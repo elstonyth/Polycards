@@ -27,7 +27,7 @@ for b in POKEMON_LIGHTTEXT:
 JOBS["starter-riftbound-pack"] = dict(src="starter-riftbound-pack-machine.avif", kind="white",
                                       band=(0.345, 0.625, 0.150, 0.219), color=WHITE, centre=(0.48, 0.166),
                                       twf=0.16, thresh=50, dilate=3)  # ornate → LaMa needs generous coverage
-JOBS["black-pack-jjnfuk"] = dict(src="black-pack-jjnfuk-machine-src.webp", kind="white",
+JOBS["black-pack-jjnfuk"] = dict(src="black-pack-jjnfuk-machine.avif", kind="white",
                                  band=(0.35, 0.63, 0.095, 0.172), color=WHITE, centre=(0.49, 0.135), twf=0.165)
 JOBS["legend-pack-1dpaec"] = dict(src="legend-pack-1dpaec-machine-src.webp", kind="white",
                                   band=(0.35, 0.63, 0.095, 0.172), color=WHITE, centre=(0.49, 0.135), twf=0.165)

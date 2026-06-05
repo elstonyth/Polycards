@@ -148,11 +148,13 @@ export function findCategory(slug: string): PackCategory | null {
 const CLAW_HAS_ANIM = new Set([
   "mythic-pack", "legend-pack", "elite-pack", "platinum-pack", "rookie-pack", "trainer-pack",
   "starter-riftbound-pack", "legend-pack-1dpaec", "modern-grails-noafw0", "pro-soccer-pack",
+  // black-pack-jjnfuk: animated source found (black-pack-1.avif, 142f) but it's framed differently
+  // from every other machine and needs a full banner+placard+url re-tune — pending. Stays static.
 ]);
 
 // Bump CLAW_REV whenever the machine pixels change (rebrand passes) so browsers fetch the new
 // image instead of a cached older one (filenames stay the same across edits).
-const CLAW_REV = "6";
+const CLAW_REV = "13";
 
 export function clawMachine(pack: Pack): { webp: string; anim?: string } {
   const base = pack.image.replace("/images/claw/", "").replace("-icon.webp", "");

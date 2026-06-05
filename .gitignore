@@ -47,3 +47,9 @@ next-env.d.ts
 
 # Local temp files
 temp/
+
+# Regenerable / session junk
+scripts/__pycache__/
+.playwright-mcp/
+docs/research/packdetail/_patch/
+docs/research/packdetail/_frames/

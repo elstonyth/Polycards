@@ -156,7 +156,7 @@ export default function PackDetailClient({
         {/* ---- LEFT column ---- */}
         <div className="flex flex-col gap-6">
           {/* Claw machine stage */}
-          <div className="relative flex aspect-[16/11] items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-b from-zinc-200 to-zinc-400 sm:aspect-[16/10]">
+          <div className="relative flex aspect-[36/25] items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-b from-zinc-200 to-zinc-400">
             {active.boost && (
               <span className="absolute left-4 top-4 z-20 rounded-md bg-emerald-500 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-white shadow-sm">
                 +90% Buyback Boost
@@ -169,15 +169,16 @@ export default function PackDetailClient({
               style={{ background: "radial-gradient(45% 45% at 50% 45%, rgba(255,255,255,0.9), transparent 70%)" }}
             />
             {/* Claw-machine render. Like the live site this is an ANIMATED AVIF (the claw slides
-                left↔right INSIDE the file) rendered in a FIXED <img> — no whole-image float. The
-                Pokenic re-brand is baked frame-by-frame into the asset (static banner zone). Packs
-                without an animated source fall back to the static rebranded webp. */}
+                left↔right INSIDE the file) rendered in a FIXED <img> — no whole-image float. The full
+                Pokenic rebrand is baked frame-by-frame into the asset: the banner wordmark, the
+                placard ("pokenic claw.") and the base url ("pokenic.com"). Packs without an animated
+                source fall back to the static rebranded webp. */}
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               key={active.id}
               src={claw.anim ?? claw.webp}
               alt={`${active.name} claw machine`}
-              className="relative z-10 h-[92%] w-auto object-contain drop-shadow-[0_30px_60px_rgba(0,0,0,0.35)]"
+              className="relative z-10 h-full w-full object-contain"
             />
           </div>
 
