@@ -78,6 +78,8 @@ REG = {  # generous region; widest-run + label-mask isolate the text within it
     "starter-riftbound-pack": (0.34, 0.749, 0.54, 0.795),
 }
 mode = sys.argv[1] if len(sys.argv) > 1 else "orig"
+if mode not in {"orig", "cur"}:
+    raise SystemExit(f"invalid mode: {mode!r} (expected 'orig' or 'cur')")
 bases = sys.argv[2:] or list(REG)
 for base in bases:
     if base not in REG:
