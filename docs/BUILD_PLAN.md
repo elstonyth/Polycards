@@ -10,6 +10,61 @@
 
 ---
 
+## Addendum — Mercur pivot + state of play (2026-06-07)
+
+> This addendum **overrides** the conflicting body details below. The body's *data
+> model, Medusa v2 rules, and component→API wiring map remain authoritative* — only
+> the items here changed.
+
+**The backend is now Mercur v2 (multi-vendor marketplace on Medusa v2), not plain
+`create-medusa-app`.** Branch `feat/backend-medusa-mercur`; scaffold committed in
+`d550cb9`; `@mercurjs/core` registered in `medusa-config.ts` with `rbac` +
+`seller_registration`. This **reverses** the "Why not Mercur" rejection in Context below.
+
+**What's still valid (most of this doc):** the Pack/PackOdds/Card/Pull data model, the
+Medusa v2 rules (prices as decimals, every mutation through a workflow, GET/POST/DELETE
+only, SDK-only access), and the entire component→Store-API wiring map.
+
+**What's stale — corrections:**
+- **Paths:** custom backend code lives in **`backend/packages/api/src/…`** (yarn
+  workspace `@acme/api`), not `backend/src/…`. The repo is a yarn 4.5 + turbo monorepo
+  (`backend/packages/api`, `backend/apps/admin`, `backend/apps/vendor`); the storefront
+  stays npm at the repo root.
+- **Admin/vendor surface:** Mercur ships **`apps/admin` (mounted at `/dashboard`)** and
+  **`apps/vendor` (mounted at `/seller`)** via `mercurDashboardPlugin` + file-based
+  `src/pages` routing — use these instead of plain-Medusa `backend/src/admin/routes` +
+  widgets. The admin URL is **`:9000/dashboard`**, not `:9000/app`.
+- **Toolchain:** boot the backend with `corepack yarn dev` from `backend/` (or
+  `backend/packages/api` for the API alone); Node ≥20 (24.14.0 pinned).
+- **Registry first:** before hand-building a marketplace feature, check Mercur blocks
+  (`npx @mercurjs/cli search`) — see the `mercur-blocks` skill.
+
+**Multi-vendor ownership decision (Option B — house seller):** gacha packs/cards are
+platform-owned, but Mercur products are seller-scoped. Decision: seed **one "house"
+seller** that owns all packs/cards (0% commission), and use **real per-user sellers for
+the resale marketplace** (users listing won cards). This keeps Mercur's machinery on the
+happy path and leaves room for real vendors later. *Verify at the catalog phase whether
+Mercur hard-requires a seller link for Store-API product visibility.*
+
+**Current state (Phases 0–1):**
+- **Phase 0 — DONE.** `pokenic-postgres` (PG16) + `pokenic-redis` (R7) containers up;
+  `backend/packages/api/.env` set (DB, Redis, `STORE_CORS`/`AUTH_CORS` include `:3000`);
+  migrations applied (180 tables); 1 admin user; 1 region; publishable key
+  (`apk_01KTDZ…`/token `pk_a23d…`) linked to a sales channel and present in `.env.local`.
+  Boot verified: `/health` 200, `/store/products` 200 with key (400 without),
+  `/dashboard` + `/seller` serve.
+- **Phase 1 — seam partially done.** `@medusajs/js-sdk` + `src/lib/medusa.ts` in place;
+  **marketplace catalog seam** extracted to `src/lib/data/products.ts`
+  (`getMarketplaceCards()` / `getMarketplaceCategories()`), consumed via props by
+  `marketplace/page.tsx` → `MarketplaceClient.tsx`. `card/[id]` and the
+  deferred/excluded routes still read `@/lib/mock/*` (their seam lands with their wiring).
+- **Known gap for Phase 2 (catalog):** the 4 seed products are **not in the publishable
+  key's sales channel**, so `/store/products` returns `count: 0`. Catalog phase seeds
+  cards as products *into that sales channel* (under the house seller) with decimal prices
+  + fmv/grade/grader on `Product.metadata`, then flips the seam getters to `sdk.store.*`.
+
+---
+
 ## Scope & ground rules (carried forward — unchanged intent)
 
 **What this project is:** a learning/portfolio build. We reconstruct the *look and feel* of

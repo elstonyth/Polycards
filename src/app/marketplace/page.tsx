@@ -1,4 +1,8 @@
 import type { Metadata } from "next";
+import {
+  getMarketplaceCards,
+  getMarketplaceCategories,
+} from "@/lib/data/products";
 import MarketplaceClient from "./MarketplaceClient";
 
 export const metadata: Metadata = {
@@ -8,5 +12,7 @@ export const metadata: Metadata = {
 };
 
 export default function MarketplacePage() {
-  return <MarketplaceClient />;
+  const cards = getMarketplaceCards();
+  const categories = getMarketplaceCategories();
+  return <MarketplaceClient cards={cards} categories={categories} />;
 }
