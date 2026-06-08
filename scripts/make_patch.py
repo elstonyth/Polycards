@@ -11,13 +11,19 @@ DIR = "public/images/claw"
 MASKDIR = "docs/research/packdetail/bottom-mask"
 OUT = "docs/research/packdetail/_patch"
 BAND = 0.27   # top fraction = static banner zone
+# Per-base banner band caps so the frozen top zone never reaches the claw's HIGHEST frame (measured by
+# unioning all consecutive inter-frame diffs, not just frame0-vs-mid): black claw peaks at y0.269,
+# diamond at y0.226. The rebranded "Pokenic" text ends ~y0.218, so these cap above the text but below
+# the claw. (default 0.27 would clip black's claw tip by 1px → a one-frame freeze hitch.)
+BAND_OVERRIDE = {"black-pack": 0.255, "diamond-pack": 0.225}
 
 os.makedirs(OUT, exist_ok=True)
 for base in sys.argv[1:]:
     reb = Image.open(f"{DIR}/{base}-machine.webp").convert("RGB")
     W, H = reb.size
+    band = BAND_OVERRIDE.get(base, BAND)
     mask = Image.new("L", (W, H), 0)
-    ImageDraw.Draw(mask).rectangle([0, 0, W, int(BAND * H)], fill=255)   # banner band
+    ImageDraw.Draw(mask).rectangle([0, 0, W, int(band * H)], fill=255)   # banner band
     bm = f"{MASKDIR}/{base}.png"
     if os.path.exists(bm):
         b = Image.open(bm).convert("L")
