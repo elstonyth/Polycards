@@ -36,5 +36,23 @@
       "loadError": "Could not load pack odds.",
       "flattenWarning": "No cards are locked — saving will reset every card to an even {{pct}}%. Lock the cards you want to preserve first."
     }
+  },
+  "pulls": {
+    "title": "Pull Ledger",
+    "subtitle": "Every pack opened, the card won, and who pulled it.",
+    "total": "Total pulls",
+    "topCards": "Most-pulled cards",
+    "topRarities": "Pulls by rarity",
+    "recent": "Recent pulls",
+    "card": "Card",
+    "rarity": "Rarity",
+    "value": "Value",
+    "customer": "Customer",
+    "pack": "Pack",
+    "when": "When",
+    "count": "Pulls",
+    "empty": "No pulls yet.",
+    "anon": "—",
+    "loadError": "Could not load the pull ledger."
   }
 }

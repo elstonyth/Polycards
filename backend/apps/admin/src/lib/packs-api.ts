@@ -39,6 +39,42 @@ export interface PackOddsResponse {
   odds: OddsRow[];
 }
 
+export interface PullRow {
+  id: string;
+  rolled_at: string;
+  customer_id: string | null;
+  customer_email: string | null;
+  pack_id: string;
+  card: {
+    handle: string;
+    name: string;
+    rarity: string;
+    market_value: number;
+    image: string;
+  } | null;
+}
+
+export interface TopCard {
+  handle: string;
+  name: string;
+  rarity: string | null;
+  market_value: number | null;
+  image: string | null;
+  count: number;
+}
+
+export interface TopRarity {
+  rarity: string;
+  count: number;
+}
+
+export interface PullsResponse {
+  total: number;
+  pulls: PullRow[];
+  topCards: TopCard[];
+  topRarities: TopRarity[];
+}
+
 type PacksApi = {
   admin: {
     packs: {
@@ -52,6 +88,9 @@ type PacksApi = {
           }) => Promise<{ odds: ComputedOdd[] }>;
         };
       };
+    };
+    pulls: {
+      query: () => Promise<PullsResponse>;
     };
   };
 };
