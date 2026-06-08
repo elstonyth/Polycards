@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -29,10 +29,7 @@ import {
   clawMachine,
   priceNumber,
 } from "../packs-data";
-
-// Roulette item width (px) — kept in JS so the landing offset is exact.
-const ITEM_W = 116;
-const WIN_INDEX = 36; // strip lands on this index
+import PackOpenOverlay from "./PackOpenOverlay";
 
 const RARITY_RING: Record<PackCard["rarity"], string> = {
   Legendary: "234, 179, 8",
@@ -105,20 +102,17 @@ export default function PackDetailClient({
   const [active, setActive] = useState<Pack>(pack);
   const [qty, setQty] = useState(1);
   const [spice, setSpice] = useState<Spice>("Medium");
-  const [phase, setPhase] = useState<"idle" | "spinning" | "done">("idle");
-  const [offset, setOffset] = useState(0);
-  const [won, setWon] = useState<PackCard | null>(null);
-  // Real-open state. `realWinner` is the backend-won card injected at WIN_INDEX
-  // for a real open (null for a demo spin); `opening` guards the async server
-  // round-trip; `openError` surfaces a friendly failure inline.
-  const [realWinner, setRealWinner] = useState<PackCard | null>(null);
+  // `opening` guards the async server round-trip; `openError` surfaces a friendly
+  // failure inline.
   const [opening, setOpening] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
   // Live Recent Pulls: seeded from the server snapshot, then optimistically
   // prepended on each successful open so the feed reflects this session's pulls
   // without a navigation round-trip.
   const [recent, setRecent] = useState<RecentPull[]>(recentPulls);
-  const windowRef = useRef<HTMLDivElement>(null);
+  // The pack-opening reveal overlay — non-null while showing the won/demo card.
+  // `nonce` keys the overlay so "Open another" remounts it and re-runs the burst.
+  const [reveal, setReveal] = useState<{ card: PackCard; isReal: boolean; nonce: number } | null>(null);
 
   const claw = clawMachine(active);
   const priceNum = priceNumber(active.price);
@@ -126,11 +120,6 @@ export default function PackDetailClient({
   const ev = Math.round(priceNum * (active.boost ? 1.02 : 0.96) * SPICE_MULT[spice]);
   const points = priceNum * 100 * qty;
 
-  // Deterministic strip (SSR-safe order); the winner index is chosen on click.
-  const strip = useMemo(
-    () => Array.from({ length: 48 }, (_, i) => CARD_POOL[(i * 3 + 1) % CARD_POOL.length]),
-    [],
-  );
   // Top Hits come from the backend prize pool (highest market_value). In 5a the
   // pool is pool-wide (identical across packs), so it applies regardless of the
   // selected sibling; it falls back to the static mock pool when the backend is
@@ -144,45 +133,20 @@ export default function PackDetailClient({
 
   const setQ = (n: number) => setQty(Math.min(99, Math.max(1, n)));
 
-  // The strip with the real winner injected at the landing index (WIN_INDEX).
-  // For a demo spin `realWinner` is null, so this is just `strip` unchanged.
-  const displayStrip = useMemo(() => {
-    if (!realWinner) return strip;
-    const copy = [...strip];
-    copy[WIN_INDEX] = realWinner;
-    return copy;
-  }, [strip, realWinner]);
-
-  // Shared reveal: render `winner` at WIN_INDEX, then animate the strip to land
-  // on it. Under reduced motion, skip the animation and reveal immediately.
-  function runReveal(winner: PackCard, isReal: boolean) {
-    setRealWinner(isReal ? winner : null);
-    if (reduced) {
-      setWon(winner);
-      setPhase("done");
-      return;
-    }
-    setWon(null);
-    setOffset(0);
-    setPhase("spinning");
-    const win = windowRef.current?.clientWidth ?? 600;
-    const target = WIN_INDEX * ITEM_W + ITEM_W / 2 - win / 2;
-    const jitter = (WIN_INDEX % 2 === 0 ? 1 : -1) * (ITEM_W * 0.18);
-    requestAnimationFrame(() => requestAnimationFrame(() => setOffset(-(target + jitter))));
-  }
-
-  // Free demo spin — mock winner from the static pool. No backend, no auth.
+  // Free demo spin — a random card from the static pool drives the same reveal
+  // overlay. No backend, no auth.
   function demoSpin() {
-    if (phase === "spinning" || opening) return;
+    if (opening) return;
     setOpenError(null);
-    runReveal(strip[WIN_INDEX], false);
+    const mock = CARD_POOL[Math.floor(Math.random() * CARD_POOL.length)];
+    setReveal({ card: mock, isReal: false, nonce: Date.now() });
   }
 
   // Real open — auth-gated. Awaits the server action (the customer id is derived
   // from the token server-side, never sent), then reveals the actual won card.
   // Logged-out users get the login modal instead of a call.
   async function handleOpenPack() {
-    if (phase === "spinning" || opening) return;
+    if (opening) return;
     if (!customer) {
       openAuth("login");
       return;
@@ -196,7 +160,7 @@ export default function PackDetailClient({
         else setOpenError(res.error);
         return;
       }
-      runReveal(res.card, true);
+      setReveal({ card: res.card, isReal: true, nonce: Date.now() });
       const justPulled: RecentPull = {
         id: `${res.card.id}-${Date.now()}`,
         name: res.card.name,
@@ -214,10 +178,7 @@ export default function PackDetailClient({
   }
 
   function reset() {
-    setPhase("idle");
-    setWon(null);
-    setOffset(0);
-    setRealWinner(null);
+    setReveal(null);
     setOpenError(null);
   }
 
@@ -256,44 +217,6 @@ export default function PackDetailClient({
               className="relative z-10 h-full w-full object-contain"
             />
           </div>
-
-          {/* Reveal stage — mock roulette (appears after Open / demo spin) */}
-          {phase !== "idle" && (
-            <section className="overflow-hidden rounded-2xl border border-white/10 bg-neutral-950 p-5 sm:p-6">
-              <div className="relative" ref={windowRef}>
-                <div className="pointer-events-none absolute left-1/2 top-0 z-10 h-full w-0.5 -translate-x-1/2 bg-white/70" />
-                <div className="pointer-events-none absolute left-1/2 top-0 z-10 -translate-x-1/2 border-x-[6px] border-t-[8px] border-x-transparent border-t-white/70" />
-                <div className="overflow-hidden">
-                  <div
-                    className={cn("flex", phase === "spinning" && "transition-transform duration-[4200ms] ease-[cubic-bezier(0.12,0.8,0.18,1)]")}
-                    style={{ transform: `translateX(${offset}px)` }}
-                    onTransitionEnd={() => {
-                      if (phase === "spinning") {
-                        setWon(displayStrip[WIN_INDEX]);
-                        setPhase("done");
-                      }
-                    }}
-                  >
-                    {displayStrip.map((c, i) => (
-                      <CardThumb key={i} card={c} w={ITEM_W} />
-                    ))}
-                  </div>
-                </div>
-              </div>
-              {phase === "done" && won && (
-                <div className="mt-5 flex flex-col items-center gap-2 text-center motion-safe:animate-[fadeIn_0.4s_ease-out]">
-                  <p className="text-[11px] font-medium uppercase tracking-widest text-white/40">You pulled</p>
-                  <p className="font-heading text-xl font-bold text-white">{won.name}</p>
-                  <p className="text-sm" style={{ color: `rgb(${RARITY_RING[won.rarity]})` }}>
-                    {won.rarity} · {won.value}
-                  </p>
-                  <button type="button" onClick={handleOpenPack} disabled={opening} className="mt-2 inline-flex h-10 items-center justify-center rounded-xl bg-neutral-200 px-5 text-sm font-semibold text-neutral-950 transition-colors hover:bg-white disabled:opacity-60">
-                    {opening ? "Opening…" : "Open another"}
-                  </button>
-                </div>
-              )}
-            </section>
-          )}
 
           {/* Top Hits */}
           <Reveal as="section">
@@ -432,7 +355,7 @@ export default function PackDetailClient({
               <button
                 type="button"
                 onClick={demoSpin}
-                disabled={phase === "spinning" || opening}
+                disabled={opening}
                 className="flex h-11 items-center justify-between rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-4 text-sm font-medium text-emerald-200 transition-colors hover:bg-emerald-500/20 disabled:opacity-60"
               >
                 <span className="flex items-center gap-2">
@@ -464,7 +387,7 @@ export default function PackDetailClient({
               <button
                 type="button"
                 onClick={handleOpenPack}
-                disabled={phase === "spinning" || opening}
+                disabled={opening}
                 className="flex h-12 w-full items-center justify-between rounded-xl bg-gradient-to-r from-emerald-500 to-green-500 px-5 text-sm font-bold text-white shadow-lg shadow-emerald-900/30 transition-opacity hover:opacity-95 disabled:opacity-60"
               >
                 <span className="flex items-center gap-2">
@@ -537,6 +460,20 @@ export default function PackDetailClient({
           </ul>
         </Reveal>
       </div>
+
+      {reveal && (
+        <PackOpenOverlay
+          key={reveal.nonce}
+          card={reveal.card}
+          isReal={reveal.isReal}
+          packImage={active.image}
+          packName={active.name}
+          opening={opening}
+          reduced={reduced}
+          onClose={() => setReveal(null)}
+          onOpenAnother={handleOpenPack}
+        />
+      )}
     </div>
   );
 }

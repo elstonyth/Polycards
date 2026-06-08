@@ -186,6 +186,50 @@
   }
 }
 
+/* ---- Pack-opening reveal (/claw/[slug] "Open Pack") ---- */
+/* The pack drops in, then charges (pulse + shake) before it bursts. */
+@keyframes packCharge {
+  0% { transform: translateY(-28px) scale(0.85); opacity: 0; }
+  18% { transform: translateY(0) scale(1); opacity: 1; }
+  62% { transform: translateY(0) scale(1.04) rotate(-1.5deg); }
+  70% { transform: translateY(0) scale(1.05) rotate(1.6deg); }
+  78% { transform: translateY(0) scale(1.06) rotate(-1.3deg); }
+  86% { transform: translateY(0) scale(1.07) rotate(1deg); }
+  100% { transform: translateY(0) scale(1.16) rotate(0deg); opacity: 1; }
+}
+/* Central flash on burst (white core → rarity tint, scales out + fades). */
+@keyframes revealFlash {
+  0% { transform: scale(0.2); opacity: 0; }
+  25% { opacity: 1; }
+  100% { transform: scale(2.6); opacity: 0; }
+}
+/* Expanding ring shockwave from the burst point. */
+@keyframes revealRing {
+  0% { transform: scale(0.25); opacity: 0.85; }
+  100% { transform: scale(2.8); opacity: 0; }
+}
+/* A particle shard flying outward (direction via --tx/--ty), then fading. */
+@keyframes shardFly {
+  0% { transform: translate(0, 0) scale(1); opacity: 1; }
+  100% { transform: translate(var(--tx), var(--ty)) scale(0.25); opacity: 0; }
+}
+/* Won card flips + scales in out of the burst. */
+@keyframes cardReveal {
+  0% { transform: perspective(1000px) rotateY(88deg) scale(0.6); opacity: 0; }
+  55% { transform: perspective(1000px) rotateY(-9deg) scale(1.07); opacity: 1; }
+  100% { transform: perspective(1000px) rotateY(0deg) scale(1); opacity: 1; }
+}
+/* Rarity aura pulsing behind the revealed card. */
+@keyframes auraPulse {
+  0%, 100% { opacity: 0.5; transform: scale(1); }
+  50% { opacity: 0.85; transform: scale(1.07); }
+}
+/* Caption + actions rise in after the card lands. */
+@keyframes captionUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
