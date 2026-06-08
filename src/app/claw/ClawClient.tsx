@@ -29,16 +29,17 @@ function PackCard({ pack, icon }: { pack: Pack; icon: string }) {
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={icon} alt="" aria-hidden="true" width={24} height={24} className="absolute right-3 top-3 z-[2] h-6 w-6 object-contain opacity-80" />
 
-      {/* Pack image */}
-      <div className="flex items-center justify-center pb-2 pt-5">
+      {/* Pack image — the tall vertical pack art dominates the card, matching the
+          live /claw's tall, narrow cards (art is natively ~0.57 aspect). */}
+      <div className="flex items-center justify-center pb-2 pt-3">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={pack.image}
           alt={pack.name}
-          width={200}
-          height={260}
+          width={205}
+          height={360}
           loading="lazy"
-          className="h-40 w-auto object-contain drop-shadow-[0_12px_28px_rgba(0,0,0,0.5)] transition-transform duration-300 ease-out group-hover:-translate-y-1"
+          className="h-52 w-auto object-contain drop-shadow-[0_12px_28px_rgba(0,0,0,0.5)] transition-transform duration-300 ease-out group-hover:-translate-y-1 sm:h-60"
         />
       </div>
 
@@ -185,7 +186,7 @@ export default function ClawClient({
           </div>
 
           {/* Desktop: card grid */}
-          <div className="hidden grid-cols-3 gap-4 sm:grid lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+          <div className="hidden grid-cols-3 gap-4 sm:grid md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7">
             {cat.packs.map((p, i) => (
               <Reveal key={p.id} delay={Math.min(i, 6) * 50} className="h-full">
                 <PackCard pack={p} icon={cat.icon} />
