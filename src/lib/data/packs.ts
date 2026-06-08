@@ -16,6 +16,7 @@
 
 import { sdk } from "@/lib/medusa";
 import { logger } from "@/lib/logger";
+import { RARITIES, isRarity, formatValue } from "@/lib/packs-format";
 import {
   CATEGORIES as MOCK_CATEGORIES,
   type Pack,
@@ -111,14 +112,8 @@ export interface PackDetail {
   rarityOdds: RarityOdd[];
 }
 
-// Rarest-first display order + dot colors (mirrors the mock ODDS in packs-data).
-const RARITY_ORDER: Rarity[] = [
-  "Legendary",
-  "Epic",
-  "Rare",
-  "Uncommon",
-  "Common",
-];
+// Rarest-first dot colors (presentational). The rarest-first ORDER (RARITIES),
+// the isRarity guard, and formatValue come from the shared packs-format module.
 const RARITY_DOT: Record<Rarity, string> = {
   Legendary: "bg-amber-400",
   Epic: "bg-fuchsia-400",
@@ -126,15 +121,6 @@ const RARITY_DOT: Record<Rarity, string> = {
   Uncommon: "bg-emerald-400",
   Common: "bg-neutral-400",
 };
-const RARITY_SET = new Set<string>(RARITY_ORDER);
-const isRarity = (r: string): r is Rarity => RARITY_SET.has(r);
-
-// Card market value -> "$39.80" (2 decimals, matching the mock card values).
-const formatValue = (mv: number): string =>
-  `$${mv.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
 
 // Pull chance -> "8.9%" / "30%" (drop a trailing ".0", matching the mock odds).
 const formatChance = (pct: number): string => {
@@ -189,7 +175,7 @@ export async function getPackDetail(slug: string): Promise<PackDetail | null> {
       const r = o.rarity as Rarity;
       weightByRarity.set(r, (weightByRarity.get(r) ?? 0) + o.weight);
     }
-    const rarityOdds: RarityOdd[] = RARITY_ORDER.filter((r) =>
+    const rarityOdds: RarityOdd[] = RARITIES.filter((r) =>
       weightByRarity.has(r),
     ).map((r) => ({
       rarity: r,

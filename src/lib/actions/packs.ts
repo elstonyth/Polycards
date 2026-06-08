@@ -12,6 +12,7 @@
 import { sdk } from "@/lib/medusa";
 import { logger } from "@/lib/logger";
 import { getAuthToken } from "@/lib/data/customer";
+import { isRarity, formatValue } from "@/lib/packs-format";
 import type { Rarity } from "@/app/claw/packs-data";
 
 // The won card, shaped for the roulette reveal (same fields as a mock PackCard).
@@ -35,15 +36,6 @@ interface BackendWonCard {
   market_value: number;
   rarity: string;
 }
-
-const RARITIES: Rarity[] = ["Legendary", "Epic", "Rare", "Uncommon", "Common"];
-const isRarity = (r: string): r is Rarity => (RARITIES as string[]).includes(r);
-
-const formatValue = (mv: number): string =>
-  `$${mv.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
 
 // Map known backend failures to friendly copy; never surface raw errors.
 function friendlyError(error: unknown): string {
