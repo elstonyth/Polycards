@@ -47,6 +47,8 @@ export const CATEGORIES: PackCategory[] = [
     heading: "Pokémon Packs",
     icon: CAT_ICON.pokemon,
     packs: [
+      { id: "pokemon-black", name: "Black Pack", price: "$2,500", image: "/images/claw/black-pack-icon.webp", boost: true },
+      { id: "pokemon-diamond", name: "Diamond Pack", price: "$5,000", image: "/images/claw/diamond-pack-icon.webp", boost: true },
       { id: "pokemon-mythic", name: "Mythic Pack", price: "$1,000", image: "/images/claw/mythic-pack-icon.webp", boost: true },
       { id: "pokemon-legend", name: "Legend Pack", price: "$250", image: "/images/claw/legend-pack-icon.webp", boost: true },
       { id: "pokemon-elite", name: "Elite Pack", price: "$50", image: "/images/claw/elite-pack-icon.webp" },
@@ -152,12 +154,18 @@ const CLAW_HAS_ANIM = new Set([
   // from every other machine and needs a full banner+placard+url re-tune — pending. Stays static.
 ]);
 
+// Packs that ship NO rebranded claw-machine render yet (their live machine avif still
+// carries phygitals branding — pending the claw-rebrand pass). The detail page falls back
+// to the brand-consistent pack ICON for these instead of a broken/branded machine image.
+const CLAW_NO_MACHINE = new Set(["black-pack", "diamond-pack"]);
+
 // Bump CLAW_REV whenever the machine pixels change (rebrand passes) so browsers fetch the new
 // image instead of a cached older one (filenames stay the same across edits).
 const CLAW_REV = "14";
 
 export function clawMachine(pack: Pack): { webp: string; anim?: string } {
   const base = pack.image.replace("/images/claw/", "").replace("-icon.webp", "");
+  if (CLAW_NO_MACHINE.has(base)) return { webp: pack.image };
   return {
     webp: `/images/claw/${base}-machine.webp?v=${CLAW_REV}`,
     anim: CLAW_HAS_ANIM.has(base) ? `/images/claw/${base}-anim.avif?v=${CLAW_REV}` : undefined,
