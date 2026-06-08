@@ -94,6 +94,10 @@ const CARD_IMG = {
 
 const cardImage = (id: string) => `/cdn/cards/${id}.webp`;
 
+// The 5 gacha rarity tiers. Typing CardSeed.rarity as this union (not string)
+// makes a rarity typo a compile error instead of a silent RARITY_WEIGHT miss.
+type Rarity = "Legendary" | "Epic" | "Rare" | "Uncommon" | "Common";
+
 type CardSeed = {
   handle: string;
   title: string;
@@ -103,7 +107,7 @@ type CardSeed = {
   grade: string;
   grader: string;
   set: string;
-  rarity: string;
+  rarity: Rarity;
   year: number;
   image: string;
   // Gacha pool key — MUST match a Pack.category exactly (pokemon | one-piece |
@@ -1152,7 +1156,7 @@ export default async function seedDemoData({ container }: ExecArgs) {
     set: c.set,
     grader: c.grader,
     grade: c.grade,
-    rarity: c.rarity as "Legendary" | "Epic" | "Rare" | "Uncommon" | "Common",
+    rarity: c.rarity,
     market_value: c.fmv, // USD decimal — stored as-is, never cents.
     image: c.image,
   }));
@@ -1169,7 +1173,7 @@ export default async function seedDemoData({ container }: ExecArgs) {
   // category (Phase 8 per-category pools), so a basketball pack can never pull a
   // Pokemon card. Within a category the rarity weights are identical, so the
   // aggregated per-rarity odds match across that category's packs.
-  const RARITY_WEIGHT: Record<string, number> = {
+  const RARITY_WEIGHT: Record<Rarity, number> = {
     Legendary: 5,
     Epic: 45,
     Rare: 150,

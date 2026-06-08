@@ -9,12 +9,14 @@ import { openPackWorkflow } from "../workflows/open-pack";
 export default async function verifyPools({ container }: ExecArgs) {
   const packs = container.resolve(PACKS_MODULE);
   const customer_id = "verify-pools-temp";
+  // Every active pack, so each pack in a multi-pack category is exercised (not
+  // just one per category) — a pack only ever yields a card of its own category.
   const targets = [
-    "pokemon-mythic",
-    "nba-black",
-    "baseball-pro",
-    "football-elite",
-    "onepiece-elite",
+    "pokemon-mythic", "pokemon-legend", "pokemon-elite", "pokemon-platinum", "pokemon-rookie",
+    "onepiece-legend", "onepiece-platinum", "onepiece-elite", "onepiece-starter",
+    "nba-black", "nba-legend", "nba-platinum",
+    "baseball-pro", "baseball-legend", "baseball-starter",
+    "football-elite", "football-starter", "football-platinum",
     "soccer-pro",
     "yugioh-pro",
     "riftbound-starter",
@@ -26,8 +28,7 @@ export default async function verifyPools({ container }: ExecArgs) {
       const { result } = await openPackWorkflow(container).run({
         input: { pack_id: slug, customer_id },
       });
-      const card = (result as { card?: { handle?: string } }).card;
-      seen.push(card?.handle ?? "?");
+      seen.push(result.card?.handle ?? "?");
     }
     console.log(`OPEN ${slug.padEnd(18)} -> ${seen.join(", ")}`);
   }
