@@ -21,6 +21,11 @@ export const Pack = model.define("pack", {
   price: model.number(),
   image: model.text(),
   boost: model.boolean().default(false),
+  // Buyback percentage shown on the storefront boost badge (default 90; premium
+  // Black/Diamond tiers are 92). in_stock=false renders a greyed "Out of Stock"
+  // tile on /claw (e.g. the Trainer tier).
+  buyback_percent: model.number().default(90),
+  in_stock: model.boolean().default(true),
   rank: model.number().default(0),
   status: model.enum(["active", "draft"]).default("active"),
 });

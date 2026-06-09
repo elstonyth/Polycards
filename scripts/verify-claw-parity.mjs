@@ -44,6 +44,18 @@ try {
   );
   pass("category rows are horizontal carousels", carousel);
 
+  // Backend-driven: premium Pokémon tiers at +92% and the Trainer out-of-stock tile.
+  const boost92 = await page.getByText("+92% Buyback Boost").first().isVisible().catch(() => false);
+  pass("premium tiers show +92% Buyback Boost", boost92);
+  const oos = await page.getByText(/Out of Stock/i).first().isVisible().catch(() => false);
+  pass("out-of-stock tile present", oos);
+
+  // Scroll the Pokémon carousel to the end so the premium (+92%) + out-of-stock
+  // tiles are in-frame for a visual proof shot.
+  await page.locator("section > div.overflow-x-auto").first().evaluate((el) => { el.scrollLeft = el.scrollWidth; }).catch(() => {});
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: `${OUT}/claw-premium-oos-1440.png` });
+
   // (a) no stale "85% buyback" copy — checked at mobile width (rows show the text)
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`${BASE}/claw`, { waitUntil: "networkidle", timeout: 60000 });

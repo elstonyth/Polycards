@@ -434,13 +434,15 @@ type PackSeed = {
   category: string;
   rank: number;
   boost: boolean;
+  buyback_percent: number;
+  in_stock: boolean;
 };
 
 const clawIcon = (base: string) => `/images/claw/${base}-icon.webp`;
 
 const PACK_SEED_GROUPS: {
   category: string;
-  packs: { slug: string; title: string; price: number; image: string; boost?: boolean }[];
+  packs: { slug: string; title: string; price: number; image: string; boost?: boolean; buyback?: number; inStock?: boolean }[];
 }[] = [
   {
     category: "pokemon",
@@ -450,6 +452,9 @@ const PACK_SEED_GROUPS: {
       { slug: "pokemon-elite", title: "Elite Pack", price: 50, image: clawIcon("elite-pack") },
       { slug: "pokemon-platinum", title: "Platinum Pack", price: 500, image: clawIcon("platinum-pack"), boost: true },
       { slug: "pokemon-rookie", title: "Rookie Pack", price: 25, image: clawIcon("rookie-pack") },
+      { slug: "pokemon-black", title: "Black Pack", price: 2500, image: clawIcon("black-pack"), boost: true, buyback: 92 },
+      { slug: "pokemon-diamond", title: "Diamond Pack", price: 5000, image: clawIcon("diamond-pack"), boost: true, buyback: 92 },
+      { slug: "pokemon-trainer", title: "Trainer Pack", price: 10, image: clawIcon("trainer-pack"), inStock: false },
     ],
   },
   {
@@ -508,6 +513,8 @@ const PACK_SEED: PackSeed[] = PACK_SEED_GROUPS.flatMap((group) =>
     category: group.category,
     rank: index,
     boost: pack.boost ?? false,
+    buyback_percent: pack.buyback ?? 90,
+    in_stock: pack.inStock ?? true,
   }))
 );
 

@@ -59,6 +59,7 @@ export const CATEGORIES: PackCategory[] = [
       { id: "pokemon-elite", name: "Elite Pack", price: "$50", image: "/images/claw/elite-pack-icon.webp" },
       { id: "pokemon-platinum", name: "Platinum Pack", price: "$500", image: "/images/claw/platinum-pack-icon.webp", boost: true },
       { id: "pokemon-rookie", name: "Rookie Pack", price: "$25", image: "/images/claw/rookie-pack-icon.webp" },
+      { id: "pokemon-trainer", name: "Trainer Pack", price: "$10", image: "/images/claw/trainer-pack-icon.webp", inStock: false },
     ],
   },
   {

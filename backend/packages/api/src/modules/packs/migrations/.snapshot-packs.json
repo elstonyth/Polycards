@@ -266,6 +266,26 @@
           "default": "false",
           "mappedType": "boolean"
         },
+        "buyback_percent": {
+          "name": "buyback_percent",
+          "type": "integer",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "default": "90",
+          "mappedType": "integer"
+        },
+        "in_stock": {
+          "name": "in_stock",
+          "type": "boolean",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "default": "true",
+          "mappedType": "boolean"
+        },
         "rank": {
           "name": "rank",
           "type": "integer",

@@ -4,6 +4,11 @@ import path from 'path'
 loadEnv(process.env.NODE_ENV || 'development', process.cwd())
 
 module.exports = defineConfig({
+  // Bundled Medusa admin (/app) disabled — this Mercur project serves its own
+  // admin (/dashboard) + vendor (/seller) dashboards via the *-ui modules below
+  // (and the apps/admin + apps/vendor dev servers). Disabling avoids the default
+  // admin loader requiring a bundled index.html at `medusa start`.
+  admin: { disable: true },
   projectConfig: {
     databaseUrl: process.env.DATABASE_URL,
     http: {
