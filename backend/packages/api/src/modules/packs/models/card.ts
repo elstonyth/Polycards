@@ -18,6 +18,17 @@ export const Card = model.define("card", {
   // a numeric column; model.number() would map to integer and truncate the cents.
   market_value: model.bigNumber(),
   image: model.text(),
+  // Standalone sale price (USD decimal). The card's *intended* marketplace price,
+  // kept here even while `for_sale` is off so toggling it back on has a price to
+  // restore. On save the admin mirror writes this onto the matching Medusa Product
+  // variant (the actual sellable entity). Nullable: pre-existing seeded cards had
+  // no Card-level price (their price lived on the seeded Product) until first edit.
+  price: model.bigNumber().nullable(),
+  // Listed on the storefront marketplace. When true the admin mirror keeps a
+  // PUBLISHED Medusa Product (handle === Card.handle); when false the Product is
+  // set to draft. Defaults true so the 51 already-seeded cards (all published as
+  // Products) keep matching their live marketplace listings.
+  for_sale: model.boolean().default(true),
 });
 
 export default Card;

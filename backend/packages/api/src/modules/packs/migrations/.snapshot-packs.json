@@ -94,6 +94,25 @@
           "nullable": false,
           "mappedType": "text"
         },
+        "price": {
+          "name": "price",
+          "type": "numeric",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "decimal"
+        },
+        "for_sale": {
+          "name": "for_sale",
+          "type": "boolean",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "default": "true",
+          "mappedType": "boolean"
+        },
         "raw_market_value": {
           "name": "raw_market_value",
           "type": "jsonb",
@@ -101,6 +120,15 @@
           "autoincrement": false,
           "primary": false,
           "nullable": false,
+          "mappedType": "json"
+        },
+        "raw_price": {
+          "name": "raw_price",
+          "type": "jsonb",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
           "mappedType": "json"
         },
         "created_at": {
