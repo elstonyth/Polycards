@@ -128,7 +128,12 @@ export default function PackOpenOverlay({
       aria-modal="true"
       aria-label={`Opening ${packName}`}
       onClick={() => {
+        // Tap-to-advance: reveal the slab, then step through metadata → pull →
+        // card on demand instead of waiting out the auto-play timers (taps were
+        // previously swallowed, so the reveal felt stuck with "no card").
         if (stage === "slab") setStage("metadata");
+        else if (stage === "metadata") setStage("pull");
+        else if (stage === "pull") setStage("card");
       }}
     >
       {/* top bar */}
@@ -146,6 +151,12 @@ export default function PackOpenOverlay({
       </div>
       {stage !== "packs" && (
         <p className="absolute top-5 left-1/2 z-20 -translate-x-1/2 text-[11px] font-medium uppercase tracking-[0.3em] text-white/35">1 of 1</p>
+      )}
+      {/* Tap-to-continue hint during the auto-playing reveal stages */}
+      {(stage === "metadata" || stage === "pull") && (
+        <p className="pointer-events-none absolute bottom-10 left-1/2 z-20 -translate-x-1/2 text-[11px] font-medium uppercase tracking-[0.3em] text-white/35 motion-safe:animate-pulse">
+          ● Tap to continue
+        </p>
       )}
 
       {/* ambient rarity glow (reveal stages) */}
@@ -215,7 +226,7 @@ export default function PackOpenOverlay({
 
       {/* STAGE 3 — metadata */}
       {stage === "metadata" && (
-        <div className="flex flex-col items-center gap-5 text-center" onClick={(e) => e.stopPropagation()}>
+        <div className="flex flex-col items-center gap-5 text-center">
           <Meta label="Category" value={category} delay={0} />
           {gradeLabel && <Meta label="Grade" value={gradeLabel} delay={150} />}
           <Meta label="Value" value={card.value} delay={gradeLabel ? 300 : 150} />
