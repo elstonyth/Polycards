@@ -31,6 +31,7 @@ import {
 import { MercurModules, SellerStatus } from "@mercurjs/types";
 import PacksModuleService from "../modules/packs/service";
 import { PACKS_MODULE } from "../modules/packs";
+import { buildCardProductInput } from "../modules/packs/card-product";
 
 const updateStoreCurrencies = createWorkflow(
   "update-store-currencies",
@@ -1033,34 +1034,31 @@ export default async function seedDemoData({ container }: ExecArgs) {
   } else {
     await createProductsWorkflow(container).run({
       input: {
-        products: cardsToCreate.map((card) => ({
-          title: card.title,
-          handle: card.handle,
-          status: ProductStatus.PUBLISHED,
-          shipping_profile_id: shippingProfile.id,
-          thumbnail: card.image,
-          images: [{ url: card.image }],
-          options: [{ title: "Format", values: ["Slab"] }],
-          variants: [
+        products: cardsToCreate.map((card) =>
+          buildCardProductInput(
             {
-              title: "Slab",
-              sku: `CARD-${card.handle.toUpperCase()}`,
-              manage_inventory: true,
-              options: { Format: "Slab" },
-              prices: [{ currency_code: "usd", amount: card.price }],
+              handle: card.handle,
+              title: card.title,
+              image: card.image,
+              price: card.price,
+              metadata: {
+                fmv: card.fmv,
+                points: card.points,
+                grade: card.grade,
+                grader: card.grader,
+                set: card.set,
+                rarity: card.rarity,
+                year: card.year,
+              },
             },
-          ],
-          sales_channels: [{ id: defaultSalesChannel[0].id }],
-          metadata: {
-            fmv: card.fmv,
-            points: card.points,
-            grade: card.grade,
-            grader: card.grader,
-            set: card.set,
-            rarity: card.rarity,
-            year: card.year,
-          },
-        })),
+            {
+              shippingProfileId: shippingProfile.id,
+              salesChannelId: defaultSalesChannel[0].id,
+              status: ProductStatus.PUBLISHED,
+              manageInventory: true,
+            }
+          )
+        ),
         additional_data: { seller_id: houseSeller.id },
       },
     });
