@@ -1,0 +1,79 @@
+[32minfo[39m:    redisUrl not found. A fake redis instance will be used.
+[32minfo[39m:    Using flag MEDUSA_FF_RBAC from project config with value true
+[32minfo[39m:    [Watcher] Using standard dev server (restart on file change)
+[32minfo[39m:    [Watcher] Watching filesystem to reload dev server on file change
+[32minfo[39m:    redisUrl not found. A fake redis instance will be used.
+[32minfo[39m:    Using flag MEDUSA_FF_RBAC from project config with value true
+[32minfo[39m:    redisUrl not found. A fake redis instance will be used.
+[32minfo[39m:    Using flag MEDUSA_FF_RBAC from project config with value true
+[32minfo[39m:    Skipping instrumentation registration. No register function found.
+[32minfo[39m:    redisUrl not found. A fake redis instance will be used.
+[32minfo[39m:    Using flag MEDUSA_FF_RBAC from project config with value true
+[32minfo[39m:    No link to load from C:\Users\PC\Desktop\Projects\Pokenic_Game\backend\packages\api\node_modules\@medusajs\draft-order\.medusa\server\src\links. skipped.
+[33mwarn[39m:    Local Event Bus installed. This is not recommended for production.
+[32minfo[39m:    Locking module: Using "in-memory" as default.
+[32minfo[39m:    No workflow to load from C:\Users\PC\Desktop\Projects\Pokenic_Game\backend\packages\api\node_modules\@medusajs\draft-order\.medusa\server\src\workflows. skipped.
+[32minfo[39m:    No subscriber to load from C:\Users\PC\Desktop\Projects\Pokenic_Game\backend\packages\api\node_modules\@medusajs\draft-order\.medusa\server\src\subscribers. skipped.
+[32minfo[39m:    No job to load from C:\Users\PC\Desktop\Projects\Pokenic_Game\backend\packages\api\node_modules\@medusajs\medusa\dist\jobs. skipped.
+[32minfo[39m:    No job to load from C:\Users\PC\Desktop\Projects\Pokenic_Game\backend\packages\api\node_modules\@mercurjs\core\.medusa\server\src\jobs. skipped.
+[32minfo[39m:    No job to load from C:\Users\PC\Desktop\Projects\Pokenic_Game\backend\packages\api\node_modules\@medusajs\draft-order\.medusa\server\src\jobs. skipped.
+[32minfo[39m:    Vendor URL → http://localhost:9000/seller
+[32minfo[39m:    Admin URL → http://localhost:9000/dashboard
+[32minfo[39m:    Admin URL → http://localhost:9000/app
+[32mhttp[39m:    OPTIONS /auth/user/emailpass ← - (204) - 5.457 ms
+[32minfo[39m:    Invalid email or password
+[32mhttp[39m:    POST /auth/user/emailpass ← - (401) - 20.426 ms
+[32mhttp[39m:    OPTIONS /auth/user/emailpass ← - (204) - 0.344 ms
+[32mhttp[39m:    GET / ← - (404) - 3.701 ms
+[32mhttp[39m:    GET / ← - (404) - 1.444 ms
+[32mhttp[39m:    OPTIONS /admin/users/me ← http://localhost:7000/ (204) - 1.232 ms
+[32mhttp[39m:    GET /admin/users/me ← http://localhost:7000/ (401) - 0.761 ms
+[32mhttp[39m:    GET /admin/users/me ← http://localhost:7000/ (401) - 0.514 ms
+[32mhttp[39m:    OPTIONS /auth/user/emailpass ← http://localhost:7000/ (204) - 0.231 ms
+[32mhttp[39m:    POST /auth/user/emailpass ← http://localhost:7000/ (200) - 95.704 ms
+[32mhttp[39m:    OPTIONS /auth/session ← http://localhost:7000/ (204) - 1.655 ms
+[32mhttp[39m:    POST /auth/session ← http://localhost:7000/ (200) - 2.191 ms
+[32mhttp[39m:    OPTIONS /admin/users/me ← http://localhost:7000/ (204) - 0.250 ms
+[32mhttp[39m:    GET /admin/users/me ← http://localhost:7000/ (304) - 7.383 ms
+[32mhttp[39m:    OPTIONS /admin/stores ← http://localhost:7000/ (204) - 0.579 ms
+[32mhttp[39m:    OPTIONS /admin/notifications?limit=1&offset=0&fields=created_at ← http://localhost:7000/ (204) - 0.343 ms
+[32mhttp[39m:    GET /admin/notifications?limit=1&offset=0&fields=created_at ← http://localhost:7000/ (304) - 16.190 ms
+[32mhttp[39m:    GET /admin/stores ← http://localhost:7000/ (304) - 27.198 ms
+[32mhttp[39m:    OPTIONS /admin/order-groups?limit=20&offset=0&order=-display_id&fields=id%2Cdisplay_id%2Ccustomer_id%2Cseller_count%2Ctotal%2Ccreated_at%2Corders.id%2Corders.status%2Corders.created_at%2Corders.email%2Corders.display_id%2Corders.custom_display_id%2Corders.payment_status%2Corders.fulfillment_status%2Corders.total%2Corders.currency_code%2C%2Aorders.payment_collections%2C%2Aorders.customer%2C%2Aorders.sales_channel%2C%2Aorders.seller ← http://localhost:7000/ (204) - 0.780 ms
+[32mhttp[39m:    OPTIONS /admin/customers?limit=1000&fields=id%2Cfirst_name%2Clast_name%2Cemail ← http://localhost:7000/ (204) - 0.180 ms
+[32mhttp[39m:    OPTIONS /admin/sellers?limit=1000&fields=id%2Cname ← http://localhost:7000/ (204) - 0.223 ms
+[32mhttp[39m:    OPTIONS /admin/sales-channels?limit=1000&fields=id%2Cname ← http://localhost:7000/ (204) - 0.157 ms
+[32mhttp[39m:    GET /admin/sellers?limit=1000&fields=id%2Cname ← http://localhost:7000/ (304) - 16.082 ms
+[32mhttp[39m:    GET /admin/order-groups?limit=20&offset=0&order=-display_id&fields=id%2Cdisplay_id%2Ccustomer_id%2Cseller_count%2Ctotal%2Ccreated_at%2Corders.id%2Corders.status%2Corders.created_at%2Corders.email%2Corders.display_id%2Corders.custom_display_id%2Corders.payment_status%2Corders.fulfillment_status%2Corders.total%2Corders.currency_code%2C%2Aorders.payment_collections%2C%2Aorders.customer%2C%2Aorders.sales_channel%2C%2Aorders.seller ← http://localhost:7000/ (304) - 21.881 ms
+[32mhttp[39m:    GET /admin/customers?limit=1000&fields=id%2Cfirst_name%2Clast_name%2Cemail ← http://localhost:7000/ (304) - 25.179 ms
+[32mhttp[39m:    GET /admin/sales-channels?limit=1000&fields=id%2Cname ← http://localhost:7000/ (304) - 35.845 ms
+[32mhttp[39m:    OPTIONS /admin/packs ← http://localhost:7000/ (204) - 0.369 ms
+[32mhttp[39m:    OPTIONS /admin/packs ← http://localhost:7000/ (204) - 0.242 ms
+[32mhttp[39m:    GET /admin/packs ← http://localhost:7000/ (304) - 5.157 ms
+[32mhttp[39m:    GET /admin/packs ← http://localhost:7000/ (304) - 3.286 ms
+[32mhttp[39m:    OPTIONS /admin/cards ← http://localhost:7000/ (204) - 0.280 ms
+[32mhttp[39m:    OPTIONS /admin/cards ← http://localhost:7000/ (204) - 0.181 ms
+[32mhttp[39m:    GET /admin/cards ← http://localhost:7000/ (304) - 7.723 ms
+[32mhttp[39m:    GET /admin/cards ← http://localhost:7000/ (304) - 4.729 ms
+[32mhttp[39m:    GET /static/1780993169001-baseball1.webp ← http://localhost:7000/ (304) - 2.219 ms
+[32mhttp[39m:    GET /static/1780993169481-basketball1.webp ← http://localhost:7000/ (304) - 1.457 ms
+[32mhttp[39m:    GET /static/1780993168593-basketball2.webp ← http://localhost:7000/ (304) - 1.308 ms
+[32mhttp[39m:    GET /static/1780993168631-basketball3.webp ← http://localhost:7000/ (304) - 1.079 ms
+[32mhttp[39m:    GET /static/1780993168771-yugioh1.webp ← http://localhost:7000/ (304) - 0.979 ms
+[32mhttp[39m:    GET /static/1780993168704-yugioh2.webp ← http://localhost:7000/ (304) - 1.949 ms
+[32mhttp[39m:    GET /static/1780993168389-FFbo5jfXHHQWN8bmc88UDYSDP5QzYCCj6RwUkiWYyffC.webp ← http://localhost:7000/ (304) - 0.623 ms
+[32mhttp[39m:    GET /static/1780993168871-football3.webp ← http://localhost:7000/ (304) - 0.485 ms
+[32mhttp[39m:    GET /static/1780993168037-FQEYWuGiKTkJpZSG6XqGHDBmH6EmxctEqk1kAT2MYzHc.webp ← http://localhost:7000/ (304) - 0.661 ms
+[32mhttp[39m:    GET /static/1780993168246-FjAJZ7en585MpnoLUGbuALHEmbBAPd61EZCefQzFMmRX.webp ← http://localhost:7000/ (304) - 0.891 ms
+[32mhttp[39m:    GET /static/1780993168905-football4.webp ← http://localhost:7000/ (304) - 0.820 ms
+[32mhttp[39m:    GET /static/1780993168669-football1.webp ← http://localhost:7000/ (304) - 1.127 ms
+[32mhttp[39m:    GET /static/1780993167966-6noxMybjBLtLqicAUTrG63VhWG2FgWzDBsQGnnZEyNCG.webp ← http://localhost:7000/ (304) - 1.031 ms
+[32mhttp[39m:    GET /static/1780993168087-4h13RDtFX4MWNYjvgMPeBS1hcL4AewupiFzDvyFUUTkd.webp ← http://localhost:7000/ (304) - 0.996 ms
+[32mhttp[39m:    GET /static/1780993168738-onepiece2.webp ← http://localhost:7000/ (304) - 1.409 ms
+[32mhttp[39m:    GET /static/1780993169132-onepiece4.webp ← http://localhost:7000/ (304) - 0.643 ms
+[32mhttp[39m:    GET /static/1780993168285-BEnddEeBXBHyL5qWXCg6sKS5VmUbUtZaKJ1aVB8yCWHN.webp ← http://localhost:7000/ (304) - 1.235 ms
+[32mhttp[39m:    GET /static/1780993168130-9kRLkdbbvzm335GBvraQrWrNVs72gzEzynvP1RPvftTx.webp ← http://localhost:7000/ (304) - 0.549 ms
+[32mhttp[39m:    OPTIONS /admin/pulls ← http://localhost:7000/ (204) - 0.420 ms
+[32mhttp[39m:    OPTIONS /admin/pulls ← http://localhost:7000/ (204) - 0.322 ms
+[32mhttp[39m:    GET /admin/pulls ← http://localhost:7000/ (304) - 12.318 ms
+[32mhttp[39m:    GET /admin/pulls ← http://localhost:7000/ (304) - 7.962 ms

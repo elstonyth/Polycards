@@ -1,0 +1,47 @@
+CODEMAP GENERATION REPORT
+=========================
+Generated: 2026-06-08
+Branch:    feat/backend-medusa-mercur
+Mode:      INITIAL (no prior docs/CODEMAPS/ — baseline, no diff/approval needed)
+Graph:     graphify-out/ refreshed (graphify update . — AST-only, exit 0)
+
+FILES CREATED
+-------------
+docs/CODEMAPS/architecture.md   high-level: 2-process layout, boundaries, open-pack data flow
+docs/CODEMAPS/backend.md        store routes, packs module, open-pack workflow, middlewares, seed
+docs/CODEMAPS/frontend.md       App Router tree (37 routes), Reveal pattern, data seam, auth
+docs/CODEMAPS/data.md           packs models (Pack/Card/PackOdds/Pull), join keys, migrations, core tables
+docs/CODEMAPS/dependencies.md   services, ports, frameworks, keys, payments(none), integrations(none)
+
+SCAN SUMMARY
+------------
+Storefront:  src/ — 37 route page.tsx; data seam src/lib/{data,actions,*}; Next 16 / React 19 / Tailwind v4
+Backend:     backend/packages/api/src — 1 custom module (packs, 4 models), 1 workflow (open-pack, 2 steps),
+             5 custom routes (4 store + 1 admin stub), 1 middleware entry; Mercur v2 on Medusa v2
+Database:    ~180 tables (Medusa/Mercur core) + 4 custom (pack, card, pack_odds, pull); 2 packs-module migrations
+
+ARCHITECTURE NOTES (current state)
+----------------------------------
++ Routes wired this session (Phase 5b): POST /store/packs/:slug/open, GET /store/pulls/recent
++ Workflow added: open-pack (rollPack → [PAYMENT SEAM] → recordPull(compensated) → emit pack.opened)
++ Shared util extracted: src/lib/packs-format.ts (RARITIES/isRarity/formatValue) — used by data + actions
++ Customer auth: httpOnly cookie JWT; all Store-API auth server-side (CORS excludes :4000)
++ Single-vendor model: house seller == admin/operator; vendor SPA :7001 effectively unused
+
+NEW DEPENDENCIES DETECTED
+-------------------------
+None new this session. Stack unchanged (Medusa v2 / Mercur v2 / @medusajs/js-sdk / Next 16).
+Payments: Stripe REMOVED from plan; no active payment provider.
+
+GAPS / NOT-YET-BUILT (tracked for future codemap updates)
+---------------------------------------------------------
+- No admin API routes for packs/odds/pulls (gacha managed via seed only) — Phase 6
+- No defineLink (pack↔product, card↔product) — lands with payment/inventory
+- No payment gateway (custom endpoint → workflow PAYMENT SEAM), no inventory reserve, no buyback
+- No Socket.io realtime / leaderboard aggregation — Phase 7
+- pack.opened event emits but has NO subscriber yet (forward-scaffolding)
+
+STALENESS
+---------
+None — all 5 codemaps generated fresh 2026-06-08. Re-run /ecc:update-codemaps after the next
+major feature (payment, Phase 6 admin UI, or Phase 7 realtime). Keep graph current with `graphify update .`.

@@ -1,0 +1,84 @@
+[1m[38;2;173;127;168m▲ Next.js 16.2.1[39m[22m (Turbopack)
+- Local:         http://localhost:4000
+- Network:       http://26.42.209.183:4000
+- Environments: .env.local
+[32m[1m✓[22m[39m Ready in 411ms
+
+ GET / [32m200[39m in 2.8s[2m (next.js: 2.4s, application-code: 449ms)[22m
+ GET / [32m200[39m in 148ms[2m (next.js: 5ms, application-code: 143ms)[22m
+ GET /api/me [32m200[39m in 432ms[2m (next.js: 388ms, application-code: 45ms)[22m
+ GET /api/recent-pulls [32m200[39m in 462ms[2m (next.js: 343ms, application-code: 118ms)[22m
+ GET /api/leaderboard [32m200[39m in 467ms[2m (next.js: 424ms, application-code: 43ms)[22m
+ GET /api/recent-pulls [32m200[39m in 22ms[2m (next.js: 2ms, application-code: 20ms)[22m
+ GET /api/recent-pulls [32m200[39m in 15ms[2m (next.js: 1780µs, application-code: 13ms)[22m
+ GET / [32m200[39m in 157ms[2m (next.js: 3ms, application-code: 154ms)[22m
+ GET / [32m200[39m in 126ms[2m (next.js: 2ms, application-code: 124ms)[22m
+ GET /api/recent-pulls [32m200[39m in 17ms[2m (next.js: 1795µs, application-code: 15ms)[22m
+ GET /api/recent-pulls [32m200[39m in 14ms[2m (next.js: 1550µs, application-code: 12ms)[22m
+ GET /api/recent-pulls [32m200[39m in 14ms[2m (next.js: 1440µs, application-code: 13ms)[22m
+ GET /api/recent-pulls [32m200[39m in 21ms[2m (next.js: 1393µs, application-code: 19ms)[22m
+ GET /api/recent-pulls [32m200[39m in 14ms[2m (next.js: 1476µs, application-code: 12ms)[22m
+ GET / [32m200[39m in 164ms[2m (next.js: 1992µs, application-code: 162ms)[22m
+ GET /api/recent-pulls [32m200[39m in 21ms[2m (next.js: 1980µs, application-code: 19ms)[22m
+ GET / [32m200[39m in 123ms[2m (next.js: 3ms, application-code: 120ms)[22m
+ GET /pack-party [32m200[39m in 493ms[2m (next.js: 387ms, application-code: 107ms)[22m
+ GET /claw [32m200[39m in 597ms[2m (next.js: 381ms, application-code: 216ms)[22m
+ GET / [32m200[39m in 151ms[2m (next.js: 3ms, application-code: 149ms)[22m
+ GET /claw [32m200[39m in 159ms[2m (next.js: 11ms, application-code: 148ms)[22m
+ GET /pack-party [32m200[39m in 73ms[2m (next.js: 19ms, application-code: 54ms)[22m
+ GET /claw [32m200[39m in 108ms[2m (next.js: 1552µs, application-code: 106ms)[22m
+ GET /claw [32m200[39m in 116ms[2m (next.js: 1610µs, application-code: 115ms)[22m
+ GET /api/me [32m200[39m in 5ms[2m (next.js: 1539µs, application-code: 4ms)[22m
+ GET /claw [32m200[39m in 121ms[2m (next.js: 1899µs, application-code: 119ms)[22m
+ GET /api/me [32m200[39m in 7ms[2m (next.js: 1402µs, application-code: 6ms)[22m
+ GET / [32m200[39m in 33ms[2m (next.js: 2ms, application-code: 30ms)[22m
+ GET /api/recent-pulls [32m200[39m in 29ms[2m (next.js: 3ms, application-code: 26ms)[22m
+ GET /api/recent-pulls [32m200[39m in 45ms[2m (next.js: 6ms, application-code: 38ms)[22m
+ GET /api/leaderboard [32m200[39m in 58ms[2m (next.js: 11ms, application-code: 46ms)[22m
+ GET /api/leaderboard [32m200[39m in 61ms[2m (next.js: 3ms, application-code: 58ms)[22m
+ GET /pack-party [32m200[39m in 60ms[2m (next.js: 1675µs, application-code: 58ms)[22m
+ GET /api/me [32m200[39m in 17ms[2m (next.js: 1616µs, application-code: 16ms)[22m
+ GET /api/me [32m200[39m in 7ms[2m (next.js: 2ms, application-code: 4ms)[22m
+ GET /marketplace [32m200[39m in 706ms[2m (next.js: 377ms, application-code: 329ms)[22m
+ GET /leaderboard [32m200[39m in 496ms[2m (next.js: 382ms, application-code: 114ms)[22m
+ GET /api/me [32m200[39m in 9ms[2m (next.js: 3ms, application-code: 6ms)[22m
+ GET /marketplace [32m200[39m in 274ms[2m (next.js: 1624µs, application-code: 273ms)[22m
+ GET /api/me [32m200[39m in 19ms[2m (next.js: 2ms, application-code: 17ms)[22m
+ GET /activity [32m200[39m in 396ms[2m (next.js: 340ms, application-code: 56ms)[22m
+ GET /pack-party [32m200[39m in 70ms[2m (next.js: 2ms, application-code: 68ms)[22m
+ GET /api/me [32m200[39m in 15ms[2m (next.js: 2ms, application-code: 13ms)[22m
+ GET /marketplace [32m200[39m in 286ms[2m (next.js: 2ms, application-code: 283ms)[22m
+ GET /api/me [32m200[39m in 6ms[2m (next.js: 1530µs, application-code: 5ms)[22m
+ GET /claw [32m200[39m in 126ms[2m (next.js: 1894µs, application-code: 124ms)[22m
+ GET /api/me [32m200[39m in 17ms[2m (next.js: 2ms, application-code: 15ms)[22m
+ GET /claw/pokemon-elite [32m200[39m in 699ms[2m (next.js: 655ms, application-code: 44ms)[22m
+ GET /claw/pokemon-rookie [32m200[39m in 45ms[2m (next.js: 6ms, application-code: 38ms)[22m
+ GET /claw/pokemon-mythic [32m200[39m in 32ms[2m (next.js: 6ms, application-code: 26ms)[22m
+ GET / [32m200[39m in 116ms[2m (next.js: 1729µs, application-code: 114ms)[22m
+ GET /api/me [32m200[39m in 11ms[2m (next.js: 7ms, application-code: 4ms)[22m
+ GET /api/recent-pulls [32m200[39m in 26ms[2m (next.js: 5ms, application-code: 20ms)[22m
+ GET /api/leaderboard [32m200[39m in 31ms[2m (next.js: 1465µs, application-code: 29ms)[22m
+ GET /pack-party [32m200[39m in 62ms[2m (next.js: 1573µs, application-code: 61ms)[22m
+ GET /api/me [32m200[39m in 21ms[2m (next.js: 1767µs, application-code: 19ms)[22m
+ GET /marketplace [32m200[39m in 174ms[2m (next.js: 2ms, application-code: 172ms)[22m
+ GET /api/me [32m200[39m in 5ms[2m (next.js: 1522µs, application-code: 4ms)[22m
+ GET /marketplace [32m200[39m in 170ms[2m (next.js: 2ms, application-code: 168ms)[22m
+ GET /api/me [32m200[39m in 14ms[2m (next.js: 1593µs, application-code: 13ms)[22m
+ GET /card/rapidash [32m200[39m in 659ms[2m (next.js: 611ms, generate-params: 288ms, application-code: 47ms)[22m
+ GET /pack-party [32m200[39m in 57ms[2m (next.js: 1869µs, application-code: 55ms)[22m
+ GET /api/me [32m200[39m in 16ms[2m (next.js: 1443µs, application-code: 15ms)[22m
+ GET /claw [32m200[39m in 150ms[2m (next.js: 1885µs, application-code: 148ms)[22m
+ GET /api/me [32m200[39m in 7ms[2m (next.js: 1470µs, application-code: 5ms)[22m
+ GET /claw/onepiece-elite [32m200[39m in 39ms[2m (next.js: 6ms, application-code: 33ms)[22m
+ GET /claw/soccer-pro [32m200[39m in 34ms[2m (next.js: 6ms, application-code: 29ms)[22m
+ GET /claw [32m200[39m in 132ms[2m (next.js: 1921µs, application-code: 130ms)[22m
+ GET /api/me [32m200[39m in 10ms[2m (next.js: 4ms, application-code: 6ms)[22m
+ GET /claw/riftbound-starter [32m200[39m in 40ms[2m (next.js: 6ms, application-code: 34ms)[22m
+ GET /claw/riftbound-starter [32m200[39m in 220ms[2m (next.js: 63ms, application-code: 156ms)[22m
+ GET /api/me [32m200[39m in 9ms[2m (next.js: 2ms, application-code: 6ms)[22m
+ GET /claw/riftbound-starter [32m200[39m in 123ms[2m (next.js: 6ms, application-code: 117ms)[22m
+ GET /api/me [32m200[39m in 8ms[2m (next.js: 1816µs, application-code: 6ms)[22m
+ GET /claw/riftbound-starter [32m200[39m in 127ms[2m (next.js: 6ms, application-code: 121ms)[22m
+ GET /api/me [32m200[39m in 9ms[2m (next.js: 3ms, application-code: 6ms)[22m
+[32m[1m✓[22m[39m Compiled in 249ms
+[?25h
