@@ -8,7 +8,26 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import {
+  AnimatePresence,
+  animate,
+  motion,
+  type AnimationPlaybackControls,
+} from "motion/react";
 import { ArrowLeft, Zap, Volume2 } from "lucide-react";
+import {
+  CARD_FLIP,
+  CYL_SPRING,
+  DRAG_DEG_PER_PX,
+  EASE_BACK,
+  EASE_TW,
+  META_AUTO_ADVANCE_MS,
+  META_LABEL_DELAYS,
+  META_PILL_DELAY,
+  META_VALUE_OFFSET,
+  PACK_EXIT,
+  SLAB_RISE,
+} from "@/lib/motion";
 import type { PackCard } from "../packs-data";
 
 // Rarity → rgb (shared with the detail-page rings) drives the glow, pill, and the
@@ -22,20 +41,21 @@ const RARITY_RGB: Record<PackCard["rarity"], string> = {
 };
 
 // Carousel cylinder geometry, measured from the live phygitals demo (6 packs 60°
-// apart, radius≈259 at a 318px pack; scaled down here, same ratio). See
-// docs/research/components/pack-opening.spec.md.
+// apart, radius≈259 at a 318px pack; scaled down here, same ratio). Motion values
+// (float, exit drop, slab rise, metadata stagger, flip, glow spin) are frame-measured
+// — see docs/research/components/motion-fidelity.spec.md.
 const SLOTS = 6;
 const STEP = 360 / SLOTS; // 60°
 const PACK_W = 196;
 const PACK_H = 304;
 const RADIUS = 188;
-const DRAG_DEG_PER_PX = 0.4;
 
 type Stage = "packs" | "slab" | "metadata" | "pull" | "card";
 
 // Full-screen pack-opening, frame-matched to the live phygitals flow: an interactive
-// 3D pack cylinder (drag/swipe to spin, shuffle, tap to select) → a face-down graded
-// slab → metadata → a rarity "PULL" celebration → the won card in a graded holder.
+// 3D pack cylinder (drag/swipe to spin, shuffle, tap to select) → packs drop away →
+// a face-down graded slab rises → the metadata suspense screen → (Epic/Legendary
+// only) a rarity "PULL" ribbon → the won card flips in over a spinning glow.
 // Reduced motion jumps straight to the card.
 export default function PackOpenOverlay({
   card,
@@ -60,43 +80,61 @@ export default function PackOpenOverlay({
 }) {
   const [stage, setStage] = useState<Stage>(reduced ? "card" : "packs");
   const rgb = RARITY_RGB[card.rarity];
+  // Live gates the ribbon celebration by rarity (an Uncommon pull skips straight from
+  // metadata to the card; an Epic pull got the ribbon) — celebrate the top two tiers.
+  const celebrate = card.rarity === "Epic" || card.rarity === "Legendary";
 
-  // GRADE parsed from the card name (e.g. "… PSA 10", "… CGC 9.5"); shown in metadata
-  // only when present — never fabricated.
+  // GRADE / YEAR parsed from the card name (e.g. "2016 … PSA 10") — live's metadata
+  // screen shows YEAR → CATEGORY → GRADE. Never fabricated; Value stands in when the
+  // name carries no year.
   const gradeMatch = card.name.match(/\b(PSA|CGC|BGS|SGC)\s*(\d+(?:\.\d+)?)\b/i);
   const gradeLabel = gradeMatch ? `${gradeMatch[1].toUpperCase()} ${gradeMatch[2]}` : null;
+  const yearMatch = card.name.match(/\b(19|20)\d{2}\b/);
+  const yearLabel = yearMatch ? yearMatch[0] : null;
+  const rows: { label: string; value: string }[] = [
+    yearLabel ? { label: "Year", value: yearLabel } : { label: "Value", value: card.value },
+    { label: "Category", value: category },
+    ...(gradeLabel ? [{ label: "Grade", value: gradeLabel }] : []),
+  ];
 
   // Interactive cylinder driven IMPERATIVELY (ref + direct style writes) so dragging
   // never re-renders the 12 pack images — React state on every pointermove was the lag.
+  // Snap/shuffle use Framer Motion's imperative spring on the same ref.
   const cylRef = useRef<HTMLDivElement>(null);
   const rotRef = useRef(0);
+  const springRef = useRef<AnimationPlaybackControls | null>(null);
   const drag = useRef({ active: false, startX: 0, startRot: 0, moved: false });
 
-  const applyRotation = (deg: number, animate: boolean) => {
+  const spinTo = (target: number) => {
+    springRef.current?.stop();
     const el = cylRef.current;
     if (!el) return;
-    el.style.transition = animate ? "transform 0.6s cubic-bezier(0.22,0.61,0.36,1)" : "none";
-    el.style.transform = `rotateY(${deg}deg)`;
-    rotRef.current = deg;
+    springRef.current = animate(rotRef.current, target, {
+      ...CYL_SPRING,
+      onUpdate: (v) => {
+        el.style.transform = `rotateY(${v}deg)`;
+        rotRef.current = v;
+      },
+    });
   };
 
-  // metadata holds, then the Pull celebration, then the card.
+  // metadata holds (live ≈3.6s), then either the Pull celebration or the card.
   useEffect(() => {
     if (stage === "metadata") {
-      const t = setTimeout(() => setStage("pull"), 1800);
+      const t = setTimeout(() => setStage(celebrate ? "pull" : "card"), META_AUTO_ADVANCE_MS);
       return () => clearTimeout(t);
     }
     if (stage === "pull") {
       const t = setTimeout(() => setStage("card"), 1150);
       return () => clearTimeout(t);
     }
-  }, [stage]);
+  }, [stage, celebrate]);
 
   const onPointerDown = (e: ReactPointerEvent) => {
     if (stage !== "packs") return;
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    springRef.current?.stop();
     drag.current = { active: true, startX: e.clientX, startRot: rotRef.current, moved: false };
-    if (cylRef.current) cylRef.current.style.transition = "none";
   };
   const onPointerMove = (e: ReactPointerEvent) => {
     if (!drag.current.active || !cylRef.current) return;
@@ -110,29 +148,28 @@ export default function PackOpenOverlay({
     if (!drag.current.active) return;
     const { moved } = drag.current;
     drag.current.active = false;
-    if (!moved) setStage("slab"); // a tap (not a drag) → reveal
-    else applyRotation(Math.round(rotRef.current / STEP) * STEP, true); // snap to slot
+    if (!moved) setStage("slab"); // a tap (not a drag) → select → packs drop, slab rises
+    else spinTo(Math.round(rotRef.current / STEP) * STEP); // snap to slot (spring)
   };
 
   const shuffle = (e: ReactMouseEvent) => {
     e.stopPropagation();
     const target =
       Math.round(rotRef.current / STEP) * STEP + 360 * 2 + STEP * (1 + Math.floor(Math.random() * (SLOTS - 1)));
-    applyRotation(target, true);
+    spinTo(target);
   };
 
   return (
     <div
-      className="fixed inset-0 z-[80] flex flex-col items-center justify-center overflow-hidden bg-black motion-safe:animate-[fadeIn_0.3s_ease-out]"
+      className="fixed inset-0 z-[80] overflow-hidden bg-black motion-safe:animate-[fadeIn_0.3s_ease-out]"
       role="dialog"
       aria-modal="true"
       aria-label={`Opening ${packName}`}
       onClick={() => {
-        // Tap-to-advance: reveal the slab, then step through metadata → pull →
-        // card on demand instead of waiting out the auto-play timers (taps were
-        // previously swallowed, so the reveal felt stuck with "no card").
+        // Tap-to-advance (live's metadata screen is itself a button): slab → metadata
+        // → (pull, top rarities only) → card, instead of waiting out the timers.
         if (stage === "slab") setStage("metadata");
-        else if (stage === "metadata") setStage("pull");
+        else if (stage === "metadata") setStage(celebrate ? "pull" : "card");
         else if (stage === "pull") setStage("card");
       }}
     >
@@ -159,145 +196,238 @@ export default function PackOpenOverlay({
         </p>
       )}
 
-      {/* ambient rarity glow (reveal stages) */}
-      {(stage === "metadata" || stage === "pull" || stage === "card") && (
-        <div aria-hidden className="pointer-events-none absolute left-1/2 top-1/2 h-[560px] w-[560px] -translate-x-1/2 -translate-y-1/2 rounded-full blur-3xl"
-          style={{ background: `radial-gradient(circle, rgba(${rgb},0.4) 0%, rgba(${rgb},0) 70%)`, animation: reduced ? undefined : "auraPulse 2.6s ease-in-out infinite" }} />
-      )}
-
-      {/* STAGE 1 — interactive 3D pack cylinder */}
-      {stage === "packs" && (
-        <div className="flex select-none flex-col items-center gap-12">
-          <div
-            className="relative cursor-grab touch-none active:cursor-grabbing"
-            style={{ width: PACK_W, height: PACK_H, perspective: "1100px" }}
-            onPointerDown={onPointerDown}
-            onPointerMove={onPointerMove}
-            onPointerUp={onPointerUp}
-            onPointerCancel={onPointerUp}
+      <AnimatePresence>
+        {/* STAGE 1 — interactive 3D pack cylinder; on select the packs DROP away
+            (measured: +430px, 0.48s, ease(0.55,0,0.85,0.4)) while the UI fades fast */}
+        {stage === "packs" && (
+          <motion.div
+            key="packs"
+            className="absolute inset-0 flex select-none flex-col items-center justify-center gap-12"
+            exit={reduced ? { opacity: 0 } : { y: 430, opacity: 0.35, transition: PACK_EXIT }}
+            // the select-tap must not bubble to the overlay's tap-to-advance handler —
+            // with AnimatePresence the block stays mounted through the exit drop, so a
+            // leaked click would skip the slab stage instantly
+            onClick={(e) => e.stopPropagation()}
           >
             <div
-              ref={cylRef}
-              className="absolute inset-0"
-              style={{
-                transformStyle: "preserve-3d",
-                transform: "rotateY(0deg)",
-                willChange: "transform",
-              }}
+              className="relative cursor-grab touch-none active:cursor-grabbing"
+              style={{ width: PACK_W, height: PACK_H, perspective: "1100px" }}
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onPointerCancel={onPointerUp}
             >
-              {Array.from({ length: SLOTS }).map((_, i) => (
-                <div
-                  key={i}
-                  className="absolute inset-0"
-                  style={{ transform: `rotateY(${i * STEP}deg) translateZ(${RADIUS}px)`, backfaceVisibility: "hidden" }}
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={packImage} alt={i === 0 ? packName : ""} aria-hidden={i !== 0}
-                    className="h-full w-full object-contain drop-shadow-[0_20px_36px_rgba(0,0,0,0.6)]" draggable={false} />
-                  {/* floor reflection */}
-                  <div className="absolute left-0 top-full h-full w-full overflow-hidden opacity-20" style={{ transform: "scaleY(-1)", maskImage: "linear-gradient(to bottom, rgba(0,0,0,0.6), transparent 55%)", WebkitMaskImage: "linear-gradient(to bottom, rgba(0,0,0,0.6), transparent 55%)" }} aria-hidden>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={packImage} alt="" className="h-full w-full object-contain" draggable={false} />
+              <div
+                ref={cylRef}
+                className="absolute inset-0"
+                style={{
+                  transformStyle: "preserve-3d",
+                  transform: "rotateY(0deg)",
+                  willChange: "transform",
+                }}
+              >
+                {Array.from({ length: SLOTS }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="absolute inset-0"
+                    style={{ transform: `rotateY(${i * STEP}deg) translateZ(${RADIUS}px)`, backfaceVisibility: "hidden" }}
+                  >
+                    {/* idle float, measured off live: y ±2.1px over 4.4s, ease-in-out */}
+                    <motion.div
+                      className="absolute inset-0"
+                      animate={reduced ? undefined : { y: [2.1, -2.1, 2.1] }}
+                      transition={{ duration: 4.4, ease: "easeInOut", repeat: Infinity }}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={packImage} alt={i === 0 ? packName : ""} aria-hidden={i !== 0}
+                        className="h-full w-full object-contain drop-shadow-[0_20px_36px_rgba(0,0,0,0.6)]" draggable={false} />
+                      {/* floor reflection — pointer-events-none so the strip below the
+                          pack can't swallow clicks meant for the Shuffle button */}
+                      <div className="pointer-events-none absolute left-0 top-full h-full w-full overflow-hidden opacity-20" style={{ transform: "scaleY(-1)", maskImage: "linear-gradient(to bottom, rgba(0,0,0,0.6), transparent 55%)", WebkitMaskImage: "linear-gradient(to bottom, rgba(0,0,0,0.6), transparent 55%)" }} aria-hidden>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={packImage} alt="" className="h-full w-full object-contain" draggable={false} />
+                      </div>
+                    </motion.div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
-          <div className="flex flex-col items-center gap-3">
-            <button
-              type="button"
-              onClick={shuffle}
-              className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-5 py-2 text-sm font-semibold text-white/80 transition-colors hover:bg-white/10"
+            <motion.div
+              className="flex flex-col items-center gap-3"
+              exit={{ opacity: 0, transition: { duration: 0.18, ease: EASE_TW } }}
             >
-              ⇄ Shuffle
-            </button>
-            <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-white/35">Drag to spin · tap a pack to open</p>
-          </div>
-        </div>
-      )}
-
-      {/* STAGE 2 — face-down graded slab */}
-      {stage === "slab" && (
-        <div className="flex flex-col items-center gap-8 motion-safe:animate-[cardReveal_0.5s_cubic-bezier(0.2,0.8,0.2,1)_both]">
-          <SlabBack />
-          <p className="text-[11px] font-medium uppercase tracking-[0.3em] text-white/45 motion-safe:animate-pulse">● Tap to reveal</p>
-        </div>
-      )}
-
-      {/* STAGE 3 — metadata */}
-      {stage === "metadata" && (
-        <div className="flex flex-col items-center gap-5 text-center">
-          <Meta label="Category" value={category} delay={0} />
-          {gradeLabel && <Meta label="Grade" value={gradeLabel} delay={150} />}
-          <Meta label="Value" value={card.value} delay={gradeLabel ? 300 : 150} />
-          <div style={{ animation: "metaUp 0.5s ease-out 0.42s both" }}>
-            <RarityPill rarity={card.rarity} rgb={rgb} />
-          </div>
-        </div>
-      )}
-
-      {/* STAGE 4 — rarity PULL celebration (diagonal ribbon + shout) */}
-      {stage === "pull" && (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden" aria-hidden onClick={(e) => e.stopPropagation()}>
-          <SlabBack faded />
-          <div
-            className="absolute left-1/2 top-1/2 w-[160%] -translate-x-1/2 -translate-y-1/2 overflow-hidden py-3 shadow-[0_8px_40px_rgba(0,0,0,0.5)]"
-            style={{ background: `rgb(${rgb})`, animation: "pullRibbonIn 0.5s cubic-bezier(0.2,0.8,0.2,1) both" }}
-          >
-            <div className="flex w-[200%] whitespace-nowrap" style={{ animation: "pullMarquee 6s linear infinite" }}>
-              {[0, 1].map((k) => (
-                <span key={k} className="flex w-1/2 justify-around text-2xl font-black uppercase tracking-tight text-black/70">
-                  {Array.from({ length: 6 }).map((_, i) => (
-                    <span key={i} className="px-4">{card.rarity} Pull&nbsp;•</span>
-                  ))}
-                </span>
-              ))}
-            </div>
-          </div>
-          <p
-            className="font-heading absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-5xl font-black uppercase tracking-tight text-white sm:text-7xl"
-            style={{ animation: "pullShout 0.55s cubic-bezier(0.2,0.9,0.3,1) both", textShadow: "0 4px 24px rgba(0,0,0,0.6)" }}
-          >
-            {card.rarity}!
-          </p>
-        </div>
-      )}
-
-      {/* STAGE 5 — the won card in a graded holder */}
-      {stage === "card" && (
-        <div className="flex flex-col items-center gap-4" onClick={(e) => e.stopPropagation()}>
-          <div
-            className="motion-safe:animate-[cardReveal_0.6s_cubic-bezier(0.2,0.8,0.2,1)_both]"
-            style={{ filter: `drop-shadow(0 0 60px rgba(${rgb},0.6))` }}
-          >
-            <GradedHolder image={card.image} name={card.name} grade={gradeLabel} category={category} rgb={rgb} />
-          </div>
-          <div className="flex flex-col items-center gap-2 text-center" style={{ animation: reduced ? undefined : "captionUp 0.45s ease-out 0.15s both" }}>
-            <p className="font-heading max-w-md px-4 text-sm font-bold text-white sm:text-base">{card.name}</p>
-            <div className="flex items-center gap-2">
-              <RarityPill rarity={card.rarity} rgb={rgb} small />
-              <span className="text-[13px] font-semibold text-white/70">Value: {card.value}{!isReal && " · demo"}</span>
-            </div>
-            <div className="mt-3 flex items-center gap-3">
-              <button type="button" onClick={onClose} className="inline-flex h-11 items-center justify-center rounded-xl bg-gradient-to-r from-emerald-500 to-green-500 px-7 text-sm font-bold text-white shadow-lg shadow-emerald-900/30 transition-opacity hover:opacity-95">
-                Continue
+              <button
+                type="button"
+                onClick={shuffle}
+                className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-5 py-2 text-sm font-semibold text-white/80 transition-colors hover:bg-white/10"
+              >
+                ⇄ Shuffle
               </button>
-              <button type="button" onClick={onOpenAnother} disabled={opening} className="inline-flex h-11 items-center justify-center rounded-xl border border-white/15 bg-white/5 px-5 text-sm font-semibold text-white/80 transition-colors hover:bg-white/10 disabled:opacity-60">
-                {opening ? "Opening…" : "Open another"}
-              </button>
+              <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-white/35">Drag to spin · tap a pack to open</p>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* STAGE 2 — face-down graded slab RISES in (y 200→0, 0.6s ease(0.16,1,0.3,1),
+            starting as the packs finish dropping) with a looping celestial shimmer */}
+        {stage === "slab" && (
+          <motion.div
+            key="slab"
+            className="absolute inset-0 flex flex-col items-center justify-center gap-8"
+            initial={reduced ? false : { y: 200, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ opacity: 0, transition: { duration: 0.15, ease: EASE_TW } }}
+            transition={{ ...SLAB_RISE, delay: 0.46 }}
+          >
+            <SlabBack shimmer={!reduced} />
+            <motion.p
+              initial={reduced ? false : { opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.4, ease: "easeOut", delay: 0.66 }}
+              className="text-[11px] font-medium uppercase tracking-[0.3em] text-white/45 motion-safe:animate-pulse"
+            >
+              ● Tap to reveal
+            </motion.p>
+          </motion.div>
+        )}
+
+        {/* STAGE 3 — metadata suspense over clean black: rows pop in with overshoot
+            (label y16/0.25s, value y12/0.2s, ease(0.34,1.56,0.64,1)) at 0.2/0.9/1.6s,
+            rarity pill at 2.6s; auto-advances at ≈3.6s */}
+        {stage === "metadata" && (
+          <motion.div
+            key="metadata"
+            className="absolute inset-0 flex flex-col items-center justify-center gap-7 text-center"
+            exit={{ opacity: 0, transition: { duration: 0.15, ease: EASE_TW } }}
+          >
+            {rows.map((r, i) => (
+              <MetaRow
+                key={r.label}
+                label={r.label}
+                value={r.value}
+                delay={META_LABEL_DELAYS[i] ?? META_LABEL_DELAYS[2] + 0.7 * (i - 2)}
+                reduced={reduced}
+              />
+            ))}
+            <motion.div
+              initial={reduced ? false : { y: 12, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ duration: 0.3, ease: EASE_BACK, delay: META_PILL_DELAY }}
+              className="mt-1"
+            >
+              <RarityPill rarity={card.rarity} rgb={rgb} />
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* STAGE 4 — rarity PULL celebration (top rarities only, like live):
+            diagonal ribbon + shout over the still-visible slab */}
+        {stage === "pull" && (
+          <motion.div
+            key="pull"
+            className="pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden"
+            aria-hidden
+            exit={{ opacity: 0, transition: { duration: 0.15, ease: EASE_TW } }}
+          >
+            <SlabBack faded />
+            <div
+              className="absolute left-1/2 top-1/2 w-[160%] -translate-x-1/2 -translate-y-1/2 overflow-hidden py-3 shadow-[0_8px_40px_rgba(0,0,0,0.5)]"
+              style={{ background: `rgb(${rgb})`, animation: "pullRibbonIn 0.5s cubic-bezier(0.2,0.8,0.2,1) both" }}
+            >
+              <div className="flex w-[200%] whitespace-nowrap" style={{ animation: "pullMarquee 6s linear infinite" }}>
+                {[0, 1].map((k) => (
+                  <span key={k} className="flex w-1/2 justify-around text-2xl font-black uppercase tracking-tight text-black/70">
+                    {Array.from({ length: 6 }).map((_, i) => (
+                      <span key={i} className="px-4">{card.rarity} Pull&nbsp;•</span>
+                    ))}
+                  </span>
+                ))}
+              </div>
             </div>
-          </div>
-        </div>
-      )}
+            <p
+              className="font-heading absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-5xl font-black uppercase tracking-tight text-white sm:text-7xl"
+              style={{ animation: "pullShout 0.55s cubic-bezier(0.2,0.9,0.3,1) both", textShadow: "0 4px 24px rgba(0,0,0,0.6)" }}
+            >
+              {card.rarity}!
+            </p>
+          </motion.div>
+        )}
+
+        {/* STAGE 5 — the won card FLIPS in (rotateY 90→0, 0.6s ease(0.16,1,0.3,1),
+            content fading 0.28s) over a spinning rarity glow; caption rises at +0.4s */}
+        {stage === "card" && (
+          <motion.div key="card" className="absolute inset-0 flex flex-col items-center justify-center gap-4" onClick={(e) => e.stopPropagation()}>
+            {!reduced && (
+              <div
+                aria-hidden
+                className="pointer-events-none absolute left-1/2 top-1/2 h-[560px] w-[560px] blur-3xl"
+                style={{
+                  // centering lives INSIDE the keyframe (translate(-50%,-50%) rotate(...)) —
+                  // Tailwind v4 translate-* utilities would double-shift on top of it.
+                  background: `conic-gradient(from 0deg, rgba(${rgb},0.45), transparent 30%, rgba(${rgb},0.3) 50%, transparent 72%, rgba(${rgb},0.45))`,
+                  borderRadius: "50%",
+                  animation: "glowSpin 3.5s linear infinite",
+                }}
+              />
+            )}
+            <motion.div
+              initial={reduced ? false : { rotateY: 90, opacity: 0 }}
+              animate={{ rotateY: 0, opacity: 1 }}
+              transition={{ ...CARD_FLIP, opacity: { duration: 0.28, ease: EASE_TW } }}
+              style={{ transformPerspective: 1000, filter: `drop-shadow(0 0 60px rgba(${rgb},0.6))` }}
+              className="relative"
+            >
+              <GradedHolder image={card.image} name={card.name} grade={gradeLabel} category={category} rgb={rgb} />
+            </motion.div>
+            <motion.div
+              initial={reduced ? false : { y: 24, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ duration: 0.3, ease: "easeOut", delay: 0.4 }}
+              className="relative flex flex-col items-center gap-2 text-center"
+            >
+              <p className="font-heading max-w-md px-4 text-sm font-bold text-white sm:text-base">{card.name}</p>
+              <div className="flex items-center gap-2">
+                <RarityPill rarity={card.rarity} rgb={rgb} small />
+                <span className="text-[13px] font-semibold text-white/70">Value: {card.value}{!isReal && " · demo"}</span>
+              </div>
+              <div className="mt-3 flex items-center gap-3">
+                <button type="button" onClick={onClose} className="inline-flex h-11 items-center justify-center rounded-xl bg-gradient-to-r from-emerald-500 to-green-500 px-7 text-sm font-bold text-white shadow-lg shadow-emerald-900/30 transition-opacity hover:opacity-95">
+                  Continue
+                </button>
+                <button type="button" onClick={onOpenAnother} disabled={opening} className="inline-flex h-11 items-center justify-center rounded-xl border border-white/15 bg-white/5 px-5 text-sm font-semibold text-white/80 transition-colors hover:bg-white/10 disabled:opacity-60">
+                  {opening ? "Opening…" : "Open another"}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
 
-function Meta({ label, value, delay }: { label: string; value: string; delay: number }) {
+// One metadata row: tiny grey label over a big glowing value (live: 42px), both
+// popping up with the measured overshoot ease, value trailing its label by 100ms.
+function MetaRow({ label, value, delay, reduced }: { label: string; value: string; delay: number; reduced: boolean }) {
   return (
-    <div style={{ animation: `metaUp 0.5s ease-out ${delay}ms both` }}>
-      <p className="text-[10px] font-medium uppercase tracking-[0.3em] text-white/35">{label}</p>
-      <p className="font-heading mt-1 text-2xl font-bold text-white sm:text-3xl" style={{ textShadow: "0 0 24px rgba(255,255,255,0.25)" }}>{value}</p>
+    <div>
+      <motion.p
+        initial={reduced ? false : { y: 16, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ duration: 0.25, ease: EASE_BACK, delay }}
+        className="text-[10px] font-medium uppercase tracking-[0.3em] text-white/35"
+      >
+        {label}
+      </motion.p>
+      <motion.p
+        initial={reduced ? false : { y: 12, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ duration: 0.2, ease: EASE_BACK, delay: delay + META_VALUE_OFFSET }}
+        className="font-heading mt-1 text-3xl font-bold text-white sm:text-[42px] sm:leading-tight"
+        style={{ textShadow: "0 0 24px rgba(255,255,255,0.25)" }}
+      >
+        {value}
+      </motion.p>
     </div>
   );
 }
@@ -315,11 +445,12 @@ function RarityPill({ rarity, rgb, small }: { rarity: PackCard["rarity"]; rgb: s
 
 // Face-down graded slab back (pokenic-branded) — a clear holder bezel, a top label
 // (wordmark + QR), embossed category glyphs over black, and a certification footer.
-function SlabBack({ faded }: { faded?: boolean }) {
+// `shimmer` adds live's looping celestial sweep across the face (6.5s ease-in-out).
+function SlabBack({ faded, shimmer }: { faded?: boolean; shimmer?: boolean }) {
   return (
     <div className={`relative h-[400px] w-[290px] rounded-[20px] border border-white/10 bg-gradient-to-b from-neutral-700/60 to-neutral-950 p-2.5 shadow-[0_30px_60px_-12px_rgba(0,0,0,0.8)] ${faded ? "opacity-60" : ""}`}>
       {/* inner card back */}
-      <div className="relative flex h-full w-full flex-col rounded-xl bg-gradient-to-b from-neutral-900 to-black ring-1 ring-white/5">
+      <div className="relative flex h-full w-full flex-col overflow-hidden rounded-xl bg-gradient-to-b from-neutral-900 to-black ring-1 ring-white/5">
         {/* top label: wordmark + QR */}
         <div className="m-2 flex items-center justify-between rounded-md bg-white/5 px-3 py-2">
           <span className="font-heading text-sm font-bold tracking-tight text-white/85">pokenic</span>
@@ -341,6 +472,16 @@ function SlabBack({ faded }: { faded?: boolean }) {
           </span>
         </div>
         <p className="pb-3 text-center text-[8px] uppercase tracking-[0.3em] text-white/25">Phygital Certification</p>
+        {/* celestial shimmer sweep (live `revealv4-celestial-sweep`, 6.5s loop) */}
+        {shimmer && (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-y-[-20%] w-[55%] motion-safe:animate-[celestialSweep_6.5s_ease-in-out_infinite]"
+            style={{
+              background: "linear-gradient(105deg, transparent 0%, rgba(255,255,255,0.09) 38%, rgba(255,255,255,0.22) 50%, rgba(255,255,255,0.09) 62%, transparent 100%)",
+            }}
+          />
+        )}
       </div>
     </div>
   );

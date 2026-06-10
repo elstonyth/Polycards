@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
 import { usePrefersReducedMotion } from "@/lib/use-reveal";
+import { HERO_ROTATE_MS, HERO_SLIDE } from "@/lib/motion";
 
 type Theme = {
   name: string;
@@ -45,7 +47,6 @@ const THEMES: Theme[] = [
 ];
 
 const N = THEMES.length;
-const ROTATE_MS = 2800;
 
 type SlotKey = "-1" | "0" | "1";
 
@@ -57,13 +58,14 @@ type SlotConfig = {
   rotate: number;
 };
 
-// Slot geometry measured off the live site's carousel:
-//   center = scale 1 / 0° / opacity 1, sides = scale 0.81 / ±8° / opacity 0.6,
-//   incoming/outgoing back card = scale 0.7 / opacity 0.
+// Slot geometry + timing measured off the live carousel at rAF resolution
+// (docs/research/motion-live/hero-curve2.json): center = scale 1 / 0° / opacity 1,
+// sides = scale 0.822 / ±8° / opacity 0.6, back card = scale 0.7 / opacity 0;
+// slides run ~650ms ease-OUT and the theme swaps every ≈4.5s (HERO_* in lib/motion).
 const SLOTS: Record<SlotKey, SlotConfig> = {
-  "-1": { x: "-10%", scale: 0.81, opacity: 0.6, z: 20, rotate: -8 },
+  "-1": { x: "-10%", scale: 0.822, opacity: 0.6, z: 20, rotate: -8 },
   "0": { x: "0%", scale: 1, opacity: 1, z: 30, rotate: 0 },
-  "1": { x: "10%", scale: 0.81, opacity: 0.6, z: 20, rotate: 8 },
+  "1": { x: "10%", scale: 0.822, opacity: 0.6, z: 20, rotate: 8 },
 };
 
 export default function HeroSection() {
@@ -74,7 +76,7 @@ export default function HeroSection() {
     if (reduced) return;
     const id = setInterval(() => {
       setCenter((c) => (c + 1) % N);
-    }, ROTATE_MS);
+    }, HERO_ROTATE_MS);
     return () => clearInterval(id);
   }, [reduced]);
 
@@ -104,7 +106,8 @@ export default function HeroSection() {
             alt=""
             className={cn(
               "pointer-events-none absolute inset-0 h-full w-full scale-125 object-cover blur-[20px] saturate-[2]",
-              !reduced && "transition-opacity duration-700 ease-in-out",
+              // glow crossfade runs in the same ~650ms ease-out window as the cards
+              !reduced && "transition-opacity duration-[650ms] ease-out",
               i === center ? "opacity-100" : "opacity-0"
             )}
           />
@@ -150,19 +153,18 @@ export default function HeroSection() {
                 const cfg = slot ? SLOTS[slot] : null;
                 const isCenter = slot === "0";
                 return (
-                  <div
+                  <motion.div
                     key={t.name}
-                    className={cn(
-                      "absolute inset-0 flex items-end justify-center p-4 pb-0 lg:p-6 lg:pb-0",
-                      !reduced && "transition-all duration-[650ms] ease-in-out"
-                    )}
-                    style={{
-                      transform: cfg
-                        ? `translateX(${cfg.x}) scale(${cfg.scale}) rotate(${cfg.rotate}deg)`
-                        : "translateX(0) scale(0.7)",
+                    className="absolute inset-0 flex items-end justify-center p-4 pb-0 lg:p-6 lg:pb-0"
+                    initial={false}
+                    animate={{
+                      x: cfg ? cfg.x : "0%",
+                      scale: cfg ? cfg.scale : 0.7,
+                      rotate: cfg ? cfg.rotate : 0,
                       opacity: cfg ? cfg.opacity : 0,
-                      zIndex: cfg ? cfg.z : 0,
                     }}
+                    transition={reduced ? { duration: 0 } : HERO_SLIDE}
+                    style={{ zIndex: cfg ? cfg.z : 0 }}
                   >
                     <div
                       className={cn(
@@ -188,7 +190,7 @@ export default function HeroSection() {
                         aria-hidden
                       />
                     </div>
-                  </div>
+                  </motion.div>
                 );
               })}
             </div>

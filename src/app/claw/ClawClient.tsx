@@ -58,8 +58,10 @@ function PackCard({ pack, icon }: { pack: Pack; icon: string }) {
           height={360}
           loading="lazy"
           className={cn(
-            "h-52 w-auto object-contain drop-shadow-[0_12px_28px_rgba(0,0,0,0.5)] transition-transform duration-300 ease-out sm:h-60",
-            oos ? "grayscale" : "group-hover:-translate-y-1",
+            // hover zoom measured on live /claw: art scales to 1.092 over 0.7s on
+            // Tailwind's default curve (0.4,0,0.2,1) — live has no lift/translate
+            "h-52 w-auto object-contain drop-shadow-[0_12px_28px_rgba(0,0,0,0.5)] transition-transform duration-700 sm:h-60",
+            oos ? "grayscale" : "group-hover:scale-[1.092]",
           )}
         />
       </div>
