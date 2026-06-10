@@ -4,6 +4,7 @@ import { Container, Heading, Text, Table, Badge } from "@medusajs/ui";
 import { ChartBar } from "@medusajs/icons";
 import type { RouteConfig } from "@mercurjs/dashboard-sdk";
 import { packsApi, type PullsResponse } from "../../lib/packs-api";
+import { resolveImageUrl } from "../../lib/image-url";
 
 export const config: RouteConfig = {
   label: "Pull Ledger",
@@ -126,7 +127,7 @@ const PullLedgerPage = () => {
                   <Table.Cell>
                     <div className="flex items-center gap-3">
                       {p.card?.image && (
-                        <img src={p.card.image} alt="" className="h-10 w-8 shrink-0 rounded object-contain" />
+                        <img src={resolveImageUrl(p.card.image)} alt="" className="h-10 w-8 shrink-0 rounded object-contain" />
                       )}
                       <span className="max-w-[20rem] truncate">{p.card?.name ?? p.card?.handle ?? "—"}</span>
                     </div>

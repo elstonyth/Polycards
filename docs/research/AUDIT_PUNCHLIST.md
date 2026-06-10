@@ -122,24 +122,52 @@
   all 12 pack imgs/frame). Now driven **imperatively**: pointermove writes `cylRef.current.style.transform`
   directly (+`will-change:transform`), React state only on snap/tap. Build green; drag+tap+snap re-verified.
 
-### ⏳ ACTIONABLE NEXT: animated claw-machine rebake (use the `claw-rebrand` skill)
-Some detail-page packs show a STATIC machine (or the pack icon) instead of the sliding-claw animation,
-because the animated `-anim.avif` was only generated for 9 packs. Status by pack BASE
-(base = icon filename, e.g. `legend-one-piece-pack-icon.webp` → `legend-one-piece-pack`):
-- ✅ **Animated now** (`CLAW_HAS_ANIM` in `packs-data.ts`): mythic-pack, legend-pack, elite-pack,
-  platinum-pack, rookie-pack, legend-pack-1dpaec, modern-grails-noafw0, pro-soccer-pack, starter-riftbound-pack.
-- ⚠️ **Static webp → need rebake (12):** legend-one-piece-pack, one-piece-platinum-pack, elite-one-piece-pack,
-  starter-one-piece-pack, black-pack-jjnfuk *(anim exists on disk but disabled — framed differently, needs
-  re-tune)*, pro-baseball-pack, legend-baseball-pack, starter-baseball-pack, elite-football-pack,
-  starter-football-pack, platinum-football-pack, yugioh-pro-pack.
-- ⚠️ **Icon fallback → need a machine entirely (2):** black-pack, diamond-pack *(in `CLAW_NO_MACHINE`)*.
-- **How:** live animated source = `https://www.phygitals.com/images/claw/<base>-1.avif` (confirmed 200 for
-  black-pack-1.avif, diamond-pack-1.avif, legend-pack-1.avif — verify per base). Per the claw-rebrand skill:
-  download → rebrand banner(→pokenic)+placard+url frame-by-frame → ffmpeg re-encode (⚠️ kill stale ffmpeg
-  first, cap `-frames:v`, runaway-CPU risk) → bump `CLAW_REV` → add base to `CLAW_HAS_ANIM` (and remove
-  black-pack/diamond-pack from `CLAW_NO_MACHINE`).
-- **Caveat:** existing anim machines have a pokenic BANNER but still phygitals PLACARD/URL (base-text
-  rebrand deferred = "task 19"). New rebakes should match — or finally do the base-text too.
+### ✅ RESOLVED: animated claw-machine rebake (verified 2026-06-09)
+**Every animation rebake that is POSSIBLE is done.** 18 machines that have a live animated source
+(`https://www.phygitals.com/images/claw/<base>-1.avif`, HTTP 200) are rebranded, baked to `<base>-anim.avif`,
+and wired into `CLAW_HAS_ANIM` (`packs-data.ts`): the pokemon tiers (incl. black-pack + diamond-pack), all
+One Piece + Yu-Gi-Oh tiers, NBA black/legend/platinum (black-pack-jjnfuk, legend-pack-1dpaec,
+modern-grails-noafw0), pro-soccer-pack, and starter-riftbound-pack. `CLAW_NO_MACHINE` is now **empty**.
+- **The only non-animated machines are the 6 sports packs** (baseball: pro/legend/starter; football:
+  elite/starter/platinum). They **CANNOT be animated**: live returns **404 for `<slug>-1.avif`** (only a
+  static `<slug>-1.webp` exists), and their live `__NEXT_DATA__` records have `claw_image_url: null` with the
+  *same data shape* as animated packs — the live frontend builds the machine URL purely by slug convention,
+  so there is no animated source to download. The clone's static `<base>-machine.webp` fallback is therefore
+  the **faithful match to live**. Nothing to rebake. (Verified via direct AVIF probe + live record diff:
+  `pro-baseball-pack` vs animated `legend-pack` — identical keys, `claw_image_url` null on both.)
+- **Separate items (NOT animation rebakes — do not fold in):** live baseball has 2 packs the clone lacks —
+  `platinum-baseball-pack`, `mythic-baseball-pack` (catalog completeness); and live `buyback_percent` reads
+  0.85 on pro-baseball vs 0.9 on the premium tiers (the 85→90 copy drift). Track under catalog/copy.
+- **Method (for reference, if live ever adds a source):** download `<base>-1.avif` → rebrand banner/placard/url
+  frame-by-frame → ffmpeg re-encode (⚠️ kill stale ffmpeg first, cap `-frames:v`, runaway-CPU risk) → bump
+  `CLAW_REV` → add base to `CLAW_HAS_ANIM`. See the `claw-rebrand` skill.
+- **Open (separate from animation):** the already-animated machines carry a pokenic BANNER but several still
+  show a phygitals PLACARD/URL (base-text rebrand = "task 19").
+
+#### Attempt log (2026-06-09) — groundwork done, first bake bounced (verify-first caught it)
+- **Pipeline confirmed reusable** (search-first): `make_patch.py` (top-band patch from `<base>-machine.webp`)
+  → `rebake_ff.mjs` (overlay onto `<base>-machine.avif` → `<base>-anim.avif`). Toolchain verified:
+  ffmpeg 8.1.1 + libsvtav1, venv pillow_avif. Banner rebrand technique = `rebrand-claw-final.mjs`
+  (stroke-level inpaint of the wordmark + redraw "Pokenic").
+- **DONE:** downloaded live animated sources for black-pack + diamond-pack
+  (`black-pack-1.avif`/`-machine.avif`, `diamond-pack-1.avif`/`-machine.avif`); wrote focused
+  `scripts/rebrand-banner-new.mjs` (scoped to these 2, won't touch the 16 existing).
+- **❌ First rebrand pass DOUBLED the wordmark** (drew "Pokenic" ABOVE an un-erased "phygitals") —
+  reverted the bad `<base>-machine.webp` (were never wired; black/diamond stay in CLAW_NO_MACHINE → icon,
+  no regression). Two reasons, both the skill's lesson #3 (busy-bg contamination):
+  1. On **black-pack the "phygitals" wordmark is ORANGE-glow**, not white — the white-only `isText`
+     missed it (so it wasn't erased), and a stray white highlight at y≈134 gave a false position.
+  2. Color-threshold measurement of the wordmark y is **contaminated by the glowing machine frame +
+     pack** (bbox sprawls y133→299). Raw numbers are not trustworthy here.
+- **Corrected approach for next pass (per skill: measure by DRAWING the bbox, then PIN):** (a) extract
+  frame 0, save a **zoomed crop of just the banner**, read the true wordmark top/centre by eye off a grid;
+  (b) PIN cx/cy + a tight inpaint band (don't rely on color detection); (c) on black, detect+erase the
+  ORANGE wordmark and **redraw "Pokenic" in matching orange-glow** (white won't match); (d) verify the
+  STILL before `make_patch`+`rebake_ff`, then anim frame 0, then live :4000.
+- **One Piece correction (was wrong above):** the One Piece `<base>-machine.webp` stills are **NOT
+  rebranded** — top banner = tier name ("LEGEND PACK MACHINE", no wordmark); brand is in the LOWER zone
+  ("Phygitals.com" + "RIP & REVEAL by phygitals"). So One Piece needs the **lower-zone** rebrand
+  (`rebrand_bottom.mjs` / placard-url style), NOT the top-band banner patch. Re-scope before doing them.
 
 ### Other STILL-OPEN /claw items (user said they'll handle these)
 - Live `/claw` list uses a **horizontal-scroll carousel** per category; clone uses a wrapped grid.

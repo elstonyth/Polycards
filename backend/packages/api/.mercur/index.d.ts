@@ -429,7 +429,17 @@ export type Routes = {
             invite: typeof import("@mercurjs/core/api/admin/sellers/invite/route");
             $id: typeof import("@mercurjs/core/api/admin/sellers/[id]/route");
         };
+        cards: typeof import("../../src/api/admin/cards/route") & {
+            $handle: typeof import("../../src/api/admin/cards/[handle]/route");
+        };
         custom: typeof import("../../src/api/admin/custom/route");
+        packs: typeof import("../../src/api/admin/packs/route") & {
+            $slug: typeof import("../../src/api/admin/packs/[slug]/route") & {
+                members: typeof import("../../src/api/admin/packs/[slug]/members/route");
+                odds: typeof import("../../src/api/admin/packs/[slug]/odds/route");
+            };
+        };
+        pulls: typeof import("../../src/api/admin/pulls/route");
     };
     auth: {
         $actorType: {
@@ -522,6 +532,15 @@ export type Routes = {
             $id: typeof import("@mercurjs/core/api/store/sellers/[id]/route");
         };
         custom: typeof import("../../src/api/store/custom/route");
+        leaderboard: typeof import("../../src/api/store/leaderboard/route");
+        packs: typeof import("../../src/api/store/packs/route") & {
+            $slug: typeof import("../../src/api/store/packs/[slug]/route") & {
+                open: typeof import("../../src/api/store/packs/[slug]/open/route");
+            };
+        };
+        pulls: {
+            recent: typeof import("../../src/api/store/pulls/recent/route");
+        };
     };
     vendor: {
         campaigns: typeof import("@mercurjs/core/api/vendor/campaigns/route") & {
