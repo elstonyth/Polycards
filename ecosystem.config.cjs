@@ -26,6 +26,20 @@ module.exports = {
       restart_delay: 3000,
     },
     {
+      // LIVE-EDIT preview: hot-reloads on every source change, reachable at
+      // http://26.42.209.183:4100. Known machine quirk: next dev serves
+      // images slowly here — :4000 (prod build) stays the fidelity reference;
+      // never verify clone work against this one.
+      name: "pokenic-store-dev",
+      cwd: __dirname,
+      script: "node_modules/next/dist/bin/next",
+      args: "dev -p 4100",
+      interpreter: "C:/Program Files/nodejs/node.exe",
+      windowsHide: true,
+      max_restarts: 10,
+      restart_delay: 3000,
+    },
+    {
       name: "pokenic-backend",
       cwd: `${__dirname}/backend/packages/api`,
       script: "node_modules/@medusajs/cli/cli.js",

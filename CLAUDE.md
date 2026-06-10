@@ -69,6 +69,7 @@ Rules:
 | Port | Name | What |
 |------|------|------|
 | 4000 | pokenic-store | `next start` (prod build — `pm2 restart pokenic-store` after `npm run build`) |
+| 4100 | pokenic-store-dev | `next dev` — LIVE-EDIT preview (hot reload on every save; images slow on this machine — never verify against it, :4000 stays the reference) |
 | 9000 | pokenic-backend | `medusa develop` (MUST be dev mode: prod marks the admin session cookie Secure → dropped over http → admin login silently fails) |
 | 7000 | pokenic-admin | `vite preview --host` of the built dist (backendUrl 26.42.209.183:9000 baked at build) |
 
