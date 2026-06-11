@@ -3,6 +3,21 @@ import { DashboardModuleOptions } from '@mercurjs/types'
 import path from 'path'
 loadEnv(process.env.NODE_ENV || 'development', process.cwd())
 
+// The "supersecret" fallback is a dev convenience ONLY: these values sign every
+// admin/customer JWT and session cookie, so production booting on the known
+// default (or with the secret unset) silently voids all of that — fail at
+// startup instead, per the repo security rule "validate required secrets at
+// startup". Generation one-liner lives in .env.template's PROD CHECKLIST.
+const requiredSecret = (name: 'JWT_SECRET' | 'COOKIE_SECRET'): string => {
+  const value = process.env[name] || 'supersecret'
+  if (process.env.NODE_ENV === 'production' && value === 'supersecret') {
+    throw new Error(
+      `${name} must be set to a strong random value in production (see .env.template)`
+    )
+  }
+  return value
+}
+
 module.exports = defineConfig({
   // Bundled Medusa admin (/app) disabled — this Mercur project serves its own
   // admin (/dashboard) + vendor (/seller) dashboards via the *-ui modules below
@@ -17,8 +32,8 @@ module.exports = defineConfig({
       authCors: process.env.AUTH_CORS!,
       // @ts-expect-error: vendorCors is not defined in medusa config module
       vendorCors: process.env.VENDOR_CORS!,
-      jwtSecret: process.env.JWT_SECRET || "supersecret",
-      cookieSecret: process.env.COOKIE_SECRET || "supersecret",
+      jwtSecret: requiredSecret('JWT_SECRET'),
+      cookieSecret: requiredSecret('COOKIE_SECRET'),
     }
   },
   featureFlags: {

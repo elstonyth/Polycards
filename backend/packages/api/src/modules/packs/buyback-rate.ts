@@ -45,6 +45,9 @@ export function instantBuybackWindowMs(): number {
 // exact half-cents (0.15 × 90 = 13.499999999999998 → 13¢ instead of 14¢).
 // cents × percent is exact integer arithmetic and a true half after /100 is
 // exactly representable in binary, so Math.round always breaks the tie up.
+// (The exactness argument assumes an INTEGER percent — guaranteed today by the
+// integer buyback_percent column + admin validation's Math.trunc, and
+// FLAT_PERCENT is integer. Revisit if fractional rates ever land.)
 // The vault quote and the buyback credit MUST both go through this helper —
 // they have to agree to the cent.
 export function buybackAmount(marketValue: number, percent: number): number {

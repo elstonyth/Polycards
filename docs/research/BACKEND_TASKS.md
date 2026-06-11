@@ -15,7 +15,9 @@
 > - Mock (non-real) payment gateway first; the real gateway swaps in later
 >   behind the same top-up route.
 > - Single-vendor model: the house seller IS the admin. No vendor onboarding.
-> - Defer: Google/Discord social login (buttons stay placeholders).
+> - Defer: Google/Discord social login (buttons stay placeholders). When it
+>   DOES land: cover its credential/callback auth routes with the auth rate
+>   limiter — the current matcher only covers `/auth/*/emailpass(/*)`.
 >
 > **Environment ground rules** (same as GAP_CLOSURE_KICKOFF.md): backend :9000
 > (PM2 `pokenic-backend`, dev mode), storefront verify on :4000 against a REBUILT

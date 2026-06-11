@@ -107,10 +107,18 @@ export const registerCardInvoke = async (
         },
       ]);
     } catch (error) {
-      const [raced] = await packs.listCards(
-        { handle: product.handle },
-        { take: 1 }
-      );
+      // The recovery probe gets its own guard: if the insert failed because
+      // the DB is down, this re-list fails too, and ITS error must never
+      // replace the original fault.
+      let raced: unknown;
+      try {
+        [raced] = await packs.listCards(
+          { handle: product.handle },
+          { take: 1 }
+        );
+      } catch {
+        raced = undefined;
+      }
       if (raced) {
         throw new MedusaError(
           MedusaError.Types.DUPLICATE_ERROR,

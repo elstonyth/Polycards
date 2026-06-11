@@ -8,8 +8,9 @@ import { openPackWorkflow } from "../../../../../workflows/open-pack";
 // weighted odds and append the result to the Pull ledger.
 //
 // AUTH: this matcher is registered in src/api/middlewares.ts with
-// authenticate("customer", ["session","bearer"]), so the request is guaranteed
-// authenticated by the time it reaches here. The customer id is taken ONLY from
+// authenticate("customer", ["bearer"]) (bearer-only — customer session cookies
+// don't exist on this backend), so the request is guaranteed authenticated by
+// the time it reaches here. The customer id is taken ONLY from
 // the verified token (req.auth_context.actor_id) — never from the body/param —
 // so a caller cannot forge pulls for another account. AuthenticatedMedusaRequest
 // makes actor_id non-optional (the authenticate middleware guarantees it).

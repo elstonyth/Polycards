@@ -91,6 +91,22 @@ describe("registerCardInvoke duplicate handling", () => {
     expect(packs.listCards).toHaveBeenCalledTimes(2);
   });
 
+  it("surfaces the ORIGINAL insert error even when the recovery re-list also fails", async () => {
+    // DB-down scenario: createCards throws AND the duplicate probe throws.
+    // The probe's failure must never replace the original fault.
+    const dbDown = new Error("connection terminated unexpectedly");
+    const packs = {
+      listCards: jest
+        .fn()
+        .mockResolvedValueOnce([]) // pre-check passes
+        .mockRejectedValueOnce(new Error("still down")),
+      createCards: jest.fn().mockRejectedValue(dbDown),
+    };
+    await expect(
+      registerCardInvoke(INPUT, { container: buildContainer(packs) })
+    ).rejects.toBe(dbDown);
+  });
+
   it("rethrows the ORIGINAL error when the insert fails for any non-duplicate reason", async () => {
     const dbDown = new Error("connection terminated unexpectedly");
     const packs = {
