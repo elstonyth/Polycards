@@ -32,6 +32,11 @@ import {
   SLAB_RISE,
 } from "@/lib/motion";
 import type { PackCard } from "../packs-data";
+import {
+  SELL_COUNTDOWN_SECS,
+  sellOfferDeadlineMs,
+  sellSecondsLeft,
+} from "@/lib/sell-countdown";
 
 // Rarity → rgb (shared with the detail-page rings) drives the glow, pill, and the
 // Pull-celebration ribbon color.
@@ -53,16 +58,6 @@ const PACK_W = 196;
 const PACK_H = 304;
 const RADIUS = 188;
 
-// Keep/sell decision window at the reveal, in seconds. Expiry auto-keeps the
-// card in the vault, where later sells pay the flat rate instead of the pack's
-// instant rate. Mirrors (with grace) the server window in
-// backend/packages/api/src/modules/packs/buyback-rate.ts.
-const SELL_COUNTDOWN_SECS = 30;
-// Hard cap from the moment the open call resolved: the pre-card stages are
-// tap-gated (unbounded), so without this a lingering user would still see the
-// instant quote after the server's 90s window lapsed — and be credited the
-// flat rate instead. 75s leaves a safety margin under the server window.
-const SELL_HARD_CAP_MS = 75_000;
 
 type Stage = "packs" | "slab" | "metadata" | "pull" | "card";
 
@@ -125,24 +120,22 @@ export default function PackOpenOverlay({
   // applies. Wall-clock (deadline) based, not tick based, so background-tab
   // interval throttling can't stretch it; hard-capped from the open call so a
   // user lingering on the tap-gated stages never sees a quote the server
-  // window no longer honors. The server enforces its own window with grace on
-  // top, so this countdown is UX, not the security gate.
+  // window no longer honors (timing math + tests: src/lib/sell-countdown.ts).
+  // The server enforces its own window with grace on top, so this countdown
+  // is UX, not the security gate.
   const sellDeadline = useRef<number | null>(null);
   const [secondsLeft, setSecondsLeft] = useState(SELL_COUNTDOWN_SECS);
   const sellExpired = secondsLeft <= 0;
   useEffect(() => {
     if (stage !== "card" || !buyback) return;
     if (sellDeadline.current === null) {
-      sellDeadline.current = Math.min(
-        Date.now() + SELL_COUNTDOWN_SECS * 1000,
-        buyback.openedAtMs + SELL_HARD_CAP_MS,
-      );
+      sellDeadline.current = sellOfferDeadlineMs(Date.now(), buyback.openedAtMs);
     }
     if (sell.phase === "sold" || sellExpired) return;
     const tick = () => {
       const deadline = sellDeadline.current;
       if (deadline === null) return;
-      setSecondsLeft(Math.max(0, Math.ceil((deadline - Date.now()) / 1000)));
+      setSecondsLeft(sellSecondsLeft(deadline, Date.now()));
     };
     tick();
     const id = setInterval(tick, 250);
