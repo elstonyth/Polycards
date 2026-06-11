@@ -360,6 +360,51 @@ function buildFailoverStore(
   );
 }
 
+interface EnvLimiterDefaults {
+  burstLimit: number;
+  burstWindowMs: number;
+  limit: number;
+  windowMs: number;
+}
+
+/**
+ * Builds a burst + sustained limiter whose rules are env-tunable under a
+ * shared naming scheme: `${envPrefix}_BURST_LIMIT`, `${envPrefix}_BURST_WINDOW_MS`,
+ * `${envPrefix}_LIMIT`, `${envPrefix}_WINDOW_MS`. Every endpoint limiter below
+ * is this with its own store namespace, connection name, and defaults.
+ */
+function createEnvRateLimit(opts: {
+  envPrefix: string;
+  connectionName: string;
+  prefix: string;
+  message?: string;
+  defaults: EnvLimiterDefaults;
+}): MiddlewareHandler {
+  const { envPrefix, defaults } = opts;
+  const rules: RateLimitRule[] = [
+    {
+      limit: positiveIntFromEnv(`${envPrefix}_BURST_LIMIT`, defaults.burstLimit),
+      windowMs: positiveIntFromEnv(
+        `${envPrefix}_BURST_WINDOW_MS`,
+        defaults.burstWindowMs
+      ),
+    },
+    {
+      limit: positiveIntFromEnv(`${envPrefix}_LIMIT`, defaults.limit),
+      windowMs: positiveIntFromEnv(`${envPrefix}_WINDOW_MS`, defaults.windowMs),
+    },
+  ];
+
+  const warn = throttledWarn(60_000);
+  return createRateLimitMiddleware({
+    store: buildFailoverStore(opts.connectionName, warn),
+    rules,
+    prefix: opts.prefix,
+    message: opts.message,
+    onError: (err) => warn("limiter error; request allowed through", err),
+  });
+}
+
 /**
  * The pack-open limiter: burst + sustained sliding windows per customer,
  * Redis-backed (REDIS_URL) with in-memory failover. Limits are env-tunable:
@@ -367,26 +412,11 @@ function buildFailoverStore(
  * PACK_OPEN_RATE_LIMIT / PACK_OPEN_RATE_WINDOW_MS (default 20/60s)
  */
 export function createPackOpenRateLimit(): MiddlewareHandler {
-  const rules: RateLimitRule[] = [
-    {
-      limit: positiveIntFromEnv("PACK_OPEN_RATE_BURST_LIMIT", DEFAULTS.burstLimit),
-      windowMs: positiveIntFromEnv(
-        "PACK_OPEN_RATE_BURST_WINDOW_MS",
-        DEFAULTS.burstWindowMs
-      ),
-    },
-    {
-      limit: positiveIntFromEnv("PACK_OPEN_RATE_LIMIT", DEFAULTS.limit),
-      windowMs: positiveIntFromEnv("PACK_OPEN_RATE_WINDOW_MS", DEFAULTS.windowMs),
-    },
-  ];
-
-  const warn = throttledWarn(60_000);
-  return createRateLimitMiddleware({
-    store: buildFailoverStore("pack-open-rate-limit", warn),
-    rules,
+  return createEnvRateLimit({
+    envPrefix: "PACK_OPEN_RATE",
+    connectionName: "pack-open-rate-limit",
     prefix: "rl:pack-open:",
-    onError: (err) => warn("limiter error; request allowed through", err),
+    defaults: DEFAULTS,
   });
 }
 
@@ -398,23 +428,48 @@ export function createPackOpenRateLimit(): MiddlewareHandler {
  * VAULT_BUYBACK_RATE_LIMIT / VAULT_BUYBACK_RATE_WINDOW_MS (30/60s)
  */
 export function createVaultBuybackRateLimit(): MiddlewareHandler {
-  const rules: RateLimitRule[] = [
-    {
-      limit: positiveIntFromEnv("VAULT_BUYBACK_RATE_BURST_LIMIT", 10),
-      windowMs: positiveIntFromEnv("VAULT_BUYBACK_RATE_BURST_WINDOW_MS", 10_000),
-    },
-    {
-      limit: positiveIntFromEnv("VAULT_BUYBACK_RATE_LIMIT", 30),
-      windowMs: positiveIntFromEnv("VAULT_BUYBACK_RATE_WINDOW_MS", 60_000),
-    },
-  ];
-
-  const warn = throttledWarn(60_000);
-  return createRateLimitMiddleware({
-    store: buildFailoverStore("vault-buyback-rate-limit", warn),
-    rules,
+  return createEnvRateLimit({
+    envPrefix: "VAULT_BUYBACK_RATE",
+    connectionName: "vault-buyback-rate-limit",
     prefix: "rl:vault-buyback:",
     message: "Too many buyback requests.",
-    onError: (err) => warn("limiter error; request allowed through", err),
+    defaults: { burstLimit: 10, burstWindowMs: 10_000, limit: 30, windowMs: 60_000 },
+  });
+}
+
+/**
+ * The auth-endpoint limiter (login / register / password reset). These routes
+ * are PUBLIC — there is no auth_context yet — so the middleware keys on the
+ * request IP (its designed fallback): this is brute-force/credential-stuffing
+ * protection, not per-account fairness. Defaults are deliberately roomier than
+ * a single user needs but far below hammering rates. Env-tunable:
+ * AUTH_RATE_BURST_LIMIT / AUTH_RATE_BURST_WINDOW_MS (default 5/10s)
+ * AUTH_RATE_LIMIT / AUTH_RATE_WINDOW_MS (default 20/60s)
+ */
+export function createAuthRateLimit(): MiddlewareHandler {
+  return createEnvRateLimit({
+    envPrefix: "AUTH_RATE",
+    connectionName: "auth-rate-limit",
+    prefix: "rl:auth:",
+    message: "Too many sign-in attempts.",
+    defaults: DEFAULTS,
+  });
+}
+
+/**
+ * The store-read limiter for the customer's own vault/credits GETs — cheap
+ * reads, so the budget is generous; it only stops a runaway client or script
+ * from hammering. One instance is shared by both matchers (a combined budget —
+ * the two reads always travel together in the UI). Env-tunable:
+ * STORE_READ_RATE_BURST_LIMIT / STORE_READ_RATE_BURST_WINDOW_MS (default 30/10s)
+ * STORE_READ_RATE_LIMIT / STORE_READ_RATE_WINDOW_MS (default 120/60s)
+ */
+export function createStoreReadRateLimit(): MiddlewareHandler {
+  return createEnvRateLimit({
+    envPrefix: "STORE_READ_RATE",
+    connectionName: "store-read-rate-limit",
+    prefix: "rl:store-read:",
+    message: "Too many requests.",
+    defaults: { burstLimit: 30, burstWindowMs: 10_000, limit: 120, windowMs: 60_000 },
   });
 }
