@@ -77,21 +77,41 @@ export const createCardStep = createStep(
       );
     }
 
-    const [card] = await packs.createCards([
-      {
-        handle: product.handle,
-        name: product.title,
-        set: input.set,
-        grader: input.grader,
-        grade: input.grade,
-        market_value: input.market_value,
-        image,
-        // NULL price = "use FMV"; the product's own variant price stays the
-        // marketplace source of truth and is not touched by registration.
-        price: null,
-        for_sale: product.status === "published",
-      },
-    ]);
+    // The pre-check above is advisory only — two concurrent registrations of
+    // the same product both pass it. The handle's UNIQUE constraint is the
+    // real guard; map its violation to the same friendly duplicate error
+    // instead of letting a raw DB error surface as a 500 (mirror of the
+    // credit-row pattern in buyback-pull).
+    let card: Awaited<ReturnType<typeof packs.createCards>>[number];
+    try {
+      [card] = await packs.createCards([
+        {
+          handle: product.handle,
+          name: product.title,
+          set: input.set,
+          grader: input.grader,
+          grade: input.grade,
+          market_value: input.market_value,
+          image,
+          // NULL price = "use FMV"; the product's own variant price stays the
+          // marketplace source of truth and is not touched by registration.
+          price: null,
+          for_sale: product.status === "published",
+        },
+      ]);
+    } catch (error) {
+      const [raced] = await packs.listCards(
+        { handle: product.handle },
+        { take: 1 }
+      );
+      if (raced) {
+        throw new MedusaError(
+          MedusaError.Types.DUPLICATE_ERROR,
+          `'${product.title}' is already registered as a gacha card.`
+        );
+      }
+      throw error;
+    }
 
     // Mirror the gacha facts onto the product metadata (the marketplace card
     // page reads fmv/grade/grader/set from there) and make sure the product is
