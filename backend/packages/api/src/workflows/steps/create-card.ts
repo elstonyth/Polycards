@@ -109,14 +109,21 @@ export const registerCardInvoke = async (
     } catch (error) {
       // The recovery probe gets its own guard: if the insert failed because
       // the DB is down, this re-list fails too, and ITS error must never
-      // replace the original fault.
+      // replace the original fault — but it is logged, because a probe that
+      // fails for a DIFFERENT reason than the insert is a signal worth keeping.
       let raced: unknown;
       try {
         [raced] = await packs.listCards(
           { handle: product.handle },
           { take: 1 }
         );
-      } catch {
+      } catch (probeError) {
+        const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
+        logger.warn(
+          `create-card: duplicate probe failed after insert error — surfacing the insert error. ${
+            probeError instanceof Error ? probeError.message : String(probeError)
+          }`
+        );
         raced = undefined;
       }
       if (raced) {

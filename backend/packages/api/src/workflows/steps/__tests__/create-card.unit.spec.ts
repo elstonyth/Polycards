@@ -1,5 +1,9 @@
 import type { MedusaContainer } from "@medusajs/framework/types";
-import { MedusaError, Modules } from "@medusajs/framework/utils";
+import {
+  ContainerRegistrationKeys,
+  MedusaError,
+  Modules,
+} from "@medusajs/framework/utils";
 import { PACKS_MODULE } from "../../../modules/packs";
 import { registerCardInvoke } from "../create-card";
 
@@ -36,6 +40,7 @@ const buildContainer = (packs: Record<string, jest.Mock>) => {
     [Modules.PRODUCT]: {
       listProducts: jest.fn().mockResolvedValue([PRODUCT]),
     },
+    [ContainerRegistrationKeys.LOGGER]: { warn: jest.fn() },
   };
   return {
     resolve: (key: string) => {
