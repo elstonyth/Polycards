@@ -58,6 +58,6 @@ scripts/            # Asset download scripts
 ```
 
 ## MOST IMPORTANT NOTES
-- When launching Claude Code agent teams, prefer giving each teammate its own worktree branch and merging at the end (you serve the orchestrator role with full context). **EXCEPTION for this repo:** the git root *is* this repo (no parent monorepo), so Agent worktree isolation **fails** — dispatch builder sub-agents **in-place** here, not in per-teammate worktrees. See CLAUDE.md / `.claude/rules/common/agents.md`.
+- **Worktrees: follow the superpowers `using-git-worktrees` skill** for feature work needing isolation (preference declared 2026-06-11; consent is pre-granted, don't re-ask). Prefer the native `EnterWorktree` tool; fallback is `git worktree add .worktrees/<branch> -b <branch>` (`.worktrees/` is gitignored; plain `git worktree` verified working in this repo). Caveats: run `npm install` in a fresh worktree before building, and the historical failure note only applied to *background-agent* worktree isolation (`worktree.bgIsolation` is set to `none` in `.claude/settings.local.json` — leave it). See `.claude/rules/common/agents.md`.
 - After editing `AGENTS.md`, run `bash scripts/sync-agent-rules.sh` to regenerate platform-specific instruction files.
 @docs/research/INSPECTION_GUIDE.md

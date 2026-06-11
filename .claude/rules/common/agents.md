@@ -13,10 +13,13 @@ commands no longer resolve. Use these instead:
 | Built-in `Plan` agent | Implementation planning | Complex features, refactoring |
 | Built-in `Explore` agent | Read-only codebase exploration | Broad fan-out searches |
 
-> **This repo:** the git root *is* this repo (no parent monorepo), so Agent
-> worktree isolation fails — **dispatch builder sub-agents in-place**, not in
-> per-teammate worktrees (the worktree-per-teammate flow in AGENTS.md does not
-> apply here). See CLAUDE.md.
+> **Worktrees in this repo:** follow the superpowers `using-git-worktrees` skill
+> for isolated feature work (user preference, 2026-06-11 — consent pre-granted,
+> don't re-ask). Prefer the native `EnterWorktree` tool; fallback
+> `git worktree add .worktrees/<branch> -b <branch>` (`.worktrees/` is
+> gitignored). Run `npm install` in a fresh worktree before building. Only
+> *background-agent* worktree isolation stays off (`worktree.bgIsolation: none`
+> in `.claude/settings.local.json`).
 
 ## What is actually enforced vs. advisory
 

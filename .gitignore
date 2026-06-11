@@ -61,3 +61,6 @@ graphify-out/*
 !graphify-out/graph.json
 !graphify-out/GRAPH_REPORT.md
 !graphify-out/graph.html
+
+# git worktrees (superpowers using-git-worktrees skill)
+/.worktrees/

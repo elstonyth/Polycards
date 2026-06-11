@@ -23,7 +23,7 @@ These are hard-won constraints from `docs/HANDOFF.md`, not preferences:
   ```
 - **Verify with the Playwright scripts in `scripts/*.mjs`, NOT Chrome MCP.** Chrome MCP caused hours of false "still broken" from port/cache confusion. Scripts screenshot to `docs/research/*.png`; read those PNGs back with the Read tool.
 - **Watch for runaway node processes** (this has hit thousands of processes / 90+ GB). Check `@(Get-Process node).Count`; kill all with `Get-Process node | Stop-Process -Force`.
-- The git root **is** this repo (no parent monorepo), so Agent **worktree isolation from a parent fails** — dispatch builder sub-agents in-place here, even though `AGENTS.md` describes a worktree-per-teammate flow.
+- **Worktrees are OK and preferred for isolated feature work** (user adopted the superpowers `using-git-worktrees` skill 2026-06-11 — consent pre-granted): native `EnterWorktree` tool first, else `git worktree add .worktrees/<branch> -b <branch>` (gitignored; verified working). Run `npm install` in fresh worktrees. The old "worktree isolation fails" note applied only to *background-agent* isolation (`worktree.bgIsolation: none` in settings.local.json — leave that as is).
 
 Standard scripts: `npm run dev | build | start | lint | typecheck`, and `npm run check` (lint + typecheck + build). Docker: `docker compose up app --build` (prod) / `dev --build` (port 3001).
 
