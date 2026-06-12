@@ -158,6 +158,33 @@ export async function adjustCustomerCredits(
   return (await res.json()) as { amount: number; balance: number };
 }
 
+// ── Economy report ───────────────────────────────────────────────────────────
+
+export interface EconomyReport {
+  totals: {
+    revenue: number;
+    payouts: number;
+    topups: number;
+    adjustments: number;
+    net: number;
+  };
+  liability: { count: number; market_value: number };
+  packs: {
+    slug: string;
+    title: string;
+    category: string;
+    price: number;
+    /** Odds-weighted expected FMV per open; null when unanswerable. */
+    ev: number | null;
+    /** ev / price × 100; > 100 means the pack loses money. */
+    rtp_pct: number | null;
+  }[];
+}
+
+export async function getEconomyReport(): Promise<EconomyReport> {
+  return getJson<EconomyReport>("/admin/economy");
+}
+
 // PriceCharting proxies (the API token lives server-side only). A 503 from the
 // proxy means PRICECHARTING_API_TOKEN is not configured — surface the message
 // and fall back to manual FMV entry.

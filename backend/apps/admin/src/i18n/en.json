@@ -203,5 +203,25 @@
     "status": "Status",
     "when": "When",
     "empty": "Nothing here yet."
+  },
+  "economy": {
+    "title": "Economy",
+    "subtitle": "Lifetime credit flows and what the vault still owes.",
+    "revenue": "Revenue (opens)",
+    "payouts": "Payouts (buybacks)",
+    "net": "Net margin",
+    "liability": "Vault liability",
+    "liabilityHint": "{{count}} cards owed",
+    "topups": "Top-ups",
+    "adjustments": "Adjustments (net)",
+    "rtpTitle": "Pack RTP (theoretical)",
+    "rtpSubtitle": "Expected payout per open from the current odds × card FMVs. Above 100% means the pack loses money.",
+    "pack": "Pack",
+    "category": "Category",
+    "price": "Price",
+    "ev": "EV / open",
+    "rtp": "RTP",
+    "empty": "No active packs.",
+    "loadError": "Could not load the economy report."
   }
 }

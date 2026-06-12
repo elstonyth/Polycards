@@ -121,6 +121,25 @@ try {
     fullPage: true,
   });
 
+  // ── Economy report ───────────────────────────────────────────────────────
+  await page.goto(`${ADMIN}/economy`, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2500);
+  for (const stat of [/revenue/i, /payouts/i, /vault liability/i]) {
+    if (await page.getByText(stat).first().isVisible())
+      ok(`economy: stat card renders (${stat})`);
+    else fail(`economy: stat card missing (${stat})`);
+  }
+  const rtpRows = await page.locator("table tbody tr").count();
+  if (rtpRows > 0) ok(`economy: RTP table lists ${rtpRows} active packs`);
+  else fail("economy: RTP table empty");
+  const rtpBadge = await page.getByText(/%$/).count();
+  if (rtpBadge > 0) ok("economy: RTP percentages render");
+  else fail("economy: no RTP percentages found");
+  await page.screenshot({
+    path: "docs/research/qa-admin-economy.png",
+    fullPage: true,
+  });
+
   if (consoleErrors.length === 0) ok("admin dashboard: zero console errors");
   else fail(`admin console errors: ${consoleErrors.slice(0, 5).join(" | ")}`);
 } catch (err) {
