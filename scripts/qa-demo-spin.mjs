@@ -47,11 +47,11 @@ try {
   });
 
   await page.goto(`${BASE}/claw/${PACK}`, { waitUntil: "domcontentloaded" });
-  const loginCta = await page
+  // waitFor, not isVisible — the label hydrates client-side from auth state.
+  await page
     .getByRole("button", { name: /log in to open/i })
-    .isVisible();
-  if (loginCta) ok("anonymous real-open CTA reads 'Log in to open'");
-  else fail("anonymous real-open CTA missing");
+    .waitFor({ timeout: 15000 });
+  ok("anonymous real-open CTA reads 'Log in to open'");
 
   await playDemoToCard(page);
   ok("demo spin played through to the card reveal");
@@ -72,13 +72,13 @@ try {
 
   await page.screenshot({ path: "docs/research/qa-demo-spin-anon.png" });
 
-  const openPosts = posts.filter((u) => /\/store\/packs\/.+\/open/.test(u));
-  if (openPosts.length === 0) ok("no POST /store/packs/*/open fired");
-  else fail(`demo fired real open POST(s): ${openPosts.join(", ")}`);
-  const backendPosts = posts.filter((u) => !u.startsWith(`${BASE}/`));
-  if (backendPosts.length === 0)
-    ok("no cross-origin POSTs at all from the demo");
-  else fail(`unexpected POSTs: ${backendPosts.join(", ")}`);
+  // openPack is a Next SERVER ACTION: from the browser a real open is a
+  // same-origin POST to the page URL (next-action header) — the backend
+  // /store/packs/*/open call happens server-side, invisible here. So the
+  // honest assertion is ZERO POSTs of any kind during the anonymous flow
+  // (the anon page makes none legitimately; the auth session check is a GET).
+  if (posts.length === 0) ok("zero POSTs during the anonymous demo flow");
+  else fail(`demo flow fired POST(s): ${posts.join(", ")}`);
 
   // Sign-up CTA opens the auth modal in signup mode.
   await signup.click();
@@ -88,6 +88,20 @@ try {
     .waitFor({ timeout: 10000 });
   ok("sign-up CTA opens the auth modal");
   await page.screenshot({ path: "docs/research/qa-demo-spin-signup.png" });
+
+  // Marketplace gating: anonymous Buy now on a card detail → login modal.
+  await page.goto(`${BASE}/marketplace`, { waitUntil: "domcontentloaded" });
+  const cardHref = await page
+    .locator('a[href^="/card/"]')
+    .first()
+    .getAttribute("href");
+  await page.goto(`${BASE}${cardHref}`, { waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: /buy now/i }).click();
+  await page
+    .locator('input[name="email"]')
+    .waitFor({ state: "visible", timeout: 10000 });
+  ok("anonymous Buy now routes to the login modal");
+  await page.screenshot({ path: "docs/research/qa-demo-spin-buygate.png" });
   await ctxA.close();
 
   // ── Flow B: logged-in customer — real flow unchanged, demo loses the CTA ──

@@ -68,5 +68,7 @@ export function demoDraw(
       ];
     }
   }
-  return null;
+  // Pool rarities all outside the published odds (can't happen with the full
+  // static ODDS, but keeps the "null only on empty pool" contract honest).
+  return pool[0];
 }

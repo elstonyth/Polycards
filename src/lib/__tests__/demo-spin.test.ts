@@ -91,4 +91,12 @@ describe("demoDraw", () => {
   it("returns null on an empty pool", () => {
     expect(demoDraw([], ODDS, 0.5, 0.5)).toBeNull();
   });
+
+  it("still draws when no pool rarity appears in the published odds", () => {
+    const offOdds: { rarity: Rarity; chance: string }[] = [
+      { rarity: "Common", chance: "100%" },
+    ];
+    const pool = [card("only", "Legendary")];
+    expect(demoDraw(pool, offOdds, 0.5, 0.5)?.id).toBe("only");
+  });
 });
