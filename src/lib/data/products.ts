@@ -126,18 +126,6 @@ function toMockCard(p: HttpTypes.StoreProduct): MockCard {
 // and the tab icons are local assets, not backend-derived.
 const CATEGORIES: MarketplaceCategory[] = [
   { name: 'Pokémon', icon: '/pack-index-icons/pokemon.webp' },
-  { name: 'One Piece', icon: '/pack-index-icons/onepiece.webp' },
-  { name: 'Basketball', icon: '/pack-index-icons/nba.webp' },
-  { name: 'Football', icon: '/pack-index-icons/nfl.webp' },
-  { name: 'Baseball', icon: '/pack-index-icons/mlb.webp' },
-  { name: 'Soccer', icon: '/pack-index-icons/soccer.webp' },
-  { name: 'Yu-Gi-Oh!', icon: '/pack-index-icons/yugioh.webp' },
-  { name: 'Riftbound', icon: '/pack-index-icons/riftbound.webp' },
-  { name: 'Dragon Ball', icon: '/pack-index-icons/dragonball.webp' },
-  { name: 'Fwog', icon: '/pack-index-icons/fwog.jpg' },
-  { name: 'NEUKO', icon: '/pack-index-icons/neuko.jpg' },
-  { name: 'Vibes', icon: '/pack-index-icons/vibes.webp' },
-  { name: 'Moonbirds', icon: '/pack-index-icons/moonbirds.png' },
 ];
 
 /** Marketplace listing grid — live from the Store API (empty on backend failure). */

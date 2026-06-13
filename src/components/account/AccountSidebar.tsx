@@ -32,7 +32,6 @@ export const ACCOUNT_NAV: { label: string; href: string; icon: LucideIcon }[] =
     { label: 'Withdraw', href: '/bank-withdrawal', icon: Landmark },
     { label: 'Borrow / Lend', href: '/borrow-lend', icon: HandCoins },
     { label: 'PokéCoin', href: '/pokecoin', icon: Coins },
-    { label: 'NBACoin', href: '/nbacoin', icon: Coins },
     { label: 'Accelerate Claim', href: '/accelerate-claim', icon: Zap },
   ];
 

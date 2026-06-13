@@ -27,36 +27,6 @@ const CATEGORIES: PackCategory[] = [
     pack: '/home/hero/ripped-packs/pokemon.webp',
     href: '/claw?category=pokemon',
   },
-  {
-    label: 'Basketball',
-    slab: '/home/hero/slabs/basketball2.webp',
-    pack: '/home/hero/ripped-packs/basketball.webp',
-    href: '/claw?category=basketball',
-  },
-  {
-    label: 'Football',
-    slab: '/home/hero/slabs/football3.webp',
-    pack: '/home/hero/ripped-packs/football.webp',
-    href: '/claw?category=football',
-  },
-  {
-    label: 'One Piece',
-    slab: '/home/hero/slabs/onepiece4.webp',
-    pack: '/home/hero/ripped-packs/onepiece.webp',
-    href: '/claw?category=one-piece',
-  },
-  {
-    label: 'Baseball',
-    slab: '/home/hero/slabs/baseball1.webp',
-    pack: '/home/hero/ripped-packs/baseball.webp',
-    href: '/claw?category=baseball',
-  },
-  {
-    label: 'Yu-Gi-Oh!',
-    slab: '/home/hero/slabs/yugioh2.webp',
-    pack: '/home/hero/ripped-packs/yugioh.webp',
-    href: '/claw?category=yugioh',
-  },
 ];
 
 export default function OpenPacksSection() {
