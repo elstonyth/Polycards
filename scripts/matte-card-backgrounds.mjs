@@ -15,14 +15,14 @@
 //   5. Save as webp with alpha (q92). Writes per-file metrics for QA.
 //
 // Run: node scripts/matte-card-backgrounds.mjs [--dry]
-import fs from "node:fs";
-import path from "node:path";
-import sharp from "sharp";
+import fs from 'node:fs';
+import path from 'node:path';
+import sharp from 'sharp';
 
-const DIR = path.resolve("public/cdn/cards");
-const DRY = process.argv.includes("--dry");
+const DIR = path.resolve('public/cdn/cards');
+const DRY = process.argv.includes('--dry');
 const METRICS_OUT = path.resolve(
-  "docs/research/clone-film/v2/matte-metrics.json",
+  'docs/research/clone-film/v2/matte-metrics.json',
 );
 
 const median = (arr) => {
@@ -197,7 +197,7 @@ async function matteOne(file) {
 
 const files = fs
   .readdirSync(DIR)
-  .filter((f) => f.endsWith(".webp"))
+  .filter((f) => f.endsWith('.webp'))
   .map((f) => path.join(DIR, f));
 const metrics = [];
 let warn = 0;
@@ -212,11 +212,11 @@ for (const f of files) {
     m.interiorHoles > 0;
   if (bad) warn++;
   console.log(
-    `${bad ? "WARN " : "ok   "}${m.file}  bg=${m.bg}  transparent=${m.transparentPct}%  opaqueBorder=${m.opaqueBorderPx}px  holes=${m.interiorHoles}`,
+    `${bad ? 'WARN ' : 'ok   '}${m.file}  bg=${m.bg}  transparent=${m.transparentPct}%  opaqueBorder=${m.opaqueBorderPx}px  holes=${m.interiorHoles}`,
   );
 }
 fs.mkdirSync(path.dirname(METRICS_OUT), { recursive: true });
 fs.writeFileSync(METRICS_OUT, JSON.stringify(metrics, null, 1));
 console.log(
-  `\n${files.length} files matted, ${warn} warnings${DRY ? " (dry run)" : ""} — metrics: ${METRICS_OUT}`,
+  `\n${files.length} files matted, ${warn} warnings${DRY ? ' (dry run)' : ''} — metrics: ${METRICS_OUT}`,
 );

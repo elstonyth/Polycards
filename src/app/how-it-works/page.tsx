@@ -1,6 +1,6 @@
-import type { Metadata } from "next";
-import Link from "next/link";
-import { features } from "@/lib/features";
+import type { Metadata } from 'next';
+import Link from 'next/link';
+import { features } from '@/lib/features';
 import {
   Vault,
   ShieldCheck,
@@ -11,51 +11,51 @@ import {
   Gamepad2,
   Trophy,
   type LucideIcon,
-} from "lucide-react";
-import FaqAccordion, { type FaqItem } from "@/components/FaqAccordion";
-import Reveal from "@/components/Reveal";
-import HowItWorksSteps from "@/components/HowItWorksSteps";
+} from 'lucide-react';
+import FaqAccordion, { type FaqItem } from '@/components/FaqAccordion';
+import Reveal from '@/components/Reveal';
+import HowItWorksSteps from '@/components/HowItWorksSteps';
 
 export const metadata: Metadata = {
-  title: "How It Works — Phygitals",
+  title: 'How It Works — Phygitals',
   description:
-    "Open packs of real graded cards, own them instantly, and ship to your door or sell on the marketplace.",
+    'Open packs of real graded cards, own them instantly, and ship to your door or sell on the marketplace.',
 };
 
 const STATS = [
-  { value: "1.9M", label: "Transactions" },
-  { value: "$167.9M", label: "Volume traded" },
-  { value: "24K", label: "Active listings" },
+  { value: '1.9M', label: 'Transactions' },
+  { value: '$167.9M', label: 'Volume traded' },
+  { value: '24K', label: 'Active listings' },
 ];
 
 type VaultCard = { icon: LucideIcon; title: string; body: string };
 const VAULT_CARDS: VaultCard[] = [
   {
     icon: Vault,
-    title: "Choose Your Vault",
-    body: "Cards stored at PSA, Alt, or Fanatics facilities",
+    title: 'Choose Your Vault',
+    body: 'Cards stored at PSA, Alt, or Fanatics facilities',
   },
   {
     icon: ShieldCheck,
-    title: "Fully Insured",
-    body: "Complete coverage on every card from day one",
+    title: 'Fully Insured',
+    body: 'Complete coverage on every card from day one',
   },
   {
     icon: Thermometer,
-    title: "Climate Controlled",
-    body: "Optimal conditions for long-term preservation",
+    title: 'Climate Controlled',
+    body: 'Optimal conditions for long-term preservation',
   },
   {
     icon: Truck,
-    title: "Ship Anytime",
-    body: "Redeem your cards with worldwide tracked delivery",
+    title: 'Ship Anytime',
+    body: 'Redeem your cards with worldwide tracked delivery',
   },
 ];
 
 const VAULT_LOGOS = [
-  { src: "/images/psa.png", alt: "PSA" },
-  { src: "/images/fanatics.png", alt: "Fanatics" },
-  { src: "/images/altwhite.png", alt: "Alt" },
+  { src: '/images/psa.png', alt: 'PSA' },
+  { src: '/images/fanatics.png', alt: 'Fanatics' },
+  { src: '/images/altwhite.png', alt: 'Alt' },
 ];
 
 type Testimonial = {
@@ -67,25 +67,25 @@ type Testimonial = {
 };
 const TESTIMONIALS: Testimonial[] = [
   {
-    name: "Mikerow",
-    handle: "@Mikerow01",
-    text: "LFG my claim from @phygitals came it look how nice those slabs are. Thank you again one love",
-    pfp: "/social/pfp/Mikerow01-400x400.jpg",
-    media: "/social/tweets/1940199479699022263_media-1.webp",
+    name: 'Mikerow',
+    handle: '@Mikerow01',
+    text: 'LFG my claim from @phygitals came it look how nice those slabs are. Thank you again one love',
+    pfp: '/social/pfp/Mikerow01-400x400.jpg',
+    media: '/social/tweets/1940199479699022263_media-1.webp',
   },
   {
-    name: "Lynch",
-    handle: "@_LYNCHY__",
-    text: "Digital to physical in just under 2 weeks super cool! Thanks @phygitals for creating unique way to trade!",
-    pfp: "/social/pfp/_LYNCHY__-400x400.jpg",
-    media: "/social/tweets/1937209444800004323_media-1.webp",
+    name: 'Lynch',
+    handle: '@_LYNCHY__',
+    text: 'Digital to physical in just under 2 weeks super cool! Thanks @phygitals for creating unique way to trade!',
+    pfp: '/social/pfp/_LYNCHY__-400x400.jpg',
+    media: '/social/tweets/1937209444800004323_media-1.webp',
   },
   {
-    name: "James Pleiades Hawkins",
-    handle: "@PleiadesHawkin",
-    text: "Mail day here in the gallery. @phygitals made it REAL!!",
-    pfp: "/social/pfp/PleiadesHawkin-400x400.jpg",
-    media: "/social/tweets/1959021922383274245_media-1.webp",
+    name: 'James Pleiades Hawkins',
+    handle: '@PleiadesHawkin',
+    text: 'Mail day here in the gallery. @phygitals made it REAL!!',
+    pfp: '/social/pfp/PleiadesHawkin-400x400.jpg',
+    media: '/social/tweets/1959021922383274245_media-1.webp',
   },
 ];
 
@@ -93,50 +93,50 @@ type Capability = { icon: LucideIcon; title: string; body: string };
 const CAPABILITIES: Capability[] = [
   {
     icon: Layers,
-    title: "Open Packs",
-    body: "Hundreds of packs across Pokemon, sports, TCG, and more. New drops every week.",
+    title: 'Open Packs',
+    body: 'Hundreds of packs across Pokemon, sports, TCG, and more. New drops every week.',
   },
   {
     icon: Store,
-    title: "Marketplace",
-    body: "Buy and sell cards with other collectors. Real cards, real ownership, instant transfers.",
+    title: 'Marketplace',
+    body: 'Buy and sell cards with other collectors. Real cards, real ownership, instant transfers.',
   },
   {
     icon: Gamepad2,
-    title: "Games",
-    body: "Pack Party, Duel, Draft. Compete with friends and other collectors for real cards.",
+    title: 'Games',
+    body: 'Pack Party, Duel, Draft. Compete with friends and other collectors for real cards.',
   },
   {
     icon: Trophy,
-    title: "Leaderboard",
-    body: "Earn points on every purchase. Top collectors win weekly prizes and exclusive rewards.",
+    title: 'Leaderboard',
+    body: 'Earn points on every purchase. Top collectors win weekly prizes and exclusive rewards.',
   },
 ];
 
 const FAQS: FaqItem[] = [
   {
-    q: "Are these real physical cards?",
-    a: "Yes. Every card on Phygitals is a real, professionally graded physical card stored in secure vault facilities. When you open a pack, you receive ownership of a specific physical slab that exists in a PSA, Fanatics, or Alt vault. You can ship it to your door at any time.",
+    q: 'Are these real physical cards?',
+    a: 'Yes. Every card on Phygitals is a real, professionally graded physical card stored in secure vault facilities. When you open a pack, you receive ownership of a specific physical slab that exists in a PSA, Fanatics, or Alt vault. You can ship it to your door at any time.',
   },
   {
-    q: "How does shipping work?",
-    a: "When you request a shipment, your card is pulled from the vault, carefully packaged, and shipped via fully tracked and insured delivery. We ship worldwide, and most domestic orders arrive within 5-7 business days. International shipping typically takes 10-14 days.",
+    q: 'How does shipping work?',
+    a: 'When you request a shipment, your card is pulled from the vault, carefully packaged, and shipped via fully tracked and insured delivery. We ship worldwide, and most domestic orders arrive within 5-7 business days. International shipping typically takes 10-14 days.',
   },
   {
     q: "What if I don't like my pull?",
-    a: "You can sell any card back instantly for 85-90% of its market value, or list it on the marketplace at your own price. Many collectors also trade cards with each other directly on the platform.",
+    a: 'You can sell any card back instantly for 85-90% of its market value, or list it on the marketplace at your own price. Many collectors also trade cards with each other directly on the platform.',
   },
   {
-    q: "How are pulls determined? Is it fair?",
-    a: "Every pull is determined by a provably fair system using public VRF (Verifiable Random Function). The odds for each pack are published transparently, and every result can be independently verified on-chain. No one, including us, can influence the outcome.",
+    q: 'How are pulls determined? Is it fair?',
+    a: 'Every pull is determined by a provably fair system using public VRF (Verifiable Random Function). The odds for each pack are published transparently, and every result can be independently verified on-chain. No one, including us, can influence the outcome.',
   },
   {
-    q: "Where are my cards stored?",
-    a: "Cards are stored in climate-controlled, fully insured vault facilities operated by PSA, Fanatics, and Alt. These are the same facilities used by major auction houses and institutional collectors. Your cards are protected around the clock.",
+    q: 'Where are my cards stored?',
+    a: 'Cards are stored in climate-controlled, fully insured vault facilities operated by PSA, Fanatics, and Alt. These are the same facilities used by major auction houses and institutional collectors. Your cards are protected around the clock.',
   },
   {
-    q: "Can I sell my cards?",
-    a: "Absolutely. You can list any card on the Phygitals marketplace and set your own price. When it sells, funds are available immediately. You can also use the instant sell-back feature for a guaranteed payout at 85-90% of market value.",
+    q: 'Can I sell my cards?',
+    a: 'Absolutely. You can list any card on the Phygitals marketplace and set your own price. When it sells, funds are available immediately. You can also use the instant sell-back feature for a guaranteed payout at 85-90% of market value.',
   },
 ];
 
@@ -181,7 +181,7 @@ export default function HowItWorksPage() {
               delay={90}
               className="font-heading text-4xl font-bold leading-[1.05] tracking-tight text-white sm:text-5xl lg:text-6xl 2xl:text-7xl"
             >
-              Real Cards,{" "}
+              Real Cards,{' '}
               <span className="text-neutral-500">Owned Digitally</span>
             </Reveal>
             <Reveal

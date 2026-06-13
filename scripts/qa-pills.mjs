@@ -1,21 +1,21 @@
-import { chromium } from "playwright";
+import { chromium } from 'playwright';
 const b = await chromium.launch();
 const p = await b.newPage({ viewport: { width: 1440, height: 900 } });
-await p.goto("http://localhost:4000/how-it-works", {
-  waitUntil: "load",
+await p.goto('http://localhost:4000/how-it-works', {
+  waitUntil: 'load',
   timeout: 60000,
 });
 await p.waitForTimeout(1500);
 // scroll the 3 steps into view
 await p.evaluate(() => {
-  const h = [...document.querySelectorAll("h2")].find(
-    (e) => e.textContent.trim() === "How It Works",
+  const h = [...document.querySelectorAll('h2')].find(
+    (e) => e.textContent.trim() === 'How It Works',
   );
-  h && h.scrollIntoView({ block: "center" });
+  h && h.scrollIntoView({ block: 'center' });
 });
 await p.waitForTimeout(1200);
 // screenshot the 3 cards
-await p.screenshot({ path: "docs/research/PILLS_cards.png" });
+await p.screenshot({ path: 'docs/research/PILLS_cards.png' });
 // click the buyback "?" button
 const clicked = await p.evaluate(() => {
   const btn = [
@@ -29,15 +29,15 @@ const clicked = await p.evaluate(() => {
   }
   return false;
 });
-console.log("buyback button found+clicked:", clicked);
+console.log('buyback button found+clicked:', clicked);
 await p.waitForTimeout(600);
 // verify modal open + content
 const modal = await p.evaluate(() => {
   const d = document.querySelector("[role='dialog']");
   if (!d) return { open: false };
-  const t = d.querySelector("#buyback-title")?.textContent;
-  const txt = d.innerText.replace(/\n+/g, " ");
-  const broken = [...d.querySelectorAll("img")].filter(
+  const t = d.querySelector('#buyback-title')?.textContent;
+  const txt = d.innerText.replace(/\n+/g, ' ');
+  const broken = [...d.querySelectorAll('img')].filter(
     (i) => i.complete && i.naturalWidth === 0,
   ).length;
   return {
@@ -52,6 +52,6 @@ const modal = await p.evaluate(() => {
     broken,
   };
 });
-console.log("MODAL:", JSON.stringify(modal));
-await p.screenshot({ path: "docs/research/PILLS_modal.png" });
+console.log('MODAL:', JSON.stringify(modal));
+await p.screenshot({ path: 'docs/research/PILLS_modal.png' });
 await b.close();

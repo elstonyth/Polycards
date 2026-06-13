@@ -1,11 +1,11 @@
-import type { Metadata } from "next";
-import { Ticket } from "lucide-react";
-import Reveal from "@/components/Reveal";
+import type { Metadata } from 'next';
+import { Ticket } from 'lucide-react';
+import Reveal from '@/components/Reveal';
 
 export const metadata: Metadata = {
-  title: "Your Vouchers — Phygitals",
+  title: 'Your Vouchers — Phygitals',
   description:
-    "Redeem vouchers for free pulls and guaranteed buybacks on the claw machine.",
+    'Redeem vouchers for free pulls and guaranteed buybacks on the claw machine.',
 };
 
 // Standalone full-width route matching the live anonymous /vouchers: a centered hero
@@ -14,11 +14,11 @@ export const metadata: Metadata = {
 // live has no account sidebar here.
 
 const HERO_SLABS = [
-  "/images/claw/legend-pack-icon.webp",
-  "/images/claw/mythic-pack-icon.webp",
-  "/images/claw/elite-pack-icon.webp",
-  "/images/claw/legend-one-piece-pack-icon.webp",
-  "/images/claw/platinum-football-pack-icon.webp",
+  '/images/claw/legend-pack-icon.webp',
+  '/images/claw/mythic-pack-icon.webp',
+  '/images/claw/elite-pack-icon.webp',
+  '/images/claw/legend-one-piece-pack-icon.webp',
+  '/images/claw/platinum-football-pack-icon.webp',
 ];
 
 export default function VouchersPage() {

@@ -1,16 +1,16 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import Link from "next/link";
-import { AccountHeader, StatCards } from "@/components/account/ui";
-import { AddCreditsPanel } from "@/components/account/AddCreditsPanel";
-import { usd } from "@/lib/format";
+import { useState } from 'react';
+import Link from 'next/link';
+import { AccountHeader, StatCards } from '@/components/account/ui';
+import { AddCreditsPanel } from '@/components/account/AddCreditsPanel';
+import { usd } from '@/lib/format';
 import {
   sellBackPull,
   type VaultItem,
   type VaultResult,
-} from "@/lib/actions/vault";
-import { FLAT_BUYBACK_PERCENT } from "@/app/claw/packs-data";
+} from '@/lib/actions/vault';
+import { FLAT_BUYBACK_PERCENT } from '@/app/claw/packs-data';
 
 // The customer's vault: every pulled card still held, each with a sell-back
 // offer (current FMV × the flat buyback rate — the server quotes the percent).
@@ -43,7 +43,7 @@ export default function VaultClient({ initial }: { initial: VaultResult }) {
       setBalance(res.balance);
     } catch {
       // A transport-level throw must still surface feedback, not fail silently.
-      setError("Something went wrong. Please try again.");
+      setError('Something went wrong. Please try again.');
     } finally {
       setSellingId(null);
     }
@@ -57,9 +57,9 @@ export default function VaultClient({ initial }: { initial: VaultResult }) {
       />
       <StatCards
         items={[
-          { label: "Credit balance", value: usd(balance) },
-          { label: "Cards in vault", value: String(items.length) },
-          { label: "Vault value (FMV)", value: usd(vaultValue) },
+          { label: 'Credit balance', value: usd(balance) },
+          { label: 'Cards in vault', value: String(items.length) },
+          { label: 'Vault value (FMV)', value: usd(vaultValue) },
         ]}
       />
 
@@ -127,7 +127,7 @@ export default function VaultClient({ initial }: { initial: VaultResult }) {
                 className="mt-2.5 inline-flex h-9 items-center justify-center rounded-lg border border-amber-400/60 bg-amber-400/10 text-[12px] font-bold text-amber-300 transition-colors hover:bg-amber-400/20 disabled:opacity-50"
               >
                 {sellingId === item.pullId
-                  ? "Selling…"
+                  ? 'Selling…'
                   : `Sell for ${usd(item.buyback.amount)} (${item.buyback.percent}%)`}
               </button>
             </div>
@@ -136,7 +136,7 @@ export default function VaultClient({ initial }: { initial: VaultResult }) {
       )}
 
       <p className="mt-5 text-[12px] text-white/35">
-        Sell-back credits your site balance instantly at the flat{" "}
+        Sell-back credits your site balance instantly at the flat{' '}
         {FLAT_BUYBACK_PERCENT}% buyback rate. Physical shipping of vaulted cards
         arrives with checkout.
       </p>

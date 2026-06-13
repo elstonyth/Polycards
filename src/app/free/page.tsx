@@ -1,37 +1,37 @@
-import type { Metadata } from "next";
-import { Sparkles, UserPlus, Gamepad2, Banknote } from "lucide-react";
-import Reveal from "@/components/Reveal";
-import AuthButton from "@/components/AuthButton";
+import type { Metadata } from 'next';
+import { Sparkles, UserPlus, Gamepad2, Banknote } from 'lucide-react';
+import Reveal from '@/components/Reveal';
+import AuthButton from '@/components/AuthButton';
 
 export const metadata: Metadata = {
-  title: "Your Free Pack is Waiting — Pokenic",
+  title: 'Your Free Pack is Waiting — Pokenic',
   description:
-    "Join thousands of collectors pulling rare cards daily. Create your account and claim a free pack.",
+    'Join thousands of collectors pulling rare cards daily. Create your account and claim a free pack.',
 };
 
 const PACKS = [
-  "/images/claw/mythic-pack-icon.webp",
-  "/images/claw/legend-pack-icon.webp",
-  "/images/claw/elite-pack-icon.webp",
-  "/images/claw/platinum-pack-icon.webp",
-  "/images/claw/rookie-pack-icon.webp",
+  '/images/claw/mythic-pack-icon.webp',
+  '/images/claw/legend-pack-icon.webp',
+  '/images/claw/elite-pack-icon.webp',
+  '/images/claw/platinum-pack-icon.webp',
+  '/images/claw/rookie-pack-icon.webp',
 ];
 
 const STEPS = [
   {
     icon: UserPlus,
-    title: "Create your account in seconds",
-    body: "Sign up free — no card required to start.",
+    title: 'Create your account in seconds',
+    body: 'Sign up free — no card required to start.',
   },
   {
     icon: Gamepad2,
-    title: "Try our $1 claw machine risk free",
-    body: "Rip your first pack and reveal a real graded card.",
+    title: 'Try our $1 claw machine risk free',
+    body: 'Rip your first pack and reveal a real graded card.',
   },
   {
     icon: Banknote,
-    title: "Keep or sell back for up to $500",
-    body: "Hold it, ship it, or sell back instantly at 85–90%.",
+    title: 'Keep or sell back for up to $500',
+    body: 'Hold it, ship it, or sell back instantly at 85–90%.',
   },
 ];
 

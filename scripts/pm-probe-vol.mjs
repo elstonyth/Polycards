@@ -1,12 +1,12 @@
 // Verify the leaderboard Volume cell format: ORIG "US$..." vs CLONE "$...".
-import { chromium } from "playwright";
+import { chromium } from 'playwright';
 const ORIGIN = {
-  ORIG: "https://www.phygitals.com",
-  CLONE: "http://localhost:4000",
+  ORIG: 'https://www.phygitals.com',
+  CLONE: 'http://localhost:4000',
 };
 const EXTRACT = () => {
   // grab text cells that look like currency
-  const cells = [...document.querySelectorAll("td,span,div")]
+  const cells = [...document.querySelectorAll('td,span,div')]
     .filter(
       (e) => e.children.length === 0 && /\$\s?\d[\d,]*/.test(e.textContent),
     )
@@ -23,15 +23,15 @@ for (const [site, origin] of Object.entries(ORIGIN)) {
   });
   const page = await ctx.newPage();
   try {
-    await page.goto(origin + "/leaderboard", {
-      waitUntil: "domcontentloaded",
+    await page.goto(origin + '/leaderboard', {
+      waitUntil: 'domcontentloaded',
       timeout: 60000,
     });
     for (let i = 0; i < 22; i++) {
       const r = await page
         .evaluate(
           () =>
-            document.querySelectorAll("td").length > 0 ||
+            document.querySelectorAll('td').length > 0 ||
             document.images.length > 4,
         )
         .catch(() => false);

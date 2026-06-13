@@ -1,25 +1,25 @@
 // Settle the claw mechanism: dump the FULL machine-container subtree (unfiltered) and track
 // every descendant's bounding-rect over 6s to find ANY motion (transform, left, margin, etc.)
 // and any separate claw layer. Animations forced on.
-import { chromium } from "playwright";
-import { writeFileSync } from "node:fs";
+import { chromium } from 'playwright';
+import { writeFileSync } from 'node:fs';
 
-const URL = process.argv[2] || "https://www.phygitals.com/claw/legend-pack";
-const OUT = "docs/research/packdetail";
+const URL = process.argv[2] || 'https://www.phygitals.com/claw/legend-pack';
+const OUT = 'docs/research/packdetail';
 const browser = await chromium.launch();
 const page = await browser.newPage({
   viewport: { width: 1440, height: 1000 },
   deviceScaleFactor: 1,
 });
-await page.emulateMedia({ reducedMotion: "no-preference" });
-await page.goto(URL, { waitUntil: "domcontentloaded", timeout: 60000 });
+await page.emulateMedia({ reducedMotion: 'no-preference' });
+await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
 await page.waitForTimeout(4000);
 
 // tag the machine wrapper so we can query its subtree repeatedly
 const found = await page.evaluate(() => {
   let best = null,
     area = 0;
-  for (const im of document.querySelectorAll("img")) {
+  for (const im of document.querySelectorAll('img')) {
     const r = im.getBoundingClientRect();
     if (r.top < 760 && r.width * r.height > area) {
       area = r.width * r.height;
@@ -29,7 +29,7 @@ const found = await page.evaluate(() => {
   if (!best) return null;
   let cont = best;
   for (let i = 0; i < 4 && cont.parentElement; i++) cont = cont.parentElement;
-  cont.setAttribute("data-recon", "machine");
+  cont.setAttribute('data-recon', 'machine');
   // full subtree dump
   const dump = [];
   const walk = (el, depth) => {
@@ -38,12 +38,12 @@ const found = await page.evaluate(() => {
     dump.push({
       depth,
       tag: el.tagName,
-      cls: (el.className || "").toString().slice(0, 70),
+      cls: (el.className || '').toString().slice(0, 70),
       w: Math.round(r.width),
       h: Math.round(r.height),
-      src: (el.currentSrc || el.getAttribute?.("src") || "").slice(0, 70),
+      src: (el.currentSrc || el.getAttribute?.('src') || '').slice(0, 70),
       anim: cs.animationName,
-      tf: cs.transform === "none" ? "" : cs.transform,
+      tf: cs.transform === 'none' ? '' : cs.transform,
     });
     for (const c of el.children) walk(c, depth + 1);
   };
@@ -58,7 +58,7 @@ for (let t = 0; t < 24; t++) {
   const snap = await page.evaluate(() => {
     const cont = document.querySelector('[data-recon="machine"]');
     const arr = [];
-    const all = cont ? cont.querySelectorAll("*") : [];
+    const all = cont ? cont.querySelectorAll('*') : [];
     let i = 0;
     for (const el of all) {
       const r = el.getBoundingClientRect();

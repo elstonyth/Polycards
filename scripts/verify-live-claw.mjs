@@ -1,12 +1,12 @@
 // Capture the LIVE pack-detail claw machine (prod server :4000) for visual recheck.
 // Screenshots the actual rendered <img> so we see exactly what the browser serves —
 // not a disk webp, not a number. Reads back with the Read tool.
-import { chromium } from "playwright";
+import { chromium } from 'playwright';
 
 const SLUGS = [
-  ["nba-platinum", "modern-grails (de-blurred)"],
-  ["pokemon-platinum", "platinum (de-blurred)"],
-  ["nba-black", "black-pack (de-blurred)"],
+  ['nba-platinum', 'modern-grails (de-blurred)'],
+  ['pokemon-platinum', 'platinum (de-blurred)'],
+  ['nba-black', 'black-pack (de-blurred)'],
 ];
 
 const browser = await chromium.launch();
@@ -16,14 +16,14 @@ const page = await browser.newPage({
 });
 for (const [slug, label] of SLUGS) {
   await page.goto(`http://localhost:4000/claw/${slug}`, {
-    waitUntil: "networkidle",
+    waitUntil: 'networkidle',
   });
   await page.waitForTimeout(900);
   const img = page.locator('img[src*="-machine.webp"]').first();
   let shot = `docs/research/packdetail/live_${slug}.png`;
   try {
-    await img.waitFor({ state: "visible", timeout: 6000 });
-    const src = await img.getAttribute("src");
+    await img.waitFor({ state: 'visible', timeout: 6000 });
+    const src = await img.getAttribute('src');
     const box = await img.boundingBox();
     // crop to the banner zone (upper ~32% of the machine) at full image width
     await page.screenshot({
@@ -44,4 +44,4 @@ for (const [slug, label] of SLUGS) {
   }
 }
 await browser.close();
-console.log("done");
+console.log('done');

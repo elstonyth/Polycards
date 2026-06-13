@@ -2,42 +2,42 @@
 // region, so rebrand-pokemon-icons.mjs gets TIGHT per-icon url bands (the tier
 // name sits a few px above the url line; a shared band merges them).
 //   node scripts/probe-icon-text.mjs
-import { chromium } from "playwright";
-import { readFile } from "node:fs/promises";
+import { chromium } from 'playwright';
+import { readFile } from 'node:fs/promises';
 
 const JOBS = [
-  ["mythic-pack", "public/images/claw/mythic-pack-icon.webp", "dark"],
-  ["legend-pack", "public/images/claw/legend-pack-icon.webp", "dark"],
-  ["elite-pack", "public/images/claw/elite-pack-icon.webp", "dark"],
-  ["platinum-pack", "public/images/claw/platinum-pack-icon.webp", "dark"],
-  ["rookie-pack", "public/images/claw/rookie-pack-icon.webp", "dark"],
-  ["trainer-pack", "public/images/claw/trainer-pack-icon.webp", "dark"],
-  ["black-pack", "public/images/claw/black-pack-icon.webp", "light"],
-  ["diamond-pack", "public/images/claw/diamond-pack-icon.webp", "light"],
-  ["sealed-pack", "docs/research/missing-tiers/sealed-pack-icon.webp", "dark"],
+  ['mythic-pack', 'public/images/claw/mythic-pack-icon.webp', 'dark'],
+  ['legend-pack', 'public/images/claw/legend-pack-icon.webp', 'dark'],
+  ['elite-pack', 'public/images/claw/elite-pack-icon.webp', 'dark'],
+  ['platinum-pack', 'public/images/claw/platinum-pack-icon.webp', 'dark'],
+  ['rookie-pack', 'public/images/claw/rookie-pack-icon.webp', 'dark'],
+  ['trainer-pack', 'public/images/claw/trainer-pack-icon.webp', 'dark'],
+  ['black-pack', 'public/images/claw/black-pack-icon.webp', 'light'],
+  ['diamond-pack', 'public/images/claw/diamond-pack-icon.webp', 'light'],
+  ['sealed-pack', 'docs/research/missing-tiers/sealed-pack-icon.webp', 'dark'],
 ];
 
 const browser = await chromium.launch();
 const page = await browser.newPage();
-await page.goto("about:blank");
+await page.goto('about:blank');
 
 for (const [name, path, dir] of JOBS) {
   const data =
-    "data:image/webp;base64," + (await readFile(path)).toString("base64");
+    'data:image/webp;base64,' + (await readFile(path)).toString('base64');
   const out = await page.evaluate(
     async ({ data, dir }) => {
       const img = await new Promise((ok, no) => {
         const im = new Image();
         im.onload = () => ok(im);
-        im.onerror = () => no(new Error("load"));
+        im.onerror = () => no(new Error('load'));
         im.src = data;
       });
       const W = img.naturalWidth,
         H = img.naturalHeight;
-      const cv = document.createElement("canvas");
+      const cv = document.createElement('canvas');
       cv.width = W;
       cv.height = H;
-      const ctx = cv.getContext("2d");
+      const ctx = cv.getContext('2d');
       ctx.drawImage(img, 0, 0, W, H);
       const od = ctx.getImageData(0, 0, W, H).data;
       const bx0 = Math.round(0.06 * W),
@@ -52,8 +52,8 @@ for (const [name, path, dir] of JOBS) {
         }
       lum.sort((a, b) => a - b);
       const medL = lum[lum.length >> 1];
-      const TH = dir === "dark" ? 150 : 120;
-      const isHit = (s) => (dir === "dark" ? s < medL - TH : s > medL + TH);
+      const TH = dir === 'dark' ? 150 : 120;
+      const isHit = (s) => (dir === 'dark' ? s < medL - TH : s > medL + TH);
       const rows = [];
       for (let y = by0; y <= by1; y++) {
         let c = 0,
@@ -105,6 +105,6 @@ for (const [name, path, dir] of JOBS) {
     { data, dir },
   );
   console.log(`${name} ${out.W}x${out.H}`);
-  for (const b of out.blocks) console.log("   ", JSON.stringify(b));
+  for (const b of out.blocks) console.log('   ', JSON.stringify(b));
 }
 await browser.close();

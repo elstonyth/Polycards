@@ -1,8 +1,8 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import { usd } from "@/lib/format";
-import { topUpCredits } from "@/lib/actions/vault";
+import { useState } from 'react';
+import { usd } from '@/lib/format';
+import { topUpCredits } from '@/lib/actions/vault';
 
 const PRESETS = [10, 25, 50, 100];
 
@@ -16,7 +16,7 @@ export function AddCreditsPanel({
   onToppedUp: (balance: number, amount: number) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [amountText, setAmountText] = useState("25");
+  const [amountText, setAmountText] = useState('25');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -43,7 +43,7 @@ export function AddCreditsPanel({
       onToppedUp(res.balance, res.amount);
     } catch {
       // A transport-level throw must still surface feedback, not fail silently.
-      setError("Something went wrong. Please try again.");
+      setError('Something went wrong. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -83,8 +83,8 @@ export function AddCreditsPanel({
             onClick={() => setAmountText(String(preset))}
             className={`inline-flex h-9 items-center justify-center rounded-lg border px-4 text-[13px] font-bold transition-colors ${
               amountText === String(preset)
-                ? "border-emerald-400/60 bg-emerald-400/10 text-emerald-300"
-                : "border-white/15 bg-white/[0.02] text-white/70 hover:bg-white/[0.06]"
+                ? 'border-emerald-400/60 bg-emerald-400/10 text-emerald-300'
+                : 'border-white/15 bg-white/[0.02] text-white/70 hover:bg-white/[0.06]'
             }`}
           >
             ${preset}
@@ -144,10 +144,10 @@ export function AddCreditsPanel({
           className="inline-flex h-10 items-center justify-center rounded-xl bg-gradient-to-r from-emerald-500 to-green-500 px-5 text-sm font-bold text-white transition-opacity hover:opacity-95 disabled:opacity-50"
         >
           {submitting
-            ? "Processing…"
+            ? 'Processing…'
             : amountValid
               ? `Add ${usd(amount)}`
-              : "Enter an amount"}
+              : 'Enter an amount'}
         </button>
         <button
           type="button"

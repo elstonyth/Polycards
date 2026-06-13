@@ -1,8 +1,8 @@
-import { chromium } from "playwright";
+import { chromium } from 'playwright';
 const b = await chromium.launch();
 const p = await b.newPage({ viewport: { width: 1440, height: 900 } });
-await p.goto("https://www.phygitals.com/", {
-  waitUntil: "domcontentloaded",
+await p.goto('https://www.phygitals.com/', {
+  waitUntil: 'domcontentloaded',
   timeout: 60000,
 });
 for (let i = 0; i < 25; i++) {
@@ -11,14 +11,14 @@ for (let i = 0; i < 25; i++) {
 }
 await p.waitForTimeout(2500);
 await p.evaluate(() => {
-  const sc = [...document.querySelectorAll("*")].find((el) => {
+  const sc = [...document.querySelectorAll('*')].find((el) => {
     const s = getComputedStyle(el);
     return (
-      (s.overflowY === "auto" || s.overflowY === "scroll") &&
+      (s.overflowY === 'auto' || s.overflowY === 'scroll') &&
       el.scrollHeight > el.clientHeight + 100
     );
   });
-  const h = [...document.querySelectorAll("h1,h2,h3")].find((e) =>
+  const h = [...document.querySelectorAll('h1,h2,h3')].find((e) =>
     /how it works/i.test(e.textContent),
   );
   if (h && sc) {
@@ -27,16 +27,16 @@ await p.evaluate(() => {
 });
 await p.waitForTimeout(1000);
 // click the help button via Playwright (more reliable than evaluate click for some handlers)
-const btns = await p.$$("button");
+const btns = await p.$$('button');
 let clicked = false;
 for (const btn of btns) {
-  const al = await btn.getAttribute("aria-label");
-  const tx = await btn.innerText().catch(() => "");
+  const al = await btn.getAttribute('aria-label');
+  const tx = await btn.innerText().catch(() => '');
   const box = await btn.boundingBox();
   if (
     box &&
     box.y > 0 &&
-    (/\?/.test(tx) || /buyback|help|info|how/i.test(al || ""))
+    (/\?/.test(tx) || /buyback|help|info|how/i.test(al || ''))
   ) {
     await btn.click().catch(() => {});
     clicked = true;
@@ -45,7 +45,7 @@ for (const btn of btns) {
 }
 // fallback: click any small round button near the buyback pill
 if (!clicked) {
-  const pill = await p.$("text=85-90%");
+  const pill = await p.$('text=85-90%');
   if (pill) {
     const box = await pill.boundingBox();
     if (box)
@@ -56,8 +56,8 @@ if (!clicked) {
 }
 await p.waitForTimeout(1000);
 const m = await p.evaluate(() => {
-  const cand = [...document.querySelectorAll("div")].filter((d) => {
-    const t = d.textContent || "";
+  const cand = [...document.querySelectorAll('div')].filter((d) => {
+    const t = d.textContent || '';
     return /Instant Buyback/.test(t) && /Card FMV/.test(t) && /Got it/i.test(t);
   });
   cand.sort(
@@ -67,22 +67,22 @@ const m = await p.evaluate(() => {
   if (!panel)
     return {
       found: false,
-      anyBuyback: [...document.querySelectorAll("*")].some((e) =>
-        /Instant Buyback/.test(e.textContent || ""),
+      anyBuyback: [...document.querySelectorAll('*')].some((e) =>
+        /Instant Buyback/.test(e.textContent || ''),
       ),
     };
   const r = panel.getBoundingClientRect();
   const cs = getComputedStyle(panel);
-  const overlay = [...document.querySelectorAll("div")].find((d) => {
+  const overlay = [...document.querySelectorAll('div')].find((d) => {
     const s = getComputedStyle(d);
     const rr = d.getBoundingClientRect();
     return (
-      s.position === "fixed" &&
+      s.position === 'fixed' &&
       rr.width >= innerWidth - 2 &&
       rr.height >= innerHeight - 2
     );
   });
-  const btn = [...panel.querySelectorAll("button")].find((x) =>
+  const btn = [...panel.querySelectorAll('button')].find((x) =>
     /got it/i.test(x.textContent),
   );
   return {
@@ -92,14 +92,14 @@ const m = await p.evaluate(() => {
     radius: cs.borderRadius,
     padding: cs.padding,
     bg: cs.backgroundColor,
-    overlayBg: overlay ? getComputedStyle(overlay).backgroundColor : "(none)",
+    overlayBg: overlay ? getComputedStyle(overlay).backgroundColor : '(none)',
     overlayBackdrop: overlay
       ? getComputedStyle(overlay).backdropFilter
-      : "(none)",
+      : '(none)',
     gotItBg: btn ? getComputedStyle(btn).backgroundColor : null,
     gotItRadius: btn ? getComputedStyle(btn).borderRadius : null,
   };
 });
-console.log("ORIG MODAL:", JSON.stringify(m, null, 1));
-if (m.found) await p.screenshot({ path: "docs/research/ORIG_MODAL.png" });
+console.log('ORIG MODAL:', JSON.stringify(m, null, 1));
+if (m.found) await p.screenshot({ path: 'docs/research/ORIG_MODAL.png' });
 await b.close();

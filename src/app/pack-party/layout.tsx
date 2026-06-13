@@ -1,6 +1,6 @@
-import type { ReactNode } from "react";
-import { notFound } from "next/navigation";
-import { features } from "@/lib/features";
+import type { ReactNode } from 'react';
+import { notFound } from 'next/navigation';
+import { features } from '@/lib/features';
 
 // Gate the whole /pack-party segment on the feature flag from a server layout —
 // reliable 404 status regardless of the page being a client component. Flip the

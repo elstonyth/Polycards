@@ -1,9 +1,9 @@
-"use client";
+'use client';
 
-import { type ReactNode } from "react";
-import { cn } from "@/lib/utils";
-import { useInView, usePrefersReducedMotion } from "@/lib/use-reveal";
-import StepInfoPill from "@/components/StepInfoPill";
+import { type ReactNode } from 'react';
+import { cn } from '@/lib/utils';
+import { useInView, usePrefersReducedMotion } from '@/lib/use-reveal';
+import StepInfoPill from '@/components/StepInfoPill';
 
 /**
  * The 3 "How It Works" step cards. SHARED by the homepage section and the
@@ -18,18 +18,18 @@ type Step = {
   body: string;
   pill: string;
   pillSub: string;
-  pillVariant: "packs" | "buyback" | "ships";
+  pillVariant: 'packs' | 'buyback' | 'ships';
   media: ReactNode;
 };
 
 const STEPS: Step[] = [
   {
-    num: "1",
-    title: "Open a pack",
-    body: "Choose from Pokemon, One Piece, sports, and more. Every pack contains a random graded card with live odds and provably fair pulls powered by public VRF.",
-    pill: "View all packs",
-    pillSub: "Browse every category and rip",
-    pillVariant: "packs",
+    num: '1',
+    title: 'Open a pack',
+    body: 'Choose from Pokemon, One Piece, sports, and more. Every pack contains a random graded card with live odds and provably fair pulls powered by public VRF.',
+    pill: 'View all packs',
+    pillSub: 'Browse every category and rip',
+    pillVariant: 'packs',
     media: (
       <>
         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -38,7 +38,7 @@ const STEPS: Step[] = [
           alt=""
           aria-hidden
           className="absolute z-[1] h-[62%] w-auto object-contain opacity-40 drop-shadow-[0_12px_32px_rgba(0,0,0,0.5)] transition-transform duration-500 ease-out group-hover:-translate-x-[8%]"
-          style={{ transform: "translateX(-52%) rotate(-7deg)" }}
+          style={{ transform: 'translateX(-52%) rotate(-7deg)' }}
         />
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
@@ -52,18 +52,18 @@ const STEPS: Step[] = [
           alt=""
           aria-hidden
           className="absolute z-[1] h-[62%] w-auto object-contain opacity-40 drop-shadow-[0_12px_32px_rgba(0,0,0,0.5)] transition-transform duration-500 ease-out group-hover:translate-x-[8%]"
-          style={{ transform: "translateX(52%) rotate(7deg)" }}
+          style={{ transform: 'translateX(52%) rotate(7deg)' }}
         />
       </>
     ),
   },
   {
-    num: "2",
-    title: "Reveal your card",
-    body: "Tap to reveal what you pulled. Every card is real, vaulted by PSA, Fanatics, and Alt, and fully insured from the moment you own it.",
-    pill: "85-90% instant cash back",
+    num: '2',
+    title: 'Reveal your card',
+    body: 'Tap to reveal what you pulled. Every card is real, vaulted by PSA, Fanatics, and Alt, and fully insured from the moment you own it.',
+    pill: '85-90% instant cash back',
     pillSub: "Don't like your pull? Sell it back instantly",
-    pillVariant: "buyback",
+    pillVariant: 'buyback',
     media: (
       // eslint-disable-next-line @next/next/no-img-element
       <img
@@ -74,12 +74,12 @@ const STEPS: Step[] = [
     ),
   },
   {
-    num: "3",
-    title: "Keep, ship, or sell for 90% cash back",
+    num: '3',
+    title: 'Keep, ship, or sell for 90% cash back',
     body: "Hold your card in the vault, flip it on the marketplace, trade with collectors, or redeem and we'll ship the physical slab to your door.",
-    pill: "Ships worldwide",
-    pillSub: "Fully tracked and insured to your door",
-    pillVariant: "ships",
+    pill: 'Ships worldwide',
+    pillSub: 'Fully tracked and insured to your door',
+    pillVariant: 'ships',
     media: (
       // eslint-disable-next-line @next/next/no-img-element
       <img
@@ -101,16 +101,16 @@ export default function HowItWorksSteps() {
         <div
           key={step.num}
           style={{
-            transitionDelay: shown && !reduced ? `${i * 120}ms` : "0ms",
+            transitionDelay: shown && !reduced ? `${i * 120}ms` : '0ms',
           }}
           className={cn(
-            "group relative flex h-full flex-col overflow-hidden rounded-2xl p-6 sm:p-7",
-            "border border-white/10 bg-gradient-to-br from-white/[0.07] to-white/[0.02]",
-            "shadow-[0_4px_20px_rgba(0,0,0,0.25)] hover:border-white/20",
-            !reduced && "transition-all duration-700 ease-out",
+            'group relative flex h-full flex-col overflow-hidden rounded-2xl p-6 sm:p-7',
+            'border border-white/10 bg-gradient-to-br from-white/[0.07] to-white/[0.02]',
+            'shadow-[0_4px_20px_rgba(0,0,0,0.25)] hover:border-white/20',
+            !reduced && 'transition-all duration-700 ease-out',
             shown || reduced
-              ? "opacity-100 translate-y-0"
-              : "opacity-0 translate-y-6",
+              ? 'opacity-100 translate-y-0'
+              : 'opacity-0 translate-y-6',
           )}
         >
           <div className="mb-4 flex items-center gap-3">

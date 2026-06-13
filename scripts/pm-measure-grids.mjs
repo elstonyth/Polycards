@@ -1,12 +1,12 @@
 // Measure the card/pack GRID density on ORIG vs CLONE for /claw and /marketplace.
 // Finds the largest grid/flex-wrap container with many similar children and reports
 // column count (distinct x in first row), card width, gap, and gridTemplateColumns.
-import { chromium } from "playwright";
+import { chromium } from 'playwright';
 
-const ROUTES = ["/claw", "/marketplace"];
+const ROUTES = ['/claw', '/marketplace'];
 const ORIGIN = {
-  ORIG: "https://www.phygitals.com",
-  CLONE: "http://localhost:4000",
+  ORIG: 'https://www.phygitals.com',
+  CLONE: 'http://localhost:4000',
 };
 
 const EXTRACT = () => {
@@ -17,7 +17,7 @@ const EXTRACT = () => {
     return o;
   };
   // candidate containers: many children, children roughly equal width, arranged in rows
-  const all = [...document.querySelectorAll("div, ul, section")];
+  const all = [...document.querySelectorAll('div, ul, section')];
   let best = null,
     bestScore = 0;
   for (const el of all) {
@@ -44,7 +44,7 @@ const EXTRACT = () => {
       best = { el, rects, kids };
     }
   }
-  if (!best) return "NO GRID";
+  if (!best) return 'NO GRID';
   const { el, rects } = best;
   // columns = number of children sharing the minimum top (first row)
   const minTop = Math.min(...rects.map((r) => r.top));
@@ -59,14 +59,14 @@ const EXTRACT = () => {
       : null;
   return {
     container: cs(el, [
-      "display",
-      "gridTemplateColumns",
-      "gap",
-      "columnGap",
-      "rowGap",
-      "padding",
-      "maxWidth",
-      "width",
+      'display',
+      'gridTemplateColumns',
+      'gap',
+      'columnGap',
+      'rowGap',
+      'padding',
+      'maxWidth',
+      'width',
     ]),
     containerRect: {
       w: Math.round(el.getBoundingClientRect().width),
@@ -91,7 +91,7 @@ for (const route of ROUTES) {
     const page = await ctx.newPage();
     try {
       await page.goto(origin + route, {
-        waitUntil: "domcontentloaded",
+        waitUntil: 'domcontentloaded',
         timeout: 60000,
       });
       for (let i = 0; i < 22; i++) {

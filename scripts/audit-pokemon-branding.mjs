@@ -3,22 +3,22 @@
 // unreliable — see the doubled-wordmark incident in AUDIT_PUNCHLIST).
 // Crops → docs/research/brand-audit/<base>-<zone>.png at 2x zoom.
 //   node scripts/audit-pokemon-branding.mjs
-import { chromium } from "playwright";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { chromium } from 'playwright';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 
-const OUT = "docs/research/brand-audit";
+const OUT = 'docs/research/brand-audit';
 await mkdir(OUT, { recursive: true });
 
 const POKEMON_BASES = [
-  "mythic-pack",
-  "legend-pack",
-  "elite-pack",
-  "platinum-pack",
-  "rookie-pack",
-  "trainer-pack",
-  "black-pack",
-  "diamond-pack",
+  'mythic-pack',
+  'legend-pack',
+  'elite-pack',
+  'platinum-pack',
+  'rookie-pack',
+  'trainer-pack',
+  'black-pack',
+  'diamond-pack',
 ];
 
 // [name, path, zones]; zone rect = fractions [x0, x1, y0, y1] of the image.
@@ -44,7 +44,7 @@ for (const b of POKEMON_BASES) {
   });
 }
 // the two staged icons (full-surface check: they have extra brand zones)
-for (const n of ["sealed-pack-icon", "base-set-pack-icon"]) {
+for (const n of ['sealed-pack-icon', 'base-set-pack-icon']) {
   jobs.push({
     name: `staged-${n}`,
     path: `docs/research/missing-tiers/${n}.webp`,
@@ -57,21 +57,21 @@ for (const n of ["sealed-pack-icon", "base-set-pack-icon"]) {
 }
 
 const present = jobs.filter((j) => existsSync(j.path));
-for (const j of jobs) if (!existsSync(j.path)) console.log("MISSING", j.path);
+for (const j of jobs) if (!existsSync(j.path)) console.log('MISSING', j.path);
 
 const browser = await chromium.launch();
 const page = await browser.newPage();
-await page.goto("about:blank");
+await page.goto('about:blank');
 
 for (const job of present) {
   const data =
-    "data:image/webp;base64," + (await readFile(job.path)).toString("base64");
+    'data:image/webp;base64,' + (await readFile(job.path)).toString('base64');
   const crops = await page.evaluate(
     async ({ data, zones }) => {
       const img = await new Promise((ok, no) => {
         const im = new Image();
         im.onload = () => ok(im);
-        im.onerror = () => no(new Error("load"));
+        im.onerror = () => no(new Error('load'));
         im.src = data;
       });
       const W = img.naturalWidth,
@@ -82,13 +82,13 @@ for (const job of present) {
           sw = Math.round((x1 - x0) * W),
           sy = Math.round(y0 * H),
           sh = Math.round((y1 - y0) * H);
-        const cv = document.createElement("canvas");
+        const cv = document.createElement('canvas');
         cv.width = sw * 2;
         cv.height = sh * 2;
-        const ctx = cv.getContext("2d");
+        const ctx = cv.getContext('2d');
         ctx.imageSmoothingEnabled = false;
         ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw * 2, sh * 2);
-        out.crops[zone] = cv.toDataURL("image/png");
+        out.crops[zone] = cv.toDataURL('image/png');
       }
       return out;
     },
@@ -97,12 +97,12 @@ for (const job of present) {
   for (const [zone, url] of Object.entries(crops.crops)) {
     await writeFile(
       `${OUT}/${job.name}-${zone}.png`,
-      Buffer.from(url.split(",")[1], "base64"),
+      Buffer.from(url.split(',')[1], 'base64'),
     );
   }
   console.log(
-    `${job.name} (${crops.W}x${crops.H}) -> ${Object.keys(crops.crops).join(", ")}`,
+    `${job.name} (${crops.W}x${crops.H}) -> ${Object.keys(crops.crops).join(', ')}`,
   );
 }
 await browser.close();
-console.log("done");
+console.log('done');

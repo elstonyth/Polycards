@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 // /borrow-lend — peer lending marketplace matching live phygitals: "Borrow / Lend"
 // header + "Create lend offer" CTA, two mode tiles (lend USD / borrow USDC), a
@@ -8,21 +8,21 @@
 // live). Client component for mode + sort state; metadata skipped (consistent with
 // /claw, /repacks, /pack-party).
 
-import { useState } from "react";
-import { Landmark, Plus, ChevronDown } from "lucide-react";
-import { cn } from "@/lib/utils";
-import Reveal from "@/components/Reveal";
-import { MOCK_CARDS } from "@/lib/mock/cards";
-import { MOCK_USERS } from "@/lib/mock/users";
-import { usd } from "@/lib/format";
+import { useState } from 'react';
+import { Landmark, Plus, ChevronDown } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import Reveal from '@/components/Reveal';
+import { MOCK_CARDS } from '@/lib/mock/cards';
+import { MOCK_USERS } from '@/lib/mock/users';
+import { usd } from '@/lib/format';
 
-const DURATIONS = ["3d", "7d", "14d", "30d"];
+const DURATIONS = ['3d', '7d', '14d', '30d'];
 const EXPIRES = [
-  "expires in 1h",
-  "expires in 1d",
-  "expires in 2d",
-  "expires in 3d",
-  "expires in 5d",
+  'expires in 1h',
+  'expires in 1d',
+  'expires in 2d',
+  'expires in 3d',
+  'expires in 5d',
 ];
 
 // One lend offer per card in the mock pool (48) → "48 active offers", APR descending.
@@ -37,19 +37,19 @@ const OFFERS = MOCK_CARDS.map((c, i) => ({
   duration: DURATIONS[i % DURATIONS.length],
 }));
 
-type Mode = "lend" | "borrow";
+type Mode = 'lend' | 'borrow';
 
 export default function BorrowLendPage() {
-  const [mode, setMode] = useState<Mode>("lend");
-  const [collection, setCollection] = useState("All collections");
-  const [aprDir, setAprDir] = useState<"high" | "low">("high");
+  const [mode, setMode] = useState<Mode>('lend');
+  const [collection, setCollection] = useState('All collections');
+  const [aprDir, setAprDir] = useState<'high' | 'low'>('high');
 
   const offers = [...OFFERS].sort((a, b) =>
-    aprDir === "high" ? b.apr - a.apr : a.apr - b.apr,
+    aprDir === 'high' ? b.apr - a.apr : a.apr - b.apr,
   );
 
   const selectClass =
-    "appearance-none rounded-xl border border-white/10 bg-white/5 py-2 pl-3 pr-9 text-[13px] font-medium text-white/80 transition-colors hover:bg-white/10 focus:outline-none focus:ring-1 focus:ring-white/20";
+    'appearance-none rounded-xl border border-white/10 bg-white/5 py-2 pl-3 pr-9 text-[13px] font-medium text-white/80 transition-colors hover:bg-white/10 focus:outline-none focus:ring-1 focus:ring-white/20';
 
   return (
     <div className="w-full px-fluid py-6">
@@ -73,13 +73,13 @@ export default function BorrowLendPage() {
       <div className="mb-5 grid grid-cols-2 gap-3">
         <button
           type="button"
-          onClick={() => setMode("lend")}
-          aria-pressed={mode === "lend"}
+          onClick={() => setMode('lend')}
+          aria-pressed={mode === 'lend'}
           className={cn(
-            "rounded-2xl border p-4 text-left transition-colors",
-            mode === "lend"
-              ? "border-white/25 bg-white/[0.07]"
-              : "border-white/10 bg-white/[0.02] hover:bg-white/[0.04]",
+            'rounded-2xl border p-4 text-left transition-colors',
+            mode === 'lend'
+              ? 'border-white/25 bg-white/[0.07]'
+              : 'border-white/10 bg-white/[0.02] hover:bg-white/[0.04]',
           )}
         >
           <div className="text-sm font-semibold text-white">
@@ -91,13 +91,13 @@ export default function BorrowLendPage() {
         </button>
         <button
           type="button"
-          onClick={() => setMode("borrow")}
-          aria-pressed={mode === "borrow"}
+          onClick={() => setMode('borrow')}
+          aria-pressed={mode === 'borrow'}
           className={cn(
-            "rounded-2xl border p-4 text-left transition-colors",
-            mode === "borrow"
-              ? "border-white/25 bg-white/[0.07]"
-              : "border-white/10 bg-white/[0.02] hover:bg-white/[0.04]",
+            'rounded-2xl border p-4 text-left transition-colors',
+            mode === 'borrow'
+              ? 'border-white/25 bg-white/[0.07]'
+              : 'border-white/10 bg-white/[0.02] hover:bg-white/[0.04]',
           )}
         >
           <div className="text-sm font-semibold text-white">
@@ -132,7 +132,7 @@ export default function BorrowLendPage() {
         <div className="relative">
           <select
             value={aprDir}
-            onChange={(e) => setAprDir(e.target.value as "high" | "low")}
+            onChange={(e) => setAprDir(e.target.value as 'high' | 'low')}
             className={selectClass}
             aria-label="Sort by APR"
           >

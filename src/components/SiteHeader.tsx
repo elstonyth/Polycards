@@ -1,8 +1,8 @@
-"use client";
+'use client';
 
-import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   Activity,
   ChevronDown,
@@ -18,14 +18,14 @@ import {
   Trophy,
   X,
   type LucideIcon,
-} from "lucide-react";
-import { cn } from "@/lib/utils";
-import { features } from "@/lib/features";
-import AuthModal from "./AuthModal";
-import { openAuth } from "./AuthButton";
-import { useAuth } from "./auth/AuthProvider";
-import UserMenu from "./auth/UserMenu";
-import { logout } from "@/lib/actions/auth";
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { features } from '@/lib/features';
+import AuthModal from './AuthModal';
+import { openAuth } from './AuthButton';
+import { useAuth } from './auth/AuthProvider';
+import UserMenu from './auth/UserMenu';
+import { logout } from '@/lib/actions/auth';
 
 type NavItem = {
   label: string;
@@ -40,29 +40,29 @@ type NavItem = {
 // Pack Party collapses to a non-clickable "Coming Soon" tab. Flip the env vars
 // (see src/lib/features.ts) to restore the real links.
 const NAV_ITEMS: NavItem[] = [
-  { label: "Packs", href: "/claw", icon: Layers, badge: "NEW" },
+  { label: 'Packs', href: '/claw', icon: Layers, badge: 'NEW' },
   features.packParty
-    ? { label: "Pack Party", href: "/pack-party", icon: PartyPopper }
+    ? { label: 'Pack Party', href: '/pack-party', icon: PartyPopper }
     : {
-        label: "Coming Soon",
-        href: "/pack-party",
+        label: 'Coming Soon',
+        href: '/pack-party',
         icon: PartyPopper,
         disabled: true,
       },
   ...(features.marketplace
-    ? [{ label: "Marketplace", href: "/marketplace", icon: Store } as NavItem]
+    ? [{ label: 'Marketplace', href: '/marketplace', icon: Store } as NavItem]
     : []),
-  { label: "Leaderboard", href: "/leaderboard", icon: Trophy },
+  { label: 'Leaderboard', href: '/leaderboard', icon: Trophy },
 ];
 
 // Items in the "More" dropdown (match the live nav's More menu).
 const MORE_ITEMS: NavItem[] = [
-  { label: "Activity", href: "/activity", icon: Activity },
-  { label: "Pokémon", href: "/pokemon/generation/1", icon: CircleDot },
-  { label: "Series", href: "/series", icon: Library },
+  { label: 'Activity', href: '/activity', icon: Activity },
+  { label: 'Pokémon', href: '/pokemon/generation/1', icon: CircleDot },
+  { label: 'Series', href: '/series', icon: Library },
 ];
 
-const LOGO_SRC = "/branding/pokenic-logo.png";
+const LOGO_SRC = '/branding/pokenic-logo.png';
 
 function NewBadge() {
   return (
@@ -84,7 +84,7 @@ export default function SiteHeader() {
     setMenuOpen(false);
     await logout();
     setCustomer(null);
-    router.push("/");
+    router.push('/');
     router.refresh();
   }
 
@@ -96,12 +96,12 @@ export default function SiteHeader() {
         setMoreOpen(false);
     };
     const onKey = (e: KeyboardEvent) =>
-      e.key === "Escape" && setMoreOpen(false);
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
+      e.key === 'Escape' && setMoreOpen(false);
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
     return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
     };
   }, [moreOpen]);
 
@@ -177,8 +177,8 @@ export default function SiteHeader() {
                 More
                 <ChevronDown
                   className={cn(
-                    "h-4 w-4 transition-transform duration-200",
-                    moreOpen && "rotate-180",
+                    'h-4 w-4 transition-transform duration-200',
+                    moreOpen && 'rotate-180',
                   )}
                   aria-hidden
                 />
@@ -240,7 +240,7 @@ export default function SiteHeader() {
             <>
               <button
                 type="button"
-                onClick={() => openAuth("login")}
+                onClick={() => openAuth('login')}
                 className="flex h-10 items-center gap-2 rounded-lg bg-white/5 px-3 text-sm font-medium text-neutral-50 transition-all duration-200 ease-in-out hover:bg-white/10 sm:px-3.5"
               >
                 <LogIn className="h-4 w-4" aria-hidden />
@@ -248,7 +248,7 @@ export default function SiteHeader() {
               </button>
               <button
                 type="button"
-                onClick={() => openAuth("signup")}
+                onClick={() => openAuth('signup')}
                 className="inline-flex h-10 items-center justify-center whitespace-nowrap rounded-lg bg-gradient-to-r from-white/90 via-white to-white/90 px-3.5 text-sm font-medium text-black transition-all duration-300 hover:opacity-90 sm:px-4"
               >
                 Sign Up
@@ -261,8 +261,8 @@ export default function SiteHeader() {
       {/* Mobile menu panel */}
       <div
         className={cn(
-          "overflow-hidden transition-all duration-300 lg:hidden",
-          menuOpen ? "mt-3 max-h-[480px]" : "max-h-0",
+          'overflow-hidden transition-all duration-300 lg:hidden',
+          menuOpen ? 'mt-3 max-h-[480px]' : 'max-h-0',
         )}
       >
         <nav className="flex flex-col gap-1 border-t border-neutral-800 pt-3">
@@ -304,8 +304,8 @@ export default function SiteHeader() {
             </span>
             <ChevronDown
               className={cn(
-                "h-4 w-4 transition-transform duration-200",
-                mobileMoreOpen && "rotate-180",
+                'h-4 w-4 transition-transform duration-200',
+                mobileMoreOpen && 'rotate-180',
               )}
               aria-hidden
             />
@@ -367,7 +367,7 @@ export default function SiteHeader() {
                   type="button"
                   onClick={() => {
                     setMenuOpen(false);
-                    openAuth("login");
+                    openAuth('login');
                   }}
                   className="flex h-10 items-center justify-center gap-2 rounded-lg bg-white/5 px-4 text-sm font-medium text-neutral-50 transition-all duration-200 hover:bg-white/10"
                 >
@@ -378,7 +378,7 @@ export default function SiteHeader() {
                   type="button"
                   onClick={() => {
                     setMenuOpen(false);
-                    openAuth("signup");
+                    openAuth('signup');
                   }}
                   className="inline-flex h-10 items-center justify-center whitespace-nowrap rounded-lg bg-gradient-to-r from-white/90 via-white to-white/90 px-5 text-sm font-medium text-black transition-all duration-300 hover:opacity-90"
                 >

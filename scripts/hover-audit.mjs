@@ -1,7 +1,7 @@
-import { chromium } from "playwright";
+import { chromium } from 'playwright';
 const b = await chromium.launch();
 const p = await b.newPage({ viewport: { width: 1440, height: 900 } });
-await p.goto("http://localhost:4000/", { waitUntil: "load", timeout: 60000 });
+await p.goto('http://localhost:4000/', { waitUntil: 'load', timeout: 60000 });
 await p.waitForTimeout(1500);
 
 // helper: scroll a heading into view, find a target element under its section, measure
@@ -14,7 +14,7 @@ async function audit(label, findFn) {
     console.log(`${label}: TARGET NOT FOUND`);
     return;
   }
-  await p.evaluate((el) => el.scrollIntoView({ block: "center" }), target);
+  await p.evaluate((el) => el.scrollIntoView({ block: 'center' }), target);
   await p.waitForTimeout(400);
   const snap = async () =>
     p.evaluate((el) => {
@@ -42,49 +42,49 @@ async function audit(label, findFn) {
   const bgChanged = after.bg !== before.bg;
   const any = moved || tChanged || shadowChanged || bgChanged;
   console.log(
-    `${label}: ${any ? "HOVER OK" : "NO HOVER EFFECT"} | move=${(after.top - before.top).toFixed(1)}px transform:${tChanged} shadow:${shadowChanged} bg:${bgChanged}`,
+    `${label}: ${any ? 'HOVER OK' : 'NO HOVER EFFECT'} | move=${(after.top - before.top).toFixed(1)}px transform:${tChanged} shadow:${shadowChanged} bg:${bgChanged}`,
   );
 }
 
-await audit("RecentPulls card", () => {
-  const h = [...document.querySelectorAll("*")].find(
-    (e) => e.textContent?.trim() === "Recent Pulls",
+await audit('RecentPulls card', () => {
+  const h = [...document.querySelectorAll('*')].find(
+    (e) => e.textContent?.trim() === 'Recent Pulls',
   );
-  const sec = h.closest("section") || h.parentElement.parentElement;
+  const sec = h.closest('section') || h.parentElement.parentElement;
   return sec.querySelector(
     '[class*="group/card"], .group, a, div[class*="rounded-2xl"]',
   );
 });
-await audit("RecentPulls card img", () => {
-  const h = [...document.querySelectorAll("*")].find(
-    (e) => e.textContent?.trim() === "Recent Pulls",
+await audit('RecentPulls card img', () => {
+  const h = [...document.querySelectorAll('*')].find(
+    (e) => e.textContent?.trim() === 'Recent Pulls',
   );
-  const sec = h.closest("section") || h.parentElement.parentElement;
-  return sec.querySelector("img");
+  const sec = h.closest('section') || h.parentElement.parentElement;
+  return sec.querySelector('img');
 });
-await audit("HowItWorks(home) card", () => {
-  const h = [...document.querySelectorAll("h2")].find((e) =>
-    e.textContent?.includes("How It Works"),
+await audit('HowItWorks(home) card', () => {
+  const h = [...document.querySelectorAll('h2')].find((e) =>
+    e.textContent?.includes('How It Works'),
   );
-  const sec = h.closest("section") || h.parentElement;
-  return sec.querySelector(".group");
+  const sec = h.closest('section') || h.parentElement;
+  return sec.querySelector('.group');
 });
-await audit("Community card", () => {
-  const h = [...document.querySelectorAll("*")].find(
-    (e) => e.textContent?.trim() === "Our Community",
+await audit('Community card', () => {
+  const h = [...document.querySelectorAll('*')].find(
+    (e) => e.textContent?.trim() === 'Our Community',
   );
-  const sec = h?.closest("section") || h?.parentElement?.parentElement;
-  return sec?.querySelector("a, .group\/card, [class*=group]");
+  const sec = h?.closest('section') || h?.parentElement?.parentElement;
+  return sec?.querySelector('a, .group\/card, [class*=group]');
 });
-await audit("Leaderboard row", () => {
-  const h = [...document.querySelectorAll("h2")].find((e) =>
-    e.textContent?.includes("Leaderboard"),
+await audit('Leaderboard row', () => {
+  const h = [...document.querySelectorAll('h2')].find((e) =>
+    e.textContent?.includes('Leaderboard'),
   );
-  const sec = h.closest("section") || h.parentElement;
-  const rows = sec.querySelectorAll("tbody tr, [class*=grid] > div, li");
+  const sec = h.closest('section') || h.parentElement;
+  const rows = sec.querySelectorAll('tbody tr, [class*=grid] > div, li');
   return rows[1] || rows[0];
 });
-await audit("Header nav link", () => document.querySelector("header nav a"));
-await audit("Footer link", () => document.querySelector("footer a"));
+await audit('Header nav link', () => document.querySelector('header nav a'));
+await audit('Footer link', () => document.querySelector('footer a'));
 
 await b.close();

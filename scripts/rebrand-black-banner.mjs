@@ -9,16 +9,16 @@
 // Output: docs/research/brand-audit/<base>-rebrand-preview.png (review first).
 // Promote to public/ + freeze onto the anim frames only after visual sign-off.
 //   node scripts/rebrand-black-banner.mjs
-import { chromium } from "playwright";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { chromium } from 'playwright';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
 
-const OUT = "docs/research/brand-audit";
+const OUT = 'docs/research/brand-audit';
 await mkdir(OUT, { recursive: true });
 
 // Per-banner config measured from the clean source frames.
 const JOBS = [
   {
-    base: "black-pack",
+    base: 'black-pack',
     srcPng: `${OUT}/black-clean-full.png`,
     // phygitals core bbox (detected): x 564-829, y 134-212
     text: { lx: 564, rx: 829, ty: 134, by: 212 },
@@ -33,7 +33,7 @@ const JOBS = [
 
 const browser = await chromium.launch();
 const page = await browser.newPage();
-await page.goto("about:blank");
+await page.goto('about:blank');
 await page.addStyleTag({
   content:
     "@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&display=swap');",
@@ -41,27 +41,27 @@ await page.addStyleTag({
 await page.waitForTimeout(1600);
 await page.evaluate(async () => {
   await document.fonts.ready;
-  if (!(await document.fonts.load("600 80px Poppins")).length)
-    throw new Error("Poppins 600 failed to load");
+  if (!(await document.fonts.load('600 80px Poppins')).length)
+    throw new Error('Poppins 600 failed to load');
 });
 
 for (const job of JOBS) {
   const data =
-    "data:image/png;base64," + (await readFile(job.srcPng)).toString("base64");
+    'data:image/png;base64,' + (await readFile(job.srcPng)).toString('base64');
   const res = await page.evaluate(
     async ({ data, job }) => {
       const img = await new Promise((ok, no) => {
         const im = new Image();
         im.onload = () => ok(im);
-        im.onerror = () => no(new Error("load"));
+        im.onerror = () => no(new Error('load'));
         im.src = data;
       });
       const W = img.naturalWidth,
         H = img.naturalHeight;
-      const cv = document.createElement("canvas");
+      const cv = document.createElement('canvas');
       cv.width = W;
       cv.height = H;
-      const ctx = cv.getContext("2d");
+      const ctx = cv.getContext('2d');
       ctx.drawImage(img, 0, 0, W, H);
       const id = ctx.getImageData(0, 0, W, H);
       const px = id.data;
@@ -100,7 +100,7 @@ for (const job of JOBS) {
         g.addColorStop(0.55, `rgba(${gr}, ${gg}, ${gb}, 0.22)`);
         g.addColorStop(1, `rgba(${gr}, ${gg}, ${gb}, 0)`);
         ctx.save();
-        ctx.globalCompositeOperation = "lighter";
+        ctx.globalCompositeOperation = 'lighter';
         ctx.fillStyle = g;
         ctx.fillRect(x0 - 30, y0 - 30, x1 - x0 + 60, y1 - y0 + 60);
         ctx.restore();
@@ -116,28 +116,28 @@ for (const job of JOBS) {
       let fs = 86;
       const fit = () => {
         ctx.font = `600 ${fs}px Poppins, sans-serif`;
-        return ctx.measureText("pokenic").width;
+        return ctx.measureText('pokenic').width;
       };
       for (let i = 0; i < 12; i++) {
         const w = fit();
         if (Math.abs(w - targetW) < 4) break;
         fs = Math.max(20, Math.round(fs * (targetW / w)));
       }
-      const drawX = cxMid - ctx.measureText("pokenic").width / 2;
-      ctx.textAlign = "left";
-      ctx.textBaseline = "alphabetic";
+      const drawX = cxMid - ctx.measureText('pokenic').width / 2;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'alphabetic';
       // red neon glow: several blurred passes
       ctx.shadowColor = `rgb(${job.glow[0]}, ${job.glow[1]}, ${job.glow[2]})`;
       ctx.fillStyle = `rgb(${job.glow[0]}, ${job.glow[1]}, ${job.glow[2]})`;
       for (const blur of [22, 14, 8]) {
         ctx.shadowBlur = blur;
-        ctx.fillText("pokenic", drawX, baseY);
+        ctx.fillText('pokenic', drawX, baseY);
       }
       // cream core on top, slight white glow
-      ctx.shadowColor = "rgba(255,210,190,0.9)";
+      ctx.shadowColor = 'rgba(255,210,190,0.9)';
       ctx.shadowBlur = 4;
       ctx.fillStyle = `rgb(${job.core[0]}, ${job.core[1]}, ${job.core[2]})`;
-      ctx.fillText("pokenic", drawX, baseY);
+      ctx.fillText('pokenic', drawX, baseY);
       ctx.shadowBlur = 0;
 
       return {
@@ -145,18 +145,18 @@ for (const job of JOBS) {
         H,
         fs,
         baseY,
-        full: cv.toDataURL("image/png"),
+        full: cv.toDataURL('image/png'),
       };
     },
     { data, job },
   );
   await writeFile(
     `${OUT}/${job.base}-rebrand-preview.png`,
-    Buffer.from(res.full.split(",")[1], "base64"),
+    Buffer.from(res.full.split(',')[1], 'base64'),
   );
   console.log(
     `${job.base}: fs=${res.fs} baseY=${res.baseY} -> ${OUT}/${job.base}-rebrand-preview.png`,
   );
 }
 await browser.close();
-console.log("done — review the preview PNGs before promoting");
+console.log('done — review the preview PNGs before promoting');

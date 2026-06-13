@@ -1,9 +1,9 @@
-"use client";
+'use client';
 
-import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { X } from "lucide-react";
-import AuthForm from "./AuthForm";
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { X } from 'lucide-react';
+import AuthForm from './AuthForm';
 
 // Tabbable-element selector used by the focus trap.
 const FOCUSABLE =
@@ -20,20 +20,20 @@ const FOCUSABLE =
  */
 export default function AuthModal() {
   const [open, setOpen] = useState(false);
-  const [mode, setMode] = useState<"login" | "signup">("login");
+  const [mode, setMode] = useState<'login' | 'signup'>('login');
   const panelRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     const onOpen = (e: Event) => {
-      const detail = (e as CustomEvent<{ mode?: "login" | "signup" }>).detail;
+      const detail = (e as CustomEvent<{ mode?: 'login' | 'signup' }>).detail;
       // Remember whatever had focus so it can be restored when the modal closes.
       triggerRef.current = document.activeElement as HTMLElement | null;
-      setMode(detail?.mode ?? "login");
+      setMode(detail?.mode ?? 'login');
       setOpen(true);
     };
-    window.addEventListener("pokenic:auth", onOpen);
-    return () => window.removeEventListener("pokenic:auth", onOpen);
+    window.addEventListener('pokenic:auth', onOpen);
+    return () => window.removeEventListener('pokenic:auth', onOpen);
   }, []);
 
   // Open automatically when redirected here with ?auth=login|signup (e.g. the
@@ -41,14 +41,14 @@ export default function AuthModal() {
   // Reuses the event path above (avoids a synchronous setState in this effect).
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const requested = params.get("auth");
-    if (requested !== "login" && requested !== "signup") return;
+    const requested = params.get('auth');
+    if (requested !== 'login' && requested !== 'signup') return;
     window.dispatchEvent(
-      new CustomEvent("pokenic:auth", { detail: { mode: requested } }),
+      new CustomEvent('pokenic:auth', { detail: { mode: requested } }),
     );
     const url = new URL(window.location.href);
-    url.searchParams.delete("auth");
-    window.history.replaceState({}, "", url);
+    url.searchParams.delete('auth');
+    window.history.replaceState({}, '', url);
   }, []);
 
   useEffect(() => {
@@ -59,12 +59,12 @@ export default function AuthModal() {
     panel?.focus();
 
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+      if (e.key === 'Escape') {
         setOpen(false);
         return;
       }
       // Trap focus within the dialog so background content stays unreachable (WCAG 2.1.2).
-      if (e.key !== "Tab" || !panel) return;
+      if (e.key !== 'Tab' || !panel) return;
       const focusables = Array.from(
         panel.querySelectorAll<HTMLElement>(FOCUSABLE),
       );
@@ -81,11 +81,11 @@ export default function AuthModal() {
       }
     };
 
-    document.addEventListener("keydown", onKey);
+    document.addEventListener('keydown', onKey);
     const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    document.body.style.overflow = 'hidden';
     return () => {
-      document.removeEventListener("keydown", onKey);
+      document.removeEventListener('keydown', onKey);
       document.body.style.overflow = prevOverflow;
       // Restore focus to the element that opened the modal (WCAG 2.4.3).
       triggerRef.current?.focus();
@@ -111,7 +111,7 @@ export default function AuthModal() {
         ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-label={mode === "signup" ? "Create account" : "Log in"}
+        aria-label={mode === 'signup' ? 'Create account' : 'Log in'}
         tabIndex={-1}
         className="relative z-10 w-full max-w-md rounded-2xl border border-white/10 bg-neutral-950 p-7 shadow-2xl shadow-black/60 outline-none sm:p-8"
       >

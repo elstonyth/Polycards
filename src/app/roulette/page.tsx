@@ -1,9 +1,9 @@
-import type { Metadata } from "next";
-import RouletteClient from "./RouletteClient";
+import type { Metadata } from 'next';
+import RouletteClient from './RouletteClient';
 
 export const metadata: Metadata = {
-  title: "Pokémon Card Roulette — Pokenic",
-  description: "Test your luck and win exclusive cards.",
+  title: 'Pokémon Card Roulette — Pokenic',
+  description: 'Test your luck and win exclusive cards.',
 };
 
 export default function RoulettePage() {

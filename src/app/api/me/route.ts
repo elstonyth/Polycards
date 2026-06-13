@@ -1,6 +1,6 @@
-import { NextResponse } from "next/server";
-import { getCustomer } from "@/lib/data/customer";
-import { getOwnProfileHandle } from "@/lib/data/profiles";
+import { NextResponse } from 'next/server';
+import { getCustomer } from '@/lib/data/customer';
+import { getOwnProfileHandle } from '@/lib/data/profiles';
 
 // Same-origin endpoint the client AuthProvider polls once on mount to learn the
 // logged-in customer — the browser can't read the httpOnly JWT cookie directly,

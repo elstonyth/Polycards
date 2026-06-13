@@ -1,24 +1,24 @@
-"use client";
+'use client';
 
-import { useMemo, useRef, useState } from "react";
-import Link from "next/link";
-import { Sparkles, RotateCcw, ArrowRight } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { usePrefersReducedMotion } from "@/lib/use-reveal";
-import { usd } from "@/lib/format";
+import { useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
+import { Sparkles, RotateCcw, ArrowRight } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { usePrefersReducedMotion } from '@/lib/use-reveal';
+import { usd } from '@/lib/format';
 import {
   MOCK_CARDS,
   RARITY_RGB,
   type MockCard,
   type Rarity,
-} from "@/lib/mock/cards";
+} from '@/lib/mock/cards';
 
 const ITEM_W = 124;
 const WIN_INDEX = 36;
 const TIERS: { rarity: Rarity; chance: string }[] = [
-  { rarity: "Legendary", chance: "1%" },
-  { rarity: "Rare", chance: "9%" },
-  { rarity: "Uncommon", chance: "90%" },
+  { rarity: 'Legendary', chance: '1%' },
+  { rarity: 'Rare', chance: '9%' },
+  { rarity: 'Uncommon', chance: '90%' },
 ];
 
 function Thumb({ card, w }: { card: MockCard; w?: number }) {
@@ -46,7 +46,7 @@ function Thumb({ card, w }: { card: MockCard; w?: number }) {
 
 export default function RouletteClient() {
   const reduced = usePrefersReducedMotion();
-  const [phase, setPhase] = useState<"idle" | "spinning" | "done">("idle");
+  const [phase, setPhase] = useState<'idle' | 'spinning' | 'done'>('idle');
   const [offset, setOffset] = useState(0);
   const [won, setWon] = useState<MockCard | null>(null);
   const windowRef = useRef<HTMLDivElement>(null);
@@ -60,16 +60,16 @@ export default function RouletteClient() {
   );
 
   function play() {
-    if (phase === "spinning") return;
+    if (phase === 'spinning') return;
     const winner = strip[WIN_INDEX];
     if (reduced) {
       setWon(winner);
-      setPhase("done");
+      setPhase('done');
       return;
     }
     setWon(null);
     setOffset(0);
-    setPhase("spinning");
+    setPhase('spinning');
     const win = windowRef.current?.clientWidth ?? 600;
     const target = WIN_INDEX * ITEM_W + ITEM_W / 2 - win / 2;
     const jitter = (WIN_INDEX % 2 === 0 ? 1 : -1) * (ITEM_W * 0.18);
@@ -117,15 +117,15 @@ export default function RouletteClient() {
         <div className="overflow-hidden">
           <div
             className={cn(
-              "flex",
-              phase === "spinning" &&
-                "transition-transform duration-[4200ms] ease-[cubic-bezier(0.12,0.8,0.18,1)]",
+              'flex',
+              phase === 'spinning' &&
+                'transition-transform duration-[4200ms] ease-[cubic-bezier(0.12,0.8,0.18,1)]',
             )}
             style={{ transform: `translateX(${offset}px)` }}
             onTransitionEnd={() => {
-              if (phase === "spinning") {
+              if (phase === 'spinning') {
                 setWon(strip[WIN_INDEX]);
-                setPhase("done");
+                setPhase('done');
               }
             }}
           >
@@ -137,7 +137,7 @@ export default function RouletteClient() {
       </div>
 
       {/* Result + CTA */}
-      {phase === "done" && won ? (
+      {phase === 'done' && won ? (
         <div className="mt-6 flex flex-col items-center gap-2 motion-safe:animate-[fadeIn_0.4s_ease-out]">
           <p className="text-[11px] font-medium uppercase tracking-widest text-white/40">
             You won
@@ -171,11 +171,11 @@ export default function RouletteClient() {
         <button
           type="button"
           onClick={play}
-          disabled={phase === "spinning"}
+          disabled={phase === 'spinning'}
           className="mt-6 inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-fuchsia-500 to-violet-500 px-8 text-sm font-semibold text-white shadow-lg transition-opacity hover:opacity-90 disabled:opacity-60"
         >
-          <Sparkles className="h-4 w-4" aria-hidden />{" "}
-          {phase === "spinning" ? "Spinning…" : "Play Roulette"}
+          <Sparkles className="h-4 w-4" aria-hidden />{' '}
+          {phase === 'spinning' ? 'Spinning…' : 'Play Roulette'}
         </button>
       )}
       <p className="mt-4 text-[11px] text-white/35">

@@ -1,28 +1,28 @@
-import type { Metadata } from "next";
-import { Geist } from "next/font/google";
-import localFont from "next/font/local";
-import "./globals.css";
-import SiteHeader from "@/components/SiteHeader";
-import SiteFooter from "@/components/SiteFooter";
-import { AuthProvider } from "@/components/auth/AuthProvider";
+import type { Metadata } from 'next';
+import { Geist } from 'next/font/google';
+import localFont from 'next/font/local';
+import './globals.css';
+import SiteHeader from '@/components/SiteHeader';
+import SiteFooter from '@/components/SiteFooter';
+import { AuthProvider } from '@/components/auth/AuthProvider';
 
 const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
+  variable: '--font-geist-sans',
+  subsets: ['latin'],
 });
 
 // Nekst Black — the display/heading font used on phygitals.com (self-hosted)
 const nekst = localFont({
-  src: "../../public/fonts/Nekst-Black.woff2",
-  variable: "--font-nekst",
-  weight: "900",
-  display: "swap",
+  src: '../../public/fonts/Nekst-Black.woff2',
+  variable: '--font-nekst',
+  weight: '900',
+  display: 'swap',
 });
 
 export const metadata: Metadata = {
-  title: "Phygitals — Your Gateway to Physical & Digital Collectibles",
+  title: 'Phygitals — Your Gateway to Physical & Digital Collectibles',
   description:
-    "Rip packs. Pull graded cards. Hold, trade, redeem, or sell back at up to 90% value.",
+    'Rip packs. Pull graded cards. Hold, trade, redeem, or sell back at up to 90% value.',
   // Favicon + apple-touch icon come from the Next file convention (src/app/icon.png
   // and src/app/apple-icon.png — the Pokenic badge).
 };

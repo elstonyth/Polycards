@@ -1,7 +1,7 @@
-import { type ReactNode } from "react";
-import { redirect } from "next/navigation";
-import AccountSidebar from "@/components/account/AccountSidebar";
-import { getCustomer } from "@/lib/data/customer";
+import { type ReactNode } from 'react';
+import { redirect } from 'next/navigation';
+import AccountSidebar from '@/components/account/AccountSidebar';
+import { getCustomer } from '@/lib/data/customer';
 
 // Shared shell for the account/wallet pages (URLs stay top-level via the route group).
 // Gated: unauthenticated visitors are bounced home with ?auth=login, which the
@@ -12,7 +12,7 @@ export default async function AccountLayout({
   children: ReactNode;
 }) {
   const customer = await getCustomer();
-  if (!customer) redirect("/?auth=login");
+  if (!customer) redirect('/?auth=login');
 
   return (
     <div className="mx-auto w-full px-fluid py-6">

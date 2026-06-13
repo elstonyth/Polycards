@@ -1,9 +1,9 @@
 // Measure the rendered width of the claw-machine <img> across breakpoints, to decide
 // whether the baked "phygitals.com" url (native ~12px in a 1000px frame) is legible at any
 // supported size. URL CSS height ≈ 0.0083 × rendered machine width. <3px → banner-only scope.
-import { chromium } from "playwright";
+import { chromium } from 'playwright';
 
-const BASE = "http://localhost:4000";
+const BASE = 'http://localhost:4000';
 const URL = `${BASE}/claw/pokemon-mythic`; // shows mythic-pack animated machine
 const WIDTHS = [390, 768, 1024, 1440, 1920, 2560, 3840];
 
@@ -15,7 +15,7 @@ for (const w of WIDTHS) {
     deviceScaleFactor: 1,
   });
   const page = await ctx.newPage();
-  await page.goto(URL, { waitUntil: "domcontentloaded" });
+  await page.goto(URL, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(800);
   const box = await page
     .locator('img[alt*="claw machine"]')

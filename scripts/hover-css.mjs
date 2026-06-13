@@ -1,13 +1,13 @@
-import { chromium } from "playwright";
+import { chromium } from 'playwright';
 const b = await chromium.launch();
 const p = await b.newPage({ viewport: { width: 1440, height: 900 } });
-await p.goto("http://localhost:4000/", { waitUntil: "load", timeout: 60000 });
+await p.goto('http://localhost:4000/', { waitUntil: 'load', timeout: 60000 });
 await p.waitForTimeout(2000);
 const info = await p.evaluate(() => {
   const outer = [...document.querySelectorAll('[class*="group/card"]')].find(
-    (e) => getComputedStyle(e).pointerEvents === "auto",
+    (e) => getComputedStyle(e).pointerEvents === 'auto',
   );
-  if (!outer) return { err: "no center card" };
+  if (!outer) return { err: 'no center card' };
   const inner = outer.firstElementChild;
   const r = outer.getBoundingClientRect();
   return {

@@ -1,11 +1,11 @@
-import { chromium } from "playwright";
-import fs from "node:fs";
-const OUT = "docs/playwright/hero-slide";
+import { chromium } from 'playwright';
+import fs from 'node:fs';
+const OUT = 'docs/playwright/hero-slide';
 fs.mkdirSync(OUT, { recursive: true });
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-await page.goto("http://localhost:4000/", {
-  waitUntil: "load",
+await page.goto('http://localhost:4000/', {
+  waitUntil: 'load',
   timeout: 60000,
 });
 await page.waitForTimeout(1500);
@@ -13,12 +13,12 @@ await page.waitForTimeout(1500);
 const samples = [];
 for (let s = 0; s < 18; s++) {
   const snap = await page.evaluate(() => {
-    const track = [...document.querySelectorAll("div")].find(
-      (d) => d.style.transform && d.style.transform.includes("translateX"),
+    const track = [...document.querySelectorAll('div')].find(
+      (d) => d.style.transform && d.style.transform.includes('translateX'),
     );
-    const packs = [...document.querySelectorAll("img")].filter(
+    const packs = [...document.querySelectorAll('img')].filter(
       (i) =>
-        (i.src || "").includes("ripped-packs") && !i.className.includes("blur"),
+        (i.src || '').includes('ripped-packs') && !i.className.includes('blur'),
     );
     // which pack is horizontally centered (x near 1080-ish in right column)?
     const centered = packs
@@ -43,11 +43,11 @@ for (let s = 0; s < 18; s++) {
 fs.writeFileSync(`${OUT}/slide-samples.json`, JSON.stringify(samples, null, 1));
 samples.forEach((s, i) =>
   console.log(
-    "s" +
+    's' +
       String(i).padStart(2) +
-      ": track=" +
+      ': track=' +
       s.track +
-      " centered=" +
+      ' centered=' +
       s.centered,
   ),
 );
@@ -64,5 +64,5 @@ const broken = await page.evaluate(
     [...document.images].filter((x) => x.complete && x.naturalWidth === 0)
       .length,
 );
-console.log("broken:", broken);
+console.log('broken:', broken);
 await browser.close();

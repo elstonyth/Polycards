@@ -1,22 +1,22 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import Link from "next/link";
+import { useState } from 'react';
+import Link from 'next/link';
 import {
   Users,
   ChevronDown,
   MessageSquare,
   ArrowLeftRight,
-} from "lucide-react";
-import { cn } from "@/lib/utils";
-import Reveal from "@/components/Reveal";
-import { compact } from "@/lib/format";
-import { MOCK_USERS } from "@/lib/mock/users";
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+import Reveal from '@/components/Reveal';
+import { compact } from '@/lib/format';
+import { MOCK_USERS } from '@/lib/mock/users';
 
-const TABS = ["All Users", "Friends", "Incoming", "Outgoing"];
+const TABS = ['All Users', 'Friends', 'Incoming', 'Outgoing'];
 
 export default function SocialPage() {
-  const [tab, setTab] = useState("All Users");
+  const [tab, setTab] = useState('All Users');
 
   return (
     <div className="mx-auto w-full px-fluid py-6">
@@ -41,10 +41,10 @@ export default function SocialPage() {
               type="button"
               onClick={() => setTab(t)}
               className={cn(
-                "rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors",
+                'rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors',
                 tab === t
-                  ? "bg-white/10 text-white"
-                  : "text-white/45 hover:text-white/70",
+                  ? 'bg-white/10 text-white'
+                  : 'text-white/45 hover:text-white/70',
               )}
             >
               {t}

@@ -1,11 +1,11 @@
-import { chromium } from "playwright";
+import { chromium } from 'playwright';
 const b = await chromium.launch();
 const p = await b.newPage({ viewport: { width: 1920, height: 1000 } });
-await p.goto("http://localhost:4000/", { waitUntil: "load", timeout: 60000 });
+await p.goto('http://localhost:4000/', { waitUntil: 'load', timeout: 60000 });
 await p.waitForTimeout(2000);
 await p.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
 await p.waitForTimeout(1500);
-const f = await p.$("footer");
-await f.screenshot({ path: "docs/research/CLONE_FOOTER2.png" });
-console.log("done");
+const f = await p.$('footer');
+await f.screenshot({ path: 'docs/research/CLONE_FOOTER2.png' });
+console.log('done');
 await b.close();

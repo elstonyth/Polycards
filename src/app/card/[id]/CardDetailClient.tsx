@@ -1,7 +1,7 @@
-"use client";
+'use client';
 
-import { useMemo, useState } from "react";
-import Link from "next/link";
+import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import {
   ArrowLeft,
   ShoppingCart,
@@ -9,15 +9,15 @@ import {
   HandCoins,
   ShieldCheck,
   TrendingUp,
-} from "lucide-react";
-import { cn } from "@/lib/utils";
-import Reveal from "@/components/Reveal";
-import { features } from "@/lib/features";
-import { usd, num } from "@/lib/format";
-import { useAuth } from "@/components/auth/AuthProvider";
-import { openAuth } from "@/components/AuthButton";
-import { type MockCard, RARITY_RGB, moreFromSet } from "@/lib/mock/cards";
-import { MOCK_USERS } from "@/lib/mock/users";
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+import Reveal from '@/components/Reveal';
+import { features } from '@/lib/features';
+import { usd, num } from '@/lib/format';
+import { useAuth } from '@/components/auth/AuthProvider';
+import { openAuth } from '@/components/AuthButton';
+import { type MockCard, RARITY_RGB, moreFromSet } from '@/lib/mock/cards';
+import { MOCK_USERS } from '@/lib/mock/users';
 
 export default function CardDetailClient({ card }: { card: MockCard }) {
   const ring = RARITY_RGB[card.rarity];
@@ -28,7 +28,7 @@ export default function CardDetailClient({ card }: { card: MockCard }) {
   // get the login modal; logged-in customers see the not-yet-live note.
   const gated = (message: string) => () => {
     if (!customer) {
-      openAuth("login");
+      openAuth('login');
       return;
     }
     setNote(message);
@@ -57,17 +57,17 @@ export default function CardDetailClient({ card }: { card: MockCard }) {
         (p, i) =>
           `${(i / 23) * 100},${100 - ((p - min) / (max - min || 1)) * 100}`,
       )
-      .join(" ");
+      .join(' ');
   }, [card]);
 
   return (
     <div className="mx-auto w-full px-fluid py-4">
       <Link
-        href={features.marketplace ? "/marketplace" : "/claw"}
+        href={features.marketplace ? '/marketplace' : '/claw'}
         className="mb-4 inline-flex items-center gap-1.5 text-[13px] font-medium text-white/55 transition-colors hover:text-white"
       >
-        <ArrowLeft className="h-4 w-4" aria-hidden />{" "}
-        {features.marketplace ? "Marketplace" : "Packs"}
+        <ArrowLeft className="h-4 w-4" aria-hidden />{' '}
+        {features.marketplace ? 'Marketplace' : 'Packs'}
       </Link>
 
       <section className="grid gap-8 md:grid-cols-[0.9fr_1.1fr]">
@@ -142,7 +142,7 @@ export default function CardDetailClient({ card }: { card: MockCard }) {
               </p>
             </div>
             <div className="flex items-center gap-1 text-[13px] font-medium text-emerald-400">
-              <TrendingUp className="h-4 w-4" aria-hidden /> Buyback{" "}
+              <TrendingUp className="h-4 w-4" aria-hidden /> Buyback{' '}
               {usd(Math.round(card.fmv * 0.88))}
             </div>
           </div>
@@ -151,21 +151,21 @@ export default function CardDetailClient({ card }: { card: MockCard }) {
           <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
             <button
               type="button"
-              onClick={gated("Checkout goes live with the backend.")}
+              onClick={gated('Checkout goes live with the backend.')}
               className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-neutral-200 text-sm font-semibold text-neutral-950 transition-colors hover:bg-white"
             >
               <ShoppingCart className="h-4 w-4" aria-hidden /> Buy now
             </button>
             <button
               type="button"
-              onClick={gated("Offers go live with the backend.")}
+              onClick={gated('Offers go live with the backend.')}
               className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/5 text-sm font-medium text-white transition-colors hover:bg-white/10"
             >
               <HandCoins className="h-4 w-4" aria-hidden /> Make offer
             </button>
             <button
               type="button"
-              onClick={gated("Instant sell-back goes live with the backend.")}
+              onClick={gated('Instant sell-back goes live with the backend.')}
               className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/5 text-sm font-medium text-white transition-colors hover:bg-white/10"
             >
               <Tag className="h-4 w-4" aria-hidden /> Sell
@@ -185,11 +185,11 @@ export default function CardDetailClient({ card }: { card: MockCard }) {
                 alt=""
                 className="h-7 w-7 rounded-full object-cover ring-1 ring-white/10"
               />
-              Owned by{" "}
+              Owned by{' '}
               <span className="font-semibold text-white">{owner.username}</span>
             </Link>
             <span className="flex items-center gap-1.5 text-white/45">
-              <ShieldCheck className="h-4 w-4 text-emerald-400" aria-hidden />{" "}
+              <ShieldCheck className="h-4 w-4 text-emerald-400" aria-hidden />{' '}
               Vaulted &amp; insured · {card.grader}
             </span>
           </div>

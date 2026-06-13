@@ -1,4 +1,4 @@
-import HowItWorksSteps from "@/components/HowItWorksSteps";
+import HowItWorksSteps from '@/components/HowItWorksSteps';
 
 /**
  * Homepage "How It Works" teaser: heading row (left title + "Learn more" link)

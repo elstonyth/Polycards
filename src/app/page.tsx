@@ -1,11 +1,11 @@
-import HeroSection from "@/components/HeroSection";
-import OpenPacksSection from "@/components/OpenPacksSection";
-import RecentPullsSection from "@/components/RecentPullsSection";
-import HowItWorksSection from "@/components/HowItWorksSection";
-import CommunitySection from "@/components/CommunitySection";
-import LeaderboardSection from "@/components/LeaderboardSection";
-import CtaSection from "@/components/CtaSection";
-import Reveal from "@/components/Reveal";
+import HeroSection from '@/components/HeroSection';
+import OpenPacksSection from '@/components/OpenPacksSection';
+import RecentPullsSection from '@/components/RecentPullsSection';
+import HowItWorksSection from '@/components/HowItWorksSection';
+import CommunitySection from '@/components/CommunitySection';
+import LeaderboardSection from '@/components/LeaderboardSection';
+import CtaSection from '@/components/CtaSection';
+import Reveal from '@/components/Reveal';
 
 export default function Home() {
   return (

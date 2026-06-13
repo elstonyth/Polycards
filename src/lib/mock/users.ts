@@ -1,6 +1,6 @@
 // MOCK user/collector pool. `userOrGeneric()` resolves ANY username so every
 // /profile/<user> link works.
-import { MOCK_CARDS, type MockCard } from "./cards";
+import { MOCK_CARDS, type MockCard } from './cards';
 
 export type MockUser = {
   username: string;
@@ -15,24 +15,24 @@ export type MockUser = {
 
 // Usernames seen across leaderboard / activity / community, plus extras.
 const USERNAMES = [
-  "FightingProdigy3098",
-  "love",
-  "PsychicGuardian5685",
-  "RockHunter5734",
-  "kaoyan",
-  "ProfessorOak",
-  "EmberCollector9389",
-  "IceTactician3911",
-  "CrystalRanger9084",
-  "PoisonTactician4598",
-  "FireKnight8258",
-  "PoisonExplorer2503",
-  "CrystalMentor3422",
-  "PrinceOfDragons",
-  "PoisonTamer",
-  "DragonTamerJin",
-  "GrassWhisperer77",
-  "ThunderApex",
+  'FightingProdigy3098',
+  'love',
+  'PsychicGuardian5685',
+  'RockHunter5734',
+  'kaoyan',
+  'ProfessorOak',
+  'EmberCollector9389',
+  'IceTactician3911',
+  'CrystalRanger9084',
+  'PoisonTactician4598',
+  'FireKnight8258',
+  'PoisonExplorer2503',
+  'CrystalMentor3422',
+  'PrinceOfDragons',
+  'PoisonTamer',
+  'DragonTamerJin',
+  'GrassWhisperer77',
+  'ThunderApex',
 ];
 const PFP = (i: number) => `/images/pfps/pfp-${(i % 81) + 1}.webp`;
 

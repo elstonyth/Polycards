@@ -8,52 +8,52 @@
 //   • GLOW    — on for dark/glowing banners (bg luminance low), off for light banners.
 // Text is drawn in the BROWSER (Poppins web font; PIL 9.5 mis-renders TTFs as .notdef).
 // OVERRIDES{} can pin any value if a measurement is visibly off.
-import { chromium } from "playwright";
-import { readFile, writeFile } from "node:fs/promises";
+import { chromium } from 'playwright';
+import { readFile, writeFile } from 'node:fs/promises';
 
-const DIR = "public/images/claw";
-const IN = "docs/research/packdetail/lama-in"; // ORIGINAL (with phygitals) — colour source
-const OUT = "docs/research/packdetail/lama-out"; // LaMa-cleaned — draw target
-const MASK = "docs/research/packdetail/lama-mask";
+const DIR = 'public/images/claw';
+const IN = 'docs/research/packdetail/lama-in'; // ORIGINAL (with phygitals) — colour source
+const OUT = 'docs/research/packdetail/lama-out'; // LaMa-cleaned — draw target
+const MASK = 'docs/research/packdetail/lama-mask';
 
 const ALL_BASES = [
-  "mythic-pack",
-  "legend-pack",
-  "elite-pack",
-  "platinum-pack",
-  "rookie-pack",
-  "trainer-pack",
-  "starter-riftbound-pack",
-  "black-pack-jjnfuk",
-  "legend-pack-1dpaec",
-  "modern-grails-noafw0",
-  "pro-soccer-pack",
+  'mythic-pack',
+  'legend-pack',
+  'elite-pack',
+  'platinum-pack',
+  'rookie-pack',
+  'trainer-pack',
+  'starter-riftbound-pack',
+  'black-pack-jjnfuk',
+  'legend-pack-1dpaec',
+  'modern-grails-noafw0',
+  'pro-soccer-pack',
 ];
 // optional argv filter: process only the named bases (so re-deriving one machine doesn't touch others)
 const ONLY = process.argv.slice(2);
 const UNKNOWN = ONLY.filter((b) => !ALL_BASES.includes(b));
-if (UNKNOWN.length) throw new Error(`Unknown base(s): ${UNKNOWN.join(", ")}`);
+if (UNKNOWN.length) throw new Error(`Unknown base(s): ${UNKNOWN.join(', ')}`);
 const BASES = ONLY.length
   ? ALL_BASES.filter((b) => ONLY.includes(b))
   : ALL_BASES;
 // Match the phygitals wordmark style: LOWERCASE "pokenic" (originals are lowercase), in
 // Poppins 700 (the phygitals face), sized to the wordmark's LETTER HEIGHT (not stretched to
 // width), baseline-aligned, FLAT (no glow) — except machines whose original wordmark glows.
-const WORD = "pokenic";
+const WORD = 'pokenic';
 const FSF = 0.78; // font-size as a fraction of the measured wordmark bbox height (dilate-3 inflated)
 const BASEF = 0.74; // baseline as a fraction down the bbox (so caps rise, 'p' descends, like phygitals)
 // Per-base overrides: {color:[r,g,b], glow:bool, blur, fsf, basef, cxabs(0..1 absolute centre)}
 const OVERRIDES = {
   // ornate plate: per-row interpolation smears the filigree, so use the LaMa fill here; gold
   // wordmark + soft glow; auto-sample picks the cyan glow not the gold, so pin gold.
-  "starter-riftbound-pack": {
+  'starter-riftbound-pack': {
     lama: true,
     glow: true,
     blur: 0.16,
     color: [219, 177, 101],
   },
   // phygitals sat left over "SOCCER CLAW" (FIFA logo right) → centre on the plate per user.
-  "pro-soccer-pack": { cxabs: 0.497 },
+  'pro-soccer-pack': { cxabs: 0.497 },
 };
 
 const orig = {},
@@ -61,19 +61,19 @@ const orig = {},
   masks = {};
 for (const base of BASES) {
   orig[base] =
-    "data:image/png;base64," +
-    (await readFile(`${IN}/${base}.png`)).toString("base64");
+    'data:image/png;base64,' +
+    (await readFile(`${IN}/${base}.png`)).toString('base64');
   outp[base] =
-    "data:image/png;base64," +
-    (await readFile(`${OUT}/${base}.png`)).toString("base64");
+    'data:image/png;base64,' +
+    (await readFile(`${OUT}/${base}.png`)).toString('base64');
   masks[base] =
-    "data:image/png;base64," +
-    (await readFile(`${MASK}/${base}.png`)).toString("base64");
+    'data:image/png;base64,' +
+    (await readFile(`${MASK}/${base}.png`)).toString('base64');
 }
 
 const browser = await chromium.launch();
 const page = await browser.newPage();
-await page.goto("about:blank");
+await page.goto('about:blank');
 await page.addStyleTag({
   content:
     "@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@700&display=swap');",
@@ -81,7 +81,7 @@ await page.addStyleTag({
 await page.waitForTimeout(1800);
 await page.evaluate(async () => {
   try {
-    await document.fonts.load("700 60px Poppins");
+    await document.fonts.load('700 60px Poppins');
   } catch {}
 });
 
@@ -91,7 +91,7 @@ const results = await page.evaluate(
       new Promise((ok, no) => {
         const im = new Image();
         im.onload = () => ok(im);
-        im.onerror = () => no(new Error("load"));
+        im.onerror = () => no(new Error('load'));
         im.src = s;
       });
     const med = (arr) => {
@@ -108,10 +108,10 @@ const results = await page.evaluate(
       const W = oImg.naturalWidth,
         H = oImg.naturalHeight;
       const data = (img) => {
-        const cv = document.createElement("canvas");
+        const cv = document.createElement('canvas');
         cv.width = W;
         cv.height = H;
-        const cx = cv.getContext("2d");
+        const cx = cv.getContext('2d');
         cx.drawImage(img, 0, 0, W, H);
         return cx.getImageData(0, 0, W, H).data;
       };
@@ -179,10 +179,10 @@ const results = await page.evaluate(
       const baseY = minY + bboxH * (ov.basef ?? BASEF); // alphabetic baseline → caps rise, 'p' descends
       const glow = ov.glow ?? false;
 
-      const cv = document.createElement("canvas");
+      const cv = document.createElement('canvas');
       cv.width = W;
       cv.height = H;
-      const ctx = cv.getContext("2d");
+      const ctx = cv.getContext('2d');
       if (ov.lama) {
         ctx.drawImage(cImg, 0, 0, W, H); // ornate → LaMa fill
       } else {
@@ -246,8 +246,8 @@ const results = await page.evaluate(
         ctx.putImageData(id, 0, 0);
       }
       ctx.font = `700 ${fs}px Poppins, sans-serif`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "alphabetic";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'alphabetic';
       const col = `rgb(${color[0]},${color[1]},${color[2]})`;
       ctx.fillStyle = col;
       if (glow) {
@@ -256,7 +256,7 @@ const results = await page.evaluate(
         ctx.fillText(WORD, cx, baseY);
       }
       ctx.shadowBlur = 0;
-      ctx.shadowColor = "transparent";
+      ctx.shadowColor = 'transparent';
       ctx.fillText(WORD, cx, baseY);
 
       out[base] = {
@@ -269,7 +269,7 @@ const results = await page.evaluate(
         bboxH,
         glow,
       };
-      out[base].data = cv.toDataURL("image/webp", 0.95);
+      out[base].data = cv.toDataURL('image/webp', 0.95);
     }
     return out;
   },
@@ -279,7 +279,7 @@ const results = await page.evaluate(
 for (const [base, r] of Object.entries(results)) {
   await writeFile(
     `${DIR}/${base}-machine.webp`,
-    Buffer.from(r.data.split(",")[1], "base64"),
+    Buffer.from(r.data.split(',')[1], 'base64'),
   );
   console.log(
     `${base}: color=rgb(${r.color}) bg=rgb(${r.bg}) glow=${r.glow} cx=${r.cx}% baseY=${r.baseY}% bboxH=${r.bboxH} fs=${r.fs}`,

@@ -1,11 +1,11 @@
 // Zoom the LIVE placard zone (lower-left of the machine) at high DSF so "pokenic claw." is legible —
 // this is the exact region the user flagged. Confirms the fix on the real served animated AVIF.
-import { chromium } from "playwright";
+import { chromium } from 'playwright';
 
 const SLUGS = [
-  ["nba-legend", "legend-pack-1dpaec"],
-  ["nba-platinum", "modern-grails"],
-  ["riftbound-starter", "riftbound"],
+  ['nba-legend', 'legend-pack-1dpaec'],
+  ['nba-platinum', 'modern-grails'],
+  ['riftbound-starter', 'riftbound'],
 ];
 
 const browser = await chromium.launch();
@@ -16,15 +16,15 @@ const page = await browser.newPage({
 for (const [slug, label] of SLUGS) {
   try {
     await page.goto(`http://localhost:4000/claw/${slug}`, {
-      waitUntil: "networkidle",
+      waitUntil: 'networkidle',
     });
     await page.waitForTimeout(1000);
     const img = page
       .locator('img[src*="-anim.avif"], img[src*="-machine.webp"]')
       .first();
-    await img.waitFor({ state: "visible", timeout: 8000 });
+    await img.waitFor({ state: 'visible', timeout: 8000 });
     const b = await img.boundingBox();
-    if (!b) throw new Error("machine bounding box unavailable");
+    if (!b) throw new Error('machine bounding box unavailable');
     // placard zone ~ x 0.30-0.56, y 0.70-0.90 of the machine image
     await page.screenshot({
       path: `docs/research/packdetail/livezoom_${slug}.png`,
@@ -43,4 +43,4 @@ for (const [slug, label] of SLUGS) {
   }
 }
 await browser.close();
-console.log("done");
+console.log('done');

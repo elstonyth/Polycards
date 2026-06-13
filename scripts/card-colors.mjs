@@ -1,26 +1,26 @@
-import { chromium } from "playwright";
+import { chromium } from 'playwright';
 const b = await chromium.launch();
 const p = await b.newPage({ viewport: { width: 1920, height: 1080 } });
-await p.goto("http://localhost:4000/", { waitUntil: "load", timeout: 60000 });
+await p.goto('http://localhost:4000/', { waitUntil: 'load', timeout: 60000 });
 await p.waitForTimeout(1500);
 const themes = [
-  ["pokemon", "/home/hero/ripped-packs/pokemon.webp"],
-  ["onepiece", "/home/hero/ripped-packs/onepiece.webp"],
-  ["basketball", "/home/hero/ripped-packs/basketball.webp"],
-  ["football", "/home/hero/ripped-packs/football.webp"],
-  ["baseball", "/home/hero/ripped-packs/baseball.webp"],
-  ["yugioh", "/home/hero/ripped-packs/yugioh.webp"],
+  ['pokemon', '/home/hero/ripped-packs/pokemon.webp'],
+  ['onepiece', '/home/hero/ripped-packs/onepiece.webp'],
+  ['basketball', '/home/hero/ripped-packs/basketball.webp'],
+  ['football', '/home/hero/ripped-packs/football.webp'],
+  ['baseball', '/home/hero/ripped-packs/baseball.webp'],
+  ['yugioh', '/home/hero/ripped-packs/yugioh.webp'],
 ];
 for (const [name, src] of themes) {
   const rgb = await p.evaluate(async (src) => {
     const img = new Image();
-    img.crossOrigin = "anonymous";
+    img.crossOrigin = 'anonymous';
     img.src = src;
     await img.decode();
-    const c = document.createElement("canvas");
+    const c = document.createElement('canvas');
     c.width = 40;
     c.height = 60;
-    const ctx = c.getContext("2d");
+    const ctx = c.getContext('2d');
     ctx.drawImage(img, 0, 0, 40, 60);
     const d = ctx.getImageData(0, 0, 40, 60).data;
     let r = 0,
@@ -44,6 +44,6 @@ for (const [name, src] of themes) {
     if (n === 0) return [120, 120, 120];
     return [Math.round(r / n), Math.round(g / n), Math.round(bl / n)];
   }, src);
-  console.log(`${name}: rgb(${rgb.join(", ")})`);
+  console.log(`${name}: rgb(${rgb.join(', ')})`);
 }
 await b.close();

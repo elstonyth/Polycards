@@ -1,10 +1,10 @@
 // Targeted probe: the hero "Open Packs" CTA + header "How it works" link,
 // matched by exact text, on ORIG vs CLONE. These are non-animation elements.
-import { chromium } from "playwright";
+import { chromium } from 'playwright';
 
 const SITES = [
-  ["https://www.phygitals.com/", "ORIG"],
-  ["http://localhost:4000/", "CLONE"],
+  ['https://www.phygitals.com/', 'ORIG'],
+  ['http://localhost:4000/', 'CLONE'],
 ];
 
 const EXTRACT = () => {
@@ -24,19 +24,19 @@ const EXTRACT = () => {
     };
   };
   const P = [
-    "backgroundColor",
-    "color",
-    "borderRadius",
-    "padding",
-    "fontSize",
-    "fontWeight",
-    "border",
-    "boxShadow",
-    "backgroundImage",
+    'backgroundColor',
+    'color',
+    'borderRadius',
+    'padding',
+    'fontSize',
+    'fontWeight',
+    'border',
+    'boxShadow',
+    'backgroundImage',
   ];
 
-  const byText = (re, tags = ["button", "a"]) => {
-    const els = [...document.querySelectorAll(tags.join(","))].filter((e) =>
+  const byText = (re, tags = ['button', 'a']) => {
+    const els = [...document.querySelectorAll(tags.join(','))].filter((e) =>
       re.test(e.textContent.trim()),
     );
     // smallest matching element (the actual control, not a wrapper)
@@ -59,7 +59,7 @@ const EXTRACT = () => {
           styles: cs(openPacks, P),
           rect: rct(openPacks),
         }
-      : "NOT FOUND",
+      : 'NOT FOUND',
     howItWorks: howItWorks
       ? {
           text: howItWorks.textContent.trim(),
@@ -67,7 +67,7 @@ const EXTRACT = () => {
           styles: cs(howItWorks, P),
           rect: rct(howItWorks),
         }
-      : "NOT FOUND",
+      : 'NOT FOUND',
   };
 };
 
@@ -80,7 +80,7 @@ for (const [url, site] of SITES) {
   });
   const page = await ctx.newPage();
   try {
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
     for (let i = 0; i < 25; i++) {
       const r = await page
         .evaluate(() => document.images.length > 2)

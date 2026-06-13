@@ -1,18 +1,18 @@
-"use client";
+'use client';
 
-import { useMemo, useState } from "react";
-import Link from "next/link";
-import { Search } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { useMemo, useState } from 'react';
+import Link from 'next/link';
+import { Search } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import {
   type Pokemon,
   GENS,
   REGION,
   spriteGif,
   spritePng,
-} from "@/lib/mock/pokedex";
+} from '@/lib/mock/pokedex';
 
-const LANGS = ["US", "JP", "KR"];
+const LANGS = ['US', 'JP', 'KR'];
 
 function PokeSprite({ dex, name }: { dex: number; name: string }) {
   const [src, setSrc] = useState(spriteGif(dex));
@@ -35,8 +35,8 @@ export default function PokedexClient({
   gen: string;
   pokemon: Pokemon[];
 }) {
-  const [query, setQuery] = useState("");
-  const [lang, setLang] = useState("US");
+  const [query, setQuery] = useState('');
+  const [lang, setLang] = useState('US');
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -74,10 +74,10 @@ export default function PokedexClient({
                 type="button"
                 onClick={() => setLang(l)}
                 className={cn(
-                  "rounded-lg px-2.5 py-1.5 text-[12px] font-semibold transition-colors",
+                  'rounded-lg px-2.5 py-1.5 text-[12px] font-semibold transition-colors',
                   lang === l
-                    ? "bg-white/10 text-white"
-                    : "text-white/45 hover:text-white/70",
+                    ? 'bg-white/10 text-white'
+                    : 'text-white/45 hover:text-white/70',
                 )}
               >
                 {l}
@@ -93,10 +93,10 @@ export default function PokedexClient({
               key={n}
               href={`/pokemon/generation/${n}`}
               className={cn(
-                "-mb-px shrink-0 border-b-2 px-3 py-2 text-[13px] font-medium transition-colors",
+                '-mb-px shrink-0 border-b-2 px-3 py-2 text-[13px] font-medium transition-colors',
                 n === gen
-                  ? "border-white text-white"
-                  : "border-transparent text-white/45 hover:text-white",
+                  ? 'border-white text-white'
+                  : 'border-transparent text-white/45 hover:text-white',
               )}
             >
               Gen {n}
@@ -131,7 +131,7 @@ export default function PokedexClient({
         </p>
       )}
       <p className="mt-6 text-center text-[11px] text-white/30">
-        Sprites courtesy of PokeAPI · Generation {gen} ({REGION[gen]}) ·{" "}
+        Sprites courtesy of PokeAPI · Generation {gen} ({REGION[gen]}) ·{' '}
         {pokemon.length} Pokémon
       </p>
     </div>

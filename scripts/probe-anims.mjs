@@ -1,24 +1,24 @@
 // What AMBIENT (infinite-loop) CSS animations does ORIG run per route? These are
 // the "alive" motions the clone may lack. Reports distinct animationName ->
 // count + duration + a sample element, filtered to infinite iteration.
-import { chromium } from "playwright";
+import { chromium } from 'playwright';
 
 const ROUTES = [
-  "/",
-  "/claw",
-  "/pack-party",
-  "/activity",
-  "/store",
-  "/marketplace",
+  '/',
+  '/claw',
+  '/pack-party',
+  '/activity',
+  '/store',
+  '/marketplace',
 ];
-const ORIGIN = "https://www.phygitals.com";
+const ORIGIN = 'https://www.phygitals.com';
 
 const EXTRACT = () => {
   const map = {};
-  for (const el of document.querySelectorAll("*")) {
+  for (const el of document.querySelectorAll('*')) {
     const s = getComputedStyle(el);
-    if (!s.animationName || s.animationName === "none") continue;
-    if (s.animationIterationCount !== "infinite") continue; // ambient only
+    if (!s.animationName || s.animationName === 'none') continue;
+    if (s.animationIterationCount !== 'infinite') continue; // ambient only
     const key = s.animationName;
     if (!map[key])
       map[key] = {
@@ -26,8 +26,8 @@ const EXTRACT = () => {
         duration: s.animationDuration,
         sample: (
           el.tagName.toLowerCase() +
-          "." +
-          (el.className?.toString().split(" ")[0] || "")
+          '.' +
+          (el.className?.toString().split(' ')[0] || '')
         ).slice(0, 40),
       };
     map[key].count++;
@@ -44,7 +44,7 @@ for (const route of ROUTES) {
   const page = await ctx.newPage();
   try {
     await page.goto(ORIGIN + route, {
-      waitUntil: "domcontentloaded",
+      waitUntil: 'domcontentloaded',
       timeout: 45000,
     });
     for (let i = 0; i < 18; i++) {
@@ -58,7 +58,7 @@ for (const route of ROUTES) {
     const m = await page.evaluate(EXTRACT);
     console.log(`\n=== ${route} (infinite/ambient animations) ===`);
     const keys = Object.keys(m);
-    if (!keys.length) console.log("  (none)");
+    if (!keys.length) console.log('  (none)');
     for (const k of keys)
       console.log(
         `  ${k.padEnd(22)} x${m[k].count}  ${m[k].duration}  e.g. ${m[k].sample}`,

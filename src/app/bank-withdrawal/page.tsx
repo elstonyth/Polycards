@@ -1,10 +1,10 @@
-import type { Metadata } from "next";
-import { AlertCircle } from "lucide-react";
-import AuthButton from "@/components/AuthButton";
+import type { Metadata } from 'next';
+import { AlertCircle } from 'lucide-react';
+import AuthButton from '@/components/AuthButton';
 
 export const metadata: Metadata = {
-  title: "Bank Withdrawal — Phygitals",
-  description: "Complete your withdrawal with a direct bank transfer.",
+  title: 'Bank Withdrawal — Phygitals',
+  description: 'Complete your withdrawal with a direct bank transfer.',
 };
 
 // Standalone full-width route matching the live anonymous /bank-withdrawal: heading +

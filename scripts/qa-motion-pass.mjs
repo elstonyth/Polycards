@@ -5,9 +5,9 @@
 //     regression test for the AnimatePresence click-bubble bug).
 //  3. Full flow reaches the card; tap-to-advance still skips ahead.
 //  4. prefers-reduced-motion: overlay jumps straight to the card; hero does not rotate.
-import { chromium } from "playwright";
+import { chromium } from 'playwright';
 
-const BASE = process.env.BASE_URL ?? "http://localhost:4000";
+const BASE = process.env.BASE_URL ?? 'http://localhost:4000';
 const results = [];
 const pass = (n, ok, note) => results.push({ name: n, ok: !!ok, note });
 
@@ -15,17 +15,17 @@ const pass = (n, ok, note) => results.push({ name: n, ok: !!ok, note });
 // ("rotateY(-52.8deg)"), fall back to decomposing the computed matrix3d
 const cylRotY = (page) =>
   page.evaluate(() => {
-    const el = [...document.querySelectorAll("div")].find(
-      (d) => getComputedStyle(d).transformStyle === "preserve-3d",
+    const el = [...document.querySelectorAll('div')].find(
+      (d) => getComputedStyle(d).transformStyle === 'preserve-3d',
     );
     if (!el) return null;
     const inline = el.style.transform;
     const m1 = inline && inline.match(/rotateY\((-?[\d.]+)deg\)/);
     if (m1) return +m1[1];
     const tr = getComputedStyle(el).transform;
-    if (!tr || tr === "none") return 0;
+    if (!tr || tr === 'none') return 0;
     const m = tr.match(/-?[\d.e]+/g)?.map(Number) || [];
-    if (tr.startsWith("matrix3d"))
+    if (tr.startsWith('matrix3d'))
       return (Math.atan2(m[8], m[0]) * 180) / Math.PI;
     return 0;
   });
@@ -38,10 +38,10 @@ try {
   });
   const page = await ctx.newPage();
   await page.goto(`${BASE}/claw/pokemon-mythic`, {
-    waitUntil: "networkidle",
+    waitUntil: 'networkidle',
     timeout: 60000,
   });
-  await page.getByRole("button", { name: /Try a free demo spin/i }).click();
+  await page.getByRole('button', { name: /Try a free demo spin/i }).click();
   await page.waitForTimeout(900);
   // ALL stage text lives inside the overlay dialog — scope there, or Playwright
   // "sees" the page behind it (isVisible ignores occlusion).
@@ -58,7 +58,7 @@ try {
     if (Math.abs(during) < 20) await page.waitForTimeout(600);
   }
   pass(
-    "drag rotates the cylinder",
+    'drag rotates the cylinder',
     Math.abs(during) > 20,
     `rotY≈${during.toFixed(1)}° during drag`,
   );
@@ -68,17 +68,17 @@ try {
   const settled = (await cylRotY(page)) ?? 0;
   const snapErr = Math.abs(settled / 60 - Math.round(settled / 60)) * 60;
   pass(
-    "release snaps to a 60° slot",
+    'release snaps to a 60° slot',
     Math.abs(during) > 20 && snapErr < 2,
     `settled ${settled.toFixed(1)}° (err ${snapErr.toFixed(1)}°)`,
   );
 
   // 1c. shuffle spins
-  await dialog.getByRole("button", { name: /Shuffle/i }).click();
+  await dialog.getByRole('button', { name: /Shuffle/i }).click();
   await page.waitForTimeout(1400);
   const afterShuffle = (await cylRotY(page)) ?? 0;
   pass(
-    "shuffle spins the cylinder",
+    'shuffle spins the cylinder',
     Math.abs(afterShuffle - settled) > 30,
     `${settled.toFixed(0)}° -> ${afterShuffle.toFixed(0)}°`,
   );
@@ -91,10 +91,10 @@ try {
     .first()
     .isVisible()
     .catch(() => false);
-  pass("select-tap does not skip the slab stage", !earlyMeta);
+  pass('select-tap does not skip the slab stage', !earlyMeta);
   await page.waitForTimeout(900);
   pass(
-    "slab visible (Tap to reveal)",
+    'slab visible (Tap to reveal)',
     await dialog
       .getByText(/Tap to reveal/i)
       .first()
@@ -106,7 +106,7 @@ try {
   await page.mouse.click(720, 500);
   await page.waitForTimeout(400);
   pass(
-    "metadata stage shows (Year/Value row)",
+    'metadata stage shows (Year/Value row)',
     await dialog
       .getByText(/^(Year|Value)$/)
       .first()
@@ -118,43 +118,43 @@ try {
   await page.mouse.click(720, 500); // in case a pull stage was in between
   await page.waitForTimeout(600);
   pass(
-    "card stage reached (Continue)",
+    'card stage reached (Continue)',
     await dialog
-      .getByRole("button", { name: /^Continue$/ })
+      .getByRole('button', { name: /^Continue$/ })
       .first()
       .isVisible()
       .catch(() => false),
   );
   const imgOk = await page.evaluate(() =>
-    [...document.querySelectorAll("img")].some(
-      (i) => i.src.includes("/cdn/cards/") && i.naturalWidth > 50,
+    [...document.querySelectorAll('img')].some(
+      (i) => i.src.includes('/cdn/cards/') && i.naturalWidth > 50,
     ),
   );
-  pass("won card image rendered", imgOk);
+  pass('won card image rendered', imgOk);
   await ctx.close();
 
   // ---------- reduced-motion context ----------
   const rctx = await browser.newContext({
     viewport: { width: 1440, height: 1000 },
-    reducedMotion: "reduce",
+    reducedMotion: 'reduce',
   });
   const rpage = await rctx.newPage();
   await rpage.goto(`${BASE}/claw/pokemon-mythic`, {
-    waitUntil: "networkidle",
+    waitUntil: 'networkidle',
     timeout: 60000,
   });
-  await rpage.getByRole("button", { name: /Try a free demo spin/i }).click();
+  await rpage.getByRole('button', { name: /Try a free demo spin/i }).click();
   await rpage.waitForTimeout(500);
   pass(
-    "reduced-motion: jumps straight to the card",
+    'reduced-motion: jumps straight to the card',
     await rpage
-      .getByRole("button", { name: /^Continue$/ })
+      .getByRole('button', { name: /^Continue$/ })
       .first()
       .isVisible()
       .catch(() => false),
   );
   pass(
-    "reduced-motion: no cylinder stage",
+    'reduced-motion: no cylinder stage',
     !(await rpage
       .getByText(/Drag to spin/i)
       .first()
@@ -163,11 +163,11 @@ try {
   );
 
   // hero does not rotate under reduced motion
-  await rpage.goto(`${BASE}/`, { waitUntil: "networkidle", timeout: 60000 });
+  await rpage.goto(`${BASE}/`, { waitUntil: 'networkidle', timeout: 60000 });
   await rpage.waitForTimeout(600);
   const snap = () =>
     rpage.evaluate(() =>
-      [...document.querySelectorAll("img")]
+      [...document.querySelectorAll('img')]
         .filter((im) => {
           const r = im.getBoundingClientRect();
           return r.top < 560 && r.x > 560 && r.width > 50;
@@ -178,21 +178,21 @@ try {
           while (
             w &&
             d < 4 &&
-            getComputedStyle(w).opacity === "1" &&
-            getComputedStyle(w).transform === "none"
+            getComputedStyle(w).opacity === '1' &&
+            getComputedStyle(w).transform === 'none'
           ) {
             w = w.parentElement;
             d++;
           }
-          return `${(im.src || "").split("/").pop()}:${getComputedStyle(w).opacity}`;
+          return `${(im.src || '').split('/').pop()}:${getComputedStyle(w).opacity}`;
         })
         .sort()
-        .join("|"),
+        .join('|'),
     );
   const a = await snap();
   await rpage.waitForTimeout(5000); // > one rotate period
   const b = await snap();
-  pass("reduced-motion: hero static across 5s", a === b);
+  pass('reduced-motion: hero static across 5s', a === b);
   await rctx.close();
 } finally {
   await browser.close();
@@ -201,7 +201,7 @@ try {
 let ok = 0;
 for (const r of results) {
   console.log(
-    `${r.ok ? "PASS" : "FAIL"}  ${r.name}${r.note ? "  (" + r.note + ")" : ""}`,
+    `${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${r.note ? '  (' + r.note + ')' : ''}`,
   );
   if (r.ok) ok++;
 }

@@ -10,12 +10,12 @@
 // which naturally excludes the pedestal below the dark gap.
 //
 // Run: node scripts/crop-card-pedestals.mjs [--dry]
-import fs from "node:fs";
-import path from "node:path";
-import sharp from "sharp";
+import fs from 'node:fs';
+import path from 'node:path';
+import sharp from 'sharp';
 
-const DIR = path.resolve("public/cdn/cards");
-const DRY = process.argv.includes("--dry");
+const DIR = path.resolve('public/cdn/cards');
+const DRY = process.argv.includes('--dry');
 const PAD = 8;
 const BRIGHT = 30; // 0-255 luminance: above = slab/pedestal, below = background
 const RUN = 6; // sustained rows to confirm a block edge
@@ -64,7 +64,7 @@ async function cropOne(file) {
   if (bottom < 0)
     return {
       file: path.basename(file),
-      skip: "already slab-only (no pedestal gap)",
+      skip: 'already slab-only (no pedestal gap)',
     };
   if (top < 0 || bottom <= top)
     return { file, error: `no slab block (top=${top} bottom=${bottom})` };
@@ -92,7 +92,7 @@ async function cropOne(file) {
       break;
     }
   }
-  if (left < 0 || right <= left) return { file, error: "no slab columns" };
+  if (left < 0 || right <= left) return { file, error: 'no slab columns' };
 
   const box = {
     left: Math.max(0, left - PAD),
@@ -104,7 +104,7 @@ async function cropOne(file) {
   if (box.width > W * 0.95 && box.height > H * 0.95) {
     return {
       file: path.basename(file),
-      skip: "already slab-only (full-frame box)",
+      skip: 'already slab-only (full-frame box)',
     };
   }
   const ratio = box.height / box.width;
@@ -121,7 +121,7 @@ async function cropOne(file) {
 
 const files = fs
   .readdirSync(DIR)
-  .filter((f) => f.endsWith(".webp"))
+  .filter((f) => f.endsWith('.webp'))
   .map((f) => path.join(DIR, f));
 let errors = 0,
   outliers = 0,
@@ -140,13 +140,13 @@ for (const f of files) {
   }
   // a graded slab is ~1.4-1.8 tall:wide — flag anything else for eyeballing
   const flag =
-    r.ratio < 1.3 || r.ratio > 1.95 ? "  <-- RATIO OUTLIER, inspect" : "";
+    r.ratio < 1.3 || r.ratio > 1.95 ? '  <-- RATIO OUTLIER, inspect' : '';
   if (flag) outliers++;
   console.log(
-    `${DRY ? "would crop" : "cropped"}  ${r.file}  -> ${r.box}  ratio ${r.ratio}${flag}`,
+    `${DRY ? 'would crop' : 'cropped'}  ${r.file}  -> ${r.box}  ratio ${r.ratio}${flag}`,
   );
 }
 console.log(
-  `\n${files.length} files, ${skipped} skipped (already slab-only), ${errors} errors, ${outliers} ratio outliers${DRY ? " (dry run)" : ""}`,
+  `\n${files.length} files, ${skipped} skipped (already slab-only), ${errors} errors, ${outliers} ratio outliers${DRY ? ' (dry run)' : ''}`,
 );
 process.exit(errors ? 1 : 0);

@@ -6,11 +6,11 @@
 //   - Top Hits values are the real card market values (~$39.80), NOT the mock
 //     CARD_POOL values (e.g. $912.00).
 // Screenshots -> docs/research/phase5.
-import { chromium } from "playwright";
-import { mkdirSync } from "node:fs";
+import { chromium } from 'playwright';
+import { mkdirSync } from 'node:fs';
 
-const BASE = "http://localhost:4000";
-const OUT = "docs/research/phase5";
+const BASE = 'http://localhost:4000';
+const OUT = 'docs/research/phase5';
 mkdirSync(OUT, { recursive: true });
 
 const r = {};
@@ -19,31 +19,31 @@ const browser = await chromium.launch();
 // below-the-fold Pull Odds panel is captured in the full-page screenshot.
 const ctx = await browser.newContext({
   viewport: { width: 1440, height: 1400 },
-  reducedMotion: "reduce",
+  reducedMotion: 'reduce',
 });
 const page = await ctx.newPage();
 
-await page.goto(`${BASE}/claw/pokemon-mythic`, { waitUntil: "networkidle" });
+await page.goto(`${BASE}/claw/pokemon-mythic`, { waitUntil: 'networkidle' });
 await page.waitForTimeout(400);
 
 // Pull Odds (by rarity) — read the rows under the "Pull Odds" heading.
 const pullOddsSection = page
-  .locator("section", {
-    has: page.getByRole("heading", { name: /Pull Odds/i }),
+  .locator('section', {
+    has: page.getByRole('heading', { name: /Pull Odds/i }),
   })
   .first();
 r.rarityRows = await pullOddsSection
-  .locator("li")
+  .locator('li')
   .allTextContents()
-  .then((a) => a.map((s) => s.replace(/\s+/g, " ").trim()));
+  .then((a) => a.map((s) => s.replace(/\s+/g, ' ').trim()));
 r.rarityCount = r.rarityRows.length;
 
 // Top Hits — the value labels under each card.
 const topHitsSection = page
-  .locator("section", { has: page.getByRole("heading", { name: /Top Hits/i }) })
+  .locator('section', { has: page.getByRole('heading', { name: /Top Hits/i }) })
   .first();
 r.topHitValues = await topHitsSection
-  .locator("p.text-center")
+  .locator('p.text-center')
   .allTextContents()
   .then((a) => a.map((s) => s.trim()));
 
@@ -58,8 +58,8 @@ r.verdict =
   !r.hasLegendaryRow &&
   r.backendTopValuePresent &&
   !r.mockTopValuePresent
-    ? "PASS (backend-wired)"
-    : "FAIL (mock fallback or wrong data)";
+    ? 'PASS (backend-wired)'
+    : 'FAIL (mock fallback or wrong data)';
 
 await page.screenshot({
   path: `${OUT}/01-detail-pokemon-mythic.png`,

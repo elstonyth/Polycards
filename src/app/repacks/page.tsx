@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 // /repacks — community-created packs ("Packs created by anyone"). Single-file client
 // component (needs chip-filter + per-card quantity state); metadata is intentionally
@@ -12,15 +12,15 @@
 // flavored so the two pages don't render identically. (Layout fix, not an exact 1:1
 // content match — the live 50/50 / FIRE / PIKA custom artwork is user-uploaded.)
 
-import { useState } from "react";
-import Link from "next/link";
-import { Plus, SlidersHorizontal, ChevronDown } from "lucide-react";
-import { cn } from "@/lib/utils";
-import Reveal from "@/components/Reveal";
-import QtyStepper from "@/components/QtyStepper";
-import { usd0 } from "@/lib/format";
-import { MOCK_USERS } from "@/lib/mock/users";
-import { CATEGORIES } from "../claw/packs-data";
+import { useState } from 'react';
+import Link from 'next/link';
+import { Plus, SlidersHorizontal, ChevronDown } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import Reveal from '@/components/Reveal';
+import QtyStepper from '@/components/QtyStepper';
+import { usd0 } from '@/lib/format';
+import { MOCK_USERS } from '@/lib/mock/users';
+import { CATEGORIES } from '../claw/packs-data';
 
 // ---------------------------------------------------------------------------
 // Data — community packs (real art, community-flavored names + creators).
@@ -30,7 +30,7 @@ const CAT_BY_ID = new Map(CATEGORIES.map((c) => [c.id, c]));
 
 // Chip-rail tabs: "All Packs" + the real /claw categories (label + icon reused).
 const TABS = [
-  { id: "all", tab: "All Packs", icon: "" },
+  { id: 'all', tab: 'All Packs', icon: '' },
   ...CATEGORIES.map((c) => ({ id: c.id, tab: c.tab, icon: c.icon })),
 ];
 
@@ -52,112 +52,112 @@ type CommunityPack = {
 
 const COMMUNITY_PACKS: CommunityPack[] = [
   {
-    id: "mini-5050",
-    name: "Mini 50/50 Pack",
-    categoryId: "pokemon",
-    image: "/images/claw/rookie-pack-icon.webp",
+    id: 'mini-5050',
+    name: 'Mini 50/50 Pack',
+    categoryId: 'pokemon',
+    image: '/images/claw/rookie-pack-icon.webp',
     price: 50,
     creator: 0,
     boost: true,
   },
   {
-    id: "5050",
-    name: "50/50 Pack",
-    categoryId: "pokemon",
-    image: "/images/claw/elite-pack-icon.webp",
+    id: '5050',
+    name: '50/50 Pack',
+    categoryId: 'pokemon',
+    image: '/images/claw/elite-pack-icon.webp',
     price: 100,
     creator: 5,
   },
   {
-    id: "super-mini-fire",
-    name: "Super Mini Fire Pack",
-    categoryId: "pokemon",
-    image: "/images/claw/mythic-pack-icon.webp",
+    id: 'super-mini-fire',
+    name: 'Super Mini Fire Pack',
+    categoryId: 'pokemon',
+    image: '/images/claw/mythic-pack-icon.webp',
     price: 25,
     creator: 11,
     boost: true,
   },
   {
-    id: "phantom-pika",
-    name: "Phantom Pika Pack",
-    categoryId: "pokemon",
-    image: "/images/claw/legend-pack-icon.webp",
+    id: 'phantom-pika',
+    name: 'Phantom Pika Pack',
+    categoryId: 'pokemon',
+    image: '/images/claw/legend-pack-icon.webp',
     price: 250,
     creator: 3,
     boost: true,
   },
   {
-    id: "daily-ripper",
-    name: "Daily Ripper",
-    categoryId: "one-piece",
-    image: "/images/claw/starter-one-piece-pack-icon.webp",
+    id: 'daily-ripper',
+    name: 'Daily Ripper',
+    categoryId: 'one-piece',
+    image: '/images/claw/starter-one-piece-pack-icon.webp',
     price: 15,
     creator: 7,
   },
   {
-    id: "grail-hunter",
-    name: "Grail Hunter",
-    categoryId: "one-piece",
-    image: "/images/claw/legend-one-piece-pack-icon.webp",
+    id: 'grail-hunter',
+    name: 'Grail Hunter',
+    categoryId: 'one-piece',
+    image: '/images/claw/legend-one-piece-pack-icon.webp',
     price: 250,
     creator: 13,
     boost: true,
   },
   {
-    id: "court-kings-mini",
-    name: "Court Kings Mini",
-    categoryId: "basketball",
-    image: "/images/claw/legend-pack-1dpaec-icon.webp",
+    id: 'court-kings-mini',
+    name: 'Court Kings Mini',
+    categoryId: 'basketball',
+    image: '/images/claw/legend-pack-1dpaec-icon.webp',
     price: 40,
     creator: 2,
   },
   {
-    id: "black-ice-whale",
-    name: "Black Ice Whale",
-    categoryId: "basketball",
-    image: "/images/claw/black-pack-jjnfuk-icon.webp",
+    id: 'black-ice-whale',
+    name: 'Black Ice Whale',
+    categoryId: 'basketball',
+    image: '/images/claw/black-pack-jjnfuk-icon.webp',
     price: 1000,
     creator: 16,
     boost: true,
   },
   {
-    id: "diamond-rookie",
-    name: "Diamond Rookie",
-    categoryId: "baseball",
-    image: "/images/claw/starter-baseball-pack-icon.webp",
+    id: 'diamond-rookie',
+    name: 'Diamond Rookie',
+    categoryId: 'baseball',
+    image: '/images/claw/starter-baseball-pack-icon.webp',
     price: 20,
     creator: 9,
   },
   {
-    id: "gridiron-grail",
-    name: "Gridiron Grail",
-    categoryId: "football",
-    image: "/images/claw/platinum-football-pack-icon.webp",
+    id: 'gridiron-grail',
+    name: 'Gridiron Grail',
+    categoryId: 'football',
+    image: '/images/claw/platinum-football-pack-icon.webp',
     price: 500,
     creator: 4,
     boost: true,
   },
   {
-    id: "pitch-perfect",
-    name: "Pitch Perfect",
-    categoryId: "soccer",
-    image: "/images/claw/pro-soccer-pack-icon.webp",
+    id: 'pitch-perfect',
+    name: 'Pitch Perfect',
+    categoryId: 'soccer',
+    image: '/images/claw/pro-soccer-pack-icon.webp',
     price: 100,
     creator: 15,
   },
   {
-    id: "duelist-daily",
-    name: "Duelist Daily",
-    categoryId: "yugioh",
-    image: "/images/claw/yugioh-pro-pack-icon.webp",
+    id: 'duelist-daily',
+    name: 'Duelist Daily',
+    categoryId: 'yugioh',
+    image: '/images/claw/yugioh-pro-pack-icon.webp',
     price: 10,
     creator: 8,
   },
   {
-    id: "rift-starter",
-    name: "Rift Starter",
-    categoryId: "riftbound",
-    image: "/images/claw/starter-riftbound-pack-icon.webp",
+    id: 'rift-starter',
+    name: 'Rift Starter',
+    categoryId: 'riftbound',
+    image: '/images/claw/starter-riftbound-pack-icon.webp',
     price: 25,
     creator: 17,
   },
@@ -165,11 +165,11 @@ const COMMUNITY_PACKS: CommunityPack[] = [
 
 // Blurred pack-art slabs behind the hero (atmosphere — verified to exist).
 const HERO_SLABS = [
-  "/images/claw/legend-pack-icon.webp",
-  "/images/claw/mythic-pack-icon.webp",
-  "/images/claw/black-pack-jjnfuk-icon.webp",
-  "/images/claw/legend-one-piece-pack-icon.webp",
-  "/images/claw/platinum-football-pack-icon.webp",
+  '/images/claw/legend-pack-icon.webp',
+  '/images/claw/mythic-pack-icon.webp',
+  '/images/claw/black-pack-jjnfuk-icon.webp',
+  '/images/claw/legend-one-piece-pack-icon.webp',
+  '/images/claw/platinum-football-pack-icon.webp',
 ];
 
 // ---------------------------------------------------------------------------
@@ -248,7 +248,7 @@ function PackCard({ pack }: { pack: CommunityPack }) {
         href="/claw"
         className="mt-auto flex h-9 w-full items-center justify-center rounded-xl bg-neutral-200 text-[13px] font-semibold text-neutral-950 transition-colors duration-200 hover:bg-white"
       >
-        Open{qty > 1 ? ` ×${qty}` : ""}
+        Open{qty > 1 ? ` ×${qty}` : ''}
       </Link>
     </div>
   );
@@ -259,9 +259,9 @@ function PackCard({ pack }: { pack: CommunityPack }) {
 // ---------------------------------------------------------------------------
 
 export default function RepacksPage() {
-  const [cat, setCat] = useState("all");
+  const [cat, setCat] = useState('all');
   const packs =
-    cat === "all"
+    cat === 'all'
       ? COMMUNITY_PACKS
       : COMMUNITY_PACKS.filter((p) => p.categoryId === cat);
 
@@ -336,10 +336,10 @@ export default function RepacksPage() {
               onClick={() => setCat(t.id)}
               aria-pressed={cat === t.id}
               className={cn(
-                "flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-medium transition-colors sm:text-[13px]",
+                'flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-medium transition-colors sm:text-[13px]',
                 cat === t.id
-                  ? "bg-white text-neutral-950"
-                  : "bg-white/5 text-white/60 hover:bg-white/10 hover:text-white",
+                  ? 'bg-white text-neutral-950'
+                  : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white',
               )}
             >
               {t.icon && (

@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import {
   useEffect,
@@ -7,14 +7,14 @@ import {
   type CSSProperties,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
-} from "react";
+} from 'react';
 import {
   AnimatePresence,
   animate,
   motion,
   type AnimationPlaybackControls,
-} from "motion/react";
-import { ArrowLeft, Zap, Volume2 } from "lucide-react";
+} from 'motion/react';
+import { ArrowLeft, Zap, Volume2 } from 'lucide-react';
 import {
   CARD_FLIP,
   CYL_SPRING,
@@ -30,22 +30,22 @@ import {
   PACK_EXIT,
   SHUFFLE_SPIN,
   SLAB_RISE,
-} from "@/lib/motion";
-import type { PackCard } from "../packs-data";
+} from '@/lib/motion';
+import type { PackCard } from '../packs-data';
 import {
   SELL_COUNTDOWN_SECS,
   sellOfferDeadlineMs,
   sellSecondsLeft,
-} from "@/lib/sell-countdown";
+} from '@/lib/sell-countdown';
 
 // Rarity → rgb (shared with the detail-page rings) drives the glow, pill, and the
 // Pull-celebration ribbon color.
-const RARITY_RGB: Record<PackCard["rarity"], string> = {
-  Legendary: "234, 179, 8",
-  Epic: "217, 70, 239",
-  Rare: "56, 189, 248",
-  Uncommon: "52, 211, 153",
-  Common: "163, 163, 163",
+const RARITY_RGB: Record<PackCard['rarity'], string> = {
+  Legendary: '234, 179, 8',
+  Epic: '217, 70, 239',
+  Rare: '56, 189, 248',
+  Uncommon: '52, 211, 153',
+  Common: '163, 163, 163',
 };
 
 // Carousel cylinder geometry, measured from the live phygitals demo (6 packs 60°
@@ -58,7 +58,7 @@ const PACK_W = 196;
 const PACK_H = 304;
 const RADIUS = 188;
 
-type Stage = "packs" | "slab" | "metadata" | "pull" | "card";
+type Stage = 'packs' | 'slab' | 'metadata' | 'pull' | 'card';
 
 // Full-screen pack-opening, frame-matched to the live phygitals flow: an interactive
 // 3D pack cylinder (drag/swipe to spin, shuffle, tap to select) → packs drop away →
@@ -110,14 +110,14 @@ export default function PackOpenOverlay({
    *  logged-in demo spins. */
   onSignUp?: (() => void) | null;
 }) {
-  const [stage, setStage] = useState<Stage>(reduced ? "card" : "packs");
+  const [stage, setStage] = useState<Stage>(reduced ? 'card' : 'packs');
   // Instant sell-back state for the card stage: idle → selling → sold.
   const [sell, setSell] = useState<
-    | { phase: "idle" }
-    | { phase: "selling" }
-    | { phase: "sold"; amount: number; balance: number }
-    | { phase: "error"; message: string }
-  >({ phase: "idle" });
+    | { phase: 'idle' }
+    | { phase: 'selling' }
+    | { phase: 'sold'; amount: number; balance: number }
+    | { phase: 'error'; message: string }
+  >({ phase: 'idle' });
 
   // The keep/sell offer expires 30s after the card is revealed — expiry keeps
   // the card (every pull is vaulted until sold), where the flat vault rate
@@ -131,14 +131,14 @@ export default function PackOpenOverlay({
   const [secondsLeft, setSecondsLeft] = useState(SELL_COUNTDOWN_SECS);
   const sellExpired = secondsLeft <= 0;
   useEffect(() => {
-    if (stage !== "card" || !buyback) return;
+    if (stage !== 'card' || !buyback) return;
     if (sellDeadline.current === null) {
       sellDeadline.current = sellOfferDeadlineMs(
         Date.now(),
         buyback.openedAtMs,
       );
     }
-    if (sell.phase === "sold" || sellExpired) return;
+    if (sell.phase === 'sold' || sellExpired) return;
     const tick = () => {
       const deadline = sellDeadline.current;
       if (deadline === null) return;
@@ -154,30 +154,30 @@ export default function PackOpenOverlay({
       !buyback ||
       !onSellBack ||
       sellExpired ||
-      sell.phase === "selling" ||
-      sell.phase === "sold"
+      sell.phase === 'selling' ||
+      sell.phase === 'sold'
     )
       return;
-    setSell({ phase: "selling" });
+    setSell({ phase: 'selling' });
     try {
       const res = await onSellBack(buyback.pullId);
       if (res.ok) {
-        setSell({ phase: "sold", amount: res.amount, balance: res.balance });
+        setSell({ phase: 'sold', amount: res.amount, balance: res.balance });
       } else {
-        setSell({ phase: "error", message: res.error });
+        setSell({ phase: 'error', message: res.error });
       }
     } catch {
       // A transport-level throw must never strand the button on "Selling…".
       setSell({
-        phase: "error",
-        message: "Something went wrong. Please try again.",
+        phase: 'error',
+        message: 'Something went wrong. Please try again.',
       });
     }
   }
   const rgb = RARITY_RGB[card.rarity];
   // Live gates the ribbon celebration by rarity (an Uncommon pull skips straight from
   // metadata to the card; an Epic pull got the ribbon) — celebrate the top two tiers.
-  const celebrate = card.rarity === "Epic" || card.rarity === "Legendary";
+  const celebrate = card.rarity === 'Epic' || card.rarity === 'Legendary';
 
   // GRADE / YEAR parsed from the card name (e.g. "2016 … PSA 10") — live's metadata
   // screen shows YEAR → CATEGORY → GRADE. Never fabricated; Value stands in when the
@@ -192,10 +192,10 @@ export default function PackOpenOverlay({
   const yearLabel = yearMatch ? yearMatch[0] : null;
   const rows: { label: string; value: string }[] = [
     yearLabel
-      ? { label: "Year", value: yearLabel }
-      : { label: "Value", value: card.value },
-    { label: "Category", value: category },
-    ...(gradeLabel ? [{ label: "Grade", value: gradeLabel }] : []),
+      ? { label: 'Year', value: yearLabel }
+      : { label: 'Value', value: card.value },
+    { label: 'Category', value: category },
+    ...(gradeLabel ? [{ label: 'Grade', value: gradeLabel }] : []),
   ];
 
   // Interactive cylinder driven IMPERATIVELY (ref + direct style writes) so dragging
@@ -237,21 +237,21 @@ export default function PackOpenOverlay({
 
   // metadata holds (live ≈3.6s), then either the Pull celebration or the card.
   useEffect(() => {
-    if (stage === "metadata") {
+    if (stage === 'metadata') {
       const t = setTimeout(
-        () => setStage(celebrate ? "pull" : "card"),
+        () => setStage(celebrate ? 'pull' : 'card'),
         META_AUTO_ADVANCE_MS,
       );
       return () => clearTimeout(t);
     }
-    if (stage === "pull") {
-      const t = setTimeout(() => setStage("card"), 1150);
+    if (stage === 'pull') {
+      const t = setTimeout(() => setStage('card'), 1150);
       return () => clearTimeout(t);
     }
   }, [stage, celebrate]);
 
   const onPointerDown = (e: ReactPointerEvent) => {
-    if (stage !== "packs") return;
+    if (stage !== 'packs') return;
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     springRef.current?.stop();
     drag.current = {
@@ -286,7 +286,7 @@ export default function PackOpenOverlay({
     const { moved, vel } = drag.current;
     drag.current.active = false;
     if (!moved) {
-      setStage("slab"); // a tap (not a drag) → select → packs drop, slab rises
+      setStage('slab'); // a tap (not a drag) → select → packs drop, slab rises
       return;
     }
     // fling: project the release velocity forward, snap THAT to a slot, and seed
@@ -314,9 +314,9 @@ export default function PackOpenOverlay({
       onClick={() => {
         // Tap-to-advance (live's metadata screen is itself a button): slab → metadata
         // → (pull, top rarities only) → card, instead of waiting out the timers.
-        if (stage === "slab") setStage("metadata");
-        else if (stage === "metadata") setStage(celebrate ? "pull" : "card");
-        else if (stage === "pull") setStage("card");
+        if (stage === 'slab') setStage('metadata');
+        else if (stage === 'metadata') setStage(celebrate ? 'pull' : 'card');
+        else if (stage === 'pull') setStage('card');
       }}
     >
       {/* top bar */}
@@ -339,13 +339,13 @@ export default function PackOpenOverlay({
           <Volume2 className="h-4 w-4" aria-hidden />
         </span>
       </div>
-      {stage !== "packs" && (
+      {stage !== 'packs' && (
         <p className="absolute top-5 left-1/2 z-20 -translate-x-1/2 text-[11px] font-medium uppercase tracking-[0.3em] text-white/35">
-          {isReal ? "1 of 1" : "Demo spin"}
+          {isReal ? '1 of 1' : 'Demo spin'}
         </p>
       )}
       {/* Tap-to-continue hint during the auto-playing reveal stages */}
-      {(stage === "metadata" || stage === "pull") && (
+      {(stage === 'metadata' || stage === 'pull') && (
         <p className="pointer-events-none absolute bottom-10 left-1/2 z-20 -translate-x-1/2 text-[11px] font-medium uppercase tracking-[0.3em] text-white/35 motion-safe:animate-pulse">
           ● Tap to continue
         </p>
@@ -354,7 +354,7 @@ export default function PackOpenOverlay({
       <AnimatePresence>
         {/* STAGE 1 — interactive 3D pack cylinder; on select the packs DROP away
             (measured: +430px, 0.48s, ease(0.55,0,0.85,0.4)) while the UI fades fast */}
-        {stage === "packs" && (
+        {stage === 'packs' && (
           <motion.div
             key="packs"
             className="absolute inset-0 flex select-none flex-col items-center justify-center gap-12"
@@ -370,7 +370,7 @@ export default function PackOpenOverlay({
           >
             <div
               className="relative cursor-grab touch-none active:cursor-grabbing"
-              style={{ width: PACK_W, height: PACK_H, perspective: "1100px" }}
+              style={{ width: PACK_W, height: PACK_H, perspective: '1100px' }}
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}
@@ -380,9 +380,9 @@ export default function PackOpenOverlay({
                 ref={cylRef}
                 className="absolute inset-0"
                 style={{
-                  transformStyle: "preserve-3d",
-                  transform: "rotateY(0deg)",
-                  willChange: "transform",
+                  transformStyle: 'preserve-3d',
+                  transform: 'rotateY(0deg)',
+                  willChange: 'transform',
                 }}
               >
                 {Array.from({ length: SLOTS }).map((_, i) => (
@@ -391,7 +391,7 @@ export default function PackOpenOverlay({
                     className="absolute inset-0"
                     style={{
                       transform: `rotateY(${i * STEP}deg) translateZ(${RADIUS}px)`,
-                      backfaceVisibility: "hidden",
+                      backfaceVisibility: 'hidden',
                     }}
                   >
                     {/* idle float, measured off live: y ±2.1px over 4.4s, ease-in-out */}
@@ -400,14 +400,14 @@ export default function PackOpenOverlay({
                       animate={reduced ? undefined : { y: [2.1, -2.1, 2.1] }}
                       transition={{
                         duration: 4.4,
-                        ease: "easeInOut",
+                        ease: 'easeInOut',
                         repeat: Infinity,
                       }}
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={packImage}
-                        alt={i === 0 ? packName : ""}
+                        alt={i === 0 ? packName : ''}
                         aria-hidden={i !== 0}
                         className="h-full w-full object-contain drop-shadow-[0_20px_36px_rgba(0,0,0,0.6)]"
                         draggable={false}
@@ -417,11 +417,11 @@ export default function PackOpenOverlay({
                       <div
                         className="pointer-events-none absolute left-0 top-full h-full w-full overflow-hidden opacity-20"
                         style={{
-                          transform: "scaleY(-1)",
+                          transform: 'scaleY(-1)',
                           maskImage:
-                            "linear-gradient(to bottom, rgba(0,0,0,0.6), transparent 55%)",
+                            'linear-gradient(to bottom, rgba(0,0,0,0.6), transparent 55%)',
                           WebkitMaskImage:
-                            "linear-gradient(to bottom, rgba(0,0,0,0.6), transparent 55%)",
+                            'linear-gradient(to bottom, rgba(0,0,0,0.6), transparent 55%)',
                         }}
                         aria-hidden
                       >
@@ -461,7 +461,7 @@ export default function PackOpenOverlay({
 
         {/* STAGE 2 — face-down graded slab RISES in (y 200→0, 0.6s ease(0.16,1,0.3,1),
             starting as the packs finish dropping) with a looping celestial shimmer */}
-        {stage === "slab" && (
+        {stage === 'slab' && (
           <motion.div
             key="slab"
             className="absolute inset-0 flex flex-col items-center justify-center gap-8"
@@ -474,7 +474,7 @@ export default function PackOpenOverlay({
             <motion.p
               initial={reduced ? false : { opacity: 0 }}
               animate={{ opacity: 1 }}
-              transition={{ duration: 0.4, ease: "easeOut", delay: 0.66 }}
+              transition={{ duration: 0.4, ease: 'easeOut', delay: 0.66 }}
               className="text-[11px] font-medium uppercase tracking-[0.3em] text-white/45 motion-safe:animate-pulse"
             >
               ● Tap to reveal
@@ -485,7 +485,7 @@ export default function PackOpenOverlay({
         {/* STAGE 3 — metadata suspense over clean black: rows pop in with overshoot
             (label y16/0.25s, value y12/0.2s, ease(0.34,1.56,0.64,1)) at 0.2/0.9/1.6s,
             rarity pill at 2.6s; auto-advances at ≈3.6s */}
-        {stage === "metadata" && (
+        {stage === 'metadata' && (
           <motion.div
             key="metadata"
             className="absolute inset-0 flex flex-col items-center justify-center gap-7 text-center"
@@ -519,7 +519,7 @@ export default function PackOpenOverlay({
 
         {/* STAGE 4 — rarity PULL celebration (top rarities only, like live):
             diagonal ribbon + shout over the still-visible slab */}
-        {stage === "pull" && (
+        {stage === 'pull' && (
           <motion.div
             key="pull"
             className="pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden"
@@ -531,12 +531,12 @@ export default function PackOpenOverlay({
               className="absolute left-1/2 top-1/2 w-[160%] -translate-x-1/2 -translate-y-1/2 overflow-hidden py-3 shadow-[0_8px_40px_rgba(0,0,0,0.5)]"
               style={{
                 background: `rgb(${rgb})`,
-                animation: "pullRibbonIn 0.5s cubic-bezier(0.2,0.8,0.2,1) both",
+                animation: 'pullRibbonIn 0.5s cubic-bezier(0.2,0.8,0.2,1) both',
               }}
             >
               <div
                 className="flex w-[200%] whitespace-nowrap"
-                style={{ animation: "pullMarquee 6s linear infinite" }}
+                style={{ animation: 'pullMarquee 6s linear infinite' }}
               >
                 {[0, 1].map((k) => (
                   <span
@@ -555,8 +555,8 @@ export default function PackOpenOverlay({
             <p
               className="font-heading absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-5xl font-black uppercase tracking-tight text-white sm:text-7xl"
               style={{
-                animation: "pullShout 0.55s cubic-bezier(0.2,0.9,0.3,1) both",
-                textShadow: "0 4px 24px rgba(0,0,0,0.6)",
+                animation: 'pullShout 0.55s cubic-bezier(0.2,0.9,0.3,1) both',
+                textShadow: '0 4px 24px rgba(0,0,0,0.6)',
               }}
             >
               {card.rarity}!
@@ -566,7 +566,7 @@ export default function PackOpenOverlay({
 
         {/* STAGE 5 — the won card FLIPS in (rotateY 90→0, 0.6s ease(0.16,1,0.3,1),
             content fading 0.28s) over a spinning rarity glow; caption rises at +0.4s */}
-        {stage === "card" && (
+        {stage === 'card' && (
           <motion.div
             key="card"
             className="absolute inset-0 flex flex-col items-center justify-center gap-4"
@@ -580,8 +580,8 @@ export default function PackOpenOverlay({
                   // centering lives INSIDE the keyframe (translate(-50%,-50%) rotate(...)) —
                   // Tailwind v4 translate-* utilities would double-shift on top of it.
                   background: `conic-gradient(from 0deg, rgba(${rgb},0.45), transparent 30%, rgba(${rgb},0.3) 50%, transparent 72%, rgba(${rgb},0.45))`,
-                  borderRadius: "50%",
-                  animation: "glowSpin 3.5s linear infinite",
+                  borderRadius: '50%',
+                  animation: 'glowSpin 3.5s linear infinite',
                 }}
               />
             )}
@@ -612,7 +612,7 @@ export default function PackOpenOverlay({
                 <span
                   aria-hidden
                   className="font-heading pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rotate-[-18deg] rounded-xl border-[3px] border-white/45 px-6 py-2 text-5xl font-black uppercase tracking-[0.25em] text-white/50 sm:text-6xl"
-                  style={{ textShadow: "0 2px 16px rgba(0,0,0,0.8)" }}
+                  style={{ textShadow: '0 2px 16px rgba(0,0,0,0.8)' }}
                 >
                   Demo
                 </span>
@@ -621,7 +621,7 @@ export default function PackOpenOverlay({
             <motion.div
               initial={reduced ? false : { y: 24, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
-              transition={{ duration: 0.3, ease: "easeOut", delay: 0.4 }}
+              transition={{ duration: 0.3, ease: 'easeOut', delay: 0.4 }}
               className="relative flex flex-col items-center gap-2 text-center"
             >
               <p className="max-w-[300px] px-2 text-[13px] font-semibold leading-snug text-white">
@@ -630,9 +630,9 @@ export default function PackOpenOverlay({
               <div className="flex items-center gap-2">
                 <RarityPill rarity={card.rarity} rgb={rgb} small />
                 <span className="text-[13px] text-white/70">
-                  Value:{" "}
+                  Value:{' '}
                   <span className="font-bold text-white">{card.value}</span>
-                  {!isReal && " · demo"}
+                  {!isReal && ' · demo'}
                 </span>
               </div>
               <div className="mt-3 flex flex-col items-center gap-2">
@@ -661,34 +661,34 @@ export default function PackOpenOverlay({
                 {/* Keep an in-flight "Selling…" visible past expiry — the server
                     (with grace) decides; hiding it would orphan the request. */}
                 {buyback &&
-                  sell.phase !== "sold" &&
-                  (!sellExpired || sell.phase === "selling") && (
+                  sell.phase !== 'sold' &&
+                  (!sellExpired || sell.phase === 'selling') && (
                     <button
                       type="button"
                       onClick={handleSellBack}
-                      disabled={sell.phase === "selling"}
+                      disabled={sell.phase === 'selling'}
                       className="inline-flex h-12 w-[300px] items-center justify-center rounded-xl border border-amber-400/60 bg-amber-400/10 text-sm font-bold text-amber-300 transition-colors hover:bg-amber-400/20 disabled:opacity-60"
                     >
-                      {sell.phase === "selling"
-                        ? "Selling…"
-                        : `Sell back for $${buyback.amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${buyback.percent}%) · ${secondsLeft}s`}
+                      {sell.phase === 'selling'
+                        ? 'Selling…'
+                        : `Sell back for $${buyback.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${buyback.percent}%) · ${secondsLeft}s`}
                     </button>
                   )}
-                {sell.phase === "sold" && (
+                {sell.phase === 'sold' && (
                   <p className="flex h-12 w-[300px] items-center justify-center rounded-xl border border-emerald-400/50 bg-emerald-400/10 text-sm font-bold text-emerald-300">
                     +$
-                    {sell.amount.toLocaleString("en-US", {
+                    {sell.amount.toLocaleString('en-US', {
                       minimumFractionDigits: 2,
                       maximumFractionDigits: 2,
-                    })}{" "}
+                    })}{' '}
                     credited · balance $
-                    {sell.balance.toLocaleString("en-US", {
+                    {sell.balance.toLocaleString('en-US', {
                       minimumFractionDigits: 2,
                       maximumFractionDigits: 2,
                     })}
                   </p>
                 )}
-                {sell.phase === "error" && (
+                {sell.phase === 'error' && (
                   <p className="max-w-[300px] text-center text-[12px] font-medium text-red-400">
                     {sell.message}
                   </p>
@@ -700,17 +700,17 @@ export default function PackOpenOverlay({
                   onClick={onClose}
                   className={
                     onSignUp
-                      ? "inline-flex h-10 items-center justify-center rounded-xl px-5 text-[13px] font-semibold text-white/60 transition-colors hover:text-white"
-                      : "inline-flex h-12 w-[300px] items-center justify-center rounded-xl bg-gradient-to-r from-emerald-500 to-green-500 text-sm font-bold text-white shadow-lg shadow-emerald-900/30 transition-opacity hover:opacity-95"
+                      ? 'inline-flex h-10 items-center justify-center rounded-xl px-5 text-[13px] font-semibold text-white/60 transition-colors hover:text-white'
+                      : 'inline-flex h-12 w-[300px] items-center justify-center rounded-xl bg-gradient-to-r from-emerald-500 to-green-500 text-sm font-bold text-white shadow-lg shadow-emerald-900/30 transition-opacity hover:opacity-95'
                   }
                 >
-                  {buyback && sell.phase !== "sold" && !sellExpired
-                    ? "Keep in vault"
-                    : "Continue"}
+                  {buyback && sell.phase !== 'sold' && !sellExpired
+                    ? 'Keep in vault'
+                    : 'Continue'}
                 </button>
                 {/* The spot rate is only good during the countdown — vaulted cards
                     sell at the flat rate. */}
-                {buyback && sell.phase !== "sold" && (
+                {buyback && sell.phase !== 'sold' && (
                   <p className="max-w-[300px] text-center text-[11px] text-white/45">
                     {sellExpired
                       ? `Offer expired — the card is in your vault and sells back anytime at ${buyback.vaultPercent}%.`
@@ -724,10 +724,10 @@ export default function PackOpenOverlay({
                   className="inline-flex h-10 items-center justify-center rounded-xl px-5 text-[13px] font-semibold text-white/60 transition-colors hover:text-white disabled:opacity-60"
                 >
                   {opening
-                    ? "Opening…"
+                    ? 'Opening…'
                     : isReal
-                      ? "Open another"
-                      : "Spin again"}
+                      ? 'Open another'
+                      : 'Spin again'}
                 </button>
               </div>
             </motion.div>
@@ -770,7 +770,7 @@ function MetaRow({
           delay: delay + META_VALUE_OFFSET,
         }}
         className="font-heading mt-1 text-3xl font-bold text-white sm:text-[42px] sm:leading-tight"
-        style={{ textShadow: "0 0 24px rgba(255,255,255,0.25)" }}
+        style={{ textShadow: '0 0 24px rgba(255,255,255,0.25)' }}
       >
         {value}
       </motion.p>
@@ -783,7 +783,7 @@ function RarityPill({
   rgb,
   small,
 }: {
-  rarity: PackCard["rarity"];
+  rarity: PackCard['rarity'];
   rgb: string;
   small?: boolean;
 }) {
@@ -791,8 +791,8 @@ function RarityPill({
     <span
       className={
         small
-          ? "rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider"
-          : "rounded-full px-4 py-1.5 text-xs font-bold uppercase tracking-widest"
+          ? 'rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider'
+          : 'rounded-full px-4 py-1.5 text-xs font-bold uppercase tracking-widest'
       }
       style={
         {
@@ -813,7 +813,7 @@ function RarityPill({
 function SlabBack({ faded, shimmer }: { faded?: boolean; shimmer?: boolean }) {
   return (
     <div
-      className={`relative h-[400px] w-[290px] rounded-[20px] border border-white/10 bg-gradient-to-b from-neutral-700/60 to-neutral-950 p-2.5 shadow-[0_30px_60px_-12px_rgba(0,0,0,0.8)] ${faded ? "opacity-60" : ""}`}
+      className={`relative h-[400px] w-[290px] rounded-[20px] border border-white/10 bg-gradient-to-b from-neutral-700/60 to-neutral-950 p-2.5 shadow-[0_30px_60px_-12px_rgba(0,0,0,0.8)] ${faded ? 'opacity-60' : ''}`}
     >
       {/* inner card back */}
       <div className="relative flex h-full w-full flex-col overflow-hidden rounded-xl bg-gradient-to-b from-neutral-900 to-black ring-1 ring-white/5">
@@ -831,8 +831,8 @@ function SlabBack({ faded, shimmer }: { faded?: boolean; shimmer?: boolean }) {
                 key={i}
                 className={
                   [0, 1, 2, 3, 4, 7, 8, 11, 12, 13, 14, 15, 5, 10].includes(i)
-                    ? "bg-black"
-                    : "bg-transparent"
+                    ? 'bg-black'
+                    : 'bg-transparent'
                 }
               />
             ))}
@@ -870,7 +870,7 @@ function SlabBack({ faded, shimmer }: { faded?: boolean; shimmer?: boolean }) {
             className="pointer-events-none absolute inset-y-[-20%] w-[55%] motion-safe:animate-[celestialSweep_6.5s_ease-in-out_infinite]"
             style={{
               background:
-                "linear-gradient(105deg, transparent 0%, rgba(255,255,255,0.09) 38%, rgba(255,255,255,0.22) 50%, rgba(255,255,255,0.09) 62%, transparent 100%)",
+                'linear-gradient(105deg, transparent 0%, rgba(255,255,255,0.09) 38%, rgba(255,255,255,0.22) 50%, rgba(255,255,255,0.09) 62%, transparent 100%)',
             }}
           />
         )}

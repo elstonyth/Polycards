@@ -11,11 +11,11 @@
 //   - per-file TOL/closing overrides where the defaults leaked or over-kept
 //
 // Run: node scripts/matte-fix-flagged.mjs
-import fs from "node:fs";
-import path from "node:path";
-import sharp from "sharp";
+import fs from 'node:fs';
+import path from 'node:path';
+import sharp from 'sharp';
 
-const DIR = path.resolve("public/cdn/cards");
+const DIR = path.resolve('public/cdn/cards');
 // v2 configs, derived from measured row profiles + the v1 failure analysis:
 // - the 237x430 pedestal batch: slab rim ends ~y330, pedestal top ~y345 (the
 //   "gap" is polluted by the slab's reflection) -> fixed crop at 0.78*H
@@ -29,11 +29,11 @@ const CFG = {
   // slabs end with a clear-plastic section (~y337-341, reads dark) + a bottom
   // edge highlight (~y342-355); the true slab/pedestal gap is y356-361 — the
   // earlier 0.78*H crop (y335) cut the slab bottom off.
-  "h-007": { cropBottomPx: 358, refsMode: "dark", close: 6 },
-  "h-008": { cropBottomPx: 358, refsMode: "dark", close: 6 },
-  "h-009": { cropBottomPx: 360, refsMode: "dark", close: 6 },
-  "h-010": { cropBottomPx: 358, refsMode: "dark", close: 6 },
-  "h-012": { cropBottomPx: 359, refsMode: "dark", close: 6 },
+  'h-007': { cropBottomPx: 358, refsMode: 'dark', close: 6 },
+  'h-008': { cropBottomPx: 358, refsMode: 'dark', close: 6 },
+  'h-009': { cropBottomPx: 360, refsMode: 'dark', close: 6 },
+  'h-010': { cropBottomPx: 358, refsMode: 'dark', close: 6 },
+  'h-012': { cropBottomPx: 359, refsMode: 'dark', close: 6 },
 };
 
 const median = (arr) => {
@@ -50,7 +50,7 @@ async function cropBottomFrac(buf, frac) {
 }
 
 // ---- matte v2: dual-ref flood + closing + largest-component + feather ----
-async function matte(buf, { tol, close = 6, refsMode = "dark", point } = {}) {
+async function matte(buf, { tol, close = 6, refsMode = 'dark', point } = {}) {
   const cfgRefsMode = refsMode,
     cfgPoint = point;
   const { data, info } = await sharp(buf)
@@ -86,7 +86,7 @@ async function matte(buf, { tol, close = 6, refsMode = "dark", point } = {}) {
   // "dark": only the darker border cluster — the light cluster on tight crops is
   // the slab's own rim and must never seed the flood
   refs.push(refFor(border.filter((i, k) => lums[k] <= mid)));
-  if (cfgRefsMode === "darkPlusPoint" && cfgPoint) {
+  if (cfgRefsMode === 'darkPlusPoint' && cfgPoint) {
     const px = Math.round(W * cfgPoint[0]),
       py = Math.round(H * cfgPoint[1]);
     const idxs = [];
@@ -247,7 +247,7 @@ async function matte(buf, { tol, close = 6, refsMode = "dark", point } = {}) {
 for (const [name, cfg] of Object.entries(CFG)) {
   const file = path.join(DIR, `${name}.webp`);
   let buf = fs.readFileSync(file);
-  let note = "";
+  let note = '';
   if (cfg.cropBottomFrac || cfg.cropBottomPx) {
     const before = (await sharp(buf).metadata()).height;
     buf = cfg.cropBottomPx
@@ -267,4 +267,4 @@ for (const [name, cfg] of Object.entries(CFG)) {
     `${name}: ${m.W}x${m.H} transparent=${m.transparentPct}% comps=${m.components} refs=[${m.refs}] ${note}`,
   );
 }
-console.log("done");
+console.log('done');

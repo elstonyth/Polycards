@@ -1,16 +1,16 @@
-"use client";
+'use client';
 
-import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { ChevronDown, LogOut, Package, Settings, User } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { logout, type AuthCustomer } from "@/lib/actions/auth";
-import { useAuth } from "./AuthProvider";
+import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { ChevronDown, LogOut, Package, Settings, User } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { logout, type AuthCustomer } from '@/lib/actions/auth';
+import { useAuth } from './AuthProvider';
 
 const MENU_LINKS = [
-  { label: "Orders", href: "/orders", icon: Package },
-  { label: "Settings", href: "/settings", icon: Settings },
+  { label: 'Orders', href: '/orders', icon: Package },
+  { label: 'Settings', href: '/settings', icon: Settings },
 ] as const;
 
 // "My Profile" goes first when the customer's public handle is known (it is
@@ -19,13 +19,13 @@ const MENU_LINKS = [
 const menuLinks = (handle: string | null) =>
   handle
     ? [
-        { label: "My Profile", href: `/profile/${handle}`, icon: User },
+        { label: 'My Profile', href: `/profile/${handle}`, icon: User },
         ...MENU_LINKS,
       ]
     : [...MENU_LINKS];
 
 const displayName = (c: AuthCustomer) =>
-  c.first_name?.trim() || c.email.split("@")[0];
+  c.first_name?.trim() || c.email.split('@')[0];
 
 /** Logged-in header control: avatar + dropdown (account links + logout). */
 export default function UserMenu({ customer }: { customer: AuthCustomer }) {
@@ -35,7 +35,7 @@ export default function UserMenu({ customer }: { customer: AuthCustomer }) {
   const { setCustomer } = useAuth();
 
   const name = displayName(customer);
-  const initial = (name[0] ?? "?").toUpperCase();
+  const initial = (name[0] ?? '?').toUpperCase();
 
   useEffect(() => {
     if (!open) return;
@@ -43,12 +43,12 @@ export default function UserMenu({ customer }: { customer: AuthCustomer }) {
       if (ref.current && !ref.current.contains(e.target as Node))
         setOpen(false);
     };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
     return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
     };
   }, [open]);
 
@@ -56,7 +56,7 @@ export default function UserMenu({ customer }: { customer: AuthCustomer }) {
     setOpen(false);
     await logout();
     setCustomer(null);
-    router.push("/");
+    router.push('/');
     router.refresh();
   }
 
@@ -76,8 +76,8 @@ export default function UserMenu({ customer }: { customer: AuthCustomer }) {
         <span className="hidden max-w-[120px] truncate sm:block">{name}</span>
         <ChevronDown
           className={cn(
-            "h-4 w-4 text-white/50 transition-transform duration-200",
-            open && "rotate-180",
+            'h-4 w-4 text-white/50 transition-transform duration-200',
+            open && 'rotate-180',
           )}
           aria-hidden
         />

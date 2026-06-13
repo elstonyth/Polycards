@@ -1,7 +1,7 @@
-import type { Metadata } from "next";
-import { notFound } from "next/navigation";
-import { GENS, REGION, getGeneration } from "@/lib/mock/pokedex";
-import PokedexClient from "./PokedexClient";
+import type { Metadata } from 'next';
+import { notFound } from 'next/navigation';
+import { GENS, REGION, getGeneration } from '@/lib/mock/pokedex';
+import PokedexClient from './PokedexClient';
 
 export function generateStaticParams() {
   return GENS.map((gen) => ({ gen }));
@@ -17,8 +17,8 @@ export async function generateMetadata({
   return {
     title: region
       ? `Pokémon · Generation ${gen} (${region}) — Pokenic`
-      : "Pokémon — Pokenic",
-    description: "Browse the Pokédex by generation.",
+      : 'Pokémon — Pokenic',
+    description: 'Browse the Pokédex by generation.',
   };
 }
 

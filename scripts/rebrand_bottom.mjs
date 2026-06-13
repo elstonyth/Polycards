@@ -18,27 +18,27 @@
 // the base) / riftbound (parchment). Outputs: overwrites {base}-machine.webp and writes a tight
 // edit-mask docs/research/packdetail/bottom-mask/{base}.png that rebrand_anim.py freezes onto frames.
 // RUN AFTER any lama_compose.mjs run.   node scripts/rebrand_bottom.mjs [base ...]
-import { chromium } from "playwright";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { chromium } from 'playwright';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
 
-const DIR = "public/images/claw";
-const MASKDIR = "docs/research/packdetail/bottom-mask";
-const OVERLAY_JSON = "docs/research/packdetail/claw-text-coords.json"; // reference: baked-text positions
+const DIR = 'public/images/claw';
+const MASKDIR = 'docs/research/packdetail/bottom-mask';
+const OVERLAY_JSON = 'docs/research/packdetail/claw-text-coords.json'; // reference: baked-text positions
 
 // fs/baseY/fallback positions are FRACTIONS of image H (vertical) or W (horizontal).
 const MODELS = {
   pokemon: {
     bases: [
-      "mythic-pack",
-      "legend-pack",
-      "elite-pack",
-      "platinum-pack",
-      "rookie-pack",
-      "trainer-pack",
+      'mythic-pack',
+      'legend-pack',
+      'elite-pack',
+      'platinum-pack',
+      'rookie-pack',
+      'trainer-pack',
     ],
     placard: {
       band: [0.392, 0.488, 0.762, 0.828],
-      dir: "dark",
+      dir: 'dark',
       fs: 0.0145,
       color: [34, 32, 36],
     },
@@ -46,7 +46,7 @@ const MODELS = {
     // "phygitals.com" (≈ x40–49.5%, baseline ≈88.7%) so the erase fully covers it (no faint double).
     url: {
       band: [0.392, 0.531, 0.87, 0.9],
-      dir: "light",
+      dir: 'light',
       fs: 0.011,
       color: [232, 232, 235],
       fallback: { x: 0.396, baseY: 0.887 },
@@ -55,35 +55,35 @@ const MODELS = {
   base: {
     // white card, url low on the base strip — nba (1037) + soccer + black-pack (1440)
     bases: [
-      "legend-pack-1dpaec",
-      "modern-grails-noafw0",
-      "pro-soccer-pack",
-      "black-pack-jjnfuk",
+      'legend-pack-1dpaec',
+      'modern-grails-noafw0',
+      'pro-soccer-pack',
+      'black-pack-jjnfuk',
     ],
     placard: {
       band: [0.368, 0.492, 0.772, 0.84],
-      dir: "dark",
+      dir: 'dark',
       fs: 0.016,
       color: [26, 26, 28],
     },
     url: {
       band: [0.305, 0.527, 0.908, 0.953],
-      dir: "light",
+      dir: 'light',
       fs: 0.013,
       color: [240, 240, 242],
     },
   },
   riftbound: {
-    bases: ["starter-riftbound-pack"],
+    bases: ['starter-riftbound-pack'],
     placard: {
       band: [0.365, 0.482, 0.745, 0.812],
-      dir: "dark",
+      dir: 'dark',
       fs: 0.015,
       color: [40, 34, 30],
     },
     url: {
       band: [0.355, 0.52, 0.856, 0.897],
-      dir: "light",
+      dir: 'light',
       fs: 0.013,
       color: [236, 233, 228],
     },
@@ -99,12 +99,12 @@ const OVERRIDES = {
   // erase never reaches the gold box / dark frame — overshooting there masks the shading and paints a
   // white/tan "tab" onto it. Both measured (label-constrained + fine-grid verified), not eyeballed.
   // See bbox_orig_*.png + measure_placard.png.
-  "legend-pack-1dpaec": { placard: { pin: { x: 0.406, y: 0.796, w: 0.054 } } },
-  "modern-grails-noafw0": {
+  'legend-pack-1dpaec': { placard: { pin: { x: 0.406, y: 0.796, w: 0.054 } } },
+  'modern-grails-noafw0': {
     placard: { pin: { x: 0.402, y: 0.795, w: 0.058 } },
   },
-  "starter-riftbound-pack": { placard: { pin: { x: 0.41, y: 0.76, w: 0.06 } } },
-  "pro-soccer-pack": {
+  'starter-riftbound-pack': { placard: { pin: { x: 0.41, y: 0.76, w: 0.06 } } },
+  'pro-soccer-pack': {
     // soccer's "phygitals" sits LOWER (≈80%) with "VIBES PACKS" close above it; band top must start
     // below that small text so the anchor lands on "phygitals", not a line too high.
     placard: { band: [0.392, 0.498, 0.793, 0.845] },
@@ -127,12 +127,12 @@ await mkdir(MASKDIR, { recursive: true });
 const imgs = {};
 for (const j of jobs)
   imgs[j.base] =
-    "data:image/webp;base64," +
-    (await readFile(`${DIR}/${j.base}-machine.webp`)).toString("base64");
+    'data:image/webp;base64,' +
+    (await readFile(`${DIR}/${j.base}-machine.webp`)).toString('base64');
 
 const browser = await chromium.launch();
 const page = await browser.newPage();
-await page.goto("about:blank");
+await page.goto('about:blank');
 await page.addStyleTag({
   content:
     "@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@600;700&display=swap');",
@@ -142,11 +142,11 @@ await page.waitForTimeout(1800);
 // the wrong metrics/position. (Remote @import kept; this repo ships no local Poppins woff2.)
 await page.evaluate(async () => {
   await document.fonts.ready;
-  const w700 = await document.fonts.load("700 40px Poppins");
-  const w600 = await document.fonts.load("600 40px Poppins");
+  const w700 = await document.fonts.load('700 40px Poppins');
+  const w600 = await document.fonts.load('600 40px Poppins');
   if (!w700.length || !w600.length)
     throw new Error(
-      "Poppins failed to load (would fall back to wrong metrics)",
+      'Poppins failed to load (would fall back to wrong metrics)',
     );
 });
 
@@ -156,7 +156,7 @@ const results = await page.evaluate(
       new Promise((ok, no) => {
         const im = new Image();
         im.onload = () => ok(im);
-        im.onerror = () => no(new Error("load"));
+        im.onerror = () => no(new Error('load'));
         im.src = s;
       });
     const med = (a) => {
@@ -170,23 +170,23 @@ const results = await page.evaluate(
       const img = await load(imgs[job.base]);
       const W = img.naturalWidth,
         H = img.naturalHeight;
-      const cv = document.createElement("canvas");
+      const cv = document.createElement('canvas');
       cv.width = W;
       cv.height = H;
-      const ctx = cv.getContext("2d");
+      const ctx = cv.getContext('2d');
       ctx.drawImage(img, 0, 0, W, H);
       let id = ctx.getImageData(0, 0, W, H);
       const od = new Uint8ClampedArray(id.data);
-      const mcv = document.createElement("canvas");
+      const mcv = document.createElement('canvas');
       mcv.width = W;
       mcv.height = H;
-      const mctx = mcv.getContext("2d");
-      mctx.fillStyle = "#000";
+      const mctx = mcv.getContext('2d');
+      mctx.fillStyle = '#000';
       mctx.fillRect(0, 0, W, H);
 
       const log = [],
         jobCoords = {};
-      for (const key of ["placard", "url"]) {
+      for (const key of ['placard', 'url']) {
         const el = job[key];
         const ov = (OVERRIDES[job.base] || {})[key] || {};
         const band = ov.band || el.band,
@@ -196,7 +196,7 @@ const results = await page.evaluate(
           by0 = Math.round(band[2] * H),
           by1 = Math.round(band[3] * H);
         const fs = Math.max(8, Math.round((ov.fs ?? el.fs) * H));
-        const TH = ov.th ?? (dir === "dark" ? 160 : 135);
+        const TH = ov.th ?? (dir === 'dark' ? 160 : 135);
         const lum = [];
         for (let y = by0; y <= by1; y++)
           for (let x = bx0; x <= bx1; x++) {
@@ -204,7 +204,7 @@ const results = await page.evaluate(
             lum.push(od[p] + od[p + 1] + od[p + 2]);
           }
         const medL = med(lum);
-        const isHit = (s) => (dir === "dark" ? s < medL - TH : s > medL + TH);
+        const isHit = (s) => (dir === 'dark' ? s < medL - TH : s > medL + TH);
 
         // per-row dark counts -> anchor = top of the dense text block
         const rowc = [];
@@ -286,11 +286,11 @@ const results = await page.evaluate(
           anchorY = Math.round(fb.baseY * H) - Math.round(ASC * fs);
           blockRight = bx1;
           blockBot =
-            anchorY + (key === "placard" ? Math.round(STEP * fs) + fs : fs);
+            anchorY + (key === 'placard' ? Math.round(STEP * fs) + fs : fs);
           color =
             ov.color ||
             el.color ||
-            (dir === "dark" ? [30, 30, 32] : [234, 234, 236]);
+            (dir === 'dark' ? [30, 30, 32] : [234, 234, 236]);
         }
 
         // SHARP erase (NO blur, NO flat patch). Build a dilated mask of the original text STROKES, then
@@ -307,7 +307,7 @@ const results = await page.evaluate(
         // before the rule line / Mew below. The url is one line, so keep its detected block.
         const ey1 = Math.min(
           H - 1,
-          (key === "placard"
+          (key === 'placard'
             ? Math.round(anchorY + (ASC + STEP + 0.15) * fs)
             : blockBot) + pad,
         );
@@ -365,14 +365,14 @@ const results = await page.evaluate(
         // detected position/size — a single self-contained animated AVIF, matching the live single-AVIF
         // mechanism. rebrand_anim.py then freezes this static placard/url zone onto every frame.
         const base1 = anchorY + ASC * fs;
-        ctx.font = `${key === "placard" ? 700 : 600} ${fs}px Poppins, sans-serif`;
-        ctx.textAlign = "left";
-        ctx.textBaseline = "alphabetic";
+        ctx.font = `${key === 'placard' ? 700 : 600} ${fs}px Poppins, sans-serif`;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
         ctx.fillStyle = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
-        if (key === "placard") {
-          ctx.fillText("pokenic", anchorX, base1);
-          ctx.fillText("claw.", anchorX, base1 + STEP * fs);
-        } else ctx.fillText("pokenic.com", anchorX, base1);
+        if (key === 'placard') {
+          ctx.fillText('pokenic', anchorX, base1);
+          ctx.fillText('claw.', anchorX, base1 + STEP * fs);
+        } else ctx.fillText('pokenic.com', anchorX, base1);
         id = ctx.getImageData(0, 0, W, H); // re-sync so the next element + frozen frames include this text
 
         // Coords still emitted for reference (a DOM overlay could use them), but the text is baked above.
@@ -385,15 +385,15 @@ const results = await page.evaluate(
           detected,
         };
 
-        mctx.fillStyle = "#fff";
+        mctx.fillStyle = '#fff';
         mctx.fillRect(ex0, ey0, ex1 - ex0 + 1, ey1 - ey0 + 1);
         log.push(
-          `${key}: ${detected ? "det" : "FALLBK"} anchor=(${Math.round((anchorX / W) * 1000) / 10}%,${Math.round((anchorY / H) * 1000) / 10}%) right=${Math.round((blockRight / W) * 1000) / 10}% fs=${fs} color=rgb(${color}) hits=${hits.length}`,
+          `${key}: ${detected ? 'det' : 'FALLBK'} anchor=(${Math.round((anchorX / W) * 1000) / 10}%,${Math.round((anchorY / H) * 1000) / 10}%) right=${Math.round((blockRight / W) * 1000) / 10}% fs=${fs} color=rgb(${color}) hits=${hits.length}`,
         );
       }
       out[job.base] = {
-        webp: cv.toDataURL("image/webp", 0.95),
-        mask: mcv.toDataURL("image/png"),
+        webp: cv.toDataURL('image/webp', 0.95),
+        mask: mcv.toDataURL('image/png'),
         W,
         H,
         log,
@@ -409,11 +409,11 @@ const overlay = {};
 for (const [base, r] of Object.entries(results)) {
   await writeFile(
     `${DIR}/${base}-machine.webp`,
-    Buffer.from(r.webp.split(",")[1], "base64"),
+    Buffer.from(r.webp.split(',')[1], 'base64'),
   );
   await writeFile(
     `${MASKDIR}/${base}.png`,
-    Buffer.from(r.mask.split(",")[1], "base64"),
+    Buffer.from(r.mask.split(',')[1], 'base64'),
   );
   overlay[base] = r.coords;
   console.log(`${base} (${r.W}x${r.H}):`);
@@ -424,9 +424,9 @@ let existing = {};
 // Missing file is fine (first run); a malformed JSON must NOT be silently dropped — that would
 // overwrite OVERLAY_JSON and lose every base not in this partial run.
 try {
-  existing = JSON.parse(await readFile(OVERLAY_JSON, "utf8"));
+  existing = JSON.parse(await readFile(OVERLAY_JSON, 'utf8'));
 } catch (err) {
-  if (err?.code !== "ENOENT") throw err;
+  if (err?.code !== 'ENOENT') throw err;
 }
 await writeFile(
   OVERLAY_JSON,

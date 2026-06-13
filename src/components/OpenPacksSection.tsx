@@ -1,6 +1,6 @@
-"use client";
+'use client';
 
-import { cn } from "@/lib/utils";
+import { cn } from '@/lib/utils';
 
 type PackCategory = {
   label: string;
@@ -22,40 +22,40 @@ type PackCategory = {
 // backend — only the destination is.
 const CATEGORIES: PackCategory[] = [
   {
-    label: "Pokémon",
-    slab: "/home/hero/slabs/pokemon1.webp",
-    pack: "/home/hero/ripped-packs/pokemon.webp",
-    href: "/claw?category=pokemon",
+    label: 'Pokémon',
+    slab: '/home/hero/slabs/pokemon1.webp',
+    pack: '/home/hero/ripped-packs/pokemon.webp',
+    href: '/claw?category=pokemon',
   },
   {
-    label: "Basketball",
-    slab: "/home/hero/slabs/basketball2.webp",
-    pack: "/home/hero/ripped-packs/basketball.webp",
-    href: "/claw?category=basketball",
+    label: 'Basketball',
+    slab: '/home/hero/slabs/basketball2.webp',
+    pack: '/home/hero/ripped-packs/basketball.webp',
+    href: '/claw?category=basketball',
   },
   {
-    label: "Football",
-    slab: "/home/hero/slabs/football3.webp",
-    pack: "/home/hero/ripped-packs/football.webp",
-    href: "/claw?category=football",
+    label: 'Football',
+    slab: '/home/hero/slabs/football3.webp',
+    pack: '/home/hero/ripped-packs/football.webp',
+    href: '/claw?category=football',
   },
   {
-    label: "One Piece",
-    slab: "/home/hero/slabs/onepiece4.webp",
-    pack: "/home/hero/ripped-packs/onepiece.webp",
-    href: "/claw?category=one-piece",
+    label: 'One Piece',
+    slab: '/home/hero/slabs/onepiece4.webp',
+    pack: '/home/hero/ripped-packs/onepiece.webp',
+    href: '/claw?category=one-piece',
   },
   {
-    label: "Baseball",
-    slab: "/home/hero/slabs/baseball1.webp",
-    pack: "/home/hero/ripped-packs/baseball.webp",
-    href: "/claw?category=baseball",
+    label: 'Baseball',
+    slab: '/home/hero/slabs/baseball1.webp',
+    pack: '/home/hero/ripped-packs/baseball.webp',
+    href: '/claw?category=baseball',
   },
   {
-    label: "Yu-Gi-Oh!",
-    slab: "/home/hero/slabs/yugioh2.webp",
-    pack: "/home/hero/ripped-packs/yugioh.webp",
-    href: "/claw?category=yugioh",
+    label: 'Yu-Gi-Oh!',
+    slab: '/home/hero/slabs/yugioh2.webp',
+    pack: '/home/hero/ripped-packs/yugioh.webp',
+    href: '/claw?category=yugioh',
   },
 ];
 
@@ -66,8 +66,8 @@ export default function OpenPacksSection() {
       <div className="mb-4 flex items-baseline justify-between sm:mb-5">
         <h2
           className={cn(
-            "font-heading text-2xl font-bold tracking-tight",
-            "bg-gradient-to-b from-white via-white/80 to-white/30 bg-clip-text text-transparent",
+            'font-heading text-2xl font-bold tracking-tight',
+            'bg-gradient-to-b from-white via-white/80 to-white/30 bg-clip-text text-transparent',
           )}
         >
           Open Packs
@@ -87,8 +87,8 @@ export default function OpenPacksSection() {
             key={cat.label}
             href={cat.href}
             className={cn(
-              "group block overflow-hidden rounded-2xl border border-white/10 bg-white/5",
-              "shadow-[0_4px_20px_rgba(0,0,0,0.25)] transition-[border-color] duration-300 hover:border-white/20",
+              'group block overflow-hidden rounded-2xl border border-white/10 bg-white/5',
+              'shadow-[0_4px_20px_rgba(0,0,0,0.25)] transition-[border-color] duration-300 hover:border-white/20',
             )}
           >
             {/* Layered composition (exact match to the live site markup): the graded

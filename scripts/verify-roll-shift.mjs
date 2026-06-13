@@ -8,17 +8,17 @@
 // Cleans up after itself: restores pokemon-mythic's seed odds and deletes the
 // simulation's Pull rows (by the throwaway customer's id) so the demo ledger
 // stays clean.
-import { execSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { execSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 
-const API = "http://localhost:9000";
-const SLUG = "pokemon-mythic";
+const API = 'http://localhost:9000';
+const SLUG = 'pokemon-mythic';
 const N = 150;
-const PK = readFileSync(".env.local", "utf8")
+const PK = readFileSync('.env.local', 'utf8')
   .split(/\r?\n/)
-  .find((l) => l.startsWith("NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY="))
-  ?.split("=")[1]
-  ?.replace(/['"]/g, "")
+  .find((l) => l.startsWith('NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY='))
+  ?.split('=')[1]
+  ?.replace(/['"]/g, '')
   .trim();
 
 const j = async (res) => ({
@@ -30,18 +30,18 @@ const j = async (res) => ({
 const adminTok = (
   await (
     await fetch(`${API}/auth/user/emailpass`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        email: "admin@pokenic.local",
-        password: "pokenicadmin2026",
+        email: 'admin@pokenic.local',
+        password: 'pokenicadmin2026',
       }),
     })
   ).json()
 ).token;
 const AH = {
   Authorization: `Bearer ${adminTok}`,
-  "Content-Type": "application/json",
+  'Content-Type': 'application/json',
 };
 
 const odds = (
@@ -50,7 +50,7 @@ const odds = (
 const topId = odds[0].card_id;
 const baselinePct = odds[0].pct;
 await fetch(`${API}/admin/packs/${SLUG}/odds`, {
-  method: "POST",
+  method: 'POST',
   headers: AH,
   body: JSON.stringify({
     entries: odds.map((o, i) => ({
@@ -62,27 +62,27 @@ await fetch(`${API}/admin/packs/${SLUG}/odds`, {
 });
 
 // --- customer: register + login a throwaway buyer ---
-const SH = { "Content-Type": "application/json", "x-publishable-api-key": PK };
+const SH = { 'Content-Type': 'application/json', 'x-publishable-api-key': PK };
 const email = `roll-sim-${Date.now()}@pokenic.local`;
-const password = "rollsim2026";
+const password = 'rollsim2026';
 const regTok = (
   await (
     await fetch(`${API}/auth/customer/emailpass/register`, {
-      method: "POST",
+      method: 'POST',
       headers: SH,
       body: JSON.stringify({ email, password }),
     })
   ).json()
 ).token;
 await fetch(`${API}/store/customers`, {
-  method: "POST",
+  method: 'POST',
   headers: { ...SH, Authorization: `Bearer ${regTok}` },
   body: JSON.stringify({ email }),
 });
 const loginTok = (
   await (
     await fetch(`${API}/auth/customer/emailpass`, {
-      method: "POST",
+      method: 'POST',
       headers: SH,
       body: JSON.stringify({ email, password }),
     })
@@ -99,7 +99,7 @@ let opened = 0;
 for (let i = 0; i < N; i++) {
   const res = await j(
     await fetch(`${API}/store/packs/${SLUG}/open`, {
-      method: "POST",
+      method: 'POST',
       headers: CH,
     }),
   );
@@ -115,11 +115,11 @@ const topFreqPct = opened ? (topWins / opened) * 100 : 0;
 // --- cleanup: delete sim pulls + restore seed odds ---
 execSync(
   `docker exec pokenic-postgres psql -U medusa -d medusa -c "DELETE FROM pull WHERE customer_id = '${meId}';"`,
-  { stdio: "pipe" },
+  { stdio: 'pipe' },
 );
 execSync(
   `docker exec pokenic-postgres psql -U medusa -d medusa -c "UPDATE pack_odds po SET weight = CASE c.rarity WHEN 'Legendary' THEN 5 WHEN 'Epic' THEN 45 WHEN 'Rare' THEN 150 WHEN 'Uncommon' THEN 300 WHEN 'Common' THEN 500 ELSE 100 END, locked = false FROM card c WHERE po.card_id = c.handle AND po.pack_id = '${SLUG}';"`,
-  { stdio: "pipe" },
+  { stdio: 'pipe' },
 );
 
 const out = {
@@ -135,6 +135,6 @@ const out = {
 };
 out.verdict =
   out.withinBand && opened === N
-    ? "PASS (roll shifted to the saved win rate)"
-    : "FAIL";
+    ? 'PASS (roll shifted to the saved win rate)'
+    : 'FAIL';
 console.log(JSON.stringify(out, null, 2));

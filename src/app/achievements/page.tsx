@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 // /achievements — "Achievement System" matching live phygitals: centered hero with
 // trophy + stat pills (count / total XP), 5 color-coded rarity-tier cards, then a
@@ -8,7 +8,7 @@
 //
 // All achievements render "Locked" — the live anonymous view exposes no progress.
 
-import { useState } from "react";
+import { useState } from 'react';
 import {
   Trophy,
   Zap,
@@ -25,11 +25,11 @@ import {
   Flame,
   Sparkles,
   type LucideIcon,
-} from "lucide-react";
-import { cn } from "@/lib/utils";
-import Reveal from "@/components/Reveal";
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+import Reveal from '@/components/Reveal';
 
-type Rarity = "Common" | "Uncommon" | "Rare" | "Epic" | "Legendary";
+type Rarity = 'Common' | 'Uncommon' | 'Rare' | 'Epic' | 'Legendary';
 
 const RARITY_ORDER: Record<Rarity, number> = {
   Common: 0,
@@ -50,52 +50,52 @@ const RARITY_STYLE: Record<
   }
 > = {
   Common: {
-    text: "text-white",
-    border: "border-white/15",
-    glow: "",
-    chipBg: "bg-white/10",
-    chipText: "text-white/80",
+    text: 'text-white',
+    border: 'border-white/15',
+    glow: '',
+    chipBg: 'bg-white/10',
+    chipText: 'text-white/80',
   },
   Uncommon: {
-    text: "text-blue-400",
-    border: "border-blue-500/40",
-    glow: "shadow-[0_0_30px_-12px_rgba(59,130,246,0.7)]",
-    chipBg: "bg-blue-500/15",
-    chipText: "text-blue-300",
+    text: 'text-blue-400',
+    border: 'border-blue-500/40',
+    glow: 'shadow-[0_0_30px_-12px_rgba(59,130,246,0.7)]',
+    chipBg: 'bg-blue-500/15',
+    chipText: 'text-blue-300',
   },
   Rare: {
-    text: "text-emerald-400",
-    border: "border-emerald-500/40",
-    glow: "shadow-[0_0_30px_-12px_rgba(16,185,129,0.7)]",
-    chipBg: "bg-emerald-500/15",
-    chipText: "text-emerald-300",
+    text: 'text-emerald-400',
+    border: 'border-emerald-500/40',
+    glow: 'shadow-[0_0_30px_-12px_rgba(16,185,129,0.7)]',
+    chipBg: 'bg-emerald-500/15',
+    chipText: 'text-emerald-300',
   },
   Epic: {
-    text: "text-purple-400",
-    border: "border-purple-500/40",
-    glow: "shadow-[0_0_30px_-12px_rgba(168,85,247,0.7)]",
-    chipBg: "bg-purple-500/15",
-    chipText: "text-purple-300",
+    text: 'text-purple-400',
+    border: 'border-purple-500/40',
+    glow: 'shadow-[0_0_30px_-12px_rgba(168,85,247,0.7)]',
+    chipBg: 'bg-purple-500/15',
+    chipText: 'text-purple-300',
   },
   Legendary: {
-    text: "text-amber-400",
-    border: "border-amber-500/40",
-    glow: "shadow-[0_0_30px_-12px_rgba(245,158,11,0.7)]",
-    chipBg: "bg-amber-500/15",
-    chipText: "text-amber-300",
+    text: 'text-amber-400',
+    border: 'border-amber-500/40',
+    glow: 'shadow-[0_0_30px_-12px_rgba(245,158,11,0.7)]',
+    chipBg: 'bg-amber-500/15',
+    chipText: 'text-amber-300',
   },
 };
 
 const TIERS: { rarity: Rarity; range: string }[] = [
-  { rarity: "Common", range: "50-100" },
-  { rarity: "Uncommon", range: "200-500" },
-  { rarity: "Rare", range: "500-1000" },
-  { rarity: "Epic", range: "1000-2500" },
-  { rarity: "Legendary", range: "5000" },
+  { rarity: 'Common', range: '50-100' },
+  { rarity: 'Uncommon', range: '200-500' },
+  { rarity: 'Rare', range: '500-1000' },
+  { rarity: 'Epic', range: '1000-2500' },
+  { rarity: 'Legendary', range: '5000' },
 ];
 
 const CATEGORY_ICON: Record<string, LucideIcon> = {
-  "Cases Opened": Package,
+  'Cases Opened': Package,
   Collection: Layers,
   Trading: Repeat,
   Spending: Wallet,
@@ -115,220 +115,220 @@ type Achievement = {
 // 31 achievements, grouped by category in ascending difficulty (XP sums to 42,050).
 const ACHIEVEMENTS: Achievement[] = [
   {
-    name: "First Pull",
-    desc: "Open your first case",
-    category: "Cases Opened",
-    rarity: "Common",
+    name: 'First Pull',
+    desc: 'Open your first case',
+    category: 'Cases Opened',
+    rarity: 'Common',
     xp: 50,
   },
   {
-    name: "Case Opener",
-    desc: "Open 25 cases",
-    category: "Cases Opened",
-    rarity: "Common",
+    name: 'Case Opener',
+    desc: 'Open 25 cases',
+    category: 'Cases Opened',
+    rarity: 'Common',
     xp: 100,
   },
   {
-    name: "Case Enthusiast",
-    desc: "Open 50 cases",
-    category: "Cases Opened",
-    rarity: "Uncommon",
+    name: 'Case Enthusiast',
+    desc: 'Open 50 cases',
+    category: 'Cases Opened',
+    rarity: 'Uncommon',
     xp: 250,
   },
   {
-    name: "Case Master",
-    desc: "Open 250 cases",
-    category: "Cases Opened",
-    rarity: "Rare",
+    name: 'Case Master',
+    desc: 'Open 250 cases',
+    category: 'Cases Opened',
+    rarity: 'Rare',
     xp: 500,
   },
   {
-    name: "Case Legend",
-    desc: "Open 1,000 cases",
-    category: "Cases Opened",
-    rarity: "Epic",
+    name: 'Case Legend',
+    desc: 'Open 1,000 cases',
+    category: 'Cases Opened',
+    rarity: 'Epic',
     xp: 1500,
   },
   {
-    name: "Case God",
-    desc: "Open 5,000 cases",
-    category: "Cases Opened",
-    rarity: "Legendary",
+    name: 'Case God',
+    desc: 'Open 5,000 cases',
+    category: 'Cases Opened',
+    rarity: 'Legendary',
     xp: 5000,
   },
   {
-    name: "Getting Started",
-    desc: "Add your first card",
-    category: "Collection",
-    rarity: "Common",
+    name: 'Getting Started',
+    desc: 'Add your first card',
+    category: 'Collection',
+    rarity: 'Common',
     xp: 50,
   },
   {
-    name: "Collector",
-    desc: "Own 10 cards",
-    category: "Collection",
-    rarity: "Common",
+    name: 'Collector',
+    desc: 'Own 10 cards',
+    category: 'Collection',
+    rarity: 'Common',
     xp: 100,
   },
   {
-    name: "Curator",
-    desc: "Own 100 cards",
-    category: "Collection",
-    rarity: "Uncommon",
+    name: 'Curator',
+    desc: 'Own 100 cards',
+    category: 'Collection',
+    rarity: 'Uncommon',
     xp: 250,
   },
   {
-    name: "Archivist",
-    desc: "Own 500 cards",
-    category: "Collection",
-    rarity: "Rare",
+    name: 'Archivist',
+    desc: 'Own 500 cards',
+    category: 'Collection',
+    rarity: 'Rare',
     xp: 750,
   },
   {
-    name: "Set Finisher",
-    desc: "Complete a full set",
-    category: "Collection",
-    rarity: "Rare",
+    name: 'Set Finisher',
+    desc: 'Complete a full set',
+    category: 'Collection',
+    rarity: 'Rare',
     xp: 1000,
   },
   {
-    name: "Hoarder",
-    desc: "Own 1,000 cards",
-    category: "Collection",
-    rarity: "Epic",
+    name: 'Hoarder',
+    desc: 'Own 1,000 cards',
+    category: 'Collection',
+    rarity: 'Epic',
     xp: 1500,
   },
   {
-    name: "Vault Keeper",
-    desc: "Own 5,000 cards",
-    category: "Collection",
-    rarity: "Legendary",
+    name: 'Vault Keeper',
+    desc: 'Own 5,000 cards',
+    category: 'Collection',
+    rarity: 'Legendary',
     xp: 5000,
   },
   {
-    name: "First Trade",
-    desc: "Complete your first trade",
-    category: "Trading",
-    rarity: "Common",
+    name: 'First Trade',
+    desc: 'Complete your first trade',
+    category: 'Trading',
+    rarity: 'Common',
     xp: 50,
   },
   {
-    name: "Window Shopper",
-    desc: "List your first card",
-    category: "Trading",
-    rarity: "Common",
+    name: 'Window Shopper',
+    desc: 'List your first card',
+    category: 'Trading',
+    rarity: 'Common',
     xp: 100,
   },
   {
-    name: "Dealmaker",
-    desc: "Complete 25 trades",
-    category: "Trading",
-    rarity: "Uncommon",
+    name: 'Dealmaker',
+    desc: 'Complete 25 trades',
+    category: 'Trading',
+    rarity: 'Uncommon',
     xp: 500,
   },
   {
-    name: "Market Maker",
-    desc: "Complete 100 trades",
-    category: "Trading",
-    rarity: "Rare",
+    name: 'Market Maker',
+    desc: 'Complete 100 trades',
+    category: 'Trading',
+    rarity: 'Rare',
     xp: 750,
   },
   {
-    name: "Trade Tycoon",
-    desc: "Complete 500 trades",
-    category: "Trading",
-    rarity: "Epic",
+    name: 'Trade Tycoon',
+    desc: 'Complete 500 trades',
+    category: 'Trading',
+    rarity: 'Epic',
     xp: 2000,
   },
   {
-    name: "Big Spender",
-    desc: "Spend $1,000",
-    category: "Spending",
-    rarity: "Uncommon",
+    name: 'Big Spender',
+    desc: 'Spend $1,000',
+    category: 'Spending',
+    rarity: 'Uncommon',
     xp: 200,
   },
   {
-    name: "Heavy Hitter",
-    desc: "Spend $5,000",
-    category: "Spending",
-    rarity: "Rare",
+    name: 'Heavy Hitter',
+    desc: 'Spend $5,000',
+    category: 'Spending',
+    rarity: 'Rare',
     xp: 1000,
   },
   {
-    name: "Whale",
-    desc: "Spend $10,000",
-    category: "Spending",
-    rarity: "Epic",
+    name: 'Whale',
+    desc: 'Spend $10,000',
+    category: 'Spending',
+    rarity: 'Epic',
     xp: 1000,
   },
   {
-    name: "High Roller",
-    desc: "Spend $50,000",
-    category: "Spending",
-    rarity: "Legendary",
+    name: 'High Roller',
+    desc: 'Spend $50,000',
+    category: 'Spending',
+    rarity: 'Legendary',
     xp: 5000,
   },
   {
-    name: "Socialite",
-    desc: "Refer your first friend",
-    category: "Social",
-    rarity: "Uncommon",
+    name: 'Socialite',
+    desc: 'Refer your first friend',
+    category: 'Social',
+    rarity: 'Uncommon',
     xp: 200,
   },
   {
-    name: "Connector",
-    desc: "Refer 5 friends",
-    category: "Social",
-    rarity: "Uncommon",
+    name: 'Connector',
+    desc: 'Refer 5 friends',
+    category: 'Social',
+    rarity: 'Uncommon',
     xp: 500,
   },
   {
-    name: "Community Pillar",
-    desc: "Refer 25 friends",
-    category: "Social",
-    rarity: "Epic",
+    name: 'Community Pillar',
+    desc: 'Refer 25 friends',
+    category: 'Social',
+    rarity: 'Epic',
     xp: 2500,
   },
   {
-    name: "Daily Devotee",
-    desc: "Log in 7 days in a row",
-    category: "Streaks",
-    rarity: "Uncommon",
+    name: 'Daily Devotee',
+    desc: 'Log in 7 days in a row',
+    category: 'Streaks',
+    rarity: 'Uncommon',
     xp: 200,
   },
   {
-    name: "Streak Keeper",
-    desc: "Log in 30 days in a row",
-    category: "Streaks",
-    rarity: "Rare",
+    name: 'Streak Keeper',
+    desc: 'Log in 30 days in a row',
+    category: 'Streaks',
+    rarity: 'Rare',
     xp: 1000,
   },
   {
-    name: "Marathoner",
-    desc: "Log in 100 days in a row",
-    category: "Streaks",
-    rarity: "Epic",
+    name: 'Marathoner',
+    desc: 'Log in 100 days in a row',
+    category: 'Streaks',
+    rarity: 'Epic',
     xp: 2500,
   },
   {
-    name: "Lucky Streak",
-    desc: "Pull 3 rares in a row",
-    category: "Pulls",
-    rarity: "Rare",
+    name: 'Lucky Streak',
+    desc: 'Pull 3 rares in a row',
+    category: 'Pulls',
+    rarity: 'Rare',
     xp: 1000,
   },
   {
-    name: "Grail Hunter",
-    desc: "Pull a Legendary card",
-    category: "Pulls",
-    rarity: "Epic",
+    name: 'Grail Hunter',
+    desc: 'Pull a Legendary card',
+    category: 'Pulls',
+    rarity: 'Epic',
     xp: 2500,
   },
   {
-    name: "Jackpot",
-    desc: "Pull a 1/1",
-    category: "Pulls",
-    rarity: "Legendary",
+    name: 'Jackpot',
+    desc: 'Pull a 1/1',
+    category: 'Pulls',
+    rarity: 'Legendary',
     xp: 5000,
   },
 ];
@@ -336,18 +336,18 @@ const ACHIEVEMENTS: Achievement[] = [
 const TOTAL_XP = ACHIEVEMENTS.reduce((sum, a) => sum + a.xp, 0);
 const COUNT = ACHIEVEMENTS.length;
 
-type SortKey = "name" | "category" | "rarity" | "xp";
-type SortDir = "asc" | "desc";
+type SortKey = 'name' | 'category' | 'rarity' | 'xp';
+type SortDir = 'asc' | 'desc';
 
 function compare(a: Achievement, b: Achievement, key: SortKey): number {
   switch (key) {
-    case "name":
+    case 'name':
       return a.name.localeCompare(b.name);
-    case "category":
+    case 'category':
       return a.category.localeCompare(b.category);
-    case "rarity":
+    case 'rarity':
       return RARITY_ORDER[a.rarity] - RARITY_ORDER[b.rarity];
-    case "xp":
+    case 'xp':
       return a.xp - b.xp;
   }
 }
@@ -357,15 +357,15 @@ export default function AchievementsPage() {
 
   const rows = sort
     ? [...ACHIEVEMENTS].sort((a, b) =>
-        sort.dir === "asc" ? compare(a, b, sort.key) : compare(b, a, sort.key),
+        sort.dir === 'asc' ? compare(a, b, sort.key) : compare(b, a, sort.key),
       )
     : ACHIEVEMENTS;
 
   const toggleSort = (key: SortKey) =>
     setSort((prev) =>
       prev?.key === key
-        ? { key, dir: prev.dir === "asc" ? "desc" : "asc" }
-        : { key, dir: "asc" },
+        ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+        : { key, dir: 'asc' },
     );
 
   // Render helper (not a nested component) — returns the sort glyph for a column.
@@ -373,7 +373,7 @@ export default function AchievementsPage() {
   const sortIcon = (col: SortKey) => {
     if (sort?.key !== col)
       return <ChevronsUpDown className="h-3 w-3 text-white/30" aria-hidden />;
-    return sort.dir === "asc" ? (
+    return sort.dir === 'asc' ? (
       <ChevronUp className="h-3 w-3 text-white/70" aria-hidden />
     ) : (
       <ChevronDown className="h-3 w-3 text-white/70" aria-hidden />
@@ -407,12 +407,12 @@ export default function AchievementsPage() {
           className="mt-5 flex items-center justify-center gap-3"
         >
           <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-1.5 text-sm font-medium text-white">
-            <Trophy className="h-4 w-4 text-white/70" aria-hidden /> {COUNT}{" "}
+            <Trophy className="h-4 w-4 text-white/70" aria-hidden /> {COUNT}{' '}
             Achievements
           </span>
           <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-1.5 text-sm font-medium text-white">
-            <Zap className="h-4 w-4 text-amber-400" aria-hidden />{" "}
-            {TOTAL_XP.toLocaleString("en-US")} Total XP
+            <Zap className="h-4 w-4 text-amber-400" aria-hidden />{' '}
+            {TOTAL_XP.toLocaleString('en-US')} Total XP
           </span>
         </Reveal>
       </div>
@@ -425,20 +425,20 @@ export default function AchievementsPage() {
             <Reveal key={t.rarity} delay={Math.min(i, 5) * 60}>
               <div
                 className={cn(
-                  "flex flex-col rounded-2xl border bg-white/[0.02] p-4",
+                  'flex flex-col rounded-2xl border bg-white/[0.02] p-4',
                   s.border,
                   s.glow,
                 )}
               >
                 <div className="mb-3 flex items-center justify-between">
-                  <span className={cn("text-sm font-semibold", s.text)}>
+                  <span className={cn('text-sm font-semibold', s.text)}>
                     {t.rarity}
                   </span>
                   <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white/5">
-                    <Star className={cn("h-3.5 w-3.5", s.text)} aria-hidden />
+                    <Star className={cn('h-3.5 w-3.5', s.text)} aria-hidden />
                   </span>
                 </div>
-                <span className={cn("font-heading text-2xl font-bold", s.text)}>
+                <span className={cn('font-heading text-2xl font-bold', s.text)}>
                   {t.range}
                 </span>
                 <span className="mt-1 text-[11px] uppercase tracking-wide text-white/40">
@@ -473,38 +473,38 @@ export default function AchievementsPage() {
                 <th className="px-4 py-3">
                   <button
                     type="button"
-                    onClick={() => toggleSort("name")}
+                    onClick={() => toggleSort('name')}
                     className="inline-flex items-center gap-1 hover:text-white/70"
                   >
-                    <Trophy className="h-3.5 w-3.5" aria-hidden /> Achievement{" "}
-                    {sortIcon("name")}
+                    <Trophy className="h-3.5 w-3.5" aria-hidden /> Achievement{' '}
+                    {sortIcon('name')}
                   </button>
                 </th>
                 <th className="px-4 py-3">
                   <button
                     type="button"
-                    onClick={() => toggleSort("category")}
+                    onClick={() => toggleSort('category')}
                     className="inline-flex items-center gap-1 hover:text-white/70"
                   >
-                    Category {sortIcon("category")}
+                    Category {sortIcon('category')}
                   </button>
                 </th>
                 <th className="hidden px-4 py-3 md:table-cell">
                   <button
                     type="button"
-                    onClick={() => toggleSort("rarity")}
+                    onClick={() => toggleSort('rarity')}
                     className="inline-flex items-center gap-1 hover:text-white/70"
                   >
-                    Rarity {sortIcon("rarity")}
+                    Rarity {sortIcon('rarity')}
                   </button>
                 </th>
                 <th className="hidden px-4 py-3 md:table-cell">
                   <button
                     type="button"
-                    onClick={() => toggleSort("xp")}
+                    onClick={() => toggleSort('xp')}
                     className="inline-flex items-center gap-1 hover:text-white/70"
                   >
-                    XP Reward {sortIcon("xp")}
+                    XP Reward {sortIcon('xp')}
                   </button>
                 </th>
                 <th className="px-4 py-3">Status</th>
@@ -539,14 +539,14 @@ export default function AchievementsPage() {
                     </td>
                     <td className="px-4 py-3">
                       <span className="inline-flex items-center gap-1.5 text-sm text-white/70">
-                        <Cat className="h-4 w-4 text-white/40" aria-hidden />{" "}
+                        <Cat className="h-4 w-4 text-white/40" aria-hidden />{' '}
                         {a.category}
                       </span>
                     </td>
                     <td className="hidden px-4 py-3 md:table-cell">
                       <span
                         className={cn(
-                          "inline-block rounded px-2 py-0.5 text-[11px] font-semibold",
+                          'inline-block rounded px-2 py-0.5 text-[11px] font-semibold',
                           rs.chipBg,
                           rs.chipText,
                         )}
@@ -557,7 +557,7 @@ export default function AchievementsPage() {
                     <td className="hidden px-4 py-3 md:table-cell">
                       <span className="inline-flex items-center gap-1 rounded bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-400">
                         <Zap className="h-3 w-3" aria-hidden /> +
-                        {a.xp.toLocaleString("en-US")} XP
+                        {a.xp.toLocaleString('en-US')} XP
                       </span>
                     </td>
                     <td className="px-4 py-3">
@@ -565,7 +565,7 @@ export default function AchievementsPage() {
                         <span
                           className="h-1.5 w-1.5 rounded-full bg-white/30"
                           aria-hidden
-                        />{" "}
+                        />{' '}
                         Locked
                       </span>
                     </td>

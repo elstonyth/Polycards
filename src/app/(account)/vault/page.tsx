@@ -1,8 +1,8 @@
-import type { Metadata } from "next";
-import { getVault } from "@/lib/actions/vault";
-import VaultClient from "./VaultClient";
+import type { Metadata } from 'next';
+import { getVault } from '@/lib/actions/vault';
+import VaultClient from './VaultClient';
 
-export const metadata: Metadata = { title: "Vault | Pokenic" };
+export const metadata: Metadata = { title: 'Vault | Pokenic' };
 
 // Server shell: loads the vault + balance with the httpOnly JWT (the (account)
 // layout already gates signed-out visitors), then hands off to the client grid

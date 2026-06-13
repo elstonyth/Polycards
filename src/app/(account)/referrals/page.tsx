@@ -1,14 +1,14 @@
-import type { Metadata } from "next";
+import type { Metadata } from 'next';
 import {
   AccountHeader,
   StatCards,
   Panel,
   DemoNote,
-} from "@/components/account/ui";
-import { MOCK_USERS } from "@/lib/mock/users";
-import { usd } from "@/lib/format";
+} from '@/components/account/ui';
+import { MOCK_USERS } from '@/lib/mock/users';
+import { usd } from '@/lib/format';
 
-export const metadata: Metadata = { title: "Referrals | Pokenic" };
+export const metadata: Metadata = { title: 'Referrals | Pokenic' };
 
 export default function ReferralsPage() {
   return (
@@ -19,10 +19,10 @@ export default function ReferralsPage() {
       />
       <StatCards
         items={[
-          { label: "Invited", value: "14" },
-          { label: "Active", value: "9" },
-          { label: "Earned", value: usd(642.5) },
-          { label: "Rate", value: "5%" },
+          { label: 'Invited', value: '14' },
+          { label: 'Active', value: '9' },
+          { label: 'Earned', value: usd(642.5) },
+          { label: 'Rate', value: '5%' },
         ]}
       />
       <Panel className="mt-5">

@@ -1,10 +1,10 @@
 // Exact-text probe across ALL element types (the hero CTA is a span, not a button).
 // Captures "Open Packs" CTA + "Packs available now" eyebrow on ORIG vs CLONE.
-import { chromium } from "playwright";
+import { chromium } from 'playwright';
 
 const SITES = [
-  ["https://www.phygitals.com/", "ORIG"],
-  ["http://localhost:4000/", "CLONE"],
+  ['https://www.phygitals.com/', 'ORIG'],
+  ['http://localhost:4000/', 'CLONE'],
 ];
 
 const EXTRACT = () => {
@@ -24,38 +24,38 @@ const EXTRACT = () => {
     };
   };
   const P = [
-    "backgroundColor",
-    "backgroundImage",
-    "color",
-    "borderRadius",
-    "padding",
-    "fontSize",
-    "fontWeight",
-    "letterSpacing",
-    "textTransform",
-    "border",
-    "boxShadow",
+    'backgroundColor',
+    'backgroundImage',
+    'color',
+    'borderRadius',
+    'padding',
+    'fontSize',
+    'fontWeight',
+    'letterSpacing',
+    'textTransform',
+    'border',
+    'boxShadow',
   ];
 
   // exact innermost element with this trimmed text
   const exact = (txt) => {
-    const all = [...document.querySelectorAll("button,a,span,div,p")].filter(
+    const all = [...document.querySelectorAll('button,a,span,div,p')].filter(
       (e) => e.textContent.trim().toLowerCase() === txt.toLowerCase(),
     );
     // innermost = the one with no child also matching (fewest descendants)
     all.sort(
-      (a, b) => a.querySelectorAll("*").length - b.querySelectorAll("*").length,
+      (a, b) => a.querySelectorAll('*').length - b.querySelectorAll('*').length,
     );
     return all[0] || null;
   };
 
-  const cta = exact("Open Packs");
-  const eyebrow = exact("Packs available now");
+  const cta = exact('Open Packs');
+  const eyebrow = exact('Packs available now');
 
   return {
     openPacks: cta
       ? { tag: cta.tagName.toLowerCase(), styles: cs(cta, P), rect: rct(cta) }
-      : "NOT FOUND",
+      : 'NOT FOUND',
     eyebrow: eyebrow
       ? {
           tag: eyebrow.tagName.toLowerCase(),
@@ -63,7 +63,7 @@ const EXTRACT = () => {
           styles: cs(eyebrow, P),
           rect: rct(eyebrow),
         }
-      : "NOT FOUND",
+      : 'NOT FOUND',
   };
 };
 
@@ -76,7 +76,7 @@ for (const [url, site] of SITES) {
   });
   const page = await ctx.newPage();
   try {
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
     for (let i = 0; i < 25; i++) {
       const r = await page
         .evaluate(() => document.images.length > 2)

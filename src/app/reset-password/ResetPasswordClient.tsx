@@ -1,9 +1,9 @@
-"use client";
+'use client';
 
-import { useEffect, useState, type FormEvent } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { Lock, Loader2, CheckCircle2 } from "lucide-react";
-import { resetPassword } from "@/lib/actions/auth";
+import { useEffect, useState, type FormEvent } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Lock, Loader2, CheckCircle2 } from 'lucide-react';
+import { resetPassword } from '@/lib/actions/auth';
 
 // Landing page for the emailed reset link:
 // /reset-password?token=…&email=…  (built by the backend's password-reset
@@ -16,11 +16,11 @@ export default function ResetPasswordClient() {
   const params = useSearchParams();
   // Capture once, then scrub the query from the address bar — an abandoned
   // (unused) link in a shared computer's history stays valid for up to 15m.
-  const [token] = useState(() => params.get("token") ?? "");
-  const [email] = useState(() => params.get("email") ?? "");
+  const [token] = useState(() => params.get('token') ?? '');
+  const [email] = useState(() => params.get('email') ?? '');
   useEffect(() => {
     if (!window.location.search) return;
-    window.history.replaceState({}, "", window.location.pathname);
+    window.history.replaceState({}, '', window.location.pathname);
   }, []);
 
   const [busy, setBusy] = useState(false);
@@ -33,9 +33,9 @@ export default function ResetPasswordClient() {
   // global (SiteHeader), so it survives the route change.
   function goToLogin() {
     window.dispatchEvent(
-      new CustomEvent("pokenic:auth", { detail: { mode: "login" } }),
+      new CustomEvent('pokenic:auth', { detail: { mode: 'login' } }),
     );
-    router.replace("/");
+    router.replace('/');
   }
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
@@ -44,8 +44,8 @@ export default function ResetPasswordClient() {
     setNote(null);
 
     const form = new FormData(e.currentTarget);
-    const password = String(form.get("password") ?? "");
-    if (password !== String(form.get("confirmPassword") ?? "")) {
+    const password = String(form.get('password') ?? '');
+    if (password !== String(form.get('confirmPassword') ?? '')) {
       setNote("Passwords don't match.");
       return;
     }
@@ -100,11 +100,11 @@ export default function ResetPasswordClient() {
             <p className="mt-1.5 text-sm text-white/50">
               {email ? (
                 <>
-                  Set a new password for{" "}
+                  Set a new password for{' '}
                   <span className="text-white/80">{email}</span>.
                 </>
               ) : (
-                "Set a new password for your account."
+                'Set a new password for your account.'
               )}
             </p>
 

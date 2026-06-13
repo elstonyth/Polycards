@@ -1,8 +1,8 @@
-import { chromium } from "playwright";
+import { chromium } from 'playwright';
 const b = await chromium.launch();
 const p = await b.newPage({ viewport: { width: 1440, height: 900 } });
-await p.goto("https://www.phygitals.com/", {
-  waitUntil: "domcontentloaded",
+await p.goto('https://www.phygitals.com/', {
+  waitUntil: 'domcontentloaded',
   timeout: 60000,
 });
 for (let i = 0; i < 25; i++) {
@@ -12,8 +12,8 @@ for (let i = 0; i < 25; i++) {
 await p.waitForTimeout(2500);
 const d = await p.evaluate(() => {
   // climb from the "Rip packs" headline up to the full hero container
-  const h = [...document.querySelectorAll("h1,h2")].find((e) =>
-    e.textContent.includes("Rip packs"),
+  const h = [...document.querySelectorAll('h1,h2')].find((e) =>
+    e.textContent.includes('Rip packs'),
   );
   const chain = [];
   let el = h;
@@ -22,7 +22,7 @@ const d = await p.evaluate(() => {
     const cs = getComputedStyle(el);
     chain.push({
       tag: el.tagName,
-      cls: (el.className || "").toString().slice(0, 45),
+      cls: (el.className || '').toString().slice(0, 45),
       x: Math.round(r.x),
       w: Math.round(r.width),
       h: Math.round(r.height),
@@ -33,5 +33,5 @@ const d = await p.evaluate(() => {
   }
   return chain;
 });
-d.forEach((c, i) => console.log(i + ": " + JSON.stringify(c)));
+d.forEach((c, i) => console.log(i + ': ' + JSON.stringify(c)));
 await b.close();

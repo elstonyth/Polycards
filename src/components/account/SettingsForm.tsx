@@ -1,10 +1,10 @@
-"use client";
+'use client';
 
-import { useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
-import { Loader2 } from "lucide-react";
-import { updateProfile, type ProfileCustomer } from "@/lib/actions/customer";
-import { useAuth } from "@/components/auth/AuthProvider";
+import { useState, type FormEvent } from 'react';
+import { useRouter } from 'next/navigation';
+import { Loader2 } from 'lucide-react';
+import { updateProfile, type ProfileCustomer } from '@/lib/actions/customer';
+import { useAuth } from '@/components/auth/AuthProvider';
 
 // Real, wired profile form for the logged-in customer ("me"). Submits via the
 // `updateProfile` server action (httpOnly-cookie Bearer, no client-side token).
@@ -28,9 +28,9 @@ export default function SettingsForm({ customer }: Props) {
     const form = new FormData(e.currentTarget);
     setBusy(true);
     const result = await updateProfile({
-      first_name: String(form.get("first_name") ?? ""),
-      last_name: String(form.get("last_name") ?? ""),
-      phone: String(form.get("phone") ?? ""),
+      first_name: String(form.get('first_name') ?? ''),
+      last_name: String(form.get('last_name') ?? ''),
+      phone: String(form.get('phone') ?? ''),
     });
     setBusy(false);
 
@@ -44,7 +44,7 @@ export default function SettingsForm({ customer }: Props) {
         last_name: result.customer.last_name,
         handle: authCustomer?.handle ?? null,
       });
-      setNote({ ok: true, text: "Changes saved." });
+      setNote({ ok: true, text: 'Changes saved.' });
       router.refresh();
       return;
     }
@@ -56,14 +56,14 @@ export default function SettingsForm({ customer }: Props) {
       <Field
         label="Display name"
         name="first_name"
-        defaultValue={customer.first_name ?? ""}
+        defaultValue={customer.first_name ?? ''}
         autoComplete="given-name"
         placeholder="Your name"
       />
       <Field
         label="Last name"
         name="last_name"
-        defaultValue={customer.last_name ?? ""}
+        defaultValue={customer.last_name ?? ''}
         autoComplete="family-name"
         placeholder="Optional"
       />
@@ -71,7 +71,7 @@ export default function SettingsForm({ customer }: Props) {
         label="Phone"
         name="phone"
         type="tel"
-        defaultValue={customer.phone ?? ""}
+        defaultValue={customer.phone ?? ''}
         autoComplete="tel"
         placeholder="Optional"
       />
@@ -103,7 +103,7 @@ export default function SettingsForm({ customer }: Props) {
         {note && (
           <span
             role="status"
-            className={`text-[12px] ${note.ok ? "text-emerald-400" : "text-red-400"}`}
+            className={`text-[12px] ${note.ok ? 'text-emerald-400' : 'text-red-400'}`}
           >
             {note.text}
           </span>
@@ -123,7 +123,7 @@ function Field({
         {label}
       </span>
       <input
-        aria-label={props["aria-label"] ?? label}
+        aria-label={props['aria-label'] ?? label}
         {...props}
         className="h-11 w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 text-sm text-white placeholder:text-white/40 focus:border-white/25 focus:outline-none"
       />

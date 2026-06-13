@@ -1,12 +1,12 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import Link from "next/link";
-import { ChevronDown, ChevronRight, Layers } from "lucide-react";
-import { cn } from "@/lib/utils";
-import Reveal from "@/components/Reveal";
-import QtyStepper from "@/components/QtyStepper";
-import type { Pack, PackCategory } from "./packs-data";
+import { useState } from 'react';
+import Link from 'next/link';
+import { ChevronDown, ChevronRight, Layers } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import Reveal from '@/components/Reveal';
+import QtyStepper from '@/components/QtyStepper';
+import type { Pack, PackCategory } from './packs-data';
 
 // Pack catalog comes from the backend via getPackCategories() (server page);
 // types + presentational category meta still live in ./packs-data.
@@ -26,8 +26,8 @@ function PackCard({ pack, icon }: { pack: Pack; icon: string }) {
   return (
     <div
       className={cn(
-        "group relative flex h-full flex-col rounded-2xl border border-white/10 bg-white/5 p-3 shadow-[0_4px_20px_rgba(0,0,0,0.25)] transition-colors duration-300",
-        oos ? "opacity-60" : "hover:border-white/20",
+        'group relative flex h-full flex-col rounded-2xl border border-white/10 bg-white/5 p-3 shadow-[0_4px_20px_rgba(0,0,0,0.25)] transition-colors duration-300',
+        oos ? 'opacity-60' : 'hover:border-white/20',
       )}
     >
       {/* Status badge (top-left): buyback boost on boosted tiers, else OOS chip */}
@@ -67,8 +67,8 @@ function PackCard({ pack, icon }: { pack: Pack; icon: string }) {
           className={cn(
             // hover zoom measured on live /claw: art scales to 1.092 over 0.7s on
             // Tailwind's default curve (0.4,0,0.2,1) — live has no lift/translate
-            "h-52 w-auto object-contain drop-shadow-[0_12px_28px_rgba(0,0,0,0.5)] transition-transform duration-700 sm:h-60",
-            oos ? "grayscale" : "group-hover:scale-[1.092]",
+            'h-52 w-auto object-contain drop-shadow-[0_12px_28px_rgba(0,0,0,0.5)] transition-transform duration-700 sm:h-60',
+            oos ? 'grayscale' : 'group-hover:scale-[1.092]',
           )}
         />
       </div>
@@ -132,8 +132,8 @@ function PackRow({
           src={pack.image}
           alt={pack.name}
           className={cn(
-            "h-16 w-auto object-contain drop-shadow-[0_6px_14px_rgba(0,0,0,0.5)]",
-            oos && "grayscale",
+            'h-16 w-auto object-contain drop-shadow-[0_6px_14px_rgba(0,0,0,0.5)]',
+            oos && 'grayscale',
           )}
         />
         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -223,13 +223,13 @@ export default function ClawClient({
   const [creatorPacks, setCreatorPacks] = useState(false);
 
   const tabs = [
-    { id: "all", tab: "All Packs", icon: "" },
+    { id: 'all', tab: 'All Packs', icon: '' },
     ...categories.map((c) => ({ id: c.id, tab: c.tab, icon: c.icon })),
   ];
   // "All" hides empty categories from the sections (but keeps their chip); a
   // directly-selected empty category renders an empty state.
   const visible =
-    active === "all"
+    active === 'all'
       ? categories.filter((c) => c.packs.length > 0)
       : categories.filter((c) => c.id === active);
 
@@ -246,10 +246,10 @@ export default function ClawClient({
               onClick={() => setActive(t.id)}
               aria-pressed={active === t.id}
               className={cn(
-                "flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-medium transition-colors sm:text-[13px]",
+                'flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-medium transition-colors sm:text-[13px]',
                 active === t.id
-                  ? "bg-white text-neutral-950"
-                  : "bg-white/5 text-white/60 hover:bg-white/10 hover:text-white",
+                  ? 'bg-white text-neutral-950'
+                  : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white',
               )}
             >
               {t.icon ? (
@@ -285,14 +285,14 @@ export default function ClawClient({
           >
             <span
               className={cn(
-                "relative h-5 w-9 shrink-0 rounded-full transition-colors",
-                creatorPacks ? "bg-emerald-500" : "bg-white/15",
+                'relative h-5 w-9 shrink-0 rounded-full transition-colors',
+                creatorPacks ? 'bg-emerald-500' : 'bg-white/15',
               )}
             >
               <span
                 className={cn(
-                  "absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white transition-transform",
-                  creatorPacks && "translate-x-4",
+                  'absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white transition-transform',
+                  creatorPacks && 'translate-x-4',
                 )}
               />
             </span>

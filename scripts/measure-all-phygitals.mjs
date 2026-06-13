@@ -1,36 +1,36 @@
 // Measure the FULL "phygitals" extent (incl. faint glow/halo) on the product render
 // (mythic avif) and the 4 dramatic -src webps, so the bake band fully covers it and
 // Pokenic is centred on it. Same-origin load (no taint).
-import { chromium } from "playwright";
+import { chromium } from 'playwright';
 
 const TARGETS = [
-  { base: "mythic-pack", file: "mythic-pack-machine.avif", kind: "purple" },
+  { base: 'mythic-pack', file: 'mythic-pack-machine.avif', kind: 'purple' },
   {
-    base: "black-pack-jjnfuk",
-    file: "black-pack-jjnfuk-machine-src.webp",
-    kind: "white",
+    base: 'black-pack-jjnfuk',
+    file: 'black-pack-jjnfuk-machine-src.webp',
+    kind: 'white',
   },
   {
-    base: "legend-pack-1dpaec",
-    file: "legend-pack-1dpaec-machine-src.webp",
-    kind: "white",
+    base: 'legend-pack-1dpaec',
+    file: 'legend-pack-1dpaec-machine-src.webp',
+    kind: 'white',
   },
   {
-    base: "modern-grails-noafw0",
-    file: "modern-grails-noafw0-machine-src.webp",
-    kind: "white",
+    base: 'modern-grails-noafw0',
+    file: 'modern-grails-noafw0-machine-src.webp',
+    kind: 'white',
   },
   {
-    base: "pro-soccer-pack",
-    file: "pro-soccer-pack-machine-src.webp",
-    kind: "white",
+    base: 'pro-soccer-pack',
+    file: 'pro-soccer-pack-machine-src.webp',
+    kind: 'white',
   },
 ];
 
 const browser = await chromium.launch();
 const page = await browser.newPage();
-await page.goto("http://localhost:4000/", {
-  waitUntil: "domcontentloaded",
+await page.goto('http://localhost:4000/', {
+  waitUntil: 'domcontentloaded',
   timeout: 30000,
 });
 
@@ -53,10 +53,10 @@ const res = await page.evaluate(async (TARGETS) => {
     }
     const W = img.naturalWidth,
       H = img.naturalHeight;
-    const cv = document.createElement("canvas");
+    const cv = document.createElement('canvas');
     cv.width = W;
     cv.height = H;
-    const ctx = cv.getContext("2d");
+    const ctx = cv.getContext('2d');
     ctx.drawImage(img, 0, 0, W, H);
     const d = ctx.getImageData(0, 0, W, H).data;
     const px = (x, y) => {
@@ -70,7 +70,7 @@ const res = await page.evaluate(async (TARGETS) => {
       x1 = Math.round(W * 0.8);
     const hit = (x, y) => {
       const [r, g, b] = px(x, y);
-      return kind === "purple" ? b - g > 6 && b > 108 : Math.min(r, g, b) > 120;
+      return kind === 'purple' ? b - g > 6 && b > 108 : Math.min(r, g, b) > 120;
     };
     // find the densest contiguous row-band of hits (the wordmark line)
     let minX = 1e9,
@@ -105,7 +105,7 @@ const res = await page.evaluate(async (TARGETS) => {
               b: +((maxY / H) * 100).toFixed(1),
               cx: +(((minX + maxX) / 2 / W) * 100).toFixed(1),
             }
-          : "none",
+          : 'none',
     };
   }
   return out;

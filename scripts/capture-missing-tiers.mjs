@@ -8,28 +8,28 @@
 // (document scroll is a no-op), networkidle never fires (fixed waits), and
 // per-category pack rows are horizontal carousels whose offscreen tiles
 // lazy-load — so every overflowing row is scrolled to the end and back.
-import { chromium } from "playwright";
-import { mkdirSync, writeFileSync, createWriteStream, statSync } from "node:fs";
-import { pipeline } from "node:stream/promises";
-import { Readable } from "node:stream";
+import { chromium } from 'playwright';
+import { mkdirSync, writeFileSync, createWriteStream, statSync } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
+import { Readable } from 'node:stream';
 
-const LIVE = "https://www.phygitals.com";
-const OUT = "docs/research/missing-tiers";
+const LIVE = 'https://www.phygitals.com';
+const OUT = 'docs/research/missing-tiers';
 const UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 
 mkdirSync(OUT, { recursive: true });
 
 async function dl(url, dest) {
   const res = await fetch(url, {
-    headers: { "User-Agent": UA, Referer: "https://www.phygitals.com/" },
+    headers: { 'User-Agent': UA, Referer: 'https://www.phygitals.com/' },
   });
   if (!res.ok) {
-    console.log("DL FAIL", res.status, url);
+    console.log('DL FAIL', res.status, url);
     return false;
   }
   await pipeline(Readable.fromWeb(res.body), createWriteStream(dest));
-  console.log("DL OK ", dest, `(${statSync(dest).size}b)`);
+  console.log('DL OK ', dest, `(${statSync(dest).size}b)`);
   return true;
 }
 
@@ -42,14 +42,14 @@ const ctx = await browser.newContext({
 const page = await ctx.newPage();
 
 await page.goto(`${LIVE}/claw`, {
-  waitUntil: "domcontentloaded",
+  waitUntil: 'domcontentloaded',
   timeout: 60_000,
 });
 await page.waitForTimeout(8000);
 
 // 1) Vertical scroll of the real container to force lazy section renders.
 await page.evaluate(async () => {
-  const main = document.querySelector("main");
+  const main = document.querySelector('main');
   const el =
     main && main.scrollHeight > main.clientHeight + 50
       ? main
@@ -75,7 +75,7 @@ await page.waitForTimeout(2000);
 // 2) Horizontal-scroll every overflowing row (carousels) to lazy-load tiles,
 //    then snap back to the start so positions reflect natural order.
 await page.evaluate(async () => {
-  const rows = [...document.querySelectorAll("*")].filter(
+  const rows = [...document.querySelectorAll('*')].filter(
     (e) =>
       e.scrollWidth > e.clientWidth + 80 &&
       e.clientWidth > 300 &&
@@ -93,33 +93,33 @@ await page.waitForTimeout(2000);
 
 // 3) Extract the Pokémon row: every claw-pack img with its card's texts.
 const data = await page.evaluate(() => {
-  const main = document.querySelector("main") ?? document.body;
-  const headings = [...main.querySelectorAll("*")]
+  const main = document.querySelector('main') ?? document.body;
+  const headings = [...main.querySelectorAll('*')]
     .filter(
       (e) =>
-        /Packs$/.test((e.childNodes[0]?.textContent ?? "").trim()) &&
+        /Packs$/.test((e.childNodes[0]?.textContent ?? '').trim()) &&
         e.children.length === 0,
     )
     .map((e) => ({
       text: e.textContent.trim(),
       top:
         e.getBoundingClientRect().top +
-        (document.querySelector("main")?.scrollTop ?? 0),
+        (document.querySelector('main')?.scrollTop ?? 0),
     }));
 
-  const packImgs = [...main.querySelectorAll("img")].filter((i) =>
-    (i.currentSrc || i.src || "").includes("images/claw"),
+  const packImgs = [...main.querySelectorAll('img')].filter((i) =>
+    (i.currentSrc || i.src || '').includes('images/claw'),
   );
   const tiles = packImgs.map((img) => {
     // climb to the card: nearest ancestor whose text includes a $ price
     let card = img.parentElement;
     for (let i = 0; i < 8 && card; i++) {
-      if (/\$\s?[\d,]+/.test(card.textContent ?? "")) break;
+      if (/\$\s?[\d,]+/.test(card.textContent ?? '')) break;
       card = card.parentElement;
     }
-    const txt = (card?.textContent ?? "").replace(/\s+/g, " ").trim();
+    const txt = (card?.textContent ?? '').replace(/\s+/g, ' ').trim();
     const r = (card ?? img).getBoundingClientRect();
-    const scrollTop = document.querySelector("main")?.scrollTop ?? 0;
+    const scrollTop = document.querySelector('main')?.scrollTop ?? 0;
     return {
       src: img.currentSrc || img.src,
       cardText: txt.slice(0, 220),
@@ -147,7 +147,7 @@ const result = {
   capturedAt: new Date().toISOString(),
   headings: heads.map((h) => h.text),
   pokemonRowOrder: pokemonTiles.map((t) => ({
-    name: t.cardText.replace(/\$.*$/, "").trim().slice(0, 60),
+    name: t.cardText.replace(/\$.*$/, '').trim().slice(0, 60),
     price: t.price,
     soldOut: t.soldOut,
     icon: t.src,
@@ -159,7 +159,7 @@ console.log(JSON.stringify(result.pokemonRowOrder, null, 2));
 
 // 5) Screenshot the Pokémon section for the visual record.
 await page.evaluate((top) => {
-  const main = document.querySelector("main");
+  const main = document.querySelector('main');
   if (main) main.scrollTop = Math.max(0, top - 80);
 }, pkTop);
 await page.waitForTimeout(1500);
@@ -167,18 +167,18 @@ await page.screenshot({ path: `${OUT}/live-pokemon-section.png` });
 
 // 6) Download the Sealed / Base Set icons (staging dir only).
 const targets = result.pokemonRowOrder.filter((t) =>
-  /sealed|base\s*set/i.test(t.name + " " + t.icon),
+  /sealed|base\s*set/i.test(t.name + ' ' + t.icon),
 );
 for (const t of targets) {
   const base = decodeURIComponent(
-    new URL(t.icon).pathname.split("/").pop() ?? "tile.webp",
+    new URL(t.icon).pathname.split('/').pop() ?? 'tile.webp',
   );
   await dl(t.icon, `${OUT}/${base}`);
 }
 if (!targets.length)
   console.log(
-    "WARN: no Sealed/Base Set tiles matched — inspect pokemon-row.json + screenshot",
+    'WARN: no Sealed/Base Set tiles matched — inspect pokemon-row.json + screenshot',
   );
 
 await browser.close();
-console.log("done");
+console.log('done');

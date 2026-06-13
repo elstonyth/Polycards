@@ -1,16 +1,16 @@
-import type { Metadata } from "next";
-import { AccountHeader, DemoNote } from "@/components/account/ui";
-import { MOCK_USERS } from "@/lib/mock/users";
+import type { Metadata } from 'next';
+import { AccountHeader, DemoNote } from '@/components/account/ui';
+import { MOCK_USERS } from '@/lib/mock/users';
 
-export const metadata: Metadata = { title: "Messages | Pokenic" };
+export const metadata: Metadata = { title: 'Messages | Pokenic' };
 
 const PREVIEWS = [
-  "gg on that pull!",
-  "Is the listing still available?",
-  "Trade offer sent your way",
-  "Thanks for the fast shipping",
-  "Let me know if you want to sell",
-  "Appreciate the deal 🙌",
+  'gg on that pull!',
+  'Is the listing still available?',
+  'Trade offer sent your way',
+  'Thanks for the fast shipping',
+  'Let me know if you want to sell',
+  'Appreciate the deal 🙌',
 ];
 
 export default function MessagesPage() {

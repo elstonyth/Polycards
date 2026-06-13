@@ -1,8 +1,8 @@
-import { chromium } from "playwright";
-import fs from "node:fs";
+import { chromium } from 'playwright';
+import fs from 'node:fs';
 const b = await chromium.launch();
 const p = await b.newPage({ viewport: { width: 1920, height: 1080 } });
-await p.goto("http://localhost:4000/", { waitUntil: "load", timeout: 60000 });
+await p.goto('http://localhost:4000/', { waitUntil: 'load', timeout: 60000 });
 await p.waitForTimeout(1500);
 // QA: 3 visible cards, glow follows center, full width, 0 broken
 const r = await p.evaluate(() => {
@@ -24,7 +24,7 @@ const r = await p.evaluate(() => {
   ].filter((d) => d.style.background && +getComputedStyle(d).opacity > 0.5);
   const glow = glows[0]
     ? glows[0].style.background.match(/rgba\(([^)]+)\)/)?.[1]
-    : "none";
+    : 'none';
   return {
     visibleCards: vis,
     broken,
@@ -35,7 +35,7 @@ const r = await p.evaluate(() => {
 });
 console.log(JSON.stringify(r));
 await p.screenshot({
-  path: "docs/research/SKILL_HERO.png",
+  path: 'docs/research/SKILL_HERO.png',
   clip: { x: 0, y: 56, width: 1920, height: 520 },
 });
 await b.close();

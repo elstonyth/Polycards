@@ -1,7 +1,7 @@
-"use client";
+'use client';
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import {
   Settings,
   Package,
@@ -16,24 +16,24 @@ import {
   Zap,
   Vault,
   type LucideIcon,
-} from "lucide-react";
-import { cn } from "@/lib/utils";
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 export const ACCOUNT_NAV: { label: string; href: string; icon: LucideIcon }[] =
   [
-    { label: "Vault", href: "/vault", icon: Vault },
-    { label: "Settings", href: "/settings", icon: Settings },
-    { label: "Orders", href: "/orders", icon: Package },
-    { label: "Messages", href: "/messages", icon: MessageSquare },
-    { label: "Earnings", href: "/earnings", icon: TrendingUp },
-    { label: "Referrals", href: "/referrals", icon: Gift },
-    { label: "Achievements", href: "/achievements", icon: Award },
-    { label: "Vouchers", href: "/vouchers", icon: Ticket },
-    { label: "Withdraw", href: "/bank-withdrawal", icon: Landmark },
-    { label: "Borrow / Lend", href: "/borrow-lend", icon: HandCoins },
-    { label: "PokéCoin", href: "/pokecoin", icon: Coins },
-    { label: "NBACoin", href: "/nbacoin", icon: Coins },
-    { label: "Accelerate Claim", href: "/accelerate-claim", icon: Zap },
+    { label: 'Vault', href: '/vault', icon: Vault },
+    { label: 'Settings', href: '/settings', icon: Settings },
+    { label: 'Orders', href: '/orders', icon: Package },
+    { label: 'Messages', href: '/messages', icon: MessageSquare },
+    { label: 'Earnings', href: '/earnings', icon: TrendingUp },
+    { label: 'Referrals', href: '/referrals', icon: Gift },
+    { label: 'Achievements', href: '/achievements', icon: Award },
+    { label: 'Vouchers', href: '/vouchers', icon: Ticket },
+    { label: 'Withdraw', href: '/bank-withdrawal', icon: Landmark },
+    { label: 'Borrow / Lend', href: '/borrow-lend', icon: HandCoins },
+    { label: 'PokéCoin', href: '/pokecoin', icon: Coins },
+    { label: 'NBACoin', href: '/nbacoin', icon: Coins },
+    { label: 'Accelerate Claim', href: '/accelerate-claim', icon: Zap },
   ];
 
 export default function AccountSidebar() {
@@ -50,10 +50,10 @@ export default function AccountSidebar() {
               key={item.href}
               href={item.href}
               className={cn(
-                "flex shrink-0 items-center gap-2.5 rounded-xl px-3 py-2 text-[13px] font-medium transition-colors",
+                'flex shrink-0 items-center gap-2.5 rounded-xl px-3 py-2 text-[13px] font-medium transition-colors',
                 active
-                  ? "bg-white/10 text-white"
-                  : "text-white/55 hover:bg-white/5 hover:text-white",
+                  ? 'bg-white/10 text-white'
+                  : 'text-white/55 hover:bg-white/5 hover:text-white',
               )}
             >
               <Icon className="h-4 w-4 shrink-0 text-white/45" aria-hidden />

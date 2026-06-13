@@ -2,16 +2,16 @@
 // Reads docs/research/audit/triage.json, screenshots clone (:4000) for every rendering
 // route and live phygitals for the diffable bucket. Writes PNGs + manifest.json to disk.
 // Diff sub-agents READ these PNGs; they do NOT launch browsers.
-import { chromium } from "playwright";
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { chromium } from 'playwright';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 
-const CLONE = "http://localhost:4000";
-const LIVE = "https://www.phygitals.com";
-const OUT = "docs/research/audit/shots";
+const CLONE = 'http://localhost:4000';
+const LIVE = 'https://www.phygitals.com';
+const OUT = 'docs/research/audit/shots';
 mkdirSync(OUT, { recursive: true });
 
 const triage = JSON.parse(
-  readFileSync("docs/research/audit/triage.json", "utf8"),
+  readFileSync('docs/research/audit/triage.json', 'utf8'),
 );
 
 // width set: [w, fullPage?] — 4K viewport-only to cap token cost
@@ -24,18 +24,18 @@ const WIDTHS = [
 const clonePaths = triage.rows
   .filter((r) => r.clone === 200)
   .map((r) => r.path);
-if (!clonePaths.includes("/claw/pokemon-mythic"))
-  clonePaths.push("/claw/pokemon-mythic");
+if (!clonePaths.includes('/claw/pokemon-mythic'))
+  clonePaths.push('/claw/pokemon-mythic');
 const livePaths = triage.rows
-  .filter((r) => r.bucket === "diffable")
+  .filter((r) => r.bucket === 'diffable')
   .map((r) => r.path);
 
 const slug = (p) =>
-  p === "/" ? "home" : p.replace(/^\//, "").replace(/\//g, "_");
+  p === '/' ? 'home' : p.replace(/^\//, '').replace(/\//g, '_');
 
 const jobs = [];
-for (const p of clonePaths) jobs.push({ site: "clone", base: CLONE, path: p });
-for (const p of livePaths) jobs.push({ site: "live", base: LIVE, path: p });
+for (const p of clonePaths) jobs.push({ site: 'clone', base: CLONE, path: p });
+for (const p of livePaths) jobs.push({ site: 'live', base: LIVE, path: p });
 
 async function autoScroll(page) {
   await page
@@ -71,8 +71,8 @@ async function runJob(job) {
   const rec = { site: job.site, path: job.path, files: {}, errors: [] };
   try {
     await page
-      .goto(job.base + job.path, { waitUntil: "networkidle", timeout: 45000 })
-      .catch((e) => rec.errors.push("goto:" + e.message.slice(0, 60)));
+      .goto(job.base + job.path, { waitUntil: 'networkidle', timeout: 45000 })
+      .catch((e) => rec.errors.push('goto:' + e.message.slice(0, 60)));
     await page.waitForTimeout(1200);
     for (const [w, full] of WIDTHS) {
       await page.setViewportSize({ width: w, height: full ? 900 : 2160 });
@@ -85,13 +85,13 @@ async function runJob(job) {
       rec.files[w] = file;
     }
   } catch (e) {
-    rec.errors.push("fatal:" + String(e.message || e).slice(0, 80));
+    rec.errors.push('fatal:' + String(e.message || e).slice(0, 80));
   } finally {
     await ctx.close();
   }
   manifest.push(rec);
   console.log(
-    `${job.site.padEnd(5)} ${job.path.padEnd(34)} ${rec.errors.length ? "ERR " + rec.errors.join("|") : "ok"}`,
+    `${job.site.padEnd(5)} ${job.path.padEnd(34)} ${rec.errors.length ? 'ERR ' + rec.errors.join('|') : 'ok'}`,
   );
 }
 
@@ -103,7 +103,7 @@ await Promise.all([worker(), worker()]);
 
 await browser.close();
 writeFileSync(
-  "docs/research/audit/manifest.json",
+  'docs/research/audit/manifest.json',
   JSON.stringify(manifest, null, 2),
 );
 console.log(

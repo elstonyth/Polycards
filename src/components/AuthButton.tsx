@@ -1,6 +1,6 @@
-"use client";
+'use client';
 
-import { type ReactNode } from "react";
+import { type ReactNode } from 'react';
 
 /**
  * Opens the global auth modal (mounted once in SiteHeader). Fired as a window
@@ -8,8 +8,8 @@ import { type ReactNode } from "react";
  * prop drilling or shared context. Matches the live site, which uses a modal for
  * login/signup rather than dedicated /login and /signup pages.
  */
-export function openAuth(mode: "login" | "signup") {
-  window.dispatchEvent(new CustomEvent("pokenic:auth", { detail: { mode } }));
+export function openAuth(mode: 'login' | 'signup') {
+  window.dispatchEvent(new CustomEvent('pokenic:auth', { detail: { mode } }));
 }
 
 export default function AuthButton({
@@ -17,7 +17,7 @@ export default function AuthButton({
   className,
   children,
 }: {
-  mode: "login" | "signup";
+  mode: 'login' | 'signup';
   className?: string;
   children: ReactNode;
 }) {

@@ -1,8 +1,8 @@
-import { chromium } from "playwright";
+import { chromium } from 'playwright';
 const b = await chromium.launch();
 const p = await b.newPage({ viewport: { width: 1440, height: 900 } });
-await p.goto("https://www.phygitals.com/", {
-  waitUntil: "domcontentloaded",
+await p.goto('https://www.phygitals.com/', {
+  waitUntil: 'domcontentloaded',
   timeout: 60000,
 });
 for (let i = 0; i < 25; i++) {
@@ -13,14 +13,14 @@ await p.waitForTimeout(2500);
 
 // scroll How It Works into view (inside the real scroller)
 await p.evaluate(() => {
-  const sc = [...document.querySelectorAll("*")].find((el) => {
+  const sc = [...document.querySelectorAll('*')].find((el) => {
     const s = getComputedStyle(el);
     return (
-      (s.overflowY === "auto" || s.overflowY === "scroll") &&
+      (s.overflowY === 'auto' || s.overflowY === 'scroll') &&
       el.scrollHeight > el.clientHeight + 100
     );
   });
-  const h = [...document.querySelectorAll("h1,h2,h3")].find((e) =>
+  const h = [...document.querySelectorAll('h1,h2,h3')].find((e) =>
     /how it works/i.test(e.textContent),
   );
   if (h && sc) {
@@ -32,15 +32,15 @@ await p.waitForTimeout(1200);
 // find and click a "?" / help button near the buyback pill
 const opened = await p.evaluate(() => {
   // look for a button inside the "85-90%" pill area
-  const pill = [...document.querySelectorAll("*")].find(
-    (e) => /85-90%/.test(e.textContent || "") && e.querySelector("button"),
+  const pill = [...document.querySelectorAll('*')].find(
+    (e) => /85-90%/.test(e.textContent || '') && e.querySelector('button'),
   );
   const btn = pill
-    ? pill.querySelector("button")
-    : [...document.querySelectorAll("button")].find(
+    ? pill.querySelector('button')
+    : [...document.querySelectorAll('button')].find(
         (b) =>
           /\?/.test(b.textContent) ||
-          /help|buyback|info/i.test(b.getAttribute("aria-label") || ""),
+          /help|buyback|info/i.test(b.getAttribute('aria-label') || ''),
       );
   if (btn) {
     btn.click();
@@ -52,7 +52,7 @@ await p.waitForTimeout(900);
 
 const m = await p.evaluate(() => {
   // the modal is likely a fixed/absolute panel that just appeared with "Instant Buyback"
-  const cand = [...document.querySelectorAll("div")].filter(
+  const cand = [...document.querySelectorAll('div')].filter(
     (d) =>
       /Instant Buyback/.test(d.textContent) && /Card FMV/.test(d.textContent),
   );
@@ -65,14 +65,14 @@ const m = await p.evaluate(() => {
   const r = panel.getBoundingClientRect();
   const cs = getComputedStyle(panel);
   // backdrop: find a fixed full-screen element behind it
-  const overlay = [...document.querySelectorAll("div")].find((d) => {
+  const overlay = [...document.querySelectorAll('div')].find((d) => {
     const s = getComputedStyle(d);
     const rr = d.getBoundingClientRect();
     return (
-      s.position === "fixed" &&
+      s.position === 'fixed' &&
       rr.width >= window.innerWidth - 2 &&
       rr.height >= window.innerHeight - 2 &&
-      s.backgroundColor !== "rgba(0, 0, 0, 0)"
+      s.backgroundColor !== 'rgba(0, 0, 0, 0)'
     );
   });
   return {
@@ -87,6 +87,6 @@ const m = await p.evaluate(() => {
     overlayBackdrop: overlay ? getComputedStyle(overlay).backdropFilter : null,
   };
 });
-console.log("ORIGINAL MODAL:", JSON.stringify(m, null, 1));
-await p.screenshot({ path: "docs/research/ORIG_MODAL.png" });
+console.log('ORIGINAL MODAL:', JSON.stringify(m, null, 1));
+await p.screenshot({ path: 'docs/research/ORIG_MODAL.png' });
 await b.close();

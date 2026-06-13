@@ -1,9 +1,9 @@
-import { chromium } from "playwright";
+import { chromium } from 'playwright';
 const b = await chromium.launch();
 for (const w of [390, 768, 1440, 1920, 3840]) {
   const p = await b.newPage({ viewport: { width: w, height: 900 } });
-  await p.goto("http://localhost:4000/how-it-works", {
-    waitUntil: "load",
+  await p.goto('http://localhost:4000/how-it-works', {
+    waitUntil: 'load',
     timeout: 60000,
   });
   await p.waitForTimeout(900);

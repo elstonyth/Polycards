@@ -1,39 +1,39 @@
-import { chromium } from "playwright";
-import fs from "node:fs";
-const OUT = "docs/playwright/carousel";
+import { chromium } from 'playwright';
+import fs from 'node:fs';
+const OUT = 'docs/playwright/carousel';
 fs.mkdirSync(OUT, { recursive: true });
 const b = await chromium.launch();
 const p = await b.newPage({ viewport: { width: 1440, height: 900 } });
-await p.goto("http://localhost:4000/", { waitUntil: "load", timeout: 60000 });
+await p.goto('http://localhost:4000/', { waitUntil: 'load', timeout: 60000 });
 await p.waitForTimeout(1200);
 
 // snapshot: how many card slots are visible (opacity>0.05) + which is center (opacity~1, no blur) + glow color
 async function snap() {
   return p.evaluate(() => {
-    const right = [...document.querySelectorAll("section a div")].filter(
+    const right = [...document.querySelectorAll('section a div')].filter(
       (d) =>
-        d.style && d.style.transform && d.style.transform.includes("scale"),
+        d.style && d.style.transform && d.style.transform.includes('scale'),
     );
     const cards = right
       .map((d) => {
         const cs = getComputedStyle(d);
-        const slab = d.querySelector("img[alt]");
+        const slab = d.querySelector('img[alt]');
         return {
           op: +(+cs.opacity).toFixed(2),
           blur: cs.filter,
           z: cs.zIndex,
-          name: (slab && slab.alt) || "",
+          name: (slab && slab.alt) || '',
         };
       })
       .filter((c) => c.op > 0.05);
     const center = cards.find(
-      (c) => c.op > 0.9 && (c.blur === "none" || c.blur === ""),
+      (c) => c.op > 0.9 && (c.blur === 'none' || c.blur === ''),
     );
     // active glow div
     const glows = [
-      ...document.querySelectorAll("section a > div[aria-hidden]"),
+      ...document.querySelectorAll('section a > div[aria-hidden]'),
     ].filter(
-      (d) => d.style.background && d.style.background.includes("radial"),
+      (d) => d.style.background && d.style.background.includes('radial'),
     );
     const activeGlow = glows
       .map((g) => ({
@@ -69,5 +69,5 @@ const broken = await p.evaluate(
     [...document.images].filter((x) => x.complete && x.naturalWidth === 0)
       .length,
 );
-console.log("broken:", broken);
+console.log('broken:', broken);
 await b.close();

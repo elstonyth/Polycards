@@ -3,11 +3,11 @@
 // over a MOVING base pixel created a static-rectangle seam, it shows as a sharp zero-motion rect
 // against moving surroundings. seam_check.py then computes the motion map. Run with prod server on :4000.
 //   node scripts/verify-anim-seam.mjs nba-legend nba-platinum
-import { chromium } from "playwright";
+import { chromium } from 'playwright';
 
-const OUT = "docs/research/packdetail";
+const OUT = 'docs/research/packdetail';
 const slugs = process.argv.slice(2);
-if (!slugs.length) slugs.push("nba-legend");
+if (!slugs.length) slugs.push('nba-legend');
 const browser = await chromium.launch({ headless: false });
 const page = await browser.newPage({
   viewport: { width: 1440, height: 1000 },
@@ -16,7 +16,7 @@ const page = await browser.newPage({
 
 for (const slug of slugs) {
   await page.goto(`http://localhost:4000/claw/${slug}`, {
-    waitUntil: "networkidle",
+    waitUntil: 'networkidle',
     timeout: 60000,
   });
   await page.bringToFront();
@@ -43,4 +43,4 @@ for (const slug of slugs) {
   );
 }
 await browser.close();
-console.log("done");
+console.log('done');

@@ -1,6 +1,6 @@
-import type { ReactNode } from "react";
-import { notFound } from "next/navigation";
-import { features } from "@/lib/features";
+import type { ReactNode } from 'react';
+import { notFound } from 'next/navigation';
+import { features } from '@/lib/features';
 
 // Gate the whole /marketplace segment on the feature flag. The guard lives in the
 // layout (not page.tsx) on purpose: marketplace/loading.tsx makes the page stream,

@@ -1,9 +1,9 @@
-import Link from "next/link";
-import { MessageCircle } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { features } from "@/lib/features";
+import Link from 'next/link';
+import { MessageCircle } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { features } from '@/lib/features';
 
-const LOGO_SRC = "/branding/pokenic-logo.png";
+const LOGO_SRC = '/branding/pokenic-logo.png';
 
 const TAGLINE =
   "Discover the world's first Pokémon marketplace where digitized cards can be bought, sold, traded, vaulted, and earn income, instantaneously, all in one seamless platform.";
@@ -11,25 +11,25 @@ const TAGLINE =
 type FooterLink = { label: string; href: string };
 
 const QUICK_LINKS: FooterLink[] = [
-  { label: "Home", href: "/" },
+  { label: 'Home', href: '/' },
   // Marketplace is hidden behind a feature flag — omit the link while it 404s.
   ...(features.marketplace
-    ? [{ label: "Marketplace", href: "/marketplace" }]
+    ? [{ label: 'Marketplace', href: '/marketplace' }]
     : []),
-  { label: "Play the Claw", href: "/claw" },
-  { label: "Leaderboard", href: "/leaderboard" },
+  { label: 'Play the Claw', href: '/claw' },
+  { label: 'Leaderboard', href: '/leaderboard' },
 ];
 
 const SUPPORT_LINKS: FooterLink[] = [
-  { label: "Contact Us", href: "/contact" },
-  { label: "Documentation", href: "https://docs.phygitals.com" },
+  { label: 'Contact Us', href: '/contact' },
+  { label: 'Documentation', href: 'https://docs.phygitals.com' },
   {
-    label: "Terms of Service",
-    href: "https://docs.phygitals.com/user-agreements/terms-of-service",
+    label: 'Terms of Service',
+    href: 'https://docs.phygitals.com/user-agreements/terms-of-service',
   },
   {
-    label: "Privacy Policy",
-    href: "https://docs.phygitals.com/user-agreements/privacy-policy",
+    label: 'Privacy Policy',
+    href: 'https://docs.phygitals.com/user-agreements/privacy-policy',
   },
 ];
 
@@ -85,28 +85,28 @@ function DiscordIcon({ className }: IconProps) {
 
 const SOCIALS = [
   {
-    label: "Twitter",
-    href: "https://x.com/phygitals",
+    label: 'Twitter',
+    href: 'https://x.com/phygitals',
     Icon: TwitterIcon,
-    iconClass: "h-5 w-5",
+    iconClass: 'h-5 w-5',
   },
   {
-    label: "Instagram",
-    href: "https://www.instagram.com/phygitals",
+    label: 'Instagram',
+    href: 'https://www.instagram.com/phygitals',
     Icon: InstagramIcon,
-    iconClass: "h-5 w-5",
+    iconClass: 'h-5 w-5',
   },
   {
-    label: "Discord",
-    href: "https://discord.gg/phygitals",
+    label: 'Discord',
+    href: 'https://discord.gg/phygitals',
     Icon: DiscordIcon,
-    iconClass: "h-4 w-4",
+    iconClass: 'h-4 w-4',
   },
   {
-    label: "Telegram",
-    href: "https://t.me/phygitals_bot",
+    label: 'Telegram',
+    href: 'https://t.me/phygitals_bot',
     Icon: MessageCircle,
-    iconClass: "h-5 w-5",
+    iconClass: 'h-5 w-5',
   },
 ];
 
@@ -140,8 +140,8 @@ export default function SiteFooter() {
   return (
     <footer
       className={cn(
-        "relative mt-12 w-full border-t border-neutral-800",
-        "bg-gradient-to-b from-transparent to-white/[0.02]",
+        'relative mt-12 w-full border-t border-neutral-800',
+        'bg-gradient-to-b from-transparent to-white/[0.02]',
       )}
     >
       <div className="px-fluid mx-auto w-full py-12">
@@ -196,7 +196,7 @@ export default function SiteFooter() {
                       <Icon
                         className={cn(
                           iconClass,
-                          "transition-transform duration-300 group-hover:scale-110",
+                          'transition-transform duration-300 group-hover:scale-110',
                         )}
                       />
                     </a>

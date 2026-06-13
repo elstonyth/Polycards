@@ -8,14 +8,14 @@
  * storefront's verify origin (:4000), but server→backend requests aren't subject
  * to it. The client learns the auth state via the same-origin `/api/me` route.
  */
-import "server-only";
-import { cache } from "react";
-import { cookies } from "next/headers";
-import type { HttpTypes } from "@medusajs/types";
-import { sdk } from "@/lib/medusa";
-import { logger } from "@/lib/logger";
+import 'server-only';
+import { cache } from 'react';
+import { cookies } from 'next/headers';
+import type { HttpTypes } from '@medusajs/types';
+import { sdk } from '@/lib/medusa';
+import { logger } from '@/lib/logger';
 
-const AUTH_COOKIE = "_pokenic_jwt";
+const AUTH_COOKIE = '_pokenic_jwt';
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
 
 /** Persist the customer JWT (call only from a server action or route handler). */
@@ -23,9 +23,9 @@ export async function setAuthToken(token: string): Promise<void> {
   const store = await cookies();
   store.set(AUTH_COOKIE, token, {
     httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    path: '/',
     maxAge: COOKIE_MAX_AGE,
   });
 }
@@ -73,7 +73,7 @@ export const getCustomer = cache(
 // plus the line items. The Store API doesn't guarantee an order without an
 // explicit sort, so `getOrders` sorts newest-first after fetching.
 const ORDER_FIELDS =
-  "id,display_id,status,fulfillment_status,payment_status,total,currency_code,created_at,*items";
+  'id,display_id,status,fulfillment_status,payment_status,total,currency_code,created_at,*items';
 const ORDER_LIST_LIMIT = 50;
 
 /**
@@ -94,7 +94,7 @@ export async function getOrders(): Promise<HttpTypes.StoreOrder[]> {
         new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
     );
   } catch (error) {
-    logger.error("[orders] failed to load orders from backend:", error);
+    logger.error('[orders] failed to load orders from backend:', error);
     return [];
   }
 }
@@ -108,7 +108,7 @@ export async function updateCustomerProfile(
   body: HttpTypes.StoreUpdateCustomer,
 ): Promise<HttpTypes.StoreCustomer> {
   const token = await getAuthToken();
-  if (!token) throw new Error("Not authenticated.");
+  if (!token) throw new Error('Not authenticated.');
   const { customer } = await sdk.store.customer.update(
     body,
     {},

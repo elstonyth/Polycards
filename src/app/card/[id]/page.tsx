@@ -1,8 +1,8 @@
-import { cache } from "react";
-import type { Metadata } from "next";
-import { MOCK_CARDS } from "@/lib/mock/cards";
-import { getCardById, getCardHandles } from "@/lib/data/products";
-import CardDetailClient from "./CardDetailClient";
+import { cache } from 'react';
+import type { Metadata } from 'next';
+import { MOCK_CARDS } from '@/lib/mock/cards';
+import { getCardById, getCardHandles } from '@/lib/data/products';
+import CardDetailClient from './CardDetailClient';
 
 // Prerendered seeded handles are revalidated hourly so card-detail price/FMV
 // don't drift from the live (force-dynamic) marketplace grid. Non-seeded slugs

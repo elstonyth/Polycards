@@ -1,88 +1,88 @@
-"use client";
+'use client';
 
-import { useEffect, useState } from "react";
-import { cn } from "@/lib/utils";
-import type { RecentPull } from "@/lib/data/packs";
+import { useEffect, useState } from 'react';
+import { cn } from '@/lib/utils';
+import type { RecentPull } from '@/lib/data/packs';
 
 // Helper to build the real phygitals CDN card-image URL (localized webp).
 const cardImg = (id: string) =>
-  `/cdn/cards/${id.replace(/[^\w.-]/g, "_")}.webp`;
+  `/cdn/cards/${id.replace(/[^\w.-]/g, '_')}.webp`;
 
-const ROOKIE_ICON = "/images/claw/rookie-pack-icon.webp";
-const ELITE_ICON = "/images/claw/elite-pack-icon.webp";
+const ROOKIE_ICON = '/images/claw/rookie-pack-icon.webp';
+const ELITE_ICON = '/images/claw/elite-pack-icon.webp';
 
 // Static fallback — real extracted pulls from phygitals.com. Used when the live
 // ledger is empty or the backend is down, so the home section stays populated.
 const MOCK_PULLS: RecentPull[] = [
   {
-    id: "m1",
-    name: "2021 Pokemon Japanese Sword & Shield Jet-Black Spirit Celebi V #3 CGC 10 GEM MINT",
-    image: cardImg("FQEYWuGiKTkJpZSG6XqGHDBmH6EmxctEqk1kAT2MYzHc"),
-    value: "",
-    rarity: "Legendary",
-    packName: "Rookie Pack",
+    id: 'm1',
+    name: '2021 Pokemon Japanese Sword & Shield Jet-Black Spirit Celebi V #3 CGC 10 GEM MINT',
+    image: cardImg('FQEYWuGiKTkJpZSG6XqGHDBmH6EmxctEqk1kAT2MYzHc'),
+    value: '',
+    rarity: 'Legendary',
+    packName: 'Rookie Pack',
     packIcon: ROOKIE_ICON,
-    agoLabel: "1m ago",
+    agoLabel: '1m ago',
   },
   {
-    id: "m2",
-    name: "2025 Pokemon Japanese SV Glory Of Rocket Gang Holo Team Rockets Mewtwo ex CGC 10",
-    image: cardImg("9kRLkdbbvzm335GBvraQrWrNVs72gzEzynvP1RPvftTx"),
-    value: "",
-    rarity: "Epic",
-    packName: "Rookie Pack",
+    id: 'm2',
+    name: '2025 Pokemon Japanese SV Glory Of Rocket Gang Holo Team Rockets Mewtwo ex CGC 10',
+    image: cardImg('9kRLkdbbvzm335GBvraQrWrNVs72gzEzynvP1RPvftTx'),
+    value: '',
+    rarity: 'Epic',
+    packName: 'Rookie Pack',
     packIcon: ROOKIE_ICON,
-    agoLabel: "6m ago",
+    agoLabel: '6m ago',
   },
   {
-    id: "m3",
-    name: "2023 Pokemon Sword and Shield Crown Zenith Galarian Gallery Darkrai Vstar #GG50 PSA 10",
-    image: cardImg("4h13RDtFX4MWNYjvgMPeBS1hcL4AewupiFzDvyFUUTkd"),
-    value: "",
-    rarity: "Epic",
-    packName: "Elite Pack",
+    id: 'm3',
+    name: '2023 Pokemon Sword and Shield Crown Zenith Galarian Gallery Darkrai Vstar #GG50 PSA 10',
+    image: cardImg('4h13RDtFX4MWNYjvgMPeBS1hcL4AewupiFzDvyFUUTkd'),
+    value: '',
+    rarity: 'Epic',
+    packName: 'Elite Pack',
     packIcon: ELITE_ICON,
-    agoLabel: "15m ago",
+    agoLabel: '15m ago',
   },
   {
-    id: "m4",
-    name: "2024 Pokemon Japanese Scarlet & Violet Terastal Fest ex Holo Jolteon ex #52 CGC 10 PRISTINE",
-    image: cardImg("BEnddEeBXBHyL5qWXCg6sKS5VmUbUtZaKJ1aVB8yCWHN"),
-    value: "",
-    rarity: "Rare",
-    packName: "Elite Pack",
+    id: 'm4',
+    name: '2024 Pokemon Japanese Scarlet & Violet Terastal Fest ex Holo Jolteon ex #52 CGC 10 PRISTINE',
+    image: cardImg('BEnddEeBXBHyL5qWXCg6sKS5VmUbUtZaKJ1aVB8yCWHN'),
+    value: '',
+    rarity: 'Rare',
+    packName: 'Elite Pack',
     packIcon: ELITE_ICON,
-    agoLabel: "15m ago",
+    agoLabel: '15m ago',
   },
   {
-    id: "m5",
-    name: "2025 Pokemon Japanese Mega Start Deck 100 Battle Collection Reverse Holo Rapidash #90 CGC 10",
-    image: cardImg("FFbo5jfXHHQWN8bmc88UDYSDP5QzYCCj6RwUkiWYyffC"),
-    value: "",
-    rarity: "Common",
-    packName: "Rookie Pack",
+    id: 'm5',
+    name: '2025 Pokemon Japanese Mega Start Deck 100 Battle Collection Reverse Holo Rapidash #90 CGC 10',
+    image: cardImg('FFbo5jfXHHQWN8bmc88UDYSDP5QzYCCj6RwUkiWYyffC'),
+    value: '',
+    rarity: 'Common',
+    packName: 'Rookie Pack',
     packIcon: ROOKIE_ICON,
-    agoLabel: "16m ago",
+    agoLabel: '16m ago',
   },
   {
-    id: "m6",
-    name: "2022 Pokemon Japanese Sword & Shield Incandescent Arcana Ho-Oh V #55 CGC 10 GEM MINT",
-    image: cardImg("FjAJZ7en585MpnoLUGbuALHEmbBAPd61EZCefQzFMmRX"),
-    value: "",
-    rarity: "Rare",
-    packName: "Rookie Pack",
+    id: 'm6',
+    name: '2022 Pokemon Japanese Sword & Shield Incandescent Arcana Ho-Oh V #55 CGC 10 GEM MINT',
+    image: cardImg('FjAJZ7en585MpnoLUGbuALHEmbBAPd61EZCefQzFMmRX'),
+    value: '',
+    rarity: 'Rare',
+    packName: 'Rookie Pack',
     packIcon: ROOKIE_ICON,
-    agoLabel: "16m ago",
+    agoLabel: '16m ago',
   },
   {
-    id: "m7",
-    name: "2023 Pokemon Japanese Scarlet & Violet 151 Holo Gengar #94 CGC 10 GEM MINT",
-    image: cardImg("6noxMybjBLtLqicAUTrG63VhWG2FgWzDBsQGnnZEyNCG"),
-    value: "",
-    rarity: "Epic",
-    packName: "Rookie Pack",
+    id: 'm7',
+    name: '2023 Pokemon Japanese Scarlet & Violet 151 Holo Gengar #94 CGC 10 GEM MINT',
+    image: cardImg('6noxMybjBLtLqicAUTrG63VhWG2FgWzDBsQGnnZEyNCG'),
+    value: '',
+    rarity: 'Epic',
+    packName: 'Rookie Pack',
     packIcon: ROOKIE_ICON,
-    agoLabel: "16m ago",
+    agoLabel: '16m ago',
   },
 ];
 
@@ -92,10 +92,10 @@ function PullCard({ pull }: { pull: RecentPull }) {
   return (
     <div
       className={cn(
-        "group/card w-[240px] shrink-0 overflow-hidden rounded-2xl",
-        "border border-neutral-700 bg-neutral-800",
-        "transition-all duration-300 ease-out",
-        "hover:-translate-y-1 hover:border-neutral-500 hover:shadow-xl hover:shadow-black/40",
+        'group/card w-[240px] shrink-0 overflow-hidden rounded-2xl',
+        'border border-neutral-700 bg-neutral-800',
+        'transition-all duration-300 ease-out',
+        'hover:-translate-y-1 hover:border-neutral-500 hover:shadow-xl hover:shadow-black/40',
       )}
     >
       <div className="flex flex-col">
@@ -163,7 +163,7 @@ export default function RecentPullsSection({
     let active = true;
     const tick = async () => {
       try {
-        const res = await fetch("/api/recent-pulls", { cache: "no-store" });
+        const res = await fetch('/api/recent-pulls', { cache: 'no-store' });
         if (!res.ok) return;
         const data = (await res.json()) as { pulls?: RecentPull[] };
         if (active && Array.isArray(data.pulls) && data.pulls.length > 0) {
@@ -200,9 +200,9 @@ export default function RecentPullsSection({
         {/* Horizontally-scrollable row of pulled-card cards */}
         <div
           className={cn(
-            "flex gap-4 overflow-x-auto pb-4",
-            "[scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden",
-            "snap-x snap-mandatory scroll-px-4",
+            'flex gap-4 overflow-x-auto pb-4',
+            '[scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden',
+            'snap-x snap-mandatory scroll-px-4',
           )}
         >
           {pulls.map((pull) => (

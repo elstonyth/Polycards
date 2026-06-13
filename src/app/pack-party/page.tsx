@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 // NOTE: This page has client interactivity (Active / Completed tab state),
 // so the page component itself is a client component. Client components cannot
@@ -6,7 +6,7 @@
 // per the build spec, matching /claw and /leaderboard) — the global
 // <SiteHeader/>/<SiteFooter/> from layout.tsx still wrap this page body.
 
-import { useState } from "react";
+import { useState } from 'react';
 import {
   Users,
   Clock,
@@ -16,9 +16,9 @@ import {
   LayoutGrid,
   List,
   Sparkles,
-} from "lucide-react";
-import { cn } from "@/lib/utils";
-import Reveal from "@/components/Reveal";
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+import Reveal from '@/components/Reveal';
 
 // ---------------------------------------------------------------------------
 // Data
@@ -48,175 +48,175 @@ type Party = {
 // `entry < avg` flags the green "Great Deal!" badge + highlights the Entry value.
 const ACTIVE_PARTIES: Party[] = [
   {
-    id: "a1",
-    image: "/home/hero/slabs/pokemon1.webp",
-    title: "Pokemon Chase",
+    id: 'a1',
+    image: '/home/hero/slabs/pokemon1.webp',
+    title: 'Pokemon Chase',
     entry: 54,
     chase: 103,
     avg: 56,
     filled: 1,
     seats: 2,
-    time: "4d",
+    time: '4d',
   },
   {
-    id: "a2",
-    image: "/home/hero/slabs/pokemon3.webp",
-    title: "Pokemon Vintage",
+    id: 'a2',
+    image: '/home/hero/slabs/pokemon3.webp',
+    title: 'Pokemon Vintage',
     entry: 38,
     chase: 38,
     avg: 34,
     filled: 1,
     seats: 2,
-    time: "2d",
+    time: '2d',
   },
   {
-    id: "a3",
-    image: "/home/hero/slabs/onepiece2.webp",
-    title: "One Piece OP-05",
+    id: 'a3',
+    image: '/home/hero/slabs/onepiece2.webp',
+    title: 'One Piece OP-05',
     entry: 41,
     chase: 50,
     avg: 40,
     filled: 1,
     seats: 2,
-    time: "4d",
+    time: '4d',
   },
   {
-    id: "a4",
-    image: "/home/hero/slabs/basketball2.webp",
-    title: "Prizm Basketball",
+    id: 'a4',
+    image: '/home/hero/slabs/basketball2.webp',
+    title: 'Prizm Basketball',
     entry: 39,
     chase: 52,
     avg: 39,
     filled: 1,
     seats: 2,
-    time: "3d",
+    time: '3d',
   },
   {
-    id: "a5",
-    image: "/home/hero/slabs/onepiece4.webp",
-    title: "One Piece Romance Dawn",
+    id: 'a5',
+    image: '/home/hero/slabs/onepiece4.webp',
+    title: 'One Piece Romance Dawn',
     entry: 47,
     chase: 88,
     avg: 49,
     filled: 1,
     seats: 2,
-    time: "5d",
+    time: '5d',
   },
   {
-    id: "a6",
-    image: "/home/hero/slabs/football1.webp",
-    title: "Select Football",
+    id: 'a6',
+    image: '/home/hero/slabs/football1.webp',
+    title: 'Select Football',
     entry: 33,
     chase: 41,
     avg: 33,
     filled: 2,
     seats: 4,
-    time: "6d",
+    time: '6d',
   },
   {
-    id: "a7",
-    image: "/home/hero/slabs/yugioh1.webp",
-    title: "Yu-Gi-Oh! 25th",
+    id: 'a7',
+    image: '/home/hero/slabs/yugioh1.webp',
+    title: 'Yu-Gi-Oh! 25th',
     entry: 29,
     chase: 44,
     avg: 30,
     filled: 1,
     seats: 2,
-    time: "2d",
+    time: '2d',
   },
   {
-    id: "a8",
-    image: "/home/hero/slabs/baseball1.webp",
-    title: "Topps Chrome Baseball",
+    id: 'a8',
+    image: '/home/hero/slabs/baseball1.webp',
+    title: 'Topps Chrome Baseball',
     entry: 45,
     chase: 72,
     avg: 46,
     filled: 2,
     seats: 4,
-    time: "4d",
+    time: '4d',
   },
 ];
 
 // Completed parties — already drawn. Buttons disabled, badge muted "Ended".
 const COMPLETED_PARTIES: Party[] = [
   {
-    id: "c1",
-    image: "/home/hero/slabs/basketball1.webp",
-    title: "Prizm Basketball",
+    id: 'c1',
+    image: '/home/hero/slabs/basketball1.webp',
+    title: 'Prizm Basketball',
     entry: 62,
     chase: 140,
     avg: 64,
     filled: 2,
     seats: 2,
-    time: "Ended",
+    time: 'Ended',
   },
   {
-    id: "c2",
-    image: "/home/hero/slabs/football3.webp",
-    title: "Mosaic Football",
+    id: 'c2',
+    image: '/home/hero/slabs/football3.webp',
+    title: 'Mosaic Football',
     entry: 35,
     chase: 48,
     avg: 36,
     filled: 2,
     seats: 2,
-    time: "Ended",
+    time: 'Ended',
   },
   {
-    id: "c3",
-    image: "/home/hero/slabs/yugioh2.webp",
-    title: "Yu-Gi-Oh! Legend",
+    id: 'c3',
+    image: '/home/hero/slabs/yugioh2.webp',
+    title: 'Yu-Gi-Oh! Legend',
     entry: 28,
     chase: 39,
     avg: 29,
     filled: 2,
     seats: 2,
-    time: "Ended",
+    time: 'Ended',
   },
   {
-    id: "c4",
-    image: "/home/hero/slabs/football4.webp",
-    title: "Donruss Football",
+    id: 'c4',
+    image: '/home/hero/slabs/football4.webp',
+    title: 'Donruss Football',
     entry: 31,
     chase: 55,
     avg: 33,
     filled: 4,
     seats: 4,
-    time: "Ended",
+    time: 'Ended',
   },
   {
-    id: "c5",
-    image: "/home/hero/slabs/basketball3.webp",
-    title: "Select Basketball",
+    id: 'c5',
+    image: '/home/hero/slabs/basketball3.webp',
+    title: 'Select Basketball',
     entry: 49,
     chase: 96,
     avg: 50,
     filled: 2,
     seats: 2,
-    time: "Ended",
+    time: 'Ended',
   },
   {
-    id: "c6",
-    image: "/home/hero/slabs/onepiece2.webp",
-    title: "One Piece OP-04",
+    id: 'c6',
+    image: '/home/hero/slabs/onepiece2.webp',
+    title: 'One Piece OP-04',
     entry: 42,
     chase: 61,
     avg: 43,
     filled: 2,
     seats: 2,
-    time: "Ended",
+    time: 'Ended',
   },
 ];
 
-const TABS = ["Active", "Completed"] as const;
+const TABS = ['Active', 'Completed'] as const;
 type Tab = (typeof TABS)[number];
 
 // Blurred decorative slabs behind the header banner (verified to exist).
 const HEADER_SLABS = [
-  "/home/hero/slabs/pokemon1.webp",
-  "/home/hero/slabs/onepiece4.webp",
-  "/home/hero/slabs/basketball1.webp",
-  "/home/hero/slabs/football1.webp",
-  "/home/hero/slabs/yugioh1.webp",
+  '/home/hero/slabs/pokemon1.webp',
+  '/home/hero/slabs/onepiece4.webp',
+  '/home/hero/slabs/basketball1.webp',
+  '/home/hero/slabs/football1.webp',
+  '/home/hero/slabs/yugioh1.webp',
 ];
 
 // ---------------------------------------------------------------------------
@@ -229,13 +229,13 @@ const fmt = (n: number) => `$${n}`;
 // Each card gets a gradient ring border (purple cards also glow), cycled by index
 // so the grid reads as varied/colorful like the original.
 const RARITY_RINGS = [
-  "168, 85, 247", // purple
-  "59, 130, 246", // blue
-  "34, 197, 94", // green
-  "6, 182, 212", // cyan
-  "249, 115, 22", // orange
-  "236, 72, 153", // pink
-  "234, 179, 8", // yellow
+  '168, 85, 247', // purple
+  '59, 130, 246', // blue
+  '34, 197, 94', // green
+  '6, 182, 212', // cyan
+  '249, 115, 22', // orange
+  '236, 72, 153', // pink
+  '234, 179, 8', // yellow
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -257,15 +257,15 @@ function PartyCard({
   return (
     <div
       className={cn(
-        "group rounded-2xl p-px transition-all duration-300 hover:-translate-y-1",
+        'group rounded-2xl p-px transition-all duration-300 hover:-translate-y-1',
         // Live parties get a slowly-drifting gradient ring (matches the live site's
         // animated gradient-xy borders); ended cards stay static.
         !ended &&
-          "[background-size:180%_180%] motion-safe:animate-[gradientShift_7s_ease-in-out_infinite]",
+          '[background-size:180%_180%] motion-safe:animate-[gradientShift_7s_ease-in-out_infinite]',
       )}
       style={{
         background: ended
-          ? "rgba(255,255,255,0.10)"
+          ? 'rgba(255,255,255,0.10)'
           : `linear-gradient(160deg, rgb(${ring}), rgba(${ring},0.25) 48%, rgba(255,255,255,0.06))`,
         boxShadow: ended ? undefined : `0 0 22px -8px rgba(${ring},0.55)`,
       }}
@@ -278,8 +278,8 @@ function PartyCard({
             src={party.image}
             alt={party.title}
             className={cn(
-              "h-full w-full object-contain p-3 transition-transform duration-500 group-hover:scale-[1.04]",
-              ended && "opacity-60 saturate-[0.7]",
+              'h-full w-full object-contain p-3 transition-transform duration-500 group-hover:scale-[1.04]',
+              ended && 'opacity-60 saturate-[0.7]',
             )}
           />
           {/* "Live" pulse on joinable parties (matches the live site's pinging dots) */}
@@ -314,8 +314,8 @@ function PartyCard({
             <div>
               <div
                 className={cn(
-                  "text-sm font-bold",
-                  greatDeal ? "text-emerald-400" : "text-white",
+                  'text-sm font-bold',
+                  greatDeal ? 'text-emerald-400' : 'text-white',
                 )}
               >
                 {fmt(party.entry)}
@@ -351,8 +351,8 @@ function PartyCard({
               </span>
               <span
                 className={cn(
-                  "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5",
-                  ended ? "text-white/35" : "bg-white/10 text-white/70",
+                  'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5',
+                  ended ? 'text-white/35' : 'bg-white/10 text-white/70',
                 )}
               >
                 <Clock className="h-3 w-3" aria-hidden />
@@ -362,10 +362,10 @@ function PartyCard({
             <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
               <div
                 className={cn(
-                  "h-full rounded-full",
+                  'h-full rounded-full',
                   ended
-                    ? "bg-white/25"
-                    : "bg-gradient-to-r from-emerald-500 to-green-500",
+                    ? 'bg-white/25'
+                    : 'bg-gradient-to-r from-emerald-500 to-green-500',
                 )}
                 style={{ width: `${pct}%` }}
               />
@@ -400,8 +400,8 @@ function PartyCard({
 // ---------------------------------------------------------------------------
 
 export default function PackPartyPage() {
-  const [tab, setTab] = useState<Tab>("Active");
-  const ended = tab === "Completed";
+  const [tab, setTab] = useState<Tab>('Active');
+  const ended = tab === 'Completed';
   const parties = ended ? COMPLETED_PARTIES : ACTIVE_PARTIES;
 
   return (
@@ -473,10 +473,10 @@ export default function PackPartyPage() {
               type="button"
               onClick={() => setTab(t)}
               className={cn(
-                "rounded-lg px-4 py-1.5 text-sm font-medium transition-colors duration-200",
+                'rounded-lg px-4 py-1.5 text-sm font-medium transition-colors duration-200',
                 tab === t
-                  ? "bg-white/10 text-white"
-                  : "text-white/50 hover:text-white/80",
+                  ? 'bg-white/10 text-white'
+                  : 'text-white/50 hover:text-white/80',
               )}
             >
               {t}
@@ -537,7 +537,7 @@ export default function PackPartyPage() {
           Previous
         </button>
         <span className="text-[13px] text-white/55">
-          Page <span className="font-medium text-white">1</span> of{" "}
+          Page <span className="font-medium text-white">1</span> of{' '}
           {ended ? 2 : 4}
         </span>
         <button

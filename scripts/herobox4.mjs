@@ -1,10 +1,10 @@
-import { chromium } from "playwright";
-import fs from "node:fs";
+import { chromium } from 'playwright';
+import fs from 'node:fs';
 const b = await chromium.launch();
 const out = {};
 async function m(url, label, wait) {
   const p = await b.newPage({ viewport: { width: 1440, height: 900 } });
-  await p.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+  await p.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
   if (wait) {
     for (let i = 0; i < 25; i++) {
       if (await p.evaluate(() => document.images.length > 5)) break;
@@ -13,8 +13,8 @@ async function m(url, label, wait) {
   }
   await p.waitForTimeout(2500);
   out[label] = await p.evaluate(() => {
-    const h = [...document.querySelectorAll("h1,h2")].find((e) =>
-      e.textContent.includes("Rip packs"),
+    const h = [...document.querySelectorAll('h1,h2')].find((e) =>
+      e.textContent.includes('Rip packs'),
     );
     // climb to outermost element that still has the rounded hero radius
     let hero = h,
@@ -41,7 +41,7 @@ async function m(url, label, wait) {
   });
   await p.close();
 }
-await m("https://www.phygitals.com/", "ORIGINAL", true);
-await m("http://localhost:4000/", "CLONE", false);
-fs.writeFileSync("docs/research/herobox.json", JSON.stringify(out, null, 2));
+await m('https://www.phygitals.com/', 'ORIGINAL', true);
+await m('http://localhost:4000/', 'CLONE', false);
+fs.writeFileSync('docs/research/herobox.json', JSON.stringify(out, null, 2));
 await b.close();

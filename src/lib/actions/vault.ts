@@ -1,4 +1,4 @@
-"use server";
+'use server';
 
 /**
  * Vault + credit server actions. Run server-side so the customer JWT stays in
@@ -12,9 +12,9 @@
  *   GET  /store/credits            — balance (Σ ledger) + recent transactions
  *   POST /store/credits/topup      — buy credit via the mock gateway (demo)
  */
-import { sdk } from "@/lib/medusa";
-import { logger } from "@/lib/logger";
-import { getAuthToken } from "@/lib/data/customer";
+import { sdk } from '@/lib/medusa';
+import { logger } from '@/lib/logger';
+import { getAuthToken } from '@/lib/data/customer';
 
 export type VaultItem = {
   pullId: string;
@@ -60,17 +60,17 @@ interface BackendVaultItem {
 function friendlyError(error: unknown): string {
   const text = error instanceof Error ? error.message : String(error);
   if (/too many|rate.?limit|429/i.test(text))
-    return "Too many requests — give it a moment and try again.";
+    return 'Too many requests — give it a moment and try again.';
   if (/unauthorized|not authenticated|401/i.test(text))
-    return "Please log in to view your vault.";
+    return 'Please log in to view your vault.';
   if (/declined/i.test(text))
-    return "Payment declined by the demo gateway — amounts ending in .13 always decline.";
+    return 'Payment declined by the demo gateway — amounts ending in .13 always decline.';
   if (/amount/i.test(text))
-    return "Enter a valid amount (up to $10,000, whole cents).";
-  if (/already sold/i.test(text)) return "This card was already sold back.";
+    return 'Enter a valid amount (up to $10,000, whole cents).';
+  if (/already sold/i.test(text)) return 'This card was already sold back.';
   if (/not found|404/i.test(text))
-    return "This card is no longer in your vault.";
-  return "Something went wrong. Please try again.";
+    return 'This card is no longer in your vault.';
+  return 'Something went wrong. Please try again.';
 }
 
 const needsAuthFrom = (error: unknown): boolean =>
@@ -84,20 +84,20 @@ export async function getVault(): Promise<VaultResult> {
   if (!token) {
     return {
       ok: false,
-      error: "Please log in to view your vault.",
+      error: 'Please log in to view your vault.',
       needsAuth: true,
     };
   }
 
   try {
     const [{ items }, { balance }] = await Promise.all([
-      sdk.client.fetch<{ items: BackendVaultItem[] }>("/store/vault", {
+      sdk.client.fetch<{ items: BackendVaultItem[] }>('/store/vault', {
         headers: { Authorization: `Bearer ${token}` },
-        cache: "no-store",
+        cache: 'no-store',
       }),
-      sdk.client.fetch<{ balance: number }>("/store/credits", {
+      sdk.client.fetch<{ balance: number }>('/store/credits', {
         headers: { Authorization: `Bearer ${token}` },
-        cache: "no-store",
+        cache: 'no-store',
       }),
     ]);
 
@@ -105,9 +105,9 @@ export async function getVault(): Promise<VaultResult> {
       .filter(
         (i) =>
           i &&
-          typeof i.pull_id === "string" &&
+          typeof i.pull_id === 'string' &&
           i.card &&
-          typeof i.card.name === "string" &&
+          typeof i.card.name === 'string' &&
           Number.isFinite(i.buyback?.amount),
       )
       .map((i) => ({
@@ -131,7 +131,7 @@ export async function getVault(): Promise<VaultResult> {
       balance: Number.isFinite(balance) ? balance : 0,
     };
   } catch (error) {
-    logger.error("[vault] load failed:", error);
+    logger.error('[vault] load failed:', error);
     return {
       ok: false,
       error: friendlyError(error),
@@ -148,12 +148,12 @@ export async function getCreditBalance(): Promise<number | null> {
   if (!token) return null;
   try {
     const { balance } = await sdk.client.fetch<{ balance: number }>(
-      "/store/credits",
-      { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" },
+      '/store/credits',
+      { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' },
     );
     return Number.isFinite(balance) ? balance : null;
   } catch (error) {
-    logger.error("[vault] balance read failed:", error);
+    logger.error('[vault] balance read failed:', error);
     return null;
   }
 }
@@ -167,20 +167,20 @@ export type TopUpActionResult =
 // backend re-validates it (the gateway declines amounts ending in .13).
 export async function topUpCredits(amount: number): Promise<TopUpActionResult> {
   // Validate at the boundary — a server action is a public endpoint.
-  if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0) {
-    return { ok: false, error: "Enter a valid amount." };
+  if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
+    return { ok: false, error: 'Enter a valid amount.' };
   }
 
   const token = await getAuthToken();
   if (!token) {
-    return { ok: false, error: "Please log in first.", needsAuth: true };
+    return { ok: false, error: 'Please log in first.', needsAuth: true };
   }
 
   try {
     const res = await sdk.client.fetch<{ amount: number; balance: number }>(
-      "/store/credits/topup",
+      '/store/credits/topup',
       {
-        method: "POST",
+        method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
         body: { amount },
       },
@@ -189,12 +189,12 @@ export async function topUpCredits(amount: number): Promise<TopUpActionResult> {
     if (!Number.isFinite(res.amount) || !Number.isFinite(res.balance)) {
       return {
         ok: false,
-        error: "Got an unexpected response. Please try again.",
+        error: 'Got an unexpected response. Please try again.',
       };
     }
     return { ok: true, amount: res.amount, balance: res.balance };
   } catch (error) {
-    logger.error("[vault] top-up failed:", error);
+    logger.error('[vault] top-up failed:', error);
     return {
       ok: false,
       error: friendlyError(error),
@@ -207,13 +207,13 @@ export async function topUpCredits(amount: number): Promise<TopUpActionResult> {
 // once-per-pull at the database level.
 export async function sellBackPull(pullId: string): Promise<SellBackResult> {
   // Validate at the boundary — a server action is a public endpoint.
-  if (typeof pullId !== "string" || pullId.trim() === "") {
-    return { ok: false, error: "Invalid card." };
+  if (typeof pullId !== 'string' || pullId.trim() === '') {
+    return { ok: false, error: 'Invalid card.' };
   }
 
   const token = await getAuthToken();
   if (!token) {
-    return { ok: false, error: "Please log in first.", needsAuth: true };
+    return { ok: false, error: 'Please log in first.', needsAuth: true };
   }
 
   try {
@@ -222,7 +222,7 @@ export async function sellBackPull(pullId: string): Promise<SellBackResult> {
       percent: number;
       balance: number;
     }>(`/store/vault/${encodeURIComponent(pullId)}/buyback`, {
-      method: "POST",
+      method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
       body: {},
     });
@@ -230,7 +230,7 @@ export async function sellBackPull(pullId: string): Promise<SellBackResult> {
     if (!Number.isFinite(res.amount) || !Number.isFinite(res.balance)) {
       return {
         ok: false,
-        error: "Got an unexpected response. Please try again.",
+        error: 'Got an unexpected response. Please try again.',
       };
     }
     return {

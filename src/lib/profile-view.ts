@@ -4,8 +4,8 @@
  * (unknown handles / backend down), so `ProfileClient` stays purely
  * presentational and pixel-identical across the two.
  */
-import type { MockUser } from "@/lib/mock/users";
-import type { PublicProfile } from "@/lib/data/profiles";
+import type { MockUser } from '@/lib/mock/users';
+import type { PublicProfile } from '@/lib/data/profiles';
 
 export interface ProfileViewCard {
   id: string;
@@ -46,9 +46,9 @@ export const avatarForSeed = (seed: number): string =>
 /** Coarse relative time for the activity feed ("3h ago", "2d ago"). */
 export function timeAgo(iso: string, now: Date = new Date()): string {
   const ms = now.getTime() - new Date(iso).getTime();
-  if (!Number.isFinite(ms) || ms < 0) return "just now";
+  if (!Number.isFinite(ms) || ms < 0) return 'just now';
   const minutes = Math.floor(ms / 60_000);
-  if (minutes < 1) return "just now";
+  if (minutes < 1) return 'just now';
   if (minutes < 60) return `${minutes}m ago`;
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}h ago`;
@@ -60,7 +60,7 @@ export function timeAgo(iso: string, now: Date = new Date()): string {
 /** Join year for "Collecting since {year}" — "—" for an unparsable date. */
 function joinedYear(iso: string): string {
   const year = new Date(iso).getFullYear();
-  return Number.isFinite(year) ? String(year) : "—";
+  return Number.isFinite(year) ? String(year) : '—';
 }
 
 /** Real backend profile → the view the page renders. */
@@ -83,7 +83,7 @@ export function toProfileView(profile: PublicProfile): ProfileViewUser {
     joined: joinedYear(profile.joined_at),
     collection: cards,
     activity: profile.recent.map((p, i) => ({
-      verb: "pulled",
+      verb: 'pulled',
       time: timeAgo(p.rolled_at),
       card: cards[i],
     })),

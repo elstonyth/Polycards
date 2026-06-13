@@ -1,7 +1,7 @@
-"use client";
+'use client';
 
-import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
+import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import {
   ArrowLeft,
   ArrowRight,
@@ -12,17 +12,17 @@ import {
   Minus,
   Play,
   Plus,
-} from "lucide-react";
-import { cn } from "@/lib/utils";
-import { usd } from "@/lib/format";
-import { usePrefersReducedMotion } from "@/lib/use-reveal";
-import { useAuth } from "@/components/auth/AuthProvider";
-import { openAuth } from "@/components/AuthButton";
-import Reveal from "@/components/Reveal";
-import type { PackDetail, RecentPull } from "@/lib/data/packs";
-import { demoDraw } from "@/lib/demo-spin";
-import { openPack } from "@/lib/actions/packs";
-import { getCreditBalance, sellBackPull } from "@/lib/actions/vault";
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { usd } from '@/lib/format';
+import { usePrefersReducedMotion } from '@/lib/use-reveal';
+import { useAuth } from '@/components/auth/AuthProvider';
+import { openAuth } from '@/components/AuthButton';
+import Reveal from '@/components/Reveal';
+import type { PackDetail, RecentPull } from '@/lib/data/packs';
+import { demoDraw } from '@/lib/demo-spin';
+import { openPack } from '@/lib/actions/packs';
+import { getCreditBalance, sellBackPull } from '@/lib/actions/vault';
 import {
   type Pack,
   type ResolvedPack,
@@ -32,15 +32,15 @@ import {
   ODDS,
   clawMachine,
   priceNumber,
-} from "../packs-data";
-import PackOpenOverlay from "./PackOpenOverlay";
+} from '../packs-data';
+import PackOpenOverlay from './PackOpenOverlay';
 
-const RARITY_RING: Record<PackCard["rarity"], string> = {
-  Legendary: "234, 179, 8",
-  Epic: "217, 70, 239",
-  Rare: "56, 189, 248",
-  Uncommon: "52, 211, 153",
-  Common: "163, 163, 163",
+const RARITY_RING: Record<PackCard['rarity'], string> = {
+  Legendary: '234, 179, 8',
+  Epic: '217, 70, 239',
+  Rare: '56, 189, 248',
+  Uncommon: '52, 211, 153',
+  Common: '163, 163, 163',
 };
 
 function CardThumb({ card, w }: { card: PackCard; w?: number }) {
@@ -172,7 +172,7 @@ export default function PackDetailClient({
   async function handleOpenPack() {
     if (opening) return;
     if (!customer) {
-      openAuth("login");
+      openAuth('login');
       return;
     }
     setOpenError(null);
@@ -181,7 +181,7 @@ export default function PackDetailClient({
     try {
       const res = await openPack(active.id);
       if (!res.ok) {
-        if (res.needsAuth) openAuth("login");
+        if (res.needsAuth) openAuth('login');
         else {
           setOpenError(res.error);
           setNeedsTopUp(res.needsTopUp === true);
@@ -205,7 +205,7 @@ export default function PackDetailClient({
         rarity: res.card.rarity,
         packName: active.name,
         packIcon: active.image,
-        agoLabel: "just now",
+        agoLabel: 'just now',
       };
       setRecent((prev) => [justPulled, ...prev].slice(0, 12));
     } finally {
@@ -334,10 +334,10 @@ export default function PackDetailClient({
                           reset();
                         }}
                         className={cn(
-                          "flex flex-col items-center gap-1 rounded-xl border px-2 py-2.5 text-center transition-colors",
+                          'flex flex-col items-center gap-1 rounded-xl border px-2 py-2.5 text-center transition-colors',
                           selected
-                            ? "border-white/40 bg-white/10"
-                            : "border-white/10 bg-white/[0.03] hover:border-white/20 hover:bg-white/[0.06]",
+                            ? 'border-white/40 bg-white/10'
+                            : 'border-white/10 bg-white/[0.03] hover:border-white/20 hover:bg-white/[0.06]',
                         )}
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -348,7 +348,7 @@ export default function PackDetailClient({
                           className="h-10 w-auto object-contain"
                         />
                         <span className="text-[11px] font-medium leading-tight text-white">
-                          {p.name.replace(" Pack", "")}
+                          {p.name.replace(' Pack', '')}
                         </span>
                         <span className="text-[11px] font-semibold text-white/55">
                           {p.price}
@@ -366,7 +366,7 @@ export default function PackDetailClient({
                   <Info className="h-3.5 w-3.5 text-white/30" aria-hidden />
                 </span>
                 <span className="text-sm font-semibold text-white">
-                  ${ev.toLocaleString("en-US")}
+                  ${ev.toLocaleString('en-US')}
                   <span className="ml-1 text-[11px] font-normal text-white/40">
                     per pack
                   </span>
@@ -399,7 +399,7 @@ export default function PackDetailClient({
                   <Minus className="h-4 w-4" aria-hidden />
                 </button>
                 <span className="flex h-10 flex-1 items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] text-sm font-medium tabular-nums text-white">
-                  {qty} {qty === 1 ? "Pack" : "Packs"}
+                  {qty} {qty === 1 ? 'Pack' : 'Packs'}
                 </span>
                 <button
                   type="button"
@@ -429,16 +429,16 @@ export default function PackDetailClient({
               >
                 <span className="flex items-center gap-2">
                   {opening
-                    ? "Opening…"
+                    ? 'Opening…'
                     : customer
-                      ? "Open Pack"
-                      : "Log in to open"}
+                      ? 'Open Pack'
+                      : 'Log in to open'}
                   <span className="rounded-md bg-black/20 px-1.5 py-0.5 text-[11px] font-semibold">
-                    +{points.toLocaleString("en-US")} pts
+                    +{points.toLocaleString('en-US')} pts
                   </span>
                 </span>
                 <span className="flex items-center gap-1.5">
-                  ${(priceNum * qty).toLocaleString("en-US")}
+                  ${(priceNum * qty).toLocaleString('en-US')}
                   <ArrowRight className="h-4 w-4" aria-hidden />
                 </span>
               </button>
@@ -450,7 +450,7 @@ export default function PackDetailClient({
                   {openError}
                   {needsTopUp && (
                     <>
-                      {" "}
+                      {' '}
                       <Link
                         href="/vault"
                         className="font-bold text-emerald-300 underline underline-offset-2 hover:text-emerald-200"
@@ -469,11 +469,11 @@ export default function PackDetailClient({
                 {customer && balance !== null ? (
                   <>
                     Each open costs {usd(priceNum)} in site credits — your
-                    balance:{" "}
+                    balance:{' '}
                     <span
                       className={cn(
-                        "font-bold",
-                        balance < priceNum ? "text-red-300" : "text-white/70",
+                        'font-bold',
+                        balance < priceNum ? 'text-red-300' : 'text-white/70',
                       )}
                     >
                       {usd(balance)}
@@ -506,7 +506,7 @@ export default function PackDetailClient({
                 className="flex items-center justify-between border-b border-white/5 px-4 py-3 last:border-b-0"
               >
                 <span className="flex items-center gap-2.5 text-[13px] font-medium text-white">
-                  <span className={cn("h-2.5 w-2.5 rounded-full", o.dot)} />
+                  <span className={cn('h-2.5 w-2.5 rounded-full', o.dot)} />
                   {o.rarity}
                 </span>
                 <span className="text-[13px] tabular-nums text-white/55">
@@ -590,7 +590,7 @@ export default function PackDetailClient({
           onOpenAnother={reveal.isReal ? handleOpenPack : demoSpin}
           // Anonymous demo spins swap keep/sell for the sign-up conversion CTA.
           onSignUp={
-            !reveal.isReal && !customer ? () => openAuth("signup") : null
+            !reveal.isReal && !customer ? () => openAuth('signup') : null
           }
         />
       )}

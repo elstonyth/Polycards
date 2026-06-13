@@ -28,12 +28,12 @@ export const META_PILL_DELAY = 2.6;
 export const META_AUTO_ADVANCE_MS = 3600; // live flips to the card at ≈3.6s
 
 /** hero carousel: ~650ms ease-out slides, theme swap every ≈4.5s */
-export const HERO_SLIDE = { duration: 0.65, ease: "easeOut" } as const;
+export const HERO_SLIDE = { duration: 0.65, ease: 'easeOut' } as const;
 export const HERO_ROTATE_MS = 4500;
 
 /** cylinder release spring — soft enough to carry release velocity (fling) */
 export const CYL_SPRING = {
-  type: "spring",
+  type: 'spring',
   stiffness: 170,
   damping: 26,
 } as const;

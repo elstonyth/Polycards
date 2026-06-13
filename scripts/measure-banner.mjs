@@ -1,20 +1,20 @@
 // Detect the baked-in "phygitals" wordmark bbox + local banner (cream) & brand
 // (purple) colors in claw-machine renders. Loads images SAME-ORIGIN from the running
 // server so the canvas isn't tainted. Reports bbox as % of the 1440x1000 image.
-import { chromium } from "playwright";
+import { chromium } from 'playwright';
 
 const machines = [
-  "mythic-pack",
-  "legend-pack",
-  "elite-pack",
-  "rookie-pack",
-  "diamond-pack",
+  'mythic-pack',
+  'legend-pack',
+  'elite-pack',
+  'rookie-pack',
+  'diamond-pack',
 ];
 
 const browser = await chromium.launch();
 const page = await browser.newPage();
-await page.goto("http://localhost:4000/", {
-  waitUntil: "domcontentloaded",
+await page.goto('http://localhost:4000/', {
+  waitUntil: 'domcontentloaded',
   timeout: 30000,
 });
 
@@ -23,7 +23,7 @@ const res = await page.evaluate(async (machines) => {
     new Promise((ok, no) => {
       const im = new Image();
       im.onload = () => ok(im);
-      im.onerror = () => no(new Error("load " + src));
+      im.onerror = () => no(new Error('load ' + src));
       im.src = src;
     });
   const out = {};
@@ -31,24 +31,24 @@ const res = await page.evaluate(async (machines) => {
     try {
       const ext =
         [
-          "mythic-pack",
-          "legend-pack",
-          "elite-pack",
-          "rookie-pack",
-          "trainer-pack",
+          'mythic-pack',
+          'legend-pack',
+          'elite-pack',
+          'rookie-pack',
+          'trainer-pack',
         ].includes(b) || true
-          ? "avif"
-          : "webp";
+          ? 'avif'
+          : 'webp';
       let img;
       try {
         img = await load(`/images/claw/${b}-machine.avif`);
       } catch {
         img = await load(`/images/claw/${b}-machine.webp`);
       }
-      const cv = document.createElement("canvas");
+      const cv = document.createElement('canvas');
       cv.width = 1440;
       cv.height = 1000;
-      const ctx = cv.getContext("2d");
+      const ctx = cv.getContext('2d');
       ctx.drawImage(img, 0, 0, 1440, 1000);
       const data = ctx.getImageData(0, 0, 1440, 1000).data;
       const at = (x, y) => {
@@ -101,13 +101,13 @@ const res = await page.evaluate(async (machines) => {
               cx: +(((minX + maxX) / 2 / 1440) * 100).toFixed(1),
               pxCount: pc,
             }
-          : "none",
+          : 'none',
         purple: pc
           ? `rgb(${Math.round(pr / pc)},${Math.round(pg / pc)},${Math.round(pb / pc)})`
-          : "-",
+          : '-',
         cream: cc
           ? `rgb(${Math.round(cr / cc)},${Math.round(cg / cc)},${Math.round(cb / cc)})`
-          : "-",
+          : '-',
       };
     } catch (e) {
       out[b] = { error: e.message };

@@ -8,33 +8,33 @@
 // scroll container to force lazy renders, then takes a TALL-VIEWPORT
 // (viewport-only) screenshot sized to the content height — full content for
 // live AND clone at 390/1440. 3840 stays viewport-only (token cost cap).
-import { chromium } from "playwright";
-import { writeFileSync, mkdirSync } from "node:fs";
+import { chromium } from 'playwright';
+import { writeFileSync, mkdirSync } from 'node:fs';
 
-const LIVE = "https://www.phygitals.com";
-const CLONE = "http://localhost:4000";
-const OUT = "docs/research/audit/shots";
+const LIVE = 'https://www.phygitals.com';
+const CLONE = 'http://localhost:4000';
+const OUT = 'docs/research/audit/shots';
 const UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 
 const ROUTES = [
-  "/contact",
-  "/series",
-  "/30th",
-  "/free",
-  "/lucky-draw",
-  "/roulette",
-  "/clawmaker",
-  "/airdrop",
-  "/social",
-  "/orders",
-  "/messages",
-  "/earnings",
-  "/referrals",
-  "/pokecoin",
-  "/nbacoin",
-  "/accelerate-claim",
-  "/pokemon/generation/1",
+  '/contact',
+  '/series',
+  '/30th',
+  '/free',
+  '/lucky-draw',
+  '/roulette',
+  '/clawmaker',
+  '/airdrop',
+  '/social',
+  '/orders',
+  '/messages',
+  '/earnings',
+  '/referrals',
+  '/pokecoin',
+  '/nbacoin',
+  '/accelerate-claim',
+  '/pokemon/generation/1',
 ];
 
 // [width, fullContent?]
@@ -45,7 +45,7 @@ const WIDTHS = [
 ];
 const MAX_VIEWPORT_H = 12_000; // playwright handles tall viewports headless
 
-const slug = (p) => p.replace(/^\//, "").replace(/\//g, "_");
+const slug = (p) => p.replace(/^\//, '').replace(/\//g, '_');
 
 // Scroll whichever container actually scrolls (live: main.overflow-y-auto;
 // clone: the window) to trigger lazy renders, then return content height.
@@ -55,7 +55,7 @@ const slug = (p) => p.replace(/^\//, "").replace(/\//g, "_");
 async function scrollAndMeasure(page) {
   const evaluated = page
     .evaluate(async () => {
-      const main = document.querySelector("main");
+      const main = document.querySelector('main');
       const el =
         main && main.scrollHeight > main.clientHeight + 50
           ? main
@@ -103,15 +103,15 @@ async function run(site, base, path) {
   try {
     // networkidle never fires on the live SPA — fixed render wait instead.
     await page
-      .goto(base + path, { waitUntil: "domcontentloaded", timeout: 60_000 })
-      .catch((e) => rec.errors.push("goto:" + e.message.slice(0, 50)));
-    await page.waitForTimeout(site === "live" ? 8000 : 2500);
+      .goto(base + path, { waitUntil: 'domcontentloaded', timeout: 60_000 })
+      .catch((e) => rec.errors.push('goto:' + e.message.slice(0, 50)));
+    await page.waitForTimeout(site === 'live' ? 8000 : 2500);
     for (const [w, fullContent] of WIDTHS) {
       await page.setViewportSize({
         width: w,
         height: fullContent ? 900 : 2160,
       });
-      await page.waitForTimeout(site === "live" ? 1500 : 500);
+      await page.waitForTimeout(site === 'live' ? 1500 : 500);
       if (fullContent) {
         const h = await scrollAndMeasure(page);
         rec.heights[w] = h;
@@ -119,16 +119,16 @@ async function run(site, base, path) {
           width: w,
           height: Math.min(Math.max(h, 900), MAX_VIEWPORT_H),
         });
-        await page.waitForTimeout(site === "live" ? 1200 : 400);
+        await page.waitForTimeout(site === 'live' ? 1200 : 400);
       }
       const file = `${dir}/${site}-${w}.png`;
       await page
         .screenshot({ path: file, fullPage: false })
-        .catch(() => rec.errors.push("shot" + w));
+        .catch(() => rec.errors.push('shot' + w));
       rec.files[w] = file;
     }
   } catch (e) {
-    rec.errors.push("fatal:" + String(e.message || e).slice(0, 60));
+    rec.errors.push('fatal:' + String(e.message || e).slice(0, 60));
   } finally {
     await ctx.close();
   }
@@ -136,8 +136,8 @@ async function run(site, base, path) {
   console.log(
     `${site.padEnd(5)} ${path.padEnd(24)} ${
       rec.errors.length
-        ? "ERR " + rec.errors.join("|")
-        : "ok h=" + JSON.stringify(rec.heights)
+        ? 'ERR ' + rec.errors.join('|')
+        : 'ok h=' + JSON.stringify(rec.heights)
     }`,
   );
 }
@@ -146,18 +146,18 @@ async function run(site, base, path) {
 // (leading slash optional — Git Bash on Windows rewrites "/x" env values
 // into MSYS paths, so pass routes without it there)
 const onlyRoutes = process.env.ONLY
-  ? process.env.ONLY.split(",").map((r) => {
-      const clean = r.replace(/^[A-Za-z]:[\\/].*?(?=[^\\/]*$)/, "").trim();
-      return clean.startsWith("/") ? clean : "/" + clean;
+  ? process.env.ONLY.split(',').map((r) => {
+      const clean = r.replace(/^[A-Za-z]:[\\/].*?(?=[^\\/]*$)/, '').trim();
+      return clean.startsWith('/') ? clean : '/' + clean;
     })
   : null;
 const onlySite = process.env.SITE || null;
 const routes = onlyRoutes ?? ROUTES;
 const jobs = [];
-if (!onlySite || onlySite === "clone")
-  for (const p of routes) jobs.push(["clone", CLONE, p]);
-if (!onlySite || onlySite === "live")
-  for (const p of routes) jobs.push(["live", LIVE, p]);
+if (!onlySite || onlySite === 'clone')
+  for (const p of routes) jobs.push(['clone', CLONE, p]);
+if (!onlySite || onlySite === 'live')
+  for (const p of routes) jobs.push(['live', LIVE, p]);
 const q = [...jobs];
 async function worker() {
   while (q.length) {
@@ -169,7 +169,7 @@ await Promise.all([worker(), worker()]);
 await browser.close();
 // Partial reruns must not clobber the full manifest.
 const manifestFile = onlyRoutes
-  ? "docs/research/audit/manifest-wave2-partial.json"
-  : "docs/research/audit/manifest-wave2.json";
+  ? 'docs/research/audit/manifest-wave2-partial.json'
+  : 'docs/research/audit/manifest-wave2.json';
 writeFileSync(manifestFile, JSON.stringify(manifest, null, 2));
 console.log(`\nCaptured ${manifest.length} site×route jobs → ${manifestFile}`);

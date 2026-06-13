@@ -1,15 +1,15 @@
 // Compare baked rookie banner vs the clean original (avif) at the same crop+grid,
 // to see the dark edge streaks and where they came from.
-import { chromium } from "playwright";
-import { resolve } from "node:path";
-import { writeFileSync } from "node:fs";
+import { chromium } from 'playwright';
+import { resolve } from 'node:path';
+import { writeFileSync } from 'node:fs';
 
-const FILES = ["rookie-pack-machine.webp", "rookie-pack-machine.avif"]; // baked, original
+const FILES = ['rookie-pack-machine.webp', 'rookie-pack-machine.avif']; // baked, original
 const DW = 1100,
   TOP = 0.1,
   FRAC = 0.22;
 const grid = (dispH) => {
-  let s = "";
+  let s = '';
   for (let p = 0; p <= 100; p += 2.5) {
     const major = p % 10 === 0;
     s += `<div style="position:absolute;left:${p}%;top:0;bottom:0;width:1px;background:rgba(0,255,255,${major ? 0.7 : 0.25})"></div>`;
@@ -26,9 +26,9 @@ const cells = FILES.map((f) => {
   const dispH = DW * (1000 / 1440),
     ch = Math.round(dispH * FRAC);
   return `<div style="margin:6px"><div style="font:13px monospace;color:#fff">${f}</div><div style="position:relative;width:${DW}px;height:${ch}px;overflow:hidden;background:#222"><img src="../../../public/images/claw/${f}" style="position:absolute;width:${DW}px;top:${-Math.round(dispH * TOP)}px"/>${grid(dispH)}</div></div>`;
-}).join("");
+}).join('');
 writeFileSync(
-  "docs/research/packdetail/rookie-compare.html",
+  'docs/research/packdetail/rookie-compare.html',
   `<!doctype html><body style="margin:0;background:#111">${cells}</body>`,
 );
 
@@ -38,14 +38,14 @@ const page = await browser.newPage({
   deviceScaleFactor: 1.6,
 });
 await page.goto(
-  "file:///" +
-    resolve("docs/research/packdetail/rookie-compare.html").replace(/\\/g, "/"),
-  { waitUntil: "load" },
+  'file:///' +
+    resolve('docs/research/packdetail/rookie-compare.html').replace(/\\/g, '/'),
+  { waitUntil: 'load' },
 );
 await page.waitForTimeout(1000);
 await page.screenshot({
-  path: "docs/research/packdetail/rookie-compare.png",
+  path: 'docs/research/packdetail/rookie-compare.png',
   fullPage: true,
 });
 await browser.close();
-console.log("rendered");
+console.log('rendered');

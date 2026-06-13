@@ -1,12 +1,12 @@
-"use client";
+'use client';
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
-import { createPortal } from "react-dom";
-import { ArrowRight, HelpCircle, Globe, DollarSign, X } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { createPortal } from 'react-dom';
+import { ArrowRight, HelpCircle, Globe, DollarSign, X } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
-type Variant = "packs" | "buyback" | "ships";
+type Variant = 'packs' | 'buyback' | 'ships';
 
 /**
  * The footer "info pill" on each How It Works step card. Matches the live site:
@@ -28,12 +28,12 @@ export default function StepInfoPill({
   // lock scroll + close on Escape while the modal is open
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    document.addEventListener("keydown", onKey);
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('keydown', onKey);
     const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    document.body.style.overflow = 'hidden';
     return () => {
-      document.removeEventListener("keydown", onKey);
+      document.removeEventListener('keydown', onKey);
       document.body.style.overflow = prev;
     };
   }, [open]);
@@ -48,15 +48,15 @@ export default function StepInfoPill({
   );
 
   const base =
-    "mt-auto flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 transition-colors duration-300";
+    'mt-auto flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 transition-colors duration-300';
 
-  if (variant === "packs") {
+  if (variant === 'packs') {
     return (
       <Link
         href="/claw"
         className={cn(
           base,
-          "group/pill hover:border-white/20 hover:bg-white/[0.07]",
+          'group/pill hover:border-white/20 hover:bg-white/[0.07]',
         )}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -75,7 +75,7 @@ export default function StepInfoPill({
     );
   }
 
-  if (variant === "ships") {
+  if (variant === 'ships') {
     return (
       <div className={base}>
         <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/10">

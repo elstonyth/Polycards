@@ -1,64 +1,64 @@
-import type { Metadata } from "next";
-import Link from "next/link";
-import { Library, ArrowUpRight } from "lucide-react";
-import Reveal from "@/components/Reveal";
-import { features } from "@/lib/features";
+import type { Metadata } from 'next';
+import Link from 'next/link';
+import { Library, ArrowUpRight } from 'lucide-react';
+import Reveal from '@/components/Reveal';
+import { features } from '@/lib/features';
 
 export const metadata: Metadata = {
-  title: "Series — Pokenic",
-  description: "Browse collectible card series and sets available on Pokenic.",
+  title: 'Series — Pokenic',
+  description: 'Browse collectible card series and sets available on Pokenic.',
 };
 
 // Mock series tiles (layout only — real set catalog comes from the backend).
 type Series = { name: string; sub: string; image: string; count: string };
 const SERIES: Series[] = [
   {
-    name: "Scarlet & Violet 151",
-    sub: "Pokémon",
-    image: "/home/hero/slabs/pokemon1.webp",
-    count: "207 cards",
+    name: 'Scarlet & Violet 151',
+    sub: 'Pokémon',
+    image: '/home/hero/slabs/pokemon1.webp',
+    count: '207 cards',
   },
   {
-    name: "Crown Zenith",
-    sub: "Pokémon",
-    image: "/home/hero/slabs/pokemon3.webp",
-    count: "159 cards",
+    name: 'Crown Zenith',
+    sub: 'Pokémon',
+    image: '/home/hero/slabs/pokemon3.webp',
+    count: '159 cards',
   },
   {
-    name: "Romance Dawn",
-    sub: "One Piece",
-    image: "/home/hero/slabs/onepiece2.webp",
-    count: "121 cards",
+    name: 'Romance Dawn',
+    sub: 'One Piece',
+    image: '/home/hero/slabs/onepiece2.webp',
+    count: '121 cards',
   },
   {
-    name: "Wings of the Captain",
-    sub: "One Piece",
-    image: "/home/hero/slabs/onepiece4.webp",
-    count: "112 cards",
+    name: 'Wings of the Captain',
+    sub: 'One Piece',
+    image: '/home/hero/slabs/onepiece4.webp',
+    count: '112 cards',
   },
   {
-    name: "Prizm Basketball",
-    sub: "Basketball",
-    image: "/home/hero/slabs/basketball1.webp",
-    count: "300 cards",
+    name: 'Prizm Basketball',
+    sub: 'Basketball',
+    image: '/home/hero/slabs/basketball1.webp',
+    count: '300 cards',
   },
   {
-    name: "Select Football",
-    sub: "Football",
-    image: "/home/hero/slabs/football1.webp",
-    count: "400 cards",
+    name: 'Select Football',
+    sub: 'Football',
+    image: '/home/hero/slabs/football1.webp',
+    count: '400 cards',
   },
   {
-    name: "Topps Chrome",
-    sub: "Baseball",
-    image: "/home/hero/slabs/baseball1.webp",
-    count: "220 cards",
+    name: 'Topps Chrome',
+    sub: 'Baseball',
+    image: '/home/hero/slabs/baseball1.webp',
+    count: '220 cards',
   },
   {
-    name: "25th Anniversary",
-    sub: "Yu-Gi-Oh!",
-    image: "/home/hero/slabs/yugioh1.webp",
-    count: "156 cards",
+    name: '25th Anniversary',
+    sub: 'Yu-Gi-Oh!',
+    image: '/home/hero/slabs/yugioh1.webp',
+    count: '156 cards',
   },
 ];
 
@@ -81,7 +81,7 @@ export default function SeriesPage() {
         {SERIES.map((s, i) => (
           <Reveal key={s.name} delay={Math.min(i, 8) * 60} className="h-full">
             <Link
-              href={features.marketplace ? "/marketplace" : "/claw"}
+              href={features.marketplace ? '/marketplace' : '/claw'}
               aria-label={`${s.name} — ${s.count}`}
               className="group relative flex h-full items-center gap-4 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] p-4 transition-all duration-300 hover:-translate-y-1 hover:border-white/20 hover:bg-white/[0.06]"
             >

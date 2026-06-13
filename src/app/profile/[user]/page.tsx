@@ -1,8 +1,8 @@
-import type { Metadata } from "next";
-import { userOrGeneric } from "@/lib/mock/users";
-import { getPublicProfile } from "@/lib/data/profiles";
-import { mockProfileView, toProfileView } from "@/lib/profile-view";
-import ProfileClient from "./ProfileClient";
+import type { Metadata } from 'next';
+import { userOrGeneric } from '@/lib/mock/users';
+import { getPublicProfile } from '@/lib/data/profiles';
+import { mockProfileView, toProfileView } from '@/lib/profile-view';
+import ProfileClient from './ProfileClient';
 
 // Real public profiles (Task B): the param is a collector handle resolved via
 // GET /store/profiles/:handle (safe-public subset, no PII). Unknown handles —

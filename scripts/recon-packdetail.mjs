@@ -1,12 +1,12 @@
 // Recon the live phygitals pack-detail page (/claw/mythic-pack). Identify the
 // claw-machine media (video / canvas / iframe / Spline) and dump the right control
 // panel's structure + content so we can rebuild it faithfully.
-import { chromium } from "playwright";
-import { mkdirSync } from "node:fs";
+import { chromium } from 'playwright';
+import { mkdirSync } from 'node:fs';
 
-mkdirSync("docs/research/packdetail", { recursive: true });
+mkdirSync('docs/research/packdetail', { recursive: true });
 const URL =
-  "https://www.phygitals.com/claw/mythic-pack?quantity=1&autoOpen=true";
+  'https://www.phygitals.com/claw/mythic-pack?quantity=1&autoOpen=true';
 
 const browser = await chromium.launch();
 const ctx = await browser.newContext({
@@ -17,7 +17,7 @@ const page = await ctx.newPage();
 
 // collect network media requests (videos, 3d, lottie json)
 const media = [];
-page.on("response", (r) => {
+page.on('response', (r) => {
   const u = r.url();
   if (/\.(mp4|webm|mov|m4v|json|glb|gltf|splinecode|lottie|riv)(\?|$)/i.test(u))
     media.push({
@@ -27,7 +27,7 @@ page.on("response", (r) => {
     });
 });
 
-await page.goto(URL, { waitUntil: "domcontentloaded", timeout: 60000 });
+await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
 for (let i = 0; i < 30; i++) {
   const r = await page
     .evaluate(() => document.images.length > 3)
@@ -47,29 +47,29 @@ const info = await page.evaluate(() => {
       h: Math.round(r.height),
     };
   };
-  const videos = [...document.querySelectorAll("video")].map((v) => ({
-    src: v.currentSrc || v.src || v.querySelector("source")?.src || null,
+  const videos = [...document.querySelectorAll('video')].map((v) => ({
+    src: v.currentSrc || v.src || v.querySelector('source')?.src || null,
     poster: v.poster || null,
     autoplay: v.autoplay,
     loop: v.loop,
     muted: v.muted,
     rect: rct(v),
   }));
-  const canvases = [...document.querySelectorAll("canvas")].map((c) => ({
+  const canvases = [...document.querySelectorAll('canvas')].map((c) => ({
     rect: rct(c),
     w: c.width,
     h: c.height,
   }));
-  const iframes = [...document.querySelectorAll("iframe")].map((f) => ({
+  const iframes = [...document.querySelectorAll('iframe')].map((f) => ({
     src: f.src,
     rect: rct(f),
   }));
   // spline / 3d hints
   const splineEls = [
-    ...document.querySelectorAll("[class*=spline], spline-viewer, canvas"),
+    ...document.querySelectorAll('[class*=spline], spline-viewer, canvas'),
   ].length;
   // big left-panel media: largest element in left 65%
-  const bigImgs = [...document.querySelectorAll("img")]
+  const bigImgs = [...document.querySelectorAll('img')]
     .filter(
       (im) =>
         im.getBoundingClientRect().left < 950 &&
@@ -81,7 +81,7 @@ const info = await page.evaluate(() => {
 
   // Right panel = elements with left > 1150
   const rightTexts = [
-    ...document.querySelectorAll("button, h1, h2, h3, p, span, div"),
+    ...document.querySelectorAll('button, h1, h2, h3, p, span, div'),
   ]
     .filter((e) => {
       const r = e.getBoundingClientRect();
@@ -105,7 +105,7 @@ const info = await page.evaluate(() => {
   const seen = new Set();
   const right = [];
   for (const t of rightTexts) {
-    const k = t.text + "@" + t.y;
+    const k = t.text + '@' + t.y;
     if (!seen.has(k)) {
       seen.add(k);
       right.push(t);
@@ -115,15 +115,15 @@ const info = await page.evaluate(() => {
   return { videos, canvases, iframes, splineEls, bigImgs, right };
 });
 
-await page.screenshot({ path: "docs/research/packdetail/ORIG_full.png" });
+await page.screenshot({ path: 'docs/research/packdetail/ORIG_full.png' });
 await page.screenshot({
-  path: "docs/research/packdetail/ORIG_left.png",
+  path: 'docs/research/packdetail/ORIG_left.png',
   clip: { x: 270, y: 140, width: 900, height: 580 },
 });
 
-console.log("=== NETWORK MEDIA ===");
+console.log('=== NETWORK MEDIA ===');
 console.log(JSON.stringify(media.slice(0, 20), null, 2));
-console.log("\n=== DOM MEDIA + RIGHT PANEL ===");
+console.log('\n=== DOM MEDIA + RIGHT PANEL ===');
 console.log(JSON.stringify(info, null, 2));
 
 await browser.close();

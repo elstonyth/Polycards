@@ -1,8 +1,8 @@
-import { chromium } from "playwright";
+import { chromium } from 'playwright';
 const b = await chromium.launch();
 const p = await b.newPage({ viewport: { width: 1440, height: 900 } });
-await p.goto("https://www.phygitals.com/", {
-  waitUntil: "domcontentloaded",
+await p.goto('https://www.phygitals.com/', {
+  waitUntil: 'domcontentloaded',
   timeout: 60000,
 });
 for (let i = 0; i < 25; i++) {
@@ -11,20 +11,20 @@ for (let i = 0; i < 25; i++) {
 }
 await p.waitForTimeout(2500);
 const d = await p.evaluate(() => {
-  const h = [...document.querySelectorAll("h1,h2")].find((e) =>
-    e.textContent.includes("Rip packs"),
+  const h = [...document.querySelectorAll('h1,h2')].find((e) =>
+    e.textContent.includes('Rip packs'),
   );
-  const hero = h.closest("a") || h.parentElement.parentElement.parentElement;
+  const hero = h.closest('a') || h.parentElement.parentElement.parentElement;
   const hr = hero.getBoundingClientRect();
   // center pack (full opacity, biggest)
-  const packs = [...document.querySelectorAll("img")]
+  const packs = [...document.querySelectorAll('img')]
     .filter((im) => /ripped-packs/.test(im.src))
     .map((im) => {
       const r = im.getBoundingClientRect();
       let w = im.parentElement,
         wc = getComputedStyle(w),
         dep = 0;
-      while (w && dep < 4 && wc.opacity === "1") {
+      while (w && dep < 4 && wc.opacity === '1') {
         w = w.parentElement;
         wc = getComputedStyle(w);
         dep++;
@@ -44,14 +44,14 @@ const d = await p.evaluate(() => {
     centerPack: center,
   };
 });
-console.log("ORIGINAL:", JSON.stringify(d));
+console.log('ORIGINAL:', JSON.stringify(d));
 // pack bottom gap from hero bottom + pack height as % of hero height
 console.log(
-  "pack height % of hero:",
-  ((d.centerPack.h / d.heroH) * 100).toFixed(1) + "%",
+  'pack height % of hero:',
+  ((d.centerPack.h / d.heroH) * 100).toFixed(1) + '%',
 );
 console.log(
-  "gap pack-bottom to hero-bottom:",
-  d.heroBottom - d.centerPack.bottom + "px",
+  'gap pack-bottom to hero-bottom:',
+  d.heroBottom - d.centerPack.bottom + 'px',
 );
 await b.close();

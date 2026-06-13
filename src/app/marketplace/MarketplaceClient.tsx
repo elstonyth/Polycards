@@ -1,9 +1,9 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import Link from "next/link";
-import { cn } from "@/lib/utils";
-import Reveal from "@/components/Reveal";
+import { useState } from 'react';
+import Link from 'next/link';
+import { cn } from '@/lib/utils';
+import Reveal from '@/components/Reveal';
 import {
   Filter,
   X,
@@ -27,29 +27,29 @@ import {
   Languages,
   Trash2,
   type LucideIcon,
-} from "lucide-react";
-import type { MarketplaceCard, MarketplaceCategory } from "@/lib/data/products";
+} from 'lucide-react';
+import type { MarketplaceCard, MarketplaceCategory } from '@/lib/data/products';
 
 // Marketplace catalog data (cards + category tabs) now lives in the data seam,
 // passed in as props from the server page. See @/lib/data/products.
 type FilterGroup = { label: string; icon: LucideIcon; count?: number };
 const FILTER_GROUPS: FilterGroup[] = [
-  { label: "Platform", icon: Layers, count: 1 },
-  { label: "Category", icon: Asterisk, count: 1 },
-  { label: "Grade Type", icon: Star, count: 1 },
-  { label: "Price Range", icon: DollarSign },
-  { label: "FMV Range", icon: BarChart3 },
-  { label: "Card Type", icon: Flame },
-  { label: "Rarity", icon: Diamond },
-  { label: "Set", icon: BookMarked },
-  { label: "Grader", icon: Award },
-  { label: "Grade", icon: Medal },
-  { label: "Year", icon: Calendar },
-  { label: "Language", icon: Languages },
+  { label: 'Platform', icon: Layers, count: 1 },
+  { label: 'Category', icon: Asterisk, count: 1 },
+  { label: 'Grade Type', icon: Star, count: 1 },
+  { label: 'Price Range', icon: DollarSign },
+  { label: 'FMV Range', icon: BarChart3 },
+  { label: 'Card Type', icon: Flame },
+  { label: 'Rarity', icon: Diamond },
+  { label: 'Set', icon: BookMarked },
+  { label: 'Grader', icon: Award },
+  { label: 'Grade', icon: Medal },
+  { label: 'Year', icon: Calendar },
+  { label: 'Language', icon: Languages },
 ];
 
 const fmt = (n: number) =>
-  n.toLocaleString("en-US", {
+  n.toLocaleString('en-US', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
@@ -73,7 +73,7 @@ function FilterSidebar({
   return (
     // Left drawer on ALL breakpoints (opened by the toolbar "Filters" button) — the
     // live marketplace has no persistent sidebar at desktop widths, just a Filters panel.
-    <aside className={cn("fixed inset-0 z-40", open ? "block" : "hidden")}>
+    <aside className={cn('fixed inset-0 z-40', open ? 'block' : 'hidden')}>
       <button
         type="button"
         aria-label="Close filters"
@@ -106,10 +106,10 @@ function FilterSidebar({
             type="button"
             onClick={() => onBuyNow(true)}
             className={cn(
-              "rounded-lg py-1.5 text-xs font-semibold transition-colors",
+              'rounded-lg py-1.5 text-xs font-semibold transition-colors',
               buyNow
-                ? "bg-white/10 text-white"
-                : "text-white/45 hover:text-white/70",
+                ? 'bg-white/10 text-white'
+                : 'text-white/45 hover:text-white/70',
             )}
           >
             Buy Now
@@ -118,10 +118,10 @@ function FilterSidebar({
             type="button"
             onClick={() => onBuyNow(false)}
             className={cn(
-              "rounded-lg py-1.5 text-xs font-semibold transition-colors",
+              'rounded-lg py-1.5 text-xs font-semibold transition-colors',
               !buyNow
-                ? "bg-white/10 text-white"
-                : "text-white/45 hover:text-white/70",
+                ? 'bg-white/10 text-white'
+                : 'text-white/45 hover:text-white/70',
             )}
           >
             All
@@ -168,8 +168,8 @@ function FilterSidebar({
                   )}
                   <ChevronDown
                     className={cn(
-                      "h-4 w-4 text-white/40 transition-transform duration-200",
-                      isOpen && "rotate-180",
+                      'h-4 w-4 text-white/40 transition-transform duration-200',
+                      isOpen && 'rotate-180',
                     )}
                     aria-hidden
                   />
@@ -196,9 +196,9 @@ function MarketCard({ card }: { card: MarketplaceCard }) {
   return (
     <article
       className={cn(
-        "group/card h-full overflow-hidden rounded-2xl border border-white/10 bg-neutral-800",
-        "transition-all duration-300 ease-out",
-        "hover:-translate-y-1 hover:border-white/20 hover:shadow-xl hover:shadow-black/40",
+        'group/card h-full overflow-hidden rounded-2xl border border-white/10 bg-neutral-800',
+        'transition-all duration-300 ease-out',
+        'hover:-translate-y-1 hover:border-white/20 hover:shadow-xl hover:shadow-black/40',
       )}
     >
       {/* Image area on a dark radial pedestal */}
@@ -261,7 +261,7 @@ export default function MarketplaceClient({
   categories,
 }: MarketplaceClientProps) {
   const [activeCategory, setActiveCategory] = useState<string>(
-    categories[0]?.name ?? "",
+    categories[0]?.name ?? '',
   );
   const [buyNow, setBuyNow] = useState(true);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -290,10 +290,10 @@ export default function MarketplaceClient({
                   type="button"
                   onClick={() => setActiveCategory(cat.name)}
                   className={cn(
-                    "-mb-px flex shrink-0 items-center gap-2 border-b-2 px-3.5 py-2.5 text-sm font-medium transition-colors",
+                    '-mb-px flex shrink-0 items-center gap-2 border-b-2 px-3.5 py-2.5 text-sm font-medium transition-colors',
                     active
-                      ? "border-white text-white"
-                      : "border-transparent text-neutral-400 hover:text-white",
+                      ? 'border-white text-white'
+                      : 'border-transparent text-neutral-400 hover:text-white',
                   )}
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}

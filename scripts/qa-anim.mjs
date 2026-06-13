@@ -1,10 +1,10 @@
-import { chromium } from "playwright";
+import { chromium } from 'playwright';
 const b = await chromium.launch();
 
 async function testPage(url, label, sizes) {
   for (const [w, h] of sizes) {
     const p = await b.newPage({ viewport: { width: w, height: h } });
-    await p.goto(url, { waitUntil: "load", timeout: 60000 });
+    await p.goto(url, { waitUntil: 'load', timeout: 60000 });
     await p.waitForTimeout(700);
     // Find a Reveal element BELOW the fold (should still be opacity 0 on load)
     const before = await p.evaluate(() => {
@@ -30,7 +30,7 @@ async function testPage(url, label, sizes) {
       await new Promise((r) => setTimeout(r, 900));
     });
     const after = await p.evaluate(() => {
-      const stillHidden = [...document.querySelectorAll("*")].filter(
+      const stillHidden = [...document.querySelectorAll('*')].filter(
         (e) =>
           +getComputedStyle(e).opacity < 0.05 &&
           e.getBoundingClientRect().height > 20,
@@ -57,6 +57,6 @@ const sizes = [
   [2560, 1440],
   [3840, 2160],
 ];
-await testPage("http://localhost:4000/", "HOME", sizes);
-await testPage("http://localhost:4000/how-it-works", "HIW", sizes);
+await testPage('http://localhost:4000/', 'HOME', sizes);
+await testPage('http://localhost:4000/how-it-works', 'HIW', sizes);
 await b.close();

@@ -2,11 +2,11 @@
 // (below the ~70px header, above 700px) on the left. Report: largest-font heading
 // + per-line span color/gradient, the CTA button, any pill above the heading, and
 // EVERY image layer (foreground pack vs blurred bg) with opacity/filter/zIndex.
-import { chromium } from "playwright";
+import { chromium } from 'playwright';
 
 const SITES = [
-  ["https://www.phygitals.com/", "ORIG"],
-  ["http://localhost:4000/", "CLONE"],
+  ['https://www.phygitals.com/', 'ORIG'],
+  ['http://localhost:4000/', 'CLONE'],
 ];
 
 const EXTRACT = () => {
@@ -33,7 +33,7 @@ const EXTRACT = () => {
   // Heading = largest font-size text element in the band, left half.
   let heading = null,
     maxFs = 0;
-  for (const el of document.querySelectorAll("h1,h2,h3,div,span,p")) {
+  for (const el of document.querySelectorAll('h1,h2,h3,div,span,p')) {
     if (!inBand(el)) continue;
     const r = el.getBoundingClientRect();
     if (r.left > 760) continue;
@@ -42,10 +42,10 @@ const EXTRACT = () => {
       [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())
         ? el.textContent.trim()
         : [...el.children].every((c) =>
-              ["SPAN", "BR", "EM", "B"].includes(c.tagName),
+              ['SPAN', 'BR', 'EM', 'B'].includes(c.tagName),
             )
           ? el.textContent.trim()
-          : "";
+          : '';
     if (!txt || txt.length > 60) continue;
     const fs = parseFloat(getComputedStyle(el).fontSize);
     if (fs > maxFs) {
@@ -57,15 +57,15 @@ const EXTRACT = () => {
     ? {
         text: heading.textContent.trim().slice(0, 80),
         styles: cs(heading, [
-          "fontSize",
-          "fontWeight",
-          "fontFamily",
-          "lineHeight",
-          "letterSpacing",
-          "color",
-          "textTransform",
-          "backgroundImage",
-          "webkitTextFillColor",
+          'fontSize',
+          'fontWeight',
+          'fontFamily',
+          'lineHeight',
+          'letterSpacing',
+          'color',
+          'textTransform',
+          'backgroundImage',
+          'webkitTextFillColor',
         ]),
         rect: rct(heading),
         lines: [...heading.children].map((c) => ({
@@ -80,7 +80,7 @@ const EXTRACT = () => {
     : null;
 
   // CTA = button/link in band, left side, that looks like a button (bg or border or padding) — prefer text match.
-  const ctaCands = [...document.querySelectorAll("button, a")].filter((b) => {
+  const ctaCands = [...document.querySelectorAll('button, a')].filter((b) => {
     const r = b.getBoundingClientRect();
     return (
       r.top >= 80 &&
@@ -94,7 +94,7 @@ const EXTRACT = () => {
   const cta = ctaCands.sort((a, b) => {
     const score = (e) =>
       (/open pack|shop|explore|rip|pull|view/i.test(e.textContent) ? 100 : 0) +
-      (parseFloat(getComputedStyle(e).backgroundColor.split(",")[3] || "1") > 0
+      (parseFloat(getComputedStyle(e).backgroundColor.split(',')[3] || '1') > 0
         ? 10
         : 0);
     return score(b) - score(a);
@@ -103,14 +103,14 @@ const EXTRACT = () => {
     ? {
         text: cta.textContent.trim().slice(0, 30),
         styles: cs(cta, [
-          "backgroundColor",
-          "color",
-          "borderRadius",
-          "padding",
-          "fontSize",
-          "fontWeight",
-          "border",
-          "boxShadow",
+          'backgroundColor',
+          'color',
+          'borderRadius',
+          'padding',
+          'fontSize',
+          'fontWeight',
+          'border',
+          'boxShadow',
         ]),
         rect: rct(cta),
       }
@@ -119,7 +119,7 @@ const EXTRACT = () => {
   // Pill above heading
   const headTop = heading ? heading.getBoundingClientRect().top : 300;
   const pill =
-    [...document.querySelectorAll("*")]
+    [...document.querySelectorAll('*')]
       .filter((el) => {
         const r = el.getBoundingClientRect();
         const s = getComputedStyle(el);
@@ -142,30 +142,30 @@ const EXTRACT = () => {
       .map((el) => ({
         text: el.textContent.trim().slice(0, 40),
         styles: cs(el, [
-          "backgroundColor",
-          "color",
-          "borderRadius",
-          "padding",
-          "fontSize",
-          "border",
+          'backgroundColor',
+          'color',
+          'borderRadius',
+          'padding',
+          'fontSize',
+          'border',
         ]),
         rect: rct(el),
       }))[0] || null;
 
   // All image layers in band
-  const layers = [...document.querySelectorAll("img")]
+  const layers = [...document.querySelectorAll('img')]
     .filter(inBand)
     .map((im) => ({
-      src: (im.currentSrc || im.src).split("/").slice(-2).join("/"),
+      src: (im.currentSrc || im.src).split('/').slice(-2).join('/'),
       natural: { w: im.naturalWidth, h: im.naturalHeight },
       styles: cs(im, [
-        "objectFit",
-        "objectPosition",
-        "opacity",
-        "filter",
-        "zIndex",
-        "borderRadius",
-        "transform",
+        'objectFit',
+        'objectPosition',
+        'opacity',
+        'filter',
+        'zIndex',
+        'borderRadius',
+        'transform',
       ]),
       rect: rct(im),
     }))
@@ -183,7 +183,7 @@ for (const [url, site] of SITES) {
   });
   const page = await ctx.newPage();
   try {
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
     for (let i = 0; i < 25; i++) {
       const r = await page
         .evaluate(() => document.images.length > 2)

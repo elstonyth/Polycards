@@ -1,8 +1,8 @@
 // Zoom into the rookie banner (incl. margin above/left) to find the residual
 // "phygitals" fragment the user circled. Shows x18-64%, y7-27% enlarged ~2.3x.
-import { chromium } from "playwright";
-import { resolve } from "node:path";
-import { writeFileSync } from "node:fs";
+import { chromium } from 'playwright';
+import { resolve } from 'node:path';
+import { writeFileSync } from 'node:fs';
 
 const Z = 2.4; // zoom factor
 const cropX = 0.18 * 1440,
@@ -15,7 +15,7 @@ const html = `<!doctype html><body style="margin:0;background:#000">
          style="position:absolute;width:${Math.round(1440 * Z)}px;left:${-Math.round(cropX * Z)}px;top:${-Math.round(cropY * Z)}px"/>
   </div>
 </body>`;
-writeFileSync("docs/research/packdetail/zoom-rookie.html", html);
+writeFileSync('docs/research/packdetail/zoom-rookie.html', html);
 
 const browser = await chromium.launch();
 const page = await browser.newPage({
@@ -23,11 +23,11 @@ const page = await browser.newPage({
   deviceScaleFactor: 2,
 });
 await page.goto(
-  "file:///" +
-    resolve("docs/research/packdetail/zoom-rookie.html").replace(/\\/g, "/"),
-  { waitUntil: "load" },
+  'file:///' +
+    resolve('docs/research/packdetail/zoom-rookie.html').replace(/\\/g, '/'),
+  { waitUntil: 'load' },
 );
 await page.waitForTimeout(900);
-await page.screenshot({ path: "docs/research/packdetail/zoom-rookie.png" });
+await page.screenshot({ path: 'docs/research/packdetail/zoom-rookie.png' });
 await browser.close();
 console.log(`zoomed ${VW}x${VH}`);

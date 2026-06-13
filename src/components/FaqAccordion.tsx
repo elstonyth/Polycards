@@ -1,8 +1,8 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import { ChevronDown } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { useState } from 'react';
+import { ChevronDown } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 export type FaqItem = { q: string; a: string };
 
@@ -27,18 +27,18 @@ export default function FaqAccordion({ items }: { items: FaqItem[] }) {
               {item.q}
               <ChevronDown
                 className={cn(
-                  "h-5 w-5 shrink-0 text-white/50 transition-transform duration-300",
-                  isOpen && "rotate-180",
+                  'h-5 w-5 shrink-0 text-white/50 transition-transform duration-300',
+                  isOpen && 'rotate-180',
                 )}
                 aria-hidden
               />
             </button>
             <div
               className={cn(
-                "grid transition-all duration-300 ease-in-out",
+                'grid transition-all duration-300 ease-in-out',
                 isOpen
-                  ? "grid-rows-[1fr] opacity-100"
-                  : "grid-rows-[0fr] opacity-0",
+                  ? 'grid-rows-[1fr] opacity-100'
+                  : 'grid-rows-[0fr] opacity-0',
               )}
             >
               <div className="overflow-hidden">

@@ -1,30 +1,30 @@
 // Identify the phygitals wordmark font: crop the REAL wordmark from a clean original and
 // render "phygitals"/"pokenic" in candidate web fonts at the same scale to find the match.
-import { chromium } from "playwright";
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
-import { writeFileSync } from "node:fs";
+import { chromium } from 'playwright';
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { writeFileSync } from 'node:fs';
 
 const origB =
-  "data:image/png;base64," +
-  (await readFile("docs/research/packdetail/lama-in/legend-pack.png")).toString(
-    "base64",
+  'data:image/png;base64,' +
+  (await readFile('docs/research/packdetail/lama-in/legend-pack.png')).toString(
+    'base64',
   );
 const CANDIDATES = [
-  "Poppins",
-  "Montserrat",
-  "Outfit",
-  "Urbanist",
-  "Nunito",
-  "Quicksand",
-  "Baloo 2",
-  "Comfortaa",
-  "DM Sans",
-  "Manrope",
+  'Poppins',
+  'Montserrat',
+  'Outfit',
+  'Urbanist',
+  'Nunito',
+  'Quicksand',
+  'Baloo 2',
+  'Comfortaa',
+  'DM Sans',
+  'Manrope',
 ];
 const fams = CANDIDATES.map(
-  (c) => `family=${c.replace(/ /g, "+")}:wght@600;700`,
-).join("&");
+  (c) => `family=${c.replace(/ /g, '+')}:wght@600;700`,
+).join('&');
 
 const rows = CANDIDATES.map(
   (c) => `
@@ -33,7 +33,7 @@ const rows = CANDIDATES.map(
     <div style="font-family:'${c}';font-weight:700;font-size:54px;color:#111">phygitals</div>
     <div style="font-family:'${c}';font-weight:700;font-size:54px;color:#b8003a">pokenic</div>
   </div>`,
-).join("");
+).join('');
 
 const html = `<!doctype html><head><link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?${fams}&display=swap" rel="stylesheet"></head>
@@ -44,7 +44,7 @@ const html = `<!doctype html><head><link rel="preconnect" href="https://fonts.go
   </div>
   <div style="background:#e9e3cf;border-radius:8px;padding:8px 14px">${rows}</div>
 </body>`;
-const f = resolve("docs/research/packdetail/_fontcmp.html").replace(/\\/g, "/");
+const f = resolve('docs/research/packdetail/_fontcmp.html').replace(/\\/g, '/');
 writeFileSync(f, html);
 
 const browser = await chromium.launch();
@@ -52,11 +52,11 @@ const page = await browser.newPage({
   viewport: { width: 900, height: 1000 },
   deviceScaleFactor: 2,
 });
-await page.goto("file:///" + f, { waitUntil: "load" });
+await page.goto('file:///' + f, { waitUntil: 'load' });
 await page.waitForTimeout(2500);
 await page.screenshot({
-  path: "docs/research/packdetail/fontcmp.png",
+  path: 'docs/research/packdetail/fontcmp.png',
   fullPage: true,
 });
 await browser.close();
-console.log("font comparison rendered");
+console.log('font comparison rendered');

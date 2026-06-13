@@ -6,15 +6,15 @@
  * and the open-pack server action (`src/lib/actions/packs.ts`) so the two can't
  * drift. Pure + isomorphic (no server-only imports), safe to import anywhere.
  */
-import type { Rarity } from "@/app/claw/packs-data";
+import type { Rarity } from '@/app/claw/packs-data';
 
 /** Canonical rarity tiers, rarest-first (display + iteration order). */
 export const RARITIES: Rarity[] = [
-  "Legendary",
-  "Epic",
-  "Rare",
-  "Uncommon",
-  "Common",
+  'Legendary',
+  'Epic',
+  'Rare',
+  'Uncommon',
+  'Common',
 ];
 
 const RARITY_SET = new Set<string>(RARITIES);
@@ -27,7 +27,7 @@ export const isRarity = (r: string): r is Rarity => RARITY_SET.has(r);
  * never cents — formatted as-is.
  */
 export const formatValue = (mv: number): string =>
-  `$${mv.toLocaleString("en-US", {
+  `$${mv.toLocaleString('en-US', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;

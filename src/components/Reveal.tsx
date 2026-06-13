@@ -1,8 +1,8 @@
-"use client";
+'use client';
 
-import { type ElementType, type ReactNode } from "react";
-import { cn } from "@/lib/utils";
-import { useInView, usePrefersReducedMotion } from "@/lib/use-reveal";
+import { type ElementType, type ReactNode } from 'react';
+import { cn } from '@/lib/utils';
+import { useInView, usePrefersReducedMotion } from '@/lib/use-reveal';
 
 type RevealProps = {
   children: ReactNode;
@@ -25,7 +25,7 @@ export default function Reveal({
   className,
   delay = 0,
   y = 24,
-  as: Tag = "div",
+  as: Tag = 'div',
 }: RevealProps) {
   // ref typed loosely so it works whether Tag is div, section, etc.
   const [ref, shown] = useInView<HTMLElement>();
@@ -37,13 +37,13 @@ export default function Reveal({
       ref={ref}
       className={cn(
         !reduced &&
-          "transition-all duration-700 ease-out will-change-[opacity,transform] motion-reduce:transition-none",
-        visible ? "translate-y-0 opacity-100" : "opacity-0",
+          'transition-all duration-700 ease-out will-change-[opacity,transform] motion-reduce:transition-none',
+        visible ? 'translate-y-0 opacity-100' : 'opacity-0',
         className,
       )}
       style={{
         transform: visible ? undefined : `translateY(${y}px)`,
-        transitionDelay: shown && !reduced ? `${delay}ms` : "0ms",
+        transitionDelay: shown && !reduced ? `${delay}ms` : '0ms',
       }}
     >
       {children}

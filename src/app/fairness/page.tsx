@@ -1,9 +1,9 @@
-import type { Metadata } from "next";
-import Reveal from "@/components/Reveal";
+import type { Metadata } from 'next';
+import Reveal from '@/components/Reveal';
 
 export const metadata: Metadata = {
-  title: "Your Fairness Proofs — Phygitals",
-  description: "Verify the provably-fair selection proofs for your pulls.",
+  title: 'Your Fairness Proofs — Phygitals',
+  description: 'Verify the provably-fair selection proofs for your pulls.',
 };
 
 // Matches the live phygitals /fairness for an anonymous visitor: a heading + the

@@ -1,30 +1,30 @@
-import type { Metadata } from "next";
-import { notFound } from "next/navigation";
-import { ShieldCheck, Zap, Boxes, Repeat } from "lucide-react";
-import Reveal from "@/components/Reveal";
-import FaqAccordion, { type FaqItem } from "@/components/FaqAccordion";
+import type { Metadata } from 'next';
+import { notFound } from 'next/navigation';
+import { ShieldCheck, Zap, Boxes, Repeat } from 'lucide-react';
+import Reveal from '@/components/Reveal';
+import FaqAccordion, { type FaqItem } from '@/components/FaqAccordion';
 
 type Brand = { name: string; icon: string; tagline: string };
 const BRANDS: Record<string, Brand> = {
   fwog: {
-    name: "Fwog",
-    icon: "/pack-index-icons/fwog.jpg",
-    tagline: "Next-generation entertainment collectibles",
+    name: 'Fwog',
+    icon: '/pack-index-icons/fwog.jpg',
+    tagline: 'Next-generation entertainment collectibles',
   },
   neuko: {
-    name: "NEUKO",
-    icon: "/pack-index-icons/neuko.jpg",
-    tagline: "Premium drops, blockchain-verified",
+    name: 'NEUKO',
+    icon: '/pack-index-icons/neuko.jpg',
+    tagline: 'Premium drops, blockchain-verified',
   },
   vibes: {
-    name: "Vibes",
-    icon: "/pack-index-icons/vibes.webp",
-    tagline: "Good vibes, real collectibles",
+    name: 'Vibes',
+    icon: '/pack-index-icons/vibes.webp',
+    tagline: 'Good vibes, real collectibles',
   },
   moonbirds: {
-    name: "Moonbirds",
-    icon: "/pack-index-icons/moonbirds.png",
-    tagline: "Iconic art, physically backed",
+    name: 'Moonbirds',
+    icon: '/pack-index-icons/moonbirds.png',
+    tagline: 'Iconic art, physically backed',
   },
 };
 
@@ -40,50 +40,50 @@ export async function generateMetadata({
   const { brand } = await params;
   const b = BRANDS[brand];
   return {
-    title: b ? `${b.name} Launchpad — Pokenic` : "Launchpad — Pokenic",
+    title: b ? `${b.name} Launchpad — Pokenic` : 'Launchpad — Pokenic',
     description: b?.tagline,
   };
 }
 
 const TIERS = [
   {
-    name: "Single Box",
-    price: "$50",
-    contents: "1 sealed box · 1 digital collectible",
+    name: 'Single Box',
+    price: '$50',
+    contents: '1 sealed box · 1 digital collectible',
   },
   {
-    name: "Collector Pack",
-    price: "$250",
-    contents: "5 boxes · boosted chase odds",
+    name: 'Collector Pack',
+    price: '$250',
+    contents: '5 boxes · boosted chase odds',
     popular: true,
   },
   {
-    name: "Whale Pack",
-    price: "$1,000",
-    contents: "20 boxes · guaranteed grail + perks",
+    name: 'Whale Pack',
+    price: '$1,000',
+    contents: '20 boxes · guaranteed grail + perks',
   },
 ];
 
 const FEATURES = [
   {
     icon: ShieldCheck,
-    title: "Blockchain-verified",
+    title: 'Blockchain-verified',
     body: "Every collectible is verifiable on-chain from the moment it's minted.",
   },
   {
     icon: Zap,
-    title: "Minted instantly",
-    body: "Your digital item is created the second you purchase — no waiting.",
+    title: 'Minted instantly',
+    body: 'Your digital item is created the second you purchase — no waiting.',
   },
   {
     icon: Boxes,
-    title: "Physically backed",
-    body: "Each digital collectible is redeemable for a real, vaulted physical item.",
+    title: 'Physically backed',
+    body: 'Each digital collectible is redeemable for a real, vaulted physical item.',
   },
   {
     icon: Repeat,
-    title: "Trade anytime",
-    body: "List on the marketplace or trade peer-to-peer with zero friction.",
+    title: 'Trade anytime',
+    body: 'List on the marketplace or trade peer-to-peer with zero friction.',
   },
 ];
 
@@ -102,16 +102,16 @@ export default async function LaunchpadPage({
       a: `${b.name} is a digital collectible series backed by a real physical item that you can redeem at any time.`,
     },
     {
-      q: "What do I receive with my purchase?",
-      a: "A blockchain-verified digital collectible, minted instantly, plus the physical item shipped to you on request.",
+      q: 'What do I receive with my purchase?',
+      a: 'A blockchain-verified digital collectible, minted instantly, plus the physical item shipped to you on request.',
     },
     {
-      q: "When will I receive my physical item?",
-      a: "Redeem whenever you like — physical items ship fully tracked and insured, typically within 5–7 business days.",
+      q: 'When will I receive my physical item?',
+      a: 'Redeem whenever you like — physical items ship fully tracked and insured, typically within 5–7 business days.',
     },
     {
       q: `Can I trade my ${b.name} collectible?`,
-      a: "Yes. List it on the Pokenic marketplace or trade peer-to-peer with other collectors instantly.",
+      a: 'Yes. List it on the Pokenic marketplace or trade peer-to-peer with other collectors instantly.',
     },
   ];
 
@@ -144,7 +144,7 @@ export default async function LaunchpadPage({
         {TIERS.map((t, i) => (
           <Reveal key={t.name} delay={i * 90} className="h-full">
             <div
-              className={`flex h-full flex-col rounded-2xl border p-6 ${t.popular ? "border-white/25 bg-white/[0.06]" : "border-white/10 bg-white/[0.03]"}`}
+              className={`flex h-full flex-col rounded-2xl border p-6 ${t.popular ? 'border-white/25 bg-white/[0.06]' : 'border-white/10 bg-white/[0.03]'}`}
             >
               {t.popular && (
                 <span className="mb-3 self-start rounded-full bg-white px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-neutral-950">

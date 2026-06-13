@@ -1,21 +1,21 @@
-import type { Metadata } from "next";
-import { Coins } from "lucide-react";
+import type { Metadata } from 'next';
+import { Coins } from 'lucide-react';
 import {
   AccountHeader,
   MockTable,
   Badge,
   DemoNote,
-} from "@/components/account/ui";
-import { num } from "@/lib/format";
+} from '@/components/account/ui';
+import { num } from '@/lib/format';
 
-export const metadata: Metadata = { title: "PokéCoin | Pokenic" };
+export const metadata: Metadata = { title: 'PokéCoin | Pokenic' };
 
 const TX = [
-  ["2026-06-02", "Pack purchase reward", "+250", "green"],
-  ["2026-06-01", "Marketplace sale", "+1,200", "green"],
-  ["2026-05-30", "Redeemed for voucher", "-500", "neutral"],
-  ["2026-05-28", "Daily streak bonus", "+100", "green"],
-  ["2026-05-25", "Lucky draw entry", "-150", "neutral"],
+  ['2026-06-02', 'Pack purchase reward', '+250', 'green'],
+  ['2026-06-01', 'Marketplace sale', '+1,200', 'green'],
+  ['2026-05-30', 'Redeemed for voucher', '-500', 'neutral'],
+  ['2026-05-28', 'Daily streak bonus', '+100', 'green'],
+  ['2026-05-25', 'Lucky draw entry', '-150', 'neutral'],
 ] as const;
 
 export default function PokeCoinPage() {
@@ -45,7 +45,7 @@ export default function PokeCoinPage() {
         </button>
       </div>
       <MockTable
-        head={["Date", "Activity", "Amount"]}
+        head={['Date', 'Activity', 'Amount']}
         rows={TX.map((t) => [
           t[0],
           t[1],

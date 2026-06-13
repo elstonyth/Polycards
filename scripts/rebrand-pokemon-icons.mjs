@@ -9,12 +9,12 @@
 // Also promotes the two staged icons (docs/research/missing-tiers/) into
 // public/images/claw/ once their extra brand zones are rebranded.
 //   node scripts/rebrand-pokemon-icons.mjs [base ...]
-import { chromium } from "playwright";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { chromium } from 'playwright';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
 
-const DIR = "public/images/claw";
-const STAGE = "docs/research/missing-tiers";
-const PREVIEW = "docs/research/brand-audit/after";
+const DIR = 'public/images/claw';
+const STAGE = 'docs/research/missing-tiers';
+const PREVIEW = 'docs/research/brand-audit/after';
 
 const GRAY = [58, 58, 60];
 
@@ -23,65 +23,65 @@ const GRAY = [58, 58, 60];
 // fsScale), center (true: center text on the block; false: left-align at block
 // left, baseline at block bottom), track (letter-spacing, em).
 const URL_OP = (ink = GRAY) => ({
-  key: "url",
+  key: 'url',
   band: [0.06, 0.75, 0.84, 0.905],
-  dir: "dark",
+  dir: 'dark',
   ink,
-  text: "www.pokenic.com",
+  text: 'www.pokenic.com',
   weight: 400,
   fsScale: 1.04,
   center: false,
 });
 const STICKER_OP = (ink = [40, 40, 44]) => ({
-  key: "sticker",
+  key: 'sticker',
   band: [0.68, 0.93, 0.76, 0.92],
-  dir: "dark",
+  dir: 'dark',
   ink,
-  text: "P",
+  text: 'P',
   weight: 800,
   fsScale: 1.35,
   center: true,
 });
 
 const ICONS = {
-  "mythic-pack": { ops: [URL_OP(), STICKER_OP()] },
-  "legend-pack": { ops: [URL_OP([52, 52, 54]), STICKER_OP()] },
-  "elite-pack": { ops: [URL_OP([52, 52, 54]), STICKER_OP()] },
-  "platinum-pack": { ops: [URL_OP([44, 44, 46]), STICKER_OP()] },
-  "rookie-pack": { ops: [URL_OP([91, 45, 131]), STICKER_OP([70, 35, 110])] },
-  "trainer-pack": { ops: [URL_OP([46, 46, 50]), STICKER_OP()] },
-  "black-pack": {
+  'mythic-pack': { ops: [URL_OP(), STICKER_OP()] },
+  'legend-pack': { ops: [URL_OP([52, 52, 54]), STICKER_OP()] },
+  'elite-pack': { ops: [URL_OP([52, 52, 54]), STICKER_OP()] },
+  'platinum-pack': { ops: [URL_OP([44, 44, 46]), STICKER_OP()] },
+  'rookie-pack': { ops: [URL_OP([91, 45, 131]), STICKER_OP([70, 35, 110])] },
+  'trainer-pack': { ops: [URL_OP([46, 46, 50]), STICKER_OP()] },
+  'black-pack': {
     ops: [
-      { ...URL_OP([198, 198, 204]), dir: "light" },
+      { ...URL_OP([198, 198, 204]), dir: 'light' },
       STICKER_OP([20, 20, 22]), // black glyph on the silver sticker
     ],
   },
-  "diamond-pack": {
+  'diamond-pack': {
     ops: [
-      { ...URL_OP([235, 235, 238]), dir: "light" },
+      { ...URL_OP([235, 235, 238]), dir: 'light' },
       // bare white logomark on the dark holo wrap (no sticker plate)
       {
         ...STICKER_OP([245, 245, 247]),
-        dir: "light",
+        dir: 'light',
         band: [0.55, 0.95, 0.75, 0.92],
       },
     ],
   },
-  "sealed-pack": {
+  'sealed-pack': {
     src: `${STAGE}/sealed-pack-icon.webp`,
     ops: [URL_OP([46, 46, 50]), STICKER_OP()],
   },
-  "base-set-pack": {
+  'base-set-pack': {
     src: `${STAGE}/base-set-pack-icon.webp`,
     ops: [
       // "PHYGITALS PRESENTS" headline (dark caps on wavy green lines — the row
       // fill follows the horizontal waves, so the erase stays invisible)
       {
-        key: "presents",
+        key: 'presents',
         band: [0.22, 0.8, 0.07, 0.12],
-        dir: "dark",
+        dir: 'dark',
         ink: [24, 24, 26],
-        text: "POKENIC PRESENTS",
+        text: 'POKENIC PRESENTS',
         weight: 700,
         fsScale: 1.25,
         center: true,
@@ -89,33 +89,33 @@ const ICONS = {
       },
       // "by phygitals" white text on the green badge strip
       {
-        key: "badge",
+        key: 'badge',
         band: [0.06, 0.27, 0.835, 0.872],
-        dir: "light",
+        dir: 'light',
         ink: [250, 250, 250],
-        text: "by pokenic",
+        text: 'by pokenic',
         weight: 700,
         fsScale: 1.0,
         center: true,
       },
       // "phygitals.io" wordmark, dark on the white wrap
       {
-        key: "io",
+        key: 'io',
         band: [0.74, 0.98, 0.852, 0.888],
-        dir: "dark",
+        dir: 'dark',
         ink: [28, 28, 30],
-        text: "pokenic.io",
+        text: 'pokenic.io',
         weight: 600,
         fsScale: 1.05,
         center: false,
       },
       // black P logomark above the wordmark
       {
-        key: "mark",
+        key: 'mark',
         band: [0.82, 0.97, 0.778, 0.852],
-        dir: "dark",
+        dir: 'dark',
         ink: [16, 16, 18],
-        text: "P",
+        text: 'P',
         weight: 800,
         fsScale: 1.3,
         center: true,
@@ -137,7 +137,7 @@ const jobs = Object.entries(ICONS)
 await mkdir(PREVIEW, { recursive: true });
 const browser = await chromium.launch();
 const page = await browser.newPage();
-await page.goto("about:blank");
+await page.goto('about:blank');
 await page.addStyleTag({
   content:
     "@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;800&display=swap');",
@@ -153,21 +153,21 @@ await page.evaluate(async () => {
 
 for (const job of jobs) {
   const data =
-    "data:image/webp;base64," + (await readFile(job.src)).toString("base64");
+    'data:image/webp;base64,' + (await readFile(job.src)).toString('base64');
   const res = await page.evaluate(
     async ({ data, ops }) => {
       const img = await new Promise((ok, no) => {
         const im = new Image();
         im.onload = () => ok(im);
-        im.onerror = () => no(new Error("load"));
+        im.onerror = () => no(new Error('load'));
         im.src = data;
       });
       const W = img.naturalWidth,
         H = img.naturalHeight;
-      const cv = document.createElement("canvas");
+      const cv = document.createElement('canvas');
       cv.width = W;
       cv.height = H;
-      const ctx = cv.getContext("2d");
+      const ctx = cv.getContext('2d');
       ctx.drawImage(img, 0, 0, W, H);
       let id = ctx.getImageData(0, 0, W, H);
       const log = [];
@@ -188,9 +188,9 @@ for (const job of jobs) {
           }
         lum.sort((a, b) => a - b);
         const medL = lum[lum.length >> 1];
-        const TH = op.dir === "dark" ? 150 : 120;
+        const TH = op.dir === 'dark' ? 150 : 120;
         const isHit = (s) =>
-          op.dir === "dark" ? s < medL - TH : s > medL + TH;
+          op.dir === 'dark' ? s < medL - TH : s > medL + TH;
 
         // stroke bbox
         let lx = 1e9,
@@ -268,7 +268,7 @@ for (const job of jobs) {
         const blockH = byx - ty + 1;
         const fs = Math.max(9, Math.round(blockH * op.fsScale * 0.72));
         ctx.fillStyle = `rgb(${op.ink[0]}, ${op.ink[1]}, ${op.ink[2]})`;
-        ctx.textBaseline = "alphabetic";
+        ctx.textBaseline = 'alphabetic';
         ctx.font = `${op.weight} ${fs}px Poppins, sans-serif`;
         const track = (op.track ?? 0) * fs;
         const textW = op.track
@@ -284,7 +284,7 @@ for (const job of jobs) {
           ? Math.round((ty + byx) / 2 + fs * 0.36)
           : byx - (hasDesc ? Math.round(fs * 0.21) : 0);
         let drawX = op.center ? Math.round((lx + rx) / 2 - textW / 2) : lx;
-        ctx.textAlign = "left";
+        ctx.textAlign = 'left';
         if (op.track) {
           for (const c of op.text) {
             ctx.fillText(c, drawX, baseY);
@@ -298,13 +298,13 @@ for (const job of jobs) {
           `${op.key}: bbox=(${((lx / W) * 100).toFixed(1)}%,${((ty / H) * 100).toFixed(1)}%)-(${((rx / W) * 100).toFixed(1)}%,${((byx / H) * 100).toFixed(1)}%) fs=${fs} px=${n}`,
         );
       }
-      return { webp: cv.toDataURL("image/webp", 0.95), log, W, H };
+      return { webp: cv.toDataURL('image/webp', 0.95), log, W, H };
     },
     { data, ops: job.ops },
   );
-  await writeFile(job.dest, Buffer.from(res.webp.split(",")[1], "base64"));
+  await writeFile(job.dest, Buffer.from(res.webp.split(',')[1], 'base64'));
   console.log(`${job.base} (${res.W}x${res.H}) -> ${job.dest}`);
   for (const l of res.log) console.log(`   ${l}`);
 }
 await browser.close();
-console.log("done — re-run scripts/audit-pokemon-branding.mjs to verify");
+console.log('done — re-run scripts/audit-pokemon-branding.mjs to verify');

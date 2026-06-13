@@ -1,19 +1,19 @@
-"use client";
+'use client';
 
 // /merchants — "Trusted Merchants" directory matching live phygitals: centered hero
 // (Global Network pill + heading + subtitle + search), centered category chips, and a
 // grid of real, well-known TCG merchants with rating + region + shipping badges.
 
-import { useState } from "react";
+import { useState } from 'react';
 import {
   Search,
   Star,
   SlidersHorizontal,
   Globe,
   BadgeCheck,
-} from "lucide-react";
-import { cn } from "@/lib/utils";
-import Reveal from "@/components/Reveal";
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+import Reveal from '@/components/Reveal';
 
 type Merchant = {
   name: string;
@@ -29,106 +29,106 @@ type Merchant = {
 // Real, recognizable trading-card merchants (matching the live site's curated list).
 const MERCHANTS: Merchant[] = [
   {
-    name: "Cardmarket EU",
-    country: "Germany",
-    code: "DE",
-    cat: "Pokémon",
+    name: 'Cardmarket EU',
+    country: 'Germany',
+    code: 'DE',
+    cat: 'Pokémon',
     rating: 4.8,
-    ago: "2h ago",
+    ago: '2h ago',
     blurb: "Europe's premier trading card marketplace with worldwide shipping.",
-    badges: ["Free Shipping €50+", "Express Available"],
+    badges: ['Free Shipping €50+', 'Express Available'],
   },
   {
-    name: "Card Kingdom",
-    country: "United States",
-    code: "US",
-    cat: "Magic",
+    name: 'Card Kingdom',
+    country: 'United States',
+    code: 'US',
+    cat: 'Magic',
     rating: 4.9,
-    ago: "30m ago",
+    ago: '30m ago',
     blurb: "America's trusted source for trading cards and gaming supplies.",
-    badges: ["Free Shipping $75+", "Same Day Processing"],
+    badges: ['Free Shipping $75+', 'Same Day Processing'],
   },
   {
-    name: "TCGPlayer",
-    country: "New York",
-    code: "US",
-    cat: "Magic",
+    name: 'TCGPlayer',
+    country: 'New York',
+    code: 'US',
+    cat: 'Magic',
     rating: 4.7,
-    ago: "1h ago",
+    ago: '1h ago',
     blurb:
-      "The largest online marketplace for collectible card games in North America.",
-    badges: ["Free Shipping $35+", "Express Available"],
+      'The largest online marketplace for collectible card games in North America.',
+    badges: ['Free Shipping $35+', 'Express Available'],
   },
   {
-    name: "Troll and Toad",
-    country: "United States",
-    code: "US",
-    cat: "Yu-Gi-Oh!",
+    name: 'Troll and Toad',
+    country: 'United States',
+    code: 'US',
+    cat: 'Yu-Gi-Oh!',
     rating: 4.6,
-    ago: "3h ago",
+    ago: '3h ago',
     blurb:
-      "One of the largest online card stores, serving collectors since 1991.",
-    badges: ["Free Shipping $50+"],
+      'One of the largest online card stores, serving collectors since 1991.',
+    badges: ['Free Shipping $50+'],
   },
   {
-    name: "CoolStuffInc",
-    country: "Florida",
-    code: "US",
-    cat: "Magic",
+    name: 'CoolStuffInc',
+    country: 'Florida',
+    code: 'US',
+    cat: 'Magic',
     rating: 4.7,
-    ago: "1h ago",
-    blurb: "Games, singles, and supplies with fast, reliable fulfillment.",
-    badges: ["Free Shipping $99+", "Same Day Processing"],
+    ago: '1h ago',
+    blurb: 'Games, singles, and supplies with fast, reliable fulfillment.',
+    badges: ['Free Shipping $99+', 'Same Day Processing'],
   },
   {
-    name: "401 Games",
-    country: "Canada",
-    code: "CA",
-    cat: "Pokémon",
+    name: '401 Games',
+    country: 'Canada',
+    code: 'CA',
+    cat: 'Pokémon',
     rating: 4.6,
-    ago: "5h ago",
+    ago: '5h ago',
     blurb: "Canada's largest game store with deep singles inventory.",
-    badges: ["Free Shipping $75+"],
+    badges: ['Free Shipping $75+'],
   },
   {
     name: "Dave & Adam's",
-    country: "United States",
-    code: "US",
-    cat: "Sports",
+    country: 'United States',
+    code: 'US',
+    cat: 'Sports',
     rating: 4.7,
-    ago: "2h ago",
+    ago: '2h ago',
     blurb:
-      "Sports cards, boxes, and collectibles with a 100% satisfaction guarantee.",
-    badges: ["Free Shipping $50+", "Express Available"],
+      'Sports cards, boxes, and collectibles with a 100% satisfaction guarantee.',
+    badges: ['Free Shipping $50+', 'Express Available'],
   },
   {
-    name: "Blowout Cards",
-    country: "United States",
-    code: "US",
-    cat: "Sports",
+    name: 'Blowout Cards',
+    country: 'United States',
+    code: 'US',
+    cat: 'Sports',
     rating: 4.5,
-    ago: "4h ago",
-    blurb: "Sealed sports and TCG product at case-break-friendly prices.",
-    badges: ["Free Shipping $99+"],
+    ago: '4h ago',
+    blurb: 'Sealed sports and TCG product at case-break-friendly prices.',
+    badges: ['Free Shipping $99+'],
   },
   {
-    name: "Magic Madhouse",
-    country: "United Kingdom",
-    code: "GB",
-    cat: "Yu-Gi-Oh!",
+    name: 'Magic Madhouse',
+    country: 'United Kingdom',
+    code: 'GB',
+    cat: 'Yu-Gi-Oh!',
     rating: 4.5,
-    ago: "6h ago",
-    blurb: "UK retailer for TCG singles, sealed product, and accessories.",
-    badges: ["Free Shipping £50+", "Express Available"],
+    ago: '6h ago',
+    blurb: 'UK retailer for TCG singles, sealed product, and accessories.',
+    badges: ['Free Shipping £50+', 'Express Available'],
   },
 ];
 
-const CATS = ["All", "Pokémon", "Magic", "Yu-Gi-Oh!", "Sports"];
+const CATS = ['All', 'Pokémon', 'Magic', 'Yu-Gi-Oh!', 'Sports'];
 
 export default function MerchantsPage() {
-  const [cat, setCat] = useState("All");
+  const [cat, setCat] = useState('All');
   const list =
-    cat === "All" ? MERCHANTS : MERCHANTS.filter((m) => m.cat === cat);
+    cat === 'All' ? MERCHANTS : MERCHANTS.filter((m) => m.cat === cat);
 
   return (
     <div className="mx-auto w-full px-fluid py-10">
@@ -181,10 +181,10 @@ export default function MerchantsPage() {
             onClick={() => setCat(c)}
             aria-pressed={cat === c}
             className={cn(
-              "rounded-full px-4 py-2 text-[13px] font-medium transition-colors",
+              'rounded-full px-4 py-2 text-[13px] font-medium transition-colors',
               cat === c
-                ? "bg-white text-neutral-950"
-                : "border border-white/10 bg-white/5 text-white/60 hover:bg-white/10 hover:text-white",
+                ? 'bg-white text-neutral-950'
+                : 'border border-white/10 bg-white/5 text-white/60 hover:bg-white/10 hover:text-white',
             )}
           >
             {c}

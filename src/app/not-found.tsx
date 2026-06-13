@@ -1,7 +1,7 @@
-import Link from "next/link";
-import { ArrowRight } from "lucide-react";
-import { Press_Start_2P } from "next/font/google";
-import { features } from "@/lib/features";
+import Link from 'next/link';
+import { ArrowRight } from 'lucide-react';
+import { Press_Start_2P } from 'next/font/google';
+import { features } from '@/lib/features';
 
 // Clone of the live custom 404 (wave-2 audit: captured on /lucky-draw, which
 // 404s on live — shots in docs/research/audit/shots/lucky-draw/live-*.png):
@@ -9,26 +9,26 @@ import { features } from "@/lib/features";
 // "NO CARD ON FILE" / "SLOT EMPTY"), "Page not found." heading, green
 // back-to-marketplace + dark go-home pills, then three suggested packs under
 // "OPEN ONE OF THESE INSTEAD". Normal site chrome stays (live keeps it too).
-const pixel = Press_Start_2P({ weight: "400", subsets: ["latin"] });
+const pixel = Press_Start_2P({ weight: '400', subsets: ['latin'] });
 
 // Live suggests "Pokemon Elite / One Piece Mythic / Basketball Pro"; the clone
 // catalog has no One Piece Mythic or Basketball Pro, so use the closest real
 // packs in the same category+tier label format.
 const SUGGESTIONS = [
   {
-    label: "Pokemon Elite",
-    href: "/claw/pokemon-elite",
-    image: "/images/claw/elite-pack-icon.webp",
+    label: 'Pokemon Elite',
+    href: '/claw/pokemon-elite',
+    image: '/images/claw/elite-pack-icon.webp',
   },
   {
-    label: "One Piece Legend",
-    href: "/claw/onepiece-legend",
-    image: "/images/claw/legend-one-piece-pack-icon.webp",
+    label: 'One Piece Legend',
+    href: '/claw/onepiece-legend',
+    image: '/images/claw/legend-one-piece-pack-icon.webp',
   },
   {
-    label: "Basketball Platinum",
-    href: "/claw/nba-platinum",
-    image: "/images/claw/modern-grails-noafw0-icon.webp",
+    label: 'Basketball Platinum',
+    href: '/claw/nba-platinum',
+    image: '/images/claw/modern-grails-noafw0-icon.webp',
   },
 ];
 
@@ -80,10 +80,10 @@ export default function NotFound() {
 
       <div className="mt-7 flex w-full flex-col items-center gap-3 sm:w-auto sm:flex-row sm:justify-center">
         <Link
-          href={features.marketplace ? "/marketplace" : "/claw"}
+          href={features.marketplace ? '/marketplace' : '/claw'}
           className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[#1aa87a] to-green-500 px-6 text-sm font-semibold text-white transition-opacity hover:opacity-90 sm:w-auto"
         >
-          {features.marketplace ? "Back to marketplace" : "Back to packs"}
+          {features.marketplace ? 'Back to marketplace' : 'Back to packs'}
           <ArrowRight className="h-4 w-4" aria-hidden />
         </Link>
         <Link

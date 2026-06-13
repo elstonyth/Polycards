@@ -1,12 +1,12 @@
-import { chromium } from "playwright";
+import { chromium } from 'playwright';
 const b = await chromium.launch();
 const p = await b.newPage({ viewport: { width: 1440, height: 900 } });
-await p.goto("https://www.phygitals.com/", {
-  waitUntil: "domcontentloaded",
+await p.goto('https://www.phygitals.com/', {
+  waitUntil: 'domcontentloaded',
   timeout: 60000,
 });
 for (let i = 0; i < 20; i++) {
-  if (await p.evaluate(() => document.querySelectorAll("img").length > 5))
+  if (await p.evaluate(() => document.querySelectorAll('img').length > 5))
     break;
   await p.waitForTimeout(1000);
 }
@@ -21,7 +21,7 @@ async function audit(label, findFn) {
     console.log(`${label}: NOT FOUND`);
     return;
   }
-  await p.evaluate((el) => el.scrollIntoView({ block: "center" }), target);
+  await p.evaluate((el) => el.scrollIntoView({ block: 'center' }), target);
   await p.waitForTimeout(500);
   const snap = async () =>
     p.evaluate((el) => {
@@ -48,30 +48,30 @@ async function audit(label, findFn) {
 }
 
 // RecentPulls card
-await audit("ORIG RecentPulls card", () => {
-  const h = [...document.querySelectorAll("*")].find(
-    (e) => e.children.length === 0 && e.textContent?.trim() === "Recent Pulls",
+await audit('ORIG RecentPulls card', () => {
+  const h = [...document.querySelectorAll('*')].find(
+    (e) => e.children.length === 0 && e.textContent?.trim() === 'Recent Pulls',
   );
   let sec = h;
   for (let i = 0; i < 6; i++) {
     sec = sec.parentElement;
-    if (sec.querySelectorAll("img").length > 3) break;
+    if (sec.querySelectorAll('img').length > 3) break;
   }
-  return sec.querySelector("img")?.closest("div[class*=rounded],a");
+  return sec.querySelector('img')?.closest('div[class*=rounded],a');
 });
 // Leaderboard row
-await audit("ORIG Leaderboard row", () => {
-  const h = [...document.querySelectorAll("*")].find(
+await audit('ORIG Leaderboard row', () => {
+  const h = [...document.querySelectorAll('*')].find(
     (e) =>
       e.children.length === 0 &&
-      /Leaderboard/.test(e.textContent?.trim() || ""),
+      /Leaderboard/.test(e.textContent?.trim() || ''),
   );
   let sec = h;
   for (let i = 0; i < 7; i++) {
     sec = sec.parentElement;
-    if (sec.querySelectorAll("tr,li,[class*=grid]>div").length > 3) break;
+    if (sec.querySelectorAll('tr,li,[class*=grid]>div').length > 3) break;
   }
-  const rows = sec.querySelectorAll("tbody tr, li, [class*=grid]>div");
+  const rows = sec.querySelectorAll('tbody tr, li, [class*=grid]>div');
   return rows[2] || rows[1];
 });
 await b.close();

@@ -1,26 +1,26 @@
 // Detect the "phygitals" wordmark bbox in the remaining 11 renders (yugioh 1440x900
 // + 10 dramatic webp-only). Tries periwinkle-purple detection; reports bbox %, dims,
 // and pixel count so we can bake per-image. Loads same-origin (no taint).
-import { chromium } from "playwright";
+import { chromium } from 'playwright';
 
 const REMAIN = [
-  "yugioh-pro-pack",
-  "black-pack-jjnfuk",
-  "elite-football-pack",
-  "legend-baseball-pack",
-  "legend-pack-1dpaec",
-  "modern-grails-noafw0",
-  "platinum-football-pack",
-  "pro-baseball-pack",
-  "pro-soccer-pack",
-  "starter-baseball-pack",
-  "starter-football-pack",
+  'yugioh-pro-pack',
+  'black-pack-jjnfuk',
+  'elite-football-pack',
+  'legend-baseball-pack',
+  'legend-pack-1dpaec',
+  'modern-grails-noafw0',
+  'platinum-football-pack',
+  'pro-baseball-pack',
+  'pro-soccer-pack',
+  'starter-baseball-pack',
+  'starter-football-pack',
 ];
 
 const browser = await chromium.launch();
 const page = await browser.newPage();
-await page.goto("http://localhost:4000/", {
-  waitUntil: "domcontentloaded",
+await page.goto('http://localhost:4000/', {
+  waitUntil: 'domcontentloaded',
   timeout: 30000,
 });
 
@@ -41,16 +41,16 @@ const res = await page.evaluate(async (REMAIN) => {
       try {
         img = await load(`/images/claw/${base}-machine.webp`);
       } catch {
-        out[base] = { err: "load" };
+        out[base] = { err: 'load' };
         continue;
       }
     }
     const W = img.naturalWidth,
       H = img.naturalHeight;
-    const cv = document.createElement("canvas");
+    const cv = document.createElement('canvas');
     cv.width = W;
     cv.height = H;
-    const ctx = cv.getContext("2d");
+    const ctx = cv.getContext('2d');
     ctx.drawImage(img, 0, 0, W, H);
     const d = ctx.getImageData(0, 0, W, H).data;
     const px = (x, y) => {
@@ -89,7 +89,7 @@ const res = await page.evaluate(async (REMAIN) => {
               t: +((minY / H) * 100).toFixed(1),
               b: +((maxY / H) * 100).toFixed(1),
             }
-          : "weak",
+          : 'weak',
     };
   }
   return out;

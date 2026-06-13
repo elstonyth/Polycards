@@ -1,13 +1,13 @@
-"use client";
+'use client';
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
-const REDUCED_QUERY = "(prefers-reduced-motion: reduce)";
+const REDUCED_QUERY = '(prefers-reduced-motion: reduce)';
 
 function subscribeReducedMotion(onChange: () => void) {
   const mql = window.matchMedia(REDUCED_QUERY);
-  mql.addEventListener("change", onChange);
-  return () => mql.removeEventListener("change", onChange);
+  mql.addEventListener('change', onChange);
+  return () => mql.removeEventListener('change', onChange);
 }
 
 /**
@@ -38,7 +38,7 @@ export function useInView<T extends HTMLElement = HTMLDivElement>() {
     if (!node) return;
     // If IntersectionObserver is unavailable (legacy / SSR-only), reveal on the next
     // tick — deferred via setTimeout so we never setState synchronously in the effect.
-    if (typeof IntersectionObserver === "undefined") {
+    if (typeof IntersectionObserver === 'undefined') {
       const id = setTimeout(() => setShown(true), 0);
       return () => clearTimeout(id);
     }
@@ -51,7 +51,7 @@ export function useInView<T extends HTMLElement = HTMLDivElement>() {
           }
         }
       },
-      { threshold: 0.15, rootMargin: "0px 0px -8% 0px" },
+      { threshold: 0.15, rootMargin: '0px 0px -8% 0px' },
     );
     obs.observe(node);
     return () => obs.disconnect();

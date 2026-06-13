@@ -1,11 +1,11 @@
-import type { Metadata } from "next";
-import { Gift, Sparkles } from "lucide-react";
-import Reveal from "@/components/Reveal";
-import AuthButton from "@/components/AuthButton";
+import type { Metadata } from 'next';
+import { Gift, Sparkles } from 'lucide-react';
+import Reveal from '@/components/Reveal';
+import AuthButton from '@/components/AuthButton';
 
 export const metadata: Metadata = {
-  title: "Pokémon Card Airdrop — Pokenic",
-  description: "Claim free Pokémon cards in the upcoming airdrop.",
+  title: 'Pokémon Card Airdrop — Pokenic',
+  description: 'Claim free Pokémon cards in the upcoming airdrop.',
 };
 
 // Early claimers wall (reuses the local avatar set).

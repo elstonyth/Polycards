@@ -1,10 +1,10 @@
-import { chromium } from "playwright";
+import { chromium } from 'playwright';
 const b = await chromium.launch();
 
 async function measure(url, label, sizes) {
   for (const w of sizes) {
     const p = await b.newPage({ viewport: { width: w, height: 900 } });
-    await p.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await p.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
     for (let i = 0; i < 20; i++) {
       if (await p.evaluate(() => document.images.length > 3)) break;
       await p.waitForTimeout(800);
@@ -12,7 +12,7 @@ async function measure(url, label, sizes) {
     await p.waitForTimeout(1500);
     const d = await p.evaluate(() => {
       // find the hero/content container (the rounded box near top, or the main content wrapper)
-      const h = [...document.querySelectorAll("h1,h2")].find((e) =>
+      const h = [...document.querySelectorAll('h1,h2')].find((e) =>
         /rip packs|real cards/i.test(e.textContent),
       );
       let box = null,
@@ -32,7 +32,7 @@ async function measure(url, label, sizes) {
         }
       }
       // the outermost content wrapper
-      const main = document.querySelector("main") || document.body;
+      const main = document.querySelector('main') || document.body;
       const mr = main.getBoundingClientRect();
       const mcs = getComputedStyle(main);
       return {
@@ -43,11 +43,11 @@ async function measure(url, label, sizes) {
       };
     });
     console.log(
-      `[${label} ${w}] heroBox=${d.hero ? JSON.stringify(d.hero) : "?"} mainW=${d.mainW} vw=${d.vw} | sideMargin=${d.hero ? Math.round((d.vw - d.hero.w) / 2) : "?"}`,
+      `[${label} ${w}] heroBox=${d.hero ? JSON.stringify(d.hero) : '?'} mainW=${d.mainW} vw=${d.vw} | sideMargin=${d.hero ? Math.round((d.vw - d.hero.w) / 2) : '?'}`,
     );
     await p.close();
   }
 }
-await measure("https://www.phygitals.com/", "ORIG", [1280, 1920, 2560, 3840]);
-await measure("http://localhost:4000/", "CLONE", [1280, 1920, 2560, 3840]);
+await measure('https://www.phygitals.com/', 'ORIG', [1280, 1920, 2560, 3840]);
+await measure('http://localhost:4000/', 'CLONE', [1280, 1920, 2560, 3840]);
 await b.close();

@@ -1,4 +1,4 @@
-import { type ReactNode } from "react";
+import { type ReactNode } from 'react';
 
 export function AccountHeader({ title, sub }: { title: string; sub?: string }) {
   return (
@@ -13,7 +13,7 @@ export function AccountHeader({ title, sub }: { title: string; sub?: string }) {
 
 export function Panel({
   children,
-  className = "",
+  className = '',
 }: {
   children: ReactNode;
   className?: string;
@@ -94,15 +94,15 @@ export function MockTable({
 }
 
 const TONES = {
-  green: "bg-emerald-500/15 text-emerald-400",
-  amber: "bg-amber-500/15 text-amber-400",
-  sky: "bg-sky-500/15 text-sky-400",
-  neutral: "bg-white/10 text-white/70",
+  green: 'bg-emerald-500/15 text-emerald-400',
+  amber: 'bg-amber-500/15 text-amber-400',
+  sky: 'bg-sky-500/15 text-sky-400',
+  neutral: 'bg-white/10 text-white/70',
 } as const;
 
 export function Badge({
   children,
-  tone = "neutral",
+  tone = 'neutral',
 }: {
   children: ReactNode;
   tone?: keyof typeof TONES;

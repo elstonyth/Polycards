@@ -1,30 +1,30 @@
-import { POKEDEX_NAMES } from "./pokedex-names";
+import { POKEDEX_NAMES } from './pokedex-names';
 
 export type Pokemon = { dex: number; name: string };
 
 export const REGION: Record<string, string> = {
-  "1": "Kanto",
-  "2": "Johto",
-  "3": "Hoenn",
-  "4": "Sinnoh",
-  "5": "Unova",
-  "6": "Kalos",
-  "7": "Alola",
-  "8": "Galar",
-  "9": "Paldea",
+  '1': 'Kanto',
+  '2': 'Johto',
+  '3': 'Hoenn',
+  '4': 'Sinnoh',
+  '5': 'Unova',
+  '6': 'Kalos',
+  '7': 'Alola',
+  '8': 'Galar',
+  '9': 'Paldea',
 };
 
 // National-dex range per generation.
 const RANGES: Record<string, [number, number]> = {
-  "1": [1, 151],
-  "2": [152, 251],
-  "3": [252, 386],
-  "4": [387, 493],
-  "5": [494, 649],
-  "6": [650, 721],
-  "7": [722, 809],
-  "8": [810, 905],
-  "9": [906, 1025],
+  '1': [1, 151],
+  '2': [152, 251],
+  '3': [252, 386],
+  '4': [387, 493],
+  '5': [494, 649],
+  '6': [650, 721],
+  '7': [722, 809],
+  '8': [810, 905],
+  '9': [906, 1025],
 };
 
 export const GENS = Object.keys(RANGES);

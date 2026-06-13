@@ -1,11 +1,11 @@
-import { chromium } from "playwright";
+import { chromium } from 'playwright';
 const b = await chromium.launch();
 for (const [url, name] of [
-  ["http://localhost:4000/", "HOME"],
-  ["http://localhost:4000/how-it-works", "HIW"],
+  ['http://localhost:4000/', 'HOME'],
+  ['http://localhost:4000/how-it-works', 'HIW'],
 ]) {
   const p = await b.newPage({ viewport: { width: 3840, height: 2160 } });
-  await p.goto(url, { waitUntil: "load", timeout: 60000 });
+  await p.goto(url, { waitUntil: 'load', timeout: 60000 });
   await p.waitForTimeout(1500);
   await p.screenshot({
     path: `docs/research/4K_${name}_top.png`,
@@ -13,10 +13,10 @@ for (const [url, name] of [
   });
   // scroll to how it works on home / steps on hiw
   await p.evaluate(() => {
-    const h = [...document.querySelectorAll("h2")].find((e) =>
+    const h = [...document.querySelectorAll('h2')].find((e) =>
       /how it works/i.test(e.textContent),
     );
-    h && h.scrollIntoView({ block: "center" });
+    h && h.scrollIntoView({ block: 'center' });
   });
   await p.waitForTimeout(1200);
   await p.screenshot({
@@ -26,4 +26,4 @@ for (const [url, name] of [
   await p.close();
 }
 await b.close();
-console.log("4k shots done");
+console.log('4k shots done');

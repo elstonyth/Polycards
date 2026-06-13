@@ -1,19 +1,19 @@
-import type { Metadata } from "next";
-import Link from "next/link";
-import { Trophy, PartyPopper } from "lucide-react";
-import Reveal from "@/components/Reveal";
+import type { Metadata } from 'next';
+import Link from 'next/link';
+import { Trophy, PartyPopper } from 'lucide-react';
+import Reveal from '@/components/Reveal';
 
 export const metadata: Metadata = {
-  title: "30th Edition — Pokenic",
-  description: "The 30th Edition celebration has concluded — see the winners.",
+  title: '30th Edition — Pokenic',
+  description: 'The 30th Edition celebration has concluded — see the winners.',
 };
 
 const PRIZES = [
-  "/images/claw/mythic-pack-icon.webp",
-  "/home/hero/slabs/pokemon1.webp",
-  "/images/claw/legend-pack-icon.webp",
-  "/home/hero/slabs/pokemon3.webp",
-  "/images/claw/platinum-pack-icon.webp",
+  '/images/claw/mythic-pack-icon.webp',
+  '/home/hero/slabs/pokemon1.webp',
+  '/images/claw/legend-pack-icon.webp',
+  '/home/hero/slabs/pokemon3.webp',
+  '/images/claw/platinum-pack-icon.webp',
 ];
 
 export default function ThirtiethPage() {

@@ -1,7 +1,7 @@
-"use client";
+'use client';
 
-import { useMemo, useState } from "react";
-import Link from "next/link";
+import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import {
   Trophy,
   Layers,
@@ -11,34 +11,34 @@ import {
   Star,
   Flame,
   Crown,
-} from "lucide-react";
-import { cn } from "@/lib/utils";
-import Reveal from "@/components/Reveal";
-import { usd, num, compact } from "@/lib/format";
-import { type ProfileViewUser } from "@/lib/profile-view";
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+import Reveal from '@/components/Reveal';
+import { usd, num, compact } from '@/lib/format';
+import { type ProfileViewUser } from '@/lib/profile-view';
 
-const TABS = ["Collection", "Activity", "Achievements"] as const;
+const TABS = ['Collection', 'Activity', 'Achievements'] as const;
 type Tab = (typeof TABS)[number];
 
 const BADGES = [
-  { icon: Crown, label: "Top 100", tint: "text-amber-400" },
-  { icon: Flame, label: "100 Pulls", tint: "text-orange-400" },
-  { icon: Star, label: "First Legendary", tint: "text-fuchsia-400" },
-  { icon: Award, label: "Vault Veteran", tint: "text-sky-400" },
+  { icon: Crown, label: 'Top 100', tint: 'text-amber-400' },
+  { icon: Flame, label: '100 Pulls', tint: 'text-orange-400' },
+  { icon: Star, label: 'First Legendary', tint: 'text-fuchsia-400' },
+  { icon: Award, label: 'Vault Veteran', tint: 'text-sky-400' },
 ];
 
 export default function ProfileClient({ user }: { user: ProfileViewUser }) {
-  const [tab, setTab] = useState<Tab>("Collection");
+  const [tab, setTab] = useState<Tab>('Collection');
   const stats = [
     // Real profiles carry no global rank (a leaderboard concern) — render "—".
     {
       icon: Trophy,
-      label: "Rank",
-      value: user.rank == null ? "—" : `#${num(user.rank)}`,
+      label: 'Rank',
+      value: user.rank == null ? '—' : `#${num(user.rank)}`,
     },
-    { icon: Star, label: "Points", value: compact(user.points) },
-    { icon: Layers, label: "Pulls", value: num(user.pulls) },
-    { icon: TrendingUp, label: "Volume", value: usd(user.volume) },
+    { icon: Star, label: 'Points', value: compact(user.points) },
+    { icon: Layers, label: 'Pulls', value: num(user.pulls) },
+    { icon: TrendingUp, label: 'Volume', value: usd(user.volume) },
   ];
   // Real profiles ship their pull activity; the mock pool derives a synthetic
   // feed from the collection (unchanged legacy behavior).
@@ -46,7 +46,7 @@ export default function ProfileClient({ user }: { user: ProfileViewUser }) {
     () =>
       user.activity ??
       user.collection.map((c, i) => ({
-        verb: ["pulled", "bought", "listed", "sold"][i % 4],
+        verb: ['pulled', 'bought', 'listed', 'sold'][i % 4],
         card: c,
         time: `${(i + 1) * 3}h ago`,
       })),
@@ -122,10 +122,10 @@ export default function ProfileClient({ user }: { user: ProfileViewUser }) {
             aria-selected={tab === t}
             onClick={() => setTab(t)}
             className={cn(
-              "rounded-lg px-5 py-2 text-center text-sm font-medium transition-colors",
+              'rounded-lg px-5 py-2 text-center text-sm font-medium transition-colors',
               tab === t
-                ? "bg-white/10 text-white"
-                : "text-white/50 hover:text-white/80",
+                ? 'bg-white/10 text-white'
+                : 'text-white/50 hover:text-white/80',
             )}
           >
             {t}
@@ -134,7 +134,7 @@ export default function ProfileClient({ user }: { user: ProfileViewUser }) {
       </div>
 
       {/* Panels */}
-      {tab === "Collection" && (
+      {tab === 'Collection' && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           {/* Key includes the index: a real profile's recent pulls can repeat
               the same card (same handle) — ids alone would collide. */}
@@ -169,7 +169,7 @@ export default function ProfileClient({ user }: { user: ProfileViewUser }) {
         </div>
       )}
 
-      {tab === "Activity" && (
+      {tab === 'Activity' && (
         <ul className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]">
           {activity.map((a, i) => (
             <li
@@ -183,7 +183,7 @@ export default function ProfileClient({ user }: { user: ProfileViewUser }) {
                 className="h-11 w-8 shrink-0 rounded object-contain"
               />
               <p className="min-w-0 flex-1 truncate text-[13px] text-white/80">
-                <span className="text-white/50">{a.verb}</span>{" "}
+                <span className="text-white/50">{a.verb}</span>{' '}
                 <Link
                   href={`/card/${a.card.id}`}
                   className="font-medium text-white hover:underline"
@@ -202,7 +202,7 @@ export default function ProfileClient({ user }: { user: ProfileViewUser }) {
         </ul>
       )}
 
-      {tab === "Achievements" && (
+      {tab === 'Achievements' && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {BADGES.map((b) => {
             const Icon = b.icon;
@@ -212,7 +212,7 @@ export default function ProfileClient({ user }: { user: ProfileViewUser }) {
                 className="flex flex-col items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] p-6 text-center"
               >
                 <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white/5">
-                  <Icon className={cn("h-6 w-6", b.tint)} aria-hidden />
+                  <Icon className={cn('h-6 w-6', b.tint)} aria-hidden />
                 </span>
                 <span className="text-[13px] font-medium text-white">
                   {b.label}

@@ -1,42 +1,42 @@
-import type { Metadata } from "next";
-import Link from "next/link";
-import { Package } from "lucide-react";
-import type { HttpTypes } from "@medusajs/types";
+import type { Metadata } from 'next';
+import Link from 'next/link';
+import { Package } from 'lucide-react';
+import type { HttpTypes } from '@medusajs/types';
 import {
   AccountHeader,
   MockTable,
   Badge,
   Panel,
-} from "@/components/account/ui";
-import { getOrders } from "@/lib/data/customer";
-import { features } from "@/lib/features";
+} from '@/components/account/ui';
+import { getOrders } from '@/lib/data/customer';
+import { features } from '@/lib/features';
 
-export const metadata: Metadata = { title: "Orders | Pokenic" };
+export const metadata: Metadata = { title: 'Orders | Pokenic' };
 
 // Per-customer data behind the auth gate — always rendered fresh.
-export const dynamic = "force-dynamic";
+export const dynamic = 'force-dynamic';
 
-type Tone = "green" | "sky" | "amber" | "neutral";
+type Tone = 'green' | 'sky' | 'amber' | 'neutral';
 
 // Map Medusa fulfillment status → badge tone + readable label.
 const FULFILLMENT: Record<string, Tone> = {
-  delivered: "green",
-  partially_delivered: "green",
-  shipped: "sky",
-  partially_shipped: "sky",
-  fulfilled: "sky",
-  partially_fulfilled: "amber",
-  not_fulfilled: "amber",
-  canceled: "neutral",
+  delivered: 'green',
+  partially_delivered: 'green',
+  shipped: 'sky',
+  partially_shipped: 'sky',
+  fulfilled: 'sky',
+  partially_fulfilled: 'amber',
+  not_fulfilled: 'amber',
+  canceled: 'neutral',
 };
 
 const humanize = (s: string) =>
-  s.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
+  s.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
 
 const money = (amount: number, currency: string) => {
   try {
-    return amount.toLocaleString("en-US", {
-      style: "currency",
+    return amount.toLocaleString('en-US', {
+      style: 'currency',
       currency: currency.toUpperCase(),
     });
   } catch {
@@ -46,10 +46,10 @@ const money = (amount: number, currency: string) => {
 };
 
 const orderDate = (value: string | Date) =>
-  new Date(value).toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
+  new Date(value).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
   });
 
 function OrderItems({ items }: { items: HttpTypes.StoreOrderLineItem[] }) {
@@ -67,7 +67,7 @@ function OrderItems({ items }: { items: HttpTypes.StoreOrderLineItem[] }) {
           className="h-8 w-6 shrink-0 rounded object-contain"
         />
       )}
-      <span className="max-w-[220px] truncate">{first?.title ?? "—"}</span>
+      <span className="max-w-[220px] truncate">{first?.title ?? '—'}</span>
       {extra > 0 && <span className="text-white/45">+{extra} more</span>}
     </span>
   );
@@ -87,10 +87,10 @@ function EmptyState() {
         will show up here.
       </p>
       <Link
-        href={features.marketplace ? "/marketplace" : "/claw"}
+        href={features.marketplace ? '/marketplace' : '/claw'}
         className="mt-1 inline-flex h-10 items-center rounded-xl bg-neutral-200 px-5 text-sm font-semibold text-neutral-950 transition-colors hover:bg-white"
       >
-        {features.marketplace ? "Browse the marketplace" : "Open a pack"}
+        {features.marketplace ? 'Browse the marketplace' : 'Open a pack'}
       </Link>
     </Panel>
   );
@@ -118,7 +118,7 @@ export default async function OrdersPage() {
     <OrderItems key="i" items={o.items ?? []} />,
     orderDate(o.created_at),
     money(o.total, o.currency_code),
-    <Badge key="s" tone={FULFILLMENT[o.fulfillment_status] ?? "neutral"}>
+    <Badge key="s" tone={FULFILLMENT[o.fulfillment_status] ?? 'neutral'}>
       {humanize(o.fulfillment_status)}
     </Badge>,
   ]);
@@ -130,7 +130,7 @@ export default async function OrdersPage() {
         sub="Your purchases, shipments, and vaulted items."
       />
       <MockTable
-        head={["Order", "Item", "Date", "Total", "Status"]}
+        head={['Order', 'Item', 'Date', 'Total', 'Status']}
         rows={rows}
       />
     </>

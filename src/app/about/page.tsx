@@ -1,5 +1,5 @@
-import type { Metadata } from "next";
-import Link from "next/link";
+import type { Metadata } from 'next';
+import Link from 'next/link';
 import {
   ShoppingBag,
   Sparkles,
@@ -12,36 +12,36 @@ import {
   ShieldCheck,
   Thermometer,
   type LucideIcon,
-} from "lucide-react";
-import Reveal from "@/components/Reveal";
+} from 'lucide-react';
+import Reveal from '@/components/Reveal';
 
 export const metadata: Metadata = {
-  title: "About — Phygitals",
+  title: 'About — Phygitals',
   description:
-    "The infrastructure for digital collectibles. Buy digital packs backed by real physical cards. Instantly reveal, securely vault, and ship or sell whenever you want.",
+    'The infrastructure for digital collectibles. Buy digital packs backed by real physical cards. Instantly reveal, securely vault, and ship or sell whenever you want.',
 };
 
 type Step = { icon: LucideIcon; title: string; body: string };
 const STEPS: Step[] = [
   {
     icon: ShoppingBag,
-    title: "Buy a Pack",
-    body: "Purchase digitally with card or crypto. Real physical cards from our inventory.",
+    title: 'Buy a Pack',
+    body: 'Purchase digitally with card or crypto. Real physical cards from our inventory.',
   },
   {
     icon: Sparkles,
-    title: "Instant Reveal",
-    body: "Watch your cards revealed live. Know exactly what you pulled.",
+    title: 'Instant Reveal',
+    body: 'Watch your cards revealed live. Know exactly what you pulled.',
   },
   {
     icon: Vault,
-    title: "Securely Vaulted",
-    body: "Cards stored in top-tier insured US facilities.",
+    title: 'Securely Vaulted',
+    body: 'Cards stored in top-tier insured US facilities.',
   },
   {
     icon: Truck,
-    title: "Ship or Sell",
-    body: "Redeem anytime with worldwide shipping, or sell back at 85%.",
+    title: 'Ship or Sell',
+    body: 'Redeem anytime with worldwide shipping, or sell back at 85%.',
   },
 ];
 
@@ -49,27 +49,27 @@ type Feature = { icon: LucideIcon; stat: string; label: string; body: string };
 const FEATURES: Feature[] = [
   {
     icon: Boxes,
-    stat: "5+",
-    label: "Card categories",
-    body: "Sports, Pokemon, TCG, and more. One platform for every type of collectible card.",
+    stat: '5+',
+    label: 'Card categories',
+    body: 'Sports, Pokemon, TCG, and more. One platform for every type of collectible card.',
   },
   {
     icon: Layers,
-    stat: "100K+",
-    label: "Cards tokenized",
-    body: "Own digital representations backed by real cards. Best of both worlds combined.",
+    stat: '100K+',
+    label: 'Cards tokenized',
+    body: 'Own digital representations backed by real cards. Best of both worlds combined.',
   },
   {
     icon: Zap,
-    stat: "85%",
-    label: "Buyback rate",
-    body: "85% buyback guarantee on every card. Sell instantly without waiting for buyers.",
+    stat: '85%',
+    label: 'Buyback rate',
+    body: '85% buyback guarantee on every card. Sell instantly without waiting for buyers.',
   },
   {
     icon: Globe,
-    stat: "24/7",
-    label: "Always open",
-    body: "24/7 marketplace accessible worldwide. Trade across borders without shipping delays.",
+    stat: '24/7',
+    label: 'Always open',
+    body: '24/7 marketplace accessible worldwide. Trade across borders without shipping delays.',
   },
 ];
 
@@ -77,25 +77,25 @@ type VaultCard = { icon: LucideIcon; title: string; body: string };
 const VAULT_CARDS: VaultCard[] = [
   {
     icon: Vault,
-    title: "Choose Your Vault",
-    body: "PSA, Alt, or Fanatics facilities",
+    title: 'Choose Your Vault',
+    body: 'PSA, Alt, or Fanatics facilities',
   },
   {
     icon: ShieldCheck,
-    title: "Fully Insured",
-    body: "Complete coverage for all items",
+    title: 'Fully Insured',
+    body: 'Complete coverage for all items',
   },
   {
     icon: Thermometer,
-    title: "Climate Controlled",
-    body: "Optimal storage conditions",
+    title: 'Climate Controlled',
+    body: 'Optimal storage conditions',
   },
 ];
 
 const VAULT_LOGOS = [
-  { src: "/images/psa.png", alt: "PSA" },
-  { src: "/images/fanatics.png", alt: "Fanatics" },
-  { src: "/images/altwhite.png", alt: "Alt" },
+  { src: '/images/psa.png', alt: 'PSA' },
+  { src: '/images/fanatics.png', alt: 'Fanatics' },
+  { src: '/images/altwhite.png', alt: 'Alt' },
 ];
 
 const SectionHeading = ({ title, sub }: { title: string; sub?: string }) => (
@@ -130,7 +130,7 @@ export default function AboutPage() {
               <span
                 className="h-1.5 w-1.5 rounded-full bg-emerald-400"
                 aria-hidden
-              />{" "}
+              />{' '}
               Powering 100K+ collectibles
             </span>
           </Reveal>
@@ -138,7 +138,7 @@ export default function AboutPage() {
             as="h1"
             className="mx-auto max-w-3xl font-heading text-4xl font-bold leading-[1.05] tracking-tight text-white sm:text-5xl lg:text-6xl"
           >
-            The Infrastructure for{" "}
+            The Infrastructure for{' '}
             <span className="text-neutral-500">Digital Collectibles</span>
           </Reveal>
           <Reveal
@@ -353,7 +353,7 @@ export default function AboutPage() {
           </a>
         </div>
         <p className="mt-5 text-[13px] text-white/45">
-          Reach out to{" "}
+          Reach out to{' '}
           <a
             href="mailto:hello@phygitals.com"
             className="text-white/70 underline-offset-2 hover:underline"

@@ -1,16 +1,16 @@
-import type { Metadata } from "next";
+import type { Metadata } from 'next';
 import {
   AccountHeader,
   StatCards,
   MockTable,
   Badge,
   DemoNote,
-} from "@/components/account/ui";
-import { usd } from "@/lib/format";
+} from '@/components/account/ui';
+import { usd } from '@/lib/format';
 
-export const metadata: Metadata = { title: "Earnings | Pokenic" };
+export const metadata: Metadata = { title: 'Earnings | Pokenic' };
 
-const TYPES = ["Buyback", "Sale", "Referral", "Sale", "Buyback", "Sale"];
+const TYPES = ['Buyback', 'Sale', 'Referral', 'Sale', 'Buyback', 'Sale'];
 
 export default function EarningsPage() {
   const rows = Array.from({ length: 6 }, (_, i) => [
@@ -26,14 +26,14 @@ export default function EarningsPage() {
       <AccountHeader title="Earnings" sub="Sales, buybacks, and payouts." />
       <StatCards
         items={[
-          { label: "Available", value: usd(1284.5) },
-          { label: "Pending", value: usd(312) },
-          { label: "Lifetime", value: usd(18420.75) },
-          { label: "This month", value: usd(947.25), sub: "+12% vs last" },
+          { label: 'Available', value: usd(1284.5) },
+          { label: 'Pending', value: usd(312) },
+          { label: 'Lifetime', value: usd(18420.75) },
+          { label: 'This month', value: usd(947.25), sub: '+12% vs last' },
         ]}
       />
       <div className="mt-5">
-        <MockTable head={["Date", "Type", "Amount", "Status"]} rows={rows} />
+        <MockTable head={['Date', 'Type', 'Amount', 'Status']} rows={rows} />
       </div>
       <button
         type="button"

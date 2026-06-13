@@ -1,11 +1,11 @@
 // Measure the hero region on ORIG vs CLONE: H1 (+per-line spans), primary CTA
 // button, pill/badge above heading, and the main hero image. Dumps JSON so we
 // match pixels, not eyeballs. Measured right after content paints to catch slide 0.
-import { chromium } from "playwright";
+import { chromium } from 'playwright';
 
 const SITES = [
-  ["https://www.phygitals.com/", "ORIG"],
-  ["http://localhost:4000/", "CLONE"],
+  ['https://www.phygitals.com/', 'ORIG'],
+  ['http://localhost:4000/', 'CLONE'],
 ];
 
 const EXTRACT = () => {
@@ -26,16 +26,16 @@ const EXTRACT = () => {
   };
 
   // Anchor: an H1 near the top of the page = the hero heading.
-  const h1s = [...document.querySelectorAll("h1")].filter(
+  const h1s = [...document.querySelectorAll('h1')].filter(
     (h) => h.getBoundingClientRect().top < 700,
   );
   const h1 = h1s[0] || null;
-  let hero = h1 ? h1.closest("section, div") : null;
+  let hero = h1 ? h1.closest('section, div') : null;
   // climb a bit to a container that also holds a button + image
   for (let i = 0; i < 4 && hero && hero.parentElement; i++) {
     if (
-      hero.querySelector("button, a[role=button]") &&
-      hero.querySelector("img")
+      hero.querySelector('button, a[role=button]') &&
+      hero.querySelector('img')
     )
       break;
     hero = hero.parentElement;
@@ -46,13 +46,13 @@ const EXTRACT = () => {
     ? {
         text: h1.textContent.trim().slice(0, 80),
         styles: cs(h1, [
-          "fontSize",
-          "fontWeight",
-          "fontFamily",
-          "lineHeight",
-          "letterSpacing",
-          "color",
-          "textTransform",
+          'fontSize',
+          'fontWeight',
+          'fontFamily',
+          'lineHeight',
+          'letterSpacing',
+          'color',
+          'textTransform',
         ]),
         rect: rect(h1),
         lines: [...h1.children].map((c) => ({
@@ -66,7 +66,7 @@ const EXTRACT = () => {
     : null;
 
   // CTA buttons in hero scope
-  const buttons = [...scope.querySelectorAll("button, a")]
+  const buttons = [...scope.querySelectorAll('button, a')]
     .filter(
       (b) =>
         b.getBoundingClientRect().width > 40 &&
@@ -78,19 +78,19 @@ const EXTRACT = () => {
       tag: b.tagName.toLowerCase(),
       text: b.textContent.trim().slice(0, 30),
       styles: cs(b, [
-        "backgroundColor",
-        "color",
-        "borderRadius",
-        "padding",
-        "fontSize",
-        "fontWeight",
-        "border",
+        'backgroundColor',
+        'color',
+        'borderRadius',
+        'padding',
+        'fontSize',
+        'fontWeight',
+        'border',
       ]),
       rect: rect(b),
     }));
 
   // Pill/badge candidates above the heading (small, rounded, near top)
-  const pillCands = [...scope.querySelectorAll("*")]
+  const pillCands = [...scope.querySelectorAll('*')]
     .filter((el) => {
       const r = el.getBoundingClientRect();
       const s = getComputedStyle(el);
@@ -110,18 +110,18 @@ const EXTRACT = () => {
     .map((el) => ({
       text: el.textContent.trim().slice(0, 40),
       styles: cs(el, [
-        "backgroundColor",
-        "color",
-        "borderRadius",
-        "padding",
-        "fontSize",
-        "border",
+        'backgroundColor',
+        'color',
+        'borderRadius',
+        'padding',
+        'fontSize',
+        'border',
       ]),
       rect: rect(el),
     }));
 
   // Largest image in hero scope
-  const imgs = [...scope.querySelectorAll("img")]
+  const imgs = [...scope.querySelectorAll('img')]
     .map((im) => ({
       el: im,
       area:
@@ -133,13 +133,13 @@ const EXTRACT = () => {
         src: (imgs[0].el.currentSrc || imgs[0].el.src).slice(-90),
         natural: { w: imgs[0].el.naturalWidth, h: imgs[0].el.naturalHeight },
         styles: cs(imgs[0].el, [
-          "objectFit",
-          "objectPosition",
-          "width",
-          "height",
-          "borderRadius",
-          "filter",
-          "opacity",
+          'objectFit',
+          'objectPosition',
+          'width',
+          'height',
+          'borderRadius',
+          'filter',
+          'opacity',
         ]),
         rect: rect(imgs[0].el),
       }
@@ -147,7 +147,7 @@ const EXTRACT = () => {
 
   return {
     heroRect: rect(scope),
-    heroBg: cs(scope, ["backgroundColor", "borderRadius", "padding"]),
+    heroBg: cs(scope, ['backgroundColor', 'borderRadius', 'padding']),
     heading,
     buttons,
     pillCands,
@@ -164,11 +164,11 @@ for (const [url, site] of SITES) {
   });
   const page = await ctx.newPage();
   try {
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
     for (let i = 0; i < 25; i++) {
       const ready = await page
         .evaluate(
-          () => document.querySelector("h1") && document.images.length > 2,
+          () => document.querySelector('h1') && document.images.length > 2,
         )
         .catch(() => false);
       if (ready) break;

@@ -4,15 +4,15 @@
 //  Phase 1: hero carousel curve (~9s)
 //  Phase 2: /claw/pokemon-mythic demo reveal — idle float, tap -> packs exit ->
 //           slab rise -> (tap) metadata -> auto -> [pull] -> card.
-import { chromium } from "playwright";
-import fs from "node:fs";
+import { chromium } from 'playwright';
+import fs from 'node:fs';
 
-const BASE = process.env.BASE_URL ?? "http://localhost:4000";
-const OUT = "docs/research/clone-film/v2";
+const BASE = process.env.BASE_URL ?? 'http://localhost:4000';
+const OUT = 'docs/research/clone-film/v2';
 fs.mkdirSync(OUT, { recursive: true });
 const save = (n, x) => {
   fs.writeFileSync(`${OUT}/${n}`, JSON.stringify(x));
-  console.log("WROTE", `${OUT}/${n}`, x?.frames?.length ?? "");
+  console.log('WROTE', `${OUT}/${n}`, x?.frames?.length ?? '');
 };
 
 // ---------- shared easing fit ----------
@@ -42,14 +42,14 @@ function cubicBez(x1, y1, x2, y2) {
 const BEZ = {
   linear: (t) => t,
   ease: cubicBez(0.25, 0.1, 0.25, 1),
-  "ease-in": cubicBez(0.42, 0, 1, 1),
-  "ease-out": cubicBez(0, 0, 0.58, 1),
-  "ease-in-out": cubicBez(0.42, 0, 0.58, 1),
-  "tw(0.4,0,0.2,1)": cubicBez(0.4, 0, 0.2, 1),
+  'ease-in': cubicBez(0.42, 0, 1, 1),
+  'ease-out': cubicBez(0, 0, 0.58, 1),
+  'ease-in-out': cubicBez(0.42, 0, 0.58, 1),
+  'tw(0.4,0,0.2,1)': cubicBez(0.4, 0, 0.2, 1),
   outCubic: cubicBez(0.22, 0.61, 0.36, 1),
-  "outQuint(0.16,1,0.3,1)": cubicBez(0.16, 1, 0.3, 1),
-  "outBack(0.34,1.56,0.64,1)": cubicBez(0.34, 1.56, 0.64, 1),
-  "exit(0.55,0,0.85,0.4)": cubicBez(0.55, 0, 0.85, 0.4),
+  'outQuint(0.16,1,0.3,1)': cubicBez(0.16, 1, 0.3, 1),
+  'outBack(0.34,1.56,0.64,1)': cubicBez(0.34, 1.56, 0.64, 1),
+  'exit(0.55,0,0.85,0.4)': cubicBez(0.55, 0, 0.85, 0.4),
 };
 const fitEase = (samples) => {
   let best = null;
@@ -64,16 +64,16 @@ const fitEase = (samples) => {
   return best.name;
 };
 const dec = (tr) => {
-  if (!tr || tr === "none") return {};
+  if (!tr || tr === 'none') return {};
   const m = tr.match(/-?[\d.e]+/g)?.map(Number) || [];
-  if (tr.startsWith("matrix3d"))
+  if (tr.startsWith('matrix3d'))
     return {
       sc: +Math.hypot(m[0], m[1], m[2]).toFixed(4),
       rotY: +((Math.atan2(m[8], m[0]) * 180) / Math.PI).toFixed(2),
       tx: +m[12].toFixed(1),
       ty: +m[13].toFixed(1),
     };
-  if (tr.startsWith("matrix"))
+  if (tr.startsWith('matrix'))
     return {
       sc: +Math.hypot(m[0], m[1]).toFixed(4),
       rot: +((Math.atan2(m[1], m[0]) * 180) / Math.PI).toFixed(2),
@@ -96,16 +96,16 @@ function printSegments(track, label) {
   const rows = [];
   for (const [sig, series] of bySig) {
     if (series.length < 4) continue;
-    for (const prop of ["o", "sc", "rot", "rotY", "tx", "ty"]) {
+    for (const prop of ['o', 'sc', 'rot', 'rotY', 'tx', 'ty']) {
       const vals = series
         .map((r) => ({
           t: r.t,
-          v: typeof r[prop] === "number" ? r[prop] : null,
+          v: typeof r[prop] === 'number' ? r[prop] : null,
         }))
         .filter((r) => r.v != null);
       if (vals.length < 4) continue;
       let i = 0;
-      const eps = prop === "o" ? 0.008 : 0.4;
+      const eps = prop === 'o' ? 0.008 : 0.4;
       while (i < vals.length - 1) {
         if (Math.abs(vals[i + 1].v - vals[i].v) < eps * 0.25) {
           i++;
@@ -121,7 +121,7 @@ function printSegments(track, label) {
         const seg = vals.slice(i, Math.max(i + 2, j + 1 - still));
         const from = seg[0].v,
           to = seg.at(-1).v;
-        if (Math.abs(to - from) >= (prop === "o" ? 0.08 : 3)) {
+        if (Math.abs(to - from) >= (prop === 'o' ? 0.08 : 3)) {
           const t0 = seg[0].t,
             dur = seg.at(-1).t - t0;
           if (dur > 30 && dur < 5000) {
@@ -163,7 +163,7 @@ const page = await browser.newPage({
 });
 
 // ---------------- Phase 1: HERO ----------------
-await page.goto(`${BASE}/`, { waitUntil: "networkidle", timeout: 60000 });
+await page.goto(`${BASE}/`, { waitUntil: 'networkidle', timeout: 60000 });
 await page.waitForTimeout(1500);
 await page.evaluate(() => {
   const data = { t0: performance.now(), frames: [], stopped: false };
@@ -171,7 +171,7 @@ await page.evaluate(() => {
   const tick = () => {
     if (data.stopped) return;
     const t = +(performance.now() - data.t0).toFixed(1);
-    const imgs = [...document.querySelectorAll("img")]
+    const imgs = [...document.querySelectorAll('img')]
       .filter((im) => {
         const r = im.getBoundingClientRect();
         return (
@@ -189,8 +189,8 @@ await page.evaluate(() => {
         while (
           wrap &&
           d < 4 &&
-          wcs.transform === "none" &&
-          wcs.opacity === "1"
+          wcs.transform === 'none' &&
+          wcs.opacity === '1'
         ) {
           wrap = wrap.parentElement;
           wcs = getComputedStyle(wrap);
@@ -198,10 +198,10 @@ await page.evaluate(() => {
         }
         const r = im.getBoundingClientRect();
         return {
-          src: (im.currentSrc || im.src || "").split("/").pop().split("?")[0],
+          src: (im.currentSrc || im.src || '').split('/').pop().split('?')[0],
           cx: Math.round(r.x + r.width / 2),
           wo: +(+wcs.opacity).toFixed(3),
-          wt: wcs.transform === "none" ? "" : wcs.transform,
+          wt: wcs.transform === 'none' ? '' : wcs.transform,
         };
       });
     data.frames.push({ t, imgs });
@@ -215,7 +215,7 @@ const hero = await page.evaluate(() => {
   d.stopped = true;
   return { frames: d.frames };
 });
-save("hero-curve.json", hero);
+save('hero-curve.json', hero);
 // hero digest: per-theme cx windows
 {
   const themes = new Map();
@@ -223,8 +223,8 @@ save("hero-curve.json", hero);
     const by = new Map();
     for (const im of fr.imgs) {
       const t = im.src
-        .replace(/\.(webp|avif|png)$/i, "")
-        .replace(/[0-9]+$/, "");
+        .replace(/\.(webp|avif|png)$/i, '')
+        .replace(/[0-9]+$/, '');
       (by.get(t) || by.set(t, []).get(t)).push(im);
     }
     for (const [t, ims] of by) {
@@ -234,7 +234,7 @@ save("hero-curve.json", hero);
       (themes.get(t) || themes.set(t, []).get(t)).push({ t: fr.t, cx, wo, sc });
     }
   }
-  console.log("\n### CLONE HERO transitions:");
+  console.log('\n### CLONE HERO transitions:');
   for (const [name, series] of themes) {
     let i = 0;
     while (i < series.length - 1) {
@@ -271,34 +271,34 @@ save("hero-curve.json", hero);
 
 // ---------------- Phase 2: REVEAL ----------------
 await page.goto(`${BASE}/claw/pokemon-mythic`, {
-  waitUntil: "networkidle",
+  waitUntil: 'networkidle',
   timeout: 60000,
 });
 await page.waitForTimeout(800);
-await page.getByRole("button", { name: /Try a free demo spin/i }).click();
+await page.getByRole('button', { name: /Try a free demo spin/i }).click();
 await page.waitForTimeout(400);
 
 // overlay rAF recorder (same as live runs)
 await page.evaluate(() => {
   const sig = (el) => {
     if (el.__sig) return el.__sig;
-    const img = el.tagName === "IMG" ? el : el.querySelector?.(":scope img");
+    const img = el.tagName === 'IMG' ? el : el.querySelector?.(':scope img');
     const src =
-      (img?.currentSrc || img?.src || "")
-        .split("/")
+      (img?.currentSrc || img?.src || '')
+        .split('/')
         .pop()
-        ?.split("?")[0]
-        ?.slice(-26) || "";
-    el.__sig = `${el.tagName}.${("" + (el.className || "")).trim().split(/\s+/).slice(0, 3).join(".").slice(0, 44)}${src ? "#" + src : ""}`;
+        ?.split('?')[0]
+        ?.slice(-26) || '';
+    el.__sig = `${el.tagName}.${('' + (el.className || '')).trim().split(/\s+/).slice(0, 3).join('.').slice(0, 44)}${src ? '#' + src : ''}`;
     return el.__sig;
   };
   const findOverlay = () =>
-    [...document.querySelectorAll("div")].find((d) => {
+    [...document.querySelectorAll('div')].find((d) => {
       const s = getComputedStyle(d);
       return (
-        s.position === "fixed" &&
+        s.position === 'fixed' &&
         d.getBoundingClientRect().width > innerWidth * 0.8 &&
-        d.querySelector("img,button")
+        d.querySelector('img,button')
       );
     });
   const data = { t0: performance.now(), frames: [], stopped: false };
@@ -309,17 +309,17 @@ await page.evaluate(() => {
     const o = findOverlay();
     const fr = { t, n: [] };
     if (o) {
-      fr.txt = (o.innerText || "").replace(/\s+/g, " ").trim().slice(0, 100);
-      const els = [...o.querySelectorAll("*")]
+      fr.txt = (o.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 100);
+      const els = [...o.querySelectorAll('*')]
         .filter((el) => {
-          if (el.tagName === "SCRIPT" || el.tagName === "STYLE") return false;
+          if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE') return false;
           const r = el.getBoundingClientRect();
           if (r.width < 8 || r.height < 8) return false;
           const cs = getComputedStyle(el);
           return (
-            cs.transform !== "none" ||
+            cs.transform !== 'none' ||
             +cs.opacity < 1 ||
-            cs.animationName !== "none"
+            cs.animationName !== 'none'
           );
         })
         .slice(0, 36);
@@ -354,7 +354,7 @@ await page.screenshot({ path: `${OUT}/slab.png` }).catch(() => {});
 await page.mouse.click(720, 450); // slab -> metadata
 for (let i = 0; i < 22; i++) {
   await page
-    .screenshot({ path: `${OUT}/r-${String(i).padStart(2, "0")}.png` })
+    .screenshot({ path: `${OUT}/r-${String(i).padStart(2, '0')}.png` })
     .catch(() => {});
   await page.waitForTimeout(330);
 }
@@ -363,29 +363,29 @@ const rev = await page.evaluate(() => {
   d.stopped = true;
   return { frames: d.frames };
 });
-save("reveal-track.json", rev);
+save('reveal-track.json', rev);
 
 // stage timeline from overlay text
 {
-  let last = "";
-  console.log("\n### CLONE REVEAL stage timeline:");
+  let last = '';
+  console.log('\n### CLONE REVEAL stage timeline:');
   for (const fr of rev.frames) {
-    const txt = (fr.txt || "").toUpperCase();
+    const txt = (fr.txt || '').toUpperCase();
     let stage = null;
-    if (/TAP A PACK|DRAG TO SPIN|SHUFFLE/.test(txt)) stage = "packs";
-    else if (/TAP TO REVEAL/.test(txt)) stage = "slab";
-    else if (/PULL •/.test(txt)) stage = "pull";
-    else if (/OPEN ANOTHER/.test(txt)) stage = "card";
-    else if (/CATEGORY|GRADE|YEAR|VALUE/.test(txt)) stage = "metadata";
+    if (/TAP A PACK|DRAG TO SPIN|SHUFFLE/.test(txt)) stage = 'packs';
+    else if (/TAP TO REVEAL/.test(txt)) stage = 'slab';
+    else if (/PULL •/.test(txt)) stage = 'pull';
+    else if (/OPEN ANOTHER/.test(txt)) stage = 'card';
+    else if (/CATEGORY|GRADE|YEAR|VALUE/.test(txt)) stage = 'metadata';
     if (stage && stage !== last) {
       console.log(
-        `- STAGE ${String(Math.round(fr.t)).padStart(6)}ms  ${stage.padEnd(9)} "${(fr.txt || "").slice(0, 80)}"`,
+        `- STAGE ${String(Math.round(fr.t)).padStart(6)}ms  ${stage.padEnd(9)} "${(fr.txt || '').slice(0, 80)}"`,
       );
       last = stage;
     }
   }
 }
-printSegments(rev, "CLONE REVEAL");
+printSegments(rev, 'CLONE REVEAL');
 await page.screenshot({ path: `${OUT}/final.png` }).catch(() => {});
 await browser.close();
-console.log("DONE");
+console.log('DONE');

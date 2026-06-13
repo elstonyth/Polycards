@@ -1,5 +1,5 @@
-import type { Metadata } from "next";
-import { AlertCircle } from "lucide-react";
+import type { Metadata } from 'next';
+import { AlertCircle } from 'lucide-react';
 
 // Live /clawmaker (anonymous) shows ONLY an in-place auth wall — an amber
 // circle-exclamation in a faint warm glow, "Access Restricted", and "Please
@@ -7,8 +7,8 @@ import { AlertCircle } from "lucide-react";
 // builder existed nowhere on live). The logged-in builder, if ever needed,
 // must be recloned from a logged-in live capture.
 export const metadata: Metadata = {
-  title: "Claw Maker",
-  description: "Build your own custom claw pack.",
+  title: 'Claw Maker',
+  description: 'Build your own custom claw pack.',
 };
 
 export default function ClawMakerPage() {

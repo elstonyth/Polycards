@@ -14,9 +14,9 @@
  * (local assets, not backend-derived).
  */
 
-import { sdk } from "@/lib/medusa";
-import { logger } from "@/lib/logger";
-import { isRarity, formatValue } from "@/lib/packs-format";
+import { sdk } from '@/lib/medusa';
+import { logger } from '@/lib/logger';
+import { isRarity, formatValue } from '@/lib/packs-format';
 import {
   CATEGORIES as MOCK_CATEGORIES,
   findPack,
@@ -24,7 +24,7 @@ import {
   type PackCategory,
   type PackCard,
   type Rarity,
-} from "@/app/claw/packs-data";
+} from '@/app/claw/packs-data';
 
 // Shape of a pack row from GET /store/packs (backend Pack model).
 interface BackendPack {
@@ -41,7 +41,7 @@ interface BackendPack {
 
 // Pack prices are whole-dollar USD; render as "$1,000" to match the live site.
 const formatPrice = (price: number): string =>
-  `$${Math.round(price).toLocaleString("en-US")}`;
+  `$${Math.round(price).toLocaleString('en-US')}`;
 
 const toPack = (p: BackendPack): Pack => ({
   id: p.slug,
@@ -50,7 +50,7 @@ const toPack = (p: BackendPack): Pack => ({
   image: p.image,
   boost: p.boost || undefined,
   buybackPercent:
-    typeof p.buyback_percent === "number" ? p.buyback_percent : undefined,
+    typeof p.buyback_percent === 'number' ? p.buyback_percent : undefined,
   inStock: p.in_stock === false ? false : undefined,
 });
 
@@ -63,7 +63,7 @@ const toPack = (p: BackendPack): Pack => ({
 export async function getPackCategories(): Promise<PackCategory[]> {
   try {
     const { packs } = await sdk.client.fetch<{ packs: BackendPack[] }>(
-      "/store/packs",
+      '/store/packs',
     );
     if (!Array.isArray(packs) || packs.length === 0) return MOCK_CATEGORIES;
 
@@ -73,7 +73,7 @@ export async function getPackCategories(): Promise<PackCategory[]> {
     // "$NaN" or a category-less pack.
     const byCategory = new Map<string, Pack[]>();
     for (const p of packs) {
-      if (!p || typeof p.category !== "string" || !Number.isFinite(p.price)) {
+      if (!p || typeof p.category !== 'string' || !Number.isFinite(p.price)) {
         continue;
       }
       const list = byCategory.get(p.category) ?? [];
@@ -95,7 +95,7 @@ export async function getPackCategories(): Promise<PackCategory[]> {
       ? categories
       : MOCK_CATEGORIES;
   } catch (error) {
-    logger.error("[packs] failed to load packs from backend:", error);
+    logger.error('[packs] failed to load packs from backend:', error);
     return MOCK_CATEGORIES;
   }
 }
@@ -150,7 +150,7 @@ export async function getPackDetail(slug: string): Promise<PackDetail | null> {
     const valid = odds.filter(
       (o) =>
         o &&
-        typeof o.handle === "string" &&
+        typeof o.handle === 'string' &&
         isRarity(o.rarity) &&
         Number.isFinite(o.market_value),
     );
@@ -200,14 +200,14 @@ export interface RecentPull {
 }
 
 // Fallback pack label when a pull's pack_id isn't in the static catalog.
-const FALLBACK_PACK_ICON = "/images/claw/rookie-pack-icon.webp";
+const FALLBACK_PACK_ICON = '/images/claw/rookie-pack-icon.webp';
 
 // rolled_at -> "just now" / "4m ago" / "2h ago" / "3d ago".
 function relativeTime(iso: string): string {
   const then = new Date(iso).getTime();
-  if (!Number.isFinite(then)) return "just now";
+  if (!Number.isFinite(then)) return 'just now';
   const secs = Math.max(0, Math.floor((Date.now() - then) / 1000));
-  if (secs < 60) return "just now";
+  if (secs < 60) return 'just now';
   const mins = Math.floor(secs / 60);
   if (mins < 60) return `${mins}m ago`;
   const hours = Math.floor(mins / 60);
@@ -225,7 +225,7 @@ function relativeTime(iso: string): string {
 export async function getRecentPulls(): Promise<RecentPull[]> {
   try {
     const { pulls } = await sdk.client.fetch<{ pulls: BackendRecentPull[] }>(
-      "/store/pulls/recent",
+      '/store/pulls/recent',
     );
     if (!Array.isArray(pulls)) return [];
 
@@ -233,8 +233,8 @@ export async function getRecentPulls(): Promise<RecentPull[]> {
       .filter(
         (p) =>
           p &&
-          typeof p.handle === "string" &&
-          typeof p.name === "string" &&
+          typeof p.handle === 'string' &&
+          typeof p.name === 'string' &&
           isRarity(p.rarity) &&
           Number.isFinite(p.market_value),
       )
@@ -246,13 +246,13 @@ export async function getRecentPulls(): Promise<RecentPull[]> {
           image: p.image,
           value: formatValue(p.market_value),
           rarity: p.rarity as Rarity,
-          packName: pack?.name ?? "Mystery Pack",
+          packName: pack?.name ?? 'Mystery Pack',
           packIcon: pack?.image ?? FALLBACK_PACK_ICON,
           agoLabel: relativeTime(p.rolled_at),
         };
       });
   } catch (error) {
-    logger.error("[packs] failed to load recent pulls:", error);
+    logger.error('[packs] failed to load recent pulls:', error);
     return [];
   }
 }

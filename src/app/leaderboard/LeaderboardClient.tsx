@@ -1,11 +1,11 @@
-"use client";
+'use client';
 
-import { useEffect, useState } from "react";
-import { Settings, ChevronLeft, ChevronRight, Clock } from "lucide-react";
-import { cn } from "@/lib/utils";
-import Reveal from "@/components/Reveal";
-import LeaderboardSection from "@/components/LeaderboardSection";
-import type { LeaderboardEntry } from "@/lib/data/leaderboard";
+import { useEffect, useState } from 'react';
+import { Settings, ChevronLeft, ChevronRight, Clock } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import Reveal from '@/components/Reveal';
+import LeaderboardSection from '@/components/LeaderboardSection';
+import type { LeaderboardEntry } from '@/lib/data/leaderboard';
 
 type PodiumPlayer = {
   rank: 1 | 2 | 3;
@@ -14,22 +14,22 @@ type PodiumPlayer = {
   avatar: string;
 };
 
-const TABS = ["Weekly", "All Time", "Prizes"] as const;
+const TABS = ['Weekly', 'All Time', 'Prizes'] as const;
 type Tab = (typeof TABS)[number];
 
 const PRIZE_TIERS = [
-  { place: "1st Place", reward: "Grand prize pack + 50,000 bonus points" },
-  { place: "2nd Place", reward: "Premium pack + 25,000 bonus points" },
-  { place: "3rd Place", reward: "Premium pack + 10,000 bonus points" },
-  { place: "Top 10", reward: "Exclusive pack + 5,000 bonus points" },
-  { place: "Top 100", reward: "1,000 bonus points" },
+  { place: '1st Place', reward: 'Grand prize pack + 50,000 bonus points' },
+  { place: '2nd Place', reward: 'Premium pack + 25,000 bonus points' },
+  { place: '3rd Place', reward: 'Premium pack + 10,000 bonus points' },
+  { place: 'Top 10', reward: 'Exclusive pack + 5,000 bonus points' },
+  { place: 'Top 100', reward: '1,000 bonus points' },
 ];
 
 // Weekly leaderboard countdown (matches the live "6d 07h 33m 59s" format).
 const INITIAL_SECONDS = 6 * 86400 + 7 * 3600 + 33 * 60 + 59;
 
 function pad(n: number): string {
-  return n.toString().padStart(2, "0");
+  return n.toString().padStart(2, '0');
 }
 
 function useCountdown(initialSeconds: number): number {
@@ -52,10 +52,10 @@ function Countdown() {
   const m = Math.floor((total % 3600) / 60);
   const s = total % 60;
   const segments: [number, string][] = [
-    [d, "d"],
-    [h, "h"],
-    [m, "m"],
-    [s, "s"],
+    [d, 'd'],
+    [h, 'h'],
+    [m, 'm'],
+    [s, 's'],
   ];
 
   // Bordered pill + clock icon + boxed time segments (matches the live podium header).
@@ -70,7 +70,7 @@ function Countdown() {
               key={u}
               className="rounded-md border border-white/10 bg-white/[0.05] px-1.5 py-0.5 font-medium tabular-nums text-white/80"
             >
-              {u === "d" ? v : pad(v)}
+              {u === 'd' ? v : pad(v)}
               <span className="text-white/40">{u}</span>
             </span>
           ))}
@@ -86,9 +86,9 @@ function PodiumColumn({ player }: { player: PodiumPlayer }) {
   return (
     <div
       className={cn(
-        "flex h-full min-w-0 flex-col items-center justify-end text-center",
+        'flex h-full min-w-0 flex-col items-center justify-end text-center',
         // Order = 2nd | 1st | 3rd; the graduated pedestal heights lift 1st highest.
-        isFirst ? "order-2" : player.rank === 2 ? "order-1" : "order-3",
+        isFirst ? 'order-2' : player.rank === 2 ? 'order-1' : 'order-3',
       )}
     >
       <div className="relative">
@@ -100,38 +100,38 @@ function PodiumColumn({ player }: { player: PodiumPlayer }) {
           height={isFirst ? 64 : 48}
           loading="lazy"
           className={cn(
-            "rounded-full object-cover ring-2 ring-offset-2 ring-offset-neutral-950",
+            'rounded-full object-cover ring-2 ring-offset-2 ring-offset-neutral-950',
             isFirst
-              ? "h-14 w-14 ring-amber-400 sm:h-16 sm:w-16"
-              : "h-10 w-10 ring-white/15 sm:h-11 sm:w-11",
+              ? 'h-14 w-14 ring-amber-400 sm:h-16 sm:w-16'
+              : 'h-10 w-10 ring-white/15 sm:h-11 sm:w-11',
           )}
         />
         {/* rank badge */}
         <span
           className={cn(
-            "absolute -top-2 left-1/2 flex h-6 w-6 -translate-x-1/2 items-center justify-center rounded-full text-[11px] font-bold shadow",
+            'absolute -top-2 left-1/2 flex h-6 w-6 -translate-x-1/2 items-center justify-center rounded-full text-[11px] font-bold shadow',
             isFirst
-              ? "h-7 w-7 bg-amber-400 text-neutral-950"
+              ? 'h-7 w-7 bg-amber-400 text-neutral-950'
               : player.rank === 2
-                ? "bg-neutral-300 text-neutral-900"
-                : "bg-amber-700 text-amber-50",
+                ? 'bg-neutral-300 text-neutral-900'
+                : 'bg-amber-700 text-amber-50',
           )}
           aria-hidden
         >
-          {isFirst ? "♔" : player.rank}
+          {isFirst ? '♔' : player.rank}
         </span>
       </div>
 
       <p
         className={cn(
-          "mt-3 w-full max-w-[10rem] truncate px-1 font-medium text-white",
-          isFirst ? "text-sm sm:text-base" : "text-[13px]",
+          'mt-3 w-full max-w-[10rem] truncate px-1 font-medium text-white',
+          isFirst ? 'text-sm sm:text-base' : 'text-[13px]',
         )}
         title={player.name}
       >
         {player.name}
       </p>
-      <p className={cn("text-white/45", isFirst ? "text-[13px]" : "text-xs")}>
+      <p className={cn('text-white/45', isFirst ? 'text-[13px]' : 'text-xs')}>
         {player.points} points
       </p>
 
@@ -141,21 +141,21 @@ function PodiumColumn({ player }: { player: PodiumPlayer }) {
         aria-hidden
         style={{
           animationDelay: isFirst
-            ? "180ms"
+            ? '180ms'
             : player.rank === 2
-              ? "0ms"
-              : "90ms",
+              ? '0ms'
+              : '90ms',
         }}
         className={cn(
-          "mt-2 w-16 origin-bottom rounded-t-xl border border-b-0 border-white/10",
-          "bg-gradient-to-b from-white/[0.14] to-white/[0.05] sm:w-20",
+          'mt-2 w-16 origin-bottom rounded-t-xl border border-b-0 border-white/10',
+          'bg-gradient-to-b from-white/[0.14] to-white/[0.05] sm:w-20',
           // Smoother rise: easeOutExpo-style decel + fade (see podiumRise keyframe).
-          "motion-safe:animate-[podiumRise_0.85s_cubic-bezier(0.16,1,0.3,1)_both]",
+          'motion-safe:animate-[podiumRise_0.85s_cubic-bezier(0.16,1,0.3,1)_both]',
           isFirst
-            ? "h-[116px] sm:h-[140px]"
+            ? 'h-[116px] sm:h-[140px]'
             : player.rank === 2
-              ? "h-[84px] sm:h-[104px]"
-              : "h-[60px] sm:h-[76px]",
+              ? 'h-[84px] sm:h-[104px]'
+              : 'h-[60px] sm:h-[76px]',
         )}
       />
     </div>
@@ -211,12 +211,12 @@ function Pagination({ count }: { count: number }) {
             key={p}
             type="button"
             aria-label={`Page ${p}`}
-            aria-current={p === 1 ? "page" : undefined}
+            aria-current={p === 1 ? 'page' : undefined}
             className={cn(
-              "flex h-8 min-w-8 items-center justify-center rounded-lg px-2 text-sm transition-colors",
+              'flex h-8 min-w-8 items-center justify-center rounded-lg px-2 text-sm transition-colors',
               p === 1
-                ? "bg-white text-neutral-950"
-                : "border border-white/10 bg-white/[0.03] text-white/60 hover:bg-white/10 hover:text-white",
+                ? 'bg-white text-neutral-950'
+                : 'border border-white/10 bg-white/[0.03] text-white/60 hover:bg-white/10 hover:text-white',
             )}
           >
             {p}
@@ -241,10 +241,10 @@ export default function LeaderboardClient({
   weekly: LeaderboardEntry[];
   alltime: LeaderboardEntry[];
 }) {
-  const [tab, setTab] = useState<Tab>("Weekly");
+  const [tab, setTab] = useState<Tab>('Weekly');
 
   // Podium + table reflect the active timeframe (Prizes keeps the weekly view).
-  const activeEntries = tab === "All Time" ? alltime : weekly;
+  const activeEntries = tab === 'All Time' ? alltime : weekly;
   const podium: PodiumPlayer[] = activeEntries.slice(0, 3).map((e, i) => ({
     rank: (i + 1) as 1 | 2 | 3,
     name: e.name,
@@ -287,7 +287,7 @@ export default function LeaderboardClient({
         </button>
         <button
           type="button"
-          onClick={() => setTab("Prizes")}
+          onClick={() => setTab('Prizes')}
           className="inline-flex items-center justify-center rounded-2xl bg-white/90 px-5 py-2.5 text-sm font-semibold text-neutral-950 shadow-lg transition-colors duration-300 hover:bg-white"
         >
           Win prizes!
@@ -308,10 +308,10 @@ export default function LeaderboardClient({
             aria-selected={tab === t}
             onClick={() => setTab(t)}
             className={cn(
-              "rounded-lg px-3 py-2 text-center text-sm font-medium transition-colors",
+              'rounded-lg px-3 py-2 text-center text-sm font-medium transition-colors',
               tab === t
-                ? "bg-white/10 text-white"
-                : "text-white/45 hover:text-white/70",
+                ? 'bg-white/10 text-white'
+                : 'text-white/45 hover:text-white/70',
             )}
           >
             {t}
@@ -320,7 +320,7 @@ export default function LeaderboardClient({
       </div>
 
       {/* Tab panels */}
-      {tab === "Prizes" ? (
+      {tab === 'Prizes' ? (
         <PrizesPanel />
       ) : (
         <>

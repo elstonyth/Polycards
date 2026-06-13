@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import {
   createContext,
@@ -7,8 +7,8 @@ import {
   useEffect,
   useState,
   type ReactNode,
-} from "react";
-import type { AuthCustomer } from "@/lib/actions/auth";
+} from 'react';
+import type { AuthCustomer } from '@/lib/actions/auth';
 
 type AuthContextValue = {
   customer: AuthCustomer | null;
@@ -27,7 +27,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async () => {
     try {
-      const res = await fetch("/api/me", { cache: "no-store" });
+      const res = await fetch('/api/me', { cache: 'no-store' });
       const data = (await res.json()) as { customer: AuthCustomer | null };
       setCustomer(data.customer);
     } catch {
@@ -52,6 +52,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export function useAuth(): AuthContextValue {
   const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be used within <AuthProvider>");
+  if (!ctx) throw new Error('useAuth must be used within <AuthProvider>');
   return ctx;
 }

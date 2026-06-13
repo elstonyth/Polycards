@@ -1,4 +1,4 @@
-"use server";
+'use server';
 
 /**
  * Open-pack server action. Called from the client pack detail (the "Open Pack"
@@ -9,11 +9,11 @@
  * never sends an id — so a pull can't be forged for another account. The route
  * is POST /store/packs/:slug/open (customer-authenticated).
  */
-import { sdk } from "@/lib/medusa";
-import { logger } from "@/lib/logger";
-import { getAuthToken } from "@/lib/data/customer";
-import { isRarity, formatValue } from "@/lib/packs-format";
-import type { Rarity } from "@/app/claw/packs-data";
+import { sdk } from '@/lib/medusa';
+import { logger } from '@/lib/logger';
+import { getAuthToken } from '@/lib/data/customer';
+import { isRarity, formatValue } from '@/lib/packs-format';
+import type { Rarity } from '@/app/claw/packs-data';
 
 // The won card, shaped for the roulette reveal (same fields as a mock PackCard).
 export type WonCard = {
@@ -54,25 +54,25 @@ function friendlyError(error: unknown): string {
   if (/too many|rate.?limit|429/i.test(text))
     return "You're opening packs too fast — give it a moment and try again.";
   if (/unauthorized|not authenticated|401/i.test(text))
-    return "Please log in to open a pack.";
+    return 'Please log in to open a pack.';
   if (/not enough credits/i.test(text))
-    return "Not enough credits to open this pack.";
+    return 'Not enough credits to open this pack.';
   if (/not available|not found|404/i.test(text))
     return "This pack isn't available right now.";
-  return "Could not open the pack. Please try again.";
+  return 'Could not open the pack. Please try again.';
 }
 
 export async function openPack(slug: string): Promise<OpenPackResult> {
   // Validate at the boundary — a server action is a public endpoint.
-  if (typeof slug !== "string" || slug.trim() === "") {
-    return { ok: false, error: "Invalid pack." };
+  if (typeof slug !== 'string' || slug.trim() === '') {
+    return { ok: false, error: 'Invalid pack.' };
   }
 
   const token = await getAuthToken();
   if (!token) {
     return {
       ok: false,
-      error: "Please log in to open a pack.",
+      error: 'Please log in to open a pack.',
       needsAuth: true,
     };
   }
@@ -83,7 +83,7 @@ export async function openPack(slug: string): Promise<OpenPackResult> {
       card: BackendWonCard;
       balance?: unknown;
     }>(`/store/packs/${encodeURIComponent(slug)}/open`, {
-      method: "POST",
+      method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
       body: {},
     });
@@ -92,14 +92,14 @@ export async function openPack(slug: string): Promise<OpenPackResult> {
     // shape so a renamed field can't render "$NaN" / an undefined rarity ring.
     if (
       !card ||
-      typeof card.handle !== "string" ||
-      typeof card.name !== "string" ||
+      typeof card.handle !== 'string' ||
+      typeof card.name !== 'string' ||
       !isRarity(card.rarity) ||
       !Number.isFinite(card.market_value)
     ) {
       return {
         ok: false,
-        error: "Got an unexpected response. Please try again.",
+        error: 'Got an unexpected response. Please try again.',
       };
     }
 
@@ -112,10 +112,10 @@ export async function openPack(slug: string): Promise<OpenPackResult> {
         value: formatValue(card.market_value),
         rarity: card.rarity,
       },
-      pullId: typeof pull?.id === "string" ? pull.id : null,
+      pullId: typeof pull?.id === 'string' ? pull.id : null,
       marketValue: card.market_value,
       balance:
-        typeof balance === "number" && Number.isFinite(balance)
+        typeof balance === 'number' && Number.isFinite(balance)
           ? balance
           : null,
     };

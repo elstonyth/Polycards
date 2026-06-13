@@ -13,15 +13,15 @@
  * build never hard-fails on a transient backend outage.
  */
 
-import type { HttpTypes } from "@medusajs/types";
-import { sdk } from "@/lib/medusa";
-import { logger } from "@/lib/logger";
+import type { HttpTypes } from '@medusajs/types';
+import { sdk } from '@/lib/medusa';
+import { logger } from '@/lib/logger';
 import {
   cardOrGeneric,
   type Grader,
   type MockCard,
   type Rarity,
-} from "@/lib/mock/cards";
+} from '@/lib/mock/cards';
 
 export interface MarketplaceCard {
   id: string;
@@ -39,7 +39,7 @@ export interface MarketplaceCategory {
 
 // Store API field selection: default fields + card `metadata` + each variant's
 // region-resolved `calculated_price` (verified working against the backend).
-const PRODUCT_FIELDS = "+metadata,*variants.calculated_price";
+const PRODUCT_FIELDS = '+metadata,*variants.calculated_price';
 const PRODUCT_LIST_LIMIT = 100;
 
 // The storefront prices and displays cards in USD, so Store API calls pass the
@@ -52,7 +52,7 @@ function getUsdRegionId(): Promise<string | undefined> {
     usdRegionIdPromise = sdk.store.region
       .list()
       .then(({ regions }) => {
-        const id = regions.find((r) => r.currency_code === "usd")?.id;
+        const id = regions.find((r) => r.currency_code === 'usd')?.id;
         if (!id) usdRegionIdPromise = null; // not found — allow a later retry
         return id;
       })
@@ -65,18 +65,18 @@ function getUsdRegionId(): Promise<string | undefined> {
 }
 
 const VALID_RARITIES: readonly Rarity[] = [
-  "Legendary",
-  "Epic",
-  "Rare",
-  "Uncommon",
-  "Common",
+  'Legendary',
+  'Epic',
+  'Rare',
+  'Uncommon',
+  'Common',
 ];
-const VALID_GRADERS: readonly Grader[] = ["PSA", "CGC", "Fanatics"];
+const VALID_GRADERS: readonly Grader[] = ['PSA', 'CGC', 'Fanatics'];
 
 const toRarity = (v: unknown): Rarity =>
-  (VALID_RARITIES as readonly unknown[]).includes(v) ? (v as Rarity) : "Common";
+  (VALID_RARITIES as readonly unknown[]).includes(v) ? (v as Rarity) : 'Common';
 const toGrader = (v: unknown): Grader =>
-  (VALID_GRADERS as readonly unknown[]).includes(v) ? (v as Grader) : "CGC";
+  (VALID_GRADERS as readonly unknown[]).includes(v) ? (v as Grader) : 'CGC';
 
 // Coerce an untrusted `metadata` value to a finite number, else fall back —
 // guards against a malformed seed value silently becoming `NaN` in the UI.
@@ -88,7 +88,7 @@ const toFinite = (v: unknown, fallback: number): number => {
 const priceOf = (p: HttpTypes.StoreProduct): number =>
   p.variants?.[0]?.calculated_price?.calculated_amount ?? 0;
 const imageOf = (p: HttpTypes.StoreProduct): string =>
-  p.thumbnail ?? p.images?.[0]?.url ?? "";
+  p.thumbnail ?? p.images?.[0]?.url ?? '';
 
 function toMarketplaceCard(p: HttpTypes.StoreProduct): MarketplaceCard {
   const meta = p.metadata ?? {};
@@ -109,9 +109,9 @@ function toMockCard(p: HttpTypes.StoreProduct): MockCard {
   return {
     id: p.handle,
     name: p.title,
-    set: String(meta.set ?? ""),
+    set: String(meta.set ?? ''),
     grader: toGrader(meta.grader),
-    grade: String(meta.grade ?? ""),
+    grade: String(meta.grade ?? ''),
     rarity: toRarity(meta.rarity),
     image: imageOf(p),
     fmv: toFinite(meta.fmv, price),
@@ -125,19 +125,19 @@ function toMockCard(p: HttpTypes.StoreProduct): MockCard {
 // public/pack-index-icons/). Static this phase: all seeded cards are Pokémon
 // and the tab icons are local assets, not backend-derived.
 const CATEGORIES: MarketplaceCategory[] = [
-  { name: "Pokémon", icon: "/pack-index-icons/pokemon.webp" },
-  { name: "One Piece", icon: "/pack-index-icons/onepiece.webp" },
-  { name: "Basketball", icon: "/pack-index-icons/nba.webp" },
-  { name: "Football", icon: "/pack-index-icons/nfl.webp" },
-  { name: "Baseball", icon: "/pack-index-icons/mlb.webp" },
-  { name: "Soccer", icon: "/pack-index-icons/soccer.webp" },
-  { name: "Yu-Gi-Oh!", icon: "/pack-index-icons/yugioh.webp" },
-  { name: "Riftbound", icon: "/pack-index-icons/riftbound.webp" },
-  { name: "Dragon Ball", icon: "/pack-index-icons/dragonball.webp" },
-  { name: "Fwog", icon: "/pack-index-icons/fwog.jpg" },
-  { name: "NEUKO", icon: "/pack-index-icons/neuko.jpg" },
-  { name: "Vibes", icon: "/pack-index-icons/vibes.webp" },
-  { name: "Moonbirds", icon: "/pack-index-icons/moonbirds.png" },
+  { name: 'Pokémon', icon: '/pack-index-icons/pokemon.webp' },
+  { name: 'One Piece', icon: '/pack-index-icons/onepiece.webp' },
+  { name: 'Basketball', icon: '/pack-index-icons/nba.webp' },
+  { name: 'Football', icon: '/pack-index-icons/nfl.webp' },
+  { name: 'Baseball', icon: '/pack-index-icons/mlb.webp' },
+  { name: 'Soccer', icon: '/pack-index-icons/soccer.webp' },
+  { name: 'Yu-Gi-Oh!', icon: '/pack-index-icons/yugioh.webp' },
+  { name: 'Riftbound', icon: '/pack-index-icons/riftbound.webp' },
+  { name: 'Dragon Ball', icon: '/pack-index-icons/dragonball.webp' },
+  { name: 'Fwog', icon: '/pack-index-icons/fwog.jpg' },
+  { name: 'NEUKO', icon: '/pack-index-icons/neuko.jpg' },
+  { name: 'Vibes', icon: '/pack-index-icons/vibes.webp' },
+  { name: 'Moonbirds', icon: '/pack-index-icons/moonbirds.png' },
 ];
 
 /** Marketplace listing grid — live from the Store API (empty on backend failure). */
@@ -151,7 +151,7 @@ export async function getMarketplaceCards(): Promise<MarketplaceCard[]> {
     });
     return products.map(toMarketplaceCard);
   } catch (error) {
-    logger.error("[marketplace] failed to load products from backend:", error);
+    logger.error('[marketplace] failed to load products from backend:', error);
     return [];
   }
 }
@@ -187,12 +187,12 @@ export async function getCardById(handle: string): Promise<MockCard> {
 export async function getCardHandles(): Promise<string[]> {
   try {
     const { products } = await sdk.store.product.list({
-      fields: "handle",
+      fields: 'handle',
       limit: PRODUCT_LIST_LIMIT,
     });
     return products.map((p) => p.handle);
   } catch (error) {
-    logger.error("[card] failed to load product handles from backend:", error);
+    logger.error('[card] failed to load product handles from backend:', error);
     return [];
   }
 }

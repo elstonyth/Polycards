@@ -1,4 +1,4 @@
-"use server";
+'use server';
 
 /**
  * Customer auth server actions (emailpass). Called from the client auth modal.
@@ -11,11 +11,11 @@
  *  signup: register → {token} → create customer (Bearer register-token) → login
  *  login:  /auth/customer/emailpass → {token} → store → retrieve /me
  */
-import type { HttpTypes } from "@medusajs/types";
-import { sdk } from "@/lib/medusa";
-import { logger } from "@/lib/logger";
-import { setAuthToken, clearAuthToken } from "@/lib/data/customer";
-import { fetchProfileHandle } from "@/lib/data/profiles";
+import type { HttpTypes } from '@medusajs/types';
+import { sdk } from '@/lib/medusa';
+import { logger } from '@/lib/logger';
+import { setAuthToken, clearAuthToken } from '@/lib/data/customer';
+import { fetchProfileHandle } from '@/lib/data/profiles';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD_LENGTH = 8;
@@ -51,9 +51,9 @@ const toAuthCustomer = (
 function friendlyError(error: unknown, fallback: string): string {
   const text = error instanceof Error ? error.message : String(error);
   if (/already exists/i.test(text))
-    return "An account with this email already exists.";
+    return 'An account with this email already exists.';
   if (/invalid email or password/i.test(text))
-    return "Incorrect email or password.";
+    return 'Incorrect email or password.';
   return fallback;
 }
 
@@ -63,7 +63,7 @@ async function exchangeToken(
   password: string,
 ): Promise<string> {
   const { token } = await sdk.client.fetch<TokenResponse>(path, {
-    method: "POST",
+    method: 'POST',
     body: { email, password },
   });
   return token;
@@ -76,13 +76,13 @@ export async function login(input: {
   const email = input.email.trim().toLowerCase();
   // Validate at the boundary — a server action is a public endpoint.
   if (!EMAIL_RE.test(email))
-    return { ok: false, error: "Please enter a valid email address." };
+    return { ok: false, error: 'Please enter a valid email address.' };
   if (!input.password)
-    return { ok: false, error: "Please enter your password." };
+    return { ok: false, error: 'Please enter your password.' };
 
   try {
     const token = await exchangeToken(
-      "/auth/customer/emailpass",
+      '/auth/customer/emailpass',
       email,
       input.password,
     );
@@ -102,10 +102,10 @@ export async function login(input: {
       throw error;
     }
   } catch (error) {
-    logger.error("[auth] login failed:", error);
+    logger.error('[auth] login failed:', error);
     return {
       ok: false,
-      error: friendlyError(error, "Could not log in. Please try again."),
+      error: friendlyError(error, 'Could not log in. Please try again.'),
     };
   }
 }
@@ -117,7 +117,7 @@ export async function signup(input: {
 }): Promise<AuthResult> {
   const email = input.email.trim().toLowerCase();
   if (!EMAIL_RE.test(email))
-    return { ok: false, error: "Please enter a valid email address." };
+    return { ok: false, error: 'Please enter a valid email address.' };
   if (input.password.length < MIN_PASSWORD_LENGTH)
     return {
       ok: false,
@@ -126,7 +126,7 @@ export async function signup(input: {
 
   try {
     const registerToken = await exchangeToken(
-      "/auth/customer/emailpass/register",
+      '/auth/customer/emailpass/register',
       email,
       input.password,
     );
@@ -138,12 +138,12 @@ export async function signup(input: {
     // The register token isn't a session token — log in to get the real one.
     return await login({ email, password: input.password });
   } catch (error) {
-    logger.error("[auth] signup failed:", error);
+    logger.error('[auth] signup failed:', error);
     return {
       ok: false,
       error: friendlyError(
         error,
-        "Could not create your account. Please try again.",
+        'Could not create your account. Please try again.',
       ),
     };
   }
@@ -165,18 +165,18 @@ export async function requestPasswordReset(input: {
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const email = input.email.trim().toLowerCase();
   if (!EMAIL_RE.test(email))
-    return { ok: false, error: "Please enter a valid email address." };
+    return { ok: false, error: 'Please enter a valid email address.' };
 
   try {
-    await sdk.auth.resetPassword("customer", "emailpass", {
+    await sdk.auth.resetPassword('customer', 'emailpass', {
       identifier: email,
     });
     return { ok: true };
   } catch (error) {
-    logger.error("[auth] password reset request failed:", error);
+    logger.error('[auth] password reset request failed:', error);
     return {
       ok: false,
-      error: "Could not send the reset email. Please try again.",
+      error: 'Could not send the reset email. Please try again.',
     };
   }
 }
@@ -196,23 +196,23 @@ export async function resetPassword(input: {
       error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`,
     };
   if (!input.token)
-    return { ok: false, error: "This reset link is invalid or has expired." };
+    return { ok: false, error: 'This reset link is invalid or has expired.' };
 
   try {
     await sdk.auth.updateProvider(
-      "customer",
-      "emailpass",
+      'customer',
+      'emailpass',
       { password: input.password },
       input.token,
     );
     return { ok: true };
   } catch (error) {
-    logger.error("[auth] password reset failed:", error);
+    logger.error('[auth] password reset failed:', error);
     // Expired, consumed, or tampered token all surface as 401 — one message.
     return {
       ok: false,
       error:
-        "This reset link is invalid or has expired. Request a new one and try again.",
+        'This reset link is invalid or has expired. Request a new one and try again.',
     };
   }
 }

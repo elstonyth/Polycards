@@ -1,6 +1,6 @@
 // Measure /claw pack-card geometry on the LIVE site vs the clone at 1440px so the
 // proportions can be matched from numbers, not eyeballing.
-import { chromium } from "playwright";
+import { chromium } from 'playwright';
 
 const browser = await chromium.launch();
 
@@ -10,29 +10,29 @@ async function measure(label, url) {
   });
   const page = await ctx.newPage();
   try {
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
     await page.waitForTimeout(4000);
     const data = await page.evaluate(() => {
       // A "card" = the smallest element that contains BOTH an <img> and a button/link
       // whose text is "Open" (the live + clone pack cards).
-      const isOpen = (el) => /^open$/i.test((el.innerText || "").trim());
-      const opens = [...document.querySelectorAll("button,a")].filter(isOpen);
+      const isOpen = (el) => /^open$/i.test((el.innerText || '').trim());
+      const opens = [...document.querySelectorAll('button,a')].filter(isOpen);
       const cards = opens
         .map((b) => {
           let el = b;
           for (let i = 0; i < 6; i++) {
             el = el.parentElement;
             if (!el) break;
-            if (el.querySelector("img")) return el;
+            if (el.querySelector('img')) return el;
           }
           return null;
         })
         .filter(Boolean);
       if (!cards.length)
-        return { error: "no cards found", openCount: opens.length };
+        return { error: 'no cards found', openCount: opens.length };
       const card = cards[0];
       const cr = card.getBoundingClientRect();
-      const img = card.querySelector("img");
+      const img = card.querySelector('img');
       const ir = img.getBoundingClientRect();
       // grid container
       const grid = card.parentElement;
@@ -55,7 +55,7 @@ async function measure(label, url) {
         },
         grid: {
           display: gcs.display,
-          cols: gcs.gridTemplateColumns?.split(" ").length,
+          cols: gcs.gridTemplateColumns?.split(' ').length,
           gap: gcs.gap || gcs.columnGap,
         },
         cardPadding: getComputedStyle(card).padding,
@@ -67,7 +67,7 @@ async function measure(label, url) {
   }
 }
 
-const live = await measure("LIVE", "https://www.phygitals.com/claw");
-const clone = await measure("CLONE", "http://localhost:4000/claw");
+const live = await measure('LIVE', 'https://www.phygitals.com/claw');
+const clone = await measure('CLONE', 'http://localhost:4000/claw');
 await browser.close();
 console.log(JSON.stringify({ live, clone }, null, 2));

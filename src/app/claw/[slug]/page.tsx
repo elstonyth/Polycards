@@ -1,13 +1,13 @@
-import type { Metadata } from "next";
-import { notFound } from "next/navigation";
-import { findPack, findCategory } from "../packs-data";
-import { getPackDetail, getRecentPulls } from "@/lib/data/packs";
-import PackDetailClient from "./PackDetailClient";
+import type { Metadata } from 'next';
+import { notFound } from 'next/navigation';
+import { findPack, findCategory } from '../packs-data';
+import { getPackDetail, getRecentPulls } from '@/lib/data/packs';
+import PackDetailClient from './PackDetailClient';
 
 // Pack detail is backend-driven (Top Hits + Pull Odds via GET /store/packs/:slug),
 // so render per request — keeps odds fresh and frees the build from a live
 // backend (the fetch degrades to mock pools when unreachable).
-export const dynamic = "force-dynamic";
+export const dynamic = 'force-dynamic';
 
 export async function generateMetadata({
   params,
@@ -19,7 +19,7 @@ export async function generateMetadata({
   return {
     title: pack
       ? `${pack.name} — ${pack.categoryName} | Pokenic`
-      : "Pack | Pokenic",
+      : 'Pack | Pokenic',
   };
 }
 

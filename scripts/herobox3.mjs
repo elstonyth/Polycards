@@ -1,9 +1,9 @@
-import { chromium } from "playwright";
+import { chromium } from 'playwright';
 const b = await chromium.launch();
 
 async function trace(url, label, wait) {
   const p = await b.newPage({ viewport: { width: 1440, height: 900 } });
-  await p.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+  await p.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
   if (wait) {
     for (let i = 0; i < 25; i++) {
       if (await p.evaluate(() => document.images.length > 5)) break;
@@ -12,10 +12,10 @@ async function trace(url, label, wait) {
   }
   await p.waitForTimeout(2500);
   const d = await p.evaluate(() => {
-    const h = [...document.querySelectorAll("h1,h2")].find((e) =>
-      e.textContent.includes("Rip packs"),
+    const h = [...document.querySelectorAll('h1,h2')].find((e) =>
+      e.textContent.includes('Rip packs'),
     );
-    if (!h) return [{ err: "no headline" }];
+    if (!h) return [{ err: 'no headline' }];
     const chain = [];
     let el = h;
     for (let i = 0; i < 9 && el; i++) {
@@ -35,10 +35,10 @@ async function trace(url, label, wait) {
     return chain;
   });
   console.log(`\n=== ${label} ===`);
-  d.forEach((c, i) => console.log(i + ": " + JSON.stringify(c)));
+  d.forEach((c, i) => console.log(i + ': ' + JSON.stringify(c)));
   await p.close();
 }
 
-await trace("https://www.phygitals.com/", "ORIGINAL", true);
-await trace("http://localhost:4000/", "CLONE", false);
+await trace('https://www.phygitals.com/', 'ORIGINAL', true);
+await trace('http://localhost:4000/', 'CLONE', false);
 await b.close();

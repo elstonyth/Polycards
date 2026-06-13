@@ -9,102 +9,102 @@
 // native res so it matches the pixels the bake composites onto) AND the bottom-mask
 // docs/research/packdetail/bottom-mask/<base>.png (url+placard+badge boxes) that make_patch.py freezes onto
 // every animation frame. Needs :4000 for the Poppins font. Coords measured/iterated on the AVIF frame0.
-import { chromium } from "playwright";
-import { writeFile, readFile, mkdir } from "node:fs/promises";
+import { chromium } from 'playwright';
+import { writeFile, readFile, mkdir } from 'node:fs/promises';
 
-const DIR = "public/images/claw";
-const MASKDIR = "docs/research/packdetail/bottom-mask";
+const DIR = 'public/images/claw';
+const MASKDIR = 'docs/research/packdetail/bottom-mask';
 // erase = [x0,y0,x1,y1] px box on the AVIF frame0. draw.x/baseline in px. align left|center.
 // kind "badge" supports draw.rot (degrees) about the text anchor for mild box-face skew.
 const JOBS = [
   {
-    base: "elite-one-piece-pack",
-    file: "elite-one-piece-pack-machine.avif",
+    base: 'elite-one-piece-pack',
+    file: 'elite-one-piece-pack-machine.avif',
     zones: [
       {
-        kind: "url",
+        kind: 'url',
         erase: [556, 860, 714, 904],
         draw: {
-          text: "Pokenic.com",
-          align: "center",
+          text: 'Pokenic.com',
+          align: 'center',
           x: 635,
           baseline: 895,
           fs: 30,
-          color: "rgb(245,245,245)",
+          color: 'rgb(245,245,245)',
         },
       },
       {
-        kind: "badge",
+        kind: 'badge',
         erase: [704, 812, 830, 854],
         draw: {
-          text: "by pokenic",
-          align: "center",
+          text: 'by pokenic',
+          align: 'center',
           x: 767,
           baseline: 838,
           fs: 15,
-          color: "rgb(40,28,22)",
+          color: 'rgb(40,28,22)',
           rot: 0,
         },
       },
     ],
   },
   {
-    base: "legend-one-piece-pack",
-    file: "legend-one-piece-pack-machine.avif",
+    base: 'legend-one-piece-pack',
+    file: 'legend-one-piece-pack-machine.avif',
     zones: [
       {
-        kind: "url",
+        kind: 'url',
         erase: [452, 864, 694, 908],
         draw: {
-          text: "Pokenic.com",
-          align: "center",
+          text: 'Pokenic.com',
+          align: 'center',
           x: 573,
           baseline: 898,
           fs: 28,
-          color: "rgb(248,240,214)",
+          color: 'rgb(248,240,214)',
         },
       },
       {
-        kind: "badge",
+        kind: 'badge',
         erase: [686, 848, 858, 884],
         draw: {
-          text: "by pokenic",
-          align: "center",
+          text: 'by pokenic',
+          align: 'center',
           x: 772,
           baseline: 873,
           fs: 14,
-          color: "rgb(48,38,20)",
+          color: 'rgb(48,38,20)',
           rot: 0,
         },
       },
     ],
   },
   {
-    base: "starter-one-piece-pack",
-    file: "starter-one-piece-pack-machine.avif",
+    base: 'starter-one-piece-pack',
+    file: 'starter-one-piece-pack-machine.avif',
     zones: [
       {
-        kind: "url",
+        kind: 'url',
         erase: [470, 872, 706, 916],
         draw: {
-          text: "Pokenic.com",
-          align: "center",
+          text: 'Pokenic.com',
+          align: 'center',
           x: 588,
           baseline: 906,
           fs: 29,
-          color: "rgb(248,246,248)",
+          color: 'rgb(248,246,248)',
         },
       },
       {
-        kind: "badge",
+        kind: 'badge',
         erase: [700, 832, 826, 860],
         draw: {
-          text: "by pokenic",
-          align: "center",
+          text: 'by pokenic',
+          align: 'center',
           x: 763,
           baseline: 852,
           fs: 14,
-          color: "rgb(60,40,48)",
+          color: 'rgb(60,40,48)',
           rot: 0,
         },
       },
@@ -112,44 +112,44 @@ const JOBS = [
   },
   // Yu-Gi-Oh (1440x900): placard "phygitals/claw." line 1 only, url, and the RIP&REVEAL pill.
   {
-    base: "yugioh-pro-pack",
-    file: "yugioh-pro-pack-machine.avif",
+    base: 'yugioh-pro-pack',
+    file: 'yugioh-pro-pack-machine.avif',
     zones: [
       {
-        kind: "placard",
+        kind: 'placard',
         erase: [548, 718, 700, 744],
         solid: true,
         draw: {
-          text: "pokenic",
-          align: "left",
+          text: 'pokenic',
+          align: 'left',
           x: 552,
           baseline: 738,
           fs: 17,
-          color: "rgb(235,110,75)",
+          color: 'rgb(235,110,75)',
         },
       },
       {
-        kind: "url",
+        kind: 'url',
         erase: [506, 838, 676, 868],
         draw: {
-          text: "Pokenic.com",
-          align: "center",
+          text: 'Pokenic.com',
+          align: 'center',
           x: 590,
           baseline: 862,
           fs: 20,
-          color: "rgb(245,250,245)",
+          color: 'rgb(245,250,245)',
         },
       },
       {
-        kind: "badge",
+        kind: 'badge',
         erase: [740, 804, 876, 828],
         draw: {
-          text: "by pokenic",
-          align: "center",
+          text: 'by pokenic',
+          align: 'center',
           x: 808,
           baseline: 821,
           fs: 14,
-          color: "rgb(40,40,38)",
+          color: 'rgb(40,40,38)',
           rot: 0,
         },
       },
@@ -164,13 +164,13 @@ for (const j of JOBS) {
   inputs[j.base] = im;
 }
 function Image_dataurl(buf) {
-  return `data:image/avif;base64,${buf.toString("base64")}`;
+  return `data:image/avif;base64,${buf.toString('base64')}`;
 }
 
 const browser = await chromium.launch();
 const page = await browser.newPage();
-await page.goto("http://localhost:4000/", {
-  waitUntil: "domcontentloaded",
+await page.goto('http://localhost:4000/', {
+  waitUntil: 'domcontentloaded',
   timeout: 30000,
 });
 await page.addStyleTag({
@@ -180,9 +180,9 @@ await page.addStyleTag({
 await page.waitForTimeout(1800);
 await page.evaluate(async () => {
   await document.fonts.ready;
-  const a = await document.fonts.load("700 40px Poppins");
-  const b = await document.fonts.load("600 24px Poppins");
-  if (!a.length || !b.length) throw new Error("Poppins failed to load");
+  const a = await document.fonts.load('700 40px Poppins');
+  const b = await document.fonts.load('600 24px Poppins');
+  if (!a.length || !b.length) throw new Error('Poppins failed to load');
 });
 
 const results = await page.evaluate(
@@ -191,7 +191,7 @@ const results = await page.evaluate(
       new Promise((ok, no) => {
         const im = new Image();
         im.onload = () => ok(im);
-        im.onerror = () => no(new Error("load"));
+        im.onerror = () => no(new Error('load'));
         im.src = s;
       });
     const out = {};
@@ -199,16 +199,16 @@ const results = await page.evaluate(
       const img = await load(inputs[j.base]);
       const W = img.naturalWidth,
         H = img.naturalHeight;
-      const cv = document.createElement("canvas");
+      const cv = document.createElement('canvas');
       cv.width = W;
       cv.height = H;
-      const ctx = cv.getContext("2d");
+      const ctx = cv.getContext('2d');
       ctx.drawImage(img, 0, 0, W, H);
-      const mk = document.createElement("canvas");
+      const mk = document.createElement('canvas');
       mk.width = W;
       mk.height = H;
-      const mc = mk.getContext("2d");
-      mc.fillStyle = "#000";
+      const mc = mk.getContext('2d');
+      mc.fillStyle = '#000';
       mc.fillRect(0, 0, W, H);
 
       for (const z of j.zones) {
@@ -286,9 +286,9 @@ const results = await page.evaluate(
         if (z.draw) {
           const dr = z.draw;
           ctx.save();
-          ctx.font = `${z.kind === "url" ? 700 : 700} ${dr.fs}px Poppins, sans-serif`;
+          ctx.font = `${z.kind === 'url' ? 700 : 700} ${dr.fs}px Poppins, sans-serif`;
           ctx.textAlign = dr.align;
-          ctx.textBaseline = "alphabetic";
+          ctx.textBaseline = 'alphabetic';
           ctx.fillStyle = dr.color;
           if (dr.rot) {
             ctx.translate(dr.x, dr.baseline);
@@ -298,12 +298,12 @@ const results = await page.evaluate(
           ctx.restore();
         }
         // freeze every rebranded zone in the bottom mask
-        mc.fillStyle = "#fff";
+        mc.fillStyle = '#fff';
         mc.fillRect(x0, y0, bw, bh);
       }
       out[j.base] = {
-        webp: cv.toDataURL("image/webp", 0.95),
-        mask: mk.toDataURL("image/png"),
+        webp: cv.toDataURL('image/webp', 0.95),
+        mask: mk.toDataURL('image/png'),
       };
     }
     return out;
@@ -315,17 +315,17 @@ let n = 0;
 for (const [base, r] of Object.entries(results)) {
   await writeFile(
     `${DIR}/${base}-machine.webp`,
-    Buffer.from(r.webp.split(",")[1], "base64"),
+    Buffer.from(r.webp.split(',')[1], 'base64'),
   );
   await writeFile(
     `${MASKDIR}/${base}.png`,
-    Buffer.from(r.mask.split(",")[1], "base64"),
+    Buffer.from(r.mask.split(',')[1], 'base64'),
   );
   n++;
   console.log(
     `${base}: rebranded ${JOBS.find((j) => j.base === base)
       .zones.map((z) => z.kind)
-      .join("+")} + mask`,
+      .join('+')} + mask`,
   );
 }
 console.log(`${n} machine(s) rebranded`);

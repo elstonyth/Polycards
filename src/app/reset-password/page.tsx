@@ -1,10 +1,10 @@
-import type { Metadata } from "next";
-import { Suspense } from "react";
-import ResetPasswordClient from "./ResetPasswordClient";
+import type { Metadata } from 'next';
+import { Suspense } from 'react';
+import ResetPasswordClient from './ResetPasswordClient';
 
 export const metadata: Metadata = {
-  title: "Reset password — Phygitals",
-  description: "Choose a new password for your account.",
+  title: 'Reset password — Phygitals',
+  description: 'Choose a new password for your account.',
   // Tokenized links must never end up in a search index.
   robots: { index: false, follow: false },
 };

@@ -1,13 +1,13 @@
 // Distill the rAF recon JSONs (recon-motion-live.mjs output) into the numbers the
 // Framer Motion rebuild needs: per-element motion segments with duration, value
 // ranges, decomposed transforms, overshoot, and a best-fit easing label.
-import fs from "node:fs";
+import fs from 'node:fs';
 
-const PACK = "docs/research/openpack-live";
-const PAGE = "docs/research/motion-live";
+const PACK = 'docs/research/openpack-live';
+const PAGE = 'docs/research/motion-live';
 const load = (p) => {
   try {
-    return JSON.parse(fs.readFileSync(p, "utf8"));
+    return JSON.parse(fs.readFileSync(p, 'utf8'));
   } catch {
     return null;
   }
@@ -37,24 +37,24 @@ const dec3d = (m) => {
   };
 };
 const parseT = (tr) => {
-  if (!tr || tr === "none") return { kind: "none" };
+  if (!tr || tr === 'none') return { kind: 'none' };
   const nums = tr.match(/-?[\d.e]+/g)?.map(Number) || [];
-  if (tr.startsWith("matrix3d")) return { kind: "3d", ...dec3d(nums) };
-  if (tr.startsWith("matrix")) return { kind: "2d", ...dec2d(nums) };
-  return { kind: "raw", raw: tr.slice(0, 60) };
+  if (tr.startsWith('matrix3d')) return { kind: '3d', ...dec3d(nums) };
+  if (tr.startsWith('matrix')) return { kind: '2d', ...dec2d(nums) };
+  return { kind: 'raw', raw: tr.slice(0, 60) };
 };
 
 // ---- easing fit: normalized progress samples -> closest standard curve ----
 const BEZ = {
   linear: (t) => t,
   ease: cubic(0.25, 0.1, 0.25, 1),
-  "ease-in": cubic(0.42, 0, 1, 1),
-  "ease-out": cubic(0, 0, 0.58, 1),
-  "ease-in-out": cubic(0.42, 0, 0.58, 1),
-  "tw-default(0.4,0,0.2,1)": cubic(0.4, 0, 0.2, 1),
-  "easeOutCubic(0.22,0.61,0.36,1)": cubic(0.22, 0.61, 0.36, 1),
-  "easeOutQuint(0.22,1,0.36,1)": cubic(0.22, 1, 0.36, 1),
-  "easeOutBack(0.34,1.56,0.64,1)": cubic(0.34, 1.56, 0.64, 1),
+  'ease-in': cubic(0.42, 0, 1, 1),
+  'ease-out': cubic(0, 0, 0.58, 1),
+  'ease-in-out': cubic(0.42, 0, 0.58, 1),
+  'tw-default(0.4,0,0.2,1)': cubic(0.4, 0, 0.2, 1),
+  'easeOutCubic(0.22,0.61,0.36,1)': cubic(0.22, 0.61, 0.36, 1),
+  'easeOutQuint(0.22,1,0.36,1)': cubic(0.22, 1, 0.36, 1),
+  'easeOutBack(0.34,1.56,0.64,1)': cubic(0.34, 1.56, 0.64, 1),
 };
 function cubic(x1, y1, x2, y2) {
   const cx = 3 * x1,
@@ -96,7 +96,7 @@ const fitEase = (samples) => {
 // ---- per-sig series -> motion segments ----
 function segments(
   track,
-  { minDelta = 0.5, props = ["o", "sc", "rot", "rotY", "tx", "ty"] } = {},
+  { minDelta = 0.5, props = ['o', 'sc', 'rot', 'rotY', 'tx', 'ty'] } = {},
 ) {
   const bySig = new Map();
   for (const fr of track.frames) {
@@ -122,7 +122,7 @@ function segments(
       const vals = series
         .map((r) => ({
           t: r.t,
-          v: typeof r[prop] === "number" ? r[prop] : null,
+          v: typeof r[prop] === 'number' ? r[prop] : null,
         }))
         .filter((r) => r.v != null);
       if (vals.length < 4) continue;
@@ -131,7 +131,7 @@ function segments(
       while (i < vals.length - 1) {
         if (
           Math.abs(vals[i + 1].v - vals[i].v) <
-          (prop === "o" ? 0.01 : minDelta) * 0.2
+          (prop === 'o' ? 0.01 : minDelta) * 0.2
         ) {
           i++;
           continue;
@@ -141,7 +141,7 @@ function segments(
         while (j < vals.length - 1 && still < 6) {
           if (
             Math.abs(vals[j + 1].v - vals[j].v) <
-            (prop === "o" ? 0.005 : minDelta * 0.1)
+            (prop === 'o' ? 0.005 : minDelta * 0.1)
           )
             still++;
           else still = 0;
@@ -151,7 +151,7 @@ function segments(
         const from = seg[0].v,
           to = seg[seg.length - 1 - Math.min(still, seg.length - 1)].v;
         const delta = Math.abs(to - from);
-        if (delta >= (prop === "o" ? 0.05 : minDelta)) {
+        if (delta >= (prop === 'o' ? 0.05 : minDelta)) {
           const t0 = seg[0].t,
             t1 = seg[Math.max(0, seg.length - 1 - still)].t;
           const dur = t1 - t0;
@@ -193,30 +193,30 @@ if (reveal) {
   P(
     `\n## REVEAL (tap -> card) — ${reveal.frames.length} rAF frames over ${Math.round(reveal.frames.at(-1).t)}ms`,
   );
-  let last = "";
+  let last = '';
   const stages = [];
   for (const fr of reveal.frames) {
-    const txt = (fr.txt || "").toUpperCase();
+    const txt = (fr.txt || '').toUpperCase();
     let stage = null;
-    if (/TAP TO SELECT/.test(txt)) stage = "packs";
-    else if (/TAP TO REVEAL/.test(txt)) stage = "slab";
-    else if (/PULL\b/.test(txt) && /•|!/.test(txt)) stage = "pull";
-    else if (/CATEGORY|GRADE|YEAR/.test(txt)) stage = "metadata";
-    else if (/CONTINUE|OPEN ANOTHER|SELL/.test(txt)) stage = "card";
+    if (/TAP TO SELECT/.test(txt)) stage = 'packs';
+    else if (/TAP TO REVEAL/.test(txt)) stage = 'slab';
+    else if (/PULL\b/.test(txt) && /•|!/.test(txt)) stage = 'pull';
+    else if (/CATEGORY|GRADE|YEAR/.test(txt)) stage = 'metadata';
+    else if (/CONTINUE|OPEN ANOTHER|SELL/.test(txt)) stage = 'card';
     if (stage && stage !== last) {
       stages.push({
         t: Math.round(fr.t),
         stage,
-        txt: (fr.txt || "").slice(0, 70),
+        txt: (fr.txt || '').slice(0, 70),
       });
       last = stage;
     }
   }
-  P("### Stage timeline (ms from tap):");
+  P('### Stage timeline (ms from tap):');
   stages.forEach((s) =>
     P(`- ${String(s.t).padStart(6)}  ${s.stage.padEnd(9)} "${s.txt}"`),
   );
-  P("### Motion segments:");
+  P('### Motion segments:');
   segments(reveal).forEach((s) =>
     P(
       `- t=${String(s.t0).padStart(6)} +${String(s.dur).padStart(4)}ms  ${s.prop.padEnd(4)} ${String(s.from).padStart(8)} -> ${String(s.to).padEnd(8)} ${s.ease.padEnd(28)} ${s.sig}`,
@@ -227,24 +227,24 @@ if (reveal) {
     fr.n.forEach((n) => n.an && anims.add(`${n.an}  [${n.s.slice(0, 50)}]`)),
   );
   if (anims.size) {
-    P("### CSS animations seen:");
-    [...anims].slice(0, 20).forEach((a) => P("- " + a));
+    P('### CSS animations seen:');
+    [...anims].slice(0, 20).forEach((a) => P('- ' + a));
   }
 }
 
 // ================= cylinder =================
 for (const name of [
-  "overlay-entrance",
-  "cylinder-idle",
-  "cylinder-drag",
-  "cylinder-shuffle",
+  'overlay-entrance',
+  'cylinder-idle',
+  'cylinder-drag',
+  'cylinder-shuffle',
 ]) {
   const d = load(`${PACK}/${name}.json`);
   if (!d || !d.frames?.length) continue;
   P(
     `\n## ${name} — ${d.frames.length} frames over ${Math.round(d.frames.at(-1).t)}ms`,
   );
-  if (name.startsWith("cylinder")) {
+  if (name.startsWith('cylinder')) {
     const series = d.frames
       .map((fr) => ({ t: fr.t, n: fr.n[0] }))
       .filter((r) => r.n);
@@ -262,11 +262,11 @@ for (const name of [
       const compact = ys
         .filter((_, i) => i % Math.ceil(ys.length / 26) === 0)
         .map((r) => `${Math.round(r.t)}:${r.rotY.toFixed(1)}`)
-        .join(" ");
+        .join(' ');
       P(`- rotY(t): ${compact}`);
     }
     const sample = series[0]?.n;
-    if (sample) P(`- node: ${sample.s ?? ""} ${series[0].n.tr?.slice(0, 60)}`);
+    if (sample) P(`- node: ${sample.s ?? ''} ${series[0].n.tr?.slice(0, 60)}`);
   } else {
     segments(d)
       .slice(0, 24)
@@ -296,13 +296,13 @@ const entry = load(`${PAGE}/entry-curve.json`);
 if (entry) {
   P(`\n## SCROLL-ENTRY`);
   if (!entry.frames?.length)
-    P("- no frames captured: " + JSON.stringify(entry).slice(0, 200));
+    P('- no frames captured: ' + JSON.stringify(entry).slice(0, 200));
   else {
     P(`- candidate: ${JSON.stringify(entry.candidate || {}).slice(0, 220)}`);
     const segs = segments(entry);
     if (!segs.length)
       P(
-        "- NO motion segments — the element did not animate on scroll-in (live likely has no entry reveal here)",
+        '- NO motion segments — the element did not animate on scroll-in (live likely has no entry reveal here)',
       );
     segs.forEach((s) =>
       P(
@@ -314,8 +314,8 @@ if (entry) {
 
 // ================= hovers + catalog (verbatim, they're small) =================
 for (const [file, label] of [
-  ["home-hover.json", "HOME CARD HOVER"],
-  ["claw-hover.json", "CLAW CARD HOVER"],
+  ['home-hover.json', 'HOME CARD HOVER'],
+  ['claw-hover.json', 'CLAW CARD HOVER'],
 ]) {
   const d = load(`${PAGE}/${file}`);
   if (!d) continue;
@@ -324,14 +324,14 @@ for (const [file, label] of [
     for (const k of Object.keys(b)) {
       const bv = JSON.stringify(b[k]),
         av = JSON.stringify(a[k]);
-      if (bv !== av && k !== "transition") P(`- ${who}.${k}: ${bv} -> ${av}`);
+      if (bv !== av && k !== 'transition') P(`- ${who}.${k}: ${bv} -> ${av}`);
     }
     if (b.transition) P(`- ${who}.transition: ${b.transition}`);
   };
-  diff(d.before.self, d.after.self, "self");
+  diff(d.before.self, d.after.self, 'self');
   d.before.kids.forEach((bk, i) => {
     const ak = d.after.kids[i];
-    if (ak) diff(bk, ak, `kid${i}(${bk.tag}.${(bk.cls || "").slice(0, 18)})`);
+    if (ak) diff(bk, ak, `kid${i}(${bk.tag}.${(bk.cls || '').slice(0, 18)})`);
   });
 }
 const cat = load(`${PAGE}/claw-catalog.json`);
@@ -344,5 +344,5 @@ if (cat) {
   );
 }
 
-fs.writeFileSync(`${PACK}/DIGEST.md`, md.join("\n"));
+fs.writeFileSync(`${PACK}/DIGEST.md`, md.join('\n'));
 console.log(`\nWROTE ${PACK}/DIGEST.md`);

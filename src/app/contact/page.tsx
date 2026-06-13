@@ -1,30 +1,30 @@
-import type { Metadata } from "next";
-import { MessageCircle, Vault, HelpCircle, ChevronRight } from "lucide-react";
-import Reveal from "@/components/Reveal";
+import type { Metadata } from 'next';
+import { MessageCircle, Vault, HelpCircle, ChevronRight } from 'lucide-react';
+import Reveal from '@/components/Reveal';
 
 export const metadata: Metadata = {
-  title: "Contact — Phygitals",
+  title: 'Contact — Phygitals',
   description:
-    "How can we help? Our team typically responds within a few minutes.",
+    'How can we help? Our team typically responds within a few minutes.',
 };
 
 const VAULTS = [
   {
-    name: "Vault 1",
-    status: "Operational",
-    note: "5–7 day processing",
+    name: 'Vault 1',
+    status: 'Operational',
+    note: '5–7 day processing',
     ok: true,
   },
   {
-    name: "Vault 2",
-    status: "Operational",
-    note: "5–7 day processing",
+    name: 'Vault 2',
+    status: 'Operational',
+    note: '5–7 day processing',
     ok: true,
   },
   {
-    name: "Vault 3",
-    status: "Operational",
-    note: "7–10 day processing",
+    name: 'Vault 3',
+    status: 'Operational',
+    note: '7–10 day processing',
     ok: true,
   },
 ];
@@ -32,10 +32,10 @@ const VAULTS = [
 const FAQS = [
   "Why is my card showing 'In Transit'?",
   "Why is my order still 'Processing'?",
-  "How long does it take to receive cards after claiming?",
+  'How long does it take to receive cards after claiming?',
   "Why hasn't my submitted card appeared in my inventory yet?",
-  "What grading companies do you accept?",
-  "How do I track my shipment?",
+  'What grading companies do you accept?',
+  'How do I track my shipment?',
 ];
 
 export default function ContactPage() {

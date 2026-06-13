@@ -1,5 +1,5 @@
-import { cn } from "@/lib/utils";
-import { Heart } from "lucide-react";
+import { cn } from '@/lib/utils';
+import { Heart } from 'lucide-react';
 
 type CommunityPost = {
   link: string;
@@ -13,60 +13,60 @@ type CommunityPost = {
 // duplicated once in the track for a seamless infinite loop).
 const POSTS: CommunityPost[] = [
   {
-    link: "https://x.com/pominik/status/1960039317956620617",
-    img: "/social/tweets/1960039317956620617_media-1.webp",
-    text: "I got this from a $25 pack\nAMA",
-    name: "pominik",
-    avatar: "/social/pfp/pominik-400x400.jpg",
+    link: 'https://x.com/pominik/status/1960039317956620617',
+    img: '/social/tweets/1960039317956620617_media-1.webp',
+    text: 'I got this from a $25 pack\nAMA',
+    name: 'pominik',
+    avatar: '/social/pfp/pominik-400x400.jpg',
   },
   {
-    link: "https://x.com/PleiadesHawkin/status/1959021922383274245",
-    img: "/social/tweets/1959021922383274245_media-1.webp",
-    text: "Mail day here in the gallery 📬\n\n@phygitals made it REAL!! 🤝",
-    name: "James Pleiades Hawkins",
-    avatar: "/social/pfp/PleiadesHawkin-400x400.jpg",
+    link: 'https://x.com/PleiadesHawkin/status/1959021922383274245',
+    img: '/social/tweets/1959021922383274245_media-1.webp',
+    text: 'Mail day here in the gallery 📬\n\n@phygitals made it REAL!! 🤝',
+    name: 'James Pleiades Hawkins',
+    avatar: '/social/pfp/PleiadesHawkin-400x400.jpg',
   },
   {
-    link: "https://twitter.com/dcfgod/status/1953653730555179251",
-    img: "/social/tweets/1953653730555179251_media-1.webp",
-    text: "Phygitals is so much more fun than collecting as it has the ease of trading / buying on chain… but real demand off chain and can always redeem the actual card\n\nIf you’re looking to collect Pokémons this is the team to reach out to. Don’t think what’s on their site is all they got - they’re directly linked to a bunch of marketplaces and just white glove acquired what I wanted",
-    name: "DCF GOD",
-    avatar: "/social/pfp/dcfgod-400x400.jpg",
+    link: 'https://twitter.com/dcfgod/status/1953653730555179251',
+    img: '/social/tweets/1953653730555179251_media-1.webp',
+    text: 'Phygitals is so much more fun than collecting as it has the ease of trading / buying on chain… but real demand off chain and can always redeem the actual card\n\nIf you’re looking to collect Pokémons this is the team to reach out to. Don’t think what’s on their site is all they got - they’re directly linked to a bunch of marketplaces and just white glove acquired what I wanted',
+    name: 'DCF GOD',
+    avatar: '/social/pfp/dcfgod-400x400.jpg',
   },
   {
-    link: "https://x.com/CaleCrypto/status/1951018112519712830",
-    img: "/social/tweets/1951018112519712830_media-1.webp",
-    text: "Slab delivery day",
-    name: "Cale",
-    avatar: "/social/pfp/CaleCrypto-400x400.jpg",
+    link: 'https://x.com/CaleCrypto/status/1951018112519712830',
+    img: '/social/tweets/1951018112519712830_media-1.webp',
+    text: 'Slab delivery day',
+    name: 'Cale',
+    avatar: '/social/pfp/CaleCrypto-400x400.jpg',
   },
   {
-    link: "https://x.com/LebnaniTCG/status/1947359768730910937",
-    img: "/social/tweets/1947359768730910937_media-1.webp",
-    text: "Thank you @phygitals",
-    name: "Lebnani TCG",
-    avatar: "/social/pfp/LebnaniTCG-400x400.jpg",
+    link: 'https://x.com/LebnaniTCG/status/1947359768730910937',
+    img: '/social/tweets/1947359768730910937_media-1.webp',
+    text: 'Thank you @phygitals',
+    name: 'Lebnani TCG',
+    avatar: '/social/pfp/LebnaniTCG-400x400.jpg',
   },
   {
-    link: "https://x.com/Mikerow01/status/1940199479699022263",
-    img: "/social/tweets/1940199479699022263_media-1.webp",
-    text: "LFG my claim from @phygitals came it look how nice those slabs are\nthank you again one love",
-    name: "Mikerow",
-    avatar: "/social/pfp/Mikerow01-400x400.jpg",
+    link: 'https://x.com/Mikerow01/status/1940199479699022263',
+    img: '/social/tweets/1940199479699022263_media-1.webp',
+    text: 'LFG my claim from @phygitals came it look how nice those slabs are\nthank you again one love',
+    name: 'Mikerow',
+    avatar: '/social/pfp/Mikerow01-400x400.jpg',
   },
   {
-    link: "https://x.com/ClmentHiggins/status/1937523748019527828",
-    img: "/social/tweets/1937523748019527828_media-1.webp",
-    text: "From Digital to Physical ✈️\n\nI just received my first five @phygitals cards!\n\nPurchased or won on the platform using the Claw and the Lucky Draw, and delivered to my home in just a few days\n\nYou guys are doing an amazing job!\n\nphygitals.com/invite/662b59",
-    name: "Brice",
-    avatar: "/social/pfp/ClmentHiggins-400x400.jpg",
+    link: 'https://x.com/ClmentHiggins/status/1937523748019527828',
+    img: '/social/tweets/1937523748019527828_media-1.webp',
+    text: 'From Digital to Physical ✈️\n\nI just received my first five @phygitals cards!\n\nPurchased or won on the platform using the Claw and the Lucky Draw, and delivered to my home in just a few days\n\nYou guys are doing an amazing job!\n\nphygitals.com/invite/662b59',
+    name: 'Brice',
+    avatar: '/social/pfp/ClmentHiggins-400x400.jpg',
   },
   {
-    link: "https://x.com/_LYNCHY__/status/1937209444800004323",
-    img: "/social/tweets/1937209444800004323_media-1.webp",
-    text: "Digital to physical in just under 2 weeks super cool!\n\nThanks @phygitals for creating unique way to trade!",
-    name: "Lynch",
-    avatar: "/social/pfp/_LYNCHY__-400x400.jpg",
+    link: 'https://x.com/_LYNCHY__/status/1937209444800004323',
+    img: '/social/tweets/1937209444800004323_media-1.webp',
+    text: 'Digital to physical in just under 2 weeks super cool!\n\nThanks @phygitals for creating unique way to trade!',
+    name: 'Lynch',
+    avatar: '/social/pfp/_LYNCHY__-400x400.jpg',
   },
 ];
 
@@ -77,8 +77,8 @@ function CommunityCard({ post }: { post: CommunityPost }) {
       target="_blank"
       rel="noopener noreferrer"
       className={cn(
-        "group/card flex w-[280px] flex-shrink-0 flex-col overflow-hidden rounded-2xl border bg-white/5 transition-[border-color] duration-300 sm:w-[320px]",
-        "border-white/10 shadow-[0_4px_20px_rgba(0,0,0,0.25)] hover:border-white/20",
+        'group/card flex w-[280px] flex-shrink-0 flex-col overflow-hidden rounded-2xl border bg-white/5 transition-[border-color] duration-300 sm:w-[320px]',
+        'border-white/10 shadow-[0_4px_20px_rgba(0,0,0,0.25)] hover:border-white/20',
       )}
     >
       <div className="relative h-[200px] w-full overflow-hidden bg-white/5 sm:h-[220px]">
@@ -159,7 +159,7 @@ export default function CommunitySection() {
         <div className="sp-community-scrollbar-hide group/scroll -my-4 overflow-hidden py-4">
           <div
             className="sp-community-track flex w-max gap-3 [transform:translateZ(0)] will-change-transform group-hover/scroll:[animation-play-state:paused]"
-            style={{ animation: "sp-scroll-x 90s linear infinite" }}
+            style={{ animation: 'sp-scroll-x 90s linear infinite' }}
           >
             {track.map((post, i) => (
               <CommunityCard key={`${post.link}-${i}`} post={post} />

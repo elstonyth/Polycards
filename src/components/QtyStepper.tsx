@@ -1,7 +1,7 @@
-"use client";
+'use client';
 
-import { Minus, Plus } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Minus, Plus } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 type QtyStepperProps = {
   qty: number;
@@ -25,7 +25,7 @@ export default function QtyStepper({
   return (
     <div
       className={cn(
-        "flex items-center gap-1 rounded-xl border border-white/10 bg-white/5 p-1",
+        'flex items-center gap-1 rounded-xl border border-white/10 bg-white/5 p-1',
         className,
       )}
     >

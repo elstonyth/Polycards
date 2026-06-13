@@ -1,12 +1,12 @@
 // Digest pass 2: hero-curve2.json (img-rect tracking) + reveal2-track.json
 // (slab -> metadata -> pull -> card). Appends to openpack-live/DIGEST.md.
-import fs from "node:fs";
+import fs from 'node:fs';
 
-const PACK = "docs/research/openpack-live";
-const PAGE = "docs/research/motion-live";
+const PACK = 'docs/research/openpack-live';
+const PAGE = 'docs/research/motion-live';
 const load = (p) => {
   try {
-    return JSON.parse(fs.readFileSync(p, "utf8"));
+    return JSON.parse(fs.readFileSync(p, 'utf8'));
   } catch {
     return null;
   }
@@ -38,14 +38,14 @@ function cubic(x1, y1, x2, y2) {
 const BEZ = {
   linear: (t) => t,
   ease: cubic(0.25, 0.1, 0.25, 1),
-  "ease-in": cubic(0.42, 0, 1, 1),
-  "ease-out": cubic(0, 0, 0.58, 1),
-  "ease-in-out": cubic(0.42, 0, 0.58, 1),
-  "tw(0.4,0,0.2,1)": cubic(0.4, 0, 0.2, 1),
-  "outCubic(0.22,0.61,0.36,1)": cubic(0.22, 0.61, 0.36, 1),
-  "outQuint(0.22,1,0.36,1)": cubic(0.22, 1, 0.36, 1),
-  "outBack(0.34,1.56,0.64,1)": cubic(0.34, 1.56, 0.64, 1),
-  "inOutQuad(0.45,0,0.55,1)": cubic(0.45, 0, 0.55, 1),
+  'ease-in': cubic(0.42, 0, 1, 1),
+  'ease-out': cubic(0, 0, 0.58, 1),
+  'ease-in-out': cubic(0.42, 0, 0.58, 1),
+  'tw(0.4,0,0.2,1)': cubic(0.4, 0, 0.2, 1),
+  'outCubic(0.22,0.61,0.36,1)': cubic(0.22, 0.61, 0.36, 1),
+  'outQuint(0.22,1,0.36,1)': cubic(0.22, 1, 0.36, 1),
+  'outBack(0.34,1.56,0.64,1)': cubic(0.34, 1.56, 0.64, 1),
+  'inOutQuad(0.45,0,0.55,1)': cubic(0.45, 0, 0.55, 1),
 };
 const fitEase = (samples) => {
   let best = null;
@@ -72,14 +72,14 @@ const dec3d = (m) => ({
   ty: +m[13].toFixed(1),
 });
 const parseT = (tr) => {
-  if (!tr || tr === "none" || tr === "") return {};
+  if (!tr || tr === 'none' || tr === '') return {};
   const nums = tr.match(/-?[\d.e]+/g)?.map(Number) || [];
-  if (tr.startsWith("matrix3d")) return dec3d(nums);
-  if (tr.startsWith("matrix")) return dec2d(nums);
+  if (tr.startsWith('matrix3d')) return dec3d(nums);
+  if (tr.startsWith('matrix')) return dec2d(nums);
   return {};
 };
 
-const md = ["\n\n# ===== PASS 2 ====="];
+const md = ['\n\n# ===== PASS 2 ====='];
 const P = (s) => {
   md.push(s);
   console.log(s);
@@ -97,8 +97,8 @@ if (hero?.frames?.length) {
     const by = new Map();
     for (const im of fr.imgs) {
       const t = im.src
-        .replace(/\.(webp|avif|png)$/i, "")
-        .replace(/[0-9]+$/, "");
+        .replace(/\.(webp|avif|png)$/i, '')
+        .replace(/[0-9]+$/, '');
       (by.get(t) || by.set(t, []).get(t)).push(im);
     }
     for (const [t, ims] of by) {
@@ -142,11 +142,11 @@ if (hero?.frames?.length) {
       }
       i = j + 1;
     }
-    P(`- ${name}: ${segs.length ? "" : "STATIC"}`);
+    P(`- ${name}: ${segs.length ? '' : 'STATIC'}`);
     segs.forEach((s) => P(`    ${s}`));
   }
   // период: время между начала окон движения первой темы
-} else P("\n## HERO v2 — no data");
+} else P('\n## HERO v2 — no data');
 
 // -------------------- REVEAL 2 --------------------
 const rev = load(`${PACK}/reveal2-track.json`);
@@ -154,22 +154,22 @@ if (rev?.frames?.length) {
   P(
     `\n## REVEAL v2 (slab tap -> card) — ${rev.frames.length} frames over ${Math.round(rev.frames.at(-1).t)}ms`,
   );
-  let last = "";
+  let last = '';
   for (const fr of rev.frames) {
-    const txt = (fr.txt || "").toUpperCase();
+    const txt = (fr.txt || '').toUpperCase();
     let stage = null;
-    if (/TAP TO REVEAL/.test(txt)) stage = "slab";
+    if (/TAP TO REVEAL/.test(txt)) stage = 'slab';
     else if (
       /PULL •|PULL!|! PULL/.test(txt) ||
       (/PULL/.test(txt) && /•/.test(txt))
     )
-      stage = "pull";
-    else if (/CONTINUE|OPEN ANOTHER|SELL|ADD TO/.test(txt)) stage = "card";
+      stage = 'pull';
+    else if (/CONTINUE|OPEN ANOTHER|SELL|ADD TO/.test(txt)) stage = 'card';
     else if (/CATEGORY|GRADE|YEAR|\b(19|20)\d\d\b/.test(txt))
-      stage = "metadata";
+      stage = 'metadata';
     if (stage && stage !== last) {
       P(
-        `- STAGE ${String(Math.round(fr.t)).padStart(6)}ms  ${stage.padEnd(9)} "${(fr.txt || "").slice(0, 90)}"`,
+        `- STAGE ${String(Math.round(fr.t)).padStart(6)}ms  ${stage.padEnd(9)} "${(fr.txt || '').slice(0, 90)}"`,
       );
       last = stage;
     }
@@ -191,20 +191,20 @@ if (rev?.frames?.length) {
         h: n.h,
       });
     }
-  P("### Motion segments:");
+  P('### Motion segments:');
   const rows = [];
   for (const [sig, series] of bySig) {
     if (series.length < 4) continue;
-    for (const prop of ["o", "sc", "rot", "rotY", "tx", "ty"]) {
+    for (const prop of ['o', 'sc', 'rot', 'rotY', 'tx', 'ty']) {
       const vals = series
         .map((r) => ({
           t: r.t,
-          v: typeof r[prop] === "number" ? r[prop] : null,
+          v: typeof r[prop] === 'number' ? r[prop] : null,
         }))
         .filter((r) => r.v != null);
       if (vals.length < 4) continue;
       let i = 0;
-      const eps = prop === "o" ? 0.008 : 0.4;
+      const eps = prop === 'o' ? 0.008 : 0.4;
       while (i < vals.length - 1) {
         if (Math.abs(vals[i + 1].v - vals[i].v) < eps * 0.25) {
           i++;
@@ -221,7 +221,7 @@ if (rev?.frames?.length) {
         const from = seg[0].v,
           to = seg.at(-1).v,
           delta = Math.abs(to - from);
-        if (delta >= (prop === "o" ? 0.08 : 3)) {
+        if (delta >= (prop === 'o' ? 0.08 : 3)) {
           const t0 = seg[0].t,
             dur = seg.at(-1).t - t0;
           if (dur > 30 && dur < 5000) {
@@ -253,19 +253,19 @@ if (rev?.frames?.length) {
   const bgs = new Set();
   rev.frames.forEach((fr) =>
     fr.n.forEach((n) => {
-      if (n.bg && n.bg !== "rgba(0, 0, 0, 0)" && n.h < 220 && n.w > 800)
+      if (n.bg && n.bg !== 'rgba(0, 0, 0, 0)' && n.h < 220 && n.w > 800)
         bgs.add(`${n.bg} ${n.w}x${n.h} [${n.s.slice(0, 40)}]`);
     }),
   );
   if (anims.size) {
-    P("### CSS animations seen:");
-    [...anims].slice(0, 24).forEach((a) => P("- " + a));
+    P('### CSS animations seen:');
+    [...anims].slice(0, 24).forEach((a) => P('- ' + a));
   }
   if (bgs.size) {
-    P("### Wide colored bars (ribbon candidates):");
-    [...bgs].slice(0, 12).forEach((b) => P("- " + b));
+    P('### Wide colored bars (ribbon candidates):');
+    [...bgs].slice(0, 12).forEach((b) => P('- ' + b));
   }
-} else P("\n## REVEAL v2 — no data");
+} else P('\n## REVEAL v2 — no data');
 
-fs.appendFileSync(`${PACK}/DIGEST.md`, md.join("\n"));
+fs.appendFileSync(`${PACK}/DIGEST.md`, md.join('\n'));
 console.log(`\nAPPENDED ${PACK}/DIGEST.md`);

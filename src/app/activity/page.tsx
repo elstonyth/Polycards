@@ -1,40 +1,40 @@
-import type { Metadata } from "next";
-import Link from "next/link";
-import Reveal from "@/components/Reveal";
-import { usd } from "@/lib/format";
-import { MOCK_CARDS } from "@/lib/mock/cards";
-import { MOCK_USERS, findUser } from "@/lib/mock/users";
+import type { Metadata } from 'next';
+import Link from 'next/link';
+import Reveal from '@/components/Reveal';
+import { usd } from '@/lib/format';
+import { MOCK_CARDS } from '@/lib/mock/cards';
+import { MOCK_USERS, findUser } from '@/lib/mock/users';
 
 export const metadata: Metadata = {
-  title: "Marketplace Activity — Pokenic",
+  title: 'Marketplace Activity — Pokenic',
   description:
-    "Track all marketplace activities and transactions in real-time.",
+    'Track all marketplace activities and transactions in real-time.',
 };
 
 const STATS = [
-  { value: "2.6M", label: "transactions" },
-  { value: "$322.7MM", label: "volume" },
-  { value: "19.8K", label: "listings" },
+  { value: '2.6M', label: 'transactions' },
+  { value: '$322.7MM', label: 'volume' },
+  { value: '19.8K', label: 'listings' },
 ];
 
-type TxType = "BUY" | "CLAW" | "SALE" | "LIST";
+type TxType = 'BUY' | 'CLAW' | 'SALE' | 'LIST';
 const TYPE_TONE: Record<TxType, string> = {
-  BUY: "bg-emerald-500/15 text-emerald-400",
-  CLAW: "bg-sky-500/15 text-sky-400",
-  SALE: "bg-amber-500/15 text-amber-400",
-  LIST: "bg-fuchsia-500/15 text-fuchsia-400",
+  BUY: 'bg-emerald-500/15 text-emerald-400',
+  CLAW: 'bg-sky-500/15 text-sky-400',
+  SALE: 'bg-amber-500/15 text-amber-400',
+  LIST: 'bg-fuchsia-500/15 text-fuchsia-400',
 };
-const CLAW = "Claw Machine";
-const MARKET = "Marketplace";
+const CLAW = 'Claw Machine';
+const MARKET = 'Marketplace';
 
 // Mock transaction feed (real-time stream is a backend/Socket.io feed).
 const FEED = MOCK_CARDS.slice(0, 16).map((card, i) => {
-  const type = (["BUY", "CLAW", "SALE", "LIST"] as TxType[])[i % 4];
+  const type = (['BUY', 'CLAW', 'SALE', 'LIST'] as TxType[])[i % 4];
   const a = MOCK_USERS[i % MOCK_USERS.length].username;
   const b = MOCK_USERS[(i + 3) % MOCK_USERS.length].username;
-  const from = type === "CLAW" ? CLAW : a;
+  const from = type === 'CLAW' ? CLAW : a;
   const to =
-    type === "BUY" ? CLAW : type === "LIST" ? MARKET : type === "CLAW" ? a : b;
+    type === 'BUY' ? CLAW : type === 'LIST' ? MARKET : type === 'CLAW' ? a : b;
   return {
     card,
     type,
@@ -93,7 +93,7 @@ export default function ActivityPage() {
                 </span>
               )}
               <span>
-                <span className="font-bold text-white">{s.value}</span>{" "}
+                <span className="font-bold text-white">{s.value}</span>{' '}
                 {s.label}
               </span>
             </span>

@@ -1,25 +1,25 @@
 // Locate the white "phygitals" wordmark on the dramatic banners (tier names are
 // COLOURED, phygitals is WHITE) by detecting near-white horizontal text clusters in
 // the top band. Reports bbox % + dims + density so we can bake per-image.
-import { chromium } from "playwright";
+import { chromium } from 'playwright';
 
 const DRAMATIC = [
-  "black-pack-jjnfuk",
-  "elite-football-pack",
-  "legend-baseball-pack",
-  "legend-pack-1dpaec",
-  "modern-grails-noafw0",
-  "platinum-football-pack",
-  "pro-baseball-pack",
-  "pro-soccer-pack",
-  "starter-baseball-pack",
-  "starter-football-pack",
+  'black-pack-jjnfuk',
+  'elite-football-pack',
+  'legend-baseball-pack',
+  'legend-pack-1dpaec',
+  'modern-grails-noafw0',
+  'platinum-football-pack',
+  'pro-baseball-pack',
+  'pro-soccer-pack',
+  'starter-baseball-pack',
+  'starter-football-pack',
 ];
 
 const browser = await chromium.launch();
 const page = await browser.newPage();
-await page.goto("http://localhost:4000/", {
-  waitUntil: "domcontentloaded",
+await page.goto('http://localhost:4000/', {
+  waitUntil: 'domcontentloaded',
   timeout: 30000,
 });
 
@@ -42,10 +42,10 @@ const res = await page.evaluate(async (DRAMATIC) => {
     }
     const W = img.naturalWidth,
       H = img.naturalHeight;
-    const cv = document.createElement("canvas");
+    const cv = document.createElement('canvas');
     cv.width = W;
     cv.height = H;
-    const ctx = cv.getContext("2d");
+    const ctx = cv.getContext('2d');
     ctx.drawImage(img, 0, 0, W, H);
     const d = ctx.getImageData(0, 0, W, H).data;
     const isWhite = (x, y) => {
@@ -96,7 +96,7 @@ const res = await page.evaluate(async (DRAMATIC) => {
               t: +((minY / H) * 100).toFixed(1),
               b: +((maxY / H) * 100).toFixed(1),
             }
-          : "none",
+          : 'none',
     };
   }
   return out;
