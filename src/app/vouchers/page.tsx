@@ -17,8 +17,8 @@ const HERO_SLABS = [
   '/images/claw/legend-pack-icon.webp',
   '/images/claw/mythic-pack-icon.webp',
   '/images/claw/elite-pack-icon.webp',
-  '/images/claw/legend-one-piece-pack-icon.webp',
-  '/images/claw/platinum-football-pack-icon.webp',
+  '/images/claw/black-pack-icon.webp',
+  '/images/claw/diamond-pack-icon.webp',
 ];
 
 export default function VouchersPage() {

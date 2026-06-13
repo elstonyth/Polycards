@@ -149,27 +149,10 @@ const CLAW_HAS_ANIM = new Set([
   'platinum-pack',
   'rookie-pack',
   'trainer-pack',
-  'starter-riftbound-pack',
-  'legend-pack-1dpaec',
-  'modern-grails-noafw0',
-  'pro-soccer-pack',
   // premium pokemon tiers: full banner+placard+url rebrand on the busy red-neon / crystal-refraction
   // backgrounds (scripts/rebrand-premium-banner.mjs blur-patch + make_patch per-base BAND).
   'black-pack',
   'diamond-pack',
-  // NBA Black: 142-frame anim, banner+placard+url already rebranded "pokenic" (only a sub-pixel
-  // preview-card watermark remains, below render-scale legibility).
-  'black-pack-jjnfuk',
-  // One Piece + Yu-Gi-Oh: these have NO top "phygitals" banner (top = tier name / "PR-OH"), so only the
-  // bottom pedestal zones are rebranded — url "Pokenic.com", the "RIP & REVEAL by pokenic" pill, and
-  // (Yu-Gi-Oh) the "pokenic / claw." placard (scripts/rebrand-onepiece-yugioh.mjs blur-patch + redraw,
-  // make_patch BAND=0 so the bottom-only mask never freezes the claw). Platinum carries no legible
-  // phygitals (occluded by its silver waves), so its anim is the source re-used as-is.
-  'elite-one-piece-pack',
-  'legend-one-piece-pack',
-  'starter-one-piece-pack',
-  'one-piece-platinum-pack',
-  'yugioh-pro-pack',
 ]);
 
 // Packs that ship NO rebranded claw-machine render yet. Empty now that the premium tiers are baked;

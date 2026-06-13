@@ -120,9 +120,6 @@ export default function BorrowLendPage() {
           >
             <option>All collections</option>
             <option>Pokémon</option>
-            <option>Basketball</option>
-            <option>One Piece</option>
-            <option>Baseball</option>
           </select>
           <ChevronDown
             className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-white/50"
