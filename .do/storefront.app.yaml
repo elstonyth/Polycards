@@ -16,7 +16,7 @@ services:
     dockerfile_path: Dockerfile
     github:
       repo: elstonyth/Pokenic_Game
-      branch: feat/do-app-platform-deploy
+      branch: master
       deploy_on_push: true
     http_port: 3000
     instance_size_slug: basic-xxs

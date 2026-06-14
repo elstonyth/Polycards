@@ -116,4 +116,57 @@ POST /auth/session and expects a `connect.sid` cookie. Under `medusa start`
 subsequent /admin/* request 401s and the dashboard renders empty lists.
 Under `corepack yarn dev` (`medusa develop`) the cookie is issued and the
 dashboard works. Always run the backend with `yarn dev` for local admin work
-(bearer-token API clients are unaffected either way).
+(bearer-token API clients are unaffected either way). NOTE: this is an http
+artifact (secure cookie won't set over http://localhost). PROD is https, so the
+cookie sets and login works there — the empty-dashboard-on-login symptom is
+local-only.
+
+### Prod dashboards 404 — SPA router basename baked "/" not "/dashboard"
+mercurDashboardPlugin bakes the React Router basename into `__BASE__` from
+medusa-config's `admin_ui.options.path`, via `loadMedusaConfig()` which
+`require()`s medusa-config.ts. Its `try/catch` SILENTLY swallows a load failure
+in the prod build → `__BASE__` falls back to "/" → the admin/vendor SPA serves
+its own 404 ("There is no page at this address") at /dashboard/ even though
+assets load. Two causes + fixes (2026-06-14):
+1. `medusa-config.ts` registered the packs module with a RELATIVE
+   `resolve: './src/modules/packs'`. Medusa resolves it against process.cwd(), so
+   it broke when the config was require()d from the apps/* vite build cwd → the
+   silent throw (which also drops pluginExtensions). Fix: `resolve:
+   path.join(__dirname, 'src/modules/packs')` (absolute, cwd-independent).
+2. This project's `modules` is an ARRAY with `resolve:'@mercurjs/core/modules/
+   admin-ui'`, but the plugin expects an OBJECT keyed `admin_ui`/`vendor_ui` → base
+   never derives even on a clean load. Fix: a `forceBasename` vite plugin AFTER
+   mercurDashboardPlugin in apps/{admin,vendor}/vite.config.ts:
+   `config:()=>({ define:{ __BASE__: JSON.stringify('/dashboard'|'/seller') } })`
+   (later-plugin define wins the merge). VERIFY WITH A BROWSER, not HTTP 200 — the
+   SPA returns 200 while client-rendering its 404 (scripts/check-dashboard-render.mjs).
+
+### Don't slim the backend image with `yarn workspaces focus --production`
+`medusa start` runs from packages/api and loads the medusa-config.ts SOURCE via
+@medusajs/utils dynamic-import (plain `require` + a TS hook from DEV deps). Focus
+--production removes that hook → boot dies: "Error in loading config: Cannot find
+module '/app/packages/api/medusa-config'". (Running from compiled .medusa/server
+avoids it but breaks appDir -> apps/*/dist.) So dev deps must stay. Also:
+`workspace-tools` is BUILT INTO Yarn 4 — `yarn plugin import workspace-tools`
+errors YN0051. The SAFE runtime slim (2.56GB->1.86GB) = `rm -rf
+apps/{admin,vendor}/node_modules` after build (dashboards serve from the static
+apps/*/dist; their node_modules are build-only). See backend/Dockerfile.
+
+### Prod admin card images 404 — storefront-relative URLs across a two-app deploy
+Card/pack art is bundled STOREFRONT assets, seeded as site-relative paths
+(/cdn/cards/<file>.webp; also /home, /images). The storefront serves them (200);
+the backend (where the admin runs) does not. In prod the storefront is a SEPARATE
+domain, so anything rendering the raw relative URL on the backend origin 404s.
+Two surfaces, two fixes (2026-06-14):
+1. CUSTOM admin pages (cards/packs/pulls/support) use apps/admin/src/lib/
+   image-url.ts `resolveImageUrl`, which rewrote relative paths to `${host}:4000`
+   (local-dev assumption). Fix: bake the storefront origin into the admin bundle
+   (`MERCUR_STOREFRONT_URL` -> vite define `__STOREFRONT_URL__`) and resolve
+   against it (fallback host:4000 local). **MUST add MERCUR_STOREFRONT_URL to
+   turbo.json `build.env`** or turbo strips it before vite → define bakes empty.
+2. MEDUSA-CORE pages (built-in /products, order line items) render the raw URL and
+   DON'T use resolveImageUrl. Fix: GET /cdn/cards/[file] route that 302-redirects
+   to `${MERCUR_STOREFRONT_URL}/cdn/cards/<file>` (runtime env, hardcoded fallback).
+NOT a media-persistence issue — the files exist + serve 200 on the storefront;
+it was purely cross-origin URL resolution. Verified prod: /products 0 console
+errors, /cdn/cards/* -> 302 -> storefront -> 200.

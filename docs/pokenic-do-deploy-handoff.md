@@ -213,16 +213,30 @@ Not auto-applied — it is a tradeoff, not a free win:
   push-to-deploy replaced by a build pipeline. Until then the 3-component build
   cost stands.
 
-### DEFERRED — Tier 2b (slim runtime) + Tier 3b (backend URL via env)
+### DONE (partial) — Tier 2b (slim runtime image)
 
-- **T2b slim:** higher risk (the `medusa start` appDir → `apps/*/dist` layout is
-  hard-won) and not turnkey — the `workspace-tools` yarn plugin (for
-  `yarn workspaces focus --production`) is **not installed**. Now de-risked by
-  the preflight harness: attempt the slim, re-run `preflight.ps1`, revert if
-  `/dashboard` breaks.
-- **T3b backend URL:** `backend/Dockerfile` hardcodes the prod URL because (per
-  its own comment) App Platform doesn't reliably pass build-time env as
-  build-args. De-hardcoding needs that assumption re-verified first.
+`backend/Dockerfile` runtime slimmed **2.56 GB → 1.86 GB** (−700 MB, ~27%),
+verified via `preflight.ps1` (boot + `/dashboard` + `/seller` render) and
+deployed. Change: `rm -rf apps/{admin,vendor}/node_modules` after build (the
+dashboards serve from the pre-built static `apps/*/dist`; their node_modules are
+build-only) + in-image `HEALTHCHECK`.
+
+**Cannot go further easily** (two dead ends, both now in `backend/.claude/lessons.md`):
+- `yarn workspaces focus --production` (the dev-dep prune, would save more) is
+  **incompatible** — `medusa start` loads the `medusa-config.ts` SOURCE from
+  packages/api via a TS require-hook that lives in dev deps; pruning breaks config
+  load. Running from compiled `.medusa/server` avoids it but breaks the
+  appDir→`apps/*/dist` resolution.
+- `workspace-tools` is built into Yarn 4 (don't `yarn plugin import` it).
+
+### DEFERRED — Tier 2a (DOCR) + Tier 3b (backend URL via env)
+
+- **T2a build-once/DOCR:** still a tradeoff (registry cost + removes
+  `deploy_on_push`); the slim image now fits a cheaper tier if pursued.
+- **T3b backend URL:** `backend/Dockerfile` hardcodes the prod URL because App
+  Platform doesn't reliably pass build-time env as build-args (confirmed this
+  session — empty ARG defaults clobbered the storefront's NEXT_PUBLIC). De-brittling
+  needs a different mechanism than build-args.
 
 ---
 

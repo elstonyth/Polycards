@@ -94,7 +94,7 @@ services:
     source_dir: backend
     github:
       repo: elstonyth/Pokenic_Game
-      branch: feat/do-app-platform-deploy
+      branch: master
       deploy_on_push: true
     http_port: 9000
     instance_size_slug: basic-xs
@@ -112,7 +112,7 @@ workers:
     source_dir: backend
     github:
       repo: elstonyth/Pokenic_Game
-      branch: feat/do-app-platform-deploy
+      branch: master
       deploy_on_push: true
     instance_size_slug: basic-xxs
     instance_count: 1
@@ -129,7 +129,7 @@ jobs:
     source_dir: backend
     github:
       repo: elstonyth/Pokenic_Game
-      branch: feat/do-app-platform-deploy
+      branch: master
     instance_size_slug: basic-xxs
     run_command: corepack yarn deploy:migrate-user
 
