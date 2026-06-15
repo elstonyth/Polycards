@@ -165,6 +165,13 @@ const CLAW_NO_MACHINE = new Set<string>([]);
 const CLAW_REV = '17';
 
 export function clawMachine(pack: Pack): { webp: string; anim?: string } {
+  // Machine renders are hand-rebranded static assets keyed to the baked pack
+  // icon basenames (/images/claw/{base}-icon.webp). A backend-created pack ships
+  // its own uploaded art (CDN URL or other path) and has no {base}-machine
+  // asset, so fall back to the pack image as the hero instead of a broken path.
+  const isBaked =
+    pack.image.startsWith('/images/claw/') && pack.image.endsWith('-icon.webp');
+  if (!isBaked) return { webp: pack.image };
   const base = pack.image
     .replace('/images/claw/', '')
     .replace('-icon.webp', '');

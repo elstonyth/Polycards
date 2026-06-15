@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import { findPack, findCategory } from '../packs-data';
-import { getPackDetail, getRecentPulls } from '@/lib/data/packs';
+import { findPack } from '../packs-data';
+import { getPackBySlug, getPackDetail, getRecentPulls } from '@/lib/data/packs';
 import PackDetailClient from './PackDetailClient';
 
 // Pack detail is backend-driven (Top Hits + Pull Odds via GET /store/packs/:slug),
@@ -29,23 +29,25 @@ export default async function PackDetailPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const pack = findPack(slug);
-  const category = findCategory(slug);
-  if (!pack || !category) notFound();
 
-  // Base pack art/price/siblings stay static (packs-data); the gacha depth
-  // (Top Hits + Pull Odds) and the live Recent Pulls feed come from the backend.
-  // Fetch both in parallel — independent reads, no waterfall — each degrading on
-  // its own (detail → null → mock pools; recent pulls → [] → empty state).
-  const [detail, recentPulls] = await Promise.all([
+  // Resolve the base pack from the SAME backend catalog seam as the /claw list
+  // (getPackBySlug → getPackCategories), so admin-created packs that appear in
+  // the grid also resolve here instead of 404ing against the static 8-pack list.
+  // The gacha depth (Top Hits + Pull Odds) and the live Recent Pulls feed come
+  // from their own routes. All three fetch in parallel — independent reads, no
+  // waterfall — each degrading on its own (base → null → notFound; detail →
+  // null → mock pools; recent pulls → [] → empty state).
+  const [base, detail, recentPulls] = await Promise.all([
+    getPackBySlug(slug),
     getPackDetail(slug),
     getRecentPulls(),
   ]);
+  if (!base) notFound();
 
   return (
     <PackDetailClient
-      pack={pack}
-      siblings={category.packs}
+      pack={base.pack}
+      siblings={base.siblings}
       detail={detail}
       recentPulls={recentPulls}
     />

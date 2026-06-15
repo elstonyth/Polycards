@@ -24,6 +24,7 @@ import {
   type PackCategory,
   type PackCard,
   type Rarity,
+  type ResolvedPack,
 } from '@/app/claw/packs-data';
 
 // Shape of a pack row from GET /store/packs (backend Pack model).
@@ -98,6 +99,38 @@ export async function getPackCategories(): Promise<PackCategory[]> {
     logger.error('[packs] failed to load packs from backend:', error);
     return MOCK_CATEGORIES;
   }
+}
+
+export interface PackBase {
+  pack: ResolvedPack;
+  siblings: Pack[];
+}
+
+/**
+ * Resolve a single pack + its category siblings by slug from the SAME backend
+ * catalog seam as the /claw list (`getPackCategories`). This keeps the detail
+ * page in sync with the list: any backend-created pack that shows in the grid
+ * also resolves here — fixing the 404 where the detail page used to gate on the
+ * static `findPack` 8-pack list while the list rendered live backend packs.
+ *
+ * `getPackCategories` already degrades to the static mock catalog when the
+ * backend is down, so the 8 baked packs still resolve offline. Returns null only
+ * when no category contains the slug (genuinely unknown pack → the page 404s).
+ */
+export async function getPackBySlug(slug: string): Promise<PackBase | null> {
+  const categories = await getPackCategories();
+  const category = categories.find((c) => c.packs.some((p) => p.id === slug));
+  const pack = category?.packs.find((p) => p.id === slug);
+  if (!category || !pack) return null;
+  return {
+    pack: {
+      ...pack,
+      categoryId: category.id,
+      categoryName: category.tab,
+      icon: category.icon,
+    },
+    siblings: category.packs,
+  };
 }
 
 // --- Pack detail: Top Hits + Pull Odds (GET /store/packs/:slug) -------------
