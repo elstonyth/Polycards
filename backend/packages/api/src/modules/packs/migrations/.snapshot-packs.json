@@ -223,7 +223,8 @@
           "enumItems": [
             "buyback",
             "topup",
-            "pack_open"
+            "pack_open",
+            "adjustment"
           ],
           "mappedType": "enum"
         },
@@ -307,6 +308,15 @@
           "primary": false,
           "unique": false,
           "expression": "CREATE INDEX IF NOT EXISTS \"IDX_credit_transaction_deleted_at\" ON \"credit_transaction\" (\"deleted_at\") WHERE deleted_at IS NULL"
+        },
+        {
+          "keyName": "IDX_credit_transaction_customer_id_created_at",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_credit_transaction_customer_id_created_at\" ON \"credit_transaction\" (\"customer_id\", \"created_at\") WHERE deleted_at IS NULL"
         },
         {
           "keyName": "credit_transaction_pkey",
@@ -613,6 +623,24 @@
           "expression": "CREATE INDEX IF NOT EXISTS \"IDX_pack_odds_deleted_at\" ON \"pack_odds\" (\"deleted_at\") WHERE deleted_at IS NULL"
         },
         {
+          "keyName": "IDX_pack_odds_pack_id",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_pack_odds_pack_id\" ON \"pack_odds\" (\"pack_id\") WHERE deleted_at IS NULL"
+        },
+        {
+          "keyName": "IDX_pack_odds_card_id",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_pack_odds_card_id\" ON \"pack_odds\" (\"card_id\") WHERE deleted_at IS NULL"
+        },
+        {
           "keyName": "pack_odds_pkey",
           "columnNames": [
             "id"
@@ -780,6 +808,24 @@
           "primary": false,
           "unique": false,
           "expression": "CREATE INDEX IF NOT EXISTS \"IDX_pull_deleted_at\" ON \"pull\" (\"deleted_at\") WHERE deleted_at IS NULL"
+        },
+        {
+          "keyName": "IDX_pull_customer_id_rolled_at",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_pull_customer_id_rolled_at\" ON \"pull\" (\"customer_id\", \"rolled_at\") WHERE deleted_at IS NULL"
+        },
+        {
+          "keyName": "IDX_pull_rolled_at",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_pull_rolled_at\" ON \"pull\" (\"rolled_at\") WHERE deleted_at IS NULL"
         },
         {
           "keyName": "pull_pkey",
