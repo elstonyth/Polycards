@@ -4,6 +4,11 @@ import Card from "./models/card";
 import PackOdds from "./models/pack-odds";
 import Pull from "./models/pull";
 import CreditTransaction from "./models/credit-transaction";
+import {
+  resolveBuybackRate,
+  buybackAmount,
+  type BuybackRate,
+} from "./buyback-rate";
 
 // Auto-generates CRUD for each model: list/retrieve/create/update/delete<Model>s
 // (e.g. listPacks, listCards, listPackOdds, createPulls,
@@ -20,6 +25,21 @@ class PacksModuleService extends MedusaService({
   Pull,
   CreditTransaction,
 }) {
+  // The instant/flat sell-back offer for a pull, composed from the SAME pure
+  // helpers the buyback workflow credits with — so the reveal quote, the vault
+  // quote, and the credit can never disagree. Removes the listPacks +
+  // resolveBuybackRate re-query the open route did inline.
+  async quoteBuyback(
+    packSlug: string,
+    rolledAt: Date | string,
+    marketValue: number,
+    nowMs: number = Date.now()
+  ): Promise<{ percent: number; amount: number; rate_type: BuybackRate["rate_type"] }> {
+    const [pack] = await this.listPacks({ slug: packSlug }, { take: 1 });
+    const { percent, rate_type } = resolveBuybackRate(pack, rolledAt, nowMs);
+    return { percent, amount: buybackAmount(marketValue, percent), rate_type };
+  }
+
   // Customer credit balance = Σ(amount) over the append-only ledger, paged so
   // the result is exact at any ledger size. Integer-cent sum avoids float drift.
   async creditBalance(customerId: string): Promise<number> {
