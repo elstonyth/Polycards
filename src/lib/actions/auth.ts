@@ -16,6 +16,7 @@ import { sdk } from '@/lib/medusa';
 import { logger } from '@/lib/logger';
 import { setAuthToken, clearAuthToken } from '@/lib/data/customer';
 import { fetchProfileHandle } from '@/lib/data/profiles';
+import { friendlyError, type ErrorRule } from '@/lib/errors';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD_LENGTH = 8;
@@ -47,15 +48,11 @@ const toAuthCustomer = (
   handle,
 });
 
-// Map known backend errors to friendly copy; never surface raw errors to the UI.
-function friendlyError(error: unknown, fallback: string): string {
-  const text = error instanceof Error ? error.message : String(error);
-  if (/already exists/i.test(text))
-    return 'An account with this email already exists.';
-  if (/invalid email or password/i.test(text))
-    return 'Incorrect email or password.';
-  return fallback;
-}
+// Known backend errors → friendly copy (patterns local to auth; never raw).
+const AUTH_RULES: ErrorRule[] = [
+  [/already exists/i, 'An account with this email already exists.'],
+  [/invalid email or password/i, 'Incorrect email or password.'],
+];
 
 async function exchangeToken(
   path: string,
@@ -105,7 +102,11 @@ export async function login(input: {
     logger.error('[auth] login failed:', error);
     return {
       ok: false,
-      error: friendlyError(error, 'Could not log in. Please try again.'),
+      error: friendlyError(
+        error,
+        AUTH_RULES,
+        'Could not log in. Please try again.',
+      ),
     };
   }
 }
@@ -143,6 +144,7 @@ export async function signup(input: {
       ok: false,
       error: friendlyError(
         error,
+        AUTH_RULES,
         'Could not create your account. Please try again.',
       ),
     };

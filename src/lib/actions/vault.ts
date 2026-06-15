@@ -15,6 +15,7 @@
 import { sdk } from '@/lib/medusa';
 import { logger } from '@/lib/logger';
 import { getAuthToken } from '@/lib/data/customer';
+import { friendlyError, isAuthError, type ErrorRule } from '@/lib/errors';
 
 export type VaultItem = {
   pullId: string;
@@ -57,26 +58,23 @@ interface BackendVaultItem {
   buyback: { percent: number; amount: number };
 }
 
-function friendlyError(error: unknown): string {
-  const text = error instanceof Error ? error.message : String(error);
-  if (/too many|rate.?limit|429/i.test(text))
-    return 'Too many requests — give it a moment and try again.';
-  if (/unauthorized|not authenticated|401/i.test(text))
-    return 'Please log in to view your vault.';
-  if (/declined/i.test(text))
-    return 'Payment declined by the demo gateway — amounts ending in .13 always decline.';
-  if (/amount/i.test(text))
-    return 'Enter a valid amount (up to $10,000, whole cents).';
-  if (/already sold/i.test(text)) return 'This card was already sold back.';
-  if (/not found|404/i.test(text))
-    return 'This card is no longer in your vault.';
-  return 'Something went wrong. Please try again.';
-}
-
-const needsAuthFrom = (error: unknown): boolean =>
-  /unauthorized|not authenticated|401/i.test(
-    error instanceof Error ? error.message : String(error),
-  );
+// Patterns local to the vault/credit actions (rate-limit, auth, the demo
+// gateway decline, amount/already-sold/not-found). Order matters — first match.
+const VAULT_RULES: ErrorRule[] = [
+  [
+    /too many|rate.?limit|429/i,
+    'Too many requests — give it a moment and try again.',
+  ],
+  [/unauthorized|not authenticated|401/i, 'Please log in to view your vault.'],
+  [
+    /declined/i,
+    'Payment declined by the demo gateway — amounts ending in .13 always decline.',
+  ],
+  [/amount/i, 'Enter a valid amount (up to $10,000, whole cents).'],
+  [/already sold/i, 'This card was already sold back.'],
+  [/not found|404/i, 'This card is no longer in your vault.'],
+];
+const VAULT_FALLBACK = 'Something went wrong. Please try again.';
 
 // The vault list + the credit balance in one call (the page shows both).
 export async function getVault(): Promise<VaultResult> {
@@ -134,8 +132,8 @@ export async function getVault(): Promise<VaultResult> {
     logger.error('[vault] load failed:', error);
     return {
       ok: false,
-      error: friendlyError(error),
-      needsAuth: needsAuthFrom(error),
+      error: friendlyError(error, VAULT_RULES, VAULT_FALLBACK),
+      needsAuth: isAuthError(error),
     };
   }
 }
@@ -197,8 +195,8 @@ export async function topUpCredits(amount: number): Promise<TopUpActionResult> {
     logger.error('[vault] top-up failed:', error);
     return {
       ok: false,
-      error: friendlyError(error),
-      needsAuth: needsAuthFrom(error),
+      error: friendlyError(error, VAULT_RULES, VAULT_FALLBACK),
+      needsAuth: isAuthError(error),
     };
   }
 }
@@ -243,8 +241,8 @@ export async function sellBackPull(pullId: string): Promise<SellBackResult> {
     logger.error(`[vault] buyback failed for '${pullId}':`, error);
     return {
       ok: false,
-      error: friendlyError(error),
-      needsAuth: needsAuthFrom(error),
+      error: friendlyError(error, VAULT_RULES, VAULT_FALLBACK),
+      needsAuth: isAuthError(error),
     };
   }
 }

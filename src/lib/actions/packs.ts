@@ -14,6 +14,7 @@ import { logger } from '@/lib/logger';
 import { getAuthToken } from '@/lib/data/customer';
 import { isRarity, formatValue } from '@/lib/packs-format';
 import type { Rarity } from '@/app/claw/packs-data';
+import { friendlyError, type ErrorRule } from '@/lib/errors';
 
 // The won card, shaped for the roulette reveal (same fields as a mock PackCard).
 export type WonCard = {
@@ -59,19 +60,17 @@ interface BackendBuyback {
   amount?: unknown;
 }
 
-// Map known backend failures to friendly copy; never surface raw errors.
-function friendlyError(error: unknown): string {
-  const text = error instanceof Error ? error.message : String(error);
-  if (/too many|rate.?limit|429/i.test(text))
-    return "You're opening packs too fast — give it a moment and try again.";
-  if (/unauthorized|not authenticated|401/i.test(text))
-    return 'Please log in to open a pack.';
-  if (/not enough credits/i.test(text))
-    return 'Not enough credits to open this pack.';
-  if (/not available|not found|404/i.test(text))
-    return "This pack isn't available right now.";
-  return 'Could not open the pack. Please try again.';
-}
+// Patterns local to the open-pack action; never surface raw errors.
+const PACKS_RULES: ErrorRule[] = [
+  [
+    /too many|rate.?limit|429/i,
+    "You're opening packs too fast — give it a moment and try again.",
+  ],
+  [/unauthorized|not authenticated|401/i, 'Please log in to open a pack.'],
+  [/not enough credits/i, 'Not enough credits to open this pack.'],
+  [/not available|not found|404/i, "This pack isn't available right now."],
+];
+const PACKS_FALLBACK = 'Could not open the pack. Please try again.';
 
 export async function openPack(slug: string): Promise<OpenPackResult> {
   // Validate at the boundary — a server action is a public endpoint.
@@ -144,6 +143,11 @@ export async function openPack(slug: string): Promise<OpenPackResult> {
     const text = error instanceof Error ? error.message : String(error);
     const needsAuth = /unauthorized|401/i.test(text);
     const needsTopUp = /not enough credits/i.test(text);
-    return { ok: false, error: friendlyError(error), needsAuth, needsTopUp };
+    return {
+      ok: false,
+      error: friendlyError(error, PACKS_RULES, PACKS_FALLBACK),
+      needsAuth,
+      needsTopUp,
+    };
   }
 }

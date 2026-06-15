@@ -13,6 +13,7 @@
 import type { HttpTypes } from '@medusajs/types';
 import { logger } from '@/lib/logger';
 import { updateCustomerProfile } from '@/lib/data/customer';
+import { friendlyError, type ErrorRule } from '@/lib/errors';
 
 const MAX_FIELD_LENGTH = 120;
 
@@ -43,12 +44,12 @@ const clean = (v: string | undefined): string | null | undefined => {
   return trimmed === '' ? null : trimmed.slice(0, MAX_FIELD_LENGTH);
 };
 
-function friendlyError(error: unknown, fallback: string): string {
-  const text = error instanceof Error ? error.message : String(error);
-  if (/not authenticated|unauthorized|401/i.test(text))
-    return 'Your session has expired. Please log in again.';
-  return fallback;
-}
+const PROFILE_RULES: ErrorRule[] = [
+  [
+    /not authenticated|unauthorized|401/i,
+    'Your session has expired. Please log in again.',
+  ],
+];
 
 export async function updateProfile(input: {
   first_name?: string;
@@ -70,6 +71,7 @@ export async function updateProfile(input: {
       ok: false,
       error: friendlyError(
         error,
+        PROFILE_RULES,
         'Could not save your changes. Please try again.',
       ),
     };
