@@ -18,7 +18,11 @@ export const Pack = model.define("pack", {
   slug: model.text().unique(),
   title: model.text(),
   category: model.text(),
-  price: model.number(),
+  // USD price as a DECIMAL (e.g. 4.99), never cents. bigNumber maps to a numeric
+  // column (+ raw_price jsonb sidecar) like every other money field here
+  // (card.market_value, pull.buyback_amount, credit_transaction.amount).
+  // model.number() mapped to integer and truncated any cents.
+  price: model.bigNumber(),
   image: model.text(),
   boost: model.boolean().default(false),
   // buyback_percent — the INSTANT sell-back rate (% of current FMV), applied

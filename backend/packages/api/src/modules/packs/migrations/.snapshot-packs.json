@@ -373,12 +373,12 @@
         },
         "price": {
           "name": "price",
-          "type": "integer",
+          "type": "numeric",
           "unsigned": false,
           "autoincrement": false,
           "primary": false,
           "nullable": false,
-          "mappedType": "integer"
+          "mappedType": "decimal"
         },
         "image": {
           "name": "image",
@@ -442,6 +442,15 @@
             "draft"
           ],
           "mappedType": "enum"
+        },
+        "raw_price": {
+          "name": "raw_price",
+          "type": "jsonb",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "json"
         },
         "created_at": {
           "name": "created_at",
