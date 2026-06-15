@@ -30,6 +30,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import type { MarketplaceCard, MarketplaceCategory } from '@/lib/data/products';
+import { money } from '@/lib/format';
 
 // Marketplace catalog data (cards + category tabs) now lives in the data seam,
 // passed in as props from the server page. See @/lib/data/products.
@@ -48,12 +49,6 @@ const FILTER_GROUPS: FilterGroup[] = [
   { label: 'Year', icon: Calendar },
   { label: 'Language', icon: Languages },
 ];
-
-const fmt = (n: number) =>
-  n.toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
 
 function FilterSidebar({
   open,
@@ -241,10 +236,10 @@ function MarketCard({ card }: { card: MarketplaceCard }) {
         </Link>
         <div className="flex items-baseline justify-between">
           <span className="text-sm font-bold text-white">
-            ${fmt(card.price)}
+            {money(card.price)}
           </span>
           <span className="text-[11px] font-medium text-white/45">
-            FMV ${fmt(card.fmv)}
+            FMV {money(card.fmv)}
           </span>
         </div>
       </div>

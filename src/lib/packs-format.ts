@@ -7,6 +7,7 @@
  * drift. Pure + isomorphic (no server-only imports), safe to import anywhere.
  */
 import type { Rarity } from '@/app/claw/packs-data';
+import { money } from './format';
 
 /** Canonical rarity tiers, rarest-first (display + iteration order). */
 export const RARITIES: Rarity[] = [
@@ -26,8 +27,4 @@ export const isRarity = (r: string): r is Rarity => RARITY_SET.has(r);
  * Card market value -> "$39.80" (USD, always 2 decimals). Values are decimals,
  * never cents — formatted as-is.
  */
-export const formatValue = (mv: number): string =>
-  `$${mv.toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
+export const formatValue = (mv: number): string => money(mv);

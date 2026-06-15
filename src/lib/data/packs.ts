@@ -17,6 +17,7 @@
 import { sdk } from '@/lib/medusa';
 import { logger } from '@/lib/logger';
 import { isRarity, formatValue } from '@/lib/packs-format';
+import { money } from '@/lib/format';
 import {
   CATEGORIES as MOCK_CATEGORIES,
   findPack,
@@ -42,7 +43,7 @@ interface BackendPack {
 
 // Pack prices are whole-dollar USD; render as "$1,000" to match the live site.
 const formatPrice = (price: number): string =>
-  `$${Math.round(price).toLocaleString('en-US')}`;
+  money(Math.round(price), { decimals: 0 });
 
 const toPack = (p: BackendPack): Pack => ({
   id: p.slug,

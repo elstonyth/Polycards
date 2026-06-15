@@ -13,6 +13,7 @@
 import { sdk } from '@/lib/medusa';
 import { logger } from '@/lib/logger';
 import { avatarForSeed } from '@/lib/profile-view';
+import { money } from '@/lib/format';
 
 export type LeaderboardPeriod = 'weekly' | 'alltime';
 
@@ -46,8 +47,7 @@ interface BackendEntry {
 // Avatar mapping is shared with the profile page (lib/profile-view.ts) so the
 // same PII-safe seed renders the same avatar on both surfaces.
 
-const fmtUsd = (n: number): string =>
-  `US$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const fmtUsd = (n: number): string => money(n, { prefix: 'US$' });
 
 // Static fallback — real data + avatars extracted verbatim from phygitals.com's
 // homepage "Weekly Leaderboard". Keeps the page populated and on-brand when the
