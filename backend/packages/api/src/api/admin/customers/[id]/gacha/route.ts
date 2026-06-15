@@ -5,6 +5,7 @@ import { PACKS_MODULE } from "../../../../../modules/packs";
 import type PacksModuleService from "../../../../../modules/packs/service";
 import { creditBalance } from "../../../../../modules/packs/credit-balance";
 import { pageAll } from "../../../../utils/page-all";
+import { toMoney } from "../../../../../modules/packs/money";
 
 const RECENT = 50;
 
@@ -55,7 +56,7 @@ export async function GET(
 
   const vaultValueCents = vaulted.reduce((sum, p) => {
     const card = cardByHandle.get(p.card_id);
-    const value = card ? Number(card.market_value) : 0;
+    const value = card ? toMoney(card.market_value) : 0;
     return sum + (Number.isFinite(value) ? Math.round(value * 100) : 0);
   }, 0);
 
@@ -87,7 +88,7 @@ export async function GET(
           ? {
               handle: card.handle,
               name: card.name,
-              market_value: Number(card.market_value),
+              market_value: toMoney(card.market_value),
               image: card.image,
             }
           : null,

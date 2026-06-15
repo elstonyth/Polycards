@@ -7,6 +7,7 @@ import {
   type LedgerRow,
 } from "../../../modules/packs/economy";
 import { pageAll } from "../../utils/page-all";
+import { toMoney } from "../../../modules/packs/money";
 
 // GET /admin/economy — the operator's money report: lifetime ledger totals
 // (revenue / payouts / top-ups / adjustments / net), the outstanding vault
@@ -42,7 +43,7 @@ export async function GET(
   }
   const allCards = await pageAll((opts) => packs.listCards({}, opts));
   const valueByHandle = new Map(
-    allCards.map((c) => [c.handle, Number(c.market_value)]),
+    allCards.map((c) => [c.handle, toMoney(c.market_value)]),
   );
   let liabilityCents = 0;
   let liabilityCount = 0;
@@ -74,13 +75,13 @@ export async function GET(
     .map((p) => {
       const rtp = packTheoreticalRtp(
         oddsByPack.get(p.slug) ?? [],
-        Number(p.price),
+        toMoney(p.price),
       );
       return {
         slug: p.slug,
         title: p.title,
         category: p.category,
-        price: Number(p.price),
+        price: toMoney(p.price),
         ev: rtp?.ev ?? null,
         rtp_pct: rtp?.rtp_pct ?? null,
       };

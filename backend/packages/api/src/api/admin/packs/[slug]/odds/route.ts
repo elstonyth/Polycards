@@ -7,6 +7,7 @@ import {
   type OddsInput,
 } from "../../../../../modules/packs/odds-math";
 import { getCardStockByHandle } from "../../../../../modules/packs/card-stock";
+import { toMoney } from "../../../../../modules/packs/money";
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
@@ -70,7 +71,7 @@ export async function GET(
       name: card.name,
       image: card.image,
       rarity: o.rarity,
-      market_value: Number(card.market_value),
+      market_value: toMoney(card.market_value),
       stock: stockByHandle.get(card.handle) ?? null,
       weight: o.weight,
       locked: o.locked,

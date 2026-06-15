@@ -4,6 +4,7 @@ import { PACKS_MODULE } from "../../../modules/packs";
 import { createCardWorkflow } from "../../../workflows/create-card";
 import { getCardStockByHandle } from "../../../modules/packs/card-stock";
 import { coerceRegisterCardBody } from "./validate";
+import { toMoney } from "../../../modules/packs/money";
 
 // GET /admin/cards — the catalog list for the admin Gacha Cards page (auto-
 // protected by Medusa admin auth). Returns every card, alphabetical by name.
@@ -28,10 +29,10 @@ export async function GET(
       set: c.set,
       grader: c.grader,
       grade: c.grade,
-      market_value: Number(c.market_value),
+      market_value: toMoney(c.market_value),
       image: c.image,
       // Raw stored price: null means "use FMV" — the form preserves that sentinel.
-      price: c.price === null ? null : Number(c.price),
+      price: c.price === null ? null : toMoney(c.price),
       for_sale: c.for_sale,
       stock: stockByHandle.get(c.handle) ?? null,
     })),

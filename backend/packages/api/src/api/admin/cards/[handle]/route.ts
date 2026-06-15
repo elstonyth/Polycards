@@ -4,6 +4,7 @@ import { PACKS_MODULE } from "../../../../modules/packs";
 import { updateCardWorkflow } from "../../../../workflows/update-card";
 import { deleteCardWorkflow } from "../../../../workflows/delete-card";
 import { coerceUpdateCardBody } from "../validate";
+import { toMoney } from "../../../../modules/packs/money";
 
 // GET /admin/cards/:handle — load one card for the edit form.
 export async function GET(
@@ -26,10 +27,10 @@ export async function GET(
       set: card.set,
       grader: card.grader,
       grade: card.grade,
-      market_value: Number(card.market_value),
+      market_value: toMoney(card.market_value),
       image: card.image,
       // Raw stored price: null means "use FMV" — the form preserves that sentinel.
-      price: card.price === null ? null : Number(card.price),
+      price: card.price === null ? null : toMoney(card.price),
       for_sale: card.for_sale,
     },
   });
