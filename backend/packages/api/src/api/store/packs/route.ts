@@ -20,5 +20,21 @@ export async function GET(
     { order: { category: "ASC", rank: "ASC" }, take: 500 }
   );
 
-  res.json({ packs });
+  // Explicit public shape — `price` is bigNumber now, so a raw spread would
+  // leak the internal `raw_price` jsonb sidecar (and id/timestamps) into a
+  // public payload. `price` serializes as a JSON number (whole-dollar USD).
+  res.json({
+    packs: packs.map((p) => ({
+      slug: p.slug,
+      title: p.title,
+      category: p.category,
+      price: p.price,
+      image: p.image,
+      boost: p.boost,
+      buyback_percent: p.buyback_percent,
+      in_stock: p.in_stock,
+      rank: p.rank,
+      status: p.status,
+    })),
+  });
 }

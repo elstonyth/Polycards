@@ -67,5 +67,21 @@ export async function GET(
     })
     .filter((e): e is NonNullable<typeof e> => e !== null);
 
-  res.json({ pack, odds: entries });
+  // Explicit public shape — `price` is bigNumber now, so a raw `pack` spread
+  // would leak the internal `raw_price` jsonb sidecar into a public payload.
+  res.json({
+    pack: {
+      slug: pack.slug,
+      title: pack.title,
+      category: pack.category,
+      price: pack.price,
+      image: pack.image,
+      boost: pack.boost,
+      buyback_percent: pack.buyback_percent,
+      in_stock: pack.in_stock,
+      rank: pack.rank,
+      status: pack.status,
+    },
+    odds: entries,
+  });
 }
