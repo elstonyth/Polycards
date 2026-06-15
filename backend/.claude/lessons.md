@@ -170,3 +170,15 @@ Two surfaces, two fixes (2026-06-14):
 NOT a media-persistence issue — the files exist + serve 200 on the storefront;
 it was purely cross-origin URL resolution. Verified prod: /products 0 console
 errors, /cdn/cards/* -> 302 -> storefront -> 200.
+
+### Adding an index to a large packs-module table ⇒ build it out-of-band, not in a migration
+Medusa runs every migration inside a transaction, so `CREATE INDEX CONCURRENTLY`
+is impossible in a normal migration (`Migration20260615093006.ts` adds the first
+real indexes via `CREATE INDEX ... WHERE deleted_at IS NULL`). A plain
+`CREATE INDEX` takes a write-blocking lock for the build duration — invisible at
+the current ~150-row scale, but on the append-heavy `pull` / `credit_transaction`
+ledgers it would stall opens/buybacks once they reach ~100k+ rows. When that day
+comes, add the index OUT-OF-BAND against prod (`CREATE INDEX CONCURRENTLY` via a
+manual psql/`doctl` session, outside the Medusa migration runner, in a low-write
+window) and declare it in the model `.indexes()` with the SAME name so a later
+`db:generate` sees no drift and won't try to recreate it.

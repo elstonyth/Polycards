@@ -16,6 +16,10 @@ export class Migration20260615094216 extends Migration {
   override async down(): Promise<void> {
     // Lossy by nature: any cents written while decimal are rounded to the
     // nearest dollar (round(), not truncation) when price goes back to integer.
+    // The target is int4 — the original column type, so this is the faithful
+    // reverse — which means a price >= 2^31 would overflow and fail the rollback.
+    // Not a real risk (prices are small whole dollars); noted so a future
+    // operator running this break-glass down() isn't surprised.
     this.addSql(`ALTER TABLE "pack" DROP COLUMN IF EXISTS "raw_price";`);
     this.addSql(`ALTER TABLE "pack" ALTER COLUMN "price" TYPE integer USING (round("price")::integer);`);
   }
