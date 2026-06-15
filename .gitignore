@@ -56,15 +56,22 @@ scripts/__pycache__/
 .playwright-mcp/
 docs/research/packdetail/_patch/
 docs/research/packdetail/_frames/
+# Runtime capture logs (backend/next/standalone logs dropped in docs/research)
+*.log
+# Generated showcase walkthrough videos (rebuilt by scripts/showcase/*.mjs)
+docs/showcase/*.mp4
+docs/showcase/*.webm
+# Loose QA/verify capture screenshots (rebuilt by scripts/*.mjs)
+/verify-*.png
+docs/research/verify-*.png
+docs/research/pw-*.png
 
-# graphify — ignore machine-local internals (cache/, manifest.json, absolute-path
-# caches, cost tracker, temp .graphify_* files) AND the large generated artifacts
-# graph.json (~3MB) + graph.html, which the post-commit/post-checkout hooks rebuild
-# on every commit and otherwise churn ~90k lines in every diff. They stay on disk
-# locally (queries still work) and a fresh clone regenerates them via the hooks /
-# `graphify .`. Only the human-readable GRAPH_REPORT.md is committed to share.
+# graphify — ignore ALL generated graph artifacts (cache/, manifest.json,
+# graph.json ~3MB, graph.html, AND GRAPH_REPORT.md). The post-commit/post-checkout
+# hooks rebuild them on every commit and they otherwise churn thousands of lines in
+# every diff. They stay on disk locally (queries still work) and a fresh clone
+# regenerates them via the hooks / `graphify .` — nothing under graphify-out/ is committed.
 graphify-out/*
-!graphify-out/GRAPH_REPORT.md
 
 # git worktrees (superpowers using-git-worktrees skill)
 /.worktrees/
