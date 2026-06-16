@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { useTranslation } from "react-i18next";
+import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Button,
   FocusModal,
@@ -10,17 +10,16 @@ import {
   Text,
   toast,
   clx,
-} from "@medusajs/ui";
-import { packsApi } from "../../lib/packs-api";
+} from '@medusajs/ui';
 import {
-  listEligibleProducts,
   searchPriceCharting,
   getPriceChartingProduct,
   type EligibleProduct,
   type PcMatch,
   type PcProduct,
-} from "../../lib/admin-rest";
-import { resolveImageUrl } from "../../lib/image-url";
+} from '../../lib/admin-rest';
+import { useEligibleProducts, useRegisterCard } from '../../lib/queries';
+import { resolveImageUrl } from '../../lib/image-url';
 
 // Register an EXISTING inventory product as a gacha card (inventory-first: the
 // item is created in the product catalog beforehand; this dialog only adds the
@@ -29,7 +28,6 @@ import { resolveImageUrl } from "../../lib/image-url";
 type Props = {
   open: boolean;
   onClose: () => void;
-  onRegistered: () => Promise<void> | void;
 };
 
 type Fields = {
@@ -39,47 +37,49 @@ type Fields = {
   market_value: string; // string so the operator can type freely
 };
 
-const EMPTY_FIELDS: Fields = { set: "", grader: "", grade: "", market_value: "" };
+const EMPTY_FIELDS: Fields = {
+  set: '',
+  grader: '',
+  grade: '',
+  market_value: '',
+};
 
-const RegisterCardModal = ({ open, onClose, onRegistered }: Props) => {
+const RegisterCardModal = ({ open, onClose }: Props) => {
   const { t } = useTranslation();
 
-  // Product picker.
-  const [products, setProducts] = useState<EligibleProduct[] | null>(null);
-  const [loadError, setLoadError] = useState(false);
-  const [filter, setFilter] = useState("");
+  // Product picker — the eligible list is a cached query, refetched on each open.
+  const { data: products = null, isError: loadError } =
+    useEligibleProducts(open);
+  const registerCard = useRegisterCard();
+  const [filter, setFilter] = useState('');
   const [productId, setProductId] = useState<string | null>(null);
 
   // Gacha facts.
   const [fields, setFields] = useState<Fields>(EMPTY_FIELDS);
-  const [saving, setSaving] = useState(false);
+  const saving = registerCard.isPending;
 
   // PriceCharting lookup.
-  const [pcQuery, setPcQuery] = useState("");
+  const [pcQuery, setPcQuery] = useState('');
   const [pcSearching, setPcSearching] = useState(false);
   const [pcMatches, setPcMatches] = useState<PcMatch[] | null>(null);
   const [pcProduct, setPcProduct] = useState<PcProduct | null>(null);
   const [pcLoadingId, setPcLoadingId] = useState<string | null>(null);
 
-  // Reset + (re)load the eligible list every time the dialog opens.
-  useEffect(() => {
-    if (!open) return;
-    let active = true;
-    setProducts(null);
-    setLoadError(false);
-    setFilter("");
-    setProductId(null);
-    setFields(EMPTY_FIELDS);
-    setPcQuery("");
-    setPcMatches(null);
-    setPcProduct(null);
-    listEligibleProducts()
-      .then((list) => active && setProducts(list))
-      .catch(() => active && setLoadError(true));
-    return () => {
-      active = false;
-    };
-  }, [open]);
+  // Reset the local form state on the open transition. Done during render (not
+  // an effect) per react.dev "you might not need an effect" — the eligible list
+  // is owned by useEligibleProducts(open) and refetches on its own.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) {
+      setFilter('');
+      setProductId(null);
+      setFields(EMPTY_FIELDS);
+      setPcQuery('');
+      setPcMatches(null);
+      setPcProduct(null);
+    }
+  }
 
   const selected = useMemo(
     () => products?.find((p) => p.id === productId) ?? null,
@@ -143,28 +143,24 @@ const RegisterCardModal = ({ open, onClose, onRegistered }: Props) => {
 
   const canSave =
     !!productId &&
-    fields.market_value.trim() !== "" &&
+    fields.market_value.trim() !== '' &&
     Number(fields.market_value) >= 0 &&
     !saving;
 
   const save = async () => {
     if (!canSave || !productId) return;
-    setSaving(true);
     try {
-      await packsApi.admin.cards.mutate({
+      await registerCard.mutateAsync({
         product_id: productId,
         set: fields.set.trim(),
         grader: fields.grader.trim(),
         grade: fields.grade.trim(),
         market_value: Number(fields.market_value),
       });
-      toast.success(t("cards.toast.created"));
+      toast.success(t('cards.toast.created'));
       onClose();
-      await onRegistered();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -179,10 +175,15 @@ const RegisterCardModal = ({ open, onClose, onRegistered }: Props) => {
         <FocusModal.Header>
           <div className="flex items-center justify-end gap-x-2">
             <Button size="small" variant="secondary" onClick={onClose}>
-              {t("cards.form.cancel")}
+              {t('cards.form.cancel')}
             </Button>
-            <Button size="small" onClick={save} isLoading={saving} disabled={!canSave}>
-              {t("cards.register.save")}
+            <Button
+              size="small"
+              onClick={save}
+              isLoading={saving}
+              disabled={!canSave}
+            >
+              {t('cards.register.save')}
             </Button>
           </div>
         </FocusModal.Header>
@@ -190,11 +191,11 @@ const RegisterCardModal = ({ open, onClose, onRegistered }: Props) => {
           <div className="flex w-full max-w-[640px] flex-col gap-y-6">
             <div>
               <FocusModal.Title asChild>
-                <Heading level="h2">{t("cards.register.title")}</Heading>
+                <Heading level="h2">{t('cards.register.title')}</Heading>
               </FocusModal.Title>
               <FocusModal.Description asChild>
                 <Text className="text-ui-fg-subtle mt-1" size="small">
-                  {t("cards.register.subtitle")}
+                  {t('cards.register.subtitle')}
                 </Text>
               </FocusModal.Description>
             </div>
@@ -202,16 +203,16 @@ const RegisterCardModal = ({ open, onClose, onRegistered }: Props) => {
             {/* 1 — pick the inventory product */}
             <div className="flex flex-col gap-y-2">
               <Label size="small" weight="plus">
-                {t("cards.register.product")}
+                {t('cards.register.product')}
               </Label>
               <Input
-                placeholder={t("cards.register.searchPlaceholder")}
+                placeholder={t('cards.register.searchPlaceholder')}
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
               />
               {loadError ? (
                 <Text className="text-ui-fg-subtle" size="small">
-                  {t("cards.register.loadError")}
+                  {t('cards.register.loadError')}
                 </Text>
               ) : products === null ? (
                 <Text className="text-ui-fg-subtle" size="small">
@@ -219,7 +220,7 @@ const RegisterCardModal = ({ open, onClose, onRegistered }: Props) => {
                 </Text>
               ) : products.length === 0 ? (
                 <Text className="text-ui-fg-subtle" size="small">
-                  {t("cards.register.noEligible")}
+                  {t('cards.register.noEligible')}
                 </Text>
               ) : (
                 <div className="max-h-64 divide-y overflow-y-auto rounded-lg border">
@@ -229,8 +230,8 @@ const RegisterCardModal = ({ open, onClose, onRegistered }: Props) => {
                       type="button"
                       onClick={() => pick(p)}
                       className={clx(
-                        "hover:bg-ui-bg-base-hover flex w-full items-center gap-3 px-4 py-2 text-left",
-                        p.id === productId && "bg-ui-bg-base-pressed",
+                        'hover:bg-ui-bg-base-hover flex w-full items-center gap-3 px-4 py-2 text-left',
+                        p.id === productId && 'bg-ui-bg-base-pressed',
                       )}
                     >
                       {p.thumbnail ? (
@@ -245,21 +246,23 @@ const RegisterCardModal = ({ open, onClose, onRegistered }: Props) => {
                       <span className="flex-1 truncate text-sm font-medium">
                         {p.title}
                       </span>
-                      <StatusBadge color={p.status === "published" ? "green" : "grey"}>
+                      <StatusBadge
+                        color={p.status === 'published' ? 'green' : 'grey'}
+                      >
                         {p.status}
                       </StatusBadge>
                     </button>
                   ))}
                   {visible.length === 0 && (
                     <div className="text-ui-fg-subtle px-4 py-3 text-sm">
-                      {t("cards.register.noMatch")}
+                      {t('cards.register.noMatch')}
                     </div>
                   )}
                 </div>
               )}
               {selected && (
                 <Text className="text-ui-fg-subtle" size="small">
-                  {t("cards.register.selectedHint", { title: selected.title })}
+                  {t('cards.register.selectedHint', { title: selected.title })}
                 </Text>
               )}
             </div>
@@ -267,15 +270,15 @@ const RegisterCardModal = ({ open, onClose, onRegistered }: Props) => {
             {/* 2 — market value via PriceCharting (or manual) */}
             <div className="bg-ui-bg-subtle flex flex-col gap-y-3 rounded-lg p-4">
               <Label size="small" weight="plus">
-                {t("cards.register.pcTitle")}
+                {t('cards.register.pcTitle')}
               </Label>
               <div className="flex gap-2">
                 <Input
-                  placeholder={t("cards.register.pcPlaceholder")}
+                  placeholder={t('cards.register.pcPlaceholder')}
                   value={pcQuery}
                   onChange={(e) => setPcQuery(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") {
+                    if (e.key === 'Enter') {
                       e.preventDefault();
                       void runPcSearch();
                     }
@@ -287,14 +290,14 @@ const RegisterCardModal = ({ open, onClose, onRegistered }: Props) => {
                   type="button"
                   onClick={runPcSearch}
                   isLoading={pcSearching}
-                  disabled={pcQuery.trim() === ""}
+                  disabled={pcQuery.trim() === ''}
                 >
-                  {t("cards.register.pcSearch")}
+                  {t('cards.register.pcSearch')}
                 </Button>
               </div>
               {pcMatches !== null && pcMatches.length === 0 && (
                 <Text className="text-ui-fg-subtle" size="small">
-                  {t("cards.register.pcNoMatches")}
+                  {t('cards.register.pcNoMatches')}
                 </Text>
               )}
               {pcMatches !== null && pcMatches.length > 0 && (
@@ -306,11 +309,13 @@ const RegisterCardModal = ({ open, onClose, onRegistered }: Props) => {
                       onClick={() => void pickPcMatch(m)}
                       disabled={pcLoadingId !== null}
                       className={clx(
-                        "hover:bg-ui-bg-base-hover flex w-full flex-col px-4 py-2 text-left",
-                        pcProduct?.id === m.id && "bg-ui-bg-base-pressed",
+                        'hover:bg-ui-bg-base-hover flex w-full flex-col px-4 py-2 text-left',
+                        pcProduct?.id === m.id && 'bg-ui-bg-base-pressed',
                       )}
                     >
-                      <span className="truncate text-sm font-medium">{m.name}</span>
+                      <span className="truncate text-sm font-medium">
+                        {m.name}
+                      </span>
                       <span className="text-ui-fg-subtle text-xs">{m.set}</span>
                     </button>
                   ))}
@@ -320,7 +325,7 @@ const RegisterCardModal = ({ open, onClose, onRegistered }: Props) => {
                 <div className="flex flex-wrap gap-2">
                   {pcProduct.prices.length === 0 ? (
                     <Text className="text-ui-fg-subtle" size="small">
-                      {t("cards.register.pcNoPrices")}
+                      {t('cards.register.pcNoPrices')}
                     </Text>
                   ) : (
                     pcProduct.prices.map((p) => (
@@ -332,7 +337,7 @@ const RegisterCardModal = ({ open, onClose, onRegistered }: Props) => {
                         onClick={() => applyPrice(p.grade, p.usd)}
                       >
                         {p.grade}: $
-                        {p.usd.toLocaleString("en-US", {
+                        {p.usd.toLocaleString('en-US', {
                           minimumFractionDigits: 2,
                           maximumFractionDigits: 2,
                         })}
@@ -342,7 +347,7 @@ const RegisterCardModal = ({ open, onClose, onRegistered }: Props) => {
                 </div>
               )}
               <Text className="text-ui-fg-subtle text-xs">
-                {t("cards.register.pcHint")}
+                {t('cards.register.pcHint')}
               </Text>
             </div>
 
@@ -350,7 +355,7 @@ const RegisterCardModal = ({ open, onClose, onRegistered }: Props) => {
             <div className="grid grid-cols-2 gap-4">
               <div className="flex flex-col gap-y-2">
                 <Label size="small" weight="plus">
-                  {t("cards.form.marketValue")}
+                  {t('cards.form.marketValue')}
                 </Label>
                 <Input
                   type="number"
@@ -362,7 +367,7 @@ const RegisterCardModal = ({ open, onClose, onRegistered }: Props) => {
               </div>
               <div className="flex flex-col gap-y-2">
                 <Label size="small" weight="plus">
-                  {t("cards.form.set")}
+                  {t('cards.form.set')}
                 </Label>
                 <Input
                   value={fields.set}
@@ -371,7 +376,7 @@ const RegisterCardModal = ({ open, onClose, onRegistered }: Props) => {
               </div>
               <div className="flex flex-col gap-y-2">
                 <Label size="small" weight="plus">
-                  {t("cards.form.grader")}
+                  {t('cards.form.grader')}
                 </Label>
                 <Input
                   value={fields.grader}
@@ -380,7 +385,7 @@ const RegisterCardModal = ({ open, onClose, onRegistered }: Props) => {
               </div>
               <div className="flex flex-col gap-y-2">
                 <Label size="small" weight="plus">
-                  {t("cards.form.grade")}
+                  {t('cards.form.grade')}
                 </Label>
                 <Input
                   value={fields.grade}
@@ -390,7 +395,7 @@ const RegisterCardModal = ({ open, onClose, onRegistered }: Props) => {
             </div>
 
             <Text className="text-ui-fg-subtle text-xs">
-              {t("cards.register.rarityHint")}
+              {t('cards.register.rarityHint')}
             </Text>
           </div>
         </FocusModal.Body>

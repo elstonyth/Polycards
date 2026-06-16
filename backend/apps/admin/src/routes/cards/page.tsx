@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { useRef, useState, type ChangeEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Container,
@@ -16,12 +16,13 @@ import {
 } from '@medusajs/ui';
 import { Sparkles } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
+import { type AdminCard, type AdminCardUpdate } from '../../lib/packs-api';
 import {
-  packsApi,
-  type AdminCard,
-  type AdminCardUpdate,
-} from '../../lib/packs-api';
-import { uploadImage, deleteCard } from '../../lib/admin-rest';
+  useCards,
+  useDeleteCard,
+  useUpdateCard,
+  useUploadImage,
+} from '../../lib/queries';
 import { resolveImageUrl } from '../../lib/image-url';
 import { validateImageFile } from '../../lib/image-validation';
 import RegisterCardModal from './RegisterCardModal';
@@ -65,34 +66,16 @@ const gradeLabel = (c: AdminCard): string =>
 
 const GachaCardsPage = () => {
   const { t } = useTranslation();
-  const [cards, setCards] = useState<AdminCard[] | null>(null);
-  const [error, setError] = useState(false);
+  const { data: cards = null, isError } = useCards();
+  const updateCard = useUpdateCard();
+  const removeCard = useDeleteCard();
+  const uploadImg = useUploadImage();
   const [registerOpen, setRegisterOpen] = useState(false);
   const [form, setForm] = useState<FormState | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [uploading, setUploading] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AdminCard | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    let active = true;
-    packsApi.admin.cards
-      .query()
-      .then((res) => active && setCards(res.cards))
-      .catch(() => active && setError(true));
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const reload = async () => {
-    try {
-      const res = await packsApi.admin.cards.query();
-      setCards(res.cards);
-    } catch {
-      toast.error(t('cards.list.loadError'));
-    }
-  };
+  const uploading = uploadImg.isPending;
+  const saving = updateCard.isPending;
 
   const patch = (p: Partial<FormState>) =>
     setForm((f) => (f ? { ...f, ...p } : f));
@@ -108,14 +91,12 @@ const GachaCardsPage = () => {
       if (fileRef.current) fileRef.current.value = '';
       return;
     }
-    setUploading(true);
     try {
-      const url = await uploadImage(file, 'card');
+      const url = await uploadImg.mutateAsync({ file, kind: 'card' });
       patch({ image: url });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
     } finally {
-      setUploading(false);
       if (fileRef.current) fileRef.current.value = '';
     }
   };
@@ -131,7 +112,6 @@ const GachaCardsPage = () => {
 
   const save = async () => {
     if (!form || !canSave) return;
-    setSaving(true);
     const payload: AdminCardUpdate = {
       name: form.name.trim(),
       set: form.set.trim(),
@@ -143,17 +123,11 @@ const GachaCardsPage = () => {
       for_sale: form.for_sale,
     };
     try {
-      await packsApi.admin.cards.$handle.mutate({
-        $handle: form.handle,
-        ...payload,
-      });
+      await updateCard.mutateAsync({ handle: form.handle, ...payload });
       toast.success(t('cards.toast.updated'));
       setForm(null);
-      await reload();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -162,9 +136,8 @@ const GachaCardsPage = () => {
     const handle = deleteTarget.handle;
     setDeleteTarget(null);
     try {
-      await deleteCard(handle);
+      await removeCard.mutateAsync(handle);
       toast.success(t('cards.toast.deleted'));
-      await reload();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
     }
@@ -188,7 +161,7 @@ const GachaCardsPage = () => {
         </Button>
       </div>
 
-      {error ? (
+      {isError ? (
         <div className="px-6 py-8">
           <Text className="text-ui-fg-subtle">{t('cards.list.loadError')}</Text>
         </div>
@@ -302,7 +275,6 @@ const GachaCardsPage = () => {
       <RegisterCardModal
         open={registerOpen}
         onClose={() => setRegisterOpen(false)}
-        onRegistered={reload}
       />
 
       <FocusModal
