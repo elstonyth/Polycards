@@ -37,6 +37,10 @@ export type RequestDeliveryResult =
   | { ok: true; orderId: string }
   | { ok: false; error: string; needsAuth?: boolean };
 
+export type EditAddressResult =
+  | { ok: true }
+  | { ok: false; error: string; needsAuth?: boolean };
+
 export type AddressView = {
   id: string;
   name: string;
@@ -156,6 +160,43 @@ export async function requestDelivery(
     return { ok: true, orderId };
   } catch (error) {
     logger.error('[delivery] request failed:', error);
+    return {
+      ok: false,
+      error: friendlyError(error, DELIVERY_RULES, FALLBACK),
+      needsAuth: isAuthError(error),
+    };
+  }
+}
+
+// Re-point a pre-ship delivery order at a different saved address. The backend
+// only permits this while the order is `requested` or `packing` (it returns
+// NOT_ALLOWED→400 otherwise); the UI hides the affordance for other statuses.
+export async function editDeliveryAddress(
+  orderId: string,
+  addressId: string,
+): Promise<EditAddressResult> {
+  if (typeof orderId !== 'string' || orderId.trim() === '') {
+    return { ok: false, error: 'Missing order.' };
+  }
+  if (typeof addressId !== 'string' || addressId.trim() === '') {
+    return { ok: false, error: 'Choose a shipping address.' };
+  }
+  const token = await getAuthToken();
+  if (!token)
+    return { ok: false, error: 'Please log in first.', needsAuth: true };
+
+  try {
+    await sdk.client.fetch(
+      `/store/delivery-orders/${encodeURIComponent(orderId)}/address`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: { address_id: addressId },
+      },
+    );
+    return { ok: true };
+  } catch (error) {
+    logger.error('[delivery] edit address failed:', error);
     return {
       ok: false,
       error: friendlyError(error, DELIVERY_RULES, FALLBACK),
