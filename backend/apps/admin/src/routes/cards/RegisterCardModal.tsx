@@ -20,6 +20,7 @@ import {
 } from '../../lib/admin-rest';
 import { useEligibleProducts, useRegisterCard } from '../../lib/queries';
 import { resolveImageUrl } from '../../lib/image-url';
+import { usd } from '../../lib/format';
 
 // Register an EXISTING inventory product as a gacha card (inventory-first: the
 // item is created in the product catalog beforehand; this dialog only adds the
@@ -336,11 +337,7 @@ const RegisterCardModal = ({ open, onClose }: Props) => {
                         type="button"
                         onClick={() => applyPrice(p.grade, p.usd)}
                       >
-                        {p.grade}: $
-                        {p.usd.toLocaleString('en-US', {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
+                        {p.grade}: {usd(p.usd)}
                       </Button>
                     ))
                   )}

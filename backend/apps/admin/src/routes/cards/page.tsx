@@ -25,6 +25,7 @@ import {
 } from '../../lib/queries';
 import { resolveImageUrl } from '../../lib/image-url';
 import { validateImageFile } from '../../lib/image-validation';
+import { usd } from '../../lib/format';
 import RegisterCardModal from './RegisterCardModal';
 
 export const config: RouteConfig = {
@@ -216,18 +217,10 @@ const GachaCardsPage = () => {
                   {gradeLabel(c) || '—'}
                 </Table.Cell>
                 <Table.Cell className="text-ui-fg-subtle text-right tabular-nums">
-                  $
-                  {c.market_value.toLocaleString('en-US', {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
+                  {usd(c.market_value)}
                 </Table.Cell>
                 <Table.Cell className="text-right tabular-nums">
-                  $
-                  {(c.price ?? c.market_value).toLocaleString('en-US', {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
+                  {usd(c.price ?? c.market_value)}
                   {c.price === null && (
                     <span className="text-ui-fg-muted ml-1 text-xs">FMV</span>
                   )}
