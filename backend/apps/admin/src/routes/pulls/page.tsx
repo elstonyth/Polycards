@@ -1,9 +1,8 @@
-import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Container, Heading, Text, Table, Badge, StatusBadge } from "@medusajs/ui";
 import { ChartBar } from "@medusajs/icons";
 import type { RouteConfig } from "@mercurjs/dashboard-sdk";
-import { packsApi, type PullsResponse } from "../../lib/packs-api";
+import { usePulls } from "../../lib/queries";
 import { resolveImageUrl } from "../../lib/image-url";
 
 export const config: RouteConfig = {
@@ -28,19 +27,7 @@ function timeAgo(iso: string): string {
 
 const PullLedgerPage = () => {
   const { t } = useTranslation();
-  const [data, setData] = useState<PullsResponse | null>(null);
-  const [error, setError] = useState(false);
-
-  useEffect(() => {
-    let active = true;
-    packsApi.admin.pulls
-      .query()
-      .then((res) => active && setData(res))
-      .catch(() => active && setError(true));
-    return () => {
-      active = false;
-    };
-  }, []);
+  const { data, isError } = usePulls();
 
   return (
     <div className="flex flex-col gap-y-3">
@@ -52,11 +39,11 @@ const PullLedgerPage = () => {
           </Text>
         </div>
 
-        {error ? (
+        {isError ? (
           <div className="border-t px-6 py-8">
             <Text className="text-ui-fg-subtle">{t("pulls.loadError")}</Text>
           </div>
-        ) : data === null ? (
+        ) : !data ? (
           <div className="border-t px-6 py-8">
             <Text className="text-ui-fg-subtle">…</Text>
           </div>
