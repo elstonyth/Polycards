@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -17,8 +17,14 @@ import {
   clx,
 } from '@medusajs/ui';
 import { ArrowLeft } from '@medusajs/icons';
-import { packsApi, type AdminCard } from '../../../lib/packs-api';
+import type { OddsRow, PackOddsResponse } from '../../../lib/packs-api';
 import { computeOdds, RARITIES, type OddsInput } from '@acme/odds-math';
+import {
+  useCards,
+  usePackOdds,
+  useSaveMembers,
+  useSaveOdds,
+} from '../../../lib/queries';
 import { resolveImageUrl } from '../../../lib/image-url';
 
 // One editable row: the immutable card facts + its current saved %, plus the
@@ -37,6 +43,21 @@ type EditRow = {
   pctInput: string;
 };
 
+// Map a server odds snapshot into the editable row buffer. Used to seed the
+// editor on load and to reseed after a membership change.
+const mapOddsToRows = (odds: OddsRow[]): EditRow[] =>
+  odds.map((o) => ({
+    card_id: o.card_id,
+    name: o.name,
+    image: o.image,
+    rarity: o.rarity,
+    market_value: o.market_value,
+    stock: o.stock,
+    currentPct: o.pct,
+    locked: o.locked,
+    pctInput: String(o.pct),
+  }));
+
 const fmtPct = (n: number): string =>
   `${Number.isInteger(n) ? n : n.toFixed(2)}%`;
 
@@ -45,81 +66,36 @@ const PackOddsEditorPage = () => {
   const navigate = useNavigate();
   const { slug = '' } = useParams();
 
-  const [packTitle, setPackTitle] = useState<string>('');
-  const [packStatus, setPackStatus] = useState<string>('');
+  const { data, isError: loadError } = usePackOdds(slug);
+  const saveOdds = useSaveOdds();
+  const saveMembersMut = useSaveMembers();
   const [rows, setRows] = useState<EditRow[] | null>(null);
-  const [loadError, setLoadError] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const saving = saveOdds.isPending;
+  const packTitle = data?.pack.title ?? '';
+  const packStatus = data?.pack.status ?? '';
 
-  useEffect(() => {
-    let active = true;
-    packsApi.admin.packs.$slug.odds
-      .query({ $slug: slug })
-      .then((res) => {
-        if (!active) return;
-        setPackTitle(res.pack.title);
-        setPackStatus(res.pack.status);
-        setRows(
-          res.odds.map((o) => ({
-            card_id: o.card_id,
-            name: o.name,
-            image: o.image,
-            rarity: o.rarity,
-            market_value: o.market_value,
-            stock: o.stock,
-            currentPct: o.pct,
-            locked: o.locked,
-            pctInput: String(o.pct),
-          })),
-        );
-      })
-      .catch(() => active && setLoadError(true));
-    return () => {
-      active = false;
-    };
-  }, [slug]);
-
-  // Reload the pool after a membership change (no mount guard — still mounted).
-  const reloadOdds = async () => {
-    try {
-      const res = await packsApi.admin.packs.$slug.odds.query({ $slug: slug });
-      setPackTitle(res.pack.title);
-      setPackStatus(res.pack.status);
-      setRows(
-        res.odds.map((o) => ({
-          card_id: o.card_id,
-          name: o.name,
-          image: o.image,
-          rarity: o.rarity,
-          market_value: o.market_value,
-          stock: o.stock,
-          currentPct: o.pct,
-          locked: o.locked,
-          pctInput: String(o.pct),
-        })),
-      );
-    } catch {
-      toast.error(t('packs.editor.loadError'));
-    }
-  };
+  // Seed (and reseed) the editable buffer from the server snapshot, during render
+  // (not an effect) per react.dev "you might not need an effect". React Query keeps
+  // a stable `data` reference until the content changes, so this reseeds only on
+  // initial load and after our explicit post-save-members invalidation — never
+  // clobbering in-progress edits.
+  const [seededFrom, setSeededFrom] = useState<PackOddsResponse | undefined>(
+    undefined,
+  );
+  if (data && data !== seededFrom) {
+    setSeededFrom(data);
+    setRows(mapOddsToRows(data.odds));
+  }
 
   // Prize-pool membership — which cards belong to this pack.
   const [poolOpen, setPoolOpen] = useState(false);
-  const [allCards, setAllCards] = useState<AdminCard[] | null>(null);
+  const { data: allCards = null } = useCards({ enabled: poolOpen });
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [savingMembers, setSavingMembers] = useState(false);
+  const savingMembers = saveMembersMut.isPending;
 
-  const openPool = async () => {
+  const openPool = () => {
     setSelected(new Set((rows ?? []).map((r) => r.card_id)));
     setPoolOpen(true);
-    if (allCards === null) {
-      try {
-        const res = await packsApi.admin.cards.query();
-        setAllCards(res.cards);
-      } catch {
-        toast.error(t('packs.pool.loadError'));
-      }
-    }
   };
 
   const toggleCard = (handle: string) =>
@@ -131,21 +107,18 @@ const PackOddsEditorPage = () => {
     });
 
   const saveMembers = async () => {
-    setSavingMembers(true);
     try {
-      const res = await packsApi.admin.packs.$slug.members.mutate({
-        $slug: slug,
+      const res = await saveMembersMut.mutateAsync({
+        slug,
         card_ids: Array.from(selected),
       });
       toast.success(
         t('packs.pool.saved', { added: res.added, removed: res.removed }),
       );
       setPoolOpen(false);
-      await reloadOdds();
+      // Invalidation (in the hook) refetches the odds → the seeding effect reseeds.
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSavingMembers(false);
     }
   };
 
@@ -189,7 +162,6 @@ const PackOddsEditorPage = () => {
 
   async function save() {
     if (!rows || result.error || saving) return;
-    setSaving(true);
     try {
       const entries: OddsInput[] = rows.map((r) => ({
         card_id: r.card_id,
@@ -197,10 +169,7 @@ const PackOddsEditorPage = () => {
         pct: Number(r.pctInput),
         rarity: r.rarity,
       }));
-      const res = await packsApi.admin.packs.$slug.odds.mutate({
-        $slug: slug,
-        entries,
-      });
+      const res = await saveOdds.mutateAsync({ slug, entries });
       const byId = new Map(res.odds.map((c) => [c.card_id, c]));
       setRows(
         (prev) =>
@@ -220,8 +189,6 @@ const PackOddsEditorPage = () => {
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       toast.error(message);
-    } finally {
-      setSaving(false);
     }
   }
 

@@ -1,9 +1,8 @@
-import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Badge, Container, Heading, Table, Text } from "@medusajs/ui";
 import { CurrencyDollar } from "@medusajs/icons";
 import type { RouteConfig } from "@mercurjs/dashboard-sdk";
-import { getEconomyReport, type EconomyReport } from "../../lib/admin-rest";
+import { useEconomy } from "../../lib/queries";
 
 export const config: RouteConfig = {
   label: "Economy",
@@ -17,18 +16,7 @@ const usd = (n: number | null): string =>
 
 const EconomyPage = () => {
   const { t } = useTranslation();
-  const [data, setData] = useState<EconomyReport | null>(null);
-  const [error, setError] = useState(false);
-
-  useEffect(() => {
-    let active = true;
-    getEconomyReport()
-      .then((res) => active && setData(res))
-      .catch(() => active && setError(true));
-    return () => {
-      active = false;
-    };
-  }, []);
+  const { data, isError } = useEconomy();
 
   const stats: { key: string; value: string; hint?: string }[] = data
     ? [
@@ -55,11 +43,11 @@ const EconomyPage = () => {
           </Text>
         </div>
 
-        {error ? (
+        {isError ? (
           <div className="border-t px-6 py-8">
             <Text className="text-ui-fg-subtle">{t("economy.loadError")}</Text>
           </div>
-        ) : data === null ? (
+        ) : !data ? (
           <div className="border-t px-6 py-8">
             <Text className="text-ui-fg-subtle">…</Text>
           </div>

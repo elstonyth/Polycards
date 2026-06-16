@@ -15,13 +15,8 @@ import {
 } from "@medusajs/ui";
 import { Buildings } from "@medusajs/icons";
 import type { RouteConfig } from "@mercurjs/dashboard-sdk";
-import {
-  adjustCustomerCredits,
-  getCustomerGacha,
-  searchCustomers,
-  type CustomerGacha,
-  type SupportCustomer,
-} from "../../lib/admin-rest";
+import { searchCustomers, type SupportCustomer } from "../../lib/admin-rest";
+import { useAdjustCredits, useCustomerGacha } from "../../lib/queries";
 import { resolveImageUrl } from "../../lib/image-url";
 
 export const config: RouteConfig = {
@@ -39,13 +34,14 @@ const SupportPage = () => {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SupportCustomer[] | null>(null);
   const [searching, setSearching] = useState(false);
-  const [view, setView] = useState<CustomerGacha | null>(null);
-  const [loadingView, setLoadingView] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const { data: view } = useCustomerGacha(selectedId);
+  const adjustCredits = useAdjustCredits();
   // Adjust form state — string inputs, validated server-side (the backend owns
   // the money rules; surfacing its message keeps the two in lockstep).
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
-  const [adjusting, setAdjusting] = useState(false);
+  const adjusting = adjustCredits.isPending;
   // Money mutation behind an explicit confirm — a mistyped sign on a support
   // ticket must not apply on a single click.
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -54,7 +50,7 @@ const SupportPage = () => {
     const q = query.trim();
     if (!q || searching) return;
     setSearching(true);
-    setView(null);
+    setSelectedId(null);
     try {
       setResults(await searchCustomers(q));
     } catch (e) {
@@ -65,18 +61,10 @@ const SupportPage = () => {
     }
   };
 
-  const open = async (id: string) => {
-    if (loadingView) return;
-    setLoadingView(true);
-    try {
-      setView(await getCustomerGacha(id));
-      setAmount("");
-      setNote("");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoadingView(false);
-    }
+  const open = (id: string) => {
+    setSelectedId(id);
+    setAmount("");
+    setNote("");
   };
 
   // Validate, then ask for confirmation — the actual mutation runs in
@@ -95,23 +83,23 @@ const SupportPage = () => {
     if (!view || adjusting) return;
     const value = Number(amount);
     setConfirmOpen(false);
-    setAdjusting(true);
     try {
-      const res = await adjustCustomerCredits(view.customer.id, value, note);
+      const res = await adjustCredits.mutateAsync({
+        id: view.customer.id,
+        amount: value,
+        note,
+      });
       toast.success(
         t("support.adjusted", {
           amount: usd(res.amount),
           balance: usd(res.balance),
         }),
       );
-      // Re-fetch so the ledger table shows the new row immediately.
-      setView(await getCustomerGacha(view.customer.id));
+      // Invalidation (in the hook) refetches the customer view → fresh ledger row.
       setAmount("");
       setNote("");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
-    } finally {
-      setAdjusting(false);
     }
   };
 
@@ -191,7 +179,7 @@ const SupportPage = () => {
               <Button
                 variant="secondary"
                 size="small"
-                onClick={() => setView(null)}
+                onClick={() => setSelectedId(null)}
               >
                 {t("support.back")}
               </Button>

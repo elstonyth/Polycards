@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { useRef, useState, type ChangeEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -18,12 +18,14 @@ import {
 } from '@medusajs/ui';
 import { Gift } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
+import { type AdminPack, type AdminPackWrite } from '../../lib/packs-api';
 import {
-  packsApi,
-  type AdminPack,
-  type AdminPackWrite,
-} from '../../lib/packs-api';
-import { uploadImage, deletePack } from '../../lib/admin-rest';
+  useCreatePack,
+  useDeletePack,
+  usePacks,
+  useUpdatePack,
+  useUploadImage,
+} from '../../lib/queries';
 import { resolveImageUrl } from '../../lib/image-url';
 import { validateImageFile } from '../../lib/image-validation';
 
@@ -90,34 +92,17 @@ const formFromPack = (p: AdminPack): FormState => ({
 const PacksListPage = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const [packs, setPacks] = useState<AdminPack[] | null>(null);
-  const [error, setError] = useState(false);
+  const { data: packs = null, isError } = usePacks();
+  const createPack = useCreatePack();
+  const updatePack = useUpdatePack();
+  const removePack = useDeletePack();
+  const uploadImg = useUploadImage();
   const [mode, setMode] = useState<'create' | 'edit' | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
-  const [saving, setSaving] = useState(false);
-  const [uploading, setUploading] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AdminPack | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    let active = true;
-    packsApi.admin.packs
-      .query()
-      .then((res) => active && setPacks(res.packs))
-      .catch(() => active && setError(true));
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const reload = async () => {
-    try {
-      const res = await packsApi.admin.packs.query();
-      setPacks(res.packs);
-    } catch {
-      toast.error(t('packs.list.loadError'));
-    }
-  };
+  const uploading = uploadImg.isPending;
+  const saving = createPack.isPending || updatePack.isPending;
 
   const patch = (p: Partial<FormState>) => setForm((f) => ({ ...f, ...p }));
 
@@ -141,14 +126,12 @@ const PacksListPage = () => {
       if (fileRef.current) fileRef.current.value = '';
       return;
     }
-    setUploading(true);
     try {
-      const url = await uploadImage(file, 'pack');
+      const url = await uploadImg.mutateAsync({ file, kind: 'pack' });
       patch({ image: url });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
     } finally {
-      setUploading(false);
       if (fileRef.current) fileRef.current.value = '';
     }
   };
@@ -167,7 +150,6 @@ const PacksListPage = () => {
 
   const save = async () => {
     if (!canSave) return;
-    setSaving(true);
     const payload: AdminPackWrite = {
       title: form.title.trim(),
       category: form.category,
@@ -180,24 +162,15 @@ const PacksListPage = () => {
     };
     try {
       if (mode === 'create') {
-        await packsApi.admin.packs.mutate({
-          ...payload,
-          slug: form.slug.trim(),
-        });
+        await createPack.mutateAsync({ ...payload, slug: form.slug.trim() });
         toast.success(t('packs.toast.created'));
       } else {
-        await packsApi.admin.packs.$slug.mutate({
-          $slug: form.slug,
-          ...payload,
-        });
+        await updatePack.mutateAsync({ slug: form.slug, ...payload });
         toast.success(t('packs.toast.updated'));
       }
       setMode(null);
-      await reload();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -206,9 +179,8 @@ const PacksListPage = () => {
     const slug = deleteTarget.slug;
     setDeleteTarget(null);
     try {
-      await deletePack(slug);
+      await removePack.mutateAsync(slug);
       toast.success(t('packs.toast.deleted'));
-      await reload();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
     }
@@ -228,7 +200,7 @@ const PacksListPage = () => {
         </Button>
       </div>
 
-      {error ? (
+      {isError ? (
         <div className="px-6 py-8">
           <Text className="text-ui-fg-subtle">{t('packs.list.loadError')}</Text>
         </div>
