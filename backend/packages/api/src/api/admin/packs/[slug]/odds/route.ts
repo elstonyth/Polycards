@@ -2,10 +2,7 @@ import { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
 import PacksModuleService from '../../../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../../../modules/packs';
 import { savePackOddsWorkflow } from '../../../../../workflows/save-pack-odds';
-import {
-  RARITIES,
-  type OddsInput,
-} from '../../../../../modules/packs/odds-math';
+import { RARITIES, type OddsInput } from '@acme/odds-math';
 import { getCardStockByHandle } from '../../../../../modules/packs/card-stock';
 import { toMoney } from '../../../../../modules/packs/money';
 import { cardByHandle } from '../../../../../modules/packs/card-view';

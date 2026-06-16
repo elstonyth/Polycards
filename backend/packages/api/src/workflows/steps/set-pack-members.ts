@@ -1,8 +1,8 @@
-import { createStep, StepResponse } from "@medusajs/framework/workflows-sdk";
-import { MedusaError } from "@medusajs/framework/utils";
-import { PACKS_MODULE } from "../../modules/packs";
-import type PacksModuleService from "../../modules/packs/service";
-import type { OddsRarity } from "../../modules/packs/odds-math";
+import { createStep, StepResponse } from '@medusajs/framework/workflows-sdk';
+import { MedusaError } from '@medusajs/framework/utils';
+import { PACKS_MODULE } from '../../modules/packs';
+import type PacksModuleService from '../../modules/packs/service';
+import type { OddsRarity } from '@acme/odds-math';
 
 export type SetPackMembersInput = {
   pack_id: string; // = Pack.slug
@@ -21,14 +21,16 @@ type RemovedRow = {
   weight: number;
   locked: boolean;
 };
-type CompensateData = { createdIds: string[]; removed: RemovedRow[] } | undefined;
+type CompensateData =
+  | { createdIds: string[]; removed: RemovedRow[] }
+  | undefined;
 
 // set-pack-members — reconcile a pack's prize pool to a desired card set by
 // DIFFING (add missing PackOdds rows, delete removed ones, leave shared rows —
 // and their tuned weights — untouched). This is deliberately NOT save-pack-odds:
 // that step rejects any change to the card set; this one IS the card-set change.
 export const setPackMembersStep = createStep(
-  "set-pack-members",
+  'set-pack-members',
   async (input: SetPackMembersInput, { container }) => {
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
 
@@ -36,7 +38,7 @@ export const setPackMembersStep = createStep(
     if (!pack) {
       throw new MedusaError(
         MedusaError.Types.NOT_FOUND,
-        `Pack '${input.pack_id}' not found.`
+        `Pack '${input.pack_id}' not found.`,
       );
     }
 
@@ -46,21 +48,21 @@ export const setPackMembersStep = createStep(
     if (desired.length) {
       const cards = await packs.listCards(
         { handle: desired },
-        { take: desired.length }
+        { take: desired.length },
       );
       const found = new Set(cards.map((c) => c.handle));
       const missing = desired.filter((h) => !found.has(h));
       if (missing.length) {
         throw new MedusaError(
           MedusaError.Types.INVALID_DATA,
-          `Unknown card handle(s): ${missing.join(", ")}.`
+          `Unknown card handle(s): ${missing.join(', ')}.`,
         );
       }
     }
 
     const existing = await packs.listPackOdds(
       { pack_id: input.pack_id },
-      { take: 1000 }
+      { take: 1000 },
     );
     const existingCards = new Set(existing.map((o) => o.card_id));
     const desiredSet = new Set(desired);
@@ -76,10 +78,10 @@ export const setPackMembersStep = createStep(
           card_id,
           // New members join as Common; the operator picks the real per-pack
           // tier in the win-rate editor, which recomputes the weights from it.
-          rarity: "Common" as const,
+          rarity: 'Common' as const,
           weight: NEW_MEMBER_WEIGHT,
           locked: false,
-        }))
+        })),
       );
       createdIds = created.map((c) => c.id);
     }
@@ -102,7 +104,7 @@ export const setPackMembersStep = createStep(
         added: toAdd.length,
         removed: toRemove.length,
       },
-      { createdIds, removed } satisfies CompensateData
+      { createdIds, removed } satisfies CompensateData,
     );
   },
   async (data: CompensateData, { container }) => {
@@ -114,7 +116,7 @@ export const setPackMembersStep = createStep(
     if (data.removed.length) {
       await packs.createPackOdds(data.removed);
     }
-  }
+  },
 );
 
 export default setPackMembersStep;

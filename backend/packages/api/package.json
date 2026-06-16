@@ -29,6 +29,7 @@
     "test:unit": "TEST_TYPE=unit NODE_OPTIONS=--experimental-vm-modules jest --silent --runInBand --forceExit"
   },
   "dependencies": {
+    "@acme/odds-math": "workspace:*",
     "@medusajs/admin-sdk": "2.13.4",
     "@medusajs/admin-shared": "2.13.4",
     "@medusajs/cli": "2.13.4",

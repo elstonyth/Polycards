@@ -1,8 +1,8 @@
-import { createStep, StepResponse } from "@medusajs/framework/workflows-sdk";
-import { MedusaError } from "@medusajs/framework/utils";
-import { PACKS_MODULE } from "../../modules/packs";
-import type PacksModuleService from "../../modules/packs/service";
-import type { OddsRarity } from "../../modules/packs/odds-math";
+import { createStep, StepResponse } from '@medusajs/framework/workflows-sdk';
+import { MedusaError } from '@medusajs/framework/utils';
+import { PACKS_MODULE } from '../../modules/packs';
+import type PacksModuleService from '../../modules/packs/service';
+import type { OddsRarity } from '@acme/odds-math';
 
 export type DeleteCardInput = { handle: string };
 
@@ -38,7 +38,7 @@ type CompensateData =
 // you really want it gone. Pull history is also kept — the ledger is a permanent
 // record. Compensation recreates the card and its odds rows.
 export const deleteCardStep = createStep(
-  "delete-card",
+  'delete-card',
   async (input: DeleteCardInput, { container }) => {
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
 
@@ -46,13 +46,13 @@ export const deleteCardStep = createStep(
     if (!card) {
       throw new MedusaError(
         MedusaError.Types.NOT_FOUND,
-        `Card '${input.handle}' not found.`
+        `Card '${input.handle}' not found.`,
       );
     }
 
     const oddsRows = await packs.listPackOdds(
       { card_id: input.handle },
-      { take: 1000 }
+      { take: 1000 },
     );
     const oddsSnapshot: OddsSnapshot[] = oddsRows.map((o) => ({
       pack_id: o.pack_id,
@@ -92,7 +92,7 @@ export const deleteCardStep = createStep(
     if (data.odds.length) {
       await packs.createPackOdds(data.odds);
     }
-  }
+  },
 );
 
 export default deleteCardStep;

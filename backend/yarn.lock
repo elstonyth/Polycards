@@ -23,6 +23,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@acme/api@workspace:packages/api"
   dependencies:
+    "@acme/odds-math": "workspace:*"
     "@medusajs/admin-sdk": "npm:2.13.4"
     "@medusajs/admin-shared": "npm:2.13.4"
     "@medusajs/cli": "npm:2.13.4"
@@ -49,7 +50,7 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@acme/odds-math@workspace:packages/odds-math":
+"@acme/odds-math@workspace:*, @acme/odds-math@workspace:packages/odds-math":
   version: 0.0.0-use.local
   resolution: "@acme/odds-math@workspace:packages/odds-math"
   dependencies:

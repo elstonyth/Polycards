@@ -1,13 +1,13 @@
-import { createStep, StepResponse } from "@medusajs/framework/workflows-sdk";
-import { MedusaError } from "@medusajs/framework/utils";
-import { PACKS_MODULE } from "../../modules/packs";
-import type PacksModuleService from "../../modules/packs/service";
+import { createStep, StepResponse } from '@medusajs/framework/workflows-sdk';
+import { MedusaError } from '@medusajs/framework/utils';
+import { PACKS_MODULE } from '../../modules/packs';
+import type PacksModuleService from '../../modules/packs/service';
 import {
   computeOdds,
   RARITIES,
   type OddsInput,
   type OddsRarity,
-} from "../../modules/packs/odds-math";
+} from '@acme/odds-math';
 
 export type SavePackOddsInput = {
   pack_id: string; // = Pack.slug
@@ -17,9 +17,9 @@ export type SavePackOddsInput = {
 // OddsInput carries rarity as a plain string (the route validates it); narrow it
 // back to the enum for the persistence layer, falling back to Common.
 const toRarity = (s: string | undefined): OddsRarity =>
-  (RARITIES as readonly string[]).includes(s ?? "")
+  (RARITIES as readonly string[]).includes(s ?? '')
     ? (s as OddsRarity)
-    : "Common";
+    : 'Common';
 
 // Snapshot used to restore the prior odds if a later step ever fails.
 type OddsSnapshot = {
@@ -40,29 +40,29 @@ type OddsSnapshot = {
 //   - computeOdds must return no error (Σlocked ≤ 100; all-locked ⇒ Σ == 100;
 //     each locked rate in 0–100)
 export const savePackOddsStep = createStep(
-  "save-pack-odds",
+  'save-pack-odds',
   async (input: SavePackOddsInput, { container }) => {
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
 
     const [pack] = await packs.listPacks(
-      { slug: input.pack_id, status: "active" },
-      { take: 1 }
+      { slug: input.pack_id, status: 'active' },
+      { take: 1 },
     );
     if (!pack) {
       throw new MedusaError(
         MedusaError.Types.NOT_FOUND,
-        `Pack '${input.pack_id}' is not available.`
+        `Pack '${input.pack_id}' is not available.`,
       );
     }
 
     const existing = await packs.listPackOdds(
       { pack_id: input.pack_id },
-      { take: 1000 }
+      { take: 1000 },
     );
     if (existing.length === 0) {
       throw new MedusaError(
         MedusaError.Types.NOT_FOUND,
-        `Pack '${input.pack_id}' has no odds configured.`
+        `Pack '${input.pack_id}' has no odds configured.`,
       );
     }
 
@@ -76,7 +76,7 @@ export const savePackOddsStep = createStep(
     if (!sameSet) {
       throw new MedusaError(
         MedusaError.Types.INVALID_DATA,
-        "Submitted cards do not match this pack's prize pool. Reload and retry."
+        "Submitted cards do not match this pack's prize pool. Reload and retry.",
       );
     }
 
@@ -88,7 +88,9 @@ export const savePackOddsStep = createStep(
     const idByCard = new Map(existing.map((o) => [o.card_id, o.id]));
     // Rarity rides along with the save: the editor chooses the per-pack tier and
     // the weights computed FROM it in one submit.
-    const rarityByCard = new Map(input.entries.map((e) => [e.card_id, e.rarity]));
+    const rarityByCard = new Map(
+      input.entries.map((e) => [e.card_id, e.rarity]),
+    );
     const updates = computed.map((c) => ({
       id: idByCard.get(c.card_id)!,
       rarity: toRarity(rarityByCard.get(c.card_id)),
@@ -112,7 +114,7 @@ export const savePackOddsStep = createStep(
     if (!snapshot) return;
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
     await packs.updatePackOdds(snapshot);
-  }
+  },
 );
 
 export default savePackOddsStep;
