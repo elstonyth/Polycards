@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { AccountHeader, StatCards } from '@/components/account/ui';
 import { usd } from '@/lib/format';
 import { getTransactions } from '@/lib/actions/vault';
-import { reasonLabel, signedUsd, withRunningBalance } from '@/lib/transactions';
+import { reasonLabel, signedUsd } from '@/lib/transactions';
 
 export const metadata: Metadata = { title: 'Transactions | Pokenic' };
 
@@ -23,7 +23,7 @@ export default async function TransactionsPage() {
     );
   }
 
-  const rows = withRunningBalance(res.transactions, res.balance);
+  const rows = res.transactions;
 
   return (
     <>
@@ -50,7 +50,6 @@ export default async function TransactionsPage() {
                 <th className="px-4 py-3 font-medium">Date</th>
                 <th className="px-4 py-3 font-medium">Type</th>
                 <th className="px-4 py-3 text-right font-medium">Amount</th>
-                <th className="px-4 py-3 text-right font-medium">Balance</th>
               </tr>
             </thead>
             <tbody>
@@ -75,9 +74,6 @@ export default async function TransactionsPage() {
                     }`}
                   >
                     {signedUsd(t.amount)}
-                  </td>
-                  <td className="px-4 py-3 text-right text-white/70">
-                    {usd(t.balanceAfter)}
                   </td>
                 </tr>
               ))}

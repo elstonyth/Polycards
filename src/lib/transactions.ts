@@ -18,20 +18,3 @@ export function signedUsd(amount: number): string {
   const sign = amount > 0 ? '+' : amount < 0 ? '-' : '';
   return `${sign}${usd(Math.abs(amount))}`;
 }
-
-/**
- * Rows are newest-first (API order). Returns each row with the balance the
- * account held immediately AFTER that transaction, derived by walking backward
- * from the current (authoritative, full-ledger) balance.
- */
-export function withRunningBalance(
-  rows: CreditTxn[],
-  currentBalance: number,
-): (CreditTxn & { balanceAfter: number })[] {
-  let running = currentBalance;
-  return rows.map((r) => {
-    const balanceAfter = running;
-    running = Math.round((running - r.amount) * 100) / 100; // balance before this row
-    return { ...r, balanceAfter };
-  });
-}
