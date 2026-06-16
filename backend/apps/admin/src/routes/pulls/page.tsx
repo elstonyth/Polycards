@@ -4,26 +4,12 @@ import { ChartBar } from "@medusajs/icons";
 import type { RouteConfig } from "@mercurjs/dashboard-sdk";
 import { usePulls } from "../../lib/queries";
 import { resolveImageUrl } from "../../lib/image-url";
+import { usd, timeAgo } from "../../lib/format";
 
 export const config: RouteConfig = {
   label: "Pull Ledger",
   icon: ChartBar,
 };
-
-const usd = (n: number | null): string =>
-  n === null ? "—" : `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
-function timeAgo(iso: string): string {
-  const then = new Date(iso).getTime();
-  if (!Number.isFinite(then)) return "—";
-  const secs = Math.max(0, Math.floor((Date.now() - then) / 1000));
-  if (secs < 60) return "just now";
-  const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
-}
 
 const PullLedgerPage = () => {
   const { t } = useTranslation();

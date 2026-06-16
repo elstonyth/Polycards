@@ -17,49 +17,21 @@ import {
   clx,
 } from '@medusajs/ui';
 import { ArrowLeft } from '@medusajs/icons';
-import type { OddsRow, PackOddsResponse } from '../../../lib/packs-api';
-import { computeOdds, RARITIES, type OddsInput } from '@acme/odds-math';
+import type { PackOddsResponse } from '../../../lib/packs-api';
+import { computeOdds, RARITIES } from '@acme/odds-math';
 import {
   useCards,
   usePackOdds,
   useSaveMembers,
   useSaveOdds,
 } from '../../../lib/queries';
+import { fmtPct } from '../../../lib/format';
+import {
+  mapOddsToRows,
+  rowsToOddsInputs,
+  type EditRow,
+} from '../../../lib/odds-rows';
 import { resolveImageUrl } from '../../../lib/image-url';
-
-// One editable row: the immutable card facts + its current saved %, plus the
-// editable PER-PACK rarity (drives the unlocked share), the lock state, and
-// (when locked) the win-rate input as a string so the operator can type freely
-// (e.g. "12.").
-type EditRow = {
-  card_id: string;
-  name: string;
-  image: string;
-  rarity: string;
-  market_value: number;
-  stock: number | null;
-  currentPct: number;
-  locked: boolean;
-  pctInput: string;
-};
-
-// Map a server odds snapshot into the editable row buffer. Used to seed the
-// editor on load and to reseed after a membership change.
-const mapOddsToRows = (odds: OddsRow[]): EditRow[] =>
-  odds.map((o) => ({
-    card_id: o.card_id,
-    name: o.name,
-    image: o.image,
-    rarity: o.rarity,
-    market_value: o.market_value,
-    stock: o.stock,
-    currentPct: o.pct,
-    locked: o.locked,
-    pctInput: String(o.pct),
-  }));
-
-const fmtPct = (n: number): string =>
-  `${Number.isInteger(n) ? n : n.toFixed(2)}%`;
 
 const PackOddsEditorPage = () => {
   const { t } = useTranslation();
@@ -126,12 +98,7 @@ const PackOddsEditorPage = () => {
   // the operator sees in "After save" is exactly what gets persisted. Changing a
   // row's rarity re-splits the unlocked share immediately.
   const { result, previewByCard } = useMemo(() => {
-    const inputs: OddsInput[] = (rows ?? []).map((r) => ({
-      card_id: r.card_id,
-      locked: r.locked,
-      pct: Number(r.pctInput),
-      rarity: r.rarity,
-    }));
+    const inputs = rowsToOddsInputs(rows ?? []);
     const result = computeOdds(inputs);
     const previewByCard = new Map(
       result.computed.map((c) => [c.card_id, c.pct]),
@@ -163,12 +130,7 @@ const PackOddsEditorPage = () => {
   async function save() {
     if (!rows || result.error || saving) return;
     try {
-      const entries: OddsInput[] = rows.map((r) => ({
-        card_id: r.card_id,
-        locked: r.locked,
-        pct: Number(r.pctInput),
-        rarity: r.rarity,
-      }));
+      const entries = rowsToOddsInputs(rows);
       const res = await saveOdds.mutateAsync({ slug, entries });
       const byId = new Map(res.odds.map((c) => [c.card_id, c]));
       setRows(

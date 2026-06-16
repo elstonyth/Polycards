@@ -18,16 +18,12 @@ import type { RouteConfig } from "@mercurjs/dashboard-sdk";
 import { searchCustomers, type SupportCustomer } from "../../lib/admin-rest";
 import { useAdjustCredits, useCustomerGacha } from "../../lib/queries";
 import { resolveImageUrl } from "../../lib/image-url";
+import { usd } from "../../lib/format";
 
 export const config: RouteConfig = {
   label: "Customer Support",
   icon: Buildings,
 };
-
-const usd = (n: number | null): string =>
-  n === null
-    ? "—"
-    : `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const SupportPage = () => {
   const { t } = useTranslation();

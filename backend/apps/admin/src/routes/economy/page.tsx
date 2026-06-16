@@ -3,16 +3,12 @@ import { Badge, Container, Heading, Table, Text } from "@medusajs/ui";
 import { CurrencyDollar } from "@medusajs/icons";
 import type { RouteConfig } from "@mercurjs/dashboard-sdk";
 import { useEconomy } from "../../lib/queries";
+import { usd } from "../../lib/format";
 
 export const config: RouteConfig = {
   label: "Economy",
   icon: CurrencyDollar,
 };
-
-const usd = (n: number | null): string =>
-  n === null
-    ? "—"
-    : `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const EconomyPage = () => {
   const { t } = useTranslation();
