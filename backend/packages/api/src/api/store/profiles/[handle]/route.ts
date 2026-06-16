@@ -111,6 +111,31 @@ export async function GET(
     })
     .slice(0, RECENT_N);
 
+  // Collection: only pulls the customer has opted to showcase (showcased=true,
+  // still vaulted). Computed from the already-loaded pull set — no extra query.
+  // The activity feed (recent) stays ungated as decided at spec time.
+  const collection = pulls
+    .filter(
+      (p) =>
+        (p as unknown as { showcased: boolean }).showcased &&
+        p.status === "vaulted",
+    )
+    .flatMap((p) => {
+      const card = byHandle.get(p.card_id);
+      if (!card) return [];
+      return [
+        {
+          handle: card.handle,
+          name: card.name,
+          set: card.set,
+          grader: card.grader,
+          grade: card.grade,
+          market_value: toMoney(card.market_value),
+          image: card.image,
+        },
+      ];
+    });
+
   const seed = seedOf(customer.id);
   const first = (customer.first_name || '').trim();
 
@@ -125,6 +150,7 @@ export async function GET(
       points: Math.round(points),
       by_rarity: byRarity,
     },
+    collection,
     recent,
   });
 }
