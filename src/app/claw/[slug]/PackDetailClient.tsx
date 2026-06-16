@@ -22,7 +22,7 @@ import { openAuth } from '@/components/AuthButton';
 import Reveal from '@/components/Reveal';
 import type { PackDetail, RecentPull } from '@/lib/data/packs';
 import { demoDraw } from '@/lib/demo-spin';
-import { openPack } from '@/lib/actions/packs';
+import { openPack, revealPull } from '@/lib/actions/packs';
 import { getCreditBalance, sellBackPull } from '@/lib/actions/vault';
 import {
   type Pack,
@@ -131,6 +131,9 @@ export default function PackDetailClient({
     // backend (then the reveal falls back to the catalog rate).
     buybackPercent: number | null;
     buybackAmount: number | null;
+    vaultPercent: number | null;
+    vaultAmount: number | null;
+    instantDeadlineMs: number | null;
   } | null>(null);
 
   const claw = clawMachine(active);
@@ -174,6 +177,9 @@ export default function PackDetailClient({
       openedAt: null,
       buybackPercent: null,
       buybackAmount: null,
+      vaultPercent: null,
+      vaultAmount: null,
+      instantDeadlineMs: null,
     });
   }
 
@@ -209,6 +215,9 @@ export default function PackDetailClient({
         openedAt: Date.now(),
         buybackPercent: res.buyback?.percent ?? null,
         buybackAmount: res.buyback?.amount ?? null,
+        vaultPercent: res.buyback?.vaultPercent ?? null,
+        vaultAmount: res.buyback?.vaultAmount ?? null,
+        instantDeadlineMs: res.buyback?.instantDeadlineMs ?? null,
       });
       const justPulled: RecentPull = {
         id: `${res.card.id}-${Date.now()}`,
@@ -591,6 +600,7 @@ export default function PackDetailClient({
             reveal.pullId !== null && reveal.marketValue !== null
               ? {
                   pullId: reveal.pullId,
+                  fmv: reveal.marketValue,
                   // Authoritative from the open response (backend quote == credit).
                   // Fall back to the catalog rate only if an older backend omitted
                   // it — never let the catalog override a backend-supplied offer,
@@ -607,12 +617,19 @@ export default function PackDetailClient({
                     ) / 100,
                   // Sells from the vault always pay the site-wide flat rate,
                   // never a per-pack one (matches the server's FLAT_PERCENT).
-                  vaultPercent: FLAT_BUYBACK_PERCENT,
-                  openedAtMs: reveal.openedAt ?? Date.now(),
+                  vaultPercent: reveal.vaultPercent ?? FLAT_BUYBACK_PERCENT,
+                  vaultAmount:
+                    reveal.vaultAmount ??
+                    Math.round(reveal.marketValue * FLAT_BUYBACK_PERCENT) / 100,
+                  // Server reveal-anchored deadline arrives via onReveal; this is
+                  // the open-response fallback if that ping fails.
+                  instantDeadlineMs:
+                    reveal.instantDeadlineMs ?? Date.now() + 30_000,
                 }
               : null
           }
           onSellBack={sellBackPull}
+          onReveal={revealPull}
           onClose={() => setReveal(null)}
           // Demo reveals re-run the demo; only real reveals re-open for real.
           onOpenAnother={reveal.isReal ? handleOpenPack : demoSpin}
