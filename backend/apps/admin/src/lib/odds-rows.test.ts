@@ -57,4 +57,15 @@ describe('rowsToOddsInputs', () => {
       rowsToOddsInputs([editRow({ pctInput: '20', locked: true })]),
     ).toEqual([{ card_id: 'card_1', locked: true, pct: 20, rarity: 'Rare' }]);
   });
+
+  it('handles multiple rows in order', () => {
+    const rows = [
+      editRow({ card_id: 'a', pctInput: '10', locked: true }),
+      editRow({ card_id: 'b', pctInput: '20', locked: false, rarity: 'Common' }),
+    ];
+    expect(rowsToOddsInputs(rows)).toEqual([
+      { card_id: 'a', locked: true, pct: 10, rarity: 'Rare' },
+      { card_id: 'b', locked: false, pct: 20, rarity: 'Common' },
+    ]);
+  });
 });
