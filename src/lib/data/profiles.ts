@@ -56,6 +56,7 @@ export interface PublicProfile {
     points: number;
     by_rarity: Record<ProfileRarity, number>;
   };
+  collection?: PublicProfileCard[]; // showcased-only; optional: absent = empty (pre-migration compat)
   recent: PublicProfilePull[];
 }
 

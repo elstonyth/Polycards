@@ -87,8 +87,15 @@ export const ProfileHandleSchema = z.looseObject({ handle: z.string() });
 /** GET /store/vault item — pull_id + card.name + finite buyback.amount. */
 export const VaultItemSchema = z.looseObject({
   pull_id: z.string(),
+  showcased: z.boolean().optional(),
   card: z.looseObject({ name: z.string() }),
   buyback: z.looseObject({ amount: finite }),
+});
+
+/** POST /store/vault/:id/showcase response — pull_id + final showcased state. */
+export const VaultShowcaseSchema = z.looseObject({
+  pull_id: z.string(),
+  showcased: z.boolean(),
 });
 
 /** GET /store/credits — finite balance. */

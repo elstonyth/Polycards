@@ -20,6 +20,7 @@ import {
   parseList,
   parseOne,
   VaultItemSchema,
+  VaultShowcaseSchema,
   BalanceSchema,
   AmountBalanceSchema,
   CreditsSchema,
@@ -31,6 +32,7 @@ export type VaultItem = {
   rolledAt: string;
   packId: string;
   packTitle: string;
+  showcased: boolean;
   card: {
     handle: string;
     name: string;
@@ -118,6 +120,7 @@ export async function getVault(): Promise<VaultResult> {
       rolledAt: i.rolled_at,
       packId: i.pack_id,
       packTitle: i.pack_title,
+      showcased: (i as unknown as { showcased?: boolean }).showcased ?? false,
       card: {
         handle: i.card.handle,
         name: i.card.name,
@@ -258,6 +261,52 @@ export async function getTransactions(): Promise<TransactionsResult> {
     };
   } catch (error) {
     logger.error('[credits] transactions load failed:', error);
+    return {
+      ok: false,
+      error: friendlyError(error, VAULT_RULES, VAULT_FALLBACK),
+      needsAuth: isAuthError(error),
+    };
+  }
+}
+
+export type ToggleShowcaseResult =
+  | { ok: true; showcased: boolean }
+  | { ok: false; error: string; needsAuth?: boolean };
+
+export async function toggleShowcase(
+  pullId: string,
+  showcased: boolean,
+): Promise<ToggleShowcaseResult> {
+  if (typeof pullId !== 'string' || pullId.trim() === '') {
+    return { ok: false, error: 'Invalid card.' };
+  }
+
+  const token = await getAuthToken();
+  if (!token) {
+    return { ok: false, error: 'Please log in first.', needsAuth: true };
+  }
+
+  try {
+    const parsed = parseOne(
+      VaultShowcaseSchema,
+      await sdk.client.fetch(
+        `/store/vault/${encodeURIComponent(pullId)}/showcase`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: { showcased },
+        },
+      ),
+    );
+    if (!parsed) {
+      return {
+        ok: false,
+        error: 'Got an unexpected response. Please try again.',
+      };
+    }
+    return { ok: true, showcased: parsed.showcased };
+  } catch (error) {
+    logger.error(`[vault] showcase toggle failed for '${pullId}':`, error);
     return {
       ok: false,
       error: friendlyError(error, VAULT_RULES, VAULT_FALLBACK),
