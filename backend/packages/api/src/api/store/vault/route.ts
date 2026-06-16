@@ -73,6 +73,7 @@ export async function GET(
         rolled_at: p.rolled_at,
         pack_id: p.pack_id,
         pack_title: pack?.title ?? p.pack_id,
+        showcased: (p as unknown as { showcased: boolean }).showcased ?? false,
         card: toCardView(card, rarityOf(p.pack_id, p.card_id)),
         buyback: {
           percent,
