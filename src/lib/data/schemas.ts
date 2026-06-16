@@ -141,3 +141,21 @@ export const OpenBuybackSchema = z.looseObject({
   vault_amount: finite.optional(),
   instant_deadline_ms: finite.optional(),
 });
+
+// --- actions/delivery.ts ----------------------------------------------------
+
+/** GET /store/delivery-orders item — id + status + items[]. */
+export const DeliveryOrderSchema = z.looseObject({
+  id: z.string(),
+  status: z.enum(['requested', 'packing', 'shipped', 'delivered', 'canceled']),
+  created_at: z.string(),
+});
+
+/** A Medusa customer address as the delivery picker needs it. */
+export const DeliveryAddressSchema = z.looseObject({
+  id: z.string(),
+  address_1: z.string(),
+  city: z.string(),
+  postal_code: z.string(),
+  country_code: z.string(),
+});
