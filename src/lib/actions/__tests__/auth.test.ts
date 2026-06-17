@@ -75,7 +75,7 @@ describe('resetPassword — password presence (#3)', () => {
       token: 'tok',
       password: undefined as unknown as string,
     });
-    expect(r.ok).toBe(false);
+    expect(r).toEqual({ ok: false, error: 'Please enter your password.' });
   });
 });
 
