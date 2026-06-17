@@ -119,6 +119,10 @@ export async function signup(input: {
   const email = input.email.trim().toLowerCase();
   if (!EMAIL_RE.test(email))
     return { ok: false, error: 'Please enter a valid email address.' };
+  // Presence first — a missing/undefined password (API client, autofill glitch)
+  // would otherwise throw on `.length` before the try-block (mirrors `login`).
+  if (!input.password)
+    return { ok: false, error: 'Please enter your password.' };
   if (input.password.length < MIN_PASSWORD_LENGTH)
     return {
       ok: false,
@@ -192,6 +196,8 @@ export async function resetPassword(input: {
   token: string;
   password: string;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!input.password)
+    return { ok: false, error: 'Please enter your password.' };
   if (input.password.length < MIN_PASSWORD_LENGTH)
     return {
       ok: false,
