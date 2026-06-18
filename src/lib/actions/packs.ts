@@ -52,6 +52,9 @@ export type OpenPackResult =
       /** Credit balance AFTER the charge (opens debit the pack price — A2);
        *  null only if the backend response shape regresses. */
       balance: number | null;
+      /** Pack price debited for this open (USD decimal). Already in the HTTP
+       *  response; surfaced for the slot's COST display. Null if it regresses. */
+      price: number | null;
     }
   | { ok: false; error: string; needsAuth?: boolean; needsTopUp?: boolean };
 
@@ -101,10 +104,11 @@ export async function openPack(slug: string): Promise<OpenPackResult> {
   }
 
   try {
-    const { pull, card, balance, buyback } = await sdk.client.fetch<{
+    const { pull, card, balance, price, buyback } = await sdk.client.fetch<{
       pull?: { id?: unknown };
       card: BackendWonCard;
       balance?: unknown;
+      price?: unknown;
       buyback?: BackendBuyback;
     }>(`/store/packs/${encodeURIComponent(slug)}/open`, {
       method: 'POST',
@@ -148,6 +152,7 @@ export async function openPack(slug: string): Promise<OpenPackResult> {
         typeof balance === 'number' && Number.isFinite(balance)
           ? balance
           : null,
+      price: typeof price === 'number' && Number.isFinite(price) ? price : null,
     };
   } catch (error) {
     logger.error(`[packs] open-pack failed for '${slug}':`, error);
