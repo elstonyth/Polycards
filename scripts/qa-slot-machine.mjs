@@ -6,9 +6,15 @@
 import { chromium } from 'playwright';
 
 const BASE = 'http://localhost:4000';
-const EMAIL = 'stocktest-1@pokenic.local';
-const PASSWORD = 'stocktest2026!';
+const EMAIL = process.env.QA_SLOT_EMAIL;
+const PASSWORD = process.env.QA_SLOT_PASSWORD;
 const PACK = 'pokemon-rookie'; // affordable
+
+if (!EMAIL || !PASSWORD) {
+  throw new Error(
+    'Set QA_SLOT_EMAIL and QA_SLOT_PASSWORD (the seeded test customer) before running.',
+  );
+}
 
 const fail = (m) => {
   console.error(`✗ ${m}`);
@@ -52,8 +58,14 @@ try {
   ok('reel settled and surfaced a winner');
 
   const after = await readCredit(page);
-  if (Math.abs(before - after) > 0) ok(`credit debited (${before} → ${after})`);
-  else fail('credit did not change after a spin');
+  const costText = await page.getByText(/Cost/i).first().textContent();
+  const cost = Number((costText || '').replace(/[^0-9.]/g, ''));
+  if (Math.abs(before - after - cost) < 0.01)
+    ok(`credit debited by pack price (${before} → ${after}, cost ${cost})`);
+  else
+    fail(
+      `expected debit of ${cost}, got ${before - after} (${before} → ${after})`,
+    );
 
   const sell = page.getByRole('button', { name: /sell back for|sell for/i });
   if (await sell.isVisible()) ok('sell-back offer present');

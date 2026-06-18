@@ -75,9 +75,13 @@ export default function SlotMachineClient({
       return;
     }
     let cancelled = false;
-    getCreditBalance().then((b) => {
-      if (!cancelled) setBalance(b);
-    });
+    getCreditBalance()
+      .then((b) => {
+        if (!cancelled) setBalance(b);
+      })
+      .catch(() => {
+        if (!cancelled) setBalance(null);
+      });
     return () => {
       cancelled = true;
     };

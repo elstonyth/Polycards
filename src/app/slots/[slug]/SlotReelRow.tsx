@@ -73,10 +73,18 @@ export function SlotReelRow({
     // Real spin: origin → centered winner, settle on transition end.
     setOffset(0);
     setSpinning(true);
-    const raf = requestAnimationFrame(() =>
-      requestAnimationFrame(() => setOffset(-target)),
-    );
-    return () => cancelAnimationFrame(raf);
+    // Two nested frames so the transition starts from the origin; cancel BOTH on
+    // teardown — if only the outer is canceled, the inner can still setOffset
+    // after unmount.
+    let raf1 = 0;
+    let raf2 = 0;
+    raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => setOffset(-target));
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
   }, [winnerRarity, reduced, pool, onSettled]);
 
   return (

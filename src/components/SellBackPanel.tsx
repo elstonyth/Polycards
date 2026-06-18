@@ -72,15 +72,32 @@ export function SellBackPanel({
   const revealPinged = useRef(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
+  // A new pull while this stays mounted must reset per-offer state — otherwise
+  // `revealPinged` stays true and the next offer's ping is skipped, and the
+  // countdown/sell state leak across offers. (Harmless under the current
+  // unmount-per-spin usage; required once the panel is reused across rows.)
+  useEffect(() => {
+    revealPinged.current = false;
+    setSell({ phase: 'idle' });
+    setConfirmOpen(false);
+    setSecondsLeft(SELL_COUNTDOWN_SECS);
+    setDeadlineMs(offer ? offer.instantDeadlineMs : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- key on pullId only; other offer fields are read at reset time by design
+  }, [offer?.pullId]);
+
   // Reveal ping ONCE, when the reel has settled (active) — anchors the 30s window.
   useEffect(() => {
     if (!active || !offer || revealPinged.current) return;
     revealPinged.current = true;
     if (!onReveal) return;
     let cancelled = false;
-    onReveal(offer.pullId).then((r) => {
-      if (!cancelled && r.ok) setDeadlineMs(r.instantDeadlineMs);
-    });
+    onReveal(offer.pullId)
+      .then((r) => {
+        if (!cancelled && r.ok) setDeadlineMs(r.instantDeadlineMs);
+      })
+      .catch(() => {
+        /* keep the open-response fallback deadline */
+      });
     return () => {
       cancelled = true;
     };

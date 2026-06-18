@@ -14,10 +14,9 @@ export function PaylineBeam({
       <div
         aria-hidden
         className={cn(
-          'pointer-events-none absolute left-1/2 top-0 z-10 h-full w-1 -translate-x-1/2 rounded-full bg-gradient-to-b from-fuchsia-500 to-violet-500',
+          'pointer-events-none absolute left-1/2 top-0 z-10 h-full w-1 -translate-x-1/2 rounded-full bg-gradient-to-b from-fuchsia-500 to-violet-500 shadow-[0_0_24px_2px_rgba(168,85,247,0.7)]',
           !reduced && pulse && 'animate-pulse',
         )}
-        style={{ boxShadow: '0 0 24px 2px rgba(168,85,247,0.7)' }}
       />
       <div
         aria-hidden

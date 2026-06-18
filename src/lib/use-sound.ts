@@ -59,28 +59,36 @@ export function useSound() {
     }
   }, []);
 
-  const play = useCallback((name: SoundName) => {
-    if (readMuted()) return;
-    const audio = pool.current[name];
-    if (!audio) return;
-    try {
-      audio.currentTime = 0;
-      void audio.play().catch(() => {});
-    } catch {
-      /* no-op */
-    }
-  }, []);
-
-  const vibrate = useCallback((pattern: number | number[]) => {
-    if (readMuted()) return;
-    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+  const play = useCallback(
+    (name: SoundName) => {
+      // Gate on the in-memory state (authoritative) — readMuted() falls back to
+      // false when storage is blocked, which would let muted sounds still play.
+      if (muted) return;
+      const audio = pool.current[name];
+      if (!audio) return;
       try {
-        navigator.vibrate(pattern);
+        audio.currentTime = 0;
+        void audio.play().catch(() => {});
       } catch {
         /* no-op */
       }
-    }
-  }, []);
+    },
+    [muted],
+  );
+
+  const vibrate = useCallback(
+    (pattern: number | number[]) => {
+      if (muted) return;
+      if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+        try {
+          navigator.vibrate(pattern);
+        } catch {
+          /* no-op */
+        }
+      }
+    },
+    [muted],
+  );
 
   const toggleMuted = useCallback(() => {
     setMuted((m) => {
