@@ -21,10 +21,12 @@ const result = await p.evaluate(() => {
   const playLinks = [...document.querySelectorAll('a[href^="/slots/"]')].map(
     (a) => a.getAttribute('href'),
   );
-  const steppers = document.querySelectorAll('[aria-label="Increase quantity"]').length;
-  const brokenImages = [...document.images].filter(
-    (i) => i.complete && i.naturalWidth === 0,
-  ).map((i) => i.getAttribute('src'));
+  const steppers = document.querySelectorAll(
+    '[aria-label="Increase quantity"]',
+  ).length;
+  const brokenImages = [...document.images]
+    .filter((i) => i.complete && i.naturalWidth === 0)
+    .map((i) => i.getAttribute('src'));
   const h1 = document.querySelector('h1')?.textContent?.trim() ?? null;
   return {
     h1,
@@ -35,7 +37,10 @@ const result = await p.evaluate(() => {
   };
 });
 
-await p.screenshot({ path: 'docs/research/pw-slots-config.png', fullPage: true });
+await p.screenshot({
+  path: 'docs/research/pw-slots-config.png',
+  fullPage: true,
+});
 await b.close();
 
 const fail = [];
@@ -53,4 +58,6 @@ if (fail.length) {
   console.error('\nQA FAILED:\n- ' + fail.join('\n- '));
   process.exit(1);
 }
-console.log('\nQA PASSED: /slots configurator renders with ?count= Play links.');
+console.log(
+  '\nQA PASSED: /slots configurator renders with ?count= Play links.',
+);
