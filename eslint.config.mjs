@@ -33,7 +33,7 @@ const eslintConfig = defineConfig([
   // scratch bindings and standalone awaited expressions by design. Relax those
   // two rules here so `npm run lint` over scripts/ stays signal, not warnings.
   {
-    files: ['scripts/**/*.{mjs,js,ts}'],
+    files: ['scripts/**/*.{mjs,cjs,js,ts}'],
     rules: {
       '@typescript-eslint/no-unused-vars': 'off',
       '@typescript-eslint/no-unused-expressions': 'off',
