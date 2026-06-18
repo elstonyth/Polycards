@@ -7,7 +7,6 @@
 // fires when `active` flips true (the slot passes active only after the reel
 // settles, so the 30s window isn't eaten by the spin — PRD §5.2).
 import { useEffect, useRef, useState } from 'react';
-import { cn } from '@/lib/utils';
 import { SELL_COUNTDOWN_SECS, sellSecondsLeft } from '@/lib/sell-countdown';
 import SellConfirmModal from '@/components/SellConfirmModal';
 
@@ -89,7 +88,8 @@ export function SellBackPanel({
 
   // Tick the visible countdown to the server deadline (wall-clock).
   useEffect(() => {
-    if (!active || !offer || deadlineMs === null || sell.phase === 'sold') return;
+    if (!active || !offer || deadlineMs === null || sell.phase === 'sold')
+      return;
     const tick = () => setSecondsLeft(sellSecondsLeft(deadlineMs, Date.now()));
     tick();
     const id = setInterval(tick, 250);
@@ -120,7 +120,9 @@ export function SellBackPanel({
 
   if (!offer) return null;
 
-  const barPct = sellExpired ? 0 : Math.max(0, (secondsLeft / SELL_COUNTDOWN_SECS) * 100);
+  const barPct = sellExpired
+    ? 0
+    : Math.max(0, (secondsLeft / SELL_COUNTDOWN_SECS) * 100);
 
   return (
     <div className="flex w-full max-w-[340px] flex-col items-center gap-2">

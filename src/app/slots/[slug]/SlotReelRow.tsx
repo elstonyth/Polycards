@@ -49,7 +49,11 @@ export function SlotReelRow({
     const target = Math.round(reelTarget(WIN_INDEX, ITEM_W, winW));
 
     // Idle: rest centered, no spin, no settle callback.
+    // setState inside an effect is intentional here — we're synchronizing a DOM
+    // measurement (clientWidth) into visual state. The linter flag is a false
+    // positive: this is the canonical "measure then position" pattern.
     if (winnerRarity === null) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSpinning(false);
       setOffset(-target);
       return;
