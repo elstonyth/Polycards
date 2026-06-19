@@ -11,6 +11,7 @@ __metadata:
   dependencies:
     "@acme/api": "workspace:*"
     "@acme/odds-math": "workspace:*"
+    "@acme/pokemon": "workspace:*"
     "@medusajs/ui-preset": "npm:2.15.5"
     "@mercurjs/admin": "npm:2.1.6"
     "@types/node": "npm:^24.10.1"
@@ -55,6 +56,18 @@ __metadata:
 "@acme/odds-math@workspace:*, @acme/odds-math@workspace:packages/odds-math":
   version: 0.0.0-use.local
   resolution: "@acme/odds-math@workspace:packages/odds-math"
+  dependencies:
+    "@swc/core": "npm:^1.7.28"
+    "@swc/jest": "npm:^0.2.36"
+    "@types/jest": "npm:^29.5.13"
+    jest: "npm:^29.7.0"
+    typescript: "npm:5.9.3"
+  languageName: unknown
+  linkType: soft
+
+"@acme/pokemon@workspace:*, @acme/pokemon@workspace:packages/pokemon":
+  version: 0.0.0-use.local
+  resolution: "@acme/pokemon@workspace:packages/pokemon"
   dependencies:
     "@swc/core": "npm:^1.7.28"
     "@swc/jest": "npm:^0.2.36"
