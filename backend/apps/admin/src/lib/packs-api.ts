@@ -53,6 +53,10 @@ export interface AdminCard {
   /** Stored sale price; `null` means "use FMV (market_value)". */
   price: number | null;
   for_sale: boolean;
+  /** Assigned national-dex (1-based) or null → resolve from the name. */
+  pokemon_dex: number | null;
+  /** Custom uploaded pixel sprite URL or null → use the dex default gif. */
+  sprite_image: string | null;
   /** Available physical units; `null` = untracked (infinite). Display-only —
    *  0-stock cards stay pullable/listed (buyback fulfills them). */
   stock: number | null;
@@ -66,6 +70,8 @@ export interface AdminCardRegister {
   grader: string;
   grade: string;
   market_value: number;
+  pokemon_dex: number | null;
+  sprite_image: string | null;
 }
 
 // Edit payload. `handle` travels as the `$handle` path param, not the body.
@@ -78,6 +84,8 @@ export interface AdminCardUpdate {
   image: string;
   price?: number;
   for_sale: boolean;
+  pokemon_dex: number | null;
+  sprite_image: string | null;
 }
 
 export interface OddsRow {

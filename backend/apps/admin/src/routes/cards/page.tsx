@@ -27,6 +27,7 @@ import { resolveImageUrl } from '../../lib/image-url';
 import { validateImageFile } from '../../lib/image-validation';
 import { usd } from '../../lib/format';
 import RegisterCardModal from './RegisterCardModal';
+import CardPokemonFields from './CardPokemonFields';
 
 export const config: RouteConfig = {
   label: 'Gacha Cards',
@@ -47,6 +48,8 @@ type FormState = {
   image: string;
   price: string;
   for_sale: boolean;
+  pokemon_dex: number | null;
+  sprite_image: string | null;
 };
 
 const formFromCard = (c: AdminCard): FormState => ({
@@ -60,6 +63,8 @@ const formFromCard = (c: AdminCard): FormState => ({
   // null price = "use FMV" → empty field (preserved on save as undefined).
   price: c.price === null ? '' : String(c.price),
   for_sale: c.for_sale,
+  pokemon_dex: c.pokemon_dex,
+  sprite_image: c.sprite_image,
 });
 
 const gradeLabel = (c: AdminCard): string =>
@@ -122,6 +127,8 @@ const GachaCardsPage = () => {
       image: form.image.trim(),
       price: form.price.trim() === '' ? undefined : Number(form.price),
       for_sale: form.for_sale,
+      pokemon_dex: form.pokemon_dex,
+      sprite_image: form.sprite_image,
     };
     try {
       await updateCard.mutateAsync({ handle: form.handle, ...payload });
@@ -443,6 +450,15 @@ const GachaCardsPage = () => {
                     onCheckedChange={(v) => patch({ for_sale: v })}
                   />
                 </div>
+
+                <CardPokemonFields
+                  value={{
+                    pokemon_dex: form.pokemon_dex,
+                    sprite_image: form.sprite_image,
+                  }}
+                  onChange={(p) => patch(p)}
+                  suggestionName={form.name}
+                />
               </div>
             )}
           </FocusModal.Body>

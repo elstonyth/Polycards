@@ -21,6 +21,7 @@ import {
 import { useEligibleProducts, useRegisterCard } from '../../lib/queries';
 import { resolveImageUrl } from '../../lib/image-url';
 import { usd } from '../../lib/format';
+import CardPokemonFields from './CardPokemonFields';
 
 // Register an EXISTING inventory product as a gacha card (inventory-first: the
 // item is created in the product catalog beforehand; this dialog only adds the
@@ -36,6 +37,8 @@ type Fields = {
   grader: string;
   grade: string;
   market_value: string; // string so the operator can type freely
+  pokemon_dex: number | null;
+  sprite_image: string | null;
 };
 
 const EMPTY_FIELDS: Fields = {
@@ -43,6 +46,8 @@ const EMPTY_FIELDS: Fields = {
   grader: '',
   grade: '',
   market_value: '',
+  pokemon_dex: null,
+  sprite_image: null,
 };
 
 const RegisterCardModal = ({ open, onClose }: Props) => {
@@ -157,6 +162,8 @@ const RegisterCardModal = ({ open, onClose }: Props) => {
         grader: fields.grader.trim(),
         grade: fields.grade.trim(),
         market_value: Number(fields.market_value),
+        pokemon_dex: fields.pokemon_dex,
+        sprite_image: fields.sprite_image,
       });
       toast.success(t('cards.toast.created'));
       onClose();
@@ -390,6 +397,15 @@ const RegisterCardModal = ({ open, onClose }: Props) => {
                 />
               </div>
             </div>
+
+            <CardPokemonFields
+              value={{
+                pokemon_dex: fields.pokemon_dex,
+                sprite_image: fields.sprite_image,
+              }}
+              onChange={(p) => patch(p)}
+              suggestionName={selected?.title ?? ''}
+            />
 
             <Text className="text-ui-fg-subtle text-xs">
               {t('cards.register.rarityHint')}
