@@ -56,6 +56,14 @@ export function SlotReelColumn({
   const [spinning, setSpinning] = useState(false);
   const settled = useRef(false);
 
+  // Keep the latest onSettled in a ref so it isn't an effect dependency — an
+  // inline-arrow parent gets a new reference each render, and depending on it
+  // would reset/restart the spin mid-scroll. Re-spin happens via remount (key).
+  const onSettledRef = useRef(onSettled);
+  useEffect(() => {
+    onSettledRef.current = onSettled;
+  });
+
   const isWin = winnerDex !== null || winnerImage !== undefined;
 
   const strip = useMemo(
@@ -90,7 +98,7 @@ export function SlotReelColumn({
       const id = setTimeout(() => {
         if (!settled.current) {
           settled.current = true;
-          onSettled?.();
+          onSettledRef.current?.();
         }
       }, 0);
       return () => clearTimeout(id);
@@ -108,7 +116,7 @@ export function SlotReelColumn({
       cancelAnimationFrame(raf1);
       cancelAnimationFrame(raf2);
     };
-  }, [isWin, reduced, onSettled]);
+  }, [isWin, reduced]);
 
   return (
     <div
@@ -136,7 +144,7 @@ export function SlotReelColumn({
           if (spinning && !settled.current) {
             settled.current = true;
             setSpinning(false);
-            onSettled?.();
+            onSettledRef.current?.();
           }
         }}
       >
