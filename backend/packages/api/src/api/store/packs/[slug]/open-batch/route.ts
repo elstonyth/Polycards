@@ -48,6 +48,13 @@ export async function POST(
     input: { pack_id: slug, customer_id: customerId, count },
   });
 
+  if (result.rolls.length !== result.pulls.length) {
+    throw new MedusaError(
+      MedusaError.Types.UNEXPECTED_STATE,
+      "open-batch workflow returned mismatched rolls/pulls.",
+    );
+  }
+
   // Quote a buyback offer for each roll from the same helper the buyback
   // workflow uses (packsService.quoteBuyback), so the multi-reveal's
   // "sell on the spot" numbers are authoritative and can never disagree with
