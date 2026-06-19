@@ -1,7 +1,7 @@
 # Mercur/Medusa backend image for DigitalOcean App Platform (git-based build).
 #
 # Build context MUST be the backend monorepo root (this dir): the Yarn 4
-# workspace (packages/api + packages/odds-math + apps/admin + apps/vendor) is built together by
+# workspace (packages/api + packages/odds-math + packages/pokemon + apps/admin + apps/vendor) is built together by
 # turbo, and the running server resolves the admin/vendor dashboards from the
 # SOURCE `apps/*/dist` via medusa-config's `appDir: __dirname/../../apps/*`.
 # That relative path only resolves when the whole monorepo is preserved in the
@@ -33,6 +33,7 @@ RUN corepack enable
 COPY package.json yarn.lock .yarnrc.yml turbo.json ./
 COPY packages/api/package.json ./packages/api/
 COPY packages/odds-math/package.json ./packages/odds-math/
+COPY packages/pokemon/package.json ./packages/pokemon/
 COPY apps/admin/package.json ./apps/admin/
 COPY apps/vendor/package.json ./apps/vendor/
 RUN corepack yarn install --immutable
