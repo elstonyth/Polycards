@@ -64,10 +64,13 @@ export default function SlotMachineClient({
     winners: ColumnWinner[];
     tier: Tier;
   } | null>(null);
-  // Held until the reel settles (spoiler guard).
+  // Held until the reel settles (spoiler guard). Carries the won card too, so
+  // handleSettled reads the result from this ref (always current) instead of
+  // closing over `spin` — the callback stays stable and double-fire-safe.
   const pending = useRef<{
     balance: number | null;
     offer: SellBackOffer | null;
+    card: WonCard;
   } | null>(null);
   const [offer, setOffer] = useState<SellBackOffer | null>(null);
   const [announce, setAnnounce] = useState('');
@@ -151,7 +154,11 @@ export default function SlotMachineClient({
               res.buyback?.instantDeadlineMs ?? Date.now() + 30_000,
           }
         : null;
-    pending.current = { balance: res.balance, offer: builtOffer };
+    pending.current = {
+      balance: res.balance,
+      offer: builtOffer,
+      card: res.card,
+    };
 
     // Cosmetic mapping (decides nothing): tier color + winner Pokémon (or the
     // §2/G5 card-art fallback when the card has no resolvable Pokémon).
@@ -171,15 +178,17 @@ export default function SlotMachineClient({
     setPhase('spinning');
   }
 
-  // Fired by the stack once the last column settles.
+  // Fired by the stack once the last column settles. Reads the result from the
+  // pending ref (not `spin`), so the callback is stable across re-renders and a
+  // second fire is a no-op (held is nulled after the first).
   const handleSettled = useCallback(() => {
-    const won = spin?.card;
-    if (!won) return;
     const held = pending.current;
+    if (!held) return;
     pending.current = null;
+    const won = held.card;
 
-    if (held?.balance != null) setBalance(held.balance);
-    setOffer(held?.offer ?? null);
+    if (held.balance != null) setBalance(held.balance);
+    setOffer(held.offer);
 
     const justPulled: RecentPull = {
       id: `${won.id}-${Date.now()}`,
@@ -205,7 +214,7 @@ export default function SlotMachineClient({
       () => setCooldown(false),
       COOLDOWN_MS,
     );
-  }, [spin, pack.name, pack.image, play, vibrate]);
+  }, [pack.name, pack.image, play, vibrate]);
 
   const refreshBalance = useCallback((b: number) => setBalance(b), []);
 
