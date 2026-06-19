@@ -11,6 +11,7 @@ __metadata:
   dependencies:
     "@acme/api": "workspace:*"
     "@acme/odds-math": "workspace:*"
+    "@acme/pokemon": "workspace:*"
     "@medusajs/ui-preset": "npm:2.15.5"
     "@mercurjs/admin": "npm:2.1.6"
     "@types/node": "npm:^24.10.1"
@@ -64,7 +65,7 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@acme/pokemon@workspace:packages/pokemon":
+"@acme/pokemon@workspace:*, @acme/pokemon@workspace:packages/pokemon":
   version: 0.0.0-use.local
   resolution: "@acme/pokemon@workspace:packages/pokemon"
   dependencies:
