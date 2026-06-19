@@ -39,4 +39,28 @@ describe('pokemonFromCard', () => {
     expect(pokemonFromCard('')).toBeNull();
     expect(pokemonFromCard('   ')).toBeNull();
   });
+
+  it('resolves form-labeled species when the card omits the form word', () => {
+    // Dex entry is "Shaymin Land" — a bare "Shaymin VSTAR" card must still resolve.
+    expect(
+      pokemonFromCard(
+        '2022 Pokemon Japanese Sword & Shield Star Birth Holo Shaymin VSTAR #13 CGC 9.5',
+      ),
+    ).toEqual({ dex: 492, name: 'Shaymin Land' });
+    expect(pokemonFromCard('Deoxys EX')).toEqual({
+      dex: 386,
+      name: 'Deoxys Normal',
+    });
+    expect(pokemonFromCard('Giratina V')).toEqual({
+      dex: 487,
+      name: 'Giratina Altered',
+    });
+  });
+
+  it('does not let the base fallback mis-resolve multi-word species', () => {
+    // Full-name match wins — and the non-species first words are never base-indexed.
+    expect(pokemonFromCard('Iron Hands ex')?.name).toBe('Iron Hands');
+    expect(pokemonFromCard('Great Tusk ex')?.name).toBe('Great Tusk');
+    expect(pokemonFromCard('Flutter Mane ex')?.name).toBe('Flutter Mane');
+  });
 });
