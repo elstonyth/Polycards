@@ -25,7 +25,13 @@ export const chargePackBatchStep = createStep<
   async (input: ChargePackBatchInput, { container }) => {
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
     const [pack] = await packs.listPacks({ slug: input.pack_id }, { take: 1 });
-    const price = Number(pack?.price);
+    if (!pack) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        `Pack '${input.pack_id}' is not available.`,
+      );
+    }
+    const price = Number(pack.price);
     if (!Number.isFinite(price) || price < 0) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,

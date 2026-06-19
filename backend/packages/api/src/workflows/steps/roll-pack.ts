@@ -28,18 +28,42 @@ export type RolledCard = {
   sprite_image: string | null;
 };
 
-// rollOne — the pure draw logic, extracted so the batch step can reuse the
-// exact same algorithm without duplicating it. Exported for direct testing.
-export async function rollOne(
+// Shared return shape from fetchPackData — carries the static pack/odds state
+// that is safe to fetch once and reuse across N independent draws.
+export type PackData = {
+  pack: Awaited<ReturnType<PacksModuleService["listPacks"]>>[number];
+  odds: Awaited<ReturnType<PacksModuleService["listPackOdds"]>>;
+  totalWeight: number;
+};
+
+// fetchPackData — fetches and validates the pack + odds ONCE.
+// Call this before a draw loop so listPacks + listPackOdds run only once per
+// batch regardless of count. The validations (active check, empty odds, zero
+// weight) all belong here — they are pack-level invariants, not per-draw logic.
+// NOTE: take: 1000 on listPackOdds is intentional and pre-existing; packs with
+// >1000 odds rows are not a realistic scenario (skipping Fix #2 per spec).
+export async function fetchPackData(
   packs: PacksModuleService,
   packId: string,
-): Promise<RolledCard> {
+): Promise<PackData> {
   const [pack] = await packs.listPacks({ slug: packId, status: "active" }, { take: 1 });
   if (!pack) throw new MedusaError(MedusaError.Types.NOT_FOUND, `Pack '${packId}' is not available.`);
   const odds = await packs.listPackOdds({ pack_id: packId }, { take: 1000 });
   if (odds.length === 0) throw new MedusaError(MedusaError.Types.NOT_FOUND, `Pack '${packId}' has no odds configured.`);
   const totalWeight = odds.reduce((sum, o) => sum + o.weight, 0);
   if (totalWeight <= 0) throw new MedusaError(MedusaError.Types.NOT_ALLOWED, `Pack '${packId}' has invalid odds.`);
+  return { pack, odds, totalWeight };
+}
+
+// drawFromData — performs ONE independent weighted draw from pre-fetched pack data.
+// This is the per-roll logic: a new Math.random() per call ensures draw independence.
+// listCards is intentionally kept HERE (not hoisted) because it fetches the
+// specific card that WAS won — it varies per roll and must stay per-draw.
+export async function drawFromData(
+  packs: PacksModuleService,
+  odds: PackData["odds"],
+  totalWeight: number,
+): Promise<RolledCard> {
   let roll = Math.random() * totalWeight;
   let won = odds[odds.length - 1];
   for (const o of odds) { roll -= o.weight; if (roll < 0) { won = o; break; } }
@@ -50,6 +74,18 @@ export async function rollOne(
     grade: card.grade, rarity: won.rarity, market_value: Number(card.market_value),
     image: card.image, pokemon_dex: card.pokemon_dex ?? null, sprite_image: card.sprite_image ?? null,
   };
+}
+
+// rollOne — convenience wrapper: fetch pack data + draw once.
+// Single-open (rollPackStep) uses this so its behavior stays byte-identical to
+// before the refactor — same validations, same draw algorithm, same errors.
+// Batch callers should call fetchPackData once, then drawFromData N times.
+export async function rollOne(
+  packs: PacksModuleService,
+  packId: string,
+): Promise<RolledCard> {
+  const d = await fetchPackData(packs, packId);
+  return drawFromData(packs, d.odds, d.totalWeight);
 }
 
 // roll-pack — read-only step: validate the pack is active, then pick a winner
