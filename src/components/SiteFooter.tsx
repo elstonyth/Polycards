@@ -139,6 +139,7 @@ function LinkColumn({
 export default function SiteFooter() {
   return (
     <footer
+      data-site-chrome
       className={cn(
         'relative mt-12 w-full border-t border-neutral-800',
         'bg-gradient-to-b from-transparent to-white/[0.02]',

@@ -109,7 +109,10 @@ export default function SiteHeader() {
   }, [moreOpen]);
 
   return (
-    <header className="px-fluid sticky top-0 z-50 border-b border-neutral-800 bg-neutral-900 py-3 transition-all duration-300">
+    <header
+      data-site-chrome
+      className="px-fluid sticky top-0 z-50 border-b border-neutral-800 bg-neutral-900 py-3 transition-all duration-300"
+    >
       <div className="flex items-center justify-between gap-4">
         {/* Left cluster: hamburger (mobile, far LEFT per live) + logo + desktop nav */}
         <div className="flex min-w-0 items-center gap-2 lg:gap-5">

@@ -16,6 +16,10 @@ type PokemonTokenProps = {
   landed?: boolean;
   /** prefers-reduced-motion: no pulse/scale transition; static glow only. */
   reduced?: boolean;
+  /** Eager-load this cell's image (winner + cells resting in the visible window). */
+  eager?: boolean;
+  /** Render this exact image instead of a dex sprite (non-Pokémon card fallback, §2/G5). */
+  imageSrc?: string;
 };
 
 /**
@@ -31,12 +35,15 @@ export function PokemonToken({
   size = 96,
   landed = false,
   reduced = false,
+  eager = false,
+  imageSrc,
 }: PokemonTokenProps) {
-  const [src, setSrc] = useState(spriteGif(dex));
-  // Re-sync the sprite if a recycled reel cell receives a new dex (Phase B reuse).
+  const [src, setSrc] = useState(imageSrc ?? spriteGif(dex));
+  // Re-sync if a recycled cell receives a new dex or image override.
   useEffect(() => {
-    setSrc(spriteGif(dex));
-  }, [dex]);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- v7 false positive: deriving src from props for recycled cells (same pattern as SlotReelColumn)
+    setSrc(imageSrc ?? spriteGif(dex));
+  }, [dex, imageSrc]);
   const rgb = TIER_COLOR[tier];
   return (
     <div
@@ -58,10 +65,11 @@ export function PokemonToken({
       <img
         src={src}
         alt={name}
-        loading="lazy"
-        onError={() =>
-          setSrc((s) => (s === spritePng(dex) ? s : spritePng(dex)))
-        }
+        loading={eager ? 'eager' : 'lazy'}
+        onError={() => {
+          if (imageSrc) return; // no sprite fallback for a direct image override
+          setSrc((s) => (s === spritePng(dex) ? s : spritePng(dex)));
+        }}
         className="h-[80%] w-auto max-w-[80%] object-contain [image-rendering:auto]"
       />
     </div>

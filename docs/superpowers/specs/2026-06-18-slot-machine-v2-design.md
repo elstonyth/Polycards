@@ -78,6 +78,8 @@ Immersive (no `SiteHeader`/`SiteFooter` on `/slots/[slug]`); body scroll locked 
 
 **Chrome-suppression mechanism (G2 — route groups).** `SiteHeader`/`SiteFooter` currently live in the **root** `layout.tsx`, which wraps every route — a nested layout *composes* with it and cannot remove it. Resolution: relocate the chrome into a `(site)` route-group layout and move the currently-chromed routes under `src/app/(site)/`; place the immersive slot reveal in a bare `(immersive)` group (or leave it at root once root holds only `<html>`/providers). Route groups don't change URLs, so this is a mechanical folder move. **This restructure lands in Phase B** (when the full-screen surface is built), not Phase A′.
 
+> **Rev 4 (Phase B, 2026-06-19) — SUPERSEDES the route-group plan above.** Phase B suppresses chrome with a **fixed `inset-0 z-[100]` overlay + a `useChromeInert` hook** that marks every `[data-site-chrome]` element (SiteHeader/SiteFooter) `inert` + `aria-hidden` and locks body scroll while the immersive route is mounted. Chosen over the ~25-folder route-group move for blast radius (modal-grade focus isolation, no folder restructure). The route-group option remains available if a later phase needs true multi-root isolation. Verified on the prod standalone (:4000) by `scripts/qa-slots-phaseB.mjs`.
+
 ## 11. Reuse map
 
 | Reuse                                                                             | For                                                   |
@@ -102,7 +104,7 @@ The first Phase-A pass built a ball direction that is now wrong. **Remove**: `sr
 ## 14. Phased rollout (revised)
 
 - **Phase A′ — Configurator + reel-token swap:** ball work is **already removed** (verified clean — branch net-diff vs master is just this spec + `.gitignore`). Build the **lean dedicated `/slots` configurator** (G1; `/slots` index is net-new — v1 only shipped `/slots/[slug]`, G7) routing to `/slots/[slug]?count=N`; build `PokemonToken` (sprite via `spriteGif` + png fallback per `PokeSprite` + grow/glow by tier) + `pokemonFromCard` (normalized longest-match + null fallback, §2) + `priceTier` (§3) — both helpers TDD.
-- **Phase B — Full-screen reveal + vertical Pokémon reel:** immersive route; adapt reel math to vertical; `SlotReelColumn`/`SlotReelStack` (N columns, shared payline, staggered L→R, winner grow+glow); win-after-stop.
+- **Phase B — Full-screen reveal + vertical Pokémon reel:** ✅ **DONE 2026-06-19** (branch `worktree-slot-v2-phaseB`). immersive route via fixed-overlay + `useChromeInert` (NOT route groups — see §10 rev 4); `reelTargetY` + `buildDexStrip` (TDD); `SlotReelColumn`/`SlotReelStack` (N-capable, driven at count=1 — single `openPack`; N-roll wiring is Phase D); shared horizontal payline; winner grow+glow on settle. Win-after-stop guaranteed: settle gates on the strip's OWN `transform` transitionend (a bubbled child `scale` transitionend was firing the win mid-scroll — fixed) + the win flow reads from a `pending` ref applied only on `onAllSettled`. Dead v1 ball reel (`SlotReelRow`/`BallToken`/`PaylineBeam`) removed. Verified on :4000 by `scripts/qa-slots-phaseB.mjs`.
 - **Phase C — Packs + peel:** N front-facing packs (pack foil art); one-tap peel (`PackPeel`, Motion + CSS clip-path, swappable); idle→SPIN gate.
 - **Phase D — `open-batch` backend** (all-or-nothing) + `openBatch` action; wire N reels to N rolls.
 - **Phase E — Sell-back + view-card + polish:** focused-column sell-back, view-card modal, SFX, big-win burst, reduced-motion, a11y, Playwright sign-off.

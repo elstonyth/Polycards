@@ -6,6 +6,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { ArrowLeft } from 'lucide-react';
 import { usePrefersReducedMotion } from '@/lib/use-reveal';
+import { useChromeInert } from '@/lib/use-chrome-inert';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { openAuth } from '@/components/AuthButton';
 import { openPack, revealPull } from '@/lib/actions/packs';
@@ -15,22 +16,30 @@ import { useSound } from '@/lib/use-sound';
 import {
   type ResolvedPack,
   type Pack,
-  type Rarity,
   FLAT_BUYBACK_PERCENT,
   priceNumber,
 } from '@/app/claw/packs-data';
 import type { RecentPull } from '@/lib/data/packs';
 import { BASE_SPIN_MS } from '@/lib/reel';
-import { SlotReelRow } from './SlotReelRow';
-import { PaylineBeam } from './PaylineBeam';
+import { priceTier, TIER_COLOR, type Tier } from '@/lib/price-tier';
+import { pokemonFromCard } from '@/lib/pokemon-from-card';
+import { SlotReelStack, type ColumnWinner } from './SlotReelStack';
 import { SlotStatusBar } from './SlotStatusBar';
 import { SlotControls } from './SlotControls';
 import { OddsSheet } from './OddsSheet';
-import { RARITY_RGB } from './BallToken';
 import { SellBackPanel, type SellBackOffer } from '@/components/SellBackPanel';
 
-const RARITIES: Rarity[] = ['Legendary', 'Epic', 'Rare', 'Uncommon', 'Common'];
 const COOLDOWN_MS = 600;
+// Phase B is single-roll; open-batch / count>1 lands in Phase D.
+const COLUMN_COUNT = 1;
+
+// Neutral reel cell for a won card with no resolvable Pokémon (trainer/energy):
+// a classic Poké Ball. Keeps the reel sprite-themed and never reveals the prize.
+const POKEBALL_PLACEHOLDER =
+  'data:image/svg+xml,' +
+  encodeURIComponent(
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='46' fill='#f5f5f5' stroke='#171717' stroke-width='4'/><path d='M5 50a45 45 0 0 1 90 0Z' fill='#ef4444'/><rect x='4' y='46' width='92' height='8' fill='#171717'/><circle cx='50' cy='50' r='13' fill='#f5f5f5' stroke='#171717' stroke-width='4'/></svg>",
+  );
 
 type Phase = 'idle' | 'resolving' | 'spinning' | 'landed';
 
@@ -42,6 +51,8 @@ export default function SlotMachineClient({
   recentPulls: RecentPull[];
 }) {
   const reduced = usePrefersReducedMotion();
+  // Immersive surface: chrome inert + body scroll locked the whole time mounted.
+  useChromeInert(true);
   const { customer } = useAuth();
   const { muted, toggleMuted, play, vibrate } = useSound();
 
@@ -52,21 +63,25 @@ export default function SlotMachineClient({
   const [error, setError] = useState<string | null>(null);
   const [needsTopUp, setNeedsTopUp] = useState(false);
   const [oddsOpen, setOddsOpen] = useState(false);
-  // Brief post-settle cooldown so a mash can't re-fire instantly (PRD §10).
   const [cooldown, setCooldown] = useState(false);
 
-  // Won result + a nonce that remounts the reel row to re-spin (PRD §6.5).
-  const [spin, setSpin] = useState<{ nonce: number; card: WonCard } | null>(
-    null,
-  );
-  // Held until the reel settles (spoiler guard, PRD §3.1).
+  // Won result + a nonce that remounts the reel stack to re-spin.
+  const [spin, setSpin] = useState<{
+    nonce: number;
+    card: WonCard;
+    winners: ColumnWinner[];
+    tier: Tier;
+  } | null>(null);
+  // Held until the reel settles (spoiler guard). Carries the won card too, so
+  // handleSettled reads the result from this ref (always current) instead of
+  // closing over `spin` — the callback stays stable and double-fire-safe.
   const pending = useRef<{
     balance: number | null;
     offer: SellBackOffer | null;
+    card: WonCard;
   } | null>(null);
   const [offer, setOffer] = useState<SellBackOffer | null>(null);
   const [announce, setAnnounce] = useState('');
-  // Cooldown timer id — cleared on unmount so it can't setState after teardown.
   const cooldownTimer = useRef<number | null>(null);
   useEffect(
     () => () => {
@@ -75,10 +90,10 @@ export default function SlotMachineClient({
     [],
   );
 
-  // Load balance on mount / auth change (PackDetailClient.tsx:98-110).
+  // Load balance on mount / auth change.
   useEffect(() => {
     if (!customer) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- v7 false positive (same pattern in PackDetailClient passes clean)
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setBalance(null);
       return;
     }
@@ -94,17 +109,6 @@ export default function SlotMachineClient({
       cancelled = true;
     };
   }, [customer]);
-
-  // Lock body scroll while the reel is in motion (PRD §11).
-  useEffect(() => {
-    const active = phase === 'resolving' || phase === 'spinning';
-    if (!active) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, [phase]);
 
   const canAfford = balance !== null && balance >= cost;
   const spinGuarded = phase === 'resolving' || phase === 'spinning';
@@ -158,21 +162,43 @@ export default function SlotMachineClient({
               res.buyback?.instantDeadlineMs ?? Date.now() + 30_000,
           }
         : null;
-    pending.current = { balance: res.balance, offer: builtOffer };
+    pending.current = {
+      balance: res.balance,
+      offer: builtOffer,
+      card: res.card,
+    };
 
-    setSpin({ nonce: Date.now(), card: res.card });
+    // Cosmetic mapping (decides nothing): tier color + winner Pokémon. The reel
+    // never shows the won card itself — a card with no resolvable Pokémon
+    // (trainer/energy) lands on a neutral Poké Ball placeholder; the real prize
+    // is the slab shown below the reel.
+    const tier = priceTier(res.marketValue);
+    const mon = pokemonFromCard(res.card.name);
+    const winners: ColumnWinner[] = Array.from(
+      { length: COLUMN_COUNT },
+      () => ({
+        dex: mon?.dex ?? null,
+        image: mon ? undefined : POKEBALL_PLACEHOLDER,
+        name: mon?.name ?? res.card.name,
+        tier,
+      }),
+    );
+
+    setSpin({ nonce: Date.now(), card: res.card, winners, tier });
     setPhase('spinning');
   }
 
-  // Fired by the reel row when the winner lands center.
+  // Fired by the stack once the last column settles. Reads the result from the
+  // pending ref (not `spin`), so the callback is stable across re-renders and a
+  // second fire is a no-op (held is nulled after the first).
   const handleSettled = useCallback(() => {
-    const won = spin?.card;
-    if (!won) return;
     const held = pending.current;
+    if (!held) return;
     pending.current = null;
+    const won = held.card;
 
-    if (held?.balance != null) setBalance(held.balance);
-    setOffer(held?.offer ?? null);
+    if (held.balance != null) setBalance(held.balance);
+    setOffer(held.offer);
 
     const justPulled: RecentPull = {
       id: `${won.id}-${Date.now()}`,
@@ -192,130 +218,139 @@ export default function SlotMachineClient({
     setAnnounce(`Won ${won.name}, ${won.value}`);
     setPhase('landed');
 
-    // Brief cooldown so a mash can't re-fire before re-enable (PRD §10).
     setCooldown(true);
     if (cooldownTimer.current !== null) clearTimeout(cooldownTimer.current);
     cooldownTimer.current = window.setTimeout(
       () => setCooldown(false),
       COOLDOWN_MS,
     );
-  }, [spin, pack.name, pack.image, play, vibrate]);
+  }, [pack.name, pack.image, play, vibrate]);
 
   const refreshBalance = useCallback((b: number) => setBalance(b), []);
 
   const won = phase === 'landed' ? (spin?.card ?? null) : null;
-  const rgb = won ? RARITY_RGB[won.rarity] : null;
+  const tier = spin?.tier ?? null;
+  const rgb = won && tier ? TIER_COLOR[tier] : null;
 
   return (
-    <div className="mx-auto flex w-full flex-col gap-6 px-fluid py-6">
-      <Link
-        href="/claw"
-        className="inline-flex items-center gap-1.5 text-[13px] font-medium text-white/55 transition-colors hover:text-white"
+    <div className="fixed inset-0 z-[100] flex flex-col bg-neutral-950 text-neutral-50">
+      {/* Top bar */}
+      <div className="flex items-center justify-between gap-4 px-fluid py-4">
+        <Link
+          href="/slots"
+          className="inline-flex items-center gap-1.5 text-[13px] font-medium text-white/55 transition-colors hover:text-white"
+        >
+          <ArrowLeft className="h-4 w-4" aria-hidden /> Exit
+        </Link>
+        <SlotStatusBar balance={balance} recent={recent} reduced={reduced} />
+      </div>
+
+      {/* Center: banner + reel stack + prize. Scrolls if a short viewport can't
+          fit the reveal, so the prize + sell-back are never hidden behind the
+          fixed controls. */}
+      <div
+        className="min-h-0 flex-1 overflow-y-auto px-fluid"
+        aria-busy={phase === 'spinning'}
       >
-        <ArrowLeft className="h-4 w-4" aria-hidden /> All packs
-      </Link>
-
-      <SlotStatusBar balance={balance} recent={recent} reduced={reduced} />
-
-      {/* Banner */}
-      <div className="min-h-8 text-center">
-        {won && rgb && (
-          <p
-            className="font-heading text-xl font-bold tracking-tight"
-            style={{ color: `rgb(${rgb})` }}
-          >
-            YOU WON — {won.rarity} · {won.value}
-          </p>
-        )}
-        {phase === 'spinning' && (
-          <p className="font-heading text-lg font-bold tracking-tight text-white/60">
-            SPINNING…
-          </p>
-        )}
-      </div>
-
-      {/* Reel hero */}
-      <div className="relative" aria-busy={phase === 'spinning'}>
-        <PaylineBeam reduced={reduced} pulse={phase === 'landed'} />
-        <SlotReelRow
-          key={spin?.nonce ?? 'idle'}
-          winnerRarity={
-            phase === 'idle' || phase === 'resolving'
-              ? null
-              : (spin?.card.rarity ?? null)
-          }
-          pool={RARITIES}
-          reduced={reduced}
-          durationMs={BASE_SPIN_MS}
-          onSettled={handleSettled}
-        />
-      </div>
-
-      {/* Won card slab (the real prize) + sell-back */}
-      {won && (
-        <div className="flex flex-col items-center gap-4">
-          <div className="flex items-center gap-4">
-            <Image
-              src={won.image}
-              alt={won.name}
-              width={110}
-              height={154}
-              className="h-[154px] w-auto rounded-lg object-contain"
-            />
-            <div className="text-left">
-              <p className="text-sm font-semibold text-white">{won.name}</p>
-              <p className="text-[13px] text-white/60">
-                Value <span className="font-bold text-white">{won.value}</span>
-              </p>
-            </div>
-          </div>
-          <SellBackPanel
-            offer={offer}
-            active={phase === 'landed'}
-            reduced={reduced}
-            onSellBack={sellBackPull}
-            onReveal={revealPull}
-            onSold={refreshBalance}
-          />
-        </div>
-      )}
-
-      {/* Controls */}
-      <SlotControls
-        cost={cost}
-        spinning={phase === 'spinning' || phase === 'resolving'}
-        disabled={spinGuarded || cooldown || (customer != null && !canAfford)}
-        label={
-          !customer
-            ? 'Log in to spin'
-            : phase === 'landed'
-              ? 'Spin again'
-              : 'Spin'
-        }
-        muted={muted}
-        onSpin={handleSpin}
-        onToggleMute={toggleMuted}
-        onOpenOdds={() => setOddsOpen(true)}
-      />
-
-      {error && (
-        <p role="alert" className="text-center text-[12px] text-red-300">
-          {error}
-          {needsTopUp && (
-            <>
-              {' '}
-              <Link
-                href="/vault"
-                className="font-bold text-emerald-300 underline underline-offset-2 hover:text-emerald-200"
+        <div className="flex min-h-full flex-col items-center justify-center gap-6 py-6">
+          <div className="min-h-8 text-center">
+            {won && rgb && tier && (
+              <p
+                className="font-heading text-2xl font-bold tracking-tight"
+                style={{ color: `rgb(${rgb})` }}
               >
-                Add credits in your Vault →
-              </Link>
-            </>
-          )}
-        </p>
-      )}
+                YOU WON — {tier.toUpperCase()} · {won.value}
+              </p>
+            )}
+            {phase === 'spinning' && (
+              <p className="font-heading text-lg font-bold tracking-tight text-white/60">
+                SPINNING…
+              </p>
+            )}
+          </div>
 
-      {/* Single consolidated announcement (PRD §11). */}
+          <SlotReelStack
+            count={COLUMN_COUNT}
+            spinKey={spin?.nonce ?? 'idle'}
+            winners={
+              phase === 'idle' || phase === 'resolving'
+                ? null
+                : (spin?.winners ?? null)
+            }
+            reduced={reduced}
+            baseDurationMs={BASE_SPIN_MS}
+            pulse={phase === 'landed'}
+            onAllSettled={handleSettled}
+          />
+
+          {won && (
+            <div className="flex flex-col items-center gap-4">
+              <div className="flex items-center gap-4">
+                <Image
+                  src={won.image}
+                  alt={won.name}
+                  width={110}
+                  height={154}
+                  className="h-[154px] w-auto rounded-lg object-contain"
+                />
+                <div className="text-left">
+                  <p className="text-sm font-semibold text-white">{won.name}</p>
+                  <p className="text-[13px] text-white/60">
+                    Value{' '}
+                    <span className="font-bold text-white">{won.value}</span>
+                  </p>
+                </div>
+              </div>
+              <SellBackPanel
+                offer={offer}
+                active={phase === 'landed'}
+                reduced={reduced}
+                onSellBack={sellBackPull}
+                onReveal={revealPull}
+                onSold={refreshBalance}
+              />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Bottom controls */}
+      <div className="px-fluid pb-6 pt-2">
+        <SlotControls
+          cost={cost}
+          spinning={phase === 'spinning' || phase === 'resolving'}
+          disabled={spinGuarded || cooldown || (customer != null && !canAfford)}
+          label={
+            !customer
+              ? 'Log in to spin'
+              : phase === 'landed'
+                ? 'Spin again'
+                : 'Spin'
+          }
+          muted={muted}
+          onSpin={handleSpin}
+          onToggleMute={toggleMuted}
+          onOpenOdds={() => setOddsOpen(true)}
+        />
+        {error && (
+          <p role="alert" className="mt-3 text-center text-[12px] text-red-300">
+            {error}
+            {needsTopUp && (
+              <>
+                {' '}
+                <Link
+                  href="/vault"
+                  className="font-bold text-emerald-300 underline underline-offset-2 hover:text-emerald-200"
+                >
+                  Add credits in your Vault →
+                </Link>
+              </>
+            )}
+          </p>
+        )}
+      </div>
+
+      {/* Single consolidated announcement (settle-only). */}
       <p role="status" aria-live="polite" className="sr-only">
         {announce}
       </p>
