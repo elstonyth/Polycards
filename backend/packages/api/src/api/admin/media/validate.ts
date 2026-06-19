@@ -8,7 +8,7 @@
 // (declared type, size, decoded dimensions), so the sniff/animation gates are
 // skipped client-side and enforced here.
 
-export type ImageKind = "pack" | "card";
+export type ImageKind = "pack" | "card" | "sprite";
 
 export interface ImageFacts {
   width: number;
@@ -61,6 +61,9 @@ export const IMAGE_RULES = {
   profiles: {
     card: { minWidth: 600, minHeight: 840, targetRatio: 5 / 7, aspectTolerance: 0.03 },
     pack: { minWidth: 512, minHeight: 512, targetRatio: 1, aspectTolerance: 0.05 },
+    // Pixel sprite: small + square-ish. Generous tolerance — pixel art is often
+    // a few px off square; the storefront renders it object-contain regardless.
+    sprite: { minWidth: 64, minHeight: 64, targetRatio: 1, aspectTolerance: 0.25 },
   } satisfies Record<ImageKind, ProfileRule>,
 } as const;
 
@@ -118,9 +121,10 @@ export function validateImage(facts: ImageFacts, kind: ImageKind): ValidationRes
 
   // 7 — minimum resolution (no blurry upscaling on the storefront).
   if (facts.width < profile.minWidth || facts.height < profile.minHeight) {
+    const label = kind === "card" ? "Card" : kind === "pack" ? "Pack" : "Sprite";
     return fail(
       "too_small",
-      `${kind === "card" ? "Card" : "Pack"} art must be at least ${profile.minWidth}×${profile.minHeight}px.`,
+      `${label} art must be at least ${profile.minWidth}×${profile.minHeight}px.`,
     );
   }
 
@@ -132,7 +136,7 @@ export function validateImage(facts: ImageFacts, kind: ImageKind): ValidationRes
       "bad_aspect",
       kind === "card"
         ? "Card art must be roughly 5:7 (portrait)."
-        : "Pack art must be roughly square (1:1).",
+        : "Sprite/pack art must be roughly square (1:1).",
     );
   }
 

@@ -117,3 +117,20 @@ describe("validateImage — pack profile", () => {
     expect((r as { code: string }).code).toBe("bad_aspect");
   });
 });
+
+const facts = (w: number, h: number): ImageFacts => ({
+  width: w, height: h, bytes: 1000, mimeType: 'image/png', detectedFormat: 'png', frames: 1,
+});
+
+describe('validateImage — sprite profile', () => {
+  it('accepts a square pixel sprite', () => {
+    expect(validateImage(facts(96, 96), 'sprite')).toEqual({ ok: true });
+  });
+  it('accepts a small near-square sprite', () => {
+    expect(validateImage(facts(64, 64), 'sprite')).toEqual({ ok: true });
+  });
+  it('rejects a portrait card-shaped image under the sprite profile', () => {
+    const r = validateImage(facts(600, 840), 'sprite');
+    expect(r.ok).toBe(false);
+  });
+});

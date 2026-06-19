@@ -197,7 +197,7 @@ export const useAdjustCredits = () => {
 
 export const useUploadImage = () =>
   useMutation({
-    mutationFn: (vars: { file: File; kind: 'pack' | 'card' }) =>
+    mutationFn: (vars: { file: File; kind: 'pack' | 'card' | 'sprite' }) =>
       uploadImage(vars.file, vars.kind),
   });
 

@@ -33,10 +33,10 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
   }
 
   const rawKind = (req.body as { kind?: string } | undefined)?.kind;
-  if (rawKind !== 'pack' && rawKind !== 'card') {
+  if (rawKind !== 'pack' && rawKind !== 'card' && rawKind !== 'sprite') {
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
-      "Field 'kind' must be 'pack' or 'card'.",
+      "Field 'kind' must be 'pack', 'card', or 'sprite'.",
     );
   }
   const kind: ImageKind = rawKind;
