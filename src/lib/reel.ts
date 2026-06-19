@@ -31,7 +31,8 @@ export function reelTarget(
 /**
  * A fixed-length strip of rarities with `winnerRarity` pinned at `winIndex`.
  * Non-winner cells cycle the pool deterministically (a real slot has a small
- * fixed symbol set). The rarity at a cell selects its Pokéball art (BallToken).
+ * fixed symbol set). Retained as a tested pure helper; the v2 reel uses
+ * `buildDexStrip` (dex/sprite cells) instead.
  */
 export function buildStrip(
   winnerRarity: Rarity,
