@@ -230,8 +230,9 @@ export default function SlotMachineClient({
     play(big ? 'bigwin' : 'win');
     vibrate(big ? [40, 40, 80] : 30);
 
-    if (held.cards.length === 1) {
-      setAnnounce(`Won ${held.cards[0].name}, ${held.cards[0].value}`);
+    const first = held.cards[0];
+    if (held.cards.length === 1 && first) {
+      setAnnounce(`Won ${first.name}, ${first.value}`);
     } else {
       setAnnounce(`Won ${held.cards.length} cards`);
     }
