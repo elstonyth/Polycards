@@ -1,6 +1,7 @@
 import {
   computeOdds,
   RARITY_WEIGHT,
+  RARITIES,
   TOTAL_BPS,
   type OddsInput,
 } from '../index';
@@ -81,6 +82,18 @@ describe('computeOdds — rarity-weighted split', () => {
     expect(RARITY_WEIGHT.Epic).toBeLessThan(RARITY_WEIGHT.Rare);
     expect(RARITY_WEIGHT.Rare).toBeLessThan(RARITY_WEIGHT.Uncommon);
     expect(RARITY_WEIGHT.Uncommon).toBeLessThan(RARITY_WEIGHT.Common);
+  });
+
+  it('lists RARITIES rarest-first with Immortal as the apex tier', () => {
+    expect(RARITIES[0]).toBe('Immortal');
+    expect(RARITIES).toEqual([
+      'Immortal',
+      'Legendary',
+      'Epic',
+      'Rare',
+      'Uncommon',
+      'Common',
+    ]);
   });
 
   it('splits unlocked cards proportionally to their rarity weight', () => {

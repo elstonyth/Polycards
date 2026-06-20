@@ -42,14 +42,17 @@ const html = `<!doctype html><html><head><meta charset="utf-8"><style>
 
 await mkdir('docs/research/tier-glows', { recursive: true });
 const b = await chromium.launch();
-const p = await b.newPage({
-  viewport: { width: 300, height: 360 },
-  deviceScaleFactor: 2,
-});
-await p.setContent(html, { waitUntil: 'load' });
-await p.waitForTimeout(250);
-await p
-  .locator('.wrap')
-  .screenshot({ path: 'docs/research/tier-glows/admin-rarity-dropdown.png' });
-console.log('done → docs/research/tier-glows/admin-rarity-dropdown.png');
-await b.close();
+try {
+  const p = await b.newPage({
+    viewport: { width: 300, height: 360 },
+    deviceScaleFactor: 2,
+  });
+  await p.setContent(html, { waitUntil: 'load' });
+  await p.waitForTimeout(250);
+  await p
+    .locator('.wrap')
+    .screenshot({ path: 'docs/research/tier-glows/admin-rarity-dropdown.png' });
+  console.log('done → docs/research/tier-glows/admin-rarity-dropdown.png');
+} finally {
+  await b.close();
+}

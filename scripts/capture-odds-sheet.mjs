@@ -60,14 +60,17 @@ const html = `<!doctype html><html><head><meta charset="utf-8"><style>
 
 await mkdir('docs/research/tier-glows', { recursive: true });
 const b = await chromium.launch();
-const p = await b.newPage({
-  viewport: { width: 440, height: 720 },
-  deviceScaleFactor: 2,
-});
-await p.setContent(html, { waitUntil: 'load' });
-await p.waitForTimeout(300);
-await p
-  .locator('.card')
-  .screenshot({ path: 'docs/research/tier-glows/odds-sheet-updated.png' });
-console.log('done → docs/research/tier-glows/odds-sheet-updated.png');
-await b.close();
+try {
+  const p = await b.newPage({
+    viewport: { width: 440, height: 720 },
+    deviceScaleFactor: 2,
+  });
+  await p.setContent(html, { waitUntil: 'load' });
+  await p.waitForTimeout(300);
+  await p
+    .locator('.card')
+    .screenshot({ path: 'docs/research/tier-glows/odds-sheet-updated.png' });
+  console.log('done → docs/research/tier-glows/odds-sheet-updated.png');
+} finally {
+  await b.close();
+}

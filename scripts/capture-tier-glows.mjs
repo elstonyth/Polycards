@@ -91,40 +91,43 @@ const html = `<!doctype html><html><head><meta charset="utf-8"><style>
 
 await mkdir('docs/research/tier-glows', { recursive: true });
 const b = await chromium.launch();
-const p = await b.newPage({
-  viewport: { width: 980, height: 760 },
-  deviceScaleFactor: 2,
-});
-await p.setContent(html, { waitUntil: 'load' });
-// Wait for every sprite to actually paint.
-await p
-  .waitForFunction(
-    () => [...document.images].every((i) => i.complete && i.naturalWidth > 0),
-    null,
-    { timeout: 30000 },
-  )
-  .catch(() => console.log('warn: some sprites may not have loaded'));
-await p.waitForTimeout(600);
-
-// Combined grid.
-await p.screenshot({ path: 'docs/research/tier-glows/all-tiers.png' });
-
-// Each cell individually.
-const cells = await p.locator('.cell').all();
-for (let i = 0; i < cells.length; i++) {
-  await cells[i].screenshot({
-    path: `docs/research/tier-glows/${TIERS[i].key}.png`,
+try {
+  const p = await b.newPage({
+    viewport: { width: 980, height: 760 },
+    deviceScaleFactor: 2,
   });
-}
+  await p.setContent(html, { waitUntil: 'load' });
+  // Wait for every sprite to actually paint.
+  await p
+    .waitForFunction(
+      () => [...document.images].every((i) => i.complete && i.naturalWidth > 0),
+      null,
+      { timeout: 30000 },
+    )
+    .catch(() => console.log('warn: some sprites may not have loaded'));
+  await p.waitForTimeout(600);
 
-const broken = await p.evaluate(
-  () =>
-    [...document.images].filter((x) => x.complete && x.naturalWidth === 0)
-      .length,
-);
-console.log(
-  'done. broken sprites:',
-  broken,
-  '| files: docs/research/tier-glows/{all-tiers,common,uncommon,rare,mythical,legendary,immortal}.png',
-);
-await b.close();
+  // Combined grid.
+  await p.screenshot({ path: 'docs/research/tier-glows/all-tiers.png' });
+
+  // Each cell individually.
+  const cells = await p.locator('.cell').all();
+  for (let i = 0; i < cells.length; i++) {
+    await cells[i].screenshot({
+      path: `docs/research/tier-glows/${TIERS[i].key}.png`,
+    });
+  }
+
+  const broken = await p.evaluate(
+    () =>
+      [...document.images].filter((x) => x.complete && x.naturalWidth === 0)
+        .length,
+  );
+  console.log(
+    'done. broken sprites:',
+    broken,
+    '| files: docs/research/tier-glows/{all-tiers,common,uncommon,rare,mythical,legendary,immortal}.png',
+  );
+} finally {
+  await b.close();
+}
