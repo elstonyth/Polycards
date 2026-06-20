@@ -5,6 +5,7 @@ import './globals.css';
 import SiteHeader from '@/components/SiteHeader';
 import SiteFooter from '@/components/SiteFooter';
 import { AuthProvider } from '@/components/auth/AuthProvider';
+import { SITE_URL } from '@/lib/site';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -20,11 +21,33 @@ const nekst = localFont({
 });
 
 export const metadata: Metadata = {
-  title: 'Phygitals — Your Gateway to Physical & Digital Collectibles',
+  metadataBase: new URL(SITE_URL),
+  title: {
+    default: 'Phygitals — Your Gateway to Physical & Digital Collectibles',
+    template: '%s · Phygitals',
+  },
   description:
     'Rip packs. Pull graded cards. Hold, trade, redeem, or sell back at up to 90% value.',
-  // Favicon + apple-touch icon come from the Next file convention (src/app/icon.png
-  // and src/app/apple-icon.png — the Pokenic badge).
+  applicationName: 'Phygitals',
+  alternates: { canonical: '/' },
+  openGraph: {
+    type: 'website',
+    siteName: 'Phygitals',
+    title: 'Phygitals — Your Gateway to Physical & Digital Collectibles',
+    description:
+      'Rip packs. Pull graded cards. Hold, trade, redeem, or sell back at up to 90% value.',
+    url: '/',
+    images: [{ url: '/seo/icon-512x512.png', width: 512, height: 512 }],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Phygitals — Your Gateway to Physical & Digital Collectibles',
+    description:
+      'Rip packs. Pull graded cards. Hold, trade, redeem, or sell back at up to 90% value.',
+    images: ['/seo/icon-512x512.png'],
+  },
+  appleWebApp: { capable: true, title: 'Phygitals', statusBarStyle: 'black' },
+  // Favicon + apple-touch icon come from src/app/icon.png + apple-icon.png.
 };
 
 export default function RootLayout({
