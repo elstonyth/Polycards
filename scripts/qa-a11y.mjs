@@ -11,7 +11,28 @@ const page = await browser.newPage();
 let failed = false;
 
 for (const route of ROUTES) {
-  await page.goto(BASE + route, { waitUntil: 'networkidle' });
+  // 'load' (not 'networkidle') so always-animating routes like /claw can't hang
+  // the scan; a bounded timeout turns a stuck navigation into a loud failure
+  // instead of an indefinite wait.
+  let resp;
+  try {
+    resp = await page.goto(BASE + route, {
+      waitUntil: 'load',
+      timeout: 30_000,
+    });
+  } catch (err) {
+    failed = true;
+    console.error(`\n${route} — navigation failed: ${err.message}`);
+    continue;
+  }
+  // A 404/500 would otherwise let axe scan the (clean) error page and pass.
+  if (!resp || !resp.ok()) {
+    failed = true;
+    console.error(
+      `\n${route} — bad response: ${resp ? resp.status() : 'none'}`,
+    );
+    continue;
+  }
   const { violations } = await new AxeBuilder({ page })
     .withTags(['wcag2a', 'wcag2aa'])
     .analyze();
