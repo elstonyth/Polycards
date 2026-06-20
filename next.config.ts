@@ -77,12 +77,31 @@ if (mediaHost) {
   });
 }
 
+const securityHeaders = [
+  // HSTS: 2 years, include subdomains, preload-eligible.
+  {
+    key: 'Strict-Transport-Security',
+    value: 'max-age=63072000; includeSubDomains; preload',
+  },
+  { key: 'X-Frame-Options', value: 'DENY' },
+  { key: 'X-Content-Type-Options', value: 'nosniff' },
+  { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+  // Lock down powerful features the storefront never uses.
+  {
+    key: 'Permissions-Policy',
+    value: 'camera=(), microphone=(), geolocation=(), browsing-topics=()',
+  },
+];
+
 const nextConfig: NextConfig = {
   // Standalone output: the production Dockerfile (and DO App Platform) run the
   // server from `.next/standalone/server.js`. Without this, that dir is never
   // emitted and the Dockerfile's runner stage has nothing to copy.
   output: 'standalone',
   images: { remotePatterns, dangerouslyAllowLocalIP },
+  async headers() {
+    return [{ source: '/:path*', headers: securityHeaders }];
+  },
 };
 
 export default nextConfig;
