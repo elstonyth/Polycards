@@ -11,5 +11,7 @@ export function setConsent(state: ConsentState): void {
   if (typeof window === 'undefined') return;
   window.localStorage.setItem(CONSENT_KEY, state);
   // Mirror to a cookie so server middleware can read it later if needed.
-  document.cookie = `${CONSENT_KEY}=${state}; path=/; max-age=31536000; SameSite=Lax`;
+  // Secure (HTTPS prod; allowed on http://localhost) + encodeURIComponent
+  // future-proof the value if ConsentState ever widens beyond the fixed enum.
+  document.cookie = `${CONSENT_KEY}=${encodeURIComponent(state)}; path=/; max-age=31536000; SameSite=Lax; Secure`;
 }
