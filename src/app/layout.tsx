@@ -5,6 +5,7 @@ import './globals.css';
 import SiteHeader from '@/components/SiteHeader';
 import SiteFooter from '@/components/SiteFooter';
 import { AuthProvider } from '@/components/auth/AuthProvider';
+import SkipLink from '@/components/SkipLink';
 import { SITE_URL } from '@/lib/site';
 
 const geistSans = Geist({
@@ -71,8 +72,11 @@ export default function RootLayout({
         className="min-h-full flex flex-col bg-neutral-900 text-neutral-50"
       >
         <AuthProvider>
+          <SkipLink />
           <SiteHeader />
-          <main className="flex-1">{children}</main>
+          <main id="main" className="flex-1">
+            {children}
+          </main>
           <SiteFooter />
         </AuthProvider>
       </body>
