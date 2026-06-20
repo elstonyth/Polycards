@@ -1,11 +1,22 @@
 'use client';
 
+import * as Sentry from '@sentry/nextjs';
+import { useEffect } from 'react';
+
 export default function Error({
+  error,
   reset,
 }: {
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  // Report client-side render errors caught by this segment boundary — the
+  // common case. (global-error.tsx covers root-layout failures; the
+  // instrumentation onRequestError hook covers server-side errors.)
+  useEffect(() => {
+    Sentry.captureException(error);
+  }, [error]);
+
   return (
     <div className="mx-auto flex min-h-[50vh] max-w-md flex-col items-center justify-center gap-4 px-6 text-center">
       <h2 className="text-xl font-semibold text-white">Something went wrong</h2>
