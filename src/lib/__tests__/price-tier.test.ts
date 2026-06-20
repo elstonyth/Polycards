@@ -55,9 +55,14 @@ describe('priceTier', () => {
     ]);
   });
 
-  it('TIER_BAND has a non-empty band for every tier', () => {
-    for (const t of TIER_ORDER) {
-      expect(TIER_BAND[t]).toBeTruthy();
-    }
+  it('TIER_BAND mirrors the priceTier thresholds exactly', () => {
+    expect(TIER_BAND).toEqual({
+      common: '< $25',
+      uncommon: '$25 – 99',
+      rare: '$100 – 499',
+      mythical: '$500 – 1,999',
+      legendary: '$2,000 – 9,999',
+      immortal: '≥ $10,000',
+    });
   });
 });
