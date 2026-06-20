@@ -6,6 +6,7 @@ import type PacksModuleService from '../../../../../modules/packs/service';
 import { pageAll } from '../../../../utils/page-all';
 import { toMoney } from '../../../../../modules/packs/money';
 import { cardByHandle } from '../../../../../modules/packs/card-view';
+import { levelForSpend } from '../../../../../modules/packs/vip-ladder';
 
 const RECENT = 50;
 
@@ -60,6 +61,18 @@ export async function GET(
     return sum + (Number.isFinite(value) ? Math.round(value * 100) : 0);
   }, 0);
 
+  const summary = await packs.creditSummary(id);
+  const ladderRows = await packs.listVipLevels(
+    {},
+    { select: ['level', 'spend_threshold'], take: 1000 },
+  );
+  const ladder = ladderRows.map((r) => ({
+    level: r.level,
+    spend_threshold: Number(r.spend_threshold),
+  }));
+  const vipLevel =
+    ladder.length > 0 ? levelForSpend(summary.spendTotal, ladder) : null;
+
   res.json({
     customer: {
       id: customer.id,
@@ -95,5 +108,7 @@ export async function GET(
       };
     }),
     vault: { count: vaulted.length, market_value: vaultValueCents / 100 },
+    vip:
+      vipLevel === null ? null : { level: vipLevel, spend: summary.spendTotal },
   });
 }
