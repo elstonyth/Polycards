@@ -318,7 +318,7 @@ export default function SlotMachineClient({
           {wonCards.length > 0 && (
             <div className="flex w-full flex-col items-center gap-5 lg:absolute lg:right-0 lg:top-1/2 lg:max-h-full lg:w-[300px] lg:-translate-y-1/2 lg:items-stretch lg:overflow-y-auto">
               {wonCards.map((won, i) => {
-                const species = resolveCardPokemon(won).name;
+                const species = resolveCardPokemon(won)?.name;
                 return (
                   <div
                     key={`${won.id}-${i}`}

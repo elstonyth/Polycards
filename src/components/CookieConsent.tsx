@@ -7,7 +7,9 @@ export default function CookieConsent() {
   const [show, setShow] = useState(false);
 
   // Read after mount so SSR markup matches and we don't flash the banner for
-  // users who already chose.
+  // users who already chose. Intentional post-mount sync read (same pattern as
+  // the other deliberate effect reads in this app).
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => setShow(getConsent() === null), []);
 
   if (!show) return null;
