@@ -71,7 +71,9 @@ export async function GET(
     spend_threshold: Number(r.spend_threshold),
   }));
   const vipLevel =
-    ladder.length > 0 ? levelForSpend(summary.spendTotal, ladder) : null;
+    ladder.length > 0
+      ? levelForSpend(summary.externalFundedSpendTotal, ladder)
+      : null;
 
   res.json({
     customer: {
@@ -109,6 +111,8 @@ export async function GET(
     }),
     vault: { count: vaulted.length, market_value: vaultValueCents / 100 },
     vip:
-      vipLevel === null ? null : { level: vipLevel, spend: summary.spendTotal },
+      vipLevel === null
+        ? null
+        : { level: vipLevel, spend: summary.externalFundedSpendTotal },
   });
 }
