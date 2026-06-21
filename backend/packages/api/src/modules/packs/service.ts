@@ -16,6 +16,7 @@ import DeliveryOrderItem from './models/delivery-order-item';
 import VipLevel from './models/vip-level';
 import RewardsSettings from './models/rewards-settings';
 import ReferralRelationship from './models/referral-relationship';
+import Commission from './models/commission';
 import {
   resolveBuybackRate,
   buybackAmount,
@@ -103,6 +104,7 @@ class PacksModuleService extends MedusaService({
   VipLevel,
   RewardsSettings,
   ReferralRelationship,
+  Commission,
 }) {
   // Commission engine globals. Reads the singleton row; falls back to defaults
   // when absent. COMMISSION_COOLDOWN_DAYS env override forces the demo (0) and

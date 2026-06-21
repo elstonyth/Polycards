@@ -38,6 +38,10 @@ export const CreditTransaction = model
     // pre-2a rows and on topup/buyback/adjustment. The commission idempotency
     // index (Task 12) keys on this. Forward-only; never back-filled.
     source_transaction_id: model.text().nullable(),
+    // Phase 2a — generation of a commission row (1 = direct sponsor; >1 = override
+    // ancestors, Phase 2b). NULL on non-commission rows. Part of the idempotency
+    // index so a retried open can't double-pay any single beneficiary at any gen.
+    generation: model.number().nullable(),
   })
   // Balance Σ + credits feed + admin gacha all read by customer_id ordered by
   // created_at; composite serves the filter + ORDER BY (+ pagination) in one scan.
