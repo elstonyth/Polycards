@@ -98,4 +98,17 @@ describe("foldLedgerRow + totalsToUsd (external-funded)", () => {
     expect(t.balanceCents).toBe(30);
     expect(totalsToUsd(t).balance).toBe(0.3);
   });
+
+  it("a positive-external pack_open reversal nets the VIP basis back to zero", () => {
+    // open RM75 consuming 7500 external, then a compensating +RM75 pack_open row
+    // carrying +7500 external (the reversal). Basis must return to 0.
+    const t = foldAll([
+      { amount: 100, reason: "topup", externalFundedCents: 10000 },
+      { amount: -75, reason: "pack_open", externalFundedCents: -7500 },
+      { amount: 75, reason: "pack_open", externalFundedCents: 7500 },
+    ]);
+    expect(t.externalFundedSpendCents).toBe(0); // -(-7500) + -(+7500) = 0
+    expect(t.externalBalanceCents).toBe(10000); // external balance fully restored
+    expect(t.balanceCents).toBe(10000); // net wallet unchanged by the round-trip
+  });
 });

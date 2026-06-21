@@ -33,10 +33,11 @@ export function foldLedgerRow(
 ): LedgerTotals {
   const cents = Math.round(row.amount * 100);
   const ext = Math.round(row.externalFundedCents);
-  // A pack_open row stores NEGATIVE consumed external; flip sign so the basis
-  // accumulates a positive "external spent" figure. Other reasons contribute 0.
-  const externalConsumed =
-    row.reason === "pack_open" && ext < 0 ? -ext : 0;
+  // A pack_open row stores the consumed external as NEGATIVE sen; a reversal
+  // stores it back as POSITIVE. Count BOTH signs (flip), so a reversed open
+  // subtracts exactly what the open added — the VIP basis nets to zero. Other
+  // reasons never touch the basis.
+  const externalConsumed = row.reason === "pack_open" ? -ext : 0;
   return {
     balanceCents: acc.balanceCents + cents,
     topupCents:
