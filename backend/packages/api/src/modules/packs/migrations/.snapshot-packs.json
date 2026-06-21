@@ -273,6 +273,15 @@
           "nullable": true,
           "mappedType": "integer"
         },
+        "source_transaction_id": {
+          "name": "source_transaction_id",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "text"
+        },
         "raw_amount": {
           "name": "raw_amount",
           "type": "jsonb",

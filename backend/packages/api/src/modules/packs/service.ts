@@ -54,6 +54,8 @@ export type CreditMutationInput = {
   pullId?: string | null;
   /** Minimum allowed resulting balance in USD (default $0 — no overdraft). */
   floor?: number;
+  /** The open's stable id (open_id), stamped on pack_open charge rows. */
+  sourceTransactionId?: string | null;
 };
 
 /** The transactional MikroORM manager surface we use for the advisory lock +
@@ -222,6 +224,7 @@ class PacksModuleService extends MedusaService({
           pull_id: input.pullId ?? null,
           reference: input.reference ?? null,
           external_funded_cents: externalFundedCents,
+          source_transaction_id: input.sourceTransactionId ?? null,
         },
       ],
       sharedContext,
