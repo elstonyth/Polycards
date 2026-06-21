@@ -164,6 +164,23 @@ class PacksModuleService extends MedusaService({
     const deltaCents = Math.round(input.amount * 100);
     const floorCents = Math.round((input.floor ?? 0) * 100);
 
+    // 2a) Sign invariants — fail LOUD on misuse rather than silently stamping
+    // external_funded_cents = 0 and corrupting the VIP basis. A top-up is always
+    // a credit (> 0); a pack_open is always a debit (< 0); free packs skip this
+    // method entirely upstream. (adjustment is intentionally sign-agnostic.)
+    if (input.reason === 'topup' && deltaCents <= 0) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'topup amount must be greater than 0.',
+      );
+    }
+    if (input.reason === 'pack_open' && deltaCents >= 0) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'pack_open amount must be less than 0.',
+      );
+    }
+
     // 2b) External-funded snapshot (Phase 1b) — uses the external balance from
     // the SAME locked read above, so the consume is race-safe against concurrent
     // top-ups/opens. A top-up adds its full amount as external money in; a

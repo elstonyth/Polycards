@@ -161,5 +161,31 @@ medusaIntegrationTestRunner({
         expect(ext == null ? 0 : Number(ext)).toBe(0);
       });
     });
+
+    describe('mutateCreditAtomic sign invariants', () => {
+      it('rejects a non-positive top-up', async () => {
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        await expect(
+          packs.mutateCreditAtomic({
+            customerId: 'cus_sign_topup',
+            amount: -5,
+            reason: 'topup',
+            reference: 'bad',
+          }),
+        ).rejects.toThrow(/topup amount must be greater than 0/);
+      });
+
+      it('rejects a non-negative pack_open', async () => {
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        await expect(
+          packs.mutateCreditAtomic({
+            customerId: 'cus_sign_open',
+            amount: 5,
+            reason: 'pack_open',
+            floor: 0,
+          }),
+        ).rejects.toThrow(/pack_open amount must be less than 0/);
+      });
+    });
   },
 });
