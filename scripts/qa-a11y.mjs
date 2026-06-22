@@ -7,7 +7,11 @@ const BASE = process.env.BASE_URL ?? 'http://localhost:4000';
 const ROUTES = ['/', '/claw', '/leaderboard', '/how-it-works', '/about'];
 
 const browser = await chromium.launch();
-const page = await browser.newPage();
+// @axe-core/playwright requires a page from an explicit BrowserContext — calling
+// browser.newPage() directly makes AxeBuilder.analyze() throw "Please use
+// browser.newContext()", which was silently breaking the whole gate.
+const context = await browser.newContext();
+const page = await context.newPage();
 let failed = false;
 
 for (const route of ROUTES) {
