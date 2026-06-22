@@ -567,3 +567,27 @@ export function createStoreReadRateLimit(): MiddlewareHandler {
     },
   });
 }
+
+/**
+ * Rate-limiter for admin money-mutation routes (freeze/unfreeze, commission
+ * reverse/suspend/unsuspend, rewards-settings, credit-adjust). Admins are
+ * trusted operators, so the budget is deliberately generous — this is
+ * anti-token-drain hardening, not a tight per-action throttle. One instance
+ * is shared by all matched matchers so they share one budget and one Redis
+ * connection. Keys on auth_context.actor_id (populated by the framework admin
+ * auth); falls back to the request IP if no actor is present. Env-tunable:
+ * ADMIN_ACTION_RATE_BURST_LIMIT / ADMIN_ACTION_RATE_BURST_WINDOW_MS (default 30/10s)
+ * ADMIN_ACTION_RATE_LIMIT / ADMIN_ACTION_RATE_WINDOW_MS (default 200/60s)
+ */
+export function createAdminActionRateLimit(): MiddlewareHandler {
+  return createEnvRateLimit({
+    name: "admin-action",
+    message: "Too many admin requests. Try again shortly.",
+    defaults: {
+      burstLimit: 30,
+      burstWindowMs: 10_000,
+      limit: 200,
+      windowMs: 60_000,
+    },
+  });
+}

@@ -8,6 +8,7 @@ import {
 import { MedusaError } from '@medusajs/framework/utils';
 import multer from 'multer';
 import {
+  createAdminActionRateLimit,
   createAuthRateLimit,
   createCreditTopupRateLimit,
   createPackOpenBatchRateLimit,
@@ -44,6 +45,10 @@ import { createResetTokenSingleUseGuard } from './utils/reset-token-guard';
 // together in the UI, so they share one budget (and one Redis connection).
 const storeReadRateLimit = createStoreReadRateLimit();
 const authRateLimit = createAuthRateLimit();
+// One instance shared by all admin money-mutation matchers: they share one
+// budget and one Redis connection (a compromised admin token is throttled
+// across all mutation routes together).
+const adminActionRateLimit = createAdminActionRateLimit();
 
 // In-memory multipart parsing for the custom image-upload route. memoryStorage
 // hands the route a Buffer (no temp files); the 20 MB cap is the hard edge gate
@@ -219,6 +224,46 @@ export default defineMiddlewares({
         authenticate('customer', ['bearer']),
         createCreditTopupRateLimit(),
       ],
+    },
+    // Admin money-mutation routes — already auth-protected by the framework
+    // admin auth, so no explicit authenticate() entry is needed here. All share
+    // one limiter instance (one budget + one Redis connection). The limiter keys
+    // on auth_context.actor_id; if the admin auth hasn't populated it yet it
+    // falls back to the request IP (acceptable — the framework gate runs first).
+    {
+      matcher: '/admin/customers/*/freeze',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      matcher: '/admin/customers/*/unfreeze',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      matcher: '/admin/commissions/*/reverse',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      matcher: '/admin/commissions/*/suspend',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      matcher: '/admin/commissions/*/unsuspend',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      matcher: '/admin/rewards-settings',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      matcher: '/admin/customers/*/credits',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
     },
   ],
 });
