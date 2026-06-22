@@ -371,6 +371,97 @@ class PacksModuleService extends MedusaService({
     return { id: reversal.id };
   }
 
+  // Cascading reversal of an entire open (Phase 2b) — the saga compensation that
+  // claws back EVERY commission paid for an open, not just the recruit's debit.
+  // ONE transaction. Collects all originals sharing the open_id (the pack_open
+  // debit + every direct/override commission credit), locks each touched customer
+  // (sorted -> deadlock-safe), and appends an append-only compensating row per
+  // original, idempotent via reference `reversal:${rowId}`. Commission claw-backs
+  // post as 'commission_reversal' and flip the lifecycle row to 'reversed'; the
+  // debit refund keeps reason 'pack_open' (nets the open's external basis, exactly
+  // like reverseCreditTransaction — an aborted open correctly stops counting toward
+  // VIP basis; there is no separate VIP projection to inverse). Re-running adds
+  // nothing (returns reversed: 0). Exactly-once rests on the sorted credit: locks
+  // + the per-row reference check (no DB unique on reference; a 3a admin reverse
+  // path MUST take the same credit: locks).
+  @InjectTransactionManager()
+  async reverseOpen(
+    sourceTransactionId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ reversed: number }> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+
+    // 1) Collect the originals for this open. Exclude compensating rows from a
+    //    prior run: the debit reversal also carries reason 'pack_open', so filter
+    //    on the reference prefix, not reason alone.
+    const all = await this.listCreditTransactions(
+      { source_transaction_id: sourceTransactionId },
+      { take: 1000 },
+    );
+    const originals = all.filter((r) => {
+      const ref = String((r as { reference?: string | null }).reference ?? '');
+      if (ref.startsWith('reversal:')) return false;
+      return (
+        r.reason === 'pack_open' ||
+        r.reason === 'direct_referral' ||
+        r.reason === 'team_override'
+      );
+    });
+    if (originals.length === 0) return { reversed: 0 };
+
+    // 2) Lock every touched customer in a stable (sorted) order on the credit:
+    //    keyspace — deadlock-safe with concurrent opens/reversals. (linkSponsor's
+    //    sorted-lock technique, on the credit: keyspace used by the ledger path.)
+    const customerIds = [...new Set(originals.map((r) => r.customer_id))].sort();
+    for (const cid of customerIds) {
+      await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+        `credit:${cid}`,
+      ]);
+    }
+
+    // 3) Per-row append-only compensation, idempotent on reference `reversal:${id}`.
+    let reversed = 0;
+    for (const original of originals) {
+      const [existing] = await this.listCreditTransactions(
+        { reference: `reversal:${original.id}` },
+        { take: 1 },
+      );
+      if (existing) continue; // already reversed — no-op
+      const isCommission =
+        original.reason === 'direct_referral' || original.reason === 'team_override';
+      const originalExt = Number(
+        (original as { external_funded_cents?: number | null })
+          .external_funded_cents ?? 0,
+      );
+      const [rev] = await this.createCreditTransactions(
+        [
+          {
+            customer_id: original.customer_id,
+            amount: -Number(original.amount), // refund / claw-back
+            reason: isCommission ? 'commission_reversal' : original.reason,
+            pull_id: null,
+            reference: `reversal:${original.id}`,
+            external_funded_cents: -originalExt, // restores basis (0 for commissions)
+            source_transaction_id: sourceTransactionId,
+          },
+        ],
+        sharedContext,
+      );
+      if (isCommission) {
+        // Flip the lifecycle row to 'reversed' + anchor the reversal, on the
+        // locked connection. Idempotent via the status guard.
+        await em.execute(
+          `UPDATE commission
+              SET status = 'reversed', reversal_transaction_id = ?, updated_at = now()
+            WHERE credit_transaction_id = ? AND status <> 'reversed' AND deleted_at IS NULL`,
+          [rev.id, original.id],
+        );
+      }
+      reversed++;
+    }
+    return { reversed };
+  }
+
   // The atomic open settlement — the ONLY place an open debit (and, Phase 2a,
   // its commission) is written. Holds the per-customer advisory lock across the
   // balance read, floor check, debit insert, AND (Task 14) the commission fan-out

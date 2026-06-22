@@ -16,7 +16,7 @@ export type ChargePackOpenResult = {
   balance: number;
 };
 
-type CompensateData = { creditTransactionId: string } | undefined;
+type CompensateData = { creditTransactionId: string; open_id: string } | undefined;
 
 // charge-pack-open — the PAYMENT SEAM made real (Task A2): debit the pack
 // price from the credit ledger before the pull is recorded, so a failed
@@ -72,17 +72,18 @@ export const chargePackOpenStep = createStep(
 
     return new StepResponse(
       { price, balance } satisfies ChargePackOpenResult,
-      { creditTransactionId: id } satisfies CompensateData,
+      { creditTransactionId: id, open_id: input.open_id } satisfies CompensateData,
     );
   },
   async (data: CompensateData, { container }) => {
-    if (!data) return;
-    // The charge row is append-only: undo it with a compensating reversal row,
-    // NOT a delete, so a failure after a commission was written (Phase 2b+) can
-    // never orphan or vanish money history. reverseCreditTransaction refunds the
-    // customer exactly and nets the VIP basis.
+    if (!data) return; // free-pack open wrote no debit -> nothing to reverse
+    // The open is append-only: undo it with cascading compensating rows, NOT a
+    // delete. reverseOpen reverses the recruit's debit AND claws back every
+    // commission (direct + override) paid for this open_id, so a failure after
+    // settleOpen committed can never leave the recruit refunded but sponsors
+    // overpaid (Phase 2b go-live blocker).
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
-    await packs.reverseCreditTransaction(data.creditTransactionId);
+    await packs.reverseOpen(data.open_id);
   },
 );
 
