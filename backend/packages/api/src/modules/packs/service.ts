@@ -317,6 +317,18 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
 
+    // Auto-clear an AUTO freeze if this inflow repays the debt. projectedBalance
+    // is computed from the committed snapshot (beforeCents) + the just-inserted
+    // delta — never re-read after the insert (MikroORM UoW buffers until flush,
+    // so a raw SELECT inside the same txn would NOT see the new row).
+    if (deltaCents > 0) {
+      await this.maybeAutoUnfreeze(
+        input.customerId,
+        beforeCents + deltaCents,
+        sharedContext,
+      );
+    }
+
     return { id: txn.id, balance: (beforeCents + deltaCents) / 100 };
   }
 
@@ -520,59 +532,6 @@ class PacksModuleService extends MedusaService({
     return { reversed };
   }
 
-  // If the customer's raw balance is now negative (a clawback drove it under),
-  // freeze them (cause='auto') so available=0 until repaid. A manual freeze is
-  // left as-is (sticky). Returns true if the account is frozen afterward.
-  private async setAutoFreezeIfNegative(
-    customerId: string,
-    reason: string,
-    sharedContext: Context,
-  ): Promise<boolean> {
-    const em = (sharedContext.transactionManager ??
-      sharedContext.manager) as unknown as LedgerSqlManager;
-    const [bal] = await em.execute<{ b: string | null }[]>(
-      'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS b FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
-      [customerId],
-    );
-    if (Number(bal?.b ?? 0) >= 0) return false;
-    const [existing] = await this.listCustomerAccountStates(
-      { customer_id: customerId },
-      { take: 1 },
-      sharedContext,
-    );
-    if (existing) {
-      if (existing.frozen) return true; // already frozen (manual stays sticky)
-      await this.updateCustomerAccountStates(
-        {
-          selector: { id: existing.id },
-          data: {
-            frozen: true,
-            cause: 'auto',
-            frozen_reason: reason,
-            frozen_by: null,
-            frozen_at: new Date(),
-            unfrozen_at: null,
-            unfreeze_cause: null,
-          },
-        },
-        sharedContext,
-      );
-    } else {
-      await this.createCustomerAccountStates(
-        [
-          {
-            customer_id: customerId,
-            frozen: true,
-            cause: 'auto',
-            frozen_reason: reason,
-          },
-        ],
-        sharedContext,
-      );
-    }
-    return true;
-  }
-
   // Freeze the account unconditionally (caller has already determined the balance
   // is projected negative). Returns true if the account ends up frozen (or was
   // already frozen). Used by reverseOpen / reverseCommission after they compute
@@ -612,6 +571,36 @@ class PacksModuleService extends MedusaService({
       );
     }
     return true;
+  }
+
+  // Auto-clear an AUTO freeze once a repaying inflow brings the projected balance
+  // back to >= 0. projectedBalanceCents = committed snapshot + just-inserted delta
+  // (never re-read after insert — MikroORM UoW buffers until flush, so a raw SQL
+  // read inside the same txn would NOT see the new row). A MANUAL freeze is never
+  // auto-lifted. SYSTEM event — recorded on the state row, NOT in admin_action_audit.
+  private async maybeAutoUnfreeze(
+    customerId: string,
+    projectedBalanceCents: number,
+    sharedContext: Context,
+  ): Promise<void> {
+    if (projectedBalanceCents < 0) return;
+    const [state] = await this.listCustomerAccountStates(
+      { customer_id: customerId, frozen: true, cause: 'auto' },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!state) return;
+    await this.updateCustomerAccountStates(
+      {
+        selector: { id: state.id },
+        data: {
+          frozen: false,
+          unfrozen_at: new Date(),
+          unfreeze_cause: 'repaid',
+        },
+      },
+      sharedContext,
+    );
   }
 
   // Admin commission-scoped reversal (Phase 3a). Claws back EVERY commission row
@@ -932,6 +921,21 @@ class PacksModuleService extends MedusaService({
               sharedContext,
             );
             commissions.push({ beneficiary, amountSen, matured });
+            // Auto-clear an AUTO freeze for this beneficiary if the commission
+            // credit repays any outstanding debt. Read the committed balance now
+            // (before the ORM flush) and project forward by amountSen.
+            const [balRow] = await (
+              sharedContext.transactionManager as unknown as LedgerSqlManager
+            ).execute<{ b: string | null }[]>(
+              'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS b FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
+              [beneficiary],
+            );
+            const committedCents = Number(balRow?.b ?? 0);
+            await this.maybeAutoUnfreeze(
+              beneficiary,
+              committedCents + amountSen,
+              sharedContext,
+            );
           };
 
           try {
