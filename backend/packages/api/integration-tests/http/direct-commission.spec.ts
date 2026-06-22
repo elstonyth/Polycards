@@ -65,12 +65,18 @@ medusaIntegrationTestRunner({
           customerId: recruit, amount: 200, reason: "topup", reference: "mock_idem",
         });
         await packs.settleOpen({ customerId: recruit, amount: -50, sourceTransactionId: "open_dup" });
-        // Replay the SAME open_id → the unique index makes the 2nd commission a no-op.
-        await packs.settleOpen({ customerId: recruit, amount: -50, sourceTransactionId: "open_dup" }).catch(() => {});
+        // Replay the SAME open_id MUST reject and roll back: the 23505 on the
+        // commission idempotency index aborts the whole settleOpen txn, so the
+        // duplicate's debit is undone too (the debit is not separately keyed).
+        await expect(
+          packs.settleOpen({ customerId: recruit, amount: -50, sourceTransactionId: "open_dup" }),
+        ).rejects.toThrow();
         const comms = await packs.listCommissions(
           { source_transaction_id: "open_dup" }, { take: 10 },
         );
         expect(comms.length).toBe(1); // exactly one commission for that open
+        // No double-debit: 200 topup − 50 (first open) = 150; the replay rolled back.
+        expect(await packs.creditBalance(recruit)).toBe(150);
       });
 
       it("pays no commission when the recruit has no sponsor", async () => {

@@ -538,9 +538,13 @@ class PacksModuleService extends MedusaService({
 
   // Locked (unspendable) commission credit for a customer, in cents, read inside
   // the caller's transaction. Sums the POSITIVE commission credit rows whose
-  // paired commission lifecycle record is not yet spendable (status != available
-  // OR matures_at > now()). Maturity is a read-time predicate — no scheduler can
-  // make spend wrong by lagging.
+  // paired lifecycle record is not yet spendable: 'pending' AND not matured
+  // (matures_at > now()), OR 'suspended'. 'available' and 'reversed' are NOT
+  // locked — 'available' is the post-maturity spendable state, and a 'reversed'
+  // commission's positive credit is already netted by its negative reversal row
+  // in the raw balance (locking it too would double-subtract). Maturity is a
+  // read-time predicate on 'pending' — no scheduler can make spend wrong by
+  // lagging (a matured-but-not-yet-flipped 'pending' row reads as available).
   private async lockedCommissionCents(
     customerId: string,
     em: LedgerSqlManager,
@@ -553,7 +557,7 @@ class PacksModuleService extends MedusaService({
           AND ct.deleted_at IS NULL
           AND c.deleted_at IS NULL
           AND ct.amount > 0
-          AND (c.status <> 'available' OR c.matures_at > now())`,
+          AND ((c.status = 'pending' AND c.matures_at > now()) OR c.status = 'suspended')`,
       [customerId],
     );
     return Number(rows[0]?.locked_cents ?? 0);

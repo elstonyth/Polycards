@@ -161,7 +161,7 @@ medusaIntegrationTestRunner({
         // so the spend is external-funded and commissionable).
         await packs.mutateCreditAtomic({
           customerId: recruit.actorId,
-          amount: PACK_PRICE * 2, // enough for one open
+          amount: PACK_PRICE * 2, // headroom for the open (2x price)
           reason: "topup",
           reference: "mock_e2e_gate",
         });

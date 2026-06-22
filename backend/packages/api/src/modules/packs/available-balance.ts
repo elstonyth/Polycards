@@ -1,8 +1,12 @@
-// Pure available/locked fold (DB-free, unit-testable). A commission credit is
-// LOCKED — not yet spendable — while its lifecycle status is anything but
-// 'available', OR while it has not matured (now < matures_at). Maturity is a
-// READ-TIME predicate (the authoritative, drift-proof gate); a materialized
-// status is denormalization only. Inputs/outputs are integer sen.
+// Pure available/locked fold (DB-free, unit-testable; mirrors the
+// lockedCommissionCents SQL). A commission credit is LOCKED — not yet spendable —
+// only while it is 'pending' AND not yet matured (now < matures_at), OR
+// 'suspended'. 'available' and 'reversed' are NOT locked: 'available' is the
+// post-maturity spendable state, and a 'reversed' commission's positive credit is
+// already netted by its negative reversal row in the raw balance (locking it too
+// would double-subtract). Maturity is a READ-TIME predicate on 'pending' — a
+// lagging maturity job can't wrongly lock a matured 'pending' row. Amounts are
+// integer minor units (cents = sen; MYR × 100).
 export type CommissionLockRow = {
   status: string;
   matures_at_ms: number;
@@ -15,9 +19,9 @@ export function lockedCentsFromCommissions(
 ): number {
   let locked = 0;
   for (const r of rows) {
-    const immature = nowMs < r.matures_at_ms;
-    const heldByStatus = r.status !== 'available';
-    if (immature || heldByStatus) locked += Math.max(0, r.amount_cents);
+    const immaturePending = r.status === 'pending' && nowMs < r.matures_at_ms;
+    const heldBySuspension = r.status === 'suspended';
+    if (immaturePending || heldBySuspension) locked += Math.max(0, r.amount_cents);
   }
   return locked;
 }
