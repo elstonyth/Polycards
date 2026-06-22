@@ -386,6 +386,15 @@ class PacksModuleService extends MedusaService({
         'settleOpen amount must be less than 0 (an open is a debit).',
       );
     }
+    // sourceTransactionId is the commission idempotency key (open_id). Reject an
+    // empty/missing one at the boundary so a bad caller can't write rows that
+    // escape the partial-unique index (Sourcery review).
+    if (!input.sourceTransactionId) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'settleOpen requires a non-empty sourceTransactionId (the open_id).',
+      );
+    }
 
     // 1) Serialize all credit mutations for THIS customer on the locked txn.
     await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
@@ -520,18 +529,24 @@ class PacksModuleService extends MedusaService({
               matured: settings.commissionCooldownDays === 0,
             });
           } catch (e) {
-            // A 23505 means this open_id already paid its commission. Swallowing
-            // the JS error does NOT make settleOpen a clean no-op: the 23505 has
-            // already aborted THIS transaction (Postgres 25P02), so the outer
-            // commit fails and the duplicate open's DEBIT rolls back too. That is
-            // intentional and correct — the debit is not separately
-            // idempotency-keyed, so aborting the whole settleOpen is what stops a
-            // replayed open_id from double-debiting the recruit. Do NOT wrap this
-            // insert in a SAVEPOINT to "keep the open": that would let the
-            // duplicate debit commit (double-charge). Normal opens mint a fresh
-            // open_id (open-pack workflow), so this path is defense-in-depth.
-            // Re-throw anything that isn't a 23505.
-            if (!isUniqueViolation(e)) throw e;
+            // A 23505 means this open_id already settled (the commission
+            // idempotency index rejected the duplicate). The 23505 has already
+            // aborted THIS transaction (Postgres 25P02), so we re-raise it as a
+            // clear DUPLICATE_ERROR — @InjectTransactionManager then rolls the
+            // whole settleOpen back, DEBIT included. That is intentional and
+            // correct: the debit is not separately idempotency-keyed, so aborting
+            // the entire settleOpen is what stops a replayed open_id from
+            // double-debiting the recruit. Do NOT wrap the inserts in a SAVEPOINT
+            // to "keep the open" — that would let the duplicate debit commit
+            // (double-charge). Normal opens mint a fresh open_id (open-pack
+            // workflow), so this path is defense-in-depth. Re-throw non-23505 as-is.
+            if (isUniqueViolation(e)) {
+              throw new MedusaError(
+                MedusaError.Types.DUPLICATE_ERROR,
+                `Open '${input.sourceTransactionId}' has already been settled.`,
+              );
+            }
+            throw e;
           }
         }
       }

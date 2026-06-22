@@ -29,8 +29,11 @@ medusaIntegrationTestRunner({
             status: "available", matures_at: new Date(), effective_pct: 1,
           } as Record<string, unknown>,
         ]);
-        // Deleting the credit row that backs a commission must be refused.
-        await expect(packs.deleteCreditTransactionsGuarded([credit.id])).rejects.toThrow();
+        // Deleting the credit row that backs a commission must be refused with
+        // the specific guard error (not just any throw).
+        await expect(
+          packs.deleteCreditTransactionsGuarded([credit.id]),
+        ).rejects.toThrow(/backs a commission/);
         // A row with no dependents still deletes fine (resolves without throwing).
         await expect(packs.deleteCreditTransactionsGuarded([charge.id])).resolves.toBeUndefined();
       });

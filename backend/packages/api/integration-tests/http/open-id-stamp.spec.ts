@@ -71,17 +71,19 @@ medusaIntegrationTestRunner({
           input: { pack_id: PACK_SLUG, customer_id: cust },
         });
 
-        // The most-recent transaction for this customer is the pack_open charge
-        // (topup was first, pack_open was second). Filter by customer + order DESC
-        // so we always land on the pack_open row regardless of timing.
+        // Anchor on the pack_open charge explicitly (not "latest row") so the
+        // assertion is order-independent.
         const [charge] = await packs.listCreditTransactions(
-          { customer_id: cust },
+          { customer_id: cust, reason: "pack_open" },
           { take: 1, order: { created_at: "DESC" } },
         );
+        expect(charge.reason).toBe("pack_open");
         const sid = (charge as { source_transaction_id?: string | null })
           .source_transaction_id;
-        expect(typeof sid).toBe("string");
-        expect((sid ?? "").length).toBeGreaterThan(10); // a uuid
+        // open_id is a v4 uuid minted in the workflow transform seam (Task 4).
+        expect(sid).toMatch(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+        );
       });
     });
   },
