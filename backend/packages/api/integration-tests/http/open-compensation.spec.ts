@@ -42,6 +42,34 @@ medusaIntegrationTestRunner({
         expect(reversal).toBeTruthy();
         expect(Number(reversal!.amount)).toBe(30); // +30 mirrors the -30 charge
       });
+
+      it("is idempotent: a repeated compensation does not double-refund", async () => {
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        const cust = "cus_comp_idem";
+
+        await packs.mutateCreditAtomic({
+          customerId: cust, amount: 100, reason: "topup", reference: "mock_comp_idem",
+        });
+        const { id: chargeId } = await packs.mutateCreditAtomic({
+          customerId: cust, amount: -30, reason: "pack_open", floor: 0,
+        });
+
+        // Compensate twice for the SAME charge (a saga that double-compensates).
+        const first = await packs.reverseCreditTransaction(chargeId);
+        const second = await packs.reverseCreditTransaction(chargeId);
+
+        // Second call is a no-op returning the same reversal — no second refund.
+        expect(second.id).toBe(first.id);
+
+        const reversals = await packs.listCreditTransactions(
+          { reference: `reversal:${chargeId}` }, { take: 10 },
+        );
+        expect(reversals.length).toBe(1); // exactly one reversal row
+
+        const after = await packs.creditSummary(cust);
+        expect(after.balance).toBe(100); // refunded once, not 130
+        expect(after.externalFundedSpendTotal).toBe(0);
+      });
     });
   },
 });

@@ -81,8 +81,6 @@ export type SettleOpenInput = {
   amount: number;
   /** The open's stable id (open_id), stamped on the debit + commission rows. */
   sourceTransactionId: string;
-  /** Debit against available (locked-aware) or raw balance. Default 'available'. */
-  floorMode?: 'available' | 'raw';
 };
 
 export type CommissionPaid = {
@@ -312,8 +310,9 @@ class PacksModuleService extends MedusaService({
   // a mirror row: sign-flipped amount (refund) + sign-flipped external_funded_cents
   // (restores external balance; Task-1 fold nets the VIP basis). The original is
   // NEVER deleted — a reversed open keeps its history, which is mandatory once a
-  // commission can reference it (spec §3 invariant 1). Idempotency: the caller
-  // (Medusa saga compensation) runs this at most once per charge id.
+  // commission can reference it (spec §3 invariant 1). Idempotent under the
+  // lock (below): a repeated compensation of the same charge returns the
+  // existing reversal rather than appending a second full refund.
   @InjectTransactionManager()
   async reverseCreditTransaction(
     transactionId: string,
@@ -332,6 +331,18 @@ class PacksModuleService extends MedusaService({
     await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
       `credit:${original.customer_id}`,
     ]);
+
+    // Idempotency (Codex review): a saga that double-compensates the same charge
+    // must NOT append a second refund. Under the lock, if a reversal row for this
+    // charge already exists, return it as a no-op. `reversal:${id}` is the
+    // per-charge reversal key.
+    const [existingReversal] = await this.listCreditTransactions(
+      { reference: `reversal:${transactionId}` },
+      { take: 1 },
+    );
+    if (existingReversal) {
+      return { id: existingReversal.id };
+    }
 
     const originalExt = Number(
       (original as { external_funded_cents?: number | null })
@@ -394,14 +405,11 @@ class PacksModuleService extends MedusaService({
     const externalBalanceSen = Number(rows[0]?.ext_cents ?? 0);
     const externalFundedCents = -consumeExternalSen(-deltaCents, externalBalanceSen);
 
-    // 3) Floor check against the available balance (Task 13 supplies the locked
-    //    deduction; default 'available'). Debit-only Part A: available == raw,
-    //    so this matches mutateCreditAtomic's floor exactly.
-    const floorMode = input.floorMode ?? 'available';
-    const lockedCents =
-      floorMode === 'available'
-        ? await this.lockedCommissionCents(input.customerId, em)
-        : 0;
+    // 3) Floor check against the AVAILABLE balance (raw − locked commission).
+    //    Every open debit is locked-aware — there is no raw-balance opt-out, so a
+    //    debit can never spend credit backed by pending/locked commission (Codex
+    //    review removed the unused floorMode:'raw' bypass).
+    const lockedCents = await this.lockedCommissionCents(input.customerId, em);
     const availableCents = beforeCents - lockedCents;
     if (availableCents + deltaCents < 0) {
       throw new MedusaError(
