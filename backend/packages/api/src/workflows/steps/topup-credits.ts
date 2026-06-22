@@ -66,7 +66,7 @@ export const topUpCreditsStep = createStep(
     // Mirror buyback-pull: the ledger row is the only mutation, so undo is a
     // single delete. (A real gateway adds a refund call here.)
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
-    await packs.deleteCreditTransactions([data.creditTransactionId]);
+    await packs.deleteCreditTransactionsGuarded([data.creditTransactionId]);
   }
 );
 

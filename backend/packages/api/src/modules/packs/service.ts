@@ -1459,6 +1459,15 @@ class PacksModuleService extends MedusaService({
   // reverseCreditTransaction. This refuses an accidental delete of any row a
   // commission lifecycle record points at.
   //
+  // *** THIS IS THE ONLY PERMITTED DELETE PATH FOR credit_transaction ROWS. ***
+  // Never call the base `deleteCreditTransactions` directly from workflow steps,
+  // routes, or any new code — always go through this guard. The base is an
+  // internal delegation detail only (see the single call below). The source-scan
+  // seal test (`delete-guard-seal.unit.spec.ts`) enforces this: it reads the
+  // entire src/ tree and asserts that the only occurrence of a bare
+  // `.deleteCreditTransactions(` call (i.e. not `deleteCreditTransactionsGuarded`)
+  // is the single delegation inside this method. Adding a new raw caller breaks CI.
+  //
   // Named `deleteCreditTransactionsGuarded` rather than overriding
   // `deleteCreditTransactions` because MedusaService defines the base as an
   // **instance member property** (arrow-function assigned in the constructor), not

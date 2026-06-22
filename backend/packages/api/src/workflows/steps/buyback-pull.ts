@@ -141,7 +141,7 @@ export const buybackPullStep = createStep(
       // The undo itself failing leaves credit-without-flip — loud trail so the
       // inconsistent pair (pull, txn) can be repaired by hand.
       try {
-        await packs.deleteCreditTransactions([creditTransactionId]);
+        await packs.deleteCreditTransactionsGuarded([creditTransactionId]);
       } catch (undoError) {
         logger.error(
           `buyback-pull: UNDO FAILED — credit txn '${creditTransactionId}' exists but pull '${pull.id}' was not flipped; repair manually. ${
@@ -203,7 +203,7 @@ export const buybackPullStep = createStep(
   async (data: CompensateData, { container }) => {
     if (!data) return;
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
-    await packs.deleteCreditTransactions([data.creditTransactionId]);
+    await packs.deleteCreditTransactionsGuarded([data.creditTransactionId]);
     await packs.updatePulls([
       {
         id: data.pullId,
