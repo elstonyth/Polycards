@@ -114,7 +114,20 @@ export const CreditsSchema = z.looseObject({
 export const CreditTransactionSchema = z.looseObject({
   id: z.string(),
   amount: finite,
-  reason: z.enum(['buyback', 'topup', 'pack_open', 'adjustment']),
+  // Must cover EVERY reason the backend ledger emits, or parseList silently
+  // DROPS the row — VIP commission rows (direct_referral/team_override/
+  // commission_reversal) and cashout would vanish from the customer's history
+  // and stop reconciling to the displayed balance.
+  reason: z.enum([
+    'buyback',
+    'topup',
+    'pack_open',
+    'adjustment',
+    'direct_referral',
+    'team_override',
+    'commission_reversal',
+    'cashout',
+  ]),
   created_at: z.string(),
 });
 

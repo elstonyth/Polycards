@@ -7,6 +7,7 @@ import {
   RecentPullSchema,
   LeaderboardEntrySchema,
   PublicProfileSchema,
+  CreditTransactionSchema,
   VaultItemSchema,
   BalanceSchema,
   WonCardSchema,
@@ -144,5 +145,45 @@ describe('parseOne — null on failure', () => {
       parseOne(OpenBuybackSchema, { percent: 90, amount: 1 }),
     ).not.toBeNull();
     expect(parseOne(OpenBuybackSchema, { percent: 90 })).toBeNull();
+  });
+});
+
+describe('CreditTransactionSchema — keeps every reason the backend emits', () => {
+  it('keeps VIP commission rows (direct_referral etc.), not just the original 4', () => {
+    const rows = [
+      {
+        id: 'a',
+        amount: -25,
+        reason: 'pack_open',
+        created_at: '2026-06-22T00:00:00Z',
+      },
+      {
+        id: 'b',
+        amount: 1.25,
+        reason: 'direct_referral',
+        created_at: '2026-06-22T00:01:00Z',
+      },
+      {
+        id: 'c',
+        amount: 0.2,
+        reason: 'team_override',
+        created_at: '2026-06-22T00:02:00Z',
+      },
+      {
+        id: 'd',
+        amount: -1.25,
+        reason: 'commission_reversal',
+        created_at: '2026-06-22T00:03:00Z',
+      },
+      {
+        id: 'e',
+        amount: 5,
+        reason: 'cashout',
+        created_at: '2026-06-22T00:04:00Z',
+      },
+    ];
+    // The backend ledger emits all 8 reasons; the storefront must not silently
+    // drop commission rows (balance would stop reconciling to visible history).
+    expect(parseList(CreditTransactionSchema, rows)).toHaveLength(5);
   });
 });

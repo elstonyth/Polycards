@@ -8,6 +8,10 @@ const REASON_LABEL: Record<CreditTxn['reason'], string> = {
   pack_open: 'Pack open',
   buyback: 'Sell-back',
   adjustment: 'Adjustment',
+  direct_referral: 'Referral commission',
+  team_override: 'Team override',
+  commission_reversal: 'Commission reversal',
+  cashout: 'Cashout',
 };
 
 export const reasonLabel = (reason: CreditTxn['reason']): string =>

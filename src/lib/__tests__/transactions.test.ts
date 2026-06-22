@@ -8,6 +8,12 @@ describe('reasonLabel', () => {
     expect(reasonLabel('buyback')).toBe('Sell-back');
     expect(reasonLabel('adjustment')).toBe('Adjustment');
   });
+  it('labels the VIP commission reasons the backend now emits', () => {
+    expect(reasonLabel('direct_referral')).toBe('Referral commission');
+    expect(reasonLabel('team_override')).toBe('Team override');
+    expect(reasonLabel('commission_reversal')).toBe('Commission reversal');
+    expect(reasonLabel('cashout')).toBe('Cashout');
+  });
 });
 
 describe('signedUsd', () => {

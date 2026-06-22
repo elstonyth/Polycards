@@ -212,7 +212,18 @@ export async function topUpCredits(amount: number): Promise<TopUpActionResult> {
 export type CreditTxn = {
   id: string;
   amount: number;
-  reason: 'buyback' | 'topup' | 'pack_open' | 'adjustment';
+  // Mirrors the backend credit_transaction reason enum — including the VIP
+  // commission reasons — so commission rows are kept, not dropped, on the
+  // customer's Transactions page.
+  reason:
+    | 'buyback'
+    | 'topup'
+    | 'pack_open'
+    | 'adjustment'
+    | 'direct_referral'
+    | 'team_override'
+    | 'commission_reversal'
+    | 'cashout';
   createdAt: string;
 };
 

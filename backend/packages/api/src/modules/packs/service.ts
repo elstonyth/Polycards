@@ -184,7 +184,7 @@ class PacksModuleService extends MedusaService({
     for (let skip = 0; ; skip += BALANCE_PAGE) {
       const page = await this.listCreditTransactions(
         { customer_id: customerId },
-        { skip, take: BALANCE_PAGE, order: { created_at: 'ASC' } },
+        { skip, take: BALANCE_PAGE, order: { created_at: 'ASC', id: 'ASC' } },
       );
       for (const t of page) {
         totals = foldLedgerRow(totals, {
@@ -399,12 +399,12 @@ class PacksModuleService extends MedusaService({
     const PAGE = 1000;
     let all = await this.listCreditTransactions(
       { source_transaction_id: sourceTransactionId },
-      { skip: 0, take: PAGE, order: { created_at: 'ASC' } },
+      { skip: 0, take: PAGE, order: { created_at: 'ASC', id: 'ASC' } },
     );
     for (let skip = PAGE; all.length === skip; skip += PAGE) {
       const next = await this.listCreditTransactions(
         { source_transaction_id: sourceTransactionId },
-        { skip, take: PAGE, order: { created_at: 'ASC' } },
+        { skip, take: PAGE, order: { created_at: 'ASC', id: 'ASC' } },
       );
       all = all.concat(next);
     }

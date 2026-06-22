@@ -161,9 +161,11 @@ export default defineMiddlewares({
       ],
     },
     {
-      // Showcase toggle (POST /store/vault/:id/showcase).
+      // Showcase toggle (POST /store/vault/:id/showcase). Per-actor limiter for
+      // parity with every other mutating /store endpoint (anti-hammering; it's
+      // already authed + ownership-checked + idempotent, so this is hardening).
       matcher: '/store/vault/*/showcase',
-      middlewares: [authenticate('customer', ['bearer'])],
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
     },
     {
       // GET + POST /store/delivery-orders
