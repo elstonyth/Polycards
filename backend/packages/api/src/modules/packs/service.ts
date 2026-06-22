@@ -736,6 +736,117 @@ class PacksModuleService extends MedusaService({
     return { reversed, froze };
   }
 
+  // Admin per-commission status flip: available|pending → suspended.
+  // The suspended status is counted as locked in lockedCommissionCents, so
+  // the beneficiary's availableBalance drops automatically without any
+  // additional balance-mutation step. Takes the per-beneficiary advisory lock
+  // to serialise concurrent balance reads, then flips the status and writes an
+  // audit row in the same transaction.
+  @InjectTransactionManager()
+  async suspendCommission(
+    input: { commissionId: string; adminId: string; reason: string },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ status: 'suspended' }> {
+    const em =
+      sharedContext.transactionManager as unknown as LedgerSqlManager;
+    const [c] = await this.listCommissions(
+      { id: input.commissionId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!c) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        `Commission '${input.commissionId}' not found.`,
+      );
+    }
+    if (c.status === 'reversed') {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'A reversed commission cannot be suspended.',
+      );
+    }
+    await em.execute(
+      'SELECT pg_advisory_xact_lock(hashtextextended(?, 0))',
+      [`credit:${c.beneficiary}`],
+    );
+    await this.updateCommissions(
+      { selector: { id: c.id }, data: { status: 'suspended' } },
+      sharedContext,
+    );
+    await this.createAdminActionAudits(
+      [
+        {
+          admin_id: input.adminId,
+          entity_type: 'commission',
+          entity_id: c.id,
+          action: 'suspend_commission',
+          before: { status: c.status },
+          after: { status: 'suspended' },
+          reason: input.reason,
+        },
+      ],
+      sharedContext,
+    );
+    return { status: 'suspended' };
+  }
+
+  // Admin per-commission status flip: suspended → pending|available.
+  // The restored status is determined by the authoritative maturity predicate
+  // (matures_at <= now() → available, else pending) rather than a stored prior
+  // value, so a commission that matured while suspended comes back as available.
+  @InjectTransactionManager()
+  async unsuspendCommission(
+    input: { commissionId: string; adminId: string; reason: string },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ status: 'pending' | 'available' }> {
+    const em =
+      sharedContext.transactionManager as unknown as LedgerSqlManager;
+    const [c] = await this.listCommissions(
+      { id: input.commissionId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!c) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        `Commission '${input.commissionId}' not found.`,
+      );
+    }
+    if (c.status !== 'suspended') {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'Only a suspended commission can be unsuspended.',
+      );
+    }
+    // Restore from the authoritative read-predicate, not a stored prior value.
+    const next: 'pending' | 'available' =
+      new Date(c.matures_at).getTime() <= Date.now() ? 'available' : 'pending';
+    await em.execute(
+      'SELECT pg_advisory_xact_lock(hashtextextended(?, 0))',
+      [`credit:${c.beneficiary}`],
+    );
+    await this.updateCommissions(
+      { selector: { id: c.id }, data: { status: next } },
+      sharedContext,
+    );
+    await this.createAdminActionAudits(
+      [
+        {
+          admin_id: input.adminId,
+          entity_type: 'commission',
+          entity_id: c.id,
+          action: 'unsuspend_commission',
+          before: { status: 'suspended' },
+          after: { status: next },
+          reason: input.reason,
+        },
+      ],
+      sharedContext,
+    );
+    return { status: next };
+  }
+
   // The atomic open settlement — the ONLY place an open debit (and, Phase 2a,
   // its commission) is written. Holds the per-customer advisory lock across the
   // balance read, floor check, debit insert, AND (Task 14) the commission fan-out
