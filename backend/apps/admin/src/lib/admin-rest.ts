@@ -126,7 +126,7 @@ export interface CustomerGacha {
   transactions: SupportTransaction[];
   pulls: SupportPull[];
   vault: { count: number; market_value: number };
-  vip: { level: number; spend: number } | null;
+  vip: { level: number; highest_level_ever: number; spend: number } | null;
 }
 
 // Core Medusa admin customer search (?q matches email/name).
