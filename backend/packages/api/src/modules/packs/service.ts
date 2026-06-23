@@ -1902,6 +1902,85 @@ class PacksModuleService extends MedusaService({
 
     return { gained };
   }
+
+  // Maturity job (Phase 3b Task 7): flips pending commissions whose cooldown has
+  // elapsed (matures_at <= now) to 'available' so the status column stays in sync
+  // with the read-time availableBalance gate. This is COSMETIC/AUDIT only — the
+  // balance gate already treats a pending row as available once matures_at passes,
+  // so this flip never changes spendability.
+  //
+  // Per-beneficiary: acquires the credit: advisory lock (same keyspace as
+  // mutateCreditAtomic / settleOpen) so concurrent reversal writes on the same
+  // beneficiary are serialized. Uses SKIP LOCKED chunked UPDATEs so a second
+  // concurrent run skips already-locked rows rather than blocking.
+  //
+  // Status-guarded (status='pending' in WHERE) → idempotent, never clobbers
+  // reversed/suspended rows.
+  @InjectTransactionManager()
+  async matureDueCommissions(
+    notify?: (
+      beneficiaryId: string,
+      commissionId: string,
+      frozen: boolean,
+    ) => Promise<void>,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ flipped: number }> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    const CHUNK = 500;
+
+    // 1) Enumerate all distinct beneficiaries that have at least one due pending row.
+    const due = await em.execute<{ beneficiary: string }[]>(
+      `SELECT DISTINCT beneficiary FROM commission
+        WHERE status = 'pending' AND matures_at <= now() AND deleted_at IS NULL`,
+    );
+
+    let flipped = 0;
+
+    for (const { beneficiary } of due) {
+      // 2) Acquire per-beneficiary advisory lock (same credit: keyspace used by
+      //    mutateCreditAtomic, settleOpen, reverseCommission, reverseOpen).
+      //    Transaction-scoped — auto-releases on commit/rollback.
+      await em.execute(
+        'SELECT pg_advisory_xact_lock(hashtextextended(?, 0))',
+        [`credit:${beneficiary}`],
+      );
+
+      // 3) Check freeze state inside the lock so the flag is consistent with
+      //    the advisory-locked read (isFrozen reads on sharedContext's connection).
+      const frozen = await this.isFrozen(beneficiary, sharedContext);
+
+      // 4) Chunked flip: Postgres rejects LIMIT on a bare UPDATE, so use a
+      //    sub-select with FOR UPDATE SKIP LOCKED + RETURNING. Loop until the
+      //    batch returns fewer than CHUNK rows (i.e. no more to process).
+      for (;;) {
+        const rows = await em.execute<{ id: string }[]>(
+          `UPDATE commission
+              SET status = 'available', updated_at = now()
+            WHERE id IN (
+              SELECT id FROM commission
+               WHERE beneficiary = ?
+                 AND status = 'pending'
+                 AND matures_at <= now()
+                 AND deleted_at IS NULL
+               ORDER BY matures_at
+               LIMIT ?
+               FOR UPDATE SKIP LOCKED
+            )
+            RETURNING id`,
+          [beneficiary, CHUNK],
+        );
+
+        for (const r of rows) {
+          flipped++;
+          if (notify) await notify(beneficiary, r.id, frozen);
+        }
+
+        if (rows.length < CHUNK) break;
+      }
+    }
+
+    return { flipped };
+  }
 }
 
 export default PacksModuleService;
