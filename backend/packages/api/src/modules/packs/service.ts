@@ -19,6 +19,8 @@ import ReferralRelationship from './models/referral-relationship';
 import Commission from './models/commission';
 import CustomerAccountState from './models/customer-account-state';
 import AdminActionAudit from './models/admin-action-audit';
+import VipMemberState from './models/vip-member-state';
+import VipRewardGrant from './models/vip-reward-grant';
 import {
   resolveBuybackRate,
   buybackAmount,
@@ -38,6 +40,8 @@ import {
   teamOverrideSchedule,
 } from './referral-commission';
 import { levelForSpend } from './vip-ladder';
+import { levelsToGrant, rewardsForLevel } from './vip-rewards';
+import { fromSen } from './money';
 import {
   validateRewardsPatch,
   type RewardsSettingsPatch,
@@ -135,6 +139,8 @@ class PacksModuleService extends MedusaService({
   Commission,
   CustomerAccountState,
   AdminActionAudit,
+  VipMemberState,
+  VipRewardGrant,
 }) {
   // Commission engine globals. Reads the singleton row; falls back to defaults
   // when absent. COMMISSION_COOLDOWN_DAYS env override forces the demo (0) and
@@ -1112,131 +1118,154 @@ class PacksModuleService extends MedusaService({
       );
     }
 
-    // 4) Insert the debit row in the locked txn.
-    const [txn] = await this.createCreditTransactions(
-      [
-        {
-          customer_id: input.customerId,
-          amount: deltaCents / 100,
-          reason: 'pack_open',
-          pull_id: null,
-          reference: null,
-          external_funded_cents: externalFundedCents,
-          source_transaction_id: input.sourceTransactionId,
-        },
-      ],
-      sharedContext,
+    // 4) Idempotency pre-check + debit insert (Phase 3b).
+    // MikroORM's Unit of Work buffers ORM inserts until flush (transaction end), so
+    // a 23505 from the debit row's partial-unique index fires at commit time — AFTER
+    // settleOpen returns — where dbErrorMapper would intercept it before our catch.
+    // Instead we do an explicit pre-check (raw SQL, fires immediately inside the
+    // advisory lock) so a replayed no-sponsor open_id is caught here with a clear
+    // DUPLICATE_ERROR. The lock held since step 1 makes this read-then-write safe.
+    const [existing] = await em.execute<{ id: string }[]>(
+      `SELECT id FROM credit_transaction
+         WHERE source_transaction_id = ? AND reason = 'pack_open' AND amount < 0
+           AND deleted_at IS NULL
+         LIMIT 1`,
+      [input.sourceTransactionId],
     );
-
-    // 5) Commission fan-out (Phase 2b: direct gen-1 + team-override gens 2..N).
-    //    All inside the SAME locked txn so the debit + every commission credit +
-    //    lifecycle row commit or roll back together (no saga step could share
-    //    this lock — spec §3).
-    const commissions: CommissionPaid[] = [];
-    // The commission basis is the EXTERNAL-FUNDED portion of this open (refund-
-    // stable; matches the VIP basis). −externalFundedCents is what was consumed.
-    const basisSen = -externalFundedCents;
-    if (basisSen > 0) {
-      const [rel] = await this.listReferralRelationships(
-        { customer_id: input.customerId },
-        { take: 1 },
+    if (existing) {
+      throw new MedusaError(
+        MedusaError.Types.DUPLICATE_ERROR,
+        `Open '${input.sourceTransactionId}' has already been settled.`,
       );
-      if (rel?.sponsor_id) {
-        const sponsorId = rel.sponsor_id;
-        // Sponsor's effective level, derived live from THEIR external-funded
-        // spend against the current ladder (forward-only config). Note:
-        // creditSummary is @InjectManager (no context param) — the direct path's
-        // level read stays as-is; only flat-20% overrides are added below, which
-        // need no per-ancestor level read.
-        const sponsorSummary = await this.creditSummary(sponsorId);
-        const ladderRows = await this.listVipLevels(
-          {},
+    }
+
+    let txn: Awaited<ReturnType<typeof this.createCreditTransactions>>[0];
+    const commissions: CommissionPaid[] = [];
+    try {
+      [txn] = await this.createCreditTransactions(
+        [
           {
-            select: ['level', 'spend_threshold', 'direct_referral_pct'],
-            take: 1000,
+            customer_id: input.customerId,
+            amount: deltaCents / 100,
+            reason: 'pack_open',
+            pull_id: null,
+            reference: null,
+            external_funded_cents: externalFundedCents,
+            source_transaction_id: input.sourceTransactionId,
           },
-        );
-        const levelLadder = ladderRows.map((r) => ({
-          level: r.level,
-          spend_threshold: Number(r.spend_threshold),
-        }));
-        const pctLadder = ladderRows.map((r) => ({
-          level: r.level,
-          direct_referral_pct: Number(r.direct_referral_pct),
-        }));
-        const sponsorLevel = levelForSpend(
-          sponsorSummary.externalFundedSpendTotal,
-          levelLadder,
-        );
-        const pct = directReferralPctForLevel(sponsorLevel, pctLadder);
-        const commissionSen = directCommissionSen(basisSen, pct);
+        ],
+        sharedContext,
+      );
 
-        if (commissionSen > 0) {
-          // Thread sharedContext so the settings read runs on THIS locked txn.
-          const settings = await this.rewardsSettings(sharedContext);
-          const matured = settings.commissionCooldownDays === 0;
-          // For cooldown=0 set matures_at to epoch so matures_at > now() is
-          // definitively false even if JS clock lags Postgres transaction now().
-          const maturesAt = matured
-            ? new Date(0)
-            : new Date(
-                Date.now() + settings.commissionCooldownDays * 86_400_000,
+      // 5) Commission fan-out (Phase 2b: direct gen-1 + team-override gens 2..N).
+      //    All inside the SAME locked txn so the debit + every commission credit +
+      //    lifecycle row commit or roll back together (no saga step could share
+      //    this lock — spec §3).
+      // The commission basis is the EXTERNAL-FUNDED portion of this open.
+      // Net basis reaches zero on clawback (reverseOpen negates externalFundedCents),
+      // so the basis is NOT refund-stable at the ledger level. The monotonic
+      // lifetime counter (built in a later task) is the rank basis; spec §3.
+      const basisSen = -externalFundedCents;
+      if (basisSen > 0) {
+        const [rel] = await this.listReferralRelationships(
+          { customer_id: input.customerId },
+          { take: 1 },
+        );
+        if (rel?.sponsor_id) {
+          const sponsorId = rel.sponsor_id;
+          // Sponsor's effective level, derived live from THEIR external-funded
+          // spend against the current ladder (forward-only config). Note:
+          // creditSummary is @InjectManager (no context param) — the direct path's
+          // level read stays as-is; only flat-20% overrides are added below, which
+          // need no per-ancestor level read.
+          const sponsorSummary = await this.creditSummary(sponsorId);
+          const ladderRows = await this.listVipLevels(
+            {},
+            {
+              select: ['level', 'spend_threshold', 'direct_referral_pct'],
+              take: 1000,
+            },
+          );
+          const levelLadder = ladderRows.map((r) => ({
+            level: r.level,
+            spend_threshold: Number(r.spend_threshold),
+          }));
+          const pctLadder = ladderRows.map((r) => ({
+            level: r.level,
+            direct_referral_pct: Number(r.direct_referral_pct),
+          }));
+          const sponsorLevel = levelForSpend(
+            sponsorSummary.externalFundedSpendTotal,
+            levelLadder,
+          );
+          const pct = directReferralPctForLevel(sponsorLevel, pctLadder);
+          const commissionSen = directCommissionSen(basisSen, pct);
+
+          if (commissionSen > 0) {
+            // Thread sharedContext so the settings read runs on THIS locked txn.
+            const settings = await this.rewardsSettings(sharedContext);
+            const matured = settings.commissionCooldownDays === 0;
+            // For cooldown=0 set matures_at to epoch so matures_at > now() is
+            // definitively false even if JS clock lags Postgres transaction now().
+            const maturesAt = matured
+              ? new Date(0)
+              : new Date(
+                  Date.now() + settings.commissionCooldownDays * 86_400_000,
+                );
+
+            // Pay one beneficiary: the credit row + its 1:1 lifecycle row, in the
+            // SAME locked txn. The partial-unique index (source_transaction_id,
+            // reason, customer_id, generation) rejects a replayed open_id with a
+            // 23505 (caught below). reason = 'direct_referral' for gen 1, else
+            // 'team_override'. effective_pct snapshots the whole-percent used.
+            const payCommission = async (
+              beneficiary: string,
+              amountSen: number,
+              generation: number,
+              kind: 'direct' | 'override',
+              effectivePct: number,
+            ): Promise<void> => {
+              const [credit] = await this.createCreditTransactions(
+                [
+                  {
+                    customer_id: beneficiary,
+                    amount: amountSen / 100,
+                    reason:
+                      kind === 'direct' ? 'direct_referral' : 'team_override',
+                    pull_id: null,
+                    reference: null,
+                    external_funded_cents: 0, // commission is internal, not external
+                    source_transaction_id: input.sourceTransactionId,
+                    generation,
+                  },
+                ],
+                sharedContext,
               );
+              await this.createCommissions(
+                [
+                  {
+                    credit_transaction_id: credit.id,
+                    beneficiary,
+                    source_transaction_id: input.sourceTransactionId,
+                    generation,
+                    kind,
+                    status: matured ? 'available' : 'pending',
+                    matures_at: maturesAt,
+                    effective_pct: effectivePct,
+                    reversal_transaction_id: null,
+                  },
+                ],
+                sharedContext,
+              );
+              commissions.push({ beneficiary, amountSen, matured });
+              // NOTE: a frozen sponsor repaid only by a downline commission lifts
+              // on their next direct inflow (mutateCreditAtomic holds their lock)
+              // — we do NOT auto-unfreeze here: settleOpen holds only the
+              // recruit's lock, so unfreezing a beneficiary would be a TOCTOU
+              // race (and taking the beneficiary lock here risks deadlock vs the
+              // sorted-lock reversal paths).
+            };
 
-          // Pay one beneficiary: the credit row + its 1:1 lifecycle row, in the
-          // SAME locked txn. The partial-unique index (source_transaction_id,
-          // reason, customer_id, generation) rejects a replayed open_id with a
-          // 23505 (caught below). reason = 'direct_referral' for gen 1, else
-          // 'team_override'. effective_pct snapshots the whole-percent used.
-          const payCommission = async (
-            beneficiary: string,
-            amountSen: number,
-            generation: number,
-            kind: 'direct' | 'override',
-            effectivePct: number,
-          ): Promise<void> => {
-            const [credit] = await this.createCreditTransactions(
-              [
-                {
-                  customer_id: beneficiary,
-                  amount: amountSen / 100,
-                  reason:
-                    kind === 'direct' ? 'direct_referral' : 'team_override',
-                  pull_id: null,
-                  reference: null,
-                  external_funded_cents: 0, // commission is internal, not external
-                  source_transaction_id: input.sourceTransactionId,
-                  generation,
-                },
-              ],
-              sharedContext,
-            );
-            await this.createCommissions(
-              [
-                {
-                  credit_transaction_id: credit.id,
-                  beneficiary,
-                  source_transaction_id: input.sourceTransactionId,
-                  generation,
-                  kind,
-                  status: matured ? 'available' : 'pending',
-                  matures_at: maturesAt,
-                  effective_pct: effectivePct,
-                  reversal_transaction_id: null,
-                },
-              ],
-              sharedContext,
-            );
-            commissions.push({ beneficiary, amountSen, matured });
-            // NOTE: a frozen sponsor repaid only by a downline commission lifts
-            // on their next direct inflow (mutateCreditAtomic holds their lock)
-            // — we do NOT auto-unfreeze here: settleOpen holds only the
-            // recruit's lock, so unfreezing a beneficiary would be a TOCTOU
-            // race (and taking the beneficiary lock here risks deadlock vs the
-            // sorted-lock reversal paths).
-          };
-
-          try {
             // gen 1 — the direct sponsor.
             await payCommission(sponsorId, commissionSen, 1, 'direct', pct);
 
@@ -1303,27 +1332,22 @@ class PacksModuleService extends MedusaService({
                 );
               }
             }
-          } catch (e) {
-            // A 23505 means this open_id already settled (the commission
-            // idempotency index rejected a duplicate at some generation). The
-            // 23505 has already aborted THIS transaction (Postgres 25P02), so we
-            // re-raise it as a clear DUPLICATE_ERROR — @InjectTransactionManager
-            // then rolls the whole settleOpen back, DEBIT included. That is
-            // intentional: the debit is not separately idempotency-keyed, so
-            // aborting the entire open is what stops a replayed open_id from
-            // double-debiting. Do NOT wrap inserts in a SAVEPOINT to "keep the
-            // open" — that would let the duplicate debit commit. Re-throw
-            // non-23505 as-is.
-            if (isUniqueViolation(e)) {
-              throw new MedusaError(
-                MedusaError.Types.DUPLICATE_ERROR,
-                `Open '${input.sourceTransactionId}' has already been settled.`,
-              );
-            }
-            throw e;
           }
         }
       }
+    } catch (e) {
+      // A 23505 means this open_id already settled — from EITHER the debit index
+      // (no-sponsor path, Phase 3b) or the commission index (with-sponsor path).
+      // The 23505 already aborted THIS txn (25P02); re-raise as DUPLICATE_ERROR so
+      // @InjectTransactionManager rolls the whole settleOpen back, DEBIT included.
+      // No SAVEPOINT — that would let the duplicate debit commit.
+      if (isUniqueViolation(e)) {
+        throw new MedusaError(
+          MedusaError.Types.DUPLICATE_ERROR,
+          `Open '${input.sourceTransactionId}' has already been settled.`,
+        );
+      }
+      throw e;
     }
 
     return {
@@ -1701,6 +1725,348 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     return after;
+  }
+
+  // Monotonic lifetime external spend for a single customer, in SEN. Sums
+  // ORIGINAL pack_open debits (amount<0) only — reversals are amount>0 and
+  // thus excluded, so the counter never drops on a clawback (spec §3).
+  // This mirrors the `lifetimeExternalSen` pure fold but runs in raw SQL for
+  // efficiency (one scan vs. N ORM fetches). Uses @InjectManager so a caller
+  // outside a transaction gets a fresh connection.
+  @InjectManager()
+  async lifetimeExternalSenFor(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<number> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ sen: string | null }[]>(
+      `SELECT COALESCE(SUM(-external_funded_cents), 0)::bigint AS sen
+         FROM credit_transaction
+        WHERE customer_id = ? AND reason = 'pack_open' AND amount < 0 AND deleted_at IS NULL`,
+      [customerId],
+    );
+    return Number(rows[0]?.sen ?? 0);
+  }
+
+  // Outstanding voucher liability: sum of amount_myr across all GRANTED,
+  // unfulfilled voucher reward grants. These are off-ledger obligations — each
+  // represents a future redemption the operator owes. Uses @InjectManager so
+  // callers outside a transaction get a fresh connection.
+  @InjectManager()
+  async outstandingVoucherLiabilityMyr(
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<number> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ liability: string | null }[]>(
+      `SELECT COALESCE(SUM((payload->>'amount_myr')::numeric), 0) AS liability
+         FROM vip_reward_grant
+        WHERE kind='voucher' AND status='granted' AND deleted_at IS NULL`,
+    );
+    return Number(rows[0]?.liability ?? 0);
+  }
+
+  // Race-free upsert of the vip_member_state projection row. Uses
+  // INSERT … ON CONFLICT(customer_id) DO UPDATE so concurrent rebuilds for the
+  // same customer always converge. GREATEST ensures highest_level_ever is truly
+  // monotonic (never regressed by a concurrent rebuild off a different snapshot).
+  @InjectManager()
+  async upsertVipMemberState(
+    input: {
+      customerId: string;
+      lifetimeSen: number;
+      highestLevelEver: number;
+      currentLevel: number;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    await em.execute(
+      `INSERT INTO vip_member_state
+         (id, customer_id, lifetime_external_spend_sen, highest_level_ever, current_level, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, now(), now())
+       ON CONFLICT (customer_id) WHERE deleted_at IS NULL DO UPDATE SET
+         lifetime_external_spend_sen = EXCLUDED.lifetime_external_spend_sen,
+         highest_level_ever = GREATEST(vip_member_state.highest_level_ever, EXCLUDED.highest_level_ever),
+         current_level = EXCLUDED.current_level,
+         updated_at = now()`,
+      [
+        `vms_${input.customerId}`,
+        input.customerId,
+        input.lifetimeSen,
+        input.highestLevelEver,
+        input.currentLevel,
+      ],
+    );
+  }
+
+  // Shared VIP-state inputs read from the authoritative ledger: the monotonic
+  // lifetime counter (SEN), the net-basis external spend (MYR, the display axis),
+  // and the full ladder (threshold + reward columns). Both rebuildVipMemberState
+  // and grantLevelUpRewards need exactly these, so they live in one place and can
+  // never drift in what they read. Reads stay SEQUENTIAL: lifetimeExternalSenFor
+  // and listVipLevels run on the same injected EntityManager, which is not safe to
+  // query concurrently — so this is a DRY extraction, not a parallelization.
+  private async loadVipStateInputs(
+    customerId: string,
+    sharedContext: Context = {},
+  ) {
+    const lifetimeSen = await this.lifetimeExternalSenFor(
+      customerId,
+      sharedContext,
+    );
+    const netBasisMyr = (await this.creditSummary(customerId))
+      .externalFundedSpendTotal;
+    const ladderRows = await this.listVipLevels(
+      {},
+      {
+        select: [
+          'level',
+          'spend_threshold',
+          'voucher_amount',
+          'box_tier',
+          'frame_unlock',
+        ],
+        take: 1000,
+      },
+    );
+    const thresholdRows = ladderRows.map((r) => ({
+      level: r.level,
+      spend_threshold: Number(r.spend_threshold),
+    }));
+    return { lifetimeSen, netBasisMyr, ladderRows, thresholdRows };
+  }
+
+  // Rebuild the vip_member_state projection for a single customer from the
+  // authoritative ledger. Safe to call repeatedly — the upsert is idempotent.
+  // lifetime uses the monotonic counter (fromSen for levelForSpend unit conversion);
+  // current_level uses the net-basis summary (may drop on refund).
+  async rebuildVipMemberState(
+    customerId: string,
+    sharedContext: Context = {},
+  ): Promise<void> {
+    const { lifetimeSen, netBasisMyr, thresholdRows } =
+      await this.loadVipStateInputs(customerId, sharedContext);
+    await this.upsertVipMemberState(
+      {
+        customerId,
+        lifetimeSen,
+        highestLevelEver: levelForSpend(fromSen(lifetimeSen), thresholdRows), // fromSen: SEN→MYR unit conversion (UNIT TRAP)
+        currentLevel: levelForSpend(netBasisMyr, thresholdRows),
+      },
+      sharedContext,
+    );
+  }
+
+  // Rebuild the vip_member_state projection for every customer that has ever
+  // touched the credit ledger. Intended for admin-triggered full reconciliation.
+  @InjectManager()
+  async rebuildAllVipMemberState(
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const customers = await em.execute<{ customer_id: string }[]>(
+      `SELECT DISTINCT customer_id FROM credit_transaction WHERE deleted_at IS NULL`,
+      [],
+    );
+    for (const row of customers) {
+      await this.rebuildVipMemberState(row.customer_id, sharedContext);
+    }
+  }
+
+  // Grant ladder rewards for every newly-crossed VIP level (Phase 3b §E).
+  //
+  // Monotonic-grant invariant: derives the trigger level from the MONOTONIC
+  // lifetime counter (lifetimeExternalSenFor → fromSen → levelForSpend) so
+  // a clawback+respend can never re-grant rewards already earned. The high-water
+  // mark (highest_level_ever) is read from the existing state row (default L1)
+  // and drives levelsToGrant — L1 is never granted (levelsToGrant enforces L2 floor).
+  //
+  // Grant insert idempotency: uses raw INSERT … ON CONFLICT (customer_id, level, kind)
+  // WHERE deleted_at IS NULL DO NOTHING so a replayed event with the same
+  // (customerId, openId) simply skips existing rows without raising a 23505. A
+  // try/catch around the ORM's createVipRewardGrants would poison the enclosing
+  // txn (Postgres 25P02) on the first duplicate — raw DO NOTHING avoids this
+  // entirely. The partial WHERE clause must match the UQ_vip_reward_grant_customer_level_kind
+  // partial index (defined in vip-reward-grant.ts with `where: 'deleted_at IS NULL'`).
+  //
+  // currentLevel uses the NET basis (creditSummary.externalFundedSpendTotal) so
+  // it may drop below highest_level_ever after a clawback — that's by design.
+  @InjectManager()
+  async grantLevelUpRewards(
+    customerId: string,
+    openId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ gained: number[] }> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+
+    // 1-3) Recompute the shared VIP-state inputs from the ledger (monotonic
+    //       lifetime, net basis, full ladder) — the same source
+    //       rebuildVipMemberState uses, so redelivery stays idempotent and the
+    //       two paths cannot drift in what they read.
+    const { lifetimeSen, netBasisMyr, ladderRows, thresholdRows } =
+      await this.loadVipStateInputs(customerId, sharedContext);
+    // UNIT TRAP: lifetimeSen is integer sen, levelForSpend expects MYR. Convert.
+    const lifetimeMyr = fromSen(lifetimeSen);
+    const byLevel = new Map(ladderRows.map((r) => [r.level, r]));
+
+    // 4) High-water mark from existing state row (default L1 if no row yet).
+    const [existingState] = await this.listVipMemberStates(
+      { customer_id: customerId },
+      { take: 1 },
+    );
+    const highestEver = existingState
+      ? Number(existingState.highest_level_ever)
+      : 1;
+
+    // 5) Derive the new monotonic level. Clawback keeps lifetime unchanged,
+    //    so newLevel never regresses even after reverseOpen.
+    const newLevel = levelForSpend(lifetimeMyr, thresholdRows);
+
+    // 6) Grant rewards for each newly-crossed level (L2+).
+    const gained: number[] = [];
+    for (const L of levelsToGrant(highestEver, newLevel)) {
+      const row = byLevel.get(L);
+      if (!row) continue;
+      const rewards = rewardsForLevel({
+        level: row.level,
+        voucher_amount: Number(row.voucher_amount),
+        box_tier: row.box_tier,
+        frame_unlock: row.frame_unlock,
+      });
+      for (const reward of rewards) {
+        // Raw INSERT … ON CONFLICT … DO NOTHING — avoids 23505 poisoning the txn
+        // (Postgres 25P02). The ON CONFLICT predicate MUST match the partial index
+        // UQ_vip_reward_grant_customer_level_kind (where: 'deleted_at IS NULL').
+        // Deterministic id: vrg_<customerId>_<level>_<kind> for deduplication.
+        const grantId = `vrg_${customerId}_${L}_${reward.kind}`;
+        await em.execute(
+          `INSERT INTO vip_reward_grant
+             (id, customer_id, level, kind, payload, status, source_open_id, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?::jsonb, 'granted', ?, now(), now())
+           ON CONFLICT (customer_id, level, kind) WHERE deleted_at IS NULL DO NOTHING`,
+          [
+            grantId,
+            customerId,
+            L,
+            reward.kind,
+            JSON.stringify(reward.payload),
+            openId,
+          ],
+        );
+      }
+      gained.push(L);
+    }
+
+    // 7) Upsert state: GREATEST guard in upsertVipMemberState ensures
+    //    highest_level_ever never regresses even under concurrent rebuilds.
+    const newHighest = Math.max(highestEver, newLevel);
+    const currentLevel = levelForSpend(netBasisMyr, thresholdRows);
+    await this.upsertVipMemberState(
+      {
+        customerId,
+        lifetimeSen,
+        highestLevelEver: newHighest,
+        currentLevel,
+      },
+      sharedContext,
+    );
+
+    return { gained };
+  }
+
+  // Maturity job (Phase 3b Task 7): flips pending commissions whose cooldown has
+  // elapsed (matures_at <= now) to 'available' so the status column stays in sync
+  // with the read-time availableBalance gate. This is COSMETIC/AUDIT only — the
+  // balance gate already treats a pending row as available once matures_at passes,
+  // so this flip never changes spendability.
+  //
+  // Per-beneficiary: acquires the credit: advisory lock (same keyspace as
+  // mutateCreditAtomic / settleOpen) so concurrent reversal writes on the same
+  // beneficiary are serialized. Uses SKIP LOCKED chunked UPDATEs so a second
+  // concurrent run skips already-locked rows rather than blocking.
+  //
+  // Status-guarded (status='pending' in WHERE) → idempotent, never clobbers
+  // reversed/suspended rows.
+  @InjectTransactionManager()
+  async matureDueCommissions(
+    notify?: (
+      beneficiaryId: string,
+      commissionId: string,
+      frozen: boolean,
+    ) => Promise<void>,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ flipped: number }> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    const CHUNK = 500;
+
+    // 1) Enumerate all distinct beneficiaries that have at least one due pending row.
+    //    COLLATE "C" forces byte-order (C locale) sort on the outer ORDER BY,
+    //    matching JS plain Array.sort() (UTF-16 lexicographic). Without it, Postgres
+    //    uses the DB's default collation (e.g. en_US.utf8), which reorders mixed-case
+    //    IDs differently — creating an AB-BA deadlock vector when this job and a
+    //    concurrent reverseOpen/reverseCommission acquire credit: locks on the same
+    //    beneficiaries in conflicting orders.
+    //    The subquery pattern is required because Postgres rejects COLLATE in ORDER BY
+    //    when SELECT DISTINCT is used (the ORDER BY expression must appear literally
+    //    in the SELECT list; COLLATE makes it a distinct expression).
+    const due = await em.execute<{ beneficiary: string }[]>(
+      `SELECT beneficiary FROM (
+          SELECT DISTINCT beneficiary FROM commission
+           WHERE status = 'pending' AND matures_at <= now() AND deleted_at IS NULL
+         ) _b
+        ORDER BY beneficiary COLLATE "C"`,
+    );
+
+    let flipped = 0;
+
+    for (const { beneficiary } of due) {
+      // 2) Acquire per-beneficiary advisory lock (same credit: keyspace used by
+      //    mutateCreditAtomic, settleOpen, reverseCommission, reverseOpen).
+      //    Transaction-scoped — auto-releases on commit/rollback.
+      await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+        `credit:${beneficiary}`,
+      ]);
+
+      // 3) Check freeze state inside the lock so the flag is consistent with
+      //    the advisory-locked read (isFrozen reads on sharedContext's connection).
+      const frozen = await this.isFrozen(beneficiary, sharedContext);
+
+      // 4) Chunked flip: Postgres rejects LIMIT on a bare UPDATE, so use a
+      //    sub-select with FOR UPDATE SKIP LOCKED + RETURNING. Loop until the
+      //    batch returns fewer than CHUNK rows (i.e. no more to process).
+      for (;;) {
+        const rows = await em.execute<{ id: string }[]>(
+          `UPDATE commission
+              SET status = 'available', updated_at = now()
+            WHERE id IN (
+              SELECT id FROM commission
+               WHERE beneficiary = ?
+                 AND status = 'pending'
+                 AND matures_at <= now()
+                 AND deleted_at IS NULL
+               ORDER BY matures_at
+               LIMIT ?
+               FOR UPDATE SKIP LOCKED
+            )
+            RETURNING id`,
+          [beneficiary, CHUNK],
+        );
+
+        for (const r of rows) {
+          flipped++;
+          if (notify) await notify(beneficiary, r.id, frozen);
+        }
+
+        if (rows.length < CHUNK) break;
+      }
+    }
+
+    return { flipped };
   }
 }
 

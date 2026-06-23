@@ -54,6 +54,11 @@ export async function GET(
     liabilityCount += count;
   }
 
+  // Outstanding voucher liability: sum of amount_myr across GRANTED, unfulfilled
+  // voucher reward grants. Off-ledger obligation the economy report must surface.
+  const outstanding_voucher_liability_myr =
+    await packs.outstandingVoucherLiabilityMyr();
+
   // Per-pack theoretical RTP from current odds (active packs only — drafts
   // aren't sellable, so their RTP is operator-noise).
   const allPacks = await pageAll((opts) =>
@@ -91,6 +96,7 @@ export async function GET(
   res.json({
     totals,
     liability: { count: liabilityCount, market_value: liabilityCents / 100 },
+    outstanding_voucher_liability_myr,
     packs: packRows,
   });
 }

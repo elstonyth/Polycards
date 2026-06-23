@@ -91,6 +91,7 @@ graphify-out/*
 # Local tool/build caches (regenerated locally, never committed)
 .turbo/
 .clone/
+backend/.cache/
 
 # Sentry
 .sentryclirc

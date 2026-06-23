@@ -228,6 +228,14 @@ export default defineMiddlewares({
       middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
     },
     {
+      // The customer's in-app notification feed (GET /store/notifications).
+      // receiver_id is scoped to the verified bearer token in the route handler —
+      // never from query/body — so this entry is the auth + rate-limit gate only.
+      matcher: '/store/notifications',
+      method: 'GET',
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+    },
+    {
       // The customer's own profile handle (GET /store/profiles/me) — lazily
       // assigns metadata.handle, so it must be authed. Shares the vault/
       // credits read budget (the account UI fetches them together).

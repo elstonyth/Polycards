@@ -61,19 +61,40 @@ export async function GET(
     return sum + (Number.isFinite(value) ? Math.round(value * 100) : 0);
   }, 0);
 
-  const summary = await packs.creditSummary(id);
-  const ladderRows = await packs.listVipLevels(
-    {},
-    { select: ['level', 'spend_threshold'], take: 1000 },
-  );
+  const [summary, ladderRows, stateRow] = await Promise.all([
+    packs.creditSummary(id),
+    packs.listVipLevels(
+      {},
+      { select: ['level', 'spend_threshold'], take: 1000 },
+    ),
+    packs.listVipMemberStates({ customer_id: id }, { take: 1 }).then(
+      ([row]) => row ?? null,
+    ),
+  ]);
+
   const ladder = ladderRows.map((r) => ({
     level: r.level,
     spend_threshold: Number(r.spend_threshold),
   }));
-  const vipLevel =
+  const liveLevel =
     ladder.length > 0
       ? levelForSpend(summary.externalFundedSpendTotal, ladder)
       : null;
+
+  const vip =
+    liveLevel === null
+      ? null
+      : stateRow
+        ? {
+            level: Number(stateRow.current_level),
+            highest_level_ever: Number(stateRow.highest_level_ever),
+            spend: summary.externalFundedSpendTotal,
+          }
+        : {
+            level: liveLevel,
+            highest_level_ever: liveLevel,
+            spend: summary.externalFundedSpendTotal,
+          };
 
   res.json({
     customer: {
@@ -110,9 +131,6 @@ export async function GET(
       };
     }),
     vault: { count: vaulted.length, market_value: vaultValueCents / 100 },
-    vip:
-      vipLevel === null
-        ? null
-        : { level: vipLevel, spend: summary.externalFundedSpendTotal },
+    vip,
   });
 }

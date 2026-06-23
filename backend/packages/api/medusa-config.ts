@@ -188,6 +188,18 @@ module.exports = defineConfig({
       resolve: '@medusajs/medusa/rbac',
     },
     {
+      resolve: '@medusajs/medusa/notification',
+      options: {
+        providers: [
+          {
+            resolve: '@medusajs/medusa/notification-local',
+            id: 'local',
+            options: { channels: ['feed'] },
+          },
+        ],
+      },
+    },
+    {
       // Custom gacha Packs module — Phase 4 ships the Pack catalog model; the
       // gacha internals (odds/pulls) land in Phase 5. See src/modules/packs.
       // ABSOLUTE path (not './…'): Medusa resolves a module `resolve` string

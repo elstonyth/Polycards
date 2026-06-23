@@ -90,6 +90,18 @@ export const openBatchWorkflow = createWorkflow(
     );
     emitEventStep({ eventName: "pack.opened", data: eventData });
 
+    // Emit vip.spend_settled for VIP level-up reward processing (Phase 3b).
+    // ONE event per batch (not per pull), carrying the customer_id and open_id.
+    // Step is renamed to avoid the "already defined" collision with the
+    // pack.opened emitEventStep above (both use emitEventStep's default id).
+    const vipEvent = transform({ input, charged }, (d) => ({
+      customer_id: d.input.customer_id,
+      open_id: d.charged.open_id,
+    }));
+    emitEventStep({ eventName: "vip.spend_settled", data: vipEvent }).config({
+      name: "emit-vip-spend-settled-step",
+    });
+
     // 4. Shape the result: arrayized twin of open-pack's result shape.
     const result = transform({ cards, pulls, charge }, (d) => ({
       rolls: d.cards,
