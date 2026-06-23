@@ -3,8 +3,8 @@ import type {
   MedusaNextFunction,
   MedusaRequest,
   MedusaResponse,
-} from "@medusajs/framework/http";
-import Redis from "ioredis";
+} from '@medusajs/framework/http';
+import Redis from 'ioredis';
 
 // Sliding-window rate limiting for the pack-open endpoint (and reusable for
 // any future endpoint — the factory at the bottom is the only pack-specific
@@ -169,7 +169,7 @@ export class RedisSlidingWindowStore implements RateLimitStore {
   private readonly client: RedisWithConsume;
 
   constructor(client: Redis) {
-    client.defineCommand("rlConsume", {
+    client.defineCommand('rlConsume', {
       numberOfKeys: 1,
       lua: SLIDING_WINDOW_LUA,
     });
@@ -262,9 +262,9 @@ export function createRateLimitMiddleware(
     let decision: RateLimitDecision;
     try {
       const auth = (req as AuthenticatedMedusaRequest).auth_context as
-        | AuthenticatedMedusaRequest["auth_context"]
+        | AuthenticatedMedusaRequest['auth_context']
         | undefined;
-      const key = auth?.actor_id || `ip:${req.ip ?? "unknown"}`;
+      const key = auth?.actor_id || `ip:${req.ip ?? 'unknown'}`;
       decision = await store.consume(prefix + key, rules, Date.now());
     } catch (err) {
       // A limiter bug must not take the endpoint down. The Redis store
@@ -280,10 +280,10 @@ export function createRateLimitMiddleware(
     const retryAfterSec = Math.max(1, Math.ceil(decision.retryAfterMs / 1000));
     res
       .status(429)
-      .set("Retry-After", String(retryAfterSec))
+      .set('Retry-After', String(retryAfterSec))
       .json({
-        type: "rate_limit_exceeded",
-        message: `${opts.message ?? "Too many pack opens."} Try again in ${retryAfterSec}s.`,
+        type: 'rate_limit_exceeded',
+        message: `${opts.message ?? 'Too many pack opens.'} Try again in ${retryAfterSec}s.`,
       });
   };
 }
@@ -297,7 +297,7 @@ const DEFAULTS = {
 
 export function positiveIntFromEnv(name: string, fallback: number): number {
   const raw = process.env[name];
-  if (raw === undefined || raw === "") return fallback;
+  if (raw === undefined || raw === '') return fallback;
   // Floor BEFORE validating: 0 < n < 1 (e.g. "0.5") must be rejected, not
   // silently floored to 0 — windowMs=0 would disable the rule entirely and
   // limit=0 would hard-block the endpoint.
@@ -322,7 +322,7 @@ function throttledWarn(
     if (now - last < intervalMs) return;
     last = now;
     const detail = err instanceof Error ? err.message : err;
-    console.warn(`[rate-limit] ${msg}`, detail ?? "");
+    console.warn(`[rate-limit] ${msg}`, detail ?? '');
   };
 }
 
@@ -353,12 +353,12 @@ function buildFailoverStore(
   });
   // Without an 'error' listener ioredis connection failures become uncaught
   // exceptions; reconnection is automatic, so just log (throttled).
-  client.on("error", (err) => warn("redis connection error", err));
-  client.connect().catch((err) => warn("initial redis connect failed", err));
+  client.on('error', (err) => warn('redis connection error', err));
+  client.connect().catch((err) => warn('initial redis connect failed', err));
   return new FailoverRateLimitStore(
     new RedisSlidingWindowStore(client),
     memory,
-    (err) => warn("redis consume failed; using in-memory fallback", err),
+    (err) => warn('redis consume failed; using in-memory fallback', err),
   );
 }
 
@@ -377,7 +377,7 @@ function createEnvRateLimit(opts: {
   defaults: EnvLimiterDefaults;
 }): MiddlewareHandler {
   const { name, defaults } = opts;
-  const envPrefix = `${name.toUpperCase().replace(/-/g, "_")}_RATE`;
+  const envPrefix = `${name.toUpperCase().replace(/-/g, '_')}_RATE`;
   const rules: RateLimitRule[] = [
     {
       limit: positiveIntFromEnv(
@@ -401,7 +401,7 @@ function createEnvRateLimit(opts: {
     rules,
     prefix: `rl:${name}:`,
     message: opts.message,
-    onError: (err) => warn("limiter error; request allowed through", err),
+    onError: (err) => warn('limiter error; request allowed through', err),
   });
 }
 
@@ -412,7 +412,7 @@ function createEnvRateLimit(opts: {
  * PACK_OPEN_RATE_LIMIT / PACK_OPEN_RATE_WINDOW_MS (default 20/60s)
  */
 export function createPackOpenRateLimit(): MiddlewareHandler {
-  return createEnvRateLimit({ name: "pack-open", defaults: DEFAULTS });
+  return createEnvRateLimit({ name: 'pack-open', defaults: DEFAULTS });
 }
 
 /**
@@ -424,7 +424,7 @@ export function createPackOpenRateLimit(): MiddlewareHandler {
  * PACK_OPEN_BATCH_RATE_LIMIT / PACK_OPEN_BATCH_RATE_WINDOW_MS (default 20/60s)
  */
 export function createPackOpenBatchRateLimit(): MiddlewareHandler {
-  return createEnvRateLimit({ name: "pack-open-batch", defaults: DEFAULTS });
+  return createEnvRateLimit({ name: 'pack-open-batch', defaults: DEFAULTS });
 }
 
 /**
@@ -436,8 +436,8 @@ export function createPackOpenBatchRateLimit(): MiddlewareHandler {
  */
 export function createVaultBuybackRateLimit(): MiddlewareHandler {
   return createEnvRateLimit({
-    name: "vault-buyback",
-    message: "Too many buyback requests.",
+    name: 'vault-buyback',
+    message: 'Too many buyback requests.',
     defaults: {
       burstLimit: 10,
       burstWindowMs: 10_000,
@@ -455,8 +455,8 @@ export function createVaultBuybackRateLimit(): MiddlewareHandler {
  */
 export function createPullRevealRateLimit(): MiddlewareHandler {
   return createEnvRateLimit({
-    name: "pull-reveal",
-    message: "Too many requests.",
+    name: 'pull-reveal',
+    message: 'Too many requests.',
     defaults: {
       burstLimit: 20,
       burstWindowMs: 10_000,
@@ -475,12 +475,35 @@ export function createPullRevealRateLimit(): MiddlewareHandler {
  */
 export function createCreditTopupRateLimit(): MiddlewareHandler {
   return createEnvRateLimit({
-    name: "credit-topup",
-    message: "Too many top-up requests.",
+    name: 'credit-topup',
+    message: 'Too many top-up requests.',
     defaults: {
       burstLimit: 5,
       burstWindowMs: 10_000,
       limit: 15,
+      windowMs: 60_000,
+    },
+  });
+}
+
+/**
+ * The delivery-write limiter (POST /store/delivery-orders + POST
+ * /store/delivery-orders/:id/address) — scoped per customer. These are
+ * state-changing writes (audit 2026-06-23: previously governed by the generous
+ * store-READ budget); give them a tighter write-tier budget consistent with
+ * topup/buyback. Still authed + ownership-checked, so this is anti-hammering
+ * hardening. Env-tunable:
+ * DELIVERY_WRITE_RATE_BURST_LIMIT / DELIVERY_WRITE_RATE_BURST_WINDOW_MS (10/10s)
+ * DELIVERY_WRITE_RATE_LIMIT / DELIVERY_WRITE_RATE_WINDOW_MS (30/60s)
+ */
+export function createDeliveryWriteRateLimit(): MiddlewareHandler {
+  return createEnvRateLimit({
+    name: 'delivery-write',
+    message: 'Too many delivery requests.',
+    defaults: {
+      burstLimit: 10,
+      burstWindowMs: 10_000,
+      limit: 30,
       windowMs: 60_000,
     },
   });
@@ -495,8 +518,8 @@ export function createCreditTopupRateLimit(): MiddlewareHandler {
  */
 export function createReferralRecruitRateLimit(): MiddlewareHandler {
   return createEnvRateLimit({
-    name: "referral-recruit",
-    message: "Too many referral attempts. Try again later.",
+    name: 'referral-recruit',
+    message: 'Too many referral attempts. Try again later.',
     defaults: {
       burstLimit: 3,
       burstWindowMs: 60_000,
@@ -517,8 +540,8 @@ export function createReferralRecruitRateLimit(): MiddlewareHandler {
  */
 export function createAuthRateLimit(): MiddlewareHandler {
   return createEnvRateLimit({
-    name: "auth",
-    message: "Too many sign-in attempts.",
+    name: 'auth',
+    message: 'Too many sign-in attempts.',
     defaults: DEFAULTS,
   });
 }
@@ -536,8 +559,8 @@ export function createAuthRateLimit(): MiddlewareHandler {
  */
 export function createProfileReadRateLimit(): MiddlewareHandler {
   return createEnvRateLimit({
-    name: "profile-read",
-    message: "Too many requests.",
+    name: 'profile-read',
+    message: 'Too many requests.',
     defaults: {
       burstLimit: 60,
       burstWindowMs: 10_000,
@@ -557,8 +580,8 @@ export function createProfileReadRateLimit(): MiddlewareHandler {
  */
 export function createStoreReadRateLimit(): MiddlewareHandler {
   return createEnvRateLimit({
-    name: "store-read",
-    message: "Too many requests.",
+    name: 'store-read',
+    message: 'Too many requests.',
     defaults: {
       burstLimit: 30,
       burstWindowMs: 10_000,
@@ -581,8 +604,8 @@ export function createStoreReadRateLimit(): MiddlewareHandler {
  */
 export function createAdminActionRateLimit(): MiddlewareHandler {
   return createEnvRateLimit({
-    name: "admin-action",
-    message: "Too many admin requests. Try again shortly.",
+    name: 'admin-action',
+    message: 'Too many admin requests. Try again shortly.',
     defaults: {
       burstLimit: 30,
       burstWindowMs: 10_000,

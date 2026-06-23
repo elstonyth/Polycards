@@ -88,6 +88,15 @@ export type CreditMutationInput = {
   floor?: number;
   /** The open's stable id (open_id), stamped on pack_open charge rows. */
   sourceTransactionId?: string | null;
+  /**
+   * When set, the insert is IDEMPOTENT on this reference under the per-customer
+   * advisory lock: if a row already carries it, that row is returned unchanged
+   * instead of appending a second credit (top-up replay protection — security
+   * audit 2026-06-23). The stored `reference` becomes this value. Mirrors the
+   * `reversal:${id}` locked-dedupe used by reverseCreditTransaction; no DB
+   * unique needed — the lock serializes check-then-insert per customer.
+   */
+  idempotencyReference?: string | null;
 };
 
 export type SettleOpenInput = {
@@ -237,13 +246,54 @@ class PacksModuleService extends MedusaService({
   async mutateCreditAtomic(
     input: CreditMutationInput,
     @MedusaContext() sharedContext: Context = {},
-  ): Promise<{ id: string; balance: number }> {
+  ): Promise<{
+    id: string;
+    balance: number;
+    amount: number;
+    replayed: boolean;
+  }> {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
 
     // 1) Serialize all credit mutations for THIS customer on the locked txn.
     await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
       `credit:${input.customerId}`,
     ]);
+
+    // 1a) Idempotent replay (top-up): under the lock, if a row already carries
+    // this idempotency reference the request already applied — return it as a
+    // no-op rather than appending a second credit. The lock makes the
+    // check-then-insert atomic per customer, so concurrent identical-key
+    // requests can't both insert (same guarantee as reverseCreditTransaction's
+    // `reversal:` dedupe — no DB unique required).
+    if (input.idempotencyReference) {
+      // The idempotency anchor is stored in source_transaction_id (NOT reference)
+      // so the public `reference` column stays free to hold the gateway/charge
+      // reference for reconciliation + refunds (CodeRabbit). Scope the dedupe to
+      // THIS customer: the advisory lock above is per customer, so the check-then-
+      // insert is only atomic within one customer; customer_id also makes the
+      // lookup index-assisted (IDX_credit_transaction_customer_id_created_at)
+      // instead of a full ledger scan.
+      const [existing] = await this.listCreditTransactions(
+        {
+          customer_id: input.customerId,
+          source_transaction_id: input.idempotencyReference,
+        },
+        { take: 1 },
+      );
+      if (existing) {
+        const balRows = await em.execute<{ balance_cents: string | null }[]>(
+          'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents ' +
+            'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
+          [input.customerId],
+        );
+        return {
+          id: existing.id,
+          balance: Number(balRows[0]?.balance_cents ?? 0) / 100,
+          amount: Number(existing.amount),
+          replayed: true,
+        };
+      }
+    }
 
     // 2) Re-read the balance AND the external-funded balance in cents inside the
     //    lock, in ONE scan (exact; soft-delete aware). external_funded_cents is
@@ -320,9 +370,13 @@ class PacksModuleService extends MedusaService({
           amount: deltaCents / 100,
           reason: input.reason,
           pull_id: input.pullId ?? null,
+          // `reference` keeps the gateway/charge ref (or plain note) for
+          // reconciliation; the idempotency anchor lives in source_transaction_id
+          // (the dedupe target above) so the two never clobber each other.
           reference: input.reference ?? null,
           external_funded_cents: externalFundedCents,
-          source_transaction_id: input.sourceTransactionId ?? null,
+          source_transaction_id:
+            input.idempotencyReference ?? input.sourceTransactionId ?? null,
         },
       ],
       sharedContext,
@@ -340,7 +394,12 @@ class PacksModuleService extends MedusaService({
       );
     }
 
-    return { id: txn.id, balance: (beforeCents + deltaCents) / 100 };
+    return {
+      id: txn.id,
+      balance: (beforeCents + deltaCents) / 100,
+      amount: deltaCents / 100,
+      replayed: false,
+    };
   }
 
   // Append-only reversal of a single ledger row (the open-saga compensation).

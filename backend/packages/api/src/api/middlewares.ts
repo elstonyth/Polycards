@@ -11,6 +11,7 @@ import {
   createAdminActionRateLimit,
   createAuthRateLimit,
   createCreditTopupRateLimit,
+  createDeliveryWriteRateLimit,
   createPackOpenBatchRateLimit,
   createPackOpenRateLimit,
   createProfileReadRateLimit,
@@ -45,6 +46,9 @@ import { createResetTokenSingleUseGuard } from './utils/reset-token-guard';
 // together in the UI, so they share one budget (and one Redis connection).
 const storeReadRateLimit = createStoreReadRateLimit();
 const authRateLimit = createAuthRateLimit();
+// Shared by both delivery-order WRITE matchers (POST create + POST address):
+// one write-tier budget + one Redis connection, distinct from the read budget.
+const deliveryWriteRateLimit = createDeliveryWriteRateLimit();
 // One instance shared by all admin money-mutation matchers: they share one
 // budget and one Redis connection (a compromised admin token is throttled
 // across all mutation routes together).
@@ -129,6 +133,7 @@ export default defineMiddlewares({
     },
     {
       matcher: '/store/packs/*/open',
+      method: 'POST',
       middlewares: [
         authenticate('customer', ['bearer']),
         createPackOpenRateLimit(),
@@ -172,15 +177,40 @@ export default defineMiddlewares({
       matcher: '/store/vault/*/showcase',
       middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
     },
+    // delivery-orders are method-split (audit 2026-06-23): GETs keep the
+    // generous read budget; the state-changing POSTs (create + address) get the
+    // tighter write-tier limiter, consistent with topup/buyback/referral. Only
+    // GET + POST exist on these routes (no DELETE/PATCH), so the two pairs below
+    // cover every handler — no method is left unlimited.
     {
-      // GET + POST /store/delivery-orders
+      // GET /store/delivery-orders (list)
       matcher: '/store/delivery-orders',
+      method: 'GET',
       middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
     },
     {
-      // GET /store/delivery-orders/:id  +  POST /store/delivery-orders/:id/address
+      // POST /store/delivery-orders (create — state-changing write)
+      matcher: '/store/delivery-orders',
+      method: 'POST',
+      middlewares: [
+        authenticate('customer', ['bearer']),
+        deliveryWriteRateLimit,
+      ],
+    },
+    {
+      // GET /store/delivery-orders/:id (detail)
       matcher: '/store/delivery-orders/*',
+      method: 'GET',
       middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+    },
+    {
+      // POST /store/delivery-orders/:id/address (re-snapshot — state-changing write)
+      matcher: '/store/delivery-orders/*',
+      method: 'POST',
+      middlewares: [
+        authenticate('customer', ['bearer']),
+        deliveryWriteRateLimit,
+      ],
     },
     {
       // Reveal ping (POST /store/pulls/:id/reveal) — stamps revealed_at so the

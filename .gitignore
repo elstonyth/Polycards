@@ -113,6 +113,8 @@ GEMINI.md
 .github/copilot-setup-steps.yml
 # Claude Code config + personal notes/lessons/reviews (matches root AND backend/.claude)
 .claude/
+# Codex CLI config + hooks (AI tooling, mirrors .claude/) — local only
+.codex/
 # Docs corpus (research, plans, specs, handoffs, demos) — local only
 /docs/
 # Test harnesses (e2e, demo, prod-smoke) + artifacts — local only

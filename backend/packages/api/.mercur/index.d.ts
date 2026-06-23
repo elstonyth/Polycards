@@ -59,7 +59,9 @@ export type Routes = {
                 };
                 customerGroups: typeof import("@medusajs/medusa/api/admin/customers/[id]/customer-groups/route");
                 credits: typeof import("../../src/api/admin/customers/[id]/credits/route");
+                freeze: typeof import("../../src/api/admin/customers/[id]/freeze/route");
                 gacha: typeof import("../../src/api/admin/customers/[id]/gacha/route");
+                unfreeze: typeof import("../../src/api/admin/customers/[id]/unfreeze/route");
             };
         };
         draftOrders: typeof import("@medusajs/medusa/api/admin/draft-orders/route") & {
@@ -434,6 +436,13 @@ export type Routes = {
         cards: typeof import("../../src/api/admin/cards/route") & {
             $handle: typeof import("../../src/api/admin/cards/[handle]/route");
         };
+        commissions: {
+            $id: {
+                reverse: typeof import("../../src/api/admin/commissions/[id]/reverse/route");
+                suspend: typeof import("../../src/api/admin/commissions/[id]/suspend/route");
+                unsuspend: typeof import("../../src/api/admin/commissions/[id]/unsuspend/route");
+            };
+        };
         deliveryOrders: typeof import("../../src/api/admin/delivery-orders/route") & {
             $id: typeof import("../../src/api/admin/delivery-orders/[id]/route");
         };
@@ -453,6 +462,7 @@ export type Routes = {
             search: typeof import("../../src/api/admin/pricecharting/search/route");
         };
         pulls: typeof import("../../src/api/admin/pulls/route");
+        rewardsSettings: typeof import("../../src/api/admin/rewards-settings/route");
     };
     auth: {
         $actorType: {
@@ -569,6 +579,7 @@ export type Routes = {
             };
             recent: typeof import("../../src/api/store/pulls/recent/route");
         };
+        referral: typeof import("../../src/api/store/referral/route");
         vault: typeof import("../../src/api/store/vault/route") & {
             $id: {
                 buyback: typeof import("../../src/api/store/vault/[id]/buyback/route");
