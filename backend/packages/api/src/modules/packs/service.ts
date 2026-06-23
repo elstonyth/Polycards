@@ -1947,10 +1947,21 @@ class PacksModuleService extends MedusaService({
     const CHUNK = 500;
 
     // 1) Enumerate all distinct beneficiaries that have at least one due pending row.
+    //    COLLATE "C" forces byte-order (C locale) sort on the outer ORDER BY,
+    //    matching JS plain Array.sort() (UTF-16 lexicographic). Without it, Postgres
+    //    uses the DB's default collation (e.g. en_US.utf8), which reorders mixed-case
+    //    IDs differently — creating an AB-BA deadlock vector when this job and a
+    //    concurrent reverseOpen/reverseCommission acquire credit: locks on the same
+    //    beneficiaries in conflicting orders.
+    //    The subquery pattern is required because Postgres rejects COLLATE in ORDER BY
+    //    when SELECT DISTINCT is used (the ORDER BY expression must appear literally
+    //    in the SELECT list; COLLATE makes it a distinct expression).
     const due = await em.execute<{ beneficiary: string }[]>(
-      `SELECT DISTINCT beneficiary FROM commission
-        WHERE status = 'pending' AND matures_at <= now() AND deleted_at IS NULL
-        ORDER BY beneficiary`,
+      `SELECT beneficiary FROM (
+          SELECT DISTINCT beneficiary FROM commission
+           WHERE status = 'pending' AND matures_at <= now() AND deleted_at IS NULL
+         ) _b
+        ORDER BY beneficiary COLLATE "C"`,
     );
 
     let flipped = 0;
