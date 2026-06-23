@@ -16,6 +16,12 @@
 import { z } from 'zod';
 import { isRarity } from '@/lib/packs-format';
 
+// Zod 4's JIT compiles schemas with `new Function(...)`; our CSP `script-src`
+// has no 'unsafe-eval' (see src/lib/security/csp.ts), so that probe fires a CSP
+// violation on every load. `jitless` forces the interpreted parser instead.
+// Set here because this module is the app's sole `zod` importer.
+z.config({ jitless: true });
+
 /** Matches the getters' `Number.isFinite(x)` checks exactly (rejects NaN/±∞). */
 const finite = z.number().refine((n) => Number.isFinite(n));
 /** A string that is one of the known gacha rarities (the old `isRarity` guard). */

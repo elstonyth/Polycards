@@ -1,5 +1,6 @@
 import type { NextConfig } from 'next';
 import { withSentryConfig } from '@sentry/nextjs';
+import { buildCsp } from './src/lib/security/csp';
 
 // next/image refuses remote hosts unless allowlisted. Card/product art is
 // served by the Medusa backend (POST /admin/media stores it; see
@@ -91,6 +92,19 @@ const securityHeaders = [
   {
     key: 'Permissions-Policy',
     value: 'camera=(), microphone=(), geolocation=(), browsing-topics=()',
+  },
+  // Content-Security-Policy. The policy is static (nonce-free — see csp.ts for
+  // why), so it lives here with the other static headers rather than in a
+  // per-request proxy. It ships REPORT-ONLY by default; set `CSP_ENFORCE=true` in
+  // the deploy env to switch the header to the enforcing name once a build has
+  // been verified clean (scripts/qa-csp.mjs). The toggle is read at build time,
+  // so flipping it requires a redeploy (DO App Platform rebuilds on env change).
+  {
+    key:
+      process.env.CSP_ENFORCE === 'true'
+        ? 'Content-Security-Policy'
+        : 'Content-Security-Policy-Report-Only',
+    value: buildCsp(),
   },
 ];
 
