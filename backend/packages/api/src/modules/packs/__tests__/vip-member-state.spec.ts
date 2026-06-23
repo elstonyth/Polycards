@@ -5,11 +5,19 @@
  *  1. rebuildVipMemberState after two opens: lifetime == Σ consumed and
  *     highest_level_ever == levelForSpend(fromSen(lifetime)).
  *  2. After reverseOpen + rebuild: lifetime UNCHANGED (monotonic) and
- *     current_level dropped (net basis dropped).
+ *     current_level STRICTLY DROPS (net basis crosses a lower threshold).
  *
  * Uses the real DB via moduleIntegrationTestRunner (lightweight; no full
- * medusa app boot). L2 threshold = 3 MYR (300 sen); we open for 4 MYR + 1 MYR
- * so lifetime = 500 sen, which crosses L2.
+ * medusa app boot).
+ *
+ * Threshold anchors from vip-levels.data.ts:
+ *   L2 = 3 MYR (300 sen)
+ *   L3 = 25 MYR (2 500 sen)
+ *
+ * Open 1: 20 MYR (2 000 sen) — net basis lands on L2 (3 ≤ 20 < 25)
+ * Open 2:  6 MYR (  600 sen) — net basis 26 MYR crosses L3 (≥ 25)
+ * After reverseOpen(open 2): net basis drops back to 20 MYR → L2.
+ * ⟹ current_level 3 → 2 (strict drop), highest_level_ever stays 3.
  */
 
 import path from 'path';
@@ -79,24 +87,24 @@ moduleIntegrationTestRunner<PacksModuleService>({
 
         const customerId = 'cust_vms_1';
 
-        // Fund the customer (L2 threshold = 3 MYR; open for 4 + 1 MYR = 5 MYR = 500 sen)
+        // Fund the customer with enough credit to cover both opens (26 MYR total)
         await service.mutateCreditAtomic({
           customerId,
-          amount: 10,
+          amount: 30,
           reason: 'topup',
         });
 
-        // Open 1: 4 MYR spend (400 sen external, fully external-funded)
+        // Open 1: 20 MYR spend (2 000 sen external) — net basis 20 MYR ∈ [L2=3, L3=25)
         await service.settleOpen({
           customerId,
-          amount: -4,
+          amount: -20,
           sourceTransactionId: 'open_vms_1',
         });
 
-        // Open 2: 1 MYR spend (100 sen external)
+        // Open 2: 6 MYR spend (600 sen external) — cumulative 26 MYR ≥ L3 threshold (25 MYR)
         await service.settleOpen({
           customerId,
-          amount: -1,
+          amount: -6,
           sourceTransactionId: 'open_vms_2',
         });
 
@@ -111,10 +119,10 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(row).toBeDefined();
 
         const lifetime = Number(row.lifetime_external_spend_sen);
-        // Σ consumed: both opens are external-funded (topup = external); 400 + 100 = 500
-        expect(lifetime).toBe(500);
+        // Σ consumed: both opens are external-funded (topup = external); 2000 + 600 = 2600 sen
+        expect(lifetime).toBe(2600);
 
-        // highest_level_ever == levelForSpend(fromSen(500 sen = 5 MYR), ladder)
+        // highest_level_ever == levelForSpend(fromSen(2600 sen = 26 MYR), ladder)
         const ladderRows = await service.listVipLevels(
           {},
           { select: ['level', 'spend_threshold'], take: 1000 },
@@ -125,12 +133,14 @@ moduleIntegrationTestRunner<PacksModuleService>({
         }));
         const expectedHighest = levelForSpend(fromSen(lifetime), ladder);
         expect(row.highest_level_ever).toBe(expectedHighest);
-        expect(row.highest_level_ever).toBeGreaterThan(1); // crossed L2 (3 MYR threshold)
+        expect(row.highest_level_ever).toBe(3); // 26 MYR ≥ L3 (25 MYR) and < L4 (83 MYR)
 
         // current_level uses the net basis (same as highest since no reversal yet)
         expect(row.current_level).toBe(expectedHighest);
 
         // ── Phase 2: reverseOpen open_vms_2 + rebuild ────────────────────────
+        // Reversing the 6 MYR open drops net basis to 20 MYR, which is below the
+        // L3 threshold (25 MYR) → current_level must drop from 3 to 2.
         await service.reverseOpen('open_vms_2');
         await service.rebuildVipMemberState(customerId);
 
@@ -144,19 +154,21 @@ moduleIntegrationTestRunner<PacksModuleService>({
 
         // MONOTONIC: lifetime must not decrease after the reversal
         // (reversal rows have amount>0 and are excluded from the counter)
-        expect(lifetimeAfter).toBe(lifetime); // 500 sen — unchanged
+        expect(lifetimeAfter).toBe(lifetime); // 2 600 sen — unchanged
 
         // highest_level_ever must not regress (GREATEST in upsert)
-        expect(rowAfter.highest_level_ever).toBe(expectedHighest);
+        expect(rowAfter.highest_level_ever).toBe(expectedHighest); // still 3
 
-        // current_level may drop: net basis = open_vms_1 only = 4 MYR = 400 sen
+        // current_level must STRICTLY DROP: net basis = open_vms_1 only = 20 MYR
+        // 20 MYR < L3 threshold (25 MYR) → current_level == 2
         const netBasis = (await service.creditSummary(customerId))
           .externalFundedSpendTotal;
         const expectedCurrentAfter = levelForSpend(netBasis, ladder);
         expect(rowAfter.current_level).toBe(expectedCurrentAfter);
-        // Reversal brings net basis from 5 MYR → 4 MYR; level should drop or stay
-        // (depends on ladder thresholds) but the assertion is data-driven
-        expect(expectedCurrentAfter).toBeLessThanOrEqual(expectedHighest);
+        // Exact drop: 3 → 2
+        expect(rowAfter.current_level).toBe(2);
+        // Strict inequality: current_level < highest_level_ever
+        expect(rowAfter.current_level).toBeLessThan(rowAfter.highest_level_ever);
       });
     });
   },
