@@ -1672,9 +1672,9 @@ class PacksModuleService extends MedusaService({
     // interpolated), so this stays injection-safe.
     const recruitPlaceholders = recruitIds.map(() => '?').join(', ');
     const contribRows = recruitIds.length
-      ? await em.execute<{ recruit_id: string; contribution: string }[]>(
+      ? await em.execute<{ recruit_id: string; contribution_cents: string }[]>(
           `SELECT po.customer_id AS recruit_id,
-                  COALESCE(SUM(mine.amount), 0)::float8 AS contribution
+                  COALESCE(SUM(ROUND(mine.amount * 100)), 0)::bigint AS contribution_cents
              FROM credit_transaction mine
              JOIN credit_transaction po
                ON po.source_transaction_id = mine.source_transaction_id
@@ -1689,7 +1689,7 @@ class PacksModuleService extends MedusaService({
         )
       : [];
     const contribById = new Map<string, number>(
-      contribRows.map((r) => [r.recruit_id, Number(r.contribution)]),
+      contribRows.map((r) => [r.recruit_id, Number(r.contribution_cents) / 100]),
     );
 
     // 2) Downstream headcount, ALL generations, via a bounded DOWNWARD walk.
@@ -1712,14 +1712,14 @@ class PacksModuleService extends MedusaService({
 
     // 3) Total earned = Σ my commission ledger rows (direct + override); negative
     //    'commission_reversal' rows net automatically.
-    const totalRows = await em.execute<{ total: string }[]>(
-      `SELECT COALESCE(SUM(amount), 0)::float8 AS total
+    const totalRows = await em.execute<{ total_cents: string }[]>(
+      `SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS total_cents
          FROM credit_transaction
         WHERE customer_id = ? AND deleted_at IS NULL
           AND reason IN ('direct_referral', 'team_override', 'commission_reversal')`,
       [customerId],
     );
-    const totalEarned = Number(totalRows[0]?.total ?? 0);
+    const totalEarned = Number(totalRows[0]?.total_cents ?? 0) / 100;
 
     return {
       directRecruits: recruitIds.map((id) => ({
