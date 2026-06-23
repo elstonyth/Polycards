@@ -1425,6 +1425,73 @@ class PacksModuleService extends MedusaService({
     return (balanceCents - lockedCents) / 100;
   }
 
+  // Wallet summary: raw balance, available (freeze-aware), locked (pending-
+  // unmatured + suspended commissions), and the earliest pending maturity
+  // tranche (date + amount). All amounts in MYR (USD equivalents). Amounts in
+  // MYR = amounts as stored (the ledger is already in MYR decimals).
+  // available = isFrozen ? 0 : balance − locked  (matches availableBalance).
+  @InjectManager()
+  async walletSummary(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{
+    balance: number;
+    available: number;
+    locked: number;
+    isFrozen: boolean;
+    nextUnlock: { amount: number; date: string } | null;
+  }> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+
+    // Raw balance = Σ(amount) over the append-only ledger.
+    const balRows = await em.execute<{ balance: string | null }[]>(
+      'SELECT COALESCE(SUM(amount), 0)::float8 AS balance ' +
+        'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
+      [customerId],
+    );
+    const balance = Number(balRows[0]?.balance ?? 0);
+
+    // Locked = positive commission credits that are pending-unmatured OR
+    // suspended. Reversed/available commissions are excluded (mirroring
+    // lockedCommissionCents in availableBalance).
+    const lockedCents = await this.lockedCommissionCents(customerId, em);
+    const locked = lockedCents / 100;
+
+    // Next unlock = earliest pending maturity in the future + sum of all
+    // commission credits maturing at exactly that date for this customer.
+    const nextRows = await em.execute<{ date: string | null; amount: string | null }[]>(
+      `WITH nxt AS (
+         SELECT MIN(c.matures_at) AS d
+           FROM credit_transaction ct
+           JOIN commission c ON c.credit_transaction_id = ct.id AND c.deleted_at IS NULL
+          WHERE ct.customer_id = ? AND c.status = 'pending' AND c.matures_at > now()
+            AND ct.deleted_at IS NULL
+       )
+       SELECT nxt.d AS date,
+              COALESCE(SUM(ct.amount), 0)::float8 AS amount
+         FROM nxt
+         LEFT JOIN commission c ON c.matures_at = nxt.d AND c.status = 'pending' AND c.deleted_at IS NULL
+         LEFT JOIN credit_transaction ct ON ct.id = c.credit_transaction_id
+                   AND ct.customer_id = ? AND ct.deleted_at IS NULL AND ct.amount > 0
+        GROUP BY nxt.d`,
+      [customerId, customerId],
+    );
+    const nextRow = nextRows[0];
+    const nextUnlock =
+      nextRow?.date != null
+        ? {
+            amount: Number(nextRow.amount ?? 0),
+            date: new Date(nextRow.date).toISOString(),
+          }
+        : null;
+
+    const frozen = await this.isFrozen(customerId, sharedContext);
+    const available = frozen ? 0 : balance - locked;
+
+    return { balance, available, locked, isFrozen: frozen, nextUnlock };
+  }
+
   // Top-N leaderboard computed in the DB (GROUP BY + ORDER BY + LIMIT), so it's
   // correct at any pull volume — replaces the old route that fetched an UNORDERED
   // 20k slice and ranked it in memory (wrong/jittery once pulls passed ~20k, #7).
