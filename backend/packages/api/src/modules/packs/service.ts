@@ -19,6 +19,7 @@ import ReferralRelationship from './models/referral-relationship';
 import Commission from './models/commission';
 import CustomerAccountState from './models/customer-account-state';
 import AdminActionAudit from './models/admin-action-audit';
+import VipMemberState from './models/vip-member-state';
 import {
   resolveBuybackRate,
   buybackAmount,
@@ -38,6 +39,7 @@ import {
   teamOverrideSchedule,
 } from './referral-commission';
 import { levelForSpend } from './vip-ladder';
+import { fromSen } from './money';
 import {
   validateRewardsPatch,
   type RewardsSettingsPatch,
@@ -126,6 +128,7 @@ class PacksModuleService extends MedusaService({
   Commission,
   CustomerAccountState,
   AdminActionAudit,
+  VipMemberState,
 }) {
   // Commission engine globals. Reads the singleton row; falls back to defaults
   // when absent. COMMISSION_COOLDOWN_DAYS env override forces the demo (0) and
@@ -571,7 +574,14 @@ class PacksModuleService extends MedusaService({
       );
     } else {
       await this.createCustomerAccountStates(
-        [{ customer_id: customerId, frozen: true, cause, frozen_reason: reason }],
+        [
+          {
+            customer_id: customerId,
+            frozen: true,
+            cause,
+            frozen_reason: reason,
+          },
+        ],
         sharedContext,
       );
     }
@@ -618,8 +628,7 @@ class PacksModuleService extends MedusaService({
     input: { commissionId: string; adminId: string; reason: string },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ reversed: number; froze: string[] }> {
-    const em =
-      sharedContext.transactionManager as unknown as LedgerSqlManager;
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
     const [target] = await this.listCommissions(
       { id: input.commissionId },
       { take: 1 },
@@ -654,10 +663,9 @@ class PacksModuleService extends MedusaService({
       ...new Set(credits.map((c) => c.customer_id)),
     ].sort();
     for (const cid of beneficiaries) {
-      await em.execute(
-        'SELECT pg_advisory_xact_lock(hashtextextended(?, 0))',
-        [`credit:${cid}`],
-      );
+      await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+        `credit:${cid}`,
+      ]);
     }
 
     // Snapshot the committed raw balance for each beneficiary BEFORE writing any
@@ -719,7 +727,14 @@ class PacksModuleService extends MedusaService({
       const deltaCents = reversedCentsMap.get(cid) ?? 0; // amount clawed back (positive)
       const projectedCents = preCents - deltaCents;
       if (projectedCents < 0) {
-        if (await this.freezeAccountIfNotAlready(cid, 'auto', `clawback:${open}`, sharedContext))
+        if (
+          await this.freezeAccountIfNotAlready(
+            cid,
+            'auto',
+            `clawback:${open}`,
+            sharedContext,
+          )
+        )
           froze.push(cid);
       }
     }
@@ -752,8 +767,7 @@ class PacksModuleService extends MedusaService({
     input: { commissionId: string; adminId: string; reason: string },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ status: 'suspended' }> {
-    const em =
-      sharedContext.transactionManager as unknown as LedgerSqlManager;
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
     const [c] = await this.listCommissions(
       { id: input.commissionId },
       { take: 1 },
@@ -772,12 +786,14 @@ class PacksModuleService extends MedusaService({
       );
     }
     if (c.status === 'suspended') {
-      throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'Commission is already suspended.');
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'Commission is already suspended.',
+      );
     }
-    await em.execute(
-      'SELECT pg_advisory_xact_lock(hashtextextended(?, 0))',
-      [`credit:${c.beneficiary}`],
-    );
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `credit:${c.beneficiary}`,
+    ]);
     await this.updateCommissions(
       { selector: { id: c.id }, data: { status: 'suspended' } },
       sharedContext,
@@ -808,8 +824,7 @@ class PacksModuleService extends MedusaService({
     input: { commissionId: string; adminId: string; reason: string },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ status: 'pending' | 'available' }> {
-    const em =
-      sharedContext.transactionManager as unknown as LedgerSqlManager;
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
     const [c] = await this.listCommissions(
       { id: input.commissionId },
       { take: 1 },
@@ -830,10 +845,9 @@ class PacksModuleService extends MedusaService({
     // Restore from the authoritative read-predicate, not a stored prior value.
     const next: 'pending' | 'available' =
       new Date(c.matures_at).getTime() <= Date.now() ? 'available' : 'pending';
-    await em.execute(
-      'SELECT pg_advisory_xact_lock(hashtextextended(?, 0))',
-      [`credit:${c.beneficiary}`],
-    );
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `credit:${c.beneficiary}`,
+    ]);
     await this.updateCommissions(
       { selector: { id: c.id }, data: { status: next } },
       sharedContext,
@@ -875,7 +889,9 @@ class PacksModuleService extends MedusaService({
       { take: 1 },
       sharedContext,
     );
-    const before = existing ? { frozen: existing.frozen, cause: existing.cause } : null;
+    const before = existing
+      ? { frozen: existing.frozen, cause: existing.cause }
+      : null;
     if (existing) {
       await this.updateCustomerAccountStates(
         {
@@ -1009,7 +1025,10 @@ class PacksModuleService extends MedusaService({
     // 1a) Freeze gate — must run inside the lock so a concurrent unfreeze can't
     //     race past this check before the debit lands.
     if (await this.isFrozen(input.customerId, sharedContext)) {
-      throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'This account is frozen.');
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'This account is frozen.',
+      );
     }
 
     // 2) Locked balance + external read (one scan), exact + soft-delete aware.
@@ -1557,7 +1576,12 @@ class PacksModuleService extends MedusaService({
   // balance values bracketing the adjustment so the row is self-explanatory.
   @InjectTransactionManager()
   async adminAdjustCredit(
-    input: { customerId: string; amount: number; note: string; adminId: string },
+    input: {
+      customerId: string;
+      amount: number;
+      note: string;
+      adminId: string;
+    },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ id: string; amount: number; balance: number }> {
     const { id, balance } = await this.mutateCreditAtomic(
@@ -1598,7 +1622,11 @@ class PacksModuleService extends MedusaService({
     @MedusaContext() sharedContext: Context = {},
   ): Promise<RewardsSettingsView> {
     const patch = validateRewardsPatch(input.patch);
-    const [row] = await this.listRewardsSettings({}, { take: 1 }, sharedContext);
+    const [row] = await this.listRewardsSettings(
+      {},
+      { take: 1 },
+      sharedContext,
+    );
     const before: RewardsSettingsView = {
       commissionCooldownDays: row ? Number(row.commission_cooldown_days) : 3,
       teamOverridePct: row ? Number(row.team_override_pct) : 0.2,
@@ -1639,6 +1667,113 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     return after;
+  }
+
+  // Monotonic lifetime external spend for a single customer, in SEN. Sums
+  // ORIGINAL pack_open debits (amount<0) only — reversals are amount>0 and
+  // thus excluded, so the counter never drops on a clawback (spec §3).
+  // This mirrors the `lifetimeExternalSen` pure fold but runs in raw SQL for
+  // efficiency (one scan vs. N ORM fetches). Uses @InjectManager so a caller
+  // outside a transaction gets a fresh connection.
+  @InjectManager()
+  async lifetimeExternalSenFor(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<number> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ sen: string | null }[]>(
+      `SELECT COALESCE(SUM(-external_funded_cents), 0)::bigint AS sen
+         FROM credit_transaction
+        WHERE customer_id = ? AND reason = 'pack_open' AND amount < 0 AND deleted_at IS NULL`,
+      [customerId],
+    );
+    return Number(rows[0]?.sen ?? 0);
+  }
+
+  // Race-free upsert of the vip_member_state projection row. Uses
+  // INSERT … ON CONFLICT(customer_id) DO UPDATE so concurrent rebuilds for the
+  // same customer always converge. GREATEST ensures highest_level_ever is truly
+  // monotonic (never regressed by a concurrent rebuild off a different snapshot).
+  @InjectManager()
+  async upsertVipMemberState(
+    input: {
+      customerId: string;
+      lifetimeSen: number;
+      highestLevelEver: number;
+      currentLevel: number;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    await em.execute(
+      `INSERT INTO vip_member_state
+         (id, customer_id, lifetime_external_spend_sen, highest_level_ever, current_level, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, now(), now())
+       ON CONFLICT (customer_id) WHERE deleted_at IS NULL DO UPDATE SET
+         lifetime_external_spend_sen = EXCLUDED.lifetime_external_spend_sen,
+         highest_level_ever = GREATEST(vip_member_state.highest_level_ever, EXCLUDED.highest_level_ever),
+         current_level = EXCLUDED.current_level,
+         updated_at = now()`,
+      [
+        `vms_${input.customerId}`,
+        input.customerId,
+        input.lifetimeSen,
+        input.highestLevelEver,
+        input.currentLevel,
+      ],
+    );
+  }
+
+  // Rebuild the vip_member_state projection for a single customer from the
+  // authoritative ledger. Safe to call repeatedly — the upsert is idempotent.
+  // lifetime uses the monotonic counter (fromSen for levelForSpend unit conversion);
+  // current_level uses the net-basis summary (may drop on refund).
+  async rebuildVipMemberState(
+    customerId: string,
+    sharedContext: Context = {},
+  ): Promise<void> {
+    const lifetimeSen = await this.lifetimeExternalSenFor(
+      customerId,
+      sharedContext,
+    );
+    const netBasisMyr = (await this.creditSummary(customerId))
+      .externalFundedSpendTotal;
+    const ladderRows = await this.listVipLevels(
+      {},
+      { select: ['level', 'spend_threshold'], take: 1000 },
+    );
+    const ladder = ladderRows.map((r) => ({
+      level: r.level,
+      spend_threshold: Number(r.spend_threshold),
+    }));
+    await this.upsertVipMemberState(
+      {
+        customerId,
+        lifetimeSen,
+        highestLevelEver: levelForSpend(fromSen(lifetimeSen), ladder), // fromSen: SEN→MYR unit conversion (UNIT TRAP)
+        currentLevel: levelForSpend(netBasisMyr, ladder),
+      },
+      sharedContext,
+    );
+  }
+
+  // Rebuild the vip_member_state projection for every customer that has ever
+  // touched the credit ledger. Intended for admin-triggered full reconciliation.
+  @InjectManager()
+  async rebuildAllVipMemberState(
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const customers = await em.execute<{ customer_id: string }[]>(
+      `SELECT DISTINCT customer_id FROM credit_transaction WHERE deleted_at IS NULL`,
+      [],
+    );
+    for (const row of customers) {
+      await this.rebuildVipMemberState(row.customer_id, sharedContext);
+    }
   }
 }
 
