@@ -5,13 +5,17 @@
  * and asserts the service's outstandingVoucherLiabilityMyr aggregate:
  *
  *   - 2 GRANTED voucher grants (amount_myr 10 and 25) → liability == 35
- *   - 1 FULFILLED voucher grant (amount_myr 50) → excluded → still 35
- *   - 1 GRANTED non-voucher (box) grant → excluded → still 35
+ *   - 1 FULFILLED voucher grant (amount_myr 50) → excluded (status filter) → still 35
+ *   - 1 GRANTED non-voucher (box) grant with no amount_myr → excluded (no amount) → still 35
+ *   - 1 GRANTED non-voucher (frame) grant (amount_myr 99) → excluded (kind filter) → still 35
  *
  * Implementation target: PacksModuleService.outstandingVoucherLiabilityMyr()
  * SQL: SELECT COALESCE(SUM((payload->>'amount_myr')::numeric), 0)
  *        FROM vip_reward_grant
  *       WHERE kind='voucher' AND status='granted' AND deleted_at IS NULL
+ *
+ * If kind='voucher' filter is removed: 10 + 25 + 99 = 134 (FAILS)
+ * If status='granted' filter is removed: 10 + 25 + 50 + 99 = 184 (FAILS)
  */
 
 import path from 'path';
@@ -109,6 +113,21 @@ moduleIntegrationTestRunner<PacksModuleService>({
               level: 2,
               kind: 'box',
               payload: { tier: 'standard' },
+              status: 'granted',
+              source_open_id: null,
+            },
+          ]);
+
+        // 1 GRANTED non-voucher (frame) with amount_myr: 99 — must be excluded by kind filter
+        // This row makes the kind='voucher' filter load-bearing (removes it → total becomes 134)
+        await (service as unknown as { createVipRewardGrants: (rows: unknown[]) => Promise<unknown> })
+          .createVipRewardGrants([
+            {
+              id: `${base}-granted-frame-99`,
+              customer_id: `cust_${base}_e`,
+              level: 5,
+              kind: 'frame',
+              payload: { amount_myr: 99 },
               status: 'granted',
               source_open_id: null,
             },
