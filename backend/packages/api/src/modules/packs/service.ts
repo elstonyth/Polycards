@@ -1444,13 +1444,14 @@ class PacksModuleService extends MedusaService({
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
 
-    // Raw balance = Σ(amount) over the append-only ledger.
-    const balRows = await em.execute<{ balance: string | null }[]>(
-      'SELECT COALESCE(SUM(amount), 0)::float8 AS balance ' +
+    // Raw balance = Σ(amount) over the append-only ledger, summed in integer
+    // cents to avoid float drift (matches availableBalance pattern, spec §8).
+    const balRows = await em.execute<{ balance_cents: string | null }[]>(
+      'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents ' +
         'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
       [customerId],
     );
-    const balance = Number(balRows[0]?.balance ?? 0);
+    const balance = Number(balRows[0]?.balance_cents ?? 0) / 100;
 
     // Locked = positive commission credits that are pending-unmatured OR
     // suspended. Reversed/available commissions are excluded (mirroring
@@ -1460,7 +1461,7 @@ class PacksModuleService extends MedusaService({
 
     // Next unlock = earliest pending maturity in the future + sum of all
     // commission credits maturing at exactly that date for this customer.
-    const nextRows = await em.execute<{ date: string | null; amount: string | null }[]>(
+    const nextRows = await em.execute<{ date: string | null; amount_cents: string | null }[]>(
       `WITH nxt AS (
          SELECT MIN(c.matures_at) AS d
            FROM credit_transaction ct
@@ -1469,7 +1470,7 @@ class PacksModuleService extends MedusaService({
             AND ct.deleted_at IS NULL
        )
        SELECT nxt.d AS date,
-              COALESCE(SUM(ct.amount), 0)::float8 AS amount
+              COALESCE(SUM(ROUND(ct.amount * 100)), 0)::bigint AS amount_cents
          FROM nxt
          LEFT JOIN commission c ON c.matures_at = nxt.d AND c.status = 'pending' AND c.deleted_at IS NULL
          LEFT JOIN credit_transaction ct ON ct.id = c.credit_transaction_id
@@ -1481,7 +1482,7 @@ class PacksModuleService extends MedusaService({
     const nextUnlock =
       nextRow?.date != null
         ? {
-            amount: Number(nextRow.amount ?? 0),
+            amount: Number(nextRow.amount_cents ?? 0) / 100,
             date: new Date(nextRow.date).toISOString(),
           }
         : null;
