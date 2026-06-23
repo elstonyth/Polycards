@@ -492,7 +492,7 @@ export default function PackOpenOverlay({
               initial={reduced ? false : { opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.4, ease: 'easeOut', delay: 0.66 }}
-              className="text-[11px] font-medium uppercase tracking-[0.3em] text-white/45 motion-safe:animate-pulse"
+              className="text-[11px] font-medium uppercase tracking-[0.3em] text-white/50 motion-safe:animate-pulse"
             >
               ● Tap to reveal
             </motion.p>
@@ -665,7 +665,7 @@ export default function PackOpenOverlay({
                     >
                       Sign up to keep what you pull
                     </button>
-                    <p className="max-w-[300px] text-center text-[11px] text-white/45">
+                    <p className="max-w-[300px] text-center text-[11px] text-white/50">
                       Demo result — nothing is recorded or claimable. Real opens
                       vault every pull to your account.
                     </p>
@@ -688,7 +688,7 @@ export default function PackOpenOverlay({
                           ? `Sell for $${buyback.vaultAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${buyback.vaultPercent}%)`
                           : `Sell back for $${buyback.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${buyback.percent}%) · ${secondsLeft}s`}
                     </button>
-                    <p className="max-w-[300px] text-center text-[11px] text-white/45">
+                    <p className="max-w-[300px] text-center text-[11px] text-white/50">
                       {sellExpired
                         ? `Instant offer expired — this card is in your vault and sells at the flat ${buyback.vaultPercent}% rate.`
                         : `Or keep it: vaulted cards sell anytime at the flat ${buyback.vaultPercent}% rate.`}

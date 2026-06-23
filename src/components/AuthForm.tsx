@@ -136,7 +136,7 @@ export default function AuthForm({
         )}
 
         {note && (
-          <p className="mt-3 text-center text-[12px] text-white/45">{note}</p>
+          <p className="mt-3 text-center text-[12px] text-white/50">{note}</p>
         )}
 
         <p className="mt-6 text-center text-[13px] text-white/50">
@@ -230,7 +230,7 @@ export default function AuthForm({
               setForgot('form');
               setNote(null);
             }}
-            className="self-end text-[12px] text-white/45 hover:text-white/70"
+            className="self-end text-[12px] text-white/50 hover:text-white/70"
           >
             Forgot password?
           </button>
@@ -247,7 +247,7 @@ export default function AuthForm({
       </form>
 
       {note && (
-        <p className="mt-3 text-center text-[12px] text-white/45">{note}</p>
+        <p className="mt-3 text-center text-[12px] text-white/50">{note}</p>
       )}
 
       <p className="mt-6 text-center text-[13px] text-white/50">

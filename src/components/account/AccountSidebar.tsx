@@ -47,7 +47,7 @@ export default function AccountSidebar() {
                   : 'text-white/55 hover:bg-white/5 hover:text-white',
               )}
             >
-              <Icon className="h-4 w-4 shrink-0 text-white/45" aria-hidden />
+              <Icon className="h-4 w-4 shrink-0 text-white/50" aria-hidden />
               <span className="whitespace-nowrap">{item.label}</span>
             </Link>
           );

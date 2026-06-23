@@ -45,7 +45,7 @@ export default async function TransactionsPage() {
           </p>
         ) : (
           <table className="w-full text-left text-sm">
-            <thead className="text-[12px] uppercase tracking-wide text-white/45">
+            <thead className="text-[12px] uppercase tracking-wide text-white/50">
               <tr className="border-b border-white/10">
                 <th className="px-4 py-3 font-medium">Date</th>
                 <th className="px-4 py-3 font-medium">Type</th>

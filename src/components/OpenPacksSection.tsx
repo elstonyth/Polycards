@@ -45,7 +45,7 @@ export default function OpenPacksSection() {
         </h2>
         <button
           type="button"
-          className="text-[12px] font-medium text-white/45 transition-colors hover:text-white/60"
+          className="text-[12px] font-medium text-white/50 transition-colors hover:text-white/60"
         >
           85-90% instant buyback →
         </button>

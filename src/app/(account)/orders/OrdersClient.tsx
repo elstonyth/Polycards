@@ -57,7 +57,7 @@ function DeliveryItems({ items }: { items: DeliveryOrderView['items'] }) {
         />
       )}
       <span className="max-w-[220px] truncate">{first?.card?.name ?? '—'}</span>
-      {extra > 0 && <span className="text-white/45">+{extra} more</span>}
+      {extra > 0 && <span className="text-white/50">+{extra} more</span>}
     </span>
   );
 }

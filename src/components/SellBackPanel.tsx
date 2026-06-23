@@ -176,7 +176,7 @@ export function SellBackPanel({
               />
             </div>
           )}
-          <p className="text-center text-[11px] text-white/45">
+          <p className="text-center text-[11px] text-white/50">
             {sellExpired
               ? `Instant offer expired — this card is in your vault and sells at the flat ${offer.vaultPercent}% rate.`
               : `Or keep it: vaulted cards sell anytime at the flat ${offer.vaultPercent}% rate.`}

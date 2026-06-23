@@ -174,7 +174,7 @@ export default function CardDetailClient({ card }: { card: MockCard }) {
               <Tag className="h-4 w-4" aria-hidden /> Sell
             </button>
           </div>
-          {note && <p className="mt-2 text-[12px] text-white/45">{note}</p>}
+          {note && <p className="mt-2 text-[12px] text-white/50">{note}</p>}
 
           {/* owner + vault */}
           <div className="mt-5 flex flex-wrap items-center gap-4 text-[13px]">
@@ -192,7 +192,7 @@ export default function CardDetailClient({ card }: { card: MockCard }) {
               Owned by{' '}
               <span className="font-semibold text-white">{owner.username}</span>
             </Link>
-            <span className="flex items-center gap-1.5 text-white/45">
+            <span className="flex items-center gap-1.5 text-white/50">
               <ShieldCheck className="h-4 w-4 text-emerald-400" aria-hidden />{' '}
               Vaulted &amp; insured · {card.grader}
             </span>

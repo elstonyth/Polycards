@@ -14,7 +14,7 @@ export default function HowItWorksSection() {
         </h2>
         <a
           href="/how-it-works"
-          className="shrink-0 text-[12px] font-medium text-white/45 transition-colors hover:text-white/60 sm:text-sm"
+          className="shrink-0 text-[12px] font-medium text-white/50 transition-colors hover:text-white/60 sm:text-sm"
         >
           Learn more about us →
         </a>

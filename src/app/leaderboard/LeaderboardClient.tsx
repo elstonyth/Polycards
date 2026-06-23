@@ -131,7 +131,7 @@ function PodiumColumn({ player }: { player: PodiumPlayer }) {
       >
         {player.name}
       </p>
-      <p className={cn('text-white/45', isFirst ? 'text-[13px]' : 'text-xs')}>
+      <p className={cn('text-white/50', isFirst ? 'text-[13px]' : 'text-xs')}>
         {player.points} points
       </p>
 
@@ -169,7 +169,7 @@ function PrizesPanel() {
         <h2 className="font-heading text-xl font-bold tracking-tight text-white">
           Weekly prize pool
         </h2>
-        <p className="mt-1 text-[13px] text-white/45">
+        <p className="mt-1 text-[13px] text-white/50">
           Earn points on every purchase. Top collectors claim weekly rewards.
         </p>
       </div>
@@ -180,7 +180,7 @@ function PrizesPanel() {
             className="flex items-center justify-between gap-4 px-6 py-4"
           >
             <span className="text-sm font-medium text-white">{tier.place}</span>
-            <span className="text-right text-[13px] text-white/45">
+            <span className="text-right text-[13px] text-white/50">
               {tier.reward}
             </span>
           </li>
@@ -195,7 +195,7 @@ function Pagination({ count }: { count: number }) {
 
   return (
     <div className="mt-6 flex flex-col items-center justify-between gap-4 sm:flex-row">
-      <p className="text-[13px] text-white/45">
+      <p className="text-[13px] text-white/50">
         1-{count} of {count}
       </p>
       <div className="flex items-center gap-1.5">
@@ -311,7 +311,7 @@ export default function LeaderboardClient({
               'rounded-lg px-3 py-2 text-center text-sm font-medium transition-colors',
               tab === t
                 ? 'bg-white/10 text-white'
-                : 'text-white/45 hover:text-white/70',
+                : 'text-white/50 hover:text-white/70',
             )}
           >
             {t}

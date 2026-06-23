@@ -179,7 +179,7 @@ export default function StepInfoPill({
                 </div>
               </div>
 
-              <p className="mt-4 text-[12px] leading-relaxed text-white/45">
+              <p className="mt-4 text-[12px] leading-relaxed text-white/50">
                 Prices are based on Alt Fair Market Value and updated in real
                 time. Keep your grails, sell the rest.
               </p>

@@ -79,7 +79,7 @@ export default function ContactPage() {
                 Vault Status
               </h2>
             </div>
-            <p className="mb-5 text-[13px] text-white/45">
+            <p className="mb-5 text-[13px] text-white/50">
               Current processing &amp; shipping times
             </p>
             <ul className="flex flex-col gap-2.5">
@@ -118,7 +118,7 @@ export default function ContactPage() {
                 FAQ
               </h2>
             </div>
-            <p className="mb-5 text-[13px] text-white/45">
+            <p className="mb-5 text-[13px] text-white/50">
               Common questions answered
             </p>
             <ul className="flex flex-col gap-1.5">

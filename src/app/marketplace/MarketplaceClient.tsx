@@ -110,7 +110,7 @@ function FilterSidebar({
               'rounded-lg py-1.5 text-xs font-semibold transition-colors',
               buyNow
                 ? 'bg-white/10 text-white'
-                : 'text-white/45 hover:text-white/70',
+                : 'text-white/50 hover:text-white/70',
             )}
           >
             Buy Now
@@ -122,7 +122,7 @@ function FilterSidebar({
               'rounded-lg py-1.5 text-xs font-semibold transition-colors',
               !buyNow
                 ? 'bg-white/10 text-white'
-                : 'text-white/45 hover:text-white/70',
+                : 'text-white/50 hover:text-white/70',
             )}
           >
             All
@@ -248,7 +248,7 @@ function MarketCard({ card }: { card: MarketplaceCard }) {
           <span className="text-sm font-bold text-white">
             {money(card.price)}
           </span>
-          <span className="text-[11px] font-medium text-white/45">
+          <span className="text-[11px] font-medium text-white/50">
             FMV {money(card.fmv)}
           </span>
         </div>

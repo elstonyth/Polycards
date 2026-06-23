@@ -45,7 +45,7 @@ export function StatCards({
           <p className="mt-1 font-heading text-2xl font-bold text-white">
             {s.value}
           </p>
-          {s.sub && <p className="mt-0.5 text-[12px] text-white/45">{s.sub}</p>}
+          {s.sub && <p className="mt-0.5 text-[12px] text-white/50">{s.sub}</p>}
         </div>
       ))}
     </div>

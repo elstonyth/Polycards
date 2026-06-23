@@ -154,7 +154,7 @@ export default function ResetPasswordClient() {
             </form>
 
             {note && (
-              <p className="mt-3 text-center text-[12px] text-white/45">
+              <p className="mt-3 text-center text-[12px] text-white/50">
                 {note}
               </p>
             )}

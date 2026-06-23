@@ -469,7 +469,7 @@ export default function AchievementsPage() {
         <div className="overflow-hidden rounded-2xl border border-white/10">
           <table className="w-full text-left">
             <thead>
-              <tr className="border-b border-white/10 bg-white/[0.03] text-[11px] uppercase tracking-wide text-white/45">
+              <tr className="border-b border-white/10 bg-white/[0.03] text-[11px] uppercase tracking-wide text-white/50">
                 <th className="px-4 py-3">
                   <button
                     type="button"
@@ -523,7 +523,7 @@ export default function AchievementsPage() {
                       <div className="flex items-center gap-3">
                         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/5">
                           <Medal
-                            className="h-4 w-4 text-white/45"
+                            className="h-4 w-4 text-white/50"
                             aria-hidden
                           />
                         </span>
@@ -531,7 +531,7 @@ export default function AchievementsPage() {
                           <div className="truncate text-sm font-semibold text-white">
                             {a.name}
                           </div>
-                          <div className="truncate text-xs text-white/45">
+                          <div className="truncate text-xs text-white/50">
                             {a.desc}
                           </div>
                         </div>
@@ -561,7 +561,7 @@ export default function AchievementsPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      <span className="inline-flex items-center gap-1.5 text-xs text-white/45">
+                      <span className="inline-flex items-center gap-1.5 text-xs text-white/50">
                         <span
                           className="h-1.5 w-1.5 rounded-full bg-white/30"
                           aria-hidden

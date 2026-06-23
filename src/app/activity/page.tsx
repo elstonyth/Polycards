@@ -48,7 +48,7 @@ const FEED = MOCK_CARDS.slice(0, 16).map((card, i) => {
 
 function Actor({ name }: { name: string }) {
   if (name === CLAW || name === MARKET) {
-    return <span className="text-white/45">{name}</span>;
+    return <span className="text-white/50">{name}</span>;
   }
   const u = findUser(name);
   return (

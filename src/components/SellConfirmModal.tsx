@@ -139,7 +139,7 @@ export default function SellConfirmModal({
           </div>
         </dl>
 
-        <p className="mt-3 text-[12px] text-white/45">
+        <p className="mt-3 text-[12px] text-white/50">
           {rateType === 'instant' && typeof secondsLeft === 'number'
             ? `Instant offer — ${secondsLeft}s left. `
             : ''}

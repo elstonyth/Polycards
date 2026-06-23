@@ -228,7 +228,7 @@ export default function MerchantsPage() {
               <h2 className="mt-3 font-heading text-base font-bold text-white">
                 {m.name}
               </h2>
-              <div className="mt-0.5 text-[12px] text-white/45">
+              <div className="mt-0.5 text-[12px] text-white/50">
                 <span className="mr-1 text-[10px] font-semibold uppercase tracking-wide text-white/35">
                   {m.code}
                 </span>

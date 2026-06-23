@@ -77,7 +77,7 @@ export default function PokedexClient({
                   'rounded-lg px-2.5 py-1.5 text-[12px] font-semibold transition-colors',
                   lang === l
                     ? 'bg-white/10 text-white'
-                    : 'text-white/45 hover:text-white/70',
+                    : 'text-white/50 hover:text-white/70',
                 )}
               >
                 {l}
@@ -96,7 +96,7 @@ export default function PokedexClient({
                 '-mb-px shrink-0 border-b-2 px-3 py-2 text-[13px] font-medium transition-colors',
                 n === gen
                   ? 'border-white text-white'
-                  : 'border-transparent text-white/45 hover:text-white',
+                  : 'border-transparent text-white/50 hover:text-white',
               )}
             >
               Gen {n}

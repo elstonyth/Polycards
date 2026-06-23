@@ -254,7 +254,7 @@ export default function HowItWorksPage() {
               <div className="font-heading text-xl font-bold text-white sm:text-2xl lg:text-3xl 2xl:text-4xl">
                 {s.value}
               </div>
-              <div className="mt-1 text-[11px] uppercase tracking-wide text-white/45 sm:text-xs">
+              <div className="mt-1 text-[11px] uppercase tracking-wide text-white/50 sm:text-xs">
                 {s.label}
               </div>
             </Reveal>
@@ -368,7 +368,7 @@ export default function HowItWorksPage() {
                       <div className="text-[13px] font-semibold text-white">
                         {t.name}
                       </div>
-                      <div className="text-[11px] text-white/45">
+                      <div className="text-[11px] text-white/50">
                         {t.handle}
                       </div>
                     </div>

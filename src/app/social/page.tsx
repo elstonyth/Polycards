@@ -39,7 +39,7 @@ export default function SocialPage() {
                 'rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors',
                 tab === t
                   ? 'bg-white/10 text-white'
-                  : 'text-white/45 hover:text-white/70',
+                  : 'text-white/50 hover:text-white/70',
               )}
             >
               {t}
@@ -74,7 +74,7 @@ export default function SocialPage() {
                   <p className="truncate font-semibold text-white">
                     {u.username}
                   </p>
-                  <p className="text-[12px] text-white/45">
+                  <p className="text-[12px] text-white/50">
                     {compact(u.points)} pts · #{u.rank}
                   </p>
                 </div>

@@ -73,7 +73,7 @@ export default function VouchersPage() {
             <Ticket className="h-6 w-6" aria-hidden />
           </span>
           <p className="text-sm font-semibold text-white">No Active Vouchers</p>
-          <p className="mt-1.5 max-w-sm text-[13px] leading-relaxed text-white/45">
+          <p className="mt-1.5 max-w-sm text-[13px] leading-relaxed text-white/50">
             You don&apos;t have any active vouchers at the moment. Active
             vouchers will appear here when you receive them.
           </p>

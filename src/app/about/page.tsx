@@ -219,7 +219,7 @@ export default function AboutPage() {
                   <div className="font-heading text-3xl font-bold text-white">
                     {f.stat}
                   </div>
-                  <div className="mb-2 mt-1 text-[11px] uppercase tracking-wide text-white/45">
+                  <div className="mb-2 mt-1 text-[11px] uppercase tracking-wide text-white/50">
                     {f.label}
                   </div>
                   <p className="text-[13px] leading-relaxed text-white/55">
@@ -256,7 +256,7 @@ export default function AboutPage() {
                 <div className="font-heading text-2xl font-bold text-white">
                   520K+
                 </div>
-                <div className="text-[11px] uppercase tracking-wide text-white/45">
+                <div className="text-[11px] uppercase tracking-wide text-white/50">
                   Units sold
                 </div>
               </div>
@@ -264,7 +264,7 @@ export default function AboutPage() {
                 <div className="font-heading text-2xl font-bold text-white">
                   5+
                 </div>
-                <div className="text-[11px] uppercase tracking-wide text-white/45">
+                <div className="text-[11px] uppercase tracking-wide text-white/50">
                   Brand partners
                 </div>
               </div>
@@ -352,7 +352,7 @@ export default function AboutPage() {
             For Brands
           </a>
         </div>
-        <p className="mt-5 text-[13px] text-white/45">
+        <p className="mt-5 text-[13px] text-white/50">
           Reach out to{' '}
           <a
             href="mailto:hello@phygitals.com"

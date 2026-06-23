@@ -90,7 +90,7 @@ export default function UserMenu({ customer }: { customer: AuthCustomer }) {
         >
           <div className="border-b border-neutral-800 px-3 py-2.5">
             <p className="truncate text-sm font-medium text-white">{name}</p>
-            <p className="truncate text-[12px] text-white/45">
+            <p className="truncate text-[12px] text-white/50">
               {customer.email}
             </p>
           </div>

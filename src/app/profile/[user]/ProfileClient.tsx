@@ -74,7 +74,7 @@ export default function ProfileClient({ user }: { user: ProfileViewUser }) {
             <h1 className="font-heading text-3xl font-bold tracking-tight text-white sm:text-4xl">
               {user.username}
             </h1>
-            <p className="mt-1 flex items-center justify-center gap-1.5 text-[13px] text-white/45 sm:justify-start">
+            <p className="mt-1 flex items-center justify-center gap-1.5 text-[13px] text-white/50 sm:justify-start">
               <CalendarDays className="h-3.5 w-3.5" aria-hidden /> Collecting
               since {user.joined}
             </p>
@@ -206,7 +206,7 @@ export default function ProfileClient({ user }: { user: ProfileViewUser }) {
                   {a.card.name}
                 </Link>
               </p>
-              <span className="shrink-0 text-[12px] tabular-nums text-white/45">
+              <span className="shrink-0 text-[12px] tabular-nums text-white/50">
                 {usd(a.card.price)}
               </span>
               <span className="hidden shrink-0 text-[11px] text-white/35 sm:inline">

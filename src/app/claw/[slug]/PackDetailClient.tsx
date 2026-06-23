@@ -286,7 +286,7 @@ export default function PackDetailClient({
                 Top Hits
               </h2>
             </div>
-            <p className="mb-3 text-[13px] text-white/45">
+            <p className="mb-3 text-[13px] text-white/50">
               The top items available in this pack.
             </p>
             <div className="grid grid-cols-3 gap-3 sm:grid-cols-5">
@@ -570,7 +570,7 @@ export default function PackDetailClient({
                   <span className="min-w-0 flex-1 truncate text-[13px] text-white/80">
                     {c.name}
                   </span>
-                  <span className="shrink-0 text-[12px] tabular-nums text-white/45">
+                  <span className="shrink-0 text-[12px] tabular-nums text-white/50">
                     {c.value}
                   </span>
                   <span className="hidden shrink-0 text-[11px] text-white/35 sm:inline">

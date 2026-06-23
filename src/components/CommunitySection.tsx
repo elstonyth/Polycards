@@ -139,7 +139,7 @@ export default function CommunitySection() {
       `}</style>
 
       <div className="mb-4 text-center sm:mb-5">
-        <p className="mb-1.5 text-[11px] font-medium uppercase tracking-[0.3em] text-white/45">
+        <p className="mb-1.5 text-[11px] font-medium uppercase tracking-[0.3em] text-white/50">
           100,000+ collectors
         </p>
         <h2 className="font-heading bg-gradient-to-b from-white via-white/80 to-white/30 bg-clip-text text-2xl font-bold tracking-tight text-transparent md:text-3xl">

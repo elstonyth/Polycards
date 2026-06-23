@@ -341,7 +341,7 @@ export default function SlotMachineClient({
                         </p>
                         {species && (
                           <p
-                            className="truncate text-[12px] text-white/45"
+                            className="truncate text-[12px] text-white/50"
                             title={won.name}
                           >
                             {won.name}

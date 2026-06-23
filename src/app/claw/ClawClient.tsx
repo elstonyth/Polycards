@@ -188,7 +188,7 @@ function PackRow({
             +{buyback}% Buyback Boost
           </span>
         ) : (
-          <span className="mt-1 block text-[11px] text-white/45">
+          <span className="mt-1 block text-[11px] text-white/50">
             {categoryName} · {buyback}% buyback
           </span>
         )}
@@ -342,7 +342,7 @@ export default function ClawClient({
             <h2 className="font-heading text-lg font-bold tracking-tight text-white sm:text-xl">
               {cat.heading}
             </h2>
-            <span className="ml-auto text-[13px] text-white/45">
+            <span className="ml-auto text-[13px] text-white/50">
               {cat.packs.length} packs
             </span>
           </div>

@@ -170,7 +170,7 @@ export default function VaultClient({
           <p className="text-sm font-medium text-white/70">
             Your vault is empty.
           </p>
-          <p className="mt-1 text-[13px] text-white/45">
+          <p className="mt-1 text-[13px] text-white/50">
             Open a pack and the card you pull lands here.
           </p>
           <Link
