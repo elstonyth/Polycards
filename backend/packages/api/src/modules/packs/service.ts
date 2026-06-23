@@ -1931,7 +1931,8 @@ class PacksModuleService extends MedusaService({
     // 1) Enumerate all distinct beneficiaries that have at least one due pending row.
     const due = await em.execute<{ beneficiary: string }[]>(
       `SELECT DISTINCT beneficiary FROM commission
-        WHERE status = 'pending' AND matures_at <= now() AND deleted_at IS NULL`,
+        WHERE status = 'pending' AND matures_at <= now() AND deleted_at IS NULL
+        ORDER BY beneficiary`,
     );
 
     let flipped = 0;
