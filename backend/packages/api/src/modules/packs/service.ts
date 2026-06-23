@@ -1694,6 +1694,24 @@ class PacksModuleService extends MedusaService({
     return Number(rows[0]?.sen ?? 0);
   }
 
+  // Outstanding voucher liability: sum of amount_myr across all GRANTED,
+  // unfulfilled voucher reward grants. These are off-ledger obligations — each
+  // represents a future redemption the operator owes. Uses @InjectManager so
+  // callers outside a transaction get a fresh connection.
+  @InjectManager()
+  async outstandingVoucherLiabilityMyr(
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<number> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ liability: string | null }[]>(
+      `SELECT COALESCE(SUM((payload->>'amount_myr')::numeric), 0) AS liability
+         FROM vip_reward_grant
+        WHERE kind='voucher' AND status='granted' AND deleted_at IS NULL`,
+    );
+    return Number(rows[0]?.liability ?? 0);
+  }
+
   // Race-free upsert of the vip_member_state projection row. Uses
   // INSERT … ON CONFLICT(customer_id) DO UPDATE so concurrent rebuilds for the
   // same customer always converge. GREATEST ensures highest_level_ever is truly
