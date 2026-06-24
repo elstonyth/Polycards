@@ -39,8 +39,9 @@ const Customer360Page = () => {
   const { data: tree } = useReferralTree(customerId);
   const { data: commissionsData } = useCustomerCommissions(customerId);
 
+  const commissionsLoading = !commissionsData;
   const commissions = commissionsData?.commissions ?? [];
-  const nodes: ReferralTreeNode[] = tree?.nodes ?? [];
+  const nodes: ReferralTreeNode[] = tree ? [tree.root, ...tree.nodes] : [];
 
   return (
     <div className="flex flex-col gap-y-3">
@@ -62,7 +63,7 @@ const Customer360Page = () => {
               </Heading>
               {view?.vip && (
                 <Badge size="small" color="purple">
-                  VIP Lv {view.vip.level}
+                  {t('customer360.vipLevel', { level: view.vip.level })}
                 </Badge>
               )}
             </div>
@@ -135,10 +136,6 @@ const Customer360Page = () => {
           <div className="border-t px-6 py-6">
             <Text className="text-ui-fg-subtle">…</Text>
           </div>
-        ) : nodes.length === 0 ? (
-          <div className="border-t px-6 py-6">
-            <Text className="text-ui-fg-subtle">{t('customer360.treeEmpty')}</Text>
-          </div>
         ) : (
           <Table>
             <Table.Header>
@@ -156,7 +153,7 @@ const Customer360Page = () => {
                 <Table.Row key={node.customer_id}>
                   <Table.Cell>
                     {/* indent by depth using padding */}
-                    <span style={{ paddingLeft: `${(node.depth - 1) * 20}px` }} className="flex flex-col">
+                    <span style={{ paddingLeft: `${node.depth * 20}px` }} className="flex flex-col">
                       <span className="font-medium">
                         {node.handle ?? node.email ?? node.customer_id}
                       </span>
@@ -170,7 +167,7 @@ const Customer360Page = () => {
                   <Table.Cell>
                     {node.vip_level !== null ? (
                       <Badge size="2xsmall" color="purple">
-                        Lv {node.vip_level}
+                        {t('customer360.vipLevelShort', { level: node.vip_level })}
                       </Badge>
                     ) : (
                       <span className="text-ui-fg-subtle">—</span>
@@ -212,7 +209,11 @@ const Customer360Page = () => {
           </Text>
         </div>
 
-        {commissions.length === 0 ? (
+        {commissionsLoading ? (
+          <div className="border-t px-6 py-6">
+            <Text className="text-ui-fg-subtle">…</Text>
+          </div>
+        ) : commissions.length === 0 ? (
           <div className="border-t px-6 py-6">
             <Text className="text-ui-fg-subtle">{t('customer360.commissionsEmpty')}</Text>
           </div>

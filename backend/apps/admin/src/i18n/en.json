@@ -218,6 +218,8 @@
     "vault": "Cards in vault",
     "vipSpend": "VIP cumulative spend",
     "vipPeakLevel": "Peak level {{level}}",
+    "vipLevel": "VIP Lv {{level}}",
+    "vipLevelShort": "Lv {{level}}",
     "treeTitle": "Referral tree",
     "treeSubtitle": "Direct recruits and their downline — up to 6 levels deep.",
     "treeTruncated": "Tree exceeds 1 000 nodes — showing the first 1 000. Open a subtree to explore deeper.",
