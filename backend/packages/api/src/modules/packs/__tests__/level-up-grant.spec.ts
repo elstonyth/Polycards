@@ -11,8 +11,8 @@
  * Ladder anchors (vip-levels.data.ts):
  *   L1 = 0 MYR, L2 = 3 MYR, L3 = 25 MYR, L4 = 83 MYR, L5 = 198 MYR
  * Open 200 MYR → lifetime 200 sen×100=20000 sen → L5.
- * L2 has voucher_amount=2 → voucher+box; frame_unlock=false → no frame.
- * L3 has voucher_amount=2 → voucher+box. L4 same. L5 same.
+ * L2 has voucher_amount=2 → voucher only; box tier derives live at draw time (B3/B6).
+ * L3 has voucher_amount=2 → voucher only. L4 same. L5 same.
  */
 
 import path from 'path';
@@ -116,7 +116,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
           { take: 100 },
         );
 
-        // Each level grants at least a box. Levels 2-5 all have voucher_amount=2 → voucher+box.
+        // Each level grants voucher only (box no longer per-rung — tier derives live via settleRewardDraw).
         // frame_unlock is false for all L2-L5 in the seed data.
         const grantedLevels = [...new Set(grants.map((g) => g.level))].sort(
           (a, b) => a - b,

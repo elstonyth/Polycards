@@ -1,6 +1,14 @@
 // src/modules/packs/vip-rewards.ts
-export type RewardKind = 'voucher' | 'frame';
-export type Reward = { kind: RewardKind; payload: Record<string, unknown> };
+
+// Full set of kinds the vip_reward_grant model / DB column recognises.
+// Must stay in sync with the model enum ['voucher','frame','box','prize'].
+export type RewardKind = 'voucher' | 'frame' | 'box' | 'prize';
+
+// Subset actually emitted by rewardsForLevel (box derives live at draw time B6;
+// prize is never granted per-rung D7). Narrower return type preserves safety
+// without clashing with the broader persisted model enum.
+export type EmittedRewardKind = 'voucher' | 'frame';
+export type Reward = { kind: EmittedRewardKind; payload: Record<string, unknown> };
 
 // Levels gained this open. L1 is a non-granting entry tier (D8): start at 2.
 export function levelsToGrant(highestEver: number, newLevel: number): number[] {

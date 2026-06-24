@@ -25,7 +25,7 @@ describe('rewardsForLevel', () => {
       frame_unlock: false,
     });
     expect(rewards).toEqual([{ kind: 'voucher', payload: { amount_myr: 10 } }]);
-    expect(rewards.find((r) => (r.kind as string) === 'box')).toBeUndefined();
+    expect(rewards.find((r) => r.kind === 'box')).toBeUndefined();
   });
   it('frame on a ×10 level; still no box', () => {
     const r = rewardsForLevel({
@@ -45,6 +45,6 @@ describe('rewardsForLevel', () => {
       frame_unlock: false,
     });
     expect(rewards).toEqual([]);
-    expect(rewards.find((r) => (r.kind as string) === 'box')).toBeUndefined();
+    expect(rewards.find((r) => r.kind === 'box')).toBeUndefined();
   });
 });
