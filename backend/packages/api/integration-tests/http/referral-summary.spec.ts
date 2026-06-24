@@ -101,6 +101,56 @@ medusaIntegrationTestRunner({
         // totalEarned = direct + override, net of reversals = D1 + O.
         expect(s.totalEarned).toBeCloseTo(D1 + O, 2);
       });
+
+      it('referralSummary: contribution nets a reversed open (no 2x double-count)', async () => {
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        await seedLadder(packs);
+
+        // me -> R1 (direct). R1 opens RM100 external-funded; I am R1's L1 sponsor
+        // (1%) -> direct_referral to me = 1% of 10,000 sen = 100 sen = RM1 (= D1).
+        const me = 'cus_rsrev_me';
+        const R1 = 'cus_rsrev_r1';
+        await packs.linkSponsor({ recruitId: R1, sponsorId: me });
+
+        await packs.mutateCreditAtomic({
+          customerId: R1,
+          amount: 100,
+          reason: 'topup',
+          reference: 'mock_rsrev_r1',
+        });
+        await packs.settleOpen({
+          customerId: R1,
+          amount: -100,
+          sourceTransactionId: 'open_rsrev_r1',
+        });
+        const D1 = 1; // RM1 direct commission to me from R1's open
+
+        // Before the reversal, R1's contribution is exactly the one direct
+        // commission (D1) — a sanity baseline for the post-reversal assertion.
+        const before = await packs.referralSummary(me);
+        expect(
+          before.directRecruits.find((r) => r.customerId === R1)!.contribution,
+        ).toBeCloseTo(D1, 2);
+
+        // Admin-reverse R1's open: appends a compensating POSITIVE 'pack_open'
+        // refund row (same open_id) + a NEGATIVE 'commission_reversal' clawing
+        // back my direct commission (same open_id). reverseOpen is the open-scoped
+        // clawback path used by the 2b/3a specs (vip-member-state, level-up-grant).
+        const { reversed } = await packs.reverseOpen('open_rsrev_r1');
+        expect(reversed).toBeGreaterThan(0);
+
+        // After the reversal, R1's contribution must be CORRECT, not doubled.
+        // The de-dup fix (po.amount < 0) stops the refund row from joining twice;
+        // the netting fix (mine.reason IN direct_referral,commission_reversal)
+        // nets the clawback against the original credit -> contribution ~= 0,
+        // consistent with totalEarned which also nets reversals.
+        const after = await packs.referralSummary(me);
+        expect(
+          after.directRecruits.find((r) => r.customerId === R1)!.contribution,
+        ).toBeCloseTo(0, 2);
+        // totalEarned (independently correct path) nets to 0 too — cross-check.
+        expect(after.totalEarned).toBeCloseTo(0, 2);
+      });
     });
   },
 });

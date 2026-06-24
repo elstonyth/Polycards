@@ -1663,13 +1663,28 @@ class PacksModuleService extends MedusaService({
     );
     const recruitIds = directRows.map((r) => r.customer_id);
 
-    // Contribution per direct recruit = Σ my DIRECT commission whose source open
-    // belongs to that recruit. Two-hop: my 'direct_referral' rows -> their
-    // source_transaction_id -> the recruit's 'pack_open' row's customer_id.
+    // Contribution per direct recruit = Σ my DIRECT commission (net of clawbacks)
+    // whose source open belongs to that recruit. Two-hop: my 'direct_referral' /
+    // 'commission_reversal' rows -> their source_transaction_id -> the recruit's
+    // ORIGINAL 'pack_open' debit's customer_id.
     // `IN (?, ?, ...)` not `= ANY(?)`: MikroORM's em.execute expands a JS array
     // into positional binds, so `ANY(?)` would emit `ANY('a','b')` (a syntax
     // error). recruitIds come from our own DB and each id is still bound (not
     // interpolated), so this stays injection-safe.
+    //
+    // `AND po.amount < 0` is load-bearing: reverseOpen appends a COMPENSATING
+    // POSITIVE 'pack_open' refund row carrying the SAME source_transaction_id as
+    // the original (negative) debit. Without this guard, one `mine` row would join
+    // BOTH pack_open rows and SUM(mine.amount) would double-count that recruit.
+    // Filtering `po` to the original debit keeps exactly one join row per open.
+    //
+    // mine.reason IN ('direct_referral','commission_reversal') NETS the clawback:
+    // reverseOpen's commission_reversal row carries the SAME source_transaction_id
+    // (= open_id) as the direct_referral it reverses, so the negative reversal
+    // cancels the positive credit for that recruit's open — contribution then
+    // reflects reversals exactly like totalEarned does. Override reversals point
+    // at deeper opens (gen-2+ recruits, never in recruitIds), so the
+    // po.customer_id IN (recruitIds) filter naturally excludes them.
     const recruitPlaceholders = recruitIds.map(() => '?').join(', ');
     const contribRows = recruitIds.length
       ? await em.execute<{ recruit_id: string; contribution_cents: string }[]>(
@@ -1679,9 +1694,10 @@ class PacksModuleService extends MedusaService({
              JOIN credit_transaction po
                ON po.source_transaction_id = mine.source_transaction_id
               AND po.reason = 'pack_open'
+              AND po.amount < 0
               AND po.deleted_at IS NULL
             WHERE mine.customer_id = ?
-              AND mine.reason = 'direct_referral'
+              AND mine.reason IN ('direct_referral', 'commission_reversal')
               AND mine.deleted_at IS NULL
               AND po.customer_id IN (${recruitPlaceholders})
             GROUP BY po.customer_id`,
