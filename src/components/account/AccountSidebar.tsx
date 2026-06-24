@@ -11,13 +11,18 @@ import {
   Ticket,
   Landmark,
   Vault,
+  Wallet as WalletIcon,
+  Crown,
+  Bell,
   type LucideIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export const ACCOUNT_NAV: { label: string; href: string; icon: LucideIcon }[] =
   [
+    { label: 'VIP', href: '/vip', icon: Crown },
     { label: 'Vault', href: '/vault', icon: Vault },
+    { label: 'Wallet', href: '/wallet', icon: WalletIcon },
     { label: 'Settings', href: '/settings', icon: Settings },
     { label: 'Orders', href: '/orders', icon: Package },
     { label: 'Transactions', href: '/transactions', icon: Receipt },
@@ -25,6 +30,7 @@ export const ACCOUNT_NAV: { label: string; href: string; icon: LucideIcon }[] =
     { label: 'Achievements', href: '/achievements', icon: Award },
     { label: 'Vouchers', href: '/vouchers', icon: Ticket },
     { label: 'Withdraw', href: '/bank-withdrawal', icon: Landmark },
+    { label: 'Notifications', href: '/notifications', icon: Bell },
   ];
 
 export default function AccountSidebar() {
