@@ -10,8 +10,8 @@ import { chromium } from 'playwright';
 import fs from 'fs';
 import path from 'path';
 
-const BASE = 'http://localhost:4000';
-const BACKEND = 'http://localhost:9000';
+const BASE = process.env.QA_BASE ?? 'http://localhost:4000';
+const BACKEND = process.env.QA_BACKEND ?? 'http://localhost:9000';
 const EMAIL = 'test@pokenic.app';
 const PASSWORD = 'PokenicTest123!';
 const AUTH_COOKIE = '_pokenic_jwt';
