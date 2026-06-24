@@ -9,6 +9,8 @@ export const qk = {
   economy: ['admin', 'economy'] as const,
   eligibleProducts: ['admin', 'eligible-products'] as const,
   customerGacha: (id: string) => ['admin', 'customer', id, 'gacha'] as const,
+  referralTree: (id: string, d: number) => ['admin', 'customer', id, 'referral-tree', d] as const,
+  customerCommissions: (id: string, page: number) => ['admin', 'customer', id, 'commissions', page] as const,
   deliveryOrders: (status?: string) =>
     ['admin', 'delivery-orders', status ?? 'all'] as const,
   deliveryOrder: (id: string) => ['admin', 'delivery-order', id] as const,

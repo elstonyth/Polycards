@@ -143,6 +143,28 @@ export async function getCustomerGacha(id: string): Promise<CustomerGacha> {
   );
 }
 
+// ── Customer 360: referral tree + commissions (Phase 4 P4.1) ─────────────────
+
+export interface ReferralTreeNode {
+  customer_id: string; depth: number; sponsor_id: string | null;
+  vip_level: number | null; lifetime_external_spend_sen: string;
+  frozen: boolean; direct_recruit_count: number; has_more_depth: boolean;
+  handle: string | null; email: string | null; created_at: string | null;
+}
+export interface ReferralTree { root: ReferralTreeNode; nodes: ReferralTreeNode[]; maxDepth: number; truncated: boolean; }
+export const getReferralTree = (id: string, maxDepth = 6) =>
+  getJson<ReferralTree>(`/admin/customers/${encodeURIComponent(id)}/referral-tree?maxDepth=${maxDepth}`);
+
+export interface AdminCommissionRow {
+  id: string; generation: number; kind: 'direct' | 'override';
+  status: 'pending' | 'available' | 'suspended' | 'reversed';
+  amount: string; reason: string; matures_at: string | null;
+  reversal_transaction_id: string | null; source_transaction_id: string;
+  opener: { customer_id: string | null; handle: string | null }; created_at: string;
+}
+export const getCustomerCommissions = (id: string, page = 0, limit = 50) =>
+  getJson<{ commissions: AdminCommissionRow[] }>(`/admin/customers/${encodeURIComponent(id)}/commissions?limit=${limit}&offset=${page * limit}`);
+
 // Operator credit adjustment: signed amount, required audit note. The backend
 // enforces the $0 balance floor and returns the fresh balance.
 export async function adjustCustomerCredits(

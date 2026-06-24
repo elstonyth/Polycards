@@ -19,16 +19,20 @@ import {
   deleteCard,
   deletePack,
   getCustomerGacha,
+  getCustomerCommissions,
   getEconomyReport,
+  getReferralTree,
   listDeliveryOrders,
   listEligibleProducts,
   updateDeliveryOrder,
   uploadImage,
+  type AdminCommissionRow,
   type AdminDeliveryOrder,
   type CustomerGacha,
   type DeliveryStatus,
   type EconomyReport,
   type EligibleProduct,
+  type ReferralTree,
 } from './admin-rest';
 import type { OddsInput } from '@acme/odds-math';
 import { qk } from './query-keys';
@@ -83,6 +87,26 @@ export const useCustomerGacha = (
   useQuery({
     queryKey: qk.customerGacha(id ?? ''),
     queryFn: () => getCustomerGacha(id as string),
+    enabled: !!id,
+  });
+
+export const useReferralTree = (
+  id: string | null,
+  maxDepth = 6,
+): UseQueryResult<ReferralTree> =>
+  useQuery({
+    queryKey: qk.referralTree(id ?? '', maxDepth),
+    queryFn: () => getReferralTree(id!, maxDepth),
+    enabled: !!id,
+  });
+
+export const useCustomerCommissions = (
+  id: string | null,
+  page = 0,
+): UseQueryResult<{ commissions: AdminCommissionRow[] }> =>
+  useQuery({
+    queryKey: qk.customerCommissions(id ?? '', page),
+    queryFn: () => getCustomerCommissions(id!, page),
     enabled: !!id,
   });
 
