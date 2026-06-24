@@ -180,6 +180,83 @@ export const OpenBuybackSchema = z.looseObject({
   instant_deadline_ms: finite.optional(),
 });
 
+// --- actions/wallet.ts ------------------------------------------------------
+
+/** GET /store/credits — full wallet block used by getWallet().
+ *  Note: the backend does NOT nest this under a `wallet` key; the fields are
+ *  returned directly on the response object alongside `transactions`.
+ *  `available` = balance − locked (no backend field); we derive it client-side.
+ *  `is_frozen` / `next_unlock` are not yet emitted by the credits route
+ *  (Phase 5+ extension), so they are optional with safe defaults. */
+export const WalletSchema = z.looseObject({
+  balance: finite,
+  topup_total: finite.optional(),
+  spend_total: finite.optional(),
+  is_frozen: z.boolean().optional(),
+  next_unlock: z
+    .looseObject({ amount: finite, date: z.string() })
+    .nullable()
+    .optional(),
+});
+
+// --- actions/vip.ts ---------------------------------------------------------
+
+/** GET /store/vip — VIP level, cumulative spend, and next-rung teaser.
+ *  Fields mirror the route's `res.json(...)` shape exactly (snake_case). */
+export const VipSchema = z.looseObject({
+  level: finite,
+  highest_level_ever: finite,
+  spend: finite,
+  next: z
+    .looseObject({
+      level: finite,
+      threshold: finite,
+      remaining: finite,
+      reward: z.looseObject({
+        voucher_amount: finite,
+        box_tier: z.string(),
+        frame_unlock: z.boolean(),
+      }),
+    })
+    .nullable(),
+});
+
+// --- actions/referral.ts ----------------------------------------------------
+
+/** GET /store/referral — referral summary for the authenticated customer. */
+export const ReferralSummarySchema = z.looseObject({
+  directRecruits: z.array(
+    z.looseObject({ handle: z.string().nullable(), contribution: finite }),
+  ),
+  downstreamCount: finite,
+  totalEarned: finite,
+});
+
+/** POST /store/referral — apply-referral response (just the new link id). */
+export const ReferralApplySchema = z.looseObject({ id: z.string() });
+
+// --- actions/notifications.ts -----------------------------------------------
+
+/** GET /store/notifications — single notification row in the feed. */
+export const NotificationSchema = z.looseObject({
+  id: z.string(),
+  template: z.string(),
+  data: z.looseObject({}).nullable().optional(),
+  created_at: z.string(),
+  read_at: z.union([z.string(), z.date()]).nullable(),
+});
+
+/** GET /store/notifications — outer envelope (notifications array + unread_count). */
+export const NotificationsEnvelopeSchema = z.looseObject({
+  unread_count: finite,
+});
+
+/** POST /store/notifications/:id/read — mark-read response. */
+export const MarkReadSchema = z.looseObject({
+  id: z.string(),
+  read_at: z.union([z.string(), z.date()]),
+});
+
 // --- actions/delivery.ts ----------------------------------------------------
 
 /** GET /store/delivery-orders item — guards the fields the mapper consumes. */
