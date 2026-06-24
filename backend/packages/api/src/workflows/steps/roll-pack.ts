@@ -55,6 +55,16 @@ export async function fetchPackData(
   return { pack, odds, totalWeight };
 }
 
+// pickWonRow — pure weighted selection over any array of { weight: number }.
+// Extracted so the reward-draw engine (B4) can reuse the same algorithm without
+// depending on PacksModuleService or any I/O.
+// ponytail: last-row fallback handles roll >= totalWeight (rounding / float drift).
+export function pickWonRow<T extends { weight: number }>(rows: T[], roll: number): T {
+  let won = rows[rows.length - 1];
+  for (const r of rows) { roll -= r.weight; if (roll < 0) { won = r; break; } }
+  return won;
+}
+
 // drawFromData — performs ONE independent weighted draw from pre-fetched pack data.
 // This is the per-roll logic: a new Math.random() per call ensures draw independence.
 // listCards is intentionally kept HERE (not hoisted) because it fetches the
@@ -64,9 +74,7 @@ export async function drawFromData(
   odds: PackData["odds"],
   totalWeight: number,
 ): Promise<RolledCard> {
-  let roll = Math.random() * totalWeight;
-  let won = odds[odds.length - 1];
-  for (const o of odds) { roll -= o.weight; if (roll < 0) { won = o; break; } }
+  const won = pickWonRow(odds, Math.random() * totalWeight);
   const [card] = await packs.listCards({ handle: won.card_id }, { take: 1 });
   if (!card) throw new MedusaError(MedusaError.Types.NOT_FOUND, `Card '${won.card_id}' not found.`);
   return {
