@@ -1,16 +1,34 @@
 import type { Metadata } from 'next';
-import {
-  AccountHeader,
-  StatCards,
-  Panel,
-  DemoNote,
-} from '@/components/account/ui';
-import { MOCK_USERS } from '@/lib/mock/users';
+import { AccountHeader, StatCards, Panel } from '@/components/account/ui';
+import { getReferralSummary } from '@/lib/actions/referral';
+import { getOwnProfileHandle } from '@/lib/data/profiles';
 import { rm } from '@/lib/format';
+import ReferralsClient from './ReferralsClient';
 
 export const metadata: Metadata = { title: 'Referrals | Pokenic' };
 
-export default function ReferralsPage() {
+export default async function ReferralsPage() {
+  const [res, handle] = await Promise.all([
+    getReferralSummary(),
+    getOwnProfileHandle(),
+  ]);
+
+  if (!res.ok) {
+    return (
+      <>
+        <AccountHeader
+          title="Referrals"
+          sub="Invite friends and earn on every pack they rip."
+        />
+        <p className="mt-4 rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/60">
+          {res.error}
+        </p>
+      </>
+    );
+  }
+
+  const inviteUrl = handle ? `pokenic.com/invite/${handle}` : null;
+
   return (
     <>
       <AccountHeader
@@ -19,52 +37,36 @@ export default function ReferralsPage() {
       />
       <StatCards
         items={[
-          { label: 'Invited', value: '14' },
-          { label: 'Active', value: '9' },
-          { label: 'Earned', value: rm(642.5) },
-          { label: 'Rate', value: '5%' },
+          { label: 'Direct recruits', value: `${res.directRecruits.length}` },
+          { label: 'Network size', value: `${res.downstreamCount}` },
+          { label: 'Total earned', value: rm(res.totalEarned) },
         ]}
       />
-      <Panel className="mt-5">
-        <p className="mb-2 text-[12px] font-medium text-white/55">
-          Your referral link
-        </p>
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <input
-            readOnly
-            value="pokenic.com/invite/662b59"
-            className="h-11 flex-1 rounded-xl border border-white/10 bg-white/[0.03] px-3 text-sm text-white/80 focus:outline-none"
-          />
-          <button
-            type="button"
-            className="rounded-xl bg-neutral-200 px-5 py-2.5 text-sm font-semibold text-neutral-950 transition-colors hover:bg-white"
-          >
-            Copy link
-          </button>
-        </div>
-      </Panel>
+      {inviteUrl && <ReferralsClient inviteUrl={inviteUrl} />}
       <h2 className="mb-3 mt-6 font-heading text-lg font-bold text-white">
-        Invited collectors
+        Your direct recruits
       </h2>
-      <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-        {MOCK_USERS.slice(0, 8).map((u) => (
-          <li
-            key={u.username}
-            className="flex items-center gap-2.5 rounded-xl border border-white/10 bg-white/[0.03] p-3"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={u.pfp}
-              alt=""
-              className="h-8 w-8 shrink-0 rounded-full object-cover"
-            />
-            <span className="truncate text-[13px] text-white/80">
-              {u.username}
-            </span>
-          </li>
-        ))}
-      </ul>
-      <DemoNote />
+      {res.directRecruits.length === 0 ? (
+        <p className="text-sm text-white/50">
+          No recruits yet — share your invite link above.
+        </p>
+      ) : (
+        <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+          {res.directRecruits.map((r, i) => (
+            <li
+              key={r.handle ?? i}
+              className="flex items-center justify-between gap-2.5 rounded-xl border border-white/10 bg-white/[0.03] p-3"
+            >
+              <span className="truncate text-[13px] text-white/80">
+                {r.handle ?? 'Collector'}
+              </span>
+              <span className="shrink-0 text-[12px] text-emerald-300">
+                {rm(r.contribution)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
     </>
   );
 }
