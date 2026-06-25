@@ -47,7 +47,9 @@ import RewardDraw from '../models/reward-draw';
 // Import route handlers under test (same pattern as C2)
 import { GET as vaultGET } from '../../../api/store/vault/route';
 import { GET as recentGET } from '../../../api/store/pulls/recent/route';
+import { GET as profileGET } from '../../../api/store/profiles/[handle]/route';
 import { makeRarityOf } from '../card-view';
+import { Modules } from '@medusajs/framework/utils';
 
 jest.setTimeout(300 * 1000);
 
@@ -332,6 +334,62 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(rarityOf(ids.packSlug, ids.cardHandle)).toBe('Common');
         // Sentinel handle returns default (no crash)
         expect(rarityOf(ids.rewardPackSlug, ids.prizeHandle)).toBe('Common');
+      });
+
+      it('profile route handler: GET /store/profiles/:handle — no throw with reward Pulls in DB', async () => {
+        const ids = mkIds('profilerte');
+        await seed(ids);
+
+        // Stub the Modules.CUSTOMER service: findCustomerByHandle calls
+        // customers.listCustomers({metadata:{handle}},{take:1}). Return a
+        // minimal customer so the route proceeds past the 404 guard. This lets
+        // us call the actual GET handler without the real cross-module
+        // ICustomerModuleService being present in moduleIntegrationTestRunner.
+        //
+        // The handle must satisfy HANDLE_RE (/^[a-z0-9](?:[a-z0-9-]{1,58})[a-z0-9]$/)
+        // and must match the customer_id seeded above so listPulls returns the
+        // correct rows.
+        const testHandle = 'c3-profile-rt'; // valid HANDLE_RE shape
+        const stubCustomer = {
+          id: ids.customer, // same id used in seed() → listPulls hits the right rows
+          first_name: 'C3Test',
+          created_at: new Date().toISOString(),
+          metadata: { handle: testHandle },
+        };
+        // ponytail: minimal stub — only the methods findCustomerByHandle calls
+        const stubCustomerModule = {
+          listCustomers: async () => [stubCustomer],
+        };
+
+        const captured: Record<string, unknown> = {};
+        const res = { json: (body: unknown) => { captured.body = body; } };
+        const req = {
+          params: { handle: testHandle },
+          scope: {
+            resolve: (name: string) => {
+              if (name === Modules.CUSTOMER) return stubCustomerModule;
+              return service; // PACKS_MODULE + anything else → real service
+            },
+          },
+        };
+
+        // Must not throw even though a reward Pull (source='reward',
+        // card_id=prizeHandle sentinel) and a null-card_id PackOdds row
+        // both exist for this customer in the DB.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await profileGET(req as any, res as any);
+
+        const body = captured.body as {
+          stats: { pulls: number };
+          recent: unknown[];
+          collection: unknown[];
+        };
+        // Only the one normal (non-reward) pull counts in public stats
+        expect(body.stats.pulls).toBe(1);
+        // recent feed has the normal pull's card (reward pull excluded by C1 filter)
+        expect(body.recent).toHaveLength(1);
+        // collection empty (showcased not set in seed)
+        expect(body.collection).toHaveLength(0);
       });
     });
   },
