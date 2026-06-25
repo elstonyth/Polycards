@@ -54,6 +54,10 @@ test('A2 hand-written migration (20260625052600) adds pack_odds_kind_payout_chec
   expect(joined).toMatch(/pack_odds_kind_payout_check/i);
   expect(joined).toMatch(/ADD CONSTRAINT/i);
 
+  // Legacy card rows (kind IS NULL, card_id IS NOT NULL) must pass the CHECK.
+  // Without this branch the constraint would violate on existing card rows at ADD CONSTRAINT time.
+  expect(joined).toMatch(/kind IS NULL AND card_id IS NOT NULL/i);
+
   // This migration must NOT touch nullability (nullability already relaxed in the earlier one)
   expect(joined).not.toMatch(/drop not null/i);
   expect(joined).not.toMatch(/set not null/i);
