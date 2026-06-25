@@ -282,6 +282,18 @@ export const RewardPrizeSchema = z.looseObject({
   draw_day: z.string(),
 });
 
+/** Address input for prize withdrawal (subset of AddAddressInput). Defined here
+ *  because this module is the app's sole `zod` importer (eslint no-restricted-imports). */
+export const WithdrawAddressSchema = z.object({
+  firstName: z.string().min(1),
+  lastName: z.string().min(1),
+  address1: z.string().min(1),
+  city: z.string().min(1),
+  postalCode: z.string().min(1),
+  countryCode: z.string().min(2).max(2),
+});
+export type WithdrawAddressInput = z.infer<typeof WithdrawAddressSchema>;
+
 /** GET /store/rewards outer envelope. */
 export const RewardsEnvelopeSchema = z.looseObject({
   grants: z.array(z.looseObject({})).optional(),

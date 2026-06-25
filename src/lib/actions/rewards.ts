@@ -25,8 +25,9 @@ import {
   ClaimGrantSchema,
   DrawBoxSchema,
   WithdrawPrizeSchema,
+  WithdrawAddressSchema,
+  type WithdrawAddressInput,
 } from '@/lib/data/schemas';
-import { z } from 'zod';
 
 // ---- types ------------------------------------------------------------------
 
@@ -251,17 +252,10 @@ export async function drawBox(): Promise<DrawBoxResult> {
   }
 }
 
-// Address input shape for prize withdrawal (subset of AddAddressInput).
-const WithdrawAddressSchema = z.object({
-  firstName: z.string().min(1),
-  lastName: z.string().min(1),
-  address1: z.string().min(1),
-  city: z.string().min(1),
-  postalCode: z.string().min(1),
-  countryCode: z.string().min(2).max(2),
-});
-
-export type WithdrawAddressInput = z.infer<typeof WithdrawAddressSchema>;
+// WithdrawAddressSchema + WithdrawAddressInput live in @/lib/data/schemas (the
+// app's sole `zod` importer — eslint no-restricted-imports forbids importing zod
+// here). Re-exported so existing consumers (RewardsClient) keep their import path.
+export type { WithdrawAddressInput };
 
 /** Request shipping for a vaulted prize pull. Not env-gated (balance-neutral). */
 export async function withdrawPrize(
