@@ -87,6 +87,7 @@ describe('rowError', () => {
   it('flags a non-positive / non-integer weight', () => {
     expect(rowError(row({ weight: '0' }))).toMatch(/weight/i);
     expect(rowError(row({ weight: '1.5' }))).toMatch(/weight/i);
+    expect(rowError(row({ weight: '-1' }))).toMatch(/weight/i);
   });
   it('flags a product row with no handle', () => {
     expect(
@@ -97,6 +98,14 @@ describe('rowError', () => {
     expect(
       rowError(row({ kind: 'credit', credit_amount: '0', weight: '1' })),
     ).toMatch(/credit/i);
+    expect(
+      rowError(row({ kind: 'credit', credit_amount: '', weight: '1' })),
+    ).toMatch(/credit/i);
+  });
+  it('passes a valid credit row', () => {
+    expect(
+      rowError(row({ kind: 'credit', credit_amount: '5', weight: '1' })),
+    ).toBeNull();
   });
   it('passes a valid product row', () => {
     expect(
