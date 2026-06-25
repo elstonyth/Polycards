@@ -1944,7 +1944,7 @@ class PacksModuleService extends MedusaService({
         'FROM pull pu ' +
         'LEFT JOIN pack pk ON pk.slug = pu.pack_id AND pk.deleted_at IS NULL ' +
         'LEFT JOIN card c ON c.handle = pu.card_id AND c.deleted_at IS NULL ' +
-        'WHERE pu.deleted_at IS NULL AND pu.customer_id IS NOT NULL ' +
+        'WHERE pu.deleted_at IS NULL AND pu.customer_id IS NOT NULL AND pu.source <> \'reward\' ' +
         // Branch on `since` rather than a nullable param: the
         // `(? IS NULL OR rolled_at >= ?)` form is non-sargable and would skip
         // the IDX_pull_rolled_at index on the weekly window (Sourcery).

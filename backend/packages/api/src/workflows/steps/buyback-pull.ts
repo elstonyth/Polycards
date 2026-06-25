@@ -68,6 +68,14 @@ export const buybackPullStep = createStep(
         "This card was already sold back."
       );
     }
+    // C1: reward prizes are not sellable — guard before listCards so the
+    // sentinel card_id (product handle) never reaches the card lookup.
+    if (pull.source === "reward") {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        "Reward prizes can't be sold back"
+      );
+    }
 
     const [card] = await packs.listCards({ handle: pull.card_id }, { take: 1 });
     if (!card) {

@@ -42,10 +42,14 @@ export async function GET(
   }
 
   const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
-  const pulls = await packs.listPulls(
-    { customer_id: customer.id },
-    { take: MAX_PULLS, order: { rolled_at: 'DESC' } },
-  );
+  const pulls = (
+    await packs.listPulls(
+      { customer_id: customer.id },
+      { take: MAX_PULLS, order: { rolled_at: 'DESC' } },
+    )
+  // C1: exclude reward Pulls from the public profile (leaderboard, collection,
+  // recent feed). They are private vault items only visible in /store/vault.
+  ).filter((p) => p.source !== 'reward');
 
   // Lookup tables, leaderboard-style: card display/value by handle, pack
   // price by slug, per-pack rarity by (pack, card) odds row.

@@ -21,7 +21,9 @@ export async function GET(
   const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
 
   const pulls = await packs.listPulls(
-    {},
+    // ponytail: $ne filter mirrors the leaderboard SQL exclusion — reward prizes
+    // are private vault items, not public feed entries.
+    { source: { $ne: 'reward' } } as Parameters<typeof packs.listPulls>[0],
     { order: { rolled_at: 'DESC' }, take: RECENT_LIMIT },
   );
 
