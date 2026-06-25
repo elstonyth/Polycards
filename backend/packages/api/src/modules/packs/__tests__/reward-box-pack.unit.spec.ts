@@ -30,11 +30,11 @@ describe('Pack — pool config columns (A1)', () => {
       status: 'active' as const,
       // New A1 fields:
       pool_enabled: false,
-      draws_per_day: 3,
+      draws_per_day: 0,
     };
 
     expect(row.pool_enabled).toBe(false);
-    expect(row.draws_per_day).toBe(3);
+    expect(row.draws_per_day).toBe(0);
     expect(row.category).toBe('reward_box');
     expect(row.status).toBe('active');
   });
@@ -62,7 +62,8 @@ describe('Pack — pool config columns (A1)', () => {
 
   it('model schema carries pool_enabled and draws_per_day properties', () => {
     // Introspect the model definition schema to confirm the columns exist.
-    const schema = (Pack as unknown as { schema: Record<string, unknown> }).schema;
+    const schema = (Pack as unknown as { schema: Record<string, unknown> })
+      .schema;
     if (schema) {
       expect(schema).toHaveProperty('pool_enabled');
       expect(schema).toHaveProperty('draws_per_day');

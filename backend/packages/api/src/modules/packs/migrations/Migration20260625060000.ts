@@ -27,10 +27,14 @@ export class Migration20260625060000 extends Migration {
   }
 
   override async down(): Promise<void> {
-    // Refuse to narrow if reward_pool rows exist (same guard pattern as 3a).
+    // Refuse to narrow if ANY row uses a value being removed (same guard pattern
+    // as 3a). A CHECK constraint validates ALL rows incl. soft-deleted, and BOTH
+    // the entity_type ('reward_pool') and action ('edit_reward_pool') CHECKs are
+    // narrowed here — so the guard must cover both columns and drop the
+    // deleted_at filter.
     this.addSql(`DO $$ BEGIN
-      IF EXISTS (SELECT 1 FROM "admin_action_audit" WHERE entity_type = 'reward_pool' AND deleted_at IS NULL) THEN
-        RAISE EXCEPTION 'refusing to narrow admin_action_audit: reward_pool rows exist';
+      IF EXISTS (SELECT 1 FROM "admin_action_audit" WHERE entity_type = 'reward_pool' OR action = 'edit_reward_pool') THEN
+        RAISE EXCEPTION 'refusing to narrow admin_action_audit: reward_pool/edit_reward_pool rows exist';
       END IF;
     END $$;`);
     this.addSql(

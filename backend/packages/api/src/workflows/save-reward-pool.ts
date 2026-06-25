@@ -1,4 +1,9 @@
-import { createStep, StepResponse, createWorkflow, WorkflowResponse } from '@medusajs/framework/workflows-sdk';
+import {
+  createStep,
+  StepResponse,
+  createWorkflow,
+  WorkflowResponse,
+} from '@medusajs/framework/workflows-sdk';
 import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../modules/packs';
 import type PacksModuleService from '../modules/packs/service';
@@ -21,18 +26,14 @@ export type SaveRewardPoolResult = {
   pool_enabled: boolean;
 };
 
-// Compensation payload: the pack fields + the prior reward PackOdds ids, so
-// the step can restore the prior state if a later step fails.
-type Snapshot = {
-  pack_slug: string;
-  prior_pool_enabled: boolean;
-  prior_draws_per_day: number;
-  prior_odds_ids: string[];
-};
-
-// save-reward-pool-step — upsert the tier's reward_box Pack + replace-all its
-// reward PackOdds rows, then write an admin_action_audit row. Compensated by
-// restoring the prior odds rows and pack config.
+// save-reward-pool-step — upsert the tier's reward_box Pack, atomically
+// replace-all its reward PackOdds rows + pool config (one transaction inside
+// packs.replaceRewardPool), then write an admin_action_audit row.
+//
+// No compensation: the destructive part (delete → insert → update odds/pack
+// config) is atomic in replaceRewardPool's injected transaction, so a partial
+// failure rolls itself back. There are no downstream steps after this one, so a
+// rollback function would never fire — it was only ever "best-effort" cosmetics.
 const saveRewardPoolStep = createStep(
   'save-reward-pool',
   async (input: SaveRewardPoolInput, { container }) => {
@@ -42,7 +43,12 @@ const saveRewardPoolStep = createStep(
 
     // Resolve or create the reward_box Pack for this tier.
     const [existing] = await packs.listPacks({ slug }, { take: 1 });
-    let pack: { slug: string; pool_enabled: boolean; draws_per_day: number; id: string };
+    let pack: {
+      slug: string;
+      pool_enabled: boolean;
+      draws_per_day: number;
+      id: string;
+    };
 
     if (existing) {
       pack = existing as typeof pack;
@@ -63,53 +69,26 @@ const saveRewardPoolStep = createStep(
       pack = created as typeof pack;
     }
 
-    // Snapshot for compensation: prior odds ids + prior pack pool config.
+    // Prior reward odds ids (card_id null) — the replace-all targets only these.
     const priorOdds = await packs.listPackOdds(
       { pack_id: slug },
       { take: 10000 },
     );
-    // Only snapshot reward rows (card_id null) — the replace-all targets them.
     const priorRewardOddsIds = priorOdds
       .filter((o) => o.card_id == null)
       .map((o) => o.id);
+    const priorPoolEnabled = pack.pool_enabled;
+    const priorDrawsPerDay = pack.draws_per_day;
 
-    const snapshot: Snapshot = {
-      pack_slug: slug,
-      prior_pool_enabled: pack.pool_enabled,
-      prior_draws_per_day: pack.draws_per_day,
-      prior_odds_ids: priorRewardOddsIds,
-    };
-
-    // Replace-all: delete existing reward odds rows, then insert the new set.
-    if (priorRewardOddsIds.length > 0) {
-      await packs.deletePackOdds(priorRewardOddsIds);
-    }
-
-    if (input.entries.length > 0) {
-      await packs.createPackOdds(
-        input.entries.map((e) => ({
-          pack_id: slug,
-          card_id: null,
-          rarity: null,
-          weight: e.weight,
-          locked: false,
-          kind: e.kind,
-          product_handle: e.product_handle ?? null,
-          credit_amount: e.credit_amount ?? null,
-        })),
-      );
-    }
-
-    // Update Pack pool config.
-    await packs.updatePacks(
-      {
-        selector: { slug },
-        data: {
-          pool_enabled: input.pool_enabled,
-          draws_per_day: input.draws_per_day,
-        },
-      },
-    );
+    // Atomic replace-all: delete prior reward odds, insert the new set, update
+    // the Pack's pool config — all in one transaction (rolls back together).
+    await packs.replaceRewardPool({
+      slug,
+      priorOddsIds: priorRewardOddsIds,
+      newEntries: input.entries,
+      pool_enabled: input.pool_enabled,
+      draws_per_day: input.draws_per_day,
+    });
 
     // Admin audit row.
     await packs.createAdminActionAudits([
@@ -119,8 +98,8 @@ const saveRewardPoolStep = createStep(
         entity_id: slug,
         action: 'edit_reward_pool',
         before: {
-          pool_enabled: snapshot.prior_pool_enabled,
-          draws_per_day: snapshot.prior_draws_per_day,
+          pool_enabled: priorPoolEnabled,
+          draws_per_day: priorDrawsPerDay,
           entries_count: priorRewardOddsIds.length,
         },
         after: {
@@ -139,26 +118,7 @@ const saveRewardPoolStep = createStep(
       pool_enabled: input.pool_enabled,
     };
 
-    return new StepResponse(result, snapshot);
-  },
-  async (snapshot: Snapshot | undefined, { container }) => {
-    if (!snapshot) return;
-    const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
-
-    // Restore prior pack config.
-    await packs.updatePacks({
-      selector: { slug: snapshot.pack_slug },
-      data: {
-        pool_enabled: snapshot.prior_pool_enabled,
-        draws_per_day: snapshot.prior_draws_per_day,
-      },
-    });
-
-    // The newly-inserted reward odds rows (those not in the snapshot) are hard
-    // to recover cheaply — ponytail: the compensation is best-effort here since
-    // save-reward-pool has no downstream steps that can fail after this step.
-    // A full restore would require re-seeding the prior rows from a richer
-    // snapshot (omitted — add when chaining steps that can fail post-save).
+    return new StepResponse(result);
   },
 );
 

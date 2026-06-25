@@ -51,6 +51,7 @@ import {
   type RewardsSettingsPatch,
   type RewardsSettingsView,
 } from './rewards-settings-validate';
+import type { RewardPoolEntry } from './reward-pool-validate';
 import type {
   DrawnPrize,
   RewardOddsRow,
@@ -133,13 +134,13 @@ export type SettleOpenResult = {
 /** Phase 4 P4.1 — Admin referral tree node (read-only, zero migrations). */
 export type PacksTreeNode = {
   customer_id: string;
-  depth: number;                        // root = 0; direct recruits = 1
+  depth: number; // root = 0; direct recruits = 1
   sponsor_id: string | null;
   vip_level: number | null;
   lifetime_external_spend_sen: string;
   frozen: boolean;
   direct_recruit_count: number;
-  has_more_depth: boolean;              // depth === maxDepth && direct_recruit_count > 0
+  has_more_depth: boolean; // depth === maxDepth && direct_recruit_count > 0
 };
 
 /** Phase 4 P4.1 — commission row returned by commissionsForBeneficiary (read-only). */
@@ -893,7 +894,12 @@ class PacksModuleService extends MedusaService({
     customerId: string,
     grantId: string,
     @MedusaContext() sharedContext: Context = {},
-  ): Promise<{ claimed: boolean; kind: string; amount_myr?: number; level?: number }> {
+  ): Promise<{
+    claimed: boolean;
+    kind: string;
+    amount_myr?: number;
+    level?: number;
+  }> {
     // Defense-in-depth (spec §6): the route already 403s when the gate is off,
     // but fail closed at the mint site too so every present/future caller is safe.
     if (!rewardsRedemptionEnabled()) {
@@ -993,7 +999,7 @@ class PacksModuleService extends MedusaService({
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
     const resolveContainer =
       container ??
-      ((this as unknown as { __container__: MedusaContainer }).__container__);
+      (this as unknown as { __container__: MedusaContainer }).__container__;
 
     // 0) Serialize all credit mutations for THIS customer on the locked txn —
     //    held across the cap COUNT, the payout, and the INSERT below.
@@ -1134,7 +1140,12 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
 
-    return { status: 'drawn', prize, draw_ordinal: drawOrdinal, draw_day: drawDay };
+    return {
+      status: 'drawn',
+      prize,
+      draw_ordinal: drawOrdinal,
+      draw_day: drawDay,
+    };
   }
 
   // Ship a vaulted reward-prize Pull as a physical delivery (B7). Mirrors
@@ -1170,7 +1181,11 @@ class PacksModuleService extends MedusaService({
     // 1) Re-read the Pull UNDER the lock and validate it via the same pure helper
     //    the lockless delivery path uses: must be owned + 'vaulted'. The extra
     //    reward-source gate is B7-specific (only reward prizes ship via this path).
-    const [pull] = await this.listPulls({ id: pullId }, { take: 1 }, sharedContext);
+    const [pull] = await this.listPulls(
+      { id: pullId },
+      { take: 1 },
+      sharedContext,
+    );
     const verdict = validateDeliveryRequest(
       pull ? [pull] : [],
       [pullId],
@@ -1189,14 +1204,20 @@ class PacksModuleService extends MedusaService({
     }
 
     // 3) Daily-cap COUNT under the lock: today's is_reward delivery orders for
-    //    this customer. created_at::date keys the day (DeliveryOrder has no
-    //    draw_day column). The lock makes COUNT-then-INSERT atomic per customer.
+    //    this customer. DeliveryOrder has no draw_day column, so we key the day
+    //    on created_at — but on the SAME UTC boundary settleRewardDraw uses
+    //    (new Date().toISOString().slice(0,10)), NOT Postgres CURRENT_DATE (which
+    //    is the DB session TZ). (created_at AT TIME ZONE 'UTC')::date compares the
+    //    stored timestamptz in UTC against that JS-computed UTC day string, so the
+    //    draw cap and the withdrawal cap roll over at the same instant. The lock
+    //    makes COUNT-then-INSERT atomic per customer.
+    const utcDay = new Date().toISOString().slice(0, 10);
     const { withdrawals_per_day } = await this.rewardsSettings(sharedContext);
     const countRows = await em.execute<{ n: string | null }[]>(
       `SELECT COUNT(*) AS n FROM delivery_order
          WHERE customer_id = ? AND is_reward = TRUE
-           AND created_at::date = CURRENT_DATE AND deleted_at IS NULL`,
-      [customerId],
+           AND (created_at AT TIME ZONE 'UTC')::date = ?::date AND deleted_at IS NULL`,
+      [customerId, utcDay],
     );
     if (Number(countRows[0]?.n ?? 0) >= withdrawals_per_day) {
       return { status: 'capped' };
@@ -1900,7 +1921,9 @@ class PacksModuleService extends MedusaService({
 
     // Next unlock = earliest pending maturity in the future + sum of all
     // commission credits maturing at exactly that date for this customer.
-    const nextRows = await em.execute<{ date: string | null; amount_cents: string | null }[]>(
+    const nextRows = await em.execute<
+      { date: string | null; amount_cents: string | null }[]
+    >(
       `WITH nxt AS (
          SELECT MIN(c.matures_at) AS d
            FROM credit_transaction ct
@@ -1964,7 +1987,7 @@ class PacksModuleService extends MedusaService({
         'FROM pull pu ' +
         'LEFT JOIN pack pk ON pk.slug = pu.pack_id AND pk.deleted_at IS NULL ' +
         'LEFT JOIN card c ON c.handle = pu.card_id AND c.deleted_at IS NULL ' +
-        'WHERE pu.deleted_at IS NULL AND pu.customer_id IS NOT NULL AND pu.source <> \'reward\' ' +
+        "WHERE pu.deleted_at IS NULL AND pu.customer_id IS NOT NULL AND pu.source <> 'reward' " +
         // Branch on `since` rather than a nullable param: the
         // `(? IS NULL OR rolled_at >= ?)` form is non-sargable and would skip
         // the IDX_pull_rolled_at index on the weekly window (Sourcery).
@@ -2139,7 +2162,10 @@ class PacksModuleService extends MedusaService({
         )
       : [];
     const contribById = new Map<string, number>(
-      contribRows.map((r) => [r.recruit_id, Number(r.contribution_cents) / 100]),
+      contribRows.map((r) => [
+        r.recruit_id,
+        Number(r.contribution_cents) / 100,
+      ]),
     );
 
     // 2) Downstream headcount, ALL generations, via a bounded DOWNWARD walk.
@@ -2193,12 +2219,20 @@ class PacksModuleService extends MedusaService({
     customerId: string,
     maxDepth: number,
     @MedusaContext() sharedContext: Context = {},
-  ): Promise<{ root: PacksTreeNode; nodes: PacksTreeNode[]; maxDepth: number; truncated: boolean }> {
+  ): Promise<{
+    root: PacksTreeNode;
+    nodes: PacksTreeNode[];
+    maxDepth: number;
+    truncated: boolean;
+  }> {
     const depth = Math.max(1, Math.min(10, Math.floor(Number(maxDepth)) || 6));
-    const em = (sharedContext.transactionManager ?? sharedContext.manager) as unknown as LedgerSqlManager;
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
 
     // ponytail: LIMIT 1001 → detect >1000 without fetching more rows
-    const rows = await em.execute<{ node_id: string; sponsor_id: string; depth: number }[]>(
+    const rows = await em.execute<
+      { node_id: string; sponsor_id: string; depth: number }[]
+    >(
       `WITH RECURSIVE tree AS (
          SELECT customer_id AS node_id, sponsor_id, 1 AS depth
            FROM referral_relationship
@@ -2236,7 +2270,8 @@ class PacksModuleService extends MedusaService({
       lifetime_external_spend_sen: enrich.lifetimeSen.get(r.node_id) ?? '0',
       frozen: enrich.frozen.get(r.node_id) ?? false,
       direct_recruit_count: enrich.recruitCount.get(r.node_id) ?? 0,
-      has_more_depth: r.depth === depth && (enrich.recruitCount.get(r.node_id) ?? 0) > 0,
+      has_more_depth:
+        r.depth === depth && (enrich.recruitCount.get(r.node_id) ?? 0) > 0,
     }));
 
     return { root, nodes, maxDepth: depth, truncated };
@@ -2248,7 +2283,8 @@ class PacksModuleService extends MedusaService({
     opts: { limit: number; offset: number },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<CommissionRow[]> {
-    const em = (sharedContext.transactionManager ?? sharedContext.manager) as unknown as LedgerSqlManager;
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
     const limit = Math.max(1, Math.min(200, Math.floor(opts.limit ?? 50)));
     const offset = Math.max(0, Math.floor(opts.offset) || 0);
 
@@ -2270,13 +2306,17 @@ class PacksModuleService extends MedusaService({
     // sharing the same source_transaction_id; without this filter the join double-counts.
     const openIds = [...new Set(rows.map((r) => r.source_transaction_id))];
     const ph = openIds.map(() => '?').join(',');
-    const opens = await em.execute<{ source_transaction_id: string; customer_id: string }[]>(
+    const opens = await em.execute<
+      { source_transaction_id: string; customer_id: string }[]
+    >(
       `SELECT source_transaction_id, customer_id FROM credit_transaction
          WHERE source_transaction_id IN (${ph})
            AND reason = 'pack_open' AND amount < 0 AND deleted_at IS NULL`,
       openIds,
     );
-    const openerOf = new Map(opens.map((o) => [o.source_transaction_id, o.customer_id]));
+    const openerOf = new Map(
+      opens.map((o) => [o.source_transaction_id, o.customer_id]),
+    );
 
     return rows.map((r) => ({
       id: r.id,
@@ -2309,7 +2349,8 @@ class PacksModuleService extends MedusaService({
     opts: { limit: number; offset: number },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ account_state: any | null; actions: AuditRow[] }> {
-    const em = (sharedContext.transactionManager ?? sharedContext.manager) as unknown as LedgerSqlManager;
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
     const limit = Math.max(1, Math.min(200, Math.floor(opts.limit) || 50));
     const offset = Math.max(0, Math.floor(opts.offset) || 0);
 
@@ -2327,7 +2368,11 @@ class PacksModuleService extends MedusaService({
          LIMIT ? OFFSET ?`,
       [customerId, customerId, customerId, limit, offset],
     );
-    const [state] = await this.listCustomerAccountStates({ customer_id: customerId }, { take: 1 }, sharedContext);
+    const [state] = await this.listCustomerAccountStates(
+      { customer_id: customerId },
+      { take: 1 },
+      sharedContext,
+    );
     return { account_state: state ?? null, actions };
   }
 
@@ -2339,18 +2384,35 @@ class PacksModuleService extends MedusaService({
     const lifetimeSen = new Map<string, string>();
     const frozen = new Map<string, boolean>();
     const recruitCount = new Map<string, number>();
-    if (ids.length === 0) return { sponsorOf, vipLevel, lifetimeSen, frozen, recruitCount };
+    if (ids.length === 0)
+      return { sponsorOf, vipLevel, lifetimeSen, frozen, recruitCount };
 
     const ph = ids.map(() => '?').join(',');
     // Sequential to avoid concurrent queries on the shared injected EntityManager.
-    const rels = await em.execute<{ customer_id: string; sponsor_id: string }[]>(
-      `SELECT customer_id, sponsor_id FROM referral_relationship WHERE customer_id IN (${ph}) AND deleted_at IS NULL`, ids);
-    const vms = await em.execute<{ customer_id: string; current_level: number; lifetime_external_spend_sen: string }[]>(
-      `SELECT customer_id, current_level, lifetime_external_spend_sen FROM vip_member_state WHERE customer_id IN (${ph}) AND deleted_at IS NULL`, ids);
+    const rels = await em.execute<
+      { customer_id: string; sponsor_id: string }[]
+    >(
+      `SELECT customer_id, sponsor_id FROM referral_relationship WHERE customer_id IN (${ph}) AND deleted_at IS NULL`,
+      ids,
+    );
+    const vms = await em.execute<
+      {
+        customer_id: string;
+        current_level: number;
+        lifetime_external_spend_sen: string;
+      }[]
+    >(
+      `SELECT customer_id, current_level, lifetime_external_spend_sen FROM vip_member_state WHERE customer_id IN (${ph}) AND deleted_at IS NULL`,
+      ids,
+    );
     const cas = await em.execute<{ customer_id: string; frozen: boolean }[]>(
-      `SELECT customer_id, frozen FROM customer_account_state WHERE customer_id IN (${ph}) AND deleted_at IS NULL`, ids);
+      `SELECT customer_id, frozen FROM customer_account_state WHERE customer_id IN (${ph}) AND deleted_at IS NULL`,
+      ids,
+    );
     const counts = await em.execute<{ sponsor_id: string; n: string }[]>(
-      `SELECT sponsor_id, COUNT(*) AS n FROM referral_relationship WHERE sponsor_id IN (${ph}) AND deleted_at IS NULL GROUP BY sponsor_id`, ids);
+      `SELECT sponsor_id, COUNT(*) AS n FROM referral_relationship WHERE sponsor_id IN (${ph}) AND deleted_at IS NULL GROUP BY sponsor_id`,
+      ids,
+    );
     for (const r of rels) sponsorOf.set(r.customer_id, r.sponsor_id);
     for (const r of vms) {
       vipLevel.set(r.customer_id, Number(r.current_level));
@@ -2891,6 +2953,56 @@ class PacksModuleService extends MedusaService({
     }
 
     return { flipped };
+  }
+
+  // Atomic replace-all of a reward_box tier's reward pool (E1). The three writes
+  // — delete prior reward PackOdds, insert the new set, update the Pack's pool
+  // config — share ONE injected transaction, so a failure after the delete rolls
+  // the delete back too (instead of leaving the tier's odds wiped with no
+  // recovery, the non-atomic version's hazard). All writes pass sharedContext so
+  // they enlist in the same transaction. Caller (saveRewardPoolStep) keeps the
+  // Pack upsert + audit row; this method owns only the odds/pack-config writes.
+  @InjectTransactionManager()
+  async replaceRewardPool(
+    input: {
+      slug: string;
+      priorOddsIds: string[];
+      newEntries: RewardPoolEntry[];
+      pool_enabled: boolean;
+      draws_per_day: number;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    if (input.priorOddsIds.length > 0) {
+      await this.deletePackOdds(input.priorOddsIds, sharedContext);
+    }
+
+    if (input.newEntries.length > 0) {
+      await this.createPackOdds(
+        input.newEntries.map((e) => ({
+          pack_id: input.slug,
+          card_id: null,
+          rarity: null,
+          weight: e.weight,
+          locked: false,
+          kind: e.kind,
+          product_handle: e.product_handle ?? null,
+          credit_amount: e.credit_amount ?? null,
+        })),
+        sharedContext,
+      );
+    }
+
+    await this.updatePacks(
+      {
+        selector: { slug: input.slug },
+        data: {
+          pool_enabled: input.pool_enabled,
+          draws_per_day: input.draws_per_day,
+        },
+      },
+      sharedContext,
+    );
   }
 }
 

@@ -14,7 +14,7 @@ export class Migration20260625052600 extends Migration {
         (kind = 'product' AND product_handle IS NOT NULL AND credit_amount IS NULL AND card_id IS NULL)
         OR (kind = 'credit'  AND credit_amount > 0 AND product_handle IS NULL AND card_id IS NULL)
         OR (kind = 'nothing' AND product_handle IS NULL AND credit_amount IS NULL AND card_id IS NULL)
-        OR (kind IS NULL AND card_id IS NOT NULL)
+        OR (kind IS NULL AND card_id IS NOT NULL AND product_handle IS NULL AND credit_amount IS NULL)
       );`,
     );
   }

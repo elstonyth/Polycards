@@ -10,8 +10,9 @@ import { saveRewardPoolWorkflow } from '../../../../workflows/save-reward-pool';
 // GET /admin/reward-pools/:tier — current pool config + entries for a VIP tier.
 //
 // Returns the reward_box Pack config (draws_per_day, pool_enabled) and all its
-// reward PackOdds rows (card_id null). The Pack may not exist yet (204 with
-// empty body in that case).
+// reward PackOdds rows (card_id null). When the Pack does not exist yet, returns
+// 200 with an empty body shape ({ pool: null, entries: [] }) — not a 404 — so the
+// admin UI can distinguish "never authored" from a real error.
 export async function GET(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,

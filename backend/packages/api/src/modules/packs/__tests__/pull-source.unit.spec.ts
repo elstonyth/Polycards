@@ -59,14 +59,13 @@ describe('Pull — source column (A4)', () => {
   });
 
   it('model schema carries the source property', () => {
-    const schema = (Pull as unknown as { schema: Record<string, unknown> }).schema;
-    if (schema) {
-      expect(schema).toHaveProperty('source');
-    } else {
-      // Model definition shape varies by Medusa version; skip introspection if
-      // the .schema accessor is absent — the migration + TS compile are the
-      // real enforcement.
-      expect(true).toBe(true);
-    }
+    // Real assertion — no guaranteed-pass fallback. The DslSchema is always
+    // present on a DML model; require both it and the `source` column so a
+    // dropped column regresses here (the migrated-DB default is asserted in
+    // integration-tests/http/reward-db-constraints.spec.ts).
+    const schema = (Pull as unknown as { schema?: Record<string, unknown> })
+      .schema;
+    expect(schema).toBeDefined();
+    expect(schema).toHaveProperty('source');
   });
 });
