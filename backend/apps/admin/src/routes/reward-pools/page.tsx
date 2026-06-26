@@ -60,10 +60,24 @@ const RewardPoolsPage = () => {
     setPoolEnabled(data.pool?.pool_enabled ?? false);
   }
 
+  // Switching tiers must reset the buffer immediately. The reseed above only runs
+  // once the NEW tier's data arrives, so without this the previous tier's rows
+  // stay editable during the fetch — and a Save in that window would POST the old
+  // tier's entries to the new tier's pool. Clearing rows also disables Save until
+  // fresh data reseeds the buffer.
+  const handleTierChange = (nextTier: string) => {
+    setTier(nextTier);
+    setSeededFrom(undefined);
+    setRows([]);
+    setDrawsPerDay('0');
+    setPoolEnabled(false);
+  };
+
   // Product picker. allCards is loaded for BOTH the read-only product display
-  // join AND the picker, so it fetches on load (not lazily).
+  // join AND the picker, so it fetches on load (not lazily). isCardsError lets the
+  // UI tell a failed catalog fetch apart from an in-flight one.
   const [pickerFor, setPickerFor] = useState<string | null>(null);
-  const { data: allCards = null } = useCards();
+  const { data: allCards, isError: isCardsError } = useCards();
   const cardByHandle = new Map((allCards ?? []).map((c) => [c.handle, c]));
 
   const probs = rowProbabilities(rows);
@@ -129,7 +143,7 @@ const RewardPoolsPage = () => {
           ) : (
             <StatusBadge color="grey">Not authored</StatusBadge>
           )}
-          <Select value={tier} onValueChange={setTier}>
+          <Select value={tier} onValueChange={handleTierChange}>
             <Select.Trigger className="w-32">
               <Select.Value />
             </Select.Trigger>
@@ -343,7 +357,11 @@ const RewardPoolsPage = () => {
                   </Text>
                 </FocusModal.Description>
               </div>
-              {allCards === null ? (
+              {isCardsError ? (
+                <Text className="text-ui-fg-subtle">
+                  Failed to load the product catalog.
+                </Text>
+              ) : allCards == null ? (
                 <Text className="text-ui-fg-subtle">…</Text>
               ) : allCards.length === 0 ? (
                 <Text className="text-ui-fg-subtle">No cards available.</Text>
