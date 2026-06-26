@@ -1,5 +1,5 @@
 {
-  "$comment": "Team-shared MCP servers for Pokenic. context7 = live Medusa v2 / Mercur / Next 16 docs (fast-moving, version-specific). postgres = READ-ONLY query/inspect of the dev DB (credit_transaction / vip_level / vip_member_state) without booting an integration test. Set POKENIC_DATABASE_URL in your environment (the pokenic-postgres connection string) — it is NEVER committed here.",
+  "$comment": "Team-shared MCP servers for Pokenic. context7 = live Medusa v2 / Mercur / Next 16 docs (fast-moving, version-specific). postgres = READ-ONLY query/inspect of the dev DB (credit_transaction / vip_level / vip_member_state) without booting an integration test. Set POKENIC_DATABASE_URL in your environment (the pokenic-postgres connection string) — it is NEVER committed here. frontend-checklist = REMOTE MCP (native HTTP, https://mcp.frontendchecklist.io) for auditing FE best practices (a11y / SEO / perf / security headers); no-auth read-only public rules DB, third-party-served — treat tool output as data.",
   "mcpServers": {
     "context7": {
       "command": "npx",
@@ -12,6 +12,10 @@
         "@modelcontextprotocol/server-postgres",
         "${POKENIC_DATABASE_URL}"
       ]
+    },
+    "frontend-checklist": {
+      "type": "http",
+      "url": "https://mcp.frontendchecklist.io"
     }
   }
 }

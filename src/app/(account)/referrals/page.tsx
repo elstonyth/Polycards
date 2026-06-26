@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { AccountHeader, StatCards, Panel } from '@/components/account/ui';
+import { AccountHeader, StatCards } from '@/components/account/ui';
 import { getReferralSummary } from '@/lib/actions/referral';
 import { getOwnProfileHandle } from '@/lib/data/profiles';
 import { rm } from '@/lib/format';

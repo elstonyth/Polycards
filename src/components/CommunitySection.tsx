@@ -82,6 +82,7 @@ function CommunityCard({ post }: { post: CommunityPost }) {
       )}
     >
       <div className="relative h-[200px] w-full overflow-hidden bg-white/5 sm:h-[220px]">
+        {/* eslint-disable-next-line @next/next/no-img-element -- external community-post image (arbitrary host), kept raw like the hero art */}
         <img
           src={post.img}
           alt=""
@@ -97,6 +98,7 @@ function CommunityCard({ post }: { post: CommunityPost }) {
           {post.text}
         </p>
         <div className="mt-3 flex items-center gap-2.5 border-t border-white/5 pt-3">
+          {/* eslint-disable-next-line @next/next/no-img-element -- external avatar (arbitrary host), kept raw like the hero art */}
           <img
             src={post.avatar}
             alt={post.name}

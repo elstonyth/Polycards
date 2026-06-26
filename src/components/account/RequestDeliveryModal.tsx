@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import Image from 'next/image';
 import {
   requestDelivery,
@@ -9,6 +9,7 @@ import {
   type AddAddressInput,
 } from '@/lib/actions/delivery';
 import type { VaultItem } from '@/lib/actions/vault';
+import { useModalA11y } from '@/lib/use-modal-a11y';
 
 type Props = {
   open: boolean;
@@ -44,6 +45,8 @@ export default function RequestDeliveryModal({
     postalCode: '',
     countryCode: '',
   });
+  const panelRef = useRef<HTMLDivElement>(null);
+  useModalA11y(panelRef, open, onClose);
 
   if (!open) return null;
 
@@ -92,7 +95,14 @@ export default function RequestDeliveryModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-      <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-neutral-900 p-5">
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Request delivery"
+        tabIndex={-1}
+        className="w-full max-w-lg rounded-2xl border border-white/10 bg-neutral-900 p-5 outline-none"
+      >
         <h2 className="font-heading text-lg font-bold text-white">
           Request delivery
         </h2>
@@ -241,7 +251,7 @@ export default function RequestDeliveryModal({
                 type="button"
                 disabled={busy}
                 onClick={saveAddress}
-                className="rounded-lg bg-emerald-500 px-3 py-2 text-[13px] font-bold text-white disabled:opacity-50"
+                className="rounded-lg bg-emerald-700 px-3 py-2 text-[13px] font-bold text-white disabled:opacity-50"
               >
                 Save address
               </button>

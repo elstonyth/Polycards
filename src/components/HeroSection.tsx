@@ -100,10 +100,10 @@ export default function HeroSection() {
             <p className="mb-1 text-[11px] font-medium uppercase tracking-widest text-white/25 lg:mb-2 lg:text-[13px]">
               Packs available now
             </p>
-            <h2 className="font-heading text-2xl font-bold tracking-tight text-white md:text-3xl lg:max-w-[39rem] lg:text-5xl lg:leading-[1.1]">
+            <h1 className="font-heading text-2xl font-bold tracking-tight text-white md:text-3xl lg:max-w-[39rem] lg:text-5xl lg:leading-[1.1]">
               Rip packs.{' '}
               <span className="text-white/40">Pull graded cards.</span>
-            </h2>
+            </h1>
             <p className="mt-3 max-w-xs text-[13px] leading-relaxed text-white/70 sm:text-sm lg:mt-4 lg:max-w-md lg:text-base">
               Choose to hold, trade, redeem, or sell it back to us at up to{' '}
               <span className="rounded-md bg-white/15 px-2 py-0.5 font-heading text-white">

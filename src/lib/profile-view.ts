@@ -40,9 +40,12 @@ export interface ProfileViewUser {
 const PFP_COUNT = 81; // public/images/pfps/pfp-1..81.webp
 
 /** Seed → avatar path — shared with the leaderboard seam so the same seed
- * always renders the same avatar on both surfaces. */
-export const avatarForSeed = (seed: number): string =>
-  `/images/pfps/pfp-${(Math.abs(Math.trunc(seed)) % PFP_COUNT) + 1}.webp`;
+ * always renders the same avatar on both surfaces. A non-finite seed (a dropped/
+ * renamed backend field) falls back to a fixed avatar instead of pfp-NaN.webp. */
+export const avatarForSeed = (seed: number): string => {
+  const n = Number.isFinite(seed) ? Math.abs(Math.trunc(seed)) : 0;
+  return `/images/pfps/pfp-${(n % PFP_COUNT) + 1}.webp`;
+};
 
 /** Join year for "Collecting since {year}" — "—" for an unparsable date. */
 function joinedYear(iso: string): string {

@@ -289,7 +289,7 @@ function PartyCard({
               className="absolute right-2 top-2 z-10 flex h-2.5 w-2.5"
               aria-hidden
             >
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75 motion-reduce:animate-none" />
               <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
             </span>
           )}

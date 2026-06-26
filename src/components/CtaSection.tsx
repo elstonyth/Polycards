@@ -121,6 +121,7 @@ export default function CtaSection() {
                 zIndex: img.z,
               }}
             >
+              {/* eslint-disable-next-line @next/next/no-img-element -- decorative CDN card art with per-image transforms, kept raw like the hero art */}
               <img
                 src={`${CDN}${img.src}`}
                 alt=""

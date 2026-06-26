@@ -1,11 +1,12 @@
 // src/app/slots/[slug]/OddsSheet.tsx
 'use client';
 
-import { useEffect } from 'react';
+import { useRef } from 'react';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ODDS } from '@/app/claw/packs-data';
 import { TIER_COLOR, TIER_BAND, TIER_ORDER } from '@/lib/price-tier';
+import { useModalA11y } from '@/lib/use-modal-a11y';
 
 /** Published rarity-odds list. Never exposes the win-rate lock (PRD §3.7/§8). */
 export function OddsSheet({
@@ -15,14 +16,8 @@ export function OddsSheet({
   open: boolean;
   onClose: () => void;
 }) {
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useModalA11y(panelRef, open, onClose);
 
   if (!open) return null;
 
@@ -32,10 +27,12 @@ export function OddsSheet({
       onClick={onClose}
     >
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label="Published pull odds by rarity"
-        className="w-full max-w-sm rounded-2xl border border-white/10 bg-neutral-900 p-5"
+        tabIndex={-1}
+        className="w-full max-w-sm rounded-2xl border border-white/10 bg-neutral-900 p-5 outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-center justify-between">

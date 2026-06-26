@@ -81,8 +81,22 @@ export async function POST(
     }
     sponsorId = match.id;
   } else if (typeof body?.sponsor_id === 'string' && body.sponsor_id.length > 0) {
-    // Back-compat: existing callers that pass sponsor_id directly.
-    sponsorId = body.sponsor_id;
+    // Back-compat: existing callers that pass sponsor_id directly. Verify the id
+    // points to a real customer before linking — the handle branch resolves
+    // server-side, and the immutable one-shot sponsor edge must never be set to
+    // an arbitrary/nonexistent id (F7).
+    const customerService = req.scope.resolve(Modules.CUSTOMER);
+    const [match] = await customerService.listCustomers(
+      { id: body.sponsor_id },
+      { take: 1 },
+    );
+    if (!match) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'No such referral sponsor.',
+      );
+    }
+    sponsorId = match.id;
   }
 
   if (!sponsorId) {

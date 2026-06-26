@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import Image from 'next/image';
 import { MessageCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { features } from '@/lib/features';
@@ -150,7 +151,7 @@ export default function SiteFooter() {
           {/* Brand / tagline / CTA */}
           <div className="lg:col-span-5">
             <div className="flex flex-col items-center lg:items-start">
-              <img
+              <Image
                 src={LOGO_SRC}
                 alt="Pokenic"
                 width={80}
