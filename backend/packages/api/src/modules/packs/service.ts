@@ -713,10 +713,13 @@ class PacksModuleService extends MedusaService({
   }
 
   // Auto-clear an AUTO freeze once a repaying inflow brings the projected balance
-  // back to >= 0. projectedBalanceCents = committed snapshot + just-inserted delta
-  // (never re-read after insert — MikroORM UoW buffers until flush, so a raw SQL
-  // read inside the same txn would NOT see the new row). A MANUAL freeze is never
-  // auto-lifted. SYSTEM event — recorded on the state row, NOT in admin_action_audit.
+  // back to >= 0. projectedBalanceCents is the post-inflow balance: the inline
+  // caller (mutateCreditAtomic) passes committed snapshot + just-inserted delta
+  // (it can't re-read — MikroORM UoW buffers until flush, so a raw SQL read inside
+  // the same txn would NOT see the new row); the out-of-band caller
+  // (maybeAutoUnfreezeForCustomer, used by buyback) passes a fresh post-commit
+  // re-read under the same lock. A MANUAL freeze is never auto-lifted. SYSTEM
+  // event — recorded on the state row, NOT in admin_action_audit.
   private async maybeAutoUnfreeze(
     customerId: string,
     projectedBalanceCents: number,
@@ -1683,7 +1686,8 @@ class PacksModuleService extends MedusaService({
           // backs VIP display/grants; this aligns the commission tier with it.
           // lifetimeExternalSenFor is @InjectManager like creditSummary, so the
           // level read stays off the locked path. (F5)
-          const sponsorLifetimeSen = await this.lifetimeExternalSenFor(sponsorId);
+          const sponsorLifetimeSen =
+            await this.lifetimeExternalSenFor(sponsorId);
           // UNIT TRAP: lifetimeExternalSenFor returns integer SEN, but
           // levelForSpend expects MYR (it calls toSen internally) — same
           // conversion the VIP grant path does (rebuildVipMemberState /
@@ -1704,10 +1708,7 @@ class PacksModuleService extends MedusaService({
             level: r.level,
             direct_referral_pct: Number(r.direct_referral_pct),
           }));
-          const sponsorLevel = levelForSpend(
-            sponsorLifetimeMyr,
-            levelLadder,
-          );
+          const sponsorLevel = levelForSpend(sponsorLifetimeMyr, levelLadder);
           const pct = directReferralPctForLevel(sponsorLevel, pctLadder);
           const commissionSen = directCommissionSen(basisSen, pct);
 
