@@ -155,6 +155,64 @@ medusaIntegrationTestRunner({
       };
     }
 
+    it(
+      'GET /store/achievements returns live-fallback shape for a new customer with no state row',
+      async () => {
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+
+        await seedLadder(packs);
+        await seedAchievementDef(packs);
+        // ponytail: no pack open — absence of a state row is the point
+
+        const storeHeaders = await mintStoreHeaders();
+        const customer = await registerAndLogin(
+          'ach-route-new@pokenic.test',
+          storeHeaders,
+        );
+
+        const res = await unwrapResponse(
+          api.get('/store/achievements', {
+            headers: {
+              ...storeHeaders,
+              authorization: `Bearer ${customer.token}`,
+            },
+          }),
+        );
+        expect(res.status).toBe(200);
+
+        const body = res.data as {
+          collector_level: number;
+          total_xp: number;
+          next_level: { level: number; xp_threshold: number; remaining: number } | null;
+          achievements: {
+            key: string;
+            unlocked: boolean;
+            unlocked_at: unknown;
+            progress: { current: number; target: number };
+          }[];
+        };
+
+        expect(body.collector_level).toBe(1);
+        expect(body.total_xp).toBe(0);
+
+        // Level-2 rung must be present and correct.
+        expect(body.next_level).not.toBeNull();
+        expect(body.next_level?.level).toBe(2);
+        expect(body.next_level?.xp_threshold).toBe(500);
+        expect(body.next_level?.remaining).toBe(500);
+
+        // Every achievement is locked with null unlocked_at and has a progress shape.
+        expect(Array.isArray(body.achievements)).toBe(true);
+        expect(body.achievements.length).toBeGreaterThan(0);
+        for (const ach of body.achievements) {
+          expect(ach.unlocked).toBe(false);
+          expect(ach.unlocked_at).toBeNull();
+          expect(typeof ach.progress.current).toBe('number');
+          expect(typeof ach.progress.target).toBe('number');
+        }
+      },
+    );
+
     it('GET /store/achievements returns 401 without a token', async () => {
       const storeHeaders = await mintStoreHeaders();
       const res = await unwrapResponse(
