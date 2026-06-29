@@ -48,6 +48,18 @@ export async function GET(
   };
   const unlockedByKey = new Map(grants.map((g) => [g.achievement_key, g]));
 
+  // ponytail: compute earned = grants ∪ liveUnlocked ONCE so per-badge flags and
+  // aggregate always derive from the same set (fixes "0/16 unlocked" vs real level).
+  const liveUnlocked = new Set(
+    unlockedKeys(
+      metrics,
+      defs.map((d) => ({ key: d.key, metric: d.metric as AchMetric, threshold: Number(d.threshold) })),
+    ),
+  );
+  // Grants are authoritative (monotonic/peak-based); liveUnlocked covers legacy
+  // customers with no grant rows yet. For up-to-date customers grants ⊇ liveUnlocked.
+  const earned = new Set([...unlockedByKey.keys(), ...liveUnlocked]);
+
   const achievements = defs
     .map((d) => {
       const threshold = Number(d.threshold);
@@ -62,26 +74,20 @@ export async function GET(
         rarity: d.rarity,
         xp: Number(d.xp),
         metric,
-        unlocked: Boolean(g),
+        unlocked: earned.has(d.key),
         unlocked_at: g ? g.unlocked_at : null,
         progress: { current, target: threshold },
       };
     })
     .sort((a, b) => a.xp - b.xp);
 
-  // total XP / level: prefer persisted state, else compute live from grants.
-  const liveUnlocked = new Set(
-    unlockedKeys(
-      metrics,
-      defs.map((d) => ({ key: d.key, metric: d.metric as AchMetric, threshold: Number(d.threshold) })),
-    ),
-  );
-  const liveXp = defs
-    .filter((d) => unlockedByKey.has(d.key) || liveUnlocked.has(d.key))
+  // Derive total_xp from earned (same set as per-badge flags) so aggregate and
+  // badge count are always consistent — never read stateRow.total_xp directly.
+  const totalXp = defs
+    .filter((d) => earned.has(d.key))
     .reduce((s, d) => s + Number(d.xp), 0);
-  const totalXp = stateRow ? Number(stateRow.total_xp) : liveXp;
-  const collectorLevel = stateRow ? Number(stateRow.collector_level) : levelForXp(totalXp);
-  const highest = stateRow ? Number(stateRow.highest_level_ever) : collectorLevel;
+  const collectorLevel = levelForXp(totalXp);
+  const highest = Math.max(collectorLevel, stateRow ? Number(stateRow.highest_level_ever) : collectorLevel);
 
   const nextRung = ACHIEVEMENT_XP_LADDER.find((r) => r.level === collectorLevel + 1) ?? null;
   const next_level = nextRung
