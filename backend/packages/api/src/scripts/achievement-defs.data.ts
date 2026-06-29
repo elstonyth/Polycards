@@ -13,12 +13,12 @@ export type AchievementDefSeed = {
 // (no data source yet). "Set Finisher" excluded (needs set-completion, not size).
 export const ACHIEVEMENT_DEFS: AchievementDefSeed[] = [
   // Cases Opened (metric: cases_opened) — 6
-  { key: 'cases_opened_1', name: 'First Pull', description: 'Open your first case', category: 'cases_opened', rarity: 'Common', xp: 50, metric: 'cases_opened', threshold: 1 },
-  { key: 'cases_opened_25', name: 'Case Opener', description: 'Open 25 cases', category: 'cases_opened', rarity: 'Common', xp: 100, metric: 'cases_opened', threshold: 25 },
-  { key: 'cases_opened_50', name: 'Case Enthusiast', description: 'Open 50 cases', category: 'cases_opened', rarity: 'Uncommon', xp: 250, metric: 'cases_opened', threshold: 50 },
-  { key: 'cases_opened_250', name: 'Case Master', description: 'Open 250 cases', category: 'cases_opened', rarity: 'Rare', xp: 500, metric: 'cases_opened', threshold: 250 },
-  { key: 'cases_opened_1000', name: 'Case Legend', description: 'Open 1,000 cases', category: 'cases_opened', rarity: 'Epic', xp: 1500, metric: 'cases_opened', threshold: 1000 },
-  { key: 'cases_opened_5000', name: 'Case God', description: 'Open 5,000 cases', category: 'cases_opened', rarity: 'Legendary', xp: 5000, metric: 'cases_opened', threshold: 5000 },
+  { key: 'cases_opened_1', name: 'First Pull', description: 'Open your first pack', category: 'cases_opened', rarity: 'Common', xp: 50, metric: 'cases_opened', threshold: 1 },
+  { key: 'cases_opened_25', name: 'Pack Opener', description: 'Open 25 packs', category: 'cases_opened', rarity: 'Common', xp: 100, metric: 'cases_opened', threshold: 25 },
+  { key: 'cases_opened_50', name: 'Pack Enthusiast', description: 'Open 50 packs', category: 'cases_opened', rarity: 'Uncommon', xp: 250, metric: 'cases_opened', threshold: 50 },
+  { key: 'cases_opened_250', name: 'Pack Master', description: 'Open 250 packs', category: 'cases_opened', rarity: 'Rare', xp: 500, metric: 'cases_opened', threshold: 250 },
+  { key: 'cases_opened_1000', name: 'Pack Legend', description: 'Open 1,000 packs', category: 'cases_opened', rarity: 'Epic', xp: 1500, metric: 'cases_opened', threshold: 1000 },
+  { key: 'cases_opened_5000', name: 'Pack God', description: 'Open 5,000 packs', category: 'cases_opened', rarity: 'Legendary', xp: 5000, metric: 'cases_opened', threshold: 5000 },
   // Collection size (metric: collection_size) — 6
   { key: 'collection_1', name: 'Getting Started', description: 'Add your first card', category: 'collection', rarity: 'Common', xp: 50, metric: 'collection_size', threshold: 1 },
   { key: 'collection_10', name: 'Collector', description: 'Own 10 cards', category: 'collection', rarity: 'Common', xp: 100, metric: 'collection_size', threshold: 10 },

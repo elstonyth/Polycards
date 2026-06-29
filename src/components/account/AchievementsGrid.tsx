@@ -11,7 +11,7 @@ const RARITY_CHIP: Record<string, string> = {
 };
 
 const CATEGORY_LABEL: Record<string, string> = {
-  cases_opened: 'Cases Opened',
+  cases_opened: 'Packs Opened',
   collection: 'Collection',
   spending: 'Spending',
 };
