@@ -4,7 +4,7 @@ import Reveal from '@/components/Reveal';
 import AuthButton from '@/components/AuthButton';
 
 export const metadata: Metadata = {
-  title: 'Pokémon Card Airdrop — Pokenic',
+  title: 'Pokémon Card Airdrop',
   description: 'Claim free Pokémon cards in the upcoming airdrop.',
 };
 

@@ -5,7 +5,7 @@ import { getOwnProfileHandle } from '@/lib/data/profiles';
 import { rm } from '@/lib/format';
 import ReferralsClient from './ReferralsClient';
 
-export const metadata: Metadata = { title: 'Referrals | Pokenic' };
+export const metadata: Metadata = { title: 'Referrals' };
 
 export default async function ReferralsPage() {
   const [res, handle] = await Promise.all([

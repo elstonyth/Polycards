@@ -29,7 +29,7 @@ export async function generateMetadata({
   const { id } = await params;
   const card = await resolveCard(id);
   return {
-    title: `${card.name} | Pokenic`,
+    title: card.name,
     description: `${card.set} · ${card.grader} ${card.grade}`,
   };
 }

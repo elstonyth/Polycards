@@ -3,7 +3,7 @@ import { AlertCircle } from 'lucide-react';
 import AuthButton from '@/components/AuthButton';
 
 export const metadata: Metadata = {
-  title: 'Bank Withdrawal — Phygitals',
+  title: 'Bank Withdrawal',
   description: 'Complete your withdrawal with a direct bank transfer.',
 };
 

@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import InviteClient from './InviteClient';
 
-export const metadata: Metadata = { title: 'Join on Pokenic' };
+export const metadata: Metadata = { title: 'Join' };
 
 export default async function InvitePage({
   params,

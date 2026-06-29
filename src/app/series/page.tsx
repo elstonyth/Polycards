@@ -5,7 +5,7 @@ import Reveal from '@/components/Reveal';
 import { features } from '@/lib/features';
 
 export const metadata: Metadata = {
-  title: 'Series — Pokenic',
+  title: 'Series',
   description: 'Browse collectible card series and sets available on Pokenic.',
 };
 

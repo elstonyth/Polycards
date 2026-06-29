@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import RouletteClient from './RouletteClient';
 
 export const metadata: Metadata = {
-  title: 'Pokémon Card Roulette — Pokenic',
+  title: 'Pokémon Card Roulette',
   description: 'Test your luck and win exclusive cards.',
 };
 

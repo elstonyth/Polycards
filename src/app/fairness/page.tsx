@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import Reveal from '@/components/Reveal';
 
 export const metadata: Metadata = {
-  title: 'Your Fairness Proofs — Phygitals',
+  title: 'Your Fairness Proofs',
   description: 'Verify the provably-fair selection proofs for your pulls.',
 };
 

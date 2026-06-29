@@ -3,7 +3,7 @@ import { AccountHeader } from '@/components/account/ui';
 import { getNotifications } from '@/lib/actions/notifications';
 import NotificationsClient from './NotificationsClient';
 
-export const metadata: Metadata = { title: 'Notifications | Pokenic' };
+export const metadata: Metadata = { title: 'Notifications' };
 
 export default async function NotificationsPage() {
   const res = await getNotifications();

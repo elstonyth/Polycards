@@ -4,7 +4,7 @@ import Reveal from '@/components/Reveal';
 import AuthButton from '@/components/AuthButton';
 
 export const metadata: Metadata = {
-  title: 'Your Free Pack is Waiting — Pokenic',
+  title: 'Your Free Pack is Waiting',
   description:
     'Join thousands of collectors pulling rare cards daily. Create your account and claim a free pack.',
 };

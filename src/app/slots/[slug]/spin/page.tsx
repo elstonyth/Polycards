@@ -20,8 +20,8 @@ export async function generateMetadata({
   const pack = findPack(slug);
   return {
     title: pack
-      ? `${pack.name} — Slot Machine | Pokenic`
-      : 'Slot Machine | Pokenic',
+      ? `${pack.name} — Slot Machine`
+      : 'Slot Machine',
   };
 }
 

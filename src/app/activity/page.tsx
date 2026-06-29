@@ -7,7 +7,7 @@ import { MOCK_CARDS } from '@/lib/mock/cards';
 import { MOCK_USERS, findUser } from '@/lib/mock/users';
 
 export const metadata: Metadata = {
-  title: 'Marketplace Activity — Pokenic',
+  title: 'Marketplace Activity',
   description:
     'Track all marketplace activities and transactions in real-time.',
 };

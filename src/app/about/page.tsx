@@ -16,7 +16,7 @@ import {
 import Reveal from '@/components/Reveal';
 
 export const metadata: Metadata = {
-  title: 'About — Phygitals',
+  title: 'About',
   description:
     'The infrastructure for digital collectibles. Buy digital packs backed by real physical cards. Instantly reveal, securely vault, and ship or sell whenever you want.',
 };
@@ -279,7 +279,7 @@ export default function AboutPage() {
             </h3>
             <p className="mt-2 text-[13px] leading-relaxed text-white/55">
               One of the largest online Pokemon stores, now offering digital
-              pack breaks powered by Phygitals.
+              pack breaks powered by Pokenic.
             </p>
           </div>
         </div>
@@ -346,7 +346,7 @@ export default function AboutPage() {
             For Collectors
           </Link>
           <a
-            href="mailto:hello@phygitals.com"
+            href="mailto:hello@pokenic.com"
             className="inline-flex items-center justify-center rounded-2xl border border-white/15 bg-white/5 px-8 py-3 text-sm font-semibold text-white transition-colors duration-300 hover:bg-white/10"
           >
             For Brands
@@ -355,10 +355,10 @@ export default function AboutPage() {
         <p className="mt-5 text-[13px] text-white/50">
           Reach out to{' '}
           <a
-            href="mailto:hello@phygitals.com"
+            href="mailto:hello@pokenic.com"
             className="text-white/70 underline-offset-2 hover:underline"
           >
-            hello@phygitals.com
+            hello@pokenic.com
           </a>
         </p>
       </Reveal>

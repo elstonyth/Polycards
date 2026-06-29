@@ -4,7 +4,7 @@ import { Trophy, PartyPopper } from 'lucide-react';
 import Reveal from '@/components/Reveal';
 
 export const metadata: Metadata = {
-  title: '30th Edition — Pokenic',
+  title: '30th Edition',
   description: 'The 30th Edition celebration has concluded — see the winners.',
 };
 

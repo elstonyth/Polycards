@@ -17,7 +17,7 @@ import Reveal from '@/components/Reveal';
 import HowItWorksSteps from '@/components/HowItWorksSteps';
 
 export const metadata: Metadata = {
-  title: 'How It Works — Phygitals',
+  title: 'How It Works',
   description:
     'Open packs of real graded cards, own them instantly, and ship to your door or sell on the marketplace.',
 };
@@ -69,21 +69,21 @@ const TESTIMONIALS: Testimonial[] = [
   {
     name: 'Mikerow',
     handle: '@Mikerow01',
-    text: 'LFG my claim from @phygitals came it look how nice those slabs are. Thank you again one love',
+    text: 'LFG my claim from @pokenic came it look how nice those slabs are. Thank you again one love',
     pfp: '/social/pfp/Mikerow01-400x400.jpg',
     media: '/social/tweets/1940199479699022263_media-1.webp',
   },
   {
     name: 'Lynch',
     handle: '@_LYNCHY__',
-    text: 'Digital to physical in just under 2 weeks super cool! Thanks @phygitals for creating unique way to trade!',
+    text: 'Digital to physical in just under 2 weeks super cool! Thanks @pokenic for creating unique way to trade!',
     pfp: '/social/pfp/_LYNCHY__-400x400.jpg',
     media: '/social/tweets/1937209444800004323_media-1.webp',
   },
   {
     name: 'James Pleiades Hawkins',
     handle: '@PleiadesHawkin',
-    text: 'Mail day here in the gallery. @phygitals made it REAL!!',
+    text: 'Mail day here in the gallery. @pokenic made it REAL!!',
     pfp: '/social/pfp/PleiadesHawkin-400x400.jpg',
     media: '/social/tweets/1959021922383274245_media-1.webp',
   },
@@ -116,7 +116,7 @@ const CAPABILITIES: Capability[] = [
 const FAQS: FaqItem[] = [
   {
     q: 'Are these real physical cards?',
-    a: 'Yes. Every card on Phygitals is a real, professionally graded physical card stored in secure vault facilities. When you open a pack, you receive ownership of a specific physical slab that exists in a PSA, Fanatics, or Alt vault. You can ship it to your door at any time.',
+    a: 'Yes. Every card on Pokenic is a real, professionally graded physical card stored in secure vault facilities. When you open a pack, you receive ownership of a specific physical slab that exists in a PSA, Fanatics, or Alt vault. You can ship it to your door at any time.',
   },
   {
     q: 'How does shipping work?',
@@ -136,7 +136,7 @@ const FAQS: FaqItem[] = [
   },
   {
     q: 'Can I sell my cards?',
-    a: 'Absolutely. You can list any card on the Phygitals marketplace and set your own price. When it sells, funds are available immediately. You can also use the instant sell-back feature for a guaranteed payout at 85-90% of market value.',
+    a: 'Absolutely. You can list any card on the Pokenic marketplace and set your own price. When it sells, funds are available immediately. You can also use the instant sell-back feature for a guaranteed payout at 85-90% of market value.',
   },
 ];
 
@@ -237,7 +237,7 @@ export default function HowItWorksPage() {
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src="/images/claw/trainer-pack-icon.webp"
-                alt="Phygitals trading card pack"
+                alt="Pokenic trading card pack"
                 className="absolute bottom-0 left-1/2 z-[2] h-[92%] w-auto -translate-x-1/2 object-contain drop-shadow-[0_30px_80px_rgba(0,0,0,0.6)]"
               />
             </div>
@@ -340,7 +340,7 @@ export default function HowItWorksPage() {
         <Reveal>
           <SectionHeading
             title="What Collectors Are Saying"
-            sub="Real feedback from the Phygitals community."
+            sub="Real feedback from the Pokenic community."
           />
         </Reveal>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">

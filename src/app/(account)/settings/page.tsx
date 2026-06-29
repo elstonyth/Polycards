@@ -3,7 +3,7 @@ import { AccountHeader, Panel } from '@/components/account/ui';
 import SettingsForm from '@/components/account/SettingsForm';
 import { getCustomer } from '@/lib/data/customer';
 
-export const metadata: Metadata = { title: 'Settings | Pokenic' };
+export const metadata: Metadata = { title: 'Settings' };
 
 // Per-customer data behind the auth gate — always rendered fresh.
 export const dynamic = 'force-dynamic';

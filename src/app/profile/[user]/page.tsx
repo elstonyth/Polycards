@@ -20,7 +20,7 @@ export async function generateMetadata({
   const profile = await getPublicProfile(handle); // cache()d — shared with the page
   const name = profile?.name ?? userOrGeneric(handle).username;
   return {
-    title: `${name} | Pokenic`,
+    title: name,
     description: `${name}'s collection on Pokenic.`,
   };
 }

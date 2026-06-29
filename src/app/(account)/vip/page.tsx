@@ -4,7 +4,7 @@ import { AccountHeader, Panel, StatCards } from '@/components/account/ui';
 import { getVip } from '@/lib/actions/vip';
 import { rm } from '@/lib/format';
 
-export const metadata: Metadata = { title: 'VIP | Pokenic' };
+export const metadata: Metadata = { title: 'VIP' };
 
 function rewardLabel(r: {
   voucherAmount: number;

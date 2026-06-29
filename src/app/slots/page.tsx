@@ -3,7 +3,7 @@ import { getPackCategories } from '@/lib/data/packs';
 import ClawClient from '@/app/claw/ClawClient';
 
 export const metadata: Metadata = {
-  title: 'Slot Machine | Pokenic',
+  title: 'Slot Machine',
   description: 'Pick a pack, choose how many to open, and spin the reels.',
 };
 

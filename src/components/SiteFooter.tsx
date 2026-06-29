@@ -23,14 +23,14 @@ const QUICK_LINKS: FooterLink[] = [
 
 const SUPPORT_LINKS: FooterLink[] = [
   { label: 'Contact Us', href: '/contact' },
-  { label: 'Documentation', href: 'https://docs.phygitals.com' },
+  { label: 'Documentation', href: 'https://docs.pokenic.com' },
   {
     label: 'Terms of Service',
-    href: 'https://docs.phygitals.com/user-agreements/terms-of-service',
+    href: 'https://docs.pokenic.com/user-agreements/terms-of-service',
   },
   {
     label: 'Privacy Policy',
-    href: 'https://docs.phygitals.com/user-agreements/privacy-policy',
+    href: 'https://docs.pokenic.com/user-agreements/privacy-policy',
   },
 ];
 
@@ -87,25 +87,25 @@ function DiscordIcon({ className }: IconProps) {
 const SOCIALS = [
   {
     label: 'Twitter',
-    href: 'https://x.com/phygitals',
+    href: 'https://x.com/pokenic',
     Icon: TwitterIcon,
     iconClass: 'h-5 w-5',
   },
   {
     label: 'Instagram',
-    href: 'https://www.instagram.com/phygitals',
+    href: 'https://www.instagram.com/pokenic',
     Icon: InstagramIcon,
     iconClass: 'h-5 w-5',
   },
   {
     label: 'Discord',
-    href: 'https://discord.gg/phygitals',
+    href: 'https://discord.gg/pokenic',
     Icon: DiscordIcon,
     iconClass: 'h-4 w-4',
   },
   {
     label: 'Telegram',
-    href: 'https://t.me/phygitals_bot',
+    href: 'https://t.me/pokenic_bot',
     Icon: MessageCircle,
     iconClass: 'h-5 w-5',
   },
@@ -212,7 +212,7 @@ export default function SiteFooter() {
         {/* Copyright row */}
         <div className="mt-12 border-t border-neutral-800 pt-8">
           <p className="text-center text-[11px] font-medium uppercase tracking-widest text-neutral-600">
-            © 2025 Phygitals. All rights reserved.
+            © 2025 Pokenic. All rights reserved.
           </p>
         </div>
       </div>

@@ -6,7 +6,7 @@ import { getDeliveryOrders, getAddresses } from '@/lib/actions/delivery';
 import { features } from '@/lib/features';
 import OrdersClient from './OrdersClient';
 
-export const metadata: Metadata = { title: 'Orders | Pokenic' };
+export const metadata: Metadata = { title: 'Orders' };
 
 // Per-customer data behind the auth gate — always rendered fresh.
 export const dynamic = 'force-dynamic';

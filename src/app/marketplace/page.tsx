@@ -6,7 +6,7 @@ import {
 import MarketplaceClient from './MarketplaceClient';
 
 export const metadata: Metadata = {
-  title: 'Marketplace — Phygitals',
+  title: 'Marketplace',
   description:
     'Buy and sell real graded cards with other collectors. Real cards, real ownership, instant transfers.',
 };

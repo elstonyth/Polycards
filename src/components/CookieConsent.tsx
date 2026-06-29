@@ -30,7 +30,7 @@ export default function CookieConsent() {
           We use cookies to keep you signed in and improve the experience. See
           our{' '}
           <a
-            href="https://docs.phygitals.com/user-agreements/privacy-policy"
+            href="https://docs.pokenic.com/user-agreements/privacy-policy"
             target="_blank"
             rel="noopener noreferrer"
             className="underline hover:text-white"

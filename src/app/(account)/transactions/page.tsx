@@ -4,7 +4,7 @@ import { rm } from '@/lib/format';
 import { getTransactions } from '@/lib/actions/vault';
 import { reasonLabel, signedRm } from '@/lib/transactions';
 
-export const metadata: Metadata = { title: 'Transactions | Pokenic' };
+export const metadata: Metadata = { title: 'Transactions' };
 
 // The credit ledger: lifetime money in/out + the recent transactions. The
 // (account) layout already gates signed-out visitors; getTransactions reads the

@@ -3,7 +3,7 @@ import { Ticket } from 'lucide-react';
 import Reveal from '@/components/Reveal';
 
 export const metadata: Metadata = {
-  title: 'Your Vouchers — Phygitals',
+  title: 'Your Vouchers',
   description:
     'Redeem vouchers for free pulls and guaranteed buybacks on the claw machine.',
 };

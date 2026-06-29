@@ -8,7 +8,7 @@ import {
 import { getWallet } from '@/lib/actions/wallet';
 import { rm } from '@/lib/format';
 
-export const metadata: Metadata = { title: 'Wallet | Pokenic' };
+export const metadata: Metadata = { title: 'Wallet' };
 
 export default async function WalletPage() {
   const res = await getWallet();
