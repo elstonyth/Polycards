@@ -28,7 +28,23 @@ export default async function achievementsSpendSettledHandler({
       idempotencyKey: `${data.open_id}:ach`,
     });
   } catch {
-    // Non-fatal: grant rows + state are already committed.
+    // Non-fatal: grant rows + state are already committed. Log a warning if a
+    // logger is available so operators can diagnose a dropped feed notification.
+    resolveLoggerOrNull(container)?.warn(
+      `[achievements-spend-settled] notification failed for customer ${data.customer_id} open ${data.open_id} — grants committed, notification dropped`,
+    );
+  }
+}
+
+// Resolve the container logger, or null when it is unavailable (e.g. a unit-test
+// container). Mirrors vip-spend-settled.ts.
+function resolveLoggerOrNull(container: {
+  resolve: (key: string) => unknown;
+}): { warn: (msg: string) => void } | null {
+  try {
+    return container.resolve('logger') as { warn: (msg: string) => void };
+  } catch {
+    return null;
   }
 }
 
