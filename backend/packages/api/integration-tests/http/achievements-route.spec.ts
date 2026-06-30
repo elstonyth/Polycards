@@ -310,5 +310,71 @@ medusaIntegrationTestRunner({
         expect(ach?.progress.target).toBe(1);
       },
     );
+
+    it(
+      'GET /store/achievements total_xp uses grant xp_awarded snapshot, not current def.xp',
+      async () => {
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+
+        await seedLadder(packs);
+        await seedAchievementDef(packs);
+        await seedPack(packs);
+
+        const storeHeaders = await mintStoreHeaders();
+        const customer = await registerAndLogin(
+          'ach-route-snapshot@pokenic.test',
+          storeHeaders,
+        );
+
+        // Top up and open one pack to earn cases_opened_1 (xp_awarded=50 stored on grant).
+        await packs.mutateCreditAtomic({
+          customerId: customer.actorId,
+          amount: PACK_PRICE * 2,
+          reason: 'topup',
+          reference: 'mock_ach_snapshot',
+        });
+        const openRes = await unwrapResponse(
+          api.post(
+            `/store/packs/${PACK_SLUG}/open`,
+            {},
+            { headers: { ...storeHeaders, authorization: `Bearer ${customer.token}` } },
+          ),
+        );
+        expect(openRes.status).toBe(200);
+
+        // Wait for the async grant to land.
+        const grants = await waitFor(
+          () => packs.listAchievementGrants(
+            { customer_id: customer.actorId },
+            { select: ['achievement_key', 'unlocked_at', 'xp_awarded'], take: 10000 },
+          ),
+          (rows) => rows.some((g) => g.achievement_key === 'cases_opened_1'),
+        );
+
+        // Snapshot the xp_awarded stored on the grant (should be 50).
+        const grantedXp = grants
+          .filter((g) => g.achievement_key === 'cases_opened_1')
+          .reduce((s, g) => s + Number(g.xp_awarded), 0);
+        expect(grantedXp).toBe(50);
+
+        // Mutate the def's xp to a very different value to simulate an admin edit.
+        const [def] = await packs.listAchievementDefs({ key: 'cases_opened_1' }, { take: 1 });
+        expect(def).toBeDefined();
+        await packs.updateAchievementDefs([{ id: def!.id, xp: 999 }]);
+
+        // GET /store/achievements — total_xp must still reflect the snapshot (50),
+        // not the new def value (999).
+        const res = await unwrapResponse(
+          api.get('/store/achievements', {
+            headers: { ...storeHeaders, authorization: `Bearer ${customer.token}` },
+          }),
+        );
+        expect(res.status).toBe(200);
+
+        const body = res.data as { total_xp: number };
+        // The grant's xp_awarded (50) is the snapshot; total_xp must equal grantedXp, not 999.
+        expect(body.total_xp).toBe(grantedXp);
+      },
+    );
   },
 });

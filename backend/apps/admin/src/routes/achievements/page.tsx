@@ -20,8 +20,10 @@ const AchievementsPage = () => {
   const [draft, setDraft] = useState<Record<string, DraftRow>>({});
 
   function patch(key: string, base: DraftRow, field: keyof DraftRow, val: string) {
+    const n = Number(val);
+    if (!Number.isFinite(n)) return;
     const current = draft[key] ?? base;
-    setDraft((p) => ({ ...p, [key]: { ...current, [field]: Number(val) } }));
+    setDraft((p) => ({ ...p, [key]: { ...current, [field]: n } }));
   }
 
   async function save(def: AchievementDefDTO) {

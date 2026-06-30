@@ -44,7 +44,7 @@ medusaIntegrationTestRunner({
       it('PUT /admin/achievements/spend_1000 → 401 without auth', async () => {
         const res = await unwrapResponse(
           api.put('/admin/achievements/spend_1000', {
-            name: 'X', description: 'X', category: 'spend', rarity: 'Common',
+            name: 'X', description: 'X', category: 'spending', rarity: 'Common',
             xp: 100, metric: 'spend', threshold: 1000,
           }),
         );
@@ -62,7 +62,7 @@ medusaIntegrationTestRunner({
             key: 'spend_1000',
             name: 'First Big Spend',
             description: 'Spend RM 1,000',
-            category: 'spend',
+            category: 'spending',
             rarity: 'Common',
             xp: 100,
             metric: 'spend',
@@ -100,7 +100,7 @@ medusaIntegrationTestRunner({
             key: 'spend_1000',
             name: 'First Big Spend',
             description: 'Spend RM 1,000',
-            category: 'spend',
+            category: 'spending',
             rarity: 'Common',
             xp: 100,
             metric: 'spend',
@@ -114,7 +114,7 @@ medusaIntegrationTestRunner({
             {
               name: 'First Big Spend',
               description: 'Spend RM 1,000',
-              category: 'spend',
+              category: 'spending',
               rarity: 'Common',
               xp: 999,
               metric: 'spend',
@@ -131,6 +131,42 @@ medusaIntegrationTestRunner({
         expect(Number(after?.xp)).toBe(999);
       });
 
+      // ---------------------------------------------------------------- PUT 400 bad category
+
+      it('PUT /admin/achievements/spend_1000 with invalid category → 400', async () => {
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        const existing = await packs.listAchievementDefs({ key: 'spend_1000' }, { take: 1 });
+        if (existing.length === 0) {
+          await packs.createAchievementDefs([{
+            key: 'spend_1000',
+            name: 'First Big Spend',
+            description: 'Spend RM 1,000',
+            category: 'spending',
+            rarity: 'Common',
+            xp: 100,
+            metric: 'spend',
+            threshold: 1000,
+          }]);
+        }
+
+        const res = await unwrapResponse(
+          api.put(
+            '/admin/achievements/spend_1000',
+            {
+              name: 'First Big Spend',
+              description: 'Spend RM 1,000',
+              category: 'not_a_real_category',
+              rarity: 'Common',
+              xp: 100,
+              metric: 'spend',
+              threshold: 1000,
+            },
+            { headers: adminHeaders() },
+          ),
+        );
+        expect(res.status).toBe(400);
+      });
+
       // ---------------------------------------------------------------- PUT 404
 
       it('PUT /admin/achievements/nonexistent-key → 404', async () => {
@@ -138,7 +174,7 @@ medusaIntegrationTestRunner({
           api.put(
             '/admin/achievements/nonexistent-ach-key-xyz',
             {
-              name: 'X', description: 'X', category: 'spend', rarity: 'Common',
+              name: 'X', description: 'X', category: 'spending', rarity: 'Common',
               xp: 1, metric: 'spend', threshold: 1,
             },
             { headers: adminHeaders() },

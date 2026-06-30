@@ -2,6 +2,7 @@ import { MedusaError } from '@medusajs/framework/utils';
 
 const METRICS = ['spend', 'cases_opened', 'collection_size'];
 const RARITIES = ['Common', 'Uncommon', 'Rare', 'Epic', 'Legendary'];
+const CATEGORIES = ['cases_opened', 'collection', 'spending'];
 
 export type AchievementDefBody = {
   name: string;
@@ -32,10 +33,13 @@ export function validateAchievementDef(raw: unknown): AchievementDefBody {
   const rarity = str(b['rarity'], 'rarity');
   if (!RARITIES.includes(rarity))
     throw new MedusaError(MedusaError.Types.INVALID_DATA, `rarity must be one of ${RARITIES.join(', ')}`);
+  const category = str(b['category'], 'category');
+  if (!CATEGORIES.includes(category))
+    throw new MedusaError(MedusaError.Types.INVALID_DATA, `category must be one of ${CATEGORIES.join(', ')}`);
   return {
     name: str(b['name'], 'name'),
     description: str(b['description'], 'description'),
-    category: str(b['category'], 'category'),
+    category,
     rarity,
     xp: num(b['xp'], 'xp'),
     metric,

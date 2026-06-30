@@ -30,7 +30,7 @@ export async function GET(
     ),
     packs.listAchievementGrants(
       { customer_id: customerId },
-      { select: ['achievement_key', 'unlocked_at'], take: 10000 },
+      { select: ['achievement_key', 'unlocked_at', 'xp_awarded'], take: 10000 },
     ),
     packs
       .listAchievementMemberStates({ customer_id: customerId }, { take: 1 })
@@ -83,9 +83,14 @@ export async function GET(
 
   // Derive total_xp from earned (same set as per-badge flags) so aggregate and
   // badge count are always consistent — never read stateRow.total_xp directly.
+  // Use grant xp_awarded (snapshot) when available so later admin edits to def.xp
+  // don't retroactively change a customer's earned XP total (Fix 1 / Sourcery).
   const totalXp = defs
     .filter((d) => earned.has(d.key))
-    .reduce((s, d) => s + Number(d.xp), 0);
+    .reduce((s, d) => {
+      const g = unlockedByKey.get(d.key);
+      return s + Number(g ? g.xp_awarded : d.xp);
+    }, 0);
   const collectorLevel = levelForXp(totalXp);
   const highest = Math.max(collectorLevel, stateRow ? Number(stateRow.highest_level_ever) : collectorLevel);
 
