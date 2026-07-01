@@ -1,5 +1,6 @@
 import { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import { pcFetch, PC_TOKEN_MISSING } from "../client";
+import { PRICE_FIELDS } from "../../../../modules/packs/pricecharting-grades";
 
 // GET /admin/pricecharting/product?id=… — per-grade values for one PriceCharting
 // product. Upstream returns integer PENNIES in fields whose card-grade meaning is
@@ -23,19 +24,6 @@ type PcProductResponse = {
   "condition-17-price"?: number;
   "condition-18-price"?: number;
 };
-
-// (upstream field, UI label) in ascending grade order.
-const PRICE_FIELDS = [
-  ["loose-price", "Ungraded"],
-  ["cib-price", "Grade 7"],
-  ["new-price", "Grade 8"],
-  ["graded-price", "Grade 9"],
-  ["box-only-price", "Grade 9.5"],
-  ["manual-only-price", "PSA 10"],
-  ["bgs-10-price", "BGS 10"],
-  ["condition-17-price", "CGC 10"],
-  ["condition-18-price", "SGC 10"],
-] as const;
 
 export async function GET(
   req: MedusaRequest,
