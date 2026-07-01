@@ -30,6 +30,9 @@ export interface MarketplaceCard {
   fmv: number;
   points: number;
   image: string;
+  /** Live MYR market price (display-only) — fmv x FX(USD->MYR) x market_multiplier.
+   * Undefined if the FX rate couldn't be resolved (route/backend unreachable). */
+  marketPriceMyr?: number;
 }
 
 export interface MarketplaceCategory {
@@ -64,6 +67,56 @@ function getStoreRegionId(): Promise<string | undefined> {
   return storeRegionIdPromise;
 }
 
+// Storefront port of the backend's displayMarketPrice (packs/pricing.ts) —
+// same formula, kept in sync by hand (no cross-package import from the
+// storefront into `backend/`). Used only for the marketplace listing price,
+// which reads Mercur product data directly rather than a store route that
+// could compute this server-side (see products.ts header + GET /store/pricing/fx).
+function displayMarketPrice(
+  fmvUsd: number,
+  fxUsdMyr: number,
+  multiplier: number,
+): number {
+  const raw = Number(fmvUsd);
+  const fx = Number(fxUsdMyr);
+  const mult = Number(multiplier);
+  if (
+    ![raw, fx, mult].every(Number.isFinite) ||
+    raw < 0 ||
+    fx <= 0 ||
+    mult <= 0
+  )
+    return 0;
+  return Math.round(raw * fx * mult * 100) / 100;
+}
+
+const DEFAULT_USD_MYR = 4.7;
+
+// FX rate for the marketplace listing price, fetched once per request and
+// shared across all cards in the grid. Same in-flight-promise caching pattern
+// as getStoreRegionId — a miss/failure clears the cache so the next call
+// retries. Falls back to DEFAULT_USD_MYR (never blocks the listing on a
+// transient backend outage).
+let fxRatePromise: Promise<number> | null = null;
+function getFxRate(): Promise<number> {
+  if (!fxRatePromise) {
+    fxRatePromise = sdk.client
+      .fetch<{ rate: number }>('/store/pricing/fx')
+      .then(({ rate }) =>
+        Number.isFinite(rate) && rate > 0 ? rate : DEFAULT_USD_MYR,
+      )
+      .catch((error) => {
+        fxRatePromise = null;
+        logger.error(
+          '[marketplace] failed to load FX rate from backend:',
+          error,
+        );
+        return DEFAULT_USD_MYR;
+      });
+  }
+  return fxRatePromise;
+}
+
 const VALID_RARITIES: readonly Rarity[] = [
   'Legendary',
   'Epic',
@@ -90,16 +143,25 @@ const priceOf = (p: HttpTypes.StoreProduct): number =>
 const imageOf = (p: HttpTypes.StoreProduct): string =>
   p.thumbnail ?? p.images?.[0]?.url ?? '';
 
-function toMarketplaceCard(p: HttpTypes.StoreProduct): MarketplaceCard {
+function toMarketplaceCard(
+  p: HttpTypes.StoreProduct,
+  fxRate: number,
+): MarketplaceCard {
   const meta = p.metadata ?? {};
   const price = priceOf(p);
+  const fmv = toFinite(meta.fmv, price);
   return {
     id: p.handle,
     title: p.title,
     price,
-    fmv: toFinite(meta.fmv, price),
+    fmv,
     points: toFinite(meta.points, 0),
     image: imageOf(p),
+    marketPriceMyr: displayMarketPrice(
+      fmv,
+      fxRate,
+      toFinite(meta.market_multiplier, 1.2),
+    ),
   };
 }
 
@@ -131,13 +193,16 @@ const CATEGORIES: MarketplaceCategory[] = [
 /** Marketplace listing grid — live from the Store API (empty on backend failure). */
 export async function getMarketplaceCards(): Promise<MarketplaceCard[]> {
   try {
-    const region_id = await getStoreRegionId();
+    const [region_id, fxRate] = await Promise.all([
+      getStoreRegionId(),
+      getFxRate(),
+    ]);
     const { products } = await sdk.store.product.list({
       region_id,
       fields: PRODUCT_FIELDS,
       limit: PRODUCT_LIST_LIMIT,
     });
-    return products.map(toMarketplaceCard);
+    return products.map((p) => toMarketplaceCard(p, fxRate));
   } catch (error) {
     logger.error('[marketplace] failed to load products from backend:', error);
     return [];
