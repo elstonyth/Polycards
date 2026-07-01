@@ -37,14 +37,19 @@ export default async function syncMarketPricesJob(container: MedusaContainer): P
   );
   let changed = 0;
   for (const card of cards) {
-    const r = await refreshCardPrice(card, { pcFetch: pcFetchRaw, updateCards: (u) => packs.updateCards(u), now });
-    if (r.changed) {
-      changed++;
-      logger.info(`[sync-market-prices] ${r.handle} ${r.oldValue} -> ${r.newValue}`);
-    } else if (r.skippedReason) {
-      logger.warn(`[sync-market-prices] skip ${r.handle}: ${r.skippedReason}`);
+    try {
+      const r = await refreshCardPrice(card, { pcFetch: pcFetchRaw, updateCards: (u) => packs.updateCards(u), now });
+      if (r.changed) {
+        changed++;
+        logger.info(`[sync-market-prices] ${r.handle} ${r.oldValue} -> ${r.newValue}`);
+      } else if (r.skippedReason) {
+        logger.warn(`[sync-market-prices] skip ${r.handle}: ${r.skippedReason}`);
+      }
+    } catch (e) {
+      logger.error(`[sync-market-prices] card ${card.handle || card.id} failed: ${(e as Error).message}`);
+    } finally {
+      await sleep(1100);
     }
-    await sleep(1100);
   }
   logger.info(`[sync-market-prices] done: ${changed}/${cards.length} updated`);
 }
