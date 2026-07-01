@@ -26,7 +26,7 @@ import { rm } from '../../../lib/format';
 export const config: RouteConfig = {
   label: 'Add from PriceCharting',
   nested: '/gacha',
-  rank: 3,
+  rank: 6,
 };
 
 // Client mirror of backend/packages/api/src/modules/packs/pricecharting-grades.ts
