@@ -362,5 +362,14 @@ export default defineMiddlewares({
       method: 'POST',
       middlewares: [adminActionRateLimit],
     },
+    {
+      // Global USD->MYR FX-rate write. Sets the multiplier behind every
+      // displayed price, so it shares the admin money-mutation budget. Auth is
+      // the framework default /admin guard (handler is AuthenticatedMedusaRequest);
+      // registered here explicitly so the auth+rate-limit intent is visible.
+      matcher: '/admin/pricing/fx',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
   ],
 });

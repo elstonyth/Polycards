@@ -184,9 +184,15 @@ const AddFromPriceChartingPage = () => {
     image.trim() !== '' &&
     Number.isFinite(multiplier) &&
     multiplier > 0 &&
+    // Markup bounded to [0, 1000]% so a fat-fingered value can't create an
+    // absurd customer price.
+    Number(multiplierPct) >= 0 &&
+    Number(multiplierPct) <= 1000 &&
     stock.trim() !== '' &&
     Number.isInteger(Number(stock)) &&
-    Number(stock) >= 0 &&
+    // Require a positive stock — a tracked card product must ship with at
+    // least one physical copy (default 1), never 0/out-of-stock.
+    Number(stock) > 0 &&
     !saving &&
     !uploading;
 
@@ -330,6 +336,7 @@ const AddFromPriceChartingPage = () => {
                 <Input
                   type="number"
                   min={0}
+                  max={1000}
                   step={1}
                   className="max-w-[8rem]"
                   value={multiplierPct}
@@ -369,7 +376,7 @@ const AddFromPriceChartingPage = () => {
             </Label>
             <Input
               type="number"
-              min={0}
+              min={1}
               step={1}
               className="max-w-[8rem]"
               value={stock}

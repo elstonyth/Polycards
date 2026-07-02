@@ -14,6 +14,7 @@ import type { WonCard } from '@/lib/actions/packs';
 import { getCreditBalance, sellBackPull } from '@/lib/actions/vault';
 import { useSound } from '@/lib/use-sound';
 import { rm } from '@/lib/format';
+import { logger } from '@/lib/logger';
 import {
   type ResolvedPack,
   type Pack,
@@ -21,7 +22,7 @@ import {
   priceNumber,
 } from '@/app/claw/packs-data';
 import type { RecentPull } from '@/lib/data/packs';
-import { BASE_SPIN_MS } from '@/lib/reel';
+import { BASE_SPIN_MS, STAGGER_MS } from '@/lib/reel';
 import { priceTier, TIER_COLOR, type Tier } from '@/lib/price-tier';
 import { resolveCardPokemon } from '@/lib/resolve-card-pokemon';
 import { SlotReelStack, type ColumnWinner } from './SlotReelStack';
@@ -147,57 +148,89 @@ export default function SlotMachineClient({
     }
 
     // Build (but don't yet apply) the post-spin state — spoiler guard.
-    // One entry per roll.
+    // One entry per roll. The customer is ALREADY charged here, so if any
+    // cosmetic mapping below throws we must still surface the result (see the
+    // catch) rather than dying in phase='resolving'.
     const builtOffers: (SellBackOffer | null)[] = [];
     const winners: ColumnWinner[] = [];
     const cards: WonCard[] = [];
     const tiers: Tier[] = [];
+    // Single spin timestamp: unique per spin (drives the reel nonce) and the
+    // fallback instant-offer deadline. handleSpin is a user-click async event
+    // handler (never render), so this impure read is safe; the purity rule
+    // can't infer that from a bare function declaration.
+    // eslint-disable-next-line react-hooks/purity
+    const spinAt = Date.now();
 
-    for (const roll of res.rolls) {
-      // Build the sell-back offer for this roll.
-      const builtOffer: SellBackOffer | null =
-        roll.pullId !== null
-          ? {
-              pullId: roll.pullId,
-              fmv: roll.marketValue,
-              cardName: roll.card.name,
-              image: roll.card.image,
-              percent: roll.buyback?.percent ?? FLAT_BUYBACK_PERCENT,
-              amount:
-                roll.buyback?.amount ??
-                Math.round(roll.marketValue * FLAT_BUYBACK_PERCENT) / 100,
-              vaultPercent: roll.buyback?.vaultPercent ?? FLAT_BUYBACK_PERCENT,
-              vaultAmount:
-                roll.buyback?.vaultAmount ??
-                Math.round(roll.marketValue * FLAT_BUYBACK_PERCENT) / 100,
-              instantDeadlineMs:
-                roll.buyback?.instantDeadlineMs ?? Date.now() + 30_000,
-            }
-          : null;
-      builtOffers.push(builtOffer);
+    try {
+      for (const roll of res.rolls) {
+        // Build the sell-back offer for this roll.
+        const builtOffer: SellBackOffer | null =
+          roll.pullId !== null
+            ? {
+                pullId: roll.pullId,
+                fmv: roll.marketValue,
+                cardName: roll.card.name,
+                image: roll.card.image,
+                percent: roll.buyback?.percent ?? FLAT_BUYBACK_PERCENT,
+                amount:
+                  roll.buyback?.amount ??
+                  Math.round(roll.marketValue * FLAT_BUYBACK_PERCENT) / 100,
+                vaultPercent:
+                  roll.buyback?.vaultPercent ?? FLAT_BUYBACK_PERCENT,
+                vaultAmount:
+                  roll.buyback?.vaultAmount ??
+                  Math.round(roll.marketValue * FLAT_BUYBACK_PERCENT) / 100,
+                instantDeadlineMs:
+                  roll.buyback?.instantDeadlineMs ?? spinAt + 30_000,
+              }
+            : null;
+        builtOffers.push(builtOffer);
 
-      // Cosmetic mapping (decides nothing): tier color + winner Pokémon.
-      const tier = priceTier(roll.marketValue);
-      const r = resolveCardPokemon(roll.card);
-      const custom =
-        roll.card.sprite_image && roll.card.sprite_image.trim() !== ''
-          ? roll.card.sprite_image
-          : null;
-      winners.push({
-        dex: r.dex,
-        // Custom sprite wins; an explicit/derived dex lets the column draw the
-        // gif (image undefined); otherwise the neutral Poké Ball.
-        image: custom ?? (r.dex === null ? POKEBALL_PLACEHOLDER : undefined),
-        name: r.name ?? roll.card.name,
-        tier,
-      });
-      cards.push(roll.card);
-      tiers.push(tier);
+        // Cosmetic mapping (decides nothing): tier color + winner Pokémon.
+        const tier = priceTier(roll.marketValue);
+        const r = resolveCardPokemon(roll.card);
+        const custom =
+          roll.card.sprite_image && roll.card.sprite_image.trim() !== ''
+            ? roll.card.sprite_image
+            : null;
+        winners.push({
+          dex: r.dex,
+          // Custom sprite wins; an explicit/derived dex lets the column draw the
+          // gif (image undefined); otherwise the neutral Poké Ball.
+          image: custom ?? (r.dex === null ? POKEBALL_PLACEHOLDER : undefined),
+          name: r.name ?? roll.card.name,
+          tier,
+        });
+        cards.push(roll.card);
+        tiers.push(tier);
+      }
+
+      pending.current = { balance: res.balance, offers: builtOffers, cards };
+      setSpin({ nonce: spinAt, cards, winners, tiers });
+      setPhase('spinning');
+    } catch (err) {
+      // A cosmetic mapping step threw after the charge. Surface the result the
+      // user paid for (authoritative server balance + won cards) and move to a
+      // terminal phase via the idempotent settle — never strand them. The landed
+      // reveal reads `spin` (not pending), so set it too — reconstructing the
+      // cards from res.rolls if the winners loop didn't finish — otherwise it
+      // would render a stale/previous spin's cards.
+      logger.error('[slots] post-charge mapping failed', err);
+      const settledCards =
+        cards.length === res.rolls.length
+          ? cards
+          : res.rolls.map((roll) => roll.card);
+      if (!pending.current) {
+        pending.current = {
+          balance: res.balance,
+          offers: builtOffers,
+          cards: settledCards,
+        };
+      }
+      setSpin({ nonce: spinAt, cards: settledCards, winners, tiers });
+      handleSettled();
     }
-
-    pending.current = { balance: res.balance, offers: builtOffers, cards };
-    setSpin({ nonce: Date.now(), cards, winners, tiers });
-    setPhase('spinning');
   }
 
   // Fired by the stack once the last column settles. Reads the result from the
@@ -248,6 +281,25 @@ export default function SlotMachineClient({
       COOLDOWN_MS,
     );
   }, [pack.name, pack.image, play, vibrate]);
+
+  // Settle watchdog: the customer is charged the moment openBatch returns ok,
+  // but the reveal only lands when the reel reports transitionend. If that
+  // settle is ever missed (dropped transitionend, a remounted column, a browser
+  // that skips the event), force the same idempotent completion so a charged
+  // user is never stranded on a spinning reel. Sized from the reel's own timing
+  // (last column stops at BASE_SPIN_MS + (count-1)*STAGGER_MS) plus a buffer so
+  // it always outlasts the real animation and never pre-empts a normal spin.
+  // ponytail: backstop only — onAllSettled -> handleSettled is the primary path.
+  useEffect(() => {
+    if (phase !== 'spinning') return;
+    const id = window.setTimeout(
+      () => {
+        if (pending.current) handleSettled();
+      },
+      BASE_SPIN_MS + count * STAGGER_MS + 2000,
+    );
+    return () => clearTimeout(id);
+  }, [phase, spin?.nonce, count, handleSettled]);
 
   const refreshBalance = useCallback((b: number) => setBalance(b), []);
 

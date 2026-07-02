@@ -14,6 +14,7 @@ import {
   OpenBuybackSchema,
   BuybackResultSchema,
   AchievementsSchema,
+  CREDIT_REASONS,
 } from '../schemas';
 
 describe('parseList — drops invalid items, never throws', () => {
@@ -230,5 +231,46 @@ describe('CreditTransactionSchema — keeps every reason the backend emits', () 
     // The backend ledger emits all 8 reasons; the storefront must not silently
     // drop commission rows (balance would stop reconciling to visible history).
     expect(parseList(CreditTransactionSchema, rows)).toHaveLength(5);
+  });
+});
+
+// Regression tripwire (plans/005). parseList() SILENTLY drops any credit row
+// whose `reason` isn't in CREDIT_REASONS, so if the backend gains a reason the
+// storefront lacks, those transactions vanish from the customer's history with
+// no error (this drifted before — PR #36). BACKEND_CREDIT_REASONS mirrors the
+// backend enum in
+// backend/packages/api/src/modules/packs/models/credit-transaction.ts. When the
+// backend adds a reason, add it HERE and to CREDIT_REASONS in the SAME deploy —
+// these tests fail until you do.
+const BACKEND_CREDIT_REASONS = [
+  'buyback',
+  'topup',
+  'pack_open',
+  'adjustment',
+  'direct_referral',
+  'team_override',
+  'commission_reversal',
+  'cashout',
+  'voucher_claim',
+  'reward_credit',
+] as const;
+
+describe('credit-reason enum drift guard (plans/005)', () => {
+  it('storefront CREDIT_REASONS covers every backend credit reason', () => {
+    for (const reason of BACKEND_CREDIT_REASONS) {
+      expect(CREDIT_REASONS).toContain(reason);
+    }
+  });
+
+  it('parseList keeps a CreditTransaction row for every backend reason', () => {
+    const rows = BACKEND_CREDIT_REASONS.map((reason, i) => ({
+      id: `r${i}`,
+      amount: 1,
+      reason,
+      created_at: '2026-06-22T00:00:00Z',
+    }));
+    expect(parseList(CreditTransactionSchema, rows)).toHaveLength(
+      BACKEND_CREDIT_REASONS.length,
+    );
   });
 });

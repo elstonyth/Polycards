@@ -1,4 +1,7 @@
-import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
+import type {
+  AuthenticatedMedusaRequest,
+  MedusaResponse,
+} from "@medusajs/framework/http";
 import { MedusaError } from "@medusajs/framework/utils";
 import { PACKS_MODULE } from "../../../../modules/packs";
 import { effectiveRate, DEFAULT_USD_MYR } from "../../../../modules/packs/pricing";
@@ -13,7 +16,7 @@ type FxRateRow = {
 };
 
 async function loadRow(
-  scope: MedusaRequest["scope"],
+  scope: AuthenticatedMedusaRequest["scope"],
 ): Promise<{ packs: any; row: FxRateRow | null }> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const packs: any = scope.resolve(PACKS_MODULE);
@@ -24,7 +27,7 @@ async function loadRow(
 // GET /admin/pricing/fx — current USD_MYR rate breakdown + the effective
 // rate (manual override if set, else the last-fetched rate, else the 4.7
 // fallback).
-export async function GET(req: MedusaRequest, res: MedusaResponse): Promise<void> {
+export async function GET(req: AuthenticatedMedusaRequest, res: MedusaResponse): Promise<void> {
   const { row } = await loadRow(req.scope);
   res.json({
     rate: row ? Number(row.rate) : DEFAULT_USD_MYR,
@@ -51,17 +54,20 @@ const requireBoolean = (value: unknown, field: string): boolean => {
 const requirePositiveNumberOrNull = (value: unknown, field: string): number | null => {
   if (value === null || value === undefined) return null;
   const n = typeof value === "string" ? Number(value) : value;
-  if (typeof n !== "number" || !Number.isFinite(n) || n <= 0) {
+  // Upper bound: a USD->MYR rate realistically lives in ~1-20; cap generously
+  // at 1000 so a fat-fingered or hostile value can't set an absurd global
+  // multiplier across every displayed price.
+  if (typeof n !== "number" || !Number.isFinite(n) || n <= 0 || n > 1000) {
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
-      `'${field}' must be a positive number or null.`,
+      `'${field}' must be a positive number no greater than 1000, or null.`,
     );
   }
   return n;
 };
 
 // POST /admin/pricing/fx — manual-override upsert of the single USD_MYR row.
-export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<void> {
+export async function POST(req: AuthenticatedMedusaRequest, res: MedusaResponse): Promise<void> {
   const body = req.body as Body;
   const manual_override = requireBoolean(body.manual_override, "manual_override");
   const manual_rate = requirePositiveNumberOrNull(body.manual_rate, "manual_rate");

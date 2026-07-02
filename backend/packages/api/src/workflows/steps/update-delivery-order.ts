@@ -98,10 +98,31 @@ export const updateDeliveryOrderStep = createStep(
     }
 
     // Which pulls this order covers (needed for delivered/canceled side-effects).
-    const items = await packs.listDeliveryOrderItems(
-      { delivery_order_id: order.id },
-      { take: 1000 },
-    );
+    // Page to exhaustion — EVERY covered pull's status must be updated, so a
+    // silent take:1000 truncation would strand pulls (correctness, not display).
+    // MAX_PAGES bounds the loop so a misbehaving service that ignores `skip`
+    // can't spin forever; a real delivery order is far under this cap.
+    const PAGE = 1000;
+    const MAX_PAGES = 100; // 100k items — defensive ceiling, not a real limit
+    const items: Awaited<
+      ReturnType<typeof packs.listDeliveryOrderItems>
+    > = [];
+    let page = 0;
+    for (; page < MAX_PAGES; page++) {
+      const batch = await packs.listDeliveryOrderItems(
+        { delivery_order_id: order.id },
+        { take: PAGE, skip: page * PAGE },
+      );
+      items.push(...batch);
+      if (batch.length < PAGE) break;
+    }
+    if (page >= MAX_PAGES) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        `Delivery order ${order.id} exceeded ${MAX_PAGES * PAGE} items — ` +
+          'refusing to proceed with a possibly-truncated pull set.',
+      );
+    }
     const pullIds = items.map((i) => i.pull_id);
 
     // Compute timestamp side-effects.

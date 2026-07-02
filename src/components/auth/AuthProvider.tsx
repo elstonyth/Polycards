@@ -28,10 +28,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(async () => {
     try {
       const res = await fetch('/api/me', { cache: 'no-store' });
+      if (!res.ok) {
+        // `/api/me` returns 200 + { customer: null } for a genuine logout (the
+        // happy path below handles that). A non-ok status is a transient server
+        // error, NOT a logout — keep whatever session we had rather than
+        // flashing logged-out. (401 is handled defensively in case the route
+        // ever gains an auth guard.)
+        if (res.status === 401) setCustomer(null);
+        return;
+      }
       const data = (await res.json()) as { customer: AuthCustomer | null };
       setCustomer(data.customer);
     } catch {
-      setCustomer(null);
+      // Network/transient failure reaching our own /api/me — preserve prior
+      // state, do NOT force a logout. First-load `isLoading` still clears below.
     } finally {
       setIsLoading(false);
     }

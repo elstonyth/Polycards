@@ -4,11 +4,14 @@ import type { ICustomerModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../../../../modules/packs';
 import type PacksModuleService from '../../../../../modules/packs/service';
 import { enrichCustomers } from '../../../../../utils/enrich-customers';
+import { parsePaginationParams } from '../../../../../utils/pagination';
 
 export async function GET(req: MedusaRequest, res: MedusaResponse): Promise<void> {
   const { id } = req.params;
-  const limit = Number(req.query.limit ?? 50);
-  const offset = Number(req.query.offset ?? 0);
+  const { limit, offset } = parsePaginationParams({
+    limit: req.query.limit,
+    offset: req.query.offset,
+  });
 
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
   const rows = await packs.commissionsForBeneficiary(id, { limit, offset });

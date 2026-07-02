@@ -47,7 +47,9 @@ const SupportPage = () => {
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   const search = async () => {
-    const q = query.trim();
+    // Cap the query so an accidental/hostile paste can't send an unbounded
+    // string to the backend; 256 chars is generous for a name/email search.
+    const q = query.trim().slice(0, 256);
     if (!q || searching) return;
     setSearching(true);
     setSelectedId(null);
@@ -72,7 +74,9 @@ const SupportPage = () => {
   const requestAdjust = () => {
     if (!view || adjusting) return;
     const value = Number(amount);
-    if (!Number.isFinite(value)) {
+    // Reject NaN and a no-op zero adjustment. Both signs are intended
+    // (negative = debit, positive = credit); only exactly 0 is meaningless.
+    if (!Number.isFinite(value) || value === 0) {
       toast.error(t("support.adjustInvalid"));
       return;
     }

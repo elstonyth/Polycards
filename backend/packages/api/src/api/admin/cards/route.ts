@@ -5,7 +5,7 @@ import { createCardWorkflow } from '../../../workflows/create-card';
 import { getCardStockByHandle } from '../../../modules/packs/card-stock';
 import { coerceRegisterCardBody } from './validate';
 import { toAdminCardDto } from '../../../modules/packs/admin-card';
-import { resolveFxRate } from '../../../modules/packs/pricing';
+import { resolveFxRate, DEFAULT_USD_MYR } from '../../../modules/packs/pricing';
 
 // GET /admin/cards — the catalog list for the admin Gacha Cards page (auto-
 // protected by Medusa admin auth). Returns every card, alphabetical by name.
@@ -16,9 +16,17 @@ export async function GET(
   res: MedusaResponse,
 ): Promise<void> {
   const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
+  // The catalog must render even if the FX read fails — fall back to the
+  // default rate (display-only) rather than 500-ing the whole page.
   const [cards, fxRate] = await Promise.all([
     packs.listCards({}, { take: 1000 }),
-    resolveFxRate(packs),
+    resolveFxRate(packs).catch((e: unknown) => {
+      (req.scope.resolve('logger') as { warn: (m: string) => void }).warn(
+        `[admin/cards] FX read failed; using default USD_MYR=${DEFAULT_USD_MYR}: ` +
+          (e instanceof Error ? e.message : String(e)),
+      );
+      return DEFAULT_USD_MYR;
+    }),
   ]);
   const sorted = [...cards].sort((a, b) => a.name.localeCompare(b.name));
   const stockByHandle = await getCardStockByHandle(

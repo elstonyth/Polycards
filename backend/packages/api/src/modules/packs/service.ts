@@ -419,6 +419,16 @@ class PacksModuleService extends MedusaService({
         externalBalanceSen,
       );
     }
+    // Defensive: a pack_open debit snapshots the NEGATED consumed sen, so it
+    // must be non-positive. If a future consumeExternalSen regression flipped
+    // the sign, a positive value would inflate the VIP spend basis — fail loudly
+    // rather than silently corrupt it.
+    if (input.reason === 'pack_open' && externalFundedCents > 0) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'pack_open external_funded_cents must be <= 0.',
+      );
+    }
 
     // 3) Floor check — covers both "enough credit to open" and "no overdraft".
     if (deltaCents < 0 && beforeCents + deltaCents < floorCents) {
