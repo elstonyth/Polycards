@@ -142,6 +142,10 @@ export const createProductFromPcInvoke = async (
   } catch (e) {
     // Level creation failed after the product exists — delete it so the
     // operator gets a clean retry instead of a tracked-but-unstocked orphan.
+    // NOTE: this inline rollback is required — the step's compensate() below
+    // only runs when a LATER workflow step fails, not when THIS invoke throws,
+    // so it cannot cover an in-invoke failure. Do not remove this in favour of
+    // compensate() or the product would be orphaned on level-creation failure.
     await container.resolve(Modules.PRODUCT).deleteProducts([product.id]);
     throw e;
   }
