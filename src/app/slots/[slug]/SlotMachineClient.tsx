@@ -211,12 +211,24 @@ export default function SlotMachineClient({
       setPhase('spinning');
     } catch (err) {
       // A cosmetic mapping step threw after the charge. Surface the result the
-      // user paid for (authoritative server balance + whatever was built) and
-      // move to a terminal phase via the idempotent settle — never strand them.
+      // user paid for (authoritative server balance + won cards) and move to a
+      // terminal phase via the idempotent settle — never strand them. The landed
+      // reveal reads `spin` (not pending), so set it too — reconstructing the
+      // cards from res.rolls if the winners loop didn't finish — otherwise it
+      // would render a stale/previous spin's cards.
       logger.error('[slots] post-charge mapping failed', err);
+      const settledCards =
+        cards.length === res.rolls.length
+          ? cards
+          : res.rolls.map((roll) => roll.card);
       if (!pending.current) {
-        pending.current = { balance: res.balance, offers: builtOffers, cards };
+        pending.current = {
+          balance: res.balance,
+          offers: builtOffers,
+          cards: settledCards,
+        };
       }
+      setSpin({ nonce: spinAt, cards: settledCards, winners, tiers });
       handleSettled();
     }
   }

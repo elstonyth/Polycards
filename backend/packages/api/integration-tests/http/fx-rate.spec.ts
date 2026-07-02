@@ -65,13 +65,69 @@ medusaIntegrationTestRunner({
         expect(res.status).toBe(401);
       });
 
-      // Upper-bound guard: reject an absurd rate so a fat-fingered/hostile
-      // value can't distort every displayed price.
+      // Full manual_rate boundary coverage of requirePositiveNumberOrNull:
+      // reject <=0, >1000, and non-numeric; accept the inclusive 1000 bound.
       it("rejects manual_rate > 1000 with 400", async () => {
         const res = await unwrapResponse(
           api.post(
             "/admin/pricing/fx",
             { manual_override: true, manual_rate: 1001 },
+            adminHeaders(),
+          ),
+        );
+        expect(res.status).toBe(400);
+      });
+
+      it("rejects manual_rate = 0 with 400", async () => {
+        const res = await unwrapResponse(
+          api.post(
+            "/admin/pricing/fx",
+            { manual_override: true, manual_rate: 0 },
+            adminHeaders(),
+          ),
+        );
+        expect(res.status).toBe(400);
+      });
+
+      it("rejects a negative manual_rate with 400", async () => {
+        const res = await unwrapResponse(
+          api.post(
+            "/admin/pricing/fx",
+            { manual_override: true, manual_rate: -1 },
+            adminHeaders(),
+          ),
+        );
+        expect(res.status).toBe(400);
+      });
+
+      it("accepts manual_rate = 1000 (inclusive upper bound) with 200", async () => {
+        const res = await unwrapResponse(
+          api.post(
+            "/admin/pricing/fx",
+            { manual_override: true, manual_rate: 1000 },
+            adminHeaders(),
+          ),
+        );
+        expect(res.status).toBe(200);
+        expect(res.data.effective).toBe(1000);
+      });
+
+      it("rejects a non-numeric manual_rate with 400", async () => {
+        const res = await unwrapResponse(
+          api.post(
+            "/admin/pricing/fx",
+            { manual_override: true, manual_rate: "abc" },
+            adminHeaders(),
+          ),
+        );
+        expect(res.status).toBe(400);
+      });
+
+      it("rejects an empty-string manual_rate with 400", async () => {
+        const res = await unwrapResponse(
+          api.post(
+            "/admin/pricing/fx",
+            { manual_override: true, manual_rate: "" },
             adminHeaders(),
           ),
         );
