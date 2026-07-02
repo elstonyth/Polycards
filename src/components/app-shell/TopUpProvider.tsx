@@ -44,6 +44,9 @@ export function TopUpProvider({ children }: { children: ReactNode }) {
 
   const refreshBalance = useCallback(async () => {
     if (!customer) {
+      // Defer past the current tick so an effect caller never sets state
+      // synchronously (react-hooks cascading-render lint).
+      await Promise.resolve();
       setBalance(null);
       return;
     }
