@@ -1,5 +1,10 @@
 # Plan 002: Add a watchdog so a charged pack/slot open can never strand the user
 
+> **✅ Status: DONE — implemented in PR #59.** The "Current state" / steps below
+> describe the pre-implementation baseline at commit `4ca2593`, kept as the
+> historical record; the live code already reflects the completed work. See
+> [README.md](README.md) for status — do not re-run this as a fresh checklist.
+
 > **Executor instructions**: Follow this plan step by step. Run every
 > verification command and confirm the expected result before moving on. If any
 > "STOP conditions" item occurs, stop and report — do not improvise. When done,

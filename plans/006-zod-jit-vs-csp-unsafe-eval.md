@@ -1,5 +1,10 @@
 # Plan 006: Resolve Zod-JIT vs CSP `unsafe-eval` before enforcing CSP
 
+> **✅ Status: DONE — verified in PR #59 (no code change).** Option 1
+> (`z.config({ jitless: true })`) was already present in `schemas.ts`; the
+> "Current state" / investigation below is kept as the historical record. See
+> [README.md](README.md) for status.
+
 > **Executor instructions**: This is an **investigate-then-decide** plan, not a
 > mechanical edit. Do the investigation, then implement the option the evidence
 > supports. Run verifications. Honor STOP conditions. Update `plans/README.md`

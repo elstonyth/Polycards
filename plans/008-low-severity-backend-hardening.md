@@ -1,5 +1,11 @@
 # Plan 008: Low-severity backend hardening bundle
 
+> **✅ Status: DONE — implemented in PR #59.** Items B/C/E/F were applied in this
+> PR; A & D were already-safe (verified, no change). Item F (admin-cards FX
+> fallback) is **done here**, not pre-existing. The "Current state" / items below
+> are the pre-implementation baseline at commit `4ca2593`, kept as the record.
+> See [README.md](README.md) for status — do not re-run this as a fresh checklist.
+
 > **Executor instructions**: This bundles several small, independent hardening
 > items. **Each item begins with "read + confirm" — the line numbers are from
 > the audit and may have shifted; verify the cited pattern before editing.** Do

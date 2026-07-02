@@ -1,5 +1,10 @@
 # Plan 004: Close admin money-input validation gaps
 
+> **✅ Status: DONE — implemented in PR #59.** The "Current state" / steps below
+> describe the pre-implementation baseline at commit `4ca2593`, kept as the
+> historical record; the live code already reflects the completed work. See
+> [README.md](README.md) for status — do not re-run this as a fresh checklist.
+
 > **Executor instructions**: Follow this plan step by step. Each item is a small
 > independent fix; run the verification after each. If any "STOP conditions"
 > item occurs, stop and report. When done, update the status row for this plan in
