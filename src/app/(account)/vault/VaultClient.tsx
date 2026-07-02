@@ -42,8 +42,10 @@ export default function VaultClient({
   const [confirmItem, setConfirmItem] = useState<VaultItem | null>(null);
   const [showcasingId, setShowcasingId] = useState<string | null>(null);
 
-  // Keep the header balance chip in sync with sells/top-ups made here.
-  const { applyBalance } = useTopUp();
+  // Two-way sync with the header chip: sells push fresh balances up via
+  // applyBalance; top-ups made in the global sheet flow back down through
+  // providerBalance (review finding — the stat went stale one-way).
+  const { balance: providerBalance, applyBalance } = useTopUp();
   const syncBalance = (next: number) => {
     setBalance(next);
     applyBalance(next);
@@ -243,7 +245,7 @@ export default function VaultClient({
           { label: 'Vault value', value: rm(vaultValue) },
           { label: 'Cards', value: String(items.length) },
           // rm0: whole ringgit — the exact balance lives in the header chip.
-          { label: 'Balance', value: rm0(balance) },
+          { label: 'Balance', value: rm0(providerBalance ?? balance) },
         ].map((stat) => (
           <div key={stat.label} className="px-4 text-center">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">

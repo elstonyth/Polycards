@@ -8,6 +8,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { useRouter } from 'next/navigation';
 import { getCreditBalance } from '@/lib/actions/vault';
 import { openAuth } from '@/components/AuthButton';
 import { useAuth } from '@/components/auth/AuthProvider';
@@ -39,6 +40,7 @@ export function useTopUp(): TopUpContextValue {
  */
 export function TopUpProvider({ children }: { children: ReactNode }) {
   const { customer } = useAuth();
+  const router = useRouter();
   // Balance is stored WITH the customer id it was fetched for. A value tagged
   // for another identity never renders (security review: on logout→login as a
   // different account, an untagged balance briefly leaked the previous user's
@@ -117,7 +119,11 @@ export function TopUpProvider({ children }: { children: ReactNode }) {
         open={open}
         balance={shownBalance}
         onClose={() => setOpen(false)}
-        onToppedUp={applyBalance}
+        onToppedUp={(next) => {
+          applyBalance(next);
+          // Server-rendered balances (/me wallet card, /wallet stats) refetch.
+          router.refresh();
+        }}
       />
     </TopUpContext.Provider>
   );

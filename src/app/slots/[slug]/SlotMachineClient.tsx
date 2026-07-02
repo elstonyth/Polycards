@@ -12,6 +12,7 @@ import { openAuth } from '@/components/AuthButton';
 import { openBatch, revealPull } from '@/lib/actions/packs';
 import type { WonCard } from '@/lib/actions/packs';
 import { getCreditBalance, sellBackPull } from '@/lib/actions/vault';
+import { useTopUp } from '@/components/app-shell/TopUpProvider';
 import { useSound } from '@/lib/use-sound';
 import { rm } from '@/lib/format';
 import {
@@ -61,6 +62,10 @@ export default function SlotMachineClient({
   // Shrink the cell so multiple reels fit across the viewport.
   const cellSize = count > 1 ? 76 : 96;
 
+  // Mirror every server-returned balance into the app-shell provider so the
+  // header chip / top-up sheet / detail-page affordability never go stale
+  // after reel spends or sell-backs (review finding).
+  const { applyBalance } = useTopUp();
   const [balance, setBalance] = useState<number | null>(null);
   const [recent, setRecent] = useState<RecentPull[]>(recentPulls);
   const [phase, setPhase] = useState<Phase>('idle');
@@ -208,7 +213,10 @@ export default function SlotMachineClient({
     if (!held) return;
     pending.current = null;
 
-    if (held.balance != null) setBalance(held.balance);
+    if (held.balance != null) {
+      setBalance(held.balance);
+      applyBalance(held.balance);
+    }
     setOffers(held.offers);
 
     // Prepend one RecentPull per card won in this batch.
@@ -247,9 +255,15 @@ export default function SlotMachineClient({
       () => setCooldown(false),
       COOLDOWN_MS,
     );
-  }, [pack.name, pack.image, play, vibrate]);
+  }, [pack.name, pack.image, play, vibrate, applyBalance]);
 
-  const refreshBalance = useCallback((b: number) => setBalance(b), []);
+  const refreshBalance = useCallback(
+    (b: number) => {
+      setBalance(b);
+      applyBalance(b);
+    },
+    [applyBalance],
+  );
 
   const wonCards = phase === 'landed' ? (spin?.cards ?? []) : [];
   // For single-card banner: use the first card's tier.

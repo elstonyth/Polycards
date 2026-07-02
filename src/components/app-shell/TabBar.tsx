@@ -15,6 +15,7 @@ export default function TabBar() {
 
   return (
     <nav
+      data-site-chrome
       aria-label="Primary"
       className="fixed inset-x-0 bottom-0 z-50 border-t border-white/10 bg-neutral-950 pb-[env(safe-area-inset-bottom)] lg:hidden"
     >
