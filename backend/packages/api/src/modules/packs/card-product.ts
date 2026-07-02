@@ -23,6 +23,12 @@ export type CardProductMetadata = {
   grader: string;
   set: string;
   year: number;
+  // Optional PriceCharting link — present only for products minted from a
+  // PriceCharting lookup (Add-from-PriceCharting). Absent for seeded/manual
+  // cards, so their product metadata is unchanged.
+  pc_product_id?: string;
+  pc_grade?: string;
+  market_multiplier?: number;
 };
 
 export type CardProductSeed = {
@@ -90,6 +96,15 @@ export function buildCardProductInput(
       grader: card.metadata.grader,
       set: card.metadata.set,
       year: card.metadata.year,
+      ...(card.metadata.pc_product_id !== undefined
+        ? { pc_product_id: card.metadata.pc_product_id }
+        : {}),
+      ...(card.metadata.pc_grade !== undefined
+        ? { pc_grade: card.metadata.pc_grade }
+        : {}),
+      ...(card.metadata.market_multiplier !== undefined
+        ? { market_multiplier: card.metadata.market_multiplier }
+        : {}),
     },
   };
 }
