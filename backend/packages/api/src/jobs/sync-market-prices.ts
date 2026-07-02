@@ -1,11 +1,15 @@
-import type { MedusaContainer } from "@medusajs/framework/types";
-import { ContainerRegistrationKeys } from "@medusajs/framework/utils";
-import { PACKS_MODULE } from "../modules/packs";
-import type PacksModuleService from "../modules/packs/service";
-import { pcFetch } from "../api/admin/pricecharting/client";
-import { fetchUsdMyr } from "../modules/packs/pricing";
-import { refreshCardPrice, type CardRow } from "../modules/packs/sync-market-prices";
-import { pageAll } from "../api/utils/page-all";
+import type { MedusaContainer } from '@medusajs/framework/types';
+import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
+import { PACKS_MODULE } from '../modules/packs';
+import type PacksModuleService from '../modules/packs/service';
+import { pcFetch } from '../api/admin/pricecharting/client';
+import { fetchUsdMyr } from '../modules/packs/pricing';
+import {
+  recordPriceHistory,
+  refreshCardPrice,
+  type CardRow,
+} from '../modules/packs/sync-market-prices';
+import { pageAll } from '../api/utils/page-all';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -15,22 +19,36 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // Typing T as a plain Record here yields exactly the raw penny fields
 // refreshCardPrice expects — no reshaping needed, `pcFetch` already returns
 // { kind: "ok", data: <raw penny fields> } | { kind: "no-token" } | { kind: "error", message }.
-type PcProductRaw = { status: string; "error-message"?: string } & Record<string, unknown>;
-const pcFetchRaw = (path: string, params: Record<string, string>) => pcFetch<PcProductRaw>(path, params);
+type PcProductRaw = { status: string; 'error-message'?: string } & Record<
+  string,
+  unknown
+>;
+const pcFetchRaw = (path: string, params: Record<string, string>) =>
+  pcFetch<PcProductRaw>(path, params);
 
-export default async function syncMarketPricesJob(container: MedusaContainer): Promise<void> {
+export default async function syncMarketPricesJob(
+  container: MedusaContainer,
+): Promise<void> {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
   const now = new Date();
 
   try {
     const rate = await fetchUsdMyr();
-    const [row] = await packs.listFxRates({ pair: "USD_MYR" }, { take: 1 });
-    if (row) await packs.updateFxRates([{ id: row.id, rate, source: "frankfurter", fetched_at: now }]);
-    else await packs.createFxRates([{ pair: "USD_MYR", rate, source: "frankfurter", fetched_at: now }]);
+    const [row] = await packs.listFxRates({ pair: 'USD_MYR' }, { take: 1 });
+    if (row)
+      await packs.updateFxRates([
+        { id: row.id, rate, source: 'frankfurter', fetched_at: now },
+      ]);
+    else
+      await packs.createFxRates([
+        { pair: 'USD_MYR', rate, source: 'frankfurter', fetched_at: now },
+      ]);
     logger.info(`[sync-market-prices] FX USD->MYR = ${rate}`);
   } catch (e) {
-    logger.warn(`[sync-market-prices] FX failed, keeping last-known: ${(e as Error).message}`);
+    logger.warn(
+      `[sync-market-prices] FX failed, keeping last-known: ${(e as Error).message}`,
+    );
   }
 
   // Paginate past linked cards beyond a single page — a `take: N` cap would
@@ -41,15 +59,26 @@ export default async function syncMarketPricesJob(container: MedusaContainer): P
   let changed = 0;
   for (const card of cards) {
     try {
-      const r = await refreshCardPrice(card, { pcFetch: pcFetchRaw, updateCards: (u) => packs.updateCards(u), now });
+      const r = await refreshCardPrice(card, {
+        pcFetch: pcFetchRaw,
+        updateCards: (u) => packs.updateCards(u),
+        now,
+      });
       if (r.changed) {
         changed++;
-        logger.info(`[sync-market-prices] ${r.handle} ${r.oldValue} -> ${r.newValue}`);
+        logger.info(
+          `[sync-market-prices] ${r.handle} ${r.oldValue} -> ${r.newValue}`,
+        );
       } else if (r.skippedReason) {
-        logger.warn(`[sync-market-prices] skip ${r.handle}: ${r.skippedReason}`);
+        logger.warn(
+          `[sync-market-prices] skip ${r.handle}: ${r.skippedReason}`,
+        );
       }
+      await recordPriceHistory(packs, card.id, r);
     } catch (e) {
-      logger.error(`[sync-market-prices] card ${card.handle || card.id} failed: ${(e as Error).message}`);
+      logger.error(
+        `[sync-market-prices] card ${card.handle || card.id} failed: ${(e as Error).message}`,
+      );
     } finally {
       await sleep(1100);
     }
@@ -57,4 +86,4 @@ export default async function syncMarketPricesJob(container: MedusaContainer): P
   logger.info(`[sync-market-prices] done: ${changed}/${cards.length} updated`);
 }
 
-export const config = { name: "sync-market-prices", schedule: "0 3 * * *" };
+export const config = { name: 'sync-market-prices', schedule: '0 3 * * *' };

@@ -10,6 +10,7 @@ import { validateDeliveryRequest, snapshotAddress } from './delivery';
 import { rewardsRedemptionEnabled } from './rewards-gate';
 import Pack from './models/pack';
 import Card from './models/card';
+import CardPriceHistory from './models/card-price-history';
 import FxRate from './models/fx-rate';
 import PackOdds from './models/pack-odds';
 import Pull from './models/pull';
@@ -196,6 +197,7 @@ const DOWNSTREAM_DEPTH_CAP = 100;
 class PacksModuleService extends MedusaService({
   Pack,
   Card,
+  CardPriceHistory,
   FxRate,
   PackOdds,
   Pull,
