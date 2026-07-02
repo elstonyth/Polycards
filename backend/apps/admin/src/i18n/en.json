@@ -115,8 +115,8 @@
       "upload": "Upload image",
       "replace": "Replace image",
       "urlPlaceholder": "Image URL",
-      "hint": "Auto-filled from PriceCharting when available; the image is stored through the media pipeline on save, never hotlinked. Upload to override.",
-      "autoFilled": "Auto-fetched from PriceCharting"
+      "hint": "Paste the PriceCharting card photo URL (right-click the photo on their product page → copy image address) or upload your own. A pasted PriceCharting URL is auto-fetched and stored through the media pipeline on save — never hotlinked.",
+      "autoFilled": "Will be fetched & stored on save"
     },
     "submit": "Add product",
     "created": "Created",

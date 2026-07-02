@@ -56,6 +56,23 @@ function gradeToGrader(label: string): { grader: string; grade: string } {
 const usdToMyr = (usd: number, fx: number): number =>
   Math.round(usd * fx * 100) / 100;
 
+// Client mirror of backend api/admin/media/ingest-pc-image.ts isPcImageUrl —
+// PriceCharting's API exposes no image, so the operator pastes the photo URL
+// from the PC product page; the backend detects this host and ingests the
+// bytes through the media pipeline on save. Keep in sync with the backend.
+const isPcImageUrl = (url: string): boolean => {
+  try {
+    const u = new URL(url);
+    return (
+      u.protocol === 'https:' &&
+      u.hostname === 'storage.googleapis.com' &&
+      u.pathname.startsWith('/images.pricecharting.com/')
+    );
+  } catch {
+    return false;
+  }
+};
+
 const AddFromPriceChartingPage = () => {
   const { t } = useTranslation();
   const { data: fx } = useFxRate();
@@ -173,7 +190,9 @@ const AddFromPriceChartingPage = () => {
       ? rm(usdToMyr(usd, fxEffective))
       : `$${usd.toFixed(2)}`;
 
-  const imageAutoFilled = image !== '' && image === pcProduct?.image;
+  // A pasted PC photo URL (or the rare proxy-provided one) gets the "will be
+  // ingested" badge — the backend stores its own copy on save.
+  const imageAutoFilled = image !== '' && (isPcImageUrl(image) || image === pcProduct?.image);
 
   const canSave =
     !!match &&
