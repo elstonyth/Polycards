@@ -29,6 +29,10 @@ export type CardProductMetadata = {
   pc_product_id?: string;
   pc_grade?: string;
   market_multiplier?: number;
+  // Optional pixel-Pokémon staging (Add-from-PriceCharting) — inherited by
+  // create-card when the product is registered as a gacha card.
+  pokemon_dex?: number;
+  sprite_image?: string;
 };
 
 export type CardProductSeed = {
@@ -104,6 +108,12 @@ export function buildCardProductInput(
         : {}),
       ...(card.metadata.market_multiplier !== undefined
         ? { market_multiplier: card.metadata.market_multiplier }
+        : {}),
+      ...(card.metadata.pokemon_dex !== undefined
+        ? { pokemon_dex: card.metadata.pokemon_dex }
+        : {}),
+      ...(card.metadata.sprite_image !== undefined
+        ? { sprite_image: card.metadata.sprite_image }
         : {}),
     },
   };
