@@ -104,6 +104,10 @@
     "markup": {
       "label": "Markup %"
     },
+    "stock": {
+      "label": "Stock quantity",
+      "hint": "Physical copies you hold. Decrements as the card is pulled or sold. Default 1 for a single graded slab."
+    },
     "preview": {
       "loading": "Loading FX rate…",
       "line": "Raw ${{raw}} · FX {{fx}} · Market RM{{market}} · Customer sees RM{{customer}} · Margin RM{{margin}}"

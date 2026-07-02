@@ -333,6 +333,7 @@ export async function createProductFromPriceCharting(body: {
   price?: number | null;
   for_sale?: boolean;
   market_multiplier?: number;
+  stock?: number;
 }): Promise<{ id: string; handle: string }> {
   const data = await postJson<{ product: { id: string; handle: string } }>(
     '/admin/products/from-pricecharting',

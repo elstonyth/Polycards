@@ -86,6 +86,9 @@ const AddFromPriceChartingPage = () => {
   // Step 3 — markup.
   const [multiplierPct, setMultiplierPct] = useState(DEFAULT_MULTIPLIER_PCT);
 
+  // Step 3b — stock. Tracked units seeded at creation (default a single slab).
+  const [stock, setStock] = useState('1');
+
   // Step 4 — image (auto-pull seam for Task 15: no prefill wired yet — the
   // Prices API returns no image, so this always starts empty and relies on
   // upload/replace until a prefill endpoint lands).
@@ -181,6 +184,8 @@ const AddFromPriceChartingPage = () => {
     image.trim() !== '' &&
     Number.isFinite(multiplier) &&
     multiplier > 0 &&
+    Number.isInteger(Number(stock)) &&
+    Number(stock) >= 0 &&
     !saving &&
     !uploading;
 
@@ -197,6 +202,7 @@ const AddFromPriceChartingPage = () => {
         market_value: marketValue,
         image: image.trim(),
         market_multiplier: multiplier,
+        stock: Number(stock),
       });
       setCreated(product);
       toast.success(t('pcAdd.toast.created', { name: pcProduct.name }));
@@ -351,6 +357,26 @@ const AddFromPriceChartingPage = () => {
                 </Text>
               )}
             </div>
+          </div>
+        )}
+
+        {/* Step 3b — stock quantity */}
+        {pcGrade !== null && (
+          <div className="flex flex-col gap-y-2">
+            <Label size="small" weight="plus">
+              {t('pcAdd.stock.label')}
+            </Label>
+            <Input
+              type="number"
+              min={0}
+              step={1}
+              className="max-w-[8rem]"
+              value={stock}
+              onChange={(e) => setStock(e.target.value)}
+            />
+            <Text className="text-ui-fg-subtle text-xs">
+              {t('pcAdd.stock.hint')}
+            </Text>
           </div>
         )}
 
