@@ -21,7 +21,7 @@
     "build": "medusa build",
     "seed": "medusa exec ./src/scripts/seed.ts",
     "deploy:init": "medusa db:migrate && medusa exec ./src/scripts/seed.ts && medusa exec ./src/scripts/print-publishable-key.ts",
-    "deploy:migrate-user": "medusa db:migrate && medusa exec ./src/scripts/create-admin.ts",
+    "deploy:migrate-user": "medusa db:migrate && medusa exec ./src/scripts/create-admin.ts && medusa exec ./src/scripts/seed-vip-achievements.ts",
     "start": "medusa start",
     "dev": "medusa develop",
     "test:integration:http": "node integration-tests/run-http-shards.mjs",

@@ -34,12 +34,15 @@ export function topUpAmountError(value: unknown): string | null {
 // spendable credit. FAIL CLOSED — only explicit local/test environments allow
 // the mock by default; EVERY other environment (production, staging, unset, or
 // any custom NODE_ENV) requires an explicit operator opt-in (ALLOW_MOCK_TOPUP=
-// true). A misconfigured public deploy with NODE_ENV unset/staging must never
-// mint credits. Pure (env injected) so the policy is unit-testable.
+// true, or 'unsafe-demo' — the only value the production boot-guard below
+// accepts). A misconfigured public deploy with NODE_ENV unset/staging must
+// never mint credits. Pure (env injected) so the policy is unit-testable.
 export function mockTopupAllowed(
   env: { NODE_ENV?: string; ALLOW_MOCK_TOPUP?: string } = process.env,
 ): boolean {
-  if (env.ALLOW_MOCK_TOPUP === 'true') return true;
+  if (env.ALLOW_MOCK_TOPUP === 'true' || env.ALLOW_MOCK_TOPUP === 'unsafe-demo') {
+    return true;
+  }
   return env.NODE_ENV === 'development' || env.NODE_ENV === 'test';
 }
 
@@ -52,6 +55,13 @@ export function mockTopupAllowed(
 // combination (called at medusa-config load, alongside the JWT/COOKIE secret
 // checks). Uses the framework's definition of production ('production' | 'prod').
 // Pure (env injected) so the policy is unit-testable without booting.
+//
+// Demo escape hatch (2026-07-02): prod currently doubles as the DEMO box, so an
+// operator can set ALLOW_MOCK_TOPUP=unsafe-demo to run the mock gateway in
+// production ON PURPOSE. 'true' (the value every local .env carries) still
+// refuses to boot — the guard protects against copy-paste, not against a
+// deliberate, weird-looking value. Remove 'unsafe-demo' from the prod spec when
+// the real gateway (Batch B) ships.
 export function assertMockTopupSafe(
   env: { NODE_ENV?: string; ALLOW_MOCK_TOPUP?: string } = process.env,
 ): void {
@@ -60,7 +70,8 @@ export function assertMockTopupSafe(
     throw new Error(
       'ALLOW_MOCK_TOPUP=true is not permitted in production: the mock payment ' +
         'gateway always approves and mints free spendable credit. Unset ' +
-        'ALLOW_MOCK_TOPUP (and wire a real payment provider) before deploying.',
+        'ALLOW_MOCK_TOPUP (and wire a real payment provider) before deploying. ' +
+        'For a deliberate demo deployment, set ALLOW_MOCK_TOPUP=unsafe-demo.',
     );
   }
 }

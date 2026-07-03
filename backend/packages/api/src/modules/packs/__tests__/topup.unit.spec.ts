@@ -122,6 +122,16 @@ describe('mockTopupAllowed', () => {
       mockTopupAllowed({ NODE_ENV: 'production', ALLOW_MOCK_TOPUP: '1' }),
     ).toBe(false);
   });
+
+  it("allows the mock via the deliberate demo value ('unsafe-demo')", () => {
+    expect(
+      mockTopupAllowed({
+        NODE_ENV: 'production',
+        ALLOW_MOCK_TOPUP: 'unsafe-demo',
+      }),
+    ).toBe(true);
+    expect(mockTopupAllowed({ ALLOW_MOCK_TOPUP: 'unsafe-demo' })).toBe(true);
+  });
 });
 
 // Production boot-guard (security audit 2026-06-30, Batch A): ALLOW_MOCK_TOPUP=
@@ -146,6 +156,23 @@ describe('assertMockTopupSafe', () => {
         ALLOW_MOCK_TOPUP: 'false',
       }),
     ).not.toThrow();
+  });
+
+  it("permits the deliberate demo opt-in ('unsafe-demo') in production", () => {
+    // Prod-as-demo (2026-07-02): 'true' (every local .env) still refuses boot,
+    // but the weird-looking explicit value boots and enables the mock gateway.
+    expect(() =>
+      assertMockTopupSafe({
+        NODE_ENV: 'production',
+        ALLOW_MOCK_TOPUP: 'unsafe-demo',
+      }),
+    ).not.toThrow();
+    expect(
+      mockTopupAllowed({
+        NODE_ENV: 'production',
+        ALLOW_MOCK_TOPUP: 'unsafe-demo',
+      }),
+    ).toBe(true);
   });
 
   it('permits the opt-in OFF production (staging/custom/dev/test still allow the mock)', () => {
