@@ -13,7 +13,6 @@ import {
   WonCardSchema,
   OpenBuybackSchema,
   BuybackResultSchema,
-  AchievementsSchema,
   CREDIT_REASONS,
 } from '../schemas';
 
@@ -147,50 +146,6 @@ describe('parseOne — null on failure', () => {
       parseOne(OpenBuybackSchema, { percent: 90, amount: 1 }),
     ).not.toBeNull();
     expect(parseOne(OpenBuybackSchema, { percent: 90 })).toBeNull();
-  });
-});
-
-describe('AchievementsSchema — valid parse + bad-shape reject', () => {
-  const validAch = {
-    collector_level: 3,
-    total_xp: 150,
-    highest_level_ever: 3,
-    next_level: { level: 4, xp_threshold: 200, remaining: 50 },
-    achievements: [
-      {
-        key: 'first_open',
-        name: 'First Open',
-        description: 'Open your first pack',
-        category: 'packs',
-        rarity: 'Common',
-        xp: 10,
-        metric: 'cases_opened',
-        unlocked: true,
-        unlocked_at: '2026-06-01T00:00:00Z',
-        progress: { current: 1, target: 1 },
-      },
-    ],
-  };
-
-  it('parses a valid response', () => {
-    expect(parseOne(AchievementsSchema, validAch)).not.toBeNull();
-  });
-
-  it('returns null for missing collector_level', () => {
-    const { collector_level: _, ...bad } = validAch;
-    expect(parseOne(AchievementsSchema, bad)).toBeNull();
-  });
-
-  it('returns null when total_xp is NaN', () => {
-    expect(
-      parseOne(AchievementsSchema, { ...validAch, total_xp: NaN }),
-    ).toBeNull();
-  });
-
-  it('next_level: null is valid (max level)', () => {
-    expect(
-      parseOne(AchievementsSchema, { ...validAch, next_level: null }),
-    ).not.toBeNull();
   });
 });
 

@@ -3,30 +3,14 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import {
-  Trophy,
-  Layers,
-  TrendingUp,
-  CalendarDays,
-  Award,
-  Star,
-  Flame,
-  Crown,
-} from 'lucide-react';
+import { Trophy, Layers, TrendingUp, CalendarDays, Star } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import Reveal from '@/components/Reveal';
 import { rm, num, compact } from '@/lib/format';
 import { type ProfileViewUser } from '@/lib/profile-view';
 
-const TABS = ['Collection', 'Activity', 'Achievements'] as const;
+const TABS = ['Collection', 'Activity'] as const;
 type Tab = (typeof TABS)[number];
-
-const BADGES = [
-  { icon: Crown, label: 'Top 100', tint: 'text-amber-400' },
-  { icon: Flame, label: '100 Pulls', tint: 'text-orange-400' },
-  { icon: Star, label: 'First Legendary', tint: 'text-fuchsia-400' },
-  { icon: Award, label: 'Vault Veteran', tint: 'text-sky-400' },
-];
 
 export default function ProfileClient({ user }: { user: ProfileViewUser }) {
   const [tab, setTab] = useState<Tab>('Collection');
@@ -215,27 +199,6 @@ export default function ProfileClient({ user }: { user: ProfileViewUser }) {
             </li>
           ))}
         </ul>
-      )}
-
-      {tab === 'Achievements' && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {BADGES.map((b) => {
-            const Icon = b.icon;
-            return (
-              <div
-                key={b.label}
-                className="flex flex-col items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] p-6 text-center"
-              >
-                <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white/5">
-                  <Icon className={cn('h-6 w-6', b.tint)} aria-hidden />
-                </span>
-                <span className="text-[13px] font-medium text-white">
-                  {b.label}
-                </span>
-              </div>
-            );
-          })}
-        </div>
       )}
     </div>
   );

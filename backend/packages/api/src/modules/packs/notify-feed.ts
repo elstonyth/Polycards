@@ -1,6 +1,10 @@
 import { Modules } from '@medusajs/framework/utils';
 
-export type FeedTemplate = 'commission_matured' | 'vip_level_up' | 'reward_won' | 'voucher_claimed' | 'achievement_unlocked';
+export type FeedTemplate =
+  | 'commission_matured'
+  | 'vip_level_up'
+  | 'reward_won'
+  | 'voucher_claimed';
 
 // Thin wrapper over the Notification Module 'feed' channel. receiver_id is the
 // owner-scoping column the store route filters on; `to` is the provider's

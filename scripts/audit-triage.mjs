@@ -39,7 +39,6 @@ const ROUTES = [
   ['/messages', 'account'],
   ['/earnings', 'account'],
   ['/referrals', 'account'],
-  ['/achievements', 'account'],
   ['/vouchers', 'account'],
   ['/submitcards', 'account'],
   ['/bank-withdrawal', 'account'],

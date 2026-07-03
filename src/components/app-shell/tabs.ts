@@ -36,7 +36,6 @@ export const TABS: Tab[] = [
       '/notifications',
       '/vip',
       '/rewards',
-      '/achievements',
     ],
   },
 ];

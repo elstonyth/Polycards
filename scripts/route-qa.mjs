@@ -33,7 +33,6 @@ const ROUTES = [
   { route: '/series', url: '/series' },
   { route: '/pokemon/generation/[gen]', url: '/pokemon/generation/1' },
   { route: '/messages', url: '/messages' },
-  { route: '/achievements', url: '/achievements' },
   { route: '/submitcards', url: '/submitcards' },
   { route: '/earnings', url: '/earnings' },
   { route: '/referrals', url: '/referrals' },

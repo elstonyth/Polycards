@@ -8,7 +8,6 @@ const PAGES = [
   '/claw',
   '/leaderboard',
   '/repacks',
-  '/achievements',
 ];
 const b = await chromium.launch();
 const p = await b.newPage();

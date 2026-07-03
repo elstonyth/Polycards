@@ -27,9 +27,6 @@ import VipMemberState from './models/vip-member-state';
 import VipRewardGrant from './models/vip-reward-grant';
 import NotificationRead from './models/notification-read';
 import RewardDraw from './models/reward-draw';
-import AchievementDef from './models/achievement-def';
-import AchievementMemberState from './models/achievement-member-state';
-import AchievementGrant from './models/achievement-grant';
 import DailyClaim from './models/daily-claim';
 import DailyRewardSettings from './models/daily-reward-settings';
 import {
@@ -58,11 +55,6 @@ import {
 } from './referral-commission';
 import { levelForSpend } from './vip-ladder';
 import { levelsToGrant, rewardsForLevel } from './vip-rewards';
-import {
-  unlockedKeys,
-  levelForXp,
-  type AchMetric,
-} from './achievements-ladder';
 import { fromSen } from './money';
 import {
   validateRewardsPatch,
@@ -235,9 +227,6 @@ class PacksModuleService extends MedusaService({
   VipRewardGrant,
   NotificationRead,
   RewardDraw,
-  AchievementDef,
-  AchievementMemberState,
-  AchievementGrant,
   DailyClaim,
   DailyRewardSettings,
 }) {
@@ -3505,135 +3494,6 @@ class PacksModuleService extends MedusaService({
       draws_per_day: input.draws_per_day,
       pool_enabled: input.pool_enabled,
     };
-  }
-
-  // COUNT aggregate for pull metrics — no row-scan ceiling (replaces listPulls take:100000).
-  @InjectManager()
-  async pullCounts(
-    customerId: string,
-    @MedusaContext() sharedContext: Context = {},
-  ): Promise<{ casesOpened: number; collectionSize: number }> {
-    const em = (sharedContext.transactionManager ??
-      sharedContext.manager) as unknown as LedgerSqlManager;
-    const rows = await em.execute<
-      { cases_opened: number; collection_size: number }[]
-    >(
-      `SELECT COUNT(*) FILTER (WHERE source = 'pack')::int AS cases_opened,
-              COUNT(*) FILTER (WHERE status <> 'bought_back')::int AS collection_size
-         FROM pull WHERE customer_id = ? AND deleted_at IS NULL`,
-      [customerId],
-    );
-    const row = rows[0];
-    return {
-      casesOpened: Number(row?.cases_opened ?? 0),
-      collectionSize: Number(row?.collection_size ?? 0),
-    };
-  }
-
-  // Idempotent achievement grant: computes current metrics, derives which
-  // achievement thresholds are met (against monotonic peaks so unlocks never
-  // revoke on sell-back), inserts new grant rows via ON CONFLICT DO NOTHING,
-  // then upserts achievement_member_state with GREATEST guards on the peak
-  // columns. Mirrors grantLevelUpRewards pattern exactly.
-  @InjectManager()
-  async grantAchievements(
-    customerId: string,
-    openId: string,
-    @MedusaContext() sharedContext: Context = {},
-  ): Promise<{ newlyUnlocked: string[] }> {
-    // ponytail: same (transactionManager ?? manager) pattern as upsertVipMemberState
-    const em = (sharedContext.transactionManager ??
-      sharedContext.manager) as unknown as LedgerSqlManager;
-
-    // 1. Metrics (fresh). spend in MYR; counts via COUNT aggregate (no row-scan cap).
-    const summary = await this.creditSummary(customerId);
-    const { casesOpened, collectionSize } = await this.pullCounts(
-      customerId,
-      sharedContext,
-    );
-
-    const defs = await this.listAchievementDefs(
-      {},
-      { select: ['key', 'metric', 'threshold', 'xp'], take: 10000 },
-    );
-    const defByKey = new Map(defs.map((d) => [d.key, d]));
-
-    // 2. Monotonic peaks (read prior state).
-    const [prior] = await this.listAchievementMemberStates(
-      { customer_id: customerId },
-      { take: 1 },
-    );
-    const peakOpens = Math.max(
-      Number(prior?.peak_cases_opened ?? 0),
-      casesOpened,
-    );
-    const peakCollection = Math.max(
-      Number(prior?.peak_collection_size ?? 0),
-      collectionSize,
-    );
-
-    // 3. Unlocked keys (against peaks, so unlocks never revoke).
-    const unlocked = unlockedKeys(
-      {
-        spend: summary.externalFundedSpendTotal,
-        cases_opened: peakOpens,
-        collection_size: peakCollection,
-      },
-      defs.map((d) => ({
-        key: d.key,
-        metric: d.metric as AchMetric,
-        threshold: Number(d.threshold),
-      })),
-    );
-
-    // 4. Idempotent grant insert for each unlocked key; collect newly inserted.
-    // Raw INSERT … ON CONFLICT … DO NOTHING avoids 23505 poisoning the txn (Postgres 25P02).
-    // Conflict target matches partial index on achievement_grant (customer_id, achievement_key)
-    // WHERE deleted_at IS NULL (created in Task 1 migration).
-    const newlyUnlocked: string[] = [];
-    const now = new Date();
-    for (const key of unlocked) {
-      const def = defByKey.get(key);
-      if (!def) continue;
-      const grantId = `agr_${customerId}_${key}`;
-      const r = await em.execute(
-        `INSERT INTO achievement_grant
-           (id, customer_id, achievement_key, xp_awarded, unlocked_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, now(), now())
-         ON CONFLICT (customer_id, achievement_key) WHERE deleted_at IS NULL DO NOTHING
-         RETURNING id`,
-        [grantId, customerId, key, Number(def.xp), now],
-      );
-      if (Array.isArray(r) && r.length > 0) newlyUnlocked.push(key);
-    }
-
-    // 5. Recompute total XP via SUM aggregate (snapshot-safe) + collector level.
-    const xpRows = await em.execute<{ total_xp: number }[]>(
-      `SELECT COALESCE(SUM(xp_awarded),0)::int AS total_xp FROM achievement_grant WHERE customer_id = ? AND deleted_at IS NULL`,
-      [customerId],
-    );
-    const totalXp = Number(xpRows[0]?.total_xp ?? 0);
-    const level = levelForXp(totalXp);
-
-    // 6. Monotonic state upsert (peaks + highest_level_ever via GREATEST).
-    // Conflict target matches partial index on achievement_member_state (customer_id)
-    // WHERE deleted_at IS NULL (created in Task 1 migration).
-    const stateId = prior?.id ?? `ams_${customerId}`;
-    await em.execute(
-      `INSERT INTO achievement_member_state
-         (id, customer_id, peak_cases_opened, peak_collection_size, total_xp, collector_level, highest_level_ever, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, now(), now())
-       ON CONFLICT (customer_id) WHERE deleted_at IS NULL DO UPDATE SET
-         peak_cases_opened = GREATEST(achievement_member_state.peak_cases_opened, EXCLUDED.peak_cases_opened),
-         peak_collection_size = GREATEST(achievement_member_state.peak_collection_size, EXCLUDED.peak_collection_size),
-         total_xp = EXCLUDED.total_xp,
-         collector_level = EXCLUDED.collector_level,
-         highest_level_ever = GREATEST(achievement_member_state.highest_level_ever, EXCLUDED.collector_level),
-         updated_at = now()`,
-      [stateId, customerId, peakOpens, peakCollection, totalXp, level, level],
-    );
-
-    return { newlyUnlocked };
   }
 }
 

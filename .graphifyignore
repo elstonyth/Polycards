@@ -122,6 +122,9 @@ GEMINI.md
 # Test harnesses (e2e, demo, prod-smoke) + artifacts — local only
 /tests/
 
+# impeccable design-hook cache (per-app artifacts)
+**/.impeccable/
+
 # graphify matcher leaks deep .medusa build paths; force-exclude globally
 .medusa/
 **/.medusa/

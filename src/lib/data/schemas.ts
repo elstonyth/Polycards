@@ -246,33 +246,6 @@ export const VipSchema = z.looseObject({
     .nullable(),
 });
 
-// --- actions/achievements.ts ------------------------------------------------
-
-/** GET /store/achievements — single achievement definition with progress. */
-export const AchievementSchema = z.looseObject({
-  key: z.string(),
-  name: z.string(),
-  description: z.string(),
-  category: z.string(),
-  rarity: z.string(),
-  xp: finite,
-  metric: z.string(),
-  unlocked: z.boolean(),
-  unlocked_at: z.string().nullable(),
-  progress: z.looseObject({ current: finite, target: finite }),
-});
-
-/** GET /store/achievements — outer envelope. */
-export const AchievementsSchema = z.looseObject({
-  collector_level: finite,
-  total_xp: finite,
-  highest_level_ever: finite,
-  next_level: z
-    .looseObject({ level: finite, xp_threshold: finite, remaining: finite })
-    .nullable(),
-  achievements: z.array(AchievementSchema),
-});
-
 // --- actions/referral.ts ----------------------------------------------------
 
 /** GET /store/referral — referral summary for the authenticated customer. */

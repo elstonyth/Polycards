@@ -3,8 +3,6 @@ import Link from 'next/link';
 import { AccountHeader, Panel, StatCards } from '@/components/account/ui';
 import { getVip } from '@/lib/actions/vip';
 import { rm } from '@/lib/format';
-import { getAchievements } from '@/lib/actions/achievements';
-import AchievementsSection from '@/components/account/AchievementsGrid';
 
 export const metadata: Metadata = { title: 'VIP' };
 
@@ -21,7 +19,7 @@ function rewardLabel(r: {
 }
 
 export default async function VipPage() {
-  const [res, achRes] = await Promise.all([getVip(), getAchievements()]);
+  const res = await getVip();
   if (!res.ok) {
     return (
       <>
@@ -82,13 +80,6 @@ export default async function VipPage() {
         </Link>{' '}
         page.
       </p>
-      {achRes.ok ? (
-        <AchievementsSection data={achRes.data} />
-      ) : (
-        <Panel className="mt-8">
-          <p className="text-sm text-white/60">{achRes.error}</p>
-        </Panel>
-      )}
     </>
   );
 }
