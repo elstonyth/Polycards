@@ -1,0 +1,192 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-02T08:00:00+08:00",
+  "title": "Design System: Pokenic",
+  "extensions": {
+    "colorMeta": {
+      "ink-black": {
+        "role": "neutral",
+        "displayName": "Ink Black",
+        "canonical": "#0a0a0a"
+      },
+      "charcoal": {
+        "role": "neutral",
+        "displayName": "Charcoal",
+        "canonical": "#171717"
+      },
+      "graphite": {
+        "role": "neutral",
+        "displayName": "Graphite",
+        "canonical": "#262626"
+      },
+      "paper-white": {
+        "role": "primary",
+        "displayName": "Paper White",
+        "canonical": "#fafafa"
+      },
+      "chase-gold": {
+        "role": "primary",
+        "displayName": "Chase Gold",
+        "canonical": "#ffb020"
+      },
+      "buyback-green": {
+        "role": "secondary",
+        "displayName": "Buyback Green",
+        "canonical": "#4ade80"
+      },
+      "tier-starter": {
+        "role": "tertiary",
+        "displayName": "Starter Red",
+        "canonical": "#ef4444"
+      },
+      "tier-silver": {
+        "role": "tertiary",
+        "displayName": "Silver Blue",
+        "canonical": "#60a5fa"
+      },
+      "tier-gold": {
+        "role": "tertiary",
+        "displayName": "Tier Gold",
+        "canonical": "#eab308"
+      },
+      "tier-diamond": {
+        "role": "tertiary",
+        "displayName": "Diamond Purple",
+        "canonical": "#a78bfa"
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display (Nekst Black)",
+        "purpose": "Screen titles, reveal moments, rank numerals, meaningful RM values."
+      },
+      "body": {
+        "displayName": "Body (Geist)",
+        "purpose": "Descriptions, ledgers, trust copy."
+      }
+    },
+    "shadows": [
+      {
+        "name": "rarity-glow",
+        "value": "0 0 24px 0 var(--glow-color, rgba(255,176,32,0.35))",
+        "purpose": "The only shadow in the system — colored glow inherited from a card's rarity, a tier's hue, or chase gold on a prize. Never decorative."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-out-quart",
+        "value": "cubic-bezier(0.25, 1, 0.5, 1)",
+        "purpose": "Default easing for entrances and sheet slides."
+      },
+      {
+        "name": "press",
+        "value": "transform 120ms cubic-bezier(0.25, 1, 0.5, 1)",
+        "purpose": "Buttons scale to 0.98 on press."
+      }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "640px" },
+      { "name": "lg", "value": "1024px", "note": "tab bar hides, header nav appears" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one white pill per zone. Thumb-height, full-width in sheets and sticky cards.",
+      "html": "<button class=\"ds-btn-primary\">Proceed — add RM 25</button>",
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; justify-content: center; height: 48px; width: 100%; background: #fafafa; color: #0a0a0a; border: none; border-radius: 999px; font-weight: 600; font-size: 14px; transition: transform 120ms cubic-bezier(0.25,1,0.5,1); } .ds-btn-primary:hover { background: #ffffff; } .ds-btn-primary:active { transform: scale(0.98); } .ds-btn-primary:focus-visible { outline: 2px solid rgba(255,255,255,0.4); outline-offset: 2px; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Graphite pill for the non-primary action beside a white pill.",
+      "html": "<button class=\"ds-btn-secondary\">Withdraw</button>",
+      "css": ".ds-btn-secondary { display: inline-flex; align-items: center; justify-content: center; height: 44px; padding: 0 24px; background: #262626; color: #fafafa; border: none; border-radius: 999px; font-weight: 600; font-size: 14px; transition: background 150ms; } .ds-btn-secondary:hover { background: #333333; } .ds-btn-secondary:focus-visible { outline: 2px solid rgba(255,255,255,0.4); outline-offset: 2px; }"
+    },
+    {
+      "name": "Filter Chip",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "Filter/toggle chip; selected state inverts to white (90scard Daily/Weekly idiom).",
+      "html": "<span><button class=\"ds-chip ds-chip--selected\">This Week</button> <button class=\"ds-chip\">Past</button></span>",
+      "css": ".ds-chip { display: inline-flex; align-items: center; height: 36px; padding: 0 16px; background: #262626; color: #a3a3a3; border: none; border-radius: 999px; font-weight: 600; font-size: 13px; transition: color 150ms; } .ds-chip:hover { color: #ffffff; } .ds-chip--selected { background: #fafafa; color: #0a0a0a; } .ds-chip:focus-visible { outline: 2px solid rgba(255,255,255,0.4); outline-offset: 2px; }"
+    },
+    {
+      "name": "Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Charcoal surface, hairline border, 16px radius. Matte — no drop shadow.",
+      "html": "<div class=\"ds-card\"><p class=\"ds-card-label\">Wallet</p><p class=\"ds-card-value\">RM 1,234.50</p></div>",
+      "css": ".ds-card { background: #171717; border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 20px; } .ds-card-label { margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; color: #737373; } .ds-card-value { margin: 4px 0 0; font-family: Nekst, ui-sans-serif; font-weight: 900; font-size: 28px; color: #ffffff; }"
+    },
+    {
+      "name": "Balance Chip",
+      "kind": "custom",
+      "refersTo": "balance-chip",
+      "description": "Header wallet chip: balance + white plus-disc opening the top-up sheet. Present on every screen.",
+      "html": "<button class=\"ds-balance\"><span class=\"ds-balance-amt\">RM 4.49</span><span class=\"ds-balance-plus\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"3\" stroke-linecap=\"round\"><path d=\"M12 5v14M5 12h14\"/></svg></span></button>",
+      "css": ".ds-balance { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 4px 4px 4px 14px; background: #262626; border: none; border-radius: 999px; cursor: pointer; transition: background 150ms; } .ds-balance:hover { background: #333333; } .ds-balance-amt { color: #ffffff; font-weight: 600; font-size: 13px; font-variant-numeric: tabular-nums; } .ds-balance-plus { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 999px; background: #fafafa; color: #0a0a0a; }"
+    },
+    {
+      "name": "Tab Bar Item",
+      "kind": "nav",
+      "description": "Bottom tab bar item — active is Paper White, inactive #737373.",
+      "html": "<nav class=\"ds-tabbar\"><a class=\"ds-tab ds-tab--active\"><svg width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M3 10.5 12 3l9 7.5V21a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1z\"/></svg><span>Home</span></a><a class=\"ds-tab\"><svg width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><rect x=\"3\" y=\"5\" width=\"18\" height=\"16\" rx=\"2\"/><path d=\"M8 3v4M16 3v4M3 11h18\"/></svg><span>Daily</span></a></nav>",
+      "css": ".ds-tabbar { display: flex; background: #0a0a0a; border-top: 1px solid rgba(255,255,255,0.1); } .ds-tab { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; height: 64px; color: #737373; text-decoration: none; font-size: 10px; font-weight: 600; transition: color 150ms; } .ds-tab:hover { color: #d4d4d4; } .ds-tab--active { color: #fafafa; }"
+    },
+    {
+      "name": "Sticky Stat Card",
+      "kind": "custom",
+      "description": "Anchored your-rank / totals card floating above the tab bar (90scard-derived signature).",
+      "html": "<div class=\"ds-statcard\"><div class=\"ds-statcard-row\"><span class=\"ds-statcard-label\">Your rank</span><span class=\"ds-statcard-label\">To top 10</span></div><div class=\"ds-statcard-row\"><span class=\"ds-statcard-value\">#458</span><span class=\"ds-statcard-value ds-statcard-value--gold\">RM 29,701</span></div><button class=\"ds-btn-primary\" style=\"margin-top:12px\">Buy Now</button></div>",
+      "css": ".ds-statcard { background: #171717; border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 16px; } .ds-statcard-row { display: flex; justify-content: space-between; align-items: baseline; } .ds-statcard-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.02em; color: #737373; } .ds-statcard-value { font-family: Nekst, ui-sans-serif; font-weight: 900; font-size: 24px; color: #ffffff; } .ds-statcard-value--gold { color: #ffb020; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Midnight Rip",
+    "overview": "A collector in bed at 11pm, phone the only light in the room, deciding whether to rip one more pack. Near-black chrome that disappears, card art and tier color that glows out of it, money values that read instantly, and a thumb-reach bottom tab bar. Structure borrowed from 90scard and luka.game, rendered on Pokenic's own dark neutral base.",
+    "keyCharacteristics": [
+      "Dark tonal layering (ink → charcoal → graphite), zero decorative shadows",
+      "The card is the hero: chrome is monochrome; only cards, tiers, rarity, and money carry color",
+      "White pill CTAs on dark — one primary per zone",
+      "Nekst Black for headings, ranks, and RM values; Geist for everything else",
+      "Phone-first: bottom tab bar, ≥44px targets, sticky action cards"
+    ],
+    "rules": [
+      {
+        "name": "The Signal Rule",
+        "body": "Every non-neutral color must mean a tier, a rarity, money in, or danger. If a color is there 'for energy', delete it.",
+        "section": "colors"
+      },
+      {
+        "name": "The Money Is Display Rule",
+        "body": "RM values that matter are set in Nekst Black — money is content, not metadata.",
+        "section": "typography"
+      },
+      {
+        "name": "The Glow Is Earned Rule",
+        "body": "A glow appears only when its color is inherited from the thing glowing. Decorative ambient shadows are prohibited.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do keep chrome monochrome: ink/charcoal/graphite/white everywhere a color isn't a signal",
+      "Do set meaningful RM values in Nekst Black; Buyback Green for money-in, Chase Gold for prizes",
+      "Do give every interactive element default, press, focus-visible, disabled, and loading states",
+      "Do honor prefers-reduced-motion on every animation",
+      "Do keep tap targets ≥44px with primary CTAs in thumb reach"
+    ],
+    "donts": [
+      "Don't ship cheap gacha/casino energy: no slot-machine neon, coin showers, fire splash screens, or fake urgency timers",
+      "Don't drift to corporate SaaS blue-gray or dashboard-template grids",
+      "Don't touch web3/NFT purple degen gradients or glossy 3D coins",
+      "Don't build a generic e-commerce product grid",
+      "Don't use gradient text, default glassmorphism, side-stripe borders, or decorative grid/stripe backgrounds",
+      "Don't put body text below #a3a3a3 on dark surfaces",
+      "Don't round containers past 16px or add drop shadows to buttons/cards"
+    ]
+  }
+}

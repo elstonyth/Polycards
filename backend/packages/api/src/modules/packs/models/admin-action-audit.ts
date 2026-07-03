@@ -8,7 +8,14 @@ export const AdminActionAudit = model
   .define('admin_action_audit', {
     id: model.id().primaryKey(),
     admin_id: model.text(),
-    entity_type: model.enum(['customer', 'commission', 'rewards_settings', 'credit', 'reward_pool']),
+    entity_type: model.enum([
+      'customer',
+      'commission',
+      'rewards_settings',
+      'credit',
+      'reward_pool',
+      'daily_reward_settings',
+    ]),
     entity_id: model.text(),
     action: model.enum([
       'freeze',
@@ -19,15 +26,28 @@ export const AdminActionAudit = model
       'adjust_credit',
       'edit_rewards_settings',
       'edit_reward_pool',
+      'edit_daily_reward_settings',
     ]),
     before: model.json().nullable(),
     after: model.json().nullable(),
     reason: model.text(),
   })
   .indexes([
-    { name: 'IDX_admin_action_audit_admin_id', on: ['admin_id'], where: 'deleted_at IS NULL' },
-    { name: 'IDX_admin_action_audit_entity', on: ['entity_type', 'entity_id'], where: 'deleted_at IS NULL' },
-    { name: 'IDX_admin_action_audit_created_at', on: ['created_at'], where: 'deleted_at IS NULL' },
+    {
+      name: 'IDX_admin_action_audit_admin_id',
+      on: ['admin_id'],
+      where: 'deleted_at IS NULL',
+    },
+    {
+      name: 'IDX_admin_action_audit_entity',
+      on: ['entity_type', 'entity_id'],
+      where: 'deleted_at IS NULL',
+    },
+    {
+      name: 'IDX_admin_action_audit_created_at',
+      on: ['created_at'],
+      where: 'deleted_at IS NULL',
+    },
   ]);
 
 export default AdminActionAudit;

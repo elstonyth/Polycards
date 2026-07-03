@@ -64,7 +64,7 @@ export default function CardDetailClient({ card }: { card: MockCard }) {
   return (
     <div className="mx-auto w-full px-fluid py-4">
       <Link
-        href={features.marketplace ? '/marketplace' : '/claw'}
+        href={features.marketplace ? '/marketplace' : '/slots'}
         className="mb-4 inline-flex items-center gap-1.5 text-[13px] font-medium text-white/55 transition-colors hover:text-white"
       >
         <ArrowLeft className="h-4 w-4" aria-hidden />{' '}

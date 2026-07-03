@@ -15,17 +15,17 @@ const pixel = Press_Start_2P({ weight: '400', subsets: ['latin'] });
 const SUGGESTIONS = [
   {
     label: 'Pokemon Elite',
-    href: '/claw/pokemon-elite',
+    href: '/slots/pokemon-elite',
     image: '/images/claw/elite-pack-icon.webp',
   },
   {
     label: 'Pokemon Legend',
-    href: '/claw/pokemon-legend',
+    href: '/slots/pokemon-legend',
     image: '/images/claw/legend-pack-icon.webp',
   },
   {
     label: 'Pokemon Platinum',
-    href: '/claw/pokemon-platinum',
+    href: '/slots/pokemon-platinum',
     image: '/images/claw/platinum-pack-icon.webp',
   },
 ];
@@ -78,7 +78,7 @@ export default function NotFound() {
 
       <div className="mt-7 flex w-full flex-col items-center gap-3 sm:w-auto sm:flex-row sm:justify-center">
         <Link
-          href={features.marketplace ? '/marketplace' : '/claw'}
+          href={features.marketplace ? '/marketplace' : '/slots'}
           className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[#1aa87a] to-green-500 px-6 text-sm font-semibold text-white transition-opacity hover:opacity-90 sm:w-auto"
         >
           {features.marketplace ? 'Back to marketplace' : 'Back to packs'}

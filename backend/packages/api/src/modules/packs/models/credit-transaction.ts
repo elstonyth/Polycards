@@ -22,6 +22,7 @@ export const CreditTransaction = model
       "cashout",
       "voucher_claim",
       "reward_credit",
+      "daily_reward",
     ]),
     // The pull this credit came from (buyback rows only; null for top-ups).
     // UNIQUE — the DB itself guarantees a pull can never be credited twice,

@@ -301,6 +301,13 @@ export default defineMiddlewares({
       middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
     },
     {
+      // Daily check-in state (GET /store/rewards/daily) — same read family as
+      // /store/rewards above; the claim POST is covered by /store/rewards/*.
+      matcher: '/store/rewards/daily',
+      method: 'GET',
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+    },
+    {
       // Reward redemption writes — claim a grant, open a daily box, withdraw a
       // vaulted prize. All state/money mutations, so they share the delivery
       // write-tier budget (the same family as topup/buyback/delivery). The
@@ -347,6 +354,13 @@ export default defineMiddlewares({
     },
     {
       matcher: '/admin/rewards-settings',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Daily check-in config write — mutates the reward economy; shares the
+      // admin money-mutation budget like rewards-settings above.
+      matcher: '/admin/daily-reward-settings',
       method: 'POST',
       middlewares: [adminActionRateLimit],
     },

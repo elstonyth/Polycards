@@ -11,7 +11,8 @@ import { useAuth } from '@/components/auth/AuthProvider';
 import { openAuth } from '@/components/AuthButton';
 import { openBatch, revealPull } from '@/lib/actions/packs';
 import type { WonCard } from '@/lib/actions/packs';
-import { getCreditBalance, sellBackPull } from '@/lib/actions/vault';
+import { sellBackPull } from '@/lib/actions/vault';
+import { useTopUp } from '@/components/app-shell/TopUpProvider';
 import { useSound } from '@/lib/use-sound';
 import { rm } from '@/lib/format';
 import { logger } from '@/lib/logger';
@@ -20,7 +21,7 @@ import {
   type Pack,
   FLAT_BUYBACK_PERCENT,
   priceNumber,
-} from '@/app/claw/packs-data';
+} from '@/lib/packs-data';
 import type { RecentPull } from '@/lib/data/packs';
 import { BASE_SPIN_MS, STAGGER_MS } from '@/lib/reel';
 import { priceTier, TIER_COLOR, type Tier } from '@/lib/price-tier';
@@ -62,7 +63,10 @@ export default function SlotMachineClient({
   // Shrink the cell so multiple reels fit across the viewport.
   const cellSize = count > 1 ? 76 : 96;
 
-  const [balance, setBalance] = useState<number | null>(null);
+  // Balance comes from the app-shell provider (identity-tagged: values from
+  // another account never render — push security review). Server-returned
+  // balances from spins/sell-backs are pushed back up via applyBalance.
+  const { balance, applyBalance } = useTopUp();
   const [recent, setRecent] = useState<RecentPull[]>(recentPulls);
   const [phase, setPhase] = useState<Phase>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -82,6 +86,8 @@ export default function SlotMachineClient({
   // closing over `spin` — the callback stays stable and double-fire-safe.
   const pending = useRef<{
     balance: number | null;
+    /** Customer the charge/balance belongs to — settle drops it on mismatch. */
+    forId: string | null;
     offers: (SellBackOffer | null)[];
     cards: WonCard[];
   } | null>(null);
@@ -94,26 +100,6 @@ export default function SlotMachineClient({
     },
     [],
   );
-
-  // Load balance on mount / auth change.
-  useEffect(() => {
-    if (!customer) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setBalance(null);
-      return;
-    }
-    let cancelled = false;
-    getCreditBalance()
-      .then((b) => {
-        if (!cancelled) setBalance(b);
-      })
-      .catch(() => {
-        if (!cancelled) setBalance(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [customer]);
 
   const canAfford = balance !== null && balance >= cost * count;
   const spinGuarded = phase === 'resolving' || phase === 'spinning';
@@ -206,7 +192,12 @@ export default function SlotMachineClient({
         tiers.push(tier);
       }
 
-      pending.current = { balance: res.balance, offers: builtOffers, cards };
+      pending.current = {
+        balance: res.balance,
+        forId: customer?.id ?? null,
+        offers: builtOffers,
+        cards,
+      };
       setSpin({ nonce: spinAt, cards, winners, tiers });
       setPhase('spinning');
     } catch (err) {
@@ -224,6 +215,7 @@ export default function SlotMachineClient({
       if (!pending.current) {
         pending.current = {
           balance: res.balance,
+          forId: customer?.id ?? null,
           offers: builtOffers,
           cards: settledCards,
         };
@@ -241,7 +233,9 @@ export default function SlotMachineClient({
     if (!held) return;
     pending.current = null;
 
-    if (held.balance != null) setBalance(held.balance);
+    if (held.balance != null && held.forId === customer?.id) {
+      applyBalance(held.balance);
+    }
     setOffers(held.offers);
 
     // Prepend one RecentPull per card won in this batch.
@@ -280,7 +274,7 @@ export default function SlotMachineClient({
       () => setCooldown(false),
       COOLDOWN_MS,
     );
-  }, [pack.name, pack.image, play, vibrate]);
+  }, [pack.name, pack.image, play, vibrate, applyBalance, customer?.id]);
 
   // Settle watchdog: the customer is charged the moment openBatch returns ok,
   // but the reveal only lands when the reel reports transitionend. If that
@@ -301,7 +295,7 @@ export default function SlotMachineClient({
     return () => clearTimeout(id);
   }, [phase, spin?.nonce, count, handleSettled]);
 
-  const refreshBalance = useCallback((b: number) => setBalance(b), []);
+  const refreshBalance = applyBalance;
 
   const wonCards = phase === 'landed' ? (spin?.cards ?? []) : [];
   // For single-card banner: use the first card's tier.

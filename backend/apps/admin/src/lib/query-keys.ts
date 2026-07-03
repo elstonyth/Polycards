@@ -24,4 +24,5 @@ export const qk = {
   rewardPool: (tier: string) => ['admin', 'reward-pool', tier] as const,
   achievements: ['admin', 'achievements'] as const,
   fxRate: ['admin', 'pricing', 'fx'] as const,
+  dailyRewardSettings: ['admin', 'daily-reward-settings'] as const,
 };

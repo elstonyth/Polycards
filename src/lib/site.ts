@@ -10,7 +10,8 @@ export const SITE_URL = (
 // pages). Feature-flagged sections are included only when enabled.
 export const ROUTES: string[] = [
   '/',
-  '/claw',
+  '/slots',
+  '/daily',
   '/leaderboard',
   '/how-it-works',
   '/fairness',

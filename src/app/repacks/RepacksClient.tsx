@@ -20,7 +20,7 @@ import Reveal from '@/components/Reveal';
 import QtyStepper from '@/components/QtyStepper';
 import { rm0 } from '@/lib/format';
 import { MOCK_USERS } from '@/lib/mock/users';
-import { CATEGORIES } from '../claw/packs-data';
+import { CATEGORIES } from '@/lib/packs-data';
 
 // ---------------------------------------------------------------------------
 // Data — community packs (real art, community-flavored names + creators).
@@ -248,7 +248,7 @@ function PackCard({ pack }: { pack: CommunityPack }) {
 
       {/* Open button */}
       <Link
-        href="/claw"
+        href="/slots"
         className="mt-auto flex h-9 w-full items-center justify-center rounded-xl bg-neutral-200 text-[13px] font-semibold text-neutral-950 transition-colors duration-200 hover:bg-white"
       >
         Open{qty > 1 ? ` ×${qty}` : ''}

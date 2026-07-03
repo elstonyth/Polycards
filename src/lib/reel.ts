@@ -2,7 +2,7 @@
 // src/app/roulette/RouletteClient.tsx (translateX strip + center-landing). Kept
 // pure so the slot reel and any future variant share one tested formula. No DOM,
 // no React — see src/lib/__tests__/reel.test.ts.
-import type { Rarity } from '@/app/claw/packs-data';
+import type { Rarity } from '@/lib/packs-data';
 
 /** Reel cell width in CSS px (matches RouletteClient ITEM_W). */
 export const ITEM_W = 124;

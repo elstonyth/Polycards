@@ -126,6 +126,14 @@ const nextConfig: NextConfig = {
   async headers() {
     return [{ source: '/:path*', headers: securityHeaders }];
   },
+  // The claw experience was retired in the mobile redesign — old links and
+  // bookmarks land on the slots catalog/detail instead of a 404.
+  async redirects() {
+    return [
+      { source: '/claw', destination: '/slots', permanent: true },
+      { source: '/claw/:slug', destination: '/slots/:slug', permanent: true },
+    ];
+  },
 };
 
 export default withSentryConfig(nextConfig, {

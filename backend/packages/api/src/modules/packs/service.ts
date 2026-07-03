@@ -30,6 +30,14 @@ import RewardDraw from './models/reward-draw';
 import AchievementDef from './models/achievement-def';
 import AchievementMemberState from './models/achievement-member-state';
 import AchievementGrant from './models/achievement-grant';
+import DailyClaim from './models/daily-claim';
+import DailyRewardSettings from './models/daily-reward-settings';
+import {
+  coerceStoredAmounts,
+  DAILY_STREAK_DAYS,
+  type DailyRewardPatch,
+  type DailyRewardSettingsView,
+} from './daily-reward-validate';
 import {
   resolveBuybackRate,
   buybackAmount,
@@ -86,6 +94,18 @@ function isUniqueViolation(e: unknown): boolean {
 
 const BALANCE_PAGE = 1000;
 
+/**
+ * MYT (Asia/Kuala_Lumpur) calendar day as YYYY-MM-DD (en-CA gives ISO order).
+ * The daily reward is user-facing "today" for a Malaysian audience, so it keys
+ * on MYT — unlike reward_draw's UTC draw_day. MYT has no DST, so `now − 24h`
+ * is always exactly the previous MYT calendar day.
+ */
+function mytDay(at: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kuala_Lumpur',
+  }).format(at);
+}
+
 /** A signed credit-ledger write reason (mirrors CreditTransaction.reason). */
 export type CreditMutationReason =
   | 'buyback'
@@ -97,7 +117,8 @@ export type CreditMutationReason =
   | 'commission_reversal'
   | 'cashout'
   | 'voucher_claim'
-  | 'reward_credit';
+  | 'reward_credit'
+  | 'daily_reward';
 
 export type CreditMutationInput = {
   customerId: string;
@@ -217,6 +238,8 @@ class PacksModuleService extends MedusaService({
   AchievementDef,
   AchievementMemberState,
   AchievementGrant,
+  DailyClaim,
+  DailyRewardSettings,
 }) {
   // Commission engine globals. Reads the singleton row; falls back to defaults
   // when absent. COMMISSION_COOLDOWN_DAYS env override forces the demo (0) and
@@ -254,6 +277,201 @@ class PacksModuleService extends MedusaService({
       overrideGenerationCap: row ? Number(row.override_generation_cap) : 100,
       withdrawals_per_day: row ? Number(row.withdrawals_per_day) : 1,
     };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Daily check-in reward (storefront redesign Phase 5). Singleton settings +
+  // one claim per customer per MYT calendar day; claims pay a streak-positioned
+  // MYR amount into the credit ledger (reason 'daily_reward', ext=0 — never
+  // bumps the VIP spend basis, mirroring reward_credit).
+  // ---------------------------------------------------------------------------
+
+  /** Daily-reward config; first row or defaults (same pattern as rewardsSettings). */
+  @InjectManager()
+  async dailyRewardSettings(
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<DailyRewardSettingsView> {
+    const [row] = await this.listDailyRewardSettings(
+      {},
+      { take: 1 },
+      sharedContext,
+    );
+    return {
+      enabled: row ? Boolean(row.enabled) : true,
+      amounts: coerceStoredAmounts(row?.amounts),
+    };
+  }
+
+  /** Admin edit of the daily-reward singleton; audited like editRewardsSettings. */
+  @InjectTransactionManager()
+  async editDailyRewardSettings(
+    input: { patch: DailyRewardPatch; adminId: string; reason: string },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<DailyRewardSettingsView> {
+    const [row] = await this.listDailyRewardSettings(
+      {},
+      { take: 1 },
+      sharedContext,
+    );
+    const before: DailyRewardSettingsView = {
+      enabled: row ? Boolean(row.enabled) : true,
+      amounts: coerceStoredAmounts(row?.amounts),
+    };
+    const after: DailyRewardSettingsView = {
+      enabled: input.patch.enabled ?? before.enabled,
+      amounts: input.patch.amounts ?? before.amounts,
+    };
+    // JSON column stores the array under an object wrapper (Record-shaped).
+    const data = {
+      enabled: after.enabled,
+      amounts: { days: after.amounts },
+    };
+    if (row) {
+      await this.updateDailyRewardSettings(
+        { selector: { id: row.id }, data },
+        sharedContext,
+      );
+    } else {
+      await this.createDailyRewardSettings([data], sharedContext);
+    }
+    await this.createAdminActionAudits(
+      [
+        {
+          admin_id: input.adminId,
+          entity_type: 'daily_reward_settings',
+          entity_id: row?.id ?? 'singleton',
+          action: 'edit_daily_reward_settings',
+          before,
+          after,
+          reason: input.reason,
+        },
+      ],
+      sharedContext,
+    );
+    return after;
+  }
+
+  /** Claim state for the storefront /daily tab (read-only). */
+  @InjectManager()
+  async dailyStatus(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{
+    enabled: boolean;
+    day: string;
+    claimedToday: boolean;
+    /** The streak position TODAY pays (or paid, when already claimed). */
+    streakDay: number;
+    amounts: number[];
+    todayAmount: number;
+  }> {
+    const settings = await this.dailyRewardSettings(sharedContext);
+    const day = mytDay();
+    const yesterday = mytDay(new Date(Date.now() - 86_400_000));
+    const [todayClaim] = await this.listDailyClaims(
+      { customer_id: customerId, claim_day: day },
+      { take: 1 },
+      sharedContext,
+    );
+    let streakDay: number;
+    if (todayClaim) {
+      streakDay = Number(todayClaim.streak_day);
+    } else {
+      const [prev] = await this.listDailyClaims(
+        { customer_id: customerId, claim_day: yesterday },
+        { take: 1 },
+        sharedContext,
+      );
+      streakDay = prev ? (Number(prev.streak_day) % DAILY_STREAK_DAYS) + 1 : 1;
+    }
+    return {
+      enabled: settings.enabled,
+      day,
+      claimedToday: Boolean(todayClaim),
+      streakDay,
+      amounts: settings.amounts,
+      todayAmount: settings.amounts[streakDay - 1] ?? 0,
+    };
+  }
+
+  /**
+   * Claim today's reward. Serialized per customer on the `credit:` advisory
+   * lock (same key every ledger writer takes), frozen accounts blocked, the
+   * ledger write idempotent on `daily:${customer}:${day}`, and the DailyClaim
+   * unique index (customer, day) as the DB backstop.
+   */
+  @InjectTransactionManager()
+  async claimDaily(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<
+    | {
+        status: 'claimed';
+        day: string;
+        streakDay: number;
+        amount: number;
+        balance: number;
+      }
+    | { status: 'already_claimed' }
+    | { status: 'disabled' }
+  > {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `credit:${customerId}`,
+    ]);
+    await this.assertNotFrozen(customerId, sharedContext);
+
+    const settings = await this.dailyRewardSettings(sharedContext);
+    if (!settings.enabled) return { status: 'disabled' };
+
+    const day = mytDay();
+    const [existing] = await this.listDailyClaims(
+      { customer_id: customerId, claim_day: day },
+      { take: 1 },
+      sharedContext,
+    );
+    if (existing) return { status: 'already_claimed' };
+
+    const yesterday = mytDay(new Date(Date.now() - 86_400_000));
+    const [prev] = await this.listDailyClaims(
+      { customer_id: customerId, claim_day: yesterday },
+      { take: 1 },
+      sharedContext,
+    );
+    const streakDay = prev
+      ? (Number(prev.streak_day) % DAILY_STREAK_DAYS) + 1
+      : 1;
+    const amount = settings.amounts[streakDay - 1] ?? 0;
+    if (amount <= 0 || amount > MAX_REWARD_CREDIT_MYR) {
+      // Validator + defaults keep amounts in (0, cap]; fail LOUD if a stored
+      // row bypassed both rather than minting a wrong prize (Batch A posture).
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        `Daily reward amount ${amount} outside (0, ${MAX_REWARD_CREDIT_MYR}] MYR.`,
+      );
+    }
+
+    const { balance } = await this.mutateCreditAtomic(
+      {
+        customerId,
+        amount,
+        reason: 'daily_reward',
+        idempotencyReference: `daily:${customerId}:${day}`,
+      },
+      sharedContext,
+    );
+    await this.createDailyClaims(
+      [
+        {
+          customer_id: customerId,
+          claim_day: day,
+          streak_day: streakDay,
+          amount,
+        },
+      ],
+      sharedContext,
+    );
+    return { status: 'claimed', day, streakDay, amount, balance };
   }
 
   // The instant/flat sell-back offer for a pull, composed from the SAME pure

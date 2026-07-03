@@ -76,7 +76,7 @@ export type LedgerTotals = {
   commissionReversal: number;
   /** Σ cashout — customer withdrawals (balance move, not P&L). */
   cashout: number;
-  /** Σ voucher_claim + reward_credit — promo credits granted; excluded from net/revenue. */
+  /** Σ voucher_claim + reward_credit + daily_reward — promo credits granted; excluded from net/revenue. */
   rewardPromo: number;
 };
 
@@ -103,7 +103,11 @@ export function ledgerTotals(rows: LedgerRow[]): LedgerTotals {
     else if (row.reason === 'team_override') teamOverrideCents += cents;
     else if (row.reason === 'commission_reversal') commissionReversalCents += cents;
     else if (row.reason === 'cashout') cashoutCents += cents;
-    else if (row.reason === 'voucher_claim' || row.reason === 'reward_credit') {
+    else if (
+      row.reason === 'voucher_claim' ||
+      row.reason === 'reward_credit' ||
+      row.reason === 'daily_reward'
+    ) {
       rewardPromoCents += cents; continue;
     }
     // No silent drop: an unrecognized reason means the ledger grew a concept the

@@ -13,7 +13,7 @@ import { sdk } from '@/lib/medusa';
 import { logger } from '@/lib/logger';
 import { getAuthToken } from '@/lib/data/customer';
 import { formatValue } from '@/lib/packs-format';
-import type { Rarity } from '@/app/claw/packs-data';
+import type { Rarity } from '@/lib/packs-data';
 import { friendlyError, type ErrorRule } from '@/lib/errors';
 import { parseOne, WonCardSchema, OpenBuybackSchema } from '@/lib/data/schemas';
 import { mapBatchRoll, clampCount } from './pack-batch-map';

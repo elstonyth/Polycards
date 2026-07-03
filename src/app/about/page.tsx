@@ -154,7 +154,7 @@ export default function AboutPage() {
             className="mt-9 flex flex-wrap items-center justify-center gap-3"
           >
             <Link
-              href="/claw"
+              href="/slots"
               className="inline-flex items-center justify-center rounded-2xl bg-white px-7 py-3 text-sm font-semibold text-neutral-950 shadow-lg transition-colors duration-300 hover:bg-white/90"
             >
               Explore Packs
@@ -340,7 +340,7 @@ export default function AboutPage() {
         </p>
         <div className="mt-6 flex flex-wrap justify-center gap-3">
           <Link
-            href="/claw"
+            href="/slots"
             className="inline-flex items-center justify-center rounded-2xl bg-white/90 px-8 py-3 text-sm font-semibold text-neutral-950 shadow-lg transition-colors duration-300 hover:bg-white"
           >
             For Collectors

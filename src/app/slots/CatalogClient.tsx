@@ -7,35 +7,22 @@ import { ChevronDown, ChevronRight, Layers } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import Reveal from '@/components/Reveal';
 import QtyStepper from '@/components/QtyStepper';
-import type { Pack, PackCategory } from './packs-data';
+import type { Pack, PackCategory } from '@/lib/packs-data';
 
 // Pack catalog comes from the backend via getPackCategories() (server page);
-// types + presentational category meta still live in ./packs-data.
+// types + presentational category meta live in @/lib/packs-data.
 
-// /claw and /slots render this SAME layout — only the card CTA target differs.
-// 'claw' → the claw-machine detail (/claw/[slug]); 'slots' → the slot reel
-// (/slots/[slug]?count=N). One component guarantees visual parity between them.
-type PackMode = 'claw' | 'slots';
-const packHref = (mode: PackMode, id: string, qty: number) =>
-  mode === 'slots' ? `/slots/${id}?count=${qty}` : `/claw/${id}`;
+const packHref = (id: string, qty: number) =>
+  `/slots/${encodeURIComponent(id)}?count=${qty}`;
 
 // ---------------------------------------------------------------------------
-// Pack card (DESKTOP) — art, name, price, quantity stepper, Open. Matches the
-// live /claw card (− 1 + MAX stepper + Open). Boosted tiers show their buyback
-// percentage (90% / 92%); out-of-stock tiers render greyed + "Sold out". Open
-// links to the pack's claw-machine detail page (the free demo spin there needs
-// no login — only a real open/claim is auth-gated).
+// Pack card (DESKTOP) — art, name, price, quantity stepper, Open. Boosted
+// tiers show their buyback percentage (90% / 92%); out-of-stock tiers render
+// greyed + "Sold out". Open links to the pack's detail page (the free demo
+// spin there needs no login — only a real open/claim is auth-gated).
 // ---------------------------------------------------------------------------
 
-function PackCard({
-  pack,
-  icon,
-  mode,
-}: {
-  pack: Pack;
-  icon: string;
-  mode: PackMode;
-}) {
+function PackCard({ pack, icon }: { pack: Pack; icon: string }) {
   const [qty, setQty] = useState(1);
   const oos = pack.inStock === false;
   const buyback = pack.buybackPercent ?? 90;
@@ -102,18 +89,12 @@ function PackCard({
         </span>
       ) : (
         <>
-          {/* Quantity stepper — − 1 + MAX. slots opens 1–3; claw uses 1–10. */}
-          <QtyStepper
-            qty={qty}
-            onChange={setQty}
-            max={mode === 'slots' ? 3 : undefined}
-            className="mb-2"
-          />
-          {/* Open → the pack's detail page (claw machine, or the slot reel under
-              `slots` mode). The free demo spin there is open to everyone; only a
-              real open/claim is auth-gated. */}
+          {/* Quantity stepper — − 1 + MAX. The reel opens 1–3 per spin. */}
+          <QtyStepper qty={qty} onChange={setQty} max={3} className="mb-2" />
+          {/* Open → the pack's detail page. The free demo spin there is open
+              to everyone; only a real open/claim is auth-gated. */}
           <Link
-            href={packHref(mode, pack.id, qty)}
+            href={packHref(pack.id, qty)}
             className="mt-auto flex h-9 w-full items-center justify-center rounded-xl bg-neutral-200 text-[13px] font-semibold text-neutral-950 transition-colors duration-200 hover:bg-white"
           >
             Open
@@ -134,12 +115,10 @@ function PackRow({
   pack,
   icon,
   categoryName,
-  mode,
 }: {
   pack: Pack;
   icon: string;
   categoryName: string;
-  mode: PackMode;
 }) {
   const oos = pack.inStock === false;
   const buyback = pack.buybackPercent ?? 90;
@@ -218,7 +197,7 @@ function PackRow({
 
   return (
     <Link
-      href={packHref(mode, pack.id, 1)}
+      href={packHref(pack.id, 1)}
       className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-2.5 transition-colors hover:border-white/20 hover:bg-white/[0.07]"
     >
       {inner}
@@ -227,21 +206,19 @@ function PackRow({
 }
 
 // ---------------------------------------------------------------------------
-// Client — per-category sections (matches live /claw: "Pokémon Packs / 5 packs"
-// headings). Desktop renders a horizontally-scrolling card row per section (the
-// live layout); mobile renders list rows. The chip rail shows every category
-// (incl. ones with no in-stock packs — selecting one shows an empty state).
-// `initialCategory` lets a deep link (/claw?category=<key>) preselect a tab.
+// Client — per-category sections ("Pokémon Packs / 5 packs" headings).
+// Desktop renders a horizontally-scrolling card row per section; mobile
+// renders list rows. The chip rail shows every category (incl. ones with no
+// in-stock packs — selecting one shows an empty state). `initialCategory`
+// lets a deep link (/slots?category=<key>) preselect a tab.
 // ---------------------------------------------------------------------------
 
-export default function ClawClient({
+export default function CatalogClient({
   categories,
   initialCategory,
-  mode = 'claw',
 }: {
   categories: PackCategory[];
   initialCategory: string;
-  mode?: PackMode;
 }) {
   const [active, setActive] = useState<string>(initialCategory);
   const [creatorPacks, setCreatorPacks] = useState(false);
@@ -361,7 +338,7 @@ export default function ClawClient({
                     delay={Math.min(i, 6) * 50}
                     className="h-full w-44 shrink-0 lg:w-48"
                   >
-                    <PackCard pack={p} icon={cat.icon} mode={mode} />
+                    <PackCard pack={p} icon={cat.icon} />
                   </Reveal>
                 ))}
               </div>
@@ -374,7 +351,6 @@ export default function ClawClient({
                     pack={p}
                     icon={cat.icon}
                     categoryName={cat.tab}
-                    mode={mode}
                   />
                 ))}
               </div>

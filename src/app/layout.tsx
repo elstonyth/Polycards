@@ -2,8 +2,9 @@ import type { Metadata } from 'next';
 import { Geist } from 'next/font/google';
 import localFont from 'next/font/local';
 import './globals.css';
-import SiteHeader from '@/components/SiteHeader';
-import SiteFooter from '@/components/SiteFooter';
+import AppHeader from '@/components/app-shell/AppHeader';
+import TabBar from '@/components/app-shell/TabBar';
+import { TopUpProvider } from '@/components/app-shell/TopUpProvider';
 import { AuthProvider } from '@/components/auth/AuthProvider';
 import SkipLink from '@/components/SkipLink';
 import CookieConsent from '@/components/CookieConsent';
@@ -70,7 +71,7 @@ export default function RootLayout({
     >
       <body
         suppressHydrationWarning
-        className="min-h-full flex flex-col bg-neutral-900 text-neutral-50"
+        className="min-h-full flex flex-col bg-neutral-950 text-neutral-50"
       >
         <noscript>
           <div className="bg-amber-500 px-4 py-2 text-center text-sm font-medium text-neutral-900">
@@ -79,13 +80,16 @@ export default function RootLayout({
           </div>
         </noscript>
         <AuthProvider>
-          <SkipLink />
-          <SiteHeader />
-          <main id="main" className="flex-1">
-            {children}
-          </main>
-          <SiteFooter />
-          <CookieConsent />
+          <TopUpProvider>
+            <SkipLink />
+            <AppHeader />
+            {/* pb clears the fixed bottom TabBar on phones; none needed lg+. */}
+            <main id="main" className="flex-1 pb-24 lg:pb-8">
+              {children}
+            </main>
+            <TabBar />
+            <CookieConsent />
+          </TopUpProvider>
         </AuthProvider>
       </body>
     </html>

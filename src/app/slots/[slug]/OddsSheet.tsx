@@ -4,7 +4,7 @@
 import { useRef } from 'react';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { ODDS } from '@/app/claw/packs-data';
+import { ODDS } from '@/lib/packs-data';
 import { TIER_COLOR, TIER_BAND, TIER_ORDER } from '@/lib/price-tier';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 

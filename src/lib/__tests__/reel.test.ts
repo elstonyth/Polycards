@@ -10,7 +10,7 @@ import {
   ITEM_H,
   POKEDEX_MAX,
 } from '@/lib/reel';
-import type { Rarity } from '@/app/claw/packs-data';
+import type { Rarity } from '@/lib/packs-data';
 
 const POOL: Rarity[] = ['Legendary', 'Epic', 'Rare', 'Uncommon', 'Common'];
 

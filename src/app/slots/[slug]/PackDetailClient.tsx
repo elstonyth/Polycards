@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
@@ -23,8 +23,8 @@ import { openAuth } from '@/components/AuthButton';
 import Reveal from '@/components/Reveal';
 import type { PackDetail, RecentPull } from '@/lib/data/packs';
 import { demoDraw } from '@/lib/demo-spin';
-import { openPack, revealPull } from '@/lib/actions/packs';
-import { getCreditBalance, sellBackPull } from '@/lib/actions/vault';
+import { revealPull } from '@/lib/actions/packs';
+import { sellBackPull } from '@/lib/actions/vault';
 import {
   type Pack,
   type ResolvedPack,
@@ -34,17 +34,10 @@ import {
   ODDS,
   clawMachine,
   priceNumber,
-} from '../packs-data';
+} from '@/lib/packs-data';
+import { rarityRgb } from '@/lib/rarity';
+import { useTopUp } from '@/components/app-shell/TopUpProvider';
 import PackOpenOverlay from './PackOpenOverlay';
-
-const RARITY_RING: Record<PackCard['rarity'], string> = {
-  Immortal: '251, 146, 60',
-  Legendary: '234, 179, 8',
-  Epic: '217, 70, 239',
-  Rare: '56, 189, 248',
-  Uncommon: '52, 211, 153',
-  Common: '163, 163, 163',
-};
 
 function CardThumb({ card, w }: { card: PackCard; w?: number }) {
   return (
@@ -52,8 +45,8 @@ function CardThumb({ card, w }: { card: PackCard; w?: number }) {
       <div
         className="overflow-hidden rounded-xl border bg-neutral-900 p-1.5"
         style={{
-          borderColor: `rgba(${RARITY_RING[card.rarity]},0.55)`,
-          boxShadow: `0 0 16px -8px rgba(${RARITY_RING[card.rarity]},0.6)`,
+          borderColor: `rgba(${rarityRgb(card.rarity)},0.55)`,
+          boxShadow: `0 0 16px -8px rgba(${rarityRgb(card.rarity)},0.6)`,
         }}
       >
         <div className="relative aspect-[3/4] w-full overflow-hidden rounded-md">
@@ -75,7 +68,6 @@ export default function PackDetailClient({
   siblings,
   detail,
   recentPulls,
-  mode = 'claw',
 }: {
   pack: ResolvedPack;
   siblings: Pack[];
@@ -83,43 +75,23 @@ export default function PackDetailClient({
   detail: PackDetail | null;
   /** Live pull ledger feed; empty array when there are no pulls / backend down. */
   recentPulls: RecentPull[];
-  /** 'claw' (default): "Open Pack" reveals in-place via PackOpenOverlay. 'slots':
-   *  "Open Pack" navigates to the slot-machine reel (/slots/[slug]/spin), which
-   *  performs the single charge on spin — this screen never charges. */
-  mode?: 'claw' | 'slots';
 }) {
   const reduced = usePrefersReducedMotion();
   const { customer } = useAuth();
+  const { balance, openTopUp } = useTopUp();
   const router = useRouter();
   const [active, setActive] = useState<Pack>(pack);
   const [qty, setQty] = useState(1);
-  // `opening` guards the async server round-trip; `openError` surfaces a friendly
-  // failure inline (`needsTopUp` adds the top-up link for credit shortfalls).
-  const [opening, setOpening] = useState(false);
+  // `openError` surfaces a friendly failure inline (`needsTopUp` adds the
+  // top-up entry for credit shortfalls). Real opens happen on the reel, so
+  // there is no in-place async open state here.
   const [openError, setOpenError] = useState<string | null>(null);
   const [needsTopUp, setNeedsTopUp] = useState(false);
-  // Credit balance (A2: opens debit the pack price). Null = logged out or the
-  // read failed — render nothing rather than a wrong $0. Refreshed after each
-  // open from the open response itself; sell-backs in the overlay also report
-  // a fresh balance via their own result.
-  const [balance, setBalance] = useState<number | null>(null);
-  useEffect(() => {
-    if (!customer) {
-      setBalance(null);
-      return;
-    }
-    let cancelled = false;
-    getCreditBalance().then((b) => {
-      if (!cancelled) setBalance(b);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [customer]);
-  // Live Recent Pulls: seeded from the server snapshot, then optimistically
-  // prepended on each successful open so the feed reflects this session's pulls
-  // without a navigation round-trip.
-  const [recent, setRecent] = useState<RecentPull[]>(recentPulls);
+  // Credit balance (A2: opens debit the pack price) — read from the app-shell
+  // TopUpProvider (identity-tagged; null = logged out / loading), so this page,
+  // the header chip, and the top-up sheet can never disagree.
+  // Live Recent Pulls — the server snapshot (real opens happen on the reel).
+  const recent = recentPulls;
   // The pack-opening reveal overlay — non-null while showing the won/demo card.
   // `nonce` keys the overlay so "Open another" remounts it and re-runs the burst.
   // pullId/marketValue drive the sell-back offer (null for demo spins). The
@@ -165,9 +137,8 @@ export default function PackDetailClient({
   );
   const topHits = detail?.topHits ?? mockTopHits;
 
-  // The reel (openBatch) caps a single open at 3 packs; the /claw overlay flow
-  // keeps the live site's cosmetic up-to-99 framing.
-  const maxQty = mode === 'slots' ? 3 : 99;
+  // The reel (openBatch) caps a single open at 3 packs.
+  const maxQty = 3;
   const setQ = (n: number) => setQty(Math.min(maxQty, Math.max(1, n)));
 
   // Free demo spin — a client-side WEIGHTED sample over the published odds
@@ -175,7 +146,6 @@ export default function PackDetailClient({
   // no credit/stock effects; the real open below stays auth-gated. Draws from
   // the live public pool when the backend supplied one, else the static mock.
   function demoSpin() {
-    if (opening) return;
     setOpenError(null);
     const pool = detail && detail.pool.length > 0 ? detail.pool : CARD_POOL;
     const mock = demoDraw(pool, ODDS, Math.random(), Math.random());
@@ -195,62 +165,7 @@ export default function PackDetailClient({
     });
   }
 
-  // Real open — auth-gated. Awaits the server action (the customer id is derived
-  // from the token server-side, never sent), then reveals the actual won card.
-  // Logged-out users get the login modal instead of a call.
-  async function handleOpenPack() {
-    if (opening) return;
-    if (!customer) {
-      openAuth('login');
-      return;
-    }
-    setOpenError(null);
-    setNeedsTopUp(false);
-    setOpening(true);
-    try {
-      const res = await openPack(active.id);
-      if (!res.ok) {
-        if (res.needsAuth) openAuth('login');
-        else {
-          setOpenError(res.error);
-          setNeedsTopUp(res.needsTopUp === true);
-        }
-        return;
-      }
-      if (res.balance !== null) setBalance(res.balance);
-      setReveal({
-        card: res.card,
-        isReal: true,
-        nonce: Date.now(),
-        pullId: res.pullId,
-        marketValue: res.marketValue,
-        marketPriceMyr: res.card.marketPriceMyr,
-        buybackPercent: res.buyback?.percent ?? null,
-        buybackAmount: res.buyback?.amount ?? null,
-        vaultPercent: res.buyback?.vaultPercent ?? null,
-        vaultAmount: res.buyback?.vaultAmount ?? null,
-        instantDeadlineMs: res.buyback?.instantDeadlineMs ?? null,
-      });
-      const justPulled: RecentPull = {
-        id: `${res.card.id}-${Date.now()}`,
-        name: res.card.name,
-        image: res.card.image,
-        value:
-          res.card.marketPriceMyr != null
-            ? rm(res.card.marketPriceMyr)
-            : res.card.value,
-        rarity: res.card.rarity,
-        packName: active.name,
-        packIcon: active.image,
-        agoLabel: 'just now',
-      };
-      setRecent((prev) => [justPulled, ...prev].slice(0, 12));
-    } finally {
-      setOpening(false);
-    }
-  }
-
-  // Slots mode: do NOT open/charge here — navigate to the reel, which performs
+  // Do NOT open/charge here — navigate to the reel, which performs
   // the single charge via openBatch when the user pulls the lever. Auth + balance
   // are pre-checked so we don't drop into the immersive reel only to bounce to
   // login or a credit shortfall. (Deliberately navigate-then-lever, not
@@ -280,7 +195,7 @@ export default function PackDetailClient({
     <div className="mx-auto w-full px-fluid py-4">
       {/* Back link */}
       <Link
-        href={mode === 'slots' ? '/slots' : '/claw'}
+        href="/slots"
         className="mb-4 inline-flex items-center gap-1.5 text-[13px] font-medium text-white/55 transition-colors hover:text-white"
       >
         <ArrowLeft className="h-4 w-4" aria-hidden />
@@ -440,7 +355,6 @@ export default function PackDetailClient({
               <button
                 type="button"
                 onClick={demoSpin}
-                disabled={opening}
                 className="flex h-11 items-center justify-between rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-4 text-sm font-medium text-emerald-200 transition-colors hover:bg-emerald-500/20 disabled:opacity-60"
               >
                 <span className="flex items-center gap-2">
@@ -486,16 +400,11 @@ export default function PackDetailClient({
             <div className="border-t border-white/10 p-4">
               <button
                 type="button"
-                onClick={mode === 'slots' ? handleGoToReel : handleOpenPack}
-                disabled={opening}
+                onClick={handleGoToReel}
                 className="flex h-12 w-full items-center justify-between rounded-xl bg-gradient-to-r from-emerald-500 to-green-500 px-5 text-sm font-bold text-white shadow-lg shadow-emerald-900/30 transition-opacity hover:opacity-95 disabled:opacity-60"
               >
                 <span className="flex items-center gap-2">
-                  {opening
-                    ? 'Opening…'
-                    : customer
-                      ? 'Open Pack'
-                      : 'Log in to open'}
+                  {customer ? 'Open Pack' : 'Log in to open'}
                   <span className="rounded-md bg-black/20 px-1.5 py-0.5 text-[11px] font-semibold">
                     +{points.toLocaleString('en-US')} pts
                   </span>
@@ -514,12 +423,13 @@ export default function PackDetailClient({
                   {needsTopUp && (
                     <>
                       {' '}
-                      <Link
-                        href="/vault"
+                      <button
+                        type="button"
+                        onClick={openTopUp}
                         className="font-bold text-emerald-300 underline underline-offset-2 hover:text-emerald-200"
                       >
-                        Add credits in your Vault →
-                      </Link>
+                        Top up credits →
+                      </button>
                     </>
                   )}
                 </p>
@@ -629,46 +539,17 @@ export default function PackDetailClient({
           packImage={active.image}
           packName={active.name}
           category={pack.categoryName}
-          opening={opening}
+          opening={false}
           reduced={reduced}
           marketPriceMyr={reveal.marketPriceMyr}
-          buyback={
-            reveal.pullId !== null && reveal.marketValue !== null
-              ? {
-                  pullId: reveal.pullId,
-                  fmv: reveal.marketValue,
-                  // Authoritative from the open response (backend quote == credit).
-                  // Fall back to the catalog rate only if an older backend omitted
-                  // it — never let the catalog override a backend-supplied offer,
-                  // or a stale/mock catalog re-introduces the 99-vs-90 mismatch.
-                  percent:
-                    reveal.buybackPercent ??
-                    active.buybackPercent ??
-                    FLAT_BUYBACK_PERCENT,
-                  amount:
-                    reveal.buybackAmount ??
-                    Math.round(
-                      reveal.marketValue *
-                        (active.buybackPercent ?? FLAT_BUYBACK_PERCENT),
-                    ) / 100,
-                  // Sells from the vault always pay the site-wide flat rate,
-                  // never a per-pack one (matches the server's FLAT_PERCENT).
-                  vaultPercent: reveal.vaultPercent ?? FLAT_BUYBACK_PERCENT,
-                  vaultAmount:
-                    reveal.vaultAmount ??
-                    Math.round(reveal.marketValue * FLAT_BUYBACK_PERCENT) / 100,
-                  // Server reveal-anchored deadline arrives via onReveal; this is
-                  // the open-response fallback if that ping fails.
-                  instantDeadlineMs:
-                    reveal.instantDeadlineMs ?? Date.now() + 30_000,
-                }
-              : null
-          }
+          // Demo reveals have no pull, so there is never a sell-back offer.
+          buyback={null}
           onSellBack={sellBackPull}
           onReveal={revealPull}
           onClose={() => setReveal(null)}
-          // Demo reveals re-run the demo; only real reveals re-open for real.
-          onOpenAnother={reveal.isReal ? handleOpenPack : demoSpin}
+          // Reveals here are demo-only (real opens happen on the reel), so
+          // "open another" re-runs the free demo spin.
+          onOpenAnother={demoSpin}
           // Anonymous demo spins swap keep/sell for the sign-up conversion CTA.
           onSignUp={
             !reveal.isReal && !customer ? () => openAuth('signup') : null

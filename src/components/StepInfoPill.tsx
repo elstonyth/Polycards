@@ -53,7 +53,7 @@ export default function StepInfoPill({
   if (variant === 'packs') {
     return (
       <Link
-        href="/claw"
+        href="/slots"
         className={cn(
           base,
           'group/pill hover:border-white/20 hover:bg-white/[0.07]',

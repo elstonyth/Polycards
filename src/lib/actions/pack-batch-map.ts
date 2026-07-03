@@ -9,7 +9,7 @@
  */
 import { formatValue } from '@/lib/packs-format';
 import { parseOne, WonCardSchema, OpenBuybackSchema } from '@/lib/data/schemas';
-import type { Rarity } from '@/app/claw/packs-data';
+import type { Rarity } from '@/lib/packs-data';
 import type { WonCard } from './packs';
 
 /** Inline buyback offer shape — shared between openPack and openBatch. */

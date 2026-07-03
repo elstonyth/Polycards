@@ -1,11 +1,12 @@
 import type { Metadata } from 'next';
-import { AccountHeader, StatCards } from '@/components/account/ui';
+import Link from 'next/link';
+import { Crown, UserPlus, Users } from 'lucide-react';
 import { getReferralSummary } from '@/lib/actions/referral';
 import { getOwnProfileHandle } from '@/lib/data/profiles';
 import { rm } from '@/lib/format';
 import ReferralsClient from './ReferralsClient';
 
-export const metadata: Metadata = { title: 'Referrals' };
+export const metadata: Metadata = { title: 'Invite Friends' };
 
 export default async function ReferralsPage() {
   const [res, handle] = await Promise.all([
@@ -16,11 +17,8 @@ export default async function ReferralsPage() {
   if (!res.ok) {
     return (
       <>
-        <AccountHeader
-          title="Referrals"
-          sub="Invite friends and earn on every pack they rip."
-        />
-        <p className="mt-4 rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/60">
+        <h1 className="font-heading text-3xl text-white">INVITE FRIENDS</h1>
+        <p className="mt-4 rounded-xl border border-white/10 bg-neutral-900 p-4 text-sm text-neutral-400">
           {res.error}
         </p>
       </>
@@ -32,42 +30,99 @@ export default async function ReferralsPage() {
 
   return (
     <>
-      <AccountHeader
-        title="Referrals"
-        sub="Invite friends and earn on every pack they rip."
-      />
-      <StatCards
-        items={[
-          { label: 'Direct recruits', value: `${res.directRecruits.length}` },
-          { label: 'Network size', value: `${res.downstreamCount}` },
-          { label: 'Total earned', value: rm(res.totalEarned) },
-        ]}
-      />
-      {inviteUrl && <ReferralsClient inviteUrl={inviteUrl} />}
-      <h2 className="mb-3 mt-6 font-heading text-lg font-bold text-white">
-        Your direct recruits
+      <h1 className="font-heading text-3xl text-white">INVITE FRIENDS</h1>
+      <p className="mt-1 text-[13px] text-neutral-400">
+        Earn credit on every pack your recruits rip —{' '}
+        <span className="text-chase font-semibold">
+          your rate grows with your VIP level
+        </span>
+        .
+      </p>
+
+      {/* Invite link + share (showgo's invite screen, dark skin) */}
+      {inviteUrl ? (
+        <ReferralsClient inviteUrl={inviteUrl} />
+      ) : (
+        <p className="mt-4 rounded-xl border border-white/10 bg-neutral-900 p-4 text-sm text-neutral-400">
+          Set a profile handle in{' '}
+          <Link href="/settings" className="font-semibold text-white underline">
+            Settings
+          </Link>{' '}
+          to get your invite link.
+        </p>
+      )}
+
+      {/* Stats strip */}
+      <div className="mt-4 grid grid-cols-3 divide-x divide-white/10 rounded-2xl border border-white/10 bg-neutral-900 py-4">
+        {[
+          {
+            icon: UserPlus,
+            label: 'Invited',
+            value: String(res.directRecruits.length),
+          },
+          { icon: Users, label: 'Team', value: String(res.downstreamCount) },
+          {
+            icon: Crown,
+            label: 'Total earned',
+            value: rm(res.totalEarned),
+            money: true,
+          },
+        ].map(({ icon: Icon, label, value, money }) => (
+          <div key={label} className="px-3 text-center">
+            <Icon className="mx-auto h-4 w-4 text-neutral-500" aria-hidden />
+            <p
+              className={`font-heading mt-1 truncate text-lg ${
+                money ? 'text-green-400' : 'text-white'
+              }`}
+            >
+              {value}
+            </p>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+              {label}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      {/* Direct recruits */}
+      <h2 className="font-heading mb-3 mt-6 text-xl text-white">
+        YOUR RECRUITS
       </h2>
       {res.directRecruits.length === 0 ? (
-        <p className="text-sm text-white/50">
-          No recruits yet — share your invite link above.
-        </p>
+        <div className="rounded-2xl border border-white/10 bg-neutral-900 px-6 py-10 text-center">
+          <p className="text-sm text-neutral-400">
+            No recruits yet — share your invite link above and earn on their
+            very first rip.
+          </p>
+        </div>
       ) : (
-        <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        <ul className="overflow-hidden rounded-2xl border border-white/10 bg-neutral-900">
           {res.directRecruits.map((r, i) => (
             <li
               key={r.handle ?? `recruit-${i}`}
-              className="flex items-center justify-between gap-2.5 rounded-xl border border-white/10 bg-white/[0.03] p-3"
+              className={`flex items-center justify-between gap-3 px-4 py-3 ${
+                i > 0 ? 'border-t border-white/5' : ''
+              }`}
             >
-              <span className="truncate text-[13px] text-white/80">
-                {r.handle ?? 'Collector'}
+              <span className="truncate text-sm font-semibold text-white">
+                {r.handle ? `@${r.handle}` : 'Collector'}
               </span>
-              <span className="shrink-0 text-[12px] text-emerald-300">
+              <span className="shrink-0 text-[13px] font-semibold text-green-400">
                 {rm(r.contribution)}
               </span>
             </li>
           ))}
         </ul>
       )}
+
+      <p className="mt-5 text-[12px] leading-relaxed text-neutral-500">
+        Two tiers: you earn a percentage of every direct recruit&rsquo;s spend
+        (rate set by your{' '}
+        <Link href="/vip" className="text-neutral-300 underline">
+          VIP level
+        </Link>
+        ), plus a flat override on your wider team&rsquo;s spend.
+      </p>
     </>
   );
 }

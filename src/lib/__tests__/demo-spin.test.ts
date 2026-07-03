@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseChance, sampleRarity, demoDraw } from '../demo-spin';
-import type { PackCard, Rarity } from '@/app/claw/packs-data';
+import type { PackCard, Rarity } from '@/lib/packs-data';
 
 // The guest demo spin is theater: a client-side weighted sample over the
 // STATIC published odds (never the secret per-card weights). These tests pin

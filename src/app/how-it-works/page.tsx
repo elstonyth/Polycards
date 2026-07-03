@@ -194,7 +194,7 @@ export default function HowItWorksPage() {
             </Reveal>
             <Reveal delay={270} className="mt-6 flex flex-wrap gap-3">
               <Link
-                href="/claw"
+                href="/slots"
                 className="inline-flex items-center justify-center rounded-2xl bg-white/90 px-7 py-3 text-sm font-semibold text-neutral-950 shadow-lg transition-colors duration-300 hover:bg-white"
               >
                 Start Opening Packs
@@ -436,7 +436,7 @@ export default function HowItWorksPage() {
           day.
         </p>
         <Link
-          href="/claw"
+          href="/slots"
           className="mt-6 inline-flex items-center justify-center rounded-2xl bg-white/90 px-8 py-3 text-sm font-semibold text-neutral-950 shadow-lg transition-colors duration-300 hover:bg-white"
         >
           Open Your First Pack

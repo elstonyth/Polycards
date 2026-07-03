@@ -576,3 +576,25 @@ export async function saveRewardPool(
     body,
   );
 }
+
+// ── Daily Reward Settings ────────────────────────────────────────────────────
+
+export interface DailyRewardSettingsDTO {
+  enabled: boolean;
+  /** Seven MYR amounts, streak day 1 → 7. */
+  amounts: number[];
+}
+
+// GET the daily check-in config (defaults when never authored).
+export async function getDailyRewardSettings(): Promise<DailyRewardSettingsDTO> {
+  return getJson<DailyRewardSettingsDTO>('/admin/daily-reward-settings');
+}
+
+// Audited edit; `reason` is mandatory (1–500 chars, backend-enforced).
+export async function saveDailyRewardSettings(body: {
+  enabled: boolean;
+  amounts: number[];
+  reason: string;
+}): Promise<DailyRewardSettingsDTO> {
+  return postJson<DailyRewardSettingsDTO>('/admin/daily-reward-settings', body);
+}

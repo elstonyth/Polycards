@@ -81,7 +81,7 @@ export default function SeriesPage() {
         {SERIES.map((s, i) => (
           <Reveal key={s.name} delay={Math.min(i, 8) * 60} className="h-full">
             <Link
-              href={features.marketplace ? '/marketplace' : '/claw'}
+              href={features.marketplace ? '/marketplace' : '/slots'}
               aria-label={`${s.name} — ${s.count}`}
               className="group relative flex h-full items-center gap-4 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] p-4 transition-all duration-300 hover:-translate-y-1 hover:border-white/20 hover:bg-white/[0.06]"
             >

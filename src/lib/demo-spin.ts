@@ -9,7 +9,7 @@
  *
  * Rolls are injected as arguments so the weighting math stays unit-testable.
  */
-import type { PackCard, Rarity } from '@/app/claw/packs-data';
+import type { PackCard, Rarity } from '@/lib/packs-data';
 
 export interface PublishedOdd {
   rarity: Rarity;

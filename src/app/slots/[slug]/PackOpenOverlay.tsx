@@ -32,21 +32,14 @@ import {
   SHUFFLE_SPIN,
   SLAB_RISE,
 } from '@/lib/motion';
-import type { PackCard } from '../packs-data';
+import type { PackCard } from '@/lib/packs-data';
 import { SELL_COUNTDOWN_SECS, sellSecondsLeft } from '@/lib/sell-countdown';
 import SellConfirmModal from '@/components/SellConfirmModal';
 import { rm } from '@/lib/format';
 
-// Rarity → rgb (shared with the detail-page rings) drives the glow, pill, and the
-// Pull-celebration ribbon color.
-const RARITY_RGB: Record<PackCard['rarity'], string> = {
-  Immortal: '251, 146, 60',
-  Legendary: '234, 179, 8',
-  Epic: '217, 70, 239',
-  Rare: '56, 189, 248',
-  Uncommon: '52, 211, 153',
-  Common: '163, 163, 163',
-};
+// Rarity → rgb (shared util) drives the glow, pill, and the Pull-celebration
+// ribbon color.
+import { RARITY_RGB } from '@/lib/rarity';
 
 // Carousel cylinder geometry, measured from the live phygitals demo (6 packs 60°
 // apart, radius≈259 at a 318px pack; scaled down here, same ratio). Motion values

@@ -1,7 +1,7 @@
 // src/app/slots/[slug]/spin/page.tsx
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import { findPack } from '@/app/claw/packs-data';
+import { findPack } from '@/lib/packs-data';
 import { getPackBySlug, getRecentPulls } from '@/lib/data/packs';
 import SlotMachineClient from '../SlotMachineClient';
 

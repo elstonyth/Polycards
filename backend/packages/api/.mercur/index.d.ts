@@ -58,9 +58,12 @@ export type Routes = {
                     $addressId: typeof import("@medusajs/medusa/api/admin/customers/[id]/addresses/[address_id]/route");
                 };
                 customerGroups: typeof import("@medusajs/medusa/api/admin/customers/[id]/customer-groups/route");
+                audit: typeof import("../../src/api/admin/customers/[id]/audit/route");
+                commissions: typeof import("../../src/api/admin/customers/[id]/commissions/route");
                 credits: typeof import("../../src/api/admin/customers/[id]/credits/route");
                 freeze: typeof import("../../src/api/admin/customers/[id]/freeze/route");
                 gacha: typeof import("../../src/api/admin/customers/[id]/gacha/route");
+                referralTree: typeof import("../../src/api/admin/customers/[id]/referral-tree/route");
                 unfreeze: typeof import("../../src/api/admin/customers/[id]/unfreeze/route");
             };
         };
@@ -270,6 +273,7 @@ export type Routes = {
                     confirm: typeof import("@medusajs/medusa/api/admin/products/imports/[transaction_id]/confirm/route");
                 };
             };
+            fromPricecharting: typeof import("../../src/api/admin/products/from-pricecharting/route");
         };
         promotions: typeof import("@medusajs/medusa/api/admin/promotions/route") & {
             $id: typeof import("@medusajs/medusa/api/admin/promotions/[id]/route") & {
@@ -433,6 +437,9 @@ export type Routes = {
             invite: typeof import("@mercurjs/core/api/admin/sellers/invite/route");
             $id: typeof import("@mercurjs/core/api/admin/sellers/[id]/route");
         };
+        achievements: typeof import("../../src/api/admin/achievements/route") & {
+            $key: typeof import("../../src/api/admin/achievements/[key]/route");
+        };
         cards: typeof import("../../src/api/admin/cards/route") & {
             $handle: typeof import("../../src/api/admin/cards/[handle]/route");
         };
@@ -443,6 +450,7 @@ export type Routes = {
                 unsuspend: typeof import("../../src/api/admin/commissions/[id]/unsuspend/route");
             };
         };
+        dailyRewardSettings: typeof import("../../src/api/admin/daily-reward-settings/route");
         deliveryOrders: typeof import("../../src/api/admin/delivery-orders/route") & {
             $id: typeof import("../../src/api/admin/delivery-orders/[id]/route");
         };
@@ -461,7 +469,13 @@ export type Routes = {
             product: typeof import("../../src/api/admin/pricecharting/product/route");
             search: typeof import("../../src/api/admin/pricecharting/search/route");
         };
+        pricing: {
+            fx: typeof import("../../src/api/admin/pricing/fx/route");
+        };
         pulls: typeof import("../../src/api/admin/pulls/route");
+        rewardPools: {
+            $tier: typeof import("../../src/api/admin/reward-pools/[tier]/route");
+        };
         rewardsSettings: typeof import("../../src/api/admin/rewards-settings/route");
     };
     auth: {
@@ -554,6 +568,7 @@ export type Routes = {
         sellers: typeof import("@mercurjs/core/api/store/sellers/route") & {
             $id: typeof import("@mercurjs/core/api/store/sellers/[id]/route");
         };
+        achievements: typeof import("../../src/api/store/achievements/route");
         credits: typeof import("../../src/api/store/credits/route") & {
             topup: typeof import("../../src/api/store/credits/topup/route");
         };
@@ -563,11 +578,19 @@ export type Routes = {
             };
         };
         leaderboard: typeof import("../../src/api/store/leaderboard/route");
+        notifications: typeof import("../../src/api/store/notifications/route") & {
+            $id: {
+                read: typeof import("../../src/api/store/notifications/[id]/read/route");
+            };
+        };
         packs: typeof import("../../src/api/store/packs/route") & {
             $slug: typeof import("../../src/api/store/packs/[slug]/route") & {
                 openBatch: typeof import("../../src/api/store/packs/[slug]/open-batch/route");
                 open: typeof import("../../src/api/store/packs/[slug]/open/route");
             };
+        };
+        pricing: {
+            fx: typeof import("../../src/api/store/pricing/fx/route");
         };
         profiles: {
             $handle: typeof import("../../src/api/store/profiles/[handle]/route");
@@ -580,12 +603,23 @@ export type Routes = {
             recent: typeof import("../../src/api/store/pulls/recent/route");
         };
         referral: typeof import("../../src/api/store/referral/route");
+        rewards: typeof import("../../src/api/store/rewards/route") & {
+            claim: {
+                $grantId: typeof import("../../src/api/store/rewards/claim/[grantId]/route");
+            };
+            daily: typeof import("../../src/api/store/rewards/daily/route") & {
+                claim: typeof import("../../src/api/store/rewards/daily/claim/route");
+            };
+            draw: typeof import("../../src/api/store/rewards/draw/route");
+            withdraw: typeof import("../../src/api/store/rewards/withdraw/route");
+        };
         vault: typeof import("../../src/api/store/vault/route") & {
             $id: {
                 buyback: typeof import("../../src/api/store/vault/[id]/buyback/route");
                 showcase: typeof import("../../src/api/store/vault/[id]/showcase/route");
             };
         };
+        vip: typeof import("../../src/api/store/vip/route");
     };
     vendor: {
         campaigns: typeof import("@mercurjs/core/api/vendor/campaigns/route") & {

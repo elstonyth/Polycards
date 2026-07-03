@@ -1,3 +1,4 @@
+import type { DailyRewardSettingsDTO } from './admin-rest';
 import {
   useMutation,
   useQuery,
@@ -27,11 +28,13 @@ import {
   getCustomerCommissions,
   getEconomyReport,
   getFxRate,
+  getDailyRewardSettings,
   getRewardPool,
   getReferralTree,
   listDeliveryOrders,
   listEligibleProducts,
   reverseCommission,
+  saveDailyRewardSettings,
   saveRewardPool,
   setFxRate,
   suspendCommission,
@@ -403,6 +406,26 @@ export const useUpdateAchievementDef = () => {
       updateAchievementDef(vars.key, vars.body),
     onSuccess: () =>
       qc.invalidateQueries({ queryKey: qk.achievements }),
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+export const useDailyRewardSettings =
+  (): UseQueryResult<DailyRewardSettingsDTO> =>
+    useQuery({
+      queryKey: qk.dailyRewardSettings,
+      queryFn: getDailyRewardSettings,
+    });
+
+export const useSaveDailyRewardSettings = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { enabled: boolean; amounts: number[]; reason: string }) =>
+      saveDailyRewardSettings(body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.dailyRewardSettings });
+      toast.success('Daily reward settings saved');
+    },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });
 };

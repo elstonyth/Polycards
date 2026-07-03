@@ -14,6 +14,7 @@ const REASON_LABEL: Record<CreditTxn['reason'], string> = {
   cashout: 'Cashout',
   voucher_claim: 'Voucher',
   reward_credit: 'Reward credit',
+  daily_reward: 'Daily reward',
 };
 
 export const reasonLabel = (reason: CreditTxn['reason']): string =>

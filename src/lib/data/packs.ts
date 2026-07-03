@@ -8,7 +8,7 @@
  * need no house-seller link to be listed.
  *
  * Resilience: `getPackCategories()` degrades gracefully to the static mock
- * catalog (`src/app/claw/packs-data.ts`) if the backend is unreachable, so the
+ * catalog (`src/lib/packs-data.ts`) if the backend is unreachable, so the
  * page stays populated and `npm run check` stays green on a backend-down build.
  * The mock catalog also supplies the presentational per-category labels/icons
  * (local assets, not backend-derived).
@@ -32,7 +32,7 @@ import {
   type PackCard,
   type Rarity,
   type ResolvedPack,
-} from '@/app/claw/packs-data';
+} from '@/lib/packs-data';
 
 // Shape of a pack row from GET /store/packs (backend Pack model).
 interface BackendPack {

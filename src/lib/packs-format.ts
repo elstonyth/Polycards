@@ -6,7 +6,7 @@
  * and the open-pack server action (`src/lib/actions/packs.ts`) so the two can't
  * drift. Pure + isomorphic (no server-only imports), safe to import anywhere.
  */
-import type { Rarity } from '@/app/claw/packs-data';
+import type { Rarity } from '@/lib/packs-data';
 import { money } from './format';
 
 /** Canonical rarity tiers, rarest-first (display + iteration order). */

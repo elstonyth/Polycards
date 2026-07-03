@@ -24,7 +24,7 @@ function EmptyState() {
         Request delivery of a vaulted card and your shipments will show up here.
       </p>
       <Link
-        href={features.marketplace ? '/marketplace' : '/claw'}
+        href={features.marketplace ? '/marketplace' : '/slots'}
         className="mt-1 inline-flex h-10 items-center rounded-xl bg-neutral-200 px-5 text-sm font-semibold text-neutral-950 transition-colors hover:bg-white"
       >
         {features.marketplace ? 'Browse the marketplace' : 'Open a pack'}

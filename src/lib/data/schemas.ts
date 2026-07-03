@@ -138,6 +138,7 @@ export const CREDIT_REASONS = [
   'cashout',
   'voucher_claim',
   'reward_credit',
+  'daily_reward',
 ] as const;
 export type CreditReason = (typeof CREDIT_REASONS)[number];
 
@@ -151,6 +152,24 @@ export const CreditTransactionSchema = z.looseObject({
 
 /** POST /store/credits/topup response — finite amount + balance. */
 export const AmountBalanceSchema = z.looseObject({
+  amount: finite,
+  balance: finite,
+});
+
+/** GET /store/rewards/daily — daily check-in claim state (actions/daily.ts). */
+export const DailyStatusSchema = z.looseObject({
+  enabled: z.boolean(),
+  day: z.string(),
+  claimedToday: z.boolean(),
+  streakDay: z.number().int().min(1).max(7),
+  amounts: z.array(finite),
+  todayAmount: finite,
+});
+
+/** POST /store/rewards/daily/claim success response (actions/daily.ts). */
+export const DailyClaimSchema = z.looseObject({
+  status: z.literal('claimed'),
+  streakDay: z.number().int(),
   amount: finite,
   balance: finite,
 });
