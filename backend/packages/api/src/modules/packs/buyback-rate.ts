@@ -65,10 +65,12 @@ export function instantDeadlineMs(
   return Math.min(revealedMs + instantWindowMs(), cap);
 }
 
-// FMV × percent in INTEGER CENTS (naive float misrounds exact half-cents). The
-// vault quote and the buyback credit MUST both go through this helper.
-export function buybackAmount(marketValue: number, percent: number): number {
-  const cents = Math.round(marketValue * 100);
+// value × percent in INTEGER CENTS (naive float misrounds exact half-cents).
+// `value` is the MYR display Value (raw USD × FX × markup), NOT raw USD — buyback
+// pays MYR credits. The vault quote and the buyback credit MUST both go through
+// this helper (on the same MYR value) so a quote can never disagree with a credit.
+export function buybackAmount(value: number, percent: number): number {
+  const cents = Math.round(value * 100);
   return Math.round((cents * percent) / 100) / 100;
 }
 

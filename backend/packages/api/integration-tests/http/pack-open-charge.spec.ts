@@ -17,8 +17,12 @@ const PACK_SLUG = "poc-pack";
 const CARD_HANDLE = "poc-card";
 const PACK_PRICE = 10;
 const FMV = 50;
+const MULTIPLIER = 1.2;
+const MANUAL_RATE = 4.0;
+// Buyback is a cut of the FX-converted Value (50 × 4.0 × 1.2 = RM 240), not raw
+// USD: 96% × 240 = RM 230.40. FX pinned in beforeEach for determinism.
 const INSTANT_PERCENT = 96;
-const INSTANT_AMOUNT = 48;
+const INSTANT_AMOUNT = 230.4;
 const STOCKED = 5;
 
 medusaIntegrationTestRunner({
@@ -60,6 +64,7 @@ medusaIntegrationTestRunner({
             grader: "PSA",
             grade: "10",
             market_value: FMV,
+            market_multiplier: MULTIPLIER,
             image: "/cdn/test-card.webp",
           },
         ]);
@@ -70,6 +75,17 @@ medusaIntegrationTestRunner({
             weight: 100,
             locked: false,
             rarity: "Rare" as const,
+          },
+        ]);
+        // Pin USD→MYR so the buyback credit is deterministic — the sell path now
+        // pays a cut of the FX-converted Value, not raw USD.
+        await packs.createFxRates([
+          {
+            pair: "USD_MYR",
+            rate: MANUAL_RATE,
+            source: "test",
+            manual_override: true,
+            manual_rate: MANUAL_RATE,
           },
         ]);
 
@@ -226,7 +242,7 @@ medusaIntegrationTestRunner({
         expect(await pullCount()).toBe(1);
         expect(await stockedQuantity()).toBe(STOCKED - 1);
 
-        // Buyback of the PAID pull still credits FMV × instant % on top.
+        // Buyback of the PAID pull still credits Value(MYR) × instant % on top.
         const pullId: string = opened.data.pull.id;
         const buyback = await unwrapResponse(
           api.post(

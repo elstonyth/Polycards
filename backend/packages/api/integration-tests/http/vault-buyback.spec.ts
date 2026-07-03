@@ -8,17 +8,21 @@ jest.setTimeout(240 * 1000);
 
 const PASSWORD = 'vb-test-password-1';
 
-// Fixture constants — FMV 50: the pack's INSTANT rate (96%) must credit
-// exactly 48.00 inside the post-pull window; once the pull is older than the
-// window (default 90s — see buyback-rate.ts) the sell pays the FLAT rate
-// (90%, no per-pack vault rate), crediting 45.00.
+// Fixture constants — FMV $50 (raw USD) × FX 4.0 × markup 1.2 = RM 240, the
+// Value the customer sees. Buyback is a cut of that MYR Value (NOT raw USD): the
+// pack's INSTANT rate (96%) credits RM 230.40 inside the post-pull window; once
+// the pull is older than the window (default 90s — see buyback-rate.ts) the sell
+// pays the FLAT rate (90%), crediting RM 216.00. FX is pinned in beforeEach so
+// these stay deterministic (no live feed / DEFAULT_USD_MYR coupling).
 const PACK_SLUG = 'vb-pack';
 const CARD_HANDLE = 'vb-card';
 const FMV = 50;
+const MULTIPLIER = 1.2;
+const MANUAL_RATE = 4.0;
 const INSTANT_PERCENT = 96;
-const INSTANT_AMOUNT = 48;
+const INSTANT_AMOUNT = 230.4; // 96% × (50 × 4.0 × 1.2)
 const FLAT_PERCENT = 90;
-const FLAT_AMOUNT = 45;
+const FLAT_AMOUNT = 216; // 90% × (50 × 4.0 × 1.2)
 const STOCKED = 5;
 const PACK_PRICE = 10;
 // Opens charge the ledger since Task A2 — fund enough for the 3 opens below.
@@ -66,6 +70,7 @@ medusaIntegrationTestRunner({
             grader: 'PSA',
             grade: '10',
             market_value: FMV,
+            market_multiplier: MULTIPLIER,
             image: '/cdn/test-card.webp',
           },
         ]);
@@ -76,6 +81,17 @@ medusaIntegrationTestRunner({
             weight: 100,
             locked: false,
             rarity: 'Rare' as const,
+          },
+        ]);
+        // Pin USD→MYR so buyback amounts are deterministic — the sell path now
+        // credits a cut of the FX-converted Value, not raw USD.
+        await packs.createFxRates([
+          {
+            pair: 'USD_MYR',
+            rate: MANUAL_RATE,
+            source: 'test',
+            manual_override: true,
+            manual_rate: MANUAL_RATE,
           },
         ]);
 
@@ -187,7 +203,7 @@ medusaIntegrationTestRunner({
         ).toBe(401);
       });
 
-      it('open → vault offer → buyback credits FMV×% once, restores stock, 404s foreign customers', async () => {
+      it('open → vault offer → buyback credits Value×% once, restores stock, 404s foreign customers', async () => {
         const tokenA = await registerCustomer('vb-customer-a@test.dev');
         const tokenB = await registerCustomer('vb-customer-b@test.dev');
 
@@ -247,7 +263,7 @@ medusaIntegrationTestRunner({
         expect(foreign.status).toBe(404);
 
         // 5. The owner's buyback (within the window) credits exactly
-        //    FMV × instant % and reports the resulting balance.
+        //    Value(MYR) × instant % and reports the resulting balance.
         const buyback = await request(
           'post',
           `/store/vault/${pullId}/buyback`,
@@ -266,7 +282,7 @@ medusaIntegrationTestRunner({
         expect(await stockedQuantity()).toBe(STOCKED);
 
         // 7. The credit ledger shows the balance and the full row trail:
-        //    topup (+30), pack_open (-10), buyback (+48) — newest first.
+        //    topup (+30), pack_open (-10), buyback (+230.40) — newest first.
         const credits = await request('get', '/store/credits', authed(tokenA));
         expect(credits.status).toBe(200);
         expect(credits.data.balance).toBe(TOPUP - PACK_PRICE + INSTANT_AMOUNT);
@@ -392,7 +408,7 @@ medusaIntegrationTestRunner({
 
         // Recreate the clawback aftermath: drive the balance NEGATIVE (written
         // directly, bypassing the overdraft floor) and AUTO-freeze the account —
-        // chosen so the instant buyback (+48) lands the balance back at >= 0.
+        // chosen so the instant buyback (+230.40) lands the balance back at >= 0.
         const debit = -(TOPUP - PACK_PRICE + 8); // balance -> -8
         await packs.createCreditTransactions([
           {
@@ -412,7 +428,7 @@ medusaIntegrationTestRunner({
         ]);
 
         // The owner sells the card — a frozen account can still buy back, and the
-        // +48 credit lands the balance at +40 (>= 0), clearing the AUTO freeze.
+        // +230.40 credit lands the balance at +222.40 (>= 0), clearing the freeze.
         const buyback = await request(
           'post',
           `/store/vault/${pullId}/buyback`,

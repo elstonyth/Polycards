@@ -129,6 +129,13 @@ medusaIntegrationTestRunner({
         // market_value stays RAW USD — untouched by the FX/multiplier math.
         expect(open.data.card.market_value).toBe(FMV);
         expect(open.data.card.marketPriceMyr).toBe(EXPECTED_MARKET_PRICE_MYR);
+        // Buyback is a cut of the MYR Value (NOT raw USD): 96% x 480 = 460.80,
+        // flat 90% x 480 = 432. Regression guard for the FX-less buyback bug
+        // that quoted/credited 96% x 100 = 96 as if it were ringgit.
+        expect(open.data.buyback.percent).toBe(96);
+        expect(open.data.buyback.amount).toBe(460.8);
+        expect(open.data.buyback.vault_percent).toBe(90);
+        expect(open.data.buyback.vault_amount).toBe(432);
       });
 
       it('open-batch response enriches every roll with marketPriceMyr', async () => {
@@ -154,6 +161,9 @@ medusaIntegrationTestRunner({
           expect(roll.card.handle).toBe(CARD_HANDLE);
           expect(roll.card.market_value).toBe(FMV);
           expect(roll.card.marketPriceMyr).toBe(EXPECTED_MARKET_PRICE_MYR);
+          // Buyback quoted off the MYR Value, same as the single-open route.
+          expect(roll.buyback.amount).toBe(460.8);
+          expect(roll.buyback.vault_amount).toBe(432);
         }
       });
     });

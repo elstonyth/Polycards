@@ -38,29 +38,15 @@ export async function POST(
     input: { pack_id: slug, customer_id: customerId },
   });
 
-  // Quote the instant sell-back offer for THIS pull from the SAME helper the
-  // buyback workflow credits with (packsService.quoteBuyback wraps
-  // resolveBuybackRate + buybackAmount), so the reveal's "sell on the spot"
-  // number is authoritative and can never disagree with what selling actually
-  // credits. The storefront must NOT recompute this from its own pack catalog —
-  // that value drifts from the DB on a mock-catalog fallback, a stale page, or a
-  // sibling-pack switch, which is how the reveal ended up quoting the flat 90%
-  // on a 99%-boosted pack. Freshly rolled, so this is inside the instant window
-  // (rate_type "instant").
   const packsService = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
   const marketValue = toMoney(result.card.market_value);
-  const buyback = await packsService.quoteBuyback(
-    slug,
-    { rolled_at: result.pull.rolled_at, revealed_at: result.pull.revealed_at },
-    marketValue,
-  );
 
-  // Display-only live MYR price (raw USD x FX x per-card multiplier) — mirrors
-  // the vault/recent-pulls enrichment (pricing.ts) so the reveal card shows the
-  // same number the vault will once the pull lands there. market_value itself
-  // stays the raw USD decimal untouched (never overwritten). RolledCard (the
-  // roll-pack step's normalized winner shape) does not carry market_multiplier,
-  // so it is looked up here by handle — same field the vault route reads.
+  // Live MYR Value (raw USD x FX x per-card multiplier) — the number the reveal
+  // card shows and the base the buyback percent applies to (buyback pays MYR
+  // credits, so it must be a cut of the shown Value, not raw USD). market_value
+  // itself stays the raw USD decimal untouched. RolledCard (the roll-pack step's
+  // normalized winner shape) does not carry market_multiplier, so it is looked up
+  // here by handle — same field the vault route reads.
   const fxRate = await resolveFxRate(packsService);
   const [wonCardRow] = await packsService.listCards(
     { handle: result.card.handle },
@@ -70,6 +56,17 @@ export async function POST(
     marketValue,
     fxRate,
     Number(wonCardRow?.market_multiplier ?? 1.2),
+  );
+
+  // Quote the instant sell-back from the SAME helper the buyback workflow credits
+  // with (quoteBuyback wraps resolveBuybackRate + buybackAmount) — off the MYR
+  // Value — so the reveal's "sell on the spot" number is authoritative and can
+  // never disagree with what selling actually credits. The storefront must NOT
+  // recompute this. Freshly rolled, so this is inside the instant window.
+  const buyback = await packsService.quoteBuyback(
+    slug,
+    { rolled_at: result.pull.rolled_at, revealed_at: result.pull.revealed_at },
+    marketPriceMyr,
   );
 
   // result.card is already a plain, JSON-safe object (normalized in roll-pack);
@@ -85,7 +82,7 @@ export async function POST(
       // The flat rate that applies after the instant window — surfaced so the
       // reveal can offer a post-expiry "sell at flat" without recomputing.
       vault_percent: FLAT_PERCENT,
-      vault_amount: buybackAmount(marketValue, FLAT_PERCENT),
+      vault_amount: buybackAmount(marketPriceMyr, FLAT_PERCENT),
       // Fallback instant deadline (rolled_at + window) for when the reveal ping
       // fails; the ping returns the authoritative, reveal-anchored deadline.
       instant_deadline_ms: instantDeadlineMs(

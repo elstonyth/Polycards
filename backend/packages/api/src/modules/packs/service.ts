@@ -263,7 +263,9 @@ class PacksModuleService extends MedusaService({
   async quoteBuyback(
     packSlug: string,
     pull: { rolled_at: Date | string; revealed_at?: Date | string | null },
-    marketValue: number,
+    // The MYR display Value (raw USD × FX × per-card markup), NOT raw USD —
+    // buyback pays MYR credits, so the percent is of what the customer sees.
+    valueMyr: number,
     nowMs: number = Date.now(),
   ): Promise<{
     percent: number;
@@ -272,7 +274,7 @@ class PacksModuleService extends MedusaService({
   }> {
     const [pack] = await this.listPacks({ slug: packSlug }, { take: 1 });
     const { percent, rate_type } = resolveBuybackRate(pack, pull, nowMs);
-    return { percent, amount: buybackAmount(marketValue, percent), rate_type };
+    return { percent, amount: buybackAmount(valueMyr, percent), rate_type };
   }
 
   // Lifetime ledger totals (balance + money-in/out + external-funded spend),

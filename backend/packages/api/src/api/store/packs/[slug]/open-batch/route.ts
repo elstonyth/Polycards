@@ -81,15 +81,17 @@ export async function POST(
     result.rolls.map(async (card, i) => {
       const pull = result.pulls[i];
       const marketValue = toMoney(card.market_value);
-      const buyback = await packsService.quoteBuyback(
-        slug,
-        { rolled_at: pull.rolled_at, revealed_at: pull.revealed_at },
-        marketValue,
-      );
+      // MYR Value first — buyback (instant + flat) is a cut of the shown Value,
+      // not raw USD, so it must be quoted off this, matching what selling credits.
       const marketPriceMyr = displayMarketPrice(
         marketValue,
         fxRate,
         multiplierByHandle.get(card.handle) ?? 1.2,
+      );
+      const buyback = await packsService.quoteBuyback(
+        slug,
+        { rolled_at: pull.rolled_at, revealed_at: pull.revealed_at },
+        marketPriceMyr,
       );
       return {
         pull,
@@ -97,7 +99,7 @@ export async function POST(
         buyback: {
           ...buyback,
           vault_percent: FLAT_PERCENT,
-          vault_amount: buybackAmount(marketValue, FLAT_PERCENT),
+          vault_amount: buybackAmount(marketPriceMyr, FLAT_PERCENT),
           instant_deadline_ms: instantDeadlineMs(
             pull.rolled_at,
             pull.revealed_at,

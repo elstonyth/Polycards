@@ -12,6 +12,7 @@ import {
   resolveBuybackRate,
   type BuybackRateType,
 } from '../../modules/packs/buyback-rate';
+import { displayMarketPrice, resolveFxRate } from '../../modules/packs/pricing';
 import { insertOrMapDuplicate } from './duplicate-race';
 
 export type BuybackPullInput = {
@@ -21,7 +22,7 @@ export type BuybackPullInput = {
 
 export type BuybackResult = {
   pull_id: string;
-  /** USD credited (decimal, never cents). */
+  /** MYR credited (decimal, never cents) — percent of the FX-converted Value. */
   amount: number;
   /** The buyback percent actually applied. */
   percent: number;
@@ -102,14 +103,25 @@ export const buybackPullStep = createStep(
     // A money amount must never be computed from a corrupt FMV — refuse rather
     // than credit NaN/garbage (the column is NOT NULL numeric, so this only
     // fires on real data corruption).
-    const marketValue = Number(card.market_value);
-    if (!Number.isFinite(marketValue) || marketValue < 0) {
+    const rawUsd = Number(card.market_value);
+    if (!Number.isFinite(rawUsd) || rawUsd < 0) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
         'This card has no valid market value and cannot be sold back.',
       );
     }
-    const amount = buybackAmount(marketValue, percent);
+    // Buyback pays MYR credits, so it must be a percentage of the SAME MYR value
+    // the customer sees — market_value is raw USD; the shown Value multiplies it
+    // by FX and the per-card markup (displayMarketPrice). Crediting raw USD ×
+    // percent underpaid every sell-back by the FX rate. Resolve FX + multiplier
+    // at credit time, exactly as the reveal/vault quote does, so quote == credit.
+    const fx = await resolveFxRate(packs);
+    const valueMyr = displayMarketPrice(
+      rawUsd,
+      fx,
+      Number(card.market_multiplier ?? 1.2),
+    );
+    const amount = buybackAmount(valueMyr, percent);
 
     // 1. Credit row first — the unique pull_id kills concurrent duplicates here.
     const [txn] = await insertOrMapDuplicate({
