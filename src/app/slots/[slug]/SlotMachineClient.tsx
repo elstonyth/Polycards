@@ -233,7 +233,20 @@ export default function SlotMachineClient({
     if (!held) return;
     pending.current = null;
 
-    if (held.balance != null && held.forId === customer?.id) {
+    // Identity switched mid-spin (token refresh, multi-tab login): the charge
+    // and the won cards belong to the account that spun, not whoever is signed
+    // in now. Drop the ENTIRE result — balance, cards, offers, reveal — because
+    // suppressing only the balance would still show the previous account's
+    // prizes (and sell-back offers referencing their pulls). The spun account
+    // keeps its cards (server-side vault) and sees its real balance on next load
+    // (the provider re-fetches per identity).
+    if (held.forId !== customer?.id) {
+      setSpin(null);
+      setPhase('idle');
+      return;
+    }
+
+    if (held.balance != null) {
       applyBalance(held.balance);
     }
     setOffers(held.offers);
