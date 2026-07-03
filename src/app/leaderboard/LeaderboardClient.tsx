@@ -101,8 +101,8 @@ export default function LeaderboardClient({
           ))}
         </div>
         <p className="mt-1.5 text-[12px] text-neutral-500">
-          Points come from every pack you rip. Weekly board resets Monday 00:00
-          (MYT).
+          Points come from every ringgit you spend on packs. The weekly board
+          covers the last 7 days.
         </p>
       </section>
 

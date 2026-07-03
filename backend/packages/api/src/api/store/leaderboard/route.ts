@@ -4,16 +4,16 @@ import PacksModuleService from '../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../modules/packs';
 import { HANDLE_RE, seedOf } from '../../../utils/profile-handle';
 
-// GET /store/leaderboard?period=weekly|alltime — public leaderboard aggregated
-// from the Pull ledger. A plain publishable-key store route (read-only, no
-// workflow).
+// GET /store/leaderboard?period=weekly|alltime — public leaderboard. A plain
+// publishable-key store route (read-only, no workflow).
 //
 // 🔒 PII: this is PUBLIC, so it NEVER exposes a customer's email or raw id. Each
 // entry carries only a display name (first_name, else an anonymous "Collector
 // ####" handle) and a stable `seed` integer the storefront hashes into an avatar.
 //
-// Ranking is by points = Σ(pack price × 100) over the customer's pulls (the same
-// points awarded on open). `volume` = Σ won-card market value; `pulls` = count.
+// Ranking is REAL spend: points = Σ(pack_open ledger debits, RM) × 100 — see
+// PacksModuleService.leaderboardTop. `volume` = Σ won-card MYR display value;
+// `pulls` = pull count (reward-box draws excluded).
 const TOP_N = 10;
 const WEEKLY_MS = 7 * 24 * 60 * 60 * 1000;
 

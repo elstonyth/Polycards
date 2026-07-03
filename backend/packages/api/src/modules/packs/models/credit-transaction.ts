@@ -9,7 +9,9 @@ export const CreditTransaction = model
   .define("credit_transaction", {
     id: model.id().primaryKey(),
     customer_id: model.text(),
-    // USD decimal (never cents). Positive = credit, negative = spend.
+    // RM (MYR) decimal (never sen). Positive = credit, negative = spend.
+    // ALL ledger money is Ringgit — the only USD in the system is the raw
+    // PriceCharting FMV on Card/product rows, converted via the pricing seam.
     amount: model.bigNumber(),
     reason: model.enum([
       "buyback",

@@ -23,7 +23,8 @@ export async function GET(
 
   // Explicit public shape — `price` is bigNumber now, so a raw spread would
   // leak the internal `raw_price` jsonb sidecar (and id/timestamps) into a
-  // public payload. `price` serializes as a JSON number (whole-dollar USD).
+  // public payload. `price` serializes as a JSON number (RM — all pack
+  // prices and ledger money are Ringgit).
   res.json({
     packs: packs.map((p) => ({
       slug: p.slug,

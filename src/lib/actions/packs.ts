@@ -62,7 +62,7 @@ export type OpenPackResult =
       /** Credit balance AFTER the charge (opens debit the pack price — A2);
        *  null only if the backend response shape regresses. */
       balance: number | null;
-      /** Pack price debited for this open (USD decimal). Already in the HTTP
+      /** Pack price debited for this open (RM decimal). Already in the HTTP
        *  response; surfaced for the slot's COST display. Null if it regresses. */
       price: number | null;
     }
@@ -194,7 +194,7 @@ export type OpenBatchResult =
   | {
       ok: true;
       rolls: BatchRoll[];
-      /** Pack price debited per roll (USD decimal). Null on response regression. */
+      /** Pack price debited per roll (RM decimal). Null on response regression. */
       price: number | null;
       /** Total charged for the whole batch (`total_charged` from backend). */
       total: number | null;

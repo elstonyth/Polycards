@@ -18,6 +18,12 @@ const RARE_FMV = 50;
 const EPIC_CARD = "pp-card-epic";
 const EPIC_FMV = 10;
 
+// volume is the MYR display value (FMV × multiplier × FX), matching the
+// leaderboard. No FxRate row is seeded and cards carry the model-default
+// multiplier, so it's FMV × 1.2 (DEFAULT_MARKET_MULTIPLIER) × 4.7
+// (DEFAULT_USD_MYR).
+const MYR = (usd: number) => Math.round(usd * 1.2 * 4.7 * 100) / 100;
+
 const SEEDED_HANDLE = "kenji-test";
 const SEEDED_EMAIL = "pp-collector@test.dev";
 const SEEDED_NAME = "Kenji";
@@ -118,6 +124,15 @@ medusaIntegrationTestRunner({
             rolled_at: new Date("2026-06-03T10:00:00Z"),
           },
         ]);
+        // Matching pack_open ledger debits — points come from REAL spend now
+        // (the same basis as the leaderboard), not from re-joining pack price.
+        await packs.createCreditTransactions(
+          Array.from({ length: 3 }, () => ({
+            customer_id: seededCustomerId,
+            amount: -PACK_PRICE,
+            reason: "pack_open" as const,
+          })) as Parameters<typeof packs.createCreditTransactions>[0],
+        );
       });
 
       const getProfile = (handle: string) =>
@@ -159,7 +174,7 @@ medusaIntegrationTestRunner({
 
         expect(p.stats).toEqual({
           pulls: 3,
-          volume: 2 * RARE_FMV + EPIC_FMV,
+          volume: Math.round((2 * MYR(RARE_FMV) + MYR(EPIC_FMV)) * 100) / 100,
           points: 3 * PACK_PRICE * 100,
           by_rarity: {
             Legendary: 0,

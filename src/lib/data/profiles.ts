@@ -35,7 +35,10 @@ export interface PublicProfileCard {
   set: string;
   grader: string;
   grade: string;
+  /** Raw USD FMV — display should prefer marketPriceMyr. */
   market_value: number;
+  /** Live MYR display value (FMV × FX × multiplier); absent on older backends. */
+  marketPriceMyr?: number;
   image: string;
 }
 

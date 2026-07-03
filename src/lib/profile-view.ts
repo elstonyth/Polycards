@@ -63,7 +63,8 @@ export function toProfileView(profile: PublicProfile): ProfileViewUser {
       image: c.image,
       grader: c.grader,
       grade: c.grade,
-      price: c.market_value,
+      // Live MYR display value; raw USD FMV only as an old-backend fallback.
+      price: c.marketPriceMyr ?? c.market_value,
     }),
   );
 
@@ -78,7 +79,7 @@ export function toProfileView(profile: PublicProfile): ProfileViewUser {
     image: p.card.image,
     grader: p.card.grader,
     grade: p.card.grade,
-    price: p.card.market_value,
+    price: p.card.marketPriceMyr ?? p.card.market_value,
   }));
 
   return {

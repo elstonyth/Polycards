@@ -9,6 +9,11 @@ import {
   makeRarityOf,
 } from '../../../../modules/packs/card-view';
 import { toMoney } from '../../../../modules/packs/money';
+import {
+  DEFAULT_MARKET_MULTIPLIER,
+  displayMarketPrice,
+  resolveFxRate,
+} from '../../../../modules/packs/pricing';
 
 // GET /store/profiles/:handle — PUBLIC profile page data (Task B). A plain
 // publishable-key store route (read-only, no workflow), same posture as
@@ -60,9 +65,6 @@ export async function GET(
   const cards = cardIds.length
     ? await packs.listCards({ handle: cardIds }, { take: cardIds.length })
     : [];
-  const packRows = packIds.length
-    ? await packs.listPacks({ slug: packIds }, { take: packIds.length })
-    : [];
   const odds =
     cardIds.length && packIds.length
       ? await packs.listPackOdds(
@@ -72,25 +74,32 @@ export async function GET(
       : [];
 
   const byHandle = cardByHandle(cards);
-  const priceBySlug = new Map(packRows.map((p) => [p.slug, p.price]));
   // Reward rows (card_id null) carry no card rarity — exclude before the lookup.
   const cardOdds = odds.filter(
     (o): o is typeof o & { card_id: string } => o.card_id != null,
   );
   const rarityOf = makeRarityOf(cardOdds) as (p: string, c: string) => Rarity;
 
-  // Stats over the full pull history (same formulas as the leaderboard:
-  // volume = Σ won-card FMV, points = Σ pack price × 100).
+  // Stats — same definitions as the leaderboard so both surfaces agree:
+  // volume = Σ won-card MYR display value (FMV × multiplier × FX), points =
+  // real pack_open spend from the credit ledger × 100 (spend is RM, so the
+  // ledger's sen ARE the points).
+  const fxRate = await resolveFxRate(packs);
+  const cardMyr = (card: (typeof cards)[number]): number =>
+    displayMarketPrice(
+      toMoney(card.market_value),
+      fxRate,
+      Number(card.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER),
+    );
   let volume = 0;
-  let points = 0;
+  const points = await packs.packOpenSpendCents(customer.id);
   const byRarity = Object.fromEntries(RARITIES.map((r) => [r, 0])) as Record<
     Rarity,
     number
   >;
   for (const p of pulls) {
     const card = byHandle.get(p.card_id);
-    volume += card ? toMoney(card.market_value) : 0;
-    points += (priceBySlug.get(p.pack_id) ?? 0) * 100;
+    volume += card ? cardMyr(card) : 0;
     byRarity[rarityOf(p.pack_id, p.card_id)] += 1;
   }
 
@@ -114,6 +123,7 @@ export async function GET(
             grader: card.grader,
             grade: card.grade,
             market_value: toMoney(card.market_value),
+            marketPriceMyr: cardMyr(card),
             image: card.image,
           },
         },
@@ -141,6 +151,7 @@ export async function GET(
           grader: card.grader,
           grade: card.grade,
           market_value: toMoney(card.market_value),
+          marketPriceMyr: cardMyr(card),
           image: card.image,
         },
       ];

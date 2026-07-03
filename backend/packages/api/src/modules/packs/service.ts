@@ -56,6 +56,7 @@ import {
 import { levelForSpend } from './vip-ladder';
 import { levelsToGrant, rewardsForLevel } from './vip-rewards';
 import { fromSen } from './money';
+import { DEFAULT_MARKET_MULTIPLIER, resolveFxRate } from './pricing';
 import {
   validateRewardsPatch,
   type RewardsSettingsPatch,
@@ -2339,10 +2340,20 @@ class PacksModuleService extends MedusaService({
   }
 
   // Top-N leaderboard computed in the DB (GROUP BY + ORDER BY + LIMIT), so it's
-  // correct at any pull volume — replaces the old route that fetched an UNORDERED
-  // 20k slice and ranked it in memory (wrong/jittery once pulls passed ~20k, #7).
-  // points = Σ(pack price) × 100, volume = Σ(card market_value), pulls = count.
-  // sinceMs = null → all-time; a timestamp → weekly window (rolled_at >= since).
+  // correct at any volume.
+  //
+  // RANKING = real money spent on pack opens, straight from the credit ledger
+  // (reason 'pack_open', the same rows the charge step writes). It used to be
+  // Σ(current pack price) joined from pulls, which silently rewrote history
+  // whenever a pack was repriced or deleted. points = spend(MYR) × 100 (the
+  // display convention the storefront always used).
+  //
+  // volume ("winnings") = Σ won-card VALUE in MYR — market_value(USD) × the
+  // card's own multiplier, × the live FX rate — the same displayMarketPrice
+  // seam as the vault/open/Top Hits, so the board matches every other surface.
+  // Reward-box pulls stay excluded from winnings (source <> 'reward').
+  //
+  // sinceMs = null → all-time; a timestamp → weekly window.
   @InjectManager()
   async leaderboardTop(
     opts: { sinceMs: number | null; limit: number },
@@ -2354,39 +2365,80 @@ class PacksModuleService extends MedusaService({
       sharedContext.manager) as unknown as LedgerSqlManager;
     const since =
       opts.sinceMs != null ? new Date(opts.sinceMs).toISOString() : null;
+    const fxRate = await resolveFxRate(this);
 
+    // Two windowed aggregates joined by customer: spend from the ledger (the
+    // ranking), pulls + winnings from the Pull ledger (display columns). The
+    // window predicates are plain `col >= ?` so the created_at / rolled_at
+    // indexes stay usable (a nullable-param OR would be non-sargable).
     const rows = await em.execute<
       {
         customer_id: string;
-        pulls: string;
-        points: string;
-        volume_cents: string;
+        pulls: string | null;
+        spend_cents: string;
+        volume_myr: string | null;
       }[]
     >(
-      'SELECT pu.customer_id AS customer_id, ' +
-        'COUNT(*) AS pulls, ' +
-        'ROUND(COALESCE(SUM(pk.price), 0) * 100)::bigint AS points, ' +
-        'ROUND(COALESCE(SUM(c.market_value), 0) * 100)::bigint AS volume_cents ' +
-        'FROM pull pu ' +
-        'LEFT JOIN pack pk ON pk.slug = pu.pack_id AND pk.deleted_at IS NULL ' +
-        'LEFT JOIN card c ON c.handle = pu.card_id AND c.deleted_at IS NULL ' +
-        "WHERE pu.deleted_at IS NULL AND pu.customer_id IS NOT NULL AND pu.source <> 'reward' " +
-        // Branch on `since` rather than a nullable param: the
-        // `(? IS NULL OR rolled_at >= ?)` form is non-sargable and would skip
-        // the IDX_pull_rolled_at index on the weekly window (Sourcery).
-        (since === null ? '' : 'AND pu.rolled_at >= ?::timestamptz ') +
-        'GROUP BY pu.customer_id ' +
-        'ORDER BY points DESC, pulls DESC, pu.customer_id ASC ' +
-        'LIMIT ?',
-      since === null ? [opts.limit] : [since, opts.limit],
+      // NET spend per customer: charges are negative, open-reversals are
+      // positive mirror rows with the SAME 'pack_open' reason — summing the
+      // net keeps a reversed open from counting as spend. HAVING > 0 drops
+      // fully-reversed (or zero-spend) customers from the board.
+      'WITH spend AS ( ' +
+        '  SELECT customer_id, ROUND(SUM(-amount) * 100)::bigint AS spend_cents ' +
+        '    FROM credit_transaction ' +
+        "   WHERE reason = 'pack_open' " +
+        '     AND deleted_at IS NULL AND customer_id IS NOT NULL ' +
+        (since === null ? '' : '     AND created_at >= ?::timestamptz ') +
+        '   GROUP BY customer_id ' +
+        '   HAVING ROUND(SUM(-amount) * 100) > 0 ' +
+        '), wins AS ( ' +
+        '  SELECT pu.customer_id, COUNT(*) AS pulls, ' +
+        '         SUM(c.market_value * COALESCE(c.market_multiplier, ?)) AS volume_usd ' +
+        '    FROM pull pu ' +
+        '    LEFT JOIN card c ON c.handle = pu.card_id AND c.deleted_at IS NULL ' +
+        "   WHERE pu.deleted_at IS NULL AND pu.customer_id IS NOT NULL AND pu.source <> 'reward' " +
+        (since === null ? '' : '     AND pu.rolled_at >= ?::timestamptz ') +
+        '   GROUP BY pu.customer_id ' +
+        ') ' +
+        'SELECT s.customer_id, s.spend_cents, w.pulls, ' +
+        '       ROUND(COALESCE(w.volume_usd, 0) * ? * 100) / 100 AS volume_myr ' +
+        '  FROM spend s ' +
+        '  LEFT JOIN wins w ON w.customer_id = s.customer_id ' +
+        ' ORDER BY s.spend_cents DESC, w.pulls DESC NULLS LAST, s.customer_id ASC ' +
+        ' LIMIT ?',
+      since === null
+        ? [DEFAULT_MARKET_MULTIPLIER, fxRate, opts.limit]
+        : [since, DEFAULT_MARKET_MULTIPLIER, since, fxRate, opts.limit],
     );
 
     return rows.map((r) => ({
       customer_id: r.customer_id,
-      pulls: Number(r.pulls),
-      points: Number(r.points),
-      volume: Number(r.volume_cents) / 100,
+      pulls: Number(r.pulls ?? 0),
+      // points = spend × 100 — and spend_cents IS spend × 100 already.
+      points: Number(r.spend_cents),
+      volume: Number(r.volume_myr ?? 0),
     }));
+  }
+
+  // Σ of a customer's pack_open debits, in sen — the same real-spend basis the
+  // leaderboard ranks on (points = spend × 100 = exactly these sen). Public
+  // profile stats read this so both surfaces always show the same number.
+  @InjectManager()
+  async packOpenSpendCents(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<number> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    // NET sum: open-reversals are positive 'pack_open' mirror rows, so a
+    // reversed open cancels out. Floor at 0 defensively.
+    const rows = await em.execute<{ cents: string | null }[]>(
+      'SELECT GREATEST(COALESCE(ROUND(SUM(-amount) * 100), 0), 0)::bigint AS cents ' +
+        'FROM credit_transaction ' +
+        "WHERE customer_id = ? AND reason = 'pack_open' AND deleted_at IS NULL",
+      [customerId],
+    );
+    return Number(rows[0]?.cents ?? 0);
   }
 
   // Insert a recruit→sponsor edge with the fraud guards (spec §7). Under ONE

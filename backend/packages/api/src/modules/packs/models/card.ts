@@ -20,7 +20,8 @@ export const Card = model.define('card', {
   // a numeric column; model.number() would map to integer and truncate the cents.
   market_value: model.bigNumber(),
   image: model.text(),
-  // Standalone sale price (USD decimal). The card's *intended* marketplace price,
+  // Standalone sale price (RM decimal — it mirrors onto the MYR product
+  // variant price). The card's *intended* marketplace price,
   // kept here even while `for_sale` is off so toggling it back on has a price to
   // restore. On save the admin mirror writes this onto the matching Medusa Product
   // variant (the actual sellable entity). Nullable: pre-existing seeded cards had
