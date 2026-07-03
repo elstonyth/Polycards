@@ -44,6 +44,15 @@ const remotePatterns: NonNullable<
     port: backend.port || undefined,
     pathname: '/static/**',
   },
+  {
+    // PriceCharting card art. The Add-from-PriceCharting flow can reference the
+    // source image URL directly (PriceCharting serves its images from this GCS
+    // bucket) instead of a re-hosted upload. Scoped to PriceCharting's bucket
+    // path — NOT all of storage.googleapis.com.
+    protocol: 'https',
+    hostname: 'storage.googleapis.com',
+    pathname: '/images.pricecharting.com/**',
+  },
 ];
 
 // Next 16 added an SSRF guard to the image optimizer: after a remotePattern
