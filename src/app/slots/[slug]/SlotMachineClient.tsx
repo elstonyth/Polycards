@@ -270,6 +270,7 @@ export default function SlotMachineClient({
       image: won.image,
       value: won.marketPriceMyr != null ? rm(won.marketPriceMyr) : won.value,
       rarity: won.rarity,
+      who: 'You',
       packName: pack.name,
       packIcon: pack.image,
       agoLabel: 'just now',

@@ -36,6 +36,7 @@ import {
 } from '@/lib/packs-data';
 import { rarityRgb } from '@/lib/rarity';
 import { publishedOddsRows } from '@/lib/packs-format';
+import { useLiveRecentPulls } from '@/lib/use-recent-pulls';
 import { useTopUp } from '@/components/app-shell/TopUpProvider';
 import PackOpenOverlay from './PackOpenOverlay';
 
@@ -90,8 +91,9 @@ export default function PackDetailClient({
   // Credit balance (A2: opens debit the pack price) — read from the app-shell
   // TopUpProvider (identity-tagged; null = logged out / loading), so this page,
   // the header chip, and the top-up sheet can never disagree.
-  // Live Recent Pulls — the server snapshot (real opens happen on the reel).
-  const recent = recentPulls;
+  // Live Recent Pulls — seeded from the server snapshot, then polled (~4s)
+  // so anyone's pull shows up here without a reload.
+  const recent = useLiveRecentPulls(recentPulls);
   // The pack-opening reveal overlay — non-null while showing the won/demo card.
   // `nonce` keys the overlay so "Open another" remounts it and re-runs the burst.
   // pullId/marketValue drive the sell-back offer (null for demo spins). The
@@ -544,6 +546,9 @@ export default function PackDetailClient({
                   />
                   <span className="min-w-0 flex-1 truncate text-[13px] text-white/80">
                     {c.name}
+                  </span>
+                  <span className="shrink-0 text-[11px] text-white/45">
+                    {c.who}
                   </span>
                   <span className="shrink-0 text-[12px] tabular-nums text-white/50">
                     {c.value}

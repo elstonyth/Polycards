@@ -26,7 +26,6 @@ import {
 import {
   CATEGORIES as CATEGORY_META,
   CAT_ICON,
-  findPack,
   type Pack,
   type PackCategory,
   type PackCard,
@@ -263,7 +262,8 @@ export async function getPackDetail(slug: string): Promise<PackDetail | null> {
 
 // --- Recent Pulls: the live ledger feed (GET /store/pulls/recent) -----------
 
-// One row from the public recent-pulls feed (won card + when, no customer PII).
+// One row from the public recent-pulls feed: won card + when + the source
+// pack's live catalog label + a MASKED puller name ("Els***" / "Anonymous").
 interface BackendRecentPull {
   handle: string;
   name: string;
@@ -273,6 +273,11 @@ interface BackendRecentPull {
   marketPriceMyr?: number;
   rarity: string;
   pack_id: string;
+  /** Pack label from the live catalog; null when the pack was deleted. */
+  pack_title?: string | null;
+  pack_image?: string | null;
+  /** Masked puller display name; absent on an older backend. */
+  who?: string;
   rolled_at: string;
 }
 
@@ -285,6 +290,8 @@ export interface RecentPull {
   /** Source pack name + icon (for the feed's pack label). */
   packName: string;
   packIcon: string;
+  /** Masked puller display name, e.g. "Els***" (never full identity). */
+  who: string;
   /** Relative timestamp, e.g. "4m ago" (computed at render). */
   agoLabel: string;
 }
@@ -308,19 +315,19 @@ export async function getRecentPulls(): Promise<RecentPull[]> {
 
     return (
       parseList(RecentPullSchema, pulls) as unknown as BackendRecentPull[]
-    ).map((p, i) => {
-      const pack = findPack(p.pack_id);
-      return {
-        id: `${p.handle}-${p.rolled_at}-${i}`,
-        name: p.name,
-        image: p.image,
-        value: formatValue(p.marketPriceMyr ?? p.market_value),
-        rarity: p.rarity as Rarity,
-        packName: pack?.name ?? 'Mystery Pack',
-        packIcon: pack?.image ?? FALLBACK_PACK_ICON,
-        agoLabel: relativeTime(p.rolled_at),
-      };
-    });
+    ).map((p, i) => ({
+      id: `${p.handle}-${p.rolled_at}-${i}`,
+      name: p.name,
+      image: p.image,
+      value: formatValue(p.marketPriceMyr ?? p.market_value),
+      rarity: p.rarity as Rarity,
+      // Pack label straight from the backend catalog (source of truth) — a
+      // since-deleted pack degrades to the neutral label, never a wrong one.
+      packName: p.pack_title ?? 'Mystery Pack',
+      packIcon: p.pack_image ?? FALLBACK_PACK_ICON,
+      who: p.who ?? 'Anonymous',
+      agoLabel: relativeTime(p.rolled_at),
+    }));
   } catch (error) {
     logger.error('[packs] failed to load recent pulls:', error);
     return [];

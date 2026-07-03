@@ -1,16 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import { cn } from '@/lib/utils';
+import { useLiveRecentPulls } from '@/lib/use-recent-pulls';
 import {
   PEDESTAL_BG,
   PEDESTAL_FRAME_HOVER,
   PEDESTAL_IMAGE,
 } from '@/components/card-pedestal';
 import type { RecentPull } from '@/lib/data/packs';
-
-const POLL_MS = 12000;
 
 function PullCard({ pull }: { pull: RecentPull }) {
   return (
@@ -61,7 +59,7 @@ function PullCard({ pull }: { pull: RecentPull }) {
                 {pull.packName}
               </span>
               <span className="text-[10px] font-medium text-neutral-400">
-                Just revealed
+                Pulled by {pull.who}
               </span>
             </div>
           </div>
@@ -77,32 +75,8 @@ export default function RecentPullsSection({
   /** Live recent pulls (server-fetched); empty = no pulls yet (empty state). */
   initialPulls?: RecentPull[];
 }) {
-  const [pulls, setPulls] = useState<RecentPull[]>(initialPulls ?? []);
-
-  // Live feed — poll the same-origin proxy (a direct :9000 call is CORS-blocked)
-  // and swap in fresh ledger pulls. Keeps the last good set on error/empty so the
-  // row never blanks out.
-  useEffect(() => {
-    let active = true;
-    const tick = async () => {
-      try {
-        const res = await fetch('/api/recent-pulls', { cache: 'no-store' });
-        if (!res.ok) return;
-        const data = (await res.json()) as { pulls?: RecentPull[] };
-        if (active && Array.isArray(data.pulls) && data.pulls.length > 0) {
-          setPulls(data.pulls);
-        }
-      } catch {
-        // keep the current set on a transient failure
-      }
-    };
-    void tick(); // swap in live data immediately, then keep polling
-    const id = setInterval(tick, POLL_MS);
-    return () => {
-      active = false;
-      clearInterval(id);
-    };
-  }, []);
+  // Live feed — shared 4s polling hook (same seam as the pack-detail feed).
+  const pulls = useLiveRecentPulls(initialPulls ?? []);
 
   return (
     <section className="w-full bg-neutral-950 py-16 sm:py-20">
