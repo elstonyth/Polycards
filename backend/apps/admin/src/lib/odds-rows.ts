@@ -1,9 +1,10 @@
-import type { OddsRow, RarityEntry } from './packs-api';
+import type { OddsRow } from './packs-api';
+import type { OddsInput } from '@acme/odds-math';
 
-// One editable row in the pack pool editor: the immutable card facts plus the
-// editable PER-PACK rarity and the Top Hit display flag. 🔒 No win-rate
-// fields — weights/locks are secret; the UI never receives or sends them
-// (rarity saves are merged with the stored locks server-side).
+// One editable row in the pack odds editor: the immutable card facts + its
+// current saved %, plus the editable PER-PACK rarity (drives the unlocked
+// share), the lock state, and (when locked) the win-rate input as a string so
+// the operator can type freely (e.g. "12.").
 export type EditRow = {
   card_id: string;
   name: string;
@@ -11,6 +12,9 @@ export type EditRow = {
   rarity: string;
   market_value: number;
   stock: number | null;
+  currentPct: number;
+  locked: boolean;
+  pctInput: string;
   /** Admin-picked Top Hit (storefront display only; saved per toggle). */
   topHit: boolean;
 };
@@ -25,9 +29,19 @@ export const mapOddsToRows = (odds: OddsRow[]): EditRow[] =>
     rarity: o.rarity,
     market_value: o.market_value,
     stock: o.stock,
+    currentPct: o.pct,
+    locked: o.locked,
+    pctInput: String(o.pct),
     topHit: o.top_hit,
   }));
 
-// Map the editable rows to the rarity-only save payload.
-export const rowsToRarityEntries = (rows: EditRow[]): RarityEntry[] =>
-  rows.map((r) => ({ card_id: r.card_id, rarity: r.rarity }));
+// Map the editable rows back into the odds-math input shape — the SAME mapping
+// the live preview and the save handler use, so what the operator previews is
+// exactly what gets persisted.
+export const rowsToOddsInputs = (rows: EditRow[]): OddsInput[] =>
+  rows.map((r) => ({
+    card_id: r.card_id,
+    locked: r.locked,
+    pct: Number(r.pctInput),
+    rarity: r.rarity,
+  }));

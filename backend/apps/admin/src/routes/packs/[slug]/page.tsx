@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -7,6 +7,7 @@ import {
   Text,
   Table,
   Button,
+  Switch,
   Input,
   Label,
   Select,
@@ -22,20 +23,20 @@ import type {
   PackOddsResponse,
   PublishedOdds,
 } from '../../../lib/packs-api';
-import { RARITIES } from '@acme/odds-math';
+import { computeOdds, RARITIES } from '@acme/odds-math';
 import {
   useCards,
   usePackOdds,
   usePacks,
   useSaveMembers,
-  useSaveRarities,
+  useSaveOdds,
   useSaveTopHits,
   useUpdatePack,
 } from '../../../lib/queries';
-import { rm } from '../../../lib/format';
+import { fmtPct, rm } from '../../../lib/format';
 import {
   mapOddsToRows,
-  rowsToRarityEntries,
+  rowsToOddsInputs,
   type EditRow,
 } from '../../../lib/odds-rows';
 import { resolveImageUrl } from '../../../lib/image-url';
@@ -46,11 +47,11 @@ const PackOddsEditorPage = () => {
   const { slug = '' } = useParams();
 
   const { data, isError: loadError } = usePackOdds(slug);
-  const saveRarities = useSaveRarities();
+  const saveOdds = useSaveOdds();
   const saveMembersMut = useSaveMembers();
   const saveTopHits = useSaveTopHits();
   const [rows, setRows] = useState<EditRow[] | null>(null);
-  const saving = saveRarities.isPending;
+  const saving = saveOdds.isPending;
   const packTitle = data?.pack.title ?? '';
   const packStatus = data?.pack.status ?? '';
 
@@ -59,9 +60,10 @@ const PackOddsEditorPage = () => {
   const { data: packsList = null } = usePacks();
   const fullPack = packsList?.find((p) => p.slug === slug) ?? null;
   const updatePack = useUpdatePack();
-  // Backend-provided aggregate (the UI no longer sees weights) — the server
-  // remains authoritative (rejects activating an empty/zero-weight pool).
-  const canActivate = data?.rollable === true;
+  // Mirror of the backend activation guard (hasRollablePool: ≥1 card row with
+  // weight > 0 ⟺ a row with a positive saved %), for the disabled state only —
+  // the server remains authoritative (rejects an empty/zero-weight pool).
+  const canActivate = (rows ?? []).some((r) => r.currentPct > 0);
 
   const toggleStatus = async () => {
     if (!fullPack || updatePack.isPending) return;
@@ -147,6 +149,18 @@ const PackOddsEditorPage = () => {
     }
   };
 
+  // Live preview — the SAME rarity-weighted math the save workflow runs, so what
+  // the operator sees in "After save" is exactly what gets persisted. Changing a
+  // row's rarity re-splits the unlocked share immediately.
+  const { result, previewByCard } = useMemo(() => {
+    const inputs = rowsToOddsInputs(rows ?? []);
+    const result = computeOdds(inputs);
+    const previewByCard = new Map(
+      result.computed.map((c) => [c.card_id, c.pct]),
+    );
+    return { result, previewByCard };
+  }, [rows]);
+
   const setRow = (cardId: string, patch: Partial<EditRow>) =>
     setRows(
       (prev) =>
@@ -154,16 +168,40 @@ const PackOddsEditorPage = () => {
         null,
     );
 
-  // Rarity-only save. 🔒 Win-rate weights and locks never pass through the
-  // UI — the backend merges the incoming rarities with the STORED lock state
-  // (a locked card's win rate survives any rarity edit verbatim).
+  // Locking captures the card's CURRENT real % so the operator can pin a card to
+  // preserve it (rather than letting the even-split flatten it).
+  const toggleLock = (r: EditRow) =>
+    setRow(r.card_id, {
+      locked: !r.locked,
+      pctInput: !r.locked ? String(r.currentPct) : r.pctInput,
+    });
+
+  const newTotalPct = useMemo(
+    () => result.computed.reduce((s, c) => s + c.pct, 0),
+    [result],
+  );
+  const noneLocked = !!rows && rows.length > 0 && rows.every((r) => !r.locked);
+
   async function save() {
-    if (!rows || saving) return;
+    if (!rows || result.error || saving) return;
     try {
-      await saveRarities.mutateAsync({
-        slug,
-        entries: rowsToRarityEntries(rows),
-      });
+      const entries = rowsToOddsInputs(rows);
+      const res = await saveOdds.mutateAsync({ slug, entries });
+      const byId = new Map(res.odds.map((c) => [c.card_id, c]));
+      setRows(
+        (prev) =>
+          prev?.map((r) => {
+            const c = byId.get(r.card_id);
+            return c
+              ? {
+                  ...r,
+                  currentPct: c.pct,
+                  locked: c.locked,
+                  pctInput: String(c.pct),
+                }
+              : r;
+          }) ?? null,
+      );
       toast.success(t('packs.editor.saved'));
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
@@ -284,10 +322,22 @@ const PackOddsEditorPage = () => {
                 <Table.HeaderCell className="text-right">
                   {t('packs.editor.value')}
                 </Table.HeaderCell>
+                <Table.HeaderCell className="text-right">
+                  {t('packs.editor.current')}
+                </Table.HeaderCell>
+                <Table.HeaderCell className="text-center">
+                  {t('packs.editor.lock')}
+                </Table.HeaderCell>
+                <Table.HeaderCell>{t('packs.editor.winRate')}</Table.HeaderCell>
+                <Table.HeaderCell className="text-right">
+                  {t('packs.editor.result')}
+                </Table.HeaderCell>
               </Table.Row>
             </Table.Header>
             <Table.Body>
               {rows.map((r) => {
+                const preview = previewByCard.get(r.card_id) ?? 0;
+                const changed = Math.abs(preview - r.currentPct) >= 0.005;
                 return (
                   <Table.Row key={r.card_id}>
                     <Table.Cell>
@@ -348,21 +398,79 @@ const PackOddsEditorPage = () => {
                     <Table.Cell className="text-ui-fg-subtle text-right tabular-nums">
                       {rm(r.market_value)}
                     </Table.Cell>
+                    <Table.Cell className="text-ui-fg-subtle text-right tabular-nums">
+                      {fmtPct(r.currentPct)}
+                    </Table.Cell>
+                    <Table.Cell className="text-center">
+                      <Switch
+                        checked={r.locked}
+                        onCheckedChange={() => toggleLock(r)}
+                      />
+                    </Table.Cell>
+                    <Table.Cell>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step={0.01}
+                        disabled={!r.locked}
+                        value={r.locked ? r.pctInput : ''}
+                        placeholder={r.locked ? '' : 'auto'}
+                        onChange={(e) =>
+                          setRow(r.card_id, { pctInput: e.target.value })
+                        }
+                        className="w-24 tabular-nums"
+                      />
+                    </Table.Cell>
+                    <Table.Cell
+                      className={clx(
+                        'text-right tabular-nums',
+                        changed
+                          ? 'text-ui-fg-base font-medium'
+                          : 'text-ui-fg-subtle',
+                      )}
+                    >
+                      {fmtPct(preview)}
+                    </Table.Cell>
                   </Table.Row>
                 );
               })}
             </Table.Body>
           </Table>
 
-          <div className="flex items-center justify-end px-6 py-4">
-            <Button
-              variant="primary"
-              onClick={save}
-              isLoading={saving}
-              disabled={saving}
-            >
-              {t('packs.editor.save')}
-            </Button>
+          <div className="flex flex-col gap-3 px-6 py-4">
+            {noneLocked && (
+              <Text size="small" className="text-ui-tag-orange-text">
+                {t('packs.editor.flattenWarning')}
+              </Text>
+            )}
+            {result.error && (
+              <Text size="small" className="text-ui-tag-red-text">
+                {result.error}
+              </Text>
+            )}
+            <div className="flex items-center justify-between">
+              <div className="text-ui-fg-subtle flex gap-6 text-sm tabular-nums">
+                <span>
+                  {t('packs.editor.lockedTotal')}:{' '}
+                  <span className="text-ui-fg-base">
+                    {fmtPct(result.lockedTotalPct)}
+                  </span>
+                </span>
+                <span>
+                  {t('packs.editor.newTotal')}:{' '}
+                  <span className="text-ui-fg-base">{fmtPct(newTotalPct)}</span>
+                </span>
+              </div>
+              <Button
+                variant="primary"
+                onClick={save}
+                isLoading={saving}
+                disabled={saving || result.error !== null}
+              >
+                {saving ? t('packs.editor.saving') : t('packs.editor.save')}
+              </Button>
+            </div>
           </div>
         </>
       )}
@@ -545,7 +653,9 @@ const PublishedOddsSection = ({
               step={0.1}
               placeholder="—"
               value={tiers[r] ?? ''}
-              onChange={(e) => setTiers((m) => ({ ...m, [r]: e.target.value }))}
+              onChange={(e) =>
+                setTiers((m) => ({ ...m, [r]: e.target.value }))
+              }
             />
           </div>
         ))}

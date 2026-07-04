@@ -14,11 +14,11 @@ import { cardByHandle } from '../../../../../modules/packs/card-view';
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
 // One per-card row for the editor form: card display fields + the row's CURRENT
-// per-pack rarity. 🔒 The win-rate weight/lock/pct are SECRET — omitted from
-// the default response (the admin UI never renders them). They are included
-// only with `?include_weights=1`, the operator's manual curl seam for reading
-// current locks before a POST /odds write. `rarity` comes from the PackOdds
-// row — it is this pack's tier for the card, not a card property.
+// per-pack rarity, win % and lock state. `pct` is weight / Σweight × 100 (NOT
+// weight/100): the seed ships rarity-relative weights that are only normalized
+// to basis points on the first save, so deriving from the running total reads
+// correctly in BOTH states (pre- and post-normalization). `rarity` comes from
+// the PackOdds row — it is this pack's tier for the card, not a card property.
 type OddsRow = {
   card_id: string;
   name: string;
@@ -29,15 +29,11 @@ type OddsRow = {
   // nothing is excluded at any count; wins keep decrementing below 0, so a
   // negative value = units owed to winners.
   stock: number | null;
+  weight: number;
+  locked: boolean;
+  pct: number;
   /** Admin-picked Top Hit flag (storefront display only). */
   top_hit: boolean;
-  // Secret win-rate fields — present ONLY under ?include_weights=1. `pct` is
-  // weight / Σweight × 100 (NOT weight/100): the seed ships rarity-relative
-  // weights that are only normalized to basis points on the first save, so
-  // deriving from the running total reads correctly in BOTH states.
-  weight?: number;
-  locked?: boolean;
-  pct?: number;
 };
 
 // GET /admin/packs/:slug/odds — load the editor state (admin-only, auto-protected).
@@ -78,8 +74,6 @@ export async function GET(
   const fx = await resolveFxRate(packsModuleService);
 
   const total = odds.reduce((sum, o) => sum + o.weight, 0) || 1;
-  // Secret fields only for the operator's manual curl seam — never the UI.
-  const includeWeights = req.query.include_weights === '1';
 
   const rows: OddsRow[] = [];
   for (const o of odds) {
@@ -92,14 +86,10 @@ export async function GET(
       rarity: o.rarity ?? 'Common',
       market_value: displayMarketPrice(toMoney(card.market_value), fx, 1),
       stock: stockByHandle.get(card.handle) ?? null,
+      weight: o.weight,
+      locked: o.locked,
+      pct: round2((o.weight / total) * 100),
       top_hit: o.top_hit === true,
-      ...(includeWeights
-        ? {
-            weight: o.weight,
-            locked: o.locked,
-            pct: round2((o.weight / total) * 100),
-          }
-        : {}),
     });
   }
   // Rarest-by-value first so the high-value cards sit at the top of the form.
@@ -112,8 +102,6 @@ export async function GET(
       category: pack.category,
       status: pack.status,
     },
-    // Non-secret aggregate for the Activate button (mirrors hasRollablePool).
-    rollable: odds.some((o) => o.weight > 0),
     odds: rows,
   });
 }
