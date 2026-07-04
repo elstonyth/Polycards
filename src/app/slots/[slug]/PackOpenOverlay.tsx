@@ -38,8 +38,8 @@ import SellConfirmModal from '@/components/SellConfirmModal';
 import { rm } from '@/lib/format';
 
 // Rarity → rgb (shared util) drives the glow, pill, and the Pull-celebration
-// ribbon color.
-import { RARITY_RGB } from '@/lib/rarity';
+// ribbon color; isTopRarity gates the celebration tiers.
+import { RARITY_RGB, isTopRarity } from '@/lib/rarity';
 
 // Carousel cylinder geometry, measured from the live phygitals demo (6 packs 60°
 // apart, radius≈259 at a 318px pack; scaled down here, same ratio). Motion values
@@ -190,11 +190,8 @@ export default function PackOpenOverlay({
   }
   const rgb = RARITY_RGB[card.rarity];
   // Live gates the ribbon celebration by rarity (an Uncommon pull skips straight from
-  // metadata to the card; a Mythical pull got the ribbon) — celebrate the top three tiers.
-  const celebrate =
-    card.rarity === 'Immortal' ||
-    card.rarity === 'Legendary' ||
-    card.rarity === 'Mythical';
+  // metadata to the card; a Mythical pull got the ribbon) — celebrate the top tiers.
+  const celebrate = isTopRarity(card.rarity);
 
   // GRADE / YEAR parsed from the card name (e.g. "2016 … PSA 10") — live's metadata
   // screen shows YEAR → CATEGORY → GRADE. Never fabricated; Value stands in when the

@@ -8,6 +8,62 @@ import { rarityRgb } from '@/lib/rarity';
 import { TIER_COLOR, TIER_BAND, TIER_ORDER } from '@/lib/price-tier';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 
+/** The published-odds list itself — overall row + per-rarity rows + caption.
+ *  Shared between this sheet and the pack page's odds panel so the two can't
+ *  drift (they did during the Epic→Mythical rename). */
+export function PublishedOddsList({
+  odds,
+  overall,
+  rounded = 'xl',
+}: {
+  /** Published rows (rarest-first). */
+  odds: { rarity: Rarity; chance: string }[];
+  /** Overall win rate %; null hides the overall row. */
+  overall: number | null;
+  rounded?: 'xl' | '2xl';
+}) {
+  return (
+    <>
+      <ul
+        className={`overflow-hidden border border-white/10 bg-white/[0.03] ${
+          rounded === '2xl' ? 'rounded-2xl' : 'rounded-xl'
+        }`}
+      >
+        {overall !== null && (
+          <li className="flex items-center justify-between border-b border-white/5 bg-white/[0.03] px-4 py-3">
+            <span className="text-[13px] font-semibold text-white">
+              Overall win rate
+            </span>
+            <span className="text-[13px] font-semibold tabular-nums text-white">
+              {overall}%
+            </span>
+          </li>
+        )}
+        {odds.map((o) => (
+          <li
+            key={o.rarity}
+            className="flex items-center justify-between border-b border-white/5 px-4 py-3 last:border-b-0"
+          >
+            <span className="flex items-center gap-2.5 text-[13px] font-medium text-white">
+              <span
+                className="h-2.5 w-2.5 rounded-full"
+                style={{ background: `rgb(${rarityRgb(o.rarity)})` }}
+              />
+              {o.rarity}
+            </span>
+            <span className="text-[13px] tabular-nums text-white/55">
+              {o.chance}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-2 px-1 text-[11px] text-white/35">
+        Published rates for this pack.
+      </p>
+    </>
+  );
+}
+
 /** Published rarity-odds list (admin-authored, from the backend). Never
  *  exposes the win-rate lock (PRD §3.7/§8). */
 export function OddsSheet({
@@ -57,40 +113,7 @@ export function OddsSheet({
         {/* Published ⇢ render (even overall-only, tiers empty) — matching the
             pack page's gate, which keys off publishedOdds being set. */}
         {odds ? (
-          <>
-            <ul className="overflow-hidden rounded-xl border border-white/10 bg-white/[0.03]">
-              {overall !== null && (
-                <li className="flex items-center justify-between border-b border-white/5 bg-white/[0.03] px-4 py-3">
-                  <span className="text-[13px] font-semibold text-white">
-                    Overall win rate
-                  </span>
-                  <span className="text-[13px] font-semibold tabular-nums text-white">
-                    {overall}%
-                  </span>
-                </li>
-              )}
-              {odds.map((o) => (
-                <li
-                  key={o.rarity}
-                  className="flex items-center justify-between border-b border-white/5 px-4 py-3 last:border-b-0"
-                >
-                  <span className="flex items-center gap-2.5 text-[13px] font-medium text-white">
-                    <span
-                      className="h-2.5 w-2.5 rounded-full"
-                      style={{ background: `rgb(${rarityRgb(o.rarity)})` }}
-                    />
-                    {o.rarity}
-                  </span>
-                  <span className="text-[13px] tabular-nums text-white/55">
-                    {o.chance}
-                  </span>
-                </li>
-              ))}
-            </ul>
-            <p className="mt-2 px-1 text-[11px] text-white/35">
-              Published rates for this pack.
-            </p>
-          </>
+          <PublishedOddsList odds={odds} overall={overall} />
         ) : (
           <p className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-6 text-center text-[13px] text-white/40">
             Odds for this pack haven&apos;t been published yet.

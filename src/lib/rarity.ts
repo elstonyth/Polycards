@@ -29,3 +29,16 @@ export const RARITY_ORDER: readonly Rarity[] = [
 export function rarityRgb(rarity: string): string {
   return RARITY_RGB[rarity as Rarity] ?? RARITY_RGB.Common;
 }
+
+/** The tiers that get the celebration treatment (reveal ribbon, big-win
+ *  sound/haptics). Top three of RARITY_ORDER by product spec. */
+export const TOP_RARITIES: readonly Rarity[] = [
+  'Immortal',
+  'Legendary',
+  'Mythical',
+];
+
+/** Tolerant check for backend rarity strings. */
+export function isTopRarity(rarity: string): boolean {
+  return (TOP_RARITIES as readonly string[]).includes(rarity);
+}

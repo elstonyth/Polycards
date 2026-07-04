@@ -24,6 +24,7 @@ import {
 } from '@/lib/packs-data';
 import type { RecentPull } from '@/lib/data/packs';
 import { publishedOddsRows, type PublishedOdds } from '@/lib/packs-format';
+import { isTopRarity } from '@/lib/rarity';
 import { BASE_SPIN_MS, STAGGER_MS } from '@/lib/reel';
 import { priceTier, TIER_COLOR, type Tier } from '@/lib/price-tier';
 import { resolveCardPokemon } from '@/lib/resolve-card-pokemon';
@@ -277,12 +278,7 @@ export default function SlotMachineClient({
     }));
     setRecent((prev) => [...justPulled, ...prev].slice(0, 12));
 
-    const big = held.cards.some(
-      (c) =>
-        c.rarity === 'Immortal' ||
-        c.rarity === 'Legendary' ||
-        c.rarity === 'Mythical',
-    );
+    const big = held.cards.some((c) => isTopRarity(c.rarity));
     play(big ? 'bigwin' : 'win');
     vibrate(big ? [40, 40, 80] : 30);
 

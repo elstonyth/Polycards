@@ -35,6 +35,7 @@ import {
   priceNumber,
 } from '@/lib/packs-data';
 import { rarityRgb } from '@/lib/rarity';
+import { PublishedOddsList } from './OddsSheet';
 import { publishedOddsRows } from '@/lib/packs-format';
 import { useLiveRecentPulls } from '@/lib/use-recent-pulls';
 import { useTopUp } from '@/components/app-shell/TopUpProvider';
@@ -489,36 +490,11 @@ export default function PackDetailClient({
                 Pull Odds (by rarity)
               </h2>
             </div>
-            <ul className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]">
-              <li className="flex items-center justify-between border-b border-white/5 bg-white/[0.03] px-4 py-3">
-                <span className="text-[13px] font-semibold text-white">
-                  Overall win rate
-                </span>
-                <span className="text-[13px] font-semibold tabular-nums text-white">
-                  {detail.publishedOdds.overall}%
-                </span>
-              </li>
-              {publishedRows.map((o) => (
-                <li
-                  key={o.rarity}
-                  className="flex items-center justify-between border-b border-white/5 px-4 py-3 last:border-b-0"
-                >
-                  <span className="flex items-center gap-2.5 text-[13px] font-medium text-white">
-                    <span
-                      className="h-2.5 w-2.5 rounded-full"
-                      style={{ background: `rgb(${rarityRgb(o.rarity)})` }}
-                    />
-                    {o.rarity}
-                  </span>
-                  <span className="text-[13px] tabular-nums text-white/55">
-                    {o.chance}
-                  </span>
-                </li>
-              ))}
-            </ul>
-            <p className="mt-2 px-1 text-[11px] text-white/35">
-              Published rates for this pack.
-            </p>
+            <PublishedOddsList
+              odds={publishedRows}
+              overall={detail.publishedOdds.overall}
+              rounded="2xl"
+            />
           </Reveal>
         )}
 

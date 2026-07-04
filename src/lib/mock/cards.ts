@@ -2,8 +2,15 @@
 // from the harvested graded-card images in public/cdn/cards/h-*.webp so grids look full.
 // `cardOrGeneric()` resolves ANY slug (so every /card/<id> link works, even off-pool).
 
+import type { Rarity } from '@/lib/packs-data';
+
+// Rarity type + color map come from the canonical modules (packs-data /
+// rarity.ts) — re-exported so existing importers keep working without this
+// file owning a copy that can drift (it did during the Epic→Mythical rename).
+export type { Rarity } from '@/lib/packs-data';
+export { RARITY_RGB } from '@/lib/rarity';
+
 export type Grader = 'PSA' | 'CGC' | 'Fanatics';
-export type Rarity = 'Legendary' | 'Mythical' | 'Rare' | 'Uncommon' | 'Common';
 export type MockCard = {
   id: string;
   name: string;
@@ -111,14 +118,6 @@ function build(i: number, image: string): MockCard {
 }
 
 export const MOCK_CARDS: MockCard[] = HARVEST.map((img, i) => build(i, img));
-
-export const RARITY_RGB: Record<Rarity, string> = {
-  Legendary: '236, 72, 153',
-  Mythical: '168, 85, 247',
-  Rare: '37, 99, 235',
-  Uncommon: '56, 189, 248',
-  Common: '163, 163, 163',
-};
 
 export function findCard(id: string): MockCard | null {
   return MOCK_CARDS.find((c) => c.id === id) ?? null;
