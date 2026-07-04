@@ -6,6 +6,7 @@ import {
   MedusaContext,
 } from '@medusajs/framework/utils';
 import type { Context, HttpTypes } from '@medusajs/framework/types';
+import type { OddsRarity } from '@acme/odds-math';
 import { validateDeliveryRequest, snapshotAddress } from './delivery';
 import { rewardsRedemptionEnabled } from './rewards-gate';
 import Pack from './models/pack';
@@ -231,6 +232,61 @@ class PacksModuleService extends MedusaService({
   DailyClaim,
   DailyRewardSettings,
 }) {
+  // Apply a pack-membership diff (add rows + delete rows + renormalize
+  // survivor weights) as ONE transaction. The set-pack-members workflow step
+  // computes the diff; a failed step never runs its OWN compensation, so
+  // without this the pool could be left half-migrated (e.g. adds committed,
+  // removals not) by a mid-diff crash. All three writes share the injected
+  // txn and roll back together.
+  @InjectTransactionManager()
+  async applyPackMemberDiff(
+    diff: {
+      pack_id: string;
+      create: {
+        pack_id: string;
+        card_id: string;
+        rarity: OddsRarity;
+        weight: number;
+        locked: boolean;
+      }[];
+      remove_ids: string[];
+      reweigh: { id: string; weight: number }[];
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ created_ids: string[] }> {
+    // The diff was computed from a PRE-transaction read, so two racing edits
+    // on the same pack could both apply stale diffs (worst case: the same
+    // card created twice, silently doubling its draw weight). Serialize per
+    // pack (same advisory-lock pattern as the per-customer credit lock), then
+    // re-validate the stale diff against a fresh read UNDER the lock — the
+    // lock alone would serialize the writes but not fix the stale reads.
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `pack:${diff.pack_id}`,
+    ]);
+    const current = await this.listPackOdds(
+      { pack_id: diff.pack_id },
+      { take: 1000 },
+      sharedContext,
+    );
+    const presentCards = new Set(current.map((o) => o.card_id));
+    const presentIds = new Set(current.map((o) => o.id));
+    const create = diff.create.filter((c) => !presentCards.has(c.card_id));
+    const remove_ids = diff.remove_ids.filter((id) => presentIds.has(id));
+    const reweigh = diff.reweigh.filter((u) => presentIds.has(u.id));
+
+    const created = create.length
+      ? await this.createPackOdds(create, sharedContext)
+      : [];
+    if (remove_ids.length) {
+      await this.deletePackOdds(remove_ids, sharedContext);
+    }
+    if (reweigh.length) {
+      await this.updatePackOdds(reweigh, sharedContext);
+    }
+    return { created_ids: created.map((c) => c.id) };
+  }
+
   // Commission engine globals. Reads the singleton row; falls back to defaults
   // when absent. COMMISSION_COOLDOWN_DAYS env override forces the demo (0) and
   // lets integration tests pin maturity deterministically without a DB write.

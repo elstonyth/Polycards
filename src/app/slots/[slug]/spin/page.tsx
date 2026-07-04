@@ -1,8 +1,7 @@
 // src/app/slots/[slug]/spin/page.tsx
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import { findPack } from '@/lib/packs-data';
-import { getPackBySlug, getRecentPulls } from '@/lib/data/packs';
+import { getPackBySlug, getPackDetail, getRecentPulls } from '@/lib/data/packs';
 import SlotMachineClient from '../SlotMachineClient';
 
 // The slot-machine reel — reached from the pack detail (/slots/[slug]) "Open Pack"
@@ -17,9 +16,11 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  const pack = findPack(slug);
+  // Backend catalog (source of truth), same as the sibling detail page — a
+  // backend-created pack gets a real title. Next dedupes the fetch with the body.
+  const base = await getPackBySlug(slug);
   return {
-    title: pack ? `${pack.name} — Slot Machine` : 'Slot Machine',
+    title: base ? `${base.pack.name} — Slot Machine` : 'Slot Machine',
   };
 }
 
@@ -34,8 +35,9 @@ export default async function SlotSpinPage({
   const { count: countRaw } = await searchParams;
   const parsed = Number(countRaw);
   const count = Number.isInteger(parsed) ? Math.min(3, Math.max(1, parsed)) : 1;
-  const [base, recentPulls] = await Promise.all([
+  const [base, detail, recentPulls] = await Promise.all([
     getPackBySlug(slug),
+    getPackDetail(slug),
     getRecentPulls(),
   ]);
   if (!base) notFound();
@@ -45,6 +47,7 @@ export default async function SlotSpinPage({
       pack={base.pack}
       recentPulls={recentPulls}
       count={count}
+      publishedOdds={detail?.publishedOdds ?? null}
     />
   );
 }

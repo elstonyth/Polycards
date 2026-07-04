@@ -26,7 +26,7 @@ import {
 const RECENT_N = 12;
 const MAX_PULLS = 20_000; // same aggregation cap as the leaderboard
 
-const RARITIES = ['Legendary', 'Epic', 'Rare', 'Uncommon', 'Common'] as const;
+const RARITIES = ['Immortal', 'Legendary', 'Mythical', 'Rare', 'Uncommon', 'Common'] as const;
 type Rarity = (typeof RARITIES)[number];
 
 export async function GET(

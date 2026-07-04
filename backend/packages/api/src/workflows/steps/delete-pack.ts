@@ -15,7 +15,7 @@ type OddsSnapshot = {
   rarity:
     | 'Immortal'
     | 'Legendary'
-    | 'Epic'
+    | 'Mythical'
     | 'Rare'
     | 'Uncommon'
     | 'Common'

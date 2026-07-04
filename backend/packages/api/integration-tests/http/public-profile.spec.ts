@@ -87,7 +87,7 @@ medusaIntegrationTestRunner({
             pack_id: PACK_SLUG,
             card_id: EPIC_CARD,
             weight: 10,
-            rarity: "Epic" as const,
+            rarity: "Mythical" as const,
           },
         ]);
 
@@ -175,8 +175,9 @@ medusaIntegrationTestRunner({
           volume: Math.round((2 * MYR(RARE_FMV) + MYR(EPIC_FMV)) * 100) / 100,
           points: 3 * PACK_PRICE * 100,
           by_rarity: {
+            Immortal: 0,
             Legendary: 0,
-            Epic: 1,
+            Mythical: 1,
             Rare: 2,
             Uncommon: 0,
             Common: 0,
@@ -186,7 +187,7 @@ medusaIntegrationTestRunner({
         // Recent pulls: newest first, card display fields + per-pack rarity.
         expect(p.recent).toHaveLength(3);
         expect(p.recent[0]).toMatchObject({
-          rarity: "Epic",
+          rarity: "Mythical",
           pack_id: PACK_SLUG,
           card: {
             handle: EPIC_CARD,

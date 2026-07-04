@@ -2,7 +2,7 @@ import { createStep, StepResponse } from '@medusajs/framework/workflows-sdk';
 import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
-import type { OddsRarity } from '@acme/odds-math';
+import { computeOdds, type OddsInput, type OddsRarity } from '@acme/odds-math';
 
 export type SetPackMembersInput = {
   pack_id: string; // = Pack.slug
@@ -22,7 +22,12 @@ type RemovedRow = {
   locked: boolean;
 };
 type CompensateData =
-  | { createdIds: string[]; removed: RemovedRow[] }
+  | {
+      createdIds: string[];
+      removed: RemovedRow[];
+      /** Survivors' pre-renormalization weights, for rollback. */
+      reweighted: { id: string; weight: number }[];
+    }
   | undefined;
 
 // set-pack-members — reconcile a pack's prize pool to a desired card set by
@@ -104,24 +109,76 @@ export const setPackMembersStep = createStep(
       }
     }
 
-    let createdIds: string[] = [];
-    if (toAdd.length) {
-      const created = await packs.createPackOdds(
-        toAdd.map((card_id) => ({
-          pack_id: input.pack_id,
-          card_id,
-          // New members join as Common; the operator picks the real per-pack
-          // tier in the win-rate editor, which recomputes the weights from it.
-          rarity: 'Common' as const,
-          weight: NEW_MEMBER_WEIGHT,
-          locked: false,
-        })),
-      );
-      createdIds = created.map((c) => c.id);
-    }
-    if (toRemove.length) {
-      await packs.deletePackOdds(toRemove.map((o) => o.id));
-    }
+    // Re-normalize so a membership edit can never dilute a LOCKED win rate:
+    // adding a weight-100 row to a normalized Σ=10000 pool would silently
+    // shave every rate (a 95% lock → ~94.1%), and since the UI no longer
+    // shows weights, nobody would notice — the next rarity save would then
+    // bake the diluted rate in permanently. Locked rows keep their PRE-EDIT
+    // effective % (derived from the original pool total); unlocked rows —
+    // including the new members — re-split the remainder by rarity. Skipped
+    // only when the result can't be honored (e.g. a pure removal leaving an
+    // all-locked pool whose locks no longer sum to 100); the draw itself is
+    // scale-invariant, so untouched weights still roll proportionally.
+    // computeOdds is pure, so the weights are derived BEFORE any write —
+    // new members are created directly at their final normalized weight.
+    const originalTotal = existing.reduce((s, o) => s + o.weight, 0) || 1;
+    const survivors = existing.filter((o) => desiredSet.has(o.card_id));
+    const entries: OddsInput[] = [
+      ...survivors.map((o) => ({
+        card_id: o.card_id,
+        locked: o.locked,
+        pct: o.locked ? (o.weight / originalTotal) * 100 : 0,
+        rarity: (o.rarity ?? 'Common') as string,
+      })),
+      ...toAdd.map((card_id) => ({
+        card_id,
+        locked: false,
+        pct: 0,
+        rarity: 'Common',
+      })),
+    ];
+    const weightByCard: Map<string, number> | null = (() => {
+      if (entries.length === 0) return null;
+      const { computed, error } = computeOdds(entries);
+      if (error) {
+        // Operator signal: the reweight safeguard did NOT apply — the pool
+        // needs a manual pass in the win-rate editor (e.g. a pure removal
+        // left an all-locked pool whose locks no longer sum to 100).
+        console.warn(
+          `set-pack-members: skipped auto-reweight for '${input.pack_id}': ${error}`,
+        );
+        return null;
+      }
+      return new Map(computed.map((c) => [c.card_id, c.weight]));
+    })();
+
+    // Create + delete + reweigh land in ONE transaction (applyPackMemberDiff):
+    // a failed step never runs its own compensation, so without the txn a
+    // mid-diff crash could leave the pool half-migrated.
+    const reweighted = weightByCard
+      ? survivors.map((o) => ({ id: o.id, weight: o.weight }))
+      : [];
+    const { created_ids: createdIds } = await packs.applyPackMemberDiff({
+      pack_id: input.pack_id,
+      create: toAdd.map((card_id) => ({
+        pack_id: input.pack_id,
+        card_id,
+        // New members join as Common; the operator picks the real per-pack
+        // tier in the pool editor, which recomputes the weights from it.
+        rarity: 'Common' as const,
+        weight: weightByCard?.get(card_id) ?? NEW_MEMBER_WEIGHT,
+        locked: false,
+      })),
+      remove_ids: toRemove.map((o) => o.id),
+      reweigh: weightByCard
+        ? survivors.flatMap((o) => {
+            const weight = weightByCard.get(o.card_id);
+            return weight === undefined || weight === o.weight
+              ? []
+              : [{ id: o.id, weight }];
+          })
+        : [],
+    });
 
     const removed: RemovedRow[] = toRemove.map((o) => ({
       pack_id: o.pack_id,
@@ -140,7 +197,7 @@ export const setPackMembersStep = createStep(
         added: toAdd.length,
         removed: toRemove.length,
       },
-      { createdIds, removed } satisfies CompensateData,
+      { createdIds, removed, reweighted } satisfies CompensateData,
     );
   },
   async (data: CompensateData, { container }) => {
@@ -151,6 +208,9 @@ export const setPackMembersStep = createStep(
     }
     if (data.removed.length) {
       await packs.createPackOdds(data.removed);
+    }
+    if (data.reweighted?.length) {
+      await packs.updatePackOdds(data.reweighted);
     }
   },
 );

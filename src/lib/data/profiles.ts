@@ -24,7 +24,7 @@ import {
 export type ProfileRarity =
   | 'Immortal'
   | 'Legendary'
-  | 'Epic'
+  | 'Mythical'
   | 'Rare'
   | 'Uncommon'
   | 'Common';

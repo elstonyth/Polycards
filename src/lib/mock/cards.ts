@@ -3,7 +3,7 @@
 // `cardOrGeneric()` resolves ANY slug (so every /card/<id> link works, even off-pool).
 
 export type Grader = 'PSA' | 'CGC' | 'Fanatics';
-export type Rarity = 'Legendary' | 'Epic' | 'Rare' | 'Uncommon' | 'Common';
+export type Rarity = 'Legendary' | 'Mythical' | 'Rare' | 'Uncommon' | 'Common';
 export type MockCard = {
   id: string;
   name: string;
@@ -80,7 +80,7 @@ const rarityFor = (fmv: number): Rarity =>
   fmv > 800
     ? 'Legendary'
     : fmv > 400
-      ? 'Epic'
+      ? 'Mythical'
       : fmv > 180
         ? 'Rare'
         : fmv > 80
@@ -113,10 +113,10 @@ function build(i: number, image: string): MockCard {
 export const MOCK_CARDS: MockCard[] = HARVEST.map((img, i) => build(i, img));
 
 export const RARITY_RGB: Record<Rarity, string> = {
-  Legendary: '234, 179, 8',
-  Epic: '217, 70, 239',
-  Rare: '56, 189, 248',
-  Uncommon: '52, 211, 153',
+  Legendary: '236, 72, 153',
+  Mythical: '168, 85, 247',
+  Rare: '37, 99, 235',
+  Uncommon: '56, 189, 248',
   Common: '163, 163, 163',
 };
 

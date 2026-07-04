@@ -303,6 +303,15 @@ export default function CatalogClient({
         </div>
       </div>
 
+      {/* Global empty state — "All" with zero packs anywhere (the backend is
+          the source of truth) renders no sections, so say so instead of a
+          blank page. A directly-selected empty category has its own state. */}
+      {visible.length === 0 && (
+        <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-10 text-center text-[13px] text-white/40">
+          No packs available right now — check back soon.
+        </div>
+      )}
+
       {/* Per-category sections */}
       {visible.map((cat) => (
         <section key={cat.id} className="mb-8">

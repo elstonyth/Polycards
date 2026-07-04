@@ -55,7 +55,7 @@ type Stage = 'packs' | 'slab' | 'metadata' | 'pull' | 'card';
 
 // Full-screen pack-opening, frame-matched to the live phygitals flow: an interactive
 // 3D pack cylinder (drag/swipe to spin, shuffle, tap to select) → packs drop away →
-// a face-down graded slab rises → the metadata suspense screen → (Epic/Legendary
+// a face-down graded slab rises → the metadata suspense screen → (Mythical/Legendary
 // only) a rarity "PULL" ribbon → the won card flips in over a spinning glow.
 // Reduced motion jumps straight to the card.
 export default function PackOpenOverlay({
@@ -190,8 +190,11 @@ export default function PackOpenOverlay({
   }
   const rgb = RARITY_RGB[card.rarity];
   // Live gates the ribbon celebration by rarity (an Uncommon pull skips straight from
-  // metadata to the card; an Epic pull got the ribbon) — celebrate the top two tiers.
-  const celebrate = card.rarity === 'Epic' || card.rarity === 'Legendary';
+  // metadata to the card; a Mythical pull got the ribbon) — celebrate the top three tiers.
+  const celebrate =
+    card.rarity === 'Immortal' ||
+    card.rarity === 'Legendary' ||
+    card.rarity === 'Mythical';
 
   // GRADE / YEAR parsed from the card name (e.g. "2016 … PSA 10") — live's metadata
   // screen shows YEAR → CATEGORY → GRADE. Never fabricated; Value stands in when the

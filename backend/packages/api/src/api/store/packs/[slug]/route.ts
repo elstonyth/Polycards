@@ -73,6 +73,8 @@ export async function GET(
       return card
         ? {
             ...toCardView(card, o.rarity ?? 'Common'),
+            // Admin-picked Top Hit flag (display only — not draw data).
+            top_hit: o.top_hit === true,
             marketPriceMyr: displayMarketPrice(
               toMoney(card.market_value),
               fxRate,
@@ -99,5 +101,9 @@ export async function GET(
       status: pack.status,
     },
     odds: entries,
+    // The PUBLIC odds display ({ overall, tiers } percentages, admin-authored).
+    // This is the ONLY odds data customers ever see — deliberately decoupled
+    // from the secret per-card weights above. Null = not set (panel hidden).
+    published_odds: pack.published_odds ?? null,
   });
 }

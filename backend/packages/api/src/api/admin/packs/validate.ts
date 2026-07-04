@@ -1,5 +1,9 @@
 import { MedusaError } from '@medusajs/framework/utils';
-import type { PackWriteInput } from '../../../workflows/steps/create-pack';
+import { RARITIES } from '@acme/odds-math';
+import type {
+  PackWriteInput,
+  PublishedOdds,
+} from '../../../workflows/steps/create-pack';
 import { FLAT_PERCENT } from '../../../modules/packs/buyback-rate';
 
 const HANDLE_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -45,6 +49,45 @@ const num = (
   return v as number;
 };
 
+// A published-odds percentage: finite, 0–100, stored to 2 decimals.
+const pct = (v: unknown, key: string): number => {
+  const n = typeof v === 'string' ? Number(v) : v;
+  if (typeof n !== 'number' || !Number.isFinite(n) || n < 0 || n > 100) {
+    bad(`'${key}' must be a number between 0 and 100.`);
+  }
+  return Math.round((n as number) * 100) / 100;
+};
+
+// PUBLIC display odds. undefined → keep the stored value (writers that don't
+// send the field must not clear it); null → explicit clear; object → validated
+// { overall, tiers } with only the six known rarity keys kept.
+const coercePublishedOdds = (v: unknown): PublishedOdds | null | undefined => {
+  if (v === undefined) return undefined;
+  if (v === null) return null;
+  if (typeof v !== 'object' || Array.isArray(v)) {
+    bad(`'published_odds' must be an object or null.`);
+  }
+  const o = v as Record<string, unknown>;
+  const rawTiers = o.tiers;
+  if (
+    rawTiers !== undefined &&
+    (typeof rawTiers !== 'object' ||
+      rawTiers === null ||
+      Array.isArray(rawTiers))
+  ) {
+    bad(`'published_odds.tiers' must be an object.`);
+  }
+  const tiersIn = (rawTiers ?? {}) as Record<string, unknown>;
+  const tiers: PublishedOdds['tiers'] = {};
+  for (const r of RARITIES) {
+    const t = tiersIn[r];
+    if (t !== undefined && t !== null && t !== '') {
+      tiers[r] = pct(t, `published_odds.tiers.${r}`);
+    }
+  }
+  return { overall: pct(o.overall ?? 100, 'published_odds.overall'), tiers };
+};
+
 // Coerce + validate the pack form body. `slug` comes from the route params on
 // update (immutable) and from the body on create.
 export function coercePackBody(raw: unknown, slug: string): PackWriteInput {
@@ -81,5 +124,6 @@ export function coercePackBody(raw: unknown, slug: string): PackWriteInput {
     boost: b.boost === true,
     rank: Math.trunc(num(b, 'rank', 0)),
     status,
+    published_odds: coercePublishedOdds(b.published_odds),
   };
 }

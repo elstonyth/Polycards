@@ -3,18 +3,24 @@
 
 import { useRef } from 'react';
 import { X } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { ODDS } from '@/lib/packs-data';
+import type { Rarity } from '@/lib/packs-data';
+import { rarityRgb } from '@/lib/rarity';
 import { TIER_COLOR, TIER_BAND, TIER_ORDER } from '@/lib/price-tier';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 
-/** Published rarity-odds list. Never exposes the win-rate lock (PRD §3.7/§8). */
+/** Published rarity-odds list (admin-authored, from the backend). Never
+ *  exposes the win-rate lock (PRD §3.7/§8). */
 export function OddsSheet({
   open,
   onClose,
+  odds,
+  overall,
 }: {
   open: boolean;
   onClose: () => void;
+  /** Published rows (rarest-first); null = this pack has no published odds. */
+  odds: { rarity: Rarity; chance: string }[] | null;
+  overall: number | null;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   useModalA11y(panelRef, open, onClose);
@@ -48,25 +54,48 @@ export function OddsSheet({
             <X className="h-5 w-5" aria-hidden />
           </button>
         </div>
-        <ul className="overflow-hidden rounded-xl border border-white/10 bg-white/[0.03]">
-          {ODDS.map((o) => (
-            <li
-              key={o.rarity}
-              className="flex items-center justify-between border-b border-white/5 px-4 py-3 last:border-b-0"
-            >
-              <span className="flex items-center gap-2.5 text-[13px] font-medium text-white">
-                <span className={cn('h-2.5 w-2.5 rounded-full', o.dot)} />
-                {o.rarity}
-              </span>
-              <span className="text-[13px] tabular-nums text-white/55">
-                {o.chance}
-              </span>
-            </li>
-          ))}
-        </ul>
-        <p className="mt-2 px-1 text-[11px] text-white/35">
-          Indicative odds — final rates are published by the backend.
-        </p>
+        {/* Published ⇢ render (even overall-only, tiers empty) — matching the
+            pack page's gate, which keys off publishedOdds being set. */}
+        {odds ? (
+          <>
+            <ul className="overflow-hidden rounded-xl border border-white/10 bg-white/[0.03]">
+              {overall !== null && (
+                <li className="flex items-center justify-between border-b border-white/5 bg-white/[0.03] px-4 py-3">
+                  <span className="text-[13px] font-semibold text-white">
+                    Overall win rate
+                  </span>
+                  <span className="text-[13px] font-semibold tabular-nums text-white">
+                    {overall}%
+                  </span>
+                </li>
+              )}
+              {odds.map((o) => (
+                <li
+                  key={o.rarity}
+                  className="flex items-center justify-between border-b border-white/5 px-4 py-3 last:border-b-0"
+                >
+                  <span className="flex items-center gap-2.5 text-[13px] font-medium text-white">
+                    <span
+                      className="h-2.5 w-2.5 rounded-full"
+                      style={{ background: `rgb(${rarityRgb(o.rarity)})` }}
+                    />
+                    {o.rarity}
+                  </span>
+                  <span className="text-[13px] tabular-nums text-white/55">
+                    {o.chance}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 px-1 text-[11px] text-white/35">
+              Published rates for this pack.
+            </p>
+          </>
+        ) : (
+          <p className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-6 text-center text-[13px] text-white/40">
+            Odds for this pack haven&apos;t been published yet.
+          </p>
+        )}
 
         {/* Glow tiers: cosmetic, keyed off the card's USD value (not rarity).
             Explains the colored ring the reel shows on a win. */}

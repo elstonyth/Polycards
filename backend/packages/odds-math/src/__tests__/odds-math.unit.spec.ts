@@ -78,8 +78,8 @@ describe('computeOdds — same-rarity (even-split) invariants', () => {
 describe('computeOdds — rarity-weighted split', () => {
   it('orders the tiers rarest-first (Immortal least likely)', () => {
     expect(RARITY_WEIGHT.Immortal).toBeLessThan(RARITY_WEIGHT.Legendary);
-    expect(RARITY_WEIGHT.Legendary).toBeLessThan(RARITY_WEIGHT.Epic);
-    expect(RARITY_WEIGHT.Epic).toBeLessThan(RARITY_WEIGHT.Rare);
+    expect(RARITY_WEIGHT.Legendary).toBeLessThan(RARITY_WEIGHT.Mythical);
+    expect(RARITY_WEIGHT.Mythical).toBeLessThan(RARITY_WEIGHT.Rare);
     expect(RARITY_WEIGHT.Rare).toBeLessThan(RARITY_WEIGHT.Uncommon);
     expect(RARITY_WEIGHT.Uncommon).toBeLessThan(RARITY_WEIGHT.Common);
   });
@@ -89,7 +89,7 @@ describe('computeOdds — rarity-weighted split', () => {
     expect(RARITIES).toEqual([
       'Immortal',
       'Legendary',
-      'Epic',
+      'Mythical',
       'Rare',
       'Uncommon',
       'Common',

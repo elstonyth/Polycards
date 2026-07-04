@@ -35,6 +35,11 @@ export const Pack = model.define("pack", {
   in_stock: model.boolean().default(true),
   rank: model.number().default(0),
   status: model.enum(["active", "draft"]).default("active"),
+  // PUBLISHED odds — the PUBLIC display shown to players ({ overall, tiers }
+  // percentages, admin-authored). Pure display data: completely decoupled from
+  // the secret per-card PackOdds weights that drive the actual draw. Null =
+  // not set (the storefront hides the odds panel).
+  published_odds: model.json().nullable(),
   // reward_box pool controls — A1
   pool_enabled: model.boolean().default(false),
   draws_per_day: model.number().default(0),

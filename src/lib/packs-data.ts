@@ -1,10 +1,11 @@
-// Shared /claw pack catalog — consumed by the claw list page AND the [slug] detail
-// template. Pack `id` doubles as the route slug (/claw/<id>).
+// Pack catalog TYPES + presentational category meta (labels/icons) + the
+// statically-published odds display. Pack `id` doubles as the route slug
+// (/slots/<id>).
 //
-// NOTE (frontend-first): the pack art, prices, and categories are real (extracted from
-// the live /claw). The card pool, odds, and "recent pulls" below are MOCK for layout —
-// the real weighted odds + pull results come from the backend Packs module + open-pack
-// workflow (BUILD_PLAN Phase 5). Do not treat these odds as authoritative.
+// NOTE: the LIVE pack list comes entirely from the backend (the source of
+// truth) via src/lib/data/packs.ts — the static pack entries below are never
+// rendered as catalog; they only back `findPack` label lookups (recent-pull
+// pack names/icons) until that feed resolves labels from the backend too.
 
 /** Site-wide flat buyback % — what every sell from the vault/inventory pays.
  *  Mirrors FLAT_PERCENT in backend/packages/api/src/modules/packs/buyback-rate.ts. */
@@ -190,13 +191,14 @@ export function priceNumber(price: string): number {
 }
 
 // ---------------------------------------------------------------------------
-// MOCK card pool / odds (layout only — real data comes from the backend).
+// Card display types + the statically-published odds (real pool data comes
+// from the backend — the storefront renders no mock cards).
 // ---------------------------------------------------------------------------
 
 export type Rarity =
   | 'Immortal'
   | 'Legendary'
-  | 'Epic'
+  | 'Mythical'
   | 'Rare'
   | 'Uncommon'
   | 'Common';
@@ -208,66 +210,14 @@ export type PackCard = {
   rarity: Rarity;
 };
 
-const cardImg = (id: string) => `/cdn/cards/${id}.webp`;
-
-// Real localized graded-card art (shared with Recent Pulls / Marketplace).
-export const CARD_POOL: PackCard[] = [
-  {
-    id: 'celebi',
-    name: 'Jet-Black Spirit Celebi V CGC 10',
-    image: cardImg('FQEYWuGiKTkJpZSG6XqGHDBmH6EmxctEqk1kAT2MYzHc'),
-    value: 'RM 912.00',
-    rarity: 'Legendary',
-  },
-  {
-    id: 'mewtwo',
-    name: 'Rocket Gang Mewtwo ex CGC 10',
-    image: cardImg('9kRLkdbbvzm335GBvraQrWrNVs72gzEzynvP1RPvftTx'),
-    value: 'RM 540.00',
-    rarity: 'Epic',
-  },
-  {
-    id: 'darkrai',
-    name: 'Crown Zenith Darkrai VSTAR PSA 10',
-    image: cardImg('4h13RDtFX4MWNYjvgMPeBS1hcL4AewupiFzDvyFUUTkd'),
-    value: 'RM 318.00',
-    rarity: 'Epic',
-  },
-  {
-    id: 'jolteon',
-    name: 'Terastal Fest Jolteon ex CGC 10',
-    image: cardImg('BEnddEeBXBHyL5qWXCg6sKS5VmUbUtZaKJ1aVB8yCWHN'),
-    value: 'RM 156.00',
-    rarity: 'Rare',
-  },
-  {
-    id: 'rapidash',
-    name: 'Mega Start Deck Rapidash CGC 10',
-    image: cardImg('FFbo5jfXHHQWN8bmc88UDYSDP5QzYCCj6RwUkiWYyffC'),
-    value: 'RM 84.50',
-    rarity: 'Uncommon',
-  },
-  {
-    id: 'hooh',
-    name: 'Incandescent Arcana Ho-Oh V CGC 10',
-    image: cardImg('FjAJZ7en585MpnoLUGbuALHEmbBAPd61EZCefQzFMmRX'),
-    value: 'RM 213.00',
-    rarity: 'Rare',
-  },
-  {
-    id: 'gengar',
-    name: 'Scarlet & Violet 151 Gengar CGC 10',
-    image: cardImg('6noxMybjBLtLqicAUTrG63VhWG2FgWzDBsQGnnZEyNCG'),
-    value: 'RM 299.00',
-    rarity: 'Epic',
-  },
-];
-
-// Per-rarity pull odds (MOCK — published transparently by the backend in production).
+// Per-rarity pull odds — the statically-PUBLISHED display, decoupled by design
+// from the backend's secret per-card weights (admin-configurable in Step 4).
+// All six tiers, rarest first; dots match RARITY_RGB in src/lib/rarity.ts.
 export const ODDS: { rarity: Rarity; chance: string; dot: string }[] = [
-  { rarity: 'Legendary', chance: '0.5%', dot: 'bg-amber-400' },
-  { rarity: 'Epic', chance: '4.5%', dot: 'bg-fuchsia-400' },
-  { rarity: 'Rare', chance: '15%', dot: 'bg-sky-400' },
-  { rarity: 'Uncommon', chance: '30%', dot: 'bg-emerald-400' },
+  { rarity: 'Immortal', chance: '0.1%', dot: 'bg-orange-400' },
+  { rarity: 'Legendary', chance: '0.4%', dot: 'bg-pink-500' },
+  { rarity: 'Mythical', chance: '4.5%', dot: 'bg-purple-500' },
+  { rarity: 'Rare', chance: '15%', dot: 'bg-blue-600' },
+  { rarity: 'Uncommon', chance: '30%', dot: 'bg-sky-400' },
   { rarity: 'Common', chance: '50%', dot: 'bg-neutral-400' },
 ];

@@ -19,10 +19,10 @@ describe("cardByHandle", () => {
 });
 
 describe("makeRarityOf", () => {
-  const odds = [{ pack_id: "p1", card_id: "pikachu-001", rarity: "Epic" }];
+  const odds = [{ pack_id: "p1", card_id: "pikachu-001", rarity: "Mythical" }];
   it("looks rarity up by (pack, card) pair", () => {
     const rarityOf = makeRarityOf(odds);
-    expect(rarityOf("p1", "pikachu-001")).toBe("Epic");
+    expect(rarityOf("p1", "pikachu-001")).toBe("Mythical");
   });
   it("defaults missing pairs to Common", () => {
     const rarityOf = makeRarityOf(odds);
@@ -32,13 +32,13 @@ describe("makeRarityOf", () => {
 
 describe("toCardView", () => {
   it("shapes the canonical 8-field card view with money-normalized FMV", () => {
-    expect(toCardView(card, "Epic")).toEqual({
+    expect(toCardView(card, "Mythical")).toEqual({
       handle: "pikachu-001",
       name: "Pikachu",
       set: "Base",
       grader: "PSA",
       grade: "10",
-      rarity: "Epic",
+      rarity: "Mythical",
       market_value: 0.15,
       image: "/p.png",
     });

@@ -32,6 +32,7 @@ export async function GET(
       image: p.image,
       buyback_percent: p.buyback_percent,
       boost: p.boost,
+      published_odds: p.published_odds ?? null,
     })),
   });
 }

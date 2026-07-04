@@ -8,7 +8,7 @@ import type { PackCard, Rarity } from '@/lib/packs-data';
 
 const ODDS: { rarity: Rarity; chance: string }[] = [
   { rarity: 'Legendary', chance: '0.5%' },
-  { rarity: 'Epic', chance: '4.5%' },
+  { rarity: 'Mythical', chance: '4.5%' },
   { rarity: 'Rare', chance: '15%' },
   { rarity: 'Uncommon', chance: '30%' },
   { rarity: 'Common', chance: '50%' },
@@ -42,8 +42,8 @@ describe('sampleRarity', () => {
 
   it('crosses tier boundaries at the cumulative published chances', () => {
     // cumulative: 0.5 / 5 / 20 / 50 / 100 (%)
-    expect(sampleRarity(ODDS, 0.005)).toBe('Epic');
-    expect(sampleRarity(ODDS, 0.049)).toBe('Epic');
+    expect(sampleRarity(ODDS, 0.005)).toBe('Mythical');
+    expect(sampleRarity(ODDS, 0.049)).toBe('Mythical');
     expect(sampleRarity(ODDS, 0.05)).toBe('Rare');
     expect(sampleRarity(ODDS, 0.199)).toBe('Rare');
     expect(sampleRarity(ODDS, 0.2)).toBe('Uncommon');
@@ -60,8 +60,8 @@ describe('sampleRarity', () => {
 describe('demoDraw', () => {
   const pool = [
     card('leg', 'Legendary'),
-    card('epic-a', 'Epic'),
-    card('epic-b', 'Epic'),
+    card('epic-a', 'Mythical'),
+    card('epic-b', 'Mythical'),
     card('rare', 'Rare'),
     card('unc', 'Uncommon'),
     // no Common in the pool — mirrors the real mock CARD_POOL
@@ -73,7 +73,7 @@ describe('demoDraw', () => {
   });
 
   it('picks uniformly among cards of the sampled tier', () => {
-    // rarityRoll 0.01 → Epic; two epics — cardRoll selects within the tier
+    // rarityRoll 0.01 → Mythical; two epics — cardRoll selects within the tier
     expect(demoDraw(pool, ODDS, 0.01, 0)?.id).toBe('epic-a');
     expect(demoDraw(pool, ODDS, 0.01, 0.99)?.id).toBe('epic-b');
   });

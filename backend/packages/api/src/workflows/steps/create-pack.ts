@@ -1,7 +1,15 @@
 import { createStep, StepResponse } from '@medusajs/framework/workflows-sdk';
 import { MedusaError } from '@medusajs/framework/utils';
+import type { OddsRarity } from '@acme/odds-math';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
+
+// PUBLIC display odds ({ overall win %, per-tier % }) shown to players —
+// completely decoupled from the secret PackOdds weights driving the draw.
+export type PublishedOdds = {
+  overall: number;
+  tiers: Partial<Record<OddsRarity, number>>;
+};
 
 export type PackWriteInput = {
   slug: string;
@@ -16,6 +24,9 @@ export type PackWriteInput = {
   boost: boolean;
   rank: number;
   status: 'active' | 'draft';
+  // undefined = leave as-is (writers that don't send the field, e.g. the
+  // list-page edit modal, must not clear it); null = explicit clear.
+  published_odds?: PublishedOdds | null;
 };
 
 type CompensateData = { packId: string } | undefined;
@@ -58,6 +69,7 @@ export const createPackStep = createStep(
         boost: input.boost,
         rank: input.rank,
         status: input.status,
+        published_odds: input.published_odds ?? null,
       },
     ]);
 

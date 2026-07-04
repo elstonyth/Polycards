@@ -15,6 +15,8 @@ export type EditRow = {
   currentPct: number;
   locked: boolean;
   pctInput: string;
+  /** Admin-picked Top Hit (storefront display only; saved per toggle). */
+  topHit: boolean;
 };
 
 // Map a server odds snapshot into the editable row buffer. Used to seed the
@@ -30,6 +32,7 @@ export const mapOddsToRows = (odds: OddsRow[]): EditRow[] =>
     currentPct: o.pct,
     locked: o.locked,
     pctInput: String(o.pct),
+    topHit: o.top_hit,
   }));
 
 // Map the editable rows back into the odds-math input shape — the SAME mapping

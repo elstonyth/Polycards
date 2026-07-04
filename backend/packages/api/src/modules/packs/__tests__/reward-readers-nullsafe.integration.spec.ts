@@ -265,7 +265,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         // Simulate a scenario where a null-card_id odds row somehow reaches makeRarityOf.
         // The key becomes "packslug null" which simply misses the lookup → defaults "Common".
         const oddsWithNull = [
-          { pack_id: 'pack-a', card_id: null as unknown as string, rarity: 'Epic' },
+          { pack_id: 'pack-a', card_id: null as unknown as string, rarity: 'Mythical' },
           { pack_id: 'pack-a', card_id: 'real-card', rarity: 'Rare' },
         ];
         // Must not throw

@@ -19,7 +19,7 @@ export const TOTAL_BPS = 10000;
 export const RARITIES = [
   'Immortal',
   'Legendary',
-  'Epic',
+  'Mythical',
   'Rare',
   'Uncommon',
   'Common',
@@ -32,7 +32,7 @@ export type OddsRarity = (typeof RARITIES)[number];
 export const RARITY_WEIGHT: Record<OddsRarity, number> = {
   Immortal: 1,
   Legendary: 5,
-  Epic: 45,
+  Mythical: 45,
   Rare: 150,
   Uncommon: 300,
   Common: 500,

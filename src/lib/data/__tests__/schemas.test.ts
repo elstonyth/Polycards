@@ -40,9 +40,9 @@ describe('parseList — drops invalid items, never throws', () => {
 
   it('OddsEntry drops unknown rarity + non-finite value', () => {
     const out = parseList(OddsEntrySchema, [
-      { handle: 'x', rarity: 'Epic', market_value: 5 },
+      { handle: 'x', rarity: 'Mythical', market_value: 5 },
       { handle: 'y', rarity: 'Nope', market_value: 5 }, // unknown rarity → drop
-      { handle: 'z', rarity: 'Epic', market_value: NaN }, // → drop
+      { handle: 'z', rarity: 'Mythical', market_value: NaN }, // → drop
     ]);
     expect(out).toHaveLength(1);
   });
@@ -130,7 +130,7 @@ describe('parseOne — null on failure', () => {
       parseOne(WonCardSchema, {
         handle: 'h',
         name: 'N',
-        rarity: 'Epic',
+        rarity: 'Mythical',
         market_value: 1,
       }),
     ).not.toBeNull();

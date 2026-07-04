@@ -124,7 +124,7 @@ function getFxRate(): Promise<number> {
 
 const VALID_RARITIES: readonly Rarity[] = [
   'Legendary',
-  'Epic',
+  'Mythical',
   'Rare',
   'Uncommon',
   'Common',

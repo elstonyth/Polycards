@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
@@ -29,13 +29,14 @@ import {
   type Pack,
   type ResolvedPack,
   type PackCard,
-  CARD_POOL,
   FLAT_BUYBACK_PERCENT,
   ODDS,
   clawMachine,
   priceNumber,
 } from '@/lib/packs-data';
 import { rarityRgb } from '@/lib/rarity';
+import { publishedOddsRows } from '@/lib/packs-format';
+import { useLiveRecentPulls } from '@/lib/use-recent-pulls';
 import { useTopUp } from '@/components/app-shell/TopUpProvider';
 import PackOpenOverlay from './PackOpenOverlay';
 
@@ -90,8 +91,9 @@ export default function PackDetailClient({
   // Credit balance (A2: opens debit the pack price) — read from the app-shell
   // TopUpProvider (identity-tagged; null = logged out / loading), so this page,
   // the header chip, and the top-up sheet can never disagree.
-  // Live Recent Pulls — the server snapshot (real opens happen on the reel).
-  const recent = recentPulls;
+  // Live Recent Pulls — seeded from the server snapshot, then polled (~4s)
+  // so anyone's pull shows up here without a reload.
+  const recent = useLiveRecentPulls(recentPulls);
   // The pack-opening reveal overlay — non-null while showing the won/demo card.
   // `nonce` keys the overlay so "Open another" remounts it and re-runs the burst.
   // pullId/marketValue drive the sell-back offer (null for demo spins). The
@@ -123,32 +125,37 @@ export default function PackDetailClient({
   const ev = Math.round(priceNum * (active.boost ? 1.02 : 0.96));
   const points = priceNum * 100 * qty;
 
-  // Top Hits come from the backend prize pool (highest market_value). In 5a the
-  // pool is pool-wide (identical across packs), so it applies regardless of the
-  // selected sibling; it falls back to the static mock pool when the backend is
-  // down. Pull Odds are the SECRET-decoupled, statically-published `ODDS` — they
-  // never reflect the admin-tuned win rates (see packs.ts / route.ts).
-  const mockTopHits = useMemo(
-    () =>
-      [...CARD_POOL]
-        .sort((a, b) => priceNumber(b.value) - priceNumber(a.value))
-        .slice(0, 5),
-    [],
-  );
-  const topHits = detail?.topHits ?? mockTopHits;
+  // Top Hits come from the backend prize pool (highest market_value) — the
+  // backend is the source of truth, so a missing/empty pool renders an empty
+  // state (no mock fallback). Pull Odds are the SECRET-decoupled, statically-
+  // published `ODDS` — they never reflect the admin-tuned win rates (see
+  // packs.ts / route.ts).
+  const topHits = detail?.topHits ?? [];
 
   // The reel (openBatch) caps a single open at 3 packs.
   const maxQty = 3;
   const setQ = (n: number) => setQty(Math.min(maxQty, Math.max(1, n)));
 
+  // The admin-PUBLISHED odds — the ONLY rates players see. Null (unset) hides
+  // the whole Pull Odds panel; the static ODDS constant remains solely as the
+  // demo spin's sampling fallback so the demo still works pre-publication.
+  const publishedRows = detail?.publishedOdds
+    ? publishedOddsRows(detail.publishedOdds)
+    : null;
+
   // Free demo spin — a client-side WEIGHTED sample over the published odds
   // drives the same reveal overlay. Pure theater: no backend call, no Pull row,
   // no credit/stock effects; the real open below stays auth-gated. Draws from
-  // the live public pool when the backend supplied one, else the static mock.
+  // the live public pool only — an empty pool disables the demo (no mock).
+  const demoPool = detail?.pool ?? [];
   function demoSpin() {
     setOpenError(null);
-    const pool = detail && detail.pool.length > 0 ? detail.pool : CARD_POOL;
-    const mock = demoDraw(pool, ODDS, Math.random(), Math.random());
+    const mock = demoDraw(
+      demoPool,
+      publishedRows?.length ? publishedRows : ODDS,
+      Math.random(),
+      Math.random(),
+    );
     if (!mock) return;
     setReveal({
       card: mock,
@@ -242,19 +249,25 @@ export default function PackDetailClient({
             <p className="mb-3 text-[13px] text-white/50">
               The top items available in this pack.
             </p>
-            <div className="grid grid-cols-3 gap-3 sm:grid-cols-5">
-              {topHits.map((c) => (
-                <div key={c.id} className="flex flex-col gap-1.5">
-                  <CardThumb card={c} />
-                  <p
-                    className="truncate text-center text-[11px] font-medium text-white/70"
-                    title={c.name}
-                  >
-                    {c.value}
-                  </p>
-                </div>
-              ))}
-            </div>
+            {topHits.length === 0 ? (
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-8 text-center text-[13px] text-white/40">
+                No cards in this pack yet — check back soon.
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 gap-3 sm:grid-cols-5">
+                {topHits.map((c) => (
+                  <div key={c.id} className="flex flex-col gap-1.5">
+                    <CardThumb card={c} />
+                    <p
+                      className="truncate text-center text-[11px] font-medium text-white/70"
+                      title={c.name}
+                    >
+                      {c.value}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
           </Reveal>
         </div>
 
@@ -355,7 +368,8 @@ export default function PackDetailClient({
               <button
                 type="button"
                 onClick={demoSpin}
-                className="flex h-11 items-center justify-between rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-4 text-sm font-medium text-emerald-200 transition-colors hover:bg-emerald-500/20 disabled:opacity-60"
+                disabled={demoPool.length === 0}
+                className="flex h-11 items-center justify-between rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-4 text-sm font-medium text-emerald-200 transition-colors hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <span className="flex items-center gap-2">
                   <Play className="h-4 w-4 fill-current" aria-hidden />
@@ -464,34 +478,49 @@ export default function PackDetailClient({
         </aside>
       </div>
 
-      {/* ===== Pull Odds + Recent Pulls (below the fold) ===== */}
+      {/* ===== Pull Odds + Recent Pulls (below the fold) =====
+          The odds panel renders ONLY the admin-published rates from the
+          backend; a pack with no published odds shows no panel at all. */}
       <div className="mb-10 mt-8 grid gap-6 lg:grid-cols-2">
-        <Reveal as="section" className="h-full min-w-0">
-          <div className="mb-3 flex items-center gap-2">
-            <h2 className="font-heading text-lg font-bold tracking-tight text-white">
-              Pull Odds (by rarity)
-            </h2>
-          </div>
-          <ul className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]">
-            {ODDS.map((o) => (
-              <li
-                key={o.rarity}
-                className="flex items-center justify-between border-b border-white/5 px-4 py-3 last:border-b-0"
-              >
-                <span className="flex items-center gap-2.5 text-[13px] font-medium text-white">
-                  <span className={cn('h-2.5 w-2.5 rounded-full', o.dot)} />
-                  {o.rarity}
+        {detail?.publishedOdds && publishedRows && (
+          <Reveal as="section" className="h-full min-w-0">
+            <div className="mb-3 flex items-center gap-2">
+              <h2 className="font-heading text-lg font-bold tracking-tight text-white">
+                Pull Odds (by rarity)
+              </h2>
+            </div>
+            <ul className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]">
+              <li className="flex items-center justify-between border-b border-white/5 bg-white/[0.03] px-4 py-3">
+                <span className="text-[13px] font-semibold text-white">
+                  Overall win rate
                 </span>
-                <span className="text-[13px] tabular-nums text-white/55">
-                  {o.chance}
+                <span className="text-[13px] font-semibold tabular-nums text-white">
+                  {detail.publishedOdds.overall}%
                 </span>
               </li>
-            ))}
-          </ul>
-          <p className="mt-2 px-1 text-[11px] text-white/35">
-            Indicative odds — final rates are published by the backend.
-          </p>
-        </Reveal>
+              {publishedRows.map((o) => (
+                <li
+                  key={o.rarity}
+                  className="flex items-center justify-between border-b border-white/5 px-4 py-3 last:border-b-0"
+                >
+                  <span className="flex items-center gap-2.5 text-[13px] font-medium text-white">
+                    <span
+                      className="h-2.5 w-2.5 rounded-full"
+                      style={{ background: `rgb(${rarityRgb(o.rarity)})` }}
+                    />
+                    {o.rarity}
+                  </span>
+                  <span className="text-[13px] tabular-nums text-white/55">
+                    {o.chance}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 px-1 text-[11px] text-white/35">
+              Published rates for this pack.
+            </p>
+          </Reveal>
+        )}
 
         <Reveal as="section" delay={90} className="h-full min-w-0">
           <div className="mb-3 flex items-center gap-2">
@@ -517,6 +546,9 @@ export default function PackDetailClient({
                   />
                   <span className="min-w-0 flex-1 truncate text-[13px] text-white/80">
                     {c.name}
+                  </span>
+                  <span className="shrink-0 text-[11px] text-white/45">
+                    {c.who}
                   </span>
                   <span className="shrink-0 text-[12px] tabular-nums text-white/50">
                     {c.value}

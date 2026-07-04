@@ -1,5 +1,5 @@
 import { client } from './client';
-import type { ComputedOdd, OddsInput } from '@acme/odds-math';
+import type { ComputedOdd, OddsInput, OddsRarity } from '@acme/odds-math';
 
 // Typed facade for the custom gacha admin routes.
 //
@@ -11,6 +11,13 @@ import type { ComputedOdd, OddsInput } from '@acme/odds-math';
 // our custom /admin/packs endpoints. So we narrow `client` to a hand-written
 // facade describing exactly those endpoints. (Cookie auth via credentials:
 // 'include' in client.ts covers the auto-protected /admin/* routes.)
+
+// PUBLIC display odds shown to players ({ overall win %, per-tier % }) —
+// display-only, fully decoupled from the per-card win-rate weights.
+export interface PublishedOdds {
+  overall: number;
+  tiers: Partial<Record<OddsRarity, number>>;
+}
 
 export interface AdminPack {
   slug: string;
@@ -24,10 +31,12 @@ export interface AdminPack {
    *  Later sells from the vault always pay the flat rate. */
   buyback_percent: number;
   boost: boolean;
+  published_odds: PublishedOdds | null;
 }
 
 // Create/update payload. `slug` is sent on create only (immutable thereafter —
 // on update it travels as the `$slug` path param, not the body).
+// `published_odds` OMITTED = keep the stored value; null = explicit clear.
 export interface AdminPackWrite {
   slug?: string;
   title: string;
@@ -38,6 +47,7 @@ export interface AdminPackWrite {
   boost: boolean;
   rank: number;
   status: 'active' | 'draft';
+  published_odds?: PublishedOdds | null;
 }
 
 // No rarity here — rarity is a per-pack property (PackOdds), edited in each
@@ -126,6 +136,8 @@ export interface OddsRow {
   locked: boolean;
   /** Current win % = weight / Σweight × 100. */
   pct: number;
+  /** Admin-picked Top Hit flag (storefront display only). */
+  top_hit: boolean;
 }
 
 export interface PackOddsResponse {
@@ -198,6 +210,12 @@ type PacksApi = {
             members: string[];
             added: number;
             removed: number;
+          }>;
+        };
+        'top-hits': {
+          mutate: (input: { $slug: string; card_ids: string[] }) => Promise<{
+            top_hits: string[];
+            changed: number;
           }>;
         };
       };

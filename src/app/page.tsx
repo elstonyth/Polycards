@@ -65,15 +65,21 @@ export default async function HomePage() {
             <ArrowRight className="h-3.5 w-3.5" aria-hidden />
           </Link>
         </div>
-        <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-          {packs.map((pack) => (
-            <PackTile
-              key={pack.id}
-              pack={pack}
-              chase={chaseByPack.get(pack.id) ?? null}
-            />
-          ))}
-        </div>
+        {packs.length === 0 ? (
+          <p className="mt-4 rounded-2xl border border-white/10 bg-neutral-900 px-4 py-10 text-center text-[13px] text-neutral-500">
+            No packs available right now — check back soon.
+          </p>
+        ) : (
+          <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+            {packs.map((pack) => (
+              <PackTile
+                key={pack.id}
+                pack={pack}
+                chase={chaseByPack.get(pack.id) ?? null}
+              />
+            ))}
+          </div>
+        )}
       </section>
 
       <section className="mt-10">

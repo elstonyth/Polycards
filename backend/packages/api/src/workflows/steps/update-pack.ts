@@ -3,7 +3,7 @@ import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
 import { hasRollablePool } from '../../modules/packs/rollable-pool';
-import type { PackWriteInput } from './create-pack';
+import type { PackWriteInput, PublishedOdds } from './create-pack';
 
 // slug is immutable (it keys PackOdds / the /claw route); it selects the row.
 export type UpdatePackInput = PackWriteInput;
@@ -18,6 +18,7 @@ type PackSnapshot = {
   boost: boolean;
   rank: number;
   status: 'active' | 'draft';
+  published_odds: PublishedOdds | null;
 };
 
 // update-pack — patch a pack's listing fields (everything but slug).
@@ -59,6 +60,7 @@ export const updatePackStep = createStep(
       boost: pack.boost,
       rank: pack.rank,
       status: pack.status,
+      published_odds: (pack.published_odds as PublishedOdds | null) ?? null,
     };
 
     await packs.updatePacks([
@@ -72,6 +74,11 @@ export const updatePackStep = createStep(
         boost: input.boost,
         rank: input.rank,
         status: input.status,
+        // undefined = the writer didn't send the field — keep the stored value
+        // (the list-page edit modal doesn't know about published odds).
+        ...(input.published_odds !== undefined
+          ? { published_odds: input.published_odds }
+          : {}),
       },
     ]);
 

@@ -2031,6 +2031,15 @@
           ],
           "mappedType": "enum"
         },
+        "published_odds": {
+          "name": "published_odds",
+          "type": "jsonb",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "json"
+        },
         "pool_enabled": {
           "name": "pool_enabled",
           "type": "boolean",
@@ -2168,7 +2177,7 @@
           "enumItems": [
             "Immortal",
             "Legendary",
-            "Epic",
+            "Mythical",
             "Rare",
             "Uncommon",
             "Common"
@@ -2186,6 +2195,16 @@
         },
         "locked": {
           "name": "locked",
+          "type": "boolean",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "default": "false",
+          "mappedType": "boolean"
+        },
+        "top_hit": {
+          "name": "top_hit",
           "type": "boolean",
           "unsigned": false,
           "autoincrement": false,

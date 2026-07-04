@@ -12,7 +12,7 @@ import {
 } from '@/lib/reel';
 import type { Rarity } from '@/lib/packs-data';
 
-const POOL: Rarity[] = ['Legendary', 'Epic', 'Rare', 'Uncommon', 'Common'];
+const POOL: Rarity[] = ['Legendary', 'Mythical', 'Rare', 'Uncommon', 'Common'];
 
 describe('reelTarget', () => {
   it('centers the winner index under the payline', () => {
@@ -39,7 +39,7 @@ describe('buildStrip', () => {
   });
 
   it('fills every non-winner cell from the pool', () => {
-    const strip = buildStrip('Epic', POOL, STRIP_LEN, WIN_INDEX);
+    const strip = buildStrip('Mythical', POOL, STRIP_LEN, WIN_INDEX);
     strip.forEach((r, i) => {
       if (i !== WIN_INDEX) expect(POOL).toContain(r);
     });

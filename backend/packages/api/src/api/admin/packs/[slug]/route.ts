@@ -30,6 +30,7 @@ export async function GET(
       boost: pack.boost,
       rank: pack.rank,
       status: pack.status,
+      published_odds: pack.published_odds ?? null,
     },
   });
 }

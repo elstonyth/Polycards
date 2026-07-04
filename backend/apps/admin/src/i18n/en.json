@@ -13,6 +13,9 @@
       "category": "Category",
       "status": "Status",
       "price": "Price",
+      "order": "Order",
+      "moveUp": "Move up",
+      "moveDown": "Move down",
       "action": "Win rates",
       "actions": "Actions",
       "winRates": "Pool & odds",
@@ -20,6 +23,15 @@
       "delete": "Delete",
       "empty": "No packs found.",
       "loadError": "Could not load packs."
+    },
+    "published": {
+      "title": "Published odds (public)",
+      "subtitle": "The PUBLIC win rates shown to players on the pack page — overall win rate plus a rate per rarity tier. Display-only: completely independent of the internal per-card win rates below.",
+      "overall": "Overall win %",
+      "save": "Save published odds",
+      "saved": "Published odds saved.",
+      "sum": "Tier total: {{sum}}% (tiers usually sum to 100%)",
+      "notSet": "Not set yet — the storefront hides the odds panel for this pack until you save."
     },
     "form": {
       "createTitle": "New pack",
@@ -92,7 +104,8 @@
       "activateNeedsPool": "Add at least one card to the prize pool first.",
       "draftBanner": "Draft — hidden from the storefront. Add cards to the prize pool, save win rates, then activate.",
       "draftReadyBanner": "Draft — hidden from the storefront. The prize pool has cards; activate when the win rates look right.",
-      "unitsOwed": "{{count}} owed to winners"
+      "unitsOwed": "{{count}} owed to winners",
+      "topHit": "Top hit"
     }
   },
   "pcAdd": {

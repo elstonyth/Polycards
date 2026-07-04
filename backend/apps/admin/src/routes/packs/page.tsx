@@ -1,4 +1,4 @@
-import { useRef, useState, type ChangeEvent } from 'react';
+import { useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -7,6 +7,7 @@ import {
   Text,
   Table,
   Button,
+  IconButton,
   Switch,
   Input,
   Select,
@@ -16,7 +17,7 @@ import {
   Prompt,
   toast,
 } from '@medusajs/ui';
-import { Gift } from '@medusajs/icons';
+import { ArrowDownMini, ArrowUpMini, Gift } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import { type AdminPack, type AdminPackWrite } from '../../lib/packs-api';
 import {
@@ -190,6 +191,47 @@ const PacksListPage = () => {
     }
   };
 
+  // Category groups in display order (the API list is already (category, rank)
+  // sorted; re-sort defensively so the arrows always match what is rendered —
+  // rank ties broken by slug, same as nothing guarantees in the DB).
+  const grouped = useMemo(() => {
+    const m = new Map<string, AdminPack[]>();
+    for (const p of packs ?? []) {
+      const g = m.get(p.category) ?? [];
+      g.push(p);
+      m.set(p.category, g);
+    }
+    for (const g of m.values())
+      g.sort((a, b) => a.rank - b.rank || a.slug.localeCompare(b.slug));
+    return m;
+  }, [packs]);
+
+  // Render rows in the exact grouped order so the position numbers always
+  // match what's on screen, even while duplicate ranks are still unnormalized.
+  const rows = useMemo(() => [...grouped.values()].flat(), [grouped]);
+
+  // Move a pack one position up/down within its category and persist rank =
+  // position for every row that changed — this also normalizes duplicate
+  // ranks (e.g. several rank-0 packs) the first time a group is reordered.
+  const movePack = async (p: AdminPack, dir: -1 | 1) => {
+    const group = grouped.get(p.category) ?? [];
+    const i = group.findIndex((x) => x.slug === p.slug);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= group.length) return;
+    const next = [...group];
+    [next[i], next[j]] = [next[j], next[i]];
+    const writes = next
+      .map((pack, rank) => ({ pack, rank }))
+      .filter(({ pack, rank }) => pack.rank !== rank);
+    try {
+      await Promise.all(
+        writes.map(({ pack, rank }) => updatePack.mutateAsync({ ...pack, rank })),
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   return (
     <Container className="divide-y p-0">
       <div className="flex items-start justify-between gap-4 px-6 py-4">
@@ -222,6 +264,7 @@ const PacksListPage = () => {
         <Table>
           <Table.Header>
             <Table.Row>
+              <Table.HeaderCell>{t('packs.list.order')}</Table.HeaderCell>
               <Table.HeaderCell>{t('packs.list.pack')}</Table.HeaderCell>
               <Table.HeaderCell>{t('packs.list.category')}</Table.HeaderCell>
               <Table.HeaderCell>{t('packs.list.status')}</Table.HeaderCell>
@@ -232,12 +275,46 @@ const PacksListPage = () => {
             </Table.Row>
           </Table.Header>
           <Table.Body>
-            {packs.map((p) => (
+            {rows.map((p) => {
+              const group = grouped.get(p.category) ?? [];
+              const pos = group.findIndex((x) => x.slug === p.slug);
+              return (
               <Table.Row
                 key={p.slug}
                 className="cursor-pointer"
                 onClick={() => navigate(`/packs/${p.slug}`)}
               >
+                <Table.Cell>
+                  <div className="flex items-center gap-1">
+                    <span className="text-ui-fg-subtle w-6 tabular-nums">
+                      {pos + 1}
+                    </span>
+                    <IconButton
+                      size="small"
+                      variant="transparent"
+                      aria-label={t('packs.list.moveUp')}
+                      disabled={pos <= 0 || updatePack.isPending}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void movePack(p, -1);
+                      }}
+                    >
+                      <ArrowUpMini />
+                    </IconButton>
+                    <IconButton
+                      size="small"
+                      variant="transparent"
+                      aria-label={t('packs.list.moveDown')}
+                      disabled={pos >= group.length - 1 || updatePack.isPending}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void movePack(p, 1);
+                      }}
+                    >
+                      <ArrowDownMini />
+                    </IconButton>
+                  </div>
+                </Table.Cell>
                 <Table.Cell className="font-medium">{p.title}</Table.Cell>
                 <Table.Cell className="text-ui-fg-subtle">
                   {p.category}
@@ -283,7 +360,8 @@ const PacksListPage = () => {
                   </div>
                 </Table.Cell>
               </Table.Row>
-            ))}
+              );
+            })}
           </Table.Body>
         </Table>
       )}

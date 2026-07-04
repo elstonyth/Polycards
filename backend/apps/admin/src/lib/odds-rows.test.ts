@@ -12,6 +12,7 @@ const oddsRow = (over: Partial<OddsRow> = {}): OddsRow => ({
   weight: 150,
   locked: false,
   pct: 12.5,
+  top_hit: false,
   ...over,
 });
 
@@ -25,6 +26,7 @@ const editRow = (over: Partial<EditRow> = {}): EditRow => ({
   currentPct: 12.5,
   locked: false,
   pctInput: '12.5',
+  topHit: false,
   ...over,
 });
 
@@ -41,6 +43,7 @@ describe('mapOddsToRows', () => {
         currentPct: 12.5,
         locked: false,
         pctInput: '12.5',
+        topHit: false,
       },
     ]);
   });

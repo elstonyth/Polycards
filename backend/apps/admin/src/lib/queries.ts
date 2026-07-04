@@ -270,6 +270,18 @@ export const useSaveMembers = () => {
   });
 };
 
+export const useSaveTopHits = () =>
+  useMutation({
+    mutationFn: (vars: { slug: string; card_ids: string[] }) =>
+      packsApi.admin.packs.$slug['top-hits'].mutate({
+        $slug: vars.slug,
+        card_ids: vars.card_ids,
+      }),
+    // NO invalidation on purpose: the editor updates its buffer optimistically
+    // and a refetch would reseed the rows, clobbering in-progress win-rate
+    // edits. Flags are the only change, so local state == server state.
+  });
+
 export const useAdjustCredits = () => {
   const qc = useQueryClient();
   return useMutation({
