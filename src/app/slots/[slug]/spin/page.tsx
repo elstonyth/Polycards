@@ -1,7 +1,6 @@
 // src/app/slots/[slug]/spin/page.tsx
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import { findPack } from '@/lib/packs-data';
 import { getPackBySlug, getPackDetail, getRecentPulls } from '@/lib/data/packs';
 import SlotMachineClient from '../SlotMachineClient';
 
@@ -17,9 +16,11 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  const pack = findPack(slug);
+  // Backend catalog (source of truth), same as the sibling detail page — a
+  // backend-created pack gets a real title. Next dedupes the fetch with the body.
+  const base = await getPackBySlug(slug);
   return {
-    title: pack ? `${pack.name} — Slot Machine` : 'Slot Machine',
+    title: base ? `${base.pack.name} — Slot Machine` : 'Slot Machine',
   };
 }
 

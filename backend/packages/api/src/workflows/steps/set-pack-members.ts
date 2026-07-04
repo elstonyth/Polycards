@@ -109,27 +109,6 @@ export const setPackMembersStep = createStep(
       }
     }
 
-    let createdIds: string[] = [];
-    let createdByCard = new Map<string, string>();
-    if (toAdd.length) {
-      const created = await packs.createPackOdds(
-        toAdd.map((card_id) => ({
-          pack_id: input.pack_id,
-          card_id,
-          // New members join as Common; the operator picks the real per-pack
-          // tier in the pool editor, which recomputes the weights from it.
-          rarity: 'Common' as const,
-          weight: NEW_MEMBER_WEIGHT,
-          locked: false,
-        })),
-      );
-      createdIds = created.map((c) => c.id);
-      createdByCard = new Map(created.map((c) => [c.card_id as string, c.id]));
-    }
-    if (toRemove.length) {
-      await packs.deletePackOdds(toRemove.map((o) => o.id));
-    }
-
     // Re-normalize so a membership edit can never dilute a LOCKED win rate:
     // adding a weight-100 row to a normalized Σ=10000 pool would silently
     // shave every rate (a 95% lock → ~94.1%), and since the UI no longer
@@ -140,6 +119,8 @@ export const setPackMembersStep = createStep(
     // only when the result can't be honored (e.g. a pure removal leaving an
     // all-locked pool whose locks no longer sum to 100); the draw itself is
     // scale-invariant, so untouched weights still roll proportionally.
+    // computeOdds is pure, so the weights are derived BEFORE any write —
+    // new members are created directly at their final normalized weight.
     const originalTotal = existing.reduce((s, o) => s + o.weight, 0) || 1;
     const survivors = existing.filter((o) => desiredSet.has(o.card_id));
     const entries: OddsInput[] = [
@@ -156,22 +137,40 @@ export const setPackMembersStep = createStep(
         rarity: 'Common',
       })),
     ];
-    let reweighted: { id: string; weight: number }[] = [];
-    if (entries.length > 0) {
+    const weightByCard: Map<string, number> | null = (() => {
+      if (entries.length === 0) return null;
       const { computed, error } = computeOdds(entries);
-      if (!error) {
-        const idByCard = new Map<string, string>([
-          ...survivors.map((o) => [o.card_id, o.id] as const),
-          ...createdByCard.entries(),
-        ]);
-        const updates = computed.flatMap((c) => {
-          const id = idByCard.get(c.card_id);
-          return id ? [{ id, weight: c.weight }] : [];
-        });
-        reweighted = survivors.map((o) => ({ id: o.id, weight: o.weight }));
-        await packs.updatePackOdds(updates);
-      }
-    }
+      return error
+        ? null
+        : new Map(computed.map((c) => [c.card_id, c.weight]));
+    })();
+
+    // Create + delete + reweigh land in ONE transaction (applyPackMemberDiff):
+    // a failed step never runs its own compensation, so without the txn a
+    // mid-diff crash could leave the pool half-migrated.
+    const reweighted = weightByCard
+      ? survivors.map((o) => ({ id: o.id, weight: o.weight }))
+      : [];
+    const { created_ids: createdIds } = await packs.applyPackMemberDiff({
+      create: toAdd.map((card_id) => ({
+        pack_id: input.pack_id,
+        card_id,
+        // New members join as Common; the operator picks the real per-pack
+        // tier in the pool editor, which recomputes the weights from it.
+        rarity: 'Common' as const,
+        weight: weightByCard?.get(card_id) ?? NEW_MEMBER_WEIGHT,
+        locked: false,
+      })),
+      remove_ids: toRemove.map((o) => o.id),
+      reweigh: weightByCard
+        ? survivors.flatMap((o) => {
+            const weight = weightByCard.get(o.card_id);
+            return weight === undefined || weight === o.weight
+              ? []
+              : [{ id: o.id, weight }];
+          })
+        : [],
+    });
 
     const removed: RemovedRow[] = toRemove.map((o) => ({
       pack_id: o.pack_id,

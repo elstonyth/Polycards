@@ -6,6 +6,7 @@ import {
   MedusaContext,
 } from '@medusajs/framework/utils';
 import type { Context, HttpTypes } from '@medusajs/framework/types';
+import type { OddsRarity } from '@acme/odds-math';
 import { validateDeliveryRequest, snapshotAddress } from './delivery';
 import { rewardsRedemptionEnabled } from './rewards-gate';
 import Pack from './models/pack';
@@ -231,6 +232,39 @@ class PacksModuleService extends MedusaService({
   DailyClaim,
   DailyRewardSettings,
 }) {
+  // Apply a pack-membership diff (add rows + delete rows + renormalize
+  // survivor weights) as ONE transaction. The set-pack-members workflow step
+  // computes the diff; a failed step never runs its OWN compensation, so
+  // without this the pool could be left half-migrated (e.g. adds committed,
+  // removals not) by a mid-diff crash. All three writes share the injected
+  // txn and roll back together.
+  @InjectTransactionManager()
+  async applyPackMemberDiff(
+    diff: {
+      create: {
+        pack_id: string;
+        card_id: string;
+        rarity: OddsRarity;
+        weight: number;
+        locked: boolean;
+      }[];
+      remove_ids: string[];
+      reweigh: { id: string; weight: number }[];
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ created_ids: string[] }> {
+    const created = diff.create.length
+      ? await this.createPackOdds(diff.create, sharedContext)
+      : [];
+    if (diff.remove_ids.length) {
+      await this.deletePackOdds(diff.remove_ids, sharedContext);
+    }
+    if (diff.reweigh.length) {
+      await this.updatePackOdds(diff.reweigh, sharedContext);
+    }
+    return { created_ids: created.map((c) => c.id) };
+  }
+
   // Commission engine globals. Reads the singleton row; falls back to defaults
   // when absent. COMMISSION_COOLDOWN_DAYS env override forces the demo (0) and
   // lets integration tests pin maturity deterministically without a DB write.

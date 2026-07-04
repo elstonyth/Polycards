@@ -67,48 +67,72 @@ if (await page.locator('input[name="email"]').count()) {
 }
 
 await page.waitForSelector('table tbody tr', { timeout: 20000 });
-console.log('BEFORE first row:', await firstRowTitle(page));
-console.log('BEFORE storefront:', (await storefrontOrder()).join(' | '));
-await page.screenshot({
-  path: `${OUT}/step2-admin-order-before.png`,
-  fullPage: false,
-});
-
-// Move the top pack (Mythic) down one — Legend should take position 1.
 const mythicRow = page.locator('table tbody tr', { hasText: 'Mythic Pack' });
-await mythicRow.getByLabel('Move down').click();
-await waitFor(
-  () => firstRowTitle(page),
-  'Legend Pack',
-  'admin first row after move',
-);
-console.log('AFTER  first row:', await firstRowTitle(page));
-await page.screenshot({
-  path: `${OUT}/step2-admin-order-after.png`,
-  fullPage: false,
-});
 
-// Storefront must now lead with Legend.
-await waitFor(
-  async () => (await storefrontOrder())[0],
-  'Legend Pack',
-  'storefront order after move',
-);
-console.log('AFTER  storefront:', (await storefrontOrder()).join(' | '));
+// This script reorders REAL catalog data — if any assertion throws after the
+// move, the finally block still restores Mythic to the top and closes the
+// browser (no permanently flipped catalog, no leaked process).
+let moved = false;
+try {
+  console.log('BEFORE first row:', await firstRowTitle(page));
+  console.log('BEFORE storefront:', (await storefrontOrder()).join(' | '));
+  await page.screenshot({
+    path: `${OUT}/step2-admin-order-before.png`,
+    fullPage: false,
+  });
 
-// Restore: move Mythic back up.
-await mythicRow.getByLabel('Move up').click();
-await waitFor(
-  () => firstRowTitle(page),
-  'Mythic Pack',
-  'admin first row after restore',
-);
-await waitFor(
-  async () => (await storefrontOrder())[0],
-  'Mythic Pack',
-  'storefront order after restore',
-);
-console.log('RESTORED storefront:', (await storefrontOrder()).join(' | '));
+  // Move the top pack (Mythic) down one — Legend should take position 1.
+  await mythicRow.getByLabel('Move down').click();
+  moved = true;
+  await waitFor(
+    () => firstRowTitle(page),
+    'Legend Pack',
+    'admin first row after move',
+  );
+  console.log('AFTER  first row:', await firstRowTitle(page));
+  await page.screenshot({
+    path: `${OUT}/step2-admin-order-after.png`,
+    fullPage: false,
+  });
 
-await browser.close();
+  // Storefront must now lead with Legend.
+  await waitFor(
+    async () => (await storefrontOrder())[0],
+    'Legend Pack',
+    'storefront order after move',
+  );
+  console.log('AFTER  storefront:', (await storefrontOrder()).join(' | '));
+
+  // Restore: move Mythic back up.
+  await mythicRow.getByLabel('Move up').click();
+  moved = false;
+  await waitFor(
+    () => firstRowTitle(page),
+    'Mythic Pack',
+    'admin first row after restore',
+  );
+  await waitFor(
+    async () => (await storefrontOrder())[0],
+    'Mythic Pack',
+    'storefront order after restore',
+  );
+  console.log('RESTORED storefront:', (await storefrontOrder()).join(' | '));
+} finally {
+  if (moved) {
+    // Best-effort data restore on failure paths.
+    try {
+      await mythicRow.getByLabel('Move up').click();
+      await waitFor(
+        () => firstRowTitle(page),
+        'Mythic Pack',
+        'admin first row after failure restore',
+        10,
+      );
+      console.warn('Restored Mythic Pack after mid-run failure.');
+    } catch {
+      console.error('FAILED to restore pack order — fix manually in admin.');
+    }
+  }
+  await browser.close();
+}
 console.log('OK: admin arrows reorder -> storefront follows -> restored');

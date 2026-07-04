@@ -24,6 +24,7 @@ const admin = await fetch(`${BASE}/auth/user/emailpass`, {
     password: ADMIN_PASSWORD,
   }),
 }).then((r) => r.json());
+if (!admin.token) throw new Error('admin auth failed — check QA_ADMIN_* env');
 const AH = {
   'Content-Type': 'application/json',
   Authorization: `Bearer ${admin.token}`,

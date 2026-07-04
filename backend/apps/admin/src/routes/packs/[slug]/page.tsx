@@ -117,7 +117,6 @@ const PackOddsEditorPage = () => {
   // invalidation (see useSaveTopHits) so in-progress win-rate edits survive.
   const toggleTopHit = async (cardId: string) => {
     if (!rows || saveTopHits.isPending) return;
-    const prev = rows;
     const next = rows.map((x) =>
       x.card_id === cardId ? { ...x, topHit: !x.topHit } : x,
     );
@@ -128,7 +127,14 @@ const PackOddsEditorPage = () => {
         card_ids: next.filter((x) => x.topHit).map((x) => x.card_id),
       });
     } catch (err) {
-      setRows(prev);
+      // Flip back ONLY this card's flag — a whole-array snapshot restore would
+      // discard rate/lock edits made on other rows while the save was in flight.
+      setRows(
+        (cur) =>
+          cur?.map((x) =>
+            x.card_id === cardId ? { ...x, topHit: !x.topHit } : x,
+          ) ?? null,
+      );
       toast.error(err instanceof Error ? err.message : String(err));
     }
   };
