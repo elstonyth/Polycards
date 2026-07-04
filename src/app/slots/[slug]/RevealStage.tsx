@@ -182,7 +182,10 @@ export function RevealStage({
           {cardAt}
         </GalleryRail>
       )}
-      {flipped && !expired && (
+      {/* Clock is honest + always legible: it shows from review entry (before
+          the flip), since the shared window drains from review start — not only
+          once flipped. The per-card sell footer stays flip-gated (above). */}
+      {phase === 'review' && deadlineMs !== null && !expired && (
         <AuctionClock
           deadlineMs={deadlineMs}
           secondsLeft={secondsLeft}
@@ -203,7 +206,9 @@ export function RevealStage({
           onConfirm={() => {
             const i = confirmIndex;
             setConfirmIndex(null);
-            void sell(i).then(() => sfx('credit'));
+            void sell(i).then((ok) => {
+              if (ok) sfx('credit');
+            });
           }}
           onCancel={() => setConfirmIndex(null)}
         />
