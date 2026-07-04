@@ -149,7 +149,13 @@ export default function SlotMachineClient({
   );
 
   const canAfford = balance !== null && balance >= cost * reels;
-  const spinGuarded = phase === 'resolving' || phase === 'spinning';
+  // Spin is inert during the resolve/spin AND the reveal theater (flood /
+  // transform) — a tap there is a skip gesture, not a new spin.
+  const spinGuarded =
+    phase === 'resolving' ||
+    phase === 'spinning' ||
+    phase === 'flood' ||
+    phase === 'transform';
   const canAdjustReels = phase === 'idle' || phase === 'review';
 
   // Flash a meter direction cue, auto-resetting after the roll finishes.
@@ -179,6 +185,10 @@ export default function SlotMachineClient({
 
   async function handleSpin() {
     if (spinGuarded) return;
+    // Clear any in-flight reveal-theater timers (same as skipToCards) so a
+    // stale flood→transform→review handoff can't fire over the new spin.
+    if (floodTimer.current !== null) clearTimeout(floodTimer.current);
+    if (transformTimer.current !== null) clearTimeout(transformTimer.current);
     if (!customer) {
       openAuth('login');
       return;
