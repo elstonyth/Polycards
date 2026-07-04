@@ -26,7 +26,8 @@ export const qk = {
   deliveryOrders: (status?: string) =>
     ['admin', 'delivery-orders', status ?? 'all'] as const,
   deliveryOrder: (id: string) => ['admin', 'delivery-order', id] as const,
-  rewardPool: (tier: string) => ['admin', 'reward-pool', tier] as const,
   fxRate: ['admin', 'pricing', 'fx'] as const,
-  dailyRewardSettings: ['admin', 'daily-reward-settings'] as const,
+  dailyBoxes: ['admin', 'daily-rewards', 'boxes'] as const,
+  dailyBox: (tier: string) => ['admin', 'daily-rewards', 'boxes', tier] as const,
+  voucherLadder: ['admin', 'daily-rewards', 'vouchers'] as const,
 };

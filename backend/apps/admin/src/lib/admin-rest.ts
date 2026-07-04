@@ -463,86 +463,91 @@ export async function updateDeliveryOrder(
   return (await res.json()) as { order_id: string; status: DeliveryStatus };
 }
 
-// ── Reward pools (VIP reward-box authoring) ──────────────────────────────────
-export interface RewardPoolEntryView {
-  id: string;
-  kind: 'product' | 'credit' | 'nothing';
-  product_handle: string | null;
-  credit_amount: number | null; // decimal MYR (Number()-coerced server-side)
-  weight: number;
-}
+// ── Daily Rewards (level-range vouchers + VIP-tier boxes) ───────────────────
 
-export interface RewardPoolResponse {
-  pool: {
-    slug: string;
-    pool_enabled: boolean;
-    draws_per_day: number;
-    status: string;
-  } | null;
-  entries: RewardPoolEntryView[];
-}
-
-export interface RewardPoolBody {
-  entries: {
-    kind: 'product' | 'credit' | 'nothing';
-    product_handle?: string | null;
-    credit_amount?: number | null;
-    weight: number;
-  }[];
+export interface DailyBoxSummary {
+  tier: string;
+  name: string;
+  enabled: boolean;
   draws_per_day: number;
-  pool_enabled: boolean;
+  prize_count: number;
+  customer_count: number;
+  level_from: number;
+  level_to: number;
 }
 
-// POST returns a different shape than GET — callers ignore it and refetch.
-export interface SaveRewardPoolResult {
-  pool: {
-    pack_slug: string;
-    entries_count: number;
-    draws_per_day: number;
-    pool_enabled: boolean;
-  };
+export interface DailyBoxPrizeDTO {
+  id?: string;
+  kind: 'credit' | 'product' | 'voucher' | 'nothing';
+  payload: Record<string, unknown>;
+  locked: boolean;
+  pct: number;
 }
 
-// ── Reward Pools ─────────────────────────────────────────────────────────────
+export interface DailyBoxEditorDTO {
+  box: { tier: string; name: string; enabled: boolean; draws_per_day: number };
+  prizes: DailyBoxPrizeDTO[];
+}
 
-// GET the reward_box pool config + entries for a VIP tier. Empty body shape
-// ({ pool: null, entries: [] }) means the tier was never authored.
-export async function getRewardPool(tier: string): Promise<RewardPoolResponse> {
-  return getJson<RewardPoolResponse>(
-    `/admin/reward-pools/${encodeURIComponent(tier)}`,
+export interface DailyBoxSaveBody {
+  name: string;
+  enabled: boolean;
+  draws_per_day: number;
+  reason: string;
+  prizes: {
+    kind: 'credit' | 'product' | 'voucher' | 'nothing';
+    locked: boolean;
+    pct: number;
+    amount_myr?: number;
+    product_handle?: string;
+    qty?: number;
+  }[];
+}
+
+export interface VoucherRangeDTO {
+  from: number;
+  to: number;
+  amount_myr: number;
+}
+
+export interface VoucherLadderDTO {
+  levels: { level: number; amount_myr: number }[];
+  ranges: VoucherRangeDTO[];
+}
+
+// GET the VIP-tier daily boxes list (summary row per tier).
+export async function getDailyBoxes(): Promise<{ boxes: DailyBoxSummary[] }> {
+  return getJson<{ boxes: DailyBoxSummary[] }>('/admin/daily-rewards/boxes');
+}
+
+// GET one tier's box config + prize table. 404s for an unknown tier.
+export async function getDailyBox(tier: string): Promise<DailyBoxEditorDTO> {
+  return getJson<DailyBoxEditorDTO>(
+    `/admin/daily-rewards/boxes/${encodeURIComponent(tier)}`,
   );
 }
 
-// Replace-all the tier's reward pool. Throws Error(message) on a 400 validation
+// Replace-all a tier's box + prizes. Throws Error(message) on a 400 validation
 // failure (errorMessage surfaces the backend MedusaError message).
-export async function saveRewardPool(
+export async function saveDailyBox(
   tier: string,
-  body: RewardPoolBody,
-): Promise<SaveRewardPoolResult> {
-  return postJson<SaveRewardPoolResult>(
-    `/admin/reward-pools/${encodeURIComponent(tier)}`,
+  body: DailyBoxSaveBody,
+): Promise<DailyBoxEditorDTO> {
+  return postJson<DailyBoxEditorDTO>(
+    `/admin/daily-rewards/boxes/${encodeURIComponent(tier)}`,
     body,
   );
 }
 
-// ── Daily Reward Settings ────────────────────────────────────────────────────
-
-export interface DailyRewardSettingsDTO {
-  enabled: boolean;
-  /** Seven MYR amounts, streak day 1 → 7. */
-  amounts: number[];
+// GET the level-range voucher ladder (100 per-level amounts + authored ranges).
+export async function getVoucherLadder(): Promise<VoucherLadderDTO> {
+  return getJson<VoucherLadderDTO>('/admin/daily-rewards/vouchers');
 }
 
-// GET the daily check-in config (defaults when never authored).
-export async function getDailyRewardSettings(): Promise<DailyRewardSettingsDTO> {
-  return getJson<DailyRewardSettingsDTO>('/admin/daily-reward-settings');
-}
-
-// Audited edit; `reason` is mandatory (1–500 chars, backend-enforced).
-export async function saveDailyRewardSettings(body: {
-  enabled: boolean;
-  amounts: number[];
+// Replace-all the voucher ranges. Audited edit; `reason` is mandatory.
+export async function saveVoucherRanges(body: {
+  ranges: VoucherRangeDTO[];
   reason: string;
-}): Promise<DailyRewardSettingsDTO> {
-  return postJson<DailyRewardSettingsDTO>('/admin/daily-reward-settings', body);
+}): Promise<{ ok: true }> {
+  return postJson<{ ok: true }>('/admin/daily-rewards/vouchers', body);
 }

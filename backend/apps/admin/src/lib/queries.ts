@@ -1,4 +1,3 @@
-import type { DailyRewardSettingsDTO } from './admin-rest';
 import {
   useMutation,
   useQuery,
@@ -27,14 +26,15 @@ import {
   getCustomerCommissions,
   getEconomyReport,
   getFxRate,
-  getDailyRewardSettings,
-  getRewardPool,
+  getDailyBoxes,
+  getDailyBox,
+  getVoucherLadder,
   getReferralTree,
   listDeliveryOrders,
   listEligibleProducts,
   reverseCommission,
-  saveDailyRewardSettings,
-  saveRewardPool,
+  saveDailyBox,
+  saveVoucherRanges,
   setFxRate,
   suspendCommission,
   unfreezeCustomer,
@@ -45,13 +45,16 @@ import {
   type AdminDeliveryOrder,
   type CustomerAudit,
   type CustomerGacha,
+  type DailyBoxEditorDTO,
+  type DailyBoxSaveBody,
+  type DailyBoxSummary,
   type DeliveryStatus,
   type EconomyReport,
   type EligibleProduct,
   type FxRateState,
   type ReferralTree,
-  type RewardPoolBody,
-  type RewardPoolResponse,
+  type VoucherLadderDTO,
+  type VoucherRangeDTO,
 } from './admin-rest';
 import type { OddsInput } from '@acme/odds-math';
 import { qk } from './query-keys';
@@ -401,44 +404,49 @@ export const useUpdateDeliveryOrder = () => {
   });
 };
 
-export const useRewardPool = (
-  tier: string,
-): UseQueryResult<RewardPoolResponse> =>
+export type {
+  DailyBoxEditorDTO,
+  DailyBoxPrizeDTO,
+  DailyBoxSummary,
+  VoucherLadderDTO,
+  VoucherRangeDTO,
+} from './admin-rest';
+
+export const useDailyBoxes = (): UseQueryResult<{ boxes: DailyBoxSummary[] }> =>
+  useQuery({ queryKey: qk.dailyBoxes, queryFn: getDailyBoxes });
+
+export const useDailyBox = (tier: string): UseQueryResult<DailyBoxEditorDTO> =>
   useQuery({
-    queryKey: qk.rewardPool(tier),
-    queryFn: () => getRewardPool(tier),
+    queryKey: qk.dailyBox(tier),
+    queryFn: () => getDailyBox(tier),
     enabled: !!tier,
   });
 
-export const useSaveRewardPool = () => {
+export const useSaveDailyBox = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (vars: { tier: string; body: RewardPoolBody }) =>
-      saveRewardPool(vars.tier, vars.body),
-    onSuccess: (_data, vars) =>
-      qc.invalidateQueries({ queryKey: qk.rewardPool(vars.tier) }),
+    mutationFn: (vars: { tier: string; body: DailyBoxSaveBody }) =>
+      saveDailyBox(vars.tier, vars.body),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: qk.dailyBoxes });
+      qc.invalidateQueries({ queryKey: qk.dailyBox(vars.tier) });
+      toast.success('Box saved');
+    },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });
 };
 
-export const useDailyRewardSettings =
-  (): UseQueryResult<DailyRewardSettingsDTO> =>
-    useQuery({
-      queryKey: qk.dailyRewardSettings,
-      queryFn: getDailyRewardSettings,
-    });
+export const useVoucherLadder = (): UseQueryResult<VoucherLadderDTO> =>
+  useQuery({ queryKey: qk.voucherLadder, queryFn: getVoucherLadder });
 
-export const useSaveDailyRewardSettings = () => {
+export const useSaveVoucherRanges = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: {
-      enabled: boolean;
-      amounts: number[];
-      reason: string;
-    }) => saveDailyRewardSettings(body),
+    mutationFn: (vars: { ranges: VoucherRangeDTO[]; reason: string }) =>
+      saveVoucherRanges(vars),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: qk.dailyRewardSettings });
-      toast.success('Daily reward settings saved');
+      qc.invalidateQueries({ queryKey: qk.voucherLadder });
+      toast.success('Voucher ranges saved');
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });
