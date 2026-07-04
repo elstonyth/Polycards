@@ -344,6 +344,23 @@
     opacity: 1;
   }
 }
+/* Vault Room dust motes — slow diagonal drift + fade (VaultRoom.tsx). */
+@keyframes vault-dust {
+  0% {
+    transform: translate3d(0, 0, 0);
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 0.6;
+  }
+  100% {
+    transform: translate3d(14px, 46px, 0);
+    opacity: 0;
+  }
+}
 
 @layer base {
   * {
