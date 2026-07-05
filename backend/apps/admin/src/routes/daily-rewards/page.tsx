@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState, type MutableRefObject } from 'react';
 import {
   Container,
   Heading,
@@ -30,6 +30,7 @@ import {
 import { getDailyBox } from '../../lib/admin-rest';
 import { fmtPct, rm } from '../../lib/format';
 import { resolveImageUrl } from '../../lib/image-url';
+import { snapshotOf } from './box-snapshot';
 
 const TIERS = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'Z'] as const;
 
@@ -80,6 +81,17 @@ const rowFromPrize = (p: DailyBoxPrizeDTO): EditRow => ({
 
 const DailyRewardsPage = () => {
   const [tab, setTab] = useState<'boxes' | 'vouchers'>('boxes');
+  const boxesDirty = useRef(false);
+  const switchTab = (next: 'boxes' | 'vouchers') => {
+    if (
+      tab === 'boxes' &&
+      next !== 'boxes' &&
+      boxesDirty.current &&
+      !window.confirm('Discard unsaved box changes?')
+    )
+      return;
+    setTab(next);
+  };
   return (
     <Container className="p-0">
       <div className="flex items-center justify-between px-6 py-4">
@@ -93,19 +105,19 @@ const DailyRewardsPage = () => {
         <div className="flex gap-2">
           <Button
             variant={tab === 'boxes' ? 'primary' : 'secondary'}
-            onClick={() => setTab('boxes')}
+            onClick={() => switchTab('boxes')}
           >
             Boxes
           </Button>
           <Button
             variant={tab === 'vouchers' ? 'primary' : 'secondary'}
-            onClick={() => setTab('vouchers')}
+            onClick={() => switchTab('vouchers')}
           >
             Vouchers
           </Button>
         </div>
       </div>
-      {tab === 'boxes' ? <BoxesTab /> : <VouchersTab />}
+      {tab === 'boxes' ? <BoxesTab dirtyRef={boxesDirty} /> : <VouchersTab />}
     </Container>
   );
 };
@@ -483,7 +495,7 @@ const VouchersTab = () => {
   );
 };
 
-const BoxesTab = () => {
+const BoxesTab = ({ dirtyRef }: { dirtyRef: MutableRefObject<boolean> }) => {
   const { data: boxesData } = useDailyBoxes();
   const boxes = boxesData?.boxes ?? [];
   const [tier, setTier] = useState<string>('a');
@@ -502,20 +514,36 @@ const BoxesTab = () => {
   const [drawsPerDay, setDrawsPerDay] = useState('1');
   const [rows, setRows] = useState<EditRow[]>([]);
   const [reason, setReason] = useState('');
+  const [serverSnap, setServerSnap] = useState('');
   if (data && data !== seededFrom) {
     setSeededFrom(data);
     setName(data.box.name);
     setEnabled(data.box.enabled);
     setDrawsPerDay(String(data.box.draws_per_day));
     setRows(data.prizes.map(rowFromPrize));
+    setServerSnap(
+      snapshotOf({
+        name: data.box.name,
+        enabled: data.box.enabled,
+        drawsPerDay: String(data.box.draws_per_day),
+        rows: data.prizes.map(rowFromPrize),
+      }),
+    );
   }
 
-  // ponytail: "dirty" for the copy-from-tier confirm = the buffer has been
-  // seeded at least once (so any edit, or even the loaded state, warns before
-  // overwriting) rather than deep-equality against the last snapshot.
-  const isDirty = seededFrom !== undefined;
+  // True only when the buffer actually differs from the last server snapshot.
+  const hasUnsavedEdits =
+    seededFrom !== undefined &&
+    snapshotOf({ name, enabled, drawsPerDay, rows }) !== serverSnap;
+  dirtyRef.current = hasUnsavedEdits;
 
   const handleTierChange = (nextTier: string) => {
+    if (nextTier === tier) return;
+    if (
+      hasUnsavedEdits &&
+      !window.confirm(`Discard unsaved changes to tier ${tier.toUpperCase()}?`)
+    )
+      return;
     setTier(nextTier);
     setSeededFrom(undefined);
     setRows([]);
@@ -600,7 +628,7 @@ const BoxesTab = () => {
 
   async function copyFromTier(sourceTier: string) {
     if (!sourceTier || sourceTier === tier) return;
-    if (isDirty && rows.length > 0) {
+    if (hasUnsavedEdits) {
       const ok = window.confirm(
         `Replace the current unsaved prizes for tier ${tier.toUpperCase()} with tier ${sourceTier.toUpperCase()}'s saved prizes?`,
       );
