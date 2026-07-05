@@ -240,6 +240,7 @@ describe('cellCurve', () => {
     expect(c.scale).toBe(1);
     expect(c.brightness).toBe(1);
     expect(c.translateZPx).toBe(0);
+    expect(c.translateYPx).toBe(0);
   });
   test('symmetric rotation, mirrored sign', () => {
     const up = cellCurve(-140, 280);
@@ -247,17 +248,18 @@ describe('cellCurve', () => {
     expect(up.rotateXDeg).toBeCloseTo(-down.rotateXDeg);
     expect(up.scale).toBeCloseTo(down.scale);
     expect(up.brightness).toBeCloseTo(down.brightness);
+    expect(up.translateYPx).toBeCloseTo(-down.translateYPx);
   });
-  test('clamps beyond the radius', () => {
-    expect(cellCurve(9999, 280)).toEqual(cellCurve(280, 280));
+  test('clamps beyond the 82° wrap cap', () => {
+    // 420/280 = 1.5 rad ≈ 86° — past the cap, so identical to any farther cell.
+    expect(cellCurve(9999, 280)).toEqual(cellCurve(420, 280));
   });
-  // Spec decision #36: TRUE CYLINDER projection (mouse-from-above reference).
-  // Three properties define the drum and are encoded so a tweak can't
-  // silently regress it to a linear fold (#35's mistake):
+  // Spec decisions #36 + #37b: TRUE CYLINDER projection driven by ARC angle
+  // (θ = s/R). Encoded so a tweak can't silently regress it to a linear fold:
   //  1. the middle band stays flat + bright (faces the viewer, closest);
   //  2. the rim wraps hard (near edge-on, dark, pushed away in depth);
-  //  3. width never shrinks by a uniform scale — a cylinder keeps its width
-  //     (apparent size falls off via perspective depth instead).
+  //  3. width never shrinks by a uniform scale — a cylinder keeps its width;
+  //  4. rows BUNCH toward the rims: painted position remaps to R·sin(s/R).
   test('cylinder: middle band stays flat and bright', () => {
     const near = cellCurve(0.4 * 280, 280); // 40% out — still on the flat band
     expect(near.rotateXDeg).toBeGreaterThan(-30);
@@ -265,14 +267,26 @@ describe('cellCurve', () => {
     expect(Math.abs(near.translateZPx)).toBeLessThan(20);
   });
   test('cylinder: rim wraps hard away from the viewer', () => {
-    const edge = cellCurve(280, 280);
+    const edge = cellCurve(420, 280); // at/past the wrap cap
     expect(edge.rotateXDeg).toBeLessThanOrEqual(-75);
     expect(edge.brightness).toBeLessThanOrEqual(0.42);
     expect(edge.translateZPx).toBeLessThanOrEqual(-100);
   });
   test('cylinder: width is constant (no uniform shrink)', () => {
     expect(cellCurve(140, 280).scale).toBe(1);
-    expect(cellCurve(280, 280).scale).toBe(1);
+    expect(cellCurve(420, 280).scale).toBe(1);
+  });
+  test('cylinder: rows bunch toward the rims (projected spacing)', () => {
+    // A cell one radius out projects to R·sin(1 rad) ≈ 0.84·R — pulled toward
+    // the center by ~44px at R=280.
+    const oneRadius = cellCurve(280, 280);
+    expect(oneRadius.translateYPx).toBeLessThan(-30);
+    expect(oneRadius.translateYPx).toBeGreaterThan(-60);
+    // Equal arc steps project to SHRINKING screen steps near the rim.
+    const proj = (s: number) => s + cellCurve(s, 280).translateYPx;
+    const stepNearCenter = proj(60) - proj(0);
+    const stepNearRim = proj(280) - proj(220);
+    expect(stepNearRim).toBeLessThan(stepNearCenter * 0.75);
   });
 });
 

@@ -185,23 +185,29 @@ export function spinOffset(
 }
 
 /** Rim wrap cap: 90° would render the rim cell as a zero-height sliver. */
-const CYL_MAX_DEG = 82;
+const CYL_MAX_RAD = (82 * Math.PI) / 180;
 /** Projected drum depth (px) — how far the rim recedes at full wrap (#36). */
 const CYL_DEPTH_PX = 150;
 
 /**
- * TRUE CYLINDER projection (spec decision #36 — "mouse seen from above"):
- * the strip is the visible face of a drum whose axis is horizontal. A cell at
- * normalized offset `a` from the payline sits at wrap angle θ = asin(a), so
+ * TRUE CYLINDER projection driven by ARC angle (spec decisions #36 + #37b —
+ * "mouse seen from above"): the strip is the surface of a drum with a
+ * horizontal axis, so a cell `s` px along the strip from the payline sits at
+ * wrap angle θ = s/R (equal strip steps = equal angle steps). Then:
+ *   • painted position remaps to the PROJECTION y = R·sin θ — returned as
+ *     `translateYPx` = R·sinθ − s. Rows visibly bunch toward the rims, and
+ *     during the spin symbols sweep fastest through the center band (#37b);
  *   • the middle band is FLAT — nearly untouched until ~40% out (it faces the
  *     viewer: closest, brightest, full size);
- *   • rows wrap away with ACCELERATING tilt toward the window rim (near
- *     edge-on at the very edge — the drum horizon);
+ *   • rows wrap away with ACCELERATING tilt toward the rim (near edge-on at
+ *     the cap — the drum horizon);
  *   • height compresses as cos θ (via the rotation), width stays constant —
  *     a cylinder keeps its width; apparent size falls off through real
  *     perspective depth z = −DEPTH·(1−cos θ) instead of a uniform scale;
  *   • brightness follows drum lighting: 0.22 + 0.78·cos θ.
- * Replaces #35's linear falloff, which read as a fold rather than a drum.
+ * Beyond the cap every output pins at the cap value except the position,
+ * which keeps sliding linearly out of the window (no rim pile-up; the #37c
+ * rim tunnels hide the remainder).
  * `radiusPx` is half the window height; `distPx` positive = below center.
  */
 export function cellCurve(
@@ -212,16 +218,21 @@ export function cellCurve(
   scale: number;
   brightness: number;
   translateZPx: number;
+  translateYPx: number;
 } {
-  const n = Math.max(-1, Math.min(1, distPx / radiusPx));
-  const a = Math.abs(n);
-  const thetaDeg = Math.min(CYL_MAX_DEG, (Math.asin(a) * 180) / Math.PI);
-  const cos = Math.cos((thetaDeg * Math.PI) / 180);
+  const sign = Math.sign(distPx);
+  const sCap = CYL_MAX_RAD * radiusPx;
+  const s = Math.min(Math.abs(distPx), sCap);
+  const theta = s / radiusPx;
+  const cos = Math.cos(theta);
   return {
-    rotateXDeg: -thetaDeg * Math.sign(n) + 0, // coerce signed zero
+    rotateXDeg: -((theta * 180) / Math.PI) * sign + 0, // coerce signed zero
     scale: 1,
     brightness: 0.22 + 0.78 * cos,
     translateZPx: -CYL_DEPTH_PX * (1 - cos) + 0, // coerce signed zero
+    // Remap to the projected position; constant past the cap so far cells
+    // keep sliding out of the window instead of stacking at the rim.
+    translateYPx: (radiusPx * Math.sin(theta) - s) * sign + 0,
   };
 }
 

@@ -97,8 +97,11 @@ export function VaultReelColumn({
       stripEl.style.transform = `translate3d(0, ${-offset}px, 0)`;
       const stretch = blurStretch(velocity);
       // Only style cells near the window (offset → visible index range).
-      const first = Math.max(0, Math.floor(offset / ITEM_H) - 1);
-      const last = Math.min(STRIP_LEN - 1, first + VISIBLE_CELLS + 2);
+      // ±2 extra rows vs the linear window: the cylinder projection (#37b)
+      // pulls edge rows INWARD, so rows that are off-window in linear space
+      // are visible once remapped.
+      const first = Math.max(0, Math.floor(offset / ITEM_H) - 3);
+      const last = Math.min(STRIP_LEN - 1, first + VISIBLE_CELLS + 6);
       for (let i = prevFirst; i <= prevLast; i++) {
         if (i >= first && i <= last) continue; // still visible, styled below
         const el = cellRefs.current[i];
@@ -112,9 +115,11 @@ export function VaultReelColumn({
         const cellCenter = i * ITEM_H + ITEM_H / 2 - offset;
         const dist = cellCenter - winH / 2;
         const c = cellCurve(dist, radius);
-        // 520px perspective (was 700): tighter vanishing point so translateZ
-        // contributes real foreshortening — part of the readable wheel (#35).
+        // translateY FIRST: the cylinder-projection remap (#37b) positions the
+        // row on the drum surface, then the 3D tilt happens at that position.
+        // 520px perspective: tight vanishing point for real foreshortening.
         el.style.transform =
+          `translateY(${c.translateYPx}px) ` +
           `perspective(520px) translateZ(${c.translateZPx}px) ` +
           `rotateX(${c.rotateXDeg}deg) scale(${c.scale}) scaleY(${stretch.scaleY})`;
         el.style.opacity = String(c.brightness * stretch.opacity);
@@ -180,11 +185,33 @@ export function VaultReelColumn({
       }}
       aria-hidden
     >
-      {/* glass highlight sweep — static gradient, cheap */}
+      {/* Drum lighting (#37a+c), one div, two gradient layers: cylindrical
+          shadow rolling off the bulge into deep rim tunnels at both ends, plus
+          a fixed glass sheen just above center (light falls from above). */}
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 z-10 rounded-2xl bg-gradient-to-b from-white/10 via-transparent to-black/40"
+        className="pointer-events-none absolute inset-0 z-10 rounded-2xl"
+        style={{
+          background:
+            'linear-gradient(180deg, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.5) 9%, rgba(0,0,0,0.12) 26%, rgba(0,0,0,0) 40%, rgba(0,0,0,0) 60%, rgba(0,0,0,0.12) 74%, rgba(0,0,0,0.5) 91%, rgba(0,0,0,0.85) 100%), ' +
+            'linear-gradient(180deg, rgba(0,0,0,0) 32%, rgba(255,255,255,0.05) 41%, rgba(255,255,255,0.09) 45%, rgba(255,255,255,0.03) 52%, rgba(0,0,0,0) 60%)',
+        }}
       />
+      {/* Light sweep across the glass ONLY while spinning (#37d). */}
+      {isWin && !done && !reduced && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 z-10 overflow-hidden rounded-2xl"
+        >
+          <div
+            className="absolute inset-y-0 w-2/3 animate-[vault-sheen_2.6s_ease-in-out_infinite]"
+            style={{
+              background:
+                'linear-gradient(100deg, transparent 20%, rgba(255,255,255,0.09) 50%, transparent 80%)',
+            }}
+          />
+        </div>
+      )}
       {/* Card-frame landing zone (spec decision #34) — replaces the shared
           amber payline bar. Transparent line art, so the sprites scroll (and
           the winner rests) clearly visible through it. Neutral etch until THIS

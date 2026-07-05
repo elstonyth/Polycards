@@ -344,6 +344,15 @@
     opacity: 1;
   }
 }
+/* Reel glass light sweep — spin-only, VaultReelColumn.tsx (spec #37d). */
+@keyframes vault-sheen {
+  0% {
+    transform: translateX(-160%) skewX(-14deg);
+  }
+  100% {
+    transform: translateX(260%) skewX(-14deg);
+  }
+}
 /* Vault Room dust motes — slow diagonal drift + fade (VaultRoom.tsx). */
 @keyframes vault-dust {
   0% {
