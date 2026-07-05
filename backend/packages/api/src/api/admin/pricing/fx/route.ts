@@ -5,6 +5,7 @@ import type {
 import { MedusaError } from "@medusajs/framework/utils";
 import { PACKS_MODULE } from "../../../../modules/packs";
 import { effectiveRate, DEFAULT_USD_MYR } from "../../../../modules/packs/pricing";
+import { reqReason } from "../../rewards-settings/validate";
 
 type FxRateRow = {
   id: string;
@@ -42,6 +43,7 @@ export async function GET(req: AuthenticatedMedusaRequest, res: MedusaResponse):
 type Body = {
   manual_override?: unknown;
   manual_rate?: unknown;
+  reason?: unknown;
 };
 
 const requireBoolean = (value: unknown, field: string): boolean => {
@@ -67,6 +69,8 @@ const requirePositiveNumberOrNull = (value: unknown, field: string): number | nu
 };
 
 // POST /admin/pricing/fx — manual-override upsert of the single USD_MYR row.
+// Requires a reason and delegates to editFxOverride, which writes the FX
+// upsert and the admin_action_audit row in one transaction.
 export async function POST(req: AuthenticatedMedusaRequest, res: MedusaResponse): Promise<void> {
   const body = req.body as Body;
   const manual_override = requireBoolean(body.manual_override, "manual_override");
@@ -77,22 +81,17 @@ export async function POST(req: AuthenticatedMedusaRequest, res: MedusaResponse)
       "'manual_rate' is required when 'manual_override' is true.",
     );
   }
+  const reason = reqReason(req.body);
+  const adminId = req.auth_context.actor_id;
 
-  const { packs, row } = await loadRow(req.scope);
-  if (row) {
-    await packs.updateFxRates([{ id: row.id, manual_override, manual_rate }]);
-  } else {
-    await packs.createFxRates([
-      {
-        pair: "USD_MYR",
-        rate: DEFAULT_USD_MYR,
-        source: "manual",
-        manual_override,
-        manual_rate,
-      },
-    ]);
-  }
-
-  const after = await loadRow(req.scope);
-  res.json({ effective: effectiveRate(after.row) });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const packs: any = req.scope.resolve(PACKS_MODULE);
+  res.json(
+    await packs.editFxOverride({
+      manualOverride: manual_override,
+      manualRate: manual_rate,
+      adminId,
+      reason,
+    }),
+  );
 }

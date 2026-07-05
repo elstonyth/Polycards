@@ -53,7 +53,12 @@ import {
 import { levelForSpend } from './vip-ladder';
 import { levelsToGrant, rewardsForLevel } from './vip-rewards';
 import { fromSen } from './money';
-import { DEFAULT_MARKET_MULTIPLIER, resolveFxRate } from './pricing';
+import {
+  DEFAULT_MARKET_MULTIPLIER,
+  resolveFxRate,
+  DEFAULT_USD_MYR,
+  effectiveRate,
+} from './pricing';
 import {
   validateRewardsPatch,
   type RewardsSettingsPatch,
@@ -1507,6 +1512,82 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     return { frozen: true };
+  }
+
+  // FX manual-override edit + audit row in the same transaction. The audit row
+  // is the only record of who repriced the catalog — never split these writes.
+  @InjectTransactionManager()
+  async editFxOverride(
+    input: {
+      manualOverride: boolean;
+      manualRate: number | null;
+      adminId: string;
+      reason: string;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ effective: number }> {
+    const [row] = await this.listFxRates(
+      { pair: 'USD_MYR' },
+      { take: 1 },
+      sharedContext,
+    );
+    const before = row
+      ? {
+          manual_override: row.manual_override,
+          manual_rate: row.manual_rate != null ? Number(row.manual_rate) : null,
+        }
+      : null;
+
+    if (row) {
+      await this.updateFxRates(
+        [
+          {
+            id: row.id,
+            manual_override: input.manualOverride,
+            manual_rate: input.manualRate,
+          },
+        ],
+        sharedContext,
+      );
+    } else {
+      await this.createFxRates(
+        [
+          {
+            pair: 'USD_MYR',
+            rate: DEFAULT_USD_MYR,
+            source: 'manual',
+            manual_override: input.manualOverride,
+            manual_rate: input.manualRate,
+          },
+        ],
+        sharedContext,
+      );
+    }
+
+    await this.createAdminActionAudits(
+      [
+        {
+          admin_id: input.adminId,
+          entity_type: 'fx',
+          entity_id: 'USD_MYR',
+          action: 'edit_fx_rate',
+          before,
+          after: {
+            manual_override: input.manualOverride,
+            manual_rate: input.manualRate,
+          },
+          reason: input.reason,
+        },
+      ],
+      sharedContext,
+    );
+
+    const [fresh] = await this.listFxRates(
+      { pair: 'USD_MYR' },
+      { take: 1 },
+      sharedContext,
+    );
+    return { effective: effectiveRate(fresh ?? null) };
   }
 
   // Admin-initiated MANUAL account unfreeze. Clears the freeze regardless of
