@@ -95,7 +95,10 @@ export function SlabCard({
         onClick={flipped ? undefined : onFlip} // flip is one-way; guard mid-flight re-taps
         disabled={!onFlip || flipped}
         aria-label={flipped ? card.name : 'Flip to reveal your card'}
-        className="relative block w-[75vw] max-w-[300px] [transform-style:preserve-3d]"
+        // 64vw (was 75vw): the slab presents smaller on phones so it clears the
+        // top plate with the lowered stage (spec decision #29); 300px cap keeps
+        // desktop unchanged.
+        className="relative block w-[64vw] max-w-[300px] [transform-style:preserve-3d]"
         style={
           {
             aspectRatio: String(CARD_ASPECT), // shape-synced morph (spec #16) — shared with CardTile
@@ -184,7 +187,7 @@ export function SlabCard({
             src={card.image}
             alt={card.name}
             fill
-            sizes="(max-width: 640px) 75vw, 300px"
+            sizes="(max-width: 640px) 64vw, 300px"
             className="rounded-xl object-contain"
           />
           {/* Glare sweep removed (decision #24): it parked at x:110% off the
@@ -203,7 +206,7 @@ export function SlabCard({
             transition={{ duration: 0.2, delay: reduced ? 0 : 0.45 }}
             className="flex flex-col items-center gap-1"
           >
-            <p className="max-w-[75vw] truncate text-base font-bold text-white">
+            <p className="max-w-[64vw] truncate text-base font-bold text-white sm:max-w-[300px]">
               {card.name}
             </p>
             <p

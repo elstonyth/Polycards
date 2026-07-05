@@ -491,15 +491,15 @@ export default function SlotMachineClient({
                 shown: reduced ? {} : { transition: { staggerChildren: 0.12 } },
               }}
               initial="hidden"
-              animate="shown"
+              animate={machineHidden ? 'machineOut' : 'shown'}
             >
               {/* Transform/review: the machine fully fades out of the room (spec
-                  decision #19). The fade is driven through Framer's `animate`
-                  prop, NOT a Tailwind `opacity-0` class — the entrance variant
-                  writes an inline `opacity: 1`, and an inline style always beats
-                  a utility class, so a class-based fade never took effect (the
-                  reels stayed visible behind the card). Animating opacity here
-                  writes the inline value we actually want. */}
+                  decision #19). The fade switches VARIANT LABELS on the parent —
+                  never an explicit `animate` object reset to `undefined`, which
+                  does NOT re-follow the parent variant (Framer keeps the last
+                  explicit value), so the machine stayed invisible after the
+                  reveal concluded (feedback round 3). Label → label re-animates
+                  in BOTH directions: out to `machineOut`, back in to `shown`. */}
               <motion.div
                 variants={{
                   hidden: reduced ? { opacity: 0 } : { opacity: 0, y: -60 },
@@ -511,17 +511,15 @@ export default function SlotMachineClient({
                       ease: [0.16, 1, 0.3, 1],
                     },
                   },
+                  machineOut: {
+                    opacity: 0,
+                    y: 0,
+                    transition: {
+                      duration: reduced ? 0 : 0.5,
+                      ease: 'easeOut',
+                    },
+                  },
                 }}
-                animate={
-                  machineHidden
-                    ? { opacity: 0, y: 0 }
-                    : undefined /* undefined → follow the `shown` variant */
-                }
-                transition={
-                  machineHidden
-                    ? { duration: reduced ? 0 : 0.5, ease: 'easeOut' }
-                    : undefined
-                }
                 className={cn(
                   'flex items-stretch gap-3 sm:gap-5',
                   // pointer-events-none so a tap during transform reaches the
@@ -557,7 +555,9 @@ export default function SlotMachineClient({
                 FLIP morph uses viewport-relative coordinates, so an absolute
                 overlay here doesn't invalidate the morph math. */}
             {inReveal && spin && (
-              <div className="absolute inset-0 flex items-center justify-center px-fluid">
+              // pt-14 biases the presentation DOWNWARD (spec decision #29) so
+              // the card sits clearly below the top plate instead of crowding it.
+              <div className="absolute inset-0 flex items-center justify-center px-fluid pt-14">
                 <RevealStage
                   phase={phase}
                   cards={spin.cards}
