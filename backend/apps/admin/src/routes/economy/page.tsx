@@ -1,14 +1,126 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Badge, Container, Heading, Table, Text } from "@medusajs/ui";
+import {
+  Badge,
+  Button,
+  Container,
+  Heading,
+  Input,
+  Switch,
+  Table,
+  Text,
+} from "@medusajs/ui";
 import { CurrencyDollar } from "@medusajs/icons";
 import type { RouteConfig } from "@mercurjs/dashboard-sdk";
-import { useEconomy } from "../../lib/queries";
+import { useEconomy, useFxHistory, useFxRate, useSetFxRate } from "../../lib/queries";
 import { rm } from "../../lib/format";
 
 export const config: RouteConfig = {
   label: "Economy",
   icon: CurrencyDollar,
   rank: 30,
+};
+
+const FxCard = () => {
+  const { data: fx } = useFxRate();
+  const { data: history } = useFxHistory();
+  const setFx = useSetFxRate();
+  const [override, setOverride] = useState(false);
+  const [rate, setRate] = useState("");
+  const [reason, setReason] = useState("");
+  const [seeded, setSeeded] = useState(false);
+  if (fx && !seeded) {
+    setSeeded(true);
+    setOverride(fx.manual_override);
+    setRate(fx.manual_rate != null ? String(fx.manual_rate) : "");
+  }
+
+  const rateNum = Number(rate);
+  const rateValid =
+    !override || (Number.isFinite(rateNum) && rateNum > 0 && rateNum <= 1000);
+  const canSave = !setFx.isPending && rateValid && reason.trim().length > 0;
+
+  const save = () => {
+    if (!canSave) return;
+    if (
+      !window.confirm(
+        "This reprices every card on the storefront immediately. Continue?",
+      )
+    )
+      return;
+    setFx.mutate({
+      manual_override: override,
+      manual_rate: override ? rateNum : null,
+      reason: reason.trim(),
+    });
+    setReason("");
+  };
+
+  return (
+    <Container className="p-0">
+      <div className="px-6 py-4">
+        <Heading level="h2">Exchange rate (USD → MYR)</Heading>
+        <Text className="text-ui-fg-subtle mt-1" size="small">
+          Effective rate: {fx ? fx.effective.toFixed(4) : "…"}
+          {fx?.manual_override ? " (manual override)" : " (auto)"}
+        </Text>
+      </div>
+      <div className="flex flex-wrap items-end gap-4 border-t px-6 py-4">
+        <div className="flex items-center gap-2">
+          <Switch checked={override} onCheckedChange={setOverride} id="fx-ovr" />
+          <Text size="small">Manual override</Text>
+        </div>
+        <div className="flex flex-col gap-y-1">
+          <Text size="small" weight="plus">
+            Rate
+          </Text>
+          <Input
+            className="w-32"
+            value={rate}
+            disabled={!override}
+            onChange={(e) => setRate(e.target.value)}
+            placeholder="4.70"
+          />
+        </div>
+        <div className="flex min-w-64 flex-1 flex-col gap-y-1">
+          <Text size="small" weight="plus">
+            Reason
+          </Text>
+          <Input
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="Required — why is the rate changing?"
+          />
+        </div>
+        <Button
+          size="small"
+          onClick={save}
+          isLoading={setFx.isPending}
+          disabled={!canSave}
+        >
+          Save rate
+        </Button>
+      </div>
+      {history && history.changes.length > 0 && (
+        <div className="border-t px-6 py-4">
+          <Text size="small" weight="plus">
+            Recent changes
+          </Text>
+          <ul className="mt-2 flex flex-col gap-1">
+            {history.changes.map((c, i) => (
+              <li key={i} className="text-ui-fg-subtle text-sm">
+                {new Date(c.at).toLocaleString("en-US")} — {c.admin_id}:{" "}
+                {c.after.manual_override
+                  ? `override → ${c.after.manual_rate}`
+                  : "override off"}
+                {c.reason ? ` (${c.reason})` : ""}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </Container>
+  );
 };
 
 const EconomyPage = () => {
@@ -68,6 +180,8 @@ const EconomyPage = () => {
           </div>
         )}
       </Container>
+
+      <FxCard />
 
       <Container className="p-0">
         <div className="px-6 py-4">

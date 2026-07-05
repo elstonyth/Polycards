@@ -405,7 +405,19 @@ export const getFxRate = () => getJson<FxRateState>('/admin/pricing/fx');
 export const setFxRate = (body: {
   manual_override: boolean;
   manual_rate?: number | null;
+  reason: string;
 }) => postJson<{ effective: number }>('/admin/pricing/fx', body);
+
+export interface FxChange {
+  at: string;
+  admin_id: string;
+  before: { manual_override: boolean; manual_rate: number | null } | null;
+  after: { manual_override: boolean; manual_rate: number | null };
+  reason: string | null;
+}
+
+export const getFxHistory = () =>
+  getJson<{ changes: FxChange[] }>('/admin/pricing/fx/history');
 
 // ── Delivery orders ──────────────────────────────────────────────────────────
 

@@ -27,6 +27,7 @@ import {
   getCustomerTransactions,
   getCustomerPulls,
   getEconomyReport,
+  getFxHistory,
   getFxRate,
   getPulls,
   getDailyBoxes,
@@ -56,6 +57,7 @@ import {
   type DeliveryStatus,
   type EconomyReport,
   type EligibleProduct,
+  type FxChange,
   type FxRateState,
   type ReferralTree,
   type VoucherLadderDTO,
@@ -179,6 +181,9 @@ export const useDeliveryOrders = (
 export const useFxRate = (): UseQueryResult<FxRateState> =>
   useQuery({ queryKey: qk.fxRate, queryFn: getFxRate });
 
+export const useFxHistory = (): UseQueryResult<{ changes: FxChange[] }> =>
+  useQuery({ queryKey: qk.fxHistory, queryFn: getFxHistory });
+
 // ── Mutations ────────────────────────────────────────────────────────────────
 
 export const useUpdateCard = () => {
@@ -235,6 +240,8 @@ export const useSetFxRate = () => {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.fxRate });
       qc.invalidateQueries({ queryKey: qk.cards });
+      qc.invalidateQueries({ queryKey: qk.fxHistory });
+      toast.success('Exchange rate updated');
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });
