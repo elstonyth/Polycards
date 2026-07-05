@@ -88,7 +88,7 @@ export default function SellConfirmModal({
   if (!open) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[110] flex items-end justify-center sm:items-center sm:p-4">
       <button
         type="button"
         aria-hidden="true"
@@ -102,7 +102,7 @@ export default function SellConfirmModal({
         aria-modal="true"
         aria-label="Confirm sell-back"
         tabIndex={-1}
-        className="relative z-10 w-full max-w-sm rounded-2xl border border-white/10 bg-neutral-950 p-6 shadow-2xl shadow-black/60 outline-none"
+        className="relative z-10 max-h-[85vh] w-full overflow-y-auto rounded-t-3xl border-t border-white/10 bg-neutral-950/95 p-6 pb-[calc(env(safe-area-inset-bottom)+1.5rem)] shadow-2xl shadow-black/60 backdrop-blur outline-none sm:inset-x-auto sm:bottom-auto sm:max-w-sm sm:rounded-2xl sm:border sm:pb-6"
       >
         <button
           type="button"

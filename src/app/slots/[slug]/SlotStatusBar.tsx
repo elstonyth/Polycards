@@ -2,8 +2,8 @@
 'use client';
 
 import { cn } from '@/lib/utils';
-import { rm } from '@/lib/format';
 import type { RecentPull } from '@/lib/data/packs';
+import { Meter } from './Meter';
 
 export function SlotStatusBar({
   balance,
@@ -15,16 +15,23 @@ export function SlotStatusBar({
   reduced: boolean;
 }) {
   return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    // min-w-0: as a flex item this plate must SHRINK to the space the top row
+    // gives it — without it the w-max marquee track below sets the item's
+    // min-content width and pushes the plate past the viewport edge on phones
+    // (spec decision #28). The marquee then clips inside via overflow-hidden.
+    <div className="flex min-w-0 flex-col gap-3 rounded-xl border border-white/10 bg-gradient-to-b from-white/[0.06] to-white/[0.02] px-4 py-2 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex items-center gap-5">
         {balance !== null && (
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-widest text-white/40">
               Credit
             </p>
-            <p className="font-heading text-lg font-bold tabular-nums text-white">
-              {rm(balance)}
-            </p>
+            <Meter
+              value={balance}
+              direction={null}
+              reduced={reduced}
+              className="font-heading text-lg font-bold"
+            />
           </div>
         )}
         <div>
@@ -43,7 +50,12 @@ export function SlotStatusBar({
           <div
             className={cn(
               'flex w-max gap-4',
-              !reduced && 'animate-[sp-scroll-x_30s_linear_infinite]',
+              // 100s (was 30s) = slow, calm scroll (spec #41). Linear +
+              // translate3d(-50%) over doubled content = seamless, already
+              // GPU-composited by the transform animation itself — NO
+              // will-change (a permanent will-change on an always-animating
+              // marquee holds an extra live layer that taxed the spin budget).
+              !reduced && 'animate-[sp-scroll-x_100s_linear_infinite]',
             )}
           >
             {[...recent, ...recent].map((p, i) => (

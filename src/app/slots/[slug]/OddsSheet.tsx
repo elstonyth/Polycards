@@ -85,7 +85,7 @@ export function OddsSheet({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 sm:items-center sm:p-4"
       onClick={onClose}
     >
       <div
@@ -94,7 +94,7 @@ export function OddsSheet({
         aria-modal="true"
         aria-label="Published pull odds by rarity"
         tabIndex={-1}
-        className="w-full max-w-sm rounded-2xl border border-white/10 bg-neutral-900 p-5 outline-none"
+        className="max-h-[85vh] w-full overflow-y-auto rounded-t-3xl border-t border-white/10 bg-neutral-950/95 p-5 pb-[env(safe-area-inset-bottom)] backdrop-blur outline-none sm:inset-x-auto sm:bottom-auto sm:max-w-sm sm:rounded-2xl sm:border"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-center justify-between">

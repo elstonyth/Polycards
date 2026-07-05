@@ -5,6 +5,7 @@
 // default UNMUTED (PRD §3.9). Degrades silently if an asset is missing, so the
 // slice ships before final audio is sourced.
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { playSfx, type SfxName } from '@/lib/slot-sfx';
 
 const MUTED_KEY = 'pokenic.slot.muted';
 
@@ -17,6 +18,7 @@ const FILES = {
 } as const;
 
 export type SoundName = keyof typeof FILES;
+export type { SfxName } from '@/lib/slot-sfx';
 
 /** Pure: maps a raw localStorage value to muted state. Default unmuted. */
 export function parseMuted(raw: string | null): boolean {
@@ -98,5 +100,13 @@ export function useSound() {
     });
   }, []);
 
-  return { muted, toggleMuted, play, vibrate };
+  const sfx = useCallback(
+    (name: SfxName) => {
+      if (muted) return;
+      playSfx(name);
+    },
+    [muted],
+  );
+
+  return { muted, toggleMuted, play, vibrate, sfx };
 }
