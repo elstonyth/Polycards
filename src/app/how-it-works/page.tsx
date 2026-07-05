@@ -302,26 +302,33 @@ export default function HowItWorksPage() {
             sub="Every card is stored in insured, climate-controlled facilities managed by industry leaders."
           />
         </Reveal>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {VAULT_CARDS.map((c, i) => {
-            const Icon = c.icon;
-            return (
-              <Reveal key={c.title} delay={i * 90} className="h-full">
-                <div className="flex h-full flex-col rounded-2xl border border-white/10 bg-white/[0.03] p-6 transition-colors duration-300 hover:border-white/20">
-                  <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-white/15 to-white/5 text-white">
-                    <Icon className="h-5 w-5" aria-hidden />
-                  </div>
-                  <h3 className="mb-2 font-heading text-sm font-semibold text-white">
+        {/* One grouped guarantee panel (hairline-divided cells), deliberately
+            NOT the discrete feature-card grid section 6 uses — the two benefit
+            sections must not read as the same component twice. A gap-px grid
+            over a hairline-tinted container paints the dividers without the
+            divide-x/-y-on-grid stray-border gotcha; the panel reveals as one
+            unit rather than four staggered cards. */}
+        <Reveal>
+          <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-white/10 bg-white/10 lg:grid-cols-4">
+            {VAULT_CARDS.map((c) => {
+              const Icon = c.icon;
+              return (
+                <div
+                  key={c.title}
+                  className="flex flex-col gap-2 bg-neutral-900 p-5 sm:p-6"
+                >
+                  <Icon className="h-5 w-5 text-white/80" aria-hidden />
+                  <h3 className="font-heading text-sm font-semibold text-white">
                     {c.title}
                   </h3>
-                  <p className="text-[13px] leading-relaxed text-white/55">
+                  <p className="text-[13px] leading-relaxed text-white/60">
                     {c.body}
                   </p>
                 </div>
-              </Reveal>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        </Reveal>
         <Reveal className="mt-8 flex flex-wrap items-center justify-center gap-8 opacity-70">
           {VAULT_LOGOS.map((l) => (
             // eslint-disable-next-line @next/next/no-img-element
@@ -388,21 +395,28 @@ export default function HowItWorksPage() {
             sub="Everything you need to collect, compete, and trade"
           />
         </Reveal>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {/* Discrete feature cards, 2-up and width-capped with the icon set
+            BESIDE the copy (horizontal) — a different structure and measure
+            from the full-bleed vault guarantee panel above, so the two benefit
+            sections don't rhyme. The narrower column also funnels the page
+            inward toward the FAQ/CTA. */}
+        <div className="mx-auto grid max-w-4xl grid-cols-1 gap-4 sm:grid-cols-2">
           {CAPABILITIES.map((c, i) => {
             const Icon = c.icon;
             return (
               <Reveal key={c.title} delay={i * 90} className="h-full">
-                <div className="flex h-full flex-col rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.07] to-white/[0.02] p-6 transition-colors duration-300 hover:border-white/20">
-                  <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-white/10 text-white">
+                <div className="flex h-full items-start gap-4 rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.07] to-white/[0.02] p-6 transition-colors duration-300 hover:border-white/20">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/10 text-white">
                     <Icon className="h-5 w-5" aria-hidden />
                   </div>
-                  <h3 className="mb-2 font-heading text-lg font-bold text-white">
-                    {c.title}
-                  </h3>
-                  <p className="text-[13px] leading-relaxed text-white/55">
-                    {c.body}
-                  </p>
+                  <div>
+                    <h3 className="font-heading text-lg font-bold text-white">
+                      {c.title}
+                    </h3>
+                    <p className="mt-1.5 text-[13px] leading-relaxed text-white/60">
+                      {c.body}
+                    </p>
+                  </div>
                 </div>
               </Reveal>
             );
