@@ -44,15 +44,18 @@ export function SlotControls({
           <Info className="h-5 w-5" aria-hidden />
         </button>
 
-        {onAddReel && (
+        {/* Control row order [Odds] [−] [Spin] [+] [Mute] (spec decision #20):
+            (−) left of Spin, (+) right. aria-labels stay exact — QA + e2e target
+            "Remove a reel" / "Add a reel". */}
+        {onRemoveReel && (
           <button
             type="button"
-            onClick={onAddReel}
-            disabled={addDisabled}
-            aria-label="Add a reel"
+            onClick={onRemoveReel}
+            disabled={removeDisabled}
+            aria-label="Remove a reel"
             className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/70 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-30"
           >
-            <Plus className="h-5 w-5" aria-hidden />
+            <Minus className="h-5 w-5" aria-hidden />
           </button>
         )}
 
@@ -66,15 +69,15 @@ export function SlotControls({
           {spinning ? 'Spinning…' : label}
         </button>
 
-        {onRemoveReel && (
+        {onAddReel && (
           <button
             type="button"
-            onClick={onRemoveReel}
-            disabled={removeDisabled}
-            aria-label="Remove a reel"
+            onClick={onAddReel}
+            disabled={addDisabled}
+            aria-label="Add a reel"
             className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/70 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-30"
           >
-            <Minus className="h-5 w-5" aria-hidden />
+            <Plus className="h-5 w-5" aria-hidden />
           </button>
         )}
 
