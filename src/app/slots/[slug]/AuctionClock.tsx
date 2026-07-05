@@ -2,8 +2,9 @@
 'use client';
 
 // The shared sell timer (spec decision #9): a lit-shelf strip draining
-// STRICTLY linearly with a clear numeral. Warm white → amber ≤10s → pulse ≤5s.
-// Honest urgency — no acceleration tricks ever.
+// STRICTLY linearly with a clear numeral. Neutral → chase ≤10s → pulse ≤5s.
+// Honest urgency — no acceleration tricks ever. Drains via scaleX (GPU
+// transform, not layout width).
 import { SELL_COUNTDOWN_SECS } from '@/lib/sell-countdown';
 import { cn } from '@/lib/utils';
 
@@ -28,20 +29,20 @@ export function AuctionClock({
       >
         <div
           className={cn(
-            'h-full rounded-full',
-            amber ? 'bg-amber-400' : 'bg-amber-100/90',
+            'h-full w-full origin-left rounded-full',
+            amber ? 'bg-chase' : 'bg-white/70',
             pulsing && !reduced && 'animate-pulse',
           )}
           style={{
-            width: `${pct}%`,
-            transition: reduced ? undefined : 'width 250ms linear',
+            transform: `scaleX(${pct / 100})`,
+            transition: reduced ? undefined : 'transform 250ms linear',
           }}
         />
       </div>
       <p
         className={cn(
           'w-8 text-right text-[13px] font-bold tabular-nums',
-          amber ? 'text-amber-300' : 'text-white/70',
+          amber ? 'text-chase' : 'text-white/70',
         )}
       >
         {Math.max(0, secondsLeft)}s

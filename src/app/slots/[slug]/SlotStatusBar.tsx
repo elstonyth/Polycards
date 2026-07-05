@@ -23,7 +23,7 @@ export function SlotStatusBar({
       <div className="flex items-center gap-5">
         {balance !== null && (
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-white/40">
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-white/60">
               Credit
             </p>
             <Meter
@@ -35,7 +35,7 @@ export function SlotStatusBar({
           </div>
         )}
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-white/40">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-white/60">
             Wins
           </p>
           <p className="font-heading text-lg font-bold tabular-nums text-white">
@@ -61,10 +61,10 @@ export function SlotStatusBar({
             {[...recent, ...recent].map((p, i) => (
               <span
                 key={`${p.id}-${i}`}
-                className="flex shrink-0 items-center gap-1.5 text-[11px] text-white/50"
+                className="flex shrink-0 items-center gap-1.5 text-[11px] text-white/60"
               >
                 <span className="font-medium text-white/75">{p.name}</span>
-                <span className="tabular-nums text-white/40">{p.value}</span>
+                <span className="tabular-nums text-white/60">{p.value}</span>
               </span>
             ))}
           </div>

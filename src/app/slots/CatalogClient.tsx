@@ -3,8 +3,9 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { ChevronDown, ChevronRight, Layers } from 'lucide-react';
+import { ChevronRight, Layers } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { pillVariants } from '@/components/ui/pill';
 import Reveal from '@/components/Reveal';
 import QtyStepper from '@/components/QtyStepper';
 import type { Pack, PackCategory } from '@/lib/packs-data';
@@ -84,7 +85,7 @@ function PackCard({ pack, icon }: { pack: Pack; icon: string }) {
       </div>
 
       {oos ? (
-        <span className="mt-auto flex h-9 w-full items-center justify-center rounded-xl bg-white/10 text-[13px] font-semibold text-white/40">
+        <span className="mt-auto flex h-9 w-full items-center justify-center rounded-xl bg-white/10 text-[13px] font-semibold text-white/60">
           Sold out
         </span>
       ) : (
@@ -95,7 +96,10 @@ function PackCard({ pack, icon }: { pack: Pack; icon: string }) {
               to everyone; only a real open/claim is auth-gated. */}
           <Link
             href={packHref(pack.id, qty)}
-            className="mt-auto flex h-9 w-full items-center justify-center rounded-xl bg-neutral-200 text-[13px] font-semibold text-neutral-950 transition-colors duration-200 hover:bg-white"
+            className={cn(
+              pillVariants({ variant: 'primary', size: 'sm' }),
+              'mt-auto w-full',
+            )}
           >
             Open
           </Link>
@@ -153,13 +157,13 @@ function PackRow({
           <span className="truncate">{pack.name}</span>
           {!oos && (
             <ChevronRight
-              className="h-3.5 w-3.5 shrink-0 text-white/40"
+              className="h-3.5 w-3.5 shrink-0 text-white/60"
               aria-hidden
             />
           )}
         </div>
         {oos ? (
-          <span className="mt-1 block text-[11px] text-white/40">
+          <span className="mt-1 block text-[11px] text-white/60">
             Out of stock
           </span>
         ) : pack.boost ? (
@@ -167,7 +171,7 @@ function PackRow({
             +{buyback}% Buyback Boost
           </span>
         ) : (
-          <span className="mt-1 block text-[11px] text-white/50">
+          <span className="mt-1 block text-[11px] text-white/60">
             {categoryName} · {buyback}% buyback
           </span>
         )}
@@ -175,7 +179,7 @@ function PackRow({
 
       {/* Price pill (tap target) / sold-out */}
       {oos ? (
-        <span className="flex shrink-0 items-center rounded-full bg-white/10 px-4 py-2 text-[13px] font-semibold text-white/40">
+        <span className="flex shrink-0 items-center rounded-full bg-white/10 px-4 py-2 text-[13px] font-semibold text-white/60">
           Sold out
         </span>
       ) : (
@@ -221,7 +225,6 @@ export default function CatalogClient({
   initialCategory: string;
 }) {
   const [active, setActive] = useState<string>(initialCategory);
-  const [creatorPacks, setCreatorPacks] = useState(false);
 
   const tabs = [
     { id: 'all', tab: 'All Packs', icon: '' },
@@ -236,8 +239,8 @@ export default function CatalogClient({
 
   return (
     <div className="mx-auto w-full px-fluid py-4">
-      {/* Sticky filter bar — chip rail + sort + Creator Packs toggle */}
-      <div className="sticky top-2 z-20 mb-6 flex flex-col gap-3 rounded-2xl border border-white/10 bg-neutral-950/80 p-2 backdrop-blur supports-[backdrop-filter]:bg-neutral-950/60 lg:flex-row lg:items-center lg:justify-between">
+      {/* Sticky filter bar — category chip rail */}
+      <div className="sticky top-2 z-20 mb-6 rounded-2xl border border-white/10 bg-neutral-950/80 p-2 backdrop-blur supports-[backdrop-filter]:bg-neutral-950/60">
         {/* Category chip rail (icons + label) */}
         <div className="flex items-center gap-1.5 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {tabs.map((t) => (
@@ -247,7 +250,7 @@ export default function CatalogClient({
               onClick={() => setActive(t.id)}
               aria-pressed={active === t.id}
               className={cn(
-                'flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-medium transition-colors sm:text-[13px]',
+                'flex shrink-0 items-center gap-1.5 rounded-full px-3 py-2 text-[12px] font-medium transition-colors sm:text-[13px]',
                 active === t.id
                   ? 'bg-white text-neutral-950'
                   : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white',
@@ -269,45 +272,13 @@ export default function CatalogClient({
             </button>
           ))}
         </div>
-
-        {/* Sort + Creator Packs toggle (presentational) */}
-        <div className="flex shrink-0 items-center gap-3 px-1">
-          <button
-            type="button"
-            className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[12px] font-medium text-white/70 transition-colors hover:bg-white/10 hover:text-white sm:text-[13px]"
-          >
-            Most Popular
-            <ChevronDown className="h-3.5 w-3.5" aria-hidden />
-          </button>
-          <button
-            type="button"
-            onClick={() => setCreatorPacks((v) => !v)}
-            aria-pressed={creatorPacks}
-            className="inline-flex items-center gap-2 text-[12px] font-medium text-white/70 transition-colors hover:text-white sm:text-[13px]"
-          >
-            <span
-              className={cn(
-                'relative h-5 w-9 shrink-0 rounded-full transition-colors',
-                creatorPacks ? 'bg-buyback' : 'bg-white/15',
-              )}
-            >
-              <span
-                className={cn(
-                  'absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white transition-transform',
-                  creatorPacks && 'translate-x-4',
-                )}
-              />
-            </span>
-            Creator Packs
-          </button>
-        </div>
       </div>
 
       {/* Global empty state — "All" with zero packs anywhere (the backend is
           the source of truth) renders no sections, so say so instead of a
           blank page. A directly-selected empty category has its own state. */}
       {visible.length === 0 && (
-        <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-10 text-center text-[13px] text-white/40">
+        <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-10 text-center text-[13px] text-white/60">
           No packs available right now — check back soon.
         </div>
       )}
@@ -328,13 +299,13 @@ export default function CatalogClient({
             <h2 className="font-heading text-lg font-bold tracking-tight text-white sm:text-xl">
               {cat.heading}
             </h2>
-            <span className="ml-auto text-[13px] text-white/50">
-              {cat.packs.length} packs
+            <span className="ml-auto text-[13px] text-white/60">
+              {cat.packs.length} {cat.packs.length === 1 ? 'pack' : 'packs'}
             </span>
           </div>
 
           {cat.packs.length === 0 ? (
-            <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-10 text-center text-[13px] text-white/40">
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-10 text-center text-[13px] text-white/60">
               No packs available right now — check back soon.
             </div>
           ) : (

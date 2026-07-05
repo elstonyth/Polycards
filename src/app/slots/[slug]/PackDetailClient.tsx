@@ -7,7 +7,6 @@ import Image from 'next/image';
 import {
   ArrowLeft,
   ArrowRight,
-  ChevronDown,
   Clock,
   Flame,
   Info,
@@ -122,9 +121,6 @@ export default function PackDetailClient({
 
   const claw = clawMachine(active);
   const priceNum = priceNumber(active.price);
-  // Expected value ≈ price, lifted slightly for boosted tiers (mock).
-  const ev = Math.round(priceNum * (active.boost ? 1.02 : 0.96));
-  const points = priceNum * 100 * qty;
 
   // Top Hits come from the backend prize pool (highest market_value) — the
   // backend is the source of truth, so a missing/empty pool renders an empty
@@ -242,16 +238,16 @@ export default function PackDetailClient({
           {/* Top Hits */}
           <Reveal as="section">
             <div className="mb-1 flex items-center gap-2">
-              <Flame className="h-4 w-4 text-amber-400" aria-hidden />
+              <Flame className="h-4 w-4 text-chase" aria-hidden />
               <h2 className="font-heading text-lg font-bold tracking-tight text-white">
                 Top Hits
               </h2>
             </div>
-            <p className="mb-3 text-[13px] text-white/50">
+            <p className="mb-3 text-[13px] text-white/70">
               The top items available in this pack.
             </p>
             {topHits.length === 0 ? (
-              <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-8 text-center text-[13px] text-white/40">
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-8 text-center text-[13px] text-white/60">
                 No cards in this pack yet — check back soon.
               </div>
             ) : (
@@ -289,10 +285,10 @@ export default function PackDetailClient({
             <div className="flex flex-col gap-5 overflow-y-auto px-5 py-5">
               {/* Category */}
               <div>
-                <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/40">
+                <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/60">
                   Category
                 </p>
-                <div className="flex h-11 items-center justify-between rounded-xl border border-white/10 bg-white/5 px-3 text-sm text-white">
+                <div className="flex h-11 items-center rounded-xl border border-white/10 bg-white/5 px-3 text-sm text-white">
                   <span className="flex items-center gap-2">
                     <Image
                       src={pack.icon}
@@ -304,13 +300,12 @@ export default function PackDetailClient({
                     />
                     {pack.categoryName}
                   </span>
-                  <ChevronDown className="h-4 w-4 text-white/40" aria-hidden />
                 </div>
               </div>
 
               {/* Pack tiles */}
               <div>
-                <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/40">
+                <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/60">
                   Pack
                 </p>
                 <div className="grid grid-cols-2 gap-2">
@@ -351,20 +346,6 @@ export default function PackDetailClient({
                 </div>
               </div>
 
-              {/* Expected value */}
-              <div className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] px-3.5 py-3">
-                <span className="flex items-center gap-1.5 text-[13px] font-medium text-white/70">
-                  Expected Value
-                  <Info className="h-3.5 w-3.5 text-white/30" aria-hidden />
-                </span>
-                <span className="text-sm font-semibold text-white">
-                  {rm0(ev)}
-                  <span className="ml-1 text-[11px] font-normal text-white/40">
-                    per pack
-                  </span>
-                </span>
-              </div>
-
               {/* Demo spin */}
               <button
                 type="button"
@@ -386,25 +367,25 @@ export default function PackDetailClient({
                   aria-label="Decrease quantity"
                   onClick={() => setQ(qty - 1)}
                   disabled={qty <= 1}
-                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/70 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-40"
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/70 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-40"
                 >
                   <Minus className="h-4 w-4" aria-hidden />
                 </button>
-                <span className="flex h-10 flex-1 items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] text-sm font-medium tabular-nums text-white">
+                <span className="flex h-11 flex-1 items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] text-sm font-medium tabular-nums text-white">
                   {qty} {qty === 1 ? 'Pack' : 'Packs'}
                 </span>
                 <button
                   type="button"
                   aria-label="Increase quantity"
                   onClick={() => setQ(qty + 1)}
-                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
                 >
                   <Plus className="h-4 w-4" aria-hidden />
                 </button>
                 <button
                   type="button"
                   onClick={() => setQ(maxQty)}
-                  className="flex h-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 px-3 text-[12px] font-bold uppercase tracking-wide text-white/60 transition-colors hover:bg-white/10 hover:text-white"
+                  className="flex h-11 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 px-3 text-[12px] font-bold uppercase tracking-wide text-white/60 transition-colors hover:bg-white/10 hover:text-white"
                 >
                   Max
                 </button>
@@ -420,9 +401,6 @@ export default function PackDetailClient({
               >
                 <span className="flex items-center gap-2">
                   {customer ? 'Open Pack' : 'Log in to open'}
-                  <span className="rounded-md bg-black/20 px-1.5 py-0.5 text-[11px] font-semibold">
-                    +{points.toLocaleString('en-US')} pts
-                  </span>
                 </span>
                 <span className="flex items-center gap-1.5">
                   {rm0(priceNum * qty)}
@@ -453,7 +431,7 @@ export default function PackDetailClient({
                   (cosmetic in this preview); a real open rolls ONE pack and debits
                   its price from the credit balance (A2). Quantity & provably-fair
                   pulls stay out of scope. */}
-              <p className="mt-2 text-center text-[11px] text-white/35">
+              <p className="mt-2 text-center text-[11px] text-white/60">
                 {customer && balance !== null ? (
                   <>
                     Each open costs {rm(priceNum)} in site credits — your
@@ -507,7 +485,7 @@ export default function PackDetailClient({
           </div>
           <ul className="divide-y divide-white/5 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]">
             {recent.length === 0 ? (
-              <li className="px-4 py-8 text-center text-[13px] text-white/40">
+              <li className="px-4 py-8 text-center text-[13px] text-white/60">
                 No pulls yet — be the first to open a pack.
               </li>
             ) : (
@@ -523,13 +501,13 @@ export default function PackDetailClient({
                   <span className="min-w-0 flex-1 truncate text-[13px] text-white/80">
                     {c.name}
                   </span>
-                  <span className="shrink-0 text-[11px] text-white/45">
+                  <span className="shrink-0 text-[11px] text-white/60">
                     {c.who}
                   </span>
-                  <span className="shrink-0 text-[12px] tabular-nums text-white/50">
+                  <span className="shrink-0 text-[12px] tabular-nums text-white/60">
                     {c.value}
                   </span>
-                  <span className="hidden shrink-0 text-[11px] text-white/35 sm:inline">
+                  <span className="hidden shrink-0 text-[11px] text-white/60 sm:inline">
                     {c.agoLabel}
                   </span>
                 </li>

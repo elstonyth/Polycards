@@ -15,7 +15,7 @@ import {
   motion,
   type AnimationPlaybackControls,
 } from 'motion/react';
-import { ArrowLeft, Zap, Volume2 } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import {
   CARD_FLIP,
   CYL_SPRING,
@@ -36,6 +36,7 @@ import type { PackCard } from '@/lib/packs-data';
 import { SELL_COUNTDOWN_SECS, sellSecondsLeft } from '@/lib/sell-countdown';
 import SellConfirmModal from '@/components/SellConfirmModal';
 import { rm } from '@/lib/format';
+import { useModalA11y } from '@/lib/use-modal-a11y';
 
 // Rarity → rgb (shared util) drives the glow, pill, and the Pull-celebration
 // ribbon color; isTopRarity gates the celebration tiers.
@@ -115,6 +116,10 @@ export default function PackOpenOverlay({
   onSignUp?: (() => void) | null;
 }) {
   const [stage, setStage] = useState<Stage>(reduced ? 'card' : 'packs');
+  // Root panel ref for the shared modal-a11y contract: focus trap, Escape-to-close,
+  // body-scroll lock, and focus restore on close. The hook is wired below (after
+  // `confirmOpen` exists) so Escape can defer to the nested confirm dialog.
+  const panelRef = useRef<HTMLDivElement>(null);
   // Instant sell-back state for the card stage: idle → selling → sold.
   const [sell, setSell] = useState<
     | { phase: 'idle' }
@@ -135,6 +140,14 @@ export default function PackOpenOverlay({
   const revealPinged = useRef(false);
   // Confirm-before-sell dialog.
   const [confirmOpen, setConfirmOpen] = useState(false);
+
+  // Shared modal-a11y contract (focus trap, Escape, scroll-lock, focus restore).
+  // Escape closes the overlay — but while the nested SellConfirmModal is open it
+  // ALSO listens for Escape on document, so defer to it and don't tear down the
+  // whole reveal from under an open confirm.
+  useModalA11y(panelRef, true, () => {
+    if (!confirmOpen) onClose();
+  });
 
   // Fire the reveal ping ONCE when the card is shown, then drive the deadline
   // from its result (falling back to the open-response deadline on failure).
@@ -311,6 +324,14 @@ export default function PackOpenOverlay({
     spinTo(Math.round(projected / STEP) * STEP, { velocity: v });
   };
 
+  // Advance the auto-playing reveal stages (slab → metadata → (pull) → card),
+  // shared by the overlay tap-to-advance and the keyboard-accessible hint buttons.
+  const advanceStage = () => {
+    if (stage === 'slab') setStage('metadata');
+    else if (stage === 'metadata') setStage(celebrate ? 'pull' : 'card');
+    else if (stage === 'pull') setStage('card');
+  };
+
   const shuffle = (e: ReactMouseEvent) => {
     e.stopPropagation();
     const target =
@@ -322,17 +343,13 @@ export default function PackOpenOverlay({
 
   return (
     <div
-      className="fixed inset-0 z-[80] overflow-hidden bg-black motion-safe:animate-[fadeIn_0.3s_ease-out]"
+      ref={panelRef}
+      tabIndex={-1}
+      className="fixed inset-0 z-[80] overflow-hidden bg-black outline-none motion-safe:animate-[fadeIn_0.3s_ease-out]"
       role="dialog"
       aria-modal="true"
       aria-label={`Opening ${packName}`}
-      onClick={() => {
-        // Tap-to-advance (live's metadata screen is itself a button): slab → metadata
-        // → (pull, top rarities only) → card, instead of waiting out the timers.
-        if (stage === 'slab') setStage('metadata');
-        else if (stage === 'metadata') setStage(celebrate ? 'pull' : 'card');
-        else if (stage === 'pull') setStage('card');
-      }}
+      onClick={advanceStage}
     >
       {/* top bar */}
       <button
@@ -342,28 +359,32 @@ export default function PackOpenOverlay({
           onClose();
         }}
         aria-label="Close"
-        className="absolute left-4 top-4 z-20 flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/5 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+        className="absolute left-4 top-4 z-20 flex h-11 w-11 items-center justify-center rounded-full border border-white/15 bg-white/5 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
       >
         <ArrowLeft className="h-5 w-5" aria-hidden />
       </button>
-      <div className="absolute right-4 top-4 z-20 flex gap-2 text-white/40">
-        <span className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/5">
-          <Zap className="h-4 w-4" aria-hidden />
-        </span>
-        <span className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/5">
-          <Volume2 className="h-4 w-4" aria-hidden />
-        </span>
-      </div>
       {stage !== 'packs' && (
-        <p className="absolute top-5 left-1/2 z-20 -translate-x-1/2 text-[11px] font-medium uppercase tracking-[0.3em] text-white/35">
+        <p className="absolute top-5 left-1/2 z-20 -translate-x-1/2 text-[11px] font-medium uppercase tracking-[0.3em] text-white/60">
           {isReal ? '1 of 1' : 'Demo spin'}
         </p>
       )}
-      {/* Tap-to-continue hint during the auto-playing reveal stages */}
+      {/* Tap-to-continue hint during the auto-playing reveal stages — a real
+          button so keyboard users can advance (Enter/Space), not just mouse taps.
+          Fixed full-bleed overlay: the whole reveal area is the click target. */}
       {(stage === 'metadata' || stage === 'pull') && (
-        <p className="pointer-events-none absolute bottom-10 left-1/2 z-20 -translate-x-1/2 text-[11px] font-medium uppercase tracking-[0.3em] text-white/35 motion-safe:animate-pulse">
-          ● Tap to continue
-        </p>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            advanceStage();
+          }}
+          className="absolute inset-0 z-10 flex cursor-default items-end justify-center pb-10 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/60"
+          aria-label="Continue"
+        >
+          <span className="text-[11px] font-medium uppercase tracking-[0.3em] text-white/60 motion-safe:animate-pulse">
+            ● Tap to continue
+          </span>
+        </button>
       )}
 
       <AnimatePresence>
@@ -462,14 +483,28 @@ export default function PackOpenOverlay({
                 transition: { duration: 0.18, ease: EASE_TW },
               }}
             >
-              <button
-                type="button"
-                onClick={shuffle}
-                className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-5 py-2 text-sm font-semibold text-white/80 transition-colors hover:bg-white/10"
-              >
-                ⇄ Shuffle
-              </button>
-              <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-white/35">
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={shuffle}
+                  className="inline-flex h-11 items-center gap-2 rounded-full border border-white/15 bg-white/5 px-5 text-sm font-semibold text-white/80 transition-colors hover:bg-white/10"
+                >
+                  ⇄ Shuffle
+                </button>
+                {/* Keyboard-accessible equivalent of the tap-to-select on the
+                    cylinder — advances packs → slab exactly like a pointer tap. */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setStage('slab');
+                  }}
+                  className="inline-flex h-11 items-center gap-2 rounded-full border border-white/15 bg-white/10 px-5 text-sm font-semibold text-white transition-colors hover:bg-white/15"
+                >
+                  Open this pack
+                </button>
+              </div>
+              <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-white/60">
                 Drag to spin · tap a pack to open
               </p>
             </motion.div>
@@ -488,14 +523,19 @@ export default function PackOpenOverlay({
             transition={{ ...SLAB_RISE, delay: 0.46 }}
           >
             <SlabBack shimmer={!reduced} />
-            <motion.p
+            <motion.button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                advanceStage();
+              }}
               initial={reduced ? false : { opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.4, ease: 'easeOut', delay: 0.66 }}
-              className="text-[11px] font-medium uppercase tracking-[0.3em] text-white/50 motion-safe:animate-pulse"
+              className="rounded-full px-4 py-2 text-[11px] font-medium uppercase tracking-[0.3em] text-white/60 outline-none transition-colors hover:text-white focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:ring-offset-2 focus-visible:ring-offset-black motion-safe:animate-pulse"
             >
               ● Tap to reveal
-            </motion.p>
+            </motion.button>
           </motion.div>
         )}
 
@@ -586,13 +626,16 @@ export default function PackOpenOverlay({
         {stage === 'card' && (
           <motion.div
             key="card"
-            className="absolute inset-0 flex flex-col items-center justify-center gap-4"
+            // Scrollable so the card + caption + up to 3 stacked buttons stay
+            // reachable on short (≤667px) phones; the inner wrapper's min-h-full +
+            // justify-center keeps everything centered when it does fit.
+            className="absolute inset-0 overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             {!reduced && (
               <div
                 aria-hidden
-                className="pointer-events-none absolute left-1/2 top-1/2 h-[560px] w-[560px] blur-3xl"
+                className="pointer-events-none fixed left-1/2 top-1/2 h-[560px] w-[560px] blur-3xl"
                 style={{
                   // centering lives INSIDE the keyframe (translate(-50%,-50%) rotate(...)) —
                   // Tailwind v4 translate-* utilities would double-shift on top of it.
@@ -602,151 +645,153 @@ export default function PackOpenOverlay({
                 }}
               />
             )}
-            <motion.div
-              initial={reduced ? false : { rotateY: 90, opacity: 0 }}
-              animate={{ rotateY: 0, opacity: 1 }}
-              transition={{
-                ...CARD_FLIP,
-                opacity: { duration: 0.28, ease: EASE_TW },
-              }}
-              style={{
-                transformPerspective: 1000,
-                filter: `drop-shadow(0 0 60px rgba(${rgb},0.55))`,
-              }}
-              className="relative"
-            >
-              {/* The card asset IS the graded-slab product photo — live shows it raw
+            <div className="flex min-h-full flex-col items-center justify-center gap-4 px-4 py-16 pb-[calc(4rem+env(safe-area-inset-bottom))]">
+              <motion.div
+                initial={reduced ? false : { rotateY: 90, opacity: 0 }}
+                animate={{ rotateY: 0, opacity: 1 }}
+                transition={{
+                  ...CARD_FLIP,
+                  opacity: { duration: 0.28, ease: EASE_TW },
+                }}
+                style={{
+                  transformPerspective: 1000,
+                  filter: `drop-shadow(0 0 60px rgba(${rgb},0.55))`,
+                }}
+                className="relative"
+              >
+                {/* The card asset IS the graded-slab product photo — live shows it raw
                   (330×569 at 1440, no frame, no radius); wrapping it in extra holder
                   chrome double-framed it. */}
-              <Image
-                src={card.image}
-                alt={card.name}
-                width={330}
-                height={569}
-                className="h-[440px] w-auto object-contain sm:h-[560px]"
-              />
-              {/* Demo spins watermark the result — the card is theater, not a pull */}
-              {!isReal && (
-                <span
-                  aria-hidden
-                  className="font-heading pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rotate-[-18deg] rounded-xl border-[3px] border-white/45 px-6 py-2 text-5xl font-black uppercase tracking-[0.25em] text-white/50 sm:text-6xl"
-                  style={{ textShadow: '0 2px 16px rgba(0,0,0,0.8)' }}
-                >
-                  Demo
-                </span>
-              )}
-            </motion.div>
-            <motion.div
-              initial={reduced ? false : { y: 24, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              transition={{ duration: 0.3, ease: 'easeOut', delay: 0.4 }}
-              className="relative flex flex-col items-center gap-2 text-center"
-            >
-              <p className="max-w-[300px] px-2 text-[13px] font-semibold leading-snug text-white">
-                {card.name}
-              </p>
-              <div className="flex items-center gap-2">
-                <RarityPill rarity={card.rarity} rgb={rgb} small />
-                <span className="text-[13px] text-white/70">
-                  Value:{' '}
-                  <span className="font-bold text-white">
-                    {marketPriceMyr != null
-                      ? rm(marketPriceMyr ?? 0)
-                      : card.value}
+                <Image
+                  src={card.image}
+                  alt={card.name}
+                  width={330}
+                  height={569}
+                  className="h-[440px] w-auto object-contain sm:h-[560px]"
+                />
+                {/* Demo spins watermark the result — the card is theater, not a pull */}
+                {!isReal && (
+                  <span
+                    aria-hidden
+                    className="font-heading pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rotate-[-18deg] rounded-xl border-[3px] border-white/45 px-6 py-2 text-5xl font-black uppercase tracking-[0.25em] text-white/50 sm:text-6xl"
+                    style={{ textShadow: '0 2px 16px rgba(0,0,0,0.8)' }}
+                  >
+                    Demo
                   </span>
-                  {!isReal && ' · demo'}
-                </span>
-              </div>
-              <div className="mt-3 flex flex-col items-center gap-2">
-                {/* Anonymous DEMO spin: keep/sell is replaced by the sign-up
-                    conversion CTA — nothing was recorded, nothing is claimable. */}
-                {onSignUp && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={onSignUp}
-                      className="inline-flex h-12 w-[300px] items-center justify-center rounded-xl bg-buyback text-sm font-bold text-white shadow-lg shadow-buyback/30 transition-opacity hover:opacity-95"
-                    >
-                      Sign up to keep what you pull
-                    </button>
-                    <p className="max-w-[300px] text-center text-[11px] text-white/50">
-                      Demo result — nothing is recorded or claimable. Real opens
-                      vault every pull to your account.
-                    </p>
-                  </>
                 )}
-                {/* Real pull: sell now (instant while the window runs, flat
+              </motion.div>
+              <motion.div
+                initial={reduced ? false : { y: 24, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ duration: 0.3, ease: 'easeOut', delay: 0.4 }}
+                className="relative flex flex-col items-center gap-2 text-center"
+              >
+                <p className="max-w-[300px] px-2 text-[13px] font-semibold leading-snug text-white">
+                  {card.name}
+                </p>
+                <div className="flex items-center gap-2">
+                  <RarityPill rarity={card.rarity} rgb={rgb} small />
+                  <span className="text-[13px] text-white/70">
+                    Value:{' '}
+                    <span className="font-bold text-white">
+                      {marketPriceMyr != null
+                        ? rm(marketPriceMyr ?? 0)
+                        : card.value}
+                    </span>
+                    {!isReal && ' · demo'}
+                  </span>
+                </div>
+                <div className="mt-3 flex flex-col items-center gap-2">
+                  {/* Anonymous DEMO spin: keep/sell is replaced by the sign-up
+                    conversion CTA — nothing was recorded, nothing is claimable. */}
+                  {onSignUp && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={onSignUp}
+                        className="inline-flex h-12 w-[300px] items-center justify-center rounded-xl bg-buyback text-sm font-bold text-white shadow-lg shadow-buyback/30 transition-opacity hover:opacity-95"
+                      >
+                        Sign up to keep what you pull
+                      </button>
+                      <p className="max-w-[300px] text-center text-[11px] text-white/60">
+                        Demo result — nothing is recorded or claimable. Real
+                        opens vault every pull to your account.
+                      </p>
+                    </>
+                  )}
+                  {/* Real pull: sell now (instant while the window runs, flat
                     after) — both go through the confirm modal. Demo spins have
                     no offer. */}
-                {buyback && sell.phase !== 'sold' && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => setConfirmOpen(true)}
-                      disabled={sell.phase === 'selling'}
-                      className="inline-flex h-12 w-[300px] items-center justify-center rounded-xl border border-amber-400/60 bg-amber-400/10 text-sm font-bold text-amber-300 transition-colors hover:bg-amber-400/20 disabled:opacity-60"
-                    >
-                      {sell.phase === 'selling'
-                        ? 'Selling…'
-                        : sellExpired
-                          ? `Sell for RM ${buyback.vaultAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${buyback.vaultPercent}%)`
-                          : `Sell back for RM ${buyback.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${buyback.percent}%) · ${secondsLeft}s`}
-                    </button>
-                    <p className="max-w-[300px] text-center text-[11px] text-white/50">
-                      {sellExpired
-                        ? `Instant offer expired — this card is in your vault and sells at the flat ${buyback.vaultPercent}% rate.`
-                        : `Or keep it: vaulted cards sell anytime at the flat ${buyback.vaultPercent}% rate.`}
+                  {buyback && sell.phase !== 'sold' && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmOpen(true)}
+                        disabled={sell.phase === 'selling'}
+                        className="inline-flex h-12 w-[300px] items-center justify-center rounded-xl border border-chase/50 bg-chase/10 text-sm font-bold text-chase transition-colors hover:bg-chase/20 disabled:opacity-60"
+                      >
+                        {sell.phase === 'selling'
+                          ? 'Selling…'
+                          : sellExpired
+                            ? `Sell for RM ${buyback.vaultAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${buyback.vaultPercent}%)`
+                            : `Sell back for RM ${buyback.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${buyback.percent}%) · ${secondsLeft}s`}
+                      </button>
+                      <p className="max-w-[300px] text-center text-[11px] text-white/60">
+                        {sellExpired
+                          ? `Instant offer expired — this card is in your vault and sells at the flat ${buyback.vaultPercent}% rate.`
+                          : `Or keep it: vaulted cards sell anytime at the flat ${buyback.vaultPercent}% rate.`}
+                      </p>
+                    </>
+                  )}
+                  {sell.phase === 'sold' && (
+                    <p className="flex h-12 w-[300px] items-center justify-center rounded-xl border border-buyback/50 bg-buyback/10 text-sm font-bold text-buyback-fg">
+                      +RM{' '}
+                      {sell.amount.toLocaleString('en-US', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}{' '}
+                      credited · balance RM{' '}
+                      {sell.balance.toLocaleString('en-US', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
                     </p>
-                  </>
-                )}
-                {sell.phase === 'sold' && (
-                  <p className="flex h-12 w-[300px] items-center justify-center rounded-xl border border-buyback/50 bg-buyback/10 text-sm font-bold text-buyback-fg">
-                    +RM{' '}
-                    {sell.amount.toLocaleString('en-US', {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}{' '}
-                    credited · balance RM{' '}
-                    {sell.balance.toLocaleString('en-US', {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
-                  </p>
-                )}
-                {sell.phase === 'error' && (
-                  <p className="max-w-[300px] text-center text-[12px] font-medium text-red-400">
-                    {sell.message}
-                  </p>
-                )}
-                {/* The sign-up CTA owns the primary slot on anonymous demos —
+                  )}
+                  {sell.phase === 'error' && (
+                    <p className="max-w-[300px] text-center text-[12px] font-medium text-red-400">
+                      {sell.message}
+                    </p>
+                  )}
+                  {/* The sign-up CTA owns the primary slot on anonymous demos —
                     Continue demotes to a quiet dismiss there. */}
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className={
-                    onSignUp
-                      ? 'inline-flex h-10 items-center justify-center rounded-xl px-5 text-[13px] font-semibold text-white/60 transition-colors hover:text-white'
-                      : 'inline-flex h-12 w-[300px] items-center justify-center rounded-xl bg-buyback text-sm font-bold text-white shadow-lg shadow-buyback/30 transition-opacity hover:opacity-95'
-                  }
-                >
-                  {buyback && sell.phase !== 'sold' && !sellExpired
-                    ? 'Keep in vault'
-                    : 'Continue'}
-                </button>
-                <button
-                  type="button"
-                  onClick={onOpenAnother}
-                  disabled={opening}
-                  className="inline-flex h-10 items-center justify-center rounded-xl px-5 text-[13px] font-semibold text-white/60 transition-colors hover:text-white disabled:opacity-60"
-                >
-                  {opening
-                    ? 'Opening…'
-                    : isReal
-                      ? 'Open another'
-                      : 'Spin again'}
-                </button>
-              </div>
-            </motion.div>
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className={
+                      onSignUp
+                        ? 'inline-flex h-10 items-center justify-center rounded-xl px-5 text-[13px] font-semibold text-white/60 transition-colors hover:text-white'
+                        : 'inline-flex h-12 w-[300px] items-center justify-center rounded-xl bg-buyback text-sm font-bold text-white shadow-lg shadow-buyback/30 transition-opacity hover:opacity-95'
+                    }
+                  >
+                    {buyback && sell.phase !== 'sold' && !sellExpired
+                      ? 'Keep in vault'
+                      : 'Continue'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onOpenAnother}
+                    disabled={opening}
+                    className="inline-flex h-10 items-center justify-center rounded-xl px-5 text-[13px] font-semibold text-white/60 transition-colors hover:text-white disabled:opacity-60"
+                  >
+                    {opening
+                      ? 'Opening…'
+                      : isReal
+                        ? 'Open another'
+                        : 'Spin again'}
+                  </button>
+                </div>
+              </motion.div>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -788,7 +833,7 @@ function MetaRow({
         initial={reduced ? false : { y: 16, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ duration: 0.25, ease: EASE_BACK, delay }}
-        className="text-[10px] font-medium uppercase tracking-[0.3em] text-white/35"
+        className="text-[10px] font-medium uppercase tracking-[0.3em] text-white/60"
       >
         {label}
       </motion.p>

@@ -63,7 +63,7 @@ export function SlotControls({
           type="button"
           onClick={onSpin}
           disabled={disabled}
-          className="inline-flex h-14 flex-1 items-center justify-center gap-2 rounded-2xl bg-gradient-to-b from-amber-300 to-amber-500 text-base font-bold text-neutral-950 shadow-[0_8px_30px_rgba(251,191,36,0.25)] transition-opacity hover:opacity-90 disabled:opacity-50"
+          className="inline-flex h-14 flex-1 items-center justify-center gap-2 rounded-2xl bg-chase text-base font-bold text-neutral-950 transition-colors hover:bg-chase/90 disabled:opacity-50"
         >
           <Sparkles className="h-5 w-5" aria-hidden />
           {spinning ? 'Spinning…' : label}
@@ -96,7 +96,7 @@ export function SlotControls({
         </button>
       </div>
 
-      <div className="text-[12px] text-white/50">{costLine}</div>
+      <div className="text-[12px] text-white/60">{costLine}</div>
     </div>
   );
 }

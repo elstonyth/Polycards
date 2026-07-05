@@ -124,7 +124,7 @@ export function RevealStage({
     }
     if (state.phase === 'vaulted' || expired) {
       return (
-        <p className="text-center text-[12px] text-white/55">
+        <p className="text-center text-[12px] text-white/60">
           Stored in your vault — sell anytime at {offer.vaultPercent}%
         </p>
       );
@@ -138,7 +138,7 @@ export function RevealStage({
           type="button"
           onClick={() => setConfirmIndex(i)}
           disabled={!flipped || state.phase === 'selling'}
-          className="inline-flex h-12 w-full items-center justify-center rounded-xl border border-amber-400/60 bg-amber-400/10 text-sm font-bold text-amber-300 transition-colors hover:bg-amber-400/20 disabled:opacity-50"
+          className="inline-flex h-12 w-full items-center justify-center rounded-xl border border-chase/50 bg-chase/10 text-sm font-bold text-chase transition-colors hover:bg-chase/20 disabled:opacity-50"
         >
           {state.phase === 'selling'
             ? 'Selling…'

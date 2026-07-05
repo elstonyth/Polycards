@@ -590,7 +590,7 @@ export default function SlotMachineClient({
                   className="ml-1.5 font-semibold text-white/85"
                 />
                 {reels > 1 && (
-                  <span className="ml-2 rounded bg-amber-400/15 px-1.5 py-0.5 text-[11px] font-bold text-amber-300">
+                  <span className="ml-2 rounded bg-chase/15 px-1.5 py-0.5 text-[11px] font-bold text-chase">
                     × {reels}
                   </span>
                 )}

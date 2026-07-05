@@ -155,7 +155,7 @@ export function GalleryRail({
         )}
       </div>
       {count > 1 && (
-        <p className={cn('text-[12px] font-medium text-white/50')}>
+        <p className={cn('text-[12px] font-medium text-white/60')}>
           {activeIndex + 1} of {count}
         </p>
       )}
