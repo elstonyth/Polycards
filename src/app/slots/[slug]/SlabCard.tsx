@@ -16,6 +16,7 @@ import { rm } from '@/lib/format';
 import { isTopRarity } from '@/lib/rarity';
 import { CARD_ASPECT } from '@/lib/vault-reel';
 import { cn } from '@/lib/utils';
+import { PokeCardBack } from './PokeCardBack';
 
 export function SlabCard({
   card,
@@ -126,7 +127,11 @@ export function SlabCard({
           },
         }}
       >
-        {/* BACK — realistic slab seen from behind */}
+        {/* BACK — the SAME etched card design as the reel landing zone (spec
+            decision #34; supersedes #6's charcoal slab + holo monogram). The
+            morph reads as one card growing from the reel to the stage. A faint
+            dark-glass fill gives the floating card presence in the lit room;
+            the line art + glow carry the rarity color. */}
         <span
           className={cn(
             'absolute inset-0 rounded-xl [backface-visibility:hidden]',
@@ -134,30 +139,12 @@ export function SlabCard({
           )}
           style={
             {
-              background:
-                'linear-gradient(160deg, #2a2a2e 0%, #1c1c20 45%, #26262b 100%)',
-              boxShadow: `inset 0 0 0 3px rgba(255,255,255,0.10), inset 0 0 0 8px rgba(0,0,0,0.5), 0 18px 50px rgba(0,0,0,0.6), 0 0 40px rgba(${rarityRgb}, 0.25)`,
+              background: 'rgba(12, 12, 14, 0.55)',
+              boxShadow: '0 18px 50px rgba(0,0,0,0.6)',
             } as CSSProperties
           }
         >
-          {/* plastic sheen */}
-          <span className="absolute inset-0 rounded-xl bg-gradient-to-br from-white/12 via-transparent to-white/4" />
-          {/* holo monogram */}
-          <span
-            className="absolute inset-0 flex items-center justify-center font-heading text-6xl font-black tracking-tight text-transparent"
-            style={{
-              backgroundImage:
-                'conic-gradient(from 0deg, #ff8a8a, #ffd98a, #b0ff8a, #8ad9ff, #b08aff, #ff8ad4, #ff8a8a)',
-              backgroundClip: 'text',
-              WebkitBackgroundClip: 'text',
-              opacity: 0.5,
-            }}
-          >
-            P
-          </span>
-          <span className="absolute inset-x-0 bottom-4 text-center text-[10px] font-semibold uppercase tracking-[0.3em] text-white/40">
-            Graded · Vaulted
-          </span>
+          <PokeCardBack rgb={rarityRgb} className="absolute inset-0" />
           {/* the tile's pixel Pokémon rides the morph, fading out mid-growth */}
           {spriteSrc && entering && !reduced && (
             <motion.img

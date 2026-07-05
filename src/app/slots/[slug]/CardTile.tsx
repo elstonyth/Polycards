@@ -4,11 +4,9 @@
 // A reel cell as a BARE pixel Pokémon sprite (spec decision #17, supersedes
 // #11's white mini-card look): no white face/border/shadow chrome — the box
 // stays CARD_ASPECT-shaped (same geometry VaultReelColumn measures for the
-// morph) but renders transparent, and the sprite fills most of it. Landed
-// glow is a sprite-hugging drop-shadow (a box-shadow here would draw a glowing
-// rectangle around empty transparent space). Rarity glow appears ONLY when
-// `landed` (after settle) — rarityRgb must be null before that (spoiler guard).
-import { cn } from '@/lib/utils';
+// morph) but renders transparent, and the sprite fills most of it. The landed
+// rarity treatment lives on the card-frame landing zone now, NOT the sprite
+// (spec decision #34 — the card glows, the Pokémon doesn't).
 import { CARD_ASPECT } from '@/lib/vault-reel';
 import { PokemonToken } from './PokemonToken';
 
@@ -16,18 +14,12 @@ export function CardTile({
   dex,
   name,
   size,
-  landed,
-  rarityRgb,
-  reduced,
   eager,
   imageSrc,
 }: {
   dex: number;
   name: string;
   size: number;
-  landed: boolean;
-  rarityRgb: string | null;
-  reduced: boolean;
   eager: boolean;
   imageSrc?: string;
 }) {
@@ -36,11 +28,7 @@ export function CardTile({
   const cardW = Math.round(cardH * CARD_ASPECT);
   return (
     <div
-      className={cn(
-        'relative flex items-center justify-center',
-        !reduced && 'transition-transform duration-300 ease-out',
-        landed && !reduced && 'scale-110',
-      )}
+      className="relative flex items-center justify-center"
       style={{
         width: `${cardW}px`,
         height: `${cardH}px`,
@@ -52,14 +40,9 @@ export function CardTile({
         tier="common"
         size={Math.round(size * 0.88)}
         landed={false}
-        reduced={reduced}
+        reduced
         eager={eager}
         imageSrc={imageSrc}
-        filter={
-          landed && rarityRgb
-            ? `drop-shadow(0 0 10px rgba(${rarityRgb}, 0.85)) drop-shadow(0 0 24px rgba(${rarityRgb}, 0.45))`
-            : undefined
-        }
       />
     </div>
   );

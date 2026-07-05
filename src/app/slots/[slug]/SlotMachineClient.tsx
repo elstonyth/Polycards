@@ -537,7 +537,6 @@ export default function SlotMachineClient({
                       : (spin?.winners ?? null)
                   }
                   reduced={reduced}
-                  pulse={false}
                   onAllSettled={handleSettled}
                   onWinnerRect={(i, r) => {
                     winnerRects.current[i] = r;

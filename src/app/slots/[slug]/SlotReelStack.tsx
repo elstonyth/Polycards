@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { VaultReelColumn } from './VaultReelColumn';
-import { PaylineRow } from './PaylineRow';
 
 export type ColumnWinner = {
   dex: number | null;
@@ -13,7 +12,8 @@ export type ColumnWinner = {
 };
 
 /**
- * N vertical reel columns sharing one horizontal payline. Columns stop staggered
+ * N vertical reel columns, each with its own card-frame landing zone (spec
+ * decision #34 — the shared amber payline bar is gone). Columns stop staggered
  * L→R (the rAF engine in VaultReelColumn owns per-column timing). `winners ===
  * null` = idle. `onAllSettled` fires once, after the LAST (slowest) column
  * settles — the win-after-stop guarantee (spec §4 bug #1). Remount columns via
@@ -25,7 +25,6 @@ export function SlotReelStack({
   winners,
   reduced,
   cellSize,
-  pulse = false,
   onAllSettled,
   onWinnerRect,
   hideWinners,
@@ -35,7 +34,6 @@ export function SlotReelStack({
   winners: ColumnWinner[] | null;
   reduced: boolean;
   cellSize?: number;
-  pulse?: boolean;
   onAllSettled?: () => void;
   onWinnerRect?: (colIndex: number, rect: DOMRect) => void;
   hideWinners?: boolean;
@@ -59,7 +57,6 @@ export function SlotReelStack({
 
   return (
     <div className="relative flex items-stretch justify-center gap-3 sm:gap-5">
-      <PaylineRow reduced={reduced} pulse={pulse} />
       {/* Add/remove a reel animates (spec decision #21): a new column descends &
           settles in (the Presentation move); a removed column lifts up + fades
           out. The motion wrapper is keyed by COLUMN INDEX (`col-${i}`), NOT by

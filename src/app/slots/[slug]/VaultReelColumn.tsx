@@ -12,11 +12,13 @@ import {
   cellCurve,
   blurStretch,
   buildVaultStrip,
+  CARD_ASPECT,
   VAULT_WIN_INDEX,
   VISIBLE_CELLS,
 } from '@/lib/vault-reel';
 import { spriteGif } from '@/lib/mock/pokedex';
 import { CardTile } from './CardTile';
+import { PokeCardBack } from './PokeCardBack';
 
 const EAGER_RADIUS = 3;
 
@@ -181,13 +183,27 @@ export function VaultReelColumn({
         aria-hidden
         className="pointer-events-none absolute inset-0 z-10 rounded-2xl bg-gradient-to-b from-white/10 via-transparent to-black/40"
       />
+      {/* Card-frame landing zone (spec decision #34) — replaces the shared
+          amber payline bar. Transparent line art, so the sprites scroll (and
+          the winner rests) clearly visible through it. Neutral etch until THIS
+          column settles; then the FRAME takes the rarity color — the sprite
+          itself no longer glows. Color only after `done` = the spoiler guard. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute left-1/2 top-1/2 z-20 -translate-x-1/2 -translate-y-1/2"
+        style={{
+          width: `${cellSize + 8}px`,
+          height: `${Math.round((cellSize + 8) / CARD_ASPECT)}px`,
+        }}
+      >
+        <PokeCardBack rgb={done && isWin ? rarityRgb : null} />
+      </div>
       <div
         ref={stripRef}
         className="flex flex-col items-center will-change-transform"
       >
         {strip.map((dex, i) => {
           const isWinnerCell = i === VAULT_WIN_INDEX;
-          const landed = isWinnerCell && done;
           return (
             <div
               key={i}
@@ -209,9 +225,6 @@ export function VaultReelColumn({
                 dex={dex}
                 name={isWinnerCell ? (winnerName ?? '') : ''}
                 size={cellSize}
-                landed={landed}
-                rarityRgb={landed ? rarityRgb : null}
-                reduced={reduced}
                 eager={Math.abs(i - VAULT_WIN_INDEX) <= EAGER_RADIUS}
                 imageSrc={isWinnerCell ? winnerImage : undefined}
               />
