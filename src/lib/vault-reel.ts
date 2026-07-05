@@ -236,14 +236,27 @@ export function cellCurve(
   };
 }
 
-/** Cheap motion-blur illusion: vertical stretch + ghosting, transform-only. */
+/** Peak `filter: blur()` radius (px) at full spin speed — capped so a phone
+ *  GPU never re-rasterizes a huge blur radius per frame (spec #38). */
+const MAX_BLUR_PX = 5;
+
+/**
+ * Motion-blur profile for a moving reel cell (spec decision #38). `scaleY` +
+ * `opacity` are the transform-only vertical smear/ghost; `blurPx` is a REAL
+ * `filter: blur()` radius the caller applies to the moving strip. All three are
+ * 0/identity at rest and grow with |velocity|, so the reel blurs while streaming
+ * and lands sharp as it settles. blurPx is capped and ramps gently (×1.6) so
+ * settle-speed (~0.68px/ms) is a soft trace, full speed (~2.8px/ms) a clear blur.
+ */
 export function blurStretch(velocityPxPerMs: number): {
   scaleY: number;
   opacity: number;
+  blurPx: number;
 } {
   const v = Math.abs(velocityPxPerMs);
   return {
     scaleY: 1 + Math.min(0.35, v * 0.06),
     opacity: 1 - Math.min(0.45, v * 0.08),
+    blurPx: Math.min(MAX_BLUR_PX, v * 1.6),
   };
 }

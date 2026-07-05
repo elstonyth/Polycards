@@ -96,6 +96,11 @@ export function VaultReelColumn({
     const paint = (offset: number, velocity: number) => {
       stripEl.style.transform = `translate3d(0, ${-offset}px, 0)`;
       const stretch = blurStretch(velocity);
+      // Real motion blur (#38): one filter on the whole moving strip (not
+      // per-cell), velocity-scaled → 0 at settle so the winner lands sharp.
+      // Combined with the per-cell scaleY smear it reads as vertical blur.
+      stripEl.style.filter =
+        stretch.blurPx > 0.05 ? `blur(${stretch.blurPx.toFixed(2)}px)` : '';
       // Only style cells near the window (offset → visible index range).
       // ±2 extra rows vs the linear window: the cylinder projection (#37b)
       // pulls edge rows INWARD, so rows that are off-window in linear space

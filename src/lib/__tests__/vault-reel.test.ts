@@ -291,12 +291,30 @@ describe('cellCurve', () => {
 });
 
 describe('blurStretch', () => {
-  test('at rest: no stretch, full opacity', () => {
-    expect(blurStretch(0)).toEqual({ scaleY: 1, opacity: 1 });
+  test('at rest: no stretch, full opacity, NO blur', () => {
+    expect(blurStretch(0)).toEqual({ scaleY: 1, opacity: 1, blurPx: 0 });
   });
   test('stretch and dim are clamped at high velocity', () => {
     const fast = blurStretch(50);
     expect(fast.scaleY).toBeLessThanOrEqual(1.35);
     expect(fast.opacity).toBeGreaterThanOrEqual(0.55);
+  });
+  // Spec decision #38: real motion blur — velocity-scaled blurPx, 0 at rest,
+  // ramps with speed, capped so a phone GPU isn't blurring a huge radius.
+  test('motion blur is zero at rest and grows with speed, capped', () => {
+    expect(blurStretch(0).blurPx).toBe(0);
+    // peak spin velocity is ~2.8px/ms — blur should be clearly visible there
+    const fast = blurStretch(2.8);
+    expect(fast.blurPx).toBeGreaterThan(2);
+    expect(fast.blurPx).toBeLessThanOrEqual(5);
+    // monotonic: faster = more blur (until the cap)
+    expect(blurStretch(1).blurPx).toBeGreaterThan(blurStretch(0.3).blurPx);
+    // hard cap holds even at absurd velocity
+    expect(blurStretch(999).blurPx).toBeLessThanOrEqual(5);
+  });
+  test('settle-speed blur is small (lands nearly sharp)', () => {
+    // at the settle entry velocity (~0.68px/ms) blur should be a soft trace,
+    // not a smear — the winner reads crisp as it stops.
+    expect(blurStretch(0.68).blurPx).toBeLessThan(1.5);
   });
 });
