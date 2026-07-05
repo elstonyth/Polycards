@@ -251,15 +251,28 @@ describe('cellCurve', () => {
   test('clamps beyond the radius', () => {
     expect(cellCurve(9999, 280)).toEqual(cellCurve(280, 280));
   });
-  // Spec decision #35: the wheel must actually READ. Full-deflection
-  // magnitudes are encoded so a tweak can't silently flatten the curve again
-  // (the original -38°/0.82/-46px measured as "flat dimming" on device).
-  test('full deflection is strong enough to read as a wheel', () => {
+  // Spec decision #36: TRUE CYLINDER projection (mouse-from-above reference).
+  // Three properties define the drum and are encoded so a tweak can't
+  // silently regress it to a linear fold (#35's mistake):
+  //  1. the middle band stays flat + bright (faces the viewer, closest);
+  //  2. the rim wraps hard (near edge-on, dark, pushed away in depth);
+  //  3. width never shrinks by a uniform scale — a cylinder keeps its width
+  //     (apparent size falls off via perspective depth instead).
+  test('cylinder: middle band stays flat and bright', () => {
+    const near = cellCurve(0.4 * 280, 280); // 40% out — still on the flat band
+    expect(near.rotateXDeg).toBeGreaterThan(-30);
+    expect(near.brightness).toBeGreaterThanOrEqual(0.85);
+    expect(Math.abs(near.translateZPx)).toBeLessThan(20);
+  });
+  test('cylinder: rim wraps hard away from the viewer', () => {
     const edge = cellCurve(280, 280);
-    expect(edge.rotateXDeg).toBeLessThanOrEqual(-50);
-    expect(edge.scale).toBeLessThanOrEqual(0.72);
+    expect(edge.rotateXDeg).toBeLessThanOrEqual(-75);
     expect(edge.brightness).toBeLessThanOrEqual(0.42);
-    expect(edge.translateZPx).toBeLessThanOrEqual(-80);
+    expect(edge.translateZPx).toBeLessThanOrEqual(-100);
+  });
+  test('cylinder: width is constant (no uniform shrink)', () => {
+    expect(cellCurve(140, 280).scale).toBe(1);
+    expect(cellCurve(280, 280).scale).toBe(1);
   });
 });
 

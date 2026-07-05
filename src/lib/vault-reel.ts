@@ -184,13 +184,25 @@ export function spinOffset(
   return targetPx - overshootPx * settleShape(p);
 }
 
+/** Rim wrap cap: 90° would render the rim cell as a zero-height sliver. */
+const CYL_MAX_DEG = 82;
+/** Projected drum depth (px) — how far the rim recedes at full wrap (#36). */
+const CYL_DEPTH_PX = 150;
+
 /**
- * 3D barrel curvature for a cell whose center is `distPx` from the window
- * center (positive = below). `radiusPx` is half the window height.
- * Magnitudes are deliberately strong (spec decision #35): the original
- * -38°/0.82/-46px read as flat dimming on device — the center cell stays at
- * identity (scale 1: the landed sprite must keep fitting the Poké Ball, #34)
- * and everything else falls away hard so the wheel is unmistakable.
+ * TRUE CYLINDER projection (spec decision #36 — "mouse seen from above"):
+ * the strip is the visible face of a drum whose axis is horizontal. A cell at
+ * normalized offset `a` from the payline sits at wrap angle θ = asin(a), so
+ *   • the middle band is FLAT — nearly untouched until ~40% out (it faces the
+ *     viewer: closest, brightest, full size);
+ *   • rows wrap away with ACCELERATING tilt toward the window rim (near
+ *     edge-on at the very edge — the drum horizon);
+ *   • height compresses as cos θ (via the rotation), width stays constant —
+ *     a cylinder keeps its width; apparent size falls off through real
+ *     perspective depth z = −DEPTH·(1−cos θ) instead of a uniform scale;
+ *   • brightness follows drum lighting: 0.22 + 0.78·cos θ.
+ * Replaces #35's linear falloff, which read as a fold rather than a drum.
+ * `radiusPx` is half the window height; `distPx` positive = below center.
  */
 export function cellCurve(
   distPx: number,
@@ -203,11 +215,13 @@ export function cellCurve(
 } {
   const n = Math.max(-1, Math.min(1, distPx / radiusPx));
   const a = Math.abs(n);
+  const thetaDeg = Math.min(CYL_MAX_DEG, (Math.asin(a) * 180) / Math.PI);
+  const cos = Math.cos((thetaDeg * Math.PI) / 180);
   return {
-    rotateXDeg: -55 * n + 0, // coerce signed zero to unsigned zero
-    scale: 1 - 0.3 * a,
-    brightness: 1 - 0.62 * a,
-    translateZPx: -84 * a + 0, // coerce signed zero to unsigned zero
+    rotateXDeg: -thetaDeg * Math.sign(n) + 0, // coerce signed zero
+    scale: 1,
+    brightness: 0.22 + 0.78 * cos,
+    translateZPx: -CYL_DEPTH_PX * (1 - cos) + 0, // coerce signed zero
   };
 }
 
