@@ -187,6 +187,10 @@ export function spinOffset(
 /**
  * 3D barrel curvature for a cell whose center is `distPx` from the window
  * center (positive = below). `radiusPx` is half the window height.
+ * Magnitudes are deliberately strong (spec decision #35): the original
+ * -38°/0.82/-46px read as flat dimming on device — the center cell stays at
+ * identity (scale 1: the landed sprite must keep fitting the Poké Ball, #34)
+ * and everything else falls away hard so the wheel is unmistakable.
  */
 export function cellCurve(
   distPx: number,
@@ -200,10 +204,10 @@ export function cellCurve(
   const n = Math.max(-1, Math.min(1, distPx / radiusPx));
   const a = Math.abs(n);
   return {
-    rotateXDeg: -38 * n + 0, // coerce signed zero to unsigned zero
-    scale: 1 - 0.18 * a,
-    brightness: 1 - 0.45 * a,
-    translateZPx: -46 * a + 0, // coerce signed zero to unsigned zero
+    rotateXDeg: -55 * n + 0, // coerce signed zero to unsigned zero
+    scale: 1 - 0.3 * a,
+    brightness: 1 - 0.62 * a,
+    translateZPx: -84 * a + 0, // coerce signed zero to unsigned zero
   };
 }
 

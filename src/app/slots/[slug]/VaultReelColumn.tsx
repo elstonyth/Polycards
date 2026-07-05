@@ -112,8 +112,10 @@ export function VaultReelColumn({
         const cellCenter = i * ITEM_H + ITEM_H / 2 - offset;
         const dist = cellCenter - winH / 2;
         const c = cellCurve(dist, radius);
+        // 520px perspective (was 700): tighter vanishing point so translateZ
+        // contributes real foreshortening — part of the readable wheel (#35).
         el.style.transform =
-          `perspective(700px) translateZ(${c.translateZPx}px) ` +
+          `perspective(520px) translateZ(${c.translateZPx}px) ` +
           `rotateX(${c.rotateXDeg}deg) scale(${c.scale}) scaleY(${stretch.scaleY})`;
         el.style.opacity = String(c.brightness * stretch.opacity);
       }

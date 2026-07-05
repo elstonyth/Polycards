@@ -251,6 +251,16 @@ describe('cellCurve', () => {
   test('clamps beyond the radius', () => {
     expect(cellCurve(9999, 280)).toEqual(cellCurve(280, 280));
   });
+  // Spec decision #35: the wheel must actually READ. Full-deflection
+  // magnitudes are encoded so a tweak can't silently flatten the curve again
+  // (the original -38°/0.82/-46px measured as "flat dimming" on device).
+  test('full deflection is strong enough to read as a wheel', () => {
+    const edge = cellCurve(280, 280);
+    expect(edge.rotateXDeg).toBeLessThanOrEqual(-50);
+    expect(edge.scale).toBeLessThanOrEqual(0.72);
+    expect(edge.brightness).toBeLessThanOrEqual(0.42);
+    expect(edge.translateZPx).toBeLessThanOrEqual(-80);
+  });
 });
 
 describe('blurStretch', () => {
