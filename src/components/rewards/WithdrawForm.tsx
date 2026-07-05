@@ -57,7 +57,7 @@ export function WithdrawForm({
 
   if (done) {
     return (
-      <p className="rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-sm font-semibold text-emerald-300">
+      <p className="rounded-xl border border-buyback/30 bg-buyback/10 px-4 py-3 text-sm font-semibold text-buyback-fg">
         Shipping requested! Check your Orders for status.
       </p>
     );
@@ -185,7 +185,7 @@ export function WithdrawForm({
         <button
           type="submit"
           disabled={busy}
-          className="rounded-lg bg-gradient-to-r from-emerald-500 to-green-500 px-4 py-2 text-[13px] font-bold text-white disabled:opacity-50"
+          className="rounded-lg bg-buyback px-4 py-2 text-[13px] font-bold text-white disabled:opacity-50"
         >
           {busy ? 'Requesting…' : 'Request shipping'}
         </button>

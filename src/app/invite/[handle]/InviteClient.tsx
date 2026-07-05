@@ -52,7 +52,7 @@ export default function InviteClient({ handle }: { handle: string }) {
             Log in to join
           </button>
         ) : state.kind === 'done' ? (
-          <p className="mt-6 text-sm text-emerald-400">
+          <p className="mt-6 text-sm text-buyback-fg">
             You&apos;re on {handle}&apos;s team. Welcome aboard!
           </p>
         ) : (

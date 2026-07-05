@@ -126,7 +126,7 @@ export default function TopUpSheet({
 
         {done ? (
           <div className="mt-6 flex flex-col items-center text-center">
-            <CheckCircle2 className="h-12 w-12 text-green-400" aria-hidden />
+            <CheckCircle2 className="h-12 w-12 text-buyback-fg" aria-hidden />
             <p className="mt-3 font-heading text-2xl text-white">
               {rm(done.amount)} ADDED
             </p>
@@ -185,7 +185,7 @@ export default function TopUpSheet({
               </div>
               <div className="mt-2 flex items-center justify-between text-neutral-400">
                 <span>You top up</span>
-                <span className="font-semibold text-green-400">
+                <span className="font-semibold text-buyback-fg">
                   {amountValid ? `+ ${rm(amount)}` : '—'}
                 </span>
               </div>

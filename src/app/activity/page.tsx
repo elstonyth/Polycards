@@ -20,7 +20,7 @@ const STATS = [
 
 type TxType = 'BUY' | 'CLAW' | 'SALE' | 'LIST';
 const TYPE_TONE: Record<TxType, string> = {
-  BUY: 'bg-emerald-500/15 text-emerald-400',
+  BUY: 'bg-buyback/15 text-buyback-fg',
   CLAW: 'bg-sky-500/15 text-sky-400',
   SALE: 'bg-amber-500/15 text-amber-400',
   LIST: 'bg-fuchsia-500/15 text-fuchsia-400',

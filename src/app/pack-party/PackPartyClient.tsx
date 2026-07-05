@@ -289,8 +289,8 @@ function PartyCard({
               className="absolute right-2 top-2 z-10 flex h-2.5 w-2.5"
               aria-hidden
             >
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75 motion-reduce:animate-none" />
-              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-buyback opacity-75 motion-reduce:animate-none" />
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-buyback" />
             </span>
           )}
           {/* Status badge over the image */}
@@ -300,7 +300,7 @@ function PartyCard({
                 Ended
               </span>
             ) : greatDeal ? (
-              <span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-emerald-500 to-green-500 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-white shadow-sm">
+              <span className="inline-flex items-center gap-1 rounded-full bg-buyback px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-white shadow-sm">
                 <Sparkles className="h-3 w-3" aria-hidden />
                 Great Deal!
               </span>
@@ -316,7 +316,7 @@ function PartyCard({
               <div
                 className={cn(
                   'text-sm font-bold',
-                  greatDeal ? 'text-emerald-400' : 'text-white',
+                  greatDeal ? 'text-buyback-fg' : 'text-white',
                 )}
               >
                 {fmt(party.entry)}
@@ -366,7 +366,7 @@ function PartyCard({
                   'h-full rounded-full',
                   ended
                     ? 'bg-white/25'
-                    : 'bg-gradient-to-r from-emerald-500 to-green-500',
+                    : 'bg-buyback',
                 )}
                 style={{ width: `${pct}%` }}
               />
@@ -431,7 +431,7 @@ export default function PackPartyClient() {
               className="flex items-center gap-3 font-heading text-3xl font-bold tracking-tight text-white sm:text-4xl lg:text-5xl"
             >
               Pack Party
-              <span className="inline-flex items-center rounded-full bg-gradient-to-r from-emerald-500 to-green-500 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white shadow-sm">
+              <span className="inline-flex items-center rounded-full bg-buyback px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white shadow-sm">
                 Beta
               </span>
             </Reveal>
@@ -448,7 +448,7 @@ export default function PackPartyClient() {
               delay={160}
               className="mt-3 inline-flex items-center gap-2 text-xs text-white/50"
             >
-              <span className="inline-block h-2.5 w-2.5 rounded-full bg-gradient-to-r from-emerald-500 to-green-500" />
+              <span className="inline-block h-2.5 w-2.5 rounded-full bg-buyback" />
               = Entry &lt; Avg (great deal!)
             </Reveal>
           </div>
@@ -456,7 +456,7 @@ export default function PackPartyClient() {
           <Reveal delay={120} className="shrink-0">
             <button
               type="button"
-              className="inline-flex items-center justify-center rounded-2xl bg-gradient-to-r from-emerald-500 to-green-500 px-6 py-3 text-sm font-semibold text-white shadow-lg transition-opacity duration-300 hover:opacity-90"
+              className="inline-flex items-center justify-center rounded-2xl bg-buyback px-6 py-3 text-sm font-semibold text-white shadow-lg transition-opacity duration-300 hover:opacity-90"
             >
               Create Party
             </button>
@@ -565,7 +565,7 @@ export default function PackPartyClient() {
         </p>
         <button
           type="button"
-          className="mt-6 inline-flex items-center justify-center rounded-2xl bg-gradient-to-r from-emerald-500 to-green-500 px-8 py-3 text-sm font-semibold text-white shadow-lg transition-opacity duration-300 hover:opacity-90"
+          className="mt-6 inline-flex items-center justify-center rounded-2xl bg-buyback px-8 py-3 text-sm font-semibold text-white shadow-lg transition-opacity duration-300 hover:opacity-90"
         >
           Create Your Own Party
         </button>

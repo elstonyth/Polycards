@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-07-05T20:31:15+08:00",
+  "generatedAt": "2026-07-05T20:47:00+08:00",
   "title": "Design System: Pokenic",
   "extensions": {
     "colorMeta": {
@@ -32,7 +32,12 @@
       "buyback-green": {
         "role": "secondary",
         "displayName": "Buyback Green",
-        "canonical": "#4ade80"
+        "canonical": "#118c4f"
+      },
+      "buyback-green-fg": {
+        "role": "secondary",
+        "displayName": "Buyback Green FG",
+        "canonical": "#2fbf6e"
       },
       "tier-starter": {
         "role": "tertiary",

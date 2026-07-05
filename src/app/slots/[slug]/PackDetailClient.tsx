@@ -217,7 +217,7 @@ export default function PackDetailClient({
           {/* Claw machine stage */}
           <div className="relative flex aspect-[36/25] items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-b from-zinc-200 to-zinc-400">
             {active.boost && (
-              <span className="absolute left-4 top-4 z-20 rounded-md bg-emerald-500 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-white shadow-sm">
+              <span className="absolute left-4 top-4 z-20 rounded-md bg-buyback px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-white shadow-sm">
                 +{active.buybackPercent ?? FLAT_BUYBACK_PERCENT}% Buyback Boost
               </span>
             )}
@@ -280,7 +280,7 @@ export default function PackDetailClient({
               <h1 className="font-heading text-xl font-bold tracking-tight text-white sm:text-2xl">
                 {active.name}
               </h1>
-              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/90 px-2.5 py-1 text-[11px] font-bold text-white">
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-buyback/90 px-2.5 py-1 text-[11px] font-bold text-white">
                 {active.buybackPercent ?? 90}% Buyback
                 <Info className="h-3 w-3 opacity-80" aria-hidden />
               </span>
@@ -370,7 +370,7 @@ export default function PackDetailClient({
                 type="button"
                 onClick={demoSpin}
                 disabled={demoPool.length === 0}
-                className="flex h-11 items-center justify-between rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-4 text-sm font-medium text-emerald-200 transition-colors hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                className="flex h-11 items-center justify-between rounded-xl border border-buyback/30 bg-buyback/10 px-4 text-sm font-medium text-buyback-fg transition-colors hover:bg-buyback/20 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <span className="flex items-center gap-2">
                   <Play className="h-4 w-4 fill-current" aria-hidden />
@@ -416,7 +416,7 @@ export default function PackDetailClient({
               <button
                 type="button"
                 onClick={handleGoToReel}
-                className="flex h-12 w-full items-center justify-between rounded-xl bg-gradient-to-r from-emerald-500 to-green-500 px-5 text-sm font-bold text-white shadow-lg shadow-emerald-900/30 transition-opacity hover:opacity-95 disabled:opacity-60"
+                className="flex h-12 w-full items-center justify-between rounded-xl bg-buyback px-5 text-sm font-bold text-white shadow-lg shadow-buyback/30 transition-opacity hover:opacity-95 disabled:opacity-60"
               >
                 <span className="flex items-center gap-2">
                   {customer ? 'Open Pack' : 'Log in to open'}
@@ -441,7 +441,7 @@ export default function PackDetailClient({
                       <button
                         type="button"
                         onClick={openTopUp}
-                        className="font-bold text-emerald-300 underline underline-offset-2 hover:text-emerald-200"
+                        className="font-bold text-buyback-fg underline underline-offset-2 hover:text-buyback-fg"
                       >
                         Top up credits →
                       </button>

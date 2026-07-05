@@ -40,7 +40,7 @@ export default function NotFound() {
         <div
           className={`${pixel.className} flex items-center justify-between rounded-lg bg-white/5 px-3 py-2 text-[8px] leading-none`}
         >
-          <span className="text-emerald-300/90">✦ VAULT</span>
+          <span className="text-buyback-fg/90">✦ VAULT</span>
           <span className="text-neutral-400">GRADE: NOT FOUND</span>
         </div>
         <div className="mt-3 rounded-xl border border-white/5 bg-black/60 px-6 py-10 text-center">
@@ -81,7 +81,7 @@ export default function NotFound() {
       <div className="mt-7 flex w-full flex-col items-center gap-3 sm:w-auto sm:flex-row sm:justify-center">
         <Link
           href={features.marketplace ? '/marketplace' : '/slots'}
-          className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[#1aa87a] to-green-500 px-6 text-sm font-semibold text-white transition-opacity hover:opacity-90 sm:w-auto"
+          className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-buyback px-6 text-sm font-semibold text-white transition-opacity hover:opacity-90 sm:w-auto"
         >
           {features.marketplace ? 'Back to marketplace' : 'Back to packs'}
           <ArrowRight className="h-4 w-4" aria-hidden />

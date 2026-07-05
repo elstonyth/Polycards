@@ -15,6 +15,12 @@
     var(--font-nekst), 'Nekst', ui-sans-serif, system-ui, sans-serif;
   /* DESIGN.md "Chase Gold" — prize/value moments only (The Signal Rule). */
   --color-chase: #ffb020;
+  /* DESIGN.md "Buyback Green" — money-in / success only (The Signal Rule).
+     Base carries fills, tints, and borders (white text sits on it); -fg is the
+     lighter sibling for money text on dark, which the dark base is too
+     low-contrast to serve legibly. */
+  --color-buyback: #118c4f;
+  --color-buyback-fg: #2fbf6e;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);

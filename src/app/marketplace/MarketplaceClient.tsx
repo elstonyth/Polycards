@@ -210,7 +210,7 @@ function MarketCard({ card }: { card: MarketplaceCard }) {
         )}
       >
         {/* +pts badge, top-left */}
-        <span className="absolute left-2 top-2 z-10 rounded-full bg-emerald-500/90 px-2 py-0.5 text-[11px] font-bold text-white shadow-sm">
+        <span className="absolute left-2 top-2 z-10 rounded-full bg-buyback/90 px-2 py-0.5 text-[11px] font-bold text-white shadow-sm">
           +{card.points}pts
         </span>
         {/* heart, top-right */}
@@ -253,7 +253,7 @@ function MarketCard({ card }: { card: MarketplaceCard }) {
         {/* Live MYR market price — dormant with the rest of /marketplace behind
             NEXT_PUBLIC_FEATURE_MARKETPLACE (see MarketplaceLayout). camelCase
             marketPriceMyr + rm(x ?? 0) guard per the vault/reveal precedent. */}
-        <span className="text-[11px] font-medium text-emerald-400">
+        <span className="text-[11px] font-medium text-buyback-fg">
           Market {rm(card.marketPriceMyr ?? 0)}
         </span>
       </div>

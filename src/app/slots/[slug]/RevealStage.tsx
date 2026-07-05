@@ -117,7 +117,7 @@ export function RevealStage({
     if (!offer) return null;
     if (state.phase === 'sold') {
       return (
-        <p className="flex h-11 w-full items-center justify-center rounded-xl border border-emerald-400/50 bg-emerald-400/10 text-sm font-bold text-emerald-300">
+        <p className="flex h-11 w-full items-center justify-center rounded-xl border border-buyback/50 bg-buyback/10 text-sm font-bold text-buyback-fg">
           +{rm(state.amount)} credited
         </p>
       );

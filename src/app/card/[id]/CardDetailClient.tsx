@@ -144,7 +144,7 @@ export default function CardDetailClient({ card }: { card: MockCard }) {
                 {rm(card.fmv)}
               </p>
             </div>
-            <div className="flex items-center gap-1 text-[13px] font-medium text-emerald-400">
+            <div className="flex items-center gap-1 text-[13px] font-medium text-buyback-fg">
               <TrendingUp className="h-4 w-4" aria-hidden /> Buyback{' '}
               {rm(Math.round(card.fmv * 0.88))}
             </div>
@@ -193,7 +193,7 @@ export default function CardDetailClient({ card }: { card: MockCard }) {
               <span className="font-semibold text-white">{owner.username}</span>
             </Link>
             <span className="flex items-center gap-1.5 text-white/50">
-              <ShieldCheck className="h-4 w-4 text-emerald-400" aria-hidden />{' '}
+              <ShieldCheck className="h-4 w-4 text-buyback-fg" aria-hidden />{' '}
               Vaulted &amp; insured · {card.grader}
             </span>
           </div>

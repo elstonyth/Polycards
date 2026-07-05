@@ -148,7 +148,7 @@ export default function SellConfirmModal({
           </div>
           <div className="flex justify-between border-t border-white/10 pt-2">
             <dt className="font-semibold text-white">You receive</dt>
-            <dd className="font-bold text-emerald-300">{rm(netCredit)}</dd>
+            <dd className="font-bold text-buyback-fg">{rm(netCredit)}</dd>
           </div>
         </dl>
 

@@ -82,7 +82,7 @@ export function PrizeReveal({
             }
           >
             {prize.kind === 'credit' ? (
-              <span className="font-heading text-4xl font-black text-emerald-400">
+              <span className="font-heading text-4xl font-black text-buyback-fg">
                 RM
               </span>
             ) : prize.kind === 'voucher' ? (
@@ -112,10 +112,10 @@ export function PrizeReveal({
           )}
           {prize.kind === 'credit' && (
             <>
-              <p className="text-[11px] font-medium uppercase tracking-[0.3em] text-emerald-400/70">
+              <p className="text-[11px] font-medium uppercase tracking-[0.3em] text-buyback-fg/70">
                 Credit Won
               </p>
-              <p className="font-heading text-3xl font-black text-emerald-400">
+              <p className="font-heading text-3xl font-black text-buyback-fg">
                 +{rm(prize.amountMyr ?? 0)}
               </p>
               <p className="text-sm text-white/50">
@@ -151,7 +151,7 @@ export function PrizeReveal({
         <button
           type="button"
           onClick={onClose}
-          className="mt-2 inline-flex h-12 w-[260px] items-center justify-center rounded-xl bg-gradient-to-r from-emerald-500 to-green-500 text-sm font-bold text-white shadow-lg shadow-emerald-900/30 transition-opacity hover:opacity-95"
+          className="mt-2 inline-flex h-12 w-[260px] items-center justify-center rounded-xl bg-buyback text-sm font-bold text-white shadow-lg shadow-buyback/30 transition-opacity hover:opacity-95"
         >
           Continue
         </button>

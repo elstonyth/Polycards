@@ -623,7 +623,7 @@ export default function SlotMachineClient({
                   {' '}
                   <Link
                     href="/vault"
-                    className="font-bold text-emerald-300 underline underline-offset-2 hover:text-emerald-200"
+                    className="font-bold text-buyback-fg underline underline-offset-2 hover:text-buyback-fg"
                   >
                     Add credits in your Vault →
                   </Link>

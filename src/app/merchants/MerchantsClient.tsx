@@ -218,7 +218,7 @@ export default function MerchantsClient() {
                   </span>
                   <div className="mt-1 flex items-center justify-end gap-1 text-[11px] text-white/40">
                     <span
-                      className="h-1.5 w-1.5 rounded-full bg-emerald-500/80"
+                      className="h-1.5 w-1.5 rounded-full bg-buyback/80"
                       aria-hidden
                     />
                     {m.ago}
@@ -241,7 +241,7 @@ export default function MerchantsClient() {
                 {m.badges.map((b) => (
                   <span
                     key={b}
-                    className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400"
+                    className="rounded bg-buyback/10 px-1.5 py-0.5 text-[10px] font-medium text-buyback-fg"
                   >
                     {b}
                   </span>

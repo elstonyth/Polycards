@@ -156,9 +156,9 @@ export default function StepInfoPill({
                   />
                 </MiniStep>
                 <MiniStep label="Sell instantly">
-                  <span className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/15">
+                  <span className="flex h-12 w-12 items-center justify-center rounded-full bg-buyback/15">
                     <DollarSign
-                      className="h-6 w-6 text-emerald-400"
+                      className="h-6 w-6 text-buyback-fg"
                       aria-hidden
                     />
                   </span>
@@ -173,7 +173,7 @@ export default function StepInfoPill({
                 </div>
                 <div className="mt-2 flex items-center justify-between text-sm">
                   <span className="text-white/60">Instant buyback</span>
-                  <span className="font-semibold text-emerald-400">
+                  <span className="font-semibold text-buyback-fg">
                     RM 85.00 - RM 90.00
                   </span>
                 </div>

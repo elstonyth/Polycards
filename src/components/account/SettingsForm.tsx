@@ -103,7 +103,7 @@ export default function SettingsForm({ customer }: Props) {
         {note && (
           <span
             role="status"
-            className={`text-[12px] ${note.ok ? 'text-emerald-400' : 'text-red-400'}`}
+            className={`text-[12px] ${note.ok ? 'text-buyback-fg' : 'text-red-400'}`}
           >
             {note.text}
           </span>

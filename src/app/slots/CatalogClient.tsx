@@ -40,7 +40,7 @@ function PackCard({ pack, icon }: { pack: Pack; icon: string }) {
         </span>
       ) : (
         pack.boost && (
-          <span className="absolute left-3 top-3 z-[2] rounded-md bg-emerald-700 px-1.5 py-0.5 text-[9px] font-bold uppercase leading-none tracking-wide text-white shadow-sm sm:text-[10px]">
+          <span className="absolute left-3 top-3 z-[2] rounded-md bg-buyback px-1.5 py-0.5 text-[9px] font-bold uppercase leading-none tracking-wide text-white shadow-sm sm:text-[10px]">
             +{buyback}% Buyback Boost
           </span>
         )
@@ -163,7 +163,7 @@ function PackRow({
             Out of stock
           </span>
         ) : pack.boost ? (
-          <span className="mt-1 inline-block rounded bg-emerald-700 px-1.5 py-0.5 text-[9px] font-bold uppercase leading-none tracking-wide text-white">
+          <span className="mt-1 inline-block rounded bg-buyback px-1.5 py-0.5 text-[9px] font-bold uppercase leading-none tracking-wide text-white">
             +{buyback}% Buyback Boost
           </span>
         ) : (
@@ -288,7 +288,7 @@ export default function CatalogClient({
             <span
               className={cn(
                 'relative h-5 w-9 shrink-0 rounded-full transition-colors',
-                creatorPacks ? 'bg-emerald-500' : 'bg-white/15',
+                creatorPacks ? 'bg-buyback' : 'bg-white/15',
               )}
             >
               <span

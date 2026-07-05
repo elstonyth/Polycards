@@ -188,7 +188,7 @@ function PackCard({ pack }: { pack: CommunityPack }) {
     <div className="group relative flex h-full flex-col rounded-2xl border border-white/10 bg-white/5 p-3 shadow-[0_4px_20px_rgba(0,0,0,0.25)] transition-colors duration-300 hover:border-white/20">
       {/* Green buyback badge */}
       {pack.boost && (
-        <span className="absolute left-3 top-3 z-[2] rounded-md bg-emerald-500/90 px-1.5 py-0.5 text-[9px] font-bold uppercase leading-none tracking-wide text-white shadow-sm sm:text-[10px]">
+        <span className="absolute left-3 top-3 z-[2] rounded-md bg-buyback/90 px-1.5 py-0.5 text-[9px] font-bold uppercase leading-none tracking-wide text-white shadow-sm sm:text-[10px]">
           +85% Buyback
         </span>
       )}

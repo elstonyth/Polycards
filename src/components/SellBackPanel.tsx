@@ -139,7 +139,7 @@ export function SellBackPanel({
   return (
     <div className="flex w-full max-w-[340px] flex-col items-center gap-2">
       {sell.phase === 'sold' ? (
-        <p className="flex h-12 w-full items-center justify-center rounded-xl border border-emerald-400/50 bg-emerald-400/10 text-sm font-bold text-emerald-300">
+        <p className="flex h-12 w-full items-center justify-center rounded-xl border border-buyback/50 bg-buyback/10 text-sm font-bold text-buyback-fg">
           +{rm(sell.amount)} credited · balance {rm(sell.balance)}
         </p>
       ) : (

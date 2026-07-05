@@ -152,7 +152,7 @@ export default function RequestDeliveryModal({
             <button
               type="button"
               onClick={() => setAdding(true)}
-              className="text-[12px] font-semibold text-emerald-400"
+              className="text-[12px] font-semibold text-buyback-fg"
             >
               + Add a new address
             </button>
@@ -251,7 +251,7 @@ export default function RequestDeliveryModal({
                 type="button"
                 disabled={busy}
                 onClick={saveAddress}
-                className="rounded-lg bg-emerald-700 px-3 py-2 text-[13px] font-bold text-white disabled:opacity-50"
+                className="rounded-lg bg-buyback px-3 py-2 text-[13px] font-bold text-white disabled:opacity-50"
               >
                 Save address
               </button>
@@ -286,7 +286,7 @@ export default function RequestDeliveryModal({
             type="button"
             disabled={busy || adding || !selectedAddr}
             onClick={submit}
-            className="rounded-lg bg-gradient-to-r from-emerald-500 to-green-500 px-4 py-2 text-[13px] font-bold text-white disabled:opacity-50"
+            className="rounded-lg bg-buyback px-4 py-2 text-[13px] font-bold text-white disabled:opacity-50"
           >
             {busy ? 'Requesting…' : 'Request delivery'}
           </button>

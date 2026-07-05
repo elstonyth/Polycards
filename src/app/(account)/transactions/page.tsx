@@ -70,7 +70,7 @@ export default async function TransactionsPage() {
                   </td>
                   <td
                     className={`px-4 py-3 text-right font-medium ${
-                      t.amount > 0 ? 'text-emerald-300' : 'text-white/80'
+                      t.amount > 0 ? 'text-buyback-fg' : 'text-white/80'
                     }`}
                   >
                     {signedRm(t.amount)}

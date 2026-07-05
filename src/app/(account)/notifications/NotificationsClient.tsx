@@ -64,7 +64,7 @@ export default function NotificationsClient({
               <button
                 type="button"
                 onClick={() => void onRead(n.id)}
-                className="flex w-full items-start justify-between gap-3 rounded-xl border border-emerald-400/30 bg-emerald-400/[0.06] p-3 text-left transition-colors hover:bg-emerald-400/10"
+                className="flex w-full items-start justify-between gap-3 rounded-xl border border-buyback/30 bg-buyback/[0.06] p-3 text-left transition-colors hover:bg-buyback/10"
               >
                 {inner}
               </button>

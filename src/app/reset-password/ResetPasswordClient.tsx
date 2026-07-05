@@ -85,7 +85,7 @@ export default function ResetPasswordClient() {
         ) : done ? (
           <>
             <h1 className="flex items-center gap-2 font-heading text-2xl font-bold tracking-tight text-white sm:text-3xl">
-              <CheckCircle2 className="h-6 w-6 text-emerald-400" aria-hidden />
+              <CheckCircle2 className="h-6 w-6 text-buyback-fg" aria-hidden />
               Password updated
             </h1>
             <p className="mt-1.5 text-sm text-white/50">

@@ -149,7 +149,7 @@ export default function DailyClient({ initial }: { initial: DailyState }) {
                     />
                   </div>
                 ) : p.kind === 'credit' || p.kind === 'voucher' ? (
-                  <span className="text-[10px] font-bold text-emerald-400">
+                  <span className="text-[10px] font-bold text-buyback-fg">
                     {rm(p.amountMyr ?? 0)}
                   </span>
                 ) : (
@@ -210,7 +210,7 @@ export default function DailyClient({ initial }: { initial: DailyState }) {
                       type="button"
                       disabled={isBusy || !redemptionEnabled}
                       onClick={() => handleClaim(grant)}
-                      className="shrink-0 rounded-lg bg-gradient-to-r from-emerald-500 to-green-500 px-4 py-2 text-[13px] font-bold text-white disabled:opacity-50"
+                      className="shrink-0 rounded-lg bg-buyback px-4 py-2 text-[13px] font-bold text-white disabled:opacity-50"
                     >
                       {isBusy
                         ? 'Claiming…'

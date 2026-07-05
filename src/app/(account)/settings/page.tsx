@@ -53,7 +53,7 @@ export default async function SettingsPage() {
               <li key={t} className="flex items-center justify-between py-3">
                 <span className="text-sm text-white/80">{t}</span>
                 <span
-                  className={`flex h-6 w-11 items-center rounded-full p-0.5 ${i % 2 === 0 ? 'justify-end bg-emerald-500/80' : 'justify-start bg-white/15'}`}
+                  className={`flex h-6 w-11 items-center rounded-full p-0.5 ${i % 2 === 0 ? 'justify-end bg-buyback/80' : 'justify-start bg-white/15'}`}
                 >
                   <span className="h-5 w-5 rounded-full bg-white" />
                 </span>

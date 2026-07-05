@@ -70,7 +70,7 @@ export default function UserMenu({ customer }: { customer: AuthCustomer }) {
         aria-label="Account menu"
         className="flex h-10 items-center gap-2 rounded-lg bg-white/5 py-1 pl-1.5 pr-2.5 text-sm font-medium text-white transition-colors hover:bg-white/10"
       >
-        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-green-600 text-[12px] font-bold text-white">
+        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-neutral-700 text-[12px] font-bold text-white">
           {initial}
         </span>
         <span className="hidden max-w-[120px] truncate sm:block">{name}</span>

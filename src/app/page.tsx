@@ -194,7 +194,7 @@ function PackTile({ pack, chase }: { pack: Pack; chase: PackCard | null }) {
           </span>
         ) : (
           pack.boost && (
-            <span className="absolute right-0 top-0 rounded-full bg-green-400/10 px-2 py-0.5 text-[11px] font-semibold text-green-400">
+            <span className="absolute right-0 top-0 rounded-full bg-buyback/10 px-2 py-0.5 text-[11px] font-semibold text-buyback-fg">
               {pack.buybackPercent ?? 90}% back
             </span>
           )

@@ -54,7 +54,7 @@ export default function ReferralsClient({ inviteUrl }: { inviteUrl: string }) {
           className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-neutral-700 text-neutral-200 transition-colors hover:text-white"
         >
           {copied ? (
-            <Check className="h-4 w-4 text-green-400" aria-hidden />
+            <Check className="h-4 w-4 text-buyback-fg" aria-hidden />
           ) : (
             <Copy className="h-4 w-4" aria-hidden />
           )}

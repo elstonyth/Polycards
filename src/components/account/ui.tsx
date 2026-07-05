@@ -94,7 +94,7 @@ export function MockTable({
 }
 
 const TONES = {
-  green: 'bg-emerald-500/15 text-emerald-400',
+  green: 'bg-buyback/15 text-buyback-fg',
   amber: 'bg-amber-500/15 text-amber-400',
   sky: 'bg-sky-500/15 text-sky-400',
   neutral: 'bg-white/10 text-white/70',

@@ -475,7 +475,7 @@ export default function VaultClient({
                     size="sm"
                     onClick={() => setConfirmItem(item)}
                     disabled={sellingId !== null}
-                    className="mt-2.5 h-9 text-[12px] text-green-400"
+                    className="mt-2.5 h-9 text-[12px] text-buyback-fg"
                   >
                     {sellingId === item.pullId
                       ? 'Selling…'
@@ -501,7 +501,7 @@ export default function VaultClient({
             <span className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
               {selected.size} selected · FMV {rm(selectedFmv)}
             </span>
-            <span className="text-[13px] font-semibold text-green-400">
+            <span className="text-[13px] font-semibold text-buyback-fg">
               Sell for {rm(selectedBuyback)}
             </span>
           </div>

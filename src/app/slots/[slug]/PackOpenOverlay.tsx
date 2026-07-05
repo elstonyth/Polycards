@@ -665,7 +665,7 @@ export default function PackOpenOverlay({
                     <button
                       type="button"
                       onClick={onSignUp}
-                      className="inline-flex h-12 w-[300px] items-center justify-center rounded-xl bg-gradient-to-r from-emerald-500 to-green-500 text-sm font-bold text-white shadow-lg shadow-emerald-900/30 transition-opacity hover:opacity-95"
+                      className="inline-flex h-12 w-[300px] items-center justify-center rounded-xl bg-buyback text-sm font-bold text-white shadow-lg shadow-buyback/30 transition-opacity hover:opacity-95"
                     >
                       Sign up to keep what you pull
                     </button>
@@ -700,7 +700,7 @@ export default function PackOpenOverlay({
                   </>
                 )}
                 {sell.phase === 'sold' && (
-                  <p className="flex h-12 w-[300px] items-center justify-center rounded-xl border border-emerald-400/50 bg-emerald-400/10 text-sm font-bold text-emerald-300">
+                  <p className="flex h-12 w-[300px] items-center justify-center rounded-xl border border-buyback/50 bg-buyback/10 text-sm font-bold text-buyback-fg">
                     +RM{' '}
                     {sell.amount.toLocaleString('en-US', {
                       minimumFractionDigits: 2,
@@ -726,7 +726,7 @@ export default function PackOpenOverlay({
                   className={
                     onSignUp
                       ? 'inline-flex h-10 items-center justify-center rounded-xl px-5 text-[13px] font-semibold text-white/60 transition-colors hover:text-white'
-                      : 'inline-flex h-12 w-[300px] items-center justify-center rounded-xl bg-gradient-to-r from-emerald-500 to-green-500 text-sm font-bold text-white shadow-lg shadow-emerald-900/30 transition-opacity hover:opacity-95'
+                      : 'inline-flex h-12 w-[300px] items-center justify-center rounded-xl bg-buyback text-sm font-bold text-white shadow-lg shadow-buyback/30 transition-opacity hover:opacity-95'
                   }
                 >
                   {buyback && sell.phase !== 'sold' && !sellExpired

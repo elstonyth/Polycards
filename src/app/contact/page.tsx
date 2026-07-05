@@ -90,15 +90,15 @@ export default function ContactPage() {
                 >
                   <div className="flex items-center gap-2.5">
                     <span className="relative flex h-2.5 w-2.5">
-                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400/60 motion-reduce:animate-none" />
-                      <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400" />
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-buyback/60 motion-reduce:animate-none" />
+                      <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-buyback" />
                     </span>
                     <span className="text-sm font-medium text-white">
                       {v.name}
                     </span>
                   </div>
                   <div className="text-right">
-                    <div className="text-[13px] font-medium text-emerald-400">
+                    <div className="text-[13px] font-medium text-buyback-fg">
                       {v.status}
                     </div>
                     <div className="text-[11px] text-white/40">{v.note}</div>

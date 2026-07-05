@@ -72,7 +72,7 @@ export default async function ReferralsPage() {
             <Icon className="mx-auto h-4 w-4 text-neutral-500" aria-hidden />
             <p
               className={`font-heading mt-1 truncate text-lg ${
-                money ? 'text-green-400' : 'text-white'
+                money ? 'text-buyback-fg' : 'text-white'
               }`}
             >
               {value}
@@ -107,7 +107,7 @@ export default async function ReferralsPage() {
               <span className="truncate text-sm font-semibold text-white">
                 {r.handle ? `@${r.handle}` : 'Collector'}
               </span>
-              <span className="shrink-0 text-[13px] font-semibold text-green-400">
+              <span className="shrink-0 text-[13px] font-semibold text-buyback-fg">
                 {rm(r.contribution)}
               </span>
             </li>
