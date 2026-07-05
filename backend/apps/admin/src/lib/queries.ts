@@ -43,12 +43,12 @@ import {
   updateDeliveryOrder,
   uploadImage,
   type AdminCommissionRow,
-  type AdminDeliveryOrder,
   type CustomerAudit,
   type CustomerGacha,
   type DailyBoxEditorDTO,
   type DailyBoxSaveBody,
   type DailyBoxSummary,
+  type DeliveryOrdersPage,
   type DeliveryStatus,
   type EconomyReport,
   type EligibleProduct,
@@ -145,10 +145,11 @@ export const useCustomerAudit = (
 
 export const useDeliveryOrders = (
   status?: DeliveryStatus,
-): UseQueryResult<AdminDeliveryOrder[]> =>
+  page = 0,
+): UseQueryResult<DeliveryOrdersPage> =>
   useQuery({
-    queryKey: qk.deliveryOrders(status),
-    queryFn: () => listDeliveryOrders(status),
+    queryKey: qk.deliveryOrders(status, page),
+    queryFn: () => listDeliveryOrders(status, page),
   });
 
 export const useFxRate = (): UseQueryResult<FxRateState> =>
@@ -404,9 +405,9 @@ export const useUpdateDeliveryOrder = () => {
         status: vars.status,
         tracking_number: vars.tracking_number,
       }),
-    // Status filters vary, so drop the whole delivery-orders namespace.
+    // Status filters + pages vary, so drop the whole delivery-orders namespace.
     onSuccess: () =>
-      qc.invalidateQueries({ queryKey: ['admin', 'delivery-orders'] }),
+      qc.invalidateQueries({ queryKey: qk.deliveryOrdersKey }),
   });
 };
 

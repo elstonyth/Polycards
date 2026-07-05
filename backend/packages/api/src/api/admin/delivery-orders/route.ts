@@ -3,9 +3,8 @@ import { Modules } from '@medusajs/framework/utils';
 import PacksModuleService from '../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../modules/packs';
 import { serializeDeliveryOrders } from '../../../modules/packs/delivery-view';
+import { parsePaginationParams } from '../../../utils/pagination';
 import { coerceStatusFilter } from './validate';
-
-const LIMIT = 500;
 
 export async function GET(
   req: MedusaRequest,
@@ -17,9 +16,15 @@ export async function GET(
   const status = coerceStatusFilter(req.query.status);
   const filter = status ? { status } : {};
 
-  const orders = await packs.listDeliveryOrders(filter, {
+  const { limit, offset } = parsePaginationParams(
+    { limit: req.query.limit, offset: req.query.offset },
+    { defaultLimit: 50, maxLimit: 100 },
+  );
+
+  const [orders, total] = await packs.listAndCountDeliveryOrders(filter, {
     order: { created_at: 'DESC' },
-    take: LIMIT,
+    skip: offset,
+    take: limit,
   });
 
   const serialized = await serializeDeliveryOrders(packs, orders);
@@ -35,6 +40,9 @@ export async function GET(
   const emailById = new Map(customers.map((c) => [c.id, c.email]));
 
   res.json({
+    total,
+    offset,
+    limit,
     orders: serialized.map((o) => ({
       ...o,
       customer_email: emailById.get(o.customer_id) ?? null,

@@ -25,8 +25,10 @@ export const qk = {
   // 4-segment prefix — invalidates ALL depths of a customer's referral tree in one call
   referralTreeKey: (id: string) =>
     ['admin', 'customer', id, 'referral-tree'] as const,
-  deliveryOrders: (status?: string) =>
-    ['admin', 'delivery-orders', status ?? 'all'] as const,
+  deliveryOrders: (status: string | undefined, page: number) =>
+    ['admin', 'delivery-orders', status ?? 'all', page] as const,
+  // 2-segment prefix — invalidates ALL delivery-order pages/filters in one call
+  deliveryOrdersKey: ['admin', 'delivery-orders'] as const,
   deliveryOrder: (id: string) => ['admin', 'delivery-order', id] as const,
   fxRate: ['admin', 'pricing', 'fx'] as const,
   dailyBoxes: ['admin', 'daily-rewards', 'boxes'] as const,

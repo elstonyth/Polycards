@@ -16,6 +16,7 @@ import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import { useDeliveryOrders, useUpdateDeliveryOrder } from '../../lib/queries';
 import type { AdminDeliveryOrder, DeliveryStatus } from '../../lib/admin-rest';
 import { resolveImageUrl } from '../../lib/image-url';
+import { Pager } from '../../components/Pager';
 
 export const config: RouteConfig = {
   label: 'Deliveries',
@@ -41,7 +42,9 @@ const TONE: Record<DeliveryStatus, 'orange' | 'blue' | 'green' | 'grey'> = {
 
 const DeliveriesPage = () => {
   const [filter, setFilter] = useState<DeliveryStatus | undefined>(undefined);
-  const { data: orders = null, isError } = useDeliveryOrders(filter);
+  const [page, setPage] = useState(0);
+  const { data, isError } = useDeliveryOrders(filter, page);
+  const orders = data?.orders ?? null;
   const update = useUpdateDeliveryOrder();
   const [detail, setDetail] = useState<AdminDeliveryOrder | null>(null);
   const [nextStatus, setNextStatus] = useState<DeliveryStatus>('packing');
@@ -86,9 +89,10 @@ const DeliveriesPage = () => {
         </div>
         <Select
           value={filter ?? 'all'}
-          onValueChange={(v) =>
-            setFilter(v === 'all' ? undefined : (v as DeliveryStatus))
-          }
+          onValueChange={(v) => {
+            setPage(0);
+            setFilter(v === 'all' ? undefined : (v as DeliveryStatus));
+          }}
         >
           <Select.Trigger className="w-44">
             <Select.Value />
@@ -171,6 +175,16 @@ const DeliveriesPage = () => {
             ))}
           </Table.Body>
         </Table>
+      )}
+
+      {data && (
+        <Pager
+          page={page}
+          onPage={setPage}
+          pageSize={data.limit}
+          count={data.orders.length}
+          total={data.total}
+        />
       )}
 
       <FocusModal

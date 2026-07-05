@@ -432,14 +432,24 @@ export interface AdminDeliveryOrder {
   items: AdminDeliveryItem[];
 }
 
+export interface DeliveryOrdersPage {
+  orders: AdminDeliveryOrder[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
 export async function listDeliveryOrders(
   status?: DeliveryStatus,
-): Promise<AdminDeliveryOrder[]> {
-  const qs = status ? `?status=${encodeURIComponent(status)}` : '';
-  const data = await getJson<{ orders: AdminDeliveryOrder[] }>(
-    `/admin/delivery-orders${qs}`,
-  );
-  return data.orders;
+  page = 0,
+  limit = 50,
+): Promise<DeliveryOrdersPage> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(page * limit),
+  });
+  if (status) params.set('status', status);
+  return getJson<DeliveryOrdersPage>(`/admin/delivery-orders?${params}`);
 }
 
 export async function getDeliveryOrder(
