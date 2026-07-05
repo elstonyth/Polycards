@@ -187,20 +187,8 @@ export function SlabCard({
             sizes="(max-width: 640px) 75vw, 300px"
             className="rounded-xl object-contain"
           />
-          {/* glare sweep at the turn */}
-          {!reduced && flipped && (
-            <motion.span
-              aria-hidden
-              className="absolute inset-0 rounded-xl"
-              initial={{ x: '-110%' }}
-              animate={{ x: '110%' }}
-              transition={{ duration: 0.45, delay: 0.25, ease: 'easeOut' }}
-              style={{
-                background:
-                  'linear-gradient(100deg, transparent 35%, rgba(255,255,255,0.30) 50%, transparent 65%)',
-              }}
-            />
-          )}
+          {/* Glare sweep removed (decision #24): it parked at x:110% off the
+              card's right edge and read as a weird persistent "glass" streak. */}
         </span>
       </motion.button>
       {/* info stamp — appears after the flip. Its space is ALWAYS reserved
