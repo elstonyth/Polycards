@@ -1,6 +1,7 @@
 import { MedusaError } from '@medusajs/framework/utils';
 import type { RegisterCardInput } from '../../../workflows/steps/create-card';
 import type { UpdateCardInput } from '../../../workflows/steps/update-card';
+import { MAX_MARKET_VALUE_USD } from '../../../modules/packs/sync-market-prices';
 
 const HANDLE_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const MAX_TEXT = 512;
@@ -43,6 +44,15 @@ const reqNum = (b: Record<string, unknown>, key: string): number => {
     bad(`'${key}' must be a number >= 0.`);
   }
   return v as number;
+};
+
+// market_value is the buyback money lever — cap it like the FX seam caps rates.
+const reqMarketValue = (b: Record<string, unknown>): number => {
+  const v = reqNum(b, 'market_value');
+  if (v > MAX_MARKET_VALUE_USD) {
+    bad(`'market_value' must be at most ${MAX_MARKET_VALUE_USD}.`);
+  }
+  return v;
 };
 
 // Pixel-Pokémon avatar fields. dex is a 1-based national-dex int in [1, MAX_DEX].
@@ -146,7 +156,7 @@ export function coerceRegisterCardBody(raw: unknown): RegisterCardInput {
     set: optStr(b, 'set'),
     grader: optStr(b, 'grader'),
     grade: optStr(b, 'grade'),
-    market_value: reqNum(b, 'market_value'),
+    market_value: reqMarketValue(b),
     pokemon_dex: optDex(b),
     sprite_image: optSprite(b),
     pc_product_id,
@@ -183,7 +193,7 @@ export function coerceUpdateCardBody(
     set: optStr(b, 'set'),
     grader: optStr(b, 'grader'),
     grade: optStr(b, 'grade'),
-    market_value: reqNum(b, 'market_value'),
+    market_value: reqMarketValue(b),
     image: imageStr(b, 'image'),
     price,
     for_sale: b.for_sale !== false, // default true unless explicitly false

@@ -1,5 +1,15 @@
 import { priceFieldForGrade } from './pricecharting-grades';
 
+// Money guardrails (audit 2026-07-07 #3). market_value feeds real-credit
+// buyback, so a glitched upstream value must never land silently:
+// - MAX_MARKET_VALUE_USD: absolute ceiling — no single card is worth more.
+// - MAX_SYNC_DELTA_RATIO: one sync may move a price at most this factor
+//   up or down; bigger jumps are skipped (kept last-known) and surface via
+//   the skip warn + /admin/pricing/health. An operator confirms a real 10×
+//   move by editing the card manually (the capped admin path).
+export const MAX_MARKET_VALUE_USD = 100_000;
+export const MAX_SYNC_DELTA_RATIO = 5;
+
 // Daily PriceCharting sync core (Task 8). Pure function, no DB/HTTP directly —
 // the job wrapper (src/jobs/sync-market-prices.ts) supplies pcFetch/updateCards
 // so this stays unit-testable with mocks. Never writes a null/zero/NaN
@@ -94,6 +104,22 @@ export async function refreshCardPrice(
     return { ...base, skippedReason: 'no usable price' };
   }
   const newValue = Math.round(pennies) / 100;
+  if (newValue > MAX_MARKET_VALUE_USD) {
+    return {
+      ...base,
+      skippedReason: `above cap: ${newValue} > ${MAX_MARKET_VALUE_USD}`,
+    };
+  }
+  if (
+    oldValue > 0 &&
+    (newValue > oldValue * MAX_SYNC_DELTA_RATIO ||
+      newValue < oldValue / MAX_SYNC_DELTA_RATIO)
+  ) {
+    return {
+      ...base,
+      skippedReason: `anomalous change ${oldValue} -> ${newValue} (>${MAX_SYNC_DELTA_RATIO}x)`,
+    };
+  }
   await deps.updateCards([
     { id: card.id, market_value: newValue, pc_synced_at: deps.now },
   ]);
