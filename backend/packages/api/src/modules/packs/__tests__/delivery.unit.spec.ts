@@ -65,6 +65,34 @@ describe("validateDeliveryRequest", () => {
       const noPull = vaulted("p1");
       expect(validateDeliveryRequest([noPull], ["p1"], caller)).toBe("ok");
     });
+
+    // Contract pin: recordRewardWithdrawal keys on EXACTLY 'reward_source' for
+    // a valid reward withdrawal — owned + vaulted + reward must never map to
+    // 'ok' or 'not_vaulted', and ownership/status checks fire BEFORE the
+    // source gate.
+    it("returns exactly 'reward_source' for owned+vaulted+reward (recordRewardWithdrawal keys on it)", () => {
+      const rewardPull = { ...vaulted("p1"), source: "reward" };
+      expect(validateDeliveryRequest([rewardPull], ["p1"], caller)).toBe(
+        "reward_source",
+      );
+
+      // A non-vaulted reward pull is 'not_vaulted' (status precedes source).
+      const delivering = {
+        id: "p1",
+        customer_id: caller,
+        status: "delivering",
+        source: "reward",
+      };
+      expect(validateDeliveryRequest([delivering], ["p1"], caller)).toBe(
+        "not_vaulted",
+      );
+
+      // Someone else's reward pull is 'forbidden' (ownership precedes source).
+      const foreign = { ...vaulted("p1", "cus_2"), source: "reward" };
+      expect(validateDeliveryRequest([foreign], ["p1"], caller)).toBe(
+        "forbidden",
+      );
+    });
   });
 });
 

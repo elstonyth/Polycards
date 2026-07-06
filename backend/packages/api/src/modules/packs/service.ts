@@ -1353,8 +1353,10 @@ class PacksModuleService extends MedusaService({
     await this.assertNotFrozen(customerId, sharedContext);
 
     // 1) Re-read the Pull UNDER the lock and validate it via the same pure helper
-    //    the lockless delivery path uses: must be owned + 'vaulted'. The extra
-    //    reward-source gate is B7-specific (only reward prizes ship via this path).
+    //    the lockless delivery path uses. 'reward_source' = owned + vaulted +
+    //    source='reward' — the exact shape this path ships. Any other verdict
+    //    (including 'ok', which means a NON-reward pull) is invalid here: only
+    //    reward prizes ship via this B7 path.
     const [pull] = await this.listPulls(
       { id: pullId },
       { take: 1 },
@@ -1365,7 +1367,7 @@ class PacksModuleService extends MedusaService({
       [pullId],
       customerId,
     );
-    if (verdict !== 'ok' || pull?.source !== 'reward') {
+    if (verdict !== 'reward_source') {
       return { status: 'invalid' };
     }
 
