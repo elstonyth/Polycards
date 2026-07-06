@@ -53,7 +53,9 @@ export async function createPack(
     .getByPlaceholder('Image URL or /storefront/path.webp')
     .fill(pack.imageUrl);
   await fieldByLabel(page, 'Title').getByRole('textbox').fill(pack.title);
-  await fieldByLabel(page, 'Price (USD)')
+  // "Price (RM)" since the MYR localization — the suite predates it and this
+  // drift went uncaught while nothing ran these specs in CI.
+  await fieldByLabel(page, 'Price (RM)')
     .getByRole('spinbutton')
     .fill(String(pack.price));
   await page.getByRole('button', { name: 'Save', exact: true }).click();
@@ -73,7 +75,7 @@ export async function registerCardFromInventory(
   await page.getByRole('button', { name: 'Add from inventory' }).click();
   await page.getByPlaceholder('Filter products…').fill(productTitle);
   await page.getByRole('button', { name: productTitle }).first().click();
-  await fieldByLabel(page, 'Fair-market value (USD)')
+  await fieldByLabel(page, 'Fair-market value (RM)')
     .getByRole('spinbutton')
     .fill(String(marketValue));
   await page.getByRole('button', { name: 'Register card' }).click();
@@ -94,7 +96,7 @@ export async function editCard(
   await row.first().waitFor({ timeout: 20_000 });
   await row.first().getByRole('button', { name: 'Edit' }).click();
   if (patch.marketValue !== undefined) {
-    await fieldByLabel(page, 'Fair-market value (USD)')
+    await fieldByLabel(page, 'Fair-market value (RM)')
       .getByRole('spinbutton')
       .fill(String(patch.marketValue));
   }

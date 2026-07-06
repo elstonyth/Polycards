@@ -184,6 +184,7 @@ jobs:
           name: playwright-report
           path: |
             tests/e2e/.report
+            tests/e2e/.artifacts
             backend/packages/api/backend.log
             backend/apps/admin/admin.log
             storefront.log

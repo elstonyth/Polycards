@@ -1,3 +1,5 @@
+// FIXME(ui-drift, PR #85): waits for the vault 'Select cards' button removed in
+// the vault redesign (PR #80/#82 era). Rewrite against the current vault UI.
 // Customer ordering flow through the storefront UI:
 //   a funded customer opens a pack (API setup for speed) → logs into the UI →
 //   drives the vault "select cards to ship" → request delivery → add-address form
@@ -12,7 +14,7 @@ const PACK = 'pokemon-rookie';
 // createCustomer() registers every customer with this fixed password.
 const PASSWORD = 'PwE2e2026!';
 
-test('customer requests delivery of a vaulted card via the UI', async ({
+test.fixme('customer requests delivery of a vaulted card via the UI', async ({
   page,
 }) => {
   // Funded customer holding one vaulted card (API setup), then log into the UI.

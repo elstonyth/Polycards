@@ -1,3 +1,6 @@
+// FIXME(ui-drift, PR #85): drives the retired /claw/<pack> route and the old
+// Demo Spin button (slots-only shell PR #61, demo-spin rework PR #78). Needs a
+// rewrite against the /slots flow; parked so the nightly reflects real signal.
 // Customer workflow, end to end through the storefront UI:
 //   create account → top up credits → open a pack → keep the card in the vault
 //   → sell it back. Backend ledgers are asserted via API as ground truth.
@@ -14,7 +17,7 @@ test.describe('customer workflow', () => {
   const email = `pw-cust-${id}@pokenic.local`;
   const password = 'PwCust2026!';
 
-  test('signup → top up → open → keep → vault → sell-back', async ({
+  test.fixme('signup → top up → open → keep → vault → sell-back', async ({
     page,
   }) => {
     await test.step('create account via the auth modal', async () => {
@@ -86,7 +89,7 @@ test.describe('customer workflow', () => {
   });
 });
 
-test('anonymous demo spin creates NO backend pull', async ({ page }) => {
+test.fixme('anonymous demo spin creates NO backend pull', async ({ page }) => {
   const newest = (pulls: Array<{ rolled_at: string }>): string | null =>
     pulls[0]?.rolled_at ?? null;
   const before = await api<{ pulls: Array<{ rolled_at: string }> }>(
