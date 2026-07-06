@@ -34,14 +34,74 @@ The script injects secrets, writes a resolved spec to gitignored
 `deploy/<app>.app.yaml`, runs `doctl apps spec validate`, then (without
 `-Validate`) `doctl apps update`.
 
-> **`deploy_on_push: true`** — both apps also auto-deploy on every push to
-> `feat/do-app-platform-deploy`. So a `git push` redeploys prod just like
-> `do-apply.ps1` does. Pushing spec/Dockerfile changes = a live deploy.
+> **`deploy_on_push: true`** — both apps auto-deploy on every push to
+> **`master`** (see the `github.branch` keys in the specs). So merging a PR
+> redeploys prod just like `do-apply.ps1` does. Pushing spec/Dockerfile changes
+> = a live deploy. Spec **env** changes, however, only reach the live app via
+> `do-apply.ps1` (doctl), not via git push.
 
-## One-time admin user
+## Admin user
 
-To create the `/dashboard` admin: temporarily set the `migrate` job
-`run_command` to `corepack yarn deploy:migrate-user`, add `ADMIN_EMAIL` +
-`ADMIN_PASSWORD` (`type: SECRET`) envs, apply once, then **revert both** — the
-script errors if the user already exists and would fail the PRE_DEPLOY job,
-blocking all future deploys.
+The PRE_DEPLOY `migrate` job permanently runs `deploy:migrate-user`
+(`db:migrate` + `create-admin.ts` + `seed-vip-achievements.ts`). Creation is
+**idempotent** — `create-admin.ts` checks for an existing user and SKIPS
+without throwing — so it is safe on every deploy and self-heals a lost admin.
+`ADMIN_EMAIL` / `ADMIN_PASSWORD` in `backend.app.yaml` feed it.
+
+## Rollback
+
+App Platform keeps previous deployments; a bad deploy rolls back without a git
+revert:
+
+```pwsh
+doctl apps list-deployments <APP_ID>                 # find the last good deployment
+doctl apps create-deployment <APP_ID> --wait         # redeploy current spec (rebuild)
+# Pin to a previous deployment (true rollback, no rebuild):
+doctl apps create-rollback <APP_ID> --deployment-id <DEPLOYMENT_ID> --wait
+doctl apps validate-rollback <APP_ID> --deployment-id <DEPLOYMENT_ID>  # dry-run first
+```
+
+**Migration rule that makes rollback survivable:** migrations must stay
+backward-compatible for one release (expand/contract — add columns/tables
+first, remove in a later release). The PRE_DEPLOY job migrates forward only;
+a rollback runs OLD code against the NEW schema.
+
+## Backups & restore
+
+The managed Postgres cluster (`pokenic-pg`, `production: true`) takes **daily
+automatic backups** (verified 2026-07-07: daily snapshots at ~06:48 UTC, 7-day
+retention) and supports point-in-time recovery:
+
+```pwsh
+doctl databases backups <CLUSTER_ID>                                  # list
+doctl databases create <name> --restore-from-cluster <CLUSTER_ID> `
+  --restore-from-timestamp <RFC3339>                                  # PITR -> NEW cluster
+```
+
+Restore creates a **new** cluster — repoint `DATABASE_URL` in
+`deploy/.env.deploy`, re-run `do-apply.ps1 backend`, and re-add the
+`app:$APP_ID` trusted source on the new cluster.
+
+Ad-hoc dumps (local Docker dev DB or remote): `pwsh scripts/db-dump.ps1`
+(local) / `pwsh scripts/db-dump.ps1 -DatabaseUrl <url>` (remote) → `backups/`
+(gitignored).
+
+## Observability
+
+- **Storefront:** Sentry is wired via `@sentry/nextjs` (`next.config.ts`).
+- **Backend:** no Sentry yet — errors live only in App Platform runtime logs
+  (`doctl apps logs <APP_ID> --type run [--follow]`). The specs' alert rules
+  (deploy failures, CPU/MEM/restart) are the floor. TODO(go-live): add backend
+  error tracking (Sentry DSN decision) or a log drain
+  (`doctl apps update ... --log-destination`).
+
+## Go-live checklist (grep-able blockers)
+
+- [ ] `ALLOW_MOCK_TOPUP` env **deleted** from `backend.app.yaml` + real PSP live
+      (see the GO-LIVE BLOCKER box in the spec)
+- [ ] `CSP_ENFORCE=true` confirmed live on the storefront (in the spec; applies
+      via `do-apply.ps1 storefront`)
+- [ ] A staging App Platform app (cheap `basic-xxs` pair) in front of prod —
+      today every master push deploys straight to prod
+- [ ] Backend error tracking (see Observability)
+- [ ] Instance sizing/HA review (`basic-xs`/`basic-xxs`, single instance today)

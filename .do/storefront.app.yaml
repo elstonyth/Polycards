@@ -45,12 +45,25 @@ services:
       - key: NODE_ENV
         scope: RUN_AND_BUILD_TIME
         value: production
+      # NOTE(custom-domain): this URL/key pair is ALSO hardcoded as ARG defaults
+      # in the root Dockerfile (NEXT_PUBLIC_*) and backend/Dockerfile
+      # (MERCUR_BACKEND_URL / MERCUR_STOREFRONT_URL) — App Platform doesn't
+      # reliably pass build-time env, so the Dockerfile defaults ARE the prod
+      # values. A domain move must update all of them together.
       - key: NEXT_PUBLIC_MEDUSA_BACKEND_URL
         scope: RUN_AND_BUILD_TIME
         value: https://pokenic-backend-tltfm.ondigitalocean.app
       - key: NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY
         scope: RUN_AND_BUILD_TIME
         value: pk_86273b7c12ca5b2fd838bf1c1cf6427dbb6ef41c723d8af1efa20db183517534
+      # Enforce the CSP. Without this, next.config.ts serves
+      # Content-Security-Policy-Report-Only — report-only had a clean run
+      # (qa:csp + Sentry), flip assessed safe. GO-LIVE checklist: must be true.
+      # NOTE: takes effect on the next `do-apply.ps1 storefront` (spec envs
+      # apply via doctl, not on git push).
+      - key: CSP_ENFORCE
+        scope: RUN_AND_BUILD_TIME
+        value: 'true'
       # Spaces CDN media host — baked into the client bundle (next.config.ts
       # remotePatterns) so next/image renders uploaded card/pack art from the
       # bucket. Host only, no protocol. Must rebuild the storefront to change it.

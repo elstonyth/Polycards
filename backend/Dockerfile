@@ -91,6 +91,13 @@ COPY --from=builder /app ./
 # Medusa listens on :9000; App Platform routes to http_port: 9000 (see app.yaml).
 # Worker instances override the run command with MEDUSA_WORKER_MODE=worker.
 WORKDIR /app/packages/api
+
+# Drop root (the storefront Dockerfile already does; audit M2). The only dir the
+# API writes is static/ — the LOCAL file-provider fallback when S3 is unset
+# (compose/local runs; prod uses Spaces so it stays untouched).
+RUN mkdir -p static && chown node:node static
+USER node
+
 EXPOSE 9000
 # In-image health probe (App Platform has its own; this helps local/compose +
 # `docker` orchestration). Node's global fetch (Node 18+) avoids needing curl.

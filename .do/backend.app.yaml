@@ -117,6 +117,18 @@ envs:
     scope: RUN_TIME
     type: SECRET
     value: __SECRET__S3_SECRET_ACCESS_KEY__
+  # ╔═══════════════════════════════════════════════════════════════════════╗
+  # ║ GO-LIVE BLOCKER — DELETE THIS ENV BEFORE REAL LAUNCH.                  ║
+  # ║ 'unsafe-demo' runs the always-approving MOCK payment gateway in prod   ║
+  # ║ (mints free spendable credit). Prod is deliberately a DEMO box today.  ║
+  # ║ The boot guard (packs/topup.ts assertMockTopupSafe) refuses 'true' in  ║
+  # ║ production; only this weird-on-purpose value boots. Remove when the    ║
+  # ║ real PSP (security roadmap Batch B) ships. Living here (not the DO UI) ║
+  # ║ keeps the spec = live reality and makes the blocker grep-able.         ║
+  # ╚═══════════════════════════════════════════════════════════════════════╝
+  - key: ALLOW_MOCK_TOPUP
+    scope: RUN_TIME
+    value: unsafe-demo
 
 services:
   - name: backend
