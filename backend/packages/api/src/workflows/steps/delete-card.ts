@@ -3,6 +3,7 @@ import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
 import type { OddsRarity } from '@acme/odds-math';
+import { deleteSlabFile } from '../../api/admin/media/bake-slab';
 
 export type DeleteCardInput = { handle: string };
 
@@ -26,6 +27,8 @@ type CompensateData =
         image: string;
         price: number | null;
         for_sale: boolean;
+        slab_image: string | null;
+        slab_image_key: string | null;
       };
       odds: OddsSnapshot[];
     }
@@ -75,6 +78,8 @@ export const deleteCardStep = createStep(
         image: card.image,
         price: card.price === null ? null : Number(card.price),
         for_sale: card.for_sale,
+        slab_image: card.slab_image ?? null,
+        slab_image_key: card.slab_image_key ?? null,
       },
       odds: oddsSnapshot,
     };
@@ -83,6 +88,11 @@ export const deleteCardStep = createStep(
       await packs.deletePackOdds(oddsRows.map((o) => o.id));
     }
     await packs.deleteCards([card.id]);
+
+    // The card's baked composite goes with it (decision #8; best-effort). A
+    // compensated delete restores the row pointing at a deleted file — the
+    // storefront then shows the bare photo until the next save re-bakes.
+    await deleteSlabFile(container, card.slab_image_key ?? null);
 
     return new StepResponse({ handle: input.handle }, snapshot);
   },
