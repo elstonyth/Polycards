@@ -1112,25 +1112,31 @@ const FramesTab = () => {
     const file = e.target.files?.[0];
     const level = uploadingFor;
     if (fileRef.current) fileRef.current.value = '';
-    setUploadingFor(null);
-    if (!file || level === null) return;
-    const problem = await validateImageFile(file, 'avatar-frame');
-    if (problem) {
-      toast.error(problem);
+    if (!file || level === null) {
+      setUploadingFor(null);
       return;
     }
     try {
+      const problem = await validateImageFile(file, 'avatar-frame');
+      if (problem) {
+        toast.error(problem);
+        return;
+      }
       const url = await upload.mutateAsync({ file, kind: 'avatar-frame' });
-      setPending({ ...effective, [String(level)]: url });
+      setPending((prev) => ({ ...(prev ?? current), [String(level)]: url }));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUploadingFor(null);
     }
   };
 
   const removeFrame = (level: number) => {
-    const next = { ...effective };
-    delete next[String(level)];
-    setPending(next);
+    setPending((prev) => {
+      const next = { ...(prev ?? current) };
+      delete next[String(level)];
+      return next;
+    });
   };
 
   const submit = () => {
@@ -1211,6 +1217,7 @@ const FramesTab = () => {
                       variant="secondary"
                       onClick={() => pickFile(level)}
                       isLoading={upload.isPending && uploadingFor === level}
+                      disabled={upload.isPending}
                     >
                       {url ? 'Replace…' : 'Upload…'}
                     </Button>
