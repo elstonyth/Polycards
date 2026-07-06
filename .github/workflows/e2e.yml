@@ -1,0 +1,174 @@
+# Full-stack Playwright E2E (heavy: backend + admin + storefront + browser).
+# Runs nightly and on manual dispatch — NOT per-PR — because it boots the whole
+# stack and takes ~15-25 min; gating every PR on it would be slow and flaky.
+# This exists so the E2E suite can't silently rot again (the /claw→/slots drift
+# was invisible precisely because nothing ran these specs in CI).
+#
+# Stack recipe (mirrors tests/e2e/README.md):
+#   deploy:init          -> db:migrate + seed (packs incl. pokemon-rookie/-elite,
+#                           the "Webshop" publishable key) + print-publishable-key
+#   deploy:migrate-user  -> idempotent create-admin (ADMIN_EMAIL/ADMIN_PASSWORD)
+#                           + seed-vip-achievements
+#   backend :9000 (medusa start) · storefront :4000 (standalone) · admin :7000 (vite)
+# The publishable key is parsed from deploy:init's output, baked into the
+# storefront build (NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY) and passed to the suite
+# as PW_PK — without it every /store call 401s.
+name: E2E
+
+on:
+  schedule:
+    - cron: '0 18 * * *' # 02:00 GMT+8 nightly
+  workflow_dispatch: {}
+  # TEMP validation trigger (DevOps audit C1/C2): prove the workflow green on the
+  # fix branch, then delete this block — nightly + manual dispatch is the design.
+  push:
+    branches: [devops-audit-fixes]
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: medusa
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/medusa
+      REDIS_URL: redis://localhost:6379
+      # Deliberately NO job-wide NODE_ENV: `next build` must not see test/dev
+      # (non-standard NODE_ENV can emit a dev bundle), and the backend must be
+      # non-production so the mock-gateway opt-in below is legal (topup.ts
+      # assertMockTopupSafe refuses ALLOW_MOCK_TOPUP=true under production).
+      #
+      # Mock gateway: customer flows fund themselves via /store/credits/topup.
+      ALLOW_MOCK_TOPUP: 'true'
+      # Ephemeral CI-only credential — the DB lives and dies with this job. A
+      # PW_ADMIN_PASSWORD repo secret overrides it when wired; the fallback
+      # keeps the nightly green either way (audit C2: no-fallback = red run).
+      PW_ADMIN_EMAIL: admin@pokenic.local
+      PW_ADMIN_PASSWORD: ${{ secrets.PW_ADMIN_PASSWORD || 'pokenic-ci-e2e-2026' }}
+      ADMIN_EMAIL: admin@pokenic.local
+      ADMIN_PASSWORD: ${{ secrets.PW_ADMIN_PASSWORD || 'pokenic-ci-e2e-2026' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      # Corepack before setup-node so yarn resolution is consistent everywhere.
+      - name: Enable Corepack
+        run: corepack enable
+
+      # Backend runs Node 22 — parity with the prod image (backend/Dockerfile
+      # pins 22-slim; Medusa 2.13 targets 20/22). The storefront steps switch
+      # to Node 24 further down (root engines: >=24).
+      - name: Setup Node.js 22 (backend)
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Cache yarn (berry global cache)
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.yarn/berry/cache
+          key: yarn-e2e-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
+          restore-keys: yarn-e2e-${{ runner.os }}-
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: corepack yarn install --immutable
+
+      - name: Migrate + seed (packs, publishable key, admin)
+        working-directory: backend/packages/api
+        run: |
+          set -euo pipefail
+          corepack yarn deploy:init 2>&1 | tee seed.log
+          corepack yarn deploy:migrate-user
+          PK=$(grep -oE 'token=pk_[A-Za-z0-9]+' seed.log | head -1 | cut -d= -f2)
+          if [ -z "$PK" ]; then
+            echo '::error::No publishable key in deploy:init output — /store calls would 401'
+            exit 1
+          fi
+          echo "NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY=$PK" >> "$GITHUB_ENV"
+          echo "PW_PK=$PK" >> "$GITHUB_ENV"
+
+      - name: Build backend
+        working-directory: backend/packages/api
+        run: corepack yarn build
+
+      - name: Start backend (:9000)
+        working-directory: backend/packages/api
+        run: nohup corepack yarn start > backend.log 2>&1 &
+
+      # --- Admin dashboard (:7000) — vite dev, MERCUR_BACKEND_URL defaults to :9000 ---
+      - name: Start admin (:7000)
+        working-directory: backend/apps/admin
+        run: nohup node ../../node_modules/vite/bin/vite.js --port 7000 > admin.log 2>&1 &
+
+      # --- Storefront on Node 24 (root engines) ---
+      - name: Setup Node.js 24 (storefront)
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install storefront dependencies
+        run: npm ci
+
+      # NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY arrives via GITHUB_ENV from the seed step.
+      - name: Build storefront
+        run: npm run build
+        env:
+          NEXT_PUBLIC_MEDUSA_BACKEND_URL: http://localhost:9000
+
+      # scripts/serve-standalone.ps1 is Windows-pathed (Join-Path '.next\standalone');
+      # on Linux the copy is these two lines. CI is never a worktree, so the
+      # standalone layout is flat.
+      - name: Start storefront standalone (:4000)
+        run: |
+          cp -r .next/static .next/standalone/.next/static
+          cp -r public .next/standalone/public
+          PORT=4000 HOSTNAME=127.0.0.1 nohup node .next/standalone/server.js > storefront.log 2>&1 &
+
+      - name: Wait for stack readiness
+        run: npx --yes wait-on@8 -t 180000 http://localhost:9000/health http://localhost:4000/healthz http://localhost:7000
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run E2E
+        run: npx playwright test
+
+      - name: Upload report + service logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playwright-report
+          path: |
+            tests/e2e/.report
+            backend/packages/api/backend.log
+            backend/apps/admin/admin.log
+            storefront.log
+          retention-days: 7
+          if-no-files-found: ignore

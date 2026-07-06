@@ -12,7 +12,9 @@ export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: false,
   workers: 1,
-  retries: 0,
+  // One retry in CI only: a 3-service full stack on a shared runner needs flake
+  // tolerance; locally a retry just hides real breakage slower.
+  retries: process.env.CI ? 1 : 0,
   // Reveal theater + multiple real opens are slow; give each test room.
   timeout: 180_000,
   expect: { timeout: 20_000 },

@@ -12,12 +12,11 @@ dist/
 # Deploy specs — contain generated secrets (JWT/COOKIE); never commit
 deploy/
 
-# Environment
+# Environment — every .env variant (a plain `.env.production` used to slip
+# through); committed templates are explicitly allowlisted.
 .env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env.*
+!.env.example
 
 # Debug
 npm-debug.log*
@@ -50,6 +49,9 @@ next-env.d.ts
 
 # Local temp files
 temp/
+
+# DB snapshots from scripts/db-dump.ps1 — never commit data dumps
+/backups/
 
 # Regenerable / session junk
 scripts/__pycache__/
@@ -117,8 +119,11 @@ GEMINI.md
 .codex/
 # Docs corpus (research, plans, specs, handoffs, demos) — local only
 /docs/
-# Test harnesses (e2e, demo, prod-smoke) + artifacts — local only
-/tests/
+# Local-only test harnesses (demo videos, prod smoke). tests/e2e IS committed —
+# the nightly E2E workflow (.github/workflows/e2e.yml) checks it out in CI; its
+# runtime artifacts stay ignored via the explicit rules above.
+/tests/demo/
+/tests/prod-smoke/
 
 # impeccable design-hook cache (per-app artifacts)
 **/.impeccable/
