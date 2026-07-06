@@ -38,6 +38,7 @@ import {
   type CardSeed,
 } from '@/components/cards/CardDetailOverlay';
 import { usePackDetailPoll } from '@/lib/use-pack-detail-poll';
+import { SlabImage } from '@/components/SlabImage';
 
 export default function PackDetailClient({
   pack,
@@ -475,12 +476,11 @@ export default function PackDetailClient({
                     className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-white/[0.04]"
                     aria-label={`View details for ${c.name}`}
                   >
-                    <Image
+                    <SlabImage
                       src={c.image}
                       alt=""
-                      width={32}
-                      height={40}
-                      className="h-10 w-8 shrink-0 rounded object-contain"
+                      sizes="32px"
+                      className="w-8 shrink-0"
                     />
                     <span className="min-w-0 flex-1 truncate text-[13px] text-white/80">
                       {c.name}

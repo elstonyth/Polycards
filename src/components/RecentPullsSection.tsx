@@ -3,11 +3,8 @@
 import Image from 'next/image';
 import { cn } from '@/lib/utils';
 import { useLiveRecentPulls } from '@/lib/use-recent-pulls';
-import {
-  PEDESTAL_BG,
-  PEDESTAL_FRAME_HOVER,
-  PEDESTAL_IMAGE,
-} from '@/components/card-pedestal';
+import { PEDESTAL_BG, PEDESTAL_FRAME_HOVER } from '@/components/card-pedestal';
+import { SlabImage } from '@/components/SlabImage';
 import type { RecentPull } from '@/lib/data/packs';
 
 function PullCard({ pull }: { pull: RecentPull }) {
@@ -21,10 +18,10 @@ function PullCard({ pull }: { pull: RecentPull }) {
       )}
     >
       <div className="flex flex-col">
-        {/* Card image on a dark pedestal / spotlight backdrop */}
+        {/* Slab on a dark pedestal / spotlight backdrop */}
         <div
           className={cn(
-            'relative aspect-square w-full overflow-hidden',
+            'relative flex aspect-square w-full items-center justify-center overflow-hidden',
             PEDESTAL_BG,
           )}
         >
@@ -32,12 +29,13 @@ function PullCard({ pull }: { pull: RecentPull }) {
           <span className="absolute right-2 top-2 z-10 rounded-full border border-white/10 bg-black/55 px-2 py-0.5 text-[11px] font-medium text-white backdrop-blur-sm">
             {pull.agoLabel}
           </span>
-          <Image
+          {/* width chosen so the slab's height (w / 0.6 aspect) fills the
+              square pedestal minus breathing room */}
+          <SlabImage
             src={pull.image}
             alt={pull.name}
-            fill
-            sizes="(max-width: 640px) 60vw, (max-width: 1024px) 30vw, 238px"
-            className={cn(PEDESTAL_IMAGE, 'p-4')}
+            sizes="128px"
+            className="w-[124px] transition-transform duration-300 ease-out group-hover/card:scale-[1.04]"
           />
         </div>
 
