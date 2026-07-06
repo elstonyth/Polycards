@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { CardDetailData } from '@/lib/data/cards';
 
 // Prices move at most daily (nightly PriceCharting sync) plus FX/markup edits;
@@ -16,9 +16,14 @@ export function useCardPrice(
 ): CardDetailData | null {
   const [data, setData] = useState(initial);
 
-  // Switching cards (overlay reuse) resets to the new seed.
+  // Reset to the new seed only on a genuine card switch (overlay reuse) —
+  // never on a same-handle seed re-render, which would stomp fresher polled data.
+  const prevHandle = useRef(handle);
   useEffect(() => {
-    setData(initial);
+    if (prevHandle.current !== handle) {
+      prevHandle.current = handle;
+      setData(initial);
+    }
   }, [handle, initial]);
 
   useEffect(() => {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { PackDetail } from '@/lib/data/packs';
 
 const POLL_MS = 60_000;
@@ -13,8 +13,14 @@ export function usePackDetailPoll(
 ): PackDetail | null {
   const [detail, setDetail] = useState(initial);
 
+  // Reset to the new seed only on a genuine pack switch — never on a
+  // same-slug seed re-render, which would stomp fresher polled data.
+  const prevSlug = useRef(slug);
   useEffect(() => {
-    setDetail(initial);
+    if (prevSlug.current !== slug) {
+      prevSlug.current = slug;
+      setDetail(initial);
+    }
   }, [slug, initial]);
 
   useEffect(() => {
