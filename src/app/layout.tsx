@@ -7,11 +7,9 @@ import SiteFooter from '@/components/app-shell/SiteFooter';
 import TabBar from '@/components/app-shell/TabBar';
 import { TopUpProvider } from '@/components/app-shell/TopUpProvider';
 import { AuthProvider } from '@/components/auth/AuthProvider';
-import { SlabFrameProvider } from '@/components/SlabFrameProvider';
 import SkipLink from '@/components/SkipLink';
 import CookieConsent from '@/components/CookieConsent';
 import { SITE_URL } from '@/lib/site';
-import { getSlabFrameUrl } from '@/lib/site-settings';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -61,9 +59,6 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  // Admin-configurable slab-frame overlay (TTL-cached; falls back to the
-  // bundled default when the backend is unreachable, e.g. at build time).
-  const slabFrameUrl = await getSlabFrameUrl();
   return (
     <html
       lang="en"
@@ -85,21 +80,19 @@ export default async function RootLayout({
             features.
           </div>
         </noscript>
-        <SlabFrameProvider frameUrl={slabFrameUrl}>
-          <AuthProvider>
-            <TopUpProvider>
-              <SkipLink />
-              <AppHeader />
-              <main id="main" className="flex-1 pb-12 lg:pb-8">
-                {children}
-              </main>
-              {/* Footer carries the TabBar clearance (pb-28) on phones. */}
-              <SiteFooter />
-              <TabBar />
-              <CookieConsent />
-            </TopUpProvider>
-          </AuthProvider>
-        </SlabFrameProvider>
+        <AuthProvider>
+          <TopUpProvider>
+            <SkipLink />
+            <AppHeader />
+            <main id="main" className="flex-1 pb-12 lg:pb-8">
+              {children}
+            </main>
+            {/* Footer carries the TabBar clearance (pb-28) on phones. */}
+            <SiteFooter />
+            <TabBar />
+            <CookieConsent />
+          </TopUpProvider>
+        </AuthProvider>
       </body>
     </html>
   );
