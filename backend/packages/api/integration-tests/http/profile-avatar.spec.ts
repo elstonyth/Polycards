@@ -87,6 +87,15 @@ medusaIntegrationTestRunner({
 
       it('stores the photo and writes metadata.avatar_url (merged)', async () => {
         const token = await registerCustomer('avatar-happy@test.dev');
+
+        // Seed a pre-existing metadata key (lazily assigned handle) so the
+        // upload's read-modify-write can be proven to MERGE, not clobber.
+        const profile = await unwrapResponse(
+          api.get('/store/profiles/me', { headers: authed(token) }),
+        );
+        const handle = profile.data.handle as string;
+        expect(typeof handle).toBe('string');
+
         const res = await unwrapResponse(
           uploadAvatar(await png(256, 256), authed(token)),
         );
@@ -97,6 +106,7 @@ medusaIntegrationTestRunner({
           api.get('/store/customers/me', { headers: authed(token) }),
         );
         expect(me.data.customer.metadata.avatar_url).toBe(res.data.avatar_url);
+        expect(me.data.customer.metadata.handle).toBe(handle);
       });
 
       it('rejects a disguised non-image and an oversize photo', async () => {
