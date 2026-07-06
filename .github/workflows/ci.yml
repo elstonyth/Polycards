@@ -146,6 +146,13 @@ jobs:
         working-directory: backend
         run: corepack yarn install --immutable
 
+      # jest resolves @acme/odds-math via its dist/ entrypoint, which doesn't
+      # exist on a fresh install. Build only the api's workspace deps (^ = deps,
+      # not api itself — jest SWC-transforms the api source directly).
+      - name: Build workspace deps
+        working-directory: backend
+        run: corepack yarn build --filter="@acme/api^..."
+
       - name: HTTP integration tests
         working-directory: backend/packages/api
         run: |

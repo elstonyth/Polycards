@@ -99,6 +99,14 @@ jobs:
         working-directory: backend
         run: corepack yarn install --immutable
 
+      # Build BEFORE seeding: medusa-config imports @acme/odds-math from its
+      # dist/, which doesn't exist on a fresh install (locally it's left behind
+      # by dev builds). Filter = api + its workspace deps; admin/vendor vite
+      # builds are skipped (the admin surface runs as a vite dev server below).
+      - name: Build backend (api + workspace deps)
+        working-directory: backend
+        run: corepack yarn build --filter="@acme/api..."
+
       - name: Migrate + seed (packs, publishable key, admin)
         working-directory: backend/packages/api
         run: |
@@ -112,10 +120,6 @@ jobs:
           fi
           echo "NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY=$PK" >> "$GITHUB_ENV"
           echo "PW_PK=$PK" >> "$GITHUB_ENV"
-
-      - name: Build backend
-        working-directory: backend/packages/api
-        run: corepack yarn build
 
       - name: Start backend (:9000)
         working-directory: backend/packages/api
