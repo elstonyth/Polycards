@@ -20,8 +20,10 @@ import { getOwnProfileHandle } from '@/lib/data/profiles';
 import { getWallet } from '@/lib/actions/wallet';
 import { getVip } from '@/lib/actions/vip';
 import { getDaily } from '@/lib/actions/daily';
+import { getAvatarFrames } from '@/lib/data/avatar-frames';
 import { rm, rm0 } from '@/lib/format';
 import { LogoutButton, TopUpButton } from './MeActions';
+import { AppearanceCard } from './AppearanceCard';
 
 export const metadata: Metadata = {
   title: 'Me',
@@ -52,39 +54,38 @@ const ABOUT_LINKS: { label: string; href: string }[] = [
 export default async function MePage() {
   // Layout guard guarantees a customer here.
   const customer = (await getCustomer())!;
-  const [walletResult, handle, vipResult, dailyResult] = await Promise.all([
-    getWallet(),
-    getOwnProfileHandle(),
-    getVip(),
-    getDaily(),
-  ]);
+  const [walletResult, handle, vipResult, dailyResult, avatarFrames] =
+    await Promise.all([
+      getWallet(),
+      getOwnProfileHandle(),
+      getVip(),
+      getDaily(),
+      getAvatarFrames(),
+    ]);
 
   const displayName =
     [customer.first_name, customer.last_name].filter(Boolean).join(' ') ||
     handle ||
     customer.email;
-  const initial = (displayName[0] ?? '?').toUpperCase();
+  const meta = (customer.metadata ?? {}) as Record<string, unknown>;
+  const avatarUrl =
+    typeof meta.avatar_url === 'string' ? meta.avatar_url : null;
+  const equippedLevel =
+    typeof meta.equipped_frame_level === 'number'
+      ? meta.equipped_frame_level
+      : null;
+  const highestLevel = vipResult.ok ? vipResult.vip.highestLevelEver : 1;
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Profile header */}
-      <section className="flex items-center gap-4">
-        <div
-          aria-hidden
-          className="font-heading flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-neutral-800 text-2xl text-neutral-50"
-        >
-          {initial}
-        </div>
-        <div className="min-w-0">
-          <h1 className="font-heading truncate text-2xl text-white">
-            {displayName}
-          </h1>
-          <p className="mt-0.5 truncate text-[13px] text-neutral-400">
-            {handle ? `@${handle} · ` : ''}
-            {customer.email}
-          </p>
-        </div>
-      </section>
+      <AppearanceCard
+        displayName={displayName}
+        subtitle={`${handle ? `@${handle} · ` : ''}${customer.email}`}
+        avatarUrl={avatarUrl}
+        equippedLevel={equippedLevel}
+        highestLevel={highestLevel}
+        frames={avatarFrames}
+      />
 
       {/* Wallet card */}
       <section className="rounded-2xl border border-white/10 bg-neutral-900 p-5">
