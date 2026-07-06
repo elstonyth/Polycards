@@ -347,6 +347,16 @@ export default defineMiddlewares({
         mediaUploadMiddleware,
       ],
     },
+    {
+      // Frame equip/unequip (POST /store/profile/frame) — state write, same
+      // write-tier budget.
+      matcher: '/store/profile/frame',
+      method: 'POST',
+      middlewares: [
+        authenticate('customer', ['bearer']),
+        deliveryWriteRateLimit,
+      ],
+    },
     // Admin money-mutation routes — already auth-protected by the framework
     // admin auth, so no explicit authenticate() entry is needed here. All share
     // one limiter instance (one budget + one Redis connection). The limiter keys
