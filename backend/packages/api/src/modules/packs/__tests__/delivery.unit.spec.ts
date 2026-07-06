@@ -51,6 +51,21 @@ describe("validateDeliveryRequest", () => {
       "duplicate",
     );
   });
+
+  describe("reward-source gate", () => {
+    it("rejects reward pulls (they ship via the rewards withdrawal path)", () => {
+      const pulls = [{ ...vaulted("p1"), source: "reward" }];
+      expect(validateDeliveryRequest(pulls, ["p1"], caller)).toBe("reward_source");
+    });
+
+    it("accepts pack pulls (source pack / undefined)", () => {
+      const packPull = { ...vaulted("p1"), source: "pack" };
+      expect(validateDeliveryRequest([packPull], ["p1"], caller)).toBe("ok");
+
+      const noPull = vaulted("p1");
+      expect(validateDeliveryRequest([noPull], ["p1"], caller)).toBe("ok");
+    });
+  });
 });
 
 describe("validateDeliveryStatusTransition", () => {

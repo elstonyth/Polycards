@@ -9,7 +9,12 @@ export const DELIVERY_STATUSES = [
 ] as const;
 export type DeliveryStatus = (typeof DELIVERY_STATUSES)[number];
 
-type PullLike = { id: string; customer_id: string; status: string };
+type PullLike = {
+  id: string;
+  customer_id: string;
+  status: string;
+  source?: string | null;
+};
 
 export type DeliveryRequestVerdict =
   | "ok"
@@ -17,7 +22,8 @@ export type DeliveryRequestVerdict =
   | "duplicate"
   | "not_found"
   | "forbidden"
-  | "not_vaulted";
+  | "not_vaulted"
+  | "reward_source";
 
 // Pure validation for a batch delivery request. `fetchedPulls` is whatever the
 // DB returned for `requestedIds`; ownership failure and unknown id BOTH map to
@@ -37,6 +43,9 @@ export function validateDeliveryRequest(
     if (!pull) return "not_found";
     if (pull.customer_id !== callerId) return "forbidden";
     if (pull.status !== "vaulted") return "not_vaulted";
+    // Reward prizes ship ONLY via recordRewardWithdrawal (redemption gate +
+    // daily cap + is_reward stamping) — never via the generic delivery path.
+    if (pull.source === "reward") return "reward_source";
   }
   return "ok";
 }
