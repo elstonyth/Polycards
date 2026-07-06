@@ -371,7 +371,11 @@ medusaIntegrationTestRunner({
           authed(tokenA),
         );
         expect(open3.status).toBe(200);
-        expect(await stockedQuantity()).toBe(0); // nothing to earmark
+        // Negative-stock counter: opening at 0 stock oversells the unit into the
+        // negative (-1) rather than clamping at 0. The phantom-restore invariant is
+        // the post-buyback assertion below — stock must return to EXACTLY 0 (the
+        // earmark is restored symmetrically, no unit minted above baseline).
+        expect(await stockedQuantity()).toBe(-1);
 
         const buyback3 = await request(
           'post',

@@ -90,14 +90,20 @@ medusaIntegrationTestRunner({
         const fxPost = await unwrapResponse(
           api.post(
             '/admin/pricing/fx',
-            { manual_override: true, manual_rate: MANUAL_RATE },
+            {
+              manual_override: true,
+              manual_rate: MANUAL_RATE,
+              reason: 'test: pin FX for price-sync history',
+            },
             { headers: { authorization: `Bearer ${adminToken}` } },
           ),
         );
         expect(fxPost.status).toBe(200);
       });
 
-      const loadCard = async (): Promise<CardRow & { pc_synced_at: Date | null }> => {
+      const loadCard = async (): Promise<
+        CardRow & { pc_synced_at: Date | null }
+      > => {
         const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
         const [card] = await packs.listCards(
           { handle: CARD_HANDLE },

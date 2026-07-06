@@ -8,17 +8,24 @@ on:
     branches:
       - master
 
+# Stacked pushes to the same ref supersede each other — don't bill for both.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  # Storefront gate: lint, format, typecheck, unit tests, prod build.
+  # Node 24 = the local baseline (root engines: >=24).
   quality:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           cache: npm
@@ -35,5 +42,136 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
+      - name: Unit tests (vitest)
+        run: npm test
+
       - name: Build
         run: npm run build
+
+  # Backend gate: lint + typecheck + the same turbo build the DO App Platform
+  # Docker image runs (medusa build + admin/vendor vite). Without this, a
+  # backend TS error passes CI and fails 5-10 min later inside the prod deploy.
+  # Node 22 = prod-image parity (backend/Dockerfile pins 22-slim).
+  backend-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Cache yarn (berry global cache)
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.yarn/berry/cache
+          key: yarn-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
+          restore-keys: yarn-${{ runner.os }}-
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: corepack yarn install --immutable
+
+      - name: Lint
+        working-directory: backend
+        run: corepack yarn lint
+
+      - name: Type check
+        working-directory: backend
+        run: corepack yarn check-types
+
+      - name: Build (medusa + admin/vendor vite)
+        working-directory: backend
+        run: corepack yarn build
+
+  # Backend HTTP integration gate. Not previously in CI — which is how the FX
+  # `reason`-requirement change silently broke these suites. Uses service
+  # containers; medusa's test runner creates/drops its own per-suite test DBs.
+  integration-http:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: medusa-test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/medusa-test
+      REDIS_URL: redis://localhost:6379
+      NODE_ENV: test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Cache yarn (berry global cache)
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.yarn/berry/cache
+          key: yarn-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
+          restore-keys: yarn-${{ runner.os }}-
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: corepack yarn install --immutable
+
+      - name: HTTP integration tests
+        working-directory: backend/packages/api
+        run: |
+          set -o pipefail
+          corepack yarn test:integration:http 2>&1 | tee http-tests.log
+
+      - name: Upload test log on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: http-integration-log
+          path: backend/packages/api/http-tests.log
+          retention-days: 7
+
+  # Secret scan — forward-looking insurance for a payments-adjacent codebase.
+  # Historical false positives can be waived via a .gitleaksignore fingerprint.
+  gitleaks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

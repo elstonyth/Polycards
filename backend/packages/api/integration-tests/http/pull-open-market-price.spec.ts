@@ -108,7 +108,11 @@ medusaIntegrationTestRunner({
         const fxPost = await unwrapResponse(
           api.post(
             '/admin/pricing/fx',
-            { manual_override: true, manual_rate: MANUAL_RATE },
+            {
+              manual_override: true,
+              manual_rate: MANUAL_RATE,
+              reason: 'test: pin FX',
+            },
             { headers: { authorization: `Bearer ${adminToken}` } },
           ),
         );

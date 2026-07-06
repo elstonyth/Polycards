@@ -110,7 +110,7 @@ medusaIntegrationTestRunner({
         const fxPost = await unwrapResponse(
           api.post(
             '/admin/pricing/fx',
-            { manual_override: true, manual_rate: 4.0 },
+            { manual_override: true, manual_rate: 4.0, reason: 'test: pin FX' },
             adminHeaders(),
           ),
         );

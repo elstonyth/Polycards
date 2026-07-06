@@ -99,11 +99,20 @@ medusaIntegrationTestRunner({
 
       it('vault item exposes marketPriceMyr = raw x fx x multiplier', async () => {
         // Pin the FX rate so the golden vector is deterministic (no live feed).
-        const adminToken = await mintSuperAdmin(getContainer(), api, ADMIN_EMAIL, PASSWORD);
+        const adminToken = await mintSuperAdmin(
+          getContainer(),
+          api,
+          ADMIN_EMAIL,
+          PASSWORD,
+        );
         const fxPost = await unwrapResponse(
           api.post(
             '/admin/pricing/fx',
-            { manual_override: true, manual_rate: MANUAL_RATE },
+            {
+              manual_override: true,
+              manual_rate: MANUAL_RATE,
+              reason: 'test: pin FX',
+            },
             { headers: { authorization: `Bearer ${adminToken}` } },
           ),
         );
@@ -119,7 +128,11 @@ medusaIntegrationTestRunner({
           { headers: authed(token) },
         );
         const open = await unwrapResponse(
-          api.post(`/store/packs/${PACK_SLUG}/open`, {}, { headers: authed(token) }),
+          api.post(
+            `/store/packs/${PACK_SLUG}/open`,
+            {},
+            { headers: authed(token) },
+          ),
         );
         expect(open.status).toBe(200);
 
@@ -136,25 +149,42 @@ medusaIntegrationTestRunner({
       });
 
       it('admin card read exposes the raw/fx/markup price breakdown', async () => {
-        const adminToken = await mintSuperAdmin(getContainer(), api, ADMIN_EMAIL, PASSWORD);
-        const adminHeaders = { headers: { authorization: `Bearer ${adminToken}` } };
+        const adminToken = await mintSuperAdmin(
+          getContainer(),
+          api,
+          ADMIN_EMAIL,
+          PASSWORD,
+        );
+        const adminHeaders = {
+          headers: { authorization: `Bearer ${adminToken}` },
+        };
         await unwrapResponse(
           api.post(
             '/admin/pricing/fx',
-            { manual_override: true, manual_rate: MANUAL_RATE },
+            {
+              manual_override: true,
+              manual_rate: MANUAL_RATE,
+              reason: 'test: pin FX',
+            },
             adminHeaders,
           ),
         );
 
-        const list = await unwrapResponse(api.get('/admin/cards', adminHeaders));
+        const list = await unwrapResponse(
+          api.get('/admin/cards', adminHeaders),
+        );
         expect(list.status).toBe(200);
-        const listed = list.data.cards.find((c: { handle: string }) => c.handle === CARD_HANDLE);
+        const listed = list.data.cards.find(
+          (c: { handle: string }) => c.handle === CARD_HANDLE,
+        );
         expect(listed.priceBreakdown).toMatchObject({
           raw: FMV,
           fxRate: MANUAL_RATE,
           marketMyr: FMV * MANUAL_RATE,
           displayPrice: EXPECTED_MARKET_PRICE_MYR,
-          markup: Math.round((EXPECTED_MARKET_PRICE_MYR - FMV * MANUAL_RATE) * 100) / 100,
+          markup:
+            Math.round((EXPECTED_MARKET_PRICE_MYR - FMV * MANUAL_RATE) * 100) /
+            100,
         });
 
         const detail = await unwrapResponse(
