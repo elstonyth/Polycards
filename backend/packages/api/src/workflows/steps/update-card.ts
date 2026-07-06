@@ -70,9 +70,14 @@ type ProductSnapshot = {
   variantId: string | null;
 };
 
-type CompensateData =
-  | { card: CardSnapshot; product: ProductSnapshot | null }
-  | undefined;
+// The non-undefined compensate shape both invoke branches return. Kept
+// separate from CompensateData (below) — `satisfies`-ing each branch against
+// this exact type (not the `| undefined` union) is what lets TS infer a
+// single concrete TCompensateInput for createStep instead of a union that
+// distributes over `undefined` (InvokeFn's `TCompensateInput extends
+// undefined ? TOutput : TCompensateInput` — see create-step.d.ts).
+type CardCompensate = { card: CardSnapshot; product: ProductSnapshot | null };
+type CompensateData = CardCompensate | undefined;
 
 // update-card — patch the Card row and bring its mirrored Product back in sync:
 // update title/image/metadata/price and flip PUBLISHED<->DRAFT to match for_sale.
@@ -81,7 +86,9 @@ type CompensateData =
 export const updateCardInvoke = async (
   input: UpdateCardInput,
   { container }: { container: MedusaContainer },
-) => {
+): Promise<
+  StepResponse<{ handle: string; productId: string }, CardCompensate>
+> => {
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
   const productModule = container.resolve(Modules.PRODUCT);
 
@@ -224,7 +231,7 @@ export const updateCardInvoke = async (
     return new StepResponse({ handle: card.handle, productId: product.id }, {
       card: snapshot,
       product: prevProduct,
-    } satisfies CompensateData);
+    } satisfies CardCompensate);
   }
 
   // Defensive upsert: no Product for this handle — create one to match.
@@ -267,7 +274,7 @@ export const updateCardInvoke = async (
   return new StepResponse({ handle: card.handle, productId: result[0].id }, {
     card: snapshot,
     product: null,
-  } satisfies CompensateData);
+  } satisfies CardCompensate);
 };
 
 export const updateCardStep = createStep(

@@ -33,6 +33,9 @@ export type CardProductMetadata = {
   // create-card when the product is registered as a gacha card.
   pokemon_dex?: number;
   sprite_image?: string;
+  // Public slab-composite mirror (URL only — the private provider key never
+  // belongs in product metadata). Present only for graded cards.
+  slab_image?: string | null;
 };
 
 export type CardProductSeed = {
