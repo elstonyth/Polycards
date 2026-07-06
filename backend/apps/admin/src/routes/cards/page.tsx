@@ -100,6 +100,11 @@ const GachaCardsPage = () => {
   const [registerOpen, setRegisterOpen] = useState(false);
   const [form, setForm] = useState<FormState | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AdminCard | null>(null);
+  const [q, setQ] = useState('');
+  const [sort, setSort] = useState<{
+    key: 'name' | 'value' | 'stock';
+    dir: 1 | -1;
+  } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const uploading = uploadImg.isPending;
   const saving = updateCard.isPending;
@@ -210,6 +215,45 @@ const GachaCardsPage = () => {
     }
   };
 
+  const visible = (cards ?? [])
+    .filter((c) => {
+      const needle = q.trim().toLowerCase();
+      if (!needle) return true;
+      return (
+        c.name.toLowerCase().includes(needle) ||
+        c.handle.toLowerCase().includes(needle)
+      );
+    })
+    .sort((a, b) => {
+      if (!sort) return 0;
+      const pick = (c: typeof a) =>
+        sort.key === 'name'
+          ? c.name.toLowerCase()
+          : sort.key === 'value'
+            ? (c.priceBreakdown.marketMyr ?? 0)
+            : (c.stock ?? Number.POSITIVE_INFINITY);
+      const va = pick(a);
+      const vb = pick(b);
+      return va < vb ? -sort.dir : va > vb ? sort.dir : 0;
+    });
+
+  const sortHeader = (key: 'name' | 'value' | 'stock', label: string) => (
+    <button
+      type="button"
+      className="inline-flex items-center gap-1 hover:text-ui-fg-base"
+      onClick={() =>
+        setSort((s) =>
+          s?.key === key
+            ? { key, dir: s.dir === 1 ? -1 : 1 }
+            : { key, dir: 1 },
+        )
+      }
+    >
+      {label}
+      {sort?.key === key ? (sort.dir === 1 ? ' ↑' : ' ↓') : ''}
+    </button>
+  );
+
   return (
     <Container className="divide-y p-0">
       <div className="flex items-start justify-between gap-4 px-6 py-4">
@@ -219,6 +263,12 @@ const GachaCardsPage = () => {
             {t('cards.subtitle')}
           </Text>
         </div>
+        <Input
+          className="w-56"
+          placeholder="Search name or handle…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
         <Button
           size="small"
           variant="primary"
@@ -229,6 +279,14 @@ const GachaCardsPage = () => {
       </div>
 
       <GachaPipelineHint current="card" />
+
+      {cards !== null && (
+        <Text size="small" className="text-ui-fg-subtle px-6 pb-2">
+          {q.trim()
+            ? `${visible.length} of ${cards.length} cards`
+            : `${cards.length} cards`}
+        </Text>
+      )}
 
       {isError ? (
         <div className="px-6 py-8">
@@ -246,16 +304,18 @@ const GachaCardsPage = () => {
         <Table>
           <Table.Header>
             <Table.Row>
-              <Table.HeaderCell>{t('cards.list.card')}</Table.HeaderCell>
+              <Table.HeaderCell>
+                {sortHeader('name', t('cards.list.card'))}
+              </Table.HeaderCell>
               <Table.HeaderCell>{t('cards.list.grade')}</Table.HeaderCell>
               <Table.HeaderCell className="text-right">
-                {t('cards.list.value')}
+                {sortHeader('value', t('cards.list.value'))}
               </Table.HeaderCell>
               <Table.HeaderCell className="text-right">
                 {t('cards.list.price')}
               </Table.HeaderCell>
               <Table.HeaderCell className="text-right">
-                {t('cards.list.stock')}
+                {sortHeader('stock', t('cards.list.stock'))}
               </Table.HeaderCell>
               <Table.HeaderCell>{t('cards.list.status')}</Table.HeaderCell>
               <Table.HeaderCell className="text-right">
@@ -264,7 +324,7 @@ const GachaCardsPage = () => {
             </Table.Row>
           </Table.Header>
           <Table.Body>
-            {cards.map((c) => (
+            {visible.map((c) => (
               <Table.Row key={c.handle}>
                 <Table.Cell>
                   <div className="flex items-center gap-3">
@@ -294,6 +354,7 @@ const GachaCardsPage = () => {
                   )}
                 </Table.Cell>
                 <Table.Cell
+                  title="Negative = units owed to winners; 0 = buyback-only; ∞ = untracked"
                   className={
                     // Negative = units OWED to winners (wins keep counting
                     // below 0 by design) — red beats orange for "act now".

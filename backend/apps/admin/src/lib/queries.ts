@@ -1,4 +1,5 @@
 import {
+  keepPreviousData,
   useMutation,
   useQuery,
   useQueryClient,
@@ -24,16 +25,22 @@ import {
   getCustomerAudit,
   getCustomerGacha,
   getCustomerCommissions,
+  getCustomerTransactions,
+  getCustomerPulls,
   getEconomyReport,
+  getFxHistory,
   getFxRate,
+  getPulls,
   getDailyBoxes,
   getDailyBox,
   getVoucherLadder,
   getReferralTree,
+  getRewardsSettings,
   listDeliveryOrders,
   listEligibleProducts,
   reverseCommission,
   saveDailyBox,
+  saveRewardsSettings,
   saveVoucherRanges,
   setFxRate,
   suspendCommission,
@@ -42,17 +49,21 @@ import {
   updateDeliveryOrder,
   uploadImage,
   type AdminCommissionRow,
-  type AdminDeliveryOrder,
   type CustomerAudit,
   type CustomerGacha,
+  type SupportTransaction,
+  type SupportPull,
   type DailyBoxEditorDTO,
   type DailyBoxSaveBody,
   type DailyBoxSummary,
+  type DeliveryOrdersPage,
   type DeliveryStatus,
   type EconomyReport,
   type EligibleProduct,
+  type FxChange,
   type FxRateState,
   type ReferralTree,
+  type RewardsSettingsView,
   type VoucherLadderDTO,
   type VoucherRangeDTO,
 } from './admin-rest';
@@ -78,8 +89,12 @@ export const useCards = (
     enabled: opts.enabled ?? true,
   });
 
-export const usePulls = (): UseQueryResult<PullsResponse> =>
-  useQuery({ queryKey: qk.pulls, queryFn: () => packsApi.admin.pulls.query() });
+export const usePulls = (page = 0): UseQueryResult<PullsResponse> =>
+  useQuery({
+    queryKey: qk.pulls(page),
+    queryFn: () => getPulls(page),
+    placeholderData: keepPreviousData,
+  });
 
 export const useEconomy = (): UseQueryResult<EconomyReport> =>
   useQuery({ queryKey: qk.economy, queryFn: getEconomyReport });
@@ -130,6 +145,7 @@ export const useCustomerCommissions = (
     queryKey: qk.customerCommissions(id ?? '', page),
     queryFn: () => getCustomerCommissions(id!, page),
     enabled: !!id,
+    placeholderData: keepPreviousData,
   });
 
 export const useCustomerAudit = (
@@ -140,18 +156,46 @@ export const useCustomerAudit = (
     queryKey: qk.customerAudit(id ?? '', page),
     queryFn: () => getCustomerAudit(id!, page),
     enabled: !!id,
+    placeholderData: keepPreviousData,
+  });
+
+export const useCustomerTransactions = (
+  id: string | null,
+  page = 0,
+): UseQueryResult<{ items: SupportTransaction[]; total: number }> =>
+  useQuery({
+    queryKey: qk.customerTransactions(id ?? '', page),
+    queryFn: () => getCustomerTransactions(id!, page),
+    enabled: !!id,
+    placeholderData: keepPreviousData,
+  });
+
+export const useCustomerPulls = (
+  id: string | null,
+  page = 0,
+): UseQueryResult<{ items: SupportPull[]; total: number }> =>
+  useQuery({
+    queryKey: qk.customerPulls(id ?? '', page),
+    queryFn: () => getCustomerPulls(id!, page),
+    enabled: !!id,
+    placeholderData: keepPreviousData,
   });
 
 export const useDeliveryOrders = (
   status?: DeliveryStatus,
-): UseQueryResult<AdminDeliveryOrder[]> =>
+  page = 0,
+): UseQueryResult<DeliveryOrdersPage> =>
   useQuery({
-    queryKey: qk.deliveryOrders(status),
-    queryFn: () => listDeliveryOrders(status),
+    queryKey: qk.deliveryOrders(status, page),
+    queryFn: () => listDeliveryOrders(status, page),
+    placeholderData: keepPreviousData,
   });
 
 export const useFxRate = (): UseQueryResult<FxRateState> =>
   useQuery({ queryKey: qk.fxRate, queryFn: getFxRate });
+
+export const useFxHistory = (): UseQueryResult<{ changes: FxChange[] }> =>
+  useQuery({ queryKey: qk.fxHistory, queryFn: getFxHistory });
 
 // ── Mutations ────────────────────────────────────────────────────────────────
 
@@ -209,6 +253,8 @@ export const useSetFxRate = () => {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.fxRate });
       qc.invalidateQueries({ queryKey: qk.cards });
+      qc.invalidateQueries({ queryKey: qk.fxHistory });
+      toast.success('Exchange rate updated');
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });
@@ -293,6 +339,7 @@ export const useAdjustCredits = () => {
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: qk.customerGacha(vars.id) });
       qc.invalidateQueries({ queryKey: qk.customerAuditKey(vars.id) });
+      qc.invalidateQueries({ queryKey: qk.customerTransactionsKey(vars.id) });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });
@@ -304,6 +351,7 @@ export const useFreezeCustomer = () => {
     mutationFn: (vars: { id: string; reason: string }) =>
       freezeCustomer(vars.id, vars.reason),
     onSuccess: (_data, vars) => {
+      toast.success('Customer frozen');
       qc.invalidateQueries({ queryKey: qk.customerGacha(vars.id) });
       qc.invalidateQueries({ queryKey: qk.customerAuditKey(vars.id) });
       qc.invalidateQueries({ queryKey: qk.referralTreeKey(vars.id) });
@@ -318,6 +366,7 @@ export const useUnfreezeCustomer = () => {
     mutationFn: (vars: { id: string; reason: string }) =>
       unfreezeCustomer(vars.id, vars.reason),
     onSuccess: (_data, vars) => {
+      toast.success('Customer unfrozen');
       qc.invalidateQueries({ queryKey: qk.customerGacha(vars.id) });
       qc.invalidateQueries({ queryKey: qk.customerAuditKey(vars.id) });
       qc.invalidateQueries({ queryKey: qk.referralTreeKey(vars.id) });
@@ -335,6 +384,7 @@ export const useReverseCommission = () => {
       reason: string;
     }) => reverseCommission(vars.commId, vars.reason),
     onSuccess: (_data, vars) => {
+      toast.success('Commission reversed');
       qc.invalidateQueries({
         queryKey: qk.customerCommissionsKey(vars.customerId),
       });
@@ -353,6 +403,7 @@ export const useSuspendCommission = () => {
       reason: string;
     }) => suspendCommission(vars.commId, vars.reason),
     onSuccess: (_data, vars) => {
+      toast.success('Commission suspended');
       qc.invalidateQueries({
         queryKey: qk.customerCommissionsKey(vars.customerId),
       });
@@ -371,6 +422,7 @@ export const useUnsuspendCommission = () => {
       reason: string;
     }) => unsuspendCommission(vars.commId, vars.reason),
     onSuccess: (_data, vars) => {
+      toast.success('Commission unsuspended');
       qc.invalidateQueries({
         queryKey: qk.customerCommissionsKey(vars.customerId),
       });
@@ -398,9 +450,9 @@ export const useUpdateDeliveryOrder = () => {
         status: vars.status,
         tracking_number: vars.tracking_number,
       }),
-    // Status filters vary, so drop the whole delivery-orders namespace.
+    // Status filters + pages vary, so drop the whole delivery-orders namespace.
     onSuccess: () =>
-      qc.invalidateQueries({ queryKey: ['admin', 'delivery-orders'] }),
+      qc.invalidateQueries({ queryKey: qk.deliveryOrdersKey }),
   });
 };
 
@@ -447,6 +499,23 @@ export const useSaveVoucherRanges = () => {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.voucherLadder });
       toast.success('Voucher ranges saved');
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+export type { RewardsSettingsView } from './admin-rest';
+
+export const useRewardsSettings = (): UseQueryResult<RewardsSettingsView> =>
+  useQuery({ queryKey: qk.rewardsSettings, queryFn: getRewardsSettings });
+
+export const useSaveRewardsSettings = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: saveRewardsSettings,
+    onSuccess: () => {
+      toast.success('Engine settings saved');
+      qc.invalidateQueries({ queryKey: qk.rewardsSettings });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });

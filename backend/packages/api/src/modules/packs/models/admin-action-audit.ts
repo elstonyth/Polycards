@@ -17,6 +17,7 @@ export const AdminActionAudit = model
       'daily_reward_settings',
       'daily_box',
       'voucher_ladder',
+      'fx',
     ]),
     entity_id: model.text(),
     action: model.enum([
@@ -31,6 +32,7 @@ export const AdminActionAudit = model
       'edit_daily_reward_settings',
       'edit_daily_box',
       'edit_voucher_ladder',
+      'edit_fx_rate',
     ]),
     before: model.json().nullable(),
     after: model.json().nullable(),

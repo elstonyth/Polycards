@@ -6,17 +6,17 @@ import {
   resolveFxRate,
   displayMarketPrice,
 } from "../../../modules/packs/pricing";
+import { parsePaginationParams } from "../../../utils/pagination";
 
 // GET /admin/pulls — the gacha Pull ledger for the operator, plus rollups.
 // Admin-only (auto-protected /admin/* route), so unlike the PUBLIC recent-pulls
 // feed this MAY join the customer email (legitimate operator visibility into who
 // pulled what — the PII discipline applies only to customer-facing surfaces).
 //
-// Returns the most recent LEDGER_LIMIT pulls (card + customer email) and, over a
-// wider window, the top cards and rarities by pull count. Rarity is PER-PACK
-// (PackOdds), so each pull's tier comes from its (pack_id, card_id) odds row;
-// pulls whose odds row no longer exists show rarity null.
-const LEDGER_LIMIT = 50;
+// Returns a paginated page of the ledger (card + customer email + pack title)
+// and, over a wider window, the top cards and rarities by pull count. Rarity is
+// PER-PACK (PackOdds), so each pull's tier comes from its (pack_id, card_id)
+// odds row; pulls whose odds row no longer exists show rarity null.
 const ROLLUP_WINDOW = 5000;
 
 export async function GET(
@@ -28,12 +28,21 @@ export async function GET(
   // FMV is stored USD; the pull ledger + top-cards show MYR at the live rate.
   const fx = await resolveFxRate(packs);
 
+  const { limit, offset } = parsePaginationParams(
+    { limit: req.query.limit, offset: req.query.offset },
+    { defaultLimit: 50, maxLimit: 100 },
+  );
+
   const allPulls = await packs.listPulls(
     {},
     { order: { rolled_at: "DESC" }, take: ROLLUP_WINDOW }
   );
+  const [ledger, total] = await packs.listAndCountPulls(
+    {},
+    { order: { rolled_at: "DESC" }, skip: offset, take: limit }
+  );
 
-  const handles = [...new Set(allPulls.map((p) => p.card_id))];
+  const handles = [...new Set([...allPulls, ...ledger].map((p) => p.card_id))];
   const cards = handles.length
     ? await packs.listCards({ handle: handles }, { take: handles.length })
     : [];
@@ -92,8 +101,7 @@ export async function GET(
     .sort((a, b) => b[1] - a[1])
     .map(([rarity, count]) => ({ rarity, count }));
 
-  // Ledger rows (recent slice) — join the customer email for these only.
-  const ledger = allPulls.slice(0, LEDGER_LIMIT);
+  // Ledger rows (current page) — join the customer email for these only.
   const customerIds = [
     ...new Set(ledger.map((p) => p.customer_id).filter((id): id is string => !!id)),
   ];
@@ -105,6 +113,12 @@ export async function GET(
     : [];
   const emailById = new Map(customers.map((c) => [c.id, c.email]));
 
+  const packIds = [...new Set(ledger.map((p) => p.pack_id))];
+  const packRows = packIds.length
+    ? await packs.listPacks({ id: packIds }, { take: packIds.length })
+    : [];
+  const packTitleById = new Map(packRows.map((pk: any) => [pk.id, pk.title]));
+
   const pulls = ledger.map((p) => {
     const card = cardByHandle.get(p.card_id);
     return {
@@ -113,6 +127,7 @@ export async function GET(
       customer_id: p.customer_id,
       customer_email: p.customer_id ? emailById.get(p.customer_id) ?? null : null,
       pack_id: p.pack_id,
+      pack_title: packTitleById.get(p.pack_id) ?? null,
       // Vault lifecycle: vaulted (customer still holds it) vs bought_back
       // (instant sell-back — amount = the USD actually credited).
       status: p.status,
@@ -130,5 +145,5 @@ export async function GET(
     };
   });
 
-  res.json({ total: allPulls.length, pulls, topCards, topRarities });
+  res.json({ total, offset, limit, pulls, topCards, topRarities });
 }

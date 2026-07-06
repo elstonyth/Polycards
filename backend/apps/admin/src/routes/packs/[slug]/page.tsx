@@ -508,15 +508,35 @@ const PackOddsEditorPage = () => {
           </FocusModal.Header>
           <FocusModal.Body className="flex flex-col items-center overflow-auto p-10">
             <div className="flex w-full max-w-[640px] flex-col gap-y-4">
-              <div>
-                <FocusModal.Title asChild>
-                  <Heading level="h2">{t('packs.pool.title')}</Heading>
-                </FocusModal.Title>
-                <FocusModal.Description asChild>
-                  <Text className="text-ui-fg-subtle mt-1" size="small">
-                    {t('packs.pool.subtitle', { count: selected.size })}
-                  </Text>
-                </FocusModal.Description>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <FocusModal.Title asChild>
+                    <Heading level="h2">{t('packs.pool.title')}</Heading>
+                  </FocusModal.Title>
+                  <FocusModal.Description asChild>
+                    <Text className="text-ui-fg-subtle mt-1" size="small">
+                      {t('packs.pool.subtitle', { count: selected.size })}
+                    </Text>
+                  </FocusModal.Description>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    size="small"
+                    variant="secondary"
+                    onClick={() =>
+                      setSelected(new Set((allCards ?? []).map((c) => c.handle)))
+                    }
+                  >
+                    Select all
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="secondary"
+                    onClick={() => setSelected(new Set())}
+                  >
+                    Clear all
+                  </Button>
+                </div>
               </div>
               {allCards === null ? (
                 <Text className="text-ui-fg-subtle">…</Text>

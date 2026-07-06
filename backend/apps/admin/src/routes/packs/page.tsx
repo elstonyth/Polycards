@@ -105,6 +105,11 @@ const PacksListPage = () => {
   const [mode, setMode] = useState<'create' | 'edit' | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [deleteTarget, setDeleteTarget] = useState<AdminPack | null>(null);
+  const [q, setQ] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'draft' | 'active'>(
+    'all',
+  );
+  const filtering = q.trim() !== '' || statusFilter !== 'all';
   const fileRef = useRef<HTMLInputElement>(null);
   const uploading = uploadImg.isPending;
   const saving = createPack.isPending || updatePack.isPending;
@@ -210,6 +215,12 @@ const PacksListPage = () => {
   // match what's on screen, even while duplicate ranks are still unnormalized.
   const rows = useMemo(() => [...grouped.values()].flat(), [grouped]);
 
+  const visibleRows = rows.filter((p) => {
+    if (statusFilter !== 'all' && p.status !== statusFilter) return false;
+    const needle = q.trim().toLowerCase();
+    return !needle || p.title.toLowerCase().includes(needle);
+  });
+
   // Move a pack one position up/down within its category and persist rank =
   // position for every row that changed — this also normalizes duplicate
   // ranks (e.g. several rank-0 packs) the first time a group is reordered.
@@ -241,12 +252,41 @@ const PacksListPage = () => {
             {t('packs.subtitle')}
           </Text>
         </div>
+        <Input
+          className="w-56"
+          placeholder="Search title…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+        <Select
+          value={statusFilter}
+          onValueChange={(v) =>
+            setStatusFilter(v === 'draft' || v === 'active' ? v : 'all')
+          }
+        >
+          <Select.Trigger className="w-44">
+            <Select.Value />
+          </Select.Trigger>
+          <Select.Content>
+            <Select.Item value="all">All statuses</Select.Item>
+            <Select.Item value="draft">draft</Select.Item>
+            <Select.Item value="active">active</Select.Item>
+          </Select.Content>
+        </Select>
         <Button size="small" variant="primary" onClick={openCreate}>
           {t('packs.new')}
         </Button>
       </div>
 
       <GachaPipelineHint current="pack" />
+
+      {packs !== null && (
+        <Text size="small" className="text-ui-fg-subtle px-6 pb-2">
+          {filtering
+            ? `${visibleRows.length} of ${rows.length} packs`
+            : `${rows.length} packs`}
+        </Text>
+      )}
 
       {isError ? (
         <div className="px-6 py-8">
@@ -268,6 +308,7 @@ const PacksListPage = () => {
               <Table.HeaderCell>{t('packs.list.pack')}</Table.HeaderCell>
               <Table.HeaderCell>{t('packs.list.category')}</Table.HeaderCell>
               <Table.HeaderCell>{t('packs.list.status')}</Table.HeaderCell>
+              <Table.HeaderCell>Odds</Table.HeaderCell>
               <Table.HeaderCell>{t('packs.list.price')}</Table.HeaderCell>
               <Table.HeaderCell className="text-right">
                 {t('packs.list.actions')}
@@ -275,7 +316,7 @@ const PacksListPage = () => {
             </Table.Row>
           </Table.Header>
           <Table.Body>
-            {rows.map((p) => {
+            {visibleRows.map((p) => {
               const group = grouped.get(p.category) ?? [];
               const pos = group.findIndex((x) => x.slug === p.slug);
               return (
@@ -293,7 +334,7 @@ const PacksListPage = () => {
                       size="small"
                       variant="transparent"
                       aria-label={t('packs.list.moveUp')}
-                      disabled={pos <= 0 || updatePack.isPending}
+                      disabled={filtering || pos <= 0 || updatePack.isPending}
                       onClick={(e) => {
                         e.stopPropagation();
                         void movePack(p, -1);
@@ -305,7 +346,11 @@ const PacksListPage = () => {
                       size="small"
                       variant="transparent"
                       aria-label={t('packs.list.moveDown')}
-                      disabled={pos >= group.length - 1 || updatePack.isPending}
+                      disabled={
+                        filtering ||
+                        pos >= group.length - 1 ||
+                        updatePack.isPending
+                      }
                       onClick={(e) => {
                         e.stopPropagation();
                         void movePack(p, 1);
@@ -322,6 +367,11 @@ const PacksListPage = () => {
                 <Table.Cell>
                   <StatusBadge color={p.status === 'active' ? 'green' : 'grey'}>
                     {p.status}
+                  </StatusBadge>
+                </Table.Cell>
+                <Table.Cell>
+                  <StatusBadge color={p.published_odds ? 'green' : 'orange'}>
+                    {p.published_odds ? 'Published' : 'Not set'}
                   </StatusBadge>
                 </Table.Cell>
                 <Table.Cell className="tabular-nums">{rm(p.price)}</Table.Cell>

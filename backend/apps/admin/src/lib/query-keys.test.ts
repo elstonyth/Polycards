@@ -5,7 +5,8 @@ describe('qk', () => {
   it('exposes the static list keys', () => {
     expect(qk.packs).toEqual(['admin', 'packs']);
     expect(qk.cards).toEqual(['admin', 'cards']);
-    expect(qk.pulls).toEqual(['admin', 'pulls']);
+    expect(qk.pulls(0)).toEqual(['admin', 'pulls', 0]);
+    expect(qk.pullsKey).toEqual(['admin', 'pulls']);
     expect(qk.economy).toEqual(['admin', 'economy']);
     expect(qk.eligibleProducts).toEqual(['admin', 'eligible-products']);
   });

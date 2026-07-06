@@ -16,6 +16,7 @@ import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import { useDeliveryOrders, useUpdateDeliveryOrder } from '../../lib/queries';
 import type { AdminDeliveryOrder, DeliveryStatus } from '../../lib/admin-rest';
 import { resolveImageUrl } from '../../lib/image-url';
+import { Pager } from '../../components/Pager';
 
 export const config: RouteConfig = {
   label: 'Deliveries',
@@ -41,7 +42,9 @@ const TONE: Record<DeliveryStatus, 'orange' | 'blue' | 'green' | 'grey'> = {
 
 const DeliveriesPage = () => {
   const [filter, setFilter] = useState<DeliveryStatus | undefined>(undefined);
-  const { data: orders = null, isError } = useDeliveryOrders(filter);
+  const [page, setPage] = useState(0);
+  const { data, isError } = useDeliveryOrders(filter, page);
+  const orders = data?.orders ?? null;
   const update = useUpdateDeliveryOrder();
   const [detail, setDetail] = useState<AdminDeliveryOrder | null>(null);
   const [nextStatus, setNextStatus] = useState<DeliveryStatus>('packing');
@@ -68,6 +71,13 @@ const DeliveriesPage = () => {
     }
   };
 
+  // Mirrors delivery.ts checkTransition: moving TO shipped requires tracking.
+  const trackingRequired =
+    detail !== null &&
+    nextStatus === 'shipped' &&
+    detail.status !== 'shipped' &&
+    tracking.trim() === '';
+
   return (
     <Container className="divide-y p-0">
       <div className="flex items-center justify-between gap-4 px-6 py-4">
@@ -79,9 +89,10 @@ const DeliveriesPage = () => {
         </div>
         <Select
           value={filter ?? 'all'}
-          onValueChange={(v) =>
-            setFilter(v === 'all' ? undefined : (v as DeliveryStatus))
-          }
+          onValueChange={(v) => {
+            setPage(0);
+            setFilter(v === 'all' ? undefined : (v as DeliveryStatus));
+          }}
         >
           <Select.Trigger className="w-44">
             <Select.Value />
@@ -166,6 +177,16 @@ const DeliveriesPage = () => {
         </Table>
       )}
 
+      {data && (
+        <Pager
+          page={page}
+          onPage={setPage}
+          pageSize={data.limit}
+          count={data.orders.length}
+          total={data.total}
+        />
+      )}
+
       <FocusModal
         open={detail !== null}
         onOpenChange={(open) => {
@@ -182,7 +203,12 @@ const DeliveriesPage = () => {
               >
                 Cancel
               </Button>
-              <Button size="small" onClick={save} isLoading={update.isPending}>
+              <Button
+                size="small"
+                onClick={save}
+                isLoading={update.isPending}
+                disabled={trackingRequired}
+              >
                 Save
               </Button>
             </div>
@@ -197,6 +223,9 @@ const DeliveriesPage = () => {
                   {detail.address.name} — {detail.address.address_1},{' '}
                   {detail.address.city} {detail.address.postal_code}{' '}
                   {detail.address.country_code.toUpperCase()}
+                </Text>
+                <Text className="text-ui-fg-subtle" size="small">
+                  Customer: {detail.customer_email ?? detail.customer_id}
                 </Text>
                 <div className="flex flex-col gap-y-2">
                   <Text size="small" weight="plus">
@@ -227,6 +256,11 @@ const DeliveriesPage = () => {
                     onChange={(e) => setTracking(e.target.value)}
                     placeholder="Required to mark shipped"
                   />
+                  {trackingRequired && (
+                    <Text size="small" className="text-ui-fg-error">
+                      Tracking number required to mark shipped.
+                    </Text>
+                  )}
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {detail.items.map((it) =>

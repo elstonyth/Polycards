@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState, type MutableRefObject } from 'react';
 import {
   Container,
   Heading,
@@ -22,6 +22,8 @@ import {
   useSaveDailyBox,
   useVoucherLadder,
   useSaveVoucherRanges,
+  useRewardsSettings,
+  useSaveRewardsSettings,
   type DailyBoxEditorDTO,
   type DailyBoxPrizeDTO,
   type VoucherLadderDTO,
@@ -30,6 +32,7 @@ import {
 import { getDailyBox } from '../../lib/admin-rest';
 import { fmtPct, rm } from '../../lib/format';
 import { resolveImageUrl } from '../../lib/image-url';
+import { snapshotOf } from './box-snapshot';
 
 const TIERS = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'Z'] as const;
 
@@ -39,9 +42,6 @@ const KIND_LABEL: Record<DailyBoxPrizeDTO['kind'], string> = {
   voucher: 'Voucher',
   nothing: 'Nothing',
 };
-
-// Mirrors MAX_BOX_CREDIT_MYR in packages/api src/modules/packs/daily-box.ts — keep in sync.
-const MAX_BOX_CREDIT_MYR = 10_000;
 
 // One prize row in the editable buffer. `payload` fields are flattened here
 // (rather than kept nested) so every cell binds to a single controlled input;
@@ -79,7 +79,18 @@ const rowFromPrize = (p: DailyBoxPrizeDTO): EditRow => ({
 });
 
 const DailyRewardsPage = () => {
-  const [tab, setTab] = useState<'boxes' | 'vouchers'>('boxes');
+  const [tab, setTab] = useState<'boxes' | 'vouchers' | 'settings'>('boxes');
+  const boxesDirty = useRef(false);
+  const switchTab = (next: 'boxes' | 'vouchers' | 'settings') => {
+    if (
+      tab === 'boxes' &&
+      next !== 'boxes' &&
+      boxesDirty.current &&
+      !window.confirm('Discard unsaved box changes?')
+    )
+      return;
+    setTab(next);
+  };
   return (
     <Container className="p-0">
       <div className="flex items-center justify-between px-6 py-4">
@@ -93,19 +104,27 @@ const DailyRewardsPage = () => {
         <div className="flex gap-2">
           <Button
             variant={tab === 'boxes' ? 'primary' : 'secondary'}
-            onClick={() => setTab('boxes')}
+            onClick={() => switchTab('boxes')}
           >
             Boxes
           </Button>
           <Button
             variant={tab === 'vouchers' ? 'primary' : 'secondary'}
-            onClick={() => setTab('vouchers')}
+            onClick={() => switchTab('vouchers')}
           >
             Vouchers
           </Button>
+          <Button
+            variant={tab === 'settings' ? 'primary' : 'secondary'}
+            onClick={() => switchTab('settings')}
+          >
+            Engine settings
+          </Button>
         </div>
       </div>
-      {tab === 'boxes' ? <BoxesTab /> : <VouchersTab />}
+      {tab === 'boxes' && <BoxesTab dirtyRef={boxesDirty} />}
+      {tab === 'vouchers' && <VouchersTab />}
+      {tab === 'settings' && <SettingsTab />}
     </Container>
   );
 };
@@ -483,7 +502,7 @@ const VouchersTab = () => {
   );
 };
 
-const BoxesTab = () => {
+const BoxesTab = ({ dirtyRef }: { dirtyRef: MutableRefObject<boolean> }) => {
   const { data: boxesData } = useDailyBoxes();
   const boxes = boxesData?.boxes ?? [];
   const [tier, setTier] = useState<string>('a');
@@ -502,20 +521,41 @@ const BoxesTab = () => {
   const [drawsPerDay, setDrawsPerDay] = useState('1');
   const [rows, setRows] = useState<EditRow[]>([]);
   const [reason, setReason] = useState('');
+  const [serverSnap, setServerSnap] = useState('');
   if (data && data !== seededFrom) {
     setSeededFrom(data);
     setName(data.box.name);
     setEnabled(data.box.enabled);
     setDrawsPerDay(String(data.box.draws_per_day));
     setRows(data.prizes.map(rowFromPrize));
+    setServerSnap(
+      snapshotOf({
+        name: data.box.name,
+        enabled: data.box.enabled,
+        drawsPerDay: String(data.box.draws_per_day),
+        rows: data.prizes.map(rowFromPrize),
+      }),
+    );
   }
 
-  // ponytail: "dirty" for the copy-from-tier confirm = the buffer has been
-  // seeded at least once (so any edit, or even the loaded state, warns before
-  // overwriting) rather than deep-equality against the last snapshot.
-  const isDirty = seededFrom !== undefined;
+  // True only when the buffer actually differs from the last server snapshot.
+  const hasUnsavedEdits =
+    seededFrom !== undefined &&
+    snapshotOf({ name, enabled, drawsPerDay, rows }) !== serverSnap;
+  // Sync the parent's dirty ref in an effect — writing a ref during render is a
+  // React anti-pattern (and an ESLint error); switchTab only reads it in an event
+  // handler, which always runs after commit.
+  useEffect(() => {
+    dirtyRef.current = hasUnsavedEdits;
+  }, [dirtyRef, hasUnsavedEdits]);
 
   const handleTierChange = (nextTier: string) => {
+    if (nextTier === tier) return;
+    if (
+      hasUnsavedEdits &&
+      !window.confirm(`Discard unsaved changes to tier ${tier.toUpperCase()}?`)
+    )
+      return;
     setTier(nextTier);
     setSeededFrom(undefined);
     setRows([]);
@@ -527,6 +567,10 @@ const BoxesTab = () => {
 
   const [pickerFor, setPickerFor] = useState<string | null>(null);
   const { data: allCards, isError: isCardsError } = useCards();
+
+  // Server-served ceiling (route GET spreads MAX_BOX_CREDIT_MYR) — falls back
+  // to the current server default only before the first box has loaded.
+  const maxCredit = seededFrom?.max_box_credit_myr ?? 10_000;
 
   const setRow = (localId: string, patch: Partial<EditRow>) =>
     setRows((prev) =>
@@ -573,8 +617,8 @@ const BoxesTab = () => {
     if (r.kind === 'product' && !r.productHandle) return 'Pick a product.';
     if (r.kind === 'credit' || r.kind === 'voucher') {
       const amt = Number(r.amountInput);
-      if (!(amt > 0) || amt > MAX_BOX_CREDIT_MYR)
-        return `RM amount must be between 0 and ${MAX_BOX_CREDIT_MYR}.`;
+      if (!(amt > 0) || amt > maxCredit)
+        return `RM amount must be between 0 and ${maxCredit}.`;
     }
     if (r.kind === 'product' && !(Number(r.qtyInput) >= 1))
       return 'Qty must be at least 1.';
@@ -600,7 +644,7 @@ const BoxesTab = () => {
 
   async function copyFromTier(sourceTier: string) {
     if (!sourceTier || sourceTier === tier) return;
-    if (isDirty && rows.length > 0) {
+    if (hasUnsavedEdits) {
       const ok = window.confirm(
         `Replace the current unsaved prizes for tier ${tier.toUpperCase()} with tier ${sourceTier.toUpperCase()}'s saved prizes?`,
       );
@@ -982,6 +1026,102 @@ const BoxesTab = () => {
           </FocusModal.Body>
         </FocusModal.Content>
       </FocusModal>
+    </div>
+  );
+};
+
+const SettingsTab = () => {
+  const { data, isError } = useRewardsSettings();
+  const save = useSaveRewardsSettings();
+  const [cooldown, setCooldown] = useState('');
+  const [overridePct, setOverridePct] = useState(''); // whole percent, e.g. "20"
+  const [genCap, setGenCap] = useState('');
+  const [withdrawals, setWithdrawals] = useState('');
+  const [reason, setReason] = useState('');
+  const [seeded, setSeeded] = useState(false);
+  if (data && !seeded) {
+    setSeeded(true);
+    setCooldown(String(data.commissionCooldownDays));
+    setOverridePct(String(Math.round(data.teamOverridePct * 100)));
+    setGenCap(String(data.overrideGenerationCap));
+    setWithdrawals(String(data.withdrawals_per_day));
+  }
+
+  const cooldownN = Number(cooldown);
+  const pctN = Number(overridePct);
+  const capN = Number(genCap);
+  const wdN = Number(withdrawals);
+  const errors: string[] = [];
+  if (!Number.isInteger(cooldownN) || cooldownN < 0)
+    errors.push('Cooldown must be an integer ≥ 0.');
+  if (!Number.isInteger(pctN) || pctN < 1 || pctN > 99)
+    errors.push('Team override must be a whole percent between 1 and 99.');
+  if (!Number.isInteger(capN) || capN < 1)
+    errors.push('Generation cap must be an integer ≥ 1.');
+  if (!Number.isInteger(wdN) || wdN < 1)
+    errors.push('Withdrawals/day must be an integer ≥ 1.');
+  const canSave =
+    !save.isPending && seeded && errors.length === 0 && reason.trim().length > 0;
+
+  const submit = () => {
+    if (!canSave) return;
+    save.mutate({
+      commissionCooldownDays: cooldownN,
+      teamOverridePct: pctN / 100,
+      overrideGenerationCap: capN,
+      withdrawals_per_day: wdN,
+      reason: reason.trim(),
+    });
+    setReason('');
+  };
+
+  if (isError)
+    return (
+      <div className="px-6 py-8">
+        <Text className="text-ui-fg-subtle">Failed to load settings.</Text>
+      </div>
+    );
+
+  const field = (
+    label: string,
+    value: string,
+    set: (v: string) => void,
+    hint: string,
+  ) => (
+    <div className="flex flex-col gap-y-1">
+      <Text size="small" weight="plus">{label}</Text>
+      <Input className="w-40" value={value} onChange={(e) => set(e.target.value)} />
+      <Text size="small" className="text-ui-fg-subtle">{hint}</Text>
+    </div>
+  );
+
+  return (
+    <div className="flex flex-col gap-y-5 border-t px-6 py-6">
+      <Text className="text-ui-fg-subtle" size="small">
+        Commission-engine knobs. Changes are clamped and audited server-side.
+      </Text>
+      <div className="flex flex-wrap gap-6">
+        {field('Commission cooldown (days)', cooldown, setCooldown, 'Days before a commission matures.')}
+        {field('Team override (%)', overridePct, setOverridePct, 'Whole percent, 1–99. Stored as a fraction.')}
+        {field('Override generation cap', genCap, setGenCap, 'How many upline generations earn override.')}
+        {field('Withdrawals per day', withdrawals, setWithdrawals, 'Per-customer daily withdrawal limit.')}
+      </div>
+      {errors.length > 0 && (
+        <Text size="small" className="text-ui-fg-error">{errors[0]}</Text>
+      )}
+      <div className="flex items-end gap-4">
+        <div className="flex min-w-64 flex-1 flex-col gap-y-1">
+          <Text size="small" weight="plus">Reason</Text>
+          <Input
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="Required — audit note for this change"
+          />
+        </div>
+        <Button onClick={submit} isLoading={save.isPending} disabled={!canSave}>
+          Save settings
+        </Button>
+      </div>
     </div>
   );
 };

@@ -151,6 +151,7 @@ export interface PullRow {
   customer_id: string | null;
   customer_email: string | null;
   pack_id: string;
+  pack_title: string | null;
   /** Vault lifecycle: still held vs instantly sold back. */
   status: 'vaulted' | 'bought_back';
   /** USD credited at buyback time; null while vaulted. */
@@ -181,6 +182,8 @@ export interface TopRarity {
 
 export interface PullsResponse {
   total: number;
+  offset: number;
+  limit: number;
   pulls: PullRow[];
   topCards: TopCard[];
   topRarities: TopRarity[];
@@ -219,9 +222,6 @@ type PacksApi = {
           }>;
         };
       };
-    };
-    pulls: {
-      query: () => Promise<PullsResponse>;
     };
     cards: {
       query: () => Promise<{ cards: AdminCard[] }>;

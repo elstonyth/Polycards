@@ -3,6 +3,8 @@
 // cookie session as `client` (credentials: 'include' → the auto-protected
 // /admin/* routes). __BACKEND_URL__ is injected by the dashboard Vite plugin.
 
+import type { PullsResponse } from './packs-api';
+
 declare const __BACKEND_URL__: string;
 
 async function errorMessage(res: Response): Promise<string> {
@@ -96,6 +98,11 @@ export async function listEligibleProducts(): Promise<EligibleProduct[]> {
   return data.products;
 }
 
+// ── Pull ledger ───────────────────────────────────────────────────────────────
+
+export const getPulls = (page = 0, limit = 50) =>
+  getJson<PullsResponse>(`/admin/pulls?limit=${limit}&offset=${page * limit}`);
+
 // ── Customer support view ────────────────────────────────────────────────────
 
 export interface SupportCustomer {
@@ -149,6 +156,16 @@ export async function getCustomerGacha(id: string): Promise<CustomerGacha> {
     `/admin/customers/${encodeURIComponent(id)}/gacha`,
   );
 }
+
+export const getCustomerTransactions = (id: string, page = 0, limit = 25) =>
+  getJson<{ items: SupportTransaction[]; total: number }>(
+    `/admin/customers/${encodeURIComponent(id)}/transactions?limit=${limit}&offset=${page * limit}`,
+  );
+
+export const getCustomerPulls = (id: string, page = 0, limit = 25) =>
+  getJson<{ items: SupportPull[]; total: number }>(
+    `/admin/customers/${encodeURIComponent(id)}/pulls?limit=${limit}&offset=${page * limit}`,
+  );
 
 // ── Customer 360: referral tree + commissions (Phase 4 P4.1) ─────────────────
 
@@ -388,7 +405,19 @@ export const getFxRate = () => getJson<FxRateState>('/admin/pricing/fx');
 export const setFxRate = (body: {
   manual_override: boolean;
   manual_rate?: number | null;
+  reason: string;
 }) => postJson<{ effective: number }>('/admin/pricing/fx', body);
+
+export interface FxChange {
+  at: string;
+  admin_id: string;
+  before: { manual_override: boolean; manual_rate: number | null } | null;
+  after: { manual_override: boolean; manual_rate: number | null };
+  reason: string | null;
+}
+
+export const getFxHistory = () =>
+  getJson<{ changes: FxChange[] }>('/admin/pricing/fx/history');
 
 // ── Delivery orders ──────────────────────────────────────────────────────────
 
@@ -425,14 +454,24 @@ export interface AdminDeliveryOrder {
   items: AdminDeliveryItem[];
 }
 
+export interface DeliveryOrdersPage {
+  orders: AdminDeliveryOrder[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
 export async function listDeliveryOrders(
   status?: DeliveryStatus,
-): Promise<AdminDeliveryOrder[]> {
-  const qs = status ? `?status=${encodeURIComponent(status)}` : '';
-  const data = await getJson<{ orders: AdminDeliveryOrder[] }>(
-    `/admin/delivery-orders${qs}`,
-  );
-  return data.orders;
+  page = 0,
+  limit = 50,
+): Promise<DeliveryOrdersPage> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(page * limit),
+  });
+  if (status) params.set('status', status);
+  return getJson<DeliveryOrdersPage>(`/admin/delivery-orders?${params}`);
 }
 
 export async function getDeliveryOrder(
@@ -487,6 +526,10 @@ export interface DailyBoxPrizeDTO {
 export interface DailyBoxEditorDTO {
   box: { tier: string; name: string; enabled: boolean; draws_per_day: number };
   prizes: DailyBoxPrizeDTO[];
+  /** Server-side ceiling for a credit/voucher prize's RM amount — served here
+   *  (not hardcoded client-side) so the row validation always matches the
+   *  backend's actual limit. */
+  max_box_credit_myr: number;
 }
 
 export interface DailyBoxSaveBody {
@@ -551,3 +594,19 @@ export async function saveVoucherRanges(body: {
 }): Promise<{ ok: true }> {
   return postJson<{ ok: true }>('/admin/daily-rewards/vouchers', body);
 }
+
+// ── Rewards engine settings ──────────────────────────────────────────────────
+
+export interface RewardsSettingsView {
+  commissionCooldownDays: number;
+  teamOverridePct: number;
+  overrideGenerationCap: number;
+  withdrawals_per_day: number;
+}
+
+export const getRewardsSettings = () =>
+  getJson<RewardsSettingsView>('/admin/rewards-settings');
+
+export const saveRewardsSettings = (
+  body: Partial<RewardsSettingsView> & { reason: string },
+) => postJson<RewardsSettingsView>('/admin/rewards-settings', body);

@@ -17,9 +17,15 @@ import {
 import { Buildings } from "@medusajs/icons";
 import type { RouteConfig } from "@mercurjs/dashboard-sdk";
 import { searchCustomers, type SupportCustomer } from "../../lib/admin-rest";
-import { useAdjustCredits, useCustomerGacha } from "../../lib/queries";
+import {
+  useAdjustCredits,
+  useCustomerGacha,
+  useCustomerTransactions,
+  useCustomerPulls,
+} from "../../lib/queries";
 import { resolveImageUrl } from "../../lib/image-url";
 import { rm } from "../../lib/format";
+import { Pager } from "../../components/Pager";
 
 export const config: RouteConfig = {
   label: "Customer Support",
@@ -34,8 +40,21 @@ const SupportPage = () => {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SupportCustomer[] | null>(null);
   const [searching, setSearching] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedIdRaw] = useState<string | null>(null);
   const { data: view } = useCustomerGacha(selectedId);
+  const [txPage, setTxPage] = useState(0);
+  const [pullPage, setPullPage] = useState(0);
+  const txHistory = useCustomerTransactions(selectedId, txPage);
+  const pullHistory = useCustomerPulls(selectedId, pullPage);
+  const txRows = txHistory.data?.items ?? view?.transactions ?? [];
+  const pullRows = pullHistory.data?.items ?? view?.pulls ?? [];
+  // Every selection change (search-clear, open, back) resets both history
+  // pages so a stale offset doesn't leak into the next customer's tables.
+  const setSelectedId = (id: string | null) => {
+    setSelectedIdRaw(id);
+    setTxPage(0);
+    setPullPage(0);
+  };
   const adjustCredits = useAdjustCredits();
   // Adjust form state — string inputs, validated server-side (the backend owns
   // the money rules; surfacing its message keeps the two in lockstep).
@@ -285,45 +304,54 @@ const SupportPage = () => {
             <div className="px-6 py-4">
               <Heading level="h2">{t("support.ledger")}</Heading>
             </div>
-            {view.transactions.length === 0 ? (
+            {txRows.length === 0 ? (
               <div className="border-t px-6 py-6">
                 <Text className="text-ui-fg-subtle">{t("support.empty")}</Text>
               </div>
             ) : (
-              <Table>
-                <Table.Header>
-                  <Table.Row>
-                    <Table.HeaderCell>{t("support.reason")}</Table.HeaderCell>
-                    <Table.HeaderCell>{t("support.note")}</Table.HeaderCell>
-                    <Table.HeaderCell className="text-right">
-                      {t("support.amount")}
-                    </Table.HeaderCell>
-                    <Table.HeaderCell className="text-right">
-                      {t("support.when")}
-                    </Table.HeaderCell>
-                  </Table.Row>
-                </Table.Header>
-                <Table.Body>
-                  {view.transactions.map((tx) => (
-                    <Table.Row key={tx.id}>
-                      <Table.Cell>
-                        <Badge size="2xsmall">{tx.reason}</Badge>
-                      </Table.Cell>
-                      <Table.Cell className="text-ui-fg-subtle max-w-[24rem] truncate">
-                        {tx.reference ?? "—"}
-                      </Table.Cell>
-                      <Table.Cell
-                        className={`text-right tabular-nums ${tx.amount < 0 ? "text-ui-fg-error" : ""}`}
-                      >
-                        {rm(tx.amount)}
-                      </Table.Cell>
-                      <Table.Cell className="text-ui-fg-subtle text-right">
-                        {new Date(tx.created_at).toLocaleString("en-US")}
-                      </Table.Cell>
+              <>
+                <Table>
+                  <Table.Header>
+                    <Table.Row>
+                      <Table.HeaderCell>{t("support.reason")}</Table.HeaderCell>
+                      <Table.HeaderCell>{t("support.note")}</Table.HeaderCell>
+                      <Table.HeaderCell className="text-right">
+                        {t("support.amount")}
+                      </Table.HeaderCell>
+                      <Table.HeaderCell className="text-right">
+                        {t("support.when")}
+                      </Table.HeaderCell>
                     </Table.Row>
-                  ))}
-                </Table.Body>
-              </Table>
+                  </Table.Header>
+                  <Table.Body>
+                    {txRows.map((tx) => (
+                      <Table.Row key={tx.id}>
+                        <Table.Cell>
+                          <Badge size="2xsmall">{tx.reason}</Badge>
+                        </Table.Cell>
+                        <Table.Cell className="text-ui-fg-subtle max-w-[24rem] truncate">
+                          {tx.reference ?? "—"}
+                        </Table.Cell>
+                        <Table.Cell
+                          className={`text-right tabular-nums ${tx.amount < 0 ? "text-ui-fg-error" : ""}`}
+                        >
+                          {rm(tx.amount)}
+                        </Table.Cell>
+                        <Table.Cell className="text-ui-fg-subtle text-right">
+                          {new Date(tx.created_at).toLocaleString("en-US")}
+                        </Table.Cell>
+                      </Table.Row>
+                    ))}
+                  </Table.Body>
+                </Table>
+                <Pager
+                  page={txPage}
+                  onPage={setTxPage}
+                  pageSize={25}
+                  count={txRows.length}
+                  total={txHistory.data?.total ?? null}
+                />
+              </>
             )}
           </Container>
 
@@ -331,68 +359,77 @@ const SupportPage = () => {
             <div className="px-6 py-4">
               <Heading level="h2">{t("support.pulls")}</Heading>
             </div>
-            {view.pulls.length === 0 ? (
+            {pullRows.length === 0 ? (
               <div className="border-t px-6 py-6">
                 <Text className="text-ui-fg-subtle">{t("support.empty")}</Text>
               </div>
             ) : (
-              <Table>
-                <Table.Header>
-                  <Table.Row>
-                    <Table.HeaderCell>{t("support.card")}</Table.HeaderCell>
-                    <Table.HeaderCell>{t("support.pack")}</Table.HeaderCell>
-                    <Table.HeaderCell className="text-right">
-                      {t("support.value")}
-                    </Table.HeaderCell>
-                    <Table.HeaderCell>{t("support.status")}</Table.HeaderCell>
-                    <Table.HeaderCell className="text-right">
-                      {t("support.when")}
-                    </Table.HeaderCell>
-                  </Table.Row>
-                </Table.Header>
-                <Table.Body>
-                  {view.pulls.map((p) => (
-                    <Table.Row key={p.id}>
-                      <Table.Cell>
-                        <div className="flex items-center gap-3">
-                          {p.card?.image && (
-                            <img
-                              src={resolveImageUrl(p.card.image)}
-                              alt=""
-                              className="h-10 w-8 shrink-0 rounded object-contain"
-                            />
-                          )}
-                          <span className="max-w-[20rem] truncate">
-                            {p.card?.name ?? "—"}
-                          </span>
-                        </div>
-                      </Table.Cell>
-                      <Table.Cell className="text-ui-fg-subtle">
-                        {p.pack_id}
-                      </Table.Cell>
-                      <Table.Cell className="text-ui-fg-subtle text-right tabular-nums">
-                        {rm(p.card?.market_value ?? null)}
-                      </Table.Cell>
-                      <Table.Cell>
-                        {p.status === "bought_back" ? (
-                          <StatusBadge color="orange">
-                            {t("pulls.boughtBack", {
-                              amount: rm(p.buyback_amount),
-                            })}
-                          </StatusBadge>
-                        ) : (
-                          <StatusBadge color="green">
-                            {t("pulls.vaulted")}
-                          </StatusBadge>
-                        )}
-                      </Table.Cell>
-                      <Table.Cell className="text-ui-fg-subtle text-right">
-                        {new Date(p.rolled_at).toLocaleString("en-US")}
-                      </Table.Cell>
+              <>
+                <Table>
+                  <Table.Header>
+                    <Table.Row>
+                      <Table.HeaderCell>{t("support.card")}</Table.HeaderCell>
+                      <Table.HeaderCell>{t("support.pack")}</Table.HeaderCell>
+                      <Table.HeaderCell className="text-right">
+                        {t("support.value")}
+                      </Table.HeaderCell>
+                      <Table.HeaderCell>{t("support.status")}</Table.HeaderCell>
+                      <Table.HeaderCell className="text-right">
+                        {t("support.when")}
+                      </Table.HeaderCell>
                     </Table.Row>
-                  ))}
-                </Table.Body>
-              </Table>
+                  </Table.Header>
+                  <Table.Body>
+                    {pullRows.map((p) => (
+                      <Table.Row key={p.id}>
+                        <Table.Cell>
+                          <div className="flex items-center gap-3">
+                            {p.card?.image && (
+                              <img
+                                src={resolveImageUrl(p.card.image)}
+                                alt=""
+                                className="h-10 w-8 shrink-0 rounded object-contain"
+                              />
+                            )}
+                            <span className="max-w-[20rem] truncate">
+                              {p.card?.name ?? "—"}
+                            </span>
+                          </div>
+                        </Table.Cell>
+                        <Table.Cell className="text-ui-fg-subtle">
+                          {p.pack_id}
+                        </Table.Cell>
+                        <Table.Cell className="text-ui-fg-subtle text-right tabular-nums">
+                          {rm(p.card?.market_value ?? null)}
+                        </Table.Cell>
+                        <Table.Cell>
+                          {p.status === "bought_back" ? (
+                            <StatusBadge color="orange">
+                              {t("pulls.boughtBack", {
+                                amount: rm(p.buyback_amount),
+                              })}
+                            </StatusBadge>
+                          ) : (
+                            <StatusBadge color="green">
+                              {t("pulls.vaulted")}
+                            </StatusBadge>
+                          )}
+                        </Table.Cell>
+                        <Table.Cell className="text-ui-fg-subtle text-right">
+                          {new Date(p.rolled_at).toLocaleString("en-US")}
+                        </Table.Cell>
+                      </Table.Row>
+                    ))}
+                  </Table.Body>
+                </Table>
+                <Pager
+                  page={pullPage}
+                  onPage={setPullPage}
+                  pageSize={25}
+                  count={pullRows.length}
+                  total={pullHistory.data?.total ?? null}
+                />
+              </>
             )}
           </Container>
         </>

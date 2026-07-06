@@ -119,7 +119,10 @@ const Customer360Page = () => {
     }
     if (!creditNote.trim()) return;
     closeModal();
-    adjustCredits.mutate({ id: customerId, amount, note: creditNote });
+    adjustCredits.mutate(
+      { id: customerId, amount, note: creditNote },
+      { onSuccess: () => toast.success('Credits adjusted') },
+    );
   }
 
   function applyCommAction() {

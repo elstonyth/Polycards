@@ -1,10 +1,13 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import { Container, Heading, Text, Table, Badge, StatusBadge } from "@medusajs/ui";
 import { ChartBar } from "@medusajs/icons";
 import type { RouteConfig } from "@mercurjs/dashboard-sdk";
 import { usePulls } from "../../lib/queries";
 import { resolveImageUrl } from "../../lib/image-url";
 import { rm, timeAgo } from "../../lib/format";
+import { Pager } from "../../components/Pager";
 
 export const config: RouteConfig = {
   label: "Pull Ledger",
@@ -15,7 +18,9 @@ export const config: RouteConfig = {
 
 const PullLedgerPage = () => {
   const { t } = useTranslation();
-  const { data, isError } = usePulls();
+  const navigate = useNavigate();
+  const [page, setPage] = useState(0);
+  const { data, isError } = usePulls(page);
 
   return (
     <div className="flex flex-col gap-y-3">
@@ -112,8 +117,20 @@ const PullLedgerPage = () => {
                   <Table.Cell className="text-ui-fg-subtle text-right tabular-nums">
                     {rm(p.card?.market_value ?? null)}
                   </Table.Cell>
-                  <Table.Cell className="text-ui-fg-subtle">{p.customer_email ?? t("pulls.anon")}</Table.Cell>
-                  <Table.Cell className="text-ui-fg-subtle">{p.pack_id}</Table.Cell>
+                  <Table.Cell className="text-ui-fg-subtle">
+                    {p.customer_id ? (
+                      <button
+                        type="button"
+                        className="text-ui-fg-interactive hover:underline"
+                        onClick={() => navigate(`/customers/${p.customer_id}`)}
+                      >
+                        {p.customer_email ?? p.customer_id.slice(0, 8)}
+                      </button>
+                    ) : (
+                      t("pulls.anon")
+                    )}
+                  </Table.Cell>
+                  <Table.Cell className="text-ui-fg-subtle">{p.pack_title ?? p.pack_id.slice(0, 8)}</Table.Cell>
                   <Table.Cell>
                     {p.status === "bought_back" ? (
                       <StatusBadge color="orange">
@@ -132,6 +149,15 @@ const PullLedgerPage = () => {
           <div className="border-t px-6 py-8">
             <Text className="text-ui-fg-subtle">{t("pulls.empty")}</Text>
           </div>
+        )}
+        {data && (
+          <Pager
+            page={page}
+            onPage={setPage}
+            pageSize={data.limit}
+            count={data.pulls.length}
+            total={data.total}
+          />
         )}
       </Container>
     </div>
