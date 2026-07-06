@@ -286,6 +286,8 @@ interface BackendRecentPull {
 
 export interface RecentPull {
   id: string;
+  /** Card handle — opens the card-detail overlay from the feed. */
+  handle: string;
   name: string;
   image: string;
   value: string;
@@ -320,6 +322,7 @@ export async function getRecentPulls(): Promise<RecentPull[]> {
       parseList(RecentPullSchema, pulls) as unknown as BackendRecentPull[]
     ).map((p, i) => ({
       id: `${p.handle}-${p.rolled_at}-${i}`,
+      handle: p.handle,
       name: p.name,
       image: p.image,
       value: formatValue(p.marketPriceMyr ?? p.market_value),

@@ -415,6 +415,7 @@ export default function SlotMachineClient({
       const now = Date.now();
       const justPulled: RecentPull[] = held.cards.map((won, i) => ({
         id: `${won.id}-${now}-${i}`,
+        handle: won.id,
         name: won.name,
         image: won.image,
         value: won.marketPriceMyr != null ? rm(won.marketPriceMyr) : won.value,

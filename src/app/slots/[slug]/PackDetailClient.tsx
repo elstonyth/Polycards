@@ -28,33 +28,16 @@ import {
   clawMachine,
   priceNumber,
 } from '@/lib/packs-data';
-import { rarityRgb } from '@/lib/rarity';
-import { SlabImage } from '@/components/SlabImage';
 import { PublishedOddsList } from './OddsSheet';
 import { publishedOddsRows } from '@/lib/packs-format';
 import { useLiveRecentPulls } from '@/lib/use-recent-pulls';
 import { useTopUp } from '@/components/app-shell/TopUpProvider';
-
-function CardThumb({ card, w }: { card: PackCard; w?: number }) {
-  return (
-    <div className="shrink-0 px-1" style={w ? { width: w } : undefined}>
-      <div
-        className="overflow-hidden rounded-xl border bg-neutral-900 p-1.5"
-        style={{
-          borderColor: `rgba(${rarityRgb(card.rarity)},0.55)`,
-          boxShadow: `0 0 16px -8px rgba(${rarityRgb(card.rarity)},0.6)`,
-        }}
-      >
-        <SlabImage
-          src={card.image}
-          alt={card.name}
-          sizes="(max-width: 768px) 30vw, 160px"
-          className="w-full"
-        />
-      </div>
-    </div>
-  );
-}
+import { CardTile } from '@/components/cards/CardTile';
+import {
+  CardDetailOverlay,
+  type CardSeed,
+} from '@/components/cards/CardDetailOverlay';
+import { usePackDetailPoll } from '@/lib/use-pack-detail-poll';
 
 export default function PackDetailClient({
   pack,
@@ -79,6 +62,16 @@ export default function PackDetailClient({
   // there is no in-place async open state here.
   const [openError, setOpenError] = useState<string | null>(null);
   const [needsTopUp, setNeedsTopUp] = useState(false);
+  // One request refreshes every grid price (60s, visibility-gated).
+  const liveDetail = usePackDetailPoll(active.id, detail) ?? detail;
+  const [openCard, setOpenCard] = useState<CardSeed | null>(null);
+  const toSeed = (c: PackCard): CardSeed => ({
+    handle: c.id,
+    name: c.name,
+    image: c.image,
+    value: c.value,
+    rarity: c.rarity,
+  });
   // Credit balance (A2: opens debit the pack price) — read from the app-shell
   // TopUpProvider (identity-tagged; null = logged out / loading), so this page,
   // the header chip, and the top-up sheet can never disagree.
@@ -94,7 +87,7 @@ export default function PackDetailClient({
   // state (no mock fallback). Pull Odds are the SECRET-decoupled, statically-
   // published `ODDS` — they never reflect the admin-tuned win rates (see
   // packs.ts / route.ts).
-  const topHits = detail?.topHits ?? [];
+  const topHits = liveDetail?.topHits ?? [];
 
   // The reel (openBatch) caps a single open at 3 packs.
   const maxQty = 3;
@@ -102,13 +95,13 @@ export default function PackDetailClient({
 
   // The admin-PUBLISHED odds — the ONLY rates players see. Null (unset) hides
   // the whole Pull Odds panel.
-  const publishedRows = detail?.publishedOdds
-    ? publishedOddsRows(detail.publishedOdds)
+  const publishedRows = liveDetail?.publishedOdds
+    ? publishedOddsRows(liveDetail.publishedOdds)
     : null;
 
   // Guest demo spin lives on the REEL (/spin?demo=1) — pure theater, no charge,
   // nothing won. The CTA below only shows for guests with a non-empty pool.
-  const demoPool = detail?.pool ?? [];
+  const demoPool = liveDetail?.pool ?? [];
 
   // Do NOT open/charge here — navigate to the reel, which performs
   // the single charge via openBatch when the user pulls the lever. Auth + balance
@@ -191,15 +184,33 @@ export default function PackDetailClient({
               </p>
               <div className="grid grid-cols-3 gap-3 sm:grid-cols-5">
                 {topHits.map((c) => (
-                  <div key={c.id} className="flex flex-col gap-1.5">
-                    <CardThumb card={c} />
-                    <p
-                      className="truncate text-center text-[11px] font-medium text-white/70"
-                      title={c.name}
-                    >
-                      {c.value}
-                    </p>
-                  </div>
+                  <CardTile
+                    key={c.id}
+                    card={c}
+                    onOpen={(card) => setOpenCard(toSeed(card))}
+                  />
+                ))}
+              </div>
+            </Reveal>
+          )}
+
+          {/* All cards in this pack — the full public prize pool, value-sorted
+              (phygitals parity: every card with its live price). */}
+          {(liveDetail?.pool ?? []).length > 0 && (
+            <Reveal as="section">
+              <h2 className="mb-1 font-heading text-lg font-bold tracking-tight text-white">
+                Cards in this pack
+              </h2>
+              <p className="mb-3 text-[13px] text-white/70">
+                Every card in the pool and its current market price.
+              </p>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+                {(liveDetail?.pool ?? []).map((c) => (
+                  <CardTile
+                    key={c.id}
+                    card={c}
+                    onOpen={(card) => setOpenCard(toSeed(card))}
+                  />
                 ))}
               </div>
             </Reveal>
@@ -420,7 +431,7 @@ export default function PackDetailClient({
           The odds panel renders ONLY the admin-published rates from the
           backend; a pack with no published odds shows no panel at all. */}
       <div className="mb-10 mt-8 grid gap-6 lg:grid-cols-2">
-        {detail?.publishedOdds && publishedRows && (
+        {liveDetail?.publishedOdds && publishedRows && (
           <Reveal as="section" className="h-full min-w-0">
             <div className="mb-3 flex items-center gap-2">
               <h2 className="font-heading text-lg font-bold tracking-tight text-white">
@@ -429,7 +440,7 @@ export default function PackDetailClient({
             </div>
             <PublishedOddsList
               odds={publishedRows}
-              overall={detail.publishedOdds.overall}
+              overall={liveDetail.publishedOdds.overall}
               rounded="2xl"
             />
           </Reveal>
@@ -449,32 +460,53 @@ export default function PackDetailClient({
               </li>
             ) : (
               recent.map((c) => (
-                <li key={c.id} className="flex items-center gap-3 px-4 py-2.5">
-                  <Image
-                    src={c.image}
-                    alt=""
-                    width={32}
-                    height={40}
-                    className="h-10 w-8 shrink-0 rounded object-contain"
-                  />
-                  <span className="min-w-0 flex-1 truncate text-[13px] text-white/80">
-                    {c.name}
-                  </span>
-                  <span className="shrink-0 text-[11px] text-white/60">
-                    {c.who}
-                  </span>
-                  <span className="shrink-0 text-[12px] tabular-nums text-white/60">
-                    {c.value}
-                  </span>
-                  <span className="hidden shrink-0 text-[11px] text-white/60 sm:inline">
-                    {c.agoLabel}
-                  </span>
+                <li key={c.id}>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setOpenCard({
+                        handle: c.handle,
+                        name: c.name,
+                        image: c.image,
+                        value: c.value,
+                        rarity: c.rarity,
+                      })
+                    }
+                    className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-white/[0.04]"
+                    aria-label={`View details for ${c.name}`}
+                  >
+                    <Image
+                      src={c.image}
+                      alt=""
+                      width={32}
+                      height={40}
+                      className="h-10 w-8 shrink-0 rounded object-contain"
+                    />
+                    <span className="min-w-0 flex-1 truncate text-[13px] text-white/80">
+                      {c.name}
+                    </span>
+                    <span className="shrink-0 text-[11px] text-white/60">
+                      {c.who}
+                    </span>
+                    <span className="shrink-0 text-[12px] tabular-nums text-white/60">
+                      {c.value}
+                    </span>
+                    <span className="hidden shrink-0 text-[11px] text-white/60 sm:inline">
+                      {c.agoLabel}
+                    </span>
+                  </button>
                 </li>
               ))
             )}
           </ul>
         </Reveal>
       </div>
+
+      <CardDetailOverlay
+        seed={openCard}
+        buybackPercent={active.buybackPercent ?? FLAT_BUYBACK_PERCENT}
+        onClose={() => setOpenCard(null)}
+      />
     </div>
   );
 }
