@@ -29,8 +29,11 @@ try {
   // The cookie-consent banner is ALSO role=dialog — dismiss it so dialog
   // selectors (scoped to the overlay via [aria-modal]) and screenshots stay
   // clean.
+  // isVisible() ignores { timeout } — an explicit waitFor makes the 3s
+  // banner-appearance wait real instead of an immediate check.
   const consent = page.getByRole('button', { name: 'Accept' });
-  if (await consent.isVisible({ timeout: 3000 }).catch(() => false)) {
+  await consent.waitFor({ state: 'visible', timeout: 3000 }).catch(() => {});
+  if (await consent.isVisible().catch(() => false)) {
     await consent.click();
   }
 

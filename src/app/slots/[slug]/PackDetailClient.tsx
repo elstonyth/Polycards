@@ -100,9 +100,10 @@ export default function PackDetailClient({
     ? publishedOddsRows(liveDetail.publishedOdds)
     : null;
 
-  // Guest demo spin lives on the REEL (/spin?demo=1) — pure theater, no charge,
-  // nothing won. The CTA below only shows for guests with a non-empty pool.
-  const demoPool = liveDetail?.pool ?? [];
+  // The full public prize pool (value-sorted) — feeds the "Cards in this
+  // pack" grid AND gates the guest demo-spin CTA (pure theater on the reel,
+  // /spin?demo=1 — no charge, nothing won).
+  const pool = liveDetail?.pool ?? [];
 
   // Do NOT open/charge here — navigate to the reel, which performs
   // the single charge via openBatch when the user pulls the lever. Auth + balance
@@ -197,7 +198,7 @@ export default function PackDetailClient({
 
           {/* All cards in this pack — the full public prize pool, value-sorted
               (phygitals parity: every card with its live price). */}
-          {(liveDetail?.pool ?? []).length > 0 && (
+          {pool.length > 0 && (
             <Reveal as="section">
               <h2 className="mb-1 font-heading text-lg font-bold tracking-tight text-white">
                 Cards in this pack
@@ -206,7 +207,7 @@ export default function PackDetailClient({
                 Every card in the pool and its current market price.
               </p>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-                {(liveDetail?.pool ?? []).map((c) => (
+                {pool.map((c) => (
                   <CardTile
                     key={c.id}
                     card={c}
@@ -240,7 +241,7 @@ export default function PackDetailClient({
                   account opens real packs). Routes to the slot reel in demo
                   mode: no login, no charge, nothing real won. Neutral ghost
                   styling — buyback green is reserved for money-in actions. */}
-              {!customer && demoPool.length > 0 && (
+              {!customer && pool.length > 0 && (
                 <Link
                   href={`/slots/${active.id}/spin?demo=1`}
                   className="group flex h-12 items-center justify-between rounded-xl border border-white/15 bg-white/5 px-4 text-sm font-semibold text-white transition-colors hover:bg-white/10"
@@ -474,7 +475,9 @@ export default function PackDetailClient({
                       })
                     }
                     className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-white/[0.04]"
-                    aria-label={`View details for ${c.name}`}
+                    // The label carries EVERYTHING sighted users see in the
+                    // row — an aria-label REPLACES the content for SR users.
+                    aria-label={`View details for ${c.name} — pulled by ${c.who}, ${c.value}, ${c.agoLabel}`}
                   >
                     <SlabImage
                       src={c.image}

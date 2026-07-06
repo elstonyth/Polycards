@@ -42,10 +42,15 @@ export async function GET(
   const toMyr = (usd: unknown) =>
     displayMarketPrice(toMoney(usd), fxRate, multiplier);
 
-  // Rarity fallback for deep links — the first pack this card appears in.
+  // Rarity fallback for deep links — the first pack this card appears in
+  // (created_at ASC pins "first" deterministically; unordered, the displayed
+  // rarity could vary between requests when a card sits in multiple packs).
   // When the view is opened FROM a pack/vault/feed, that context's rarity wins
   // client-side; this value only covers direct /card/<handle> visits.
-  const [oddsRow] = await packs.listPackOdds({ card_id: handle }, { take: 1 });
+  const [oddsRow] = await packs.listPackOdds(
+    { card_id: handle },
+    { take: 1, order: { created_at: 'ASC' } },
+  );
 
   const since = new Date(Date.now() - HISTORY_DAYS * 24 * 60 * 60 * 1000);
   const history = await packs.listCardPriceHistories(

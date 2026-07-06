@@ -44,9 +44,16 @@ export function useCardPrice(
     };
     void tick(); // hydrate grid-seeded overlays immediately
     const id = setInterval(tick, POLL_MS);
+    // Refocusing a backgrounded tab refetches right away — interval ticks
+    // skipped while hidden would otherwise leave a stale price for ≤60s.
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void tick();
+    };
+    document.addEventListener('visibilitychange', onVisible);
     return () => {
       active = false;
       clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
     };
   }, [handle]);
 

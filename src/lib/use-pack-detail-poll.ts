@@ -46,9 +46,16 @@ export function usePackDetailPoll(
     };
     void tick(); // correct the seed right away (effect re-runs per slug)
     const id = setInterval(tick, POLL_MS);
+    // Refocusing a backgrounded tab refetches right away — interval ticks
+    // skipped while hidden would otherwise leave stale prices for ≤60s.
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void tick();
+    };
+    document.addEventListener('visibilitychange', onVisible);
     return () => {
       active = false;
       clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
     };
   }, [slug]);
 
