@@ -27,6 +27,7 @@ export type RolledCard = {
   image: string;
   pokemon_dex: number | null;
   sprite_image: string | null;
+  slab_image: string | null;
 };
 
 // A PackOdds row narrowed to a card row (card_id non-null). The normal pack
@@ -116,6 +117,7 @@ export async function drawFromData(
     image: card.image,
     pokemon_dex: card.pokemon_dex ?? null,
     sprite_image: card.sprite_image ?? null,
+    slab_image: card.slab_image ?? null,
   };
 }
 

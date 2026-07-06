@@ -15,11 +15,13 @@ const ODDS = [
 const CARD_PIKACHU = {
   handle: "pikachu", name: "Pikachu", set: "Base", grader: "PSA", grade: "9",
   market_value: 10, image: "/pikachu.webp", pokemon_dex: 25, sprite_image: "/sprites/25.png",
+  slab_image: "/slab-pika.webp",
 };
 
 const CARD_CHARIZARD = {
   handle: "charizard", name: "Charizard", set: "Base", grader: "PSA", grade: "10",
   market_value: 500, image: "/charizard.webp", pokemon_dex: 6, sprite_image: "/sprites/6.png",
+  slab_image: null,
 };
 
 /** Build a minimal PacksModuleService stub with overrideable mocks. */
@@ -64,6 +66,7 @@ describe("batch path (fetchPackData + drawFromData)", () => {
       expect(r).toHaveProperty("rarity");
       expect(r).toHaveProperty("pokemon_dex");
       expect(r).toHaveProperty("sprite_image");
+      expect(r).toHaveProperty("slab_image");
     });
   });
 
@@ -140,6 +143,7 @@ describe("rollOne", () => {
     // These keys MUST exist (even if null) — batch step relies on them.
     expect("pokemon_dex" in result).toBe(true);
     expect("sprite_image" in result).toBe(true);
+    expect("slab_image" in result).toBe(true);
   });
 
   it("sets rarity from the winning odds row (not the card)", async () => {
@@ -177,6 +181,7 @@ describe("rollOne", () => {
         expect(r).toHaveProperty("rarity");
         expect(r).toHaveProperty("pokemon_dex");
         expect(r).toHaveProperty("sprite_image");
+        expect(r).toHaveProperty("slab_image");
       });
       // Each rollOne must call Math.random independently — 3 draws = at least 3 calls.
       expect(spy).toHaveBeenCalledTimes(3);
