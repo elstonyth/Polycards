@@ -47,4 +47,5 @@ export const qk = {
   voucherLadder: ['admin', 'daily-rewards', 'vouchers'] as const,
   rewardsSettings: ['admin', 'rewards-settings'] as const,
   siteSettings: ['admin', 'site-settings'] as const,
+  avatarFrames: ['admin', 'avatar-frames'] as const,
 };

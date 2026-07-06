@@ -22,7 +22,7 @@ async function errorMessage(res: Response): Promise<string> {
 // profile (pack ≈ square, card ≈ 5:7).
 export async function uploadImage(
   file: File,
-  kind: 'pack' | 'card' | 'sprite' | 'frame',
+  kind: 'pack' | 'card' | 'sprite' | 'frame' | 'avatar-frame',
 ): Promise<string> {
   const body = new FormData();
   body.append('files', file);
@@ -624,3 +624,17 @@ export const getSiteSettings = () =>
 
 export const saveSiteSettings = (body: SiteSettingsView & { reason: string }) =>
   postJson<SiteSettingsView>('/admin/site-settings', body);
+
+// ── Avatar frames (VIP-level unlock catalog) ────────────────────────────────
+
+export interface AvatarFramesView {
+  frames: Record<string, string>;
+}
+
+export const getAvatarFrames = () =>
+  getJson<AvatarFramesView>('/admin/avatar-frames');
+
+export const saveAvatarFrames = (body: {
+  frames: Record<string, string>;
+  reason: string;
+}) => postJson<AvatarFramesView>('/admin/avatar-frames', body);

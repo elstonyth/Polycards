@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type MutableRefObject } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type MutableRefObject,
+} from 'react';
 import {
   Container,
   Heading,
@@ -26,6 +32,9 @@ import {
   useSaveVoucherRanges,
   useRewardsSettings,
   useSaveRewardsSettings,
+  useAvatarFrames,
+  useSaveAvatarFrames,
+  useUploadImage,
   type DailyBoxEditorDTO,
   type DailyBoxPrizeDTO,
   type VoucherLadderDTO,
@@ -34,6 +43,7 @@ import {
 import { getDailyBox } from '../../lib/admin-rest';
 import { fmtPct, rm } from '../../lib/format';
 import { resolveImageUrl } from '../../lib/image-url';
+import { validateImageFile } from '../../lib/image-validation';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 import { snapshotOf } from './box-snapshot';
 
@@ -82,10 +92,14 @@ const rowFromPrize = (p: DailyBoxPrizeDTO): EditRow => ({
 });
 
 const DailyRewardsPage = () => {
-  const [tab, setTab] = useState<'boxes' | 'vouchers' | 'settings'>('boxes');
+  const [tab, setTab] = useState<'boxes' | 'vouchers' | 'frames' | 'settings'>(
+    'boxes',
+  );
   const boxesDirty = useRef(false);
   const prompt = usePrompt();
-  const switchTab = async (next: 'boxes' | 'vouchers' | 'settings') => {
+  const switchTab = async (
+    next: 'boxes' | 'vouchers' | 'frames' | 'settings',
+  ) => {
     if (tab === 'boxes' && next !== 'boxes' && boxesDirty.current) {
       const confirmed = await prompt({
         title: 'Discard changes?',
@@ -100,20 +114,24 @@ const DailyRewardsPage = () => {
     <Container className="p-0">
       <Tabs
         value={tab}
-        onValueChange={(v) => switchTab(v as 'boxes' | 'vouchers' | 'settings')}
+        onValueChange={(v) =>
+          switchTab(v as 'boxes' | 'vouchers' | 'frames' | 'settings')
+        }
         activationMode="manual"
       >
         <div className="flex items-center justify-between px-6 py-4">
           <div>
             <Heading level="h2">Daily Rewards</Heading>
             <Text className="text-ui-fg-subtle mt-1" size="small">
-              Configure the daily box each VIP tier opens and the one-time
-              vouchers granted by level.
+              Configure the daily box each VIP tier opens, the one-time
+              vouchers granted by level, and the avatar frames unlocked every
+              10 levels.
             </Text>
           </div>
           <Tabs.List>
             <Tabs.Trigger value="boxes">Boxes</Tabs.Trigger>
             <Tabs.Trigger value="vouchers">Vouchers</Tabs.Trigger>
+            <Tabs.Trigger value="frames">Frames</Tabs.Trigger>
             <Tabs.Trigger value="settings">Engine settings</Tabs.Trigger>
           </Tabs.List>
         </div>
@@ -122,6 +140,9 @@ const DailyRewardsPage = () => {
         </Tabs.Content>
         <Tabs.Content value="vouchers">
           <VouchersTab />
+        </Tabs.Content>
+        <Tabs.Content value="frames">
+          <FramesTab />
         </Tabs.Content>
         <Tabs.Content value="settings">
           <SettingsTab />
@@ -1054,6 +1075,177 @@ const BoxesTab = ({ dirtyRef }: { dirtyRef: MutableRefObject<boolean> }) => {
           </FocusModal.Body>
         </FocusModal.Content>
       </FocusModal>
+    </div>
+  );
+};
+
+const FRAME_LEVELS = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100] as const;
+
+// Avatar-frame catalog editor: one row per milestone level. Uploads go through
+// /admin/media kind 'avatar-frame' (square ≥256px; a flat-magenta AI render is
+// keyed to transparency automatically); Save replaces the whole catalog with
+// an audit reason, matching the other tabs' discipline.
+const FramesTab = () => {
+  const { data, isError } = useAvatarFrames();
+  const save = useSaveAvatarFrames();
+  const upload = useUploadImage();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [uploadingFor, setUploadingFor] = useState<number | null>(null);
+  // undefined = untouched buffer; otherwise the full edited catalog.
+  const [pending, setPending] = useState<Record<string, string> | undefined>(
+    undefined,
+  );
+  const [reason, setReason] = useState('');
+
+  const current: Record<string, string> = data?.frames ?? {};
+  const effective = pending ?? current;
+  const dirty =
+    pending !== undefined && JSON.stringify(pending) !== JSON.stringify(current);
+  const canSave = dirty && !save.isPending && reason.trim().length > 0;
+
+  const pickFile = (level: number) => {
+    setUploadingFor(level);
+    fileRef.current?.click();
+  };
+
+  const handleFile = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    const level = uploadingFor;
+    if (fileRef.current) fileRef.current.value = '';
+    setUploadingFor(null);
+    if (!file || level === null) return;
+    const problem = await validateImageFile(file, 'avatar-frame');
+    if (problem) {
+      toast.error(problem);
+      return;
+    }
+    try {
+      const url = await upload.mutateAsync({ file, kind: 'avatar-frame' });
+      setPending({ ...effective, [String(level)]: url });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const removeFrame = (level: number) => {
+    const next = { ...effective };
+    delete next[String(level)];
+    setPending(next);
+  };
+
+  const submit = () => {
+    if (!canSave || pending === undefined) return;
+    save.mutate(
+      { frames: pending, reason: reason.trim() },
+      {
+        onSuccess: () => {
+          setPending(undefined);
+          setReason('');
+        },
+      },
+    );
+  };
+
+  if (isError) {
+    return (
+      <div className="px-6 py-8">
+        <Text className="text-ui-fg-subtle">Failed to load avatar frames.</Text>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-y-5 border-t px-6 py-6">
+      <Text className="text-ui-fg-subtle" size="small">
+        One frame per 10 VIP levels, overlaid on the customer&apos;s profile
+        photo once equipped. Upload a square transparent WebP/PNG ≥ 256×256
+        (a flat-magenta AI render is keyed automatically). Customers can equip
+        a frame only after reaching its level.
+      </Text>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => void handleFile(e)}
+      />
+      <Table>
+        <Table.Header>
+          <Table.Row>
+            <Table.HeaderCell>Unlock level</Table.HeaderCell>
+            <Table.HeaderCell>Frame</Table.HeaderCell>
+            <Table.HeaderCell />
+          </Table.Row>
+        </Table.Header>
+        <Table.Body>
+          {FRAME_LEVELS.map((level) => {
+            const url = effective[String(level)];
+            return (
+              <Table.Row key={level}>
+                <Table.Cell className="font-medium">LV {level}</Table.Cell>
+                <Table.Cell>
+                  {url ? (
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-neutral-900 p-1">
+                        <img
+                          src={resolveImageUrl(url)}
+                          alt={`LV ${level} frame`}
+                          className="max-h-full max-w-full object-contain"
+                        />
+                      </div>
+                      <Text size="small" className="text-ui-fg-subtle truncate">
+                        {url}
+                      </Text>
+                    </div>
+                  ) : (
+                    <Text size="small" className="text-ui-fg-subtle">
+                      No frame uploaded — LV {level} customers can&apos;t equip
+                      one yet.
+                    </Text>
+                  )}
+                </Table.Cell>
+                <Table.Cell>
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      size="small"
+                      variant="secondary"
+                      onClick={() => pickFile(level)}
+                      isLoading={upload.isPending && uploadingFor === level}
+                    >
+                      {url ? 'Replace…' : 'Upload…'}
+                    </Button>
+                    {url && (
+                      <Button
+                        size="small"
+                        variant="transparent"
+                        onClick={() => removeFrame(level)}
+                      >
+                        Remove
+                      </Button>
+                    )}
+                  </div>
+                </Table.Cell>
+              </Table.Row>
+            );
+          })}
+        </Table.Body>
+      </Table>
+      <div className="flex items-end gap-4">
+        <div className="flex min-w-64 flex-1 flex-col gap-y-1">
+          <Label htmlFor="frames-reason" size="small" weight="plus">
+            Reason
+          </Label>
+          <Input
+            id="frames-reason"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="Required — audit note for this change"
+          />
+        </div>
+        <Button onClick={submit} isLoading={save.isPending} disabled={!canSave}>
+          Save frames
+        </Button>
+      </div>
     </div>
   );
 };

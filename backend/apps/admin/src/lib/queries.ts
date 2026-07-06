@@ -22,6 +22,7 @@ import {
   deleteCard,
   deletePack,
   freezeCustomer,
+  getAvatarFrames,
   getCustomerAudit,
   getCustomerGacha,
   getCustomerCommissions,
@@ -40,6 +41,7 @@ import {
   listDeliveryOrders,
   listEligibleProducts,
   reverseCommission,
+  saveAvatarFrames,
   saveDailyBox,
   saveRewardsSettings,
   saveSiteSettings,
@@ -51,6 +53,7 @@ import {
   updateDeliveryOrder,
   uploadImage,
   type AdminCommissionRow,
+  type AvatarFramesView,
   type CustomerAudit,
   type CustomerGacha,
   type SupportTransaction,
@@ -439,7 +442,7 @@ export const useUploadImage = () =>
   useMutation({
     mutationFn: (vars: {
       file: File;
-      kind: 'pack' | 'card' | 'sprite' | 'frame';
+      kind: 'pack' | 'card' | 'sprite' | 'frame' | 'avatar-frame';
     }) => uploadImage(vars.file, vars.kind),
   });
 
@@ -537,6 +540,23 @@ export const useSaveSiteSettings = () => {
     onSuccess: () => {
       toast.success('Slab frame saved');
       qc.invalidateQueries({ queryKey: qk.siteSettings });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+export type { AvatarFramesView } from './admin-rest';
+
+export const useAvatarFrames = (): UseQueryResult<AvatarFramesView> =>
+  useQuery({ queryKey: qk.avatarFrames, queryFn: getAvatarFrames });
+
+export const useSaveAvatarFrames = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: saveAvatarFrames,
+    onSuccess: () => {
+      toast.success('Avatar frames saved');
+      qc.invalidateQueries({ queryKey: qk.avatarFrames });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });
