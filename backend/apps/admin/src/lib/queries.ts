@@ -1,4 +1,5 @@
 import {
+  keepPreviousData,
   useMutation,
   useQuery,
   useQueryClient,
@@ -89,7 +90,11 @@ export const useCards = (
   });
 
 export const usePulls = (page = 0): UseQueryResult<PullsResponse> =>
-  useQuery({ queryKey: qk.pulls(page), queryFn: () => getPulls(page) });
+  useQuery({
+    queryKey: qk.pulls(page),
+    queryFn: () => getPulls(page),
+    placeholderData: keepPreviousData,
+  });
 
 export const useEconomy = (): UseQueryResult<EconomyReport> =>
   useQuery({ queryKey: qk.economy, queryFn: getEconomyReport });
@@ -140,6 +145,7 @@ export const useCustomerCommissions = (
     queryKey: qk.customerCommissions(id ?? '', page),
     queryFn: () => getCustomerCommissions(id!, page),
     enabled: !!id,
+    placeholderData: keepPreviousData,
   });
 
 export const useCustomerAudit = (
@@ -150,6 +156,7 @@ export const useCustomerAudit = (
     queryKey: qk.customerAudit(id ?? '', page),
     queryFn: () => getCustomerAudit(id!, page),
     enabled: !!id,
+    placeholderData: keepPreviousData,
   });
 
 export const useCustomerTransactions = (
@@ -160,6 +167,7 @@ export const useCustomerTransactions = (
     queryKey: qk.customerTransactions(id ?? '', page),
     queryFn: () => getCustomerTransactions(id!, page),
     enabled: !!id,
+    placeholderData: keepPreviousData,
   });
 
 export const useCustomerPulls = (
@@ -170,6 +178,7 @@ export const useCustomerPulls = (
     queryKey: qk.customerPulls(id ?? '', page),
     queryFn: () => getCustomerPulls(id!, page),
     enabled: !!id,
+    placeholderData: keepPreviousData,
   });
 
 export const useDeliveryOrders = (
@@ -179,6 +188,7 @@ export const useDeliveryOrders = (
   useQuery({
     queryKey: qk.deliveryOrders(status, page),
     queryFn: () => listDeliveryOrders(status, page),
+    placeholderData: keepPreviousData,
   });
 
 export const useFxRate = (): UseQueryResult<FxRateState> =>

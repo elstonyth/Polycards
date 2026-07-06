@@ -1526,6 +1526,14 @@ class PacksModuleService extends MedusaService({
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ effective: number }> {
+    // Serialize concurrent FX edits so the list-then-create path can't race a
+    // duplicate-pair insert (23505) on the very first edit. Same per-key
+    // advisory lock as the other singleton writes (setManualFreeze etc.);
+    // released automatically at transaction commit.
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      'fx:USD_MYR',
+    ]);
     const [row] = await this.listFxRates(
       { pair: 'USD_MYR' },
       { take: 1 },

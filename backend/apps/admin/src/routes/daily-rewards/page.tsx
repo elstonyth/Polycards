@@ -1,4 +1,4 @@
-import { useRef, useState, type MutableRefObject } from 'react';
+import { useEffect, useRef, useState, type MutableRefObject } from 'react';
 import {
   Container,
   Heading,
@@ -542,7 +542,12 @@ const BoxesTab = ({ dirtyRef }: { dirtyRef: MutableRefObject<boolean> }) => {
   const hasUnsavedEdits =
     seededFrom !== undefined &&
     snapshotOf({ name, enabled, drawsPerDay, rows }) !== serverSnap;
-  dirtyRef.current = hasUnsavedEdits;
+  // Sync the parent's dirty ref in an effect — writing a ref during render is a
+  // React anti-pattern (and an ESLint error); switchTab only reads it in an event
+  // handler, which always runs after commit.
+  useEffect(() => {
+    dirtyRef.current = hasUnsavedEdits;
+  }, [dirtyRef, hasUnsavedEdits]);
 
   const handleTierChange = (nextTier: string) => {
     if (nextTier === tier) return;
