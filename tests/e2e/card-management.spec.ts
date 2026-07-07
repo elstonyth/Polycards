@@ -29,6 +29,10 @@ const POOL_PACK = 'pokemon-rookie';
 const BIG_FMV = 99_999;
 
 let admin: string;
+// The eligibility re-check below only means something after the lifecycle test
+// actually ran (it verifies that test's cleanup). On a fresh DB — CI — the
+// test product was never minted, the lifecycle test skips, and so must it.
+let lifecycleRan = false;
 
 test.beforeAll(async () => {
   admin = await adminToken();
@@ -46,6 +50,7 @@ test('card lifecycle: register from inventory → adjust FMV → reflects on sto
     !elig.products.some((p) => p.handle === CARD_HANDLE),
     `No eligible product '${CARD_HANDLE}' — run create-test-product.ts first.`,
   );
+  lifecycleRan = true;
 
   const originalPool = (await getOdds(admin, POOL_PACK)).odds.map(
     (o) => o.card_id,
@@ -106,6 +111,7 @@ test('card lifecycle: register from inventory → adjust FMV → reflects on sto
 });
 
 test('deleting the card frees the product to be eligible again', async () => {
+  test.skip(!lifecycleRan, 'lifecycle test skipped — no cleanup to verify');
   // After the lifecycle test's cleanup, the product is un-registered once more.
   const elig = await eligibleProducts(admin);
   expect(elig.products.some((p) => p.handle === CARD_HANDLE)).toBe(true);
