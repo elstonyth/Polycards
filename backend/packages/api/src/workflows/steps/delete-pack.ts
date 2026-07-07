@@ -41,6 +41,9 @@ type CompensateData =
         // reward_box packs carry pool config — restore it too.
         pool_enabled: boolean;
         draws_per_day: number;
+        buyback_percent: number;
+        in_stock: boolean;
+        published_odds: Record<string, unknown> | null;
       };
       odds: OddsSnapshot[];
     }
@@ -79,6 +82,10 @@ export const deletePackStep = createStep(
         status: pack.status,
         pool_enabled: pack.pool_enabled,
         draws_per_day: pack.draws_per_day,
+        buyback_percent: pack.buyback_percent,
+        in_stock: pack.in_stock,
+        published_odds:
+          (pack.published_odds as Record<string, unknown> | null) ?? null,
       },
       odds: oddsRows.map((o) => ({
         pack_id: o.pack_id,

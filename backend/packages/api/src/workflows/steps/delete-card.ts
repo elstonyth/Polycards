@@ -32,6 +32,12 @@ type CompensateData =
         for_sale: boolean;
         slab_image: string | null;
         slab_image_key: string | null;
+        pokemon_dex: number | null;
+        sprite_image: string | null;
+        pc_product_id: string | null;
+        pc_grade: string | null;
+        market_multiplier: number;
+        pc_synced_at: Date | null;
       };
       odds: OddsSnapshot[];
     }
@@ -53,6 +59,21 @@ export const deleteCardStep = createStep(
       throw new MedusaError(
         MedusaError.Types.NOT_FOUND,
         `Card '${input.handle}' not found.`,
+      );
+    }
+
+    // A card customers still HOLD cannot be deleted — their vault items would
+    // silently vanish (unvaluable, unsellable, invisible). Sell back / deliver /
+    // wait first (audit 2026-07-07 #4). bought_back/delivered pulls are history
+    // and don't block.
+    const [held] = await packs.listPulls(
+      { card_id: input.handle, status: ['vaulted', 'delivering'] },
+      { take: 1 },
+    );
+    if (held) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `Cannot delete '${input.handle}' — customers still hold copies in their vaults.`,
       );
     }
 
@@ -83,6 +104,12 @@ export const deleteCardStep = createStep(
         for_sale: card.for_sale,
         slab_image: card.slab_image ?? null,
         slab_image_key: card.slab_image_key ?? null,
+        pokemon_dex: card.pokemon_dex ?? null,
+        sprite_image: card.sprite_image ?? null,
+        pc_product_id: card.pc_product_id ?? null,
+        pc_grade: card.pc_grade ?? null,
+        market_multiplier: Number(card.market_multiplier ?? 1.2),
+        pc_synced_at: card.pc_synced_at ?? null,
       },
       odds: oddsSnapshot,
     };

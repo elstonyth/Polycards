@@ -1,6 +1,7 @@
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
+import { deleteCardWorkflow } from '../../src/workflows/delete-card';
 
 jest.setTimeout(240 * 1000);
 
@@ -91,6 +92,27 @@ medusaIntegrationTestRunner({
         // The matching row must have been rolled back too.
         const [freshGood] = await packs.listPulls({ id: good.id }, { take: 1 });
         expect(freshGood.status).toBe('vaulted');
+      });
+
+      describe('deleteCardStep — vault guard', () => {
+        it('refuses to delete a card customers still hold', async () => {
+          const pull = await mkPull('vaulted');
+          void pull;
+          // Workflow engine errors surface as deserialized plain objects (not
+          // real Error instances) by the time .run() rethrows them, so
+          // .rejects.toThrow() (which requires isError()) can't see them —
+          // match on the message shape instead.
+          await expect(
+            deleteCardWorkflow(getContainer()).run({
+              input: { handle: CARD_HANDLE },
+            }),
+          ).rejects.toMatchObject({ message: expect.stringMatching(/still hold/i) });
+          const [card] = await packs.listCards(
+            { handle: CARD_HANDLE },
+            { take: 1 },
+          );
+          expect(card).toBeTruthy(); // not deleted
+        });
       });
     });
   },
