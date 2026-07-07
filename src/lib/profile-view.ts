@@ -28,6 +28,8 @@ export interface ProfileViewUser {
   username: string;
   pfp: string;
   frame: string | null;
+  /** Milestone level behind `frame` — drives the animated frame shader. */
+  frameLevel: number | null;
   /** Global rank is a leaderboard concern — null (rendered "—") for real profiles. */
   rank: number | null;
   points: number;
@@ -95,6 +97,11 @@ export function toProfileView(
     frame: profile.equipped_frame_level
       ? (avatarFrames[String(profile.equipped_frame_level)] ?? null)
       : null,
+    frameLevel:
+      profile.equipped_frame_level &&
+      avatarFrames[String(profile.equipped_frame_level)]
+        ? profile.equipped_frame_level
+        : null,
     rank: null,
     points: profile.stats.points,
     pulls: profile.stats.pulls,
@@ -117,6 +124,7 @@ export function mockProfileView(user: MockUser): ProfileViewUser {
     username: user.username,
     pfp: user.pfp,
     frame: null,
+    frameLevel: null,
     rank: user.rank,
     points: user.points,
     pulls: user.pulls,

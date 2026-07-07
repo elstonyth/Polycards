@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils';
+import { AnimatedFrame } from '@/components/AnimatedFrame';
 
 /**
  * Framed avatar — profile photo (or an initial-letter circle when there is no
@@ -7,6 +8,10 @@ import { cn } from '@/lib/utils';
  * stays server-and-client safe. The frame layers ABOVE the photo and bleeds
  * ~28% past it so ring-style frames read as surrounding the picture. A null
  * frameSrc renders photo-only — a removed catalog entry must never 404.
+ *
+ * `animateLevel` opts the frame into the WebGL motion shader (big avatars
+ * only — /me header, public profile; grids/leaderboards stay static). The
+ * static frame remains the fallback whenever the shader can't run.
  */
 export function FramedAvatar({
   src,
@@ -16,6 +21,7 @@ export function FramedAvatar({
   alt = '',
   className,
   priority = false,
+  animateLevel = null,
 }: {
   src: string | null;
   initial?: string;
@@ -25,6 +31,8 @@ export function FramedAvatar({
   className?: string;
   /** Eager-load — set on above-the-fold avatars (profile header = LCP). */
   priority?: boolean;
+  /** Milestone level of the equipped frame — enables the animated shader. */
+  animateLevel?: number | null;
 }) {
   return (
     <span
@@ -51,18 +59,21 @@ export function FramedAvatar({
           {initial}
         </span>
       )}
-      {frameSrc && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={frameSrc}
-          alt=""
-          aria-hidden
-          width={size}
-          height={size}
-          loading={priority ? 'eager' : 'lazy'}
-          className="pointer-events-none absolute left-1/2 top-1/2 h-[128%] w-[128%] max-w-none -translate-x-1/2 -translate-y-1/2 object-contain"
-        />
-      )}
+      {frameSrc &&
+        (animateLevel ? (
+          <AnimatedFrame frameSrc={frameSrc} level={animateLevel} size={size} />
+        ) : (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={frameSrc}
+            alt=""
+            aria-hidden
+            width={size}
+            height={size}
+            loading={priority ? 'eager' : 'lazy'}
+            className="pointer-events-none absolute left-1/2 top-1/2 h-[128%] w-[128%] max-w-none -translate-x-1/2 -translate-y-1/2 object-contain"
+          />
+        ))}
     </span>
   );
 }

@@ -93,6 +93,7 @@ export function AppearanceCard({
             src={avatarUrl}
             initial={initial}
             frameSrc={equippedFrameUrl}
+            animateLevel={equippedLevel}
             size={72}
           />
           <span className="absolute -bottom-0.5 -right-0.5 flex h-6 w-6 items-center justify-center rounded-full border border-white/20 bg-neutral-800 text-white transition-colors group-hover:bg-neutral-700">

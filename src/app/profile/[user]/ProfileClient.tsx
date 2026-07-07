@@ -52,6 +52,7 @@ export default function ProfileClient({ user }: { user: ProfileViewUser }) {
             src={user.pfp}
             initial={user.username?.[0]?.toUpperCase()}
             frameSrc={user.frame}
+            animateLevel={user.frameLevel}
             alt={user.username}
             size={96}
             priority
