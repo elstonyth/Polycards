@@ -2,6 +2,7 @@ import type { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
 import { Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
+import { pageAll } from '../../../utils/page-all';
 
 // GET /admin/pricing/health — staleness dashboard for the two money feeds
 // (audit 2026-07-07 #3b): the FX row's age and how many PriceCharting-linked
@@ -18,8 +19,10 @@ export async function GET(
   const [fxRow] = await packs.listFxRates({ pair: 'USD_MYR' }, { take: 1 });
   const fetchedAt = fxRow?.fetched_at ? new Date(fxRow.fetched_at) : null;
 
-  // Catalog-sized table — a single page is fine (same assumption as /admin/economy's card load).
-  const allCards = await packs.listCards({}, { take: 10_000 });
+  // Paged to exhaustion like /admin/economy's card load and the sync job — a
+  // flat cap would silently under-report exactly the staleness this endpoint
+  // exists to surface.
+  const allCards = await pageAll((opts) => packs.listCards({}, opts));
   const linkedCards = allCards.filter((c) => c.pc_product_id);
   let neverSynced = 0;
   let stale = 0;
