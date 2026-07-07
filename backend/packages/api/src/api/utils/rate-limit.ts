@@ -573,21 +573,27 @@ export function createProfileReadRateLimit(): MiddlewareHandler {
 /**
  * The store-read limiter for the customer's own vault/credits GETs — cheap
  * reads, so the budget is generous; it only stops a runaway client or script
- * from hammering. One instance is shared by both matchers (a combined budget —
- * the two reads always travel together in the UI). Env-tunable:
- * STORE_READ_RATE_BURST_LIMIT / STORE_READ_RATE_BURST_WINDOW_MS (default 30/10s)
- * STORE_READ_RATE_LIMIT / STORE_READ_RATE_WINDOW_MS (default 120/60s)
+ * from hammering. One instance is shared by all read matchers (a combined
+ * budget), and one account-page RSC render fans out to ~6 of these reads at
+ * once — the budget is sized to ≥10 renders per burst window, because at
+ * 30/10s two quick frame-equips (each refetches /me) 429'd every read on the
+ * page simultaneously (2026-07-07 incident: frames rendered locked, wallet
+ * failed). Env-tunable:
+ * STORE_READ_RATE_BURST_LIMIT / STORE_READ_RATE_BURST_WINDOW_MS (default 60/10s)
+ * STORE_READ_RATE_LIMIT / STORE_READ_RATE_WINDOW_MS (default 240/60s)
  */
+export const STORE_READ_DEFAULTS: EnvLimiterDefaults = {
+  burstLimit: 60,
+  burstWindowMs: 10_000,
+  limit: 240,
+  windowMs: 60_000,
+};
+
 export function createStoreReadRateLimit(): MiddlewareHandler {
   return createEnvRateLimit({
     name: 'store-read',
     message: 'Too many requests.',
-    defaults: {
-      burstLimit: 30,
-      burstWindowMs: 10_000,
-      limit: 120,
-      windowMs: 60_000,
-    },
+    defaults: STORE_READ_DEFAULTS,
   });
 }
 

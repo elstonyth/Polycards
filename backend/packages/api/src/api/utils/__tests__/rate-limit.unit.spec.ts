@@ -9,6 +9,8 @@ import {
   FailoverRateLimitStore,
   createRateLimitMiddleware,
   createAdminActionRateLimit,
+  createStoreReadRateLimit,
+  STORE_READ_DEFAULTS,
   positiveIntFromEnv,
   type RateLimitRule,
   type RateLimitStore,
@@ -415,5 +417,23 @@ describe("positiveIntFromEnv", () => {
     if (raw === undefined) delete process.env[NAME];
     else process.env[NAME] = raw;
     expect(positiveIntFromEnv(NAME, 42)).toBe(expected);
+  });
+});
+
+describe("STORE_READ_DEFAULTS", () => {
+  // One account-page RSC render fans out to ~6 store reads (credits, vip,
+  // daily, profiles/me, avatar-frames, notifications). The budget must fit
+  // ≥10 renders per burst window, or a single user equipping a frame (which
+  // refetches the page) trips 429s and every read on /me fails at once —
+  // the 2026-07-07 "all my levels are gone" incident.
+  it("fits at least 10 page renders per burst window and 40 per minute", () => {
+    expect(STORE_READ_DEFAULTS.burstLimit).toBeGreaterThanOrEqual(60);
+    expect(STORE_READ_DEFAULTS.burstWindowMs).toBeLessThanOrEqual(10_000);
+    expect(STORE_READ_DEFAULTS.limit).toBeGreaterThanOrEqual(240);
+    expect(STORE_READ_DEFAULTS.windowMs).toBeLessThanOrEqual(60_000);
+  });
+
+  it("is what createStoreReadRateLimit boots with (factory resolves)", () => {
+    expect(() => createStoreReadRateLimit()).not.toThrow();
   });
 });
