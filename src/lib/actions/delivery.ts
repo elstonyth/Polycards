@@ -46,8 +46,7 @@ export type RequestDeliveryResult =
   | { ok: false; error: string; needsAuth?: boolean };
 
 export type EditAddressResult =
-  | { ok: true }
-  | { ok: false; error: string; needsAuth?: boolean };
+  { ok: true } | { ok: false; error: string; needsAuth?: boolean };
 
 export type AddressView = {
   id: string;
