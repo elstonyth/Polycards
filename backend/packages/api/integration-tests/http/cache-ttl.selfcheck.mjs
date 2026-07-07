@@ -47,5 +47,16 @@ assert.equal(c.computes(), 4, 'clear() forces a fresh compute');
 // 5) Fail-open guarantee: the routes never let a cache error mask compute —
 //    a thrown compute must propagate, not get swallowed into a stale/empty body.
 assert.throws(() => c.get('err', () => { throw new Error('boom'); }, t0));
+//    …and the failed compute must not poison the cache: a later successful
+//    compute for the same key still runs and caches normally.
+assert.equal(c.get('err', () => 'OK', t0 + 1), 'OK');
+assert.equal(c.computes(), 6, 'a failed compute does not block a later successful one');
+
+// 6) Default now = Date.now(): two back-to-back calls (no explicit now) land in
+//    the same TTL window → second is served cached, exercising the default path.
+const beforeZ = c.computes();
+assert.equal(c.get('z', () => 'Z'), 'Z');
+assert.equal(c.get('z', () => 'Z2'), 'Z'); // real-clock ms apart, well within 30s
+assert.equal(c.computes(), beforeZ + 1, 'default Date.now() path: one compute per window');
 
 console.log('cache-ttl.selfcheck: OK');
