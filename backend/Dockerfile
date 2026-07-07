@@ -89,18 +89,23 @@ ENV COREPACK_HOME=/corepack
 RUN corepack enable && corepack prepare yarn@4.5.0 --activate \
   && chmod -R a+rX /corepack
 
-# Copy the built workspace from the builder. node_modules was pruned to prod-only
-# above (workspaces focus --production), so this is the slim layout: prod deps +
-# .medusa + apps/*/dist + sources. Matches the verified-working appDir layout.
-COPY --from=builder /app ./
+# Copy the built workspace from the builder, owned by `node`. The container runs
+# as USER node (below), and `medusa db:migrate` (the App Platform pre-deploy job)
+# writes generated migration dirs INTO node_modules —
+# `node_modules/@medusajs/*/dist/migrations` and `@mercurjs/core/.medusa/.../migrations`.
+# Without --chown those dirs are root-owned and the migrate job fails with
+# `EACCES: permission denied, mkdir ...` → deploy error → rollback. Owning the
+# whole tree as node lets migrate create them.
+COPY --chown=node:node --from=builder /app ./
 
 # Medusa listens on :9000; App Platform routes to http_port: 9000 (see app.yaml).
 # Worker instances override the run command with MEDUSA_WORKER_MODE=worker.
 WORKDIR /app/packages/api
 
-# Drop root (the storefront Dockerfile already does; audit M2). The only dir the
-# API writes is static/ — the LOCAL file-provider fallback when S3 is unset
-# (compose/local runs; prod uses Spaces so it stays untouched).
+# Drop root (the storefront Dockerfile already does; audit M2). The tree is
+# node-owned via the --chown COPY above, so the runtime can write both the
+# migrate-generated migration dirs and static/ (the LOCAL file-provider fallback
+# when S3 is unset — compose/local runs; prod uses Spaces so it stays untouched).
 RUN mkdir -p static && chown node:node static
 USER node
 
