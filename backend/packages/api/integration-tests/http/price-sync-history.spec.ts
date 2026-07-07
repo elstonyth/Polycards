@@ -7,6 +7,7 @@ import {
   refreshCardPrice,
   type CardRow,
 } from '../../src/modules/packs/sync-market-prices';
+import { clearPackDetailCache } from '../../src/api/store/packs/[slug]/route';
 import { mintSuperAdmin, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
@@ -194,8 +195,11 @@ medusaIntegrationTestRunner({
         // Daily sync moves FMV to $200…
         await syncTick(20000, new Date('2026-07-02T03:00:00Z'));
 
-        // …and the very next customer request shows 200 × 4.0 × 1.2 = 960.
-        // No cache invalidation involved: the price is computed per request.
+        // …and the next request past the route's ≤30s per-process cache shows
+        // 200 × 4.0 × 1.2 = 960. The first GET above populated that cache, so
+        // clear it (as leaderboard.spec.ts does) to read the freshly-synced
+        // price — this pins the compute, not the cache window.
+        clearPackDetailCache();
         const after = await unwrapResponse(
           api.get(`/store/packs/${PACK_SLUG}`, { headers: storeHeaders }),
         );

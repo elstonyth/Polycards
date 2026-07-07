@@ -87,7 +87,8 @@ export async function GET(
   //
   // marketPriceMyr = raw USD FMV × FX × the card's own multiplier, computed at
   // request time — the same live display seam as open/vault/recent-pulls, so
-  // the daily PriceCharting sync reaches Top Hits without any cache to bust.
+  // the daily PriceCharting sync reaches Top Hits within one cache window
+  // (≤30s, per the packCache above), no explicit bust needed.
   const fxRate = await resolveFxRate(packsModuleService);
   const entries = odds
     .map((o) => {
