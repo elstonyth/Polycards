@@ -179,9 +179,12 @@ void main() {
 
   // Some frame art (e.g. LV 40's lateral flame streams) runs to the PNG
   // border and gets hard-cut by it. Dissolve the last ~5% of texture space
-  // so edge-touching art fades out instead of slicing off.
-  float edge = smoothstep(0.0, 0.05, suv.x) * smoothstep(1.0, 0.95, suv.x)
-             * smoothstep(0.0, 0.05, suv.y) * smoothstep(1.0, 0.95, suv.y);
+  // so edge-touching art fades out instead of slicing off. (Ascending edges
+  // only — smoothstep with edge0 > edge1 is undefined per the GLSL spec.)
+  float edge = smoothstep(0.0, 0.05, suv.x)
+             * (1.0 - smoothstep(0.95, 1.0, suv.x))
+             * smoothstep(0.0, 0.05, suv.y)
+             * (1.0 - smoothstep(0.95, 1.0, suv.y));
   col *= edge;
 
   gl_FragColor = col;
@@ -252,31 +255,59 @@ export function AnimatedFrame({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [live, setLive] = useState(false);
   const params = FRAME_MOTION[level];
+  // CSS box only — the DPR-scaled draw buffer is sized in the init effect
+  // (render-time devicePixelRatio would cause a hydration mismatch).
+  const canvasCss = Math.round(
+    size * (plain ? 1 : FRAME_SCALE) * CANVAS_OVERSIZE,
+  );
 
   useEffect(() => {
     if (reduced || !params) return;
     const canvas = canvasRef.current;
     if (!canvas || activeContexts >= MAX_CONTEXTS) return;
+    // Reserve the slot NOW: the guard and the increment must not straddle the
+    // async image load, or N simultaneous mounts all pass the check at 0 and
+    // the cap never caps. Released exactly once (cleanup, or early on a path
+    // where no context will ever exist).
+    activeContexts++;
+    let released = false;
+    const releaseSlot = () => {
+      if (!released) {
+        released = true;
+        activeContexts--;
+      }
+    };
 
     let cancelled = false;
     let ins: Instance | null = null;
     let gl: WebGLRenderingContext | null = null;
-    let acquired = false;
 
     const img = new Image();
     // Same-origin via the Next image optimizer — raw backend/CDN frame URLs
     // would need CORS for texImage2D; the proxy sidesteps that everywhere.
     img.src = `/_next/image?url=${encodeURIComponent(frameSrc)}&w=640&q=75`;
+    img.onerror = () => {
+      if (!cancelled) releaseSlot(); // texture failed — no context will exist
+    };
     img.onload = () => {
       if (cancelled || !canvasRef.current) return;
-      gl = canvasRef.current.getContext('webgl', {
+      const cv = canvasRef.current;
+      // Draw-buffer size is set here, NOT as JSX width/height: reading
+      // devicePixelRatio during render makes server (1) and HiDPI client
+      // HTML disagree — a hydration mismatch. The buffer only has to be
+      // right before the first draw.
+      const dpr = Math.min(window.devicePixelRatio || 1, 1.75);
+      cv.width = Math.round(canvasCss * dpr);
+      cv.height = Math.round(canvasCss * dpr);
+      gl = cv.getContext('webgl', {
         alpha: true,
         premultipliedAlpha: true,
         antialias: false,
       });
-      if (!gl) return;
-      acquired = true;
-      activeContexts++;
+      if (!gl) {
+        releaseSlot(); // context creation failed — free the slot for others
+        return;
+      }
 
       const compile = (type: number, src: string) => {
         const s = gl!.createShader(type)!;
@@ -337,19 +368,11 @@ export function AnimatedFrame({
     return () => {
       cancelled = true;
       if (ins) removeInstance(ins);
-      if (acquired) activeContexts--;
+      releaseSlot();
       gl?.getExtension('WEBGL_lose_context')?.loseContext();
       setLive(false);
     };
-  }, [frameSrc, params, reduced, plain]);
-
-  const canvasCss = Math.round(
-    size * (plain ? 1 : FRAME_SCALE) * CANVAS_OVERSIZE,
-  );
-  const dpr =
-    typeof window !== 'undefined'
-      ? Math.min(window.devicePixelRatio || 1, 1.75)
-      : 1;
+  }, [frameSrc, params, reduced, plain, canvasCss]);
 
   return (
     <>
@@ -377,8 +400,6 @@ export function AnimatedFrame({
           key={frameSrc}
           ref={canvasRef}
           aria-hidden
-          width={Math.round(canvasCss * dpr)}
-          height={Math.round(canvasCss * dpr)}
           className="pointer-events-none absolute left-1/2 top-1/2 max-w-none -translate-x-1/2 -translate-y-1/2"
           style={{
             width: canvasCss,
