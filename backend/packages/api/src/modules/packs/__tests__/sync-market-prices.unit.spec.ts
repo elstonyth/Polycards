@@ -29,16 +29,11 @@ const deps = (pennies: number) => {
   };
 };
 
+const legacyCard = card({ id: "c1", handle: "charizard-psa-10", market_value: 100 });
+
 test("updates from tier price", async () => {
   const upd: any[] = [];
-  const testCard = {
-    id: "c1",
-    handle: "charizard-psa-10",
-    pc_product_id: "6910",
-    pc_grade: "PSA 10",
-    market_value: 100,
-  };
-  const r = await refreshCardPrice(testCard as any, {
+  const r = await refreshCardPrice(legacyCard, {
     pcFetch: async () => ({ kind: "ok", data: { "manual-only-price": 15000 } }),
     updateCards: async (u: any) => {
       upd.push(u[0]);
@@ -51,14 +46,7 @@ test("updates from tier price", async () => {
 });
 
 test("keeps last-known on error", async () => {
-  const testCard = {
-    id: "c1",
-    handle: "charizard-psa-10",
-    pc_product_id: "6910",
-    pc_grade: "PSA 10",
-    market_value: 100,
-  };
-  const r = await refreshCardPrice(testCard as any, {
+  const r = await refreshCardPrice(legacyCard, {
     pcFetch: async () => ({ kind: "error", message: "boom" }),
     updateCards: async () => {
       throw new Error("no write");
@@ -70,14 +58,7 @@ test("keeps last-known on error", async () => {
 });
 
 test("skips zero price", async () => {
-  const testCard = {
-    id: "c1",
-    handle: "charizard-psa-10",
-    pc_product_id: "6910",
-    pc_grade: "PSA 10",
-    market_value: 100,
-  };
-  const r = await refreshCardPrice(testCard as any, {
+  const r = await refreshCardPrice(legacyCard, {
     pcFetch: async () => ({ kind: "ok", data: { "manual-only-price": 0 } }),
     updateCards: async () => {
       throw new Error("no write");
