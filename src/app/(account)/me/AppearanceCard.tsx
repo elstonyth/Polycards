@@ -25,7 +25,8 @@ export function AppearanceCard({
   subtitle: string;
   avatarUrl: string | null;
   equippedLevel: number | null;
-  highestLevel: number;
+  /** null = the VIP read failed — show "couldn't load", never "locked". */
+  highestLevel: number | null;
   frames: Record<string, string>;
 }) {
   const router = useRouter();
@@ -142,10 +143,19 @@ export function AppearanceCard({
         <p className="mt-1 text-[12px] text-neutral-400">
           Unlock a new frame every 10 VIP levels.
         </p>
+        {highestLevel === null && (
+          <p className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-[13px] font-medium text-amber-300">
+            Couldn&rsquo;t load your VIP level, so frames can&rsquo;t be changed
+            right now — your unlocks are safe. Refresh to try again.
+          </p>
+        )}
         <ul className="mt-4 grid grid-cols-5 gap-3">
           {FRAME_LEVELS.map((level) => {
             const url = frames[String(level)] ?? null;
-            const unlocked = highestLevel >= level;
+            // Unknown level (failed read) is NOT "locked": no padlock, just
+            // temporarily not equippable.
+            const unlocked = highestLevel !== null && highestLevel >= level;
+            const locked = highestLevel !== null && highestLevel < level;
             const equipped = equippedLevel === level;
             const equippable = unlocked && url !== null && !equipped;
             return (
@@ -159,7 +169,9 @@ export function AppearanceCard({
                       ? `LV ${level} frame (equipped)`
                       : unlocked
                         ? `Equip LV ${level} frame`
-                        : `LV ${level} frame (unlocks at level ${level})`
+                        : locked
+                          ? `LV ${level} frame (unlocks at level ${level})`
+                          : `LV ${level} frame (level unavailable right now)`
                   }
                   className={`relative flex h-14 w-14 items-center justify-center rounded-full border p-1 transition-colors ${
                     equipped
@@ -175,12 +187,18 @@ export function AppearanceCard({
                       src={url}
                       alt=""
                       aria-hidden
-                      className={`max-h-full max-w-full object-contain ${unlocked ? '' : 'opacity-30 grayscale'}`}
+                      className={`max-h-full max-w-full object-contain ${
+                        unlocked || equipped
+                          ? ''
+                          : locked
+                            ? 'opacity-30 grayscale'
+                            : 'opacity-50'
+                      }`}
                     />
                   ) : (
                     <span className="text-[10px] text-neutral-500">soon</span>
                   )}
-                  {!unlocked && (
+                  {locked && (
                     <Lock
                       className="absolute h-4 w-4 text-neutral-400"
                       aria-hidden

@@ -74,7 +74,9 @@ export default async function MePage() {
     typeof meta.equipped_frame_level === 'number'
       ? meta.equipped_frame_level
       : null;
-  const highestLevel = vipResult.ok ? vipResult.vip.highestLevelEver : 1;
+  // null = "couldn't load", NOT "level 1" — a failed VIP read must never
+  // render every frame as locked (2026-07-07 429-cascade incident).
+  const highestLevel = vipResult.ok ? vipResult.vip.highestLevelEver : null;
 
   return (
     <div className="flex flex-col gap-4">
