@@ -40,6 +40,9 @@ export default async function apply({ container }: ExecArgs) {
   }
 
   // Index the seeded "normal" entries by dex (one query, not one-per-card).
+  // take:5000 is safe here (unlike the paginated propose): the partial unique
+  // index caps 'normal' rows at ≤1 per dex, so there are ≤ national-dex-count
+  // (~1025) of them — well under the cap.
   const normals = await pixels.listPixelPokemon(
     { variant: 'normal' },
     { take: 5000 },
