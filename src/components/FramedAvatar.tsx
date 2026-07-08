@@ -1,3 +1,4 @@
+import Image from 'next/image';
 import { cn } from '@/lib/utils';
 import { AnimatedFrame } from '@/components/AnimatedFrame';
 
@@ -63,13 +64,13 @@ export function FramedAvatar({
         (animateLevel ? (
           <AnimatedFrame frameSrc={frameSrc} level={animateLevel} size={size} />
         ) : (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <Image
             src={frameSrc}
             alt=""
             aria-hidden
             width={size}
             height={size}
+            sizes={`${Math.ceil(size * 1.28)}px`}
             loading={priority ? 'eager' : 'lazy'}
             className="pointer-events-none absolute left-1/2 top-1/2 h-[128%] w-[128%] max-w-none -translate-x-1/2 -translate-y-1/2 object-contain"
           />
