@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import NextImage from 'next/image';
 import { usePrefersReducedMotion } from '@/lib/use-reveal';
 import { FRAME_MOTION } from '@/lib/frame-motion';
 
@@ -378,13 +379,14 @@ export function AnimatedFrame({
     <>
       {/* Static frame stays mounted below the canvas until the shader is live
           (and forever when it never goes live) — never a blank ring. */}
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
+      <NextImage
         src={frameSrc}
         alt=""
         aria-hidden
         width={size}
         height={size}
+        sizes={`${plain ? size : Math.ceil(size * 1.28)}px`}
+        loading="eager"
         className={
           plain
             ? 'pointer-events-none absolute left-1/2 top-1/2 h-full w-full max-w-none -translate-x-1/2 -translate-y-1/2 object-contain'
