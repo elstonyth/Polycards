@@ -1,9 +1,9 @@
 // Standalone self-check for the per-process TTL cache branch shared by the
-// leaderboard (boardCache), pack-detail (packCache) and recent-pulls
-// (recentCache) store routes. The routes themselves can only run under the
-// medusa integration runner (needs Postgres); this pins the pure cache branch
-// — `cached && cached.expires > Date.now()` + populate-after-compute — that is
-// copied verbatim into all three handlers.
+// leaderboard (boardCache), pack-detail (packCache), recent-pulls
+// (recentCache) and pack-list (listCache) store routes. The routes themselves
+// can only run under the medusa integration runner (needs Postgres); this
+// pins the pure cache branch — `cached && cached.expires > Date.now()` +
+// populate-after-compute — that is copied verbatim into all four handlers.
 //
 // Run: node integration-tests/http/cache-ttl.selfcheck.mjs
 import assert from 'node:assert/strict';

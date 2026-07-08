@@ -8,10 +8,33 @@ import { PACKS_MODULE } from "../../../modules/packs";
 // the marketplace needs does not apply here. Returns active packs ordered by
 // (category, rank); the storefront groups them and attaches presentational
 // category labels/icons from local assets.
+// ponytail: per-process 30s cache — mirrors packCache in [slug]/route.ts and the
+// leaderboard's boardCache. /store/packs is a fixed public query (no params),
+// identical for every viewer, fetched on every anonymous (force-dynamic) home
+// view via getPackCategories; this collapses the multi-row catalog query to one
+// compute per 30s window. A pack going active/inactive or a price/stock edit
+// lags ≤30s — display-only (the purchase path re-checks live state). Upgrade to
+// Redis only if we ever run >1 instance.
+const CACHE_TTL_MS = 30_000;
+const LIST_KEY = 'list';
+const listCache = new Map<string, { expires: number; body: unknown }>();
+
+/** Test seam: module state outlives a test's fixtures — one jest process is one
+ *  module instance, so a prior test's catalog would be served to the next. */
+export function clearPackListCache(): void {
+  listCache.clear();
+}
+
 export async function GET(
   req: MedusaRequest,
   res: MedusaResponse
 ): Promise<void> {
+  const cached = listCache.get(LIST_KEY);
+  if (cached && cached.expires > Date.now()) {
+    res.json(cached.body);
+    return;
+  }
+
   const packsModuleService: PacksModuleService = req.scope.resolve(PACKS_MODULE);
 
   const packs = await packsModuleService.listPacks(
@@ -25,7 +48,7 @@ export async function GET(
   // leak the internal `raw_price` jsonb sidecar (and id/timestamps) into a
   // public payload. `price` serializes as a JSON number (RM — all pack
   // prices and ledger money are Ringgit).
-  res.json({
+  const body = {
     packs: packs.map((p) => ({
       slug: p.slug,
       title: p.title,
@@ -38,5 +61,7 @@ export async function GET(
       rank: p.rank,
       status: p.status,
     })),
-  });
+  };
+  listCache.set(LIST_KEY, { expires: Date.now() + CACHE_TTL_MS, body });
+  res.json(body);
 }
