@@ -166,3 +166,20 @@ describe('horizontal spin (reflection + real physics)', () => {
     }
   });
 });
+
+describe('gapped winner centering (winning-line alignment)', () => {
+  test('a gapped winner cell lands centered on the window center', () => {
+    // ReelStrip lays cells out with a flex gap: pitch = cellW + gap, and the
+    // settle target subtracts gap/2 so the CELL center (not the pitch center)
+    // sits on the winning line. Assert that across representative cell sizes.
+    for (const cellW of [64, 68, 79]) {
+      const gap = 10;
+      const pitch = cellW + gap;
+      const winW = pitch * 5;
+      const target = reelTarget(WIN_INDEX, pitch, winW) - gap / 2;
+      // cell WIN_INDEX center on screen after translateX(-target):
+      const cellCenterOnScreen = WIN_INDEX * pitch + cellW / 2 - target;
+      expect(cellCenterOnScreen).toBeCloseTo(winW / 2, 6);
+    }
+  });
+});

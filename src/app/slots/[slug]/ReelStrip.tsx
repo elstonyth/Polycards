@@ -56,7 +56,6 @@ export function ReelStrip({
   onWinnerRect?: (rect: DOMRect) => void;
   hideWinner?: boolean;
 }) {
-  const windowRef = useRef<HTMLDivElement>(null);
   const stripRef = useRef<HTMLDivElement>(null);
   const cellRefs = useRef<(HTMLDivElement | null)[]>([]);
   const [done, setDone] = useState(false);
@@ -101,7 +100,12 @@ export function ReelStrip({
     setDone(false);
     const stripEl = stripRef.current;
     if (!stripEl) return;
-    const target = Math.round(reelTarget(HREEL_WIN_INDEX, pitch, winW));
+    // reelTarget centers the pitch-midpoint; cells render at their cell-center,
+    // and the flex `gap: CELL_GAP` offsets those by CELL_GAP/2. Subtract it so the
+    // winner cell's center lands exactly on the winning line (window center).
+    const target = Math.round(
+      reelTarget(HREEL_WIN_INDEX, pitch, winW) - CELL_GAP / 2,
+    );
 
     const paint = (offset: number, velocity: number) => {
       const px = reelPaintX(offset, target);
@@ -162,7 +166,6 @@ export function ReelStrip({
 
   return (
     <div
-      ref={windowRef}
       className="relative overflow-hidden rounded-2xl border border-white/10 bg-neutral-950/80 shadow-[inset_0_0_30px_rgba(0,0,0,0.8)]"
       style={{ width: `${winW}px`, height: `${cellSize + 16}px` }}
       aria-hidden
