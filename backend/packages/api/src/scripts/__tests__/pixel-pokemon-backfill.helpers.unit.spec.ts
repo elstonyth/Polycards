@@ -65,6 +65,26 @@ describe('applyRow (canonical regression — Rockruff card links to Lycanroc)', 
     });
   });
 
+  test('a chosen entry with null dex/image mirrors nulls (custom entry)', () => {
+    const withNull = new Map(pixelByDex);
+    withNull.set(9999, { id: 'pp_9999', dex: null, image_url: null });
+    const row = {
+      card_id: 'card_5',
+      card_name: 'Custom art card',
+      proposed_dex: 9999,
+      proposed_species: 'Custom',
+      all_matches: [{ dex: 9999, name: 'Custom' }],
+      ambiguous: false,
+      chosen_dex: 9999,
+    };
+    expect(applyRow(row, withNull)).toEqual({
+      id: 'card_5',
+      pixel_pokemon_id: 'pp_9999',
+      pokemon_dex: null,
+      sprite_image: null,
+    });
+  });
+
   test('a row with no chosen dex is skipped (stays unlinked)', () => {
     const row = {
       card_id: 'card_3',

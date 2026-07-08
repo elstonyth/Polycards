@@ -87,8 +87,11 @@ export default async function seedPixelPokemon({ container }: ExecArgs) {
             id: existing.id,
             name,
             types: typesJson,
-            image_url,
-            image_key,
+            // Preserve a previously-hosted sprite when this run found none
+            // (a transient PokeAPI miss / fetch failure) — a re-run must never
+            // regress a good sprite to null (idempotency; CodeRabbit).
+            image_url: image_url ?? existing.image_url,
+            image_key: image_key ?? existing.image_key,
             is_custom: false,
           },
         ]);

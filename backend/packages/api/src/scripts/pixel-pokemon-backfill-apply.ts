@@ -29,7 +29,15 @@ export default async function apply({ container }: ExecArgs) {
     );
     return;
   }
-  const rows = JSON.parse(fs.readFileSync(IN, 'utf8')) as ReviewRow[];
+  let rows: ReviewRow[];
+  try {
+    rows = JSON.parse(fs.readFileSync(IN, 'utf8')) as ReviewRow[];
+  } catch (err) {
+    logger.error(
+      `backfill-apply: could not parse ${IN} (corrupted or mis-edited?) — ${(err as Error).message}`,
+    );
+    return;
+  }
 
   // Index the seeded "normal" entries by dex (one query, not one-per-card).
   const normals = await pixels.listPixelPokemon(

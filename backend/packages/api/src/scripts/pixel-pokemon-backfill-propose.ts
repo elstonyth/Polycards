@@ -19,10 +19,16 @@ export default async function propose({ container }: ExecArgs) {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
 
-  const cards = await packs.listCards({}, { take: 5000 });
-  const rows: ReviewRow[] = cards.map((c) =>
-    proposeRow({ id: c.id, name: c.name }),
-  );
+  // Fetch ALL cards, paged — never silently truncate the review set (a fixed
+  // `take` cap would drop cards past it, leaving them unlinked; 2 reviewers).
+  const cards: { id: string; name: string }[] = [];
+  const PAGE = 1000;
+  for (let skip = 0; ; skip += PAGE) {
+    const batch = await packs.listCards({}, { skip, take: PAGE });
+    for (const c of batch) cards.push({ id: c.id, name: c.name });
+    if (batch.length < PAGE) break;
+  }
+  const rows: ReviewRow[] = cards.map((c) => proposeRow(c));
   fs.writeFileSync(OUT, JSON.stringify(rows, null, 2));
 
   const ambiguous = rows.filter((r) => r.ambiguous).length;

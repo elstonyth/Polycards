@@ -1247,6 +1247,15 @@
           "nullable": true,
           "mappedType": "text"
         },
+        "proof_images": {
+          "name": "proof_images",
+          "type": "jsonb",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "json"
+        },
         "shipping_fee": {
           "name": "shipping_fee",
           "type": "numeric",
@@ -2281,6 +2290,15 @@
           "primary": false,
           "unique": false,
           "expression": "CREATE INDEX IF NOT EXISTS \"IDX_pixel_pokemon_deleted_at\" ON \"pixel_pokemon\" (\"deleted_at\") WHERE deleted_at IS NULL"
+        },
+        {
+          "keyName": "UQ_pixel_pokemon_dex_normal",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE UNIQUE INDEX IF NOT EXISTS \"UQ_pixel_pokemon_dex_normal\" ON \"pixel_pokemon\" (\"dex\") WHERE variant = 'normal' AND deleted_at IS NULL"
         },
         {
           "keyName": "pixel_pokemon_pkey",

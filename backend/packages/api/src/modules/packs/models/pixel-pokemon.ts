@@ -7,15 +7,29 @@ import { model } from '@medusajs/framework/utils';
 // a Spaces-hosted sprite (the "sprite not loaded" root fix); null → the
 // storefront renders its poké-ball fallback. `types` is always written as a
 // string[] (possibly empty).
-export const PixelPokemon = model.define('pixel_pokemon', {
-  id: model.id().primaryKey(),
-  name: model.text(),
-  dex: model.number().nullable(),
-  variant: model.text().default('normal'),
-  types: model.json(),
-  image_url: model.text().nullable(),
-  image_key: model.text().nullable(),
-  is_custom: model.boolean().default(false),
-});
+export const PixelPokemon = model
+  .define('pixel_pokemon', {
+    id: model.id().primaryKey(),
+    name: model.text(),
+    dex: model.number().nullable(),
+    variant: model.text().default('normal'),
+    types: model.json(),
+    image_url: model.text().nullable(),
+    image_key: model.text().nullable(),
+    is_custom: model.boolean().default(false),
+  })
+  .indexes([
+    {
+      // Exactly one seeded "normal" row per national dex. The seed and backfill
+      // both resolve a single (dex, 'normal') match, so enforce it at the DB —
+      // a concurrent/interrupted seed can't silently create a duplicate the
+      // backfill would then link arbitrarily (CodeRabbit). Custom variants and
+      // dex-less custom rows are unconstrained (partial index).
+      name: 'UQ_pixel_pokemon_dex_normal',
+      on: ['dex'],
+      unique: true,
+      where: "variant = 'normal' AND deleted_at IS NULL",
+    },
+  ]);
 
 export default PixelPokemon;

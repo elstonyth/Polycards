@@ -113,6 +113,12 @@ export function allPokemonMatches(cardName: string): CardPokemon[] {
   for (const { dex, norm } of BASE_INDEX) consider(dex, norm);
 
   const hits = [...bestNorm.entries()].map(([dex, norm]) => ({ dex, norm }));
+  // Drop a hit whose token is contained in a longer hit's token so a single
+  // species can't self-flag as ambiguous (every "Mewtwo" card contains "mew").
+  // Known limit (sourcery): a tag-team card naming two species where one name
+  // contains the other ("Mewtwo & Mew") keeps only the longer (Mewtwo) — a
+  // defensible single sprite for a dual-species card. Tracking token positions
+  // to keep both isn't worth the complexity in a human-reviewed flow.
   const filtered = hits.filter(
     (h) => !hits.some((o) => o.norm !== h.norm && o.norm.includes(h.norm)),
   );
