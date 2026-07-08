@@ -30,7 +30,12 @@ import type { RecentPull } from '@/lib/data/packs';
 import { demoDraw } from '@/lib/demo-spin';
 import { publishedOddsRows, type PublishedOdds } from '@/lib/packs-format';
 import { isTopRarity, rarityRgb, RARITY_ORDER } from '@/lib/rarity';
-import { spinTotalMs, columnDurationMs } from '@/lib/vault-reel';
+import {
+  spinTotalMs,
+  columnDurationMs,
+  SETTLE_MS,
+  CRAWL_MS,
+} from '@/lib/vault-reel';
 import { resolveCardPokemon } from '@/lib/resolve-card-pokemon';
 import { spriteGif } from '@/lib/mock/pokedex';
 import { SlotReelStack, type ColumnWinner } from './SlotReelStack';
@@ -145,6 +150,7 @@ export default function SlotMachineClient({
   const [needsTopUp, setNeedsTopUp] = useState(false);
   const [oddsOpen, setOddsOpen] = useState(false);
   const [cooldown, setCooldown] = useState(false);
+  const [tension, setTension] = useState(false);
   // Meter roll direction cue for the reel add/remove ('up'/'down', auto-resets).
   const [meterDir, setMeterDir] = useState<'up' | 'down' | null>(null);
 
@@ -525,6 +531,32 @@ export default function SlotMachineClient({
     return () => ids.forEach((id) => clearTimeout(id));
   }, [phase, spin?.nonce, reels, sfx]);
 
+  // Rising tension during the final strip's crawl (spec §7d).
+  useEffect(() => {
+    if (phase !== 'spinning' || reduced) return;
+    const last = columnDurationMs(reels - 1, reels);
+    const crawlStart = last - SETTLE_MS - CRAWL_MS; // when the slow crawl begins
+    const startId = window.setTimeout(
+      () => {
+        setTension(true);
+        sfx('tensionRise');
+        sfx('heartbeat');
+      },
+      Math.max(0, crawlStart),
+    );
+    const beatId = window.setTimeout(
+      () => sfx('heartbeat'),
+      Math.max(0, crawlStart + 350),
+    );
+    const endId = window.setTimeout(() => setTension(false), last);
+    return () => {
+      clearTimeout(startId);
+      clearTimeout(beatId);
+      clearTimeout(endId);
+      setTension(false);
+    };
+  }, [phase, spin?.nonce, reels, reduced, sfx]);
+
   const refreshBalance = applyBalance;
 
   const inReveal =
@@ -564,6 +596,7 @@ export default function SlotMachineClient({
         floodRgb={floodRgb}
         dimmed={inReveal && phase !== 'flood'}
         reduced={reduced}
+        tension={tension}
       >
         {/* Scrolls if a short viewport can't fit the reveal, so the prize +
             sell-back are never hidden behind the fixed controls. */}

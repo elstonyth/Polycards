@@ -22,11 +22,13 @@ export function VaultRoom({
   floodRgb,
   dimmed,
   reduced,
+  tension = false,
   children,
 }: {
   floodRgb: string | null;
   dimmed: boolean;
   reduced: boolean;
+  tension?: boolean;
   children: React.ReactNode;
 }) {
   const rgb = floodRgb ?? WARM;
@@ -61,14 +63,18 @@ export function VaultRoom({
           } as CSSProperties
         }
       />
-      {/* Vignette — starts late, stays shallow, multi-stop so the darkening
-          rolls in smoothly instead of as a hard ellipse edge. */}
+      {/* Vignette — tightens + pushes in during rising tension. */}
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0"
+        className={cn(
+          'pointer-events-none absolute inset-0',
+          !reduced && 'transition-transform duration-700 ease-out',
+        )}
         style={{
-          background:
-            'radial-gradient(135% 115% at 50% 40%, transparent 52%, rgba(0,0,0,0.22) 74%, rgba(0,0,0,0.45) 90%, rgba(0,0,0,0.6) 100%)',
+          background: tension
+            ? 'radial-gradient(115% 100% at 50% 42%, transparent 38%, rgba(0,0,0,0.35) 66%, rgba(0,0,0,0.62) 88%, rgba(0,0,0,0.78) 100%)'
+            : 'radial-gradient(135% 115% at 50% 40%, transparent 52%, rgba(0,0,0,0.22) 74%, rgba(0,0,0,0.45) 90%, rgba(0,0,0,0.6) 100%)',
+          transform: tension && !reduced ? 'scale(1.04)' : 'scale(1)',
         }}
       />
       {/* Grain dither — kills gradient banding. Static, cheap (one paint,

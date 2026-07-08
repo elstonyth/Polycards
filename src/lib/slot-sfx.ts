@@ -12,7 +12,9 @@ export type SfxName =
   | 'meterUp'
   | 'meterDown'
   | 'clockTick'
-  | 'swell';
+  | 'swell'
+  | 'heartbeat'
+  | 'tensionRise';
 
 let ctx: AudioContext | null = null;
 function audio(): AudioContext | null {
@@ -69,6 +71,15 @@ const CUES: Record<SfxName, () => void> = {
   meterDown: () => blip(1200, 24, { gain: 0.022 }),
   clockTick: () => blip(1000, 35, { type: 'sine', gain: 0.035 }),
   swell: () => blip(220, 1100, { type: 'sine', gain: 0.05, slideTo: 330 }),
+  heartbeat: () => {
+    blip(60, 90, { type: 'sine', gain: 0.14, slideTo: 40 });
+    setTimeout(
+      () => blip(60, 120, { type: 'sine', gain: 0.18, slideTo: 38 }),
+      150,
+    );
+  },
+  tensionRise: () =>
+    blip(180, 900, { type: 'sawtooth', gain: 0.05, slideTo: 520 }),
 };
 
 export function playSfx(name: SfxName): void {
