@@ -1,14 +1,15 @@
 // src/app/slots/[slug]/CardTile.tsx
 'use client';
 
-// A reel cell as a BARE pixel Pokémon sprite (spec decision #17, supersedes
-// #11's white mini-card look): no white face/border/shadow chrome — the box
-// stays CARD_ASPECT-shaped (same geometry VaultReelColumn measures for the
-// morph) but renders transparent, and the sprite fills most of it. The landed
-// rarity treatment lives on the card-frame landing zone now, NOT the sprite
-// (spec decision #34 — the card glows, the Pokémon doesn't).
+// A reel cell: a bordered GRID box (spec §2) holding one bare pixel Pokémon.
+// The box glows its reward-tier color — a decoy color that flickers during the
+// spin, the winner's real rarity color once its strip settles, neutral for
+// faded decoys after settle (spec §5). Box stays CARD_ASPECT so the winner
+// cell's measured rect still drives the tile→slab reveal morph.
+import type { CSSProperties } from 'react';
 import { CARD_ASPECT } from '@/lib/vault-reel';
 import { PokemonToken } from './PokemonToken';
+import { cn } from '@/lib/utils';
 
 export function CardTile({
   dex,
@@ -16,32 +17,53 @@ export function CardTile({
   size,
   eager,
   imageSrc,
+  glowRgb,
+  lit = false,
+  landed = false,
 }: {
   dex: number;
   name: string;
   size: number;
   eager: boolean;
   imageSrc?: string;
+  /** "r,g,b" tier color for the cell frame/glow. */
+  glowRgb?: string;
+  /** Show the tier glow (spinning decoy flicker, or the settled winner). */
+  lit?: boolean;
+  /** Winner emphasis after settle: stronger glow + slight scale. */
+  landed?: boolean;
 }) {
-  // Same aspect as the slab — required for the shape-synced reveal morph.
   const cardH = size;
   const cardW = Math.round(cardH * CARD_ASPECT);
+  const rgb = glowRgb ?? '163, 163, 163';
   return (
     <div
-      className="relative flex items-center justify-center"
-      style={{
-        width: `${cardW}px`,
-        height: `${cardH}px`,
-      }}
+      className={cn(
+        'relative flex items-center justify-center rounded-xl border',
+        'transition-[box-shadow,border-color,transform] duration-300',
+        landed && 'scale-[1.06]',
+      )}
+      style={
+        {
+          width: `${cardW}px`,
+          height: `${cardH}px`,
+          borderColor: lit
+            ? `rgba(${rgb}, ${landed ? 0.95 : 0.55})`
+            : 'rgba(255,255,255,0.10)',
+          boxShadow: lit
+            ? landed
+              ? `0 0 18px 3px rgba(${rgb}, 0.7), inset 0 0 14px rgba(${rgb}, 0.35)`
+              : `0 0 10px 1px rgba(${rgb}, 0.35), inset 0 0 8px rgba(${rgb}, 0.18)`
+            : 'inset 0 0 8px rgba(0,0,0,0.5)',
+          background: 'rgba(10,10,12,0.55)',
+        } as CSSProperties
+      }
     >
       <PokemonToken
         dex={dex}
         name={name}
         tier="common"
-        // 0.74 of the cell (was 0.88): neighbors sit smaller so the center
-        // bulge (#39, up to 1.30×) makes the payline Pokémon the clear hero
-        // and the drum falloff reads stronger — bulged center ≈ 0.96 of cell.
-        size={Math.round(size * 0.74)}
+        size={Math.round(size * 0.72)}
         landed={false}
         reduced
         eager={eager}
