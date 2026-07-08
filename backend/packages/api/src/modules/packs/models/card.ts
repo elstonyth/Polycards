@@ -48,6 +48,12 @@ export const Card = model.define('card', {
   pokemon_dex: model.number().nullable(),
   // Optional custom uploaded pixel sprite URL; overrides the dex default gif.
   sprite_image: model.text().nullable(),
+  // Spec 2: link to a PixelPokemon library entry by its unique id — the
+  // authoritative "which pixel pokémon". Same-module nullable FK (a plain id
+  // column, not a Medusa link). On link, the entry's image_url/dex are mirrored
+  // onto sprite_image/pokemon_dex above (render cache) so the storefront
+  // resolver is unchanged. Null = legacy/unlinked card (name-derivation fallback).
+  pixel_pokemon_id: model.text().nullable(),
   // PriceCharting linkage (live market-price tracking). product id links this
   // Card to a PriceCharting catalog entry; grade is PC's own grade label
   // (e.g. "PSA 10") for picking the right price field off that product.

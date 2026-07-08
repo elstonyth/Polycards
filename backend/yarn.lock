@@ -27,6 +27,7 @@ __metadata:
   resolution: "@acme/api@workspace:packages/api"
   dependencies:
     "@acme/odds-math": "workspace:*"
+    "@acme/pokemon": "workspace:*"
     "@medusajs/admin-sdk": "npm:2.13.4"
     "@medusajs/admin-shared": "npm:2.13.4"
     "@medusajs/cli": "npm:2.13.4"

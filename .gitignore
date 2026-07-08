@@ -135,3 +135,6 @@ GEMINI.md
 # Medusa build output (already ignored in backend/packages/api/.gitignore; repeated
 # here because code indexers like codebase-memory only read the ROOT gitignore)
 **/.medusa/
+
+# Pixel-Pokémon backfill review file (generated per-run by the propose script; never commit)
+pixel-pokemon-backfill.json

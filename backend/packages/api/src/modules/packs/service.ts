@@ -34,6 +34,7 @@ import NotificationRead from './models/notification-read';
 import RewardDraw from './models/reward-draw';
 import RewardBox from './models/reward-box';
 import RewardBoxPrize from './models/reward-box-prize';
+import PixelPokemon from './models/pixel-pokemon';
 import {
   resolveBuybackRate,
   buybackAmount,
@@ -273,6 +274,7 @@ class PacksModuleService extends MedusaService({
   RewardDraw,
   RewardBox,
   RewardBoxPrize,
+  PixelPokemon,
 }) {
   // Apply a pack-membership diff (add rows + delete rows + renormalize
   // survivor weights) as ONE transaction. The set-pack-members workflow step
