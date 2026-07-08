@@ -4,6 +4,7 @@ import { Crown, UserPlus, Users } from 'lucide-react';
 import { getReferralSummary } from '@/lib/actions/referral';
 import { getOwnProfileHandle } from '@/lib/data/profiles';
 import { rm } from '@/lib/format';
+import { SITE_URL } from '@/lib/site';
 import ReferralsClient from './ReferralsClient';
 
 export const metadata: Metadata = { title: 'Invite Friends' };
@@ -25,8 +26,9 @@ export default async function ReferralsPage() {
     );
   }
 
-  const appDomain = process.env.NEXT_PUBLIC_APP_DOMAIN ?? 'pokenic.com';
-  const inviteUrl = handle ? `${appDomain}/invite/${handle}` : null;
+  // Canonical origin (NEXT_PUBLIC_SITE_URL) — already absolute, no dead
+  // `pokenic.com` fallback. See src/lib/site.ts.
+  const inviteUrl = handle ? `${SITE_URL}/invite/${handle}` : null;
 
   return (
     <>

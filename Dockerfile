@@ -57,9 +57,15 @@ ENV NODE_ENV=production
 ARG NEXT_PUBLIC_MEDUSA_BACKEND_URL=https://pokenic-backend-tltfm.ondigitalocean.app
 ARG NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY=pk_86273b7c12ca5b2fd838bf1c1cf6427dbb6ef41c723d8af1efa20db183517534
 ARG NEXT_PUBLIC_MEDIA_HOST=pokenic-media.sgp1.cdn.digitaloceanspaces.com
+# Canonical public origin — baked into the client bundle so invite links (and
+# metadataBase/sitemap) resolve to the real host, not the localhost dev default.
+# Set to the live DO host; on a custom-domain move update this ARG + the .do
+# spec + the backend's MERCUR_STOREFRONT_URL together.
+ARG NEXT_PUBLIC_SITE_URL=https://pokenic-storefront-ijfiu.ondigitalocean.app
 ENV NEXT_PUBLIC_MEDUSA_BACKEND_URL=$NEXT_PUBLIC_MEDUSA_BACKEND_URL
 ENV NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY=$NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY
 ENV NEXT_PUBLIC_MEDIA_HOST=$NEXT_PUBLIC_MEDIA_HOST
+ENV NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL
 
 # Next.js collects completely anonymous telemetry data about general usage.
 # Learn more here: https://nextjs.org/telemetry

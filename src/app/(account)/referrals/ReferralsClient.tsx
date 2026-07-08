@@ -8,13 +8,9 @@ import { Pill } from '@/components/ui/pill';
 export default function ReferralsClient({ inviteUrl }: { inviteUrl: string }) {
   const [copied, setCopied] = useState(false);
 
-  const absoluteUrl = /^https?:\/\//i.test(inviteUrl)
-    ? inviteUrl
-    : `https://${inviteUrl}`;
-
   async function copy() {
     try {
-      await navigator.clipboard.writeText(absoluteUrl);
+      await navigator.clipboard.writeText(inviteUrl);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
@@ -28,7 +24,7 @@ export default function ReferralsClient({ inviteUrl }: { inviteUrl: string }) {
         await navigator.share({
           title: 'Pokenic',
           text: 'Rip packs, pull real graded cards — join me on Pokenic:',
-          url: absoluteUrl,
+          url: inviteUrl,
         });
       } else {
         await copy();

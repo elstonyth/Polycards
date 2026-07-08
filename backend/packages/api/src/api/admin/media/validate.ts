@@ -20,7 +20,8 @@ export type ImageKind =
   | 'pc-card'
   | 'frame'
   | 'avatar'
-  | 'avatar-frame';
+  | 'avatar-frame'
+  | 'delivery';
 
 export interface ImageFacts {
   width: number;
@@ -126,6 +127,18 @@ export const IMAGE_RULES = {
       targetRatio: 1,
       aspectTolerance: 0.05,
     },
+    // Proof-of-delivery photo (operator-uploaded, shown to the customer). A real
+    // phone photo in ANY orientation — so the aspect gate is deliberately loose
+    // (tolerance 1.0 admits ~[0,2] ratios: portrait, landscape, 4:3, 16:9). The
+    // security gates (type sniff, byte cap, bomb guard) still apply; the min just
+    // rejects tracking-pixel-sized junk. ponytail: NOT the card 5:7 profile — a
+    // 0.03-tolerance 5:7 gate would reject virtually every real delivery photo.
+    delivery: {
+      minWidth: 256,
+      minHeight: 256,
+      targetRatio: 1,
+      aspectTolerance: 1.0,
+    },
   } satisfies Record<ImageKind, ProfileRule>,
 } as const;
 
@@ -201,7 +214,9 @@ export function validateImage(
             ? 'Profile photo'
             : kind === 'avatar-frame' || kind === 'frame'
               ? 'Frame'
-              : 'Sprite';
+              : kind === 'delivery'
+                ? 'Delivery photo'
+                : 'Sprite';
     return fail(
       'too_small',
       `${label} art must be at least ${profile.minWidth}×${profile.minHeight}px.`,
@@ -216,7 +231,9 @@ export function validateImage(
       'bad_aspect',
       kind === 'card' || kind === 'pc-card'
         ? 'Card art must be roughly 5:7 (portrait).'
-        : 'Sprite/pack art must be roughly square (1:1).',
+        : kind === 'delivery'
+          ? 'Delivery photo is too stretched — use a normal photo, not a panorama.'
+          : 'Sprite/pack art must be roughly square (1:1).',
     );
   }
 

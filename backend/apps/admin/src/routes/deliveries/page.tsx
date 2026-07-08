@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState, type ChangeEvent } from 'react';
 import {
   Container,
   Heading,
@@ -7,13 +7,18 @@ import {
   Button,
   Select,
   Input,
+  Label,
   FocusModal,
   StatusBadge,
   toast,
 } from '@medusajs/ui';
-import { TruckFast } from '@medusajs/icons';
+import { TruckFast, XMark } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
-import { useDeliveryOrders, useUpdateDeliveryOrder } from '../../lib/queries';
+import {
+  useDeliveryOrders,
+  useUpdateDeliveryOrder,
+  useUploadImage,
+} from '../../lib/queries';
 import type { AdminDeliveryOrder, DeliveryStatus } from '../../lib/admin-rest';
 import { resolveImageUrl } from '../../lib/image-url';
 import { Pager } from '../../components/Pager';
@@ -55,15 +60,39 @@ const DeliveriesPage = () => {
   const { data, isError } = useDeliveryOrders(filter, page);
   const orders = data?.orders ?? null;
   const update = useUpdateDeliveryOrder();
+  const uploadImg = useUploadImage();
   const [detail, setDetail] = useState<AdminDeliveryOrder | null>(null);
   const [nextStatus, setNextStatus] = useState<DeliveryStatus>('packing');
   const [tracking, setTracking] = useState('');
+  const [proofImages, setProofImages] = useState<string[]>([]);
+  const proofRef = useRef<HTMLInputElement>(null);
+  const uploading = uploadImg.isPending;
 
   const openDetail = (o: AdminDeliveryOrder) => {
     setDetail(o);
     setNextStatus(o.status);
     setTracking(o.tracking_number ?? '');
+    setProofImages(o.proof_images ?? []);
   };
+
+  // Upload each picked file to /admin/media (kind 'delivery'; server validates)
+  // and append the returned URLs. One failure doesn't drop the others.
+  const handleProofFiles = async (e: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    if (proofRef.current) proofRef.current.value = '';
+    if (files.length === 0) return;
+    for (const file of files) {
+      try {
+        const url = await uploadImg.mutateAsync({ file, kind: 'delivery' });
+        setProofImages((prev) => [...prev, url]);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : String(err));
+      }
+    }
+  };
+
+  const removeProof = (url: string) =>
+    setProofImages((prev) => prev.filter((u) => u !== url));
 
   const save = async () => {
     if (!detail) return;
@@ -72,6 +101,7 @@ const DeliveriesPage = () => {
         id: detail.id,
         status: nextStatus !== detail.status ? nextStatus : undefined,
         tracking_number: tracking.trim() || null,
+        proof_images: proofImages,
       });
       toast.success('Delivery updated');
       setDetail(null);
@@ -165,7 +195,9 @@ const DeliveriesPage = () => {
                           it.card ? (
                             <img
                               key={it.pull_id}
-                              src={resolveImageUrl(it.card.image)}
+                              src={resolveImageUrl(
+                                it.card.slab_image || it.card.image,
+                              )}
                               alt={it.card.name}
                               className="h-8 w-6 rounded object-contain"
                             />
@@ -229,7 +261,7 @@ const DeliveriesPage = () => {
                 size="small"
                 onClick={save}
                 isLoading={update.isPending}
-                disabled={trackingRequired}
+                disabled={trackingRequired || uploading}
               >
                 Save
               </Button>
@@ -293,12 +325,63 @@ const DeliveriesPage = () => {
                     </Text>
                   )}
                 </div>
+
+                {/* Proof-of-delivery photos — operator uploads, customer sees. */}
+                <div className="flex flex-col gap-y-2">
+                  <Label size="small" weight="plus" htmlFor="delivery-proof">
+                    Delivery photos
+                  </Label>
+                  <input
+                    ref={proofRef}
+                    id="delivery-proof"
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={handleProofFiles}
+                  />
+                  <div>
+                    <Button
+                      size="small"
+                      variant="secondary"
+                      type="button"
+                      onClick={() => proofRef.current?.click()}
+                      isLoading={uploading}
+                    >
+                      Upload photos
+                    </Button>
+                  </div>
+                  {proofImages.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {proofImages.map((url) => (
+                        <div key={url} className="relative">
+                          <img
+                            src={resolveImageUrl(url)}
+                            alt="Delivery proof"
+                            className="border-ui-border-base h-20 w-20 rounded border object-cover"
+                          />
+                          <button
+                            type="button"
+                            aria-label="Remove photo"
+                            onClick={() => removeProof(url)}
+                            className="bg-ui-bg-base border-ui-border-base text-ui-fg-subtle hover:text-ui-fg-base absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full border shadow"
+                          >
+                            <XMark className="h-3 w-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 <div className="flex flex-wrap gap-2">
                   {detail.items.map((it) =>
                     it.card ? (
                       <img
                         key={it.pull_id}
-                        src={resolveImageUrl(it.card.image)}
+                        src={resolveImageUrl(
+                          it.card.slab_image || it.card.image,
+                        )}
                         alt={it.card.name}
                         className="h-24 w-16 rounded object-contain"
                       />

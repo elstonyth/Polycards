@@ -2336,16 +2336,33 @@ class PacksModuleService extends MedusaService({
   // of paging the whole ledger to Node (audit 2026-07-07 #5b). Emitted as
   // synthetic {reason, amount} rows so economy.ts's unit-tested ledgerTotals
   // fold (incl. its unknown-reason loud throw) keeps shaping the report.
+  // Optional half-open [from, to) ISO window scopes the totals to a period
+  // (Daily/Weekly/…); both omitted = all time (the original behavior). Served
+  // by the indexed created_at column.
   @InjectManager()
   async ledgerReasonTotals(
+    from?: string,
+    to?: string,
     @MedusaContext() sharedContext: Context = {},
   ): Promise<Array<{ reason: string; amount: number }>> {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
-    const rows = await em.execute<{ reason: string; cents: string }[]>(
+    const params: unknown[] = [];
+    let sql =
       'SELECT reason, COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS cents ' +
-        'FROM credit_transaction WHERE deleted_at IS NULL GROUP BY reason',
-      [],
+      'FROM credit_transaction WHERE deleted_at IS NULL';
+    if (from) {
+      sql += ' AND created_at >= ?::timestamptz';
+      params.push(from);
+    }
+    if (to) {
+      sql += ' AND created_at < ?::timestamptz';
+      params.push(to);
+    }
+    sql += ' GROUP BY reason';
+    const rows = await em.execute<{ reason: string; cents: string }[]>(
+      sql,
+      params,
     );
     return rows.map((r) => ({ reason: r.reason, amount: Number(r.cents) / 100 }));
   }

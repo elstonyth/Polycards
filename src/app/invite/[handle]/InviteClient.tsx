@@ -1,11 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { openAuth } from '@/components/AuthButton';
 import { applyReferral } from '@/lib/actions/referral';
+import { REF_COOKIE } from '@/lib/referral-cookie';
 
 type State =
   | { kind: 'idle' }
@@ -18,16 +19,49 @@ export default function InviteClient({ handle }: { handle: string }) {
   const router = useRouter();
   const [state, setState] = useState<State>({ kind: 'idle' });
 
-  async function join() {
+  const join = useCallback(async () => {
     setState({ kind: 'busy' });
     const r = await applyReferral(handle);
     if (r.ok) {
+      // Attributed — drop the fallback cookie so the account-landing claim
+      // (ReferralCookieClaim) doesn't re-fire a redundant apply.
+      document.cookie = `${REF_COOKIE}=; path=/; max-age=0; samesite=lax`;
       setState({ kind: 'done' });
       router.refresh();
     } else {
       setState({ kind: 'error', msg: r.error });
     }
-  }
+  }, [handle, router]);
+
+  // Persist the sponsor for a guest so they're still attributed if they sign up
+  // elsewhere and never return to this page (belt-and-suspenders — see
+  // ReferralCookieClaim). Logged-in visitors go through the button/auto-apply.
+  useEffect(() => {
+    if (isLoading || customer) return;
+    document.cookie = `${REF_COOKIE}=${encodeURIComponent(handle)}; path=/; max-age=${60 * 60 * 24 * 30}; samesite=lax`;
+  }, [isLoading, customer, handle]);
+
+  // Auto-attribute on the guest → authenticated transition: a guest who signs up
+  // via the modal on THIS page becomes `customer` without a second click. Fire
+  // once, only on the transition (never for someone already logged in on mount —
+  // they keep the manual button, avoiding an unprompted "already has a sponsor").
+  const sawGuest = useRef(false);
+  const autoApplied = useRef(false);
+  useEffect(() => {
+    if (isLoading) return;
+    if (!customer) {
+      sawGuest.current = true;
+      return;
+    }
+    if (sawGuest.current && !autoApplied.current) {
+      autoApplied.current = true;
+      // Defer past the effect's synchronous phase — join() sets a 'busy' state
+      // immediately, and setState during an effect body triggers a cascading
+      // render (react-hooks/set-state-in-effect). A microtask runs it right
+      // after, behaviourally identical.
+      queueMicrotask(() => void join());
+    }
+  }, [isLoading, customer, join]);
 
   return (
     <main className="flex min-h-[60vh] items-center justify-center px-fluid">

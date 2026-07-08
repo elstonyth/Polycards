@@ -102,8 +102,18 @@ export const usePulls = (page = 0): UseQueryResult<PullsResponse> =>
     placeholderData: keepPreviousData,
   });
 
-export const useEconomy = (): UseQueryResult<EconomyReport> =>
-  useQuery({ queryKey: qk.economy, queryFn: getEconomyReport });
+// from/to are ISO strings for the period window (undefined = all time). Appended
+// to the key inline so qk.economy stays a flat prefix (query-keys.test.ts).
+// keepPreviousData avoids a skeleton flash when switching periods.
+export const useEconomy = (
+  from?: string,
+  to?: string,
+): UseQueryResult<EconomyReport> =>
+  useQuery({
+    queryKey: [...qk.economy, from ?? 'all', to ?? 'all'],
+    queryFn: () => getEconomyReport(from, to),
+    placeholderData: keepPreviousData,
+  });
 
 export const usePackOdds = (slug: string): UseQueryResult<PackOddsResponse> =>
   useQuery({
@@ -442,7 +452,7 @@ export const useUploadImage = () =>
   useMutation({
     mutationFn: (vars: {
       file: File;
-      kind: 'pack' | 'card' | 'sprite' | 'frame' | 'avatar-frame';
+      kind: 'pack' | 'card' | 'sprite' | 'frame' | 'avatar-frame' | 'delivery';
     }) => uploadImage(vars.file, vars.kind),
   });
 
@@ -453,10 +463,12 @@ export const useUpdateDeliveryOrder = () => {
       id: string;
       status?: DeliveryStatus;
       tracking_number?: string | null;
+      proof_images?: string[];
     }) =>
       updateDeliveryOrder(vars.id, {
         status: vars.status,
         tracking_number: vars.tracking_number,
+        proof_images: vars.proof_images,
       }),
     // Status filters + pages vary, so drop the whole delivery-orders namespace.
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.deliveryOrdersKey }),

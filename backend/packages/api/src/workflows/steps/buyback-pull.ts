@@ -68,10 +68,12 @@ export const buybackPullStep = createStep(
       );
     }
     if (pull.status !== 'vaulted') {
-      throw new MedusaError(
-        MedusaError.Types.NOT_ALLOWED,
-        'This card was already sold back.',
-      );
+      // Status-accurate copy: a card that's out for delivery isn't "sold back".
+      const reason =
+        pull.status === 'delivering' || pull.status === 'delivered'
+          ? 'This card is out for delivery and can no longer be sold back — cancel the delivery first.'
+          : 'This card was already sold back.';
+      throw new MedusaError(MedusaError.Types.NOT_ALLOWED, reason);
     }
     // C1: reward prizes are not sellable — guard before listCards so the
     // sentinel card_id (product handle) never reaches the card lookup.

@@ -23,6 +23,11 @@ export const DeliveryOrder = model
     ship_phone: model.text().nullable(),
     // Operator-entered (manual) — no carrier integration in v1.
     tracking_number: model.text().nullable(),
+    // Proof-of-delivery photos (operator-uploaded /admin/media URLs). Stored as a
+    // string[] — visible to the customer on their orders page. Array (not object)
+    // so an update replaces it wholesale (Medusa's assign merges POJOs but
+    // replaces arrays), keeping the remove-all path a clean clear to [].
+    proof_images: model.json().nullable(),
     // Reserved for a future "price the shipping" pass; never set in v1.
     shipping_fee: model.bigNumber().nullable(),
     shipped_at: model.dateTime().nullable(),

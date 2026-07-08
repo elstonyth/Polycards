@@ -9,10 +9,21 @@ import {
   displayMarketPrice,
 } from '../../../modules/packs/pricing';
 
-// GET /admin/economy — the operator's money report: lifetime ledger totals
-// (revenue / payouts / top-ups / adjustments / net), the outstanding vault
-// liability (FMV of every vaulted pull), and a per-active-pack theoretical
-// RTP table from the CURRENT odds × FMVs. Reads only; pure math lives in
+// Accept an ISO date string only when it parses; anything else → undefined (no
+// bound). ponytail: invalid input silently degrades to "no filter" — the admin
+// UI only ever sends valid ISO, and the SQL param is parameterized regardless.
+function isoOrUndefined(v: unknown): string | undefined {
+  return typeof v === 'string' && v.length > 0 && !Number.isNaN(Date.parse(v))
+    ? v
+    : undefined;
+}
+
+// GET /admin/economy — the operator's money report: ledger totals
+// (revenue / payouts / top-ups / adjustments / net) for an optional [from, to)
+// period window (omit both = all time), the outstanding vault liability (FMV of
+// every vaulted pull), and a per-active-pack theoretical RTP table from the
+// CURRENT odds × FMVs. Only the ledger totals are period-scoped; liability and
+// RTP are current-state snapshots. Reads only; pure math lives in
 // modules/packs/economy.ts.
 export async function GET(
   req: MedusaRequest,
@@ -20,11 +31,13 @@ export async function GET(
 ): Promise<void> {
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
 
-  // Lifetime ledger totals — one GROUP BY in SQL instead of paging the whole
-  // ledger to Node (audit 2026-07-07 #5b). Synthetic per-reason rows keep
-  // feeding the same unit-tested ledgerTotals fold (incl. its loud throw on an
-  // unrecognized reason).
-  const totals = ledgerTotals(await packs.ledgerReasonTotals());
+  // Ledger totals — one GROUP BY in SQL instead of paging the whole ledger to
+  // Node (audit 2026-07-07 #5b), optionally scoped to a [from, to) date window.
+  // Synthetic per-reason rows keep feeding the same unit-tested ledgerTotals
+  // fold (incl. its loud throw on an unrecognized reason).
+  const from = isoOrUndefined(req.query.from);
+  const to = isoOrUndefined(req.query.to);
+  const totals = ledgerTotals(await packs.ledgerReasonTotals(from, to));
 
   // Vault liability: FMV of every card customers still hold, summed in SQL
   // (audit 2026-07-07 #5b) instead of paging every vaulted pull into Node.

@@ -14,6 +14,7 @@ export type UpdateDeliveryOrderInput = {
   order_id: string;
   status?: DeliveryStatus;
   tracking_number?: string | null;
+  proof_images?: string[];
 };
 
 export type UpdateDeliveryOrderResult = {
@@ -59,9 +60,17 @@ export const updateDeliveryOrderStep = createStep(
 
     // Tracking-only update (no status change) — just patch + return.
     if (!input.status || input.status === order.status) {
-      await packs.updateDeliveryOrders([
-        { id: order.id, tracking_number: nextTracking },
-      ]);
+      // Record<string, unknown> so the json proof_images column (DML-typed as
+      // Record) accepts our string[]. Array replaces wholesale (Medusa assign
+      // merges POJOs, replaces arrays), so [] cleanly clears every photo.
+      const trackingPatch: Record<string, unknown> = {
+        id: order.id,
+        tracking_number: nextTracking,
+      };
+      if (input.proof_images !== undefined) {
+        trackingPatch.proof_images = input.proof_images;
+      }
+      await packs.updateDeliveryOrders([trackingPatch]);
       return new StepResponse(
         { order_id: order.id, status: order.status as DeliveryStatus },
         {
@@ -132,6 +141,7 @@ export const updateDeliveryOrderStep = createStep(
       status: input.status,
       tracking_number: nextTracking,
     };
+    if (input.proof_images !== undefined) patch.proof_images = input.proof_images;
     if (input.status === 'shipped') patch.shipped_at = now;
     if (input.status === 'delivered') patch.delivered_at = now;
 

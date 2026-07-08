@@ -9,6 +9,8 @@ export type EditRow = {
   card_id: string;
   name: string;
   image: string;
+  /** Baked graded-slab composite (null for raw cards) — thumbnail prefers it. */
+  slab_image: string | null;
   rarity: string;
   market_value: number;
   stock: number | null;
@@ -27,6 +29,7 @@ export const mapOddsToRows = (odds: OddsRow[]): EditRow[] =>
     card_id: o.card_id,
     name: o.name,
     image: o.image,
+    slab_image: o.slab_image,
     rarity: o.rarity,
     market_value: o.market_value,
     stock: o.stock,

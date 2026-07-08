@@ -60,6 +60,8 @@ export interface AdminCard {
   grade: string;
   market_value: number;
   image: string;
+  /** Baked graded-slab composite (null for raw cards) — thumbnails prefer it. */
+  slab_image: string | null;
   /** Stored sale price; `null` means "use FMV (market_value)". */
   price: number | null;
   for_sale: boolean;
@@ -127,6 +129,8 @@ export interface OddsRow {
   card_id: string;
   name: string;
   image: string;
+  /** Baked graded-slab composite (null for raw cards) — thumbnails prefer it. */
+  slab_image: string | null;
   /** The card's tier IN THIS PACK (PackOdds.rarity) — editable per pack. */
   rarity: string;
   market_value: number;

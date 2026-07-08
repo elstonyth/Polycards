@@ -186,6 +186,10 @@ function PackTile({ pack, chase }: { pack: Pack; chase: PackCard | null }) {
           alt={pack.name}
           width={112}
           height={112}
+          // Pack art is operator-entered and can live on any host (not in
+          // next.config remotePatterns) — bypass the optimizer like the detail
+          // hero does, else /_next/image 400s and the thumbnail breaks.
+          unoptimized
           className="h-full w-auto object-contain"
         />
         {soldOut ? (

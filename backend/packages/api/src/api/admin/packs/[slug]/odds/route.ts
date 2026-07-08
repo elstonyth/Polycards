@@ -23,6 +23,7 @@ type OddsRow = {
   card_id: string;
   name: string;
   image: string;
+  slab_image: string | null;
   rarity: string;
   market_value: number;
   // Available physical units (null = untracked/infinite). Display-only —
@@ -83,6 +84,7 @@ export async function GET(
       card_id: card.handle,
       name: card.name,
       image: card.image,
+      slab_image: card.slab_image ?? null,
       rarity: o.rarity ?? 'Common',
       market_value: displayMarketPrice(toMoney(card.market_value), fx, 1),
       stock: stockByHandle.get(card.handle) ?? null,

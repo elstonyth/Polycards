@@ -14,6 +14,9 @@ type DeliveryOrderRow = {
   ship_country_code: string;
   ship_phone: string | null;
   tracking_number: string | null;
+  // Stored via model.json(), so the DML types it as Record<string, unknown> |
+  // null; it actually holds a string[]. Coerced with Array.isArray at read.
+  proof_images: unknown;
   shipped_at: Date | null;
   delivered_at: Date | null;
   created_at: Date;
@@ -65,6 +68,9 @@ export async function serializeDeliveryOrders(
       phone: o.ship_phone,
     },
     tracking_number: o.tracking_number,
+    proof_images: Array.isArray(o.proof_images)
+      ? (o.proof_images as string[])
+      : [],
     shipped_at: o.shipped_at,
     delivered_at: o.delivered_at,
     created_at: o.created_at,

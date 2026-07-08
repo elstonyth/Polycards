@@ -139,10 +139,19 @@ async function main() {
     console.log('Malaysia region already exists', myRegion.id);
   }
 
-  // 4) Delete every non-MYR region (Europe, United States).
+  // 4) Delete every non-MYR region (Europe, United States). Resilient: an FK
+  //    from an existing order would otherwise abort the whole run, so each
+  //    delete is caught — a region that can't be removed cleanly is left in
+  //    place (the storefront default is already MYR either way).
   for (const r of regions.filter((r) => r.currency_code !== 'myr')) {
-    await api(`/admin/regions/${r.id}`, { method: 'DELETE' });
-    console.log(`✓ deleted region "${r.name}" (${r.currency_code})`);
+    try {
+      await api(`/admin/regions/${r.id}`, { method: 'DELETE' });
+      console.log(`✓ deleted region "${r.name}" (${r.currency_code})`);
+    } catch (e) {
+      console.warn(
+        `! kept region "${r.name}" (${r.currency_code}) — delete failed: ${e.message}`,
+      );
+    }
   }
 
   // 5) Store → MYR only + rename to Pokenic. Safe now: no region/price uses eur/usd.
@@ -155,7 +164,7 @@ async function main() {
   });
   console.log('✓ store renamed "Pokenic", currencies = [myr]');
 
-  // 6) Malaysia tax region.
+  // 6) Malaysia tax region + remove the stock EU/US tax regions.
   const { tax_regions } = await api('/admin/tax-regions?limit=100');
   if (!tax_regions.some((t) => t.country_code === 'my')) {
     await api('/admin/tax-regions', {
@@ -166,8 +175,68 @@ async function main() {
   } else {
     console.log('Malaysia tax region already exists');
   }
+  for (const t of tax_regions.filter(
+    (t) => (t.country_code || '').toLowerCase() !== 'my',
+  )) {
+    try {
+      await api(`/admin/tax-regions/${t.id}`, { method: 'DELETE' });
+      console.log(`✓ deleted tax region "${t.country_code}"`);
+    } catch (e) {
+      console.warn(
+        `! kept tax region "${t.country_code}" — delete failed: ${e.message}`,
+      );
+    }
+  }
 
-  console.log('\nDONE — refresh the admin (Settings → Marketplace / Regions).');
+  // 7) Rename the default "European Warehouse" stock location → "Malaysia
+  //    Warehouse". This is Medusa's stock-seed name and is what surfaces in
+  //    admin Settings → Locations & Shipping and the marketplace "Default
+  //    location" card (no storefront code renders it). Prod has a single
+  //    location, so renaming anything not already "Malaysia Warehouse" is safe.
+  const { stock_locations } = await api(
+    '/admin/stock-locations?limit=100&fields=id,name',
+  );
+  for (const loc of (stock_locations || []).filter(
+    (l) => l.name !== 'Malaysia Warehouse',
+  )) {
+    try {
+      await api(`/admin/stock-locations/${loc.id}`, {
+        method: 'POST',
+        body: JSON.stringify({ name: 'Malaysia Warehouse' }),
+      });
+      console.log(
+        `✓ renamed stock location "${loc.name}" → "Malaysia Warehouse"`,
+      );
+    } catch (e) {
+      console.warn(
+        `! could not rename stock location "${loc.name}": ${e.message}`,
+      );
+    }
+  }
+
+  // 8) House seller (Mercur) currency → myr. The House seller was created before
+  //    PR #54 with the Mercur default 'usd', and the seed only sets the currency
+  //    on create — so an existing seller row keeps 'usd' forever without this.
+  try {
+    const { sellers } = await api(
+      '/admin/sellers?limit=100&fields=id,name,handle,currency_code',
+    );
+    for (const s of (sellers || []).filter(
+      (s) => (s.currency_code || '').toLowerCase() !== 'myr',
+    )) {
+      await api(`/admin/sellers/${s.id}`, {
+        method: 'POST',
+        body: JSON.stringify({ currency_code: 'myr' }),
+      });
+      console.log(`✓ seller "${s.name}" currency → myr`);
+    }
+  } catch (e) {
+    console.warn(`! could not update seller currency: ${e.message}`);
+  }
+
+  console.log(
+    '\nDONE — refresh the admin (Settings → Marketplace / Regions / Tax Regions / Locations).',
+  );
 }
 
 main().catch((e) => {

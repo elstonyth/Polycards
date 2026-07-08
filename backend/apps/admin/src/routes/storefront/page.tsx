@@ -18,6 +18,7 @@ import {
 } from '../../lib/queries';
 import { validateImageFile } from '../../lib/image-validation';
 import { resolveImageUrl } from '../../lib/image-url';
+import { FxCard } from './FxCard';
 
 // ─── AI frame-prompt templates ───────────────────────────────────────────────
 // Paste into any image model (Gemini, GPT, Midjourney …). Every template
@@ -138,6 +139,7 @@ const StorefrontPage = () => {
   };
 
   return (
+    <div className="flex flex-col gap-y-3">
     <Container className="divide-y p-0">
       <div className="px-6 py-4">
         <Heading level="h1">Storefront</Heading>
@@ -277,6 +279,8 @@ const StorefrontPage = () => {
         </div>
       )}
     </Container>
+    <FxCard />
+    </div>
   );
 };
 

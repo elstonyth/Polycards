@@ -377,7 +377,7 @@ const PackOddsEditorPage = () => {
                     <Table.Cell>
                       <div className="flex items-center gap-3">
                         <img
-                          src={resolveImageUrl(r.image)}
+                          src={resolveImageUrl(r.slab_image || r.image)}
                           alt=""
                           className="h-10 w-8 shrink-0 rounded object-contain"
                         />
@@ -599,7 +599,7 @@ const PackOddsEditorPage = () => {
                         onCheckedChange={() => toggleCard(c.handle)}
                       />
                       <img
-                        src={resolveImageUrl(c.image)}
+                        src={resolveImageUrl(c.slab_image || c.image)}
                         alt=""
                         className="h-9 w-7 shrink-0 rounded object-contain"
                       />

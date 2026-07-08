@@ -22,7 +22,7 @@ async function errorMessage(res: Response): Promise<string> {
 // profile (pack ≈ square, card ≈ 5:7).
 export async function uploadImage(
   file: File,
-  kind: 'pack' | 'card' | 'sprite' | 'frame' | 'avatar-frame',
+  kind: 'pack' | 'card' | 'sprite' | 'frame' | 'avatar-frame' | 'delivery',
 ): Promise<string> {
   const body = new FormData();
   body.append('files', file);
@@ -330,8 +330,17 @@ export interface EconomyReport {
   }[];
 }
 
-export async function getEconomyReport(): Promise<EconomyReport> {
-  return getJson<EconomyReport>('/admin/economy');
+// Optional [from, to) ISO window scopes the ledger totals to a period; omit
+// both for all-time (the default). Liability + RTP are always current-state.
+export async function getEconomyReport(
+  from?: string,
+  to?: string,
+): Promise<EconomyReport> {
+  const qs = new URLSearchParams();
+  if (from) qs.set('from', from);
+  if (to) qs.set('to', to);
+  const q = qs.toString();
+  return getJson<EconomyReport>(`/admin/economy${q ? `?${q}` : ''}`);
 }
 
 // PriceCharting proxies (the API token lives server-side only). A 503 from the
@@ -430,7 +439,12 @@ export type DeliveryStatus =
 
 export interface AdminDeliveryItem {
   pull_id: string;
-  card: { handle: string; name: string; image: string } | null;
+  card: {
+    handle: string;
+    name: string;
+    image: string;
+    slab_image: string | null;
+  } | null;
 }
 export interface AdminDeliveryOrder {
   id: string;
@@ -448,6 +462,7 @@ export interface AdminDeliveryOrder {
     phone: string | null;
   };
   tracking_number: string | null;
+  proof_images: string[];
   shipped_at: string | null;
   delivered_at: string | null;
   created_at: string;
@@ -485,7 +500,11 @@ export async function getDeliveryOrder(
 
 export async function updateDeliveryOrder(
   id: string,
-  body: { status?: DeliveryStatus; tracking_number?: string | null },
+  body: {
+    status?: DeliveryStatus;
+    tracking_number?: string | null;
+    proof_images?: string[];
+  },
 ): Promise<{ order_id: string; status: DeliveryStatus }> {
   const res = await fetch(
     `${__BACKEND_URL__}/admin/delivery-orders/${encodeURIComponent(id)}`,

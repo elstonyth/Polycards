@@ -33,6 +33,9 @@ export function toAdminCardDto(card: AdminCardLike, fxRate?: number) {
     grade: card.grade,
     market_value: toMoney(card.market_value),
     image: card.image,
+    // Baked graded-slab composite (null for raw cards) — the admin thumbnails
+    // prefer it over the bare photo so graded cards render framed.
+    slab_image: card.slab_image ?? null,
     price: card.price === null ? null : toMoney(card.price),
     for_sale: card.for_sale,
     pokemon_dex: card.pokemon_dex ?? null,

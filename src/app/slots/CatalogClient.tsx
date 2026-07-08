@@ -65,6 +65,9 @@ function PackCard({ pack, icon }: { pack: Pack; icon: string }) {
           alt={pack.name}
           width={205}
           height={360}
+          // Operator-entered pack art can be on any host — bypass the optimizer
+          // allowlist (matches the detail hero), else the thumbnail 400s.
+          unoptimized
           className={cn(
             // hover zoom measured on live /claw: art scales to 1.092 over 0.7s on
             // Tailwind's default curve (0.4,0,0.2,1) — live has no lift/translate
@@ -136,6 +139,7 @@ function PackRow({
           alt={pack.name}
           width={205}
           height={360}
+          unoptimized
           className={cn(
             'h-16 w-auto object-contain drop-shadow-[0_6px_14px_rgba(0,0,0,0.5)]',
             oos && 'grayscale',

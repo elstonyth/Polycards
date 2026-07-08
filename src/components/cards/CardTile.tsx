@@ -49,10 +49,10 @@ export function CardTile({
           </span>
         </span>
       </span>
-      <span className="line-clamp-2 min-h-[2em] text-[12px] font-medium leading-tight text-white/80">
+      <span className="line-clamp-2 min-h-[2.5em] text-[12px] font-medium leading-tight text-white/80">
         {card.name}
       </span>
-      <span className="text-[13px] font-bold tabular-nums text-white">
+      <span className="whitespace-nowrap text-[13px] font-bold tabular-nums text-white">
         {card.value}{' '}
         <span className="text-[11px] font-normal text-white/50">est.</span>
       </span>

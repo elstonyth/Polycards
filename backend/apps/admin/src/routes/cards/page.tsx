@@ -51,6 +51,9 @@ type FormState = {
   grade: string;
   market_value: string;
   image: string;
+  // Baked graded-slab composite (read-only here) — the thumbnail prefers it so
+  // graded cards render framed; edits still target the bare `image`.
+  slab_image: string | null;
   price: string;
   for_sale: boolean;
   pokemon_dex: number | null;
@@ -78,6 +81,7 @@ const formFromCard = (c: AdminCard): FormState => ({
   // no markup); converted back to USD on save.
   market_value: String(c.priceBreakdown.marketMyr),
   image: c.image,
+  slab_image: c.slab_image,
   // null price = "use FMV" → empty field (preserved on save as undefined).
   price: c.price === null ? '' : String(c.price),
   for_sale: c.for_sale,
@@ -321,7 +325,12 @@ const GachaCardsPage = () => {
           <Text className="text-ui-fg-subtle">{t('cards.list.empty')}</Text>
         </div>
       ) : (
-        <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Cards table">
+        <div
+          className="overflow-x-auto"
+          tabIndex={0}
+          role="region"
+          aria-label="Cards table"
+        >
           <Table>
             <Table.Header>
               <Table.Row>
@@ -356,7 +365,7 @@ const GachaCardsPage = () => {
                   <Table.Cell>
                     <div className="flex items-center gap-3">
                       <img
-                        src={resolveImageUrl(c.image)}
+                        src={resolveImageUrl(c.slab_image || c.image)}
                         alt=""
                         className="h-10 w-8 shrink-0 rounded object-contain"
                       />
@@ -383,7 +392,7 @@ const GachaCardsPage = () => {
                     )}
                   </Table.Cell>
                   <Table.Cell
-                    title="Negative = units owed to winners; 0 = buyback-only; ∞ = untracked"
+                    title="Negative = units owed to winners; 0 = no physical stock (winners still keep it in vault — buyback fulfills; restock to ship); ∞ = untracked"
                     className={
                       // Negative = units OWED to winners (wins keep counting
                       // below 0 by design) — red beats orange for "act now".
@@ -399,7 +408,7 @@ const GachaCardsPage = () => {
                       <span className="ml-1 text-xs">owed</span>
                     )}
                     {c.stock === 0 && (
-                      <span className="ml-1 text-xs">buyback-only</span>
+                      <span className="ml-1 text-xs">restock to ship</span>
                     )}
                   </Table.Cell>
                   <Table.Cell>
@@ -485,9 +494,9 @@ const GachaCardsPage = () => {
                     {t('cards.form.image')}
                   </Label>
                   <div className="flex items-center gap-4">
-                    {form.image ? (
+                    {form.slab_image || form.image ? (
                       <img
-                        src={resolveImageUrl(form.image)}
+                        src={resolveImageUrl(form.slab_image || form.image)}
                         alt=""
                         className="border-ui-border-base h-28 w-20 shrink-0 rounded border object-contain"
                       />

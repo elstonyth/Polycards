@@ -322,6 +322,7 @@ export default function PackDetailClient({
                           aria-hidden
                           width={205}
                           height={360}
+                          unoptimized
                           className="h-9 w-auto object-contain"
                         />
                         <span className="w-full truncate text-[11px] font-medium leading-tight text-white">

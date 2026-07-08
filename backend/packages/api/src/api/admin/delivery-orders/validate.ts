@@ -8,9 +8,24 @@ const bad = (message: string): never => {
   throw new MedusaError(MedusaError.Types.INVALID_DATA, message);
 };
 
+// Proof-image URLs are rendered in a customer-facing link/thumbnail, so a
+// `javascript:`/`data:` scheme would be stored XSS from admin to customer.
+// Accept only absolute http(s) URLs (what the media pipeline returns) or
+// same-origin root-relative paths (dev static) — reject every other scheme.
+const isSafeMediaUrl = (u: string): boolean => {
+  if (u.startsWith('/') && !u.startsWith('//')) return true;
+  try {
+    const p = new URL(u);
+    return p.protocol === 'http:' || p.protocol === 'https:';
+  } catch {
+    return false;
+  }
+};
+
 export type AdminDeliveryUpdate = {
   status?: DeliveryStatus;
   tracking_number?: string | null;
+  proof_images?: string[];
 };
 
 // Validate the status query filter (?status=). Returns undefined when absent.
@@ -48,8 +63,23 @@ export function coerceDeliveryUpdateBody(raw: unknown): AdminDeliveryUpdate {
         ? b.tracking_number.trim() || null
         : null;
   }
-  if (out.status === undefined && out.tracking_number === undefined) {
-    bad('Provide `status` and/or `tracking_number`.');
+  if (b.proof_images !== undefined) {
+    if (
+      !Array.isArray(b.proof_images) ||
+      b.proof_images.some(
+        (u) => typeof u !== 'string' || !isSafeMediaUrl(u.trim()),
+      )
+    ) {
+      bad('`proof_images` must be an array of http(s) URL strings.');
+    }
+    out.proof_images = (b.proof_images as string[]).map((u) => u.trim());
+  }
+  if (
+    out.status === undefined &&
+    out.tracking_number === undefined &&
+    out.proof_images === undefined
+  ) {
+    bad('Provide `status`, `tracking_number`, and/or `proof_images`.');
   }
   return out;
 }

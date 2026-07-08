@@ -56,6 +56,14 @@ services:
       - key: NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY
         scope: RUN_AND_BUILD_TIME
         value: pk_86273b7c12ca5b2fd838bf1c1cf6427dbb6ef41c723d8af1efa20db183517534
+      # Canonical public origin (invite links, metadataBase, sitemap). Also an
+      # ARG default in the root Dockerfile — App Platform doesn't reliably pass
+      # build-time env, so the Dockerfile default is what actually bakes in.
+      # Set to the live DO host; on a custom-domain move update this + the
+      # Dockerfile ARG + backend MERCUR_STOREFRONT_URL together.
+      - key: NEXT_PUBLIC_SITE_URL
+        scope: RUN_AND_BUILD_TIME
+        value: https://pokenic-storefront-ijfiu.ondigitalocean.app
       # Enforce the CSP. Without this, next.config.ts serves
       # Content-Security-Policy-Report-Only — report-only had a clean run
       # (qa:csp + Sentry), flip assessed safe. GO-LIVE checklist: must be true.

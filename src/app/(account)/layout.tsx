@@ -1,6 +1,7 @@
 import { type ReactNode } from 'react';
 import { redirect } from 'next/navigation';
 import { getCustomer } from '@/lib/data/customer';
+import ReferralCookieClaim from './ReferralCookieClaim';
 
 // Shared shell for the account/wallet pages (URLs stay top-level via the route group).
 // Gated: unauthenticated visitors are bounced home with ?auth=login, which the
@@ -16,6 +17,7 @@ export default async function AccountLayout({
 
   return (
     <div className="mx-auto w-full max-w-2xl px-fluid py-6 lg:max-w-4xl">
+      <ReferralCookieClaim />
       {children}
     </div>
   );
