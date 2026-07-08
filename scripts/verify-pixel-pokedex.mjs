@@ -48,6 +48,13 @@ await page
   .waitForFunction(() => !/\/login/.test(location.pathname), { timeout: 15000 })
   .catch(() => {});
 
+// Nav item must appear in the sidebar (RouteConfig registration), not just be
+// reachable by direct URL — that's what "I don't see it" means.
+const navLink = await page
+  .waitForSelector('a[href$="/pixel-pokemon"]', { timeout: 10000 })
+  .then(() => true)
+  .catch(() => false);
+
 await page.goto(`${ADMIN}/pixel-pokemon`, { waitUntil: 'domcontentloaded' });
 await page
   .waitForFunction(
@@ -75,6 +82,7 @@ await page.screenshot({
 });
 await browser.close();
 
+ok('nav_item_in_sidebar', navLink);
 ok('page_title', dom.hasTitle);
 ok(
   'grid_matches_api',
