@@ -6,6 +6,16 @@ import { spriteGif, spritePng } from '@/lib/mock/pokedex';
 import { TIER_COLOR, type Tier } from '@/lib/price-tier';
 import { cn } from '@/lib/utils';
 
+// Neutral poké-ball outline shown when a sprite can't load (remote showdown gif
+// AND static png both 404, or a custom sprite 404s) — so a cell never renders a
+// broken-image icon. Inline data URI, always available. (Local sprite hosting is
+// the complete fix for remote-sprite flakiness — Spec 2.)
+const POKEBALL_FALLBACK =
+  'data:image/svg+xml,' +
+  encodeURIComponent(
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='42' fill='none' stroke='#6b7280' stroke-width='5'/><line x1='8' y1='50' x2='92' y2='50' stroke='#6b7280' stroke-width='5'/><circle cx='50' cy='50' r='13' fill='#0a0a0c' stroke='#9ca3af' stroke-width='5'/></svg>",
+  );
+
 type PokemonTokenProps = {
   dex: number;
   name: string;
@@ -218,8 +228,16 @@ export function PokemonToken({
         alt={name}
         loading={eager ? 'eager' : 'lazy'}
         onError={() => {
-          if (imageSrc) return; // no sprite fallback for a direct image override
-          setSrc((s) => (s === spritePng(dex) ? s : spritePng(dex)));
+          setSrc((s) => {
+            // A custom image override that 404s has no dex fallback — go straight
+            // to the poké-ball rather than showing a broken-image icon.
+            if (imageSrc)
+              return s === POKEBALL_FALLBACK ? s : POKEBALL_FALLBACK;
+            // Dex sprite chain: showdown gif → static png → poké-ball.
+            if (s === spriteGif(dex)) return spritePng(dex);
+            if (s === spritePng(dex)) return POKEBALL_FALLBACK;
+            return s; // already the poké-ball (a data URI that can't fail)
+          });
         }}
         className={imgClassName}
         style={filter ? { ...imgStyle, filter } : imgStyle}

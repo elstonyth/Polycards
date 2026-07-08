@@ -12,8 +12,11 @@ export const HREEL_WIN_INDEX = 48;
 export const HREEL_STRIP_LEN = 64;
 /** Cells visible across a strip window — a long horizontal reel. */
 export const HREEL_VISIBLE_CELLS = 9;
-/** Decoy sprites repeat from a small pool (real slots reuse a symbol set). */
-const DECOY_POOL = 12;
+/** Decoy sprites: a curated pool of dexes that reliably have animated showdown
+ *  sprites (gen 1–4), so decoy cells never 404 into a broken image on a high or
+ *  missing dex. (The winner uses the real card's sprite; PokemonToken falls back
+ *  to a poké-ball if any sprite fails. Local hosting is the full fix — Spec 2.) */
+const DECOY_DEXES = [1, 4, 7, 25, 6, 9, 3, 143, 94, 130, 448, 197];
 
 export type HReelCell = { dex: number; rarity: Rarity };
 
@@ -72,7 +75,7 @@ export function buildHReelStrip(
   // DIFFERENT flanking Pokémon + tier colors — three independent-looking reels,
   // not one repeated ×3. seed=0 keeps the original single-strip behavior.
   const cells: HReelCell[] = Array.from({ length }, (_, i) => ({
-    dex: ((((i + seed * 4) % DECOY_POOL) * 167 + 13) % POKEDEX_MAX) + 1,
+    dex: DECOY_DEXES[(i + seed * 4) % DECOY_DEXES.length]!,
     rarity: decoyRarity(i + seed),
   }));
   // Winner: real dex, DECOY color (real color applied on settle by ReelStrip).
