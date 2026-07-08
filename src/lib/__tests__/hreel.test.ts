@@ -33,23 +33,40 @@ describe('buildHReelStrip', () => {
   test('pins the winner dex at the win index', () => {
     const s = buildHReelStrip(150, 'Rare', HREEL_STRIP_LEN, HREEL_WIN_INDEX);
     expect(s).toHaveLength(HREEL_STRIP_LEN);
-    expect(s[HREEL_WIN_INDEX].dex).toBe(150);
+    expect(s[HREEL_WIN_INDEX]!.dex).toBe(150);
   });
   test('the winner cell carries a DECOY color, never the real tier (spoiler guard)', () => {
-    const s = buildHReelStrip(150, 'Immortal', HREEL_STRIP_LEN, HREEL_WIN_INDEX);
-    expect(s[HREEL_WIN_INDEX].rarity).toBe(decoyRarity(HREEL_WIN_INDEX));
-    expect(s[HREEL_WIN_INDEX].rarity).not.toBe('Immortal'); // decoyRarity(36) !== Immortal
+    const s = buildHReelStrip(
+      150,
+      'Immortal',
+      HREEL_STRIP_LEN,
+      HREEL_WIN_INDEX,
+    );
+    expect(s[HREEL_WIN_INDEX]!.rarity).toBe(decoyRarity(HREEL_WIN_INDEX));
+    expect(s[HREEL_WIN_INDEX]!.rarity).not.toBe('Immortal'); // decoyRarity(36) !== Immortal
   });
   test('places the gated near-miss tease at winIndex-1', () => {
     const rare = buildHReelStrip(9, 'Rare', HREEL_STRIP_LEN, HREEL_WIN_INDEX);
-    expect(rare[HREEL_WIN_INDEX - 1].rarity).toBe('Mythical'); // one tier up
-    const common = buildHReelStrip(9, 'Common', HREEL_STRIP_LEN, HREEL_WIN_INDEX);
-    expect(common[HREEL_WIN_INDEX - 1].rarity).toBe(decoyRarity(HREEL_WIN_INDEX - 1)); // no faked near-miss
+    expect(rare[HREEL_WIN_INDEX - 1]!.rarity).toBe('Mythical'); // one tier up
+    const common = buildHReelStrip(
+      9,
+      'Common',
+      HREEL_STRIP_LEN,
+      HREEL_WIN_INDEX,
+    );
+    expect(common[HREEL_WIN_INDEX - 1]!.rarity).toBe(
+      decoyRarity(HREEL_WIN_INDEX - 1),
+    ); // no faked near-miss
   });
   test('null / out-of-range winner dex falls back to a valid dex', () => {
     for (const bad of [null, 0, 99999]) {
-      const s = buildHReelStrip(bad, 'Common', HREEL_STRIP_LEN, HREEL_WIN_INDEX);
-      const w = s[HREEL_WIN_INDEX].dex;
+      const s = buildHReelStrip(
+        bad,
+        'Common',
+        HREEL_STRIP_LEN,
+        HREEL_WIN_INDEX,
+      );
+      const w = s[HREEL_WIN_INDEX]!.dex;
       expect(w).toBeGreaterThanOrEqual(1);
       expect(w).toBeLessThanOrEqual(1025);
     }
