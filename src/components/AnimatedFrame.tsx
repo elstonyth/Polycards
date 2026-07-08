@@ -9,7 +9,7 @@ import { FRAME_MOTION } from '@/lib/frame-motion';
  * Animated avatar-frame overlay — a WebGL UV-displacement shader (ported from
  * the tuned Avatar_Frame preview) scrolls multi-octave noise through the frame
  * image so flames lick, water swirls and limbs sweep, anchored (zero motion)
- * at the photo hole. Renders the static <img> until the shader is live and
+ * at the photo hole. Renders the static frame (next/image) until the shader is live and
  * falls back to it permanently under prefers-reduced-motion, when WebGL is
  * unavailable, when the texture fails, or when the shared context budget is
  * spent — the static frame is always correct, animation is pure enhancement.

@@ -4,9 +4,10 @@ import { AnimatedFrame } from '@/components/AnimatedFrame';
 
 /**
  * Framed avatar — profile photo (or an initial-letter circle when there is no
- * photo) with an optional unlocked-frame overlay. Plain <img> (matching the
- * leaderboard's avatar rendering — pfp art and uploaded photos are tiny) so it
- * stays server-and-client safe. The frame layers ABOVE the photo and bleeds
+ * photo) with an optional unlocked-frame overlay. The photo is a plain <img>
+ * (leaderboard-style — pfp art and uploaded photos are tiny); the frame overlay
+ * is next/image (sizes-scoped). Both are server-and-client safe. The frame
+ * layers ABOVE the photo and bleeds
  * ~28% past it so ring-style frames read as surrounding the picture. A null
  * frameSrc renders photo-only — a removed catalog entry must never 404.
  *
