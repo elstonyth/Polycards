@@ -2,22 +2,23 @@
 
 import { useCallback, useEffect, useRef } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { VaultReelColumn } from './VaultReelColumn';
+import type { Rarity } from '@/lib/packs-data';
+import { ReelStrip } from './ReelStrip';
+import { WinningLine } from './WinningLine';
 
 export type ColumnWinner = {
   dex: number | null;
   image?: string;
   name?: string;
-  rarityRgb: string; // rarity color, applied only after settle
+  rarity: Rarity; // real rarity — drives the gated near-miss tease + settle color
+  rarityRgb: string; // real color, applied to the winner cell only after settle
 };
 
 /**
- * N vertical reel columns, each with its own card-frame landing zone (spec
- * decision #34 — the shared amber payline bar is gone). Columns stop staggered
- * L→R (the rAF engine in VaultReelColumn owns per-column timing). `winners ===
- * null` = idle. `onAllSettled` fires once, after the LAST (slowest) column
- * settles — the win-after-stop guarantee (spec §4 bug #1). Remount columns via
- * `spinKey`.
+ * N stacked HORIZONTAL strips (spec Spec-1, D1), one shared vertical winning
+ * line down the center. Strips scroll right→left and stop staggered (the rAF
+ * engine in ReelStrip owns per-strip timing). `winners === null` = idle.
+ * `onAllSettled` fires once, after the LAST strip settles.
  */
 export function SlotReelStack({
   count,
@@ -39,9 +40,6 @@ export function SlotReelStack({
   hideWinners?: boolean;
 }) {
   const settledRef = useRef(0);
-  // Latest onAllSettled in a ref so handleColSettled stays stable across parent
-  // re-renders — otherwise an unmemoized parent callback would churn the column
-  // props (harmless in Phase B at count=1, but compounds for Phase D count>1).
   const onAllSettledRef = useRef(onAllSettled);
   useEffect(() => {
     onAllSettledRef.current = onAllSettled;
@@ -56,49 +54,38 @@ export function SlotReelStack({
   }, [count]);
 
   return (
-    <div className="relative flex items-stretch justify-center gap-3 sm:gap-5">
-      {/* Add/remove a reel animates (spec decision #21): a new column descends &
-          settles in (the Presentation move); a removed column lifts up + fades
-          out. The motion wrapper is keyed by COLUMN INDEX (`col-${i}`), NOT by
-          spinKey — so a re-spin (spinKey change at the same count) never triggers
-          an exit/enter, only an actual reel add/remove does. The inner
-          VaultReelColumn keeps its `${spinKey}-${i}` key so it still remounts and
-          re-runs its rAF timeline per spin. onAllSettled semantics are untouched:
-          the settle counter keys off `count` and only spinning columns report. */}
+    <div className="relative flex flex-col items-center justify-center gap-3 sm:gap-4">
       <AnimatePresence initial={false} mode="popLayout">
         {Array.from({ length: count }, (_, i) => {
           const w = winners ? winners[i] : null;
           return (
             <motion.div
-              key={`col-${i}`}
+              key={`strip-${i}`}
               layout={!reduced}
               initial={
-                reduced ? { opacity: 0 } : { opacity: 0, y: -60, scale: 0.96 }
+                reduced ? { opacity: 0 } : { opacity: 0, x: 60, scale: 0.96 }
               }
-              animate={{ opacity: 1, y: 0, scale: 1 }}
+              animate={{ opacity: 1, x: 0, scale: 1 }}
               exit={
-                reduced ? { opacity: 0 } : { opacity: 0, y: -40, scale: 0.96 }
+                reduced ? { opacity: 0 } : { opacity: 0, x: 40, scale: 0.96 }
               }
               transition={
                 reduced
                   ? { duration: 0 }
-                  : { duration: 0.55, ease: [0.16, 1, 0.3, 1] }
+                  : { duration: 0.5, ease: [0.16, 1, 0.3, 1] }
               }
             >
-              <VaultReelColumn
+              <ReelStrip
                 key={`${spinKey}-${i}`}
                 winnerDex={w ? w.dex : null}
                 winnerImage={w?.image}
                 winnerName={w?.name}
-                // Idle (winners === null) → rarityRgb is irrelevant; the column
-                // shows a looping decoy strip and never glows or settles.
-                rarityRgb={w ? w.rarityRgb : '163, 163, 163'}
+                winnerRarity={w ? w.rarity : 'Common'}
+                winnerRarityRgb={w ? w.rarityRgb : '163, 163, 163'}
                 reduced={reduced}
                 colIndex={i}
                 count={count}
                 cellSize={cellSize}
-                // Only spinning columns report settle — idle columns get no
-                // callback so the settled counter can't advance while idle.
                 onSettled={winners ? handleColSettled : undefined}
                 onWinnerRect={
                   onWinnerRect ? (rect) => onWinnerRect(i, rect) : undefined
@@ -109,6 +96,8 @@ export function SlotReelStack({
           );
         })}
       </AnimatePresence>
+      {/* one shared winning line crossing every strip */}
+      <WinningLine />
     </div>
   );
 }
