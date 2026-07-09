@@ -48,6 +48,9 @@ export default async function SlotSpinPage({
       recentPulls={recentPulls}
       count={count}
       publishedOdds={detail?.publishedOdds ?? null}
+      // The reel flickers ONLY these cards' Pokémon (decoys tied to a reward),
+      // never arbitrary species. Available for real spins too, not just demo.
+      pool={detail?.pool ?? []}
       // ?demo=1 → guest demo mode: the reel samples client-side from the public
       // pool (no backend open, no charge, nothing won). Logged-in visitors are
       // ignored by the client (they always get the real, auth-gated machine).

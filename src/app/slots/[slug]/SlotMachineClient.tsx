@@ -1,7 +1,7 @@
 // src/app/slots/[slug]/SlotMachineClient.tsx
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import { motion } from 'motion/react';
@@ -60,7 +60,12 @@ const POKEBALL_PLACEHOLDER =
   );
 
 type Phase =
-  'idle' | 'resolving' | 'spinning' | 'flood' | 'transform' | 'review';
+  | 'idle'
+  | 'resolving'
+  | 'spinning'
+  | 'flood'
+  | 'transform'
+  | 'review';
 
 /** Highest-rarity tier present in a batch, for the room flood color. */
 function topRarityOf(cards: WonCard[]): Rarity {
@@ -91,6 +96,7 @@ export default function SlotMachineClient({
   recentPulls,
   count,
   publishedOdds,
+  pool = [],
   demoPool = null,
 }: {
   pack: ResolvedPack & Pack;
@@ -98,6 +104,9 @@ export default function SlotMachineClient({
   count: number;
   /** Admin-published PUBLIC odds for the OddsSheet; null = not published. */
   publishedOdds: PublishedOdds | null;
+  /** The pack's full public prize pool — the reel flickers ONLY these cards'
+   *  Pokémon (decoys tied to a reward), never arbitrary species. */
+  pool?: PackCard[];
   /** Non-null = ?demo=1: guest demo mode over this public pool. Pure theater —
    *  spins sample client-side (no openBatch, no charge, no Pull row, no
    *  sell-back). Logged-in customers always get the real machine regardless. */
@@ -130,6 +139,26 @@ export default function SlotMachineClient({
   const [reels, setReels] = useState(count);
   // Shrink the cell so multiple reels fit across the viewport.
   const cellSize = reels > 1 ? 76 : 96;
+
+  // Decoy flicker pool: the pack's OWN cards' Pokémon (name-derived via the
+  // canonical resolver, deduped) so the reel only ever shows species tied to a
+  // reward in this pack — never arbitrary hardcoded ones. Empty → ReelStrip
+  // falls back to its curated set.
+  // ponytail: name-derivation, matching the winner path's dex; a card with a
+  // custom-uploaded sprite would flicker its dex gif as a decoy (acceptable for
+  // a blur cell). Exact custom sprites in decoys would need the store route to
+  // expose sprite_image per pool card.
+  const decoyDexes = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          pool
+            .map((c) => resolveCardPokemon({ name: c.name }).dex)
+            .filter((d): d is number => d !== null),
+        ),
+      ),
+    [pool],
+  );
 
   // Balance comes from the app-shell provider (identity-tagged: values from
   // another account never render — push security review). Server-returned
@@ -662,6 +691,7 @@ export default function SlotMachineClient({
                       : (spin?.winners ?? null)
                   }
                   reduced={reduced}
+                  decoyDexes={decoyDexes}
                   onAllSettled={handleSettled}
                   onWinnerRect={(i, r) => {
                     winnerRects.current[i] = r;

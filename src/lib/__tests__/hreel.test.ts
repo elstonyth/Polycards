@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 import {
   HREEL_STRIP_LEN,
   HREEL_WIN_INDEX,
+  DECOY_DEXES,
   decoyRarity,
   teaseRarity,
   buildHReelStrip,
@@ -42,6 +43,35 @@ describe('buildHReelStrip', () => {
     );
     expect(decoyDexes.size).toBeLessThanOrEqual(12); // small fixed symbol set
     expect(decoyDexes.size).toBeGreaterThanOrEqual(8); // still varied
+  });
+  test('decoys are drawn ONLY from the supplied pack pool (tied to a reward)', () => {
+    const pool = [201, 202, 203]; // this pack's own card dexes
+    const s = buildHReelStrip(
+      150,
+      'Rare',
+      HREEL_STRIP_LEN,
+      HREEL_WIN_INDEX,
+      0,
+      pool,
+    );
+    for (let i = 0; i < s.length; i++) {
+      if (i === HREEL_WIN_INDEX) continue; // winner is the real reward dex
+      expect(pool).toContain(s[i]!.dex); // never an off-pool species
+    }
+  });
+  test('an empty pool falls back to the curated decoy set (never broken images)', () => {
+    const s = buildHReelStrip(
+      150,
+      'Rare',
+      HREEL_STRIP_LEN,
+      HREEL_WIN_INDEX,
+      0,
+      [],
+    );
+    for (let i = 0; i < s.length; i++) {
+      if (i === HREEL_WIN_INDEX) continue;
+      expect(DECOY_DEXES).toContain(s[i]!.dex);
+    }
   });
   test('the winner cell carries a DECOY color, never the real tier (spoiler guard)', () => {
     const s = buildHReelStrip(

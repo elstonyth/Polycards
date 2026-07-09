@@ -12,11 +12,13 @@ export const HREEL_WIN_INDEX = 48;
 export const HREEL_STRIP_LEN = 64;
 /** Cells visible across a strip window — a long horizontal reel. */
 export const HREEL_VISIBLE_CELLS = 9;
-/** Decoy sprites: a curated pool of dexes that reliably have animated showdown
- *  sprites (gen 1–4), so decoy cells never 404 into a broken image on a high or
- *  missing dex. (The winner uses the real card's sprite; PokemonToken falls back
- *  to a poké-ball if any sprite fails. Local hosting is the full fix — Spec 2.) */
-const DECOY_DEXES = [1, 4, 7, 25, 6, 9, 3, 143, 94, 130, 448, 197];
+/** Fallback decoy sprites when the caller supplies no pack pool: a curated set
+ *  of dexes that reliably have animated showdown sprites (gen 1–4), so decoy
+ *  cells never 404 into a broken image. Used only when the pack pool is empty or
+ *  yields no resolvable dex — normally the reel flickers the PACK's own cards
+ *  (see buildHReelStrip's `decoyDexes`), so decoys are always Pokémon tied to a
+ *  reward in this pack, never arbitrary species. */
+export const DECOY_DEXES = [1, 4, 7, 25, 6, 9, 3, 143, 94, 130, 448, 197];
 
 export type HReelCell = { dex: number; rarity: Rarity };
 
@@ -48,6 +50,10 @@ export function teaseRarity(winner: Rarity): Rarity | null {
  * DECOY color — the real tier is applied by the component on settle, so the
  * spin never spoils the rarity), a gated near-miss tease at `winIndex-1`
  * (the last decoy to cross the line before the winner), decoys elsewhere.
+ *
+ * `decoyDexes` is the pool the flicker cells sample from — pass the PACK's own
+ * card dexes so the reel only shows Pokémon tied to a reward in this pack (the
+ * reported bug was arbitrary hardcoded species). Empty/omitted → DECOY_DEXES.
  */
 export function buildHReelStrip(
   winnerDex: number | null,
@@ -55,6 +61,7 @@ export function buildHReelStrip(
   length: number,
   winIndex: number,
   seed = 0,
+  decoyDexes: readonly number[] = DECOY_DEXES,
 ): HReelCell[] {
   if (!Number.isInteger(length) || length <= 0) {
     throw new RangeError('buildHReelStrip: length must be a positive integer');
@@ -71,11 +78,14 @@ export function buildHReelStrip(
     winnerDex <= POKEDEX_MAX
       ? winnerDex
       : 1;
+  // A pack with no resolvable card dexes (empty pool) falls back to the curated
+  // set so decoys never render broken images.
+  const pool = decoyDexes.length > 0 ? decoyDexes : DECOY_DEXES;
   // `seed` (the reel index) shifts the decoy pattern so stacked strips show
   // DIFFERENT flanking Pokémon + tier colors — three independent-looking reels,
   // not one repeated ×3. seed=0 keeps the original single-strip behavior.
   const cells: HReelCell[] = Array.from({ length }, (_, i) => ({
-    dex: DECOY_DEXES[(i + seed * 4) % DECOY_DEXES.length]!,
+    dex: pool[(i + seed * 4) % pool.length]!,
     rarity: decoyRarity(i + seed),
   }));
   // Winner: real dex, DECOY color (real color applied on settle by ReelStrip).

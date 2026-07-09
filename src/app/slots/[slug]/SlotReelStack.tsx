@@ -26,6 +26,7 @@ export function SlotReelStack({
   winners,
   reduced,
   cellSize,
+  decoyDexes,
   onAllSettled,
   onWinnerRect,
   hideWinners,
@@ -35,6 +36,8 @@ export function SlotReelStack({
   winners: ColumnWinner[] | null;
   reduced: boolean;
   cellSize?: number;
+  /** Pack's own card dexes for the decoy flicker (Pokémon tied to a reward). */
+  decoyDexes?: readonly number[];
   onAllSettled?: () => void;
   onWinnerRect?: (colIndex: number, rect: DOMRect) => void;
   hideWinners?: boolean;
@@ -86,6 +89,7 @@ export function SlotReelStack({
                 colIndex={i}
                 count={count}
                 cellSize={cellSize}
+                decoyDexes={decoyDexes}
                 onSettled={winners ? handleColSettled : undefined}
                 onWinnerRect={
                   onWinnerRect ? (rect) => onWinnerRect(i, rect) : undefined

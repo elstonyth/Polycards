@@ -39,6 +39,7 @@ export function ReelStrip({
   colIndex,
   count,
   cellSize = 96,
+  decoyDexes,
   onSettled,
   onWinnerRect,
   hideWinner = false,
@@ -52,6 +53,9 @@ export function ReelStrip({
   colIndex: number;
   count: number;
   cellSize?: number;
+  /** Pool of dexes the decoy cells flicker — the pack's own cards so the reel
+   *  only shows Pokémon tied to a reward. Empty/omitted → curated fallback. */
+  decoyDexes?: readonly number[];
   onSettled?: () => void;
   onWinnerRect?: (rect: DOMRect) => void;
   hideWinner?: boolean;
@@ -80,8 +84,9 @@ export function ReelStrip({
         HREEL_STRIP_LEN,
         HREEL_WIN_INDEX,
         colIndex, // per-strip decoy seed → stacked strips look independent
+        decoyDexes, // pack's own card dexes (empty → curated fallback)
       ),
-    [winnerDex, winnerRarity, colIndex],
+    [winnerDex, winnerRarity, colIndex, decoyDexes],
   );
 
   const reportWinnerRect = () => {
