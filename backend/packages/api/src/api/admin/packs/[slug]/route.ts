@@ -4,6 +4,16 @@ import { PACKS_MODULE } from "../../../../modules/packs";
 import { updatePackWorkflow } from "../../../../workflows/update-pack";
 import { deletePackWorkflow } from "../../../../workflows/delete-pack";
 import { coercePackBody } from "../validate";
+import { clearPackListCache } from "../../../store/packs/route";
+import { clearPackDetailCache } from "../../../store/packs/[slug]/route";
+
+// Bust the storefront's 30s read caches (list + detail) so an admin pack edit
+// (price/status/stock/published-odds) shows IMMEDIATELY instead of ≤30s later.
+// The caches keep read-perf; this only invalidates them on the rare write.
+function bustStorefrontPackCaches(): void {
+  clearPackListCache();
+  clearPackDetailCache();
+}
 
 // GET /admin/packs/:slug — load one pack for the edit form.
 export async function GET(
@@ -45,6 +55,7 @@ export async function POST(
   const input = coercePackBody((req.body ?? {}) as Record<string, unknown>, slug);
 
   const { result } = await updatePackWorkflow(req.scope).run({ input });
+  bustStorefrontPackCaches();
   res.json({ pack: result });
 }
 
@@ -56,5 +67,6 @@ export async function DELETE(
 ): Promise<void> {
   const { slug } = req.params;
   await deletePackWorkflow(req.scope).run({ input: { slug } });
+  bustStorefrontPackCaches();
   res.json({ deleted: true, slug });
 }
