@@ -7,6 +7,7 @@ import { SlabImage } from '@/components/SlabImage';
 import { rm, rm0 } from '@/lib/format';
 import {
   sellBackPull,
+  sellBackPullsBatch,
   toggleShowcase,
   type VaultItem,
   type VaultResult,
@@ -45,6 +46,9 @@ export default function VaultClient({
   const [error, setError] = useState<string | null>(
     initial.ok ? null : initial.error,
   );
+  // Success confirmation (e.g. "Sold N cards for RM X — added to your balance").
+  // Distinct from `error` so a sale reads as a positive result, not a warning.
+  const [notice, setNotice] = useState<string | null>(null);
   const [confirmItem, setConfirmItem] = useState<VaultItem | null>(null);
   const [showcasingId, setShowcasingId] = useState<string | null>(null);
   const [openCard, setOpenCard] = useState<CardSeed | null>(null);
@@ -157,6 +161,7 @@ export default function VaultClient({
   async function sell(item: VaultItem) {
     if (sellingId) return;
     setError(null);
+    setNotice(null);
     setSellingId(item.pullId);
     try {
       const res = await sellBackPull(item.pullId);
@@ -174,54 +179,58 @@ export default function VaultClient({
     }
   }
 
-  // ponytail: bulk sell-back loops the single-pull buyback. The backend has no
-  // batch route and serializes credit writes per-customer (advisory lock), so a
-  // sequential loop is correct; add a server-side batch action if a vault ever
-  // holds enough cards that the round-trips matter.
+  // Bulk sell-back in ONE request. The previous version looped the single-pull
+  // buyback client-side, which under the per-pull rate limiter (10/10s burst)
+  // capped a bulk sell at ~10 cards and forced the user to press repeatedly for
+  // a large vault — cards appearing to "vanish" as the rest silently rate-
+  // limited. The batch endpoint sells every selected pull server-side with the
+  // same atomic per-pull logic, so the whole selection clears at once and the
+  // balance jumps by the full credited amount (no pull leaves the vault
+  // without payment; un-sellable ones are reported, not lost).
   async function bulkSell() {
     if (bulkSelling) return;
     setError(null);
+    setNotice(null);
     setBulkSelling(true);
     const ids = selectedItems.map((i) => i.pullId);
-    const sold: string[] = [];
-    let lastBalance: number | null = null;
-    // Remember the first failure's reason so the summary can say WHY (e.g. rate
-    // limited vs already sold), not just how many — keeps going either way so
-    // one failure doesn't strand the rest of the batch.
-    let firstError: string | null = null;
-    for (const id of ids) {
-      try {
-        const res = await sellBackPull(id);
-        if (res.ok) {
-          sold.push(id);
-          lastBalance = res.balance;
-        } else if (!firstError) {
-          firstError = res.error;
-        }
-      } catch {
-        if (!firstError) firstError = 'Something went wrong. Please try again.';
-      }
+    const res = await sellBackPullsBatch(ids);
+    setBulkSelling(false);
+    setConfirmBulkSell(false);
+
+    if (!res.ok) {
+      setError(res.error);
+      return;
     }
-    if (sold.length > 0) {
-      const soldSet = new Set(sold);
+
+    // Remove exactly the pulls that sold (never the whole selection) and credit
+    // the balance by the real total — so what leaves the vault always matches
+    // what was paid for.
+    if (res.soldIds.length > 0) {
+      const soldSet = new Set(res.soldIds);
       setItems((prev) => prev.filter((i) => !soldSet.has(i.pullId)));
       setSelected((prev) => {
         const next = new Set(prev);
-        sold.forEach((id) => next.delete(id));
+        res.soldIds.forEach((id) => next.delete(id));
         return next;
       });
+      syncBalance(res.balance);
     }
-    if (lastBalance !== null) syncBalance(lastBalance);
-    const failed = ids.length - sold.length;
-    setBulkSelling(false);
-    setConfirmBulkSell(false);
-    if (failed > 0) {
+
+    if (res.failed > 0) {
       setError(
-        `${failed} card${failed === 1 ? '' : 's'} couldn't be sold back${
-          sold.length > 0 ? ` — the other ${sold.length} sold` : ''
-        }.${firstError ? ` ${firstError}` : ''}`,
+        `Sold ${res.sold} card${res.sold === 1 ? '' : 's'} for ${rm(
+          res.credited,
+        )}. ${res.failed} couldn't be sold${
+          res.firstError ? ` — ${res.firstError}` : ''
+        }.`,
       );
     } else {
+      // Explicit money confirmation — the whole complaint was "sold, no money."
+      setNotice(
+        `Sold ${res.sold} card${res.sold === 1 ? '' : 's'} for ${rm(
+          res.credited,
+        )} — added to your balance.`,
+      );
       setSelectMode(false);
     }
   }
@@ -336,6 +345,15 @@ export default function VaultClient({
           className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-[13px] font-medium text-red-300"
         >
           {error}
+        </p>
+      )}
+
+      {notice && (
+        <p
+          role="status"
+          className="mt-4 rounded-xl border border-buyback-fg/30 bg-buyback-fg/10 px-4 py-3 text-[13px] font-medium text-buyback-fg"
+        >
+          {notice}
         </p>
       )}
 

@@ -195,6 +195,19 @@ export default defineMiddlewares({
       ],
     },
     {
+      // Bulk sell-back (POST /store/vault/buyback-batch) — sells many pulls in
+      // ONE request (see the route). Distinct 2-segment path, so the
+      // '/store/vault/*/buyback' matcher above (3-segment) doesn't cover it.
+      // Shares the vault-buyback limiter: one bulk sell = one hit, so a large
+      // vault clears without the per-card throttle that broke the looped client.
+      matcher: '/store/vault/buyback-batch',
+      method: 'POST',
+      middlewares: [
+        authenticate('customer', ['bearer']),
+        createVaultBuybackRateLimit(),
+      ],
+    },
+    {
       // Showcase toggle (POST /store/vault/:id/showcase). Per-actor limiter for
       // parity with every other mutating /store endpoint (anti-hammering; it's
       // already authed + ownership-checked + idempotent, so this is hardening).

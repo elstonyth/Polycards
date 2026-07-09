@@ -353,6 +353,97 @@ export async function toggleShowcase(
   }
 }
 
+export type BulkSellResult =
+  | {
+      ok: true;
+      /** How many pulls actually sold + credited. */
+      sold: number;
+      /** How many could not be sold (already sold, delivering, not owned…). */
+      failed: number;
+      /** Total MYR credited across the sold pulls. */
+      credited: number;
+      /** New credit balance (Σ ledger) after the batch. */
+      balance: number;
+      /** The pull ids that actually sold — the client removes exactly these. */
+      soldIds: string[];
+      /** First per-pull failure reason, for a "N couldn't be sold — <why>" line. */
+      firstError: string | null;
+    }
+  | { ok: false; error: string; needsAuth?: boolean };
+
+// Bulk sell-back of many vaulted pulls in ONE request (POST
+// /store/vault/buyback-batch). Replaces the old client loop that fired one
+// /buyback per card — under the per-pull rate limiter that capped a bulk sell
+// at ~10 cards and forced repeated presses. The backend sells each pull with
+// the SAME atomic per-pull workflow, so no pull leaves the vault without a
+// matching credit; un-sellable pulls are skipped and reported, the rest sell.
+export async function sellBackPullsBatch(
+  pullIds: string[],
+): Promise<BulkSellResult> {
+  // Validate at the boundary — a server action is a public endpoint.
+  if (!Array.isArray(pullIds) || pullIds.length === 0) {
+    return { ok: false, error: 'No cards selected.' };
+  }
+  const ids = pullIds.filter((x) => typeof x === 'string' && x.trim() !== '');
+  if (ids.length === 0) {
+    return { ok: false, error: 'No valid cards selected.' };
+  }
+
+  const token = await getAuthToken();
+  if (!token) {
+    return { ok: false, error: 'Please log in first.', needsAuth: true };
+  }
+
+  try {
+    const raw = await sdk.client.fetch('/store/vault/buyback-batch', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: { pull_ids: ids },
+    });
+    // The backend is ours, but a server action still validates its input at the
+    // boundary — parse defensively so a shape drift can't render NaN or drop the
+    // sold set (which the client uses to decide what to remove from the vault).
+    const r = raw as {
+      sold?: unknown;
+      failed?: unknown;
+      credited?: unknown;
+      balance?: unknown;
+      results?: { pull_id?: unknown; ok?: unknown; error?: unknown }[];
+    };
+    const results = Array.isArray(r.results) ? r.results : [];
+    const soldIds = results
+      .filter(
+        (x): x is { pull_id: string; ok: true } =>
+          !!x && x.ok === true && typeof x.pull_id === 'string',
+      )
+      .map((x) => x.pull_id);
+    const firstFail = results.find(
+      (x) => !!x && x.ok === false && typeof x.error === 'string',
+    );
+    const num = (v: unknown, fallback = 0) =>
+      typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+    return {
+      ok: true,
+      sold: num(r.sold, soldIds.length),
+      failed: num(r.failed),
+      credited: num(r.credited),
+      balance: num(r.balance),
+      soldIds,
+      firstError:
+        firstFail && typeof firstFail.error === 'string'
+          ? firstFail.error
+          : null,
+    };
+  } catch (error) {
+    logger.error('[vault] bulk buyback failed:', error);
+    return {
+      ok: false,
+      error: friendlyError(error, VAULT_RULES, VAULT_FALLBACK),
+      needsAuth: isAuthError(error),
+    };
+  }
+}
+
 // Instant sell-back of one vaulted pull. Safe to retry: the backend enforces
 // once-per-pull at the database level.
 export async function sellBackPull(pullId: string): Promise<SellBackResult> {
