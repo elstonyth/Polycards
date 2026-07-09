@@ -131,6 +131,9 @@ const AddFromPriceChartingPage = () => {
     setPcGrade(null);
     setMarketValue(null);
     setImage('');
+    // Reset the staged Pokémon too — a pick from a PREVIOUS product must not
+    // leak onto the newly searched/selected one.
+    setPokemon({ pixel_pokemon_id: null });
     try {
       setMatches(await searchPriceCharting(q));
     } catch (err) {
@@ -148,6 +151,9 @@ const AddFromPriceChartingPage = () => {
     setPcGrade(null);
     setMarketValue(null);
     setImage('');
+    // Reset the staged Pokémon too — a pick from a PREVIOUS product must not
+    // leak onto the newly searched/selected one.
+    setPokemon({ pixel_pokemon_id: null });
     try {
       const product = await getPriceChartingProduct(m.id);
       setPcProduct(product);

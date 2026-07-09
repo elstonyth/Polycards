@@ -78,6 +78,10 @@ const RegisterCardModal = ({ open, onClose }: Props) => {
 
   // Gacha facts.
   const [fields, setFields] = useState<Fields>(EMPTY_FIELDS);
+  // Did the operator touch the Pokémon picker? Only then does the payload carry
+  // pixel_pokemon_id — so an explicit CLEAR sends null (don't re-inherit the
+  // product's staged id), while an untouched picker sends undefined (inherit).
+  const [pokemonTouched, setPokemonTouched] = useState(false);
   const saving = registerCard.isPending;
 
   // PriceCharting lookup.
@@ -97,6 +101,7 @@ const RegisterCardModal = ({ open, onClose }: Props) => {
       setFilter('');
       setProductId(null);
       setFields(EMPTY_FIELDS);
+      setPokemonTouched(false);
       setPcQuery('');
       setPcMatches(null);
       setPcProduct(null);
@@ -209,9 +214,10 @@ const RegisterCardModal = ({ open, onClose }: Props) => {
         // rate before submit (fxEff non-null: guarded here + in canSave).
         market_value: myrToUsd(Number(fields.market_value), fxEff),
         market_multiplier: 1 + Number(fields.margin_pct) / 100,
-        // null (nothing picked) → undefined so the backend inherits any id
-        // staged on the product; a picked id links it explicitly.
-        pixel_pokemon_id: fields.pixel_pokemon_id ?? undefined,
+        // Untouched picker → undefined so the backend inherits any id staged
+        // on the product; touched → send the exact value (a picked id links, an
+        // explicit null clears — never silently re-inherits the staged link).
+        pixel_pokemon_id: pokemonTouched ? fields.pixel_pokemon_id : undefined,
       });
       toast.success(t('cards.toast.created'));
       onClose();
@@ -486,7 +492,10 @@ const RegisterCardModal = ({ open, onClose }: Props) => {
 
             <CardPokemonFields
               value={{ pixel_pokemon_id: fields.pixel_pokemon_id }}
-              onChange={(p) => patch(p)}
+              onChange={(p) => {
+                setPokemonTouched(true);
+                patch(p);
+              }}
               suggestionName={selected?.title ?? ''}
             />
 

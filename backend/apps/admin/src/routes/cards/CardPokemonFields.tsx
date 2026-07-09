@@ -66,17 +66,23 @@ const CardPokemonFields = ({
   const matches = q.length >= 1 ? (data?.pixel_pokemon ?? []) : [];
 
   const linked = value.pixel_pokemon_id !== null;
-  const previewSrc = picked
-    ? entrySprite(picked)
+  // Only let this session's pick drive the preview while it still matches the
+  // parent value — a form reset/unlink changes value.pixel_pokemon_id without
+  // clearing `picked`, which would otherwise show a stale linked Pokémon over an
+  // unassigned payload.
+  const pickedForValue =
+    picked && picked.id === value.pixel_pokemon_id ? picked : null;
+  const previewSrc = pickedForValue
+    ? entrySprite(pickedForValue)
     : linked
       ? entrySprite({
           image_url: currentSprite ?? null,
           dex: currentDex ?? null,
         })
       : null;
-  const previewLabel = picked
-    ? `${picked.name}${picked.dex != null ? ` · #${picked.dex}` : ''}${
-        picked.is_custom ? ' · custom' : ''
+  const previewLabel = pickedForValue
+    ? `${pickedForValue.name}${pickedForValue.dex != null ? ` · #${pickedForValue.dex}` : ''}${
+        pickedForValue.is_custom ? ' · custom' : ''
       }`
     : linked
       ? 'Linked to a library entry'
