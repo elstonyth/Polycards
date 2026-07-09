@@ -53,11 +53,6 @@ const CardPokemonFields = ({
   const [picked, setPicked] = useState<PixelPokemonRow | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
-  // A ref mirror of `search` so the mount-once Escape listener below reads the
-  // live value without re-subscribing (re-subscribing would re-register it
-  // AFTER Radix's listener and lose the ordering — see the effect comment).
-  const searchValRef = useRef(search);
-  searchValRef.current = search;
   const uploadImg = useUploadImage();
   const createEntry = useCreatePixelPokemon();
   const uploading = uploadImg.isPending || createEntry.isPending;
@@ -74,10 +69,15 @@ const CardPokemonFields = ({
   // advertises.
   useEffect(() => {
     const onCaptureKeyDown = (e: globalThis.KeyboardEvent) => {
+      // Read the live value off the (controlled) input element rather than a
+      // ref-mirror, so this mount-once listener sees the current search without
+      // a render-time ref write.
+      const el = searchRef.current;
       if (
         e.key === 'Escape' &&
-        searchValRef.current !== '' &&
-        document.activeElement === searchRef.current
+        el &&
+        document.activeElement === el &&
+        el.value !== ''
       ) {
         e.preventDefault();
         e.stopImmediatePropagation();
