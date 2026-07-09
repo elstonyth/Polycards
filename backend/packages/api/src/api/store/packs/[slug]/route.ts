@@ -102,6 +102,12 @@ export async function GET(
             // Admin-picked Top Hit order (display only — not draw data).
             // 1-based; null = not a Top Hit.
             top_hit_order: o.top_hit_order ?? null,
+            // The card's CONFIGURED pixel-Pokémon (mirror of its linked library
+            // entry) — non-secret display data, so the slot reel can flicker the
+            // pack's ACTUAL configured Pokémon (e.g. a card linked to Mewtwo)
+            // rather than a name-derived guess or a hardcoded decoy set.
+            pokemon_dex: card.pokemon_dex ?? null,
+            sprite_image: card.sprite_image ?? null,
             marketPriceMyr: displayMarketPrice(
               toMoney(card.market_value),
               fxRate,

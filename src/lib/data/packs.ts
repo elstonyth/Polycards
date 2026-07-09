@@ -176,6 +176,9 @@ interface BackendOddsEntry {
   slab_image?: string | null;
   /** Admin-picked Top Hit display order (1-based; null/absent = not one). */
   top_hit_order?: number | null;
+  /** The card's configured pixel-Pokémon (mirror of its linked library entry). */
+  pokemon_dex?: number | null;
+  sprite_image?: string | null;
 }
 
 export interface PackDetail {
@@ -243,6 +246,8 @@ export async function getPackDetail(slug: string): Promise<PackDetail | null> {
       // backend without marketPriceMyr shows "—" instead of a fake price.
       value: o.marketPriceMyr != null ? formatValue(o.marketPriceMyr) : '—',
       rarity: o.rarity as Rarity,
+      pokemonDex: o.pokemon_dex ?? null,
+      spriteImage: o.sprite_image ?? null,
     });
     const sorted = [...valid].sort(
       (a, b) =>

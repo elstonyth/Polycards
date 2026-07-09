@@ -64,6 +64,10 @@ export const OddsEntrySchema = z.looseObject({
   /** Admin-picked Top Hit display order (1-based; null/absent = not one).
    *  Malformed values degrade to null instead of dropping the whole row. */
   top_hit_order: z.number().int().positive().nullable().catch(null).optional(),
+  /** The card's configured pixel-Pokémon (mirror of its linked library entry);
+   *  a malformed value degrades to null so the reel falls back to name-derive. */
+  pokemon_dex: z.number().int().positive().nullable().catch(null).optional(),
+  sprite_image: z.string().nullable().catch(null).optional(),
 });
 
 /** GET /store/pulls/recent row — handle + name + known rarity + finite value.

@@ -140,20 +140,30 @@ export default function SlotMachineClient({
   // Shrink the cell so multiple reels fit across the viewport.
   const cellSize = reels > 1 ? 76 : 96;
 
-  // Decoy flicker pool: the pack's OWN cards' Pokémon (name-derived via the
-  // canonical resolver, deduped) so the reel only ever shows species tied to a
-  // reward in this pack — never arbitrary hardcoded ones. Empty → ReelStrip
-  // falls back to its curated set.
-  // ponytail: name-derivation, matching the winner path's dex; a card with a
-  // custom-uploaded sprite would flicker its dex gif as a decoy (acceptable for
-  // a blur cell). Exact custom sprites in decoys would need the store route to
-  // expose sprite_image per pool card.
+  // Decoy flicker pool: the pack's OWN cards' CONFIGURED Pokémon, deduped, so
+  // the reel only ever shows the exact species an admin set for this pack —
+  // never arbitrary hardcoded ones. resolveCardPokemon prefers the card's
+  // explicit pokemon_dex (the mirror of its linked library entry) and only
+  // name-derives as a fallback, so a card linked to Mewtwo shows Mewtwo even
+  // when its NAME ("SV Glory Of Rocket Gang") wouldn't derive it. Empty →
+  // ReelStrip falls back to its curated set.
+  // ponytail: decoys render the dex sprite (spriteGif); for seeded entries that
+  // IS the linked sprite. A custom-uploaded (dex-less) sprite would only flicker
+  // via name-derive — threading the custom sprite_image into decoy cells is the
+  // upgrade path if that ever matters.
   const decoyDexes = useMemo(
     () =>
       Array.from(
         new Set(
           pool
-            .map((c) => resolveCardPokemon({ name: c.name }).dex)
+            .map(
+              (c) =>
+                resolveCardPokemon({
+                  name: c.name,
+                  pokemon_dex: c.pokemonDex,
+                  sprite_image: c.spriteImage,
+                }).dex,
+            )
             .filter((d): d is number => d !== null),
         ),
       ),

@@ -71,16 +71,18 @@ export function buildHReelStrip(
       'buildHReelStrip: winIndex must be within [0, length)',
     );
   }
+  // A pack with no resolvable card dexes (empty pool) falls back to the curated
+  // set so decoys never render broken images.
+  const pool = decoyDexes.length > 0 ? decoyDexes : DECOY_DEXES;
+  // Winner cell: the real winner dex, else a POOL dex (never a hardcoded 1) so
+  // the IDLE strip (no winner yet) stays entirely pack-configured Pokémon.
   const safeWinner =
     winnerDex !== null &&
     Number.isInteger(winnerDex) &&
     winnerDex >= 1 &&
     winnerDex <= POKEDEX_MAX
       ? winnerDex
-      : 1;
-  // A pack with no resolvable card dexes (empty pool) falls back to the curated
-  // set so decoys never render broken images.
-  const pool = decoyDexes.length > 0 ? decoyDexes : DECOY_DEXES;
+      : pool[0]!;
   // `seed` (the reel index) shifts the decoy pattern so stacked strips show
   // DIFFERENT flanking Pokémon + tier colors — three independent-looking reels,
   // not one repeated ×3. seed=0 keeps the original single-strip behavior.
