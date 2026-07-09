@@ -3,6 +3,7 @@ import PacksModuleService from "../../../modules/packs/service";
 import { PACKS_MODULE } from "../../../modules/packs";
 import { createPackWorkflow } from "../../../workflows/create-pack";
 import { coercePackBody } from "./validate";
+import { clearPackListCache } from "../../store/packs/route";
 
 // GET /admin/packs — the pack selector list for the win-rate editor. An admin
 // route, so it is auto-protected by Medusa's admin auth (session/bearer); no
@@ -48,5 +49,9 @@ export async function POST(
   const input = coercePackBody(body, slug);
 
   const { result } = await createPackWorkflow(req.scope).run({ input });
+  // A pack can be created directly as `active`, so bust the storefront list
+  // cache to reflect it now instead of ≤30s later. (Detail has nothing to bust
+  // yet — a new pack's pool is empty.)
+  clearPackListCache();
   res.status(201).json({ pack: result });
 }

@@ -66,8 +66,13 @@ describe('buildHReelStrip', () => {
       expect(s[i]!.rarity).toBe(rarityByDex.get(s[i]!.dex)); // each dex keeps ITS rarity
     }
   });
-  test("decoy rarity colors are ONLY the pack's configured rarities (no phantom tiers)", () => {
-    // A pack of only Immortal + Common must never flicker any other tier color.
+  test("a top-tier win keeps EVERY cell within the pack's rarities", () => {
+    // A pack of only Immortal + Common: for a top-tier win, every cell stays in
+    // {Immortal, Common} — decoys keep their card's own tier, and the §7b tease
+    // of a top win is its OWN (in-pack) tier. (Caveat: a MID-tier win in a
+    // gappy-rarity pack CAN briefly tint the winIndex-1 tease one tier up — the
+    // deliberate spec §7b anticipation exception, covered by the tease tests
+    // above, not a phantom DECOY color.)
     const pool = [
       { dex: 150, rarity: 'Immortal' as const },
       { dex: 743, rarity: 'Common' as const },

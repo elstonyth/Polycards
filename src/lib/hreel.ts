@@ -16,7 +16,7 @@ export const HREEL_VISIBLE_CELLS = 9;
  *  of dexes that reliably have animated showdown sprites (gen 1–4), so decoy
  *  cells never 404 into a broken image. Used only when the pack pool is empty or
  *  yields no resolvable dex — normally the reel flickers the PACK's own cards
- *  (see buildHReelStrip's `decoyDexes`), so decoys are always Pokémon tied to a
+ *  (see buildHReelStrip's `decoyCards`), so decoys are always Pokémon tied to a
  *  reward in this pack, never arbitrary species. */
 export const DECOY_DEXES = [1, 4, 7, 25, 6, 9, 3, 143, 94, 130, 448, 197];
 

@@ -2,6 +2,7 @@ import { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import PacksModuleService from "../../../../../modules/packs/service";
 import { PACKS_MODULE } from "../../../../../modules/packs";
 import { setPackMembersWorkflow } from "../../../../../workflows/set-pack-members";
+import { clearPackDetailCache } from "../../../../store/packs/[slug]/route";
 
 // GET /admin/packs/:slug/members — the card handles currently in the pack's
 // prize pool (one per PackOdds row). The card-picker loads the full catalog from
@@ -40,5 +41,9 @@ export async function POST(
   const { result } = await setPackMembersWorkflow(req.scope).run({
     input: { pack_id: slug, card_ids },
   });
+  // Membership IS the pack's prize pool — the exact Pokémon the reel shows and
+  // the Top-Hit candidates. Bust the 30s storefront detail cache so a pool edit
+  // reflects immediately (matches the sibling odds/top-hits routes).
+  clearPackDetailCache();
   res.json(result);
 }

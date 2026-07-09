@@ -47,7 +47,7 @@ export function VaultRoom({
       )}
     >
       {/* Ceiling spotlight — anchored top-center, MANY soft stops so no ring
-          edge is ever visible. Warm when idle, rarity color during reveal. */}
+          edge is ever visible. Neutral when idle, rarity color during reveal. */}
       <div
         aria-hidden
         className={cn(
