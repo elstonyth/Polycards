@@ -133,7 +133,11 @@ const RegisterCardModal = ({ open, onClose }: Props) => {
         p.fmv !== null && fxEff !== null
           ? String(usdToMyr(p.fmv, fxEff))
           : f.market_value,
+      // Switching products must not carry a pokemon picked for the PREVIOUS
+      // product — the backend would then mirror the wrong sprite onto this card.
+      pixel_pokemon_id: null,
     }));
+    setPokemonTouched(false);
     // Seed the lookup query with the product title — usually the card name.
     setPcQuery(p.title);
     setPcMatches(null);

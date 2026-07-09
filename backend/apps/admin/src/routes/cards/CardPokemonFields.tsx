@@ -59,14 +59,23 @@ const CardPokemonFields = ({
 
   // Escape while typing a search should dismiss the dropdown, NOT close the
   // whole edit modal. The modal's Radix DismissableLayer listens for Escape on
-  // `document` in the CAPTURE phase (react-use-escape-keydown), which fires
-  // before any bubble-phase onKeyDown on the input — so a React stopPropagation
-  // can't stop it. Intercept the SAME capture phase: registered once on mount,
-  // this listener sits ahead of Radix's (child effects run before the ancestor
-  // DismissableLayer's), so when the search box is focused AND non-empty it
-  // stopImmediatePropagation()s the Escape and just clears the search. An empty
-  // search still bubbles Escape through → the modal closes, as the "esc" hint
-  // advertises.
+  // `document` in the CAPTURE phase (react-use-escape-keydown, a passive
+  // useEffect), which fires before any bubble-phase onKeyDown on the input — so
+  // a React stopPropagation can't stop it. Intercept the SAME capture phase:
+  // when the search box is focused AND non-empty, stopImmediatePropagation()
+  // the Escape and clear the search; an empty search still bubbles through → the
+  // modal closes, as the "esc" hint advertises.
+  //
+  // ⚠️ INVARIANT — this component MUST mount in the same (or an earlier) commit
+  // as its Dialog. Capture listeners on `document` fire in REGISTRATION order,
+  // and this guard beats Radix's only because passive child effects run before
+  // the ancestor DismissableLayer's, so ours registers first. If this picker is
+  // ever mounted LAZILY/conditionally AFTER the modal is already open (behind a
+  // tab, accordion, "Advanced" section, or a remount), Radix's listener
+  // registers first, fires first, and Escape closes the modal again — with NO
+  // type error and NO test to catch it. If that becomes necessary, switch to
+  // FocusModal.Content's `onEscapeKeyDown={(e)=>{ if (focused&&value) e.preventDefault() }}`
+  // (Radix skips dismiss when defaultPrevented), which is order-independent.
   useEffect(() => {
     const onCaptureKeyDown = (e: globalThis.KeyboardEvent) => {
       // Read the live value off the (controlled) input element rather than a
