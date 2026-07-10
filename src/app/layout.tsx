@@ -41,14 +41,16 @@ export const metadata: Metadata = {
     description:
       'Rip packs. Pull graded cards. Hold, trade, redeem, or sell back at up to 90% value.',
     url: '/',
-    images: [{ url: '/seo/icon-512x512.png', width: 512, height: 512 }],
+    images: [
+      { url: '/seo/og.png', width: 2400, height: 1260, alt: 'PixelSlot' },
+    ],
   },
   twitter: {
     card: 'summary_large_image',
     title: 'PixelSlot — Your Gateway to Physical & Digital Collectibles',
     description:
       'Rip packs. Pull graded cards. Hold, trade, redeem, or sell back at up to 90% value.',
-    images: ['/seo/icon-512x512.png'],
+    images: ['/seo/og.png'],
   },
   appleWebApp: { capable: true, title: 'PixelSlot', statusBarStyle: 'black' },
   // Favicon + apple-touch icon come from src/app/icon.png + apple-icon.png.

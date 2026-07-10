@@ -6,10 +6,12 @@
 // Modes:
 //   node scripts/rebrand-pixelslot-logo.mjs candidates   -> dark-bg comparison sheet of font options (for picking)
 //   node scripts/rebrand-pixelslot-logo.mjs final <font>  -> transparent PixelSlot logo PNG (default font: "Luckiest Guy")
-//   node scripts/rebrand-pixelslot-logo.mjs icon <font>   -> circular badge base + resized favicon/app/seo/OG icons
+//   node scripts/rebrand-pixelslot-logo.mjs icon <font>   -> circular badge base + resized favicon/app/seo icons
+//   node scripts/rebrand-pixelslot-logo.mjs og <font>     -> 1200x630 OG/Twitter share banner
 //
 // Output: docs/research/pixelslot-logo-candidates.png | public/branding/pixelslot-logo.png
 //         public/branding/pixelslot-icon.png + public/seo/icon-{192,512}.png + src/app/{icon,apple-icon}.png
+//         public/seo/og.png
 import { chromium } from 'playwright';
 import sharp from 'sharp';
 import { fileURLToPath } from 'node:url';
@@ -119,6 +121,33 @@ try {
       console.log('wrote', p, `${sz}x${sz}`);
     }
     console.log('wrote', base);
+  } else if (mode === 'og') {
+    const W = 1200;
+    const H = 630;
+    await page.setViewportSize({ width: W, height: H });
+    await page.setContent(`<!doctype html><html><head><style>
+    ${fontImport}
+    * { margin:0; box-sizing:border-box; }
+    body { width:${W}px; height:${H}px; overflow:hidden;
+      background:radial-gradient(circle at 50% 40%, #1e1e1e 0%, #141414 55%, #0d0d0d 100%);
+      display:flex; flex-direction:column; align-items:center; justify-content:center; gap:34px; }
+    .glow { position:absolute; left:50%; top:40%; transform:translate(-50%,-50%);
+      width:840px; height:340px; background:radial-gradient(ellipse, rgba(42,92,170,.4), transparent 70%); filter:blur(40px); }
+    .word { ${wordCss(chosenFont, 168)} position:relative; }
+    .tag { position:relative; font-family:Arial,system-ui,sans-serif; font-weight:700; color:#e9e9e9;
+      font-size:33px; letter-spacing:.02em; }
+  </style></head><body>
+    <div class="glow"></div>
+    <div class="word">PixelSlot</div>
+    <div class="tag">Rip packs · Pull graded cards · Sell back up to 90%</div>
+  </body></html>`);
+    await page.evaluate(() => document.fonts.ready);
+    const out = resolve(ROOT, 'public/seo/og.png');
+    await page.screenshot({
+      path: out,
+      clip: { x: 0, y: 0, width: W, height: H },
+    });
+    console.log('wrote', out);
   } else {
     const size = 200;
     await page.setContent(`<!doctype html><html><head><style>
