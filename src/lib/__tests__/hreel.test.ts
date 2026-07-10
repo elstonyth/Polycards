@@ -155,6 +155,35 @@ describe('buildHReelStrip', () => {
       expect(w).toBeLessThanOrEqual(1025);
     }
   });
+  // ReelStrip's idle drift wraps at exactly pool.length cells. That is only
+  // seamless if the IDLE strip (winnerDex === null) is a pure tiling of the
+  // pool — no winner pin, no tease cell — for ANY winnerRarity the caller
+  // happens to pass.
+  test('an idle strip (null winner) is exactly periodic over the pool length', () => {
+    const pool = [
+      { dex: 201, rarity: 'Immortal' as const },
+      { dex: 202, rarity: 'Common' as const },
+      { dex: 203, rarity: 'Rare' as const },
+    ];
+    for (const rarity of ['Common', 'Rare', 'Immortal'] as const) {
+      const s = buildHReelStrip(
+        null,
+        rarity,
+        HREEL_STRIP_LEN,
+        HREEL_WIN_INDEX,
+        1,
+        pool,
+      );
+      for (let i = 0; i + pool.length < s.length; i++) {
+        expect(s[i + pool.length]).toEqual(s[i]);
+      }
+    }
+  });
+  test('a real spin still pins the winner and tease (idle purity is null-only)', () => {
+    const s = buildHReelStrip(150, 'Rare', HREEL_STRIP_LEN, HREEL_WIN_INDEX);
+    expect(s[HREEL_WIN_INDEX]!.dex).toBe(150);
+    expect(s[HREEL_WIN_INDEX - 1]!.rarity).toBe('Mythical');
+  });
   test('rejects invalid geometry', () => {
     expect(() => buildHReelStrip(1, 'Common', 0, 0)).toThrow(RangeError);
     expect(() => buildHReelStrip(1, 'Common', 10, 10)).toThrow(RangeError);

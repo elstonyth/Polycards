@@ -18,6 +18,7 @@ import {
 } from '@/lib/vault-reel';
 import {
   buildHReelStrip,
+  DECOY_DEXES,
   HREEL_WIN_INDEX,
   HREEL_STRIP_LEN,
   HREEL_VISIBLE_CELLS,
@@ -29,6 +30,13 @@ import { CardTile } from './CardTile';
 
 const EAGER_RADIUS = 3;
 const CELL_GAP = 10;
+/** Idle creep speed (px/ms) — ~20px/s, roughly one cell every 4s. Slow enough to
+ *  read every Pokémon, fast enough that the machine never looks dead. Below
+ *  blurStretch's 0.05px threshold, so the idle strip stays sharp. */
+const IDLE_DRIFT_PX_PER_MS = 0.02;
+/** Cell the idle drift starts centered on. Must clear the left half-window
+ *  (HREEL_VISIBLE_CELLS/2), and leaves the rest of the strip as drift runway. */
+const IDLE_BASE_INDEX = 5;
 
 export function ReelStrip({
   winnerDex,
@@ -78,6 +86,11 @@ export function ReelStrip({
   const winW = pitch * HREEL_VISIBLE_CELLS;
 
   const isWin = winnerDex !== null || winnerImage !== undefined;
+  // Cells repeat every `poolLen` — mirrors buildHReelStrip's pool fallback.
+  const poolLen =
+    decoyCards && decoyCards.length > 0
+      ? decoyCards.length
+      : DECOY_DEXES.length;
   const strip = useMemo(
     () =>
       buildHReelStrip(
@@ -126,10 +139,39 @@ export function ReelStrip({
         blurPx > 0.05 ? `blur(${blurPx.toFixed(2)}px)` : '';
     };
 
-    // Idle: rest centered, sharp.
+    // Idle: creep right→left forever (same travel direction as a spin) so the
+    // machine never looks dead. buildHReelStrip leaves the idle strip a PURE
+    // tiling of the decoy pool, so it repeats every `poolLen` cells and wrapping
+    // the drift at exactly `poolLen * pitch` px is seamless. Rest sharp instead
+    // when motion is reduced, or when one whole period + the visible window
+    // wouldn't fit on the strip (the drift would run off its end).
     if (!isWin) {
-      paint(target, 0);
-      return;
+      const basePx = Math.round(
+        reelTarget(IDLE_BASE_INDEX, pitch, winW) - CELL_GAP / 2,
+      );
+      stripEl.style.filter = '';
+      if (
+        reduced ||
+        IDLE_BASE_INDEX + HREEL_VISIBLE_CELLS + poolLen > HREEL_STRIP_LEN
+      ) {
+        stripEl.style.transform = `translate3d(${-basePx}px, 0, 0)`;
+        return;
+      }
+      const wrapPx = poolLen * pitch;
+      let px = basePx;
+      let prev = performance.now();
+      let raf = 0;
+      const drift = (now: number) => {
+        // Clamp dt so a backgrounded tab (rAF pauses) resumes where it left off
+        // instead of teleporting a minute's worth of travel on the next frame.
+        px += Math.min(50, now - prev) * IDLE_DRIFT_PX_PER_MS;
+        prev = now;
+        if (px - basePx >= wrapPx) px -= wrapPx;
+        stripEl.style.transform = `translate3d(${-px}px, 0, 0)`;
+        raf = requestAnimationFrame(drift);
+      };
+      raf = requestAnimationFrame(drift);
+      return () => cancelAnimationFrame(raf);
     }
     if (reduced) {
       paint(target, 0);
@@ -170,7 +212,16 @@ export function ReelStrip({
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- pitch/winW derive from cellSize; re-running on spin identity is intended
-  }, [isWin, reduced, colIndex, count, winnerDex, winnerRarity, cellSize]);
+  }, [
+    isWin,
+    reduced,
+    colIndex,
+    count,
+    winnerDex,
+    winnerRarity,
+    cellSize,
+    poolLen,
+  ]);
 
   return (
     <div
@@ -200,11 +251,15 @@ export function ReelStrip({
           // line IS the reward (orange ⟹ Immortal, gray ⟹ Common), matching the
           // reveal; it only intensifies (bloom + scale) when it locks. Decoys
           // flicker their own tier while spinning, then fade neutral on settle.
-          const litColor = isWinnerCell
-            ? winnerRarityRgb
-            : done
-              ? undefined
-              : rarityRgb(cell.rarity);
+          // Idle has no winner, so the winner CELL must not wear the winner's
+          // color either — it would be the one off-pattern tile on an otherwise
+          // periodic strip, i.e. a seam the moment the idle drift reaches it.
+          const litColor =
+            isWinnerCell && isWin
+              ? winnerRarityRgb
+              : done
+                ? undefined
+                : rarityRgb(cell.rarity);
           return (
             <div
               key={i}

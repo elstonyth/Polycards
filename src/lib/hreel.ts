@@ -81,15 +81,6 @@ export function buildHReelStrip(
     decoyCards.length > 0
       ? decoyCards
       : DECOY_DEXES.map((dex, i) => ({ dex, rarity: decoyRarity(i) }));
-  // Winner cell: the real winner dex, else a POOL dex (never a hardcoded 1) so
-  // the IDLE strip (no winner yet) stays entirely pack-configured Pokémon.
-  const safeWinner =
-    winnerDex !== null &&
-    Number.isInteger(winnerDex) &&
-    winnerDex >= 1 &&
-    winnerDex <= POKEDEX_MAX
-      ? winnerDex
-      : pool[0]!.dex;
   // `seed` (the reel index) shifts the decoy pattern so stacked strips show
   // DIFFERENT flanking Pokémon + tier colors — three independent-looking reels,
   // not one repeated ×3. seed=0 keeps the original single-strip behavior. Each
@@ -98,16 +89,27 @@ export function buildHReelStrip(
     const c = pool[(i + seed * 4) % pool.length]!;
     return { dex: c.dex, rarity: c.rarity };
   });
-  // Winner: real dex, DECOY color from a pool card (real color applied on settle
-  // by ReelStrip, so the spin never spoils the rarity).
-  cells[winIndex] = {
-    dex: safeWinner,
-    rarity: pool[(winIndex + seed) % pool.length]!.rarity,
-  };
-  const tease = teaseRarity(winnerRarity);
-  const teaseIdx = winIndex - 1;
-  if (tease && teaseIdx >= 0) {
-    cells[teaseIdx] = { ...cells[teaseIdx]!, rarity: tease };
+  // `winnerDex === null` = IDLE (no spin yet): leave the strip a PURE tiling of
+  // the pool, so it is exactly periodic with period `pool.length` cells. That
+  // periodicity is what makes ReelStrip's idle drift wrap seamlessly — a pinned
+  // winner or tease cell in the drift path would show as a seam once per loop.
+  if (winnerDex !== null) {
+    // Winner: real dex (fall back to a POOL dex — never a hardcoded 1 — if the
+    // caller passes garbage), DECOY color from a pool card (the real color is
+    // applied on settle by ReelStrip, so the spin never spoils the rarity).
+    const safeWinner =
+      Number.isInteger(winnerDex) && winnerDex >= 1 && winnerDex <= POKEDEX_MAX
+        ? winnerDex
+        : pool[0]!.dex;
+    cells[winIndex] = {
+      dex: safeWinner,
+      rarity: pool[(winIndex + seed) % pool.length]!.rarity,
+    };
+    const tease = teaseRarity(winnerRarity);
+    const teaseIdx = winIndex - 1;
+    if (tease && teaseIdx >= 0) {
+      cells[teaseIdx] = { ...cells[teaseIdx]!, rarity: tease };
+    }
   }
   return cells;
 }
