@@ -30,8 +30,9 @@ DO assigns `<name-at-creation>-<random>` once and never revisits it. Renaming an
 app is therefore **safe and already done**. Do not "fix" these hostnames to match.
 
 **Managed databases: the hostname DOES embed the cluster name.**
-The live Postgres host is `pokenic-pg-do-user-37988790-0.i.db.ondigitalocean.com`
-and Valkey is `pokenic-valkey-do-user-...`. The cluster name is a literal substring.
+Both hosts take the form `<cluster-name>-do-user-<id>-0.i.db.ondigitalocean.com` — the
+cluster name is a literal substring of the connection hostname. (Full hostnames
+deliberately omitted: this repo is public. Get them from `doctl databases list`.)
 
 > **VERIFY BEFORE ACTING:** it is _likely_ that renaming the cluster rewrites the
 > connection hostname, which would invalidate the encrypted `DATABASE_URL` /
