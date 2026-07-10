@@ -2,8 +2,8 @@ import type { MetadataRoute } from 'next';
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'Pokenic — Physical & Digital Collectibles',
-    short_name: 'Pokenic',
+    name: 'PixelSlot — Physical & Digital Collectibles',
+    short_name: 'PixelSlot',
     description:
       'Rip packs. Pull graded cards. Hold, trade, redeem, or sell back at up to 90% value.',
     start_url: '/',

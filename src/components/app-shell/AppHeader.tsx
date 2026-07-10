@@ -35,12 +35,12 @@ export default function AppHeader() {
           <Link
             href="/"
             className="flex shrink-0 items-center"
-            aria-label="Pokenic home"
+            aria-label="PixelSlot home"
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={LOGO_SRC}
-              alt="Pokenic"
+              alt="PixelSlot"
               width={88}
               height={44}
               className="h-7 w-auto object-contain lg:h-9"

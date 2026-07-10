@@ -9,7 +9,7 @@ export async function generateMetadata({
   params: Promise<{ handle: string }>;
 }): Promise<Metadata> {
   const { handle } = await params;
-  return { title: `Join ${decodeURIComponent(handle)} on Pokenic` };
+  return { title: `Join ${decodeURIComponent(handle)} on PixelSlot` };
 }
 
 export default async function InvitePage({

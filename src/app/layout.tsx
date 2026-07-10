@@ -27,17 +27,17 @@ const nekst = localFont({
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: 'Pokenic — Your Gateway to Physical & Digital Collectibles',
-    template: '%s · Pokenic',
+    default: 'PixelSlot — Your Gateway to Physical & Digital Collectibles',
+    template: '%s · PixelSlot',
   },
   description:
     'Rip packs. Pull graded cards. Hold, trade, redeem, or sell back at up to 90% value.',
-  applicationName: 'Pokenic',
+  applicationName: 'PixelSlot',
   alternates: { canonical: '/' },
   openGraph: {
     type: 'website',
-    siteName: 'Pokenic',
-    title: 'Pokenic — Your Gateway to Physical & Digital Collectibles',
+    siteName: 'PixelSlot',
+    title: 'PixelSlot — Your Gateway to Physical & Digital Collectibles',
     description:
       'Rip packs. Pull graded cards. Hold, trade, redeem, or sell back at up to 90% value.',
     url: '/',
@@ -45,12 +45,12 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Pokenic — Your Gateway to Physical & Digital Collectibles',
+    title: 'PixelSlot — Your Gateway to Physical & Digital Collectibles',
     description:
       'Rip packs. Pull graded cards. Hold, trade, redeem, or sell back at up to 90% value.',
     images: ['/seo/icon-512x512.png'],
   },
-  appleWebApp: { capable: true, title: 'Pokenic', statusBarStyle: 'black' },
+  appleWebApp: { capable: true, title: 'PixelSlot', statusBarStyle: 'black' },
   // Favicon + apple-touch icon come from src/app/icon.png + apple-icon.png.
 };
 

@@ -144,7 +144,7 @@ function FeaturedChase({
   );
 }
 
-/** The 90scard trust row, Pokenic facts: graded slabs, buyback, vault. */
+/** The 90scard trust row, PixelSlot facts: graded slabs, buyback, vault. */
 function TrustRow() {
   const items = [
     { icon: BadgeCheck, label: 'Every pull is a real graded slab' },

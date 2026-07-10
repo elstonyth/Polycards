@@ -22,7 +22,7 @@ export async function generateMetadata({
   const name = profile?.name ?? userOrGeneric(handle).username;
   return {
     title: name,
-    description: `${name}'s collection on Pokenic.`,
+    description: `${name}'s collection on PixelSlot.`,
   };
 }
 

@@ -27,7 +27,7 @@ import { AppearanceCard } from './AppearanceCard';
 
 export const metadata: Metadata = {
   title: 'Me',
-  description: 'Your Pokenic profile, wallet, rewards, and settings.',
+  description: 'Your PixelSlot profile, wallet, rewards, and settings.',
 };
 
 // Quick-access grid (showgo's Me pattern): everything that used to live in the

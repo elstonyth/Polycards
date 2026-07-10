@@ -1,8 +1,8 @@
 {
-  "name": "pokenic-game",
+  "name": "pixelslot-game",
   "version": "0.3.1",
   "private": true,
-  "description": "Pokenic — a web-based game built with Next.js, React, and Tailwind CSS.",
+  "description": "PixelSlot — a web-based game built with Next.js, React, and Tailwind CSS.",
   "author": "elstonyth",
   "license": "MIT",
   "repository": {

@@ -6,7 +6,8 @@ import { features } from '@/lib/features';
 
 export const metadata: Metadata = {
   title: 'Series',
-  description: 'Browse collectible card series and sets available on Pokenic.',
+  description:
+    'Browse collectible card series and sets available on PixelSlot.',
 };
 
 // Mock series tiles (layout only — real set catalog comes from the backend).

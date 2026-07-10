@@ -3,7 +3,7 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '@/lib/utils';
 
 /**
- * The Pokenic pill button (DESIGN.md §5 "Buttons") — the single source of truth
+ * The PixelSlot pill button (DESIGN.md §5 "Buttons") — the single source of truth
  * for what was 20+ hand-rolled copies of the same `rounded-full` string. Baked
  * in are the states the copies dropped: a focus-visible ring, disabled styling,
  * and a reduced-motion-safe press.

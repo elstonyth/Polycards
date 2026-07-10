@@ -35,7 +35,7 @@ export default function SiteFooter() {
         </ul>
       </nav>
       <p className="mt-1 text-[12px] text-white/55">
-        © {new Date().getFullYear()} Pokenic — rip packs, pull graded cards,
+        © {new Date().getFullYear()} PixelSlot — rip packs, pull graded cards,
         sell back at up to 90%.
       </p>
     </footer>
