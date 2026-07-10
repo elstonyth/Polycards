@@ -154,6 +154,47 @@ The cap of 4 is a concession to the local Knex pool, not a design preference.
 
 ---
 
+## 4b. The live viewer
+
+The user must be able to **watch the world live** — customers walking, playing slots,
+complaining; the admin working a queue.
+
+**The seam that makes this cheap:** agents never describe motion. They emit *semantic*
+events to `events.jsonl` — `arrived`, `played_pack`, `pull_result`, `complained`,
+`admin_picked_up`, `admin_resolved`, `finding`. The **viewer owns all choreography**: it
+decides that "refund-seeker complained" means the sprite walks from slot 3 to the admin
+desk. Agents' jobs are unchanged; every pixel of presentation lives in one file whose
+correctness nothing depends on.
+
+**Transport:** `scripts/sim/viewer.mjs` — a small **zero-dependency** Node server
+(`node:http` + `node:fs`) serving one static page plus an SSE endpoint that tails
+`events.jsonl` as agents append. `localhost:4500`. Agents append with `O_APPEND` line
+writes, atomic enough for concurrent sprites.
+`ponytail: single-file tail; upgrade to a real bus only if agents outgrow one process.`
+
+**Strictly live** (user's choice): no scrub/rewind controls are built. The event log
+still persists on disk as a byproduct, so a crash does not lose the record and replay
+remains a small later addition rather than a rebuild.
+
+**The floor:** a `<canvas>` top-down pixel room drawn with rects — no art assets, no CDN
+(matching this repo's self-contained convention). Stations: entrance, slot machines,
+vault, admin desk. Sprites tween between them. Playing a slot spins reels; the result
+flashes in the card's rarity color. An angry customer gets a bubble and marches to the
+desk.
+
+**The diagnostic moment:** the admin sprite has a visible queue. **When that queue grows
+and stops draining, you are watching a customer-service gap happen.** That is what makes
+this more than decoration.
+
+**The sidebar:** day counter, each persona's balance and current action, admin queue
+depth, and a severity-colored findings feed as the auditor confirms them.
+
+The viewer finds no bugs by itself. Its value is that a human spots in ten seconds — a
+customer stuck in a corner, a queue that never drains — what would take an hour to find
+in a JSONL file. It is capped at two files and zero dependencies to stay proportionate.
+
+---
+
 ## 5. Findings ledger
 
 `findings.jsonl`, one structured record per gap:
@@ -281,7 +322,7 @@ with its own implementation plan:
 
 | Phase | Scope | Planned when |
 |---|---|---|
-| 1 | Harness: seed, time-shift, agent clients, inbox, ledger, workflow day loop. Validated by the 2-day pilot. | Now — the next plan. |
+| 1 | Harness: seed, time-shift, agent clients, inbox, ledger, event stream, **live viewer (§4b)**, workflow day loop. Validated by the 2-day pilot. | Now — the next plan. |
 | 2 | Month 1: the adversarial run. Produces `findings.jsonl`. | No plan needed; it is execution of phase 1's artifact. |
 | 3 | Fix batch(es), triaged per §6. Subsystem-sized gaps escalate to the user first. | After month 1, from the ledger. |
 | 4 | Gate: fresh month + repro replay + post-gate UI replay (§8). | After phase 3. |
