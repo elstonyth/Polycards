@@ -1,7 +1,249 @@
 <!doctype html>
 <meta charset="utf-8" />
 <title>PixelSlot — Live Sim</title>
-<canvas id="floor" width="640" height="360"></canvas>
-<script>
-  /* replaced in Task 9 */
+<style>
+  :root {
+    color-scheme: dark;
+  }
+  * {
+    margin: 0;
+    box-sizing: border-box;
+  }
+  body {
+    background: #0a0a0a;
+    color: #fafafa;
+    font:
+      13px/1.4 ui-monospace,
+      monospace;
+    display: flex;
+    height: 100vh;
+  }
+  #stage {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  canvas {
+    image-rendering: pixelated;
+    background: #141414;
+    border: 1px solid #262626;
+    width: min(96%, 900px);
+  }
+  #side {
+    width: 320px;
+    border-left: 1px solid #262626;
+    padding: 12px;
+    overflow-y: auto;
+  }
+  h2 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #a3a3a3;
+    margin: 14px 0 6px;
+  }
+  .row {
+    display: flex;
+    justify-content: space-between;
+    padding: 2px 0;
+  }
+  .dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    margin-right: 6px;
+  }
+  #findings .f {
+    padding: 4px 6px;
+    margin: 3px 0;
+    border-radius: 4px;
+    background: #1c1c1c;
+  }
+  .sev-critical {
+    border-left: 3px solid #ef4444;
+  }
+  .sev-high {
+    border-left: 3px solid #f97316;
+  }
+  .sev-medium {
+    border-left: 3px solid #eab308;
+  }
+  .sev-low {
+    border-left: 3px solid #6b7280;
+  }
+  #day {
+    font-size: 18px;
+    font-weight: 700;
+  }
+</style>
+<div id="stage"><canvas id="floor" width="640" height="360"></canvas></div>
+<aside id="side">
+  <div id="day">Day —</div>
+  <h2>Customers</h2>
+  <div id="customers"></div>
+  <h2>Admin queue (<span id="qdepth">0</span>)</h2>
+  <div id="queue"></div>
+  <h2>Findings</h2>
+  <div id="findings"></div>
+</aside>
+<script type="module">
+  // Choreography is duplicated here (browser can't import the .mjs across the
+  // SSE boundary without a bundler; the map is tiny). Keep in sync with
+  // choreography.mjs — the pilot checks a played_pack lands a sprite on a slot.
+  const STATIONS = {
+    entrance: { x: 40, y: 180 },
+    slot1: { x: 200, y: 70 },
+    slot2: { x: 200, y: 180 },
+    slot3: { x: 200, y: 290 },
+    vault: { x: 360, y: 70 },
+    desk: { x: 500, y: 180 },
+  };
+  function targetFor(e) {
+    switch (e.kind) {
+      case 'played_pack':
+        return {
+          ...(STATIONS[e.detail?.slot] || STATIONS.slot1),
+          mood: 'busy',
+        };
+      case 'pull_result':
+        return {
+          ...STATIONS.slot1,
+          mood: e.detail?.rarity === 'legendary' ? 'happy' : 'neutral',
+        };
+      case 'complained':
+        return { ...STATIONS.desk, mood: 'angry' };
+      case 'admin_picked_up':
+      case 'admin_resolved':
+        return { ...STATIONS.desk, mood: 'busy' };
+      default:
+        return { ...STATIONS.entrance, mood: 'neutral' };
+    }
+  }
+  const MOOD = {
+    neutral: '#e5e5e5',
+    happy: '#4ade80',
+    angry: '#ef4444',
+    busy: '#38bdf8',
+  };
+
+  const cvs = document.getElementById('floor');
+  const ctx = cvs.getContext('2d');
+  const sprites = new Map(); // actor -> { x, y, tx, ty, color, mood, action }
+  const queue = []; // customer ids waiting at the desk
+  const balances = new Map();
+  let day = 0;
+
+  const COLORS = {}; // actor -> color, assigned on first sight
+  const PALETTE = [
+    '#4ade80',
+    '#f87171',
+    '#a78bfa',
+    '#fbbf24',
+    '#38bdf8',
+    '#fb923c',
+    '#f472b6',
+    '#2dd4bf',
+  ];
+  let ci = 0;
+  const colorOf = (a) => (COLORS[a] ??= PALETTE[ci++ % PALETTE.length]);
+
+  function handle(e) {
+    if (typeof e.day === 'number') {
+      day = e.day;
+      document.getElementById('day').textContent = 'Day ' + day;
+    }
+    if (e.kind === 'finding') {
+      addFinding(e.detail);
+      return;
+    }
+    if (e.actor === 'admin') {
+      if (e.kind === 'admin_picked_up' && e.detail?.customer) {
+        const i = queue.indexOf(e.detail.customer);
+        if (i >= 0) queue.splice(i, 1);
+      }
+      renderQueue();
+      return;
+    }
+    if (e.kind === 'complained' && !queue.includes(e.actor))
+      queue.push(e.actor);
+    if (e.detail?.balance != null) balances.set(e.actor, e.detail.balance);
+    const t = targetFor(e);
+    const s = sprites.get(e.actor) || {
+      x: STATIONS.entrance.x,
+      y: STATIONS.entrance.y,
+      color: colorOf(e.actor),
+    };
+    s.tx = t.x;
+    s.ty = t.y;
+    s.mood = t.mood;
+    s.action = e.kind;
+    sprites.set(e.actor, s);
+    renderQueue();
+    renderCustomers();
+  }
+
+  function addFinding(f) {
+    const el = document.createElement('div');
+    el.className = 'f sev-' + (f?.severity || 'low');
+    el.textContent = `[${f?.category || '?'}] ${f?.summary || ''}`;
+    document.getElementById('findings').prepend(el);
+  }
+  function renderQueue() {
+    document.getElementById('qdepth').textContent = queue.length;
+    document.getElementById('queue').innerHTML = queue
+      .map(
+        (a) =>
+          `<div class="row"><span><span class="dot" style="background:${colorOf(a)}"></span>${a}</span></div>`,
+      )
+      .join('');
+  }
+  function renderCustomers() {
+    document.getElementById('customers').innerHTML = [...sprites.entries()]
+      .map(
+        ([a, s]) =>
+          `<div class="row"><span><span class="dot" style="background:${s.color}"></span>${a}</span><span>${balances.get(a) ?? '—'} · ${s.action || ''}</span></div>`,
+      )
+      .join('');
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, cvs.width, cvs.height);
+    // stations
+    ctx.fillStyle = '#262626';
+    for (const k of ['slot1', 'slot2', 'slot3'])
+      rect(STATIONS[k], 26, 34, '#3b3b3b');
+    rect(STATIONS.vault, 30, 30, '#3f3f46');
+    rect(STATIONS.desk, 40, 26, '#404040');
+    label(STATIONS.vault, 'VAULT');
+    label(STATIONS.desk, 'ADMIN');
+    // sprites
+    for (const s of sprites.values()) {
+      s.x += ((s.tx ?? s.x) - s.x) * 0.12;
+      s.y += ((s.ty ?? s.y) - s.y) * 0.12;
+      ctx.fillStyle = s.color;
+      ctx.fillRect(s.x - 5, s.y - 5, 10, 10);
+      ctx.fillStyle = MOOD[s.mood] || '#e5e5e5';
+      ctx.fillRect(s.x - 5, s.y - 9, 10, 3);
+    }
+    requestAnimationFrame(draw);
+  }
+  function rect(p, w, h, c) {
+    ctx.fillStyle = c;
+    ctx.fillRect(p.x - w / 2, p.y - h / 2, w, h);
+  }
+  function label(p, t) {
+    ctx.fillStyle = '#a3a3a3';
+    ctx.font = '9px monospace';
+    ctx.fillText(t, p.x - 14, p.y + 26);
+  }
+
+  const es = new EventSource('/events');
+  es.onmessage = (m) => {
+    try {
+      handle(JSON.parse(m.data));
+    } catch {}
+  };
+  requestAnimationFrame(draw);
 </script>
