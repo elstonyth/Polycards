@@ -1,6 +1,7 @@
-# preview.ps1 — start the full Pokenic dev stack (storefront + backend + admin)
+# preview.ps1 — start the full PixelSlot dev stack (storefront + backend + admin)
 # Used by Claude when the user says "run preview" / "launch dev".
-# Dev mode (no build wait) = fastest. For prod visual verify use "Launch Pokenic.bat" (:4000).
+# Dev mode (no build wait) = fastest. For prod visual verify:
+#   npm run build; pwsh scripts/serve-standalone.ps1 -Port 4000
 #
 #   Storefront  http://localhost:3001  (next dev)
 #   Backend     http://localhost:9000  (medusa develop)
@@ -9,7 +10,9 @@
 # Each server runs detached in its own window so this script returns immediately.
 
 $ErrorActionPreference = 'Stop'
-$ROOT = 'C:\Users\PC\Desktop\Projects\Pokenic_Game'
+# Derived from this script's own location (scripts/ -> repo root) so renaming or
+# moving the checkout doesn't break it.
+$ROOT = Split-Path $PSScriptRoot -Parent
 
 function Test-Port($port) {
     return [bool](Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
