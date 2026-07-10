@@ -151,6 +151,11 @@
     CSS2DRenderer,
     CSS2DObject,
   } from 'three/addons/renderers/CSS2DRenderer.js';
+  import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+  import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+  import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+  import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+  import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
   // ---- Stations on the plaza (x,z); y up. Kept in sync w/ choreography.mjs ----
   const S = {
@@ -214,6 +219,11 @@
   scene.background = new THREE.Color(0x11131f);
   scene.fog = new THREE.Fog(0x11131f, 34, 70);
 
+  // Image-based lighting: a soft procedural room env gives every PBR material
+  // realistic ambient reflections/roughness response (no external HDR file).
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
   const camera = new THREE.PerspectiveCamera(
     42,
     innerWidth / innerHeight,
@@ -228,6 +238,20 @@
   controls.maxPolarAngle = Math.PI * 0.48;
   controls.minDistance = 12;
   controls.maxDistance = 60;
+
+  // Post-processing: subtle bloom so emissive parts (screens, fountain, bulbs,
+  // mood heads) glow like real light. RenderPass -> bloom -> OutputPass (tone
+  // map + sRGB once, at the end of the chain).
+  const composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
+  const bloom = new UnrealBloomPass(
+    new THREE.Vector2(innerWidth, innerHeight),
+    0.55, // strength
+    0.6, // radius
+    0.9, // threshold — only bright/emissive pixels bloom
+  );
+  composer.addPass(bloom);
+  composer.addPass(new OutputPass());
 
   // ---- Lighting (dragonir-style: directional shadow + hemi + ambient + fog) ---
   scene.add(new THREE.HemisphereLight(0xbcd2ff, 0x1a1622, 0.6));
@@ -251,6 +275,7 @@
       color: c,
       roughness: 0.78,
       metalness: 0.12,
+      envMapIntensity: 0.9,
       ...o,
     });
   const round = (g) => ((g.castShadow = g.receiveShadow = true), g);
@@ -616,7 +641,7 @@
         (s.material.emissiveIntensity = 0.7 + Math.sin(t * 3 + i) * 0.22),
     );
     controls.update();
-    renderer.render(scene, camera);
+    composer.render();
     labelRenderer.render(scene, camera);
     requestAnimationFrame(tick);
   }
@@ -624,6 +649,7 @@
     camera.aspect = innerWidth / innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(innerWidth, innerHeight);
+    composer.setSize(innerWidth, innerHeight);
     labelRenderer.setSize(innerWidth, innerHeight);
   }
   addEventListener('resize', resize);
