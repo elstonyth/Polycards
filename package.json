@@ -7,11 +7,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/elstonyth/Pokenic_Game.git"
+    "url": "https://github.com/elstonyth/PixelSlot.git"
   },
-  "homepage": "https://github.com/elstonyth/Pokenic_Game#readme",
+  "homepage": "https://github.com/elstonyth/PixelSlot#readme",
   "bugs": {
-    "url": "https://github.com/elstonyth/Pokenic_Game/issues"
+    "url": "https://github.com/elstonyth/PixelSlot/issues"
   },
   "keywords": [
     "game",
