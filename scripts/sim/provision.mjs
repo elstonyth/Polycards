@@ -1,8 +1,29 @@
 // scripts/sim/provision.mjs
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { SIM, simDatabaseUrl, runDir } from './config.mjs';
+
+// Read DATABASE_URL from env, or fall back to the backend env file (read in
+// Node, not a shell read) so this runs without the caller exporting it.
+function resolveBase() {
+  if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
+  try {
+    const envText = readFileSync(
+      join(process.cwd(), 'backend', 'packages', 'api', '.env'),
+      'utf8',
+    );
+    const m = envText.match(/^DATABASE_URL=(.*)$/m);
+    if (m)
+      return m[1]
+        .trim()
+        .replace(/\r$/, '')
+        .replace(/^["']|["']$/g, '');
+  } catch {
+    /* fall through */
+  }
+  return null;
+}
 
 const runId = process.argv[2];
 if (!runId) {
@@ -13,9 +34,9 @@ if (!/^[\w-]+$/.test(runId)) {
   console.error('runId must be [A-Za-z0-9_-]');
   process.exit(1);
 }
-const base = process.env.DATABASE_URL;
+const base = resolveBase();
 if (!base) {
-  console.error('DATABASE_URL not set (source backend env first)');
+  console.error('DATABASE_URL not found (env or backend/packages/api/.env)');
   process.exit(1);
 }
 
