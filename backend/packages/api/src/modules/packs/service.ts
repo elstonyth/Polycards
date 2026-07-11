@@ -86,6 +86,25 @@ function isUniqueViolation(e: unknown): boolean {
   return code === '23505';
 }
 
+// Cents → customer-facing "RM 12.34" (matches the existing inline formatting
+// in this file's error messages).
+function rm(cents: number): string {
+  return `RM ${(cents / 100).toFixed(2)}`;
+}
+
+// Store-facing insufficient-credits message for a pack open: names the price,
+// the customer's (available) balance, and the exact shortfall so a newbie with
+// RM 3 can see a RM 25 pack needs a RM 22 top-up (sim day-3 LOW, ux-friction).
+function insufficientCreditsMessage(
+  costCents: number,
+  haveCents: number,
+): string {
+  return (
+    `Not enough credits to open this pack. It costs ${rm(costCents)} and ` +
+    `you have ${rm(haveCents)} — top up at least ${rm(costCents - haveCents)}.`
+  );
+}
+
 // Auto-generates CRUD for each model: list/retrieve/create/update/delete<Model>s
 // (e.g. listPacks, listCards, listPackOdds, createPulls,
 // listCreditTransactions). Card = prize metadata, PackOdds = the weighted
@@ -694,7 +713,7 @@ class PacksModuleService extends MedusaService({
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
         input.reason === 'pack_open'
-          ? 'Not enough credits to open this pack.'
+          ? insufficientCreditsMessage(-deltaCents, beforeCents - floorCents)
           : `Deduction exceeds the customer's balance (RM ${(
               beforeCents / 100
             ).toFixed(2)}) — the balance cannot go below RM ${(
@@ -1858,7 +1877,7 @@ class PacksModuleService extends MedusaService({
     if (availableCents + deltaCents < 0) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
-        'Not enough credits to open this pack.',
+        insufficientCreditsMessage(-deltaCents, availableCents),
       );
     }
 
