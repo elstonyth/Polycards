@@ -69,6 +69,19 @@ const DELIVERY_RULES: ErrorRule[] = [
     /unauthorized|not authenticated|401/i,
     'Please log in to manage deliveries.',
   ],
+  // Specific per-status reasons (sim P3 #9) — must precede the generic rule.
+  [
+    /already in a pending delivery/i,
+    'One or more cards are already in a pending delivery request.',
+  ],
+  [
+    /already been delivered/i,
+    'One or more cards have already been delivered.',
+  ],
+  [
+    /already sold back/i,
+    'One or more cards were already sold back.',
+  ],
   [
     /no longer available|not allowed|409/i,
     'One or more cards are no longer available to deliver.',
