@@ -14,7 +14,7 @@ import {
 import {
   DEFAULT_MARKET_MULTIPLIER,
   displayMarketPrice,
-  resolveFxRate,
+  resolveFxRateInfo,
 } from '../../../../../modules/packs/pricing';
 
 // POST /store/packs/:slug/open — open a pack: roll a winner over the pack's
@@ -51,7 +51,7 @@ export async function POST(
   // itself stays the raw USD decimal untouched. RolledCard (the roll-pack step's
   // normalized winner shape) does not carry market_multiplier, so it is looked up
   // here by handle — same field the vault route reads.
-  const fxRate = await resolveFxRate(packsService);
+  const { rate: fxRate, firm: fxFirm } = await resolveFxRateInfo(packsService);
   const [wonCardRow] = await packsService.listCards(
     { handle: result.card.handle },
     { take: 1 },
@@ -83,6 +83,10 @@ export async function POST(
     price: result.price,
     buyback: {
       ...buyback,
+      // false when the MYR amounts were computed on the display FX fallback:
+      // the sell would be refused ("Exchange rate unavailable"), so the UI
+      // must not present this quote as a firm offer (sim finding P1-1).
+      firm: fxFirm,
       // The flat rate that applies after the instant window — surfaced so the
       // reveal can offer a post-expiry "sell at flat" without recomputing.
       vault_percent: FLAT_PERCENT,

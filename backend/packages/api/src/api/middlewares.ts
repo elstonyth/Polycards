@@ -24,6 +24,7 @@ import {
 } from './utils/rate-limit';
 import { createResetTokenSingleUseGuard } from './utils/reset-token-guard';
 import { rejectCustomerMetadata } from './utils/customer-metadata-guard';
+import { validateDeliverableAddress } from './utils/address-guard';
 
 // Custom-route middleware. /store/* is NOT a default customer-protected prefix
 // (only /store/customers/me/* is), so every customer-owned route here must opt
@@ -49,9 +50,18 @@ import { rejectCustomerMetadata } from './utils/customer-metadata-guard';
 // together in the UI, so they share one budget (and one Redis connection).
 const storeReadRateLimit = createStoreReadRateLimit();
 const authRateLimit = createAuthRateLimit();
-// Shared by both delivery-order WRITE matchers (POST create + POST address):
-// one write-tier budget + one Redis connection, distinct from the read budget.
-const deliveryWriteRateLimit = createDeliveryWriteRateLimit();
+// Shared by ALL write-tier matchers below (delivery-order writes, rewards
+// claim/withdraw, daily draw, avatar upload): one budget + one Redis
+// connection, distinct from the read budget. The 429 label resolves per
+// request so a rewards claim is never told "Too many delivery requests."
+// (sim finding P3-10).
+const deliveryWriteRateLimit = createDeliveryWriteRateLimit((req) => {
+  if (req.path.startsWith('/store/rewards/'))
+    return 'Too many reward requests.';
+  if (req.path.startsWith('/store/daily/')) return 'Too many draw attempts.';
+  if (req.path.startsWith('/store/profile/')) return 'Too many uploads.';
+  return 'Too many delivery requests.';
+});
 // Frame equip/unequip — cosmetic metadata write with its own generous budget
 // (sharing the delivery-write tier 429'd a collector's 11th frame swap).
 const profileAppearanceRateLimit = createProfileAppearanceRateLimit();
@@ -144,6 +154,21 @@ export default defineMiddlewares({
       matcher: '/store/customers/me',
       method: 'POST',
       middlewares: [rejectCustomerMetadata],
+    },
+    // Medusa's stock address routes silently accept null country_code +
+    // postal_code (sim finding P3-8) — reject undeliverable addresses before
+    // the core route. Both are framework-authenticated already.
+    {
+      // POST /store/customers/me/addresses (create — fields required)
+      matcher: '/store/customers/me/addresses',
+      method: 'POST',
+      middlewares: [validateDeliverableAddress('create')],
+    },
+    {
+      // POST /store/customers/me/addresses/:id (update — no blanking out)
+      matcher: '/store/customers/me/addresses/*',
+      method: 'POST',
+      middlewares: [validateDeliverableAddress('update')],
     },
     {
       matcher: '/store/packs/*/open',

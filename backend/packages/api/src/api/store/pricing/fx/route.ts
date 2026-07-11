@@ -1,7 +1,7 @@
 import { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
 import PacksModuleService from '../../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../../modules/packs';
-import { resolveFxRate } from '../../../../modules/packs/pricing';
+import { resolveFxRateInfo } from '../../../../modules/packs/pricing';
 
 // GET /store/pricing/fx — the current effective USD->MYR rate. Public,
 // read-only, no customer auth (a currency rate carries no PII) — mirrors
@@ -14,6 +14,9 @@ export async function GET(
   res: MedusaResponse,
 ): Promise<void> {
   const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
-  const rate = await resolveFxRate(packs);
-  res.json({ rate });
+  // firm:false = `rate` is the display fallback (no usable FxRate row) — fine
+  // for showing prices, but money writes will refuse, so clients must not
+  // treat fallback pricing as transactable (sim finding P1-1).
+  const { rate, firm } = await resolveFxRateInfo(packs);
+  res.json({ rate, firm });
 }

@@ -216,13 +216,21 @@ export class FailoverRateLimitStore implements RateLimitStore {
   }
 }
 
+/**
+ * First sentence of the 429 body. A function resolves per denied request —
+ * used when one limiter instance (one shared budget) fronts several route
+ * families and the label must name the route actually hit (sim finding
+ * P3-10: a rewards claim answered "Too many delivery requests.").
+ */
+export type RateLimitMessage = string | ((req: MedusaRequest) => string);
+
 export interface RateLimitMiddlewareOptions {
   store: RateLimitStore;
   rules: RateLimitRule[];
   /** Namespaces the store key, e.g. "rl:pack-open:". */
   prefix: string;
-  /** First sentence of the 429 body; default "Too many pack opens.". */
-  message?: string;
+  /** Default "Too many pack opens.". */
+  message?: RateLimitMessage;
   onError?: (err: unknown) => void;
 }
 
@@ -278,12 +286,15 @@ export function createRateLimitMiddleware(
       return;
     }
     const retryAfterSec = Math.max(1, Math.ceil(decision.retryAfterMs / 1000));
+    const label =
+      (typeof opts.message === 'function' ? opts.message(req) : opts.message) ??
+      'Too many pack opens.';
     res
       .status(429)
       .set('Retry-After', String(retryAfterSec))
       .json({
         type: 'rate_limit_exceeded',
-        message: `${opts.message ?? 'Too many pack opens.'} Try again in ${retryAfterSec}s.`,
+        message: `${label} Try again in ${retryAfterSec}s.`,
       });
   };
 }
@@ -373,7 +384,7 @@ type EnvLimiterDefaults = typeof DEFAULTS;
  */
 function createEnvRateLimit(opts: {
   name: string;
-  message?: string;
+  message?: RateLimitMessage;
   defaults: EnvLimiterDefaults;
 }): MiddlewareHandler {
   const { name, defaults } = opts;
@@ -496,10 +507,12 @@ export function createCreditTopupRateLimit(): MiddlewareHandler {
  * DELIVERY_WRITE_RATE_BURST_LIMIT / DELIVERY_WRITE_RATE_BURST_WINDOW_MS (10/10s)
  * DELIVERY_WRITE_RATE_LIMIT / DELIVERY_WRITE_RATE_WINDOW_MS (30/60s)
  */
-export function createDeliveryWriteRateLimit(): MiddlewareHandler {
+export function createDeliveryWriteRateLimit(
+  message: RateLimitMessage = 'Too many delivery requests.',
+): MiddlewareHandler {
   return createEnvRateLimit({
     name: 'delivery-write',
-    message: 'Too many delivery requests.',
+    message,
     defaults: {
       burstLimit: 10,
       burstWindowMs: 10_000,

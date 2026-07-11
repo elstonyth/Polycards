@@ -15,7 +15,7 @@ import {
 import {
   DEFAULT_MARKET_MULTIPLIER,
   displayMarketPrice,
-  resolveFxRate,
+  resolveFxRateInfo,
 } from '../../../../../modules/packs/pricing';
 
 // POST /store/packs/:slug/open-batch — open N packs in one atomic operation:
@@ -72,7 +72,7 @@ export async function POST(
   // batch, and the won cards' market_multiplier fetched in a single batched
   // lookup (RolledCard, the roll-pack-batch step's winner shape, does not
   // carry market_multiplier — same gap as the single-open route).
-  const fxRate = await resolveFxRate(packsService);
+  const { rate: fxRate, firm: fxFirm } = await resolveFxRateInfo(packsService);
   const handles = [...new Set(result.rolls.map((card) => card.handle))];
   const cardRows = handles.length
     ? await packsService.listCards(
@@ -108,6 +108,10 @@ export async function POST(
         card: { ...card, marketPriceMyr },
         buyback: {
           ...buyback,
+          // Mirrors the single-open route: false when the amounts were computed
+          // on the display FX fallback — the sell would refuse, so don't
+          // present the quote as firm (sim finding P1-1).
+          firm: fxFirm,
           vault_percent: FLAT_PERCENT,
           vault_amount: buybackAmount(marketPriceMyr, FLAT_PERCENT),
           instant_deadline_ms: instantDeadlineMs(

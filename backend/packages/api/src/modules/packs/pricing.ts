@@ -44,72 +44,77 @@ export function effectiveRate(
   return Number.isFinite(r) && r > 0 ? r : DEFAULT_USD_MYR;
 }
 
-// Resolve the current effective USD->MYR rate for a request — the single seam
-// store/admin routes call so they never touch FxRate rows or effectiveRate's
-// fallback logic directly. Row fields (rate/manual_rate) are bigNumber and can
-// come back as strings/objects; effectiveRate already does Number(...) with a
-// finite/>0 guard, so no extra normalization is needed here (verified against
-// the identical raw-row usage in admin/pricing/fx/route.ts).
+type FxRateSource = {
+  listFxRates: (
+    f: unknown,
+    c: unknown,
+  ) => Promise<
+    Array<{
+      rate: number;
+      manual_override: boolean;
+      manual_rate: number | null;
+    }>
+  >;
+};
+
+export type FxRateInfo = {
+  rate: number;
+  /**
+   * true iff the rate came from a real FxRate row (fetched or valid manual
+   * override) — the SAME condition under which the strict money resolver pays.
+   * false means `rate` is the DEFAULT_USD_MYR display fallback: fine to show
+   * a price, but a buyback quote derived from it must not be presented as a
+   * firm offer, because the credit path will refuse (sim finding P1-1: the
+   * reveal promised RM48.22 during an FX-empty window, then the sell 400'd).
+   */
+  firm: boolean;
+};
+
+// THE single FX resolution — every other resolver is a view of this one, so
+// quote firmness and credit refusal can never diverge again. Row fields
+// (rate/manual_rate) are bigNumber and can come back as strings/objects; the
+// Number(...) + finite/>0 guards below normalize exactly like effectiveRate.
 //
 // Defensive on the DB read: callers (e.g. GET /admin/cards) Promise.all this
 // alongside the card list, so a transient FxRate query failure must not 500
-// the whole endpoint — fall back to the default rate instead. Every caller
-// already tolerates the fallback (displayMarketPrice/effectiveRate degrade
-// gracefully), so swallowing here is safe.
-export async function resolveFxRate(packs: {
-  listFxRates: (
-    f: unknown,
-    c: unknown,
-  ) => Promise<
-    Array<{
-      rate: number;
-      manual_override: boolean;
-      manual_rate: number | null;
-    }>
-  >;
-}): Promise<number> {
+// the whole endpoint — it degrades to the default rate with firm:false.
+export async function resolveFxRateInfo(packs: FxRateSource): Promise<FxRateInfo> {
   try {
     const [row] = await packs.listFxRates({ pair: 'USD_MYR' }, { take: 1 });
-    return effectiveRate(row ?? null);
+    if (row) {
+      if (row.manual_override) {
+        const m = Number(row.manual_rate);
+        if (Number.isFinite(m) && m > 0) return { rate: m, firm: true };
+      }
+      const r = Number(row.rate);
+      if (Number.isFinite(r) && r > 0) return { rate: r, firm: true };
+    }
   } catch {
-    return DEFAULT_USD_MYR;
+    // fall through to the display fallback
   }
+  return { rate: DEFAULT_USD_MYR, firm: false };
 }
 
-// STRICT variant for MONEY WRITES (buyback credits). Display routes tolerate
+// Lenient view for DISPLAY-ONLY call sites that don't quote a sell-back
+// (catalog prices, admin lists): the rate, fallback tolerated.
+export async function resolveFxRate(packs: FxRateSource): Promise<number> {
+  return (await resolveFxRateInfo(packs)).rate;
+}
+
+// STRICT view for MONEY WRITES (buyback credits). Display routes tolerate
 // the DEFAULT_USD_MYR fallback; a route that CREDITS money must not — a
 // transient FX read failure would silently misprice the payout by the gap
 // between 4.7 and the configured rate (audit 2026-07-07 M3). Refuse instead.
-export async function resolveFxRateStrict(packs: {
-  listFxRates: (
-    f: unknown,
-    c: unknown,
-  ) => Promise<
-    Array<{
-      rate: number;
-      manual_override: boolean;
-      manual_rate: number | null;
-    }>
-  >;
-}): Promise<number> {
-  let row: Awaited<ReturnType<typeof packs.listFxRates>>[number] | undefined;
-  try {
-    [row] = await packs.listFxRates({ pair: 'USD_MYR' }, { take: 1 });
-  } catch {
-    row = undefined;
+// Derived from resolveFxRateInfo so "strict pays" === "quote is firm".
+export async function resolveFxRateStrict(packs: FxRateSource): Promise<number> {
+  const { rate, firm } = await resolveFxRateInfo(packs);
+  if (!firm) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'Exchange rate unavailable — please try again shortly.',
+    );
   }
-  if (row) {
-    if (row.manual_override) {
-      const m = Number(row.manual_rate);
-      if (Number.isFinite(m) && m > 0) return m;
-    }
-    const r = Number(row.rate);
-    if (Number.isFinite(r) && r > 0) return r;
-  }
-  throw new MedusaError(
-    MedusaError.Types.NOT_ALLOWED,
-    'Exchange rate unavailable — please try again shortly.',
-  );
+  return rate;
 }
 
 export async function fetchUsdMyr(

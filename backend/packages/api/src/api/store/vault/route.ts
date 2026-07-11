@@ -17,7 +17,7 @@ import { toMoney } from '../../../modules/packs/money';
 import {
   DEFAULT_MARKET_MULTIPLIER,
   displayMarketPrice,
-  resolveFxRate,
+  resolveFxRateInfo,
 } from '../../../modules/packs/pricing';
 
 // GET /store/vault — the authenticated customer's vault: every pull still held
@@ -42,7 +42,7 @@ export async function GET(
 ): Promise<void> {
   const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
   const customerId = req.auth_context.actor_id;
-  const fxRate = await resolveFxRate(packs);
+  const { rate: fxRate, firm: fxFirm } = await resolveFxRateInfo(packs);
 
   const pulls = await packs.listPulls(
     { customer_id: customerId, status: 'vaulted' },
@@ -121,6 +121,10 @@ export async function GET(
           percent,
           amount: buybackAmount(marketPriceMyr, percent),
           rate_type,
+          // false when amount was computed on the display FX fallback — the
+          // sell would refuse, so the UI must not present it as a firm offer
+          // (sim finding P1-1).
+          firm: fxFirm,
         },
       };
     })
