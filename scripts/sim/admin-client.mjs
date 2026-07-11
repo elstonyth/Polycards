@@ -78,7 +78,10 @@ export function makeAdminClient({ baseUrl, token, fetchImpl = fetch }) {
       call('POST', `/admin/customers/${id}/credits`, { amount, note }),
     freeze: (id, reason) =>
       call('POST', `/admin/customers/${id}/freeze`, { reason }),
-    unfreeze: (id) => call('POST', `/admin/customers/${id}/unfreeze`, {}),
+    // The route requires reason (1–500 chars) exactly like freeze — an empty
+    // body is a guaranteed 400 that would masquerade as a missing capability.
+    unfreeze: (id, reason) =>
+      call('POST', `/admin/customers/${id}/unfreeze`, { reason }),
     getDeliveryOrder: (id) => call('GET', `/admin/delivery-orders/${id}`),
     updateDeliveryOrder: (id, patch) =>
       call('POST', `/admin/delivery-orders/${id}`, patch),

@@ -25,6 +25,16 @@ const CUSTOMERS = A.activePersonas ?? ['honest', 'refund-seeker'];
 // ReferenceError. (The prompt builders below are function declarations and are
 // hoisted, but keep everything above the loop so nothing trails the final
 // `return`.)
+const PREFLIGHT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['ok', 'output'],
+  properties: {
+    ok: { type: 'boolean' },
+    output: { type: 'string' },
+  },
+};
+
 const AUDIT_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -58,6 +68,31 @@ function adminPrompt(runId, day) {
 }
 function auditorPrompt(runId, day) {
   return `${base(runId, day)}\n\nFollow your charter exactly: scripts/sim/personas/auditor.md`;
+}
+
+// Identity guard BEFORE any agent acts (spec §4): a dev backend on the sim
+// port answers /health against the WRONG db, so preflight.mjs additionally
+// proves this run's publishable key + sim admin work. Abort loudly otherwise —
+// never let eight adversarial agents loose on a non-sim database. (Same
+// sandbox constraint as the day shift: no Node here, delegate to a Bash agent.)
+log('Preflight — verifying the backend is the provisioned sim backend');
+const pre = await agent(
+  `Run EXACTLY this one shell command from the repo root and report the ` +
+    `result — do nothing else:\n\n` +
+    `node scripts/sim/preflight.mjs ${runId}\n\n` +
+    `Set ok=true ONLY if it exited 0. Put its final stdout/stderr line in ` +
+    `output verbatim.`,
+  {
+    label: 'preflight',
+    phase: 'Day',
+    model: 'haiku',
+    schema: PREFLIGHT_SCHEMA,
+  },
+);
+if (!pre?.ok) {
+  throw new Error(
+    `Preflight failed — aborting before any agent acts: ${pre?.output ?? 'no output from the preflight agent'}`,
+  );
 }
 
 const lastDay = startDay + days - 1;

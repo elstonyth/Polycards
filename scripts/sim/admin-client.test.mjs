@@ -33,6 +33,16 @@ test('freeze hits the freeze sub-route', async () => {
   assert.equal(calls[0].opts.method, 'POST');
 });
 
+test('unfreeze sends the required reason (the route 400s on an empty body)', async () => {
+  const { fetchImpl, calls } = recorder();
+  const c = makeAdminClient({ baseUrl: 'http://h', token: 'adm', fetchImpl });
+  await c.unfreeze('cus_5', 'dispute resolved');
+  assert.equal(calls[0].url, 'http://h/admin/customers/cus_5/unfreeze');
+  assert.deepEqual(JSON.parse(calls[0].opts.body), {
+    reason: 'dispute resolved',
+  });
+});
+
 test('admin client sends no publishable key header', async () => {
   const { fetchImpl, calls } = recorder({ items: [], total: 0 });
   const c = makeAdminClient({ baseUrl: 'http://h', token: 'adm', fetchImpl });

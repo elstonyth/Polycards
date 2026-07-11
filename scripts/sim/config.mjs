@@ -59,3 +59,13 @@ export function simDatabaseUrl(baseUrl) {
   u.pathname = `/${SIM.dbName}`;
   return u.toString();
 }
+
+// Same idea for Redis: swap ONLY the db index, preserving host/credentials.
+// Without this the backend inherits the dev REDIS_URL (index 0, shared state)
+// while the day-shift flushes index 9 — a flush nothing uses. Falls back to
+// the local container when the backend .env has no REDIS_URL.
+export function simRedisUrl(baseUrl) {
+  const u = new URL(baseUrl || 'redis://localhost:6379');
+  u.pathname = `/${SIM.redisIndex}`;
+  return u.toString();
+}

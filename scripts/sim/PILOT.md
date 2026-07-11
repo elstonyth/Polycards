@@ -5,7 +5,9 @@ Prove the harness end-to-end before any 30-day run.
 ## Preconditions
 
 - Docker containers up: `docker ps` shows pokenic-postgres, pokenic-redis.
-- Backend env available: `DATABASE_URL` exported in the shell (source backend/packages/api env; do NOT print it).
+- Backend env file present at `backend/packages/api/.env` (provision.mjs and
+  start-backend.mjs self-read `DATABASE_URL`/`REDIS_URL` from it — no shell
+  export needed; never print its values).
 
 ## Steps
 
@@ -14,14 +16,23 @@ Prove the harness end-to-end before any 30-day run.
    runs/pilot/pk.txt, and provisions admin `sim-admin@pixelslot.local` /
    `SimAdmin2026!` (also written to runs/pilot/diary/admin.md — log in via
    POST /auth/user/emailpass to get the admin token).
-3. Start the sim backend (built) on :9000 against the sim DB with
-   ALLOW_MOCK_TOPUP=true AND REWARDS_REDEMPTION_ENABLED=true (the latter gates
-   `POST /store/daily/draw` — see rewards-gate.ts — and is read at request time
-   by the backend process, not by provisioning):
-   `cd backend/packages/api && DATABASE_URL=<sim url> ALLOW_MOCK_TOPUP=true REWARDS_REDEMPTION_ENABLED=true corepack yarn build && DATABASE_URL=<sim url> ALLOW_MOCK_TOPUP=true REWARDS_REDEMPTION_ENABLED=true corepack yarn start`
-   Health: `curl -s localhost:9000/health` → ok.
-4. Start the viewer: `node scripts/sim/viewer.mjs pilot` → open http://localhost:4500.
-5. Run the loop via the Workflow tool: `Workflow({ scriptPath: 'scripts/sim/run-month.workflow.mjs', args: { runId: 'pilot', days: 2 } })`.
+3. Start the sim backend: `node scripts/sim/start-backend.mjs` (run in
+   background). It self-reads the backend .env, swaps the DB to pixelslot_sim
+   and Redis to index 9, binds :9100 (SIM.backendUrl — :9000 belongs to dev
+   backends), and sets ALLOW_MOCK_TOPUP=true + REWARDS_REDEMPTION_ENABLED=true
+   (the latter gates `POST /store/daily/draw` — see rewards-gate.ts — and is
+   read at request time by the backend process, not by provisioning).
+   Health: `curl -s localhost:9100/health` → ok.
+4. Identity guard: `node scripts/sim/preflight.mjs pilot` → must print
+   `preflight OK`. This proves the backend answering :9100 is the one step 2
+   provisioned (this run's publishable key + sim-admin login), not a stray dev
+   backend — a plain health check cannot tell them apart. The workflow re-runs
+   this before day 1 and aborts if it fails.
+5. Start the viewer: `node scripts/sim/viewer.mjs pilot` → open http://localhost:4500.
+6. Run the loop via the Workflow tool: `Workflow({ scriptPath: 'scripts/sim/run-month.workflow.mjs', args: { runId: 'pilot', days: 2 } })`.
+   Note: this launch is also the first moment `run-month.workflow.mjs` is known
+   to parse — `node --check` cannot validate the Workflow dialect (`export
+const meta` + top-level `return`).
 
 ## Pass criteria (the gate for Phase 1)
 

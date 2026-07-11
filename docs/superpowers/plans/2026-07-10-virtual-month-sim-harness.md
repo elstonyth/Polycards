@@ -18,7 +18,7 @@
 - **Sim DB name:** `pixelslot_sim`. **Sim Redis index:** `9`. **Viewer port:** `4500`. **Backend port:** `9000`.
 - **DB containers already up:** `pokenic-postgres` (5432), `pokenic-redis` (6379), `--restart unless-stopped`.
 - **Tests:** `node --test scripts/sim/` (added as root script `sim:test`). Backend is transpile-only at dev time; the repo Stop hook type-checks — keep sim scripts `.mjs` (not type-checked) so they don't enter the tsc gate.
-- **Auditor rule:** infrastructure errors (`ECONNREFUSED`, Knex pool timeouts, `429` on normal use) are **not findings**.
+- **Auditor rule:** infrastructure errors (`ECONNREFUSED`, Knex pool timeouts) are **not findings**. 429s split by intent (spec §2): a 429 answering deliberate hammering is noise; a 429 that blocks a legitimate customer's normal use **is** a finding.
 - **All artifacts** live under `scripts/sim/runs/<run-id>/` (`events.jsonl`, `inbox.jsonl`, `findings.jsonl`, `diary/`, `day-*.md`). `scripts/sim/runs/` is gitignored.
 
 ---
@@ -1606,8 +1606,9 @@ and every persona's suspectedFindings for today.
    never a specific card.
 2. Verify each suspected finding by RE-EXECUTING its repro via the store/admin
    client. Only if you reproduce it does it become `status:'confirmed'`; otherwise
-   record it `status:'unverified'`. Infra errors (ECONNREFUSED, pool timeout, a
-   429 on normal use) are NOT findings — drop them.
+   record it `status:'unverified'`. Infra errors (ECONNREFUSED, pool timeout)
+   are NOT findings — drop them. 429s: deliberate hammering is noise, but a 429
+   blocking a legitimate customer's NORMAL use IS a finding (spec §2).
 3. Record confirmed/unverified findings via recordFinding (it dedupes). Write a
    one-paragraph day summary to runs/<runId>/day-<N>.md.
 
@@ -1744,10 +1745,14 @@ Prove the harness end-to-end before any 30-day run.
 - [ ] No infra errors misfiled as findings.
 ```
 
-- [ ] **Step 4: Static sanity of the workflow + charters present**
+- [ ] **Step 4: Static sanity of the charters**
 
-Run: `node --check scripts/sim/run-month.workflow.mjs && ls scripts/sim/personas/`
-Expected: exit 0; lists `admin.md auditor.md honest.md refund-seeker.md`.
+Run: `ls scripts/sim/personas/`
+Expected: lists `admin.md auditor.md honest.md refund-seeker.md`.
+Note: `run-month.workflow.mjs` canNOT be validated by `node --check` — it uses
+the Workflow-runtime dialect (`export const meta` + a top-level `return`),
+which is a SyntaxError to plain Node. The first moment it is known to parse is
+the pilot's Workflow launch (PILOT.md step 6).
 
 - [ ] **Step 5: Run the pilot**
 

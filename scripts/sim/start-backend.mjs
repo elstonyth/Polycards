@@ -13,20 +13,28 @@
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
-import { SIM, simDatabaseUrl } from './config.mjs';
+import { SIM, simDatabaseUrl, simRedisUrl } from './config.mjs';
 
 const api = join(process.cwd(), 'backend', 'packages', 'api');
 const envText = readFileSync(join(api, '.env'), 'utf8');
-const m = envText.match(/^DATABASE_URL=(.*)$/m);
-if (!m) {
+const readEnv = (key) => {
+  const m = envText.match(new RegExp(`^${key}=(.*)$`, 'm'));
+  if (!m) return null;
+  return m[1]
+    .trim()
+    .replace(/\r$/, '')
+    .replace(/^["']|["']$/g, '');
+};
+const base = readEnv('DATABASE_URL');
+if (!base) {
   console.error('[sim] DATABASE_URL not found in backend .env');
   process.exit(1);
 }
-const base = m[1]
-  .trim()
-  .replace(/\r$/, '')
-  .replace(/^["']|["']$/g, '');
 const simUrl = simDatabaseUrl(base);
+// Redis index 9 (SIM.redisIndex): without this the child inherits the dev
+// REDIS_URL (index 0, shared state with the dev backend) while the day-shift
+// flushes index 9 — a flush nothing uses.
+const simRedis = simRedisUrl(readEnv('REDIS_URL'));
 const dbName = new URL(simUrl).pathname.slice(1);
 
 if (dbName !== SIM.dbName) {
@@ -37,7 +45,7 @@ if (dbName !== SIM.dbName) {
 }
 const simPort = new URL(SIM.backendUrl).port || '9000';
 console.log(
-  `[sim] backend → db "${dbName}" on :${simPort} (ALLOW_MOCK_TOPUP + REWARDS_REDEMPTION_ENABLED)`,
+  `[sim] backend → db "${dbName}" on :${simPort}, redis index ${SIM.redisIndex} (ALLOW_MOCK_TOPUP + REWARDS_REDEMPTION_ENABLED)`,
 );
 
 if (process.argv.includes('--dry-run')) process.exit(0);
@@ -45,6 +53,7 @@ if (process.argv.includes('--dry-run')) process.exit(0);
 const env = {
   ...process.env,
   DATABASE_URL: simUrl,
+  REDIS_URL: simRedis,
   PORT: simPort,
   ALLOW_MOCK_TOPUP: 'true',
   REWARDS_REDEMPTION_ENABLED: 'true',
