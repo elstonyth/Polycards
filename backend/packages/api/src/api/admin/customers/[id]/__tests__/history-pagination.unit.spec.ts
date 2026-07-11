@@ -38,6 +38,7 @@ function mkScope() {
       listCards: async () => [
         { handle: 'card-a', name: 'Card A', market_value: 10, image: 'x.png' },
       ],
+      listPacks: async () => [{ slug: 'pack_1', buyback_percent: 95 }],
       listFxRates: async () => [],
     }),
   };
@@ -66,5 +67,27 @@ describe('customer history pagination', () => {
     );
     expect(out.body.total).toBe(60);
     expect(out.body.items[0].card?.name).toBe('Card A');
+  });
+
+  it('pulls: surfaces quote-vs-payable for the dispute desk (sim P1-3)', async () => {
+    const { res, out } = mkRes();
+    await getPulls(
+      { scope: mkScope(), params: { id: 'cus_1' }, query: {} } as any,
+      res,
+    );
+    // listFxRates is empty in the mock scope → display fallback, NOT firm:
+    // the desk must see that customer-facing quotes are currently refusable.
+    expect(out.body.fx).toEqual({ rate: 4.7, firm: false });
+    const item = out.body.items[0];
+    // Vaulted card pull rolled far outside the instant window → flat rate,
+    // amount = displayMarketPrice(10 USD × 4.7 × 1.2 default multiplier) × 90%.
+    expect(item.quote).toEqual({
+      percent: 90,
+      amount: 50.76,
+      rate_type: 'vault',
+      firm: false,
+      instant_deadline_ms: expect.any(Number),
+    });
+    expect(item.buyback_at).toBeNull();
   });
 });
