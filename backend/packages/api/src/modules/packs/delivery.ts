@@ -22,7 +22,10 @@ export type DeliveryRequestVerdict =
   | "duplicate"
   | "not_found"
   | "forbidden"
-  | "not_vaulted"
+  | "already_delivering" // e.g. double-submit — pull is in a pending delivery
+  | "already_delivered"
+  | "bought_back"
+  | "not_vaulted" // fallback for any other non-vaulted status
   | "reward_source";
 
 // Pure validation for a batch delivery request. `fetchedPulls` is whatever the
@@ -42,7 +45,14 @@ export function validateDeliveryRequest(
     const pull = byId.get(id);
     if (!pull) return "not_found";
     if (pull.customer_id !== callerId) return "forbidden";
-    if (pull.status !== "vaulted") return "not_vaulted";
+    if (pull.status !== "vaulted") {
+      // Name the actual blocker (sim P3 #9: a double-submit read as "cards
+      // vanished"). Safe to reveal — ownership was already verified above.
+      if (pull.status === "delivering") return "already_delivering";
+      if (pull.status === "delivered") return "already_delivered";
+      if (pull.status === "bought_back") return "bought_back";
+      return "not_vaulted";
+    }
     // Reward prizes ship ONLY via recordRewardWithdrawal (redemption gate +
     // daily cap + is_reward stamping) — never via the generic delivery path.
     if (pull.source === "reward") return "reward_source";

@@ -36,12 +36,24 @@ describe("validateDeliveryRequest", () => {
     );
   });
 
-  it("rejects a pull that is not vaulted (already delivering/sold)", () => {
-    const pulls = [
+  // Sim P3 #9: a double-submitted delivery request must name the real reason
+  // ("already in a delivery"), not pretend the cards vanished.
+  it("names the blocking status for a non-vaulted pull", () => {
+    const withStatus = (status: string) => [
       vaulted("p1"),
-      { id: "p2", customer_id: caller, status: "delivering" as const },
+      { id: "p2", customer_id: caller, status },
     ];
-    expect(validateDeliveryRequest(pulls, ["p1", "p2"], caller)).toBe(
+    expect(validateDeliveryRequest(withStatus("delivering"), ["p1", "p2"], caller)).toBe(
+      "already_delivering",
+    );
+    expect(validateDeliveryRequest(withStatus("delivered"), ["p1", "p2"], caller)).toBe(
+      "already_delivered",
+    );
+    expect(validateDeliveryRequest(withStatus("bought_back"), ["p1", "p2"], caller)).toBe(
+      "bought_back",
+    );
+    // Unknown/future statuses keep the generic verdict.
+    expect(validateDeliveryRequest(withStatus("frozen"), ["p1", "p2"], caller)).toBe(
       "not_vaulted",
     );
   });
@@ -76,7 +88,7 @@ describe("validateDeliveryRequest", () => {
         "reward_source",
       );
 
-      // A non-vaulted reward pull is 'not_vaulted' (status precedes source).
+      // A non-vaulted reward pull reports its status (status precedes source).
       const delivering = {
         id: "p1",
         customer_id: caller,
@@ -84,7 +96,7 @@ describe("validateDeliveryRequest", () => {
         source: "reward",
       };
       expect(validateDeliveryRequest([delivering], ["p1"], caller)).toBe(
-        "not_vaulted",
+        "already_delivering",
       );
 
       // Someone else's reward pull is 'forbidden' (ownership precedes source).

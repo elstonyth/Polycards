@@ -27,7 +27,7 @@ type CompensateData =
   | { orderId: string; itemIds: string[]; pullIds: string[] }
   | undefined;
 
-const verdictError = (
+export const verdictError = (
   v: ReturnType<typeof validateDeliveryRequest>,
 ): MedusaError => {
   switch (v) {
@@ -40,6 +40,24 @@ const verdictError = (
       return new MedusaError(
         MedusaError.Types.INVALID_DATA,
         "Duplicate cards in the selection.",
+      );
+    // Per-status messages (sim P3 #9): a double-submit used to read as if the
+    // cards vanished. Ownership is checked before status in the validator, so
+    // naming the status leaks nothing about other customers' pulls.
+    case "already_delivering":
+      return new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        "One or more cards are already in a pending delivery request.",
+      );
+    case "already_delivered":
+      return new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        "One or more cards have already been delivered.",
+      );
+    case "bought_back":
+      return new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        "One or more cards were already sold back.",
       );
     case "not_vaulted":
       return new MedusaError(
