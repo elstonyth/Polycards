@@ -8,13 +8,14 @@
  *   POST /store/delivery-orders            — request batch delivery
  *   GET  /store/delivery-orders            — the caller's orders
  *   POST /store/delivery-orders/:id/address — edit address pre-ship
+ *   POST /store/delivery-orders/:id/cancel  — cancel pre-ship (cards → vault)
  */
 import type { HttpTypes } from '@medusajs/types';
 import { sdk } from '@/lib/medusa';
 import { logger } from '@/lib/logger';
 import { getAuthToken, getCustomer } from '@/lib/data/customer';
-import { parseList, DeliveryOrderSchema } from '@/lib/data/schemas';
-import { friendlyError, isAuthError } from '@/lib/errors';
+import { parseList, parseOne, DeliveryOrderSchema } from '@/lib/data/schemas';
+import { friendlyError, isAuthError, type ErrorRule } from '@/lib/errors';
 import { DELIVERY_RULES, DELIVERY_FALLBACK } from '@/lib/delivery-errors';
 
 export type DeliveryOrderItemView = {
@@ -201,6 +202,69 @@ export async function editDeliveryAddress(
     return {
       ok: false,
       error: friendlyError(error, DELIVERY_RULES, DELIVERY_FALLBACK),
+      needsAuth: isAuthError(error),
+    };
+  }
+}
+
+export type CancelDeliveryResult =
+  | { ok: true; status: DeliveryOrderView['status'] }
+  | { ok: false; error: string; needsAuth?: boolean };
+
+// Cancel-specific error vocabulary — the generic DELIVERY_RULES map 404/409 to
+// request-delivery copy ("card or address not found") that would mislead here.
+// Order matters: "already canceled" must win before the broader shipped rule.
+const CANCEL_RULES: ErrorRule[] = [
+  [
+    /too many|rate.?limit|429/i,
+    'Too many requests — give it a moment and try again.',
+  ],
+  [
+    /unauthorized|not authenticated|401/i,
+    'Please log in to manage deliveries.',
+  ],
+  [/already canceled/i, 'This delivery is already canceled.'],
+  // Backend NOT_ALLOWED for shipped/delivered orders — mirror its copy.
+  [
+    /no longer be canceled|not allowed|shipped|delivered/i,
+    'This order has already shipped and can no longer be canceled — please contact support.',
+  ],
+  [/not found|404/i, 'That order was not found.'],
+];
+
+// Cancel a still-pre-ship (`requested`/`packing`) delivery order — the covered
+// cards return to the customer's vault. The backend enforces ownership and the
+// status transition; the UI additionally hides the affordance post-ship.
+export async function cancelDeliveryOrder(
+  orderId: string,
+): Promise<CancelDeliveryResult> {
+  if (typeof orderId !== 'string' || orderId.trim() === '') {
+    return { ok: false, error: 'Missing order.' };
+  }
+  const token = await getAuthToken();
+  if (!token)
+    return { ok: false, error: 'Please log in first.', needsAuth: true };
+
+  try {
+    const res = await sdk.client.fetch(
+      `/store/delivery-orders/${encodeURIComponent(orderId)}/cancel`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    );
+    const order = parseOne(
+      DeliveryOrderSchema,
+      (res as { order?: unknown }).order,
+    );
+    // A 2xx means the cancel happened — a drifted body must not false-fail it,
+    // so fall back to the status the backend just transitioned to.
+    return { ok: true, status: order?.status ?? 'canceled' };
+  } catch (error) {
+    logger.error(`[delivery] cancel failed for '${orderId}':`, error);
+    return {
+      ok: false,
+      error: friendlyError(error, CANCEL_RULES, DELIVERY_FALLBACK),
       needsAuth: isAuthError(error),
     };
   }

@@ -1,16 +1,19 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import Link from 'next/link';
 import { Badge } from '@/components/account/ui';
 import { SlabImage } from '@/components/SlabImage';
-import { Pill } from '@/components/ui/pill';
+import { Pill, pillVariants } from '@/components/ui/pill';
 import {
   addAddress,
+  cancelDeliveryOrder,
   editDeliveryAddress,
   type DeliveryOrderView,
   type AddressView,
   type AddAddressInput,
 } from '@/lib/actions/delivery';
+import { cn } from '@/lib/utils';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 
 type Tone = 'green' | 'sky' | 'amber' | 'neutral';
@@ -24,8 +27,9 @@ const STATUS_TONE: Record<DeliveryOrderView['status'], Tone> = {
   canceled: 'neutral',
 };
 
-// The address is editable only before the order ships.
-const EDITABLE: ReadonlySet<DeliveryOrderView['status']> = new Set([
+// Pre-ship statuses: the address is editable and the order is cancelable only
+// before it ships (mirrors the backend's transition guards).
+const PRE_SHIP: ReadonlySet<DeliveryOrderView['status']> = new Set([
   'requested',
   'packing',
 ]);
@@ -340,6 +344,100 @@ function EditAddressModal({
   );
 }
 
+// Confirm-before-cancel dialog for a pre-ship order. Honest copy: the cards
+// return to the vault, and delivery is free so there is nothing to refund.
+// Mirrors EditAddressModal's shell + useModalA11y contract.
+function CancelOrderModal({
+  order,
+  onClose,
+  onCanceled,
+}: {
+  order: DeliveryOrderView;
+  onClose: () => void;
+  onCanceled: (status: DeliveryOrderView['status']) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Only mounted while open, so `open` is always true here.
+  const panelRef = useRef<HTMLDivElement>(null);
+  useModalA11y(panelRef, true, onClose);
+
+  const count = order.items.length;
+
+  async function confirm() {
+    setBusy(true);
+    setError(null);
+    const res = await cancelDeliveryOrder(order.id);
+    setBusy(false);
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    onCanceled(res.status);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Cancel delivery"
+        tabIndex={-1}
+        className="w-full max-w-sm rounded-2xl border border-white/10 bg-neutral-900 p-5 outline-none"
+      >
+        <h2 className="font-heading text-lg font-bold text-white">
+          Cancel this delivery?
+        </h2>
+        <p className="mt-1 text-[13px] text-white/55">
+          Order #{order.id.slice(-6)} won&rsquo;t ship.{' '}
+          {count === 1 ? 'The card goes' : `All ${count} cards go`} back to your
+          vault, where you can keep, sell, or re-request{' '}
+          {count === 1 ? 'it' : 'them'} anytime. Delivery is free, so
+          there&rsquo;s nothing to refund.
+        </p>
+
+        <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] p-3 text-[13px] text-white/80">
+          <DeliveryItems items={order.items} />
+        </div>
+
+        {error && (
+          <p
+            role="alert"
+            className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[12px] text-red-300"
+          >
+            {error}
+          </p>
+        )}
+
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className="rounded-lg px-4 py-2 text-[13px] text-white/60 transition-colors hover:text-white disabled:opacity-50"
+          >
+            Keep delivery
+          </button>
+          {/* Destructive confirm: Pill DNA (focus ring, press, disabled) with
+              the red state color instead of a new button vocabulary. */}
+          <button
+            type="button"
+            onClick={confirm}
+            disabled={busy}
+            className={cn(
+              pillVariants({ variant: 'ghost' }),
+              'border-red-500/40 bg-red-500/10 px-5 text-red-300 hover:bg-red-500/20',
+            )}
+          >
+            {busy ? 'Canceling…' : 'Cancel delivery'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function OrdersClient({
   orders: initialOrders,
   addresses,
@@ -352,6 +450,11 @@ export default function OrdersClient({
   // modal open/close (instead of vanishing with the modal's local state).
   const [addrList, setAddrList] = useState<AddressView[]>(addresses);
   const [editing, setEditing] = useState<DeliveryOrderView | null>(null);
+  const [canceling, setCanceling] = useState<DeliveryOrderView | null>(null);
+  // Orders canceled this session — their rows show a "back in your vault" note.
+  const [canceledIds, setCanceledIds] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
 
   return (
     <>
@@ -423,16 +526,38 @@ export default function OrdersClient({
                   <Badge tone={STATUS_TONE[o.status] ?? 'neutral'}>
                     {humanize(o.status)}
                   </Badge>
+                  {canceledIds.has(o.id) && (
+                    <p className="mt-1.5 text-[11px] text-white/50">
+                      {o.items.length === 1 ? 'Card is' : 'Cards are'} back in{' '}
+                      <Link
+                        href="/vault"
+                        className="font-semibold text-white/70 underline underline-offset-2 hover:text-white"
+                      >
+                        your vault
+                      </Link>
+                      .
+                    </p>
+                  )}
                 </td>
                 <td className="whitespace-nowrap px-4 py-3 text-right text-white/80">
-                  {EDITABLE.has(o.status) && (
-                    <button
-                      type="button"
-                      onClick={() => setEditing(o)}
-                      className="rounded-lg border border-white/15 px-3 py-1.5 text-[12px] font-semibold text-white/70 transition-colors hover:text-white"
-                    >
-                      Edit address
-                    </button>
+                  {PRE_SHIP.has(o.status) && (
+                    <span className="inline-flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setEditing(o)}
+                        className="rounded-lg border border-white/15 px-3 py-1.5 text-[12px] font-semibold text-white/70 transition-colors hover:text-white"
+                      >
+                        Edit address
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCanceling(o)}
+                        aria-label={`Cancel order #${o.id.slice(-6)}`}
+                        className="rounded-lg border border-red-500/20 px-3 py-1.5 text-[12px] font-semibold text-red-300/80 transition-colors hover:border-red-500/40 hover:text-red-300"
+                      >
+                        Cancel order
+                      </button>
+                    </span>
                   )}
                 </td>
               </tr>
@@ -452,6 +577,20 @@ export default function OrdersClient({
               prev.map((o) => (o.id === editing.id ? { ...o, address } : o)),
             );
             setEditing(null);
+          }}
+        />
+      )}
+
+      {canceling && (
+        <CancelOrderModal
+          order={canceling}
+          onClose={() => setCanceling(null)}
+          onCanceled={(status) => {
+            setOrders((prev) =>
+              prev.map((o) => (o.id === canceling.id ? { ...o, status } : o)),
+            );
+            setCanceledIds((prev) => new Set(prev).add(canceling.id));
+            setCanceling(null);
           }}
         />
       )}
