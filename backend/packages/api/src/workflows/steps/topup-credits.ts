@@ -3,11 +3,14 @@ import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
 import {
+  buildTopUpResult,
   mockCharge,
   mockTopupAllowed,
   topUpAmountError,
   topupIdempotencyReference,
 } from '../../modules/packs/topup';
+
+export type { TopUpResult } from '../../modules/packs/topup';
 
 export type TopUpCreditsInput = {
   customer_id: string; // from the authenticated token — NEVER the request body
@@ -20,15 +23,6 @@ export type TopUpCreditsInput = {
    * key would double-credit.
    */
   idempotency_key?: string;
-};
-
-export type TopUpResult = {
-  /** MYR (RM) credited (decimal, never cents). */
-  amount: number;
-  /** The gateway's charge reference (mock today, real later). */
-  reference: string;
-  /** The customer's new credit balance (Σ ledger). */
-  balance: number;
 };
 
 // topup-credits — buy site credit through the payment gateway seam: charge
@@ -91,12 +85,7 @@ export const topUpCreditsStep = createStep(
     // money in). Returns the post-write balance — no separate Σ-ledger read.
     // When idempotencyReference is set, a replay returns the original row
     // (replayed=true) instead of crediting again.
-    const {
-      id,
-      balance,
-      amount: creditedAmount,
-      replayed,
-    } = await packs.mutateCreditAtomic({
+    const mutation = await packs.mutateCreditAtomic({
       customerId: input.customer_id,
       amount,
       reason: 'topup',
@@ -104,16 +93,15 @@ export const topUpCreditsStep = createStep(
       idempotencyReference,
     });
 
-    const result: TopUpResult = {
-      // On a replay this is the ORIGINAL credited amount, not the (ignored)
-      // amount on the replayed request body.
-      amount: creditedAmount,
-      // The gateway/charge reference is the public reconciliation handle; the
-      // idempotency anchor is internal (stored in source_transaction_id).
-      reference: charge.reference,
-      balance,
-    };
-    return new StepResponse(result, { creditTransactionId: id, replayed });
+    // The gateway/charge reference is the public reconciliation handle; the
+    // idempotency anchor is internal (stored in source_transaction_id). On a
+    // replay the response carries replayed:true and the ORIGINAL charge
+    // reference (sim P2-4) — see buildTopUpResult.
+    const result = buildTopUpResult(mutation, charge.reference);
+    return new StepResponse(result, {
+      creditTransactionId: mutation.id,
+      replayed: mutation.replayed,
+    });
   },
   async (
     data: { creditTransactionId: string; replayed?: boolean } | undefined,

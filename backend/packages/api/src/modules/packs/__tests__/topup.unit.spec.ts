@@ -1,6 +1,7 @@
 import {
   TOPUP_MAX_RM,
   assertMockTopupSafe,
+  buildTopUpResult,
   mockCharge,
   mockTopupAllowed,
   topUpAmountError,
@@ -188,6 +189,47 @@ describe('assertMockTopupSafe', () => {
     expect(() =>
       assertMockTopupSafe({ ALLOW_MOCK_TOPUP: 'true' }),
     ).not.toThrow(); // NODE_ENV unset
+  });
+});
+
+// Sim finding P2-4 (2026-07-11): a same-key replay used to return 200 with a
+// FRESH mock gateway reference and no flag — indistinguishable from a second
+// successful charge. The step's response must surface `replayed` and, on a
+// replay, the ORIGINAL row's gateway reference instead of the fresh charge's.
+describe('buildTopUpResult', () => {
+  it('passes a fresh mutation through with replayed:false and the charge reference', () => {
+    expect(
+      buildTopUpResult(
+        { amount: 25, balance: 125, replayed: false, reference: 'mock_orig' },
+        'mock_orig',
+      ),
+    ).toEqual({
+      amount: 25,
+      reference: 'mock_orig',
+      balance: 125,
+      replayed: false,
+    });
+  });
+
+  it('marks a replay and returns the ORIGINAL stored reference, not the fresh charge', () => {
+    const result = buildTopUpResult(
+      { amount: 25, balance: 125, replayed: true, reference: 'mock_orig' },
+      'mock_fresh',
+    );
+    expect(result.replayed).toBe(true);
+    expect(result.reference).toBe('mock_orig');
+    // Original credited amount/balance pass through untouched.
+    expect(result.amount).toBe(25);
+    expect(result.balance).toBe(125);
+  });
+
+  it('falls back to the fresh charge reference when the original row has none', () => {
+    const result = buildTopUpResult(
+      { amount: 25, balance: 125, replayed: true, reference: null },
+      'mock_fresh',
+    );
+    expect(result.replayed).toBe(true);
+    expect(result.reference).toBe('mock_fresh');
   });
 });
 

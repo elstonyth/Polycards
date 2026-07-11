@@ -30,9 +30,11 @@ export default function TopUpSheet({
   const [amountText, setAmountText] = useState('25');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState<{ amount: number; balance: number } | null>(
-    null,
-  );
+  const [done, setDone] = useState<{
+    amount: number;
+    balance: number;
+    replayed?: boolean;
+  } | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   // One idempotency key per top-up ATTEMPT: minted lazily on submit, REUSED on
   // error retries (so a credited-but-response-lost top-up replays instead of
@@ -72,7 +74,11 @@ export default function TopUpSheet({
         return;
       }
       attemptKey.current = null;
-      setDone({ amount: res.amount, balance: res.balance });
+      setDone({
+        amount: res.amount,
+        balance: res.balance,
+        replayed: res.replayed,
+      });
       onToppedUp(res.balance, res.amount);
     } catch {
       setError('Something went wrong. Please try again.');
@@ -136,6 +142,14 @@ export default function TopUpSheet({
                 {rm(done.balance)}
               </span>
             </p>
+            {done.replayed && (
+              <p
+                role="status"
+                className="mt-3 rounded-xl border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-[13px] font-medium text-amber-300"
+              >
+                This top-up was already processed — no double charge.
+              </p>
+            )}
             <Pill onClick={onClose} size="lg" className="mt-6 w-full">
               Done
             </Pill>

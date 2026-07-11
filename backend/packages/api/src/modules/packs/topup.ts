@@ -95,6 +95,48 @@ export function topupIdempotencyReference(
   return `topup-idem:${digest}`;
 }
 
+export type TopUpResult = {
+  /** MYR (RM) credited (decimal, never cents). */
+  amount: number;
+  /** The gateway's charge reference (mock today, real later). */
+  reference: string;
+  /** The customer's new credit balance (Σ ledger). */
+  balance: number;
+  /**
+   * True when this request replayed an already-processed Idempotency-Key:
+   * nothing new was charged or credited (sim finding P2-4 — without this flag
+   * a replay was indistinguishable from a second successful charge).
+   */
+  replayed: boolean;
+};
+
+// Shapes the public top-up response from the ledger mutation outcome. On a
+// replay the mock gateway still minted a FRESH reference (it was charged
+// before the dedupe could run), but returning it would look like a second
+// successful charge — surface the ORIGINAL row's stored reference instead,
+// falling back to the fresh one only if the original row carries none.
+export function buildTopUpResult(
+  mutation: {
+    amount: number;
+    balance: number;
+    replayed: boolean;
+    reference: string | null;
+  },
+  chargeReference: string,
+): TopUpResult {
+  return {
+    // On a replay this is the ORIGINAL credited amount, not the (ignored)
+    // amount on the replayed request body.
+    amount: mutation.amount,
+    reference:
+      mutation.replayed && mutation.reference
+        ? mutation.reference
+        : chargeReference,
+    balance: mutation.balance,
+    replayed: mutation.replayed,
+  };
+}
+
 export type MockChargeInput = {
   amount: number;
   customer_id: string;
