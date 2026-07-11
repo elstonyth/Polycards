@@ -391,8 +391,8 @@ function CancelOrderModal({
         </h2>
         <p className="mt-1 text-[13px] text-white/55">
           Order #{order.id.slice(-6)} won&rsquo;t ship.{' '}
-          {count === 1 ? 'The card goes' : `All ${count} cards go`} back to
-          your vault, where you can keep, sell, or re-request{' '}
+          {count === 1 ? 'The card goes' : `All ${count} cards go`} back to your
+          vault, where you can keep, sell, or re-request{' '}
           {count === 1 ? 'it' : 'them'} anytime. Delivery is free, so
           there&rsquo;s nothing to refund.
         </p>
