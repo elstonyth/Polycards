@@ -9,6 +9,7 @@ import { rollPackStep } from "./steps/roll-pack";
 import { chargePackOpenStep } from "./steps/charge-pack-open";
 import { recordPullStep } from "./steps/record-pull";
 import { decrementCardStockStep } from "./steps/decrement-card-stock";
+import { settleVipStep } from "./steps/settle-vip";
 
 export type OpenPackInput = {
   pack_id: string; // = Pack.slug
@@ -79,14 +80,20 @@ export const openPackWorkflow = createWorkflow(
     }));
     emitEventStep({ eventName: "pack.opened", data: eventData });
 
-    // Emit vip.spend_settled for VIP level-up reward processing (Phase 3b).
-    // ONE event per open, carrying the customer_id and open_id.
-    // Step is renamed to avoid the "already defined" collision with the
-    // pack.opened emitEventStep above (both use emitEventStep's default id).
+    // Settle VIP IN the saga: grant every ladder rung this open crossed and
+    // advance vip_member_state before the response returns. Best-effort — a
+    // grant hiccup never voids the paid open (sim day-3 vip-integrity HIGH;
+    // see settle-vip.ts).
     const vipEvent = transform({ input, charged }, (d) => ({
       customer_id: d.input.customer_id,
       open_id: d.charged.open_id,
     }));
+    settleVipStep(vipEvent);
+
+    // Emit vip.spend_settled as the redelivery healer for the settle above
+    // (Phase 3b). ONE event per open, carrying the customer_id and open_id.
+    // Step is renamed to avoid the "already defined" collision with the
+    // pack.opened emitEventStep above (both use emitEventStep's default id).
     emitEventStep({ eventName: "vip.spend_settled", data: vipEvent }).config({
       name: "emit-vip-spend-settled-step",
     });
