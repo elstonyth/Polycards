@@ -152,6 +152,12 @@ const GachaCardsPage = () => {
     form.image.trim() !== '' &&
     form.market_value.trim() !== '' &&
     Number(form.market_value) >= 0 &&
+    // Markup is optional on the edit form (empty = leave unchanged), but when
+    // present it's bounded to [0, 1000]% — matching the register modal — so a
+    // fat-fingered value can't silently multiply every price for this card.
+    (form.market_multiplier_pct.trim() === '' ||
+      (Number(form.market_multiplier_pct) >= 0 &&
+        Number(form.market_multiplier_pct) <= 1000)) &&
     !saving &&
     !uploading;
 
@@ -676,6 +682,8 @@ const GachaCardsPage = () => {
                       <Input
                         id="card-markup"
                         type="number"
+                        min={0}
+                        max={1000}
                         step={1}
                         value={form.market_multiplier_pct}
                         onChange={(e) =>

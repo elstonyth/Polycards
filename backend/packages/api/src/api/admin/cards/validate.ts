@@ -111,12 +111,25 @@ const checkPcPairing = (
   }
 };
 
+// Multiplier ceiling: the client caps display margin at 1000%, and both card
+// forms store `1 + pct/100` — so 1000% maps to exactly 11. Bounding here (not
+// just client-side) stops any caller from smuggling an absurd price multiplier
+// past the edit path's UI guard.
+const MAX_MARKET_MULTIPLIER = 11;
+
 const optMultiplier = (b: Record<string, unknown>): number | undefined => {
   const v = b.market_multiplier;
   if (v === undefined || v === null || v === '') return undefined;
   const n = typeof v === 'string' ? Number(v) : v;
-  if (typeof n !== 'number' || !Number.isFinite(n) || n <= 0) {
-    bad(`'market_multiplier' must be a positive number.`);
+  if (
+    typeof n !== 'number' ||
+    !Number.isFinite(n) ||
+    n <= 0 ||
+    n > MAX_MARKET_MULTIPLIER
+  ) {
+    bad(
+      `'market_multiplier' must be greater than 0 and at most ${MAX_MARKET_MULTIPLIER}.`,
+    );
   }
   return n as number;
 };
