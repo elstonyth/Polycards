@@ -266,6 +266,35 @@ describe("createRateLimitMiddleware", () => {
     expect(out.headers["retry-after"]).toBe("1");
   });
 
+  it("resolves a per-request message function against the denied request (sim finding P3-10)", async () => {
+    // One limiter instance is shared across route families for a shared
+    // budget; the 429 label must still name the route being hit, not
+    // "delivery" for a rewards claim.
+    const store: RateLimitStore = {
+      consume: jest
+        .fn()
+        .mockResolvedValue({ allowed: false, retryAfterMs: 1_000 }),
+    };
+    const mw = createRateLimitMiddleware({
+      store,
+      rules,
+      prefix: "rl:t:",
+      message: (req) =>
+        req.path.startsWith("/store/rewards/")
+          ? "Too many reward requests."
+          : "Too many delivery requests.",
+    });
+    const { res, out } = makeRes();
+    await mw(
+      makeReq({ path: "/store/rewards/claim/g_1" }),
+      res,
+      jest.fn() as unknown as MedusaNextFunction,
+    );
+    expect((out.body as { message: string }).message).toMatch(
+      /^Too many reward requests\./,
+    );
+  });
+
   it("rejects non-positive or fractional-to-zero rules at creation (boot-time failure)", () => {
     const store: RateLimitStore = {
       consume: jest.fn().mockResolvedValue({ allowed: true, retryAfterMs: 0 }),

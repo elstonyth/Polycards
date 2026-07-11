@@ -50,11 +50,13 @@ export const topUpCreditsStep = createStep(
 
     // Idempotency-Key is now MANDATORY (audit 2026-07-07): a keyless retry
     // against a real PSP would double-credit, so fail closed before touching
-    // the amount or the gateway.
+    // the amount or the gateway. The message is user-facing (sim finding
+    // P3-6): the storefront always sends the key, so a missing one means a
+    // broken/stale client — tell the human what to do, not the protocol.
     if (!input.idempotency_key || input.idempotency_key.trim() === '') {
       throw new MedusaError(
         MedusaError.Types.INVALID_DATA,
-        'An Idempotency-Key header is required for top-ups.',
+        'We could not start your top-up — please refresh the page and try again.',
       );
     }
 

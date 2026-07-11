@@ -35,5 +35,15 @@ export async function POST(
     input: { customer_id: customerId },
   });
 
-  res.json(result);
+  // A "nothing" prize is a normal drawn outcome, not a failure — say so in
+  // human words (sim finding P3-7: the bare {kind:"nothing"} read like an
+  // error to customers).
+  res.json(
+    result.status === 'drawn' && result.prize?.kind === 'nothing'
+      ? {
+          ...result,
+          message: 'No prize this time — better luck on your next draw!',
+        }
+      : result,
+  );
 }
