@@ -176,10 +176,14 @@ export const CreditTransactionSchema = z.looseObject({
   created_at: z.string(),
 });
 
-/** POST /store/credits/topup response — finite amount + balance. */
+/** POST /store/credits/topup response — finite amount + balance. `replayed`
+ *  is true when the backend deduped an already-processed Idempotency-Key
+ *  (nothing new was charged — sim P2-4); optional so an older backend that
+ *  omits the flag still parses. */
 export const AmountBalanceSchema = z.looseObject({
   amount: finite,
   balance: finite,
+  replayed: z.boolean().optional(),
 });
 
 /** POST /store/vault/:id/buyback response — finite amount + balance. `percent`

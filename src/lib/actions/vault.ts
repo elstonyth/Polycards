@@ -172,7 +172,14 @@ export async function getCreditBalance(): Promise<number | null> {
 }
 
 export type TopUpActionResult =
-  | { ok: true; amount: number; balance: number }
+  | {
+      ok: true;
+      amount: number;
+      balance: number;
+      /** True when the backend deduped a replayed Idempotency-Key — the
+       *  original top-up stood, nothing new was charged (sim P2-4). */
+      replayed?: boolean;
+    }
   | { ok: false; error: string; needsAuth?: boolean };
 
 // Buy site credit through the mock gateway (demo — no real payment). The fake
@@ -218,7 +225,12 @@ export async function topUpCredits(
         error: 'Got an unexpected response. Please try again.',
       };
     }
-    return { ok: true, amount: parsed.amount, balance: parsed.balance };
+    return {
+      ok: true,
+      amount: parsed.amount,
+      balance: parsed.balance,
+      replayed: parsed.replayed === true,
+    };
   } catch (error) {
     logger.error('[vault] top-up failed:', error);
     return {

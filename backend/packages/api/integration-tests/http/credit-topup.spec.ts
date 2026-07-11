@@ -159,11 +159,17 @@ medusaIntegrationTestRunner({
         const first = await topUpIdem(50, authed(token), key);
         expect(first.status).toBe(200);
         expect(first.data).toMatchObject({ amount: 50, balance: 50 });
+        expect(first.data.replayed).toBe(false);
 
         // Replay the IDENTICAL request: same balance, no second ledger row.
+        // Sim finding P2-4: the replay must be VISIBLE — replayed:true and the
+        // ORIGINAL gateway reference, not a fresh one that reads as a second
+        // successful charge.
         const replay = await topUpIdem(50, authed(token), key);
         expect(replay.status).toBe(200);
         expect(replay.data.balance).toBe(50);
+        expect(replay.data.replayed).toBe(true);
+        expect(replay.data.reference).toBe(first.data.reference);
         expect(await ledgerRows()).toHaveLength(1);
 
         const credits = await unwrapResponse(

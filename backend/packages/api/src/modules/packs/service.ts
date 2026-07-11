@@ -576,6 +576,10 @@ class PacksModuleService extends MedusaService({
     balance: number;
     amount: number;
     replayed: boolean;
+    /** The row's stored (gateway/charge) reference — on a replay this is the
+     * ORIGINAL charge reference, so callers can echo it instead of a fresh
+     * one that would read as a second successful charge (sim P2-4). */
+    reference: string | null;
   }> {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
 
@@ -616,6 +620,7 @@ class PacksModuleService extends MedusaService({
           balance: Number(balRows[0]?.balance_cents ?? 0) / 100,
           amount: Number(existing.amount),
           replayed: true,
+          reference: existing.reference ?? null,
         };
       }
     }
@@ -734,6 +739,7 @@ class PacksModuleService extends MedusaService({
       balance: (beforeCents + deltaCents) / 100,
       amount: deltaCents / 100,
       replayed: false,
+      reference: input.reference ?? null,
     };
   }
 
