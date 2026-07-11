@@ -203,6 +203,66 @@ moduleIntegrationTestRunner<PacksModuleService>({
       );
 
       it(
+        'walletSummary: playthrough gate — buybacks never unlock unspent deposits',
+        async () => {
+          const cust = 'cus_ws_playthrough';
+
+          // deposit RM100, open RM40, sell a card back for RM100.
+          await service.mutateCreditAtomic({
+            customerId: cust,
+            amount: 100,
+            reason: 'topup',
+            reference: 'topup_ws_pt',
+          });
+          await service.createCreditTransactions([
+            {
+              customer_id: cust,
+              amount: -40,
+              reason: 'pack_open' as const,
+              pull_id: null,
+              reference: null,
+            } as Record<string, unknown>,
+            {
+              customer_id: cust,
+              amount: 100,
+              reason: 'buyback' as const,
+              pull_id: null,
+              reference: null,
+            } as Record<string, unknown>,
+          ]);
+
+          // balance 160, but used(40) < deposited(100) -> nothing withdrawable.
+          let w = await service.walletSummary(cust);
+          expect(w.balance).toBeCloseTo(160, 2);
+          expect(w.withdrawable).toBe(0);
+          expect(w.playthrough).toEqual({
+            deposited: 100,
+            used: 40,
+            remaining: 60,
+          });
+
+          // open the remaining RM60 -> gate opens, full available withdrawable.
+          await service.createCreditTransactions([
+            {
+              customer_id: cust,
+              amount: -60,
+              reason: 'pack_open' as const,
+              pull_id: null,
+              reference: null,
+            } as Record<string, unknown>,
+          ]);
+          w = await service.walletSummary(cust);
+          expect(w.playthrough).toEqual({
+            deposited: 100,
+            used: 100,
+            remaining: 0,
+          });
+          expect(w.withdrawable).toBeCloseTo(w.available, 2);
+          expect(w.withdrawable).toBeCloseTo(100, 2);
+        },
+      );
+
+      it(
         'walletSummary: frozen account reports available 0 but real locked',
         async () => {
           const frozenId = 'cus_ws_frozen';

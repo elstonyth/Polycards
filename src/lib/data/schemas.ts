@@ -230,6 +230,14 @@ export const WalletSchema = z.looseObject({
   locked: finite,
   is_frozen: z.boolean(),
   next_unlock: z.looseObject({ amount: finite, date: z.string() }).nullable(),
+  // Playthrough withdrawal gate: withdrawable is 0 until playthrough.remaining
+  // hits 0 (lifetime deposits fully spent on pack opens).
+  withdrawable: finite,
+  playthrough: z.looseObject({
+    deposited: finite,
+    used: finite,
+    remaining: finite,
+  }),
 });
 
 // --- actions/vip.ts ---------------------------------------------------------

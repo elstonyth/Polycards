@@ -46,6 +46,15 @@ export async function GET(
       next_unlock: wallet.nextUnlock
         ? { amount: wallet.nextUnlock.amount, date: wallet.nextUnlock.date }
         : null,
+      // Playthrough gate (withdrawable.ts): deposits must be fully spent on
+      // pack opens before balance can be withdrawn. withdrawable = 0 while
+      // playthrough.remaining > 0; spending on packs is never restricted.
+      withdrawable: wallet.withdrawable,
+      playthrough: {
+        deposited: wallet.playthrough.deposited,
+        used: wallet.playthrough.used,
+        remaining: wallet.playthrough.remaining,
+      },
     },
   });
 }

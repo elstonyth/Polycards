@@ -57,12 +57,25 @@ export default async function WalletPage() {
             })}
           </p>
         )}
+        {w.playthrough.remaining > 0 ? (
+          <p className="mt-3 text-sm text-white/60">
+            <Badge tone="sky">Withdrawals locked</Badge> Open{' '}
+            {rm(w.playthrough.remaining)} more in packs to unlock withdrawals —
+            deposits must be fully used before balance can be withdrawn.
+          </p>
+        ) : (
+          <p className="mt-3 text-sm text-white/60">
+            <Badge tone="green">Withdrawable</Badge> {rm(w.withdrawable)}{' '}
+            eligible for withdrawal.
+          </p>
+        )}
       </Panel>
 
       <StatCards
         items={[
           { label: 'Total balance', value: rm(w.balance) },
           { label: 'Locked', value: rm(w.locked) },
+          { label: 'Withdrawable', value: rm(w.withdrawable) },
         ]}
       />
     </>

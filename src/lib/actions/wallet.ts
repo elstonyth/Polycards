@@ -21,6 +21,10 @@ export type Wallet = {
   locked: number;
   isFrozen: boolean;
   nextUnlock: { amount: number; date: string } | null;
+  /** Amount withdrawable now — 0 while the playthrough gate is closed. */
+  withdrawable: number;
+  /** Playthrough gate: deposits must be fully used on packs to unlock. */
+  playthrough: { deposited: number; used: number; remaining: number };
 };
 
 export type WalletResult =
@@ -71,6 +75,12 @@ export async function getWallet(): Promise<WalletResult> {
         nextUnlock: w.next_unlock
           ? { amount: w.next_unlock.amount, date: w.next_unlock.date }
           : null,
+        withdrawable: w.withdrawable,
+        playthrough: {
+          deposited: w.playthrough.deposited,
+          used: w.playthrough.used,
+          remaining: w.playthrough.remaining,
+        },
       },
     };
   } catch (error) {

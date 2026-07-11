@@ -11,6 +11,7 @@ import type { Context, HttpTypes } from '@medusajs/framework/types';
 import type { OddsRarity } from '@acme/odds-math';
 import { validateDeliveryRequest, snapshotAddress } from './delivery';
 import { rewardsRedemptionEnabled } from './rewards-gate';
+import { playthroughState } from './withdrawable';
 import { FRAME_LEVELS } from './avatar-frames';
 import Pack from './models/pack';
 import Card from './models/card';
@@ -2158,10 +2159,13 @@ class PacksModuleService extends MedusaService({
   }
 
   // Wallet summary: raw balance, available (freeze-aware), locked (pending-
-  // unmatured + suspended commissions), and the earliest pending maturity
-  // tranche (date + amount). All amounts in MYR (RM) — the ledger is already
+  // unmatured + suspended commissions), the earliest pending maturity
+  // tranche (date + amount), and the playthrough withdrawal gate
+  // (withdrawable.ts): deposits must be fully spent on pack opens before any
+  // balance may leave. All amounts in MYR (RM) — the ledger is already
   // stored in MYR decimals, never USD.
   // available = isFrozen ? 0 : balance − locked  (matches availableBalance).
+  // withdrawable = gate open ? available : 0.
   @InjectManager()
   async walletSummary(
     customerId: string,
@@ -2172,18 +2176,34 @@ class PacksModuleService extends MedusaService({
     locked: number;
     isFrozen: boolean;
     nextUnlock: { amount: number; date: string } | null;
+    withdrawable: number;
+    playthrough: { deposited: number; used: number; remaining: number };
   }> {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
 
     // Raw balance = Σ(amount) over the append-only ledger, summed in integer
     // cents to avoid float drift (matches availableBalance pattern, spec §8).
-    const balRows = await em.execute<{ balance_cents: string | null }[]>(
-      'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents ' +
+    // Same scan also folds the playthrough inputs: deposited = Σ positive
+    // topup rows; used = Σ −amount over pack_open rows (net — a reversed open
+    // is a positive pack_open row and gives its playthrough back). Buyback /
+    // promo / commission rows touch neither sum.
+    const balRows = await em.execute<
+      {
+        balance_cents: string | null;
+        deposited_cents: string | null;
+        used_cents: string | null;
+      }[]
+    >(
+      'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents, ' +
+        "COALESCE(SUM(ROUND(amount * 100)) FILTER (WHERE reason = 'topup' AND amount > 0), 0)::bigint AS deposited_cents, " +
+        "COALESCE(SUM(-ROUND(amount * 100)) FILTER (WHERE reason = 'pack_open'), 0)::bigint AS used_cents " +
         'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
       [customerId],
     );
     const balance = Number(balRows[0]?.balance_cents ?? 0) / 100;
+    const depositedCents = Number(balRows[0]?.deposited_cents ?? 0);
+    const usedCents = Number(balRows[0]?.used_cents ?? 0);
 
     // Locked = positive commission credits that are pending-unmatured OR
     // suspended. Reversed/available commissions are excluded (mirroring
@@ -2224,7 +2244,24 @@ class PacksModuleService extends MedusaService({
     const frozen = await this.isFrozen(customerId, sharedContext);
     const available = frozen ? 0 : balance - locked;
 
-    return { balance, available, locked, isFrozen: frozen, nextUnlock };
+    // Playthrough gate: all-or-nothing on the available balance. Spending on
+    // packs stays unrestricted either way — the gate only limits cashout.
+    const gate = playthroughState({ depositedCents, usedCents });
+    const withdrawable = gate.withdrawable ? Math.max(0, available) : 0;
+
+    return {
+      balance,
+      available,
+      locked,
+      isFrozen: frozen,
+      nextUnlock,
+      withdrawable,
+      playthrough: {
+        deposited: depositedCents / 100,
+        used: usedCents / 100,
+        remaining: gate.remainingCents / 100,
+      },
+    };
   }
 
   // Top-N leaderboard computed in the DB (GROUP BY + ORDER BY + LIMIT), so it's
