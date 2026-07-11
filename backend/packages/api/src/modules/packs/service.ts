@@ -9,7 +9,12 @@ import {
 } from '@medusajs/framework/utils';
 import type { Context, HttpTypes } from '@medusajs/framework/types';
 import type { OddsRarity } from '@acme/odds-math';
-import { validateDeliveryRequest, snapshotAddress } from './delivery';
+import {
+  validateDeliveryRequest,
+  validateDeliveryStatusTransition,
+  snapshotAddress,
+  type DeliveryStatus,
+} from './delivery';
 import { rewardsRedemptionEnabled } from './rewards-gate';
 import { FRAME_LEVELS } from './avatar-frames';
 import Pack from './models/pack';
@@ -2946,6 +2951,99 @@ class PacksModuleService extends MedusaService({
         'One or more cards changed state — refresh and try again.',
       );
     }
+  }
+
+  // Atomic, serialized delivery-order status transition — THE seam every order
+  // status move must use (admin advance/ship/deliver, customer cancel). Holds a
+  // per-order xact-scoped advisory lock across a FRESH status re-read, the
+  // transition validation, the order-row write, and the covered pulls' guarded
+  // flip — all in ONE transaction. Two concurrent cancels therefore serialize:
+  // the winner cancels and re-vaults the pulls; the loser re-reads 'canceled'
+  // under the lock and refuses with a clean NOT_ALLOWED, writing nothing
+  // (2026-07 day-3 sim: without this, the loser's manual revert landed AFTER
+  // the winner's terminal write, stranding the order at 'requested' with its
+  // pulls already re-vaulted — one physical card deliverable into a SECOND
+  // live order). Rollback is transactional, so no undo path can ever revert
+  // the order row after a terminal write.
+  @InjectTransactionManager()
+  async transitionDeliveryOrderStatus(
+    input: {
+      orderId: string;
+      to: DeliveryStatus;
+      /** Resolved tracking number to persist (incoming or already-stored). */
+      trackingNumber: string | null;
+      /** Replaces the proof-photo set wholesale when provided. */
+      proofImages?: string[];
+      /** Every pull the order covers — flipped on delivered/canceled. */
+      pullIds: string[];
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ status: DeliveryStatus }> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `delivery:${input.orderId}`,
+    ]);
+
+    const [order] = await this.listDeliveryOrders(
+      { id: input.orderId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!order) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        `Delivery order '${input.orderId}' not found.`,
+      );
+    }
+
+    // Validate against the under-lock read — the ONLY status that matters.
+    const verdict = validateDeliveryStatusTransition(
+      order.status as DeliveryStatus,
+      input.to,
+      !!input.trackingNumber,
+    );
+    if (verdict === 'invalid_transition') {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `Cannot move a ${order.status} order to ${input.to}.`,
+      );
+    }
+    if (verdict === 'tracking_required') {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'A tracking number is required to mark an order shipped.',
+      );
+    }
+
+    // proof_images (json column) replaces wholesale — Medusa assign merges
+    // POJOs but replaces arrays, so [] cleanly clears every photo.
+    const patch: Record<string, unknown> = {
+      id: input.orderId,
+      status: input.to,
+      tracking_number: input.trackingNumber,
+    };
+    if (input.proofImages !== undefined) patch.proof_images = input.proofImages;
+    if (input.to === 'shipped') patch.shipped_at = new Date();
+    if (input.to === 'delivered') patch.delivered_at = new Date();
+    await this.updateDeliveryOrders([patch], sharedContext);
+
+    // Pull side-effects ride the SAME transaction: delivered → delivered
+    // (terminal); canceled → back to the vault. The guarded flip (WHERE
+    // status='delivering') throwing rolls back the order write with it.
+    if (
+      input.pullIds.length &&
+      (input.to === 'delivered' || input.to === 'canceled')
+    ) {
+      await this.transitionPullStatus(
+        {
+          ids: input.pullIds,
+          from: 'delivering',
+          to: input.to === 'delivered' ? 'delivered' : 'vaulted',
+        },
+        sharedContext,
+      );
+    }
+    return { status: input.to };
   }
 
   // Atomic credit adjustment + audit: writes the ledger row AND the
