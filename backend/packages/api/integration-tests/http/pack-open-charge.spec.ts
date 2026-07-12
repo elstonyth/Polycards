@@ -192,6 +192,13 @@ medusaIntegrationTestRunner({
         const res = await open(authed(token));
         expect(res.status).toBe(400);
         expect(res.data.message).toMatch(/not enough credits/i);
+        // Plan 016 — the message names the numbers so the customer knows the
+        // price, their balance, and exactly how much more to top up.
+        expect(res.data.message).toContain(`RM ${PACK_PRICE.toFixed(2)}`); // price
+        expect(res.data.message).toContain("RM 0.00"); // balance (unfunded)
+        expect(res.data.message).toContain(
+          `top up at least RM ${PACK_PRICE.toFixed(2)}.`, // shortfall = full price
+        );
 
         // Nothing happened: no Pull, no stock movement, no ledger row.
         expect(await pullCount()).toBe(0);

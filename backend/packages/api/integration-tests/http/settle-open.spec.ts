@@ -36,11 +36,32 @@ medusaIntegrationTestRunner({
         ).rejects.toThrow(/less than 0/);
       });
 
-      it("enforces the floor (no overdraft)", async () => {
+      it("enforces the floor (no overdraft) and names price/balance/shortfall", async () => {
         const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        // cus_short has RM 3 and tries a RM 25 open — the error must name the
+        // pack price, the current balance, and the exact top-up shortfall
+        // (sim day-3 LOW, ux-friction).
+        await packs.mutateCreditAtomic({
+          customerId: "cus_short", amount: 3, reason: "topup", reference: "mock_short",
+        });
+        // Error-object form makes toThrow compare the FULL message (===),
+        // not a substring — the exact copy is the point of this test.
+        const expected = new Error(
+          "Not enough credits to open this pack. It costs RM 25.00 and " +
+            "you have RM 3.00 — top up at least RM 22.00.",
+        );
         await expect(
-          packs.settleOpen({ customerId: "cus_broke", amount: -10, sourceTransactionId: "y" }),
-        ).rejects.toThrow(/Not enough credits/);
+          packs.settleOpen({ customerId: "cus_short", amount: -25, sourceTransactionId: "y" }),
+        ).rejects.toThrow(expected);
+        // Same guard, other changed branch: the legacy mutateCreditAtomic
+        // pack_open path computes "have" as balance-above-floor and must emit
+        // the identical message. The failed settle above rolled back, so
+        // cus_short still holds RM 3.
+        await expect(
+          packs.mutateCreditAtomic({
+            customerId: "cus_short", amount: -25, reason: "pack_open",
+          }),
+        ).rejects.toThrow(expected);
       });
     });
   },
