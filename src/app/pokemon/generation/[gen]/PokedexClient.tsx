@@ -12,8 +12,6 @@ import {
   spritePng,
 } from '@/lib/mock/pokedex';
 
-const LANGS = ['US', 'JP', 'KR'];
-
 function PokeSprite({ dex, name }: { dex: number; name: string }) {
   const [src, setSrc] = useState(spriteGif(dex));
   return (
@@ -36,7 +34,6 @@ export default function PokedexClient({
   pokemon: Pokemon[];
 }) {
   const [query, setQuery] = useState('');
-  const [lang, setLang] = useState('US');
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -51,39 +48,20 @@ export default function PokedexClient({
 
   return (
     <div className="mx-auto w-full px-fluid py-5">
-      {/* Top bar: search + language (left), generation tabs (right) */}
+      {/* Top bar: search (left), generation tabs (right) */}
       <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex items-center gap-2">
-          <div className="relative w-full sm:w-64">
-            <Search
-              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40"
-              aria-hidden
-            />
-            <input
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search Pokémon..."
-              className="h-10 w-full rounded-xl border border-white/10 bg-white/[0.03] pl-9 pr-3 text-sm text-white placeholder:text-white/40 focus:border-white/25 focus:outline-none"
-            />
-          </div>
-          <div className="flex shrink-0 rounded-xl border border-white/10 bg-white/[0.03] p-0.5">
-            {LANGS.map((l) => (
-              <button
-                key={l}
-                type="button"
-                onClick={() => setLang(l)}
-                className={cn(
-                  'rounded-lg px-2.5 py-1.5 text-[12px] font-semibold transition-colors',
-                  lang === l
-                    ? 'bg-white/10 text-white'
-                    : 'text-white/50 hover:text-white/70',
-                )}
-              >
-                {l}
-              </button>
-            ))}
-          </div>
+        <div className="relative w-full sm:w-64">
+          <Search
+            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40"
+            aria-hidden
+          />
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search Pokémon..."
+            className="h-10 w-full rounded-xl border border-white/10 bg-white/[0.03] pl-9 pr-3 text-sm text-white placeholder:text-white/40 focus:border-white/25 focus:outline-none"
+          />
         </div>
 
         {/* Generation tabs — underline style, horizontally scrollable */}

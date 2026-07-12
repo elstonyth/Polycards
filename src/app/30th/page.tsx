@@ -43,12 +43,6 @@ export default function ThirtiethPage() {
             channel for the full breakdown of winners and prizes.
           </p>
           <div className="mt-8 flex flex-wrap justify-center gap-3">
-            <a
-              href="#"
-              className="inline-flex h-12 items-center justify-center rounded-2xl bg-white px-7 text-sm font-semibold text-neutral-950 shadow-lg transition-opacity hover:opacity-90"
-            >
-              View Winners on Discord
-            </a>
             <Link
               href="/leaderboard"
               className="inline-flex h-12 items-center justify-center rounded-2xl border border-white/15 bg-white/5 px-7 text-sm font-medium text-white transition-colors hover:bg-white/10"
