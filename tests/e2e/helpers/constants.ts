@@ -12,8 +12,7 @@ export const PK =
 // Seeded operator — created by create-admin.ts (deploy:migrate-user) from
 // ADMIN_EMAIL/ADMIN_PASSWORD. The old qa-admin@pokenic.local seed is dead.
 export const ADMIN_EMAIL = process.env.PW_ADMIN_EMAIL ?? 'admin@pokenic.local';
-export const ADMIN_PASSWORD =
-  process.env.PW_ADMIN_PASSWORD ?? 'pokenicadmin2026';
+export const ADMIN_PASSWORD = process.env.PW_ADMIN_PASSWORD ?? '';
 
 // Unique-per-run id so reruns never collide on email/slug.
 export const stamp = (): string => `${Date.now()}`;

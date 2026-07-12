@@ -2,11 +2,11 @@
 
 A physical/digital trading-card-pack collectibles platform — built as a Next.js 16 storefront on top of a Medusa v2 + Mercur marketplace backend.
 
-The experience: pack drops, a claw machine, a vault, a marketplace, and a leaderboard, in a clean, full-bleed, dark-mode codebase.
+The experience: pack drops, slot-machine pack opening, a vault, a marketplace, and a leaderboard, in a clean, full-bleed, dark-mode codebase.
 
 ## What's inside
 
-- **Storefront** (`src/`) — Next.js 16 (App Router, React 19, TypeScript strict), ~36 routes including the home page, `/claw`, `/how-it-works`, `/leaderboard`, `/marketplace`, `/pack-party`, and an account area (vault, orders, transactions, settings, referrals).
+- **Storefront** (`src/`) — Next.js 16 (App Router, React 19, TypeScript strict), ~36 routes including the home page, `/slots` (slot-machine pack opening), `/how-it-works`, `/leaderboard`, `/marketplace`, `/pack-party`, and an account area (vault, orders, transactions, settings, referrals).
 - **Backend** (`backend/`) — a [Medusa v2](https://medusajs.com/) + [Mercur](https://mercurjs.com/) (multi-vendor) commerce API at `backend/packages/api`, plus an admin dashboard at `backend/apps/admin`.
 - **Credit economy** — top-up, per-customer credit charging, public profiles, a client-side demo spin, forgot-password, a card vault, two-tier buyback, stock-aware pack pulls, and a DB-aggregated leaderboard.
 
@@ -49,11 +49,18 @@ npm run dev          # http://localhost:3000
 
 ## Running the backend
 
-First time on a machine: create the shared dev containers (Postgres 16 as
-user/db `medusa`, Redis 7) — `pwsh scripts/launch-stack.ps1` ensures
-`pokenic-postgres` + `pokenic-redis` exist and are running (it also boots the
-full stack). Thereafter they restart themselves (`--restart unless-stopped`);
-a plain `docker start pokenic-postgres pokenic-redis` also works.
+First time on a machine, create the shared dev containers (Postgres 16 with
+user/password/db all `medusa`, Redis 7):
+
+```bash
+docker run -d --name pokenic-postgres --restart unless-stopped \
+  -e POSTGRES_USER=medusa -e POSTGRES_PASSWORD=medusa -e POSTGRES_DB=medusa \
+  -p 5432:5432 postgres:16
+docker run -d --name pokenic-redis --restart unless-stopped -p 6379:6379 redis:7
+```
+
+Thereafter they restart themselves (`--restart unless-stopped`); a plain
+`docker start pokenic-postgres pokenic-redis` also works.
 
 ```bash
 # Postgres + Redis stay up via Docker (--restart unless-stopped)
@@ -92,7 +99,7 @@ docker compose up dev --build   # dev mode on port 3001
 
 ## Measurement-driven UI
 
-UI work is measurement-driven, not eyeballed. The `scripts/*.mjs` Playwright scripts read computed styles and `getBoundingClientRect`, dumping screenshots and JSON into `docs/research/`. Per-component specs (exact computed CSS, states, content, responsive breakpoints) live in `docs/research/components/*.spec.md`. Verify with the Playwright scripts (screenshots → `docs/research/*.png`), not ad-hoc browser sessions.
+UI work is measurement-driven, not eyeballed. The `scripts/*.mjs` Playwright scripts read computed styles and `getBoundingClientRect`, dumping screenshots and JSON into `docs/research/`. Per-component specs (exact computed CSS, states, content, responsive breakpoints) live in `docs/research/components/*.spec.md`. Verify with the Playwright scripts (screenshots → `docs/research/*.png`), not ad-hoc browser sessions. (`docs/research/` is a gitignored, local-only output dir — it is not shipped in a clone; regenerate it by running the scripts.)
 
 ## Project Structure
 
@@ -109,15 +116,15 @@ backend/
   packages/api/       # Medusa v2 + Mercur commerce API
   apps/admin/         # Admin dashboard (Vite)
 docs/
-  research/           # component specs, page topology, measurement output
+  superpowers/        # tracked plans + specs
+  research/           # LOCAL-ONLY (gitignored) — measurement output, component specs
 scripts/              # Playwright capture/measure/QA + serve-standalone.ps1
-AGENTS.md             # Agent instructions (single source of truth)
-CLAUDE.md             # Claude Code config (imports AGENTS.md)
+# AI-agent config (AGENTS.md, CLAUDE.md) is local-only — gitignored; see .gitignore "Private".
 ```
 
 ## Deployment
 
-Deploys to **DigitalOcean App Platform** (managed via the `doctl` CLI). Both the storefront and backend build from `git master` with `deploy_on_push`, so code changes ship via commit + push. Media is served from a DigitalOcean Spaces bucket + CDN. See `docs/HANDOFF.md` for operational details.
+Deploys to **DigitalOcean App Platform** (managed via the `doctl` CLI). Both the storefront and backend build from `git master` with `deploy_on_push`, so code changes ship via commit + push. Media is served from a DigitalOcean Spaces bucket + CDN. See [`.do/README.md`](.do/README.md) for the deploy specs and operational details.
 
 ## License
 

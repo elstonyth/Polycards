@@ -5,11 +5,17 @@ all three live surfaces: storefront `:4000`, admin dashboard `:7000`, backend `:
 
 ## What it covers
 
-| Spec                      | Flow                                                                                                                                                                                                                                                                                     |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `customer.spec.ts`        | signup → top-up → open pack (slot reel on `/slots/<slug>/spin`) → keep in vault → sell-back; backend credit ledger asserted via API. Plus: anonymous demo spin (`?demo=1`) writes NO backend pull.                                                                                       |
-| `admin.spec.ts`           | admin login → cards & packs catalogs render with management actions → **create a pack** + manage its prize pool → **adjust a customer's credits** (support) → economy report.                                                                                                            |
-| `odds-reflection.spec.ts` | **Headline.** Set one card to **100% win rate** (pack A via admin UI, pack B via odds API) → open the pack 3× → every pull is that exact card. Asserts the hardcoded published "Pull Odds" table never moves — the adjustment lands on real pull _behavior_, not the decorative display. |
+| Spec                       | Flow                                                                                                                                                                                                                                                                                     |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `customer.spec.ts`         | signup → top-up → open pack (slot reel on `/slots/<slug>/spin`) → keep in vault → sell-back; backend credit ledger asserted via API. Plus: anonymous demo spin (`?demo=1`) writes NO backend pull.                                                                                       |
+| `admin.spec.ts`            | admin login → cards & packs catalogs render with management actions → **create a pack** + manage its prize pool → **adjust a customer's credits** (support) → economy report.                                                                                                            |
+| `odds-reflection.spec.ts`  | **Headline.** Set one card to **100% win rate** (pack A via admin UI, pack B via odds API) → open the pack 3× → every pull is that exact card. Asserts the hardcoded published "Pull Odds" table never moves — the adjustment lands on real pull _behavior_, not the decorative display. |
+| `bulk-sell.spec.ts`        | Funded customer opens two packs → vault "Select" mode → selects both cards → "Sell 2" in the bulk action bar → both leave the vault and the credit ledger gains two `buyback` rows (server truth). Covers the bulk path (single-card sell-back is in `customer.spec`).                   |
+| `card-management.spec.ts`  | Admin registers an inventory product as a gacha card → edits its facts (FMV + marketplace toggle) → the FMV edit surfaces in the storefront pack-detail "Top Hits" (`GET /store/packs/{slug}`). Needs one eligible un-registered product.                                                |
+| `delivery-request.spec.ts` | Funded customer opens a pack → vault "Select" mode → "Deliver 1" → add-address form → the order shows on `/orders` as `Requested`. Customer side only; admin fulfilment is `ship-orders`.                                                                                                |
+| `rewards.spec.ts`          | Customer rewards after the `/daily` ⇄ `/vip` split: claim a VIP voucher grant on `/vip`, then open the daily box on `/daily`. **Skips** (does not fail) when reward redemption is disabled on the backend.                                                                               |
+| `ship-orders.spec.ts`      | Admin advances a delivery order `requested → packing → shipped` via the Deliveries dashboard (shipping requires a tracking number). Asserted in the UI (modal closes) and server-side (admin delivery-orders API reports `shipped`).                                                     |
+| `slot-vault-room.spec.ts`  | Vault Room slot machine end to end: spin → reel settles → face-down slab → flip → "Sell for RM…" → confirm sell-back → credit ledger gains a `buyback` row. Plus: an unsold flipped card auto-vaults after the shared 30s window expires.                                                |
 
 ## Why the 100% test instead of asserting the odds panel
 
@@ -24,7 +30,8 @@ writes never leak into the published display.
 ## Prerequisites (services must already be up)
 
 This suite does **not** spawn servers (the storefront must be the production
-standalone build, not `next dev` — see root `CLAUDE.md`).
+standalone build, not `next dev` — see the root `README.md`, "Quick Start
+(storefront)").
 
 ```powershell
 # infra
@@ -41,9 +48,11 @@ npm run build
 pwsh scripts/serve-standalone.ps1 -Port 4000           # :4000
 ```
 
-Seeded creds: admin `admin@pokenic.local` / `pokenicadmin2026` (created by
-`create-admin.ts` via `deploy:migrate-user`). Test customers are created fresh
-per run. Override via `PW_ADMIN_EMAIL` / `PW_ADMIN_PASSWORD`.
+Seeded admin: email `admin@pokenic.local`, created by `create-admin.ts` via
+`deploy:migrate-user`. The admin **password is required** — export it as
+`PW_ADMIN_PASSWORD` to match your stack's seeded admin; the suite ships no
+fallback and fails fast without it (`helpers/constants.ts`). Set `PW_ADMIN_EMAIL`
+too if your seed used a different email. Test customers are created fresh per run.
 
 ## Run
 

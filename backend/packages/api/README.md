@@ -54,8 +54,8 @@ the local equivalent.
 - **Postgres + Redis** — the shared local containers `pokenic-postgres`
   (Postgres 16) and `pokenic-redis` (Redis 7) must be running:
   `docker start pokenic-postgres pokenic-redis`. First time on a machine,
-  create them per the root `README.md` ("Running the backend") — e.g.
-  `pwsh scripts/launch-stack.ps1`.
+  create them with the `docker run` commands in the root `README.md`
+  ("Running the backend").
 - **Install + build workspace deps** — from `backend/`:
   `corepack yarn install --immutable && corepack yarn build --filter="@acme/api^..."`.
   Jest resolves workspace deps such as `@acme/odds-math` via their `dist/`

@@ -45,6 +45,11 @@ export async function api<T>(
 }
 
 export async function adminToken(): Promise<string> {
+  if (!ADMIN_PASSWORD) {
+    throw new Error(
+      "PW_ADMIN_PASSWORD is not set — export it to match your stack's seeded admin (see tests/e2e/README.md).",
+    );
+  }
   const r = await api<{ token: string }>('/auth/user/emailpass', {
     method: 'POST',
     body: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD },

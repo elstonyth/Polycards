@@ -6,6 +6,11 @@ import { ADMIN, ADMIN_EMAIL, ADMIN_PASSWORD } from './constants';
 export const ADMIN_STORAGE = 'tests/e2e/.auth/admin.json';
 
 export async function adminLogin(page: Page): Promise<void> {
+  if (!ADMIN_PASSWORD) {
+    throw new Error(
+      "PW_ADMIN_PASSWORD is not set — export it to match your stack's seeded admin (see tests/e2e/README.md).",
+    );
+  }
   // /auth/user/emailpass rate-limits sign-ins; retry through the short window.
   for (let attempt = 0; attempt < 4; attempt++) {
     await page.goto(`${ADMIN}/login`, { waitUntil: 'domcontentloaded' });
