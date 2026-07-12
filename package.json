@@ -35,7 +35,6 @@
     "format": "prettier --write src scripts",
     "format:check": "prettier --check src scripts",
     "test": "vitest run",
-    "sim:test": "node --test scripts/sim/**/*.test.mjs",
     "qa:csp": "node scripts/qa-csp.mjs",
     "test:a11y": "node scripts/qa-a11y.mjs"
   },
