@@ -138,6 +138,9 @@ GEMINI.md
 # here because code indexers like codebase-memory only read the ROOT gitignore)
 **/.medusa/
 
+# Pixel-Pokémon backfill review file (generated per-run by the propose script; never commit)
+pixel-pokemon-backfill.json
+
 # graphify matcher leaks deep .medusa build paths; force-exclude globally
 .medusa/
 **/.medusa/
