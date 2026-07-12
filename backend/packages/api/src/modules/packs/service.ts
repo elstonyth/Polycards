@@ -2365,6 +2365,92 @@ class PacksModuleService extends MedusaService({
     return Number(rows[0]?.cents ?? 0);
   }
 
+  // Public-profile stats aggregated in the DB (plan 022) — replaces the
+  // route's 20k-row JS fold. Same execution shape as leaderboardTop, scoped
+  // to one customer. Semantics pinned to the old in-route fold:
+  //  - only source='pack' pulls (C1: reward pulls are private vault items),
+  //  - capped to the NEWEST 20k pulls (the route's documented MAX_PULLS
+  //    aggregation cap — now the LIMIT in the `capped` CTE),
+  //  - volume = Σ per-card MYR display value with PER-CARD rounding, exactly
+  //    displayMarketPrice(fmv, fx, multiplier): ROUND(fmv × mult × fx, 2),
+  //    degenerate inputs (fmv < 0 or multiplier ≤ 0) → 0, missing/deleted
+  //    card → 0 (the pull still counts). Per-card rounding keeps the
+  //    documented cents-level drift vs the leaderboard's sum-level round.
+  //  - by_rarity = COUNT per rarity resolved from the LIVE (pack_id, card_id)
+  //    odds row, defaulting to 'Common' when none matches or rarity is NULL —
+  //    mirrors makeRarityOf's `?? 'Common'` fallback (card-view.ts).
+  // The customer scan rides IDX_pull_customer_id_rolled_at.
+  @InjectManager()
+  async profileStatsForCustomer(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{
+    pulls: number;
+    volume: number;
+    by_rarity: Record<string, number>;
+  }> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    // FX is a JS-side input (same seam as leaderboardTop) so profile volume
+    // and the board convert USD→MYR through the identical resolved rate.
+    const fxRate = await resolveFxRate(this);
+
+    const rows = await em.execute<
+      { rarity: string; pulls: string; volume_myr: string | null }[]
+    >(
+      `WITH capped AS (
+         SELECT pack_id, card_id
+           FROM pull
+          WHERE customer_id = ? AND source = 'pack' AND deleted_at IS NULL
+          ORDER BY rolled_at DESC
+          LIMIT 20000 -- MAX_PULLS: the route's documented aggregation cap
+       ), odds AS (
+         -- one rarity per (pack, card): the old JS Map dedupe made duplicate
+         -- odds rows harmless; DISTINCT ON keeps this join from fanning out
+         -- the per-pull counts. id DESC ≈ the Map's last-row-wins.
+         SELECT DISTINCT ON (pack_id, card_id) pack_id, card_id, rarity
+           FROM pack_odds
+          WHERE deleted_at IS NULL AND card_id IS NOT NULL
+          ORDER BY pack_id, card_id, id DESC
+       )
+       SELECT COALESCE(o.rarity, 'Common') AS rarity,
+              COUNT(*)::bigint AS pulls,
+              COALESCE(SUM(
+                CASE
+                  WHEN c.handle IS NULL THEN 0
+                  WHEN COALESCE(c.market_value, 0) < 0
+                    OR COALESCE(c.market_multiplier, ?) <= 0 THEN 0
+                  ELSE ROUND(
+                         COALESCE(c.market_value, 0)
+                         * COALESCE(c.market_multiplier, ?)
+                         * ? * 100
+                       ) / 100
+                END
+              ), 0) AS volume_myr
+         FROM capped p
+         LEFT JOIN card c ON c.handle = p.card_id AND c.deleted_at IS NULL
+         LEFT JOIN odds o ON o.pack_id = p.pack_id AND o.card_id = p.card_id
+        GROUP BY 1`,
+      [
+        customerId,
+        DEFAULT_MARKET_MULTIPLIER,
+        DEFAULT_MARKET_MULTIPLIER,
+        fxRate,
+      ],
+    );
+
+    let pulls = 0;
+    let volume = 0;
+    const by_rarity: Record<string, number> = {};
+    for (const r of rows) {
+      const n = Number(r.pulls ?? 0);
+      pulls += n;
+      volume += Number(r.volume_myr ?? 0);
+      by_rarity[r.rarity] = (by_rarity[r.rarity] ?? 0) + n;
+    }
+    return { pulls, volume, by_rarity };
+  }
+
   // Per-reason lifetime ledger sums for /admin/economy — one GROUP BY instead
   // of paging the whole ledger to Node (audit 2026-07-07 #5b). Emitted as
   // synthetic {reason, amount} rows so economy.ts's unit-tested ledgerTotals

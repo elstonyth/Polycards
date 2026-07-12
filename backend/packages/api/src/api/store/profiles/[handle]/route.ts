@@ -24,10 +24,32 @@ import {
 // and recent pulls' card display fields. NEVER email, customer id, addresses,
 // credit balance, or vault/buyback state.
 const RECENT_N = 12;
-const MAX_PULLS = 20_000; // same aggregation cap as the leaderboard
+// Recent-feed page size: a small multiple of RECENT_N so pulls of
+// since-deleted cards (skipped below) rarely under-fill the feed in one page;
+// a bounded loop (max 3 pages) covers the pathological case.
+const RECENT_PAGE = RECENT_N * 3;
+// Showcase ceiling — the same 20k aggregation cap the old in-route derivation
+// inherited from MAX_PULLS. The query is showcased-filtered (explicit opt-in
+// rows only), so this is a semantic ceiling, not a working-set size.
+const SHOWCASE_MAX = 20_000;
 
 const RARITIES = ['Immortal', 'Legendary', 'Mythical', 'Rare', 'Uncommon', 'Common'] as const;
 type Rarity = (typeof RARITIES)[number];
+
+type PullRow = Awaited<ReturnType<PacksModuleService['listPulls']>>[number];
+type CardRow = Awaited<ReturnType<PacksModuleService['listCards']>>[number];
+
+// ponytail: per-process 30s cache (leaderboard pattern) — profile stats are
+// per-customer aggregates over the pull/ledger history; upgrade to Redis if
+// we ever run >1 instance.
+const CACHE_TTL_MS = 30_000;
+const profileCache = new Map<string, { expires: number; body: unknown }>();
+
+/** Test seam: module state outlives a test's fixtures — the http suite runs in
+ *  one process, so test A's cached profile would be served to test B. */
+export function clearProfileCache(): void {
+  profileCache.clear();
+}
 
 export async function GET(
   req: MedusaRequest,
@@ -40,6 +62,14 @@ export async function GET(
     throw new MedusaError(MedusaError.Types.NOT_FOUND, 'Profile not found');
   }
 
+  // Only successful bodies are ever stored (404 paths throw before the set
+  // below), so a cache hit is always a real profile.
+  const cached = profileCache.get(handle);
+  if (cached && cached.expires > Date.now()) {
+    res.json(cached.body);
+    return;
+  }
+
   const customers = req.scope.resolve(Modules.CUSTOMER);
   const customer = await findCustomerByHandle(customers, handle);
   if (!customer) {
@@ -47,119 +77,138 @@ export async function GET(
   }
 
   const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
-  // C1: exclude reward Pulls from the public profile (leaderboard, collection,
-  // recent feed) — they are private vault items only visible in /store/vault.
-  // Filter IN the query (source='pack', the positive of source!='reward', which
-  // every non-reward row carries: the column is NOT NULL DEFAULT 'pack'). A
-  // post-`.filter()` would run AFTER the MAX_PULLS cap, so a collector with many
-  // recent reward pulls would lose older real pulls to the truncation.
-  const pulls = await packs.listPulls(
-    { customer_id: customer.id, source: 'pack' },
-    { take: MAX_PULLS, order: { rolled_at: 'DESC' } },
-  );
-
-  // Lookup tables, leaderboard-style: card display/value by handle, pack
-  // price by slug, per-pack rarity by (pack, card) odds row.
-  const cardIds = [...new Set(pulls.map((p) => p.card_id))];
-  const packIds = [...new Set(pulls.map((p) => p.pack_id))];
-  const cards = cardIds.length
-    ? await packs.listCards({ handle: cardIds }, { take: cardIds.length })
-    : [];
-  const odds =
-    cardIds.length && packIds.length
-      ? await packs.listPackOdds(
-          { pack_id: packIds, card_id: cardIds },
-          { take: packIds.length * cardIds.length },
-        )
-      : [];
-
-  const byHandle = cardByHandle(cards);
-  // Reward rows (card_id null) carry no card rarity — exclude before the lookup.
-  const cardOdds = odds.filter(
-    (o): o is typeof o & { card_id: string } => o.card_id != null,
-  );
-  const rarityOf = makeRarityOf(cardOdds) as (p: string, c: string) => Rarity;
 
   // Stats — same definitions as the leaderboard: points = real pack_open
   // spend from the credit ledger × 100 (spend is RM, so the ledger's sen ARE
   // the points — exact match with the board). volume = Σ won-card MYR display
   // value (FMV × multiplier × FX); it can drift from the board by cents
   // (per-card rounding here vs one sum-level round there) and is computed
-  // over the MAX_PULLS-capped list (pre-existing cap).
-  const fxRate = await resolveFxRate(packs);
-  const cardMyr = (card: (typeof cards)[number]): number =>
-    displayMarketPrice(
-      toMoney(card.market_value),
-      fxRate,
-      Number(card.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER),
-    );
-  let volume = 0;
+  // over the newest-20k-capped pull set (pre-existing MAX_PULLS cap — the
+  // cap and the C1 source='pack' filter now live inside the SQL aggregate,
+  // see PacksModuleService.profileStatsForCustomer).
+  const stats = await packs.profileStatsForCustomer(customer.id);
   const points = await packs.packOpenSpendCents(customer.id);
   const byRarity = Object.fromEntries(RARITIES.map((r) => [r, 0])) as Record<
     Rarity,
     number
   >;
-  for (const p of pulls) {
-    const card = byHandle.get(p.card_id);
-    volume += card ? cardMyr(card) : 0;
-    byRarity[rarityOf(p.pack_id, p.card_id)] += 1;
+  for (const [rarity, n] of Object.entries(stats.by_rarity)) {
+    // pack_odds.rarity is enum-constrained to RARITIES (NULL → 'Common' in
+    // the SQL), so every key lands on an initialized bucket.
+    byRarity[rarity as Rarity] = (byRarity[rarity as Rarity] ?? 0) + n;
   }
+
+  const fxRate = await resolveFxRate(packs);
+  const cardMyr = (card: CardRow): number =>
+    displayMarketPrice(
+      toMoney(card.market_value),
+      fxRate,
+      Number(card.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER),
+    );
 
   // Recent pulls: newest first, card display fields only (no vault status,
   // no buyback fields). Pulls whose card metadata is gone are skipped.
   // Filter BEFORE slicing so pulls of since-deleted cards can't under-fill
-  // the feed.
-  const recent = pulls
-    .flatMap((p) => {
+  // the feed. C1: source='pack' IN the query — reward pulls are private
+  // vault items (see /store/vault) and must not consume feed slots.
+  // Paged (RECENT_PAGE per page, max 3 pages) instead of the old 20k fetch.
+  const recentKept: Array<{ pull: PullRow; card: CardRow }> = [];
+  for (let page = 0; page < 3 && recentKept.length < RECENT_N; page++) {
+    const rows = await packs.listPulls(
+      { customer_id: customer.id, source: 'pack' },
+      {
+        take: RECENT_PAGE,
+        skip: page * RECENT_PAGE,
+        order: { rolled_at: 'DESC' },
+      },
+    );
+    if (rows.length === 0) break;
+    const handles = [...new Set(rows.map((p) => p.card_id))];
+    const cards = await packs.listCards(
+      { handle: handles },
+      { take: handles.length },
+    );
+    const byHandle = cardByHandle(cards);
+    for (const p of rows) {
       const card = byHandle.get(p.card_id);
-      if (!card) return [];
-      return [
-        {
-          pack_id: p.pack_id,
-          rarity: rarityOf(p.pack_id, p.card_id),
-          rolled_at: p.rolled_at,
-          card: {
-            handle: card.handle,
-            name: card.name,
-            set: card.set,
-            grader: card.grader,
-            grade: card.grade,
-            market_value: toMoney(card.market_value),
-            marketPriceMyr: cardMyr(card),
-            image: card.image,
-            slab_image: card.slab_image ?? null,
-          },
-        },
-      ];
-    })
-    .slice(0, RECENT_N);
+      if (card) recentKept.push({ pull: p, card });
+    }
+    if (rows.length < RECENT_PAGE) break; // short page = no more pulls
+  }
+  const recentTop = recentKept.slice(0, RECENT_N);
+
+  // Per-pack rarity for the recent rows only (collection items carry no
+  // rarity): rarity belongs to the (pack, card) odds row.
+  const recentPackIds = [...new Set(recentTop.map((k) => k.pull.pack_id))];
+  const recentCardIds = [...new Set(recentTop.map((k) => k.pull.card_id))];
+  const odds =
+    recentPackIds.length && recentCardIds.length
+      ? await packs.listPackOdds(
+          { pack_id: recentPackIds, card_id: recentCardIds },
+          { take: recentPackIds.length * recentCardIds.length },
+        )
+      : [];
+  // Reward rows (card_id null) carry no card rarity — exclude before the lookup.
+  const cardOdds = odds.filter(
+    (o): o is typeof o & { card_id: string } => o.card_id != null,
+  );
+  const rarityOf = makeRarityOf(cardOdds) as (p: string, c: string) => Rarity;
+
+  const recent = recentTop.map(({ pull: p, card }) => ({
+    pack_id: p.pack_id,
+    rarity: rarityOf(p.pack_id, p.card_id),
+    rolled_at: p.rolled_at,
+    card: {
+      handle: card.handle,
+      name: card.name,
+      set: card.set,
+      grader: card.grader,
+      grade: card.grade,
+      market_value: toMoney(card.market_value),
+      marketPriceMyr: cardMyr(card),
+      image: card.image,
+      slab_image: card.slab_image ?? null,
+    },
+  }));
 
   // Collection: only pulls the customer has opted to showcase (showcased=true,
-  // still vaulted). Computed from the already-loaded pull set — no extra query.
-  // The activity feed (recent) stays ungated as decided at spec time.
-  const collection = pulls
-    .filter(
-      (p) =>
-        (p as unknown as { showcased: boolean }).showcased &&
-        p.status === 'vaulted',
-    )
-    .flatMap((p) => {
-      const card = byHandle.get(p.card_id);
-      if (!card) return [];
-      return [
-        {
-          handle: card.handle,
-          name: card.name,
-          set: card.set,
-          grader: card.grader,
-          grade: card.grade,
-          market_value: toMoney(card.market_value),
-          marketPriceMyr: cardMyr(card),
-          image: card.image,
-          slab_image: card.slab_image ?? null,
-        },
-      ];
-    });
+  // still vaulted). Now its own filtered, bounded query (opt-in rows only)
+  // instead of a JS filter over the 20k list. The activity feed (recent)
+  // stays ungated as decided at spec time.
+  const showcasePulls = await packs.listPulls(
+    {
+      customer_id: customer.id,
+      source: 'pack',
+      showcased: true,
+      status: 'vaulted',
+    },
+    { take: SHOWCASE_MAX, order: { rolled_at: 'DESC' } },
+  );
+  const showcaseHandles = [...new Set(showcasePulls.map((p) => p.card_id))];
+  const showcaseCards = showcaseHandles.length
+    ? await packs.listCards(
+        { handle: showcaseHandles },
+        { take: showcaseHandles.length },
+      )
+    : [];
+  const showcaseByHandle = cardByHandle(showcaseCards);
+  const collection = showcasePulls.flatMap((p) => {
+    const card = showcaseByHandle.get(p.card_id);
+    if (!card) return [];
+    return [
+      {
+        handle: card.handle,
+        name: card.name,
+        set: card.set,
+        grader: card.grader,
+        grade: card.grade,
+        market_value: toMoney(card.market_value),
+        marketPriceMyr: cardMyr(card),
+        image: card.image,
+        slab_image: card.slab_image ?? null,
+      },
+    ];
+  });
 
   const seed = seedOf(customer.id);
   const first = (customer.first_name || '').trim();
@@ -171,7 +220,7 @@ export async function GET(
       ? custMeta.equipped_frame_level
       : null;
 
-  res.json({
+  const body = {
     handle,
     name: first.length > 0 ? first : `Collector ${String(seed).slice(0, 4)}`,
     seed,
@@ -179,12 +228,14 @@ export async function GET(
     equipped_frame_level: equippedFrameLevel,
     joined_at: customer.created_at,
     stats: {
-      pulls: pulls.length,
-      volume: Math.round(volume * 100) / 100,
+      pulls: stats.pulls,
+      volume: Math.round(stats.volume * 100) / 100,
       points: Math.round(points),
       by_rarity: byRarity,
     },
     collection,
     recent,
-  });
+  };
+  profileCache.set(handle, { expires: Date.now() + CACHE_TTL_MS, body });
+  res.json(body);
 }

@@ -3,6 +3,7 @@ import { Modules } from "@medusajs/framework/utils";
 import { PACKS_MODULE } from "../../src/modules/packs";
 import type PacksModuleService from "../../src/modules/packs/service";
 import { HANDLE_RE } from "../../src/utils/profile-handle";
+import { clearProfileCache } from "../../src/api/store/profiles/[handle]/route";
 import { myrDisplay as MYR, unwrapResponse } from "./utils";
 
 jest.setTimeout(240 * 1000);
@@ -34,6 +35,11 @@ medusaIntegrationTestRunner({
       let seededCustomerId: string;
 
       beforeEach(async () => {
+        // The route's per-process 30s profile cache outlives each test's
+        // fixtures (one jest process = one module instance) — clear it so a
+        // previous test's profile is never served against this test's data.
+        clearProfileCache();
+
         const container = getContainer();
 
         const apiKeyModule = container.resolve(Modules.API_KEY);
@@ -202,6 +208,209 @@ medusaIntegrationTestRunner({
         });
         expect(p.recent[1].card.handle).toBe(RARE_CARD);
         expect(typeof p.recent[0].rolled_at).toBe("string");
+      });
+
+      // Plan 022 parity pin: the stats now come from a SQL aggregate
+      // (profileStatsForCustomer) — this seeds ≥2 packs and ≥2 rarities plus a
+      // reward pull and asserts the exact values the old in-route JS fold
+      // produced, computed here from the seeded data.
+      it("stats parity: SQL aggregate matches the seeded data across packs/rarities; reward pulls excluded (C1)", async () => {
+        const container = getContainer();
+        const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
+        const customerModule = container.resolve(Modules.CUSTOMER);
+
+        // Second pack: the SAME card is a different rarity here — pins that
+        // by_rarity resolves per (pack, card) odds row, not per card.
+        const PACK2_SLUG = "pp-pack-2";
+        await packs.createPacks([
+          {
+            slug: PACK2_SLUG,
+            title: "PP Test Pack 2",
+            category: "pokemon",
+            price: PACK_PRICE,
+            image: "/cdn/test-pack-2.webp",
+            buyback_percent: 90,
+          },
+        ]);
+        await packs.createPackOdds([
+          {
+            pack_id: PACK2_SLUG,
+            card_id: RARE_CARD,
+            weight: 100,
+            rarity: "Legendary" as const,
+          },
+        ]);
+
+        const parity = await customerModule.createCustomers({
+          email: "pp-parity@test.dev",
+          first_name: "Parity",
+          metadata: { handle: "parity-test" },
+        });
+        await packs.createPulls([
+          {
+            customer_id: parity.id,
+            pack_id: PACK_SLUG,
+            card_id: RARE_CARD,
+            rolled_at: new Date("2026-06-01T10:00:00Z"),
+          },
+          {
+            customer_id: parity.id,
+            pack_id: PACK_SLUG,
+            card_id: RARE_CARD,
+            rolled_at: new Date("2026-06-02T10:00:00Z"),
+          },
+          {
+            customer_id: parity.id,
+            pack_id: PACK_SLUG,
+            card_id: EPIC_CARD,
+            rolled_at: new Date("2026-06-03T10:00:00Z"),
+          },
+          {
+            customer_id: parity.id,
+            pack_id: PACK2_SLUG,
+            card_id: RARE_CARD,
+            rolled_at: new Date("2026-06-04T10:00:00Z"),
+          },
+          // Reward pull, NEWEST row: if the C1 source filter leaked, this
+          // would bump pulls/by_rarity AND take recent[0].
+          {
+            customer_id: parity.id,
+            pack_id: PACK_SLUG,
+            card_id: RARE_CARD,
+            rolled_at: new Date("2026-06-05T10:00:00Z"),
+            source: "reward" as const,
+          },
+        ] as Parameters<typeof packs.createPulls>[0]);
+        await packs.createCreditTransactions(
+          Array.from({ length: 4 }, () => ({
+            customer_id: parity.id,
+            amount: -PACK_PRICE,
+            reason: "pack_open" as const,
+          })) as Parameters<typeof packs.createCreditTransactions>[0],
+        );
+
+        const res = await getProfile("parity-test");
+        expect(res.status).toBe(200);
+        expect(res.data.stats).toEqual({
+          pulls: 4, // reward pull excluded
+          // Per-card rounding (MYR rounds each card), summed — the old fold.
+          volume:
+            Math.round((3 * MYR(RARE_FMV) + MYR(EPIC_FMV)) * 100) / 100,
+          points: 4 * PACK_PRICE * 100,
+          by_rarity: {
+            Immortal: 0,
+            Legendary: 1, // RARE_CARD pulled from pack 2
+            Mythical: 1,
+            Rare: 2,
+            Uncommon: 0,
+            Common: 0,
+          },
+        });
+        // Recent feed also excludes the reward pull: newest entry is the
+        // pack-2 pull, not the (newer) reward row.
+        expect(res.data.recent).toHaveLength(4);
+        expect(res.data.recent[0]).toMatchObject({
+          pack_id: PACK2_SLUG,
+          rarity: "Legendary",
+          card: { handle: RARE_CARD },
+        });
+      });
+
+      it("recent feed: newest-first, 12 max, deleted-card pulls skipped without under-filling", async () => {
+        const container = getContainer();
+        const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
+        const customerModule = container.resolve(Modules.CUSTOMER);
+
+        const customer = await customerModule.createCustomers({
+          email: "pp-recent@test.dev",
+          first_name: "Recent",
+          metadata: { handle: "recent-test" },
+        });
+
+        // A card that will be deleted AFTER its pulls are recorded. 30 pulls
+        // of it sit NEWEST, so the first recent page (3×12=36) yields only 6
+        // survivors and the route must page again (the under-fill guard).
+        const DOOMED_CARD = "pp-card-doomed";
+        const [doomed] = await packs.createCards([
+          {
+            handle: DOOMED_CARD,
+            name: "PP Doomed",
+            set: "Test Set",
+            grader: "PSA",
+            grade: "8",
+            market_value: 5,
+            image: "/cdn/doomed.webp",
+          },
+        ]);
+        const doomedPulls = Array.from({ length: 30 }, (_, i) => ({
+          customer_id: customer.id,
+          pack_id: PACK_SLUG,
+          card_id: DOOMED_CARD,
+          rolled_at: new Date(Date.UTC(2026, 5, 10, 0, i)), // newest block
+        }));
+        const rarePulls = Array.from({ length: 13 }, (_, i) => ({
+          customer_id: customer.id,
+          pack_id: PACK_SLUG,
+          card_id: RARE_CARD,
+          rolled_at: new Date(Date.UTC(2026, 5, 1, 0, i)), // older block
+        }));
+        await packs.createPulls([...doomedPulls, ...rarePulls]);
+        await packs.softDeleteCards([doomed.id]);
+
+        const res = await getProfile("recent-test");
+        expect(res.status).toBe(200);
+
+        // Filter-before-slice: the 30 newest (deleted-card) pulls are skipped
+        // and the feed still fills to 12 from the older survivors.
+        expect(res.data.recent).toHaveLength(12);
+        for (const entry of res.data.recent) {
+          expect(entry.card.handle).toBe(RARE_CARD);
+        }
+        const times = res.data.recent.map((r: { rolled_at: string }) =>
+          new Date(r.rolled_at).getTime(),
+        );
+        expect(times).toEqual([...times].sort((a, b) => b - a)); // newest first
+
+        // Deleted-card pulls still COUNT in the stats (volume contributes 0,
+        // rarity falls back to 'Common' — no odds row was seeded for it).
+        expect(res.data.stats.pulls).toBe(43);
+        expect(res.data.stats.volume).toBe(
+          Math.round(13 * MYR(RARE_FMV) * 100) / 100,
+        );
+        expect(res.data.stats.by_rarity).toMatchObject({
+          Rare: 13,
+          Common: 30,
+        });
+      });
+
+      it("caches the body per handle for the TTL; clearProfileCache() makes new pulls visible", async () => {
+        const first = await getProfile(SEEDED_HANDLE);
+        expect(first.status).toBe(200);
+        expect(first.data.stats.pulls).toBe(3);
+
+        // Two consecutive GETs serve the identical body.
+        const second = await getProfile(SEEDED_HANDLE);
+        expect(second.data).toEqual(first.data);
+
+        // A new pull lands... but the cached body is what's served (≤30s
+        // staleness is the accepted tolerance, same as the leaderboard).
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        await packs.createPulls([
+          {
+            customer_id: seededCustomerId,
+            pack_id: PACK_SLUG,
+            card_id: RARE_CARD,
+            rolled_at: new Date("2026-06-06T10:00:00Z"),
+          },
+        ]);
+        const stillCached = await getProfile(SEEDED_HANDLE);
+        expect(stillCached.data).toEqual(first.data);
+
+        // Past the cache, the new pull is visible.
+        clearProfileCache();
+        const fresh = await getProfile(SEEDED_HANDLE);
+        expect(fresh.data.stats.pulls).toBe(4);
+        expect(fresh.data.recent[0].card.handle).toBe(RARE_CARD);
       });
 
       it("never leaks PII (email, customer id, credit/vault fields)", async () => {
