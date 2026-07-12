@@ -3,8 +3,7 @@ import MerchantsClient from './MerchantsClient';
 
 export const metadata: Metadata = {
   title: 'Merchants',
-  description:
-    'Curated selection of verified trading card merchants worldwide.',
+  description: 'Curated selection of trading card merchants worldwide.',
 };
 
 export default function MerchantsPage() {
