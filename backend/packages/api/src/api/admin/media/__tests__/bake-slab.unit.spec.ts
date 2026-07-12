@@ -1,5 +1,41 @@
 import sharp from 'sharp';
-import { composeSlab } from '../bake-slab';
+import { composeSlab, isAllowedImageUrl } from '../bake-slab';
+
+// SSRF guard for the server-side slab-bake fetch (frame + card image). Public
+// hosts and storefront-relative paths are allowed (a strict CDN allowlist would
+// break legit baking); internal / metadata / loopback targets are rejected.
+describe('isAllowedImageUrl', () => {
+  it.each([
+    ['CDN https URL', 'https://cdn.pixelslot.example/slab-abc.webp'],
+    ['public http URL', 'http://images.example.com/card.jpg'],
+    ['storefront-relative path', '/images/test-card.webp'],
+    ['relative cdn path', '/cdn/test-pack.webp'],
+  ])('allows %s', (_label, url) => {
+    expect(isAllowedImageUrl(url)).toBe(true);
+  });
+
+  it.each([
+    ['cloud metadata IP', 'http://169.254.169.254/latest/meta-data'],
+    ['loopback IPv4', 'http://127.0.0.1/frame.png'],
+    ['integer-form loopback', 'http://2130706433/frame.png'],
+    ['hex-form loopback', 'http://0x7f000001/frame.png'],
+    ['octal-form loopback', 'http://0177.0.0.1/frame.png'],
+    ['RFC-1918 10/8', 'http://10.0.0.5/x.png'],
+    ['RFC-1918 172.16/12', 'http://172.16.0.1/x.png'],
+    ['RFC-1918 192.168/16', 'http://192.168.1.1/x.png'],
+    ['0.0.0.0', 'http://0.0.0.0/x.png'],
+    ['localhost', 'http://localhost:9000/static/x.png'],
+    ['IPv6 loopback', 'http://[::1]/x.png'],
+    ['IPv4-mapped IPv6 loopback', 'http://[::ffff:127.0.0.1]/x.png'],
+    ['IPv4-mapped IPv6 metadata', 'http://[::ffff:169.254.169.254]/x.png'],
+    ['file: scheme', 'file:///etc/passwd'],
+    ['protocol-relative', '//evil.example.com/x.png'],
+    ['garbage', 'not a url'],
+    ['empty', ''],
+  ])('rejects %s', (_label, url) => {
+    expect(isAllowedImageUrl(url)).toBe(false);
+  });
+});
 
 // composeSlab geometry contract: output = frame-sized webp; the card photo
 // covers the window rect (insets 28.33% / 10.47% / 6.66%); frame layers on top.

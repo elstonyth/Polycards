@@ -148,6 +148,25 @@ medusaIntegrationTestRunner({
         ).toBe(401);
       });
 
+      it('rejects a pull_ids batch over the 500 cap with INVALID_DATA', async () => {
+        const token = await registerCustomer('del-cap@test.dev');
+        // 501 well-formed string ids + a non-empty address: the shape check
+        // passes, so the failure must come from the length cap (which fires
+        // before the workflow — no real pulls needed).
+        const over = await reqApi(
+          'post',
+          '/store/delivery-orders',
+          authed(token),
+          {
+            pull_ids: Array.from({ length: 501 }, (_, i) => `pull_${i}`),
+            address_id: 'addr_dummy',
+          },
+        );
+        expect(over.status).toBe(400);
+        // Assert it's the CAP, not an unrelated 400.
+        expect(JSON.stringify(over.data)).toMatch(/500/);
+      });
+
       it('request → delivering, lists order; foreign + non-vaulted rejected; admin ships + delivers', async () => {
         const tokenA = await registerCustomer('del-a@test.dev');
         const tokenB = await registerCustomer('del-b@test.dev');

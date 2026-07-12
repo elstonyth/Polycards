@@ -37,7 +37,81 @@ type Logger = { info: (m: string) => void; warn: (m: string) => void };
 const loggerOf = (container: MedusaContainer): Logger =>
   container.resolve(ContainerRegistrationKeys.LOGGER);
 
+// True for an IPv4 dotted-quad in a loopback / private / link-local range. Node's
+// WHATWG URL parser canonicalizes integer/hex/octal IPv4 forms (0x7f000001,
+// 2130706433, 0177.0.0.1) to dotted-quad in `hostname`, so checking the parsed
+// hostname catches those obfuscations too.
+const isPrivateIpv4 = (host: string): boolean => {
+  const parts = host.split('.').map(Number);
+  if (
+    parts.length !== 4 ||
+    parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)
+  ) {
+    return false;
+  }
+  const [a, b] = parts;
+  return (
+    a === 0 || // 0.0.0.0/8 ("this host")
+    a === 10 || // 10/8
+    a === 127 || // loopback
+    (a === 169 && b === 254) || // link-local + cloud metadata (169.254.169.254)
+    (a === 172 && b >= 16 && b <= 31) || // 172.16/12
+    (a === 192 && b === 168) // 192.168/16
+  );
+};
+
+// Block hosts that a fetch should never reach: loopback, RFC-1918, link-local,
+// and the cloud metadata endpoint. IPv6 handled by prefix (::1 loopback, fc/fd
+// ULA, fe80 link-local); brackets stripped first.
+const isPrivateHost = (hostname: string): boolean => {
+  const host = hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (host === 'localhost' || host.endsWith('.localhost')) return true;
+  if (host.includes(':')) {
+    return (
+      host === '::1' ||
+      host === '::' ||
+      // IPv4-mapped IPv6 (::ffff:a.b.c.d) — a classic SSRF-filter bypass. Node
+      // renders the embedded v4 as hex (::ffff:7f00:1), so block the whole
+      // prefix; a legit card/frame image never uses a mapped-v6 literal.
+      host.startsWith('::ffff:') ||
+      host.startsWith('fc') ||
+      host.startsWith('fd') ||
+      host.startsWith('fe80')
+    );
+  }
+  return isPrivateIpv4(host);
+};
+
+// SSRF guard for the URLs this module fetches server-side (admin-supplied
+// slab_frame_url + a card's image). Card/frame images are OUR stored copies
+// (CDN host or a storefront-relative path) or, at worst, an admin-pasted PUBLIC
+// image URL — never an internal address. So block only fetches to
+// internal/metadata hosts; every public host stays allowed. Fails OPEN for
+// public hosts by design: a strict CDN-host allowlist would break baking of
+// legit images (and collapses to "relative only" when S3_FILE_URL is unset in
+// dev/test) — worse than this admin-auth-gated, low-severity SSRF.
+// ponytail: literal-IP + hostname block only. A hostname (or IPv4-mapped IPv6
+// like ::ffff:127.0.0.1) that RESOLVES to a private IP is a documented residual
+// (DNS rebind) — add a resolve-then-check guard if this ever fetches
+// less-trusted input.
+export function isAllowedImageUrl(url: string): boolean {
+  // Storefront-relative path — not a network egress target. (Excludes
+  // protocol-relative //host, which new URL() rejects below anyway.)
+  if (url.startsWith('/') && !url.startsWith('//')) return true;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+  return !isPrivateHost(parsed.hostname);
+}
+
 const fetchBytes = async (url: string): Promise<Buffer | null> => {
+  // Fail closed (null → caller warns + falls back to the bundled default frame,
+  // or skips the card) rather than fetching an internal host.
+  if (!isAllowedImageUrl(url)) return null;
   let resp: Response;
   try {
     resp = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
