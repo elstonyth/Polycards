@@ -17,5 +17,10 @@ const STOREFRONT_URL = (
 
 export async function GET(req: MedusaRequest, res: MedusaResponse) {
   const { file } = req.params;
+  // Cache the redirect: the (file → storefront URL) mapping is stable, so a
+  // browser needn't re-round-trip the backend on every thumbnail render. Keep
+  // the 302 (not 301) — the storefront origin is env-dependent, and a 301
+  // would be cached past a config change.
+  res.setHeader('Cache-Control', 'public, max-age=86400');
   res.redirect(302, `${STOREFRONT_URL}/cdn/cards/${encodeURIComponent(file)}`);
 }
