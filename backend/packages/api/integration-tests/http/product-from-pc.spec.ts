@@ -225,6 +225,94 @@ medusaIntegrationTestRunner({
         expect(res.status).toBe(400);
         expect(res.data.message).toContain('pixel_pokemon_id');
       });
+
+      // The money fields are capped server-side (plans 004/015 lineage): FMV
+      // drives the listing price (FMV × FX), so a direct API client can't mint
+      // a listing at an arbitrary price. These caps fire BEFORE the pixel-null
+      // check, so no staged pixel is needed to reach them.
+      it('rejects market_value above the cap', async () => {
+        const res = await unwrapResponse(
+          api.post(
+            '/admin/products/from-pricecharting',
+            {
+              pc_product_id: '6910',
+              pc_grade: 'PSA 10',
+              name: 'Charizard',
+              image: 'https://example.com/charizard.png',
+              market_value: 200_000,
+              pixel_pokemon_id: 'pp_whatever',
+            },
+            adminHeaders(),
+          ),
+        );
+        expect(res.status).toBe(400);
+        expect(res.data.message).toContain("'market_value' must be at most");
+      });
+
+      it('rejects price above the cap', async () => {
+        const res = await unwrapResponse(
+          api.post(
+            '/admin/products/from-pricecharting',
+            {
+              pc_product_id: '6910',
+              pc_grade: 'PSA 10',
+              name: 'Charizard',
+              image: 'https://example.com/charizard.png',
+              market_value: 100,
+              price: 200_000,
+              pixel_pokemon_id: 'pp_whatever',
+            },
+            adminHeaders(),
+          ),
+        );
+        expect(res.status).toBe(400);
+        expect(res.data.message).toContain("'price' must be at most");
+      });
+
+      it('rejects stock above the cap', async () => {
+        const res = await unwrapResponse(
+          api.post(
+            '/admin/products/from-pricecharting',
+            {
+              pc_product_id: '6910',
+              pc_grade: 'PSA 10',
+              name: 'Charizard',
+              image: 'https://example.com/charizard.png',
+              market_value: 100,
+              stock: 10_001,
+              pixel_pokemon_id: 'pp_whatever',
+            },
+            adminHeaders(),
+          ),
+        );
+        expect(res.status).toBe(400);
+        expect(res.data.message).toContain("'stock' must be at most");
+      });
+
+      // A well-formed but nonexistent id passes the type/trim guard, then would
+      // degrade to name-derivation at card registration (a spriteless card).
+      // Resolving at add-time — when the entry is guaranteed to exist — rejects
+      // it up front instead.
+      it('rejects a well-formed but nonexistent pixel_pokemon_id', async () => {
+        const res = await unwrapResponse(
+          api.post(
+            '/admin/products/from-pricecharting',
+            {
+              pc_product_id: '6910',
+              pc_grade: 'PSA 10',
+              name: 'Charizard',
+              image: 'https://example.com/charizard.png',
+              market_value: 100,
+              pixel_pokemon_id: 'pp_does_not_exist',
+            },
+            adminHeaders(),
+          ),
+        );
+        expect(res.status).toBe(400);
+        expect(res.data.message).toContain(
+          'does not match a PixelPokemon library entry',
+        );
+      });
     });
   },
 });
