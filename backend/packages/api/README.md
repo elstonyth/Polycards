@@ -42,6 +42,54 @@ Visit the [Quickstart Guide](https://docs.medusajs.com/learn/installation) to se
 
 Visit the [Docs](https://docs.medusajs.com/learn/installation#get-started) to learn more about our system requirements.
 
+## Running the integration tests locally
+
+The money-path guarantees live in the HTTP integration suites
+(`integration-tests/http/*.spec.ts`). CI runs all of them on every backend
+change (`.github/workflows/ci.yml`, `integration-http` job); this section is
+the local equivalent.
+
+### Prerequisites
+
+- **Postgres + Redis** — the shared local containers `pokenic-postgres`
+  (Postgres 16) and `pokenic-redis` (Redis 7) must be running:
+  `docker start pokenic-postgres pokenic-redis`. First time on a machine,
+  create them per the root `README.md` ("Running the backend") — e.g.
+  `pwsh scripts/launch-stack.ps1`.
+- **Install + build workspace deps** — from `backend/`:
+  `corepack yarn install --immutable && corepack yarn build --filter="@acme/api^..."`.
+  Jest resolves workspace deps such as `@acme/odds-math` via their `dist/`
+  entrypoints, which don't exist on a fresh install.
+
+### Environment
+
+`jest.config.js` calls `loadEnv('test', …)`, which loads the tracked test env
+file in this directory. It already pins everything the Medusa test runner
+needs to the local containers — `DATABASE_URL` plus `DB_HOST` / `DB_PORT` /
+`DB_USERNAME` / `DB_PASSWORD` (used by `@medusajs/test-utils` `initDb`) — so
+no manual env setup is needed locally. `REDIS_URL` is optional and defaults
+to `redis://localhost:6379`. dotenv never overrides pre-set env, so CI runs
+the same suites against its service containers simply by exporting those
+names (see the `integration-http` job). The suites mint their own super-admin
+(`integration-tests/http/utils.ts`) — no seeded credentials required.
+
+### Commands
+
+From `backend/packages/api`:
+
+| Command                                              | What it runs                                                                                                                          |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `corepack yarn test:integration:smoke`                | Money-loop smoke (5 suites, ~5–7 min): economy report, credit top-up, pack-open charge, vault buyback, commission maturity              |
+| `corepack yarn test:integration:http economy.spec`    | Filtered subset — one or more jest path patterns, single non-sharded process                                                          |
+| `corepack yarn test:integration:http`                 | Full gate (all 66 suites) in 3 sequential shards                                                                                       |
+
+The full run is sharded because every suite boots a complete Medusa app and a
+single `--runInBand` process exhausts node's ~4 GB heap — see
+[`integration-tests/run-http-shards.mjs`](integration-tests/run-http-shards.mjs).
+
+The test runner creates and drops its own per-suite databases on the local
+Postgres, so your dev database is never touched.
+
 ## What is Medusa
 
 Medusa is a set of commerce modules and tools that allow you to build rich, reliable, and performant commerce applications without reinventing core commerce logic. The modules can be customized and used to build advanced ecommerce stores, marketplaces, or any product that needs foundational commerce primitives. All modules are open-source and freely available on npm.
