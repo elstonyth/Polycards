@@ -30,6 +30,7 @@ import {
 import { rm } from '../../../lib/format';
 import type { ReferralTreeNode } from '../../../lib/admin-rest';
 import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
+import { Pager } from '../../../components/Pager';
 
 // ponytail: no config export — keeps route out of sidebar nav (mirrors packs/[slug]/page.tsx)
 
@@ -58,11 +59,29 @@ const Customer360Page = () => {
   const { id = '' } = useParams();
   const customerId = id || null;
 
+  // Offset pages for the two paged tables. Both endpoints serve 50/page.
+  const [commPage, setCommPage] = useState(0);
+  const [auditPage, setAuditPage] = useState(0);
+  // Reset both offsets when the viewed customer changes (the tree's "open
+  // subtree" button navigates to another /customers/:id without remounting) so
+  // a stale offset can't leak into the next customer's tables. Render-phase
+  // reset runs before the fetch — no wasted (newId, stalePage) request — and is
+  // a harmless no-op if the route does remount.
+  const [prevId, setPrevId] = useState(customerId);
+  if (customerId !== prevId) {
+    setPrevId(customerId);
+    setCommPage(0);
+    setAuditPage(0);
+  }
+
   const { data: view, isError: viewError } = useCustomerGacha(customerId);
   const { data: tree, isError: treeError } = useReferralTree(customerId);
   const { data: commissionsData, isError: commissionsError } =
-    useCustomerCommissions(customerId);
-  const { data: auditData, isError: auditError } = useCustomerAudit(customerId);
+    useCustomerCommissions(customerId, commPage);
+  const { data: auditData, isError: auditError } = useCustomerAudit(
+    customerId,
+    auditPage,
+  );
 
   const freeze = useFreezeCustomer();
   const unfreeze = useUnfreezeCustomer();
@@ -457,6 +476,7 @@ const Customer360Page = () => {
             <Text className="text-ui-fg-subtle">{t('customer360.commissionsEmpty')}</Text>
           </div>
         ) : (
+          <>
           <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Commissions table">
           <Table>
             <Table.Header>
@@ -531,6 +551,14 @@ const Customer360Page = () => {
             </Table.Body>
           </Table>
           </div>
+          <Pager
+            page={commPage}
+            onPage={setCommPage}
+            pageSize={50}
+            count={commissions.length}
+            total={null}
+          />
+          </>
         )}
       </Container>
 
@@ -595,6 +623,7 @@ const Customer360Page = () => {
             <Text className="text-ui-fg-subtle">{t('customer360.auditEmpty')}</Text>
           </div>
         ) : (
+          <>
           <Table>
             <Table.Header>
               <Table.Row>
@@ -620,6 +649,14 @@ const Customer360Page = () => {
               ))}
             </Table.Body>
           </Table>
+          <Pager
+            page={auditPage}
+            onPage={setAuditPage}
+            pageSize={50}
+            count={auditActions.length}
+            total={null}
+          />
+          </>
         )}
       </Container>
     </div>
