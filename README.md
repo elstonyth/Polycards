@@ -61,6 +61,9 @@ cd backend/packages/api && corepack yarn dev     # Medusa API on :9000 (health: 
 cd backend/apps/admin   && node ../../node_modules/vite/bin/vite.js   # Admin on :7000
 ```
 
+To run the backend integration tests locally (including the money-loop smoke
+subset), see [`backend/packages/api/README.md`](backend/packages/api/README.md#running-the-integration-tests-locally).
+
 ## Commands
 
 ```bash
