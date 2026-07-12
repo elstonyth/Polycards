@@ -123,6 +123,17 @@ jobs:
           key: yarn-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
           restore-keys: yarn-${{ runner.os }}-
 
+      # turbo writes its local cache to backend/.turbo; without restoring it every
+      # lint/check-types/build task reruns cold. github.sha key + os restore-key
+      # means each run seeds from the newest prior cache and saves its own.
+      - name: Cache turbo
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: backend/.turbo
+          key: turbo-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ runner.os }}-
+
       - name: Install backend dependencies
         working-directory: backend
         run: corepack yarn install --immutable
@@ -138,6 +149,54 @@ jobs:
       - name: Build (medusa + admin/vendor vite)
         working-directory: backend
         run: corepack yarn build
+
+  # Backend unit gate. The jest unit suites (TEST_TYPE=unit) and the turbo `test`
+  # task (admin vitest + odds-math/pokemon jest) were defined but run by no
+  # workflow — including the money specs. No DB: the unit tier and the package
+  # vitest/jest suites need none.
+  backend-unit:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 22
+
+      - name: Cache yarn (berry global cache)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.yarn/berry/cache
+          key: yarn-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
+          restore-keys: yarn-${{ runner.os }}-
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: corepack yarn install --immutable
+
+      # jest resolves @acme/odds-math via its dist/ entrypoint (built here); the
+      # api source itself is SWC-transformed, so only its workspace deps build.
+      - name: Build workspace deps
+        working-directory: backend
+        run: corepack yarn build --filter="@acme/api^..."
+
+      - name: Unit tests (jest)
+        working-directory: backend/packages/api
+        run: corepack yarn test:unit
+
+      - name: Package unit tests (admin vitest + odds-math/pokemon jest)
+        working-directory: backend
+        run: corepack yarn turbo run test
 
   # Backend HTTP integration gate. Not previously in CI — which is how the FX
   # `reason`-requirement change silently broke these suites. Uses service
@@ -235,6 +294,90 @@ jobs:
         with:
           name: http-integration-log-shard-${{ matrix.shard }}
           path: backend/packages/api/http-tests.log
+          retention-days: 7
+
+  # Backend module integration gate. Not previously in CI. These use
+  # moduleIntegrationTestRunner (real DB, no full medusa app boot), so they're
+  # lighter than the HTTP suites and run as one unsharded job.
+  integration-modules:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: medusa-test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/medusa-test
+      REDIS_URL: redis://localhost:6379
+      NODE_ENV: test
+      # See integration-http: dotenv never overrides pre-set env, so these pin
+      # the module test runner (initDb) to the CI postgres service.
+      DB_HOST: localhost
+      DB_PORT: '5432'
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 22
+
+      - name: Cache yarn (berry global cache)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.yarn/berry/cache
+          key: yarn-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
+          restore-keys: yarn-${{ runner.os }}-
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: corepack yarn install --immutable
+
+      - name: Build workspace deps
+        working-directory: backend
+        run: corepack yarn build --filter="@acme/api^..."
+
+      - name: Module integration tests
+        working-directory: backend/packages/api
+        run: |
+          set -o pipefail
+          corepack yarn test:integration:modules 2>&1 | tee modules-tests.log
+
+      - name: Upload test log on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: modules-integration-log
+          path: backend/packages/api/modules-tests.log
           retention-days: 7
 
   # Secret scan — forward-looking insurance for a payments-adjacent codebase.
