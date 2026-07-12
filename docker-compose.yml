@@ -4,8 +4,8 @@ services:
       context: .
       dockerfile: Dockerfile
       target: runner
-    image: ai-website-cloner:latest
-    container_name: ai-website-cloner
+    image: pixelslot-storefront:latest
+    container_name: pixelslot-storefront
     restart: unless-stopped
     ports:
       - '${PORT:-3000}:3000'
@@ -36,8 +36,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.dev
-    image: ai-website-cloner:dev
-    container_name: ai-website-cloner-dev
+    image: pixelslot-storefront:dev
+    container_name: pixelslot-storefront-dev
     restart: unless-stopped
     ports:
       - '${DEV_PORT:-3001}:3000'

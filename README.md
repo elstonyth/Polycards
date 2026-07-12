@@ -49,6 +49,12 @@ npm run dev          # http://localhost:3000
 
 ## Running the backend
 
+First time on a machine: create the shared dev containers (Postgres 16 as
+user/db `medusa`, Redis 7) — `pwsh scripts/launch-stack.ps1` ensures
+`pokenic-postgres` + `pokenic-redis` exist and are running (it also boots the
+full stack). Thereafter they restart themselves (`--restart unless-stopped`);
+a plain `docker start pokenic-postgres pokenic-redis` also works.
+
 ```bash
 # Postgres + Redis stay up via Docker (--restart unless-stopped)
 cd backend/packages/api && corepack yarn dev     # Medusa API on :9000 (health: /health)
