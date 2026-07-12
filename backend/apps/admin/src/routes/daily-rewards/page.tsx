@@ -652,8 +652,10 @@ const BoxesTab = ({ dirtyRef }: { dirtyRef: MutableRefObject<boolean> }) => {
       if (!(amt > 0) || amt > maxCredit)
         return `RM amount must be between 0 and ${maxCredit}.`;
     }
-    if (r.kind === 'product' && !(Number(r.qtyInput) >= 1))
-      return 'Qty must be at least 1.';
+    // Backend restricts product qty to exactly 1 (daily-box.ts); match the
+    // input's max={1} so an out-of-range qty never reaches save.
+    if (r.kind === 'product' && Number(r.qtyInput) !== 1)
+      return 'Qty must be exactly 1.';
     return null;
   });
   const firstRowError = rowErrors.find((e) => e !== null) ?? null;

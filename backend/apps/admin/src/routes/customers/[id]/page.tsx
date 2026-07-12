@@ -134,7 +134,10 @@ const Customer360Page = () => {
   function applyAdjustCredits() {
     if (!customerId) return;
     const amount = Number(creditAmount.trim());
-    if (!Number.isFinite(amount)) {
+    // Reject NaN and a no-op zero adjustment (matches support/page.tsx). Both
+    // signs are intended (negative = debit, positive = credit); only exactly 0
+    // is meaningless.
+    if (!Number.isFinite(amount) || amount === 0) {
       toast.error(t('support.adjustInvalid'));
       return;
     }
@@ -183,7 +186,7 @@ const Customer360Page = () => {
 
   const confirmDisabled =
     modal === 'credits'
-      ? !creditAmount.trim() || !creditNote.trim()
+      ? !creditAmount.trim() || Number(creditAmount) === 0 || !creditNote.trim()
       : !reason.trim();
 
   return (
