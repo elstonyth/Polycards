@@ -438,6 +438,12 @@ export const useReverseCommission = () => {
         queryKey: qk.customerCommissionsKey(vars.customerId),
       });
       qc.invalidateQueries({ queryKey: qk.customerAuditKey(vars.customerId) });
+      // Reversal inserts a negative credit_transaction (clawback) and may
+      // auto-freeze on a negative balance — refresh the header balance + ledger.
+      qc.invalidateQueries({ queryKey: qk.customerGacha(vars.customerId) });
+      qc.invalidateQueries({
+        queryKey: qk.customerTransactionsKey(vars.customerId),
+      });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });
