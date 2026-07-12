@@ -46,7 +46,7 @@ export default function DailyClient({ initial }: { initial: DailyState }) {
   const [drawError, setDrawError] = useState<string | null>(null);
   const [drawResult, setDrawResult] = useState<DrawPrize | null>(null);
   const [withdrawing, setWithdrawing] = useState<string | null>(null);
-  const { applyBalance } = useTopUp();
+  const { refreshBalance } = useTopUp();
 
   const { redemptionEnabled, box, shipPrizes } = state;
 
@@ -76,7 +76,7 @@ export default function DailyClient({ initial }: { initial: DailyState }) {
     }
     if (res.prize) {
       if (res.prize.kind === 'credit' && res.prize.amountMyr != null) {
-        applyBalance(res.prize.amountMyr);
+        void refreshBalance(); // re-read the authoritative balance (prize is a delta, not the new balance)
       }
       setDrawResult(res.prize);
     } else {
