@@ -340,7 +340,7 @@ and several publicly reachable pages present fabricated data — including
 | Plan | Title                                                                 | Priority | Effort | Depends on | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | ---- | --------------------------------------------------------------------- | -------- | ------ | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 019  | Make CI type-check `backend/packages/api`                             | P1       | S      | —          | DONE (advisor-executed 2026-07-12; script pins `node node_modules/typescript/bin/tsc` because the api-local `.bin/tsc` shim mis-resolves under `yarn run` (3,585 phantom errors); direct binary + turbo `@acme/api:check-types` verified green)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| 020  | Onboarding truthfulness: `.env.example`, README DB step, compose name | P2       | S      | —          | PARTIAL — steps 2–4 done by advisor 2026-07-12 (README points at `scripts/launch-stack.ps1` as the real provisioner; compose renamed `pixelslot-storefront`; typecheck+compose-config green). Step 1 (`.env.example` Medusa vars) BLOCKED: the guard-secrets hook's dotenv regex also blocks Read/Edit of `.env.example` — operator must add the three keys by hand or exempt `*.example` in `.claude/hooks/guard-secrets.js`                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| 020  | Onboarding truthfulness: `.env.example`, README DB step, compose name | P2       | S      | —          | DONE — steps 2–4 done by advisor 2026-07-12; step 1 resolved by **plan 028** (2026-07-13): guard-secrets now exempts `*.env.example`/`*.env.template`, and `.env.example` carries the Medusa vars. Round-4 note: 020's README pointer at `scripts/launch-stack.ps1` turned out to be git-excluded (local-only) — corrected by 028's inline docker commands                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | 021  | Commission-maturity job: one transaction per beneficiary              | P2       | M      | —          | DONE (worktree `agent-ab85c6936518ad34d`, commit `9304b98d`; enumerator `@InjectManager` + private `@InjectTransactionManager` per-beneficiary flip, notify after commit best-effort; new `mature-commissions.spec.ts` 4/4 green + neighbor suites green, advisor-reviewed; merged into `feat/virtual-shop` 2026-07-12)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | 022  | Public profile route: SQL aggregates + 30s cache                      | P2       | M      | —          | DONE (worktree `agent-a312d2d53d7da0cd9`, commit `f4f5a40a`; `profileStatsForCustomer` SQL aggregate (capped CTE + DISTINCT ON odds, per-card rounding), paged recent feed, showcased-only collection query, 30s cache + `clearProfileCache()`; `public-profile.spec` 7/7 incl. parity pin, leaderboard 3/3, advisor-reviewed; merged into `feat/virtual-shop` 2026-07-12)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | 023  | Revive the disabled E2E money-loop specs                              | P2       | M      | —          | DONE (worktree `agent-abc7f29cc93900db6`, commits `fad1bb26`..HEAD; all six `test.fixme` specs re-authored against the /slots reel + vault select-mode UI — customer flagship, anonymous demo spin (`?demo=1`), bulk-sell ("Select"/"Sell N" bar), delivery-request ("Deliver N"), both odds-reflection headlines (published-odds invariant is now a before/after snapshot of the /slots panel) — each verified passing twice; helpers: logout → /me, topup sends the now-mandatory Idempotency-Key, dead PUBLISHED_ODDS constant removed; baseline repair outside the plan's file list: card-management FMV assertions re-selectored for the MYR admin money fields (RM entered, USD stored); full suite green (18 passed, 1 pre-existing rewards env-skip); NOTE: the shared dev DB had lost the 6 seeded packs incl. `pokemon-rookie`/`pokemon-elite` — restored via the idempotent `yarn seed`) |
@@ -490,3 +490,210 @@ stated) by the auditing agent and spot-confirmed by the advisor.
 - `backend/apps/vendor` (Mercur vendor app) — out of active use, skimmed only.
 - Localization/i18n depth, Windows-specific tooling paths, and the
   `.claude/` hook scripts themselves (read for evidence, not audited).
+
+---
+
+## Round 4 — deep full-repo audit (post-merge master + the #135–#142 delta), 2026-07-13
+
+Generated by the `improve` skill (deep tier) against commit `dbce0561`
+(branch `claude/deep-improvement-b6191c`, in sync with master). Method:
+eight parallel read-only audits — the PR #140 playthrough-withdrawal money
+delta, the rest of the backend delta (#135/#139 + merge coherence of all
+round-2/3 plan work), storefront sweep, tests+CI, performance, tech
+debt+deps, DX/docs, and direction — with every table-bound finding re-opened
+and confirmed by the advisor against the live code. Same caveat as rounds
+2–3: **static code-read, no runtime exercise.**
+
+Non-interactive run: per the skill default, plans were written for the top
+findings by leverage without waiting for a selection. Seven plans (the 3–5
+default was expanded because this operator has executed all 25 prior plans).
+
+**Headline.** The merged state of rounds 1–3 is coherent — no plan work was
+mangled in the merges, middlewares changes are purely additive, and the
+delta's supporting casts (address guard, delivery batch, admin pagination)
+audit clean. The two stories of round 4: **(1) the new playthrough
+withdrawal gate measures spend on the wrong basis** — commission/buyback-
+funded play banks playthrough, so a later real-money deposit can unlock
+without ever being played (display-only today; becomes a money hole the day
+the mandated cashout writer lands) — and **(2) CI enforcement theater**: the
+backend's ~90 unit/module specs (including both new wallet-gate specs) and
+the admin SPA suite are defined, green locally, and executed by nothing.
+Supporting cast: the README's onboarding path dead-ends at a git-excluded
+script, `backend/package.json` pins a lodash version that doesn't exist on
+the public registry, and the hottest authenticated read amplifies ~6× per
+call.
+
+### Round-4 plans
+
+| Plan | Title                                                                   | Priority | Effort | Depends on | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ---- | ----------------------------------------------------------------------- | -------- | ------ | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 026  | Playthrough gate: compute "used" on the external-funded (deposit) basis | P1       | M      | —          | DONE (APPROVE; branch `advisor/026-playthrough-external-basis`, commit `711d9cea`. `used_cents` now sums `−external_funded_cents` over pack_open rows (deposit-funded spend only); withdrawable.ts docs updated; existing fixtures made external-basis-honest; new discriminating case "promo-funded play does not unlock a later deposit" proves the fix; qa-withdraw-gate.mjs seeds now write the basis. Executor proved red→green via Step 2; reviewer re-ran: greps, backend typecheck, wallet-summary 4/4, smoke 20/20 (first smoke re-run had 5 failures — adjudicated as Postgres contention from concurrent module-tier runs; clean re-run green). Executor caveats on record: QA script syntax-checked not executed; the new case was only ever run green (its red proof is Step 2's mechanism). Reversal coherence independently verified at service.ts:819/822 + 926/929)                                                                                             |
+| 027  | CI: run backend unit + module suites, admin vitest; restore turbo cache | P1       | M      | —          | DONE (APPROVE after 1 approved amendment; branch `advisor/027-ci-test-tiers`, commits `92d8577e` + `487c7860`. New CI jobs `backend-unit` (no-DB: jest unit tier + turbo `test` = admin vitest + odds-math/pokemon jest) and `integration-modules` (58 suites, service containers), turbo cache restore in `backend-quality`. Amendment: `reward-draw.unit.spec.ts` was a mis-suffixed module-runner test that made the no-DB unit tier red — renamed to `reward-draw.spec.ts` (module tier owns it; zero coverage loss). Reviewer re-ran: YAML parse ok, post-rename unit tier 634/634 without DB, turbo test 5/5, executor baselines unit 93s / modules ~174s. NOTE: full CI proof still needs the first PR run — watch the two new jobs there)                                                                                                                                                                                                                                |
+| 028  | Onboarding truth round 2: hook exemption, .env.example, README scrub    | P2       | S–M    | —          | DONE (APPROVE; branch `advisor/028-onboarding-truth-2`, commit `86d96eef`, 8 in-scope files; reviewer re-ran all greps + typecheck + lint + `playwright test --list` green; guard-secrets exemption applied to both machine-local hook copies (uncommittable — replicate on other machines); accepted deviations: launch-stack mention dropped in favor of the checkable gate, `.env` block-probe substituted for nonexistent `.env.local`, `NEXT_PUBLIC_MEDIA_HOST` added per the plan's own cross-check. **Plan 020 step 1 now resolved → mark 020 fully DONE.** Operator follow-ups: rotate the seeded admin password on any persistent stack (literal remains in git history); stale `/claw` comment at `tests/e2e/slot-vault-room.spec.ts:7` noted, untouched)                                                                                                                                                                                                              |
+| 029  | from-PC route: cap money fields + resolve pixel id at add-time          | P2       | S      | —          | DONE (APPROVE; branch `advisor/029-from-pc-bounds`, commit `a7254229`. `capAtMost` helper caps market_value/price at `MAX_MARKET_VALUE_USD` and stock at 10,000; `resolvePixelPokemonPatch` at add-time maps NOT_FOUND→400. 4 new rejection cases; reviewer re-ran: greps, typecheck, product-from-pc 6/6, card-inherits-pc 2/2. Accepted judgment call: shared helper instead of three inline guards — same message shape as validate.ts)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| 030  | Dependency hygiene: phantom lodash pin + unused @base-ui/react          | P2       | S      | —          | DONE-partial (APPROVE, amended: **lodash half REJECTED — finding invalidated**, lodash 4.17.23/4.18.0/4.18.1 are real 2026 releases verified against registry.npmjs.org publish dates + lodash GitHub tags, pin/lock legitimate as-is; @base-ui half done: branch `advisor/030-dep-hygiene`, commit `a477a613`, reviewer re-ran `npm test` 200/200 + `npm run check` green; backend/ byte-identical to dbce0561)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| 031  | Cross-flow ledger-conservation spec in the money smoke subset           | P2       | S–M    | —          | TODO                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| 032  | /store/credits read diet + FX display cache + CDN redirect caching      | P3       | M      | —          | DONE (APPROVE; branch `advisor/032-credits-read-diet`, commits `c521b96e`+`cb71e1bb`+`312a2961`. Lean `GET /store/credits/balance` (auth-matched, 401-tested) now serves the header chip + vault page; 30s FX display cache with `clearFxDisplayCache()` seam, strict resolver provably uncached; CDN 302 carries `Cache-Control: public, max-age=86400`. Reviewer re-ran: pricing units 24/24, store-credits 5/5, typecheck, `npm test` + `npm run check` green. **Plan errata (executor caught, reviewer confirms):** the "0 matches" vault.ts grep criterion was wrong — `getTransactions` (vault.ts:227) legitimately needs the full route (transactions + totals), correct end state is 1 remaining match; and the cache exemplar lives in `store/profiles/[handle]/route.ts`, not service.ts. Documented tradeoff: a transient FX-read failure pins the fallback rate ≤30s (display only); executor also ran the FULL unit tier 640/640 to prove no cross-spec cache leak) |
+
+Ordering notes: all independent, but run **027 early** — once merged it
+auto-enforces 026's and 031's new specs in CI. **026 must land before any
+cashout writer is built** (see DIR-01). 028 completes plan 020's blocked
+step 1 (mark 020 fully DONE when 028 lands). 028 and 030 both edit
+`README.md` (different lines: onboarding/structure vs. the tech-stack
+`@base-ui` row) — merge in either order, re-check both greps after the
+second. 026 is the only round-4 plan touching `service.ts`; no cross-plan
+file conflicts otherwise. 031 is green before and after 026 by design.
+
+### Round-4 findings table (vetted)
+
+Ordered by leverage. Confidence is the advisor's after re-reading the code.
+
+| #   | Finding                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Category      | Impact                                           | Effort | Risk    | Confidence                     | Plan |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------- | ------------------------------------------------ | ------ | ------- | ------------------------------ | ---- |
+| 1   | Playthrough gate `used` = Σ raw `amount` over `pack_open` rows (`service.ts:2230`) instead of the deposit-funded `external_funded_cents` basis the rest of the money core uses (`creditSummary`, VIP). Promo/commission/buyback-funded play banks playthrough → a later deposit unlocks unplayed. Contradicts the gate's own header; cashout writer must route through it.                                                                                                                                                                                                                                                                                                                 | bug/security  | HIGH once cashout exists; MED now (display-only) | M      | MED     | HIGH mechanics / MED intent    | 026  |
+| 2   | CI never executes `test:unit` / `test:integration:modules` (jest routes by `TEST_TYPE`; ci.yml only runs the HTTP tier) — ~90 specs incl. every money unit/module spec and both new wallet-gate specs are green-but-unenforced. Admin SPA `vitest` also never runs (no turbo `test` task). Turbo cache never restored (cold rebuild every backend PR).                                                                                                                                                                                                                                                                                                                                     | tests/dx      | HIGH                                             | M      | MED     | HIGH                           | 027  |
+| 3   | Committed onboarding is broken on a fresh clone: README's provisioning step invokes `scripts/launch-stack.ps1` (git-excluded, `.git/info/exclude:46`); root `AGENTS.md`/`CLAUDE.md`/`docs/HANDOFF.md`/`docs/research/` referenced but gitignored; README flagship is the deleted `/claw`; `.env.example` still missing `NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY` (no code fallback → all /store 401). Root cause of the env-example blockage: `guard-secrets.js:30` regex blocks committed `.env.example`/`.env.template`. Plus: committed admin-password fallback in `tests/e2e/helpers/constants.ts:16` (env-required + rotation), Vite-boilerplate admin README, e2e README lists 3/9 specs. | dx/docs       | MED-HIGH                                         | S–M    | LOW     | HIGH                           | 028  |
+| 4   | `from-pricecharting` route: `market_value`/`price`/`stock` have no upper bound (sibling card path caps at `MAX_MARKET_VALUE_USD`); `pixel_pokemon_id` guard checks non-emptiness, not resolvability — a bogus id degrades at card-registration to the exact spriteless card PR #135 targeted.                                                                                                                                                                                                                                                                                                                                                                                              | security/bug  | MED (admin-only trigger)                         | S      | LOW     | HIGH / MED                     | 029  |
+| 5   | `backend/package.json:21` pins `lodash: ^4.18.1` — a version lodash never published; yarn.lock resolves 4.18.1 + 4.17.23 with no registry override. Reproducibility break + dependency-confusion surface. Also: `@base-ui/react` is a runtime dep with zero import sites; README still claims it as the UI foundation.                                                                                                                                                                                                                                                                                                                                                                     | deps/security | MED                                              | S      | LOW-MED | HIGH facts / MED non-existence | 030  |
+| 6   | PR #138's sim deletion removed the only cross-flow money-conservation check (`ledger.mjs`); nothing now asserts `Σ(ledger) == balance` across a live topup→open→buyback flow. One integration spec in the plan-025 smoke subset restores the invariant — the safety net the future cashout writer needs.                                                                                                                                                                                                                                                                                                                                                                                   | tests         | MED (HIGH once cashout lands)                    | S–M    | LOW     | HIGH                           | 031  |
+| 7   | `/store/credits` amplifies a one-number balance read into ~6 DB round-trips (two near-identical full-ledger scans + a discarded 50-row fetch), re-triggered after every money action by the header chip; `resolveFxRateInfo` hits the DB per call on ~14 uncached display routes; `/cdn/cards/[file]` 302 has no `Cache-Control`. Indexes all verified present.                                                                                                                                                                                                                                                                                                                            | perf          | MED                                              | M      | LOW-MED | HIGH                           | 032  |
+
+### Round-4 findings vetted but NOT planned (ask for a plan if wanted)
+
+- **`WalletSchema` hard-requires the two new wallet fields**
+  (`schemas.ts:248-253`): an older-backend response would fail the whole
+  wallet page instead of degrading (the module's own `OddsEntrySchema`
+  documents the graceful convention). Cannot fire in the current
+  lockstep deployment — do opportunistically when next touching schemas,
+  together with adding `WalletSchema` to `schemas.test.ts` (it's the one
+  schema the contract test doesn't exercise). S.
+- **Per-PR E2E smoke** — the money-loop E2E gates nightly only
+  (`e2e.yml`: schedule + dispatch, a documented ~15-25-min-boot tradeoff).
+  A 1-spec per-PR smoke job is possible but flake-prone; maintainer call.
+- **Real-timer sleeps** (`pack-open-rate-limit.spec.ts:140` sleeps 15.5s in
+  CI; `password-reset.spec.ts` fixed waits) — round-3 backlog, still open.
+  S–M (make the rate-limit window env-configurable in test mode).
+- **E2E seed-presence guard** — 8 specs hardcode `pokemon-rookie`/
+  `pokemon-elite`; CI reseeds fresh, but local runs fail opaquely if the
+  shared dev DB drifts (it happened once). S nicety: fail-fast preflight
+  in `tests/e2e/helpers/`.
+- **Admin SPA `src/lib` churn helpers still untested** (`admin-rest.ts`,
+  `queries.ts`, `image-validation.ts`) — round-3 backlog; `format`/
+  `odds-rows`/`query-keys` gained specs, these didn't. Worth more once 027
+  makes admin tests run in CI. S.
+- **`walletSummary`/`creditSummary` overlapping-scan merge + serial-await
+  parallelization** — deferred inside plan 032 (needs MikroORM
+  shared-manager concurrency verification first; the lean endpoint removes
+  the hot-path pressure).
+- **e2e.yml's own ephemeral admin-password literal** (lines ~82-84) — kept
+  as the documented CI-only tradeoff (DB dies with the job); wiring a
+  `PW_ADMIN_PASSWORD` repo secret would make the literal path dead.
+  Operator action.
+- **Operator reminders**: rotate the PriceCharting API token
+  (`docs/superpowers/PRICECHARTING-DEPLOY-NOTES.md` self-documents it as
+  compromised); rotate the seeded admin password on any persistent stack
+  once plan 028 removes the committed fallback.
+
+### Round-4 verified clean / considered and rejected
+
+Recorded so nobody re-audits. Spot-confirmed by the advisor where table-bound.
+
+- **Lodash "phantom versions" — REFUTED during execution (2026-07-13).** The
+  round-4 table's finding 5 (lodash half) claimed 4.18.1/4.17.23 don't exist
+  on public npm. Execution-time network verification proved otherwise:
+  registry.npmjs.org reports genuine publish dates (4.17.23 → 2026-01-21,
+  4.18.0 → 2026-03-31, 4.18.1 → 2026-04-01) and the lodash GitHub repo
+  carries matching release tags. The audit premise was stale
+  training-data knowledge (it was honestly hedged as "MED on non-existence,
+  not network-verified"). The `^4.18.1` pin and lockfile are legitimate —
+  do not re-file, do not "fix" the pin.
+- **Playthrough gate mechanics** (aside from the basis finding):
+  `withdrawable ≤ available ≤ balance` holds in all branches; SQL cent math
+  matches the `creditSummary` pattern; `/store/credits` is bearer-auth,
+  actor-scoped; reason enum consistent across model/service/storefront/DB
+  CHECK; reversal mirror rows restore the external basis
+  (`external_funded_cents: -originalExt`). The `deposited` filter's
+  no-negative-topup asymmetry is latent-only (no topup-reversal path
+  exists) — documented in plan 026's maintenance notes.
+- **Insufficient-credit copy (#136)**: integer-cent-correct; the live
+  charge site (`settleOpen`) reports locked-aware `available`. Clean.
+- **Address guard (#139)**: all bypass classes traced (empty/whitespace/
+  null/missing/non-string; update-mode blanking rejected); unit spec locks
+  them. Zero-width-char postal code is a data-quality edge, not a bypass.
+- **Delivery-orders route**: batch cap before per-element scan; duplicate
+  pull_ids handled downstream; ownership/status/frozen gates precede writes.
+- **middlewares.ts delta**: purely additive since #127 (the plan-010
+  metadata guard); no matcher loosened; from-PC route consistent with
+  sibling CRUD routes in carrying no rate limit (only money-mutation routes
+  do).
+- **Merge coherence of plans 009–025 in master**: every caller resolves to
+  live symbols (pulls pagination, profile aggregates + cache seam,
+  per-beneficiary `matureDueCommissions`, bake-slab SSRF denylist). No
+  half-applied merges.
+- **Storefront honesty-cleanup regressions**: none — no dead imports,
+  no dangling links (`/clawmaker` fully gone), no missed fabricated claims;
+  demo surfaces all disclosed; wallet page loading/error/staleness paths
+  clean (`router.refresh()` after top-up).
+- **Perf negatives**: no hot-path N+1 (delivery/vault/leaderboard batched);
+  service.ts per-row loops are cold-path bounded; admin TanStack has no
+  refetch storm (Mercur's 90s default staleTime); storefront bundle lean,
+  `next/image` consistent; the abandoned `perf/p1-frames-listcache`
+  worktree was right to be abandoned (single-row read).
+- **CI workflow hygiene**: SHA-pinned actions, least-privilege permissions,
+  no `continue-on-error`, gitleaks full-history scan, correct path filters.
+- **Sim removal (#138)**: clean — zero dangling references in tracked files
+  (`seed-sim-daily-box.ts` was deleted too); only the historical `plans/`
+  record still names sim files, which is expected.
+- **Dead code**: none found beyond `@base-ui/react` (plan 030);
+  `npm audit --omit=dev` at root: 0 critical/high (2 known moderates that
+  clear on the next Next bump).
+- **`service.ts` growth** (4,237 → 4,424 lines): proportional feature work,
+  not new architectural decay; the god-object refactor stays a deliberately
+  scheduled deferred item from round 3.
+- **QA script `qa-withdraw-gate.mjs`**: logic correct, guarded to
+  `wdtest-*` customers on local docker only. (Plan 026 may touch its seeds
+  for the basis change.)
+
+### Round-4 Direction (updates to round-3's options + one new)
+
+1. **DIR-01 — Close the cash-out loop (round-3 option 2, now concrete and
+   urgent-adjacent).** PR #140 shipped the read-model 20%: gate, `cashout`
+   ledger reason (written by nothing), `walletSummary.withdrawable`, and a
+   user-facing "eligible for withdrawal" number on the wallet page — with
+   no payout action anywhere. The spike now has a concrete contract: a
+   cashout writer that recomputes the gate **under the per-customer
+   `credit:` lock**, caps at `available`, writes the `cashout` row, plus an
+   admin approval surface and the PSP/KYC/AMLA long pole. Cheapest interim
+   move if the spike slips: soften the wallet-page copy so "eligible for
+   withdrawal" doesn't promise an imminent payout. L, HIGH risk. **Do plan
+   026 first regardless** — shipping cashout on the current basis ships the
+   hole.
+2. **DIR-03 — Disclose the 100%-playthrough requirement at deposit time.**
+   Enforced backend-side, surfaced only post-hoc on the wallet page; the
+   top-up flow says nothing. A material term for a money product and a
+   prerequisite disclosure for DIR-01's compliance story. S (copy + the
+   `playthrough` fields already returned); product/jurisdiction call, so
+   left as direction.
+3. **Round-3 option statuses**: P2P trading (opt 1) — grounding corrected:
+   `PRODUCT.md` never existed (round-3 cite was phantom); the marketplace
+   promises are now feature-flag-gated off by plan 024, so P2P is a clean
+   deferred bet sequenced after cash-out. Rewards launch (opt 3) —
+   unchanged. Sim-as-nightly-gate (opt 4) — **dead**: the maintainer
+   deleted the harness (#138); the salvageable 20% became plan 031. Mock-
+   route triage (opt 5) — urgency resolved by plan 024's disclosures;
+   drop from the roadmap or fold into the trading track.
+
+### Round-4 coverage — what was NOT audited
+
+- **No runtime exercise** — every verdict is a static code-read (same
+  caveat as rounds 2–3); plan verification commands are the executors'
+  runtime proof.
+- `backend/packages/api/.env.template` content — unverifiable until plan
+  028's hook exemption lands (guard-secrets blocked all agents, correctly
+  per its current regex).
+- `backend/apps/vendor` — dormant, skimmed only (its lack of a `test`
+  script is asserted in plan 027's STOP conditions, not deeply audited).
+- Admin SPA behavior — static only, no browser walk.
+- Vendored/framework internals — read only where a finding required it.
+- i18n depth, Windows-specific tooling paths, `.claude/` hook scripts
+  beyond `guard-secrets.js` (read as evidence for finding 3).
