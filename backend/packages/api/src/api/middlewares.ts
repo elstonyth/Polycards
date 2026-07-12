@@ -148,6 +148,18 @@ export default defineMiddlewares({
       middlewares: [createResetTokenSingleUseGuard()],
     },
     {
+      // POST /store/customers (register-completion / create) forwards the whole
+      // validated body — including client-supplied `metadata` — into the create
+      // workflow, so a public registrant could self-equip a frame, inject an
+      // avatar_url, or squat a handle at account creation. Same reserved-key
+      // guard as /me. Matcher is an anchored exact match (path-to-regexp; only
+      // a trailing /* matches deeper segments), so it does NOT shadow
+      // /store/customers/me or /store/customers/me/addresses.
+      matcher: '/store/customers',
+      method: 'POST',
+      middlewares: [rejectCustomerMetadata],
+    },
+    {
       // /store/customers/me is framework-authenticated; this guard rejects
       // client-supplied `metadata` (reserved for server-validated keys — see
       // utils/customer-metadata-guard.ts).

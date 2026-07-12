@@ -784,6 +784,9 @@ export default function SlotMachineClient({
               {needsTopUp && (
                 <>
                   {' '}
+                  {balance !== null && cost * reels - balance > 0 && (
+                    <>You&apos;re {rm(cost * reels - balance)} short. </>
+                  )}
                   <Link
                     href="/vault"
                     className="font-bold text-buyback-fg underline underline-offset-2 hover:text-buyback-fg"

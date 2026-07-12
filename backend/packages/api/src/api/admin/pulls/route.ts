@@ -113,11 +113,13 @@ export async function GET(
     : [];
   const emailById = new Map(customers.map((c) => [c.id, c.email]));
 
+  // Pull.pack_id is the pack SLUG (= Pack.slug), not the pack id — filter and
+  // key the lookup by slug, like the sibling customer-pulls / recent-pulls routes.
   const packIds = [...new Set(ledger.map((p) => p.pack_id))];
   const packRows = packIds.length
-    ? await packs.listPacks({ id: packIds }, { take: packIds.length })
+    ? await packs.listPacks({ slug: packIds }, { take: packIds.length })
     : [];
-  const packTitleById = new Map(packRows.map((pk: any) => [pk.id, pk.title]));
+  const packTitleBySlug = new Map(packRows.map((pk: any) => [pk.slug, pk.title]));
 
   const pulls = ledger.map((p) => {
     const card = cardByHandle.get(p.card_id);
@@ -127,7 +129,7 @@ export async function GET(
       customer_id: p.customer_id,
       customer_email: p.customer_id ? emailById.get(p.customer_id) ?? null : null,
       pack_id: p.pack_id,
-      pack_title: packTitleById.get(p.pack_id) ?? null,
+      pack_title: packTitleBySlug.get(p.pack_id) ?? null,
       // Vault lifecycle: vaulted (customer still holds it) vs bought_back
       // (instant sell-back — amount = the MYR (RM) actually credited).
       status: p.status,

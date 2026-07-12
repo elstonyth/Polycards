@@ -75,3 +75,38 @@ describe('coerceUpdateCardBody — pixel_pokemon_id', () => {
     ).toBeNull();
   });
 });
+
+// market_multiplier scales the customer-facing price. The client caps display
+// margin at 1000% (⇒ stored multiplier 1 + 1000/100 = 11), so the backend
+// ceiling is 11: 11 is accepted, anything above is rejected. This keeps the edit
+// path's UI guard from being bypassed by a direct API call.
+describe('coerceUpdateCardBody — market_multiplier bounds', () => {
+  const base = {
+    name: 'Charizard',
+    set: 'Base',
+    grader: 'PSA',
+    grade: '10',
+    market_value: 100,
+    image: '/x.png',
+    for_sale: true,
+  };
+
+  it('accepts the ceiling multiplier (11)', () => {
+    expect(
+      coerceUpdateCardBody({ ...base, market_multiplier: 11 }, 'charizard')
+        .market_multiplier,
+    ).toBe(11);
+  });
+
+  it('rejects an over-ceiling multiplier with a clear message', () => {
+    expect(() =>
+      coerceUpdateCardBody({ ...base, market_multiplier: 12 }, 'charizard'),
+    ).toThrow(/'market_multiplier' must be greater than 0 and at most 11/);
+  });
+
+  it('rejects a non-positive multiplier', () => {
+    expect(() =>
+      coerceUpdateCardBody({ ...base, market_multiplier: 0 }, 'charizard'),
+    ).toThrow(/'market_multiplier' must be greater than 0/);
+  });
+});

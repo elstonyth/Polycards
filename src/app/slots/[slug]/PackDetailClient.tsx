@@ -393,6 +393,9 @@ export default function PackDetailClient({
                   {needsTopUp && (
                     <>
                       {' '}
+                      {balance !== null && priceNum * qty - balance > 0 && (
+                        <>You&apos;re {rm(priceNum * qty - balance)} short. </>
+                      )}
                       <button
                         type="button"
                         onClick={openTopUp}

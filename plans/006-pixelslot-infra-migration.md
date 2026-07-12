@@ -1,8 +1,9 @@
 # 006 — PixelSlot infra migration (PLAN ONLY, NOT EXECUTED)
 
 Status: **draft, nothing here has been run.** Every stage needs explicit sign-off.
-The cosmetic rebrand is done and lives on branch `rebrand/pixelslot`. This file
-covers only the parts that touch live infrastructure.
+The cosmetic rebrand is done and is **merged to `master`** (#122–#124); `master` is
+level with `origin/master`. This file covers only the parts that touch live
+infrastructure.
 
 > **No credentials in this file.** `doctl databases list` / the DO MCP
 > `db-cluster-list` return **plaintext** passwords for `doadmin`, `pokenicapp`,
@@ -114,7 +115,7 @@ at `src/app/slots/[slug]/PackDetailClient.tsx:157`. `SlabCard.tsx:5` documents a
 Pokenic monogram on the card back.
 
 No find-and-replace reaches these. They need re-rendering. `scripts/rebrand-pixelslot-logo.mjs`
-(on `rebrand/pixelslot`) handles the logo/icon set only, not the claw frames.
+(now on `master`) handles the logo/icon set only, not the claw frames.
 
 ## Explicitly out of scope
 

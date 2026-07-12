@@ -13,7 +13,7 @@ const PASSWORD = 'metadata-guard-test-password-1';
 medusaIntegrationTestRunner({
   inApp: true,
   testSuite: ({ api, getContainer }) => {
-    describe('POST /store/customers/me metadata guard', () => {
+    describe('customer metadata guard', () => {
       let storeHeaders: Record<string, string>;
 
       beforeEach(async () => {
@@ -66,6 +66,42 @@ medusaIntegrationTestRunner({
           api.post('/store/customers/me', { first_name: 'Ash' }, { headers }),
         );
         expect(ok.data.customer.first_name).toBe('Ash');
+        expect(ok.data.customer.metadata ?? {}).not.toHaveProperty(
+          'equipped_frame_level',
+        );
+      });
+
+      it('rejects create with metadata, allows create without', async () => {
+        // Register only (do NOT complete /store/customers yet) so the same
+        // auth identity is still uncustomered for both create attempts below.
+        const email = 'metadata-guard-create@test.dev';
+        const reg = await api.post('/auth/customer/emailpass/register', {
+          email,
+          password: PASSWORD,
+        });
+        const headers = {
+          ...storeHeaders,
+          authorization: `Bearer ${reg.data.token}`,
+        };
+
+        // Create WITH reserved metadata → rejected before the create workflow,
+        // so no customer record is written and the identity stays uncustomered.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const rejected = await api
+          .post(
+            '/store/customers',
+            { email, metadata: { equipped_frame_level: 100 } },
+            { headers },
+          )
+          .catch((e: any) => e.response);
+        expect(rejected.status).toBe(400);
+
+        // Same identity, no metadata → the legitimate register-completion flow
+        // still succeeds (the guard doesn't break account creation).
+        const ok = await unwrapResponse(
+          api.post('/store/customers', { email }, { headers }),
+        );
+        expect(ok.data.customer.email).toBe(email);
         expect(ok.data.customer.metadata ?? {}).not.toHaveProperty(
           'equipped_frame_level',
         );

@@ -182,6 +182,12 @@ export const useReferralTree = (
     enabled: !!id,
   });
 
+// keepPreviousData, but scoped to the SAME customer (queryKey[2] is the id —
+// see qk.customerCommissions/customerAudit): page flips keep the previous
+// page's rows (no skeleton flash), while navigating to another /customers/:id
+// blanks the tables. Unscoped keepPreviousData left the PRIOR customer's
+// commission rows visible and clickable during the switch — reversing one
+// submitted the stale commId while invalidating the new customer's caches.
 export const useCustomerCommissions = (
   id: string | null,
   page = 0,
@@ -190,7 +196,8 @@ export const useCustomerCommissions = (
     queryKey: qk.customerCommissions(id ?? '', page),
     queryFn: () => getCustomerCommissions(id!, page),
     enabled: !!id,
-    placeholderData: keepPreviousData,
+    placeholderData: (prev, prevQuery) =>
+      prevQuery?.queryKey[2] === (id ?? '') ? prev : undefined,
   });
 
 export const useCustomerAudit = (
@@ -201,7 +208,8 @@ export const useCustomerAudit = (
     queryKey: qk.customerAudit(id ?? '', page),
     queryFn: () => getCustomerAudit(id!, page),
     enabled: !!id,
-    placeholderData: keepPreviousData,
+    placeholderData: (prev, prevQuery) =>
+      prevQuery?.queryKey[2] === (id ?? '') ? prev : undefined,
   });
 
 export const useCustomerTransactions = (
@@ -438,6 +446,12 @@ export const useReverseCommission = () => {
         queryKey: qk.customerCommissionsKey(vars.customerId),
       });
       qc.invalidateQueries({ queryKey: qk.customerAuditKey(vars.customerId) });
+      // Reversal inserts a negative credit_transaction (clawback) and may
+      // auto-freeze on a negative balance — refresh the header balance + ledger.
+      qc.invalidateQueries({ queryKey: qk.customerGacha(vars.customerId) });
+      qc.invalidateQueries({
+        queryKey: qk.customerTransactionsKey(vars.customerId),
+      });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });
