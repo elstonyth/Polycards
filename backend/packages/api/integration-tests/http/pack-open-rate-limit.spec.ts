@@ -5,13 +5,19 @@ import { connectTestRedisOrFail, unwrapResponse } from "./utils";
 
 jest.setTimeout(240 * 1000);
 
-// Limits sized for this harness: requests through the test runner take ~2-3s
-// each, so the burst window must comfortably hold 3 sequential requests, and
-// the sustained window must hold the whole lifecycle test (~40s).
+// Limits sized for this harness. In-app opens are fast (~15ms warm), so a
+// short burst window still comfortably holds the 3 sequential opens the burst
+// test fires — and keeping it short means the "let the burst window drain"
+// wait below is ~1.5s instead of the 15s+ it used to cost every CI run. The
+// sustained window stays long (120s) so all opens across the whole lifecycle
+// test remain inside it. BURST_WINDOW_MS is the single source of truth: the
+// env value, the drain sleep, and the retry-after bound all derive from it so
+// they can't drift.
 // The middleware reads these at boot (see src/api/utils/rate-limit.ts).
+const BURST_WINDOW_MS = 1000;
 const RATE_ENV = {
   PACK_OPEN_RATE_BURST_LIMIT: "3",
-  PACK_OPEN_RATE_BURST_WINDOW_MS: "15000",
+  PACK_OPEN_RATE_BURST_WINDOW_MS: String(BURST_WINDOW_MS),
   PACK_OPEN_RATE_LIMIT: "5",
   PACK_OPEN_RATE_WINDOW_MS: "120000",
 };
@@ -125,19 +131,23 @@ medusaIntegrationTestRunner({
         const retryAfter = Number(limited.headers["retry-after"]);
         expect(Number.isFinite(retryAfter)).toBe(true);
         expect(retryAfter).toBeGreaterThanOrEqual(1);
-        // Tight bound: the wait is until the FIRST open ages out of the 15s
-        // burst window, i.e. at most 15s minus the time already elapsed
+        // Tight bound: the wait is until the FIRST open ages out of the burst
+        // window, i.e. at most the window minus the time already elapsed
         // (±1s for ceil + clock granularity). A constant full-window bug
         // (e.g. the Lua wait=win fallback) fails this.
+        const burstWindowSec = BURST_WINDOW_MS / 1000;
         const elapsedSec = (deniedAt - firstOpenAt) / 1000;
-        expect(retryAfter).toBeLessThanOrEqual(Math.ceil(15 - elapsedSec) + 1);
+        expect(retryAfter).toBeLessThanOrEqual(
+          Math.ceil(burstWindowSec - elapsedSec) + 1,
+        );
 
         // The REAL Redis store must have served this (not the in-memory
         // failover): exactly 3 events recorded, the denial added nothing.
         expect(await redis.zcard(limiterKey)).toBe(3);
 
-        // Let the burst window empty (events age out 15s after they landed).
-        await sleep(15_500);
+        // Let the burst window empty (events age out BURST_WINDOW_MS after they
+        // landed); the sustained window (120s) still holds all 3 opens.
+        await sleep(BURST_WINDOW_MS + 500);
 
         // 3 opens consumed so far. The denied attempt must NOT have counted
         // (all-or-nothing), so exactly two more fit under the sustained
@@ -151,7 +161,9 @@ medusaIntegrationTestRunner({
         const sustained = await openPack(token);
         expect(sustained.status).toBe(429);
         const sustainedRetry = Number(sustained.headers["retry-after"]);
-        expect(sustainedRetry).toBeGreaterThan(15 - 5); // beyond burst scale
+        // Beyond the burst window: a burst-rule retry can never exceed it, so
+        // this denial can only be the sustained rule (bounded by its 120s window).
+        expect(sustainedRetry).toBeGreaterThan(burstWindowSec);
         expect(sustainedRetry).toBeLessThanOrEqual(120);
       });
 
