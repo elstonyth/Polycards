@@ -26,6 +26,7 @@ import {
   updateStoresWorkflow,
 } from '@medusajs/medusa/core-flows';
 import { MercurModules, SellerStatus } from '@mercurjs/types';
+import { rebakeAllGradedCards } from '../api/admin/media/bake-slab';
 import PacksModuleService from '../modules/packs/service';
 import { PACKS_MODULE } from '../modules/packs';
 import type { HouseSellerService } from '../modules/packs/card-product';
@@ -1075,6 +1076,27 @@ export default async function seedDemoData({ container }: ExecArgs) {
   } else {
     await packsModuleService.createCards(gachaCardsToCreate);
     logger.info(`Seeded ${gachaCardsToCreate.length} gacha card(s).`);
+    // createCards bypasses the create-card workflow step, so seeded graded
+    // cards have no baked slab composite (they'd render as bare photos).
+    // Bake them now, best-effort — card images are storefront-relative
+    // (/cdn/cards/...), so this only succeeds while the storefront
+    // (STOREFRONT_URL, default http://localhost:4000) is serving. A bake
+    // failure must never fail the seed.
+    try {
+      const { ok, failed } = await rebakeAllGradedCards(container);
+      logger.info(`Baked slab composites: ${ok} ok, ${failed} failed.`);
+      if (failed > 0) {
+        logger.warn(
+          'Some slab bakes failed (storefront probably not serving card images). ' +
+            'Once it is up, backfill with: corepack yarn medusa exec ./src/scripts/bake-slab-images.ts',
+        );
+      }
+    } catch (e) {
+      logger.warn(
+        `Slab bake skipped (${e instanceof Error ? e.message : String(e)}). ` +
+          'Backfill with: corepack yarn medusa exec ./src/scripts/bake-slab-images.ts',
+      );
+    }
   }
 
   // Relative pull weight per rarity — RARITY_WEIGHT is imported from
