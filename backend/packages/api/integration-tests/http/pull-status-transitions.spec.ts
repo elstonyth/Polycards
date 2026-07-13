@@ -172,10 +172,14 @@ medusaIntegrationTestRunner({
             acc = foldLedgerRow(acc, {
               amount: Number(t.amount),
               reason: t.reason,
-              externalFundedCents: Number(
-                (t as { external_funded_cents?: number | null })
-                  .external_funded_cents ?? 0,
-              ),
+              // Preserve null: coercing NULL→0 would lose the grandfathering
+              // distinction the deposited-playthrough basis relies on (the SQL
+              // gates on external_funded_cents IS NOT NULL). Coerce only non-null.
+              externalFundedCents: (() => {
+                const v = (t as { external_funded_cents?: number | null })
+                  .external_funded_cents;
+                return v == null ? null : Number(v);
+              })(),
             });
           }
           expect(sql).toEqual(totalsToUsd(acc));

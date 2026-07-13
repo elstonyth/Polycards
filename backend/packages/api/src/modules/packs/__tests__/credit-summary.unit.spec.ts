@@ -32,7 +32,22 @@ describe("foldLedgerRow + totalsToUsd (external-funded)", () => {
       topupTotal: 100,
       spendTotal: 125,
       externalFundedSpendTotal: 100,
+      depositedPlaythroughTotal: 100, // the RM100 topup carries a non-null basis
     });
+  });
+
+  // Plan 033/038 grandfathering: a topup with a NULL external basis (pre-1b) is
+  // counted as a topup but NOT into the deposited-playthrough basis — this is the
+  // only case that distinguishes the `!= null` gate from a `> 0` one.
+  it("excludes a NULL-basis topup from depositedPlaythrough but counts it as a topup", () => {
+    const t = foldLedgerRow(EMPTY_TOTALS, {
+      amount: 40,
+      reason: "topup",
+      externalFundedCents: null,
+    });
+    expect(t.topupCents).toBe(4000); // still a topup
+    expect(t.depositedPlaythroughCents).toBe(0); // grandfathered out of the basis
+    expect(t.externalBalanceCents).toBe(0); // null coerces to 0 external
   });
 
   it("treats a missing/NULL external column (old rows) as zero external", () => {

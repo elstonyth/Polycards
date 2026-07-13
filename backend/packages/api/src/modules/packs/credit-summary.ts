@@ -20,6 +20,10 @@ export interface LedgerTotals {
   spendCents: number;
   externalBalanceCents: number;
   externalFundedSpendCents: number;
+  // Plan 033/038 playthrough basis: topups that carry a non-null external basis
+  // (external_funded_cents IS NOT NULL), grandfathering pre-1b NULL-basis deposits
+  // OUT. NOT topupCents (which counts every positive topup regardless of basis).
+  depositedPlaythroughCents: number;
 }
 
 // Frozen: this is the shared fold SEED. foldLedgerRow is non-mutating today, but
@@ -31,14 +35,19 @@ export const EMPTY_TOTALS: Readonly<LedgerTotals> = Object.freeze({
   spendCents: 0,
   externalBalanceCents: 0,
   externalFundedSpendCents: 0,
+  depositedPlaythroughCents: 0,
 });
 
 export function foldLedgerRow(
   acc: LedgerTotals,
-  row: { amount: number; reason: string; externalFundedCents: number },
+  // externalFundedCents is nullable so the fold can tell a pre-1b NULL-basis row
+  // apart from a real 0 — the deposited-playthrough basis counts only NON-null
+  // topups (SQL: external_funded_cents IS NOT NULL). Callers must pass the raw
+  // column, NOT null-coerced-to-0, or the grandfathering distinction is lost.
+  row: { amount: number; reason: string; externalFundedCents: number | null },
 ): LedgerTotals {
   const cents = Math.round(row.amount * 100);
-  const ext = Math.round(row.externalFundedCents);
+  const ext = Math.round(row.externalFundedCents ?? 0);
   // A pack_open row stores the consumed external as NEGATIVE sen; a reversal
   // stores it back as POSITIVE. Count BOTH signs (flip), so a reversed open
   // subtracts exactly what the open added — the VIP basis nets to zero. Other
@@ -51,6 +60,16 @@ export function foldLedgerRow(
     spendCents: acc.spendCents + (cents < 0 ? -cents : 0),
     externalBalanceCents: acc.externalBalanceCents + ext,
     externalFundedSpendCents: acc.externalFundedSpendCents + externalConsumed,
+    // Mirrors SQL DEPOSITED_PT_FILTER: reason='topup' AND amount>0 AND
+    // external_funded_cents IS NOT NULL. A NULL-basis (pre-1b) topup is
+    // grandfathered OUT — gate on `!= null`, not `> 0`.
+    depositedPlaythroughCents:
+      acc.depositedPlaythroughCents +
+      (cents > 0 &&
+      row.reason === "topup" &&
+      row.externalFundedCents != null
+        ? cents
+        : 0),
   };
 }
 
@@ -59,11 +78,13 @@ export function totalsToUsd(t: LedgerTotals): {
   topupTotal: number;
   spendTotal: number;
   externalFundedSpendTotal: number;
+  depositedPlaythroughTotal: number;
 } {
   return {
     balance: t.balanceCents / 100,
     topupTotal: t.topupCents / 100,
     spendTotal: t.spendCents / 100,
     externalFundedSpendTotal: t.externalFundedSpendCents / 100,
+    depositedPlaythroughTotal: t.depositedPlaythroughCents / 100,
   };
 }
