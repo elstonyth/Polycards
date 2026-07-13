@@ -38,8 +38,12 @@ Two small, safe wins bundled:
 
 ## Current state
 
-**Admin card list** — `backend/apps/admin/src/routes/cards/page.tsx` renders
-(~line 382):
+**Admin card list** — `backend/apps/admin/src/routes/cards/page.tsx` has TWO
+`<img>` sites: the **per-row list image** (~line 386, inside `visible.map`)
+and a **single form-preview image** (~line 517, inside the edit form). Only the
+**list image (~386)** is in scope — it's the one that renders up to 1000 times.
+The form-preview at ~517 is a single above-the-fold element; do NOT add lazy
+loading to it (pointless for one visible image). The list render (~line 382):
 
 ```tsx
 {visible.map((c) => (

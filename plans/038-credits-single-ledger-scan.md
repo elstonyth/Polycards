@@ -34,7 +34,11 @@ ledger twice where once suffices, and the cost scales with per-customer ledger
 size (unbounded). Round 4 deferred this "pending MikroORM shared-manager
 concurrency verification" — but that concern **does not apply**: the fix
 threads three already-computed scalars into `walletSummary`, no shared entity
-manager, no concurrent-query question. `walletSummary` has exactly one caller.
+manager, no concurrent-query question. `walletSummary` has exactly one
+**production** caller (`credits/route.ts:27`); its other references are test
+specs (`wallet-summary.spec.ts`, `ledger-conservation.spec.ts`) that call it
+with no args — the optional-argument design (Step 3) keeps them working
+unchanged.
 
 ## Current state
 
@@ -95,7 +99,7 @@ balance route matches the full route's `balance` — keep it green.
   queries.
 - `backend/packages/api/src/api/store/credits/route.ts` — pass the shared
   scalars.
-- `integration-tests/modules/wallet-summary.spec.ts` — keep passing; adjust
+- `src/modules/packs/__tests__/wallet-summary.spec.ts` — keep passing; adjust
   only if the signature change requires it (the direct-call cases must still
   work with no pre-computed inputs).
 
@@ -105,6 +109,11 @@ balance route matches the full route's `balance` — keep it green.
 - The lean `GET /store/credits/balance` route — unchanged (already 1 scan).
 - The `deposited` grandfather filter's semantics — plan 033 owns that; do not
   alter it, just thread it correctly (see Step 1).
+
+**STOP-condition correction**: an earlier STOP condition below says "more than
+one caller". Read it as **more than one _production_ caller** — the test specs
+that call `walletSummary(customerId)` with no args are expected and stay green
+via the optional-arg path.
 
 ## Git workflow
 

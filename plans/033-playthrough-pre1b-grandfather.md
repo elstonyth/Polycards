@@ -7,7 +7,7 @@
 > not edit it.
 >
 > **Drift check (run first)**:
-> `git diff --stat 38f7dbdd..HEAD -- backend/packages/api/src/modules/packs/service.ts backend/packages/api/src/modules/packs/withdrawable.ts backend/packages/api/integration-tests/modules/wallet-summary.spec.ts`
+> `git diff --stat 38f7dbdd..HEAD -- backend/packages/api/src/modules/packs/service.ts backend/packages/api/src/modules/packs/withdrawable.ts backend/packages/api/src/modules/packs/__tests__/wallet-summary.spec.ts`
 > If any in-scope file changed since this plan was written, compare the
 > "Current state" excerpts against the live code before proceeding; on a
 > mismatch, treat it as a STOP condition.
@@ -58,7 +58,7 @@ Files:
   extends.
 - `backend/packages/api/src/modules/packs/migrations/Migration20260621120000.ts`
   — the 1b migration; its comment establishes the column semantics.
-- `backend/packages/api/integration-tests/modules/wallet-summary.spec.ts` —
+- `backend/packages/api/src/modules/packs/__tests__/wallet-summary.spec.ts` —
   module-tier spec for `walletSummary` (4 cases as of plan 026).
 
 The `walletSummary` SQL as it exists today (`service.ts` ~2228-2234):
@@ -94,9 +94,10 @@ export function playthroughState(t: PlaythroughInput): PlaythroughState {
 ```
 
 Repo conventions: integer sen (cents) SQL with `ROUND(amount * 100)`,
-`FILTER (WHERE ...)` aggregate style as above; money specs live in
-`integration-tests/modules/` and follow the arrange-act-assert style of
-`wallet-summary.spec.ts` itself.
+`FILTER (WHERE ...)` aggregate style as above; the `walletSummary` module spec
+lives at `src/modules/packs/__tests__/wallet-summary.spec.ts` (module tier,
+run via `test:integration:modules`) and follows the arrange-act-assert style
+you should match.
 
 ## Commands you will need
 
@@ -120,7 +121,7 @@ runbook in `backend/packages/api/README.md` before anything else.
 - `backend/packages/api/src/modules/packs/service.ts` — the `walletSummary`
   SQL and its adjacent comment only.
 - `backend/packages/api/src/modules/packs/withdrawable.ts` — header docs only.
-- `backend/packages/api/integration-tests/modules/wallet-summary.spec.ts` —
+- `backend/packages/api/src/modules/packs/__tests__/wallet-summary.spec.ts` —
   new cases.
 
 **Out of scope** (do NOT touch):
@@ -130,8 +131,9 @@ runbook in `backend/packages/api/README.md` before anything else.
   distinction.
 - Any migration or write path (`mutateCreditAtomic`, `settleOpen`, topup
   workflows) — this is a read-side change only.
-- `integration-tests/modules/ledger-conservation.spec.ts` — it deliberately
-  never pins `playthrough.used`/`deposited`; it must stay green **unmodified**.
+- `integration-tests/http/ledger-conservation.spec.ts` — it deliberately
+  never pins `playthrough.used`/`deposited`; it must stay green **unmodified**
+  (it runs in the `test:integration:smoke` subset).
 - The storefront wallet page/schema.
 
 ## Git workflow

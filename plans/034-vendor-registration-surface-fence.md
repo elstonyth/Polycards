@@ -128,10 +128,18 @@ AND the house seller is seeded independently:
 
 1. In `medusa-config.ts`, set `seller_registration: false`.
 2. If Step 1 found `vendorCors` is **not** consumed by `@mercurjs/core`:
-   remove the `vendorCors` line and its `@ts-expect-error`, and delete the
-   now-dead `VENDOR_CORS` from `.env.template` (line 31). If it **is**
-   consumed: leave it, and replace the `@ts-expect-error` comment with one
-   citing where `@mercurjs/core` reads it.
+   remove the `vendorCors: process.env.VENDOR_CORS!` line and its
+   `@ts-expect-error` from `medusa-config.ts`, and delete the now-dead
+   `VENDOR_CORS` line from `.env.template` (it is at **line 25** —
+   `VENDOR_CORS=http://localhost:7001`; do NOT confuse it with
+   `MERCUR_VENDOR_URL` at line 31, which is plan 037's / this plan's separate
+   dead-var — see note below). If `vendorCors` **is** consumed: leave it, and
+   replace the `@ts-expect-error` comment with one citing where `@mercurjs/core`
+   reads it.
+   **Also remove the dead `MERCUR_VENDOR_URL` (line 31)** here — it is read by
+   nothing (plan 037 explicitly defers this line to 034 to avoid a double-edit;
+   034 owns both vendor lines). Remove it whether or not `vendorCors` is
+   consumed.
 3. Delete the dead vendor scaffolding `apps/vendor/src/lib/client.ts` and
    `apps/vendor/src/i18n/` **only after** confirming `main.tsx` is their sole
    potential importer and `mercurDashboardPlugin` does not auto-discover them
