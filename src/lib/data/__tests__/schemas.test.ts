@@ -14,6 +14,7 @@ import {
   OpenBuybackSchema,
   BuybackResultSchema,
   CardDetailSchema,
+  WalletSchema,
   CREDIT_REASONS,
 } from '../schemas';
 
@@ -285,5 +286,42 @@ describe('CardDetailSchema', () => {
       parseOne(CardDetailSchema, { ...valid, priceHistory: 'nope' })
         ?.priceHistory,
     ).toEqual([]);
+  });
+});
+
+describe('WalletSchema', () => {
+  const valid = {
+    balance: 100,
+    available: 80,
+    locked: 20,
+    is_frozen: false,
+    next_unlock: null,
+    withdrawable: 50,
+    playthrough: { deposited: 60, used: 40, remaining: 20 },
+  };
+
+  it('accepts a full valid wallet', () => {
+    expect(parseOne(WalletSchema, valid)).toMatchObject(valid);
+  });
+
+  it('still parses when withdrawable + playthrough are absent (deploy-skew backend)', () => {
+    // Regression for plan 040: an older backend without the PR #140 fields must
+    // degrade, not fail the whole wallet parse.
+    const { withdrawable, playthrough, ...legacy } = valid;
+    void withdrawable;
+    void playthrough;
+    const out = parseOne(WalletSchema, legacy);
+    expect(out).not.toBeNull();
+    expect(out?.withdrawable).toBeUndefined();
+    expect(out?.playthrough).toBeUndefined();
+  });
+
+  it('rejects a malformed playthrough (wrong inner type -> whole object null)', () => {
+    expect(
+      parseOne(WalletSchema, {
+        ...valid,
+        playthrough: { deposited: 'nope', used: 40, remaining: 20 },
+      }),
+    ).toBeNull();
   });
 });

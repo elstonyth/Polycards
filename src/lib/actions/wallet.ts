@@ -75,12 +75,11 @@ export async function getWallet(): Promise<WalletResult> {
         nextUnlock: w.next_unlock
           ? { amount: w.next_unlock.amount, date: w.next_unlock.date }
           : null,
-        withdrawable: w.withdrawable,
-        playthrough: {
-          deposited: w.playthrough.deposited,
-          used: w.playthrough.used,
-          remaining: w.playthrough.remaining,
-        },
+        // Deploy-skew fallback: a backend missing these renders as
+        // not-yet-withdrawable (0) rather than crashing the page. Default to 0
+        // — never another balance field — so unknown never overstates.
+        withdrawable: w.withdrawable ?? 0,
+        playthrough: w.playthrough ?? { deposited: 0, used: 0, remaining: 0 },
       },
     };
   } catch (error) {

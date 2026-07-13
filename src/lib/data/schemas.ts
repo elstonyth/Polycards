@@ -245,13 +245,18 @@ export const WalletSchema = z.looseObject({
   is_frozen: z.boolean(),
   next_unlock: z.looseObject({ amount: finite, date: z.string() }).nullable(),
   // Playthrough withdrawal gate: withdrawable is 0 until playthrough.remaining
-  // hits 0 (lifetime deposits fully spent on pack opens).
-  withdrawable: finite,
-  playthrough: z.looseObject({
-    deposited: finite,
-    used: finite,
-    remaining: finite,
-  }),
+  // hits 0 (lifetime deposits fully spent on pack opens). Both fields are
+  // optional (mirroring OddsEntrySchema.marketPriceMyr) so a deploy-skew
+  // backend missing them still parses; the consumer applies safe fallbacks.
+  // When playthrough is present its inner shape stays strict.
+  withdrawable: finite.optional(),
+  playthrough: z
+    .looseObject({
+      deposited: finite,
+      used: finite,
+      remaining: finite,
+    })
+    .optional(),
 });
 
 // --- actions/vip.ts ---------------------------------------------------------
