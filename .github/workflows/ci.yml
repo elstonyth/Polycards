@@ -180,6 +180,14 @@ jobs:
           key: yarn-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
           restore-keys: yarn-${{ runner.os }}-
 
+      - name: Cache turbo
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: backend/.turbo
+          key: turbo-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ runner.os }}-
+
       - name: Install backend dependencies
         working-directory: backend
         run: corepack yarn install --immutable
@@ -357,6 +365,14 @@ jobs:
           path: ~/.yarn/berry/cache
           key: yarn-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
           restore-keys: yarn-${{ runner.os }}-
+
+      - name: Cache turbo
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: backend/.turbo
+          key: turbo-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ runner.os }}-
 
       - name: Install backend dependencies
         working-directory: backend
