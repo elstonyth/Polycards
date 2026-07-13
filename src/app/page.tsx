@@ -102,7 +102,7 @@ function FeaturedChase({
 
   return (
     <Link
-      href={`/slots/${pack.id}`}
+      href="/slots"
       className="relative flex overflow-hidden rounded-2xl border border-white/10 bg-neutral-900 transition-colors hover:border-white/25"
     >
       <div className="flex min-w-0 flex-1 flex-col justify-between p-5">
