@@ -10,14 +10,6 @@ import type { LeaderboardEntry } from '@/lib/data/leaderboard';
 const PERIODS = ['This Week', 'All Time'] as const;
 type Period = (typeof PERIODS)[number];
 
-const PRIZE_TIERS = [
-  { place: '#1', label: '1st Place', reward: 'Grand prize pack + 50,000 pts' },
-  { place: '#2', label: '2nd Place', reward: 'Premium pack + 25,000 pts' },
-  { place: '#3', label: '3rd Place', reward: 'Premium pack + 10,000 pts' },
-  { place: 'TOP 10', label: 'Top 10', reward: 'Exclusive pack + 5,000 pts' },
-  { place: 'TOP 100', label: 'Top 100', reward: '1,000 bonus pts' },
-];
-
 /** Medal colors for ranks 1–3 (chase gold / silver / bronze), neutral after. */
 function medalStyle(rank: number): { bg: string; text: string } {
   if (rank === 1) return { bg: 'bg-chase', text: 'text-neutral-950' };
@@ -74,40 +66,11 @@ export default function LeaderboardClient({
         ))}
       </div>
 
-      {/* Prize rail — what the week pays out. */}
-      <section aria-label="Weekly prizes" className="mt-4">
-        <div className="flex snap-x gap-2 overflow-x-auto pb-1">
-          {PRIZE_TIERS.map((tier, i) => (
-            <div
-              key={tier.place}
-              className="flex w-36 shrink-0 snap-start flex-col rounded-2xl border border-white/10 bg-neutral-900 p-3.5"
-            >
-              <span
-                className={cn(
-                  'font-heading text-xl',
-                  i === 0
-                    ? 'text-chase'
-                    : i === 1
-                      ? 'text-neutral-300'
-                      : i === 2
-                        ? // amber-600: bronze that still clears AA on neutral-900
-                          'text-amber-600'
-                        : 'text-neutral-400',
-                )}
-              >
-                {tier.place}
-              </span>
-              <span className="mt-1.5 text-[12px] leading-snug text-neutral-300">
-                {tier.reward}
-              </span>
-            </div>
-          ))}
-        </div>
-        <p className="mt-1.5 text-[12px] text-neutral-400">
-          Points come from every ringgit you spend on packs. The weekly board
-          covers the last 7 days.
-        </p>
-      </section>
+      {/* How the board works — honest, no payout promise. */}
+      <p className="mt-3 text-[12px] text-neutral-400">
+        Points come from every ringgit you spend on packs. The weekly board
+        covers the last 7 days.
+      </p>
 
       {/* Standings */}
       <section aria-label="Standings" className="mt-6">
