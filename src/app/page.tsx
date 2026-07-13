@@ -102,7 +102,7 @@ function FeaturedChase({
 
   return (
     <Link
-      href={`/slots/${pack.id}`}
+      href="/slots"
       className="relative flex overflow-hidden rounded-2xl border border-white/10 bg-neutral-900 transition-colors hover:border-white/25"
     >
       <div className="flex min-w-0 flex-1 flex-col justify-between p-5">
@@ -124,7 +124,7 @@ function FeaturedChase({
           )}
         </div>
         <span className="mt-5 inline-flex min-h-11 w-fit items-center gap-2 rounded-full bg-neutral-50 px-5 text-sm font-semibold leading-tight text-neutral-950">
-          Rip it — {pack.price}
+          Browse all packs
           <ArrowRight className="h-4 w-4 shrink-0" aria-hidden />
         </span>
       </div>
