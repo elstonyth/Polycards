@@ -57,6 +57,15 @@ test('customer requests delivery of a vaulted card via the UI', async ({
   // (otherwise the goto aborts the in-flight requestDelivery server action).
   await expect(modal).toBeHidden({ timeout: 15_000 });
 
+  // Success pops the top-of-screen toast, which then auto-dismisses. Scoped
+  // to the toast's role=status container so a same-text occurrence elsewhere
+  // on the page can never satisfy the assertion.
+  const toast = page
+    .getByRole('status')
+    .filter({ hasText: 'Shipping order created successfully!' });
+  await expect(toast).toBeVisible();
+  await expect(toast).toBeHidden({ timeout: 8_000 });
+
   // Tracked on the orders page: the row's status badge reads "Requested".
   // (Scope to tbody — the table HEADER also carries a "Requested" column.)
   await page.goto(`${BASE}/orders`, { waitUntil: 'domcontentloaded' });

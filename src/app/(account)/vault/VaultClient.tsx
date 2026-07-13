@@ -15,6 +15,7 @@ import {
 } from '@/lib/actions/vault';
 import { type AddressView } from '@/lib/actions/delivery';
 import RequestDeliveryModal from '@/components/account/RequestDeliveryModal';
+import { SuccessToast } from '@/components/ui/SuccessToast';
 import { FLAT_BUYBACK_PERCENT } from '@/lib/packs-data';
 import SellConfirmModal from '@/components/SellConfirmModal';
 import { useTopUp } from '@/components/app-shell/TopUpProvider';
@@ -50,6 +51,8 @@ export default function VaultClient({
   // Success confirmation (e.g. "Sold N cards for RM X — added to your balance").
   // Distinct from `error` so a sale reads as a positive result, not a warning.
   const [notice, setNotice] = useState<string | null>(null);
+  // Transient top-of-screen confirmation for shipping orders (auto-dismisses).
+  const [toast, setToast] = useState<string | null>(null);
   const [confirmItem, setConfirmItem] = useState<VaultItem | null>(null);
   const [showcasingId, setShowcasingId] = useState<string | null>(null);
   const [openCard, setOpenCard] = useState<CardSeed | null>(null);
@@ -677,8 +680,14 @@ export default function VaultClient({
           setSelected(new Set());
           setSelectMode(false);
           setDeliverOpen(false);
+          setError(null);
+          setToast('Shipping order created successfully!');
         }}
       />
+
+      {/* Always mounted: the live region must pre-exist its message so screen
+          readers announce it (see SuccessToast). */}
+      <SuccessToast message={toast} onClose={() => setToast(null)} />
 
       <CardDetailOverlay seed={openCard} onClose={() => setOpenCard(null)} />
     </>
