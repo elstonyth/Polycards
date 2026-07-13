@@ -1,10 +1,12 @@
 // QA: pack detail mobile-first layout (stage → buy panel → card sections).
 // Usage: node scripts/qa-pack-detail-mobile.mjs [baseUrl]
 // Screenshots to docs/research/, plus JSON measurements to stdout.
+import { mkdirSync } from 'node:fs';
 import { chromium } from 'playwright';
 
 const BASE = process.argv[2] ?? 'http://127.0.0.1:4000';
 const SLUGS = ['pikachu', 'elite-pack'];
+mkdirSync('docs/research', { recursive: true });
 
 const browser = await chromium.launch();
 try {
@@ -15,7 +17,7 @@ try {
     ]) {
       const page = await browser.newPage({ viewport });
       const res = await page.goto(`${BASE}/slots/${slug}`, {
-        waitUntil: 'networkidle',
+        waitUntil: 'domcontentloaded',
         timeout: 30000,
       });
       if (!res || res.status() !== 200) {
@@ -23,6 +25,16 @@ try {
         await page.close();
         continue;
       }
+      // Wait for a concrete readiness signal instead of network quiescence —
+      // this page polls recent pulls (~4s) + prices (~60s), so networkidle never settles.
+      await page
+        .waitForSelector(
+          'button:has-text("Open Pack"), button:has-text("Log in to open")',
+          {
+            timeout: 15000,
+          },
+        )
+        .catch(() => {});
       const m = await page.evaluate(() => {
         const btn = [...document.querySelectorAll('button')].find((b) =>
           /Open Pack|Log in to open/.test(b.textContent ?? ''),
