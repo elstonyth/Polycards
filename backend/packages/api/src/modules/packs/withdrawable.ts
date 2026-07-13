@@ -13,7 +13,11 @@
 // in SQL and feeds them through this gate. The future cashout writer MUST
 // route through this function before writing a 'cashout' ledger row.
 export interface PlaythroughInput {
-  /** Σ positive `topup` rows, in cents (lifetime deposits). */
+  /** Σ positive `topup` rows **with a non-NULL external basis** (post-1b era),
+   *  in cents. Pre-1b deposits are grandfathered: they predate
+   *  `external_funded_cents` and never require playthrough (their opens' basis
+   *  is equally invisible to `usedCents`, so counting them would lock them
+   *  forever). */
   depositedCents: number;
   /** Σ −external_funded_cents over `pack_open` rows, in cents — deposit-funded
    *  spend only (0 for commission/buyback/adjustment-funded opens). Net: a

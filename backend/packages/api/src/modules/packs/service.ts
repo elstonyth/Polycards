@@ -2219,6 +2219,9 @@ class PacksModuleService extends MedusaService({
     // deposit-funded spend only; commission/buyback/adjustment-funded opens
     // contribute 0, and a reversed open restores its basis via the mirror
     // row's −originalExt. Buyback / promo / commission rows touch neither sum.
+    // Pre-1b topup rows (external_funded_cents IS NULL) are grandfathered out of
+    // deposited: they predate the basis column, so their opens' spend is equally
+    // invisible to used — counting them would lock those deposits forever.
     const balRows = await em.execute<
       {
         balance_cents: string | null;
@@ -2227,7 +2230,7 @@ class PacksModuleService extends MedusaService({
       }[]
     >(
       'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents, ' +
-        "COALESCE(SUM(ROUND(amount * 100)) FILTER (WHERE reason = 'topup' AND amount > 0), 0)::bigint AS deposited_cents, " +
+        "COALESCE(SUM(ROUND(amount * 100)) FILTER (WHERE reason = 'topup' AND amount > 0 AND external_funded_cents IS NOT NULL), 0)::bigint AS deposited_cents, " +
         "COALESCE(SUM(-external_funded_cents) FILTER (WHERE reason = 'pack_open'), 0)::bigint AS used_cents " +
         'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
       [customerId],

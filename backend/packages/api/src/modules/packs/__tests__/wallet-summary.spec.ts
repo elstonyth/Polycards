@@ -406,6 +406,91 @@ moduleIntegrationTestRunner<PacksModuleService>({
           expect(w.isFrozen).toBe(true);
         },
       );
+
+      it(
+        'walletSummary: pre-1b topup does not count toward deposited',
+        async () => {
+          const cust = 'cus_ws_pre1b_mixed';
+
+          // Pre-1b deposit: external_funded_cents omitted → NULL (the column is
+          // nullable with no default). Simulates a deposit made before the 1b
+          // basis column existed. It must NOT route through mutateCreditAtomic,
+          // which stamps a non-NULL basis on every topup.
+          await service.createCreditTransactions([
+            {
+              customer_id: cust,
+              amount: 50,
+              reason: 'topup' as const,
+              pull_id: null,
+              reference: 'pre1b_topup',
+            } as Record<string, unknown>,
+          ]);
+
+          // Post-1b deposit RM80 (mutateCreditAtomic stamps +8000 basis), then
+          // fully played through by a deposit-funded open.
+          await service.mutateCreditAtomic({
+            customerId: cust,
+            amount: 80,
+            reason: 'topup',
+            reference: 'post1b_topup',
+          });
+          await service.createCreditTransactions([
+            {
+              customer_id: cust,
+              amount: -80,
+              reason: 'pack_open' as const,
+              pull_id: null,
+              reference: null,
+              external_funded_cents: -8000,
+            } as Record<string, unknown>,
+          ]);
+
+          const w = await service.walletSummary(cust);
+
+          // deposited counts only the post-1b RM80; the pre-1b RM50 is
+          // grandfathered out. used = 80 → gate open.
+          expect(w.playthrough).toEqual({
+            deposited: 80,
+            used: 80,
+            remaining: 0,
+          });
+          // Balance = 50 + 80 - 80 = 50; the grandfathered pre-1b deposit is
+          // fully withdrawable now that the gate is open.
+          expect(w.balance).toBeCloseTo(50, 2);
+          expect(w.withdrawable).toBeGreaterThan(0);
+          expect(w.withdrawable).toBeCloseTo(w.available, 2);
+          expect(w.withdrawable).toBeCloseTo(50, 2);
+        },
+      );
+
+      it(
+        'walletSummary: legacy customer — pre-1b deposit alone is withdrawable-eligible',
+        async () => {
+          const cust = 'cus_ws_pre1b_only';
+
+          // A legacy customer whose ONLY ledger row is a pre-1b topup (NULL
+          // basis) and who never opened a pack. Grandfathered: deposited 0 →
+          // remaining 0 → the whole balance is withdrawable.
+          await service.createCreditTransactions([
+            {
+              customer_id: cust,
+              amount: 50,
+              reason: 'topup' as const,
+              pull_id: null,
+              reference: 'pre1b_only_topup',
+            } as Record<string, unknown>,
+          ]);
+
+          const w = await service.walletSummary(cust);
+
+          expect(w.playthrough.deposited).toBe(0);
+          expect(w.playthrough.remaining).toBe(0);
+          expect(w.balance).toBeCloseTo(50, 2);
+          expect(w.withdrawable).toBeGreaterThan(0);
+          expect(w.withdrawable).toBeCloseTo(w.available, 2);
+          expect(w.withdrawable).toBeCloseTo(50, 2);
+        },
+      );
     });
   },
 });
