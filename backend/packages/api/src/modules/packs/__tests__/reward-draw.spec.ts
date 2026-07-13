@@ -113,7 +113,22 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(saved.map((r) => r.draw_ordinal).sort()).toEqual([1, 2]);
       });
 
-      it('accepts a product row with vault_pull_id set', async () => {
+      it('links a product row to a real reward Pull via vault_pull_id', async () => {
+        // Create an actual Pull first, so vault_pull_id references a row that
+        // exists — the point is the association resolves, not that a column
+        // stores an arbitrary string (a fabricated id round-tripping proves
+        // nothing; a referential-integrity regression would still pass that).
+        const [pull] = await service.createPulls([
+          {
+            customer_id: 'cust_draw_test_3',
+            pack_id: 'pokemon-rookie',
+            card_id: 'pikachu',
+            order_id: null,
+            rolled_at: new Date(),
+            source: 'reward',
+          },
+        ]);
+
         const [row] = await service.createRewardDraws([
           {
             customer_id: 'cust_draw_test_3',
@@ -122,13 +137,16 @@ moduleIntegrationTestRunner<PacksModuleService>({
             draw_ordinal: 1,
             prize_kind: 'product',
             prize_snapshot: { product_handle: 'p-x', title: 'Pikachu', image: null },
-            vault_pull_id: 'pull_abc123',
+            vault_pull_id: pull.id,
             credit_txn_id: null,
           },
         ]);
 
         expect(row.prize_kind).toBe('product');
-        expect(row.vault_pull_id).toBe('pull_abc123');
+        expect(row.vault_pull_id).toBe(pull.id);
+        // The referenced Pull is a real, retrievable row.
+        const [linked] = await service.listPulls({ id: pull.id });
+        expect(linked?.id).toBe(pull.id);
         expect(row.credit_txn_id).toBeNull();
       });
     });
