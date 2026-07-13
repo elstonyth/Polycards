@@ -124,7 +124,7 @@ function FeaturedChase({
           )}
         </div>
         <span className="mt-5 inline-flex min-h-11 w-fit items-center gap-2 rounded-full bg-neutral-50 px-5 text-sm font-semibold leading-tight text-neutral-950">
-          Rip it — {pack.price}
+          Browse all packs
           <ArrowRight className="h-4 w-4 shrink-0" aria-hidden />
         </span>
       </div>
