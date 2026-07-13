@@ -4,7 +4,8 @@ import { chromium } from 'playwright';
 import { AxeBuilder } from '@axe-core/playwright';
 
 const BASE = process.env.BASE_URL ?? 'http://localhost:4000';
-const ROUTES = ['/', '/claw', '/leaderboard', '/how-it-works', '/about'];
+// Public routes that exist today (the /claw route was retired 2026-07-12).
+const ROUTES = ['/', '/leaderboard', '/how-it-works', '/about'];
 
 const browser = await chromium.launch();
 // @axe-core/playwright requires a page from an explicit BrowserContext — calling

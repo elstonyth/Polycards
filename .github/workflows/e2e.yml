@@ -181,6 +181,15 @@ jobs:
       - name: Run E2E
         run: npx playwright test
 
+      # a11y gate: axe-core scan of key public routes against the running
+      # storefront (:4000, already up). The nightly is the right home — the
+      # stack is booted and a per-PR run would be too heavy. Reuses the chromium
+      # installed above; BASE_URL defaults to :4000 (see scripts/qa-a11y.mjs).
+      # `always()` so a red E2E run doesn't mask a11y regressions (or vice versa).
+      - name: Run a11y gate
+        if: always()
+        run: npm run test:a11y
+
       - name: Upload report + service logs
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
