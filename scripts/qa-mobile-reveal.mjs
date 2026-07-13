@@ -148,11 +148,13 @@ for (const vp of VIEWPORTS) {
     });
   } catch (err) {
     fail(`${vp.name}: ${err.message.split('\n')[0]}`);
-    await page.screenshot({
-      path: `docs/research/qa-reveal-${vp.name}-error.png`,
-    });
+    // best-effort — a crashed page must not abort the remaining viewports
+    await page
+      .screenshot({ path: `docs/research/qa-reveal-${vp.name}-error.png` })
+      .catch(() => {});
+  } finally {
+    await ctx.close().catch(() => {});
   }
-  await ctx.close();
 }
 // ── 3-reel batch: the GalleryRail + "1 of 3" counter is the tightest vertical
 // budget the reveal has, and the neighbor peek must show real card. ─────────
@@ -208,11 +210,13 @@ for (const vp of VIEWPORTS.filter((v) => BATCH_VIEWPORTS.includes(v.name))) {
     });
   } catch (err) {
     fail(`${vp.name} ×3: ${err.message.split('\n')[0]}`);
-    await page.screenshot({
-      path: `docs/research/qa-reveal-${vp.name}-3up-error.png`,
-    });
+    // best-effort — a crashed page must not abort the remaining viewports
+    await page
+      .screenshot({ path: `docs/research/qa-reveal-${vp.name}-3up-error.png` })
+      .catch(() => {});
+  } finally {
+    await ctx.close().catch(() => {});
   }
-  await ctx.close();
 }
 
 await browser.close();

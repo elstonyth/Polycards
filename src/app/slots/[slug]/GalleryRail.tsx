@@ -109,7 +109,9 @@ export function GalleryRail({
                   // off-screen.
                   className="shrink-0 px-2"
                   style={{
-                    width: 'calc(var(--slab-w, 280px) + 16px)',
+                    // fallback mirrors SlabCard's, so a --slab-w-less mount
+                    // degrades to the same card-matched step
+                    width: 'calc(var(--slab-w, min(64vw, 300px)) + 16px)',
                     transformOrigin:
                       i < activeIndex
                         ? '100% 50%'

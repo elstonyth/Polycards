@@ -639,13 +639,17 @@ export default function SlotMachineClient({
           className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-fluid"
           aria-busy={phase === 'spinning'}
         >
-          <div className="relative flex min-h-full flex-col items-center justify-center gap-6 py-4 sm:py-6">
+          {/* my-auto on the machine (not justify-center here) — same safe
+              centering as RevealStage: identical when content fits, but if the
+              scroll fallback ever engages, the machine's top stays reachable
+              instead of clipping above the scroll origin. */}
+          <div className="relative flex min-h-full flex-col items-center gap-6 py-4 sm:py-6">
             {/* Machine: entrance-choreographed column group + pedestal.
                 w-full down this chain gives the reel strip a real width to
                 clip against (fit-content flex items would let it overflow
                 narrow phones sideways). */}
             <motion.div
-              className="w-full"
+              className="my-auto w-full"
               variants={{
                 hidden: {},
                 shown: reduced ? {} : { transition: { staggerChildren: 0.12 } },
