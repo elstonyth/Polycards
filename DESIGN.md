@@ -207,6 +207,27 @@ Flat, tonally layered, glow-reserved. Depth comes from the three-step neutral ra
 
 The 90scard-derived anchored card (bottom of Leaderboard: "YOUR RANK #458 / TO TOP 10 RM 29,701 / [Buy Now]"): Charcoal surface, 16px radius, hairline border, floats above the tab bar with 12px inset. Used for your-rank, sell-back confirmation totals, and claim summaries. Label row in uppercase Label style, values in Nekst Black, one primary pill.
 
+### Signature: Drop Board (home)
+
+The home page is a six-board editorial scroll story (spec:
+`docs/superpowers/specs/2026-07-14-home-redesign-design.md`). Its patterns:
+
+- **Data marquee** — a slim full-bleed band streaming REAL signal (live pulls:
+  masked name, Nekst value, rarity dot, age). CSS-only loop (`sp-scroll-x`),
+  pauses on hover/press, static swipeable row under reduced motion. Decorative
+  word-loop marquees remain prohibited — a marquee must carry data a collector
+  can act on. The whole band is one link.
+- **Board lockup** — ALL-CAPS Nekst section head, optionally paired with a
+  right-aligned quiet text link (`All packs →`). One lockup per board.
+- **Spotlight slab** — the hero object lit by its own rarity glow
+  (`rarityRgb`), idle float (`slabFloat`, ±8px/6s) plus a subtle scroll-linked
+  tilt. Reduced motion: perfectly still, fully lit. The glow hue is always
+  inherited from the thing glowing (Glow Is Earned).
+- **Tier rack** — shelf rows grouped by the shipped six price tiers
+  (`price-tier.ts`: common → immortal), rack chip + hairline in the tier hue.
+  (Note: supersedes the aspirational starter/silver/gold/diamond band in §2 —
+  packs use the six-tier axis in shipped code.)
+
 ## 6. Do's and Don'ts
 
 ### Do:
@@ -224,7 +245,7 @@ The 90scard-derived anchored card (bottom of Leaderboard: "YOUR RANK #458 / TO T
 - **Don't** drift to "corporate SaaS / fintech" sterile blue-gray or icon-card dashboard grids (PRODUCT.md anti-reference).
 - **Don't** touch "web3 / NFT" purple degen gradients or glossy 3D coins (PRODUCT.md anti-reference) — Diamond Purple lives on tier cards only.
 - **Don't** build a "generic e-commerce" product grid; the hub is an experience shelf, not a catalog (PRODUCT.md anti-reference).
-- **Don't** use gradient text, glassmorphism-by-default, side-stripe borders (`border-left` accent), or decorative grid/stripe backgrounds. Prohibited outright.
+- **Don't** use gradient text, glassmorphism-by-default, side-stripe borders (`border-left` accent), or decorative grid/stripe backgrounds. Prohibited outright. Data marquees (see Drop Board) are the one sanctioned moving band — decorative word loops stay banned.
 - **Don't** put body text below Silver (#a3a3a3) on dark surfaces; muted-gray-on-charcoal is the #1 legibility failure.
 - **Don't** round containers past 16px or add drop shadows to buttons/cards — matte surfaces, hairline edges, earned glow only.
 - **Don't** gate content behind animations; a reveal enhances an already-visible default.
