@@ -78,29 +78,25 @@ try {
   // dismiss the reveal (verified live: the "Spin again" button stays disabled
   // through the card reveal until "Back to the reel" is clicked). Drive that
   // tap-through here instead of only waiting for auto-conclusion.
-  await a.page
-    .getByText('Tap the card to reveal')
-    .waitFor({ timeout: 15000 })
-    .catch(() => fail('reveal card prompt never appeared after spin'));
+  await a.page.getByText('Tap the card to reveal').waitFor({ timeout: 15000 });
   await a.page.mouse.click(720, 340); // card back, centered (repo convention: qa-demo-spin.mjs)
   await a.page
     .getByRole('button', { name: /back to the reel/i })
-    .click({ timeout: 15000 })
-    .catch(() => fail('"Back to the reel" CTA never appeared'));
-  await a.page
-    .waitForFunction(
-      () => {
-        const btns = [...document.querySelectorAll('button')];
-        const spin = btns.find((el) => /spin/i.test(el.textContent || ''));
-        return spin && !spin.disabled;
-      },
-      { timeout: 90000 },
-    )
-    .catch(() => fail('spin CTA never re-enabled (reveal did not conclude)'));
+    .click({ timeout: 15000 });
+  await a.page.waitForFunction(
+    () => {
+      const btns = [...document.querySelectorAll('button')];
+      const spin = btns.find((el) => /spin/i.test(el.textContent || ''));
+      return spin && !spin.disabled;
+    },
+    { timeout: 90000 },
+  );
   const postSpin = await readStrip(a.page);
   if (postSpin !== preSpin) ok('return-to-idle reshuffled the strip');
   else fail('strip unchanged after the spin cycle');
   await a.ctx.close();
+} catch (err) {
+  fail(err.message);
 } finally {
   await browser.close();
 }
