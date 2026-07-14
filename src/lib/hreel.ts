@@ -57,6 +57,26 @@ export function buildDecoyPool(
 }
 
 /**
+ * Fisher–Yates copy-shuffle of a decoy pool — the per-idle-cycle strip
+ * randomization (each reel tiles its OWN shuffled copy, reshuffled every time
+ * the machine returns to idle, so the at-rest sequence is never the same
+ * twice). `rand` is injectable for deterministic tests; defaults to
+ * Math.random (only ever called from client effects, never during render).
+ * Never mutates the input.
+ */
+export function shuffleCells(
+  cells: readonly HReelCell[],
+  rand: () => number = Math.random,
+): HReelCell[] {
+  const out = [...cells];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [out[i], out[j]] = [out[j]!, out[i]!];
+  }
+  return out;
+}
+
+/**
  * Deterministic decoy tier for cell `i`: a prime-step walk over the 6-tier
  * palette so the strip flickers varied colors with zero render-time randomness.
  * `(i*5+2) % 6` visits all six tiers with period 6.

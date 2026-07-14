@@ -8,6 +8,8 @@ import {
   buildHReelStrip,
   buildPressStrip,
   buildDecoyPool,
+  shuffleCells,
+  type HReelCell,
 } from '@/lib/hreel';
 
 describe('decoyRarity', () => {
@@ -357,5 +359,56 @@ describe('buildPressStrip edge cases', () => {
       if (i !== 30) expect(c.dex).toBe(25);
     });
     expect(press[30]!.dex).toBe(6);
+  });
+});
+
+describe('shuffleCells', () => {
+  // Tiny deterministic LCG so tests never depend on Math.random.
+  const seededRand = (seed: number) => {
+    let s = seed >>> 0;
+    return () => {
+      s = (s * 1664525 + 1013904223) >>> 0;
+      return s / 4294967296;
+    };
+  };
+  const pool: HReelCell[] = [
+    { dex: 1, rarity: 'Common' },
+    { dex: 4, rarity: 'Rare' },
+    { dex: 7, rarity: 'Mythical' },
+    { dex: 25, rarity: 'Immortal' },
+    { dex: 143, rarity: 'Uncommon' },
+    { dex: 130, rarity: 'Legendary' },
+  ];
+  const key = (c: HReelCell) => `${c.dex}:${c.rarity}`;
+
+  test('preserves length and multiset (same cells, reordered)', () => {
+    const out = shuffleCells(pool, seededRand(42));
+    expect(out).toHaveLength(pool.length);
+    expect(out.map(key).sort()).toEqual(pool.map(key).sort());
+  });
+
+  test('does not mutate its input', () => {
+    const copy = pool.map((c) => ({ ...c }));
+    shuffleCells(pool, seededRand(7));
+    expect(pool).toEqual(copy);
+  });
+
+  test('is deterministic under an injected rng', () => {
+    const a = shuffleCells(pool, seededRand(123));
+    const b = shuffleCells(pool, seededRand(123));
+    expect(a).toEqual(b);
+  });
+
+  test('actually reorders (some seed produces a different order)', () => {
+    const orders = [1, 2, 3, 4, 5].map((s) =>
+      shuffleCells(pool, seededRand(s)).map(key).join('|'),
+    );
+    const original = pool.map(key).join('|');
+    expect(orders.some((o) => o !== original)).toBe(true);
+  });
+
+  test('handles empty and single-element pools', () => {
+    expect(shuffleCells([], seededRand(1))).toEqual([]);
+    expect(shuffleCells([pool[0]!], seededRand(1))).toEqual([pool[0]]);
   });
 });
