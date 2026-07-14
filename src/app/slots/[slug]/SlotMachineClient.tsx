@@ -39,7 +39,7 @@ import {
 import { resolveCardPokemon } from '@/lib/resolve-card-pokemon';
 import { spriteGif } from '@/lib/mock/pokedex';
 import { SlotReelStack, type ColumnWinner } from './SlotReelStack';
-import { buildDecoyPool, type HReelCell } from '@/lib/hreel';
+import { buildDecoyPool, shuffleCells, type HReelCell } from '@/lib/hreel';
 import { SlotStatusBar } from './SlotStatusBar';
 import { SlotControls } from './SlotControls';
 import { OddsSheet } from './OddsSheet';
@@ -61,7 +61,12 @@ const POKEBALL_PLACEHOLDER =
   );
 
 type Phase =
-  'idle' | 'resolving' | 'spinning' | 'flood' | 'transform' | 'review';
+  | 'idle'
+  | 'resolving'
+  | 'spinning'
+  | 'flood'
+  | 'transform'
+  | 'review';
 
 /** Highest-rarity tier present in a batch, for the room flood color. */
 function topRarityOf(cards: WonCard[]): Rarity {
@@ -147,7 +152,15 @@ export default function SlotMachineClient({
   // IS the linked sprite. A custom-uploaded (dex-less) sprite would only flicker
   // via name-derive — threading the custom sprite_image into decoy cells is the
   // upgrade path if that ever matters.
-  const decoyCards = useMemo<HReelCell[]>(() => buildDecoyPool(pool), [pool]);
+  const basePool = useMemo<HReelCell[]>(() => buildDecoyPool(pool), [pool]);
+  // Per-reel decoy pools: strip i tiles its OWN shuffled copy of basePool, so
+  // stacked reels read independently and the idle sequence is never the same
+  // twice (reshuffled per idle cycle — see the phase effect below). SSR-safe:
+  // the initial value is the unshuffled pool, so server HTML matches the first
+  // client paint; the shuffle lands one effect-tick after hydration.
+  const [decoyPools, setDecoyPools] = useState<HReelCell[][]>(() =>
+    Array.from({ length: reels }, () => basePool),
+  );
 
   // Balance comes from the app-shell provider (identity-tagged: values from
   // another account never render — push security review). Server-returned
@@ -155,6 +168,20 @@ export default function SlotMachineClient({
   const { balance, applyBalance } = useTopUp();
   const [recent, setRecent] = useState<RecentPull[]>(recentPulls);
   const [phase, setPhase] = useState<Phase>('idle');
+  // Reshuffle every reel's decoy pool each time the machine goes idle: on
+  // mount (post-hydration) and on every return-to-idle after a spin — the
+  // same transition where ReelStrip snaps its position back to base, a cut
+  // the reveal theater already covers. Pools stay frozen during
+  // resolving/spinning, so buildPressStrip's keepCells always reproduce the
+  // exact idle frame on screen at press time (#147 seamless launch).
+  // Accepted trade-off (spec): adjusting the reel COUNT while idle reshuffles
+  // all strips — cosmetic, coincides with the add/remove layout animation;
+  // the alternative (stale pools array) would put non-pack Pokémon on a new
+  // reel via the DECOY_DEXES fallback.
+  useEffect(() => {
+    if (phase !== 'idle') return;
+    setDecoyPools(Array.from({ length: reels }, () => shuffleCells(basePool)));
+  }, [phase, reels, basePool]);
   // True once the player has spun at least once this session — drives the
   // "Spin again" button label, which must persist after the reveal concludes
   // back to 'idle' (spec decision #27), not only during 'review'.
@@ -681,7 +708,7 @@ export default function SlotMachineClient({
                       : (spin?.winners ?? null)
                   }
                   reduced={reduced}
-                  decoyCards={decoyCards}
+                  decoyPools={decoyPools}
                   onAllSettled={handleSettled}
                   onWinnerRect={(i, r) => {
                     winnerRects.current[i] = r;

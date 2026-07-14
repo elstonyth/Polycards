@@ -27,7 +27,7 @@ export function SlotReelStack({
   winners,
   reduced,
   cellSize,
-  decoyCards,
+  decoyPools,
   onAllSettled,
   onWinnerRect,
   hideWinners,
@@ -39,9 +39,10 @@ export function SlotReelStack({
   winners: ColumnWinner[] | null;
   reduced: boolean;
   cellSize?: number;
-  /** Pack's own cards {dex, rarity} for the decoy flicker — the reel shows only
-   *  the pack's Pokémon in only the pack's rarity colors. */
-  decoyCards?: readonly HReelCell[];
+  /** Per-strip decoy pools — pool `i` feeds strip `i` (each reel tiles its own
+   *  shuffled copy of the pack pool, reshuffled per idle cycle, so stacked
+   *  reels read independently). Cells are the pack's own {dex, rarity}. */
+  decoyPools?: readonly (readonly HReelCell[])[];
   onAllSettled?: () => void;
   onWinnerRect?: (colIndex: number, rect: DOMRect) => void;
   hideWinners?: boolean;
@@ -97,7 +98,7 @@ export function SlotReelStack({
                 count={count}
                 spinKey={spinKey}
                 cellSize={cellSize}
-                decoyCards={decoyCards}
+                decoyCards={decoyPools?.[i]}
                 onSettled={winners ? handleColSettled : undefined}
                 onWinnerRect={
                   onWinnerRect ? (rect) => onWinnerRect(i, rect) : undefined
