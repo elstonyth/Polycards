@@ -88,6 +88,16 @@ async function assertInViewport(page, locator, label, vp) {
   else ok(`${label}: fully on-screen`);
 }
 
+// Review-phase gate (runs IN the page): the flip button must EXIST and be
+// enabled. `querySelector(...)?.hasAttribute('disabled')` alone would resolve
+// on a MISSING element (!undefined === true) and silently pass a broken state.
+const flipEnabled = () => {
+  const el = document.querySelector(
+    'button[aria-label="Flip to reveal your card"]',
+  );
+  return el != null && !el.hasAttribute('disabled');
+};
+
 const browser = await chromium.launch({ headless: true });
 for (const vp of VIEWPORTS) {
   console.log(`\n── ${vp.name} (${vp.width}x${vp.height}) ──`);
@@ -115,13 +125,7 @@ for (const vp of VIEWPORTS) {
     });
     await flip.waitFor({ state: 'visible', timeout: 30000 });
     // wait for review phase (button enabled) — the real "ready" signal
-    await page.waitForFunction(
-      () =>
-        !document
-          .querySelector('button[aria-label="Flip to reveal your card"]')
-          ?.hasAttribute('disabled'),
-      { timeout: 30000 },
-    );
+    await page.waitForFunction(flipEnabled, { timeout: 30000 });
     await page.waitForTimeout(600); // let the morph settle
     await assertNoScroll(page, 'reveal (face-down)');
     await assertInViewport(page, flip, 'face-down slab', vp);
@@ -243,13 +247,7 @@ for (const vp of VIEWPORTS.filter((v) =>
       name: 'Flip to reveal your card',
     });
     await flip.waitFor({ state: 'visible', timeout: 30000 });
-    await page.waitForFunction(
-      () =>
-        !document
-          .querySelector('button[aria-label="Flip to reveal your card"]')
-          ?.hasAttribute('disabled'),
-      { timeout: 30000 },
-    );
+    await page.waitForFunction(flipEnabled, { timeout: 30000 });
     await assertNoScroll(page, 'reduced reveal (face-down)');
     await assertInViewport(page, flip, 'reduced face-down slab', vp);
     await flip.click({ force: true });
@@ -295,13 +293,7 @@ for (const vp of VIEWPORTS.filter((v) =>
       name: 'Flip to reveal your card',
     });
     await flip.waitFor({ state: 'visible', timeout: 30000 });
-    await page.waitForFunction(
-      () =>
-        !document
-          .querySelector('button[aria-label="Flip to reveal your card"]')
-          ?.hasAttribute('disabled'),
-      { timeout: 30000 },
-    );
+    await page.waitForFunction(flipEnabled, { timeout: 30000 });
     await page.waitForTimeout(600);
     const xScroll = await page.evaluate(() => {
       const bad = [];
@@ -327,13 +319,18 @@ for (const vp of VIEWPORTS.filter((v) =>
       'landscape primary action (after scroll)',
       vp,
     );
-    const flipTop = await page
-      .getByRole('button', { name: /back to the reel/i })
-      .scrollIntoViewIfNeeded()
-      .then(() => true)
-      .catch(() => false);
-    if (flipTop) ok('landscape: secondary action reachable by scroll');
-    else fail('landscape: secondary action unreachable');
+    const backBtn = page.getByRole('button', { name: /back to the reel/i });
+    try {
+      await backBtn.scrollIntoViewIfNeeded();
+      await assertInViewport(
+        page,
+        backBtn,
+        'landscape secondary action (after scroll)',
+        vp,
+      );
+    } catch {
+      fail('landscape: secondary action unreachable');
+    }
     await page.screenshot({
       path: `docs/research/qa-reveal-${vp.name}-flipped.png`,
     });

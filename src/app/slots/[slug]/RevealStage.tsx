@@ -178,9 +178,10 @@ export function RevealStage({
           >
             Keep in vault
           </button>
-          <p className="text-center text-[11px] text-white/50">
-            Sell-back is temporarily unavailable while pricing is refreshed —
-            this card is safe in your vault and can be sold once rates are back.
+          {/* copy must stay short: at the --slab-w width floor the batch-rail
+              footer is ~96px wide and long copy wraps past the 7rem slot */}
+          <p className="text-center text-[11px] leading-tight text-white/50">
+            Stored safely — sell when rates return.
           </p>
         </>
       );
