@@ -279,7 +279,7 @@ export default function AboutPage() {
             </h3>
             <p className="mt-2 text-[13px] leading-relaxed text-white/55">
               One of the largest online Pokemon stores, now offering digital
-              pack breaks powered by PixelSlot.
+              pack breaks powered by Polycards.
             </p>
           </div>
         </div>

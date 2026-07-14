@@ -6,7 +6,7 @@ import JoinPrompt from './JoinPrompt';
 
 export const metadata: Metadata = {
   title: 'Daily Rewards',
-  description: 'Open your daily box and claim vouchers on PixelSlot.',
+  description: 'Open your daily box and claim vouchers on Polycards.',
 };
 
 // Draw/claim state is per-customer and per-day — always fresh.

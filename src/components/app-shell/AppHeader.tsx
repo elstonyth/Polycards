@@ -13,7 +13,7 @@ import { Pill } from '@/components/ui/pill';
 import { useTopUp } from './TopUpProvider';
 import { TABS, isTabActive } from './tabs';
 
-const LOGO_SRC = '/branding/pixelslot-logo.png';
+const LOGO_SRC = '/branding/polycards-logo.png';
 
 /**
  * App header: logo left, balance chip + top-up entry right (90scard's
@@ -35,12 +35,12 @@ export default function AppHeader() {
           <Link
             href="/"
             className="flex shrink-0 items-center"
-            aria-label="PixelSlot home"
+            aria-label="Polycards home"
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={LOGO_SRC}
-              alt="PixelSlot"
+              alt="Polycards"
               width={128}
               height={44}
               className="h-7 w-auto object-contain lg:h-9"

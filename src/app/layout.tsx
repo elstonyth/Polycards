@@ -27,32 +27,32 @@ const nekst = localFont({
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: 'PixelSlot — Your Gateway to Physical & Digital Collectibles',
-    template: '%s · PixelSlot',
+    default: 'Polycards — Your Gateway to Physical & Digital Collectibles',
+    template: '%s · Polycards',
   },
   description:
     'Rip packs. Pull graded cards. Hold, trade, redeem, or sell back at up to 90% value.',
-  applicationName: 'PixelSlot',
+  applicationName: 'Polycards',
   alternates: { canonical: '/' },
   openGraph: {
     type: 'website',
-    siteName: 'PixelSlot',
-    title: 'PixelSlot — Your Gateway to Physical & Digital Collectibles',
+    siteName: 'Polycards',
+    title: 'Polycards — Your Gateway to Physical & Digital Collectibles',
     description:
       'Rip packs. Pull graded cards. Hold, trade, redeem, or sell back at up to 90% value.',
     url: '/',
     images: [
-      { url: '/seo/og.png', width: 2400, height: 1260, alt: 'PixelSlot' },
+      { url: '/seo/og.png', width: 2400, height: 1260, alt: 'Polycards' },
     ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'PixelSlot — Your Gateway to Physical & Digital Collectibles',
+    title: 'Polycards — Your Gateway to Physical & Digital Collectibles',
     description:
       'Rip packs. Pull graded cards. Hold, trade, redeem, or sell back at up to 90% value.',
     images: ['/seo/og.png'],
   },
-  appleWebApp: { capable: true, title: 'PixelSlot', statusBarStyle: 'black' },
+  appleWebApp: { capable: true, title: 'Polycards', statusBarStyle: 'black' },
   // Favicon + apple-touch icon come from src/app/icon.png + apple-icon.png.
 };
 

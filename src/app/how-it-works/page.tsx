@@ -129,7 +129,7 @@ const CAPABILITIES: Capability[] = [
 const FAQS: FaqItem[] = [
   {
     q: 'Are these real physical cards?',
-    a: 'Yes. Every card on PixelSlot is a real, professionally graded physical card stored in secure vault facilities. When you open a pack, you receive ownership of a specific physical slab that exists in a PSA, Fanatics, or Alt vault. You can ship it to your door at any time.',
+    a: 'Yes. Every card on Polycards is a real, professionally graded physical card stored in secure vault facilities. When you open a pack, you receive ownership of a specific physical slab that exists in a PSA, Fanatics, or Alt vault. You can ship it to your door at any time.',
   },
   {
     q: 'How does shipping work?',
@@ -154,7 +154,7 @@ const FAQS: FaqItem[] = [
     q: 'Can I sell my cards?',
     // Marketplace copy only while the flag is on (see CAPABILITIES above).
     a: features.marketplace
-      ? 'Absolutely. You can list any card on the PixelSlot marketplace and set your own price. When it sells, funds are available immediately. You can also use the instant sell-back feature for a guaranteed payout at 85-90% of market value.'
+      ? 'Absolutely. You can list any card on the Polycards marketplace and set your own price. When it sells, funds are available immediately. You can also use the instant sell-back feature for a guaranteed payout at 85-90% of market value.'
       : 'Absolutely. Every card comes with an instant sell-back at 85-90% of its market value — a guaranteed payout, with funds available immediately.',
   },
 ];
@@ -256,7 +256,7 @@ export default function HowItWorksPage() {
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src="/images/polycards/bronze-pack.webp"
-                alt="PixelSlot trading card pack"
+                alt="Polycards trading card pack"
                 className="absolute bottom-0 left-1/2 z-[2] h-[92%] w-auto -translate-x-1/2 object-contain drop-shadow-[0_30px_80px_rgba(0,0,0,0.6)]"
               />
             </div>
@@ -361,7 +361,7 @@ export default function HowItWorksPage() {
         <Reveal>
           <SectionHeading
             title="What Collectors Are Saying"
-            sub="Real feedback from the PixelSlot community."
+            sub="Real feedback from the Polycards community."
           />
         </Reveal>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">

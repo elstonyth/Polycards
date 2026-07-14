@@ -26,7 +26,7 @@ export async function generateMetadata({
       : userOrGeneric(handle).username;
   return {
     title: name,
-    description: `${name}'s collection on PixelSlot.`,
+    description: `${name}'s collection on Polycards.`,
   };
 }
 

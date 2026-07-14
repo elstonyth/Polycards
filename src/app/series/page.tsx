@@ -7,7 +7,7 @@ import { features } from '@/lib/features';
 export const metadata: Metadata = {
   title: 'Series',
   description:
-    'Browse collectible card series and sets available on PixelSlot.',
+    'Browse collectible card series and sets available on Polycards.',
 };
 
 // Mock series tiles (layout only — real set catalog comes from the backend).

@@ -22,8 +22,8 @@ export default function ReferralsClient({ inviteUrl }: { inviteUrl: string }) {
     try {
       if (navigator.share) {
         await navigator.share({
-          title: 'PixelSlot',
-          text: 'Rip packs, pull real graded cards — join me on PixelSlot:',
+          title: 'Polycards',
+          text: 'Rip packs, pull real graded cards — join me on Polycards:',
           url: inviteUrl,
         });
       } else {

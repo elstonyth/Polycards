@@ -186,7 +186,7 @@ export default function AuthForm({
       <p className="mt-1.5 text-sm text-white/50">
         {isSignup
           ? 'Start ripping packs and collecting graded cards.'
-          : 'Log in to your PixelSlot account.'}
+          : 'Log in to your Polycards account.'}
       </p>
 
       {/* Social */}
@@ -300,7 +300,7 @@ export default function AuthForm({
       </p>
 
       <p className="mt-6 text-center text-[13px] text-white/50">
-        {isSignup ? 'Already have an account? ' : 'New to PixelSlot? '}
+        {isSignup ? 'Already have an account? ' : 'New to Polycards? '}
         <button
           type="button"
           onClick={() => switchMode(isSignup ? 'login' : 'signup')}
