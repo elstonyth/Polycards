@@ -27,48 +27,54 @@ export default function HeroBoard({
     : TIER_COLOR[priceTier(priceNumber(pack.price))];
 
   return (
+    // Phone: kicker → slab → value/name → CTA, all inside the first viewport
+    // (media height is capped so the pill stays in thumb reach). Desktop: the
+    // kicker + type block form the left column, the slab the right.
     <section
       aria-labelledby="hero-heading"
-      className="px-fluid flex min-h-[calc(100svh-64px)] w-full flex-col items-center justify-center gap-6 py-10 text-center lg:flex-row-reverse lg:justify-between lg:gap-12 lg:py-16 lg:text-left"
+      className="px-fluid flex min-h-[calc(100svh-64px)] w-full flex-col items-center justify-center gap-5 py-8 text-center lg:grid lg:grid-cols-[1fr_auto] lg:content-center lg:items-center lg:gap-x-12 lg:py-16 lg:text-left"
     >
+      <p
+        id="hero-heading"
+        className="text-[11px] font-semibold uppercase tracking-[0.3em] text-neutral-400 lg:col-start-1 lg:row-start-1 lg:self-end"
+      >
+        Top chase in the building
+      </p>
+
       {/* The slab (or pack art fallback) on its spotlight */}
-      <HeroSlab>
-        <div
-          className="rounded-xl"
-          style={{ boxShadow: `0 0 80px 8px rgba(${glow}, 0.35)` }}
-        >
-          {chase ? (
-            <SlabImage
-              src={chase.image}
-              slabSrc={chase.slabImage}
-              alt={chase.name}
-              sizes="(min-width: 1024px) 420px, 60vw"
-              className="w-[min(60vw,15rem)] lg:w-[26rem]"
-            />
-          ) : (
-            <Image
-              src={pack.image}
-              alt={pack.name}
-              width={420}
-              height={420}
-              unoptimized
-              className="h-auto w-[min(60vw,15rem)] object-contain lg:w-[26rem]"
-            />
-          )}
-        </div>
-      </HeroSlab>
+      <div className="lg:col-start-2 lg:row-span-2 lg:row-start-1">
+        <HeroSlab>
+          <div
+            className="rounded-xl"
+            style={{ boxShadow: `0 0 80px 8px rgba(${glow}, 0.35)` }}
+          >
+            {chase ? (
+              <SlabImage
+                src={chase.image}
+                slabSrc={chase.slabImage}
+                alt={chase.name}
+                sizes="(min-width: 1024px) 420px, 60vw"
+                className="max-h-[42svh] w-auto max-w-[min(60vw,15rem)] lg:max-h-[60svh] lg:max-w-[26rem]"
+              />
+            ) : (
+              <Image
+                src={pack.image}
+                alt={pack.name}
+                width={420}
+                height={420}
+                unoptimized
+                className="h-auto max-h-[42svh] w-auto max-w-[min(60vw,15rem)] object-contain lg:max-h-[60svh] lg:max-w-[26rem]"
+              />
+            )}
+          </div>
+        </HeroSlab>
+      </div>
 
       {/* Type block */}
-      <div className="flex flex-col items-center lg:items-start">
-        <p
-          id="hero-heading"
-          className="text-[11px] font-semibold uppercase tracking-[0.3em] text-neutral-400"
-        >
-          Top chase in the building
-        </p>
+      <div className="flex flex-col items-center lg:col-start-1 lg:row-start-2 lg:items-start lg:self-start">
         {chase ? (
           <>
-            <p className="font-heading text-chase mt-3 text-5xl leading-none lg:text-7xl">
+            <p className="font-heading text-chase text-5xl leading-none lg:mt-3 lg:text-7xl">
               {chase.value}
             </p>
             <p className="mt-2 max-w-xs truncate text-sm text-neutral-400 lg:max-w-md">
@@ -76,7 +82,7 @@ export default function HeroBoard({
             </p>
           </>
         ) : (
-          <p className="font-heading mt-3 text-5xl leading-none text-white lg:text-7xl">
+          <p className="font-heading text-5xl leading-none text-white lg:mt-3 lg:text-7xl">
             {pack.name}
           </p>
         )}
@@ -84,7 +90,7 @@ export default function HeroBoard({
           href="/slots"
           className={cn(
             pillVariants({ variant: 'primary', size: 'lg' }),
-            'mt-7',
+            'mt-6',
           )}
         >
           RIP A PACK
