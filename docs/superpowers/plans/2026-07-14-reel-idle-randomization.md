@@ -17,7 +17,7 @@
 - DO NOT modify: `src/app/slots/[slug]/ReelStrip.tsx`, `src/lib/vault-reel.ts`, winner-selection code, `buildHReelStrip`/`buildPressStrip` logic.
 - Verify visuals against the **standalone prod server** (`pwsh scripts/serve-standalone.ps1 -Port 4000`), never `next dev`, never Chrome MCP — Playwright scripts only, screenshots to `docs/research/`.
 - The repo's PostToolUse/Stop hooks type-check every edit; leave them green.
-- `docs/` is gitignored (local-only) — spec/plan files are NOT committed; code and `scripts/*.mjs` ARE.
+- Spec/plan docs are committed (docs/ became tracked mid-branch via 2df9a343); code and `scripts/*.mjs` are committed as always.
 
 ---
 
