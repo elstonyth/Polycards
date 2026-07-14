@@ -219,6 +219,134 @@ for (const vp of VIEWPORTS.filter((v) => BATCH_VIEWPORTS.includes(v.name))) {
   }
 }
 
+// ── Reduced-motion pass: the theater collapses to instant cuts (no morph, no
+// flood beat) but every layout guarantee must hold identically. ─────────────
+for (const vp of VIEWPORTS.filter((v) =>
+  ['iphone-8', 'iphone-14'].includes(v.name),
+)) {
+  console.log(`\n── ${vp.name} reduced-motion (${vp.width}x${vp.height}) ──`);
+  const ctx = await browser.newContext({
+    viewport: { width: vp.width, height: vp.height },
+    hasTouch: true,
+    isMobile: true,
+    reducedMotion: 'reduce',
+  });
+  const page = await ctx.newPage();
+  try {
+    await page.goto(`${BASE}/slots/${PACK}/spin?demo=1`, {
+      waitUntil: 'networkidle',
+    });
+    const spinBtn = page.getByRole('button', { name: /demo spin/i });
+    await spinBtn.waitFor({ timeout: 20000 });
+    await spinBtn.click();
+    const flip = page.getByRole('button', {
+      name: 'Flip to reveal your card',
+    });
+    await flip.waitFor({ state: 'visible', timeout: 30000 });
+    await page.waitForFunction(
+      () =>
+        !document
+          .querySelector('button[aria-label="Flip to reveal your card"]')
+          ?.hasAttribute('disabled'),
+      { timeout: 30000 },
+    );
+    await assertNoScroll(page, 'reduced reveal (face-down)');
+    await assertInViewport(page, flip, 'reduced face-down slab', vp);
+    await flip.click({ force: true });
+    const cta = page.getByRole('button', { name: /sign up & pull for real/i });
+    await cta.waitFor({ timeout: 10000 });
+    await assertNoScroll(page, 'reduced reveal (flipped)');
+    await assertInViewport(page, cta, 'reduced primary action', vp);
+    await page.screenshot({
+      path: `docs/research/qa-reveal-${vp.name}-reduced.png`,
+    });
+  } catch (err) {
+    fail(`${vp.name} reduced: ${err.message.split('\n')[0]}`);
+    await page
+      .screenshot({
+        path: `docs/research/qa-reveal-${vp.name}-reduced-error.png`,
+      })
+      .catch(() => {});
+  } finally {
+    await ctx.close().catch(() => {});
+  }
+}
+
+// ── Landscape phone: the one shape where no-scroll is impossible by design
+// (the last-resort overflow-y-auto engages). Assert the fallback stays SANE:
+// sideways panning stays locked, and the sell-window actions are reachable
+// by scrolling — never clipped above the scroll origin. ─────────────────────
+{
+  const vp = { name: 'landscape-phone', width: 844, height: 390 };
+  console.log(`\n── ${vp.name} (${vp.width}x${vp.height}) ──`);
+  const ctx = await browser.newContext({
+    viewport: { width: vp.width, height: vp.height },
+    hasTouch: true,
+  });
+  const page = await ctx.newPage();
+  try {
+    await page.goto(`${BASE}/slots/${PACK}/spin?demo=1`, {
+      waitUntil: 'networkidle',
+    });
+    const spinBtn = page.getByRole('button', { name: /demo spin/i });
+    await spinBtn.waitFor({ timeout: 20000 });
+    await spinBtn.click();
+    const flip = page.getByRole('button', {
+      name: 'Flip to reveal your card',
+    });
+    await flip.waitFor({ state: 'visible', timeout: 30000 });
+    await page.waitForFunction(
+      () =>
+        !document
+          .querySelector('button[aria-label="Flip to reveal your card"]')
+          ?.hasAttribute('disabled'),
+      { timeout: 30000 },
+    );
+    await page.waitForTimeout(600);
+    const xScroll = await page.evaluate(() => {
+      const bad = [];
+      for (const el of document.querySelectorAll('*')) {
+        const s = getComputedStyle(el);
+        if (
+          (s.overflowX === 'auto' || s.overflowX === 'scroll') &&
+          el.scrollWidth > el.clientWidth + 1
+        )
+          bad.push(el.tagName.toLowerCase());
+      }
+      return bad;
+    });
+    if (xScroll.length === 0) ok('landscape: sideways panning stays locked');
+    else fail(`landscape: horizontal scroll on ${xScroll.join(', ')}`);
+    await flip.click({ force: true });
+    const cta = page.getByRole('button', { name: /sign up & pull for real/i });
+    await cta.waitFor({ timeout: 10000 });
+    await cta.scrollIntoViewIfNeeded();
+    await assertInViewport(
+      page,
+      cta,
+      'landscape primary action (after scroll)',
+      vp,
+    );
+    const flipTop = await page
+      .getByRole('button', { name: /back to the reel/i })
+      .scrollIntoViewIfNeeded()
+      .then(() => true)
+      .catch(() => false);
+    if (flipTop) ok('landscape: secondary action reachable by scroll');
+    else fail('landscape: secondary action unreachable');
+    await page.screenshot({
+      path: `docs/research/qa-reveal-${vp.name}-flipped.png`,
+    });
+  } catch (err) {
+    fail(`${vp.name}: ${err.message.split('\n')[0]}`);
+    await page
+      .screenshot({ path: `docs/research/qa-reveal-${vp.name}-error.png` })
+      .catch(() => {});
+  } finally {
+    await ctx.close().catch(() => {});
+  }
+}
+
 await browser.close();
 
 if (failures) {

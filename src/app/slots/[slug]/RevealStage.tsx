@@ -164,12 +164,12 @@ export function RevealStage({
     // display fallback and a sell would be refused — never present the amount
     // as a firm, countdown-pressured offer. Keep stays available (it's a pure
     // client-side conclude; the card is already vaulted server-side).
+    // Keep + note only (no dead sell-shaped pill): the variant must fit the
+    // reserved 7rem footer slot below, or the card shifts on flip and a
+    // height-bound phone regains the scroll this redesign removed.
     if (!offer.firm) {
       return (
         <>
-          <p className="flex h-12 w-full items-center justify-center rounded-xl border border-white/15 bg-white/5 text-sm font-bold text-white/50">
-            Sell-back temporarily unavailable
-          </p>
           <button
             type="button"
             onClick={() => keep(i)}
@@ -179,8 +179,8 @@ export function RevealStage({
             Keep in vault
           </button>
           <p className="text-center text-[11px] text-white/50">
-            Pricing is being refreshed — this card is safe in your vault and can
-            be sold once rates are back.
+            Sell-back is temporarily unavailable while pricing is refreshed —
+            this card is safe in your vault and can be sold once rates are back.
           </p>
         </>
       );
@@ -246,7 +246,10 @@ export function RevealStage({
             must not shift when the flip stamps in the name + sell/keep buttons.
             The slot holds a fixed min-height and only fills once flipped, so the
             column height is identical before and after the flip. Pre-flip it
-            carries the tap-to-reveal hint (spec #42), active card only. */}
+            carries the tap-to-reveal hint (spec #42), active card only.
+            NOTE: this 7rem is baked into --slab-w's 250px chrome budget (root
+            of this component) — every footer variant must fit inside it, and
+            changing either side means updating the other. */}
         <div className="flex min-h-[7rem] w-full max-w-[300px] flex-col items-center gap-2">
           {flipped
             ? footer(i)
