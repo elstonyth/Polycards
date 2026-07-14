@@ -23,7 +23,10 @@ import { PACKS_MODULE } from '../modules/packs';
 // admin, then activate. Asset paths are storefront-relative
 // (public/images/polycards/), shipped in the same commit as this script.
 //
-// Idempotent: deletes no-op once clean; creates skip existing slugs.
+// ONE-SHOT: if any Polycards pack already exists the script exits without
+// touching ANYTHING — a re-run after the operator has populated/activated the
+// new packs must not wipe their odds/pulls/state. Delete the polycards packs
+// manually first if you truly want to re-run the cutover.
 // Run: corepack yarn medusa exec ./src/scripts/replace-catalog-polycards.ts
 // ---------------------------------------------------------------------------
 
@@ -50,6 +53,19 @@ export default async function replaceCatalogPolycards({ container }: ExecArgs) {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
   const packs: PacksModuleService = container.resolve(PACKS_MODULE);
   const productModule = container.resolve(Modules.PRODUCT);
+
+  // One-shot guard: a prior run means the new catalog (and possibly operator
+  // work on it — cards, odds, active status) is live. Never wipe that.
+  const alreadyCutOver = await packs.listPacks(
+    { slug: POLYCARDS_PACKS.map((p) => p.slug) },
+    { select: ['slug'], take: POLYCARDS_PACKS.length },
+  );
+  if (alreadyCutOver.length > 0) {
+    logger.info(
+      `Polycards cutover already ran (${alreadyCutOver.map((p) => p.slug).join(', ')} present) — nothing to do.`,
+    );
+    return;
+  }
 
   logger.info('Polycards catalog cutover: wiping old gacha catalog...');
 
