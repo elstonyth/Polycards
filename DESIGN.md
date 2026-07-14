@@ -223,10 +223,14 @@ The home page is a six-board editorial scroll story (spec:
   (`rarityRgb`), idle float (`slabFloat`, ±8px/6s) plus a subtle scroll-linked
   tilt. Reduced motion: perfectly still, fully lit. The glow hue is always
   inherited from the thing glowing (Glow Is Earned).
-- **Tier rack** — shelf rows grouped by the shipped six price tiers
-  (`price-tier.ts`: common → immortal), rack chip + hairline in the tier hue.
-  (Note: supersedes the aspirational starter/silver/gold/diamond band in §2 —
-  packs use the six-tier axis in shipped code.)
+- **Tier ladder** — one full-width row per pack, ordered by the shipped six
+  price tiers high→low (`price-tier.ts`: common → immortal): tier-tinted art
+  pedestal + chip, pack name, top-chase line, price in Nekst right-aligned.
+  Desktop: the top rung spans full width, the rest sit two-up. Chosen over
+  horizontal racks because the catalog carries ~one pack per tier — a rack
+  with one tile is dead air. (Note: supersedes the aspirational
+  starter/silver/gold/diamond band in §2 — packs use the six-tier axis in
+  shipped code.)
 
 ## 6. Do's and Don'ts
 

@@ -72,18 +72,22 @@ keep their targets: `All packs →` (`/slots`), `How it works →`
 
 ### 02 · THE SHELF — "RIP A PACK"
 
+> Revised 2026-07-14 (operator): the catalog carries ~one pack per tier, so
+> horizontal racks (one tile each) read as dead air. The shelf is a **tier
+> ladder** instead — one full-width row per pack.
+
 - Headline lockup `RIP A PACK` + `All packs →` text link.
-- Packs grouped into horizontal snap racks by price tier (existing
-  `priceTier`/`TIER_COLOR` from `src/lib/price-tier`). Each rack: tier chip
-  (`GOLD TIER` in tier hue) + hairline in tier hue at 40%.
-- Tile: pack art large on charcoal, price in Nekst, `TOP CHASE RM X` line in
-  chase gold (uses existing per-pack chase lookup — note: home currently caps
-  lookups at `CHASE_LOOKUPS = 8`; the plan must size this for all visible
-  tiles or degrade gracefully by omitting the line), press-scale 0.98. Sold
-  out: dimmed, badge, inert.
-- Racks stagger-reveal on scroll. Each rack ends in a ghost `See all →` tile.
-- Empty tier → rack omitted; zero packs → single empty-state card.
-- Desktop: 4–5 tiles visible per rack.
+- One ladder row per pack, ordered by price tier high→low (existing
+  `priceTier`/`TIER_COLOR` from `src/lib/price-tier`), catalog order within a
+  tier. Row: tier-tinted art pedestal + tier chip in tier hue, pack name,
+  `TOP CHASE RM X` line in chase gold (existing per-pack chase lookup;
+  `CHASE_LOOKUPS = 16` covers the ladder — rows beyond omit the line), price
+  in Nekst right-aligned, quiet `Rip it →` affordance, tier-hue border at
+  40%, press-scale. Sold out: dimmed, SOLD OUT label, inert.
+- Rows stagger-reveal on scroll.
+- Zero packs → single empty-state card.
+- Desktop: the top rung spans full width (the ladder's crown); remaining rows
+  sit two-up.
 
 ### 03 · HOW IT RIPS — trust engine
 
