@@ -12,7 +12,7 @@ import { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
 // because App Platform doesn't reliably pass build-time env (see backend/Dockerfile).
 const STOREFRONT_URL = (
   process.env.MERCUR_STOREFRONT_URL ||
-  'https://pokenic-storefront-ijfiu.ondigitalocean.app'
+  'https://polycards.gg'
 ).replace(/\/$/, '');
 
 export async function GET(req: MedusaRequest, res: MedusaResponse) {

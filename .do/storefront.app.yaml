@@ -9,8 +9,8 @@
 #
 # Edit here first, then apply — do not edit the app in the DO UI (drift).
 # Must match the LIVE app name, or `doctl apps update --spec` renames the app.
-# The default *.ondigitalocean.app hostname below stays pokenic-* (frozen at creation, unrelated to the app name) — DO assigns it
-# at creation and it survived the rename. Do not "fix" it to match this name.
+# App recreated 2026-07-16; default hostname is now polycards-storefront-fzrft
+# (DO assigns it at creation with a random suffix — unrelated to the app name).
 name: polycards-storefront
 region: sgp
 
@@ -65,7 +65,7 @@ services:
       # values. A domain move must update all of them together.
       - key: NEXT_PUBLIC_MEDUSA_BACKEND_URL
         scope: RUN_AND_BUILD_TIME
-        value: https://pokenic-backend-tltfm.ondigitalocean.app
+        value: https://admin.polycards.gg
       - key: NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY
         scope: RUN_AND_BUILD_TIME
         value: pk_86273b7c12ca5b2fd838bf1c1cf6427dbb6ef41c723d8af1efa20db183517534

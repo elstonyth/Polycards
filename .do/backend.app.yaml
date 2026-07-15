@@ -20,15 +20,15 @@
 #                         SKIPS (no throw), so re-running is safe and self-healing.
 #                         ADMIN_EMAIL/ADMIN_PASSWORD below feed it.
 # Must match the LIVE app name, or `doctl apps update --spec` renames the app.
-# The default *.ondigitalocean.app hostname below stays pokenic-* (frozen at creation, unrelated to the app name) — DO assigns it
-# at creation and it survived the rename. Do not "fix" it to match this name.
+# App recreated 2026-07-16; default hostname is now polycards-backend-gce6p
+# (DO assigns it at creation with a random suffix — unrelated to the app name).
 name: polycards-backend
 region: sgp
 
 # Custom domain — REQUIRED here: `doctl apps update` replaces the FULL spec, so
 # omitting this block would detach the domain. Serves the store API plus the
 # dashboards (admin.polycards.gg/dashboard, /seller). DNS is a grey-cloud
-# (DNS-only) CNAME in Cloudflare → pokenic-backend-tltfm.ondigitalocean.app.
+# (DNS-only) CNAME in Cloudflare → polycards-backend-gce6p.ondigitalocean.app.
 domains:
   - domain: admin.polycards.gg
     type: PRIMARY
@@ -92,22 +92,22 @@ envs:
     value: __SECRET__ADMIN_PASSWORD__
   # CORS — explicit origins, comma-separated, no trailing slashes. The
   # dashboards are same-origin when opened on admin.polycards.gg (their bundles
-  # call MERCUR_BACKEND_URL = that host), but the old ondigitalocean host still
-  # serves them too, so it stays listed for cross-origin visits during the
-  # transition. (The former `${APP_URL}` literal was never a valid App Platform
-  # bindable — it only "worked" because same-origin requests skip CORS.)
+  # call MERCUR_BACKEND_URL = that host); the app's own default hostname is also
+  # listed so direct-to-default-host access still works. (The former `${APP_URL}`
+  # literal was never a valid App Platform bindable — it only "worked" because
+  # same-origin requests skip CORS.)
   - key: ADMIN_CORS
     scope: RUN_TIME
-    value: https://admin.polycards.gg,https://pokenic-backend-tltfm.ondigitalocean.app
+    value: https://admin.polycards.gg,https://polycards-backend-gce6p.ondigitalocean.app
   - key: AUTH_CORS
     scope: RUN_TIME
-    value: https://admin.polycards.gg,https://pokenic-backend-tltfm.ondigitalocean.app,https://polycards.gg,https://www.polycards.gg
+    value: https://admin.polycards.gg,https://polycards-backend-gce6p.ondigitalocean.app,https://polycards.gg,https://www.polycards.gg
   - key: VENDOR_CORS
     scope: RUN_TIME
-    value: https://admin.polycards.gg,https://pokenic-backend-tltfm.ondigitalocean.app
+    value: https://admin.polycards.gg,https://polycards-backend-gce6p.ondigitalocean.app
   - key: STORE_CORS
     scope: RUN_TIME
-    value: https://pokenic-storefront-ijfiu.ondigitalocean.app,https://polycards.gg,https://www.polycards.gg
+    value: https://polycards-storefront-fzrft.ondigitalocean.app,https://polycards.gg,https://www.polycards.gg
   # Object storage (DO Spaces, sgp1) — durable media. Without these the backend
   # falls back to the LOCAL file provider (medusa-config.ts s3Configured gate),
   # which writes to the container's EPHEMERAL disk and loses every upload on
