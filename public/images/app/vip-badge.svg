@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="30 60 930 440" width="930" height="440">
+  <defs>
+    <!-- Metallic gold sampled from the generated pass: deep bronze into bright
+         foil highlights and back — diagonal sheen. -->
+    <linearGradient id="gold" x1="0%" y1="0%" x2="85%" y2="100%">
+      <stop offset="0%"  stop-color="#8a5c07"/>
+      <stop offset="22%" stop-color="#d9a621"/>
+      <stop offset="42%" stop-color="#ffe98a"/>
+      <stop offset="58%" stop-color="#e8b92e"/>
+      <stop offset="80%" stop-color="#a97812"/>
+      <stop offset="100%" stop-color="#c9971a"/>
+    </linearGradient>
+    <!-- Cut the plate where the circle sits (instead of a white fill) so the
+         background stays fully transparent. -->
+    <mask id="plate-cut">
+      <rect x="0" y="0" width="1000" height="560" fill="#fff"/>
+      <circle cx="250" cy="280" r="203" fill="#000"/>
+    </mask>
+  </defs>
+
+  <!-- VIP plate: rounded rectangle outline, masked out behind the circle -->
+  <g mask="url(#plate-cut)">
+    <rect x="330" y="150" width="600" height="260" rx="48"
+          fill="none" stroke="url(#gold)" stroke-width="26"/>
+  </g>
+
+  <!-- VIP text -->
+  <text x="640" y="336" font-family="Arial, Helvetica, sans-serif" font-size="170"
+        font-weight="bold" letter-spacing="6" fill="url(#gold)"
+        text-anchor="middle">VIP</text>
+
+  <!-- Circle: gold outline only, interior transparent -->
+  <circle cx="250" cy="280" r="190" fill="none" stroke="url(#gold)" stroke-width="26"/>
+
+  <!-- Crown: three peaks + flat base, filled gold -->
+  <path d="M 140 220
+           L 205 275
+           L 250 205
+           L 295 275
+           L 360 220
+           L 335 360
+           Q 335 372 320 372
+           L 180 372
+           Q 165 372 165 360
+           Z"
+        fill="url(#gold)"/>
+</svg>

@@ -3,7 +3,12 @@
 import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { Mail, Lock, User as UserIcon, Loader2 } from 'lucide-react';
-import { login, signup, requestPasswordReset } from '@/lib/actions/auth';
+import {
+  login,
+  signup,
+  requestPasswordReset,
+  googleLoginStart,
+} from '@/lib/actions/auth';
 import { useAuth } from './auth/AuthProvider';
 
 // Inner content of the auth modal. The panel chrome (border/bg/padding) is provided
@@ -98,6 +103,22 @@ export default function AuthForm({
     setNote({ kind: 'error', text: result.error });
   }
 
+  async function onGoogle() {
+    if (busy) return;
+    setNote(null);
+    setBusy(true);
+    const result = await googleLoginStart();
+    if (result.ok) {
+      // Full-page redirect to Google's consent screen; the /auth/google/callback
+      // route finishes the exchange on return. We're navigating away, so leave
+      // `busy` true (no reset) to keep the button disabled until unload.
+      window.location.assign(result.location);
+      return;
+    }
+    setBusy(false);
+    setNote({ kind: 'error', text: result.error });
+  }
+
   // Only the login mode owns the forgot sub-view — if something external
   // flips the modal to signup (openAuth event) the signup form must win.
   if (!isSignup && forgot !== 'none') {
@@ -189,23 +210,30 @@ export default function AuthForm({
           : 'Log in to your Polycards account.'}
       </p>
 
-      {/* Social */}
+      {/* Social — Google is wired to the backend OAuth flow; Discord is still a
+          placeholder (no provider configured). */}
       <div className="mt-6 grid grid-cols-2 gap-3">
-        {['Google', 'Discord'].map((p) => (
-          <button
-            key={p}
-            type="button"
-            onClick={() =>
-              setNote({
-                kind: 'info',
-                text: 'Social login goes live with the backend.',
-              })
-            }
-            className="flex h-11 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] text-sm font-medium text-white transition-colors hover:bg-white/[0.08]"
-          >
-            {p}
-          </button>
-        ))}
+        <button
+          type="button"
+          onClick={onGoogle}
+          disabled={busy}
+          className="flex h-11 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] text-sm font-medium text-white transition-colors hover:bg-white/[0.08] disabled:opacity-70"
+        >
+          {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
+          Google
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            setNote({
+              kind: 'info',
+              text: 'Discord login is coming soon.',
+            })
+          }
+          className="flex h-11 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] text-sm font-medium text-white transition-colors hover:bg-white/[0.08]"
+        >
+          Discord
+        </button>
       </div>
       <div className="my-5 flex items-center gap-3 text-[11px] uppercase tracking-wide text-white/50">
         <span className="h-px flex-1 bg-white/10" /> or{' '}

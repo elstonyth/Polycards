@@ -54,9 +54,9 @@ ENV NODE_ENV=production
 # docker build-args, so an EMPTY default would let `ENV X=$ARG` clobber the value
 # to "" and ship a broken storefront. local docker-compose.prod.yml overrides via
 # --build-arg. Update these if the backend gets a custom domain.
-ARG NEXT_PUBLIC_MEDUSA_BACKEND_URL=https://pokenic-backend-tltfm.ondigitalocean.app
+ARG NEXT_PUBLIC_MEDUSA_BACKEND_URL=https://admin.polycards.gg
 ARG NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY=pk_86273b7c12ca5b2fd838bf1c1cf6427dbb6ef41c723d8af1efa20db183517534
-ARG NEXT_PUBLIC_MEDIA_HOST=pokenic-media.sgp1.cdn.digitaloceanspaces.com
+ARG NEXT_PUBLIC_MEDIA_HOST=polycards-media.sgp1.cdn.digitaloceanspaces.com
 # Canonical public origin — baked into the client bundle so invite links (and
 # metadataBase/sitemap) resolve to the real host, not the localhost dev default.
 # Set to the live DO host; on a custom-domain move update this ARG + the .do

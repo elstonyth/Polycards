@@ -143,8 +143,38 @@ const blockUnusedVendorSelfRegistration = (
   next(new MedusaError(MedusaError.Types.NOT_FOUND, 'Not found'));
 };
 
+// Root landing (GET /). This is a headless Medusa/Mercur server with no page at
+// "/", so hitting the bare origin (admin.polycards.gg) returned Express's default
+// "Cannot GET /" 404. The only human-facing surface on this host is the admin
+// dashboard at /dashboard (itself 301→/dashboard/login when signed out), so bounce
+// the root there. This lives in middlewares (NOT a src/api/route.ts): a root-level
+// route file is not picked up by the build's route scan — verified in prod, a
+// src/api/route.ts at "/" never registered while sub-path routes did. Medusa applies
+// a `{ matcher:'/', method:'GET' }` entry as `app.get('/', …)` — an EXACT path match,
+// never a prefix — and the req.path==='/' guard is defensive so it can only ever
+// fire on the bare root. 302 (not 301): the target is an internal path we may
+// repoint, and a 301 would be cached past that change.
+const redirectRootToDashboard = (
+  req: MedusaRequest,
+  res: MedusaResponse,
+  next: MedusaNextFunction,
+): void => {
+  if (req.path === '/') {
+    res.redirect(302, '/dashboard');
+    return;
+  }
+  next();
+};
+
 export default defineMiddlewares({
   routes: [
+    {
+      // Root landing → admin dashboard (see redirectRootToDashboard above).
+      // Exact-match: Medusa applies method-scoped matchers as app.get('/', …).
+      matcher: '/',
+      method: 'GET',
+      middlewares: [redirectRootToDashboard],
+    },
     {
       // See blockUnusedVendorSelfRegistration above — refuse anonymous seller
       // self-registration (the money-irrelevant but prod-DB-polluting surface).

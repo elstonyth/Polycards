@@ -30,6 +30,7 @@ __metadata:
     "@acme/pokemon": "workspace:*"
     "@medusajs/admin-sdk": "npm:2.13.4"
     "@medusajs/admin-shared": "npm:2.13.4"
+    "@medusajs/auth-google": "npm:2.13.4"
     "@medusajs/cli": "npm:2.13.4"
     "@medusajs/dashboard": "npm:2.13.4"
     "@medusajs/draft-order": "npm:2.13.4"

@@ -20,10 +20,19 @@
 #                         SKIPS (no throw), so re-running is safe and self-healing.
 #                         ADMIN_EMAIL/ADMIN_PASSWORD below feed it.
 # Must match the LIVE app name, or `doctl apps update --spec` renames the app.
-# The default *.ondigitalocean.app hostname below stays pokenic-* (frozen at creation, unrelated to the app name) — DO assigns it
-# at creation and it survived the rename. Do not "fix" it to match this name.
+# App recreated 2026-07-16; default hostname is now polycards-backend-gce6p
+# (DO assigns it at creation with a random suffix — unrelated to the app name).
 name: polycards-backend
 region: sgp
+
+# Custom domain — REQUIRED here: `doctl apps update` replaces the FULL spec, so
+# omitting this block would detach the domain. Serves the store API plus the
+# dashboards (admin.polycards.gg/dashboard, /seller). DNS is a grey-cloud
+# (DNS-only) CNAME in Cloudflare → polycards-backend-gce6p.ondigitalocean.app.
+domains:
+  - domain: admin.polycards.gg
+    type: PRIMARY
+    zone: polycards.gg
 
 # App Platform alerts → email on failed deploys / failed custom-domain certs.
 alerts:
@@ -41,7 +50,7 @@ envs:
   # pointing at localhost:9000 -> blank/black dashboard.
   - key: MERCUR_BACKEND_URL
     scope: BUILD_TIME
-    value: https://pokenic-backend-tltfm.ondigitalocean.app
+    value: https://admin.polycards.gg
   # Storefront origin. BUILD: baked into the admin bundle (vite __STOREFRONT_URL__)
   # so the admin resolves storefront-relative asset paths against the real
   # storefront domain. RUN: read by the /cdn/cards redirect route. Also defaulted
@@ -81,25 +90,24 @@ envs:
     scope: RUN_TIME
     type: SECRET
     value: __SECRET__ADMIN_PASSWORD__
-  # CORS. NOTE: ${APP_URL} is NOT a valid App Platform bindable — it was stored
-  # literally; the DO console flags it on edit. ADMIN_CORS/VENDOR_CORS are left
-  # as-is (admin/vendor dashboards are same-origin on this app, so browser CORS
-  # never triggers). AUTH_CORS + STORE_CORS use explicit origins: the backend's
-  # own URL (admin auth) and the polycards.gg storefront origins (customer auth +
-  # store calls). Old ondigitalocean storefront origin kept through the domain
-  # transition. Comma-separated, no trailing slashes.
+  # CORS — explicit origins, comma-separated, no trailing slashes. The
+  # dashboards are same-origin when opened on admin.polycards.gg (their bundles
+  # call MERCUR_BACKEND_URL = that host); the app's own default hostname is also
+  # listed so direct-to-default-host access still works. (The former `${APP_URL}`
+  # literal was never a valid App Platform bindable — it only "worked" because
+  # same-origin requests skip CORS.)
   - key: ADMIN_CORS
     scope: RUN_TIME
-    value: ${APP_URL}
+    value: https://admin.polycards.gg,https://polycards-backend-gce6p.ondigitalocean.app
   - key: AUTH_CORS
     scope: RUN_TIME
-    value: https://pokenic-backend-tltfm.ondigitalocean.app,https://polycards.gg,https://www.polycards.gg
+    value: https://admin.polycards.gg,https://polycards-backend-gce6p.ondigitalocean.app,https://polycards.gg,https://www.polycards.gg
   - key: VENDOR_CORS
     scope: RUN_TIME
-    value: ${APP_URL}
+    value: https://admin.polycards.gg,https://polycards-backend-gce6p.ondigitalocean.app
   - key: STORE_CORS
     scope: RUN_TIME
-    value: https://pokenic-storefront-ijfiu.ondigitalocean.app,https://polycards.gg,https://www.polycards.gg
+    value: https://polycards-storefront-fzrft.ondigitalocean.app,https://polycards.gg,https://www.polycards.gg
   # Object storage (DO Spaces, sgp1) — durable media. Without these the backend
   # falls back to the LOCAL file provider (medusa-config.ts s3Configured gate),
   # which writes to the container's EPHEMERAL disk and loses every upload on
@@ -107,7 +115,7 @@ envs:
   # key values are SECRET, injected from deploy/.env.deploy at apply time.
   - key: S3_BUCKET
     scope: RUN_TIME
-    value: pokenic-media
+    value: polycards-media
   - key: S3_REGION
     scope: RUN_TIME
     value: sgp1
@@ -116,7 +124,7 @@ envs:
     value: https://sgp1.digitaloceanspaces.com
   - key: S3_FILE_URL
     scope: RUN_TIME
-    value: https://pokenic-media.sgp1.cdn.digitaloceanspaces.com
+    value: https://polycards-media.sgp1.cdn.digitaloceanspaces.com
   - key: S3_ACCESS_KEY_ID
     scope: RUN_TIME
     type: SECRET
@@ -125,6 +133,23 @@ envs:
     scope: RUN_TIME
     type: SECRET
     value: __SECRET__S3_SECRET_ACCESS_KEY__
+  # Google OAuth (storefront customer social login). All three are required for
+  # the `google` auth provider to register (medusa-config.ts gates on them; a
+  # missing one boots emailpass-only). CLIENT_ID + CALLBACK_URL are non-secret;
+  # CLIENT_SECRET is injected from deploy/.env.deploy at apply time (do-apply.ps1
+  # secret list). CALLBACK_URL is the default the storefront overrides per-request
+  # with its own origin — it must match an Authorised redirect URI on the OAuth
+  # client (Cloud project "polycards").
+  - key: GOOGLE_CLIENT_ID
+    scope: RUN_TIME
+    value: 206640157304-h2jhoblti14pd96pik0im4l66s0a6o0v.apps.googleusercontent.com
+  - key: GOOGLE_CLIENT_SECRET
+    scope: RUN_TIME
+    type: SECRET
+    value: __SECRET__GOOGLE_CLIENT_SECRET__
+  - key: GOOGLE_CALLBACK_URL
+    scope: RUN_TIME
+    value: https://polycards.gg/auth/google/callback
   # ╔═══════════════════════════════════════════════════════════════════════╗
   # ║ GO-LIVE BLOCKER — DELETE THIS ENV BEFORE REAL LAUNCH.                  ║
   # ║ 'unsafe-demo' runs the always-approving MOCK payment gateway in prod   ║
@@ -197,13 +222,13 @@ jobs:
     run_command: corepack yarn deploy:migrate-user
 
 databases:
-  - name: pokenic-pg
+  - name: polycards-pg
     engine: PG
     production: true
-    cluster_name: pokenic-pg
+    cluster_name: polycards-pg
   # Valkey is attached with engine REDIS (redis-compatible) — App Platform only
   # resolves the binding under the REDIS enum. REDIS_URL is set explicitly above.
-  - name: pokenic-valkey
+  - name: polycards-valkey
     engine: REDIS
     production: true
-    cluster_name: pokenic-valkey
+    cluster_name: polycards-valkey

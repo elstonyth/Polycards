@@ -203,6 +203,47 @@ module.exports = defineConfig({
     {
       resolve: '@medusajs/medusa/rbac',
     },
+    // Auth module. Medusa registers an implicit default auth module with only the
+    // `emailpass` provider (it's what powers /auth/customer|user|seller/emailpass
+    // today — Mercur's core plugin adds NO auth providers). Declaring the module
+    // explicitly REPLACES that default, so `emailpass` must be re-listed here or
+    // every existing password login (customer, admin, vendor) breaks.
+    //
+    // `google` is added alongside for storefront customer social login — but ONLY
+    // when its three env vars are present. auth-google's validateOptions THROWS on
+    // a missing clientId/clientSecret/callbackUrl, which would crash boot; gating
+    // it (same pattern as fileModule/redisModules above) keeps dev + un-provisioned
+    // prod booting on emailpass alone, which is identical to today's default.
+    // callbackUrl is the STOREFRONT page that receives the OAuth code (the
+    // storefront also overrides it per-request via body.callback_url so one build
+    // works local + prod); it must exactly match an Authorised redirect URI on the
+    // Google OAuth client (Cloud project `polycards`).
+    {
+      resolve: '@medusajs/medusa/auth',
+      options: {
+        providers: [
+          {
+            resolve: '@medusajs/medusa/auth-emailpass',
+            id: 'emailpass',
+          },
+          ...(process.env.GOOGLE_CLIENT_ID &&
+          process.env.GOOGLE_CLIENT_SECRET &&
+          process.env.GOOGLE_CALLBACK_URL
+            ? [
+                {
+                  resolve: '@medusajs/auth-google',
+                  id: 'google',
+                  options: {
+                    clientId: process.env.GOOGLE_CLIENT_ID,
+                    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+                    callbackUrl: process.env.GOOGLE_CALLBACK_URL,
+                  },
+                },
+              ]
+            : []),
+        ],
+      },
+    },
     {
       resolve: '@medusajs/medusa/notification',
       options: {

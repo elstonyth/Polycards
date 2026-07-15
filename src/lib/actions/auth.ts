@@ -11,6 +11,7 @@
  *  signup: register → {token} → create customer (Bearer register-token) → login
  *  login:  /auth/customer/emailpass → {token} → store → retrieve /me
  */
+import { headers } from 'next/headers';
 import type { HttpTypes } from '@medusajs/types';
 import { sdk } from '@/lib/medusa';
 import { logger } from '@/lib/logger';
@@ -20,6 +21,15 @@ import { friendlyError, type ErrorRule } from '@/lib/errors';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD_LENGTH = 8;
+
+// Hosts allowed to originate the Google OAuth callback URL. Mirrors the
+// Authorised redirect URIs on the OAuth client — keep the two in sync. Guards
+// against Host/X-Forwarded-Host spoofing when building `callback_url`.
+const ALLOWED_CALLBACK_HOSTS = new Set([
+  'polycards.gg',
+  'www.polycards.gg',
+  'localhost:3000',
+]);
 
 export type AuthCustomer = {
   id: string;
@@ -54,7 +64,10 @@ const toAuthCustomer = (
 
 // Known backend errors → friendly copy (patterns local to auth; never raw).
 const AUTH_RULES: ErrorRule[] = [
-  [/already exists/i, 'An account with this email already exists.'],
+  [
+    /already exists/i,
+    'An account with this email already exists. Sign in with your password instead.',
+  ],
   [/invalid email or password/i, 'Incorrect email or password.'],
 ];
 
@@ -154,6 +167,150 @@ export async function signup(input: {
         error,
         AUTH_RULES,
         'Could not create your account. Please try again.',
+      ),
+    };
+  }
+}
+
+/**
+ * Google OAuth (customer social login). Two server actions mirror the emailpass
+ * flow — token exchange stays server-side (httpOnly cookie, no browser CORS) via
+ * `sdk.client.fetch` with an explicit Bearer, so the shared SDK singleton never
+ * holds per-request auth state.
+ *
+ * Flow (verified against @medusajs/auth-google 2.13.4):
+ *  start:    POST /auth/customer/google { callback_url } → { location } → browser
+ *            redirects to Google. `callback_url` is built from THIS request's
+ *            origin so one build works local + prod; it must exactly match an
+ *            Authorised redirect URI on the OAuth client.
+ *  callback: Google → /auth/google/callback?code&state → GET
+ *            /auth/customer/google/callback → { token }. Empty `actor_id` in the
+ *            token means first login (no customer yet): create the customer (email
+ *            comes from the token's user_metadata) then refresh to a real session
+ *            token. A returning user's token is already a session token.
+ */
+type GoogleTokenPayload = {
+  actor_id?: string;
+  user_metadata?: {
+    email?: string;
+    given_name?: string;
+    family_name?: string;
+  };
+};
+
+/** Read (not verify) the payload of our own backend-issued JWT. The token is
+ * validated by the backend on every subsequent call; here we only need
+ * `actor_id` (is a customer attached yet?) and the Google email. */
+function decodeJwtPayload(token: string): GoogleTokenPayload {
+  const payload = token.split('.')[1];
+  if (!payload) throw new Error('Malformed auth token.');
+  return JSON.parse(
+    Buffer.from(payload, 'base64url').toString('utf8'),
+  ) as GoogleTokenPayload;
+}
+
+export async function googleLoginStart(): Promise<
+  { ok: true; location: string } | { ok: false; error: string }
+> {
+  try {
+    const h = await headers();
+    const host = h.get('x-forwarded-host') ?? h.get('host');
+    // Host / X-Forwarded-Host are client-supplied. Only build the OAuth callback
+    // from a host we actually registered with Google — a spoofed one would be
+    // rejected by Google anyway, but validating here keeps attacker-controlled
+    // values out of the backend token exchange. This set mirrors the Authorised
+    // redirect URIs on the OAuth client (keep the two in sync).
+    if (!host || !ALLOWED_CALLBACK_HOSTS.has(host))
+      return { ok: false, error: 'Could not determine site origin.' };
+    const proto =
+      h.get('x-forwarded-proto') ??
+      (process.env.NODE_ENV === 'production' ? 'https' : 'http');
+    const callback_url = `${proto}://${host}/auth/google/callback`;
+
+    const { location } = await sdk.client.fetch<{ location?: string }>(
+      '/auth/customer/google',
+      { method: 'POST', body: { callback_url } },
+    );
+    if (!location)
+      return { ok: false, error: 'Google sign-in is currently unavailable.' };
+    return { ok: true, location };
+  } catch (error) {
+    logger.error('[auth] google login start failed:', error);
+    return {
+      ok: false,
+      error: 'Could not start Google sign-in. Please try again.',
+    };
+  }
+}
+
+export async function googleCallback(query: {
+  code?: string;
+  state?: string;
+}): Promise<AuthResult> {
+  if (!query.code || !query.state)
+    return { ok: false, error: 'Google sign-in was cancelled or failed.' };
+
+  try {
+    const { token } = await sdk.client.fetch<TokenResponse>(
+      '/auth/customer/google/callback',
+      { method: 'GET', query: { code: query.code, state: query.state } },
+    );
+
+    const payload = decodeJwtPayload(token);
+    let sessionToken = token;
+    // Empty actor_id ⇒ first Google login: no customer record yet, create one.
+    if (!payload.actor_id) {
+      // Normalize like login()/signup() so a mixed-case Google email can't
+      // create a duplicate of, or fail to collide with, an existing account.
+      const email = payload.user_metadata?.email?.trim().toLowerCase();
+      if (!email) {
+        // Email should ride in the token's user_metadata (the google provider
+        // copies it from the verified id_token). If it's absent, log the payload
+        // SHAPE (keys only, never values) so the cause is diagnosable — this is
+        // the one link in the flow that wasn't verifiable without a real login.
+        logger.error('[auth] google token missing user_metadata.email', {
+          payloadKeys: Object.keys(payload),
+          userMetadataKeys: Object.keys(payload.user_metadata ?? {}),
+        });
+        return { ok: false, error: 'Google did not share a verified email.' };
+      }
+      await sdk.store.customer.create(
+        {
+          email,
+          first_name: payload.user_metadata?.given_name,
+          last_name: payload.user_metadata?.family_name,
+        },
+        {},
+        { Authorization: `Bearer ${token}` },
+      );
+      // The post-register token still lacks actor_id — refresh for a real one.
+      const refreshed = await sdk.client.fetch<TokenResponse>(
+        '/auth/token/refresh',
+        { method: 'POST', headers: { Authorization: `Bearer ${token}` } },
+      );
+      sessionToken = refreshed.token;
+    }
+
+    await setAuthToken(sessionToken);
+    try {
+      const { customer } = await sdk.store.customer.retrieve(
+        {},
+        { Authorization: `Bearer ${sessionToken}` },
+      );
+      const handle = await fetchProfileHandle(sessionToken);
+      return { ok: true, customer: toAuthCustomer(customer, handle) };
+    } catch (error) {
+      await clearAuthToken();
+      throw error;
+    }
+  } catch (error) {
+    logger.error('[auth] google callback failed:', error);
+    return {
+      ok: false,
+      error: friendlyError(
+        error,
+        AUTH_RULES,
+        'Could not complete Google sign-in. Please try again.',
       ),
     };
   }

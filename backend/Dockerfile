@@ -40,19 +40,18 @@ RUN corepack yarn install --immutable
 
 # Backend origin baked into the admin/vendor vite bundles at build time (the
 # vite configs read process.env.MERCUR_BACKEND_URL; turbo.json `env` lets it
-# through to the build task). App Platform does NOT reliably pass build-time
-# env as docker build-args, so this default IS the prod value — the Dockerfile
-# is the prod artifact (local dev uses `medusa develop`, not this image).
-# Update this if the backend gets a custom domain.
-ARG MERCUR_BACKEND_URL=https://pokenic-backend-tltfm.ondigitalocean.app
+# through to the build task). NOTE (2026-07-15): App Platform DOES pass spec
+# envs as build-args and they OVERRIDE this default — the .do spec value is
+# authoritative; this default is the fallback and must be kept in sync.
+ARG MERCUR_BACKEND_URL=https://admin.polycards.gg
 ENV MERCUR_BACKEND_URL=$MERCUR_BACKEND_URL
 
 # Storefront origin baked into the admin bundle (vite define __STOREFRONT_URL__):
 # the admin resolves storefront-relative asset paths (/cdn, /home, /images)
 # against this, since in prod the storefront is a SEPARATE domain from the admin.
-# Hardcoded default like MERCUR_BACKEND_URL above (App Platform doesn't reliably
-# pass build-time env as build-args). Update if the storefront gets a custom domain.
-ARG MERCUR_STOREFRONT_URL=https://pokenic-storefront-ijfiu.ondigitalocean.app
+# Fallback default like MERCUR_BACKEND_URL above — the .do spec env overrides
+# it at build time; keep in sync with the spec.
+ARG MERCUR_STOREFRONT_URL=https://polycards.gg
 ENV MERCUR_STOREFRONT_URL=$MERCUR_STOREFRONT_URL
 
 # Full source, then build (turbo: medusa build -> packages/api/.medusa,

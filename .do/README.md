@@ -3,14 +3,20 @@
 Single source of truth for the two App Platform apps. **Edit these files, then
 apply** — never edit the apps in the DO web UI (that silently drifts from git).
 
-| App                     | Spec                  | App ID                                 | URL                                                 |
-| ----------------------- | --------------------- | -------------------------------------- | --------------------------------------------------- |
-| Backend (Medusa/Mercur) | `backend.app.yaml`    | `9011b06c-9908-4223-bf64-f96f66d702fa` | https://pokenic-backend-tltfm.ondigitalocean.app    |
-| Storefront (Next.js)    | `storefront.app.yaml` | `a3625ff4-64b3-41e8-8677-d08b65b9bbba` | https://pokenic-storefront-ijfiu.ondigitalocean.app |
+| App                     | Spec                  | App ID                                 | Custom domain              | Default hostname                                      |
+| ----------------------- | --------------------- | -------------------------------------- | -------------------------- | ----------------------------------------------------- |
+| Backend (Medusa/Mercur) | `backend.app.yaml`    | `7fd66ea2-0105-420b-87eb-8a4606262561` | https://admin.polycards.gg | https://polycards-backend-gce6p.ondigitalocean.app    |
+| Storefront (Next.js)    | `storefront.app.yaml` | `4bf179e0-70a8-4fd7-bd25-9be43e9d0319` | https://polycards.gg       | https://polycards-storefront-fzrft.ondigitalocean.app |
 
-The apps are named `polycards-backend` / `polycards-storefront`, but their default
-hostnames stay `polycards-*` — DO assigns those at creation and a rename does not
-change them. Both names above are correct; don't "fix" either to match the other.
+Both apps were **recreated from scratch 2026-07-16** (the original apps carried
+frozen `pokenic-*` default hostnames from creation; DO can't rename a default
+hostname, so the only way to get `polycards-*` ones was destroy + recreate). The
+recreate: create new app from the spec (no domains) → add the new app to the DB
+trusted sources → verify on its default host → move the custom domain + flip the
+Cloudflare CNAME to the new default host → destroy the old app. The default
+hostnames above have random suffixes DO assigns at creation; they're referenced
+in the Dockerfile ARG defaults / storefront `NEXT_PUBLIC_MEDUSA_BACKEND_URL` only
+as fallbacks — the custom domains are the real origins.
 
 ## Secrets
 
@@ -72,7 +78,7 @@ a rollback runs OLD code against the NEW schema.
 
 ## Backups & restore
 
-The managed Postgres cluster (`pokenic-pg`, `production: true`) takes **daily
+The managed Postgres cluster (`polycards-pg`, `production: true`) takes **daily
 automatic backups** (verified 2026-07-07: daily snapshots at ~06:48 UTC, 7-day
 retention) and supports point-in-time recovery:
 

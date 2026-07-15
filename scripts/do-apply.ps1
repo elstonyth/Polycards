@@ -19,8 +19,8 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 
 $ids = @{
-  backend    = '9011b06c-9908-4223-bf64-f96f66d702fa'
-  storefront = 'a3625ff4-64b3-41e8-8677-d08b65b9bbba'
+  backend    = '7fd66ea2-0105-420b-87eb-8a4606262561'
+  storefront = '4bf179e0-70a8-4fd7-bd25-9be43e9d0319'
 }
 
 $tmpl = Join-Path $root ".do/$App.app.yaml"
@@ -38,7 +38,7 @@ if ($App -eq 'backend') {
     $kv = $line -split '=', 2
     $secrets[$kv[0].Trim()] = $kv[1].Trim()
   }
-  foreach ($k in 'DATABASE_URL', 'REDIS_URL', 'JWT_SECRET', 'COOKIE_SECRET', 'ADMIN_PASSWORD', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY') {
+  foreach ($k in 'DATABASE_URL', 'REDIS_URL', 'JWT_SECRET', 'COOKIE_SECRET', 'ADMIN_PASSWORD', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY', 'GOOGLE_CLIENT_SECRET') {
     if (-not $secrets.ContainsKey($k) -or [string]::IsNullOrWhiteSpace($secrets[$k])) {
       throw "deploy/.env.deploy is missing a value for $k"
     }

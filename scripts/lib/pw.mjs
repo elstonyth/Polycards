@@ -10,7 +10,7 @@
 import { chromium } from 'playwright';
 
 // Target origin. Defaults to the local prod build; override to hit a deployed
-// env, e.g. PW_BASE=https://pokenic-storefront-ijfiu.ondigitalocean.app
+// env, e.g. PW_BASE=https://polycards.gg
 export const BASE = process.env.PW_BASE || 'http://localhost:4000';
 
 export function launch(opts = {}) {
