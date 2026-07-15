@@ -159,18 +159,21 @@ export default async function MePage() {
                 )}
               </div>
               <span className="relative shrink-0">
-                {/* Soft amber halo behind the wordmark. */}
+                {/* Soft amber halo behind the badge. */}
                 <span
                   aria-hidden
                   className="bg-chase/25 absolute left-1/2 top-1/2 h-12 w-24 -translate-x-1/2 -translate-y-1/2 rounded-full blur-xl"
                 />
+                {/* Transparent-background asset — no blend mode needed (the
+                    old wordmark was black-field + mix-blend-screen, which
+                    broke inside any ancestor with opacity < 1). */}
                 <Image
-                  src="/images/app/vip-wordmark.webp"
+                  src="/images/app/vip-badge.webp"
                   alt=""
                   aria-hidden
-                  width={480}
-                  height={261}
-                  className="relative h-9 w-auto mix-blend-screen"
+                  width={761}
+                  height={360}
+                  className="relative h-9 w-auto"
                 />
               </span>
             </Link>
