@@ -43,8 +43,7 @@ export type AuthCustomer = {
 };
 
 export type AuthResult =
-  | { ok: true; customer: AuthCustomer }
-  | { ok: false; error: string };
+  { ok: true; customer: AuthCustomer } | { ok: false; error: string };
 
 type TokenResponse = { token: string };
 
