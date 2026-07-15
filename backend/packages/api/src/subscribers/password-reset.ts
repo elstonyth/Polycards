@@ -17,23 +17,25 @@ export default async function passwordResetHandler({
   const logger = container.resolve('logger');
 
   // SECURITY (audit 2026-07-15, CWE-532): the reset token is a 15m single-use
-  // credential — logging it in production would let anyone with log access
-  // (DO runtime logs, a SIEM/Sentry sink) complete an account takeover for any
-  // email, including admin `user` actors. So the raw token is emitted ONLY in
-  // non-production (local/dev/test), where the log IS the dev mail transport.
-  // In production the token must never hit the logs; wire a real notification
+  // credential — logging it would let anyone with log access (DO runtime logs, a
+  // SIEM/Sentry sink) complete an account takeover for any email, including admin
+  // `user` actors. So the raw token is emitted ONLY in an EXPLICIT dev/test env,
+  // where the log IS the dev mail transport. This is an allowlist (fail CLOSED),
+  // mirroring modules/packs/topup.ts `mockTopupAllowed`: any other value —
+  // production, prod, staging, or an unset/unexpected NODE_ENV — suppresses the
+  // token, so a misconfigured deploy can never leak it. Wire a real notification
   // provider (Resend/SendGrid) before the storefront reset flow launches.
-  const isProduction =
-    process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'prod';
+  const isDevOrTest =
+    process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
 
   // Only customers have a storefront reset page. Other actor types (admin
   // users reset via their own dashboards) still get the token logged so a
-  // dev can complete the flow by hand — non-production only.
+  // dev can complete the flow by hand — dev/test only.
   if (data.actor_type !== 'customer') {
-    if (isProduction) {
+    if (!isDevOrTest) {
       // TODO: deliver via the notification module for non-customer actors.
       logger.warn(
-        `[password-reset] reset requested for ${data.actor_type} "${data.entity_id}" — delivery not configured (no token logged in production).`,
+        `[password-reset] reset requested for ${data.actor_type} "${data.entity_id}" — delivery not configured (token not logged outside dev/test).`,
       );
       return;
     }
@@ -51,11 +53,11 @@ export default async function passwordResetHandler({
     data.token,
   )}&email=${encodeURIComponent(data.entity_id)}`;
 
-  if (isProduction) {
+  if (!isDevOrTest) {
     // TODO: send `url` to `data.entity_id` via the notification module. Never
-    // log the token/link in production.
+    // log the token/link outside dev/test.
     logger.warn(
-      `[password-reset] reset requested for ${data.entity_id} — delivery not configured (no link logged in production).`,
+      `[password-reset] reset requested for ${data.entity_id} — delivery not configured (link not logged outside dev/test).`,
     );
     return;
   }

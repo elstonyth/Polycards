@@ -129,9 +129,12 @@ const mediaUploadMiddleware = (
 const blockUnusedVendorSelfRegistration = (
   _req: MedusaRequest,
   _res: MedusaResponse,
-  _next: MedusaNextFunction,
+  next: MedusaNextFunction,
 ): void => {
-  throw new MedusaError(MedusaError.Types.NOT_FOUND, 'Not found');
+  // next(err) — the repo convention for surfacing a middleware error into
+  // Medusa's error handler (see mediaUploadMiddleware above and
+  // utils/reset-token-guard.ts), rather than throwing.
+  next(new MedusaError(MedusaError.Types.NOT_FOUND, 'Not found'));
 };
 
 export default defineMiddlewares({
