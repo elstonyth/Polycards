@@ -125,6 +125,23 @@ envs:
     scope: RUN_TIME
     type: SECRET
     value: __SECRET__S3_SECRET_ACCESS_KEY__
+  # Google OAuth (storefront customer social login). All three are required for
+  # the `google` auth provider to register (medusa-config.ts gates on them; a
+  # missing one boots emailpass-only). CLIENT_ID + CALLBACK_URL are non-secret;
+  # CLIENT_SECRET is injected from deploy/.env.deploy at apply time (do-apply.ps1
+  # secret list). CALLBACK_URL is the default the storefront overrides per-request
+  # with its own origin — it must match an Authorised redirect URI on the OAuth
+  # client (Cloud project "polycards").
+  - key: GOOGLE_CLIENT_ID
+    scope: RUN_TIME
+    value: 206640157304-h2jhoblti14pd96pik0im4l66s0a6o0v.apps.googleusercontent.com
+  - key: GOOGLE_CLIENT_SECRET
+    scope: RUN_TIME
+    type: SECRET
+    value: __SECRET__GOOGLE_CLIENT_SECRET__
+  - key: GOOGLE_CALLBACK_URL
+    scope: RUN_TIME
+    value: https://polycards.gg/auth/google/callback
   # ╔═══════════════════════════════════════════════════════════════════════╗
   # ║ GO-LIVE BLOCKER — DELETE THIS ENV BEFORE REAL LAUNCH.                  ║
   # ║ 'unsafe-demo' runs the always-approving MOCK payment gateway in prod   ║

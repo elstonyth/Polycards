@@ -38,7 +38,7 @@ if ($App -eq 'backend') {
     $kv = $line -split '=', 2
     $secrets[$kv[0].Trim()] = $kv[1].Trim()
   }
-  foreach ($k in 'DATABASE_URL', 'REDIS_URL', 'JWT_SECRET', 'COOKIE_SECRET', 'ADMIN_PASSWORD', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY') {
+  foreach ($k in 'DATABASE_URL', 'REDIS_URL', 'JWT_SECRET', 'COOKIE_SECRET', 'ADMIN_PASSWORD', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY', 'GOOGLE_CLIENT_SECRET') {
     if (-not $secrets.ContainsKey($k) -or [string]::IsNullOrWhiteSpace($secrets[$k])) {
       throw "deploy/.env.deploy is missing a value for $k"
     }
