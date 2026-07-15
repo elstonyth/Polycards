@@ -9,6 +9,10 @@ const eslintConfig = defineConfig([
   globalIgnores([
     // Default ignores of eslint-config-next:
     '.next/**',
+    // scripts/serve-standalone.ps1 copies the standalone bundle here
+    // (gitignored) — without this, lint after a local serve reports thousands
+    // of phantom problems in build output.
+    '.next-serve/**',
     'out/**',
     'build/**',
     'next-env.d.ts',
