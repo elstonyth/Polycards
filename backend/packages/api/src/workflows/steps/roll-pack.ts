@@ -1,9 +1,27 @@
+import { randomInt } from 'node:crypto';
 import { createStep, StepResponse } from '@medusajs/framework/workflows-sdk';
 import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
 import { pickWonRow } from '../../modules/packs/pick';
 import { pageAll } from '../../api/utils/page-all';
+
+// Cryptographically-secure, UNBIASED integer roll in [0, bound). This is a
+// money-determining draw (it decides which card — and therefore its FMV/buyback
+// value — the customer wins), so it must use a CSPRNG, matching the reward-box
+// draw and pack-open ids. crypto.randomInt uses rejection sampling, so unlike
+// `randomBytes()/2**48` (division introduces modulo bias — CodeQL
+// js/biased-cryptographic-random) every value in [0, bound) is exactly equally
+// likely. Pack weights are normalized to integer basis points (Σweight = 10000),
+// so `bound` is an integer in practice; floor guards a legacy fractional total
+// (randomInt requires an integer max) and Math.max(1, …) guards the lower edge
+// (fetchPackData already throws on totalWeight <= 0). A roll in [0, bound) is
+// always < Σweight, so pickWonRow's last-row fallback is a pure safety net.
+// Exported for a direct range/distribution unit test — not called from any
+// route; production draws always use the default below.
+export function secureRoll(bound: number): number {
+  return randomInt(Math.max(1, Math.floor(bound)));
+}
 
 type RollPackInput = {
   pack_id: string; // = Pack.slug
@@ -94,15 +112,19 @@ export async function fetchPackData(
 }
 
 // drawFromData — performs ONE independent weighted draw from pre-fetched pack data.
-// This is the per-roll logic: a new Math.random() per call ensures draw independence.
+// This is the per-roll logic: a fresh CSPRNG draw per call ensures draw independence.
 // listCards is intentionally kept HERE (not hoisted) because it fetches the
 // specific card that WAS won — it varies per roll and must stay per-draw.
+// `roll` defaults to a fresh CSPRNG value in [0, totalWeight); it is injectable
+// ONLY so tests can force a specific winner deterministically — production always
+// uses the secure default (there is no caller-supplied roll on any real path).
 export async function drawFromData(
   packs: PacksModuleService,
   odds: PackData['odds'],
   totalWeight: number,
+  roll: number = secureRoll(totalWeight),
 ): Promise<RolledCard> {
-  const won = pickWonRow(odds, Math.random() * totalWeight);
+  const won = pickWonRow(odds, roll);
   const [card] = await packs.listCards({ handle: won.card_id }, { take: 1 });
   if (!card)
     throw new MedusaError(
@@ -140,8 +162,8 @@ export async function rollOne(
 
 // roll-pack — read-only step: validate the pack is active, then pick a winner
 // over its weighted PackOdds table. No mutation, so no compensation. The weighted
-// draw runs at execution time, so Math.random here is correct (the composition
-// body, which runs at load time, must never contain this logic).
+// draw runs at execution time (inside the step body, never the composition body
+// which runs at load time), so the CSPRNG draw here is correct.
 export const rollPackStep = createStep(
   'roll-pack',
   async (input: RollPackInput, { container }) => {

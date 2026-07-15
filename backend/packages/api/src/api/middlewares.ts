@@ -113,6 +113,36 @@ const mediaUploadMiddleware = (
   });
 };
 
+// SECURITY (audit 2026-07-15): this is a single-house-seller deploy with no
+// peer-to-peer vendor onboarding. The bundled @mercurjs/core plugin still mounts
+// the public vendor self-registration surface, and Mercur's `seller_registration:
+// false` flag is UI-visibility only — it does NOT gate the API. `POST
+// /vendor/sellers` is guarded by authenticate('member', …, { allowUnregistered:
+// true }), so anyone could POST /auth/member/emailpass/register then POST
+// /vendor/sellers to create a real seller+store+membership in prod. This
+// middleware hard-404s the two registration entrypoints so the surface is
+// genuinely closed (app middleware applies to plugin routes here, same as the
+// /auth/*/emailpass rate-limit entries below). The house seller is seeded
+// server-side (not via this HTTP route) and logs in via POST /auth/member/
+// emailpass (authenticate, NOT /register), so neither is affected.
+//
+// NOTE: blocking /auth/member/emailpass/register also gates seller-STAFF
+// onboarding — invite-accept (POST /vendor/members/invites/accept) needs an
+// invitee to first mint a member auth identity via /register. That flow is
+// dormant here (single house seller, no staff invites) and intentionally
+// closed. When P2P/staff onboarding is built, re-open /register behind the
+// invite-gating rather than removing this block wholesale.
+const blockUnusedVendorSelfRegistration = (
+  _req: MedusaRequest,
+  _res: MedusaResponse,
+  next: MedusaNextFunction,
+): void => {
+  // next(err) — the repo convention for surfacing a middleware error into
+  // Medusa's error handler (see mediaUploadMiddleware above and
+  // utils/reset-token-guard.ts), rather than throwing.
+  next(new MedusaError(MedusaError.Types.NOT_FOUND, 'Not found'));
+};
+
 // Root landing (GET /). This is a headless Medusa/Mercur server with no page at
 // "/", so hitting the bare origin (admin.polycards.gg) returned Express's default
 // "Cannot GET /" 404. The only human-facing surface on this host is the admin
@@ -144,6 +174,22 @@ export default defineMiddlewares({
       matcher: '/',
       method: 'GET',
       middlewares: [redirectRootToDashboard],
+    },
+    {
+      // See blockUnusedVendorSelfRegistration above — refuse anonymous seller
+      // self-registration (the money-irrelevant but prod-DB-polluting surface).
+      matcher: '/vendor/sellers',
+      method: 'POST',
+      middlewares: [blockUnusedVendorSelfRegistration],
+    },
+    {
+      // Defense-in-depth: refuse new `member`-actor self-registration too, so no
+      // anonymous member auth identity can be minted. Member LOGIN (POST
+      // /auth/member/emailpass, no /register) is deliberately NOT matched — the
+      // seeded house seller needs it for the /seller vendor dashboard.
+      matcher: '/auth/member/emailpass/register',
+      method: 'POST',
+      middlewares: [blockUnusedVendorSelfRegistration],
     },
     {
       // Validated admin image upload (POST /admin/media). /admin/* is already

@@ -31,7 +31,7 @@ export const rollPackBatchStep = createStep(
     // Fix 1 — hoist pack/odds fetch: one DB round-trip for the entire batch
     const data = await fetchPackData(packs, input.pack_id);
 
-    // Each drawFromData call is independent (new Math.random() per call).
+    // Each drawFromData call is independent (fresh CSPRNG draw per call).
     // listCards stays inside drawFromData — it varies per winning card.
     const cards: RolledCard[] = [];
     for (let i = 0; i < input.count; i++) {
