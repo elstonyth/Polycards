@@ -107,12 +107,12 @@ export function SlotReelStack({
                 cellSize={cellSize}
                 decoyCards={decoyPools?.[i]}
                 onSettled={winners ? handleColSettled : undefined}
-                // Only the LAST column feeds the tick track — one clean source
-                // that syncs to the reel you watch land, instead of every strip
-                // firing at once (which read as unsynced noise).
-                onCellCross={
-                  winners && i === count - 1 ? onCellCross : undefined
-                }
+                // EVERY reel feeds the tick track, so 1/2/3 reels sound like
+                // 1/2/3 reels running: each strip ticks its own cells crossing
+                // the line, and because they stop staggered L→R you hear the
+                // reels decelerate and lock one after another. (Only the ticks
+                // multiply — the reveal/riser/bed stay single, fired once.)
+                onCellCross={winners ? onCellCross : undefined}
                 onWinnerRect={
                   onWinnerRect ? (rect) => onWinnerRect(i, rect) : undefined
                 }
