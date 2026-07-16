@@ -174,5 +174,5 @@ Pure slot-strip geometry and physics primitives that animate the reveal. UI math
 no domain meaning.
 
 **Slab**:
-The baked graded-card composite image (frame + photo, one webp) shown for a
+The baked graded-card composite image (frame + photo, one WebP) shown for a
 graded Card.
