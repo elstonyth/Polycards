@@ -578,12 +578,18 @@ export default function SlotMachineClient({
     return () => clearTimeout(id);
   }, [phase, spin?.nonce, reels, handleSettled]);
 
-  // Per-cell tick: the LAST strip calls this as each Pokémon centers on the
-  // winning line. Measured, the crossings already form a clean accelerate→
-  // decelerate arc (min gap ~74ms, never a rattle) landing on the winner lock,
-  // so no throttle is needed — every crossing gets one crisp woody tick, kept
-  // in exact sync with the reel because it IS reel-position-driven.
+  // Per-cell tick: EVERY reel calls this as one of its Pokémon centers on the
+  // winning line, so multi-reel spins sound multi-reel. A single reel never
+  // crosses cells faster than ~74ms apart, so this ~18ms floor never drops a
+  // reel's own ticks — it only collapses the rare case where two reels cross
+  // within a blink (heard as one tick anyway), so overlapping reels can't stack
+  // into a harsh coincident peak. Keeps the multi-reel cascade and the loud
+  // single-reel tick, just tames the density.
+  const lastTickAt = useRef(0);
   const handleCellCross = useCallback(() => {
+    const now = performance.now();
+    if (now - lastTickAt.current < 18) return;
+    lastTickAt.current = now;
     sfx('reelTick');
   }, [sfx]);
 
