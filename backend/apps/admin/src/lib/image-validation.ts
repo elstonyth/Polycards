@@ -28,6 +28,8 @@ const PROFILES: Record<
     minHeight: number;
     targetRatio: number;
     aspectTolerance: number;
+    /** Optional per-profile cap; falls back to MAX_DIMENSION. */
+    maxDimension?: number;
   }
 > = {
   card: {
@@ -35,6 +37,8 @@ const PROFILES: Record<
     minHeight: 840,
     targetRatio: 5 / 7,
     aspectTolerance: 0.03,
+    // Mirrors validate.ts: card art is a composeSlab input decoded at 32 MP.
+    maxDimension: 5500,
   },
   pack: {
     minWidth: 512,
@@ -60,6 +64,8 @@ const PROFILES: Record<
     minHeight: 640,
     targetRatio: 0.62,
     aspectTolerance: 0.08,
+    // Mirrors validate.ts: the slab frame is a composeSlab input decoded at 32 MP.
+    maxDimension: 5500,
   },
   'avatar-frame': {
     minWidth: 256,
@@ -108,11 +114,12 @@ export async function validateImageFile(
   if (dim.width <= 0 || dim.height <= 0) {
     return 'Could not read the image dimensions.';
   }
-  if (dim.width > MAX_DIMENSION || dim.height > MAX_DIMENSION) {
-    return `Image is too large — keep each side ≤ ${MAX_DIMENSION}px.`;
+  const profile = PROFILES[kind];
+  const maxDim = profile.maxDimension ?? MAX_DIMENSION;
+  if (dim.width > maxDim || dim.height > maxDim) {
+    return `Image is too large — keep each side ≤ ${maxDim}px.`;
   }
 
-  const profile = PROFILES[kind];
   if (dim.width < profile.minWidth || dim.height < profile.minHeight) {
     const label =
       kind === 'card'

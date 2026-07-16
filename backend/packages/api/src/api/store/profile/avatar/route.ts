@@ -14,6 +14,12 @@ import { validateImage } from '../../../admin/media/validate';
 // Tighter than the shared 20 MB multer edge cap — avatars are small.
 const AVATAR_MAX_BYTES = 5 * 1024 * 1024;
 
+// Defense-in-depth on the sharp decode: even if validateImage's per-profile
+// dimension cap were bypassed, refuse to materialize a raster larger than a
+// generous avatar ceiling (16.7 MP >> the 2048×2048 = 4.2 MP the avatar profile
+// allows, but << a 64 MP decode bomb). Bounds decode/encode CPU+RAM per request.
+const AVATAR_MAX_PIXELS = 4096 * 4096;
+
 type UploadedFile = {
   buffer: Buffer;
   originalname: string;
@@ -80,7 +86,10 @@ export async function POST(
   // orientation first so the strip doesn't sideways-flip portrait shots.
   let clean: Buffer;
   try {
-    clean = await sharp(file.buffer).rotate().webp({ quality: 90 }).toBuffer();
+    clean = await sharp(file.buffer, { limitInputPixels: AVATAR_MAX_PIXELS })
+      .rotate()
+      .webp({ quality: 90 })
+      .toBuffer();
   } catch {
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,

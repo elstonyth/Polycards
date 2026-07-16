@@ -1975,17 +1975,34 @@ class PacksModuleService extends MedusaService({
               take: 1000,
             },
           );
-          const levelLadder = ladderRows.map((r) => ({
-            level: r.level,
-            spend_threshold: Number(r.spend_threshold),
-          }));
-          const pctLadder = ladderRows.map((r) => ({
-            level: r.level,
-            direct_referral_pct: Number(r.direct_referral_pct),
-          }));
-          const sponsorLevel = levelForSpend(sponsorLifetimeMyr, levelLadder);
-          const pct = directReferralPctForLevel(sponsorLevel, pctLadder);
-          const commissionSen = directCommissionSen(basisSen, pct);
+          // vip_level unseeded (migrations-without-seed) → skip the commission
+          // fan-out rather than aborting the recruit's PAID open: a reward-like
+          // grant must never void a paid charge (mirrors settleVipStep's
+          // best-effort design; levelForSpend throws on an empty ladder). With a
+          // PARTIALLY-seeded ladder levelForSpend still returns a present rung so
+          // directReferralPctForLevel resolves (no throw); a rung whose
+          // direct_referral_pct is NULL/0 simply pays 0% — sponsor under-payment,
+          // house-favorable — so this fully-empty guard is the only degradation.
+          let pct = 0;
+          let commissionSen = 0;
+          if (ladderRows.length === 0) {
+            // eslint-disable-next-line no-console
+            console.warn(
+              `settleOpen: vip_level ladder is empty — skipping commission for open '${input.sourceTransactionId}' (recruit '${input.customerId}', sponsor '${sponsorId}'). Seed vip_level.`,
+            );
+          } else {
+            const levelLadder = ladderRows.map((r) => ({
+              level: r.level,
+              spend_threshold: Number(r.spend_threshold),
+            }));
+            const pctLadder = ladderRows.map((r) => ({
+              level: r.level,
+              direct_referral_pct: Number(r.direct_referral_pct),
+            }));
+            const sponsorLevel = levelForSpend(sponsorLifetimeMyr, levelLadder);
+            pct = directReferralPctForLevel(sponsorLevel, pctLadder);
+            commissionSen = directCommissionSen(basisSen, pct);
+          }
 
           if (commissionSen > 0) {
             // Thread sharedContext so the settings read runs on THIS locked txn.

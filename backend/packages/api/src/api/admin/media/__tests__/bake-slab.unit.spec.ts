@@ -29,7 +29,10 @@ describe('isAllowedImageUrl', () => {
     ['IPv4-mapped IPv6 loopback', 'http://[::ffff:127.0.0.1]/x.png'],
     ['IPv4-mapped IPv6 metadata', 'http://[::ffff:169.254.169.254]/x.png'],
     ['IPv6 link-local fe80', 'http://[fe80::1]/x.png'],
-    ['IPv6 link-local mid-range (fe80::/10 is fe80-febf)', 'http://[fe95::1]/x.png'],
+    [
+      'IPv6 link-local mid-range (fe80::/10 is fe80-febf)',
+      'http://[fe95::1]/x.png',
+    ],
     ['IPv6 link-local range top', 'http://[febf::1]/x.png'],
     ['file: scheme', 'file:///etc/passwd'],
     ['protocol-relative', '//evil.example.com/x.png'],
@@ -102,13 +105,23 @@ describe('composeSlab', () => {
   const makeFrame = (w: number, h: number) =>
     sharp({
       // fully transparent "frame" — lets the test sample the photo underneath
-      create: { width: w, height: h, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
+      create: {
+        width: w,
+        height: h,
+        channels: 4,
+        background: { r: 0, g: 0, b: 0, alpha: 0 },
+      },
     })
       .png()
       .toBuffer();
   const makePhoto = () =>
     sharp({
-      create: { width: 300, height: 420, channels: 3, background: { r: 255, g: 0, b: 0 } },
+      create: {
+        width: 300,
+        height: 420,
+        channels: 3,
+        background: { r: 255, g: 0, b: 0 },
+      },
     })
       .png()
       .toBuffer();
@@ -135,8 +148,47 @@ describe('composeSlab', () => {
   });
 
   it('caps output at 1600px wide', async () => {
-    const out = await composeSlab(await makeFrame(3200, 5352), await makePhoto());
+    const out = await composeSlab(
+      await makeFrame(3200, 5352),
+      await makePhoto(),
+    );
     const meta = await sharp(out).metadata();
     expect(meta.width).toBe(1600);
+  });
+
+  // Decode-bomb guard: fetchBytes caps BYTES (20 MB) but not DIMENSIONS, so a
+  // low-entropy megapixel image from an admin-set slab_frame_url / card.image
+  // would drive a full-raster sharp decode (same primitive as the avatar route).
+  // composeSlab must refuse to decode an image whose pixel count exceeds the
+  // ceiling instead of materializing it. (Legit frames — e.g. the 17 MP frame in
+  // the 1600px-cap test above — stay under the ceiling.)
+  it('refuses to decode an over-limit frame (36 MP > ceiling)', async () => {
+    await expect(
+      composeSlab(await makeFrame(6000, 6000), await makePhoto()),
+    ).rejects.toThrow();
+  });
+
+  it('refuses to decode an over-limit card photo (36 MP > ceiling)', async () => {
+    await expect(
+      composeSlab(await makeFrame(400, 669), await makeFrame(6000, 6000)),
+    ).rejects.toThrow();
+  });
+
+  // The old cap was width-only, so a frame narrower than MAX_FRAME_WIDTH but
+  // pathologically TALL skipped the resize entirely and ballooned the create
+  // canvas + composite (fw×fh RGBA). Bound the height too — downscaling to fit
+  // (aspect preserved), never a silent bake failure.
+  it('downscales a pathologically tall frame to bound the composite canvas', async () => {
+    const out = await composeSlab(await makeFrame(1000, 9000), await makePhoto());
+    const meta = await sharp(out).metadata();
+    expect(meta.height).toBe(4000); // capped
+    expect(meta.width).toBe(444); // aspect preserved (1000 × 4000/9000)
+  });
+
+  it('does not upscale a small frame', async () => {
+    const out = await composeSlab(await makeFrame(400, 669), await makePhoto());
+    const meta = await sharp(out).metadata();
+    expect(meta.width).toBe(400);
+    expect(meta.height).toBe(669);
   });
 });
