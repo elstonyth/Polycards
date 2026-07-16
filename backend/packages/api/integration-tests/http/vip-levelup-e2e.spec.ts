@@ -48,12 +48,16 @@ medusaIntegrationTestRunner({
         authorization: `Bearer ${token}`,
       });
 
-      const registerCustomer = async (email: string): Promise<string> => {
+      // Returns the id alongside the token so every assertion can be scoped to
+      // THIS customer rather than relying on a globally-empty table.
+      const registerCustomer = async (
+        email: string,
+      ): Promise<{ token: string; id: string }> => {
         const reg = await api.post('/auth/customer/emailpass/register', {
           email,
           password: PASSWORD,
         });
-        await api.post(
+        const created = await api.post(
           '/store/customers',
           { email },
           {
@@ -67,7 +71,7 @@ medusaIntegrationTestRunner({
           email,
           password: PASSWORD,
         });
-        return login.data.token;
+        return { token: login.data.token, id: created.data.customer.id };
       };
 
       const open = (headers: Record<string, string>) =>
@@ -106,22 +110,25 @@ medusaIntegrationTestRunner({
         const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
 
         // The integration runner runs migrations but NOT the seed, so vip_level
-        // is empty by default — seed the canonical ladder ourselves (an empty
-        // ladder is itself a real prod failure mode, checked in the last case).
-        const existingLadder = await packs.listVipLevels({}, { take: 1 });
-        if (existingLadder.length === 0) {
-          await packs.createVipLevels(
-            VIP_LEVELS.map((r) => ({
-              level: r.level,
-              spend_threshold: r.spend_threshold,
-              voucher_amount: r.voucher_amount,
-              box_tier: r.box_tier,
-              frame_unlock: r.frame_unlock,
-              direct_referral_pct: r.direct_referral_pct,
-              prizes: r.prizes ?? null,
-            })),
-          );
+        // is empty by default. Establish the CANONICAL ladder unconditionally
+        // rather than "seed only when empty": the last case wipes the ladder,
+        // so a conditional seed would silently accept whatever a prior//future
+        // test happened to leave behind.
+        const staleLadder = await packs.listVipLevels({}, { take: 1000 });
+        if (staleLadder.length > 0) {
+          await packs.deleteVipLevels(staleLadder.map((r) => r.id));
         }
+        await packs.createVipLevels(
+          VIP_LEVELS.map((r) => ({
+            level: r.level,
+            spend_threshold: r.spend_threshold,
+            voucher_amount: r.voucher_amount,
+            box_tier: r.box_tier,
+            frame_unlock: r.frame_unlock,
+            direct_referral_pct: r.direct_referral_pct,
+            prizes: r.prizes ?? null,
+          })),
+        );
 
         // Single-card pool → deterministic roll (the only card always wins).
         await packs.createPacks([
@@ -207,7 +214,9 @@ medusaIntegrationTestRunner({
       });
 
       it('a fresh customer sits at L1 with the L2 teaser and no grants', async () => {
-        const token = await registerCustomer('vip-e2e-fresh@test.dev');
+        const { token, id: customerId } = await registerCustomer(
+          'vip-e2e-fresh@test.dev',
+        );
 
         const res = await getVip(authed(token));
         expect(res.status).toBe(200);
@@ -223,12 +232,17 @@ medusaIntegrationTestRunner({
         expect(res.data.next.reward).toHaveProperty('box_tier');
 
         const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
-        const grants = await packs.listVipRewardGrants({}, { take: 100 });
+        const grants = await packs.listVipRewardGrants(
+          { customer_id: customerId },
+          { take: 100 },
+        );
         expect(grants).toHaveLength(0);
       });
 
       it('opens crossing L2+L3 advance the level, grant vouchers, and surface on /store/vip', async () => {
-        const token = await registerCustomer('vip-e2e-climb@test.dev');
+        const { token, id: customerId } = await registerCustomer(
+          'vip-e2e-climb@test.dev',
+        );
 
         expect((await topUp(TOPUP, authed(token))).status).toBe(200);
 
@@ -253,7 +267,10 @@ medusaIntegrationTestRunner({
 
         // --- Grant path: L2 + L3 voucher rows landed via the in-saga settle ---
         const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
-        const grants = await packs.listVipRewardGrants({}, { take: 100 });
+        const grants = await packs.listVipRewardGrants(
+          { customer_id: customerId },
+          { take: 100 },
+        );
         const byLevel = new Map(grants.map((g) => [Number(g.level), g]));
         // L2 (voucher 2) and L3 (voucher 2) both have voucher_amount > 0, no
         // frame_unlock, so exactly one 'voucher' grant each — 2 rows total.
@@ -268,7 +285,10 @@ medusaIntegrationTestRunner({
         }
 
         // --- Member-state projection matches the ledger ----------------------
-        const [state] = await packs.listVipMemberStates({}, { take: 1 });
+        const [state] = await packs.listVipMemberStates(
+          { customer_id: customerId },
+          { take: 1 },
+        );
         expect(Number(state.current_level)).toBe(EXPECTED_LEVEL);
         expect(Number(state.highest_level_ever)).toBe(EXPECTED_LEVEL);
       });
@@ -281,7 +301,7 @@ medusaIntegrationTestRunner({
         const ladder = await packs.listVipLevels({}, { take: 1000 });
         await packs.deleteVipLevels(ladder.map((r) => r.id));
 
-        const token = await registerCustomer('vip-e2e-noladder@test.dev');
+        const { token } = await registerCustomer('vip-e2e-noladder@test.dev');
         await topUp(TOPUP, authed(token));
         for (let i = 0; i < OPENS; i++) {
           expect((await open(authed(token))).status).toBe(200);
