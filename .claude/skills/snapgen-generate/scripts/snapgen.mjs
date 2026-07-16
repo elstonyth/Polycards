@@ -18,9 +18,10 @@
 //        chroma-key the download to a real-alpha, subject-trimmed *-alpha.png;
 //        needs sharp resolvable from cwd or SHARP_PATH — no API supports
 //        native transparency, this is the reliable substitute)
-import { openAsBlob } from 'node:fs';
-import { writeFile, mkdir } from 'node:fs/promises';
-import { readFileSync } from 'node:fs';
+import { openAsBlob, createWriteStream, readFileSync } from 'node:fs';
+import { mkdir } from 'node:fs/promises';
+import { pipeline } from 'node:stream/promises';
+import { Readable } from 'node:stream';
 import { basename, join, extname, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -29,9 +30,12 @@ const POLL_MS = Number(process.env.SNAPGEN_POLL_MS || 5000);
 const TIMEOUT_MS = Number(process.env.SNAPGEN_TIMEOUT_MS || 15 * 60_000);
 
 // Key: env var, else auto-load from a .env in cwd or the skill root — the key
-// value must never appear in argv, logs, or output.
+// value must never appear in argv, logs, or output. An env var that is SET
+// (even to empty) wins and disables the dotenv fallback: callers like test
+// harnesses set it to '' precisely to opt out of file-based keys, and falling
+// through would let a stray .env make real billable requests.
 function loadKey() {
-  if (process.env.SNAPGEN_API_KEY) return process.env.SNAPGEN_API_KEY;
+  if ('SNAPGEN_API_KEY' in process.env) return process.env.SNAPGEN_API_KEY;
   const skillRoot = dirname(dirname(fileURLToPath(import.meta.url)));
   for (const dir of [process.cwd(), skillRoot]) {
     try {
@@ -54,6 +58,11 @@ const VIDEO_PATHS = {
   meta: 'video-gen/meta',
 };
 
+const die = (msg) => {
+  console.error(msg);
+  process.exit(1);
+};
+
 // --- arg parsing: positionals then --key value pairs (booleans: --dry-run etc.)
 const argv = process.argv.slice(2);
 const pos = [];
@@ -64,14 +73,17 @@ for (let i = 0; i < argv.length; i++) {
   if (a.startsWith('--')) {
     const k = a.slice(2);
     if (BOOLS.has(k)) opts[k] = true;
-    else opts[k] = argv[++i];
+    else {
+      const v = argv[++i];
+      // guard: `--model --dry-run` must not eat the flag as a value (and
+      // silently drop dry-run, turning a preview into a paid request)
+      if (v === undefined || v.startsWith('--'))
+        die(`--${k} needs a value (got ${v ?? 'nothing'})`);
+      opts[k] = v;
+    }
   } else pos.push(a);
 }
 const [cmd, ...rest] = pos;
-const die = (msg) => {
-  console.error(msg);
-  process.exit(1);
-};
 if (!cmd)
   die(
     'usage: snapgen.mjs <account|image|gpt-image|grok-image|meta-image|video|extend|storyboard|status|wait|history> ... (see header comment)',
@@ -173,14 +185,15 @@ async function api(method, path, { form, query } = {}) {
   const url = new URL(`${BASE}/uapi/v1/${path}`);
   for (const [k, v] of Object.entries(query ?? {})) url.searchParams.set(k, v);
   if (dryRun) {
-    const shown = form
-      ? Object.fromEntries(
-          [...form.entries()].map(([k, v]) => [
-            k,
-            v instanceof Blob ? `<file>` : v,
-          ]),
-        )
-      : (query ?? {});
+    // repeated multipart fields (files, ref_images, file_urls) accumulate
+    // into arrays so the preview shows the EXACT request, not the last value
+    const shown = {};
+    if (form)
+      for (const [k, v] of form.entries()) {
+        const val = v instanceof Blob ? `<file>` : v;
+        shown[k] = k in shown ? [].concat(shown[k], val) : val;
+      }
+    else Object.assign(shown, query ?? {});
     console.log(
       `[dry-run] ${method} ${url}\n${JSON.stringify(shown, null, 2)}`,
     );
@@ -190,6 +203,11 @@ async function api(method, path, { form, query } = {}) {
     method,
     headers: { 'x-api-key': KEY },
     body: form,
+    // per-request deadline so waitDone's overall timeout can actually fire
+    // (a hung socket would otherwise block inside fetch forever)
+    signal: AbortSignal.timeout(
+      Number(process.env.SNAPGEN_HTTP_TIMEOUT_MS || 120_000),
+    ),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok)
@@ -363,14 +381,21 @@ async function finish(job) {
   if (!noDownload && urls.length) {
     await mkdir(outDir, { recursive: true });
     for (const [i, u] of urls.entries()) {
-      const r = await fetch(u);
+      // stream to disk (videos can be large — never buffer whole bodies),
+      // with a hard deadline so a stalled CDN can't hang the run
+      const signal = AbortSignal.timeout(
+        Number(process.env.SNAPGEN_DOWNLOAD_TIMEOUT_MS || 10 * 60_000),
+      );
+      const r = await fetch(u, { signal });
       if (!r.ok) {
         console.error(`download failed ${r.status}: ${u}`);
         continue;
       }
       const ext = extname(new URL(u).pathname) || '.bin';
       const file = join(outDir, `snapgen-${job.uuid.slice(0, 8)}-${i}${ext}`);
-      await writeFile(file, Buffer.from(await r.arrayBuffer()));
+      await pipeline(Readable.fromWeb(r.body), createWriteStream(file), {
+        signal,
+      });
       console.log(`saved ${file}`);
       if (transparent) await keyMagenta(file);
     }

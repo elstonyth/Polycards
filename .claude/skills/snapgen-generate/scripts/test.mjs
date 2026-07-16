@@ -135,6 +135,24 @@ const run = (args, env = {}) =>
   assert.ok(r.out.includes('sunrise'), 'scenes JSON must pass through');
 }
 
+// --- 2a2. dry-run preserves repeated multipart fields as arrays (exact preview) ---
+{
+  const dir = await mkdtemp(join(tmpdir(), 'snapgen-dryfiles-'));
+  await writeFile(join(dir, 'a.png'), 'A');
+  await writeFile(join(dir, 'b.png'), 'B');
+  const r = await run([
+    'image',
+    'two refs',
+    '--files',
+    `${join(dir, 'a.png')},${join(dir, 'b.png')}`,
+    '--dry-run',
+  ]);
+  await rm(dir, { recursive: true, force: true });
+  assert.strictEqual(r.code, 0, 'dry-run with files failed: ' + r.out);
+  const files = (r.out.match(/<file>/g) ?? []).length;
+  assert.strictEqual(files, 2, 'dry-run must show BOTH files, got ' + files);
+}
+
 // --- 2b. enum typo guard: warns (non-fatal) on unknown values, silent on valid ---
 {
   const bad = await run(['image', 'x', '--aspect_ratio', '7:5', '--dry-run']);
@@ -368,7 +386,13 @@ const env = {
       [CLI, 'account'],
       {
         cwd: dir, // key comes ONLY from the .env here
-        env: { ...process.env, SNAPGEN_API_KEY: '', SNAPGEN_BASE: base },
+        // the key var must be ABSENT (not empty): a set-but-empty var now
+        // deliberately disables the dotenv fallback
+        env: (() => {
+          const e = { ...process.env, SNAPGEN_BASE: base };
+          delete e.SNAPGEN_API_KEY;
+          return e;
+        })(),
         encoding: 'utf8',
         timeout: 20_000,
       },
@@ -388,6 +412,40 @@ const env = {
     !r.out.includes('envfile-key-456'),
     'env-file key must never be printed',
   );
+}
+
+// --- 4b. set-but-EMPTY key must disable the dotenv fallback and die (never
+// silently bill via a stray .env — the 2026-07-16 real-spend bug) ---
+{
+  const dir = await mkdtemp(join(tmpdir(), 'snapgen-emptykey-'));
+  await writeFile(join(dir, '.env'), 'SNAPGEN_API_KEY=stray-key-789\n');
+  const r = await new Promise((resolve) => {
+    execFile(
+      'node',
+      [CLI, 'account'],
+      {
+        cwd: dir, // a .env with a key exists here…
+        env: { ...process.env, SNAPGEN_API_KEY: '', SNAPGEN_BASE: base }, // …but env is explicitly empty
+        encoding: 'utf8',
+        timeout: 20_000,
+      },
+      (err, stdout, stderr) =>
+        resolve({ out: stdout + stderr, code: err ? (err.code ?? 1) : 0 }),
+    );
+  });
+  await rm(dir, { recursive: true, force: true });
+  assert.notStrictEqual(r.code, 0, 'empty env key must die, not read .env');
+  assert.ok(
+    !seen.some((s) => s.key === 'stray-key-789'),
+    'stray .env key must never reach the API',
+  );
+}
+
+// --- 4c. valued flags must not eat the next flag as their value ---
+{
+  const r = await run(['image', 'x', '--model', '--dry-run']);
+  assert.notStrictEqual(r.code, 0, 'missing option value must die');
+  assert.match(r.out, /--model needs a value/, 'must name the flag');
 }
 
 // --- 5. --files comma-split → TWO multipart blobs; --file_urls → two url fields ---

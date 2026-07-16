@@ -34,7 +34,7 @@ How reference images/videos/audio attach to a SnapGen request. Grounded in `scri
 
 Comma-separated **in one flag**, not a repeated flag:
 
-```
+```text
 --files hero.png,logo.png,swatch.png
 ```
 
@@ -44,7 +44,7 @@ Comma-separated **in one flag**, not a repeated flag:
 
 An image pasted into chat reaches the model as pixels, not a file on disk. Save it first, then pass the path to `--files`:
 
-```
+```powershell
 powershell -STA -NoProfile -File scripts/save-clip.ps1 docs/research/ref.png
 node scripts/snapgen.mjs image "same style, empty window" --files docs/research/ref.png --model nano-banana-2
 ```
