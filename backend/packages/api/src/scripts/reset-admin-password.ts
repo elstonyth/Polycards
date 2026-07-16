@@ -49,10 +49,19 @@ export default async function resetAdminPassword({ container }: ExecArgs) {
     body: { email, password },
   });
   if (error || !authIdentity) {
+    // register() types `error` as unknown-ish (string | Error | object), so
+    // interpolating it directly can render "[object Object]" — useless in the
+    // one message that has to tell the operator how to restore admin login.
+    const cause =
+      error instanceof Error
+        ? error.message
+        : typeof error === 'string'
+          ? error
+          : JSON.stringify(error);
     throw new Error(
       `RESET: emailpass register FAILED after the old identity was deleted — ` +
         `${email} currently has NO login. Re-run this script immediately with ` +
-        `the same ADMIN_PASSWORD to restore access. Cause: ${error}`,
+        `the same ADMIN_PASSWORD to restore access. Cause: ${cause}`,
     );
   }
   await authService.updateAuthIdentities({
