@@ -29,6 +29,7 @@ export function SlotReelStack({
   cellSize,
   decoyPools,
   onAllSettled,
+  onCellCross,
   onWinnerRect,
   hideWinners,
 }: {
@@ -44,6 +45,9 @@ export function SlotReelStack({
    *  reels read independently). Cells are the pack's own {dex, rarity}. */
   decoyPools?: readonly (readonly HReelCell[])[];
   onAllSettled?: () => void;
+  /** Fired by any strip each time a Pokémon centers on the winning line — the
+   *  parent throttles these into the synced decelerating tick track. */
+  onCellCross?: () => void;
   onWinnerRect?: (colIndex: number, rect: DOMRect) => void;
   hideWinners?: boolean;
 }) {
@@ -103,6 +107,12 @@ export function SlotReelStack({
                 cellSize={cellSize}
                 decoyCards={decoyPools?.[i]}
                 onSettled={winners ? handleColSettled : undefined}
+                // Only the LAST column feeds the tick track — one clean source
+                // that syncs to the reel you watch land, instead of every strip
+                // firing at once (which read as unsynced noise).
+                onCellCross={
+                  winners && i === count - 1 ? onCellCross : undefined
+                }
                 onWinnerRect={
                   onWinnerRect ? (rect) => onWinnerRect(i, rect) : undefined
                 }

@@ -61,7 +61,12 @@ const POKEBALL_PLACEHOLDER =
   );
 
 type Phase =
-  'idle' | 'resolving' | 'spinning' | 'flood' | 'transform' | 'review';
+  | 'idle'
+  | 'resolving'
+  | 'spinning'
+  | 'flood'
+  | 'transform'
+  | 'review';
 
 /** Highest-rarity tier present in a batch, for the room flood color. */
 function topRarityOf(cards: WonCard[]): Rarity {
@@ -119,7 +124,7 @@ export default function SlotMachineClient({
   // mirrored every render always holds the current id, closing that bypass.
   const customerIdRef = useRef<string | null>(customer?.id ?? null);
   customerIdRef.current = customer?.id ?? null;
-  const { muted, toggleMuted, play, vibrate, sfx } = useSound();
+  const { muted, toggleMuted, play, vibrate, sfx, anticipation } = useSound();
 
   // Guest-only demo: a logged-in customer on ?demo=1 gets the real machine —
   // the demo exists purely as a pre-signup taste, never a mode for players.
@@ -311,7 +316,6 @@ export default function SlotMachineClient({
       winnerRects.current = [];
       setHasSpun(true);
       sfx('ratchet');
-      play('spin');
       pending.current = {
         balance: null,
         forId: null,
@@ -340,7 +344,6 @@ export default function SlotMachineClient({
     setHasSpun(true);
     setPhase('resolving');
     sfx('ratchet');
-    play('spin');
 
     const res = await openBatch(pack.id, reels);
     if (!res.ok) {
@@ -445,6 +448,8 @@ export default function SlotMachineClient({
     const held = pending.current;
     if (!held) return;
     pending.current = null;
+    // Don't cut the bed here — the spin is now timed to the ~6s bed and the
+    // asset's own tail-fade lands on this lock, so it finishes on the beat.
 
     // Identity switched mid-spin (token refresh, multi-tab login): the charge
     // and the won cards belong to the account that spun, not whoever is signed
@@ -507,7 +512,11 @@ export default function SlotMachineClient({
     // Reduced motion collapses the theater to an immediate cut to review.
     const heldCardsCount = held.cards.length;
     setPhase('flood');
-    sfx('swell');
+    // One rising gesture, not two: the `riser` sweep carries the flood beat and
+    // the warm reveal bed fades in under it (RevealStage). The old synth `swell`
+    // was a second, redundant rise stacked on top — dropped so the lead-up reads
+    // as one seamless swell instead of two overlapping ones.
+    play('riser');
     if (floodTimer.current !== null) clearTimeout(floodTimer.current);
     if (transformTimer.current !== null) clearTimeout(transformTimer.current);
     floodTimer.current = window.setTimeout(
@@ -529,7 +538,7 @@ export default function SlotMachineClient({
     // customerIdRef (a ref) is intentionally not a dep — the guard reads its
     // live value, so handleSettled stays stable and every caller (reel prop,
     // watchdog, stale catch closure) checks the CURRENT identity.
-  }, [pack.name, pack.image, sfx, applyBalance, reduced, isDemo]);
+  }, [pack.name, pack.image, sfx, play, applyBalance, reduced, isDemo]);
 
   // Fast-forward the post-landing theater. Lands on 'review' with card backs
   // unflipped (beat 5's skip). Never affects the spin itself — the spin is not
@@ -569,6 +578,15 @@ export default function SlotMachineClient({
     return () => clearTimeout(id);
   }, [phase, spin?.nonce, reels, handleSettled]);
 
+  // Per-cell tick: the LAST strip calls this as each Pokémon centers on the
+  // winning line. Measured, the crossings already form a clean accelerate→
+  // decelerate arc (min gap ~74ms, never a rattle) landing on the winner lock,
+  // so no throttle is needed — every crossing gets one crisp woody tick, kept
+  // in exact sync with the reel because it IS reel-position-driven.
+  const handleCellCross = useCallback(() => {
+    sfx('reelTick');
+  }, [sfx]);
+
   // Reel-stop clacks: the stack owns its per-column settle internally, so fire a
   // mechanical clack at each column's stop time from here (cleared on teardown).
   useEffect(() => {
@@ -576,11 +594,19 @@ export default function SlotMachineClient({
     const ids: number[] = [];
     for (let i = 0; i < reels; i++) {
       ids.push(
-        window.setTimeout(() => sfx('clack'), columnDurationMs(i, reels)),
+        window.setTimeout(
+          () => {
+            sfx('clack');
+            // Meaty reel-lock impact, pitched up per column — rising excitement
+            // toward the last stop (classic slot trick via playbackRate).
+            play('stop', 0.9, 1 + i * 0.06);
+          },
+          columnDurationMs(i, reels),
+        ),
       );
     }
     return () => ids.forEach((id) => clearTimeout(id));
-  }, [phase, spin?.nonce, reels, sfx]);
+  }, [phase, spin?.nonce, reels, sfx, play]);
 
   // Rising tension during the final strip's crawl (spec §7d).
   useEffect(() => {
@@ -727,6 +753,7 @@ export default function SlotMachineClient({
                   reduced={reduced}
                   decoyPools={renderPools}
                   onAllSettled={handleSettled}
+                  onCellCross={handleCellCross}
                   onWinnerRect={(i, r) => {
                     winnerRects.current[i] = r;
                   }}
@@ -768,6 +795,7 @@ export default function SlotMachineClient({
                   sfx={sfx}
                   vibrate={vibrate}
                   play={play}
+                  anticipation={anticipation}
                 />
               </div>
             )}

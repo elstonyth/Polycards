@@ -4,12 +4,20 @@
 
 /** Ratchet wind-up: the strip pulls back half a cell before release. */
 export const WINDUP_MS = 180;
-/** Full-speed blur phase (columns start together; stagger extends this phase). */
-export const BLUR_MS = 1500;
-/** Friction phase: cells tick past slower and slower (longer = spec #33 landing). */
-export const FRICTION_MS = 850;
-/** Suspense crawl — LAST column only. */
-export const CRAWL_MS = 600;
+/** Full-speed blur phase (columns start together; stagger extends this phase).
+ *  Lengthened (was 1500) to give the reel a longer readable spin whose cell
+ *  crossings form a full accelerate→decelerate tick arc (the spin's sole audio;
+ *  min crossing gap measured ~74ms, so every tick stays discrete/countable). */
+export const BLUR_MS = 2200;
+/** Friction phase: cells tick past slower and slower (longer = spec #33 landing).
+ *  Lengthened (was 850) to stretch the decelerating per-cell ticks — each
+ *  Pokémon crossing the winning line reads as its own audible tick. Raising this
+ *  also SHRINKS blurPx (it's the denominator in the blur-travel derivation), so
+ *  the strip-fit headroom actually grows. */
+export const FRICTION_MS = 1300;
+/** Suspense crawl — LAST column only. Slower (was 600) for a longer readable
+ *  final descent, so the last few ticks space out and land on the winner. */
+export const CRAWL_MS = 800;
 /** Eased overshoot + settle (longer so the landing reads unhurried, spec #33). */
 export const SETTLE_MS = 380;
 /** Per-column stop stagger (L→R). */
