@@ -43,3 +43,14 @@ export const TOP_RARITIES: readonly Rarity[] = [
 export function isTopRarity(rarity: string): boolean {
   return (TOP_RARITIES as readonly string[]).includes(rarity);
 }
+
+/**
+ * Win-sound playback volume by tier: a SUBTLE taper — Immortal 1.0 down to only
+ * Common 0.85 in even steps of RARITY_ORDER. Every tier sounds almost the same,
+ * just gently tuned down as rarity drops (not a dramatic loud/quiet split).
+ * Unknown rarities read as Common (quietest).
+ */
+export function rarityWinVolume(rarity: string): number {
+  const idx = RARITY_ORDER.indexOf(rarity as Rarity);
+  return 1 - 0.03 * (idx === -1 ? RARITY_ORDER.length - 1 : idx);
+}

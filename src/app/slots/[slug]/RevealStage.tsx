@@ -11,7 +11,7 @@ import type { WonCard } from '@/lib/actions/packs';
 import type { SellBackOffer, SellBackFn, RevealFn } from './useSellWindow';
 import SellConfirmModal from '@/components/SellConfirmModal';
 import { rm } from '@/lib/format';
-import { rarityRgb, isTopRarity } from '@/lib/rarity';
+import { rarityRgb, isTopRarity, rarityWinVolume } from '@/lib/rarity';
 import type { SoundName } from '@/lib/use-sound';
 import type { SfxName } from '@/lib/slot-sfx';
 import { useSellWindow } from './useSellWindow';
@@ -38,6 +38,7 @@ export function RevealStage({
   sfx,
   vibrate,
   play,
+  anticipation,
 }: {
   phase: RevealPhase;
   cards: WonCard[];
@@ -58,7 +59,9 @@ export function RevealStage({
   onSold?: (balance: number) => void;
   sfx: (name: SfxName) => void;
   vibrate: (p: number | number[]) => void;
-  play: (name: SoundName) => void;
+  play: (name: SoundName, volume?: number) => void;
+  /** Starts the sustained anticipation pad; returns a stop() to call on reveal. */
+  anticipation: () => () => void;
 }) {
   const [flipped, setFlipped] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -84,6 +87,23 @@ export function RevealStage({
     if (phase === 'transform') sfx('chime');
   }, [phase, sfx]);
 
+  // Hold the reveal ambience from the moment the reels stop (`flood`) through
+  // the whole face-down wait, so the reel-stop → reveal handoff is continuous:
+  // the bed fades IN under the riser (in useSound) and PERSISTS across every
+  // reveal phase — the condition stays true from flood→transform→review, so the
+  // effect never re-runs and the loop never restarts. The flip (or unmount)
+  // fades it out, handing off to the win fanfare in flipAll. Reduced motion
+  // skips the theater, so the bed would just be noise there — skip it.
+  const holdAnticipation =
+    !flipped &&
+    !reduced &&
+    (phase === 'flood' || phase === 'transform' || phase === 'review');
+  useEffect(() => {
+    if (!holdAnticipation) return;
+    const stop = anticipation();
+    return stop;
+  }, [holdAnticipation, anticipation]);
+
   useEffect(() => {
     if (!expired || thunked.current) return;
     thunked.current = true;
@@ -103,7 +123,10 @@ export function RevealStage({
   function flipAll() {
     if (flipped) return;
     setFlipped(true);
-    play(anyTop ? 'bigwin' : 'win');
+    // Louder the higher the best pull: tier-scaled volume on top of the
+    // asset ladder (bigwin is mastered hotter than win).
+    const bestVolume = Math.max(...cards.map((c) => rarityWinVolume(c.rarity)));
+    play(anyTop ? 'bigwin' : 'win', bestVolume);
     vibrate(anyTop ? [40, 40, 80] : 30);
   }
 

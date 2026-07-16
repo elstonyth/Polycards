@@ -15,6 +15,8 @@ const FILES = {
   win: '/sounds/slot-win.mp3',
   bigwin: '/sounds/slot-bigwin.mp3',
   sell: '/sounds/slot-sell.mp3',
+  riser: '/sounds/slot-riser.mp3',
+  reveal: '/sounds/slot-reveal.mp3',
 } as const;
 
 export type SoundName = keyof typeof FILES;
@@ -49,6 +51,9 @@ export function useSound() {
   // server snapshot.
   const [muted, setMuted] = useState(false);
   const pool = useRef<Partial<Record<SoundName, HTMLAudioElement>>>({});
+  // In-flight volume-fade timer for the looping reveal bed (HTMLAudio has no
+  // native fade). A new fade cancels the previous one.
+  const fadeTimer = useRef<number | null>(null);
 
   // Hydrate mute state + preload the audio pool on the client only.
   useEffect(() => {
@@ -62,13 +67,17 @@ export function useSound() {
   }, []);
 
   const play = useCallback(
-    (name: SoundName) => {
+    (name: SoundName, volume = 1, rate = 1) => {
       // Gate on the in-memory state (authoritative) — readMuted() falls back to
       // false when storage is blocked, which would let muted sounds still play.
       if (muted) return;
       const audio = pool.current[name];
       if (!audio) return;
       try {
+        audio.volume = Math.min(1, Math.max(0, volume));
+        // rate ≠ 1 shifts pitch (classic rising reel-stop): pitch correction off.
+        audio.preservesPitch = rate === 1;
+        audio.playbackRate = rate;
         audio.currentTime = 0;
         void audio.play().catch(() => {});
       } catch {
@@ -77,6 +86,19 @@ export function useSound() {
     },
     [muted],
   );
+
+  // Halt a playing sound (the 6s spin bed outlives short spins). Not muted-
+  // gated: halting must always work, even if mute was toggled mid-spin.
+  const halt = useCallback((name: SoundName) => {
+    const audio = pool.current[name];
+    if (!audio) return;
+    try {
+      audio.pause();
+      audio.currentTime = 0;
+    } catch {
+      /* no-op */
+    }
+  }, []);
 
   const vibrate = useCallback(
     (pattern: number | number[]) => {
@@ -108,5 +130,58 @@ export function useSound() {
     [muted],
   );
 
-  return { muted, toggleMuted, play, vibrate, sfx };
+  // Start the looping reveal ambience (fills the face-down wait); returns a
+  // stop() the caller MUST call on reveal/unmount. Muted → no-op stop so callers
+  // don't branch. Loops seamlessly (asset is crossfade-constructed).
+  const anticipation = useCallback((): (() => void) => {
+    if (muted) return () => {};
+    const audio = pool.current.reveal;
+    if (!audio) return () => {};
+    // Manual volume ramp (HTMLAudio has no native fade): step every ~30ms so the
+    // bed EMERGES under the reel-stop instead of popping in at full level, and
+    // fades out on the tap instead of cutting. A new ramp cancels any prior one.
+    const ramp = (to: number, ms: number, done?: () => void) => {
+      if (fadeTimer.current !== null) window.clearInterval(fadeTimer.current);
+      const from = audio.volume;
+      const steps = Math.max(1, Math.round(ms / 30));
+      let i = 0;
+      fadeTimer.current = window.setInterval(() => {
+        i += 1;
+        audio.volume = Math.min(
+          1,
+          Math.max(0, from + (to - from) * (i / steps)),
+        );
+        if (i >= steps) {
+          if (fadeTimer.current !== null)
+            window.clearInterval(fadeTimer.current);
+          fadeTimer.current = null;
+          done?.();
+        }
+      }, 30);
+    };
+    try {
+      audio.loop = true;
+      audio.volume = 0;
+      audio.currentTime = 0;
+      void audio.play().catch(() => {});
+      ramp(1, 600); // ease in across the reel-stop → reveal handoff
+    } catch {
+      /* no-op */
+    }
+    return () => {
+      try {
+        // Quick smooth duck on the tap so the bed clears cleanly under the
+        // blooming win fanfare (which now eases in too) — a seamless handoff.
+        ramp(0, 220, () => {
+          audio.pause();
+          audio.loop = false;
+          audio.currentTime = 0;
+        });
+      } catch {
+        /* no-op */
+      }
+    };
+  }, [muted]);
+
+  return { muted, toggleMuted, play, halt, vibrate, sfx, anticipation };
 }

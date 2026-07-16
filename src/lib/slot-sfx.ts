@@ -4,6 +4,7 @@
 
 export type SfxName =
   | 'tick'
+  | 'reelTick'
   | 'clack'
   | 'ratchet'
   | 'chime'
@@ -52,6 +53,14 @@ function blip(
 
 const CUES: Record<SfxName, () => void> = {
   tick: () => blip(2400, 28, { type: 'square', gain: 0.03 }),
+  // Woody per-cell reel tick — softer than `tick` (triangle, lower, quick decay)
+  // so a rapid run of them reads as a crisp tick track, not a harsh buzz. One
+  // fires per Pokémon crossing the winning line; the rate decelerates with the
+  // reel, so the ticks naturally slow and space out into a countable landing.
+  reelTick: () => {
+    blip(1500, 24, { type: 'triangle', gain: 0.14, slideTo: 1300 });
+    blip(3600, 12, { type: 'square', gain: 0.028 }); // click transient
+  },
   clack: () => {
     blip(180, 90, { type: 'triangle', gain: 0.16, slideTo: 70 });
     blip(3200, 40, { type: 'square', gain: 0.025 }); // glass ring overtone
@@ -61,7 +70,7 @@ const CUES: Record<SfxName, () => void> = {
     setTimeout(() => blip(1100, 30, { gain: 0.04 }), 45);
     setTimeout(() => blip(1300, 30, { gain: 0.045 }), 95);
   },
-  chime: () => blip(1568, 450, { type: 'sine', gain: 0.07 }),
+  chime: () => blip(1568, 450, { type: 'sine', gain: 0.045 }),
   thunk: () => blip(90, 260, { type: 'sine', gain: 0.22, slideTo: 45 }),
   credit: () => {
     blip(1046, 120, { type: 'sine', gain: 0.06 });
