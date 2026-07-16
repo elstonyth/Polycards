@@ -44,13 +44,13 @@ export default function CookieConsent() {
         <div className="flex shrink-0 gap-2">
           <button
             onClick={() => choose('rejected')}
-            className="rounded-lg px-4 py-2 text-sm font-medium text-neutral-300 hover:text-white"
+            className="inline-flex min-h-11 items-center justify-center rounded-lg px-4 py-2 text-sm font-medium text-neutral-300 hover:text-white"
           >
             Reject
           </button>
           <button
             onClick={() => choose('accepted')}
-            className="rounded-lg bg-white px-4 py-2 text-sm font-medium text-neutral-900 hover:bg-neutral-200"
+            className="inline-flex min-h-11 items-center justify-center rounded-lg bg-white px-4 py-2 text-sm font-medium text-neutral-900 hover:bg-neutral-200"
           >
             Accept
           </button>

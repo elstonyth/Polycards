@@ -15,7 +15,6 @@ import { rm } from '@/lib/format';
 import { isTopRarity } from '@/lib/rarity';
 import { SlabImage, SLAB_ASPECT } from '@/components/SlabImage';
 import { cn } from '@/lib/utils';
-import { PokeCardBack } from './PokeCardBack';
 
 export function SlabCard({
   card,
@@ -132,24 +131,31 @@ export function SlabCard({
           },
         }}
       >
-        {/* BACK — the SAME etched card design as the reel landing zone (spec
-            decision #34; supersedes #6's charcoal slab + holo monogram). The
-            morph reads as one card growing from the reel to the stage. A faint
-            dark-glass fill gives the floating card presence in the lit room;
-            the line art + glow carry the rarity color. */}
+        {/* BACK — the Polycards holo-foil card back (supersedes #34's etched
+            line art; asset: docs/research/polycards-card-back-v2.png cropped).
+            Opaque raster, so rarity color rides on the outer glow only. */}
         <span
           className={cn(
-            'absolute inset-0 rounded-xl [backface-visibility:hidden]',
+            'absolute inset-0 overflow-hidden rounded-xl [backface-visibility:hidden]',
             reduced && flipped && 'hidden',
           )}
           style={
             {
-              background: 'rgba(12, 12, 14, 0.55)',
               boxShadow: '0 18px 50px rgba(0,0,0,0.6)',
             } as CSSProperties
           }
         >
-          <PokeCardBack rgb={rarityRgb} className="absolute inset-0" />
+          <img
+            src="/images/app/polycards-card-back.webp"
+            alt=""
+            aria-hidden
+            className="absolute inset-0 h-full w-full object-fill transition-[filter] duration-300"
+            style={
+              {
+                filter: `drop-shadow(0 0 8px rgba(${rarityRgb}, 0.65)) drop-shadow(0 0 24px rgba(${rarityRgb}, 0.35))`,
+              } as CSSProperties
+            }
+          />
           {/* the tile's pixel Pokémon rides the morph, fading out mid-growth */}
           {spriteSrc && entering && !reduced && (
             <motion.img

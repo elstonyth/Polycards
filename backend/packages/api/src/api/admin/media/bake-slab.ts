@@ -29,7 +29,25 @@ export const SLAB_WINDOW = {
 const CORNER_RX = 0.048; // of window width
 const CORNER_RY = 0.034; // of window height
 const MAX_FRAME_WIDTH = 1600;
+// Frames are downscaled to fit BOTH bounds. Height matters independently: a
+// frame narrower than MAX_FRAME_WIDTH skips the width cap entirely, so without
+// this a pathologically tall one would balloon the create canvas + composite
+// (fw×fh RGBA) below. 4000 leaves the width the binding constraint for real
+// slab-proportioned art (~0.62 ratio ⇒ 1600×2580) and bounds the canvas.
+const MAX_FRAME_HEIGHT = 4000;
 const FETCH_TIMEOUT_MS = 10_000;
+
+// ADMIN-ONLY defense-in-depth — this is not an attacker-reachable path like the
+// customer avatar route; it is adequate for that threat model, not a hard bound
+// on every allocation. fetchBytes caps bytes (20 MB) but NOT dimensions, so a
+// low-entropy megapixel image from an admin-set slab_frame_url / card.image
+// would otherwise drive a full-raster decode. This ceiling bounds the decode
+// INPUT only; the composite canvas is bounded separately by MAX_FRAME_WIDTH /
+// MAX_FRAME_HEIGHT. 32 MP refuses the 64 MP+ bomb class, and the frame/card
+// validate profiles cap each side at 5500 (<=30.25 MP) so admin-UPLOADED art
+// always stays under it — validation and bake agree, no silent bake failure.
+// Best-effort: an over-limit image fails its bake and logs (bakeSlabImage catch).
+const MAX_DECODE_PIXELS = 32_000_000;
 
 export type BakedSlab = { url: string; key: string };
 
@@ -83,6 +101,23 @@ const isPrivateHost = (hostname: string): boolean => {
   return isPrivateIpv4(host);
 };
 
+// The origin of OUR OWN local file provider, trusted even though it's a loopback
+// address. When S3 (public CDN) is NOT configured — dev/test — Medusa's built-in
+// file provider serves uploads at the backend origin (default http://localhost:9000),
+// so a card/frame image URL is a loopback URL the SSRF guard below would otherwise
+// block, leaving graded cards unbaked. Gate this on S3_FILE_URL being unset — the
+// SAME condition that decides files live on the local provider — so prod (S3 set,
+// files on the public CDN) keeps loopback fully blocked with no NODE_ENV reliance.
+const localFileOrigin = (): string | null => {
+  if (process.env.S3_FILE_URL) return null; // prod: files are on the public CDN
+  try {
+    return new URL(process.env.MEDUSA_BACKEND_URL ?? 'http://localhost:9000')
+      .origin;
+  } catch {
+    return null;
+  }
+};
+
 // SSRF guard for the URLs this module fetches server-side (admin-supplied
 // slab_frame_url + a card's image). Card/frame images are OUR stored copies
 // (CDN host or a storefront-relative path) or, at worst, an admin-pasted PUBLIC
@@ -106,6 +141,10 @@ export function isAllowedImageUrl(url: string): boolean {
     return false;
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+  // Our own local file provider (dev/test only) — the one loopback origin we
+  // must reach to bake our own stored card/frame images.
+  const localOrigin = localFileOrigin();
+  if (localOrigin && parsed.origin === localOrigin) return true;
   return !isPrivateHost(parsed.hostname);
 }
 
@@ -189,18 +228,31 @@ export async function composeSlab(
   frameBytes: Buffer,
   photoBytes: Buffer,
 ): Promise<Buffer> {
-  const frameMeta = await sharp(frameBytes).metadata();
+  const frameMeta = await sharp(frameBytes, {
+    limitInputPixels: MAX_DECODE_PIXELS,
+  }).metadata();
   let fw = frameMeta.width ?? 0;
   let fh = frameMeta.height ?? 0;
   if (!fw || !fh) throw new Error('frame image has no dimensions');
   let frame = frameBytes;
-  if (fw > MAX_FRAME_WIDTH) {
-    fh = Math.round((fh * MAX_FRAME_WIDTH) / fw);
-    fw = MAX_FRAME_WIDTH;
-    frame = await sharp(frameBytes)
+  // Scale to fit inside BOTH bounds, aspect preserved, and never upscale (a
+  // small frame stays untouched). Downscaling — rather than rejecting — keeps
+  // an oversized frame bakeable instead of failing it silently.
+  const scale = Math.min(1, MAX_FRAME_WIDTH / fw, MAX_FRAME_HEIGHT / fh);
+  if (scale < 1) {
+    fw = Math.max(1, Math.round(fw * scale));
+    fh = Math.max(1, Math.round(fh * scale));
+    frame = await sharp(frameBytes, { limitInputPixels: MAX_DECODE_PIXELS })
       .resize({ width: fw, height: fh })
       .png()
       .toBuffer();
+  }
+  // The clamps above keep a wildly-skewed frame (aspect outside ~[0.0004, 2500],
+  // only reachable via an un-validated admin-set URL) from scaling to 0px — but
+  // baking a 1px-tall slab would be a silent nonsense result. Fail it instead:
+  // bakeSlabImage catches and logs, leaving slab_image untouched.
+  if (fw < 2 || fh < 2) {
+    throw new Error(`frame aspect is degenerate after scaling (${fw}x${fh})`);
   }
   const left = Math.round(fw * SLAB_WINDOW.left);
   const top = Math.round(fh * SLAB_WINDOW.top);
@@ -211,7 +263,7 @@ export async function composeSlab(
   const mask = Buffer.from(
     `<svg width="${winW}" height="${winH}"><rect width="${winW}" height="${winH}" rx="${rx}" ry="${ry}" fill="#fff"/></svg>`,
   );
-  const photo = await sharp(photoBytes)
+  const photo = await sharp(photoBytes, { limitInputPixels: MAX_DECODE_PIXELS })
     .resize(winW, winH, { fit: 'cover' })
     .composite([{ input: mask, blend: 'dest-in' }])
     .png()
@@ -243,7 +295,9 @@ export async function bakeSlabImage(
   try {
     const photo = await fetchBytes(card.image);
     if (!photo) {
-      logger.warn(`bake-slab: photo unfetchable for '${card.handle}' (${card.image})`);
+      logger.warn(
+        `bake-slab: photo unfetchable for '${card.handle}' (${card.image})`,
+      );
       return null;
     }
     // A caller looping over many cards (rebakeAllGradedCards) resolves the
@@ -253,7 +307,9 @@ export async function bakeSlabImage(
     const frame = frameBytes ?? (await resolveFrameBytes(container));
     const out = await composeSlab(frame, photo);
     if (out.length > IMAGE_RULES.maxBytes) {
-      logger.warn(`bake-slab: composite exceeds size limit for '${card.handle}'`);
+      logger.warn(
+        `bake-slab: composite exceeds size limit for '${card.handle}'`,
+      );
       return null;
     }
     const hash = createHash('sha256').update(out).digest('hex').slice(0, 8);
@@ -314,10 +370,7 @@ export async function mirrorSlabToProduct(
 ): Promise<void> {
   try {
     const productModule = container.resolve(Modules.PRODUCT);
-    const [product] = await productModule.listProducts(
-      { handle },
-      { take: 1 },
-    );
+    const [product] = await productModule.listProducts({ handle }, { take: 1 });
     if (!product) return; // defensive-upsert cards may have no Product yet
     await updateProductsWorkflow(container).run({
       input: {

@@ -84,7 +84,7 @@ export default function SeriesPage() {
             <Link
               href={features.marketplace ? '/marketplace' : '/slots'}
               aria-label={`${s.name} — ${s.count}`}
-              className="group relative flex h-full items-center gap-4 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] p-4 transition-all duration-300 hover:-translate-y-1 hover:border-white/20 hover:bg-white/[0.06]"
+              className="group relative flex h-full items-center gap-4 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] p-4 transition-[transform,border-color,background-color] duration-300 hover:-translate-y-1 hover:border-white/20 hover:bg-white/[0.06]"
             >
               <div className="flex h-24 w-20 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-neutral-950">
                 {/* eslint-disable-next-line @next/next/no-img-element */}

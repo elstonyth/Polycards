@@ -137,7 +137,7 @@ export default function ProfileClient({ user }: { user: ProfileViewUser }) {
               >
                 <Link
                   href={`/card/${c.id}`}
-                  className="group block h-full overflow-hidden rounded-2xl border border-white/10 bg-neutral-800 transition-all duration-300 hover:-translate-y-1 hover:border-white/20"
+                  className="group block h-full overflow-hidden rounded-2xl border border-white/10 bg-neutral-800 transition-[transform,border-color] duration-300 hover:-translate-y-1 hover:border-white/20"
                 >
                   <div className="relative w-full overflow-hidden bg-[radial-gradient(120%_80%_at_50%_15%,#2e2e2e_0%,#1c1c1c_55%,#141414_100%)] p-3">
                     <SlabImage

@@ -258,7 +258,7 @@ function PartyCard({
   return (
     <div
       className={cn(
-        'group rounded-2xl p-px transition-all duration-300 hover:-translate-y-1',
+        'group rounded-2xl p-px transition-transform duration-300 hover:-translate-y-1',
         // Live parties get a slowly-drifting gradient ring (matches the live site's
         // animated gradient-xy borders); ended cards stay static.
         !ended &&

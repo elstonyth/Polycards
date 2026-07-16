@@ -155,7 +155,7 @@ export default function MerchantsClient() {
       <div className="mx-auto grid max-w-6xl grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {list.map((m, i) => (
           <Reveal key={m.name} delay={Math.min(i, 8) * 50} className="h-full">
-            <div className="group flex h-full flex-col rounded-2xl border border-white/10 bg-white/[0.03] p-5 transition-all duration-300 hover:-translate-y-1 hover:border-white/20 hover:bg-white/[0.06]">
+            <div className="group flex h-full flex-col rounded-2xl border border-white/10 bg-white/[0.03] p-5 transition-[transform,border-color,background-color] duration-300 hover:-translate-y-1 hover:border-white/20 hover:bg-white/[0.06]">
               <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-fuchsia-500/30 via-violet-500/20 to-sky-500/20 font-heading text-lg font-bold text-white">
                 {m.name.charAt(0)}
               </span>

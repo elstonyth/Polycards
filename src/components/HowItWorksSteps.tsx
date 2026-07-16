@@ -109,7 +109,8 @@ export default function HowItWorksSteps() {
             'group relative flex h-full flex-col overflow-hidden rounded-2xl p-6 sm:p-7',
             'border border-white/10 bg-gradient-to-br from-white/[0.07] to-white/[0.02]',
             'shadow-[0_4px_20px_rgba(0,0,0,0.25)] hover:border-white/20',
-            !reduced && 'transition-all duration-700 ease-out',
+            !reduced &&
+              'transition-[opacity,transform,border-color] duration-700 ease-out',
             shown || reduced
               ? 'opacity-100 translate-y-0'
               : 'opacity-0 translate-y-6',

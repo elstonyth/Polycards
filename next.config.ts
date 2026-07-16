@@ -53,6 +53,12 @@ const remotePatterns: NonNullable<
     hostname: 'storage.googleapis.com',
     pathname: '/images.pricecharting.com/**',
   },
+  {
+    // A few catalog rows hotlink Pokémon Center product shots directly.
+    protocol: 'https',
+    hostname: 'www.pokemoncenter.com',
+    pathname: '/images/**',
+  },
 ];
 
 // Next 16 added an SSRF guard to the image optimizer: after a remotePattern
@@ -77,9 +83,13 @@ const isLocalHostname = (h: string): boolean => {
 };
 const dangerouslyAllowLocalIP = isLocalHostname(backend.hostname);
 
-// Optional dedicated S3/R2/CDN media host (prod). It is the bucket's own public
-// host, so the whole host is media — scope to its served prefix if you use one.
-const mediaHost = process.env.NEXT_PUBLIC_MEDIA_HOST;
+// Dedicated S3/R2/CDN media host. It is the bucket's own public host, so the
+// whole host is media — scope to its served prefix if you use one. Defaults to
+// the project's DO Spaces CDN so a prod-cloned local DB renders out of the box;
+// NEXT_PUBLIC_MEDIA_HOST still overrides per environment.
+const mediaHost =
+  process.env.NEXT_PUBLIC_MEDIA_HOST ??
+  'pokenic-media.sgp1.cdn.digitaloceanspaces.com';
 if (mediaHost) {
   remotePatterns.push({
     protocol: 'https',

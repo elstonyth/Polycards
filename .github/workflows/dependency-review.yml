@@ -1,0 +1,44 @@
+# Supply-chain gate. gitleaks (in ci.yml) scans for committed secrets and CodeQL
+# scans our code — but nothing checked the DEPENDENCIES a PR pulls in. Dependabot
+# only *bumps* deps we already have; it does not block a PR that introduces a new
+# one with a known CVE. This fills that hole: on every PR it diffs the manifests
+# (root package-lock.json + backend/yarn.lock) and fails if the change adds a
+# dependency with a high-or-worse advisory.
+#
+# Needs GitHub's dependency graph (on by default for public repos). Runs only on
+# pull_request — the action diffs base vs head, so there is nothing to review on
+# a bare push. Add `dependency-review` to the master required checks once it has
+# run once (a required context GitHub has never seen would block PRs forever).
+name: Dependency review
+
+on:
+  pull_request:
+
+concurrency:
+  group: dep-review-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read # only reads the dependency graph; findings surface in the run summary
+
+jobs:
+  dependency-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Dependency review
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          # No comment-summary-in-pr: it needs a write token, which public-repo
+          # fork PRs don't get (read-only GITHUB_TOKEN) — so it 403s there while
+          # pull_request_target (the alternative) is a privilege-escalation
+          # footgun we won't adopt. Findings land in the Actions run summary.
+          # License policy is intentionally left open for now — a deny/allow list
+          # tends to false-positive on transitive deps. Turn it on later with e.g.
+          # deny-licenses: GPL-3.0, AGPL-3.0

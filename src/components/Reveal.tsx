@@ -42,7 +42,7 @@ export default function Reveal({
         // opacity + transform already composite on the GPU, so no will-change:
         // it was leaking one live layer per revealed element across the page.
         !reduced &&
-          'transition-all duration-700 ease-out motion-reduce:transition-none',
+          'transition-[opacity,transform] duration-700 ease-out motion-reduce:transition-none',
         visible ? 'translate-y-0 opacity-100' : 'opacity-0',
         className,
       )}

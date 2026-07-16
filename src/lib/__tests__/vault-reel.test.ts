@@ -61,15 +61,16 @@ describe('spinTotalMs', () => {
     expect(spinTotalMs(1)).toBe(columnDurationMs(0, 1));
   });
 
-  // Spec decision #33 (a): a touch longer than the old ~2.86s / ~3.64s, but
-  // still snappy — a range, not exact constants, so retunes don't churn tests.
-  test('a single-reel spin runs ~3.5s (longer than before, still under 4s)', () => {
-    expect(columnDurationMs(0, 1)).toBeGreaterThan(3200);
-    expect(columnDurationMs(0, 1)).toBeLessThan(4000);
+  // Spec decision #33 (a) + audio-sync retune: lengthened so the reel's cell
+  // crossings form a full accelerate→decelerate tick arc (the spin's sole audio)
+  // landing on the winner. A range, not exact constants, so retunes don't churn.
+  test('a single-reel spin runs ~4.9s (long readable decelerating tick arc)', () => {
+    expect(columnDurationMs(0, 1)).toBeGreaterThan(4200);
+    expect(columnDurationMs(0, 1)).toBeLessThan(5400);
   });
-  test('a 3-reel spin lands ~4.3s (longer than before, still under 5s)', () => {
-    expect(spinTotalMs(3)).toBeGreaterThan(4000);
-    expect(spinTotalMs(3)).toBeLessThan(5000);
+  test('a 3-reel spin lands ~5.7s (ticks decelerate onto the winner lock)', () => {
+    expect(spinTotalMs(3)).toBeGreaterThan(5000);
+    expect(spinTotalMs(3)).toBeLessThan(6200);
   });
 });
 

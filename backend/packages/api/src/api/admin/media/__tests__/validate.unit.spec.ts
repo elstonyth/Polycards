@@ -187,3 +187,67 @@ describe('validateImage — sprite profile', () => {
     expect(r.ok).toBe(false);
   });
 });
+
+describe('validateImage — avatar profile decode-DoS dimension cap', () => {
+  const avatar = (w: number, h: number): ImageFacts => ({
+    width: w,
+    height: h,
+    bytes: 200_000,
+    mimeType: 'image/png',
+    detectedFormat: 'png',
+    frames: 1,
+  });
+
+  it('accepts a normally-sized avatar', () => {
+    expect(validateImage(avatar(512, 512), 'avatar')).toEqual({ ok: true });
+  });
+
+  it('rejects an oversized avatar far under the shared 8000 cap (decode-DoS guard)', () => {
+    // An 8000x8000 (64 MP) avatar previously passed (8000 is not > the shared
+    // 8000 bomb guard), and the route then ran a full sharp decode+webp on it —
+    // a single-request CPU/RAM DoS. The customer avatar profile must cap far
+    // tighter than the shared admin-media decompression-bomb guard.
+    const r = validateImage(avatar(8000, 8000), 'avatar');
+    expect(r.ok).toBe(false);
+    expect((r as { code: string }).code).toBe('too_big_dimension');
+  });
+
+  it('caps the avatar at 2048px per side (boundary: 2048 ok, 2049 rejected)', () => {
+    expect(validateImage(avatar(2048, 2048), 'avatar')).toEqual({ ok: true });
+    const over = validateImage(avatar(2049, 2049), 'avatar');
+    expect(over.ok).toBe(false);
+    expect((over as { code: string }).code).toBe('too_big_dimension');
+  });
+
+  it('leaves profiles without a per-profile cap on the shared 8000 bound', () => {
+    // Regression guard: 'pack' declares no maxDimension → global bound applies.
+    expect(validateImage(pack({ width: 4000, height: 4000 }), 'pack')).toEqual({
+      ok: true,
+    });
+  });
+});
+
+describe('validateImage — frame/card caps align with the slab-bake ceiling', () => {
+  // composeSlab decodes the frame + card photo at limitInputPixels 32 MP. A
+  // profile that allowed the shared 8000px per side (64 MP) would pass here and
+  // then SILENTLY fail to bake (bakeSlabImage is best-effort). Cap each side so
+  // maxDimension² stays under that ceiling.
+  it('still accepts the legit large frame the bake path downscales (3200×5352)', () => {
+    expect(validateImage(facts(3200, 5352), 'frame')).toEqual({ ok: true });
+  });
+
+  // Dimensions here sit UNDER the shared 8000 bound so they isolate the
+  // per-profile cap (4960×8000 = 39.7 MP is a frame that passes today yet blows
+  // composeSlab's 32 MP decode ceiling — the silent-bake-failure gap).
+  it('rejects a frame above the per-profile cap', () => {
+    const r = validateImage(facts(4340, 7000), 'frame'); // 0.62 ratio, < 8000
+    expect(r.ok).toBe(false);
+    expect((r as { code: string }).code).toBe('too_big_dimension');
+  });
+
+  it('rejects a card above the per-profile cap', () => {
+    const r = validateImage(facts(5000, 7000), 'card'); // 5:7 ratio, < 8000
+    expect(r.ok).toBe(false);
+    expect((r as { code: string }).code).toBe('too_big_dimension');
+  });
+});

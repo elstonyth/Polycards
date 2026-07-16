@@ -5,11 +5,29 @@ import { composeSlab, fetchBytes, isAllowedImageUrl } from '../bake-slab';
 // hosts and storefront-relative paths are allowed (a strict CDN allowlist would
 // break legit baking); internal / metadata / loopback targets are rejected.
 describe('isAllowedImageUrl', () => {
+  // These lists assume no S3 (dev/test): our local file provider origin
+  // (localhost:9000) is trusted, every OTHER loopback/internal host is not.
+  const originalS3 = process.env.S3_FILE_URL;
+  const originalBackend = process.env.MEDUSA_BACKEND_URL;
+  beforeAll(() => {
+    delete process.env.S3_FILE_URL;
+    delete process.env.MEDUSA_BACKEND_URL; // → defaults to http://localhost:9000
+  });
+  afterAll(() => {
+    if (originalS3 === undefined) delete process.env.S3_FILE_URL;
+    else process.env.S3_FILE_URL = originalS3;
+    if (originalBackend === undefined) delete process.env.MEDUSA_BACKEND_URL;
+    else process.env.MEDUSA_BACKEND_URL = originalBackend;
+  });
+
   it.each([
     ['CDN https URL', 'https://cdn.polycards.example/slab-abc.webp'],
     ['public http URL', 'http://images.example.com/card.jpg'],
     ['storefront-relative path', '/images/test-card.webp'],
     ['relative cdn path', '/cdn/test-pack.webp'],
+    // Our own local file provider — the one loopback origin we must reach to
+    // bake our stored card/frame images (dev/test, S3 unset).
+    ['local file provider origin', 'http://localhost:9000/static/x.png'],
   ])('allows %s', (_label, url) => {
     expect(isAllowedImageUrl(url)).toBe(true);
   });
@@ -24,12 +42,18 @@ describe('isAllowedImageUrl', () => {
     ['RFC-1918 172.16/12', 'http://172.16.0.1/x.png'],
     ['RFC-1918 192.168/16', 'http://192.168.1.1/x.png'],
     ['0.0.0.0', 'http://0.0.0.0/x.png'],
-    ['localhost', 'http://localhost:9000/static/x.png'],
+    // localhost on a NON-file-provider port stays blocked (origin mismatch) —
+    // only the exact local file origin is trusted, not loopback in general.
+    ['localhost, other port', 'http://localhost:8080/x.png'],
+    ['localhost, port 80', 'http://localhost/x.png'],
     ['IPv6 loopback', 'http://[::1]/x.png'],
     ['IPv4-mapped IPv6 loopback', 'http://[::ffff:127.0.0.1]/x.png'],
     ['IPv4-mapped IPv6 metadata', 'http://[::ffff:169.254.169.254]/x.png'],
     ['IPv6 link-local fe80', 'http://[fe80::1]/x.png'],
-    ['IPv6 link-local mid-range (fe80::/10 is fe80-febf)', 'http://[fe95::1]/x.png'],
+    [
+      'IPv6 link-local mid-range (fe80::/10 is fe80-febf)',
+      'http://[fe95::1]/x.png',
+    ],
     ['IPv6 link-local range top', 'http://[febf::1]/x.png'],
     ['file: scheme', 'file:///etc/passwd'],
     ['protocol-relative', '//evil.example.com/x.png'],
@@ -37,6 +61,15 @@ describe('isAllowedImageUrl', () => {
     ['empty', ''],
   ])('rejects %s', (_label, url) => {
     expect(isAllowedImageUrl(url)).toBe(false);
+  });
+
+  it('blocks the local file origin once S3 (prod CDN) is configured', () => {
+    process.env.S3_FILE_URL = 'https://cdn.polycards.example';
+    try {
+      expect(isAllowedImageUrl('http://localhost:9000/static/x.png')).toBe(false);
+    } finally {
+      delete process.env.S3_FILE_URL;
+    }
   });
 });
 
@@ -102,13 +135,23 @@ describe('composeSlab', () => {
   const makeFrame = (w: number, h: number) =>
     sharp({
       // fully transparent "frame" — lets the test sample the photo underneath
-      create: { width: w, height: h, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
+      create: {
+        width: w,
+        height: h,
+        channels: 4,
+        background: { r: 0, g: 0, b: 0, alpha: 0 },
+      },
     })
       .png()
       .toBuffer();
   const makePhoto = () =>
     sharp({
-      create: { width: 300, height: 420, channels: 3, background: { r: 255, g: 0, b: 0 } },
+      create: {
+        width: 300,
+        height: 420,
+        channels: 3,
+        background: { r: 255, g: 0, b: 0 },
+      },
     })
       .png()
       .toBuffer();
@@ -135,8 +178,47 @@ describe('composeSlab', () => {
   });
 
   it('caps output at 1600px wide', async () => {
-    const out = await composeSlab(await makeFrame(3200, 5352), await makePhoto());
+    const out = await composeSlab(
+      await makeFrame(3200, 5352),
+      await makePhoto(),
+    );
     const meta = await sharp(out).metadata();
     expect(meta.width).toBe(1600);
+  });
+
+  // Decode-bomb guard: fetchBytes caps BYTES (20 MB) but not DIMENSIONS, so a
+  // low-entropy megapixel image from an admin-set slab_frame_url / card.image
+  // would drive a full-raster sharp decode (same primitive as the avatar route).
+  // composeSlab must refuse to decode an image whose pixel count exceeds the
+  // ceiling instead of materializing it. (Legit frames — e.g. the 17 MP frame in
+  // the 1600px-cap test above — stay under the ceiling.)
+  it('refuses to decode an over-limit frame (36 MP > ceiling)', async () => {
+    await expect(
+      composeSlab(await makeFrame(6000, 6000), await makePhoto()),
+    ).rejects.toThrow();
+  });
+
+  it('refuses to decode an over-limit card photo (36 MP > ceiling)', async () => {
+    await expect(
+      composeSlab(await makeFrame(400, 669), await makeFrame(6000, 6000)),
+    ).rejects.toThrow();
+  });
+
+  // The old cap was width-only, so a frame narrower than MAX_FRAME_WIDTH but
+  // pathologically TALL skipped the resize entirely and ballooned the create
+  // canvas + composite (fw×fh RGBA). Bound the height too — downscaling to fit
+  // (aspect preserved), never a silent bake failure.
+  it('downscales a pathologically tall frame to bound the composite canvas', async () => {
+    const out = await composeSlab(await makeFrame(1000, 9000), await makePhoto());
+    const meta = await sharp(out).metadata();
+    expect(meta.height).toBe(4000); // capped
+    expect(meta.width).toBe(444); // aspect preserved (1000 × 4000/9000)
+  });
+
+  it('does not upscale a small frame', async () => {
+    const out = await composeSlab(await makeFrame(400, 669), await makePhoto());
+    const meta = await sharp(out).metadata();
+    expect(meta.width).toBe(400);
+    expect(meta.height).toBe(669);
   });
 });

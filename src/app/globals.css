@@ -367,9 +367,20 @@
   }
   body {
     @apply bg-background text-foreground;
+    /* Body copy: let the browser pull down orphaned last words. */
+    text-wrap: pretty;
   }
   html {
     @apply font-sans;
+  }
+  /* Headings balance across lines instead of leaving a lonely last word —
+     the single biggest "feels considered" typographic win, applied once here
+     so every route's headings inherit it. */
+  h1,
+  h2,
+  h3,
+  h4 {
+    text-wrap: balance;
   }
 }
 
