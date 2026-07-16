@@ -16,9 +16,14 @@
 export const PEDESTAL_BG =
   'bg-[radial-gradient(120%_80%_at_50%_15%,#2e2e2e_0%,#1c1c1c_55%,#141414_100%)]';
 
-/** Card-frame hover: lift + shadow (the border colour stays per-card). */
+/**
+ * Card-frame hover: lift + shadow, plus border-color so a per-card
+ * `hover:border-*` (MarketCard adds `hover:border-white/20`) fades instead of
+ * snapping. Consumers whose border never changes on hover (PullCard's static
+ * inline rarity color) are unaffected — border-color simply never transitions.
+ */
 export const PEDESTAL_FRAME_HOVER =
-  'transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-xl hover:shadow-black/40';
+  'transition-[transform,box-shadow,border-color] duration-300 ease-out hover:-translate-y-1 hover:shadow-xl hover:shadow-black/40';
 
 /** Card art: contain + subtle zoom on frame hover (padding stays per-card). */
 export const PEDESTAL_IMAGE =
