@@ -121,6 +121,12 @@ describe('updateCardInvoke slab bake', () => {
     expect(bakeSlabImage).toHaveBeenCalledWith(expect.anything(), {
       handle: 'test-card',
       image: '/images/new.webp',
+      grader: 'PSA',
+      grade: '9',
+      name: 'Test Card',
+      set: 'Base',
+      label_year: null,
+      label_note: null,
     });
     expect(packs.updateCards).toHaveBeenCalledWith([
       expect.objectContaining({
@@ -147,13 +153,18 @@ describe('updateCardInvoke slab bake', () => {
     expect(deleteSlabFile).not.toHaveBeenCalled();
   });
 
-  it('emptied grader clears both fields and deletes the old file', async () => {
+  it('emptied grader still calls bakeSlabImage (gate lives inside it), clears both fields, deletes the old file', async () => {
+    // §9: the caller no longer pre-checks the grader — bakeSlabImage's own
+    // PSA gate returns null for a blank/non-PSA grader.
     const packs = packsStub();
     await updateCardInvoke(
       { ...INPUT, grader: '' },
       { container: buildContainer(packs) },
     );
-    expect(bakeSlabImage).not.toHaveBeenCalled();
+    expect(bakeSlabImage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ grader: '' }),
+    );
     expect(packs.updateCards).toHaveBeenCalledWith([
       expect.objectContaining({ slab_image: null, slab_image_key: null }),
     ]);

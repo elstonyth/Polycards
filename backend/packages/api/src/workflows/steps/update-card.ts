@@ -141,17 +141,20 @@ export const updateCardInvoke = async (
 
   const salePrice = input.price ?? input.market_value;
 
-  // Slab bake (spec §C): graded → re-bake on EVERY save (no dirty-check —
-  // one composite per admin save is cheap and can never go stale when the
-  // photo changes); grader emptied → clear. Best-effort: a failed bake
-  // saves with nulls (bare photo).
-  const baked =
-    input.grader.trim() !== ''
-      ? await bakeSlabImage(container, {
-          handle: input.handle,
-          image: input.image,
-        })
-      : null;
+  // Slab bake (spec §C): re-bake on EVERY save (no dirty-check — one
+  // composite per admin save is cheap and can never go stale when the photo
+  // or label fields change); non-PSA grader or grader emptied → null →
+  // cleared. Best-effort: a failed bake saves with nulls (bare photo).
+  const baked = await bakeSlabImage(container, {
+    handle: input.handle,
+    image: input.image,
+    grader: input.grader,
+    grade: input.grade,
+    name: input.name,
+    set: input.set,
+    label_year: input.label_year ?? null,
+    label_note: input.label_note ?? null,
+  });
   const nextSlabImage = baked?.url ?? null;
   const nextSlabKey = baked?.key ?? null;
 

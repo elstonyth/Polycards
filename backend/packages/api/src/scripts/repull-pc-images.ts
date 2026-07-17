@@ -140,6 +140,11 @@ export default async function repullPcImages({ container, args }: ExecArgs) {
       id: string;
       handle: string;
       grader: string;
+      grade: string;
+      name: string;
+      set: string;
+      label_year?: string | null;
+      label_note?: string | null;
       slab_image_key?: string | null;
     },
     stored: string,
@@ -151,6 +156,12 @@ export default async function repullPcImages({ container, args }: ExecArgs) {
       {
         handle: card.handle,
         image: stored,
+        grader: card.grader,
+        grade: card.grade,
+        name: card.name,
+        set: card.set,
+        label_year: card.label_year ?? null,
+        label_note: card.label_note ?? null,
       },
       frameBytes,
     );

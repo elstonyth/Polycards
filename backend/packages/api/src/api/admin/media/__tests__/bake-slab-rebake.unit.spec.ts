@@ -35,8 +35,14 @@ type CardRow = {
   id: string;
   handle: string;
   grader: string;
+  grade: string;
+  name: string;
+  set: string;
   image: string;
+  slab_image: string | null;
   slab_image_key: string | null;
+  label_year?: string | null;
+  label_note?: string | null;
 };
 
 let TEST_PHOTO: Buffer;
@@ -117,21 +123,37 @@ describe('rebakeAllGradedCards', () => {
     id: 'card_a',
     handle: 'card-a',
     grader: 'PSA',
+    grade: '10',
+    name: 'Pikachu ex #238',
+    set: 'Pokemon Surging Sparks',
     image: 'https://img.example/a.png',
+    slab_image: null,
     slab_image_key: 'old-a',
   };
+  // §9: CGC never bakes — the PSA-branded frame can't lie about another
+  // grader's slab. Used to exercise the rebake loop's "clear a stale
+  // composite" branch (a leftover from the old frame-everything-as-PSA
+  // behaviour).
   const cardB: CardRow = {
     id: 'card_b',
     handle: 'card-b',
     grader: 'CGC',
+    grade: '9.5',
+    name: 'Charizard ex #223',
+    set: 'Pokemon Obsidian Flames',
     image: 'https://img.example/a.png', // same bytes as A on purpose (see below)
+    slab_image: 'https://cdn.example/stale-b.webp',
     slab_image_key: 'old-b',
   };
   const ungraded: CardRow = {
     id: 'card_c',
     handle: 'card-c',
     grader: '',
+    grade: '',
+    name: 'Bulbasaur #001',
+    set: 'Pokemon Base Set',
     image: 'https://img.example/c.png',
+    slab_image: null,
     slab_image_key: null,
   };
 
@@ -164,10 +186,15 @@ describe('rebakeAllGradedCards', () => {
     expect(updateProductsWorkflow).not.toHaveBeenCalled();
   });
 
-  it('resolves the frame ONCE for N graded cards, and bakes them all with it', async () => {
+  it('resolves the frame ONCE for N PSA cards, and bakes them all with it', async () => {
+    // §9: only PSA cards reach bakeSlabImage — cardB (CGC) would take the
+    // "clear stale composite" branch instead, so this test uses a SECOND PSA
+    // card with the SAME image + label fields as cardA (byte-identical
+    // composite) to exercise the multi-bake path.
+    const cardA2: CardRow = { ...cardA, id: 'card_a2', handle: 'card-a2' };
     const siteSettings = jest.fn().mockResolvedValue({ slab_frame_url: null });
     const { container } = buildContainer({
-      cards: [cardA, cardB, ungraded],
+      cards: [cardA, cardA2, ungraded],
       siteSettings,
     });
 
@@ -178,6 +205,33 @@ describe('rebakeAllGradedCards', () => {
     // Same photo bytes + a single resolved frame ⇒ byte-identical composite:
     // proves both graded cards baked against the SAME frameBytes.
     expect(uploadContentOf(0)).toBe(uploadContentOf(1));
+  });
+
+  it('clears a stale composite on a non-PSA graded card instead of baking it (§9)', async () => {
+    const { container } = buildContainer({
+      cards: [cardB],
+      products: [
+        { id: 'prod_b', handle: 'card-b', metadata: { slab_image: cardB.slab_image } },
+      ],
+    });
+
+    const result = await rebakeAllGradedCards(container);
+
+    expect(result).toEqual({ ok: 1, failed: 0 });
+    expect(uploadFilesWorkflow).not.toHaveBeenCalled(); // never baked
+    const run = jest.mocked(updateProductsWorkflow).mock.results.at(-1)!.value
+      .run as jest.Mock;
+    expect(run.mock.calls[0][0].input.products[0].metadata).toMatchObject({
+      slab_image: null,
+    });
+    const deletedIds = jest
+      .mocked(deleteFilesWorkflow)
+      .mock.results.flatMap(
+        (r) =>
+          (r.value as { run: jest.Mock }).run.mock.calls[0][0].input
+            .ids as string[],
+      );
+    expect(deletedIds).toContain('old-b');
   });
 
   it('a per-card persist failure is isolated: failed++ and the loop continues', async () => {

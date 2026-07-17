@@ -268,6 +268,12 @@ describe('registerCardInvoke slab bake', () => {
     expect(bakeSlabImage).toHaveBeenCalledWith(expect.anything(), {
       handle: 'test-card',
       image: '/images/test-card.webp',
+      grader: 'PSA',
+      grade: '9',
+      name: 'Test Card',
+      set: 'Base',
+      label_year: null,
+      label_note: null,
     });
     expect(packs.createCards).toHaveBeenCalledWith([
       expect.objectContaining({
@@ -284,13 +290,19 @@ describe('registerCardInvoke slab bake', () => {
     expect(metadata).not.toHaveProperty('slab_image_key');
   });
 
-  it('blank grader skips the bake and stores nulls', async () => {
+  it('blank grader still calls bakeSlabImage (gate lives inside it) and stores nulls', async () => {
+    // §9: the caller no longer pre-checks the grader — bakeSlabImage's own
+    // PSA gate returns null for a blank/non-PSA grader, and that null is what
+    // produces the null slab fields below.
     const packs = happyPacks();
     await registerCardInvoke(
       { ...INPUT, grader: '  ' },
       { container: buildContainer(packs) },
     );
-    expect(bakeSlabImage).not.toHaveBeenCalled();
+    expect(bakeSlabImage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ grader: '  ' }),
+    );
     expect(packs.createCards).toHaveBeenCalledWith([
       expect.objectContaining({ slab_image: null, slab_image_key: null }),
     ]);

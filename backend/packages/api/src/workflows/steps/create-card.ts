@@ -112,15 +112,6 @@ export const registerCardInvoke = async (
     throw alreadyRegistered();
   }
 
-  // Graded card (non-empty grader) → bake the slab composite BEFORE the
-  // insert so the slab fields ride the single createCards write and the
-  // product-metadata mirror below. Best-effort: a failed bake registers the
-  // card with a bare photo (nulls) — it never fails the save.
-  const baked =
-    input.grader.trim() !== ''
-      ? await bakeSlabImage(container, { handle: product.handle, image })
-      : null;
-
   // Inherit the PriceCharting link from the product's own metadata (set by
   // /admin/products/from-pricecharting) unless the caller explicitly overrides
   // it. A plain (non-PC) product leaves these null/default — untracked.
@@ -142,6 +133,22 @@ export const registerCardInvoke = async (
       : null;
   const labelYear = input.label_year ?? stagedLabel('label_year');
   const labelNote = input.label_note ?? stagedLabel('label_note');
+
+  // Graded PSA card → bake the slab composite BEFORE the insert so the slab
+  // fields ride the single createCards write and the product-metadata mirror
+  // below. Non-PSA graders skip inside bakeSlabImage (§9). Best-effort: a
+  // failed bake registers the card with a bare photo (nulls).
+  const baked = await bakeSlabImage(container, {
+    handle: product.handle,
+    image,
+    grader: input.grader,
+    grade: input.grade,
+    name: product.title,
+    set: input.set,
+    label_year: labelYear,
+    label_note: labelNote,
+  });
+
   // Pixel-Pokémon assignment staged at product creation (from-pricecharting)
   // is inherited the same way — an explicit pick in the register dialog wins.
   // The register dialog sends a PixelPokemon library id: undefined = not picked

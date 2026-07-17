@@ -247,3 +247,37 @@ describe('composeSlab', () => {
     expect(ink).toBeGreaterThan(100);
   });
 });
+
+// §9 PSA-only bake: the PSA-branded frame must never assert a PSA grade for
+// another grader's slab. The gate lives INSIDE bakeSlabImage (one guard for
+// every caller) and fires before any container/network use.
+describe('bakeSlabImage PSA gate', () => {
+  const fields = {
+    handle: 'x',
+    image: 'https://cdn.example.com/x.webp',
+    grade: '10',
+    name: 'Pikachu ex #238',
+    set: 'Pokemon Surging Sparks',
+  };
+
+  it.each([['CGC'], ['BGS'], ['SGC'], [''], ['  ']])(
+    'returns null for grader %p without touching the container',
+    async (grader) => {
+      const { bakeSlabImage } = await import('../bake-slab.js');
+      const container = new Proxy(
+        {},
+        {
+          get() {
+            throw new Error('container must not be touched for a non-PSA card');
+          },
+        },
+      );
+      await expect(
+        bakeSlabImage(
+          container as unknown as Parameters<typeof bakeSlabImage>[0],
+          { ...fields, grader },
+        ),
+      ).resolves.toBeNull();
+    },
+  );
+});

@@ -445,13 +445,27 @@ export async function composeSlab(
     .toBuffer();
 }
 
+export type SlabCardInput = {
+  handle: string;
+  image: string;
+  grader: string;
+  grade: string;
+  name: string; // raw card/product name — may embed "#238" (PC convention)
+  set: string; // PriceCharting console-name, e.g. "Pokemon Surging Sparks"
+  label_year?: string | null;
+  label_note?: string | null;
+};
+
 // Bake one card. Best-effort by contract: ANY failure logs a warning and
-// returns null — a bake must never fail a card save (spec §B.5).
+// returns null — a bake must never fail a card save (spec §B.5). PSA-only
+// (§9): the frame is PSA-branded, so any other grader (or a raw card) skips
+// the bake and renders the bare photo via the existing null path.
 export async function bakeSlabImage(
   container: MedusaContainer,
-  card: { handle: string; image: string },
+  card: SlabCardInput,
   frameBytes?: Buffer,
 ): Promise<BakedSlab | null> {
+  if (card.grader.trim() !== 'PSA') return null;
   const logger = loggerOf(container);
   try {
     const photo = await fetchBytes(card.image);
@@ -466,7 +480,13 @@ export async function bakeSlabImage(
     // silently bake the remaining cards against the bundled default while
     // still counting them ok.
     const frame = frameBytes ?? (await resolveFrameBytes(container));
-    const out = await composeSlab(frame, photo);
+    const out = await composeSlab(frame, photo, {
+      set: card.set,
+      name: card.name,
+      grade: card.grade,
+      year: card.label_year ?? null,
+      note: card.label_note ?? null,
+    });
     if (out.length > IMAGE_RULES.maxBytes) {
       logger.warn(
         `bake-slab: composite exceeds size limit for '${card.handle}'`,
@@ -570,9 +590,42 @@ export async function rebakeAllGradedCards(
   // remaining cards against the bundled default while still counting them ok.
   const frameBytes = await resolveFrameBytes(container);
   for (const card of cards) {
+    if (card.grader.trim() !== 'PSA') {
+      // §9: non-PSA graders never bake — and a composite left over from the
+      // old frame-everything-as-PSA behaviour is a stale GEM MINT 10 lie.
+      // Clear it so the card renders its bare photo.
+      if (card.slab_image || card.slab_image_key) {
+        try {
+          const oldKey = card.slab_image_key ?? null;
+          await packs.updateCards([
+            { id: card.id, slab_image: null, slab_image_key: null },
+          ]);
+          await mirrorSlabToProduct(container, card.handle, null);
+          await deleteSlabFile(container, oldKey);
+          logger.info(`bake-slab: cleared non-PSA composite for ${card.handle}`);
+        } catch (e) {
+          logger.warn(
+            `bake-slab: failed to clear non-PSA composite for '${card.handle}': ${e instanceof Error ? e.message : String(e)}`,
+          );
+          failed++;
+          continue;
+        }
+      }
+      ok++;
+      continue;
+    }
     const baked = await bakeSlabImage(
       container,
-      { handle: card.handle, image: card.image },
+      {
+        handle: card.handle,
+        image: card.image,
+        grader: card.grader,
+        grade: card.grade,
+        name: card.name,
+        set: card.set,
+        label_year: card.label_year ?? null,
+        label_note: card.label_note ?? null,
+      },
       frameBytes,
     );
     if (!baked) {
