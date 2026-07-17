@@ -77,12 +77,25 @@ export default async function passwordResetHandler({
   const notificationModuleService: INotificationModuleService =
     container.resolve(Modules.NOTIFICATION);
 
-  // Deliberately unguarded: the provider throws on a transient send failure, which
-  // rejects this handler so the event bus redelivers (a retried event replays the
-  // same token, so a duplicate email carries an identical link). A try/catch here
-  // would restore the silent-loss behaviour the throw exists to remove. The thrown
-  // message names the template and Resend's error only, so nothing on this path can
-  // put the token in a log — see modules/resend/service.ts.
+  // Deliberately unguarded: the provider throws on a send failure so the notification
+  // row records FAILURE rather than a false SUCCESS. A try/catch here would hide that.
+  // The thrown message names the template and Resend's error only, so nothing on this
+  // path can put the token in a log — see modules/resend/service.ts.
+  //
+  // NOT retried: core-flows emits this event with no `attempts` option, so
+  // event-bus-redis defaults to attempts:1 and its worker only redelivers when
+  // attempts > 1 — a failed send loses that email and the customer must request a new
+  // reset. Accepted for now; making it durable is a GLOBAL event-bus change
+  // (eventBusRedisJobOptions.attempts) plus an idempotency_key. See service.ts.
+  //
+  // SECURITY (accepted risk, 2026-07-17): `data.url` is persisted on the notification
+  // row and `data` is in defaultAdminNotificationFields, so GET /admin/notifications
+  // exposes live reset links to any authenticated admin for the token's 15m TTL, and
+  // they reach DB backups / the prod→local clone workflow. This does NOT breach the
+  // CWE-532 log invariant above (a DB row is not a log sink) and is how every Medusa
+  // notification provider works, but it is a real exposure surface for the same
+  // credential: admin auth + the 15m TTL are what bound it. Revisit if the admin
+  // surface ever widens beyond trusted operators.
   await notificationModuleService.createNotifications({
     to: data.entity_id,
     channel: 'email',

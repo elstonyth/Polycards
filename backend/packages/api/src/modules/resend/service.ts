@@ -56,10 +56,13 @@ class ResendNotificationProviderService extends AbstractNotificationProviderServ
     );
 
     if (!rendered) {
-      // PERMANENT failure: an unknown template or a malformed payload will fail
-      // identically on every redelivery, so this returns instead of throwing —
-      // throwing would put the event into a retry loop that can never succeed.
-      // Names the template only — see the SECURITY note on the error path below.
+      // PERMANENT failure — an unknown template or a malformed payload, i.e. a code
+      // bug, not a runtime condition. Returns instead of throwing so that IF the
+      // global event-bus `attempts` is ever raised (see the note on the error path
+      // below), redelivery isn't spent on something that cannot succeed. The tradeoff
+      // is that this records status SUCCESS for an email that was never sent; the
+      // logged error is the real signal. Names the template only — see the SECURITY
+      // note below.
       this.logger.error(
         `[resend] no renderable email template named "${notification.template}"`,
       );
@@ -88,15 +91,26 @@ class ResendNotificationProviderService extends AbstractNotificationProviderServ
       }`;
       this.logger.error(message);
 
-      // TRANSIENT failure (rate limit, 5xx, network): throw so the caller records
-      // status FAILURE and the event bus redelivers. Returning here instead would be
-      // silently lossy — @medusajs/notification only runs its failure branch when the
-      // provider THROWS (notification-module-service.js:95); a plain return falls
-      // through to `status = SUCCESS` with an undefined external_id, so a Resend
-      // outage would look like a delivered email and never retry.
+      // Throw rather than return so the notification row records status FAILURE:
+      // @medusajs/notification only runs its failure branch when the provider THROWS
+      // (notification-module-service.js:95); a plain return falls through to
+      // `status = SUCCESS` with an undefined external_id, i.e. a Resend outage would
+      // be recorded as a delivered email.
       //
-      // Redelivery is safe: the retried event replays the SAME token, so the customer
-      // can receive a duplicate of an identical link, never a conflicting one.
+      // NOTE — this does NOT cause a retry, and nothing here redelivers the email.
+      // core-flows emits auth.password_reset via emitEventStep({eventName, data}) with
+      // no `attempts` option, so event-bus-redis buildEvents defaults attempts:1; its
+      // worker gates redelivery on `isRetriesConfigured = configuredAttempts > 1`
+      // (event-bus-redis.js:81-83), which is false, and it merely warns "Retrying is
+      // not configured". A transient failure therefore loses that email permanently —
+      // the customer must request a new reset. Recording FAILURE instead of a false
+      // SUCCESS is the whole benefit, and it is why the throw stays.
+      //
+      // Making delivery durable would mean setting eventBusRedisJobOptions.attempts>1
+      // in medusa-config.ts, which is GLOBAL to every event in the app — deliberately
+      // out of scope here. It would also need an idempotency_key, since the module
+      // only reprocesses FAILURE rows when one is present
+      // (notification-module-service.js:51-55).
       throw new MedusaError(MedusaError.Types.UNEXPECTED_STATE, message);
     }
 
