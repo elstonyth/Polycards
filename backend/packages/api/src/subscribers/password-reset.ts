@@ -37,8 +37,12 @@ export default async function passwordResetHandler({
     if (!isDevOrTest) {
       // TODO: deliver via the notification module for non-customer actors once the
       // admin/vendor dashboards have a reset page to link to.
+      // PRIVACY: actor_type only — the identifier is the actor's email address, and
+      // prod logs (DO runtime, a SIEM/Sentry sink) are a wider audience than this
+      // warn needs. Dev/test warns below still name it: there the log IS the mail
+      // transport, so the address is the point.
       logger.warn(
-        `[password-reset] reset requested for ${data.actor_type} "${data.entity_id}" — delivery not configured (token not logged outside dev/test).`,
+        `[password-reset] reset requested for ${data.actor_type} — delivery not configured (token not logged outside dev/test).`,
       );
       return;
     }
@@ -64,12 +68,27 @@ export default async function passwordResetHandler({
     return;
   }
 
+  // Production REQUIRES a real storefront origin. The `?? 'http://localhost:4000'`
+  // fallback above is the dev transport and is unreachable from a customer's inbox:
+  // emailing it would send a dead link AND burn the single-use token, so the customer
+  // could not even retry with the same mail. This is not hypothetical — prod defines
+  // MERCUR_STOREFRONT_URL, not STOREFRONT_URL, so before .do/backend.app.yaml gained
+  // the latter every reset email would have pointed at localhost. Fail loudly rather
+  // than send garbage; the operator sees a warn and the customer can request again.
+  if (!process.env.STOREFRONT_URL?.trim()) {
+    logger.warn(
+      '[password-reset] customer reset requested — STOREFRONT_URL not configured; refusing to email a localhost link.',
+    );
+    return;
+  }
+
   // Shares medusa-config.ts's exact predicate: when this is false no provider is
   // registered on the `email` channel, and createNotifications would throw
   // MedusaError.NOT_FOUND from inside this handler instead of warning cleanly.
   if (!isResendConfigured(process.env)) {
+    // PRIVACY: no entity_id — see the note on the non-customer branch above.
     logger.warn(
-      `[password-reset] reset requested for ${data.entity_id} — email delivery not configured (link not logged outside dev/test).`,
+      '[password-reset] customer reset requested — email delivery not configured (link not logged outside dev/test).',
     );
     return;
   }

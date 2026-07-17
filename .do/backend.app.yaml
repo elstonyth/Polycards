@@ -59,6 +59,18 @@ envs:
   - key: MERCUR_STOREFRONT_URL
     scope: RUN_AND_BUILD_TIME
     value: https://polycards.gg
+  # Storefront origin for links the BACKEND generates and emails (password reset —
+  # subscribers/password-reset.ts) and for bake-slab's storefront-relative asset
+  # resolution. Distinct from MERCUR_STOREFRONT_URL above, which Mercur reads under
+  # its own name; both point at the same origin. Added 2026-07-17: without it the
+  # subscriber's dev fallback (http://localhost:4000) would have gone out in every
+  # production reset email, dead on arrival and burning the single-use token. The
+  # subscriber now refuses to send when this is unset, so a missing value degrades to
+  # a warn rather than garbage — but it must be present for reset email to work at
+  # all. App level so the WORKER (which runs the subscriber) gets it too.
+  - key: STOREFRONT_URL
+    scope: RUN_TIME
+    value: https://polycards.gg
   # Explicit PUBLIC endpoints (not the ${cluster.DATABASE_URL} binding): on an
   # attached production cluster the binding resolves to the PRIVATE host, which
   # the app (not in the DB's VPC) can't reach -> KnexTimeoutError. The public

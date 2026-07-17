@@ -108,6 +108,34 @@ describe('password-reset subscriber — token only logged in explicit dev/test',
     },
   );
 
+  // PRIVACY: prod-reachable warns must not name the actor's email either. The token
+  // is the account-takeover risk (covered above); the address is PII that prod logs
+  // (DO runtime, a SIEM/Sentry sink) don't need. Dev/test warns deliberately DO name
+  // it — there the log is the mail transport — so this asserts prod only.
+  it.each([
+    ['production', 'customer'],
+    ['production', 'user'],
+    ['prod', 'customer'],
+    ['prod', 'user'],
+  ])('NODE_ENV=%s, actor=%s: warn never names the email', async (env, actor) => {
+    process.env.NODE_ENV = env;
+    const { warn, container } = buildHarness();
+    await run(container, actor as string);
+    const logged = warn.mock.calls.map((c) => c[0]).join('\n');
+    expect(logged).not.toContain('victim@example.com');
+  });
+
+  it.each(['development', 'test'])(
+    'NODE_ENV=%s: dev warn DOES name the email (it is the mail transport)',
+    async (env) => {
+      process.env.NODE_ENV = env;
+      const { warn, container } = buildHarness();
+      await run(container, 'customer');
+      const logged = warn.mock.calls.map((c) => c[0]).join('\n');
+      expect(logged).toContain('victim@example.com');
+    },
+  );
+
   // Fail-closed: an unexpected or unset NODE_ENV must NOT log the token — the
   // gate is an allowlist, not a `production` denylist. Covers both actor types.
   it.each([
@@ -133,6 +161,7 @@ describe('password-reset subscriber — email delivery', () => {
   const originalResend = {
     key: process.env.RESEND_API_KEY,
     from: process.env.RESEND_FROM_EMAIL,
+    storefront: process.env.STOREFRONT_URL,
   };
 
   afterEach(() => {
@@ -141,11 +170,14 @@ describe('password-reset subscriber — email delivery', () => {
     else process.env.RESEND_API_KEY = originalResend.key;
     if (originalResend.from === undefined) delete process.env.RESEND_FROM_EMAIL;
     else process.env.RESEND_FROM_EMAIL = originalResend.from;
+    if (originalResend.storefront === undefined) delete process.env.STOREFRONT_URL;
+    else process.env.STOREFRONT_URL = originalResend.storefront;
   });
 
   const configureResend = () => {
     process.env.RESEND_API_KEY = 're_test_key';
     process.env.RESEND_FROM_EMAIL = 'noreply@send.polycards.gg';
+    process.env.STOREFRONT_URL = 'https://polycards.gg';
   };
 
   it('production + Resend configured: sends the reset link on the email channel', async () => {
@@ -160,7 +192,14 @@ describe('password-reset subscriber — email delivery', () => {
       to: 'victim@example.com',
       channel: 'email',
       template: PASSWORD_RESET_TEMPLATE,
-      data: { url: expect.stringContaining(encodeURIComponent(TOKEN)) },
+      // Pins the full production origin, not just the token: asserting only the token
+      // would pass happily on a `http://localhost:4000/...` link — the exact bug this
+      // suite failed to catch before the STOREFRONT_URL guard landed.
+      data: {
+        url: `https://polycards.gg/reset-password?token=${encodeURIComponent(
+          TOKEN,
+        )}&email=${encodeURIComponent('victim@example.com')}`,
+      },
     });
   });
 
@@ -183,14 +222,50 @@ describe('password-reset subscriber — email delivery', () => {
     process.env.NODE_ENV = 'production';
     process.env.RESEND_API_KEY = 're_test_key';
     delete process.env.RESEND_FROM_EMAIL;
+    // Set explicitly so this asserts the RESEND gate rather than the STOREFRONT_URL
+    // guard that runs before it — otherwise the test passes for the wrong reason.
+    process.env.STOREFRONT_URL = 'https://polycards.gg';
     const { warn, createNotifications, container } = buildHarness();
 
     await run(container, 'customer');
 
     expect(createNotifications).not.toHaveBeenCalled();
     const logged = warn.mock.calls.map((c) => c[0]).join('\n');
-    expect(logged).toContain('not configured');
+    expect(logged).toContain('email delivery not configured');
     expect(logged).not.toContain(TOKEN);
+  });
+
+  // Production must never email the dev localhost fallback: the link is unreachable
+  // from a customer's inbox AND sending it burns the single-use token, so the customer
+  // cannot retry with that mail. Prod defines MERCUR_STOREFRONT_URL, not
+  // STOREFRONT_URL, so this guard is what stood between the feature and shipping a
+  // dead link to every customer.
+  it.each(['production', 'prod'])(
+    'NODE_ENV=%s + STOREFRONT_URL unset: warns instead of emailing a localhost link',
+    async (env) => {
+      process.env.NODE_ENV = env;
+      configureResend();
+      delete process.env.STOREFRONT_URL;
+      const { warn, createNotifications, container } = buildHarness();
+
+      await run(container, 'customer');
+
+      expect(createNotifications).not.toHaveBeenCalled();
+      const logged = warn.mock.calls.map((c) => c[0]).join('\n');
+      expect(logged).toContain('STOREFRONT_URL not configured');
+      expect(logged).not.toContain(TOKEN);
+    },
+  );
+
+  it('production + blank STOREFRONT_URL: treated as unset', async () => {
+    process.env.NODE_ENV = 'production';
+    configureResend();
+    process.env.STOREFRONT_URL = '   ';
+    const { createNotifications, container } = buildHarness();
+
+    await run(container, 'customer');
+
+    expect(createNotifications).not.toHaveBeenCalled();
   });
 
   // A dev box holding real credentials must not send live mail — the console link
