@@ -17,10 +17,9 @@ import { useAuth } from './auth/AuthProvider';
 // uses a single modal, not separate pages). `onSuccess` closes the modal once the
 // auth server action returns a customer.
 
-// Errors and informational notes share one slot but render differently:
-// errors get role="alert" + red, notes stay quiet grey. `field: 'password'`
-// marks errors caused by the password pair (wires aria-invalid/-describedby).
-type Note = { kind: 'error' | 'info'; text: string; field?: 'password' };
+// Error notes. `field: 'password'` marks errors caused by the password pair
+// (wires aria-invalid/-describedby).
+type Note = { text: string; field?: 'password' };
 
 export default function AuthForm({
   mode,
@@ -62,7 +61,7 @@ export default function AuthForm({
       setForgot('sent');
       return;
     }
-    setNote({ kind: 'error', text: result.error });
+    setNote({ text: result.error });
   }
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
@@ -76,7 +75,6 @@ export default function AuthForm({
 
     if (isSignup && password !== String(form.get('confirmPassword') ?? '')) {
       setNote({
-        kind: 'error',
         text: "Passwords don't match.",
         field: 'password',
       });
@@ -100,7 +98,7 @@ export default function AuthForm({
       router.refresh();
       return;
     }
-    setNote({ kind: 'error', text: result.error });
+    setNote({ text: result.error });
   }
 
   async function onGoogle() {
@@ -116,7 +114,7 @@ export default function AuthForm({
       return;
     }
     setBusy(false);
-    setNote({ kind: 'error', text: result.error });
+    setNote({ text: result.error });
   }
 
   // Only the login mode owns the forgot sub-view — if something external
@@ -147,7 +145,7 @@ export default function AuthForm({
               <button
                 type="submit"
                 disabled={busy}
-                className="mt-1 inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-neutral-200 text-sm font-semibold text-neutral-950 transition-colors hover:bg-white disabled:opacity-70"
+                className="mt-1 inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-gradient-to-b from-white to-neutral-300 text-sm font-semibold text-neutral-950 shadow-[0_8px_20px_-8px_rgba(255,255,255,0.35)] transition-colors hover:to-neutral-100 disabled:opacity-70"
               >
                 {busy && (
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -172,11 +170,7 @@ export default function AuthForm({
           aria-live="assertive"
           aria-atomic="true"
           className={
-            note
-              ? `mt-3 text-center text-[12px] ${
-                  note.kind === 'error' ? 'text-red-400' : 'text-white/50'
-                }`
-              : 'sr-only'
+            note ? 'mt-3 text-center text-[12px] text-red-400' : 'sr-only'
           }
         >
           {note?.text}
@@ -210,31 +204,20 @@ export default function AuthForm({
           : 'Log in to your Polycards account.'}
       </p>
 
-      {/* Social — Google is wired to the backend OAuth flow; Discord is still a
-          placeholder (no provider configured). */}
-      <div className="mt-6 grid grid-cols-2 gap-3">
-        <button
-          type="button"
-          onClick={onGoogle}
-          disabled={busy}
-          className="flex h-11 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] text-sm font-medium text-white transition-colors hover:bg-white/[0.08] disabled:opacity-70"
-        >
-          {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
-          Google
-        </button>
-        <button
-          type="button"
-          onClick={() =>
-            setNote({
-              kind: 'info',
-              text: 'Discord login is coming soon.',
-            })
-          }
-          className="flex h-11 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] text-sm font-medium text-white transition-colors hover:bg-white/[0.08]"
-        >
-          Discord
-        </button>
-      </div>
+      {/* Social — Google, wired to the backend OAuth flow. */}
+      <button
+        type="button"
+        onClick={onGoogle}
+        disabled={busy}
+        className="mt-6 flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.06] text-sm font-medium text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] transition-colors hover:bg-white/[0.1] disabled:opacity-70"
+      >
+        {busy ? (
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+        ) : (
+          <GoogleIcon className="h-4 w-4" />
+        )}
+        Continue with Google
+      </button>
       <div className="my-5 flex items-center gap-3 text-[11px] uppercase tracking-wide text-white/50">
         <span className="h-px flex-1 bg-white/10" /> or{' '}
         <span className="h-px flex-1 bg-white/10" />
@@ -303,7 +286,7 @@ export default function AuthForm({
         <button
           type="submit"
           disabled={busy}
-          className="mt-1 inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-neutral-200 text-sm font-semibold text-neutral-950 transition-colors hover:bg-white disabled:opacity-70"
+          className="mt-1 inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-gradient-to-b from-white to-neutral-300 text-sm font-semibold text-neutral-950 shadow-[0_8px_20px_-8px_rgba(255,255,255,0.35)] transition-colors hover:to-neutral-100 disabled:opacity-70"
         >
           {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
           {isSignup ? 'Create account' : 'Log in'}
@@ -317,11 +300,7 @@ export default function AuthForm({
         aria-live="assertive"
         aria-atomic="true"
         className={
-          note
-            ? `mt-3 text-center text-[12px] ${
-                note.kind === 'error' ? 'text-red-400' : 'text-white/50'
-              }`
-            : 'sr-only'
+          note ? 'mt-3 text-center text-[12px] text-red-400' : 'sr-only'
         }
       >
         {note?.text}
@@ -341,6 +320,30 @@ export default function AuthForm({
   );
 }
 
+// Official multi-color Google "G" — lucide has no brand icons.
+function GoogleIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden {...props}>
+      <path
+        fill="#4285F4"
+        d="M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.51h6.47a5.57 5.57 0 0 1-2.4 3.58v3h3.86c2.26-2.09 3.56-5.17 3.56-8.82z"
+      />
+      <path
+        fill="#34A853"
+        d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.86-3c-1.08.72-2.45 1.16-4.07 1.16-3.13 0-5.78-2.11-6.73-4.96H1.29v3.09A11.99 11.99 0 0 0 12 24z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M5.27 14.29A7.19 7.19 0 0 1 4.89 12c0-.8.14-1.57.38-2.29V6.62H1.29a11.97 11.97 0 0 0 0 10.76l3.98-3.09z"
+      />
+      <path
+        fill="#EA4335"
+        d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.69 1.29 6.62l3.98 3.09C6.22 6.86 8.87 4.75 12 4.75z"
+      />
+    </svg>
+  );
+}
+
 function Field({
   icon: Icon,
   ...props
@@ -354,7 +357,7 @@ function Field({
       <input
         aria-label={props['aria-label'] ?? props.placeholder}
         {...props}
-        className="h-11 w-full rounded-xl border border-white/10 bg-white/[0.03] pl-9 pr-3 text-sm text-white placeholder:text-white/50 focus:border-white/25 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-0"
+        className="h-11 w-full rounded-xl border border-white/10 bg-white/[0.05] pl-9 pr-3 text-sm text-white shadow-[inset_0_1px_2px_rgba(0,0,0,0.25)] placeholder:text-white/50 focus:border-white/25 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-0"
       />
     </div>
   );

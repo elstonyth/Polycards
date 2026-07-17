@@ -13,6 +13,8 @@ export type Tab = {
   icon: LucideIcon;
   /** Extra path prefixes that light this tab up (e.g. account pages → Me). */
   match?: string[];
+  /** Requires auth — logged-out clicks open the signup modal instead of navigating. */
+  gated?: boolean;
 };
 
 /** The five app destinations, in the boss-specified order (Home center). */
@@ -20,11 +22,12 @@ export const TABS: Tab[] = [
   { label: 'Daily', href: '/daily', icon: CalendarCheck },
   { label: 'Ranks', href: '/leaderboard', icon: Trophy },
   { label: 'Home', href: '/', icon: Home },
-  { label: 'Vault', href: '/vault', icon: Vault },
+  { label: 'Vault', href: '/vault', icon: Vault, gated: true },
   {
     label: 'Me',
     href: '/me',
     icon: CircleUserRound,
+    gated: true,
     match: [
       '/wallet',
       '/settings',

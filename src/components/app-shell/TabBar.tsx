@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
+import { openAuth } from '@/components/AuthButton';
+import { useAuth } from '@/components/auth/AuthProvider';
 import { TABS, isTabActive } from './tabs';
 
 /**
@@ -12,6 +14,7 @@ import { TABS, isTabActive } from './tabs';
  */
 export default function TabBar() {
   const pathname = usePathname();
+  const { customer, isLoading } = useAuth();
 
   return (
     <nav
@@ -27,6 +30,17 @@ export default function TabBar() {
             <Link
               key={tab.href}
               href={tab.href}
+              // Gated tabs prompt signup in place for visitors instead of
+              // navigating into the server redirect. While auth is still
+              // loading, let navigation proceed (server gate covers it).
+              onClick={
+                tab.gated && !customer && !isLoading
+                  ? (e) => {
+                      e.preventDefault();
+                      openAuth('signup');
+                    }
+                  : undefined
+              }
               aria-current={active ? 'page' : undefined}
               className={cn(
                 'flex flex-1 flex-col items-center justify-center gap-1 transition-colors',
