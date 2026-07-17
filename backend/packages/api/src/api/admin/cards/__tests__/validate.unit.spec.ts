@@ -146,3 +146,25 @@ describe('label fields', () => {
     ).toThrow();
   });
 });
+
+// Hardening: grader/grade/set are optional but NOT unbounded — grade/set flow
+// into the baked SVG label, so optStr caps them like reqStr.
+describe('optional text fields — length cap', () => {
+  const base = { product_id: 'prod_1', market_value: 10 };
+
+  it('accepts a trimmed value at the cap', () => {
+    const out = coerceRegisterCardBody({
+      ...base,
+      grader: `  ${'x'.repeat(512)} `,
+    });
+    expect(out.grader).toBe('x'.repeat(512));
+  });
+
+  it('rejects over-cap grader/grade/set with a clear message', () => {
+    for (const key of ['grader', 'grade', 'set']) {
+      expect(() =>
+        coerceRegisterCardBody({ ...base, [key]: 'x'.repeat(513) }),
+      ).toThrow(new RegExp(`'${key}' is too long`));
+    }
+  });
+});

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { ARIMO_FONT_B64 } from './arimo-font-b64';
@@ -15,14 +15,17 @@ let installed = false;
 // this before composing; the earlier mask SVGs contain no text.
 export function ensureLabelFont(): void {
   if (installed) return;
-  const dir = path.join(tmpdir(), 'polycards-label-font');
+  // mkdtemp (0700 + unpredictable suffix), NOT a fixed world-shared tmpdir
+  // path: a predictable shared path could be pre-created by another local
+  // user, letting them swap the font/fontconfig under us (and the old
+  // existsSync reuse would happily trust their file). Costs one ~662KB write
+  // per process boot; stale dirs are left to normal OS tmp cleanup.
+  const dir = mkdtempSync(path.join(tmpdir(), 'polycards-label-font-'));
   const cacheDir = path.join(dir, 'cache');
   const fontPath = path.join(dir, 'Arimo-Variable.ttf');
   const confPath = path.join(dir, 'fonts.conf');
-  mkdirSync(cacheDir, { recursive: true });
-  if (!existsSync(fontPath)) {
-    writeFileSync(fontPath, Buffer.from(ARIMO_FONT_B64, 'base64'));
-  }
+  mkdirSync(cacheDir);
+  writeFileSync(fontPath, Buffer.from(ARIMO_FONT_B64, 'base64'));
   writeFileSync(
     confPath,
     `<?xml version="1.0"?>\n<!DOCTYPE fontconfig SYSTEM "fonts.dtd">\n<fontconfig>\n  <dir>${dir}</dir>\n  <cachedir>${cacheDir}</cachedir>\n</fontconfig>\n`,

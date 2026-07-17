@@ -596,6 +596,14 @@ export async function mirrorSlabToProduct(
   }
 }
 
+// A card (graded or raw) still holding a baked composite — the thing the §9
+// clear branch reclaims. Shared with repull-pc-images so the two paths'
+// orphan handling can't diverge.
+export const hasSlabRemnant = (card: {
+  slab_image?: string | null;
+  slab_image_key?: string | null;
+}): boolean => Boolean(card.slab_image || card.slab_image_key);
+
 // Re-bake EVERY graded card — the frame-swap trigger and the backfill script
 // share this. Per-card failures don't stop the loop (spec §F).
 // ponytail: sequential sync loop — ~17 graded cards today; move to a queue if
@@ -606,7 +614,10 @@ export async function rebakeAllGradedCards(
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
   const logger = loggerOf(container);
   const cards = (await packs.listCards({}, { take: 10_000 })).filter(
-    (c) => c.grader.trim() !== '',
+    // Graded cards bake (or clear, for non-PSA). A RAW card can still hold an
+    // orphaned composite from a since-cleared grader — include it so the §9
+    // clear branch below reclaims it too.
+    (c) => c.grader.trim() !== '' || hasSlabRemnant(c),
   );
   let ok = 0;
   let failed = 0;
@@ -617,9 +628,10 @@ export async function rebakeAllGradedCards(
   const frameBytes = await resolveFrameBytes(container);
   for (const card of cards) {
     if (card.grader.trim() !== 'PSA') {
-      // §9: non-PSA graders never bake — and a composite left over from the
-      // old frame-everything-as-PSA behaviour is a stale GEM MINT 10 lie.
-      // Clear it so the card renders its bare photo.
+      // §9: non-PSA graders (and raw cards) never bake — and a composite left
+      // over from the old frame-everything-as-PSA behaviour (or a cleared
+      // grader) is a stale GEM MINT 10 lie. Clear it so the card renders its
+      // bare photo.
       if (card.slab_image || card.slab_image_key) {
         try {
           const oldKey = card.slab_image_key ?? null;
@@ -628,10 +640,10 @@ export async function rebakeAllGradedCards(
           ]);
           await mirrorSlabToProduct(container, card.handle, null);
           await deleteSlabFile(container, oldKey);
-          logger.info(`bake-slab: cleared non-PSA composite for ${card.handle}`);
+          logger.info(`bake-slab: cleared stale composite for ${card.handle}`);
         } catch (e) {
           logger.warn(
-            `bake-slab: failed to clear non-PSA composite for '${card.handle}': ${e instanceof Error ? e.message : String(e)}`,
+            `bake-slab: failed to clear stale composite for '${card.handle}': ${e instanceof Error ? e.message : String(e)}`,
           );
           failed++;
           continue;

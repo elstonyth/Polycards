@@ -234,6 +234,44 @@ describe('rebakeAllGradedCards', () => {
     expect(deletedIds).toContain('old-b');
   });
 
+  it('clears an orphaned composite on a RAW card (grader since cleared)', async () => {
+    const rawWithSlab: CardRow = {
+      ...ungraded,
+      id: 'card_d',
+      handle: 'card-d',
+      slab_image: 'https://cdn.example/stale-d.webp',
+      slab_image_key: 'old-d',
+    };
+    const { container } = buildContainer({
+      cards: [rawWithSlab],
+      products: [
+        {
+          id: 'prod_d',
+          handle: 'card-d',
+          metadata: { slab_image: rawWithSlab.slab_image },
+        },
+      ],
+    });
+
+    const result = await rebakeAllGradedCards(container);
+
+    expect(result).toEqual({ ok: 1, failed: 0 });
+    expect(uploadFilesWorkflow).not.toHaveBeenCalled(); // never baked
+    const run = jest.mocked(updateProductsWorkflow).mock.results.at(-1)!.value
+      .run as jest.Mock;
+    expect(run.mock.calls[0][0].input.products[0].metadata).toMatchObject({
+      slab_image: null,
+    });
+    const deletedIds = jest
+      .mocked(deleteFilesWorkflow)
+      .mock.results.flatMap(
+        (r) =>
+          (r.value as { run: jest.Mock }).run.mock.calls[0][0].input
+            .ids as string[],
+      );
+    expect(deletedIds).toContain('old-d');
+  });
+
   it('a per-card persist failure is isolated: failed++ and the loop continues', async () => {
     const updateCards = jest.fn(async (rows: Array<{ id: string }>) => {
       if (rows[0]!.id === cardA.id) throw new Error('db down');

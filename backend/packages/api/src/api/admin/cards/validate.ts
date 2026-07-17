@@ -33,9 +33,14 @@ const imageStr = (b: Record<string, unknown>, key: string): string => {
   return s;
 };
 
+// Length-capped like reqStr: optStr feeds grader/grade/set, and grade/set now
+// flow into the baked SVG label — an unbounded string has no business there.
 const optStr = (b: Record<string, unknown>, key: string): string => {
   const v = b[key];
-  return typeof v === 'string' ? v.trim() : '';
+  if (typeof v !== 'string') return '';
+  const s = v.trim();
+  if (s.length > MAX_TEXT) bad(`'${key}' is too long (max ${MAX_TEXT} chars).`);
+  return s;
 };
 
 const reqNum = (b: Record<string, unknown>, key: string): number => {

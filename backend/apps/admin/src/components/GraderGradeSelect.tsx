@@ -45,6 +45,12 @@ export function GraderGradeSelect({
     grade !== '' && !PSA_GRADES.includes(grade as (typeof PSA_GRADES)[number])
       ? grade
       : null;
+  // Same treatment for an off-list grader (e.g. legacy "TAG"): without an
+  // item carrying its value, the select renders blank-looking for the row.
+  const legacyGrader =
+    grader !== '' && !GRADERS.includes(grader as (typeof GRADERS)[number])
+      ? grader
+      : null;
 
   return (
     <div className="flex gap-4">
@@ -71,6 +77,11 @@ export function GraderGradeSelect({
                 {g}
               </Select.Item>
             ))}
+            {legacyGrader !== null && (
+              <Select.Item value={legacyGrader}>
+                {legacyGrader} (legacy)
+              </Select.Item>
+            )}
           </Select.Content>
         </Select>
       </div>

@@ -70,6 +70,29 @@ describe('fetchTcgCardMeta', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
+  it('strips double-quotes from the set name before building the Lucene query', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ data: [] }), { status: 200 }),
+    );
+    await fetchTcgCardMeta('Pokemon Evil" OR name:x', '#1');
+    const url = fetchMock.mock.calls[0][0] as string;
+    // The quote can no longer close the phrase — the whole input stays inside it.
+    expect(decodeURIComponent(url)).toContain('name:"Evil OR name:x"');
+  });
+
+  it('refuses a card number with query specials — year still prefills, no card lookup', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify(setResp), { status: 200 }),
+    );
+    expect(
+      await fetchTcgCardMeta('Pokemon Surging Sparks', '#238 OR set.id:base1'),
+    ).toEqual({ year: '2024', note: null });
+    expect(fetchMock).toHaveBeenCalledTimes(1); // set query only
+    const url = fetchMock.mock.calls[0][0] as string;
+    expect(url).toContain('/sets?q=');
+    expect(url).not.toContain('/cards?q=');
+  });
+
   it('returns nulls for a Japanese set without any network call', async () => {
     expect(
       await fetchTcgCardMeta('Pokemon Japanese Mega Dream ex', '#240'),

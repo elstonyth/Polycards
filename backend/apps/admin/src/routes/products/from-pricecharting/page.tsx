@@ -70,6 +70,11 @@ const AddFromPriceChartingPage = () => {
   const createProduct = useCreateProductFromPriceCharting();
   const uploadImg = useUploadImage();
   const fileRef = useRef<HTMLInputElement>(null);
+  // Monotonic pick token: the tcg-meta prefill below is fire-and-forget, so a
+  // slow response for product A must not fill product B's blanks after the
+  // operator moves on. Bumped on every pick AND search-reset; a stale
+  // response sees a newer token and drops itself.
+  const pickSeq = useRef(0);
 
   // Step 1 — search.
   const [query, setQuery] = useState('');
@@ -115,6 +120,7 @@ const AddFromPriceChartingPage = () => {
   const runSearch = async () => {
     const q = query.trim();
     if (!q || searching) return;
+    pickSeq.current++; // invalidate any in-flight prefill for a prior pick
     setSearching(true);
     setMatches(null);
     setMatch(null);
@@ -138,6 +144,7 @@ const AddFromPriceChartingPage = () => {
 
   const pickMatch = async (m: PcMatch) => {
     if (pcLoadingId) return;
+    const seq = ++pickSeq.current;
     setPcLoadingId(m.id);
     setMatch(m);
     setPcProduct(null);
@@ -160,6 +167,7 @@ const AddFromPriceChartingPage = () => {
       const num = product.name.match(/#\s*([A-Za-z0-9/-]+)\s*$/)?.[1] ?? '';
       void getTcgCardMeta(product.set, num)
         .then((meta) => {
+          if (seq !== pickSeq.current) return; // stale — a newer pick/search won
           setLabelYear((v) => v || meta.year || '');
           setLabelNote((v) => v || meta.note || '');
         })

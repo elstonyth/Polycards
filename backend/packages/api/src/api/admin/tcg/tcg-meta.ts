@@ -43,9 +43,11 @@ export async function fetchTcgCardMeta(
   let set = setCache.get(setKey) ?? null;
   if (!set) {
     // Mechanical match, not fuzzy (§7a): exact name equality after the prefix
-    // strip; a miss means "unknown set", never a guess.
+    // strip; a miss means "unknown set", never a guess. A double-quote in the
+    // input would close the Lucene phrase and inject extra clauses — strip it
+    // (no real set name has one; the exact-match find below then just misses).
     const json = await getJson(
-      `${TCG_API}/sets?q=${encodeURIComponent(`name:"${setName}"`)}`,
+      `${TCG_API}/sets?q=${encodeURIComponent(`name:"${setName.replace(/"/g, '')}"`)}`,
     );
     const sets = (json as { data?: TcgSet[] } | null)?.data;
     if (!sets) return none; // upstream failure — do not cache
@@ -56,7 +58,11 @@ export async function fetchTcgCardMeta(
 
   const year = set.releaseDate ? set.releaseDate.slice(0, 4) : null;
   const num = number.replace(/^#/, '').trim();
-  if (!num) return { year, note: null };
+  // Unquoted Lucene term below — whitespace or specials would smuggle extra
+  // query clauses. Real card numbers are alphanumeric with '/' or '-' (same
+  // shape the admin page's #-suffix extractor allows); anything else → no
+  // card lookup, year-only prefill.
+  if (!/^[A-Za-z0-9/-]+$/.test(num)) return { year, note: null };
 
   const cardKey = `${set.id}:${num.toLowerCase()}`;
   if (!cardCache.has(cardKey)) {
