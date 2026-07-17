@@ -596,6 +596,14 @@ export async function mirrorSlabToProduct(
   }
 }
 
+// A card (graded or raw) still holding a baked composite — the thing the §9
+// clear branch reclaims. Shared with repull-pc-images so the two paths'
+// orphan handling can't diverge.
+export const hasSlabRemnant = (card: {
+  slab_image?: string | null;
+  slab_image_key?: string | null;
+}): boolean => Boolean(card.slab_image || card.slab_image_key);
+
 // Re-bake EVERY graded card — the frame-swap trigger and the backfill script
 // share this. Per-card failures don't stop the loop (spec §F).
 // ponytail: sequential sync loop — ~17 graded cards today; move to a queue if
@@ -609,7 +617,7 @@ export async function rebakeAllGradedCards(
     // Graded cards bake (or clear, for non-PSA). A RAW card can still hold an
     // orphaned composite from a since-cleared grader — include it so the §9
     // clear branch below reclaims it too.
-    (c) => c.grader.trim() !== '' || c.slab_image || c.slab_image_key,
+    (c) => c.grader.trim() !== '' || hasSlabRemnant(c),
   );
   let ok = 0;
   let failed = 0;

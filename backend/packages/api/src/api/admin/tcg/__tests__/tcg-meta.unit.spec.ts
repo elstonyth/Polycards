@@ -88,6 +88,9 @@ describe('fetchTcgCardMeta', () => {
       await fetchTcgCardMeta('Pokemon Surging Sparks', '#238 OR set.id:base1'),
     ).toEqual({ year: '2024', note: null });
     expect(fetchMock).toHaveBeenCalledTimes(1); // set query only
+    const url = fetchMock.mock.calls[0][0] as string;
+    expect(url).toContain('/sets?q=');
+    expect(url).not.toContain('/cards?q=');
   });
 
   it('returns nulls for a Japanese set without any network call', async () => {

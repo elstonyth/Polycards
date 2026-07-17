@@ -9,6 +9,7 @@ import { pcFetch } from '../api/admin/pricecharting/client';
 import {
   bakeSlabImage,
   deleteSlabFile,
+  hasSlabRemnant,
   mirrorSlabToProduct,
   resolveFrameBytes,
 } from '../api/admin/media/bake-slab';
@@ -154,7 +155,7 @@ export default async function repullPcImages({ container, args }: ExecArgs) {
     // orphaned composite (grader since cleared) — flow it through so the null
     // bake below clears DB + mirror + old file, same as non-PSA graded cards
     // and rebakeAllGradedCards' clear branch.
-    if (card.grader.trim() === '' && !card.slab_image && !card.slab_image_key) {
+    if (card.grader.trim() === '' && !hasSlabRemnant(card)) {
       return;
     }
     // Only a PSA card actually bakes — don't fetch the frame for a clear-only
