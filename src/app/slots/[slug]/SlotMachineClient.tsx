@@ -61,12 +61,7 @@ const POKEBALL_PLACEHOLDER =
   );
 
 type Phase =
-  | 'idle'
-  | 'resolving'
-  | 'spinning'
-  | 'flood'
-  | 'transform'
-  | 'review';
+  'idle' | 'resolving' | 'spinning' | 'flood' | 'transform' | 'review';
 
 /** Highest-rarity tier present in a batch, for the room flood color. */
 function topRarityOf(cards: WonCard[]): Rarity {
