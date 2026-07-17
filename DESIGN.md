@@ -175,7 +175,7 @@ A committed dark palette where chrome stays monochrome and every hue is a signal
 
 ## 4. Elevation
 
-Flat, tonally layered, glow-reserved. Depth comes from the three-step neutral ramp (ink page → charcoal card → graphite control), separated by hairline borders — never from drop shadows. The single exception: **rarity/prize glow** (a soft colored `box-shadow` matched to the rarity or tier hue) on card art, reveal moments, and the top-chase highlight. Overlays (top-up sheet, dialogs) sit on a black/60 scrim with the surface at charcoal.
+Flat, tonally layered, glow-reserved. Depth comes from the three-step neutral ramp (ink page → charcoal card → graphite control), separated by hairline borders — never from drop shadows on in-flow surfaces. Two sanctioned exceptions: **rarity/prize glow** (a soft colored `box-shadow` matched to the rarity or tier hue) on card art, reveal moments, and the top-chase highlight; and **glass-panel elevation** (2026-07-17) — the drop shadow + inset rim highlights baked into `.glass-panel`, exclusive to floating overlays (modals, sheets, toast) where the shadow sells the glass material. Overlays sit on a black/40 stage-lit dimmer (`.glass-stage`) with the surface as `.glass-panel` glass.
 
 **The Glow Is Earned Rule.** A glow appears only when its color is inherited from the thing glowing (a card's rarity, a tier's hue, chase gold on a prize). Decorative ambient shadows are prohibited — if it looks "soft and floating", it's wrong; this system is matte with jewels in it.
 

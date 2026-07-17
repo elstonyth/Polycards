@@ -1,7 +1,11 @@
 'use client';
 
 import { useEffect, useRef, type RefObject } from 'react';
-import { liquidGlass, type LiquidGlassOptions } from './liquid-glass';
+import {
+  liquidGlass,
+  type LiquidGlassHandle,
+  type LiquidGlassOptions,
+} from './liquid-glass';
 
 /**
  * Tuned presets (see .claude/skills/liquid-glass). SUBTLE is for text-heavy
@@ -49,12 +53,23 @@ export function useLiquidGlass(
   useEffect(() => {
     if (!enabled) return;
     // OS "reduce transparency": globals.css bumps the .glass-* tints to
-    // near-opaque, so skip the backdrop filter entirely.
-    if (window.matchMedia('(prefers-reduced-transparency: reduce)').matches)
-      return;
-    const el = ref.current;
-    if (!el) return;
-    const handle = liquidGlass(el, optsRef.current);
-    return () => handle.destroy();
+    // near-opaque, so drop the backdrop filter — and track live changes to
+    // the setting, destroying/recreating the effect as it flips.
+    const mql = window.matchMedia('(prefers-reduced-transparency: reduce)');
+    let handle: LiquidGlassHandle | null = null;
+    const sync = () => {
+      if (mql.matches) {
+        handle?.destroy();
+        handle = null;
+      } else if (!handle && ref.current) {
+        handle = liquidGlass(ref.current, optsRef.current);
+      }
+    };
+    sync();
+    mql.addEventListener('change', sync);
+    return () => {
+      mql.removeEventListener('change', sync);
+      handle?.destroy();
+    };
   }, [ref, enabled]);
 }

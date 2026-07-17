@@ -454,13 +454,16 @@
     }
   }
 
-  /* OS "reduce transparency": glass goes near-opaque and the stage glow
-     disappears. useLiquidGlass() skips its filter under the same query. */
+  /* OS "reduce transparency": glass goes near-opaque, the CSS-only blurs
+     are dropped, and the stage glow disappears. useLiquidGlass() skips its
+     filter under the same query. */
   @media (prefers-reduced-transparency: reduce) {
     .glass-panel,
     .glass-chrome,
     .glass-scrim {
       background-color: rgb(10 10 10 / 0.94);
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
     }
     .glass-stage {
       background-image: none;

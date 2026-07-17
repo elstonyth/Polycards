@@ -86,8 +86,8 @@
       {
         "name": "glass-panel",
         "refersTo": "glass-panel",
-        "css": "background-color: rgb(10 10 10 / 0.45); border-color: rgb(255 255 255 / 0.15);",
-        "note": "backdrop-filter is applied at runtime by useLiquidGlass() (src/lib/use-liquid-glass.ts): SVG refraction on Chromium, blur(24px) saturate(1.4) fallback elsewhere. Utility in globals.css."
+        "css": "background-color: rgb(10 10 10 / 0.55); border-color: rgb(255 255 255 / 0.15);",
+        "note": "backdrop-filter is applied at runtime by useLiquidGlass() (src/lib/use-liquid-glass.ts): SVG refraction on Chromium, preset-specific frosted fallbacks elsewhere (subtle 24px/1.4, accent 20px/1.5). Utility in globals.css."
       },
       {
         "name": "glass-chrome",
