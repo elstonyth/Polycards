@@ -249,6 +249,12 @@ jobs:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/medusa-test
       REDIS_URL: redis://localhost:6379
       NODE_ENV: test
+      # The graded-slab label bake bundles two base64 asset modules (frame +
+      # font, ~1.6MB of string) that every suite's app boot retains in its jest
+      # module registry; a shard's cumulative heap now clears the 4GB default.
+      # Lazy imports were tried and reverted — medusa's dev/exec ESM loader
+      # cannot resolve .js-suffixed dynamic imports from src.
+      NODE_OPTIONS: --max-old-space-size=6144
       # The tracked packages/api test env file targets the LOCAL docker
       # container (user 'medusa'); dotenv never overrides pre-set env, so these
       # pin the test runner (@medusajs/test-utils initDb) to the CI service.
