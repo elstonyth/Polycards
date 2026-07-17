@@ -1,10 +1,13 @@
 import { SubscriberArgs, type SubscriberConfig } from '@medusajs/framework';
+import { Modules } from '@medusajs/framework/utils';
+import type { INotificationModuleService } from '@medusajs/framework/types';
+import { isResendConfigured } from '../modules/resend/options';
+import { PASSWORD_RESET_TEMPLATE } from '../modules/resend/templates';
 
-// Dev-mode "mail" delivery for the forgot-password flow: until a real
-// notification provider (Resend/SendGrid) lands, the reset link is logged at
-// WARN so it stands out in (and is greppable from) the backend console.
-// Swapping in real mail later means replacing the logger call with a
-// notification-module send — the event payload and link stay the same.
+// Delivery for the forgot-password flow. In production the reset link is emailed via
+// the notification module's `email` channel (Resend — see src/modules/resend); in
+// dev/test the link is logged at WARN instead, so the console stays the local mail
+// transport and a fresh sending domain never burns reputation on dev traffic.
 //
 // Payload of auth.password_reset (emitted by core's
 // generateResetPasswordTokenWorkflow): entity_id = the identifier the actor
@@ -23,8 +26,7 @@ export default async function passwordResetHandler({
   // where the log IS the dev mail transport. This is an allowlist (fail CLOSED),
   // mirroring modules/packs/topup.ts `mockTopupAllowed`: any other value —
   // production, prod, staging, or an unset/unexpected NODE_ENV — suppresses the
-  // token, so a misconfigured deploy can never leak it. Wire a real notification
-  // provider (Resend/SendGrid) before the storefront reset flow launches.
+  // token, so a misconfigured deploy can never leak it.
   const isDevOrTest =
     process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
 
@@ -33,9 +35,14 @@ export default async function passwordResetHandler({
   // dev can complete the flow by hand — dev/test only.
   if (data.actor_type !== 'customer') {
     if (!isDevOrTest) {
-      // TODO: deliver via the notification module for non-customer actors.
+      // TODO: deliver via the notification module for non-customer actors once the
+      // admin/vendor dashboards have a reset page to link to.
+      // PRIVACY: actor_type only — the identifier is the actor's email address, and
+      // prod logs (DO runtime, a SIEM/Sentry sink) are a wider audience than this
+      // warn needs. Dev/test warns below still name it: there the log IS the mail
+      // transport, so the address is the point.
       logger.warn(
-        `[password-reset] reset requested for ${data.actor_type} "${data.entity_id}" — delivery not configured (token not logged outside dev/test).`,
+        `[password-reset] reset requested for ${data.actor_type} — delivery not configured (token not logged outside dev/test).`,
       );
       return;
     }
@@ -53,16 +60,67 @@ export default async function passwordResetHandler({
     data.token,
   )}&email=${encodeURIComponent(data.entity_id)}`;
 
-  if (!isDevOrTest) {
-    // TODO: send `url` to `data.entity_id` via the notification module. Never
-    // log the token/link outside dev/test.
+  // Dev/test: the log is the mail transport. Deliberately checked BEFORE the Resend
+  // gate so a developer with real credentials in .env still gets the console link
+  // rather than sending live email from a dev box.
+  if (isDevOrTest) {
+    logger.warn(`[password-reset] reset link for ${data.entity_id}: ${url}`);
+    return;
+  }
+
+  // Production REQUIRES a real storefront origin. The `?? 'http://localhost:4000'`
+  // fallback above is the dev transport and is unreachable from a customer's inbox:
+  // emailing it would send a dead link AND burn the single-use token, so the customer
+  // could not even retry with the same mail. This is not hypothetical — prod defines
+  // MERCUR_STOREFRONT_URL, not STOREFRONT_URL, so before .do/backend.app.yaml gained
+  // the latter every reset email would have pointed at localhost. Fail loudly rather
+  // than send garbage; the operator sees a warn and the customer can request again.
+  if (!process.env.STOREFRONT_URL?.trim()) {
     logger.warn(
-      `[password-reset] reset requested for ${data.entity_id} — delivery not configured (link not logged outside dev/test).`,
+      '[password-reset] customer reset requested — STOREFRONT_URL not configured; refusing to email a localhost link.',
     );
     return;
   }
 
-  logger.warn(`[password-reset] reset link for ${data.entity_id}: ${url}`);
+  // Shares medusa-config.ts's exact predicate: when this is false no provider is
+  // registered on the `email` channel, and createNotifications would throw
+  // MedusaError.NOT_FOUND from inside this handler instead of warning cleanly.
+  if (!isResendConfigured(process.env)) {
+    // PRIVACY: no entity_id — see the note on the non-customer branch above.
+    logger.warn(
+      '[password-reset] customer reset requested — email delivery not configured (link not logged outside dev/test).',
+    );
+    return;
+  }
+
+  const notificationModuleService: INotificationModuleService =
+    container.resolve(Modules.NOTIFICATION);
+
+  // Deliberately unguarded: the provider throws on a send failure so the notification
+  // row records FAILURE rather than a false SUCCESS. A try/catch here would hide that.
+  // The thrown message names the template and Resend's error only, so nothing on this
+  // path can put the token in a log — see modules/resend/service.ts.
+  //
+  // NOT retried: core-flows emits this event with no `attempts` option, so
+  // event-bus-redis defaults to attempts:1 and its worker only redelivers when
+  // attempts > 1 — a failed send loses that email and the customer must request a new
+  // reset. Accepted for now; making it durable is a GLOBAL event-bus change
+  // (eventBusRedisJobOptions.attempts) plus an idempotency_key. See service.ts.
+  //
+  // SECURITY (accepted risk, 2026-07-17): `data.url` is persisted on the notification
+  // row and `data` is in defaultAdminNotificationFields, so GET /admin/notifications
+  // exposes live reset links to any authenticated admin for the token's 15m TTL, and
+  // they reach DB backups / the prod→local clone workflow. This does NOT breach the
+  // CWE-532 log invariant above (a DB row is not a log sink) and is how every Medusa
+  // notification provider works, but it is a real exposure surface for the same
+  // credential: admin auth + the 15m TTL are what bound it. Revisit if the admin
+  // surface ever widens beyond trusted operators.
+  await notificationModuleService.createNotifications({
+    to: data.entity_id,
+    channel: 'email',
+    template: PASSWORD_RESET_TEMPLATE,
+    data: { url },
+  });
 }
 
 export const config: SubscriberConfig = {

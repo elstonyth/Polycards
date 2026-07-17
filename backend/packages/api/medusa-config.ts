@@ -2,6 +2,7 @@ import { loadEnv, defineConfig } from '@medusajs/framework/utils';
 import { DashboardModuleOptions } from '@mercurjs/types';
 import path from 'path';
 import { assertMockTopupSafe } from './src/modules/packs/topup';
+import { isResendConfigured } from './src/modules/resend/options';
 loadEnv(process.env.NODE_ENV || 'development', process.cwd());
 
 // Boot-guard (security audit 2026-06-30, Batch A): refuse to start a production
@@ -117,6 +118,16 @@ const redisModules =
         },
       ]
     : [];
+// Email delivery is env-gated, same pattern as fileModule/redisModules above: with
+// RESEND_API_KEY + RESEND_FROM_EMAIL present we register the Resend provider on the
+// `email` channel, otherwise the notification module keeps only the local/feed
+// provider and email-channel sends are skipped by their callers (see
+// subscribers/password-reset.ts, which shares this exact predicate — do NOT inline
+// the check here, the two must never drift). Gating also keeps boot alive without
+// the env: the provider's validateOptions THROWS on a missing api_key/from, which
+// would crash startup, exactly like auth-google below.
+const resendConfigured = isResendConfigured(process.env);
+
 const secretFromEnv = (
   name: 'JWT_SECRET' | 'COOKIE_SECRET',
 ): string | undefined => {
@@ -253,6 +264,26 @@ module.exports = defineConfig({
             id: 'local',
             options: { channels: ['feed'] },
           },
+          // Transactional email (password reset today). ABSOLUTE path for the same
+          // reason as the packs module below: Medusa resolves `resolve` against
+          // process.cwd(), so a relative './src/…' silently fails to load when this
+          // config is require()d from apps/{admin,vendor} by the vite build.
+          ...(resendConfigured
+            ? [
+                {
+                  resolve: path.join(__dirname, 'src/modules/resend'),
+                  id: 'resend',
+                  options: {
+                    channels: ['email'],
+                    api_key: process.env.RESEND_API_KEY,
+                    from: process.env.RESEND_FROM_EMAIL,
+                    // Transactional mail sends from a noreply@ on the sending
+                    // subdomain; without a reply-to, customer replies vanish.
+                    reply_to: process.env.RESEND_REPLY_TO,
+                  },
+                },
+              ]
+            : []),
         ],
       },
     },
