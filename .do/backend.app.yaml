@@ -59,6 +59,18 @@ envs:
   - key: MERCUR_STOREFRONT_URL
     scope: RUN_AND_BUILD_TIME
     value: https://polycards.gg
+  # Storefront origin for links the BACKEND generates and emails (password reset —
+  # subscribers/password-reset.ts) and for bake-slab's storefront-relative asset
+  # resolution. Distinct from MERCUR_STOREFRONT_URL above, which Mercur reads under
+  # its own name; both point at the same origin. Added 2026-07-17: without it the
+  # subscriber's dev fallback (http://localhost:4000) would have gone out in every
+  # production reset email, dead on arrival and burning the single-use token. The
+  # subscriber now refuses to send when this is unset, so a missing value degrades to
+  # a warn rather than garbage — but it must be present for reset email to work at
+  # all. App level so the WORKER (which runs the subscriber) gets it too.
+  - key: STOREFRONT_URL
+    scope: RUN_TIME
+    value: https://polycards.gg
   # Explicit PUBLIC endpoints (not the ${cluster.DATABASE_URL} binding): on an
   # attached production cluster the binding resolves to the PRIVATE host, which
   # the app (not in the DB's VPC) can't reach -> KnexTimeoutError. The public
@@ -150,6 +162,32 @@ envs:
   - key: GOOGLE_CALLBACK_URL
     scope: RUN_TIME
     value: https://polycards.gg/auth/google/callback
+  # ── Resend (transactional email: password reset) ─────────────────────────────
+  # API_KEY + FROM_EMAIL are BOTH required to register the provider on the `email`
+  # channel; with either unset the backend boots on the local/feed provider only and
+  # password-reset emails are skipped with a warn (medusa-config.ts and the
+  # subscriber share ONE predicate — modules/resend/options.ts — so a partial config
+  # degrades to that warn instead of throwing NOT_FOUND inside an event handler).
+  #
+  # These sit at APP level, NOT under services.backend, and that is load-bearing:
+  # the auth.password_reset subscriber runs on the WORKER component
+  # (MEDUSA_WORKER_MODE=worker drains the event queue), not the web service. Scoping
+  # them to the service would leave the worker unconfigured and silently skip every
+  # reset email. App-level envs reach both components.
+  #
+  # FROM_EMAIL is on the send.* SUBDOMAIN so its SPF/DKIM stay clear of the root
+  # domain's Google Workspace mail records (root MX -> smtp.google.com). REPLY_TO is
+  # optional; without it, customer replies to a transactional email go nowhere.
+  - key: RESEND_API_KEY
+    scope: RUN_TIME
+    type: SECRET
+    value: __SECRET__RESEND_API_KEY__
+  - key: RESEND_FROM_EMAIL
+    scope: RUN_TIME
+    value: Polycards <noreply@send.polycards.gg>
+  - key: RESEND_REPLY_TO
+    scope: RUN_TIME
+    value: support@polycards.gg
   # ╔═══════════════════════════════════════════════════════════════════════╗
   # ║ GO-LIVE BLOCKER — DELETE THIS ENV BEFORE REAL LAUNCH.                  ║
   # ║ 'unsafe-demo' runs the always-approving MOCK payment gateway in prod   ║
