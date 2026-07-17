@@ -16,6 +16,7 @@ import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
   searchPriceCharting,
   getPriceChartingProduct,
+  getTcgCardMeta,
   type PcMatch,
   type PcProduct,
 } from '../../../lib/admin-rest';
@@ -152,6 +153,17 @@ const AddFromPriceChartingPage = () => {
       const product = await getPriceChartingProduct(m.id);
       setPcProduct(product);
       if (product.image) setImage(product.image);
+      // §7a prefill: year (set release) + note (rarity) from pokemontcg.io.
+      // Fill-only — the fields stay editable and a lookup failure just leaves
+      // them blank for the operator. The card number rides product-name
+      // ("Pikachu ex #238" — PC has no separate field).
+      const num = product.name.match(/#\s*([A-Za-z0-9/-]+)\s*$/)?.[1] ?? '';
+      void getTcgCardMeta(product.set, num)
+        .then((meta) => {
+          setLabelYear((v) => v || meta.year || '');
+          setLabelNote((v) => v || meta.note || '');
+        })
+        .catch(() => {});
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
     } finally {
