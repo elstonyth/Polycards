@@ -59,6 +59,15 @@ export default function AppHeader() {
                 <Link
                   key={tab.href}
                   href={tab.href}
+                  // Gated tabs prompt signup in place for visitors (see TabBar).
+                  onClick={
+                    tab.gated && !customer && !isLoading
+                      ? (e) => {
+                          e.preventDefault();
+                          openAuth('signup');
+                        }
+                      : undefined
+                  }
                   aria-current={active ? 'page' : undefined}
                   className={cn(
                     'flex h-10 items-center gap-2 rounded-full px-3.5 text-[13px] font-semibold transition-colors',
