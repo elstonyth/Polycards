@@ -230,17 +230,32 @@ export function liquidGlass(
   // a pre-existing inline backdrop-filter or lg-fallback class isn't ours
   // to erase.
   const prevBackdrop = el.style.backdropFilter;
+  const prevWebkitBackdrop = el.style.getPropertyValue(
+    '-webkit-backdrop-filter',
+  );
+  const restore = () => {
+    el.style.backdropFilter = prevBackdrop;
+    if (prevWebkitBackdrop) {
+      el.style.setProperty('-webkit-backdrop-filter', prevWebkitBackdrop);
+    } else {
+      el.style.removeProperty('-webkit-backdrop-filter');
+    }
+  };
 
   if (!isSupported()) {
     const hadFallbackClass = el.classList.contains('lg-fallback');
     const frosted = `blur(${o.fallbackBlur}px) saturate(${o.saturate})`;
     el.style.backdropFilter = frosted;
+    // Safari ≤17 only implements the prefixed property — without this line
+    // the frosted fallback silently no-ops there and a 55%-tint panel shows
+    // the raw page through un-blurred.
+    el.style.setProperty('-webkit-backdrop-filter', frosted);
     el.classList.add('lg-fallback');
     return {
       supported: false,
       refresh: () => {},
       destroy: () => {
-        el.style.backdropFilter = prevBackdrop;
+        restore();
         if (!hadFallbackClass) el.classList.remove('lg-fallback');
       },
     };
@@ -284,7 +299,7 @@ export function liquidGlass(
       ro.disconnect();
       clearTimeout(timer);
       parts.filter.remove();
-      el.style.backdropFilter = prevBackdrop;
+      restore();
     },
   };
 }

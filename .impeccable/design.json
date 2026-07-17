@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-07-05T20:47:00+08:00",
+  "generatedAt": "2026-07-17T16:30:00+08:00",
   "title": "Design System: Polycards",
   "extensions": {
     "colorMeta": {
@@ -74,7 +74,38 @@
       {
         "name": "rarity-glow",
         "value": "0 0 24px 0 var(--glow-color, rgba(255,176,32,0.35))",
-        "purpose": "The only shadow in the system — colored glow inherited from a card's rarity, a tier's hue, or chase gold on a prize. Never decorative."
+        "purpose": "Colored glow inherited from a card's rarity, a tier's hue, or chase gold on a prize. Never decorative."
+      },
+      {
+        "name": "glass-panel-elevation",
+        "value": "0 25px 60px -15px rgb(0 0 0 / 0.85), inset 0 1px 0 rgb(255 255 255 / 0.12), inset 0 -1px 0 rgb(255 255 255 / 0.04)",
+        "purpose": "Exclusive to .glass-panel overlays (modals, sheets, toast): drop shadow + top/bottom rim highlights that sell the glass material. In-flow cards stay matte — this never appears on them."
+      }
+    ],
+    "glassSurfaces": [
+      {
+        "name": "glass-panel",
+        "refersTo": "glass-panel",
+        "css": "background-color: rgb(10 10 10 / 0.55); border-color: rgb(255 255 255 / 0.15);",
+        "note": "backdrop-filter is applied at runtime by useLiquidGlass() (src/lib/use-liquid-glass.ts): SVG refraction on Chromium, preset-specific frosted fallbacks elsewhere (subtle 24px/1.4, accent 20px/1.5). Utility in globals.css."
+      },
+      {
+        "name": "glass-chrome",
+        "refersTo": "glass-chrome",
+        "css": "background-color: rgb(10 10 10 / 0.7); backdrop-filter: blur(24px) saturate(1.5);",
+        "note": "Wide chrome only (header, tab bar, banners, sticky bars) — refraction is capped at ~800px/side. @supports fallback bumps tint to 0.94 where backdrop-filter is unavailable."
+      },
+      {
+        "name": "glass-scrim",
+        "refersTo": "glass-scrim",
+        "css": "background-color: rgb(10 10 10 / 0.8); backdrop-filter: blur(24px);",
+        "note": "Full-screen overlay backdrops. Same @supports fallback as glass-chrome."
+      },
+      {
+        "name": "glass-stage",
+        "refersTo": null,
+        "css": "background-image: radial-gradient(60% 50% at 50% 45%, rgb(255 255 255 / 0.07), transparent 70%);",
+        "note": "Stage light baked into modal dimmers (which are black/40) so the glass rim always has a gradient to bend, even over empty ink. Earned glow — barely-there by design."
       }
     ],
     "motion": [
@@ -141,14 +172,14 @@
       "refersTo": "balance-chip",
       "description": "Header wallet chip: balance (Nekst, Money Is Display) + white plus-disc opening the top-up sheet. 44px tap target, present on every screen.",
       "html": "<button class=\"ds-balance\"><span class=\"ds-balance-amt\">RM 4.49</span><span class=\"ds-balance-plus\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"3\" stroke-linecap=\"round\"><path d=\"M12 5v14M5 12h14\"/></svg></span></button>",
-      "css": ".ds-balance { display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 4px 4px 4px 14px; background: #262626; border: none; border-radius: 999px; cursor: pointer; transition: background 150ms; } .ds-balance:hover { background: #333333; } .ds-balance-amt { color: #ffffff; font-family: Nekst, ui-sans-serif; font-weight: 900; font-size: 15px; line-height: 1; font-variant-numeric: tabular-nums; } .ds-balance-plus { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 999px; background: #fafafa; color: #0a0a0a; }"
+      "css": ".ds-balance { display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 4px 4px 4px 14px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15); border-radius: 999px; cursor: pointer; transition: background 150ms; } .ds-balance:hover { background: rgba(255,255,255,0.15); } .ds-balance-amt { color: #ffffff; font-family: Nekst, ui-sans-serif; font-weight: 900; font-size: 15px; line-height: 1; font-variant-numeric: tabular-nums; } .ds-balance-plus { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 999px; background: #fafafa; color: #0a0a0a; }"
     },
     {
       "name": "Tab Bar Item",
       "kind": "nav",
       "description": "Bottom tab bar item — active is Paper White, inactive #737373.",
       "html": "<nav class=\"ds-tabbar\"><a class=\"ds-tab ds-tab--active\"><svg width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M3 10.5 12 3l9 7.5V21a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1z\"/></svg><span>Home</span></a><a class=\"ds-tab\"><svg width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><rect x=\"3\" y=\"5\" width=\"18\" height=\"16\" rx=\"2\"/><path d=\"M8 3v4M16 3v4M3 11h18\"/></svg><span>Daily</span></a></nav>",
-      "css": ".ds-tabbar { display: flex; background: #0a0a0a; border-top: 1px solid rgba(255,255,255,0.1); } .ds-tab { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; height: 64px; color: #737373; text-decoration: none; font-size: 10px; font-weight: 600; transition: color 150ms; } .ds-tab:hover { color: #d4d4d4; } .ds-tab--active { color: #fafafa; }"
+      "css": ".ds-tabbar { display: flex; background: rgba(10,10,10,0.7); backdrop-filter: blur(24px) saturate(1.5); border-top: 1px solid rgba(255,255,255,0.1); } .ds-tab { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; height: 64px; color: #737373; text-decoration: none; font-size: 10px; font-weight: 600; transition: color 150ms; } .ds-tab:hover { color: #d4d4d4; } .ds-tab--active { color: #fafafa; }"
     },
     {
       "name": "Sticky Stat Card",
@@ -197,7 +228,8 @@
       "Don't drift to corporate SaaS blue-gray or dashboard-template grids",
       "Don't touch web3/NFT purple degen gradients or glossy 3D coins",
       "Don't build a generic e-commerce product grid",
-      "Don't use gradient text, default glassmorphism, side-stripe borders, or decorative grid/stripe backgrounds",
+      "Don't use gradient text, side-stripe borders, or decorative grid/stripe backgrounds",
+      "Don't invent new translucent surfaces: liquid glass only via the three .glass-* roles (panel/chrome/scrim) on floating surfaces; in-flow cards stay matte charcoal; slab tier frame and PrizeReveal stay glass-free (refraction there was tried and rejected 2026-07)",
       "Don't put body text below #a3a3a3 on dark surfaces",
       "Don't round containers past 16px or add drop shadows to buttons/cards"
     ]

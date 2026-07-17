@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { useLiquidGlass, GLASS_ACCENT } from '@/lib/use-liquid-glass';
 
 // One source of truth for the dismiss timer AND the progress bar's
 // animation-duration (the inline style below overrides the class fallback).
@@ -36,12 +37,19 @@ export function SuccessToast({
     return () => clearTimeout(t);
   }, [message]);
 
+  // Liquid-glass rim while visible (the sr-only idle element has no box to
+  // map); frosted fallback on Safari/Firefox. Truthiness gate matches the
+  // className gate below so '' can't refract a sr-only box.
+  const toastRef = useRef<HTMLDivElement>(null);
+  useLiquidGlass(toastRef, !!message, GLASS_ACCENT);
+
   return (
     <div
+      ref={toastRef}
       role="status"
       className={
         message
-          ? 'fixed inset-x-4 top-[4.25rem] z-[70] mx-auto flex max-w-md items-center gap-3 overflow-hidden rounded-2xl border border-white/10 bg-neutral-900 px-4 py-3 shadow-[0_8px_32px_rgba(0,0,0,0.6)] motion-safe:animate-[toastIn_0.25s_ease-out]'
+          ? 'glass-panel fixed inset-x-4 top-[4.25rem] z-[70] mx-auto flex max-w-md items-center gap-3 overflow-hidden rounded-2xl border px-4 py-3 motion-safe:animate-[toastIn_0.25s_ease-out]'
           : 'sr-only'
       }
     >

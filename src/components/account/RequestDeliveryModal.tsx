@@ -11,6 +11,7 @@ import {
 import type { VaultItem } from '@/lib/actions/vault';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { Pill } from '@/components/ui/pill';
+import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
 
 type Props = {
   open: boolean;
@@ -48,6 +49,9 @@ export default function RequestDeliveryModal({
   });
   const panelRef = useRef<HTMLDivElement>(null);
   useModalA11y(panelRef, open, onClose);
+
+  // Liquid-glass rim on the panel (frosted fallback on Safari/Firefox).
+  useLiquidGlass(panelRef, open, GLASS_SUBTLE);
 
   if (!open) return null;
 
@@ -95,14 +99,14 @@ export default function RequestDeliveryModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+    <div className="glass-stage fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label="Request delivery"
         tabIndex={-1}
-        className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-white/10 bg-neutral-900 p-5 outline-none"
+        className="glass-panel max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-2xl border p-5 outline-none"
       >
         <h2 className="font-heading text-lg font-bold text-white">
           Request delivery

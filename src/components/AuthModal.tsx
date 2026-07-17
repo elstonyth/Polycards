@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
-import { liquidGlass } from '@/lib/liquid-glass';
+import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
 import AuthForm from './AuthForm';
 
 // Tabbable-element selector used by the focus trap.
@@ -24,6 +24,10 @@ export default function AuthModal() {
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const panelRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
+
+  // Liquid-glass rim on the panel — subtle settings; the interior must stay
+  // legible behind a form. Safari/Firefox get the frosted fallback.
+  useLiquidGlass(panelRef, open, GLASS_SUBTLE);
 
   useEffect(() => {
     const onOpen = (e: Event) => {
@@ -59,18 +63,6 @@ export default function AuthModal() {
     // Move focus into the dialog on open (WCAG 2.4.3).
     panel?.focus();
 
-    // Liquid glass rim refraction on the panel (subtle settings — the interior
-    // must stay legible behind a form). Safari/Firefox get the frosted fallback.
-    const glass = panel
-      ? liquidGlass(panel, {
-          scale: -60,
-          chroma: 4,
-          blur: 6,
-          saturate: 1.4,
-          fallbackBlur: 24,
-        })
-      : null;
-
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setOpen(false);
@@ -99,7 +91,6 @@ export default function AuthModal() {
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
-      glass?.destroy();
       document.removeEventListener('keydown', onKey);
       document.body.style.overflow = prevOverflow;
       // Restore focus to the element that opened the modal (WCAG 2.4.3).
@@ -120,7 +111,7 @@ export default function AuthModal() {
         aria-hidden="true"
         tabIndex={-1}
         onClick={() => setOpen(false)}
-        className="absolute inset-0 cursor-default bg-black/70 backdrop-blur-sm"
+        className="glass-stage absolute inset-0 cursor-default bg-black/40"
       />
       <div
         ref={panelRef}
@@ -128,7 +119,7 @@ export default function AuthModal() {
         aria-modal="true"
         aria-label={mode === 'signup' ? 'Create account' : 'Log in'}
         tabIndex={-1}
-        className="relative z-10 max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-2xl border border-white/15 bg-neutral-950/45 p-7 shadow-[0_25px_60px_-15px_rgba(0,0,0,0.85),inset_0_1px_0_rgba(255,255,255,0.12),inset_0_-1px_0_rgba(255,255,255,0.04)] outline-none sm:p-8"
+        className="glass-panel relative z-10 max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-2xl border p-7 outline-none sm:p-8"
       >
         <button
           type="button"

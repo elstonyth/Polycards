@@ -244,7 +244,7 @@ export default function CatalogClient({
   return (
     <div className="mx-auto w-full px-fluid py-4">
       {/* Sticky filter bar — category chip rail */}
-      <div className="sticky top-2 z-20 mb-6 rounded-2xl border border-white/10 bg-neutral-950/80 p-2 backdrop-blur supports-[backdrop-filter]:bg-neutral-950/60">
+      <div className="glass-chrome sticky top-2 z-20 mb-6 rounded-2xl border border-white/10 p-2">
         {/* Category chip rail (icons + label) */}
         <div className="flex items-center gap-1.5 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {tabs.map((t) => (

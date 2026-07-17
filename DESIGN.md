@@ -97,6 +97,17 @@ components:
     textColor: '{colors.paper-white}'
     rounded: '{rounded.md}'
     padding: '12px 14px'
+  # Liquid Glass (2026-07-17) — the one tint scale for translucent surfaces,
+  # always ink-black based. Implemented as .glass-* utilities in globals.css;
+  # refraction itself comes from useLiquidGlass() (src/lib/use-liquid-glass.ts).
+  # (blur/saturate + shadow recipes live in .impeccable/design.json —
+  # backdrop-filter isn't part of this schema's component props.)
+  glass-panel: # compact overlays: modals, sheets, toast (refraction-capable)
+    backgroundColor: '#0a0a0a8c' # ink-black / 55%
+  glass-chrome: # wide chrome: header, tab bar, banners, sticky bars (frosted only)
+    backgroundColor: '#0a0a0ab3' # ink-black / 70%
+  glass-scrim: # full-screen overlay backdrops
+    backgroundColor: '#0a0a0acc' # ink-black / 80%
 ---
 
 # Design System: Polycards
@@ -164,7 +175,7 @@ A committed dark palette where chrome stays monochrome and every hue is a signal
 
 ## 4. Elevation
 
-Flat, tonally layered, glow-reserved. Depth comes from the three-step neutral ramp (ink page → charcoal card → graphite control), separated by hairline borders — never from drop shadows. The single exception: **rarity/prize glow** (a soft colored `box-shadow` matched to the rarity or tier hue) on card art, reveal moments, and the top-chase highlight. Overlays (top-up sheet, dialogs) sit on a black/60 scrim with the surface at charcoal.
+Flat, tonally layered, glow-reserved. Depth comes from the three-step neutral ramp (ink page → charcoal card → graphite control), separated by hairline borders — never from drop shadows on in-flow surfaces. Two sanctioned exceptions: **rarity/prize glow** (a soft colored `box-shadow` matched to the rarity or tier hue) on card art, reveal moments, and the top-chase highlight; and **glass-panel elevation** (2026-07-17) — the drop shadow + inset rim highlights baked into `.glass-panel`, exclusive to floating overlays (modals, sheets, toast) where the shadow sells the glass material. Overlays sit on a black/40 stage-lit dimmer (`.glass-stage`) with the surface as `.glass-panel` glass.
 
 **The Glow Is Earned Rule.** A glow appears only when its color is inherited from the thing glowing (a card's rarity, a tier's hue, chase gold on a prize). Decorative ambient shadows are prohibited — if it looks "soft and floating", it's wrong; this system is matte with jewels in it.
 
@@ -249,7 +260,8 @@ The home page is a six-board editorial scroll story (spec:
 - **Don't** drift to "corporate SaaS / fintech" sterile blue-gray or icon-card dashboard grids (PRODUCT.md anti-reference).
 - **Don't** touch "web3 / NFT" purple degen gradients or glossy 3D coins (PRODUCT.md anti-reference) — Diamond Purple lives on tier cards only.
 - **Don't** build a "generic e-commerce" product grid; the hub is an experience shelf, not a catalog (PRODUCT.md anti-reference).
-- **Don't** use gradient text, glassmorphism-by-default, side-stripe borders (`border-left` accent), or decorative grid/stripe backgrounds. Prohibited outright. Data marquees (see Drop Board) are the one sanctioned moving band — decorative word loops stay banned.
+- **Don't** use gradient text, side-stripe borders (`border-left` accent), or decorative grid/stripe backgrounds. Prohibited outright. Data marquees (see Drop Board) are the one sanctioned moving band — decorative word loops stay banned.
+- **Don't** invent new translucent surfaces. Liquid glass is sanctioned ONLY through the three `.glass-*` roles (panel / chrome / scrim — see components above, 2026-07-17): overlays, sheets, chrome, and scrims that float over content. In-flow cards and page sections stay matte charcoal; the slab tier frame stays pure CSS (refraction there was tried and rejected — reads as a zoom-in on card art); PrizeReveal stays glass-free.
 - **Don't** put body text below Silver (#a3a3a3) on dark surfaces; muted-gray-on-charcoal is the #1 legibility failure.
 - **Don't** round containers past 16px or add drop shadows to buttons/cards — matte surfaces, hairline edges, earned glow only.
 - **Don't** gate content behind animations; a reveal enhances an already-visible default.

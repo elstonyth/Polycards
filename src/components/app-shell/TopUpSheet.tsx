@@ -7,6 +7,7 @@ import { rm, rm0 } from '@/lib/format';
 import { topUpCredits } from '@/lib/actions/vault';
 import { Pill } from '@/components/ui/pill';
 import { useModalA11y } from '@/lib/use-modal-a11y';
+import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
 
 const PRESETS = [10, 25, 50, 100];
 
@@ -51,6 +52,9 @@ export default function TopUpSheet({
 
   // Focus-in, Tab trap, Escape, scroll lock + focus restore on close.
   useModalA11y(panelRef, open, onClose);
+
+  // Liquid-glass rim on the sheet panel (frosted fallback on Safari/Firefox).
+  useLiquidGlass(panelRef, open, GLASS_SUBTLE);
 
   // Reset transient state each time the sheet opens.
   useEffect(() => {
@@ -98,7 +102,7 @@ export default function TopUpSheet({
         aria-hidden="true"
         tabIndex={-1}
         onClick={onClose}
-        className="absolute inset-0 h-full w-full cursor-default bg-black/60"
+        className="glass-stage absolute inset-0 h-full w-full cursor-default bg-black/40"
       />
 
       <div
@@ -108,7 +112,7 @@ export default function TopUpSheet({
         aria-label="Top up credits"
         tabIndex={-1}
         className={cn(
-          'absolute inset-x-0 bottom-0 mx-auto w-full max-w-md rounded-t-2xl border-t border-white/10 bg-neutral-900 p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] outline-none',
+          'glass-panel absolute inset-x-0 bottom-0 mx-auto w-full max-w-md rounded-t-2xl border-t p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] outline-none',
           'sm:inset-x-0 sm:top-1/2 sm:bottom-auto sm:-translate-y-1/2 sm:rounded-2xl sm:border',
           'motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-4 motion-safe:duration-200',
         )}
@@ -190,7 +194,7 @@ export default function TopUpSheet({
               />
             </label>
 
-            <div className="mt-4 rounded-xl border border-white/10 bg-neutral-950/60 p-4 text-sm">
+            <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm">
               <div className="flex items-center justify-between text-neutral-400">
                 <span>Current balance</span>
                 <span className="font-semibold text-neutral-200">

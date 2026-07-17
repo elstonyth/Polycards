@@ -393,6 +393,82 @@
     padding-left: clamp(1rem, 1.6vw, 4.5rem);
     padding-right: clamp(1rem, 1.6vw, 4.5rem);
   }
+
+  /* DESIGN.md "Liquid Glass" — the ONE tint scale for translucent surfaces,
+     all on ink-black (#0a0a0a) so glass reads as the same material everywhere.
+     Components keep their own border-* width/side classes; these set color,
+     tint, and elevation only. */
+
+  /* Compact refraction panels: modals, sheets, toast. useLiquidGlass()
+     supplies the backdrop-filter (refraction or frosted fallback) at runtime,
+     so this class deliberately sets none. */
+  .glass-panel {
+    /* 55%: worst case is a sheet over a wall of bright slab art — 45% let
+       too much luminance through for AA body text (review 2026-07-17). */
+    background-color: rgb(10 10 10 / 0.55);
+    border-color: rgb(255 255 255 / 0.15);
+    box-shadow:
+      0 25px 60px -15px rgb(0 0 0 / 0.85),
+      inset 0 1px 0 rgb(255 255 255 / 0.12),
+      inset 0 -1px 0 rgb(255 255 255 / 0.04);
+  }
+
+  /* Wide app chrome: header, tab bar, banners, sticky bars — frosted CSS
+     only (refraction is capped at ~800px per side for GPU cost). The
+     -webkit- line keeps Safari ≤17 frosted. */
+  .glass-chrome {
+    background-color: rgb(10 10 10 / 0.7);
+    -webkit-backdrop-filter: blur(24px) saturate(1.5);
+    backdrop-filter: blur(24px) saturate(1.5);
+  }
+
+  /* Full-screen overlay backdrops. */
+  .glass-scrim {
+    background-color: rgb(10 10 10 / 0.8);
+    -webkit-backdrop-filter: blur(24px);
+    backdrop-filter: blur(24px);
+  }
+
+  /* Stage light for modal dimmers: a faint centered glow baked into the
+     dimmer layer so the glass rim always has a gradient to bend, even when
+     the page behind is empty ink. Earned glow — barely-there by design. */
+  .glass-stage {
+    background-image: radial-gradient(
+      60% 50% at 50% 45%,
+      rgb(255 255 255 / 0.07),
+      transparent 70%
+    );
+  }
+
+  /* No backdrop-filter at all (neither unprefixed nor -webkit-) → nothing
+     can blur, including useLiquidGlass()'s JS fallback, so the tint alone is
+     too transparent for legibility; fall back to near-opaque ink (mirrors
+     the old /95 surfaces). */
+  @supports not (
+    (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))
+  ) {
+    .glass-panel,
+    .glass-chrome,
+    .glass-scrim {
+      background-color: rgb(10 10 10 / 0.94);
+    }
+  }
+
+  /* OS "reduce transparency": glass goes near-opaque, the CSS-only blurs
+     are dropped, and the stage glow disappears. useLiquidGlass() skips its
+     filter under the same query. */
+  @media (prefers-reduced-transparency: reduce) {
+    .glass-panel,
+    .glass-chrome,
+    .glass-scrim {
+      background-color: rgb(10 10 10 / 0.94);
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+    .glass-stage {
+      background-image: none;
+    }
+  }
 }
 
 @keyframes vault-shake {

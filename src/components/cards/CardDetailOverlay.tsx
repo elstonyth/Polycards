@@ -104,7 +104,7 @@ export function CardDetailOverlay({
     <motion.div
       initial={reduced ? false : { opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="fixed inset-0 z-[100] overflow-y-auto bg-neutral-950/95 backdrop-blur-sm"
+      className="glass-scrim fixed inset-0 z-[100] overflow-y-auto"
       onClick={close}
       role="presentation"
     >

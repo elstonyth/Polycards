@@ -28,7 +28,7 @@ export default function AppHeader() {
   return (
     <header
       data-site-chrome
-      className="px-fluid sticky top-0 z-50 border-b border-white/10 bg-neutral-950 py-3"
+      className="glass-chrome px-fluid sticky top-0 z-50 border-b border-white/10 py-3"
     >
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-5">
@@ -88,6 +88,10 @@ export default function AppHeader() {
           {customer ? (
             <>
               <NotificationBell />
+              {/* Translucent tint only — no refraction: the chip sits inside
+                  the header's own backdrop-filter (a backdrop root), so a
+                  nested filter refracts an already-blurred tint invisibly
+                  while costing a live filter on every scroll. */}
               <button
                 type="button"
                 onClick={openTopUp}
@@ -96,7 +100,7 @@ export default function AppHeader() {
                     ? 'Top up credits'
                     : `Balance ${rm(balance)} — top up`
                 }
-                className="flex h-11 items-center gap-2 rounded-full bg-neutral-800 py-1 pl-3.5 pr-1 transition-colors hover:bg-neutral-700"
+                className="flex h-11 items-center gap-2 rounded-full border border-white/15 bg-white/10 py-1 pl-3.5 pr-1 transition-colors hover:bg-white/15"
               >
                 {/* DESIGN.md "Money Is Display": the balance is the app's most
                     repeated RM value — set it in the Nekst ledger voice, not

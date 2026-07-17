@@ -6,6 +6,7 @@ import { X } from 'lucide-react';
 import type { Rarity } from '@/lib/packs-data';
 import { rarityRgb } from '@/lib/rarity';
 import { useModalA11y } from '@/lib/use-modal-a11y';
+import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
 
 /** The published-odds list itself — overall row + per-rarity rows + caption.
  *  Shared between this sheet and the pack page's odds panel so the two can't
@@ -80,11 +81,14 @@ export function OddsSheet({
   const panelRef = useRef<HTMLDivElement>(null);
   useModalA11y(panelRef, open, onClose);
 
+  // Liquid-glass rim on the sheet panel (frosted fallback on Safari/Firefox).
+  useLiquidGlass(panelRef, open, GLASS_SUBTLE);
+
   if (!open) return null;
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 sm:items-center sm:p-4"
+      className="glass-stage fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center sm:p-4"
       onClick={onClose}
     >
       <div
@@ -93,7 +97,7 @@ export function OddsSheet({
         aria-modal="true"
         aria-label="Published pull odds by rarity"
         tabIndex={-1}
-        className="max-h-[85vh] w-full overflow-y-auto rounded-t-2xl border-t border-white/10 bg-neutral-950/95 p-5 pb-[env(safe-area-inset-bottom)] backdrop-blur outline-none sm:inset-x-auto sm:bottom-auto sm:max-w-sm sm:rounded-2xl sm:border"
+        className="glass-panel max-h-[85vh] w-full overflow-y-auto rounded-t-2xl border-t p-5 pb-[env(safe-area-inset-bottom)] outline-none sm:inset-x-auto sm:bottom-auto sm:max-w-sm sm:rounded-2xl sm:border"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-center justify-between">

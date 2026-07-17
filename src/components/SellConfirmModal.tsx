@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { SlabImage } from '@/components/SlabImage';
 import { rm } from '@/lib/format';
+import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -49,6 +50,9 @@ export default function SellConfirmModal({
   const plural = count !== 1;
   const panelRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
+
+  // Liquid-glass rim on the panel (frosted fallback on Safari/Firefox).
+  useLiquidGlass(panelRef, open, GLASS_SUBTLE);
 
   useEffect(() => {
     if (!open) return;
@@ -96,7 +100,7 @@ export default function SellConfirmModal({
         aria-hidden="true"
         tabIndex={-1}
         onClick={() => !busy && onCancel()}
-        className="absolute inset-0 cursor-default bg-black/70 backdrop-blur-sm"
+        className="glass-stage absolute inset-0 cursor-default bg-black/40"
       />
       <div
         ref={panelRef}
@@ -104,7 +108,7 @@ export default function SellConfirmModal({
         aria-modal="true"
         aria-label="Confirm sell-back"
         tabIndex={-1}
-        className="relative z-10 max-h-[85vh] w-full overflow-y-auto rounded-t-3xl border-t border-white/10 bg-neutral-950/95 p-6 pb-[calc(env(safe-area-inset-bottom)+1.5rem)] shadow-2xl shadow-black/60 backdrop-blur outline-none sm:inset-x-auto sm:bottom-auto sm:max-w-sm sm:rounded-2xl sm:border sm:pb-6"
+        className="glass-panel relative z-10 max-h-[85vh] w-full overflow-y-auto rounded-t-3xl border-t p-6 pb-[calc(env(safe-area-inset-bottom)+1.5rem)] outline-none sm:inset-x-auto sm:bottom-auto sm:max-w-sm sm:rounded-2xl sm:border sm:pb-6"
       >
         <button
           type="button"
