@@ -55,8 +55,12 @@ export function PoolByRarity({
               )}
             </div>
             {/* Rail — a peeking partial card signals the sideways swipe;
-                hidden scrollbar matches the catalog rails. */}
-            <div className="flex gap-2 overflow-x-auto pb-1 sm:gap-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                hidden scrollbar matches the catalog rails. overflow-x-auto
+                forces overflow-y to compute to `auto` (CSS coupling), which
+                would clip each slab's tier halo (box-shadow) top/bottom; the
+                py/-my pair gives the glow room inside the scroll box without
+                changing layout. */}
+            <div className="-my-8 flex gap-2 overflow-x-auto py-8 sm:gap-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {cards.map((c) => (
                 <div key={c.id} className="w-[38%] shrink-0 sm:w-40">
                   <CardTile
