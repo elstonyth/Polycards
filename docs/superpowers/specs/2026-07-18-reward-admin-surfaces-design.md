@@ -230,6 +230,10 @@ the repo's 800-line guideline), so the tab component owns all Levels UI and stat
   `levelForSpend` recomputes the live level from the current ladder; the store `/vip`
   route's `next` lookup returns `null` (treated as ladder top); the carousel falls
   back to index 0. Do **not** "fix" this — grants and peaks are historical facts.
+  *(Post-review amendment, 2026-07-19: this list missed `resolveBoxTier`, whose
+  exact-level lookup went permanently `'unavailable'` for members peaked above a
+  shrunken ladder. It now clamps to the top rung at read time — historical rows
+  are still never mutated.)*
 - **Seed reappearance:** `seed.ts` / `seed-vip-achievements.ts` are idempotent
   upsert-if-absent **by `level`** — they never overwrite operator edits, but a
   *deleted* rung whose level number is in `VIP_LEVELS` reappears if a seed re-runs.
