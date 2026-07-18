@@ -26,7 +26,7 @@ import { FxCard } from './FxCard';
 // keys that magenta to transparency automatically on upload, so the model's
 // output can be uploaded here directly.
 
-const PROMPT_CORE = `Portrait orientation, proportions 3.31 wide by 5.35 tall like a real card grading slab, viewed perfectly straight-on (orthographic, no perspective tilt), centered in frame. The label plate sits at the top of the slab taking up roughly the top quarter; the card window opens directly below it with about 8-10% clear plastic border on each side.
+const PROMPT_CORE = `Portrait orientation, proportions 3.31 wide by 5.35 tall like a real card grading slab, viewed perfectly straight-on (orthographic, no perspective tilt), centered in frame. The label plate sits at the top of the slab taking up roughly the top quarter; the card window opens directly below it with about 10-11% clear plastic border on each side.
 
 CRITICAL: the large card window (the area below the label where the card would sit) must be a completely flat, solid, uniform bright magenta color #FF00FF with no reflections, no gradients, no shadows, nothing inside. The entire background surrounding the slab must also be the same flat solid magenta #FF00FF.
 
