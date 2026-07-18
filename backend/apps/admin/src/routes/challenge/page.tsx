@@ -406,5 +406,5 @@ export default ChallengePage;
 export const config: RouteConfig = {
   label: 'Weekly Challenge',
   icon: Trophy,
-  rank: 31,
+  rank: 33,
 };

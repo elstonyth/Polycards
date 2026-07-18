@@ -1029,5 +1029,5 @@ export default DailyRewardsPage;
 export const config: RouteConfig = {
   label: 'VIP',
   icon: Star,
-  rank: 30,
+  rank: 32,
 };
