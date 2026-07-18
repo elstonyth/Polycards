@@ -1,5 +1,6 @@
-// Customer rewards workflow after the /daily ⇄ /vip split: claim a VIP voucher
-// grant on /vip, then open the daily box on /daily.
+// Customer rewards workflow after the daily-box move onto /vip: claim a VIP
+// voucher grant on /vip, then open the daily box (also on /vip — /daily now
+// redirects there).
 //
 // PRECONDITIONS (the "reward gate" phase):
 //   1. backend running with REWARDS_REDEMPTION_ENABLED=true
@@ -15,7 +16,7 @@ const PACK = process.env.PW_REWARD_PACK ?? 'pokemon-rookie';
 const EMAIL = process.env.PW_REWARD_EMAIL ?? 'test@polycards.app';
 const PASSWORD = process.env.PW_REWARD_PASSWORD ?? 'PolycardsTest123!';
 
-test.describe('customer rewards — voucher on /vip + daily box on /daily', () => {
+test.describe('customer rewards — voucher + daily box on /vip', () => {
   test('claim a voucher grant on /vip', async ({ page }) => {
     await sf.login(page, PACK, EMAIL, PASSWORD);
     await page.goto(`${BASE}/vip`, { waitUntil: 'domcontentloaded' });
@@ -28,7 +29,10 @@ test.describe('customer rewards — voucher on /vip + daily box on /daily', () =
       .first()
       .isVisible()
       .catch(() => false);
-    test.skip(gated, 'reward redemption disabled (REWARDS_REDEMPTION_ENABLED unset)');
+    test.skip(
+      gated,
+      'reward redemption disabled (REWARDS_REDEMPTION_ENABLED unset)',
+    );
 
     const claim = page
       .getByRole('button', { name: 'Claim', exact: true })
@@ -41,15 +45,13 @@ test.describe('customer rewards — voucher on /vip + daily box on /daily', () =
     });
   });
 
-  test('open the daily box on /daily (no voucher section)', async ({ page }) => {
+  test('open the daily box on /vip (/daily redirects there)', async ({
+    page,
+  }) => {
     await sf.login(page, PACK, EMAIL, PASSWORD);
+    // The daily box moved onto /vip; /daily is now a redirect to it.
     await page.goto(`${BASE}/daily`, { waitUntil: 'domcontentloaded' });
-    await page
-      .getByRole('heading', { name: /daily rewards/i })
-      .waitFor({ timeout: 15_000 });
-
-    // The vouchers section moved to /vip — it must NOT render here.
-    await expect(page.getByRole('heading', { name: /vouchers/i })).toHaveCount(0);
+    await expect(page).toHaveURL(/\/vip$/, { timeout: 15_000 });
 
     const openBox = page.getByRole('button', { name: /open box/i });
     if (await openBox.isEnabled().catch(() => false)) {
