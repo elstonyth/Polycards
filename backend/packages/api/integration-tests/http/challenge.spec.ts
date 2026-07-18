@@ -123,6 +123,45 @@ medusaIntegrationTestRunner({
         expect(await packs().listChallengeStages({}, { take: 10 })).toHaveLength(0);
       });
 
+      it('POST stages: shrink → regrow succeeds (hard delete, no unique collision on stage_number)', async () => {
+        const full = [
+          { stage_number: 1, threshold_myr: 100, reward_credits: 10, reward_card_ids: [] },
+          { stage_number: 2, threshold_myr: 200, reward_credits: 20, reward_card_ids: [] },
+          { stage_number: 3, threshold_myr: 300, reward_credits: 30, reward_card_ids: [] },
+        ];
+        const first = await unwrapResponse(
+          api.post(
+            '/admin/challenge/stages',
+            { stages: full, reason: 'first save (3 stages)' },
+            { headers: adminHeaders() },
+          ),
+        );
+        expect(first.status).toBe(200);
+
+        const two = full.slice(0, 2);
+        const shrink = await unwrapResponse(
+          api.post(
+            '/admin/challenge/stages',
+            { stages: two, reason: 'shrink to 2' },
+            { headers: adminHeaders() },
+          ),
+        );
+        expect(shrink.status).toBe(200);
+        expect(await packs().listChallengeStages({}, { take: 10 })).toHaveLength(2);
+
+        // Recreate stage 3 — a soft-deleted stage_number=3 would collide here.
+        const regrow = await unwrapResponse(
+          api.post(
+            '/admin/challenge/stages',
+            { stages: full, reason: 'regrow to 3' },
+            { headers: adminHeaders() },
+          ),
+        );
+        expect(regrow.status).toBe(200);
+        expect(regrow.data.stages).toHaveLength(3);
+        expect(await packs().listChallengeStages({}, { take: 10 })).toHaveLength(3);
+      });
+
       it('POST settings: valid patch persists + audit; GET reflects it', async () => {
         const res = await unwrapResponse(
           api.post(
