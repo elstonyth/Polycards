@@ -48,4 +48,7 @@ export const qk = {
   rewardsSettings: ['admin', 'rewards-settings'] as const,
   siteSettings: ['admin', 'site-settings'] as const,
   avatarFrames: ['admin', 'avatar-frames'] as const,
+  vipLevels: ['admin', 'vip-levels'] as const,
+  challengeStages: ['admin', 'challenge', 'stages'] as const,
+  challengeSettings: ['admin', 'challenge', 'settings'] as const,
 };

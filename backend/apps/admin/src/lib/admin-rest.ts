@@ -695,6 +695,60 @@ export const saveAvatarFrames = (body: {
   reason: string;
 }) => postJson<AvatarFramesView>('/admin/avatar-frames', body);
 
+// ── VIP levels (ladder CRUD) ─────────────────────────────────────────────────
+
+export interface VipLevelDTO {
+  level: number;
+  spend_threshold: number; // MYR
+  voucher_amount: number; // MYR
+  box_tier: string;
+  frame_unlock: boolean;
+  direct_referral_pct: number;
+}
+
+export const getVipLevels = () =>
+  getJson<{ levels: VipLevelDTO[] }>('/admin/vip-levels');
+
+// Replace-all the ladder. Audited edit; `reason` mandatory. Throws
+// Error(message) on a 400 (errorMessage surfaces the backend MedusaError).
+export const saveVipLevels = (body: { levels: VipLevelDTO[]; reason: string }) =>
+  postJson<{ levels: VipLevelDTO[] }>('/admin/vip-levels', body);
+
+// ── Weekly Challenge (milestone stages + week/payout settings) ───────────────
+
+export interface ChallengeStageDTO {
+  stage_number: number;
+  threshold_myr: number; // MYR
+  reward_credits: number; // MYR credited as store credits
+  reward_card_ids: string[]; // featured card ids
+}
+
+export const getChallengeStages = () =>
+  getJson<{ stages: ChallengeStageDTO[] }>('/admin/challenge/stages');
+
+export const saveChallengeStages = (body: {
+  stages: ChallengeStageDTO[];
+  reason: string;
+}) => postJson<{ stages: ChallengeStageDTO[] }>('/admin/challenge/stages', body);
+
+export interface ChallengeSettingsDTO {
+  cadence: string;
+  timezone: string;
+  reset_day: number;
+  reset_hour: number;
+  payout_credits: number; // MYR credited as store credits
+  payout_card_ids: string[]; // featured card ids
+}
+
+export const getChallengeSettings = () =>
+  getJson<ChallengeSettingsDTO>('/admin/challenge/settings');
+
+// Singleton patch: send only the changed fields under `patch`.
+export const saveChallengeSettings = (body: {
+  patch: Partial<ChallengeSettingsDTO>;
+  reason: string;
+}) => postJson<ChallengeSettingsDTO>('/admin/challenge/settings', body);
+
 // ── Pixel-Pokémon library (Pokédex) ──────────────────────────────────────────
 
 export interface PixelPokemonRow {

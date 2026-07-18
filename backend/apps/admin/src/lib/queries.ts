@@ -23,6 +23,8 @@ import {
   deletePack,
   freezeCustomer,
   getAvatarFrames,
+  getChallengeSettings,
+  getChallengeStages,
   getCustomerAudit,
   getCustomerGacha,
   getCustomerCommissions,
@@ -43,13 +45,17 @@ import {
   getReferralTree,
   getRewardsSettings,
   getSiteSettings,
+  getVipLevels,
   listDeliveryOrders,
   listEligibleProducts,
   reverseCommission,
   saveAvatarFrames,
+  saveChallengeSettings,
+  saveChallengeStages,
   saveDailyBox,
   saveRewardsSettings,
   saveSiteSettings,
+  saveVipLevels,
   saveVoucherRanges,
   setFxRate,
   suspendCommission,
@@ -59,6 +65,8 @@ import {
   uploadImage,
   type AdminCommissionRow,
   type AvatarFramesView,
+  type ChallengeSettingsDTO,
+  type ChallengeStageDTO,
   type CustomerAudit,
   type CustomerGacha,
   type SupportTransaction,
@@ -75,6 +83,7 @@ import {
   type ReferralTree,
   type RewardsSettingsView,
   type SiteSettingsView,
+  type VipLevelDTO,
   type VoucherLadderDTO,
   type VoucherRangeDTO,
 } from './admin-rest';
@@ -616,6 +625,64 @@ export const useSaveAvatarFrames = () => {
     onSuccess: () => {
       toast.success('Avatar frames saved');
       qc.invalidateQueries({ queryKey: qk.avatarFrames });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+export type {
+  VipLevelDTO,
+  ChallengeStageDTO,
+  ChallengeSettingsDTO,
+} from './admin-rest';
+
+export const useVipLevels = (): UseQueryResult<{ levels: VipLevelDTO[] }> =>
+  useQuery({ queryKey: qk.vipLevels, queryFn: getVipLevels });
+
+export const useSaveVipLevels = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { levels: VipLevelDTO[]; reason: string }) =>
+      saveVipLevels(vars),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.vipLevels });
+      toast.success('VIP levels saved');
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+export const useChallengeStages = (): UseQueryResult<{
+  stages: ChallengeStageDTO[];
+}> =>
+  useQuery({ queryKey: qk.challengeStages, queryFn: getChallengeStages });
+
+export const useSaveChallengeStages = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { stages: ChallengeStageDTO[]; reason: string }) =>
+      saveChallengeStages(vars),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.challengeStages });
+      toast.success('Milestone stages saved');
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+export const useChallengeSettings = (): UseQueryResult<ChallengeSettingsDTO> =>
+  useQuery({ queryKey: qk.challengeSettings, queryFn: getChallengeSettings });
+
+export const useSaveChallengeSettings = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: {
+      patch: Partial<ChallengeSettingsDTO>;
+      reason: string;
+    }) => saveChallengeSettings(vars),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.challengeSettings });
+      toast.success('Week & payout saved');
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });
