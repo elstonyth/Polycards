@@ -67,7 +67,15 @@ function frameSrc(rarity: string): string {
   return `/images/slab-frames/${FRAME_TIERS.has(key) ? key : 'common'}.webp`;
 }
 
-/** Static outer halo (box-shadow only — no animation, operator 2026-07-17). */
+/**
+ * Static outer halo (box-shadow only — no animation, operator 2026-07-17).
+ *
+ * GEOMETRY CONTRACT: this glow reaches ~44px past the slab edge (the primary
+ * shadow). Any surface that clips its overflow around a SlabImage must reserve
+ * at least that much padding or the halo gets cut — see the rail padding in
+ * src/app/slots/[slug]/PoolByRarity.tsx (py-12/px-10). Retune this radius and
+ * that padding together.
+ */
 function glowStyle(rgb: string): React.CSSProperties {
   return {
     inset: FRAME_INSET,

@@ -1,5 +1,10 @@
 import sharp from 'sharp';
-import { composeSlab, fetchBytes, isAllowedImageUrl } from '../bake-slab';
+import {
+  composeSlab,
+  fetchBytes,
+  isAllowedImageUrl,
+  SLAB_WINDOW,
+} from '../bake-slab';
 
 // SSRF guard for the server-side slab-bake fetch (frame + card image). Public
 // hosts and storefront-relative paths are allowed (a strict CDN allowlist would
@@ -130,7 +135,9 @@ describe('fetchBytes', () => {
 });
 
 // composeSlab geometry contract: output = frame-sized webp; the card photo
-// covers the window rect (insets 26.26% / 9.56-9.44% / 7.41%); frame layers on top.
+// covers the window rect (SLAB_WINDOW insets — sampled from the constant below
+// so this test tracks a re-measure); frame layers on top; the thin recess gap
+// around the card stays transparent (no plate).
 describe('composeSlab', () => {
   const makeFrame = (w: number, h: number) =>
     sharp({
@@ -167,13 +174,24 @@ describe('composeSlab', () => {
       .raw()
       .toBuffer({ resolveWithObject: true });
     const px = (x: number, y: number) => (y * info.width + x) * info.channels;
+    // Geometry derived from SLAB_WINDOW so the samples move with a re-measure.
+    const left = Math.round(400 * SLAB_WINDOW.left);
+    const top = Math.round(669 * SLAB_WINDOW.top);
+    const winW = 400 - left - Math.round(400 * SLAB_WINDOW.right);
+    const cx = left + Math.round(winW / 2);
+    const cy =
+      top + Math.round((669 * (1 - SLAB_WINDOW.top - SLAB_WINDOW.bottom)) / 2);
     // window centre → the red photo shows through the transparent frame
-    const cy = Math.round(669 * 0.2626 + (669 * (1 - 0.2626 - 0.0741)) / 2);
-    const c = px(200, cy);
+    const c = px(cx, cy);
     expect(data[c]).toBeGreaterThan(200); // R
     expect(data[c + 1]).toBeLessThan(50); // G
+    // the thin recess gap just inside the window's left edge, level with the
+    // card, stays TRANSPARENT — the removed grey recess plate would have
+    // painted this pixel opaque, so this pins the plate's removal.
+    const g = px(left, cy);
+    expect(data[g + 3]).toBe(0); // alpha
     // above the window (label area) → still transparent
-    const t = px(200, Math.round(669 * 0.1));
+    const t = px(cx, Math.round(669 * 0.1));
     expect(data[t + 3]).toBe(0); // alpha
   });
 

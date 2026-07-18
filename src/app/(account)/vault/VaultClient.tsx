@@ -406,21 +406,18 @@ export default function VaultClient({
             const isSelected = selected.has(item.pullId);
             const glow = rarityRgb(item.card.rarity);
             const art = (
-              // drop-shadow (not box-shadow/border) so the rarity glow hugs the
-              // slab silhouette instead of drawing a rectangle behind the
-              // frame's transparent margins.
-              <div
+              // Pass `rarity` so the slab renders its tier frame + halo, matching
+              // the pool and card-detail (operator 2026-07-18 — the vault was
+              // showing the bare baked slab with only a faint drop-shadow, so the
+              // tier frame never appeared here).
+              <SlabImage
+                src={item.card.image}
+                slabSrc={item.card.slabImage}
+                rarity={item.card.rarity}
+                alt={item.card.name}
+                sizes="(max-width: 1024px) 33vw, 25vw"
                 className="w-full"
-                style={{ filter: `drop-shadow(0 0 8px rgba(${glow}, 0.5))` }}
-              >
-                <SlabImage
-                  src={item.card.image}
-                  slabSrc={item.card.slabImage}
-                  alt={item.card.name}
-                  sizes="(max-width: 1024px) 33vw, 25vw"
-                  className="w-full"
-                />
-              </div>
+              />
             );
             return (
               <div

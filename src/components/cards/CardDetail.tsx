@@ -1,8 +1,6 @@
 'use client';
 
-import { motion } from 'motion/react';
 import { SlabImage } from '@/components/SlabImage';
-import { usePrefersReducedMotion } from '@/lib/use-reveal';
 import { rarityRgb } from '@/lib/rarity';
 import { rm, relativeTime } from '@/lib/format';
 import type { CardDetailData } from '@/lib/data/cards';
@@ -24,7 +22,6 @@ export function CardDetail({
   detail: CardDetailData | null;
   buybackPercent?: number | null;
 }) {
-  const reduced = usePrefersReducedMotion();
   const rarity = seed.rarity ?? detail?.rarity ?? null;
   const rgb = rarity ? rarityRgb(rarity) : '255,255,255';
   const priceLabel = detail ? rm(detail.marketPriceMyr) : seed.value;
@@ -42,13 +39,10 @@ export function CardDetail({
 
   return (
     <div className="grid w-full items-center gap-5 md:grid-cols-[minmax(0,420px)_1fr] md:gap-12">
-      {/* The slab — the hero. Rarity-tinted glow + idle float. Phone width is
-          dvh-capped so slab + facts fit one viewport (no overlay scrolling). */}
-      <motion.div
-        animate={reduced ? undefined : { y: [0, -6, 0] }}
-        transition={{ duration: 5, repeat: Infinity, ease: 'easeInOut' }}
-        className="mx-auto w-[min(62vw,26dvh)] max-w-[320px] md:w-full md:max-w-[420px]"
-      >
+      {/* The slab — the hero. Rarity-tinted glow, STATIC (idle float removed —
+          operator 2026-07-18). Phone width is dvh-capped so slab + facts fit
+          one viewport (no overlay scrolling). */}
+      <div className="mx-auto w-[min(62vw,26dvh)] max-w-[320px] md:w-full md:max-w-[420px]">
         <div
           style={{
             filter: `drop-shadow(0 24px 60px rgba(0,0,0,0.7)) drop-shadow(0 0 46px rgba(${rgb},0.28))`,
@@ -64,7 +58,7 @@ export function CardDetail({
             className="w-full"
           />
         </div>
-      </motion.div>
+      </div>
 
       {/* Facts — phone sizes sit two steps down the scale so a long graded-
           card name reads as a title, not a wall of display type. */}

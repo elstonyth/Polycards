@@ -57,10 +57,19 @@ export function PoolByRarity({
             {/* Rail — a peeking partial card signals the sideways swipe;
                 hidden scrollbar matches the catalog rails. overflow-x-auto
                 forces overflow-y to compute to `auto` (CSS coupling), which
-                would clip each slab's tier halo (box-shadow) top/bottom; the
-                py/-my pair gives the glow room inside the scroll box without
-                changing layout. */}
-            <div className="-my-8 flex gap-2 overflow-x-auto py-8 sm:gap-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                clips each slab's tier halo (box-shadow) on ALL four sides (the
+                glow is an offset-0 shadow, ~44px each way — the radius lives in
+                glowStyle() in src/components/SlabImage.tsx; keep this padding in
+                sync with it). overflow clips at
+                the PADDING edge, so the halo room lives in the padding: py-12/
+                px-10 give it. -my-12 fully cancels the vertical padding (no
+                layout shift). -mx-4 is capped at the px-fluid gutter so the
+                rail never triggers page x-scroll on narrow viewports; it only
+                partly cancels px-10, leaving a small leading indent — the trade
+                for a fully-lit first card without horizontal overflow. Adjacent
+                cards' halos overlap across the gap and blend into one smooth
+                glow. */}
+            <div className="-mx-4 -my-12 flex gap-2 overflow-x-auto px-10 py-12 sm:gap-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {cards.map((c) => (
                 <div key={c.id} className="w-[38%] shrink-0 sm:w-40">
                   <CardTile

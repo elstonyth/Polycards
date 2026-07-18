@@ -23,10 +23,14 @@ import { ensureLabelFont } from './label-font';
 // frame asset; admin-uploaded frames must keep this geometry (PR #81 contract,
 // mirrored in the admin Storefront page copy).
 export const SLAB_WINDOW = {
-  top: 0.2626,
-  left: 0.0956,
-  right: 0.0944,
-  bottom: 0.0741,
+  top: 0.2707,
+  left: 0.1094,
+  right: 0.1087,
+  // Documentation-only anchor: composeSlab is top-aligned (spare recess at the
+  // bottom), so it reads top/left/right but NOT bottom. Kept as the measured
+  // fourth inset of the geometry contract (PR #81), so a re-measure records all
+  // four sides in one place.
+  bottom: 0.0822,
 } as const;
 const MAX_FRAME_WIDTH = 1600;
 // Frames are downscaled to fit BOTH bounds. Height matters independently: a
@@ -322,8 +326,8 @@ async function cleanScan(bytes: Buffer): Promise<Buffer> {
 // Pure composite: photo width-fitted at natural aspect into the frame's card
 // window (nothing cropped, full die-cut corner curves visible), frame layered
 // on top, then the per-card PSA label text (photo → frame → label, spec §6).
-// No label fields → today's three-layer behaviour (plate + photo + frame,
-// used by geometry tests and any raw composite).
+// No label fields → today's two-layer behaviour (photo + frame, used by
+// geometry tests and any raw composite).
 export async function composeSlab(
   frameBytes: Buffer,
   photoBytes: Buffer,
@@ -358,7 +362,6 @@ export async function composeSlab(
   const left = Math.round(fw * SLAB_WINDOW.left);
   const top = Math.round(fh * SLAB_WINDOW.top);
   const winW = fw - left - Math.round(fw * SLAB_WINDOW.right);
-  const winH = fh - top - Math.round(fh * SLAB_WINDOW.bottom);
 
   const cleaned = await cleanScan(photoBytes);
   const cMeta = await sharp(cleaned).metadata();
@@ -374,9 +377,9 @@ export async function composeSlab(
   // check — an OOM-sized resize allocation below (line ~389), escaping
   // per-card fault isolation. Bound against the FRAME canvas (fh), not the
   // nominal window height: under the shipped user-1600 geometry a real PSA
-  // card (~0.713 aspect) width-fitted into the window overflows winH by a
-  // few px (the bottom recess margin absorbs it) while still fitting inside
-  // the frame — so winH would false-positive on legitimate bakes. fh is the
+  // card (~0.713 aspect) width-fitted into the window can overflow the window
+  // height by a few px while still fitting inside the frame — so bounding on
+  // the window height would false-positive on legitimate bakes. fh is the
   // same bound sharp's composite() enforces below, just checked before the
   // expensive resize instead of after it.
   if (cardTop + cardH > fh) {
@@ -392,65 +395,16 @@ export async function composeSlab(
   // ≈ 0.07 of slab height, card top ≈ 0.25. A bottom-anchored variant (from
   // the low-res 380px PSA cert photo — a misleading reference) was rejected.
   const photo = await sharp(cleaned).resize(cardW, cardH).png().toBuffer();
-  // Glassy SHADOWED-RECESS plate across the WHOLE window, behind the card:
-  // closes the pocket above the card and makes the thin recess gap + die-cut
-  // corner cutouts read as the holder's molded interior instead of raw page
-  // background ("tiny black bars/tips" over a dark page — operator,
-  // 2026-07-16). Tone 148 renders the recess ~25% darker than the OLD glassy
-  // case front (pixel targets over a dark page: recess/pocket ~87, case
-  // ~115) — matching the real slab, where the pocket around the card reads
-  // as shadowed interior, visibly darker than the case (measured on cert
-  // 152108321; a case-bright plate made the cut look wrong-sized). The lip
-  // line marks the recess step just BELOW the card (the spare space sits at
-  // the bottom). Left AS-IS for Task 2R (still reads correctly as a shadowed
-  // interior against the new textured case; only the corner patches below
-  // needed retuning).
-  //
-  // EXCEPTION — the card's four die-cut corner cutouts read as SLAB PLASTIC,
-  // not shadow (operator, 2026-07-16): even-odd HOLES are punched in the
-  // shadow rect and filled with case-tone patches. One layer per region —
-  // stacking two alpha rects would brighten and de-glass the tips.
-  // Task 2R (2026-07-17, operator case swap to slabframe-user-1600): the new
-  // textured case reads MUCH brighter than the old glassy one — measured
-  // ~206 (avg of 30 samples along the band) on a proof composited over
-  // rgb(23,23,23), vs. the old ~115 the fill(197)/alpha(0.55) pair was tuned
-  // against. That pair rendered corner patches at ~115-118, visibly darker
-  // than the new case (clash flagged by Step 6's bake-proof check) — bumped
-  // to fill(225,225,228)/alpha(0.85), which composites to ~196 over the same
-  // background, matching the measured case tone. Pixel targets over a dark
-  // page (NEW case, Task 2R): corner tips ~196, gap/pocket ~91, case ~206.
-  const lipY = inset + cardH + Math.round(fw * 0.0025);
-  const lipH = Math.max(2, Math.round(fw * 0.003));
-  const pr = Math.round(cardW * 0.0476) + 6; // die-cut radius + margin
-  const pcs: Array<[number, number]> = [
-    [inset, inset],
-    [inset + cardW - pr, inset],
-    [inset, inset + cardH - pr],
-    [inset + cardW - pr, inset + cardH - pr],
-  ];
-  const holes = pcs
-    .map(([x, y]) => `M${x} ${y}h${pr}v${pr}h-${pr}Z`)
-    .join(' ');
-  const patches = pcs
-    .map(
-      ([x, y]) =>
-        `<rect x="${x}" y="${y}" width="${pr}" height="${pr}" fill="rgb(225,225,228)" fill-opacity="0.85"/>`,
-    )
-    .join('');
-  const plate = Buffer.from(
-    `<svg width="${winW}" height="${winH}" xmlns="http://www.w3.org/2000/svg">` +
-      `<path fill-rule="evenodd" fill="rgb(148,148,153)" fill-opacity="0.55" d="M0 0h${winW}v${winH}h-${winW}Z ${holes}"/>` +
-      patches +
-      (lipY + lipH < winH
-        ? `<rect y="${lipY}" width="${winW}" height="${lipH}" fill="rgb(90,90,95)" fill-opacity="0.5"/>`
-        : '') +
-      `</svg>`,
-  );
-
-  // The glassy case `plate` sits behind the card across the whole window:
-  // pocket, recess gap, and corner cutouts all read as case plastic.
+  // No recess plate (operator, 2026-07-18): the card is composited straight
+  // onto the transparent canvas, then the frame on top. The thin gap around the
+  // card and its four die-cut corner cutouts stay TRANSPARENT — they take the
+  // page colour on any background instead of a grey fill. Earlier builds painted
+  // a grey "shadowed recess" here (rgb(148,148,153)) plus brighter case-tone
+  // corner patches; the operator rejected both — the recess read as a grey edge
+  // around the crop and the square patches read as sharp corners on the dark
+  // storefront. Only the frame webp's own thin frosted case border frames the
+  // card now.
   const layers: sharp.OverlayOptions[] = [
-    { input: plate, left, top },
     { input: photo, left: cardLeft, top: cardTop },
     { input: frame, left: 0, top: 0 },
   ];
@@ -640,7 +594,9 @@ export async function rebakeAllGradedCards(
           ]);
           await mirrorSlabToProduct(container, card.handle, null);
           await deleteSlabFile(container, oldKey);
-          logger.info(`bake-slab: cleared stale composite for ${card.handle}`);
+          logger.info(
+            `bake-slab: cleared non-PSA composite for ${card.handle}`,
+          );
         } catch (e) {
           logger.warn(
             `bake-slab: failed to clear stale composite for '${card.handle}': ${e instanceof Error ? e.message : String(e)}`,
