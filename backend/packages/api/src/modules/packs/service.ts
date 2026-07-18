@@ -77,6 +77,7 @@ import {
   type BoxPrizeInput,
 } from './daily-box';
 import { foldRanges, type VoucherRange } from './voucher-ranges';
+import type { VipLevelInput } from './vip-levels-validate';
 import { getCardStockByHandle } from './card-stock';
 import type { MedusaContainer } from '@medusajs/framework/types';
 
@@ -4428,6 +4429,110 @@ class PacksModuleService extends MedusaService({
     return rows
       .map((r) => ({ level: r.level, amount_myr: Number(r.voucher_amount) }))
       .sort((a, b) => a.level - b.level);
+  }
+
+  // Audited whole-set replace of the VIP ladder. Diff-upsert keyed on `level`:
+  // update survivors in place (ids + prizes preserved), create new rungs
+  // (prizes null), HARD-delete removed rungs (a soft row keeps the unique
+  // `level` and would collide on recreate). box_tier existence is checked here
+  // (service-level DB lookup, not in the pure validator). One audit row.
+  @InjectTransactionManager()
+  async saveVipLevels(
+    input: { levels: VipLevelInput[]; adminId: string; reason: string },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<VipLevelInput[]> {
+    const boxes = await this.listRewardBoxes(
+      {},
+      { select: ['tier'], take: 1000 },
+      sharedContext,
+    );
+    const validTiers = new Set(boxes.map((b) => b.tier));
+    for (const lvl of input.levels) {
+      if (!validTiers.has(lvl.box_tier)) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `level ${lvl.level}: box_tier '${lvl.box_tier}' is not an existing reward box tier.`,
+        );
+      }
+    }
+
+    const existing = await this.listVipLevels(
+      {},
+      {
+        select: [
+          'id',
+          'level',
+          'spend_threshold',
+          'voucher_amount',
+          'box_tier',
+          'frame_unlock',
+          'direct_referral_pct',
+        ],
+        take: 1000,
+      },
+      sharedContext,
+    );
+    const byLevel = new Map(existing.map((r) => [r.level, r]));
+    const before = existing
+      .slice()
+      .sort((a, b) => a.level - b.level)
+      .map((r) => ({
+        level: r.level,
+        spend_threshold: Number(r.spend_threshold),
+        voucher_amount: Number(r.voucher_amount),
+        box_tier: r.box_tier,
+        frame_unlock: r.frame_unlock,
+        direct_referral_pct: r.direct_referral_pct,
+      }));
+
+    const inputLevels = new Set(input.levels.map((l) => l.level));
+    for (const lvl of input.levels) {
+      const data = {
+        spend_threshold: lvl.spend_threshold,
+        voucher_amount: lvl.voucher_amount,
+        box_tier: lvl.box_tier,
+        frame_unlock: lvl.frame_unlock,
+        direct_referral_pct: lvl.direct_referral_pct,
+      };
+      const row = byLevel.get(lvl.level);
+      if (row) {
+        await this.updateVipLevels(
+          { selector: { id: row.id }, data },
+          sharedContext,
+        );
+      } else {
+        await this.createVipLevels(
+          [{ level: lvl.level, ...data, prizes: null }],
+          sharedContext,
+        );
+      }
+    }
+
+    const removedIds = existing
+      .filter((r) => !inputLevels.has(r.level))
+      .map((r) => r.id);
+    if (removedIds.length > 0) {
+      await this.deleteVipLevels(removedIds, sharedContext);
+    }
+
+    const after = input.levels.map((l) => ({ ...l }));
+    await this.createAdminActionAudits(
+      [
+        {
+          admin_id: input.adminId,
+          entity_type: 'vip_levels',
+          entity_id: 'singleton',
+          action: 'replace',
+          // before/after are `json` columns typed Record<string, unknown> |
+          // null, not arrays — wrap the ladder snapshot under a key.
+          before: { levels: before },
+          after: { levels: after },
+          reason: input.reason,
+        },
+      ],
+      sharedContext,
+    );
+    return after;
   }
 
   // Fold admin ranges → the 100-entry ladder, update only the CHANGED
