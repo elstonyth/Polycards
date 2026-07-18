@@ -14,6 +14,11 @@ import { logger } from '@/lib/logger';
 import { getAuthToken } from '@/lib/data/customer';
 import { friendlyError, isAuthError, type ErrorRule } from '@/lib/errors';
 import { parseOne, VipSchema } from '@/lib/data/schemas';
+// mapVipLevels is a sync helper, so it lives in ./vip-map.ts rather than here
+// — a 'use server' file may only export async functions as values (same
+// reason pack-batch-map.ts / vault-map.ts exist). Re-export the type only.
+import { mapVipLevels, type VipLevel, type RawVipLevel } from './vip-map';
+export type { VipLevel } from './vip-map';
 
 export type VipReward = {
   voucherAmount: number;
@@ -27,41 +32,6 @@ export type VipNext = {
   remaining: number;
   reward: VipReward;
 };
-
-export type VipLevel = {
-  level: number;
-  threshold: number;
-  reward: {
-    voucherAmount: number;
-    boxTier: string;
-    frameUnlock: boolean;
-    directReferralPct: number;
-  };
-};
-
-type RawVipLevel = {
-  level: number;
-  threshold: number;
-  reward: {
-    voucher_amount: number;
-    box_tier: string;
-    frame_unlock: boolean;
-    direct_referral_pct: number;
-  };
-};
-
-export function mapVipLevels(raw: RawVipLevel[]): VipLevel[] {
-  return raw.map((r) => ({
-    level: r.level,
-    threshold: r.threshold,
-    reward: {
-      voucherAmount: r.reward.voucher_amount,
-      boxTier: r.reward.box_tier,
-      frameUnlock: r.reward.frame_unlock,
-      directReferralPct: r.reward.direct_referral_pct,
-    },
-  }));
-}
 
 export type Vip = {
   level: number;

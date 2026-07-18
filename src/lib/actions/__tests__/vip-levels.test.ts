@@ -1,12 +1,10 @@
-import { describe, it, expect, vi } from 'vitest';
-
-// vip.ts imports '@/lib/data/customer', which imports 'server-only' (throws
-// outside an RSC and isn't an installed package) — stub it like
-// src/lib/data/__tests__/profiles.test.ts does. mapVipLevels itself is pure
-// and never touches auth, so no other mocking is needed.
-vi.mock('server-only', () => ({}));
-
-import { mapVipLevels } from '@/lib/actions/vip';
+import { describe, it, expect } from 'vitest';
+// mapVipLevels lives in vip-map.ts, not vip.ts: vip.ts has a module-level
+// 'use server' directive, and Next.js requires every value export from such
+// a file to be an async function (see the header comment in vip-map.ts and
+// the identical pack-batch-map.ts / vault-map.ts precedent in this repo).
+// vip.ts re-exports the `VipLevel` type only.
+import { mapVipLevels } from '@/lib/actions/vip-map';
 
 describe('mapVipLevels', () => {
   it('maps snake_case wire rows to camelCase VipLevel', () => {
