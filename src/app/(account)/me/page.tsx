@@ -309,31 +309,29 @@ export default async function MePage() {
         </section>
 
         {/* Invite friends */}
-        <div>
-          <Link
-            href="/referrals"
-            className="border-chase/30 bg-chase/10 hover:border-chase/60 rounded-2xl border p-4 transition-colors"
-          >
-            <Image
-              src="/images/app/invite-gift.webp"
-              alt=""
+        <Link
+          href="/referrals"
+          className="border-chase/30 bg-chase/10 hover:border-chase/60 block rounded-2xl border p-4 transition-colors"
+        >
+          <Image
+            src="/images/app/invite-gift.webp"
+            alt=""
+            aria-hidden
+            width={239}
+            height={240}
+            className="h-12 w-12 mix-blend-screen"
+          />
+          <p className="mt-3 flex items-center gap-1 text-sm font-semibold text-white">
+            Invite friends
+            <ChevronRight
+              className="h-3.5 w-3.5 text-neutral-500"
               aria-hidden
-              width={239}
-              height={240}
-              className="h-12 w-12 mix-blend-screen"
             />
-            <p className="mt-3 flex items-center gap-1 text-sm font-semibold text-white">
-              Invite friends
-              <ChevronRight
-                className="h-3.5 w-3.5 text-neutral-500"
-                aria-hidden
-              />
-            </p>
-            <p className="mt-0.5 text-[12px] text-neutral-400">
-              Easy cash rewards
-            </p>
-          </Link>
-        </div>
+          </p>
+          <p className="mt-0.5 text-[12px] text-neutral-400">
+            Easy cash rewards
+          </p>
+        </Link>
 
         {/* Quick access grid */}
         <section className="rounded-2xl border border-white/10 bg-neutral-900 p-5">
