@@ -246,13 +246,13 @@ jobs:
   # creates/drops its own per-suite test DBs.
   #
   # jest shards natively at the file level (--shard=N/M). In CI each shard gets
-  # its OWN job + postgres, so wall-clock = install + slowest shard, and adding
-  # shards divides the ~24 test-minutes across more parallel runners. 84 suites
-  # over 6 shards ≈ 14/shard; per-shard test time now ≈ the fixed ~2 min setup
-  # overhead, the point past which more shards stop helping wall-clock (each
-  # still pays install + a cold app boot). Bumping the divisor here past 6 only
-  # pays off once the ~69 s install is cached away. postgres data is on tmpfs
-  # (below) so the per-suite migration DDL isn't fsync-bound.
+  # its OWN job + postgres, so wall-clock = per-shard overhead + slowest shard's
+  # tests, and adding shards divides the ~20 test-minutes across more runners.
+  # 84 suites over 8 shards ≈ 10-11/shard. The per-shard overhead floor is now
+  # ~1m25s (container init + node setup + the node_modules-cached ~50s install),
+  # so wall ≈ 1m25s + 20min/N; past ~8 shards the fixed floor dominates and more
+  # shards stop paying off. postgres data is on tmpfs (below) so the per-suite
+  # migration DDL isn't fsync-bound; backend/node_modules is cached (above).
   #
   # NOTE: matrix length and the /N divisor in the run step MUST match.
   integration-http:
@@ -263,7 +263,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     services:
       postgres:
         image: postgres:16
@@ -357,12 +357,12 @@ jobs:
         run: corepack yarn build --filter="@acme/api^..."
 
       # The wrapper forwards extra args to jest, so --shard reaches jest
-      # directly and this job runs exactly one of the six heap-bounded shards.
-      - name: HTTP integration tests (shard ${{ matrix.shard }}/6)
+      # directly and this job runs exactly one of the eight heap-bounded shards.
+      - name: HTTP integration tests (shard ${{ matrix.shard }}/8)
         working-directory: backend/packages/api
         run: |
           set -o pipefail
-          corepack yarn test:integration:http --shard=${{ matrix.shard }}/6 2>&1 | tee http-tests.log
+          corepack yarn test:integration:http --shard=${{ matrix.shard }}/8 2>&1 | tee http-tests.log
 
       - name: Upload test log on failure
         if: failure()
