@@ -641,12 +641,20 @@ export default async function seedDemoData({ container }: ExecArgs) {
     logger.info(`Seeded ${vipLevelsToCreate.length} VIP levels.`);
   }
 
-  // Demo gacha activity (Phase 7) — a roster of demo collectors + a deterministic,
-  // rarity-realistic spread of Pull rows so the PUBLIC leaderboard, the live
-  // "Recent Pulls" feed, and the admin pull-ledger render real, populated data on
-  // a fresh clone. Idempotent: guarded by the demo emails AND by whether those
-  // collectors already have pulls, so re-runs never pile up more rows.
-  logger.info('Seeding demo gacha activity...');
+  // Everything below this point is DEMO/DEV convenience: a roster of display-only
+  // demo collectors (public profiles resolve to someone on a fresh clone) and one
+  // loginable test customer. A PRODUCTION seed wants neither — set SEED_DEMO=false
+  // so the launch starts with a genuinely empty customer table.
+  // NOTE: this block seeds NO Pull rows (it once did; that was removed), so the
+  // public leaderboard and the Weekly Challenge pool start empty either way.
+  if (process.env.SEED_DEMO === 'false') {
+    logger.info(
+      'SEED_DEMO=false — skipping demo collectors + test login (production seed).',
+    );
+    return;
+  }
+
+  logger.info('Seeding demo collectors...');
   const customerModuleService = container.resolve(Modules.CUSTOMER);
 
   const DEMO_COLLECTORS = [
