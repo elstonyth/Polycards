@@ -75,12 +75,16 @@ function frameSrc(rarity: string): string {
  * at least that much padding or the halo gets cut — see the rail padding in
  * src/app/slots/[slug]/PoolByRarity.tsx (py-12/px-10). Retune this radius and
  * that padding together.
+ *
+ * `scale` shrinks the halo for thumbnail-sized slabs (the /me showcase strip
+ * renders 80px slabs — a full 44px halo there is wider than the slab and
+ * bleeds into its neighbours). Default 1 = the tuned full-size halo.
  */
-function glowStyle(rgb: string): React.CSSProperties {
+function glowStyle(rgb: string, scale: number): React.CSSProperties {
   return {
     inset: FRAME_INSET,
     borderRadius: FRAME_RADIUS,
-    boxShadow: `0 0 44px -2px rgba(${rgb},0.8), 0 0 90px -20px rgba(${rgb},0.6)`,
+    boxShadow: `0 0 ${44 * scale}px ${-2 * scale}px rgba(${rgb},0.8), 0 0 ${90 * scale}px ${-20 * scale}px rgba(${rgb},0.6)`,
   };
 }
 
@@ -105,6 +109,7 @@ export function SlabImage({
   className,
   priority = false,
   rarity,
+  glowScale = 1,
 }: {
   src: string;
   slabSrc?: string | null;
@@ -113,6 +118,8 @@ export function SlabImage({
   className?: string;
   priority?: boolean;
   rarity?: string | null;
+  /** Halo size multiplier — drop below 1 on thumbnail-sized slabs. */
+  glowScale?: number;
 }) {
   return (
     <span
@@ -125,7 +132,7 @@ export function SlabImage({
             <span
               aria-hidden
               className="pointer-events-none absolute"
-              style={glowStyle(rarityRgb(rarity))}
+              style={glowStyle(rarityRgb(rarity), glowScale)}
             />
             <span
               aria-hidden

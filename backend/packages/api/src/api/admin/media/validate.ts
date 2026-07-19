@@ -279,7 +279,9 @@ export function validateImage(
           ? 'Delivery photo is too stretched — use a normal photo, not a panorama.'
           : kind === 'display'
             ? 'Display art must be landscape (wider than tall, up to ~16:9).'
-            : 'Sprite/pack art must be roughly square (1:1).',
+            : kind === 'avatar'
+              ? 'Profile photo must be roughly square — crop it before uploading.'
+              : 'Sprite/pack art must be roughly square (1:1).',
     );
   }
 

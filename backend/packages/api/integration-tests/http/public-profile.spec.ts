@@ -460,6 +460,69 @@ medusaIntegrationTestRunner({
         expect(pub.data.stats.pulls).toBe(0);
         expect(pub.data.recent).toEqual([]);
       });
+
+      // The storefront draws the tier frame from collection[].rarity, so it
+      // must resolve per (pack, card) odds row — the SAME card is seeded at a
+      // different rarity in a second pack here, which is what a cross-product
+      // odds lookup would get wrong.
+      it("showcased collection items carry the per-(pack, card) rarity", async () => {
+        const container = getContainer();
+        const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
+        const customerModule = container.resolve(Modules.CUSTOMER);
+
+        const SHOWCASE_PACK = "pp-showcase-pack";
+        await packs.createPacks([
+          {
+            slug: SHOWCASE_PACK,
+            title: "PP Showcase Pack",
+            category: "pokemon",
+            price: PACK_PRICE,
+            image: "/cdn/showcase-pack.webp",
+            buyback_percent: 90,
+          },
+        ]);
+        // RARE_CARD is "Rare" in PACK_SLUG — here it is Immortal.
+        await packs.createPackOdds([
+          {
+            pack_id: SHOWCASE_PACK,
+            card_id: RARE_CARD,
+            weight: 100,
+            rarity: "Immortal" as const,
+          },
+        ]);
+
+        const collector = await customerModule.createCustomers({
+          email: "pp-showcase@test.dev",
+          first_name: "Showcase",
+          metadata: { handle: "showcase-test" },
+        });
+        await packs.createPulls([
+          {
+            customer_id: collector.id,
+            pack_id: SHOWCASE_PACK,
+            card_id: RARE_CARD,
+            rolled_at: new Date("2026-06-04T10:00:00Z"),
+            status: "vaulted" as const,
+            showcased: true,
+          },
+          // Not showcased — must not appear in the collection at all.
+          {
+            customer_id: collector.id,
+            pack_id: PACK_SLUG,
+            card_id: EPIC_CARD,
+            rolled_at: new Date("2026-06-05T10:00:00Z"),
+            status: "vaulted" as const,
+          },
+        ]);
+
+        const res = await getProfile("showcase-test");
+        expect(res.status).toBe(200);
+        expect(res.data.collection).toHaveLength(1);
+        expect(res.data.collection[0]).toMatchObject({
+          handle: RARE_CARD,
+          rarity: "Immortal",
+        });
+      });
     });
   },
 });

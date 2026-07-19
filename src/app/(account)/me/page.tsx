@@ -24,7 +24,8 @@ import { getAvatarFrames } from '@/lib/data/avatar-frames';
 import { rm, rm0 } from '@/lib/format';
 import { SlabImage } from '@/components/SlabImage';
 import { LogoutButton, TopUpButton } from './MeActions';
-import { EquippedFrameProvider, FramesCard, MeHeader } from './MeAppearance';
+import { MeHeader } from './MeAppearance';
+import { EquippedFrameProvider } from './equipped-frame';
 
 export const metadata: Metadata = {
   title: 'Me',
@@ -94,6 +95,7 @@ export default async function MePage() {
           pulls={profile ? profile.stats.pulls : null}
           avatarUrl={avatarUrl}
           frames={avatarFrames}
+          highestLevel={highestLevel}
         />
 
         {/* Level card (Show's Lv bar): compact, VIP emblem on the right.
@@ -228,7 +230,10 @@ export default async function MePage() {
               </Link>
             </div>
             {showcased.length > 0 ? (
-              <div className="mt-4 flex gap-3 overflow-x-auto pb-1">
+              // overflow-x-auto clips BOTH axes, so the tier halo needs room
+              // reserved as padding (negative margins pull the rail back out to
+              // the card's own padding — the PoolByRarity rail pattern).
+              <div className="-mx-5 mt-2 flex gap-5 overflow-x-auto px-5 py-4">
                 {showcased.map((card) => (
                   <Link
                     key={card.handle}
@@ -238,6 +243,10 @@ export default async function MePage() {
                     <SlabImage
                       src={card.image}
                       slabSrc={card.slab_image}
+                      rarity={card.rarity}
+                      // Thumbnail-sized slab: the full-size halo is wider than
+                      // the slab itself here and would bleed into neighbours.
+                      glowScale={0.4}
                       alt={card.name}
                       sizes="80px"
                       className="w-20"
@@ -359,8 +368,8 @@ export default async function MePage() {
           </div>
         </section>
 
-        {/* Frames (demoted below quick access — Show's Me has no frames row) */}
-        <FramesCard highestLevel={highestLevel} frames={avatarFrames} />
+        {/* Frames live in the Edit Profile modal (tap the avatar or name) —
+            Show's Me has no frames row. */}
 
         {/* About & help */}
         <section className="rounded-2xl border border-white/10 bg-neutral-900">

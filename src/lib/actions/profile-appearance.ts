@@ -14,6 +14,11 @@ import { FRAME_LEVELS } from '@/lib/frame-levels';
 
 const APPEARANCE_RULES: ErrorRule[] = [
   [/capped at 5 mb/i, 'Photo is too large — keep it under 5 MB.'],
+  // The cropper exports a 512px square so this shouldn't fire — it exists so a
+  // dimension rejection reads as a real reason instead of falling through to
+  // "Something went wrong" (what customers actually saw before the crop step).
+  [/each side/i, 'That photo is too big — try a smaller one.'],
+  [/roughly square/i, 'That photo is too wide — crop it to a square first.'],
   [
     /unsupported type|match the declared|valid image|dimensions|at least|animated/i,
     "That file doesn't look like a usable photo — try a JPG, PNG, or WebP.",

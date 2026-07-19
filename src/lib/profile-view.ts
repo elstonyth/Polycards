@@ -19,6 +19,9 @@ export interface ProfileViewCard {
    *  the raw USD market_value must never render behind an "RM" prefix
    *  (ProfileClient shows "—" for null). */
   price: number | null;
+  /** Gacha tier — surrounds the slab with the tier frame. Optional: the mock
+   *  pool carries no rarity, and older backends omit it (frame is skipped). */
+  rarity?: string | null;
 }
 
 export interface ProfileViewActivity {
@@ -76,6 +79,7 @@ export function toProfileView(
       // Live MYR display value only — c.market_value is raw USD and must
       // never render behind "RM"; null renders "—" instead of a fake price.
       price: c.marketPriceMyr ?? null,
+      rarity: c.rarity ?? null,
     }),
   );
 

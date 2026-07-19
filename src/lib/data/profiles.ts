@@ -22,7 +22,12 @@ import {
 } from '@/lib/data/schemas';
 
 export type ProfileRarity =
-  'Immortal' | 'Legendary' | 'Mythical' | 'Rare' | 'Uncommon' | 'Common';
+  | 'Immortal'
+  | 'Legendary'
+  | 'Mythical'
+  | 'Rare'
+  | 'Uncommon'
+  | 'Common';
 
 export interface PublicProfileCard {
   handle: string;
@@ -36,6 +41,9 @@ export interface PublicProfileCard {
   marketPriceMyr?: number;
   image: string;
   slab_image?: string | null;
+  /** Gacha tier of the (pack, card) pull — drives the slab's tier frame.
+   *  Optional: older backends omit it on collection items (frame is skipped). */
+  rarity?: ProfileRarity;
 }
 
 export interface PublicProfilePull {
