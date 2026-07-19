@@ -146,16 +146,15 @@ moduleIntegrationTestRunner<PacksModuleService>({
     };
 
     describe('Recorded Pull Value', () => {
-      // Declared FIRST on purpose: the pool is a global aggregate, so the
-      // before/after equality below is only airtight while every non-reward
-      // pull in the DB is pinned — i.e. before the fallback tests seed
-      // null-recorded rows.
       it('a card price change does NOT move an already-recorded pull (board, week top, pool)', async () => {
         const ids = mkIds('pinned');
         const { card } = await seed(ids, 24); // draw-time snapshot: 20 × 1.2
 
         expect(await volumeFor(ids.customer)).toBe(myr(24));
         expect(await weekTopFor(ids.customer)).toBe(myr(24));
+        // The pool is a global aggregate, but the equality below is still
+        // order-independent: the price mutation touches ONLY this test's card,
+        // and every other test's pulls reference their own cards.
         const { pooledMyr: poolBefore } = await service.challengeWeekPool(WEEK);
 
         // Mid-week price sync: FMV 20 → 999.
@@ -166,6 +165,16 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(await weekTopFor(ids.customer)).toBe(myr(24));
         const { pooledMyr: poolAfter } = await service.challengeWeekPool(WEEK);
         expect(poolAfter).toBe(poolBefore);
+
+        // Snapshot outlives the card row: soft-deleting the card drops it from
+        // the LEFT JOIN, but the stamped value keeps contributing (an
+        // un-stamped pull would fall to NULL — the pre-snapshot behavior).
+        await service.softDeleteCards([card.id]);
+        expect(await volumeFor(ids.customer)).toBe(myr(24));
+        expect(await weekTopFor(ids.customer)).toBe(myr(24));
+        expect((await service.challengeWeekPool(WEEK)).pooledMyr).toBe(
+          poolBefore,
+        );
       });
 
       it('a null recorded_value_usd (pre-backfill row) degrades to live pricing', async () => {

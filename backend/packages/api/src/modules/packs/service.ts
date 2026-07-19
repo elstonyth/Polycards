@@ -230,13 +230,26 @@ type LedgerSqlManager = {
   execute<T = unknown>(query: string, params?: unknown[]): Promise<T>;
 };
 
+// Live card value in USD: FMV × the card's multiplier (default when the row
+// carries none). Requires alias `card c`; binds ONE `?`
+// (DEFAULT_MARKET_MULTIPLIER). Shared by PULLED_VALUE_USD_SQL's fallback and
+// the backfill (which pins exactly this expression).
+const LIVE_VALUE_USD_SQL = 'c.market_value * COALESCE(c.market_multiplier, ?)';
+
 // Pulled value of one pull row in USD: the draw-time snapshot when stamped,
-// live card FMV × multiplier for pre-backfill rows. Shared by the three
-// pulled-value aggregates (leaderboardTop wins CTE, challengeWeekPool,
-// challengeWeekTop) so the expression can't drift between boards. Requires
-// aliases `pull pu` / `card c` and binds ONE `?` (DEFAULT_MARKET_MULTIPLIER).
+// live fallback for pre-backfill rows. Shared by the three pulled-value
+// aggregates (leaderboardTop wins CTE, challengeWeekPool, challengeWeekTop)
+// so the expression can't drift between boards. Requires aliases `pull pu` /
+// `card c` and binds ONE `?`. Snapshot semantics: a stamped pull KEEPS its
+// value even if the card row is later deleted (the snapshot outlives the
+// LEFT JOIN); an un-stamped one drops to NULL — the pre-snapshot behavior.
 const PULLED_VALUE_USD_SQL =
-  'COALESCE(pu.recorded_value_usd, c.market_value * COALESCE(c.market_multiplier, ?))';
+  'COALESCE(pu.recorded_value_usd, ' + LIVE_VALUE_USD_SQL + ')';
+
+// MikroORM bigNumber raw-column shape is {value: string, precision: number}
+// with this default precision — mirrored when the backfill hand-writes the
+// raw_ twin (see @medusajs/utils BigNumber DEFAULT_PRECISION).
+const BIG_NUMBER_RAW_PRECISION = 20;
 
 // ---- Daily Rewards (Task 5): getDailyState / drawDailyBox + admin authoring ----
 // Types match the task-5 brief verbatim — later tasks (routes, storefront) depend
@@ -4784,17 +4797,24 @@ class PacksModuleService extends MedusaService({
   ): Promise<number> {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
-    const rows = await em.execute<{ id: string }[]>(
+    const rows = await em.execute<unknown[]>(
       'UPDATE pull pu ' +
-        '   SET recorded_value_usd = c.market_value * COALESCE(c.market_multiplier, ?), ' +
+        '   SET recorded_value_usd = ' +
+        LIVE_VALUE_USD_SQL +
+        ', ' +
         '       raw_recorded_value_usd = jsonb_build_object(' +
-        "'value', (c.market_value * COALESCE(c.market_multiplier, ?))::text, " +
-        "'precision', 20) " +
+        "'value', (" +
+        LIVE_VALUE_USD_SQL +
+        ")::text, 'precision', ?) " +
         '  FROM card c ' +
         ' WHERE c.handle = pu.card_id AND c.deleted_at IS NULL ' +
         "   AND pu.recorded_value_usd IS NULL AND pu.source <> 'reward' " +
-        ' RETURNING pu.id',
-      [DEFAULT_MARKET_MULTIPLIER, DEFAULT_MARKET_MULTIPLIER],
+        ' RETURNING 1',
+      [
+        DEFAULT_MARKET_MULTIPLIER,
+        DEFAULT_MARKET_MULTIPLIER,
+        BIG_NUMBER_RAW_PRECISION,
+      ],
     );
     return rows.length;
   }
