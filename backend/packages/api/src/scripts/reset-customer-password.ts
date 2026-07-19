@@ -7,6 +7,9 @@ import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
 // test customer can't be logged into locally (POST /auth/customer/emailpass
 // answers 401 with the password everyone assumes is set).
 //
+// Logs identify the account by customer.id, never email: unlike the admin
+// twin (operator's own email), this handles a CUSTOMER's email — PII that
+// must not land in aggregated prod console logs.
 // Local/operator tool only — it needs DB + container access, never an HTTP
 // route. Reads CUST_EMAIL / CUST_PASSWORD from env; nothing is hardcoded.
 // Run (from backend/packages/api):
@@ -27,7 +30,7 @@ export default async function resetCustomerPassword({ container }: ExecArgs) {
 
   const [customer] = await customerModule.listCustomers({ email });
   if (!customer) {
-    logger.warn(`RESET: no customer ${email} — sign up on the storefront instead`);
+    logger.warn('RESET: no customer with that email — sign up on the storefront instead');
     return;
   }
 
@@ -56,7 +59,7 @@ export default async function resetCustomerPassword({ container }: ExecArgs) {
           : JSON.stringify(error);
     throw new Error(
       `RESET: emailpass register FAILED after the old identity was deleted — ` +
-        `${email} currently has NO login. Re-run this script immediately with ` +
+        `customer ${customer.id} currently has NO login. Re-run this script immediately with ` +
         `the same CUST_PASSWORD to restore access. Cause: ${cause}`,
     );
   }
@@ -67,5 +70,5 @@ export default async function resetCustomerPassword({ container }: ExecArgs) {
     app_metadata: { customer_id: customer.id },
   });
 
-  logger.info(`RESET: password updated for ${email} (customer=${customer.id})`);
+  logger.info(`RESET: password updated for customer ${customer.id}`);
 }
