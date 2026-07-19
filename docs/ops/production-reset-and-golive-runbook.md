@@ -12,11 +12,15 @@ pull value) shipped to `master` (commit `7495ea4`).
 
 ## 0. The one-line summary
 
-A full DB wipe is **recoverable** — `yarn seed` rebuilds regions, sales channels, API keys,
-stock locations, shipping, tax regions, store currencies, sellers, VIP levels, and the
-catalog. But it mints a **new publishable key**, and the storefront inlines that key at build
-time, so the storefront must be **rebuilt** (not just restarted) or every store route 401s and
-the site looks dead.
+A full DB wipe is **rebuildable for seeded data, but permanently destructive to user data** —
+`yarn seed` rebuilds regions, sales channels, API keys, stock locations, shipping, tax regions,
+store currencies, sellers, VIP levels, and the catalog. It does **not** bring back customer
+accounts, credit ledgers, or pull history; the pre-wipe backup is the only undo.
+
+It also mints a **new publishable key**, which the storefront inlines at **build** time from
+**two** sources — the DO app spec *and* the `ARG` default in the root `Dockerfile`. Both must be
+updated and the storefront **rebuilt** (not just restarted), or every store route 401s and the
+site looks dead while the backend is perfectly healthy.
 
 ---
 
@@ -89,15 +93,36 @@ Run from `backend/packages/api` unless noted.
 
 | # | Step | Command / location |
 |---|------|--------------------|
-| 1 | Wipe the database | operator-chosen (drop/recreate schema, or a targeted truncate) |
-| 2 | Reseed core + catalog | `corepack yarn seed` |
-| 3 | Read the NEW publishable key | `corepack yarn medusa exec ./src/scripts/print-publishable-key.ts` |
-| 4 | **Update `NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY`** in the storefront DO app spec | DO console / `doctl apps update` |
-| 5 | **Rebuild the storefront** (not restart — `NEXT_PUBLIC_*` is inlined at build) | DO deploy |
-| 6 | Recreate the admin user | `medusa exec ./src/scripts/create-admin.ts` |
-| 7 | Catalog art, if the reseeded catalog needs it | `replace-catalog-polycards.ts`, `bake-slab-images.ts` |
-| 8 | Verify an FxRate row exists | else money display silently uses the `DEFAULT_USD_MYR = 4.7` fallback |
-| 9 | Configure real challenge stages | admin → Weekly Challenge → Milestone Stages (§1.2) |
+| 1 | Back up first | manual DO snapshot — the only undo |
+| 2 | Wipe: **drop and recreate the schema** | `DROP SCHEMA public CASCADE; CREATE SCHEMA public;` — do **not** hand-pick truncates (they miss tables and strand FK orphans) |
+| 3 | **Prove the wipe** before seeding | post-wipe query below — every count must be 0 |
+| 4 | Run migrations, then reseed core + catalog | `corepack yarn medusa db:migrate` → `SEED_DEMO=false corepack yarn seed` |
+| 5 | Read the NEW publishable key | `corepack yarn medusa exec ./src/scripts/print-publishable-key.ts` |
+| 6 | **Update `NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY` in BOTH places** | the storefront DO app spec **and** the `ARG` default at root `Dockerfile:58` |
+| 7 | **Rebuild the storefront** (not restart — `NEXT_PUBLIC_*` is inlined at build) | DO deploy |
+| 8 | Create the admin user | `medusa exec ./src/scripts/create-admin.ts` — `seed.ts` does NOT create one |
+| 9 | Catalog art, if the reseeded catalog needs it | `replace-catalog-polycards.ts`, `bake-slab-images.ts` |
+| 10 | Verify an FxRate row exists | else money display silently uses the `DEFAULT_USD_MYR = 4.7` fallback |
+| 11 | Configure real challenge stages | admin → Weekly Challenge → Milestone Stages (§1.2) |
+
+**Step 3 — post-wipe proof.** Run before seeding; a non-zero count means the wipe was partial
+and step 4 would seed on top of survivors:
+
+```sql
+select
+  (select count(*) from customer)           as customers,
+  (select count(*) from pull)               as pulls,
+  (select count(*) from credit_transaction) as credits;
+```
+
+**Step 6 — why both.** The key is inlined at build time. `Dockerfile:58` carries a hardcoded
+`ARG NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY=pk_…` default, so if App Platform does not pass the
+build arg through, the **old** key is baked into the client bundle and the storefront 401s even
+though the app spec looks correct. Update the app spec and the Dockerfile default together.
+
+**Step 4 — `SEED_DEMO=false`** skips the 8 display-only demo collectors and the
+`test@polycards.app` convenience login. Omit it and a live storefront launches with fake
+collectors on public profiles and a known-password account.
 
 **Note on step 8:** `resolveFxRate` falls back to 4.7 when no `FxRate` row exists. This does
 not error — it silently prices everything at the fallback rate. `resolveFxRateInfo` exposes a
@@ -124,12 +149,12 @@ Fresh-DB behaviour is already known-good and should be re-confirmed:
 Read-only prod DB checks can run from the DO app console without touching the DB firewall —
 node-pg needs TLS passed explicitly or it is rejected with `FATAL 28000 ... no encryption`:
 
-```
+```sh
 node -e 'const{Client}=require("pg"),fs=require("fs");const c=new Client({connectionString:process.env.DATABASE_URL,ssl:{ca:fs.readFileSync("/tmp/ca.crt","utf8")}});c.connect().then(()=>c.query("<SQL>")).then(r=>console.log(r.rows[0])).finally(()=>c.end())'
 ```
 
-Fetch the CA once with `doctl databases get-ca <pg-cluster-uuid>`. `ssl:{rejectUnauthorized:false}`
-also connects but disables certificate verification — acceptable only for a throwaway read.
+Fetch the CA once with `doctl databases get-ca <pg-cluster-uuid>`. Verifying against the cluster
+CA is the only supported path here — do not disable certificate verification against production.
 
 ---
 
