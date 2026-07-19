@@ -3,7 +3,10 @@
   "mcpServers": {
     "context7": {
       "command": "npx",
-      "args": ["-y", "@upstash/context7-mcp"]
+      "args": [
+        "-y",
+        "@upstash/context7-mcp"
+      ]
     },
     "postgres": {
       "command": "npx",
@@ -16,6 +19,15 @@
     "frontend-checklist": {
       "type": "http",
       "url": "https://mcp.frontendchecklist.io"
+    },
+    "code-review-graph": {
+      "command": "uv",
+      "args": [
+        "run",
+        "code-review-graph",
+        "serve"
+      ],
+      "type": "stdio"
     }
   }
 }

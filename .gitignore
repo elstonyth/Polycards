@@ -142,3 +142,5 @@ pixel-pokemon-backfill.json
 
 # local-only QA asset for the display_image feature (never ship)
 public/images/claw/polycards-factory-test.png
+# Added by code-review-graph
+.code-review-graph/

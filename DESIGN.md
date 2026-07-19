@@ -234,9 +234,11 @@ The home page is a six-board editorial scroll story (spec:
   (`rarityRgb`), idle float (`slabFloat`, ±8px/6s) plus a subtle scroll-linked
   tilt. Reduced motion: perfectly still, fully lit. The glow hue is always
   inherited from the thing glowing (Glow Is Earned).
-- **Tier ladder** — one full-width row per pack, ordered by the shipped six
-  price tiers high→low (`price-tier.ts`: common → immortal): tier-tinted art
-  pedestal + chip, pack name, top-chase line, price in Nekst right-aligned.
+- **Tier ladder** — one full-width row per pack, ordered by price high→low
+  (`TierShelf.tsx`): neutral art pedestal (white/4%), pack name, top-chase
+  line (value in Chase Gold), price in Nekst right-aligned, quiet `Rip it →`
+  affordance. Packs carry no tier chip or tint — the six-tier price axis
+  (`price-tier.ts`: common → immortal) colors CARD glows, not pack rows.
   Desktop: the top rung spans full width, the rest sit two-up. Chosen over
   horizontal racks because the catalog carries ~one pack per tier — a rack
   with one tile is dead air. (Note: supersedes the aspirational

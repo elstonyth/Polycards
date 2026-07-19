@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-07-17T16:30:00+08:00",
+  "generatedAt": "2026-07-20T00:10:00+08:00",
   "title": "Design System: Polycards",
   "extensions": {
     "colorMeta": {
@@ -18,6 +18,21 @@
         "role": "neutral",
         "displayName": "Graphite",
         "canonical": "#262626"
+      },
+      "smoke": {
+        "role": "neutral",
+        "displayName": "Smoke",
+        "canonical": "#333333"
+      },
+      "hairline": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "#ffffff1a"
+      },
+      "silver-text": {
+        "role": "neutral",
+        "displayName": "Silver Text",
+        "canonical": "#a3a3a3"
       },
       "paper-white": {
         "role": "primary",
@@ -39,6 +54,11 @@
         "displayName": "Buyback Green FG",
         "canonical": "#2fbf6e"
       },
+      "alarm-red": {
+        "role": "secondary",
+        "displayName": "Alarm Red",
+        "canonical": "#f87171"
+      },
       "tier-starter": {
         "role": "tertiary",
         "displayName": "Starter Red",
@@ -59,6 +79,17 @@
         "displayName": "Diamond Purple",
         "canonical": "#a78bfa"
       }
+    },
+    "priceTiers": {
+      "note": "Shipped pack/card glow axis (src/lib/price-tier.ts) — six price tiers, common → immortal, bucketed by value. Supersedes the aspirational starter/silver/gold/diamond band for packs (DESIGN.md §5 Drop Board note). Feed rgba(<rgb>, a) for glows.",
+      "tiers": [
+        { "name": "common", "rgb": "156, 163, 175", "hex": "#9ca3af", "band": "< RM 25" },
+        { "name": "uncommon", "rgb": "125, 211, 252", "hex": "#7dd3fc", "band": "RM 25 – 99" },
+        { "name": "rare", "rgb": "37, 99, 235", "hex": "#2563eb", "band": "RM 100 – 499" },
+        { "name": "mythical", "rgb": "168, 85, 247", "hex": "#a855f7", "band": "RM 500 – 1,999" },
+        { "name": "legendary", "rgb": "244, 114, 182", "hex": "#f472b6", "band": "RM 2,000 – 9,999" },
+        { "name": "immortal", "rgb": "251, 146, 60", "hex": "#fb923c", "band": "≥ RM 10,000" }
+      ]
     },
     "typographyMeta": {
       "display": {
@@ -118,6 +149,16 @@
         "name": "press",
         "value": "transform 120ms cubic-bezier(0.25, 1, 0.5, 1)",
         "purpose": "Buttons scale to 0.98 on press."
+      },
+      {
+        "name": "marquee-loop",
+        "value": "sp-scroll-x: translate3d(0,0,0) → translate3d(-50%,0,0); 30s linear infinite (home pulls marquee) / 100s (slot RECENT WINS bar)",
+        "purpose": "The one sanctioned moving band — a duplicated track slides half its width for a seamless data loop. Pauses on hover/press; reduced motion → static swipeable row (animation off, overflow-x auto). Keyframe in globals.css."
+      },
+      {
+        "name": "slab-float",
+        "value": "slabFloat: translateY(0 → -8px → 0); 6s ease-in-out infinite",
+        "purpose": "Spotlight slab idle float on the home hero (Drop Board board 01), paired with a subtle scroll-linked tilt. Reduced motion: perfectly still, fully lit."
       }
     ],
     "breakpoints": [
@@ -175,10 +216,10 @@
       "css": ".ds-balance { display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 4px 4px 4px 14px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15); border-radius: 999px; cursor: pointer; transition: background 150ms; } .ds-balance:hover { background: rgba(255,255,255,0.15); } .ds-balance-amt { color: #ffffff; font-family: Nekst, ui-sans-serif; font-weight: 900; font-size: 15px; line-height: 1; font-variant-numeric: tabular-nums; } .ds-balance-plus { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 999px; background: #fafafa; color: #0a0a0a; }"
     },
     {
-      "name": "Tab Bar Item",
+      "name": "Bottom Tab Bar",
       "kind": "nav",
-      "description": "Bottom tab bar item — active is Paper White, inactive #737373.",
-      "html": "<nav class=\"ds-tabbar\"><a class=\"ds-tab ds-tab--active\"><svg width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M3 10.5 12 3l9 7.5V21a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1z\"/></svg><span>Home</span></a><a class=\"ds-tab\"><svg width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><rect x=\"3\" y=\"5\" width=\"18\" height=\"16\" rx=\"2\"/><path d=\"M8 3v4M16 3v4M3 11h18\"/></svg><span>Daily</span></a></nav>",
+      "description": "The five shipped destinations — Task · Ranks · Home · Vault · Me (src/components/app-shell/tabs.ts, Home center). All tabs uniform, no raised center tab. Active: Paper White; inactive #737373. Glass-chrome bar.",
+      "html": "<nav class=\"ds-tabbar\"><a class=\"ds-tab\"><svg width=\"22\" height=\"22\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"m3 17 2 2 4-4\"/><path d=\"m3 7 2 2 4-4\"/><path d=\"M13 6h8\"/><path d=\"M13 12h8\"/><path d=\"M13 18h8\"/></svg><span>Task</span></a><a class=\"ds-tab\"><svg width=\"22\" height=\"22\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M6 9H4.5a2.5 2.5 0 0 1 0-5H6\"/><path d=\"M18 9h1.5a2.5 2.5 0 0 0 0-5H18\"/><path d=\"M4 22h16\"/><path d=\"M18 2H6v7a6 6 0 0 0 12 0V2Z\"/></svg><span>Ranks</span></a><a class=\"ds-tab ds-tab--active\"><svg width=\"22\" height=\"22\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.25\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M3 10.5 12 3l9 7.5V21a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1z\"/></svg><span>Home</span></a><a class=\"ds-tab\"><svg width=\"22\" height=\"22\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect x=\"3\" y=\"3\" width=\"18\" height=\"18\" rx=\"2\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/><path d=\"M12 9v-2M15 12h2M12 15v2M9 12H7\"/></svg><span>Vault</span></a><a class=\"ds-tab\"><svg width=\"22\" height=\"22\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><circle cx=\"12\" cy=\"10\" r=\"3\"/><path d=\"M6.2 18.9a6.5 6.5 0 0 1 11.6 0\"/></svg><span>Me</span></a></nav>",
       "css": ".ds-tabbar { display: flex; background: rgba(10,10,10,0.7); backdrop-filter: blur(24px) saturate(1.5); border-top: 1px solid rgba(255,255,255,0.1); } .ds-tab { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; height: 64px; color: #737373; text-decoration: none; font-size: 10px; font-weight: 600; transition: color 150ms; } .ds-tab:hover { color: #d4d4d4; } .ds-tab--active { color: #fafafa; }"
     },
     {
@@ -187,11 +228,25 @@
       "description": "Anchored your-rank / totals card floating above the tab bar (90scard-derived signature).",
       "html": "<div class=\"ds-statcard\"><div class=\"ds-statcard-row\"><span class=\"ds-statcard-label\">Your rank</span><span class=\"ds-statcard-label\">To top 10</span></div><div class=\"ds-statcard-row\"><span class=\"ds-statcard-value\">#458</span><span class=\"ds-statcard-value ds-statcard-value--gold\">RM 29,701</span></div><button class=\"ds-btn-primary\" style=\"margin-top:12px\">Buy Now</button></div>",
       "css": ".ds-statcard { background: #171717; border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 16px; } .ds-statcard-row { display: flex; justify-content: space-between; align-items: baseline; } .ds-statcard-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.02em; color: #737373; } .ds-statcard-value { font-family: Nekst, ui-sans-serif; font-weight: 900; font-size: 24px; color: #ffffff; } .ds-statcard-value--gold { color: #ffb020; }"
+    },
+    {
+      "name": "Data Marquee",
+      "kind": "custom",
+      "description": "Drop Board seam (src/components/home/PullsMarquee.tsx): slim full-bleed band streaming REAL pulls — rarity dot, masked name, Nekst value, age. Duplicated track slides −50% for a seamless loop; pauses on hover/press; reduced motion → static swipeable row. The whole band is one link. Decorative word-loop marquees stay prohibited.",
+      "html": "<a class=\"ds-marquee\" href=\"#\"><div class=\"ds-marquee-clip\"><div class=\"ds-marquee-track\"><span class=\"ds-marquee-item\"><span class=\"ds-marquee-dot\" style=\"background:#f472b6\"></span><span class=\"ds-marquee-who\">wan*** pulled</span><span class=\"ds-marquee-val\">RM 3,200</span><span class=\"ds-marquee-age\">2m ago</span></span><span class=\"ds-marquee-item\"><span class=\"ds-marquee-dot\" style=\"background:#2563eb\"></span><span class=\"ds-marquee-who\">jay*** pulled</span><span class=\"ds-marquee-val\">RM 480</span><span class=\"ds-marquee-age\">5m ago</span></span><span class=\"ds-marquee-item\"><span class=\"ds-marquee-dot\" style=\"background:#fb923c\"></span><span class=\"ds-marquee-who\">mei*** pulled</span><span class=\"ds-marquee-val\">RM 12,900</span><span class=\"ds-marquee-age\">11m ago</span></span></div></div></a>",
+      "css": ".ds-marquee { display: block; width: 100%; border-top: 1px solid rgba(255,255,255,0.1); border-bottom: 1px solid rgba(255,255,255,0.1); background: #171717; padding: 10px 0; text-decoration: none; transition: background 150ms; } .ds-marquee:hover { background: #262626; } .ds-marquee:hover .ds-marquee-track { animation-play-state: paused; } .ds-marquee-clip { overflow: hidden; } .ds-marquee-track { display: flex; width: max-content; gap: 32px; padding-right: 32px; animation: ds-scroll-x 30s linear infinite; } @keyframes ds-scroll-x { from { transform: translate3d(0,0,0); } to { transform: translate3d(-50%,0,0); } } @media (prefers-reduced-motion: reduce) { .ds-marquee-track { animation: none; } .ds-marquee-clip { overflow-x: auto; } } .ds-marquee-item { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; } .ds-marquee-dot { width: 6px; height: 6px; border-radius: 999px; flex-shrink: 0; } .ds-marquee-who { font-size: 13px; color: #a3a3a3; } .ds-marquee-val { font-family: Nekst, ui-sans-serif; font-weight: 900; font-size: 14px; color: #ffffff; font-variant-numeric: tabular-nums; } .ds-marquee-age { font-size: 11px; color: #737373; }"
+    },
+    {
+      "name": "Tier Ladder Row",
+      "kind": "custom",
+      "description": "Drop Board board 02 (src/components/home/TierShelf.tsx): one full-width rung per pack, price high→low, under a board lockup (ALL-CAPS Nekst head + quiet 'All packs →' link). As shipped: neutral art pedestal, name, TOP CHASE line in Chase Gold, price right-aligned in Nekst. Desktop: top rung spans full width, the rest two-up.",
+      "html": "<div><div class=\"ds-lockup\"><h2 class=\"ds-lockup-head\">RIP A PACK</h2><a class=\"ds-lockup-link\" href=\"#\">All packs →</a></div><a class=\"ds-ladder-row\" href=\"#\"><span class=\"ds-ladder-art\">🂠</span><span class=\"ds-ladder-mid\"><span class=\"ds-ladder-name\">Pokémon Elite Pack</span><span class=\"ds-ladder-chase\">TOP CHASE <b>RM 12,900</b></span></span><span class=\"ds-ladder-end\"><span class=\"ds-ladder-price\">RM 199</span><span class=\"ds-ladder-cta\">Rip it →</span></span></a></div>",
+      "css": ".ds-lockup { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; } .ds-lockup-head { margin: 0; font-family: Nekst, ui-sans-serif; font-weight: 900; font-size: 28px; letter-spacing: -0.01em; color: #ffffff; } .ds-lockup-link { font-size: 13px; font-weight: 600; color: #a3a3a3; text-decoration: none; transition: color 150ms; } .ds-lockup-link:hover { color: #ffffff; } .ds-ladder-row { display: flex; align-items: center; gap: 16px; padding: 12px; background: #171717; border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; text-decoration: none; transition: border-color 150ms, transform 120ms; } .ds-ladder-row:hover { border-color: rgba(255,255,255,0.3); } .ds-ladder-row:active { transform: scale(0.99); } .ds-ladder-art { display: flex; align-items: center; justify-content: center; width: 96px; height: 96px; flex-shrink: 0; border-radius: 12px; background: rgba(255,255,255,0.04); font-size: 40px; } .ds-ladder-mid { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; } .ds-ladder-name { font-weight: 600; font-size: 15px; color: #ffffff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .ds-ladder-chase { font-size: 11px; letter-spacing: 0.02em; text-transform: uppercase; color: #a3a3a3; } .ds-ladder-chase b { color: #ffb020; font-weight: 600; } .ds-ladder-end { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0; } .ds-ladder-price { font-family: Nekst, ui-sans-serif; font-weight: 900; font-size: 24px; color: #ffffff; white-space: nowrap; } .ds-ladder-cta { font-size: 11px; font-weight: 600; color: #a3a3a3; }"
     }
   ],
   "narrative": {
     "northStar": "The Midnight Rip",
-    "overview": "A collector in bed at 11pm, phone the only light in the room, deciding whether to rip one more pack. Near-black chrome that disappears, card art and tier color that glows out of it, money values that read instantly, and a thumb-reach bottom tab bar. Structure borrowed from 90scard and luka.game, rendered on Polycards's own dark neutral base.",
+    "overview": "A collector in bed at 11pm, phone the only light in the room, deciding whether to rip one more pack. Near-black chrome that disappears, card art and tier color that glows out of it, money values that read instantly, and a thumb-reach bottom tab bar. Structure borrowed from 90scard and luka.game, rendered on Polycards's own dark neutral base. The home page is a six-board editorial scroll story (Drop Board): data marquee, spotlight slab, tier ladder — every moving band carries real signal.",
     "keyCharacteristics": [
       "Dark tonal layering (ink → charcoal → graphite), zero decorative shadows",
       "The card is the hero: chrome is monochrome; only cards, tiers, rarity, and money carry color",
@@ -221,14 +276,15 @@
       "Do set meaningful RM values in Nekst Black; Buyback Green for money-in, Chase Gold for prizes",
       "Do give every interactive element default, press, focus-visible, disabled, and loading states",
       "Do honor prefers-reduced-motion on every animation",
-      "Do keep tap targets ≥44px with primary CTAs in thumb reach"
+      "Do keep tap targets ≥44px with primary CTAs in thumb reach",
+      "Do use skeletons shaped like the content (card tiles, list rows) for loading"
     ],
     "donts": [
       "Don't ship cheap gacha/casino energy: no slot-machine neon, coin showers, fire splash screens, or fake urgency timers",
       "Don't drift to corporate SaaS blue-gray or dashboard-template grids",
       "Don't touch web3/NFT purple degen gradients or glossy 3D coins",
       "Don't build a generic e-commerce product grid",
-      "Don't use gradient text, side-stripe borders, or decorative grid/stripe backgrounds",
+      "Don't use gradient text, side-stripe borders, or decorative grid/stripe backgrounds — data marquees (Drop Board) are the one sanctioned moving band; decorative word loops stay banned",
       "Don't invent new translucent surfaces: liquid glass only via the three .glass-* roles (panel/chrome/scrim) on floating surfaces; in-flow cards stay matte charcoal; slab tier frame and PrizeReveal stay glass-free (refraction there was tried and rejected 2026-07)",
       "Don't put body text below #a3a3a3 on dark surfaces",
       "Don't round containers past 16px or add drop shadows to buttons/cards"

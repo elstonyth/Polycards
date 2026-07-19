@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "code-review-graph": {
+      "command": "uv",
+      "args": [
+        "run",
+        "code-review-graph",
+        "serve"
+      ],
+      "cwd": "C:\\Users\\PC\\Desktop\\Projects\\PixelSlot"
+    }
+  }
+}
