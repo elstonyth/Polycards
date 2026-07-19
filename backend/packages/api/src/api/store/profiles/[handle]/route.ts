@@ -167,17 +167,27 @@ export async function GET(
     cards.add(p.card_id);
     cardsByPack.set(p.pack_id, cards);
   }
-  const oddsPerPack = await Promise.all(
-    [...cardsByPack].map(([packId, cardIds]) =>
-      packs.listPackOdds(
-        { pack_id: packId, card_id: [...cardIds] },
-        // NOT take: cardIds.size — nothing enforces (pack, card) uniqueness on
-        // pack_odds, so an exact-size take would silently drop a row if a
-        // duplicate ever existed. The filter is already narrow; bound loosely.
-        { take: 10_000 },
-      ),
-    ),
-  );
+  // Chunked fan-out: one query per distinct pack, at most ODDS_CONCURRENCY in
+  // flight — a showcase spanning many packs must not burst the pg pool on a
+  // cache-miss load (this repo has been pool-full-bitten before).
+  const ODDS_CONCURRENCY = 5;
+  const packEntries = [...cardsByPack];
+  const oddsPerPack: Awaited<ReturnType<typeof packs.listPackOdds>>[] = [];
+  for (let i = 0; i < packEntries.length; i += ODDS_CONCURRENCY) {
+    oddsPerPack.push(
+      ...(await Promise.all(
+        packEntries.slice(i, i + ODDS_CONCURRENCY).map(([packId, cardIds]) =>
+          packs.listPackOdds(
+            { pack_id: packId, card_id: [...cardIds] },
+            // NOT take: cardIds.size — nothing enforces (pack, card) uniqueness
+            // on pack_odds, so an exact-size take would silently drop a row if
+            // a duplicate ever existed. The filter is narrow; bound loosely.
+            { take: 10_000 },
+          ),
+        ),
+      )),
+    );
+  }
   const cardOdds = oddsPerPack
     .flat()
     .filter((o): o is typeof o & { card_id: string } => o.card_id != null);
