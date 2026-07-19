@@ -134,14 +134,18 @@ jobs:
           restore-keys: |
             turbo-${{ runner.os }}-
 
-      # node_modules materialization (unpack + link a ~1GB tree) is ~71s even
-      # with the berry global cache warm — it's the fixed per-shard overhead
-      # that caps how far sharding helps. Caching node_modules keyed on the
-      # lockfile turns the --immutable install below into a fast verify.
+      # The ~71s install is pure node_modules materialization (unpack + link a
+      # ~450MB tree) — the fixed per-shard overhead that caps how far sharding
+      # helps. Cache node_modules + Yarn Berry's install-state.gz, keyed on the
+      # lockfile, so the --immutable install below is a fast verify. The
+      # install-state is essential: WITHOUT it the node-modules linker rebuilds
+      # its state from scratch (~37s even with node_modules present), which is
+      # what makes the state file — not just node_modules — the thing that pays.
       # Exact key, NO restore-keys on purpose: a partial restore that mismatched
       # the lockfile would make `yarn install --immutable` FAIL (it refuses to
       # mutate node_modules). On a lockfile change the key misses -> full
-      # install (today's behavior) -> a fresh cache is saved.
+      # install -> a fresh cache is saved. (Key is v2: actions/cache never
+      # overwrites an existing key, so adding install-state needs a new key.)
       - name: Cache backend node_modules
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
@@ -149,7 +153,8 @@ jobs:
             backend/node_modules
             backend/apps/*/node_modules
             backend/packages/*/node_modules
-          key: bnm-${{ runner.os }}-node22-${{ hashFiles('backend/yarn.lock') }}
+            backend/.yarn/install-state.gz
+          key: bnm2-${{ runner.os }}-node22-${{ hashFiles('backend/yarn.lock') }}
 
       - name: Install backend dependencies
         working-directory: backend
@@ -205,14 +210,18 @@ jobs:
           restore-keys: |
             turbo-${{ runner.os }}-
 
-      # node_modules materialization (unpack + link a ~1GB tree) is ~71s even
-      # with the berry global cache warm — it's the fixed per-shard overhead
-      # that caps how far sharding helps. Caching node_modules keyed on the
-      # lockfile turns the --immutable install below into a fast verify.
+      # The ~71s install is pure node_modules materialization (unpack + link a
+      # ~450MB tree) — the fixed per-shard overhead that caps how far sharding
+      # helps. Cache node_modules + Yarn Berry's install-state.gz, keyed on the
+      # lockfile, so the --immutable install below is a fast verify. The
+      # install-state is essential: WITHOUT it the node-modules linker rebuilds
+      # its state from scratch (~37s even with node_modules present), which is
+      # what makes the state file — not just node_modules — the thing that pays.
       # Exact key, NO restore-keys on purpose: a partial restore that mismatched
       # the lockfile would make `yarn install --immutable` FAIL (it refuses to
       # mutate node_modules). On a lockfile change the key misses -> full
-      # install (today's behavior) -> a fresh cache is saved.
+      # install -> a fresh cache is saved. (Key is v2: actions/cache never
+      # overwrites an existing key, so adding install-state needs a new key.)
       - name: Cache backend node_modules
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
@@ -220,7 +229,8 @@ jobs:
             backend/node_modules
             backend/apps/*/node_modules
             backend/packages/*/node_modules
-          key: bnm-${{ runner.os }}-node22-${{ hashFiles('backend/yarn.lock') }}
+            backend/.yarn/install-state.gz
+          key: bnm2-${{ runner.os }}-node22-${{ hashFiles('backend/yarn.lock') }}
 
       - name: Install backend dependencies
         working-directory: backend
@@ -328,14 +338,18 @@ jobs:
           key: yarn-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
           restore-keys: yarn-${{ runner.os }}-
 
-      # node_modules materialization (unpack + link a ~1GB tree) is ~71s even
-      # with the berry global cache warm — it's the fixed per-shard overhead
-      # that caps how far sharding helps. Caching node_modules keyed on the
-      # lockfile turns the --immutable install below into a fast verify.
+      # The ~71s install is pure node_modules materialization (unpack + link a
+      # ~450MB tree) — the fixed per-shard overhead that caps how far sharding
+      # helps. Cache node_modules + Yarn Berry's install-state.gz, keyed on the
+      # lockfile, so the --immutable install below is a fast verify. The
+      # install-state is essential: WITHOUT it the node-modules linker rebuilds
+      # its state from scratch (~37s even with node_modules present), which is
+      # what makes the state file — not just node_modules — the thing that pays.
       # Exact key, NO restore-keys on purpose: a partial restore that mismatched
       # the lockfile would make `yarn install --immutable` FAIL (it refuses to
       # mutate node_modules). On a lockfile change the key misses -> full
-      # install (today's behavior) -> a fresh cache is saved.
+      # install -> a fresh cache is saved. (Key is v2: actions/cache never
+      # overwrites an existing key, so adding install-state needs a new key.)
       - name: Cache backend node_modules
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
@@ -343,7 +357,8 @@ jobs:
             backend/node_modules
             backend/apps/*/node_modules
             backend/packages/*/node_modules
-          key: bnm-${{ runner.os }}-node22-${{ hashFiles('backend/yarn.lock') }}
+            backend/.yarn/install-state.gz
+          key: bnm2-${{ runner.os }}-node22-${{ hashFiles('backend/yarn.lock') }}
 
       - name: Install backend dependencies
         working-directory: backend
@@ -445,14 +460,18 @@ jobs:
           restore-keys: |
             turbo-${{ runner.os }}-
 
-      # node_modules materialization (unpack + link a ~1GB tree) is ~71s even
-      # with the berry global cache warm — it's the fixed per-shard overhead
-      # that caps how far sharding helps. Caching node_modules keyed on the
-      # lockfile turns the --immutable install below into a fast verify.
+      # The ~71s install is pure node_modules materialization (unpack + link a
+      # ~450MB tree) — the fixed per-shard overhead that caps how far sharding
+      # helps. Cache node_modules + Yarn Berry's install-state.gz, keyed on the
+      # lockfile, so the --immutable install below is a fast verify. The
+      # install-state is essential: WITHOUT it the node-modules linker rebuilds
+      # its state from scratch (~37s even with node_modules present), which is
+      # what makes the state file — not just node_modules — the thing that pays.
       # Exact key, NO restore-keys on purpose: a partial restore that mismatched
       # the lockfile would make `yarn install --immutable` FAIL (it refuses to
       # mutate node_modules). On a lockfile change the key misses -> full
-      # install (today's behavior) -> a fresh cache is saved.
+      # install -> a fresh cache is saved. (Key is v2: actions/cache never
+      # overwrites an existing key, so adding install-state needs a new key.)
       - name: Cache backend node_modules
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
@@ -460,7 +479,8 @@ jobs:
             backend/node_modules
             backend/apps/*/node_modules
             backend/packages/*/node_modules
-          key: bnm-${{ runner.os }}-node22-${{ hashFiles('backend/yarn.lock') }}
+            backend/.yarn/install-state.gz
+          key: bnm2-${{ runner.os }}-node22-${{ hashFiles('backend/yarn.lock') }}
 
       - name: Install backend dependencies
         working-directory: backend
