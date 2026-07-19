@@ -43,6 +43,28 @@ for (const vp of VIEWPORTS) {
     await page.screenshot({ path: file, fullPage: true });
     console.log('ok', file);
   }
+  // Prove the stage rail swipes: advance one card via the desktop chevron
+  // (drag and chevron share the same onIndexChange path) and reshoot it.
+  if (vp.name === 'desktop') {
+    await page.goto(BASE + '/task', {
+      waitUntil: 'networkidle',
+      timeout: 30000,
+    });
+    await page.waitForTimeout(800);
+    const next = page.getByRole('button', { name: 'Next card' });
+    if (await next.isVisible().catch(() => false)) {
+      await next.click();
+      await page.waitForTimeout(600);
+      const rail = page
+        .locator('section', { hasText: 'Weekly reward stages' })
+        .last();
+      const file = path.join(OUT, 'task-rail-swiped.png');
+      await rail.screenshot({ path: file });
+      console.log('ok', file);
+    } else {
+      console.log('SKIP rail swipe — chevron not visible');
+    }
+  }
   await ctx.close();
 }
 await browser.close();

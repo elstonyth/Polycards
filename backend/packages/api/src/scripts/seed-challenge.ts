@@ -44,20 +44,31 @@ export default async function seedChallenge({
     );
   }
   const at = (i: number): string | undefined => cards[i % cards.length]?.id;
-  const pick = (...idxs: number[]): string[] =>
+  // Three CONSECUTIVE catalog cards (mod length) — distinct for any catalog of
+  // 3+, so every stage always fills its #1st/#2nd/#3rd podium tiles (arbitrary
+  // index sets collide mod small catalogs; the dev DB has only 3 cards).
+  const trio = (start: number): string[] =>
     cards.length === 0
       ? []
-      : [...new Set(idxs.map(at).filter((x): x is string => Boolean(x)))];
+      : [
+          ...new Set(
+            [at(start), at(start + 1), at(start + 2)].filter(
+              (x): x is string => Boolean(x),
+            ),
+          ),
+        ];
 
   // Milestone stages — strictly increasing thresholds (the validator requires
   // it). RM values; reward_credits are RM credits granted at each milestone.
   // Sized so the current dev-DB pool (~RM 380k pulled this week) sits mid-
   // ladder — stages 1-2 cleared, stage 3 in progress — for a truthful demo.
+  // THREE cards per stage, ORDERED: reward_card_ids[0] is the #1st-place
+  // featured card, [1] → #2nd, [2] → #3rd (the storefront prize grid).
   const stages = [
-    { stage_number: 1, threshold_myr: 100_000, reward_credits: 1_000, reward_card_ids: pick(0) },
-    { stage_number: 2, threshold_myr: 250_000, reward_credits: 2_500, reward_card_ids: pick(1) },
-    { stage_number: 3, threshold_myr: 500_000, reward_credits: 5_000, reward_card_ids: pick(2, 3) },
-    { stage_number: 4, threshold_myr: 1_000_000, reward_credits: 10_000, reward_card_ids: pick(4, 5) },
+    { stage_number: 1, threshold_myr: 100_000, reward_credits: 1_000, reward_card_ids: trio(0) },
+    { stage_number: 2, threshold_myr: 250_000, reward_credits: 2_500, reward_card_ids: trio(3) },
+    { stage_number: 3, threshold_myr: 500_000, reward_credits: 5_000, reward_card_ids: trio(6) },
+    { stage_number: 4, threshold_myr: 1_000_000, reward_credits: 10_000, reward_card_ids: trio(9) },
   ];
 
   await packs.saveChallengeStages({ stages, adminId: ADMIN_ID, reason: REASON });

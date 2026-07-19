@@ -37,6 +37,9 @@ export interface ChallengeStage {
   state: ChallengeStageState | null;
   /** Marker position along the pool bar (threshold / top threshold, 0-100). */
   pct: number;
+  /** Pool progress toward THIS stage's threshold, 0-100 (100 once unlocked);
+   *  null when the backend sent no progress. Drives the stage card's mini bar. */
+  progressPct: number | null;
 }
 export interface ChallengePool {
   /** Formatted community pulled-value this week, e.g. "RM 383,292". */
@@ -174,6 +177,12 @@ export async function getChallenge(): Promise<Challenge | null> {
         reward: rm0(s.rewardCredits),
         cards: cardsFor(s.rewardCardIds),
         pct: top > 0 ? Math.min(100, (s.thresholdMyr / top) * 100) : 0,
+        progressPct:
+          pooled === null
+            ? null
+            : s.thresholdMyr > 0
+              ? Math.min(100, (pooled / s.thresholdMyr) * 100)
+              : 100,
         state:
           pooled === null
             ? null

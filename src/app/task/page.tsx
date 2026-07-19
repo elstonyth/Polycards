@@ -1,14 +1,11 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import Image from 'next/image';
-import { Trophy, Check, Lock, Coins } from 'lucide-react';
+import { Trophy, Coins } from 'lucide-react';
 import { pillVariants } from '@/components/ui/pill';
 import { cn } from '@/lib/utils';
-import {
-  getChallenge,
-  type ChallengeCard,
-  type ChallengeStage,
-} from '@/lib/data/challenge';
+import { getChallenge, type ChallengeCard } from '@/lib/data/challenge';
+import { StageCarousel } from './StageCarousel';
 
 // Live challenge config + real community pool + Weekly Pull Value standings,
 // fetched server-side per request (the storefront origin can reach the backend;
@@ -55,30 +52,6 @@ function CardThumbs({
         />
       ))}
     </div>
-  );
-}
-
-// Stage-number chip — reached/current/locked vocabulary shared with the VIP
-// ladder (VipLevelCarousel), driven by the REAL pool position.
-function StageChip({ stage }: { stage: ChallengeStage }) {
-  if (stage.state === 'complete') {
-    return (
-      <span className="bg-chase/15 flex h-9 w-9 shrink-0 items-center justify-center rounded-full">
-        <Check className="text-chase h-5 w-5" aria-label="Unlocked" />
-      </span>
-    );
-  }
-  if (stage.state === 'locked') {
-    return (
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-neutral-800">
-        <Lock className="h-4 w-4 text-white/40" aria-label="Locked" />
-      </span>
-    );
-  }
-  return (
-    <span className="font-heading text-chase flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-neutral-800 text-sm">
-      {stage.stageNumber}
-    </span>
   );
 }
 
@@ -131,19 +104,6 @@ export default async function TaskPage() {
           {challenge.resetLabel}
         </p>
       </header>
-
-      {/* Rules — the standard's intro block. */}
-      <ul className="mt-6 space-y-2 rounded-2xl border border-white/5 bg-neutral-900/60 p-5">
-        {RULES.map((rule) => (
-          <li
-            key={rule}
-            className="flex gap-2.5 text-sm leading-relaxed text-neutral-400"
-          >
-            <span className="bg-chase/60 mt-2 h-1 w-1 shrink-0 rounded-full" />
-            {rule}
-          </li>
-        ))}
-      </ul>
 
       {/* Community Progress — adapted uiverse strong-parrot-96 panel. */}
       {pool && (
@@ -236,72 +196,15 @@ export default async function TaskPage() {
         </section>
       )}
 
-      {/* Weekly Reward Stages */}
+      {/* Weekly Reward Stages — swipeable rail, same interaction as VIP. */}
       <section className="mt-8">
         <h2 className="font-heading text-lg text-white">
           Weekly reward stages
         </h2>
-        <ol className="mt-4 space-y-3">
-          {challenge.stages.map((s) => (
-            <li
-              key={s.stageNumber}
-              className={cn(
-                'rounded-2xl border bg-neutral-900 p-4',
-                s.state === 'active'
-                  ? 'border-chase/50 ring-chase/20 ring-1'
-                  : 'border-white/5',
-                s.state === 'locked' && 'opacity-70',
-              )}
-            >
-              <div className="flex items-center gap-4">
-                <StageChip stage={s} />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold text-white">
-                    Stage {s.stageNumber}
-                  </p>
-                  <p className="text-xs text-neutral-400">
-                    Unlock at{' '}
-                    <span className="font-semibold text-neutral-200">
-                      {s.threshold}
-                    </span>
-                  </p>
-                </div>
-                {s.state === 'complete' && (
-                  <span className="text-chase text-[11px] font-bold tracking-wide uppercase">
-                    Unlocked
-                  </span>
-                )}
-                {(s.state === 'active' || s.state === 'locked') && (
-                  <span className="text-[11px] font-semibold tracking-wide text-white/40 uppercase">
-                    Locked
-                  </span>
-                )}
-              </div>
-              {/* Rank-split rewards: cards → top 3, credits → ranks 4-10. */}
-              <div className="mt-3 flex flex-col gap-2 border-t border-white/5 pt-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex items-center gap-2 text-xs text-neutral-400">
-                  <Trophy className="text-chase h-3.5 w-3.5" aria-hidden />
-                  <span>
-                    1st–3rd:{' '}
-                    <span className="font-semibold text-neutral-200">
-                      Featured cards
-                    </span>
-                  </span>
-                  <CardThumbs cards={s.cards} />
-                </div>
-                <div className="flex items-center gap-2 text-xs text-neutral-400">
-                  <Coins className="text-chase h-3.5 w-3.5" aria-hidden />
-                  <span>
-                    4th–10th:{' '}
-                    <span className="text-chase font-semibold">
-                      {s.reward} credits
-                    </span>
-                  </span>
-                </div>
-              </div>
-            </li>
-          ))}
-        </ol>
+        <StageCarousel
+          stages={challenge.stages}
+          pooled={pool?.pooled ?? null}
+        />
       </section>
 
       {/* Rewards Summary — cumulative unlocked rewards for this week's top 10. */}
@@ -405,6 +308,23 @@ export default async function TaskPage() {
           </ol>
         </section>
       )}
+
+      {/* How it works — the standard's rules, parked below the live content
+          so the standings stay within easy reach (operator request). */}
+      <section className="mt-8" aria-label="How it works">
+        <h2 className="font-heading text-lg text-white">How it works</h2>
+        <ul className="mt-3 space-y-2 rounded-2xl border border-white/5 bg-neutral-900/60 p-5">
+          {RULES.map((rule) => (
+            <li
+              key={rule}
+              className="flex gap-2.5 text-sm leading-relaxed text-neutral-400"
+            >
+              <span className="bg-chase/60 mt-2 h-1 w-1 shrink-0 rounded-full" />
+              {rule}
+            </li>
+          ))}
+        </ul>
+      </section>
 
       <div className="mt-8 text-center">
         <Link href="/leaderboard" className={cn(pillVariants({ size: 'md' }))}>
