@@ -40,8 +40,14 @@ import {
   type EditRow,
 } from '../../../lib/odds-rows';
 import { resolveImageUrl } from '../../../lib/image-url';
+import { shouldSeedBuffer } from '../../../lib/seed-buffer';
 import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
 
+/**
+ * Pack odds editor (`/packs/:slug`): edit a pack's prize-pool membership and
+ * per-card odds. The odds buffer seeds once per slug and reseeds after a pool
+ * save; the router reuses this component across `:slug` changes.
+ */
 const PackOddsEditorPage = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -81,22 +87,19 @@ const PackOddsEditorPage = () => {
     }
   };
 
-  // Seed the editable buffer from the server snapshot, during render (not an
-  // effect) per react.dev "you might not need an effect". Seed once per slug
-  // only — `data` gets a new object identity on every React Query refetch
-  // (e.g. refetchOnWindowFocus), so comparing `data !== seededFrom` re-seeds —
-  // and silently wipes unsaved edits — on every background refetch.
-  // saveMembers resets seededFrom so a pool save still reseeds.
-  //
-  // The `!== slug` clause reseeds on a genuine pack switch: the router reuses
-  // this route component across `:slug` changes (no remount). It cannot loop —
-  // usePackOdds sets no keepPreviousData, so `data` is either undefined or the
-  // requested slug's payload, and the route echoes the exact slug back; once
-  // seeded, `seededFrom.pack.slug === slug`, so the clause goes quiet.
+  // Seed the editable buffer from the server snapshot during render (not an
+  // effect) per react.dev "you might not need an effect". Seed once per slug:
+  // the router reuses this route component across `:slug` changes (no remount),
+  // so reseed when the seeded snapshot's slug no longer matches. saveMembers
+  // resets seededFrom so a pool save reseeds. This cannot loop — usePackOdds
+  // sets no keepPreviousData, so `data` is either undefined or the requested
+  // slug's payload and the route echoes the exact slug back; once seeded,
+  // `seededFrom.pack.slug === slug` and the stale check goes quiet. See
+  // shouldSeedBuffer for why a plain identity check would wipe edits on refetch.
   const [seededFrom, setSeededFrom] = useState<PackOddsResponse | undefined>(
     undefined,
   );
-  if (data && (seededFrom === undefined || seededFrom.pack.slug !== slug)) {
+  if (shouldSeedBuffer(data, seededFrom, (s) => s.pack.slug !== slug)) {
     setSeededFrom(data);
     setRows(mapOddsToRows(data.odds));
   }

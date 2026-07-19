@@ -42,6 +42,7 @@ import { resolveImageUrl } from '../../lib/image-url';
 import { validateImageFile } from '../../lib/image-validation';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 import { snapshotOf } from './box-snapshot';
+import { shouldSeedBuffer } from '../../lib/seed-buffer';
 import { VipLevelsTab } from './vip-levels-tab';
 
 const TIERS = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'Z'] as const;
@@ -150,6 +151,11 @@ const DailyRewardsPage = () => {
   );
 };
 
+/**
+ * Daily-rewards "Boxes" tab: edit one tier's box settings and prize rows,
+ * seeded once from the server snapshot and reseeded from the canonical save
+ * response. `dirtyRef` lets the parent block a tab switch over unsaved edits.
+ */
 const BoxesTab = ({ dirtyRef }: { dirtyRef: MutableRefObject<boolean> }) => {
   const { data: boxesData } = useDailyBoxes();
   const boxes = boxesData?.boxes ?? [];
@@ -171,12 +177,10 @@ const BoxesTab = ({ dirtyRef }: { dirtyRef: MutableRefObject<boolean> }) => {
   const [rows, setRows] = useState<EditRow[]>([]);
   const [reason, setReason] = useState('');
   const [serverSnap, setServerSnap] = useState('');
-  // Seed once per mount only — `data` gets a new object identity on every
-  // React Query refetch (e.g. refetchOnWindowFocus), so comparing
-  // `data !== seededFrom` re-seeds — and silently wipes unsaved edits — on
-  // every background refetch. handleTierChange resets seededFrom to undefined
-  // so a tier switch still reseeds from the next tier's snapshot.
-  if (data && seededFrom === undefined) {
+  // Seed once per mount; handleTierChange resets seededFrom to undefined so a
+  // tier switch reseeds from the next tier's snapshot. See shouldSeedBuffer for
+  // why a plain identity check would wipe edits on every background refetch.
+  if (shouldSeedBuffer(data, seededFrom)) {
     setSeededFrom(data);
     setName(data.box.name);
     setEnabled(data.box.enabled);
