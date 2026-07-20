@@ -1,9 +1,11 @@
 // integration-tests/http/store-notifications.spec.ts
-// TDD: RED first — route does not exist yet, so these tests fail with 404.
 // Tests:
+//   (auth)      no bearer → 401, on both GET and mark-read.
 //   (positive)  GET /store/notifications as customer A → 200, returns A's row, id matches.
-//   (IDOR)      A's response NEVER contains B's notification id.
-//   (auth)      no bearer → 401.
+//   (IDOR)      A's response NEVER contains B's notification id, including when
+//               A's query string forges receiver_id/customer_id pointing at B.
+//   (mark-read) owner can mark own; read_at populates; idempotent; unread_count
+//               decrements; A marking B's notification → 404 (no existence leak).
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
 import { Modules } from '@medusajs/framework/utils';
 import { unwrapResponse } from './utils';
@@ -61,7 +63,12 @@ medusaIntegrationTestRunner({
         );
         customerIdA = payloadA.actor_id as string;
 
-        // Register customer B (we only need their id — no login needed).
+        // Register + login customer B. The login is required: the *registration*
+        // token's actor_id is '' — Medusa fills that claim from
+        // app_metadata.customer_id, which is not linked until POST /store/customers
+        // runs. Deriving customerIdB from the registration token would seed B's
+        // notification under receiver_id: '' and the IDOR tests below would compare
+        // against a customer that does not exist.
         const regB = await api.post('/auth/customer/emailpass/register', {
           email: 'notif-b@test.dev',
           password: PASSWORD,
@@ -76,10 +83,14 @@ medusaIntegrationTestRunner({
             },
           },
         );
-        const payloadB = JSON.parse(
-          Buffer.from(regB.data.token.split('.')[1], 'base64').toString('utf8'),
-        );
-        customerIdB = payloadB.actor_id as string;
+        const loginB = await api.post('/auth/customer/emailpass', {
+          email: 'notif-b@test.dev',
+          password: PASSWORD,
+        });
+        customerIdB = JSON.parse(
+          Buffer.from(loginB.data.token.split('.')[1], 'base64').toString('utf8'),
+        ).actor_id as string;
+        expect(customerIdB).toBeTruthy();
 
         // Seed one feed notification for A and one for B via the Notification Module.
         const notif = container.resolve(Modules.NOTIFICATION);
@@ -141,7 +152,7 @@ medusaIntegrationTestRunner({
         expect(rowA.template).toBe('vip_level_up');
         expect(rowA.data).toMatchObject({ level: 2, label: 'Silver I' });
         expect(typeof rowA.created_at).toBe('string');
-        // read_at is null until Phase 5 mark-read is implemented.
+        // Freshly seeded rows are unread — nothing has marked them yet.
         expect(rowA.read_at).toBeNull();
       });
 
@@ -156,22 +167,50 @@ medusaIntegrationTestRunner({
         // Must contain A's own row (positive gate — a vacuously-empty list would pass the IDOR check).
         expect(notifications.some((n) => n.id === notifIdA)).toBe(true);
 
-        // Must NOT contain any row scoped to B.
-        // We do this by asserting that every returned row has A's receiver_id baked in.
-        // The route owner-scopes by receiver_id from the token, so if B's row appeared
-        // it would be the IDOR hole. Checking absence of notifIdA proves B's id is missing.
-        // (notifIdA is A's id — B's id is a different value; we verify B's is excluded.)
+        // Must NOT contain any row scoped to B. Fetch B's ids directly from the
+        // module and assert none of them appear in A's response — the route
+        // owner-scopes by receiver_id from the token, so a B row showing up here
+        // would be the IDOR hole.
         const container = getContainer();
         const notif = container.resolve(Modules.NOTIFICATION);
-        // Fetch B's rows directly to get their ids.
         const bRows = await notif.listNotifications(
           { receiver_id: customerIdB, channel: 'feed' },
           { take: 10 },
         );
+        // Guard: an empty bIds would make the loop below pass vacuously.
+        expect(bRows.length).toBeGreaterThan(0);
         const bIds = new Set(bRows.map((r: { id: string }) => r.id));
         const returnedIds = notifications.map((n) => n.id);
         for (const id of returnedIds) {
           expect(bIds.has(id)).toBe(false);
+        }
+      });
+
+      it('(IDOR) a forged query targeting B is ignored — only A\'s own rows are returned', async () => {
+        // Owner scoping must be derived ONLY from req.auth_context.actor_id.
+        // Authenticate as A while asking the query string to redirect the read
+        // set at B; guards against someone later wiring req.query back in.
+        const res = await unwrapResponse(
+          api.get(
+            `/store/notifications?receiver_id=${encodeURIComponent(customerIdB)}&customer_id=${encodeURIComponent(customerIdB)}`,
+            { headers: authed(tokenA) },
+          ),
+        );
+        expect(res.status).toBe(200);
+
+        const { notifications } = res.data as { notifications: Array<{ id: string }> };
+        expect(notifications.some((n) => n.id === notifIdA)).toBe(true);
+
+        const container = getContainer();
+        const notif = container.resolve(Modules.NOTIFICATION);
+        const bRows = await notif.listNotifications(
+          { receiver_id: customerIdB, channel: 'feed' },
+          { take: 10 },
+        );
+        expect(bRows.length).toBeGreaterThan(0);
+        const bIds = new Set(bRows.map((r: { id: string }) => r.id));
+        for (const n of notifications) {
+          expect(bIds.has(n.id)).toBe(false);
         }
       });
 
