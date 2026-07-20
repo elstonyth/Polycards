@@ -91,7 +91,14 @@ type ProductSnapshot = {
 // single concrete TCompensateInput for createStep instead of a union that
 // distributes over `undefined` (InvokeFn's `TCompensateInput extends
 // undefined ? TOutput : TCompensateInput` — see create-step.d.ts).
-type CardCompensate = { card: CardSnapshot; product: ProductSnapshot | null };
+type CardCompensate = {
+  card: CardSnapshot;
+  product: ProductSnapshot | null;
+  // The slab file this run baked (or null). Restoring `card.slab_image_key`
+  // from the snapshot re-points the Card at the OLD file, so the compensate
+  // path must reclaim this NEW one or it orphans one composite per rollback.
+  newSlabKey: string | null;
+};
 type CompensateData = CardCompensate | undefined;
 
 // update-card — patch the Card row and bring its mirrored Product back in sync:
@@ -163,150 +170,194 @@ export const updateCardInvoke = async (
   // leaves the card's current link + mirror untouched — a price-only save can't
   // wipe a linked sprite); null → all three cleared; a picked id → link + its
   // mirrored dex/image_url. Throws NOT_FOUND if the id doesn't resolve.
-  const pixelPatch = await resolvePixelPokemonPatch(
-    packs,
-    input.pixel_pokemon_id,
-  );
+  // Medusa runs a step's compensate only when a LATER step throws (see
+  // record-pull.ts). A throw INSIDE this invoke gets no compensation, so the
+  // Card mutation below + the slab bake above would be left half-applied
+  // against an unchanged Product. Self-compensate like create-card.ts: undo
+  // the mutation and reclaim the new file, then rethrow. The try starts at the
+  // pixel resolve (not the mutation) because resolvePixelPokemonPatch can throw
+  // NOT_FOUND after the bake already ran, orphaning the new file otherwise.
+  try {
+    const pixelPatch = await resolvePixelPokemonPatch(
+      packs,
+      input.pixel_pokemon_id,
+    );
 
-  await packs.updateCards([
-    {
-      id: card.id,
-      name: input.name,
-      set: input.set,
-      grader: input.grader,
-      grade: input.grade,
-      market_value: input.market_value,
-      image: input.image,
-      // Store the operator's price verbatim — NULL means "use FMV" and must be
-      // preserved (the Product mirror below still gets a concrete `salePrice`).
-      price: input.price ?? null,
-      for_sale: input.for_sale,
-      ...pixelPatch,
-      slab_image: nextSlabImage,
-      slab_image_key: nextSlabKey,
-      pc_product_id: input.pc_product_id ?? null,
-      pc_grade: input.pc_grade ?? null,
-      market_multiplier: input.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER,
-      label_year: input.label_year ?? null,
-      label_note: input.label_note ?? null,
-    },
-  ]);
+    await packs.updateCards([
+      {
+        id: card.id,
+        name: input.name,
+        set: input.set,
+        grader: input.grader,
+        grade: input.grade,
+        market_value: input.market_value,
+        image: input.image,
+        // Store the operator's price verbatim — NULL means "use FMV" and must be
+        // preserved (the Product mirror below still gets a concrete `salePrice`).
+        price: input.price ?? null,
+        for_sale: input.for_sale,
+        ...pixelPatch,
+        slab_image: nextSlabImage,
+        slab_image_key: nextSlabKey,
+        pc_product_id: input.pc_product_id ?? null,
+        pc_grade: input.pc_grade ?? null,
+        market_multiplier: input.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER,
+        label_year: input.label_year ?? null,
+        label_note: input.label_note ?? null,
+      },
+    ]);
 
-  // Mirror to the Product (handle === card.handle).
-  const [product] = await productModule.listProducts(
-    { handle: input.handle },
-    { take: 1, relations: ['variants', 'images'] },
-  );
-  const nextStatus = input.for_sale
-    ? ProductStatus.PUBLISHED
-    : ProductStatus.DRAFT;
+    // Mirror to the Product (handle === card.handle).
+    const [product] = await productModule.listProducts(
+      { handle: input.handle },
+      { take: 1, relations: ['variants', 'images'] },
+    );
+    const nextStatus = input.for_sale
+      ? ProductStatus.PUBLISHED
+      : ProductStatus.DRAFT;
 
-  if (product) {
-    const variantId = product.variants?.[0]?.id ?? null;
-    // Capture the full prior Product state so compensation restores everything,
-    // not just status. The prior variant price isn't loaded here (it lives in a
-    // price set); compensation restores it from the Card snapshot, since
-    // Card.price and the Product variant price are kept in sync.
-    const prevProduct: ProductSnapshot = {
-      id: product.id,
-      title: product.title,
-      status: product.status,
-      thumbnail: product.thumbnail ?? null,
-      images: (product.images ?? []).map((im) => ({ url: im.url })),
-      metadata: (product.metadata ?? {}) as Record<string, unknown>,
-      variantId,
-    };
-    await updateProductsWorkflow(container).run({
-      input: {
-        products: [
-          {
-            id: product.id,
-            title: input.name,
-            status: nextStatus,
-            thumbnail: input.image,
-            images: [{ url: input.image }],
-            metadata: {
-              ...(product.metadata ?? {}),
-              fmv: input.market_value,
-              grade: input.grade,
-              grader: input.grader,
-              set: input.set,
-              // Keep the PC-link mirror in sync with the card's new values —
-              // the listing price reads market_multiplier off
-              // product.metadata, so an edit here must not leave it stale.
-              // (The storefront reader was removed with /marketplace.)
-              pc_product_id: input.pc_product_id ?? null,
-              pc_grade: input.pc_grade ?? null,
-              market_multiplier:
-                input.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER,
-              slab_image: nextSlabImage,
+    if (product) {
+      const variantId = product.variants?.[0]?.id ?? null;
+      // Capture the full prior Product state so compensation restores everything,
+      // not just status. The prior variant price isn't loaded here (it lives in a
+      // price set); compensation restores it from the Card snapshot, since
+      // Card.price and the Product variant price are kept in sync.
+      const prevProduct: ProductSnapshot = {
+        id: product.id,
+        title: product.title,
+        status: product.status,
+        thumbnail: product.thumbnail ?? null,
+        images: (product.images ?? []).map((im) => ({ url: im.url })),
+        metadata: (product.metadata ?? {}) as Record<string, unknown>,
+        variantId,
+      };
+      await updateProductsWorkflow(container).run({
+        input: {
+          products: [
+            {
+              id: product.id,
+              title: input.name,
+              status: nextStatus,
+              thumbnail: input.image,
+              images: [{ url: input.image }],
+              metadata: {
+                ...(product.metadata ?? {}),
+                fmv: input.market_value,
+                grade: input.grade,
+                grader: input.grader,
+                set: input.set,
+                // Keep the PC-link mirror in sync with the card's new values —
+                // the listing price reads market_multiplier off
+                // product.metadata, so an edit here must not leave it stale.
+                // (The storefront reader was removed with /marketplace.)
+                pc_product_id: input.pc_product_id ?? null,
+                pc_grade: input.pc_grade ?? null,
+                market_multiplier:
+                  input.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER,
+                slab_image: nextSlabImage,
+              },
+              ...(variantId
+                ? {
+                    variants: [
+                      {
+                        id: variantId,
+                        prices: [{ currency_code: 'usd', amount: salePrice }],
+                      },
+                    ],
+                  }
+                : {}),
             },
-            ...(variantId
-              ? {
-                  variants: [
-                    {
-                      id: variantId,
-                      prices: [{ currency_code: 'usd', amount: salePrice }],
-                    },
-                  ],
-                }
-              : {}),
-          },
-        ],
+          ],
+        },
+      });
+      // Old-composite cleanup (decision #8) — only after the new state is
+      // fully written; skip when the key is unchanged or was never set.
+      if (snapshot.slab_image_key && snapshot.slab_image_key !== nextSlabKey) {
+        await deleteSlabFile(container, snapshot.slab_image_key);
+      }
+      return new StepResponse({ handle: card.handle, productId: product.id }, {
+        card: snapshot,
+        product: prevProduct,
+        newSlabKey: nextSlabKey,
+      } satisfies CardCompensate);
+    }
+
+    // Defensive upsert: no Product for this handle — create one to match.
+    const ctx = await resolveCardProductContext(container);
+    const productInput = buildCardProductInput(
+      {
+        handle: input.handle,
+        title: input.name,
+        image: input.image,
+        price: salePrice,
+        metadata: {
+          fmv: input.market_value,
+          points: 0,
+          grade: input.grade,
+          grader: input.grader,
+          set: input.set,
+          year: new Date().getFullYear(),
+          slab_image: nextSlabImage,
+        },
+      },
+      {
+        shippingProfileId: ctx.shippingProfileId,
+        salesChannelId: ctx.salesChannelId,
+        status: nextStatus,
+        manageInventory: false,
+      },
+    );
+    const { result } = await createProductsWorkflow(container).run({
+      input: {
+        products: [productInput],
+        additional_data: { seller_id: ctx.sellerId },
       },
     });
+
     // Old-composite cleanup (decision #8) — only after the new state is
     // fully written; skip when the key is unchanged or was never set.
     if (snapshot.slab_image_key && snapshot.slab_image_key !== nextSlabKey) {
       await deleteSlabFile(container, snapshot.slab_image_key);
     }
-    return new StepResponse({ handle: card.handle, productId: product.id }, {
+    return new StepResponse({ handle: card.handle, productId: result[0].id }, {
       card: snapshot,
-      product: prevProduct,
+      product: null,
+      newSlabKey: nextSlabKey,
     } satisfies CardCompensate);
-  }
-
-  // Defensive upsert: no Product for this handle — create one to match.
-  const ctx = await resolveCardProductContext(container);
-  const productInput = buildCardProductInput(
-    {
-      handle: input.handle,
-      title: input.name,
-      image: input.image,
-      price: salePrice,
-      metadata: {
-        fmv: input.market_value,
-        points: 0,
-        grade: input.grade,
-        grader: input.grader,
-        set: input.set,
-        year: new Date().getFullYear(),
-        slab_image: nextSlabImage,
+  } catch (error) {
+    // Reclaim the file this run baked — the Card is about to be pointed back at
+    // the OLD key, so the new composite is now referenced by nothing
+    // (deleteSlabFile never throws). If the throw came from the pixel resolve,
+    // the mutation below never ran and this restore is an idempotent re-write
+    // of the snapshot values — harmless and simpler than tracking that.
+    if (nextSlabKey) {
+      await deleteSlabFile(container, nextSlabKey);
+    }
+    await packs.updateCards([
+      {
+        id: snapshot.id,
+        name: snapshot.name,
+        set: snapshot.set,
+        grader: snapshot.grader,
+        grade: snapshot.grade,
+        market_value: snapshot.market_value,
+        image: snapshot.image,
+        price: snapshot.price,
+        for_sale: snapshot.for_sale,
+        pixel_pokemon_id: snapshot.pixel_pokemon_id,
+        pokemon_dex: snapshot.pokemon_dex,
+        sprite_image: snapshot.sprite_image,
+        slab_image: snapshot.slab_image,
+        slab_image_key: snapshot.slab_image_key,
+        pc_product_id: snapshot.pc_product_id,
+        pc_grade: snapshot.pc_grade,
+        market_multiplier: snapshot.market_multiplier,
+        label_year: snapshot.label_year,
+        label_note: snapshot.label_note,
       },
-    },
-    {
-      shippingProfileId: ctx.shippingProfileId,
-      salesChannelId: ctx.salesChannelId,
-      status: nextStatus,
-      manageInventory: false,
-    },
-  );
-  const { result } = await createProductsWorkflow(container).run({
-    input: {
-      products: [productInput],
-      additional_data: { seller_id: ctx.sellerId },
-    },
-  });
-
-  // Old-composite cleanup (decision #8) — only after the new state is
-  // fully written; skip when the key is unchanged or was never set.
-  if (snapshot.slab_image_key && snapshot.slab_image_key !== nextSlabKey) {
-    await deleteSlabFile(container, snapshot.slab_image_key);
+    ]);
+    throw error;
   }
-  return new StepResponse({ handle: card.handle, productId: result[0].id }, {
-    card: snapshot,
-    product: null,
-  } satisfies CardCompensate);
 };
 
 export const updateCardStep = createStep(
@@ -369,6 +420,12 @@ export const updateCardStep = createStep(
           ],
         },
       });
+    }
+    // Reclaim the slab this run baked. The card restore above re-points the
+    // Card at snapshot.slab_image_key (the OLD file); the new one is now
+    // orphaned. Guard against deleting a key that equals the restored one.
+    if (data.newSlabKey && data.newSlabKey !== data.card.slab_image_key) {
+      await deleteSlabFile(container, data.newSlabKey);
     }
   },
 );
