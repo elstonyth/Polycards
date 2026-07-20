@@ -35,8 +35,10 @@ export default function NotificationsClient({
   // rather than with revalidatePath() in the action is deliberate: a
   // revalidation dispatched from markRead races the in-flight Link navigation
   // and non-deterministically REPLACES the /notifications history entry, so
-  // Back skips the feed entirely (measured with scripts/probe-notifications.mjs
-  // — 6/8 clicks lost the entry). A mount-time re-sync races nothing.
+  // Back skips the feed entirely: measured with scripts/probe-notifications.mjs
+  // + scripts/probe-notifications-history.mjs, 9 of 12 mark-read clicks lost the
+  // entry with revalidatePath, 0 of 18 without it, and 0 of 8 for an already-read
+  // row (a plain link firing no action). A mount-time re-sync races nothing.
   useEffect(() => {
     let live = true;
     void getNotifications(page).then((r) => {
