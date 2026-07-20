@@ -82,7 +82,11 @@ export default function NotificationsClient({
   async function onClearAll() {
     // Snapshot for rollback: only the rows this action actually flips.
     const wasUnread = items.filter((n) => !n.readAt).map((n) => n.id);
-    if (wasUnread.length === 0) return;
+    // No early-return on an empty snapshot: the button only renders when the
+    // cross-page total > 0, so reaching here with zero unread rows on THIS page
+    // means unread lives on other pages — markAllRead() must still fire (it
+    // clears every page server-side and is idempotent). With wasUnread empty,
+    // the optimistic map and rollback are both no-ops, which is correct.
     setClearing(true);
     const now = new Date().toISOString();
     setItems((xs) => xs.map((n) => (n.readAt ? n : { ...n, readAt: now })));
