@@ -14,6 +14,7 @@
  */
 import { sdk } from '@/lib/medusa';
 import { logger } from '@/lib/logger';
+import { sanePage } from '@/lib/page-param';
 import { getAuthToken } from '@/lib/data/customer';
 import { friendlyError, isAuthError, type ErrorRule } from '@/lib/errors';
 import {
@@ -208,13 +209,24 @@ export type TransactionsResult =
       topupTotal: number;
       spendTotal: number;
       transactions: CreditTxn[];
+      page: number;
+      hasMore: boolean;
     }
   | { ok: false; error: string; needsAuth?: boolean };
 
-// The credit ledger for the Transactions account page: lifetime totals + the
-// recent rows. The backend caps the row list; the totals are computed over the
-// FULL ledger server-side, so they stay accurate beyond the visible rows.
-export async function getTransactions(): Promise<TransactionsResult> {
+// Ledger page size — matches the backend default (PAGE_SIZE in store/credits).
+// Not exported: 'use server' modules may only export async functions.
+const TXN_PAGE_SIZE = 20;
+
+// The credit ledger for the Transactions account page: lifetime totals + one
+// page of rows (?page=N, newest first). The totals are computed over the FULL
+// ledger server-side, so they stay accurate beyond the visible rows.
+export async function getTransactions(
+  page: number = 1,
+): Promise<TransactionsResult> {
+  // Validate at the boundary — a server action is a public endpoint.
+  const safePage = sanePage(page);
+
   const token = await getAuthToken();
   if (!token) {
     return {
@@ -226,6 +238,10 @@ export async function getTransactions(): Promise<TransactionsResult> {
   try {
     const raw = await sdk.client.fetch('/store/credits', {
       headers: { Authorization: `Bearer ${token}` },
+      query: {
+        limit: TXN_PAGE_SIZE,
+        offset: (safePage - 1) * TXN_PAGE_SIZE,
+      },
       cache: 'no-store',
     });
     const totals = parseOne(CreditsSchema, raw);
@@ -244,6 +260,8 @@ export async function getTransactions(): Promise<TransactionsResult> {
         reason: r.reason,
         createdAt: r.created_at,
       })),
+      page: safePage,
+      hasMore: totals?.has_more ?? false,
     };
   } catch (error) {
     logger.error('[credits] transactions load failed:', error);

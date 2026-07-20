@@ -1,4 +1,8 @@
 import { type ReactNode } from 'react';
+import Link from 'next/link';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { pillVariants } from '@/components/ui/pill';
 
 export function AccountHeader({ title, sub }: { title: string; sub?: string }) {
   return (
@@ -113,6 +117,61 @@ export function Badge({
     >
       {children}
     </span>
+  );
+}
+
+/**
+ * Prev/next pagination for the account list pages (?page=N URLs, server
+ * components — plain links, no client JS). Hidden entirely on a single page
+ * so short lists don't grow dead chrome.
+ */
+export function Pager({
+  page,
+  hasMore,
+  basePath,
+}: {
+  page: number;
+  hasMore: boolean;
+  basePath: string;
+}) {
+  if (page <= 1 && !hasMore) return null;
+  const href = (p: number) => (p <= 1 ? basePath : `${basePath}?page=${p}`);
+  const linkClasses = cn(pillVariants({ variant: 'ghost', size: 'sm' }));
+  const disabledClasses = cn(
+    pillVariants({ variant: 'ghost', size: 'sm' }),
+    'pointer-events-none opacity-40',
+  );
+  return (
+    <nav
+      aria-label="Pagination"
+      className="mt-5 flex items-center justify-between"
+    >
+      {page > 1 ? (
+        <Link href={href(page - 1)} className={linkClasses}>
+          <ChevronLeft className="h-4 w-4" aria-hidden />
+          Previous
+        </Link>
+      ) : (
+        <span aria-disabled className={disabledClasses}>
+          <ChevronLeft className="h-4 w-4" aria-hidden />
+          Previous
+        </span>
+      )}
+      <span className="text-[12px] font-semibold uppercase tracking-wide text-white/50">
+        Page {page}
+      </span>
+      {hasMore ? (
+        <Link href={href(page + 1)} className={linkClasses}>
+          Next
+          <ChevronRight className="h-4 w-4" aria-hidden />
+        </Link>
+      ) : (
+        <span aria-disabled className={disabledClasses}>
+          Next
+          <ChevronRight className="h-4 w-4" aria-hidden />
+        </span>
+      )}
+    </nav>
   );
 }
 

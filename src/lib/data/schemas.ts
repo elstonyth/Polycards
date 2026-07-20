@@ -219,11 +219,13 @@ export const VaultShowcaseSchema = z.looseObject({
 /** GET /store/credits — finite balance. */
 export const BalanceSchema = z.looseObject({ balance: finite });
 
-/** GET /store/credits — lifetime totals (balance is also validated by BalanceSchema). */
+/** GET /store/credits — lifetime totals (balance is also validated by BalanceSchema).
+ *  `has_more` (pagination) is optional so an older backend still parses. */
 export const CreditsSchema = z.looseObject({
   balance: finite,
   topup_total: finite,
   spend_total: finite,
+  has_more: z.boolean().optional(),
 });
 
 /** Every reason the backend `credit_transaction` ledger emits (keep in sync with
@@ -399,9 +401,11 @@ export const NotificationSchema = z.looseObject({
   read_at: z.union([z.string(), z.date()]).nullable(),
 });
 
-/** GET /store/notifications — outer envelope (notifications array + unread_count). */
+/** GET /store/notifications — outer envelope (notifications array + unread_count).
+ *  `has_more` (pagination) is optional so an older backend still parses. */
 export const NotificationsEnvelopeSchema = z.looseObject({
   unread_count: finite,
+  has_more: z.boolean().optional(),
 });
 
 /** POST /store/notifications/:id/read — mark-read response. */

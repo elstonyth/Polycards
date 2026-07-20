@@ -51,6 +51,7 @@ import {
   type BuybackRate,
 } from './buyback-rate';
 import { consumeExternalSen } from './external-funded';
+import { recomputeExternalStamps } from './external-backfill';
 import {
   directReferralPctForLevel,
   directCommissionSen,
@@ -3555,6 +3556,102 @@ class PacksModuleService extends MedusaService({
     for (const row of customers) {
       await this.rebuildVipMemberState(row.customer_id, sharedContext);
     }
+  }
+
+  // ── External-basis backfill (pre-1b grandfathered deposits) ───────────────
+  // Migration20260621120000 added external_funded_cents; topups written BEFORE
+  // it are NULL and the live paths grandfather them OUT of the external
+  // balance, so every open funded by them stamps 0 and the customer's VIP
+  // basis never moves. This backfill flips those topups to their face value
+  // and replays consumption over the customer's chronological ledger with the
+  // exact live arithmetic (recomputeExternalStamps), then re-runs the ladder
+  // grant so crossed rungs settle. Idempotent: an already-correct ledger
+  // yields an empty diff and grantLevelUpRewards gains nothing.
+  //
+  // NOTE: stamping a topup also moves it INTO the deposited-playthrough basis
+  // (plan 033/038), so affected customers' withdrawable gates tighten to
+  // "deposits fully played through" — accepted trade-off of the backfill.
+  @InjectManager()
+  async backfillExternalFundedBasis(
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{
+    customers: number;
+    rowsUpdated: number;
+    leveled: Record<string, number[]>;
+  }> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const customers = await em.execute<{ customer_id: string }[]>(
+      `SELECT DISTINCT customer_id FROM credit_transaction
+        WHERE reason = 'topup' AND amount > 0
+          AND external_funded_cents IS NULL AND deleted_at IS NULL`,
+      [],
+    );
+    let rowsUpdated = 0;
+    const leveled: Record<string, number[]> = {};
+    for (const { customer_id } of customers) {
+      const r = await this.backfillExternalFundedBasisForCustomer(customer_id);
+      rowsUpdated += r.rowsUpdated;
+      // Grant AFTER the stamp txn commits (mirrors settleVipStep): the shared
+      // VIP-state readers (creditSummary is context-less @InjectManager) run on
+      // fresh connections and would not see this txn's uncommitted stamps.
+      const { gained } = await this.grantLevelUpRewards(
+        customer_id,
+        'external-backfill',
+      );
+      if (gained.length > 0) leveled[customer_id] = gained;
+    }
+    return { customers: customers.length, rowsUpdated, leveled };
+  }
+
+  // One customer's replay, in ONE locked transaction: advisory credit-lock
+  // (serializes against live opens/topups/reversals), recompute, stamp. The
+  // ladder grant runs from the orchestrator AFTER this txn commits — its
+  // readers (context-less creditSummary) use fresh connections and cannot see
+  // uncommitted stamps.
+  @InjectTransactionManager()
+  async backfillExternalFundedBasisForCustomer(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ rowsUpdated: number }> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `credit:${customerId}`,
+    ]);
+    const rows = await em.execute<
+      {
+        id: string;
+        reason: string;
+        amount: string;
+        external_funded_cents: number | string | null;
+        reference: string | null;
+      }[]
+    >(
+      `SELECT id, reason, amount, external_funded_cents, reference
+         FROM credit_transaction
+        WHERE customer_id = ? AND deleted_at IS NULL
+        ORDER BY created_at, id`,
+      [customerId],
+    );
+    const diff = recomputeExternalStamps(
+      rows.map((r) => ({
+        id: r.id,
+        reason: r.reason,
+        amount: Number(r.amount),
+        external_funded_cents:
+          r.external_funded_cents === null
+            ? null
+            : Number(r.external_funded_cents),
+        reference: r.reference,
+      })),
+    );
+    for (const [id, ext] of diff) {
+      await em.execute(
+        'UPDATE credit_transaction SET external_funded_cents = ?, updated_at = now() WHERE id = ?',
+        [ext, id],
+      );
+    }
+    return { rowsUpdated: diff.size };
   }
 
   // Grant ladder rewards for every newly-crossed VIP level (Phase 3b §E).

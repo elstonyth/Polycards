@@ -1,10 +1,11 @@
 import { MedusaError } from '@medusajs/framework/utils';
 
 /**
- * Parse + bound admin pagination query params at the route boundary. The service
+ * Parse + bound pagination query params at the route boundary. The service
  * layer also clamps, so this is hygiene (not a live DoS): reject clearly-invalid
  * input (NaN / negative / absurd) with INVALID_DATA instead of silently clamping.
- * Shared so the audit/commissions routes can't drift apart. See plans/008.
+ * Shared so the paged routes can't drift apart — admin audit/commissions plus
+ * the store notifications/credits feeds. See plans/008.
  */
 export function parsePaginationParams(
   query: { limit?: unknown; offset?: unknown },

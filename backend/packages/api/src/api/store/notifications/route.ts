@@ -6,6 +6,7 @@ import { Modules } from '@medusajs/framework/utils';
 import type { INotificationModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
+import { parsePaginationParams } from '../../../utils/pagination';
 
 // GET /store/notifications — the authenticated customer's own in-app feed.
 //
@@ -18,30 +19,54 @@ import type PacksModuleService from '../../../modules/packs/service';
 // read_at: sourced from the notification_read packs side-table (Task 1).
 // Rows that have no entry in that table are returned with read_at: null.
 //
-// unread_count: page-scoped count of rows in the returned page whose read_at is
-// null (limited to RECENT_NOTIFICATIONS items), NOT the total unread across all
-// notifications for this customer.
+// unread_count: TRUE unread total across ALL the customer's feed notifications
+// (not page-scoped): total feed rows minus notification_read rows with a
+// read_at, both counted server-side. The nav badge and the /notifications
+// header rely on this spanning beyond the returned page.
 //
-// Most-recent feed page size (mirrors RECENT_TRANSACTIONS in store/credits).
-const RECENT_NOTIFICATIONS = 50;
+// Pagination: ?limit=&offset= (parsePaginationParams — shared with the admin
+// audit/commissions routes). take limit + 1 → `has_more` without a separate
+// count query; the extra row is sliced off before mapping.
+const PAGE_SIZE = 20;
 
 export async function GET(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
   const receiverId = req.auth_context.actor_id;
+  const { limit, offset } = parsePaginationParams(req.query, {
+    defaultLimit: PAGE_SIZE,
+    maxLimit: 50,
+  });
 
   const notif = req.scope.resolve<INotificationModuleService>(
     Modules.NOTIFICATION,
   );
 
-  const notifications = await notif.listNotifications(
+  // listAndCount: the count is the TOTAL matching feed rows (independent of
+  // take/skip), which the true unread_count needs anyway — no extra query.
+  const [rows, totalFeed] = await notif.listAndCountNotifications(
     { receiver_id: receiverId, channel: 'feed' },
-    { take: RECENT_NOTIFICATIONS, order: { created_at: 'DESC' } },
+    // id tiebreaker: batch creates land sibling rows in the same instant, and
+    // created_at alone gives no stable order across offset pages.
+    { take: limit + 1, skip: offset, order: { created_at: 'DESC', id: 'DESC' } },
   );
+  const hasMore = rows.length > limit;
+  const notifications = rows.slice(0, limit);
+
+  const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+
+  // True unread total: all feed rows minus the customer's marked-read rows.
+  // Reads are only ever created by the owner-scoped mark-read route against
+  // feed notifications, so the subtraction is exact; clamp guards pathology
+  // (e.g. a read row surviving its notification).
+  const [, readCount] = await packs.listAndCountNotificationReads(
+    { customer_id: receiverId, read_at: { $ne: null } },
+    { take: 1 },
+  );
+  const unreadCount = Math.max(0, totalFeed - readCount);
 
   // Batch-fetch read state for this page from the packs side-table.
-  const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
   const notifIds = notifications.map((n) => n.id);
   const reads =
     notifIds.length > 0
@@ -67,6 +92,7 @@ export async function GET(
 
   res.json({
     notifications: mapped,
-    unread_count: mapped.filter((n) => !n.read_at).length,
+    unread_count: unreadCount,
+    has_more: hasMore,
   });
 }

@@ -4,12 +4,15 @@ import {
 } from "@medusajs/framework/http";
 import PacksModuleService from "../../../modules/packs/service";
 import { PACKS_MODULE } from "../../../modules/packs";
+import { parsePaginationParams } from "../../../utils/pagination";
 
 // GET /store/credits — the authenticated customer's site-credit balance
-// (paged Σ over the append-only ledger — exact at any size) plus their most
-// recent transactions. Spending credit on packs lands with the payment phase;
-// until then the balance only grows via buybacks.
-const RECENT_TRANSACTIONS = 50;
+// (paged Σ over the append-only ledger — exact at any size) plus a page of
+// transactions (?limit=&offset=, newest first; take limit + 1 → has_more
+// without a count query). The lifetime totals stay full-ledger, so they are
+// accurate beyond the visible rows. Spending credit on packs lands with the
+// payment phase; until then the balance only grows via buybacks.
+const PAGE_SIZE = 20;
 
 export async function GET(
   req: AuthenticatedMedusaRequest,
@@ -17,19 +20,27 @@ export async function GET(
 ): Promise<void> {
   const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
   const customerId = req.auth_context.actor_id;
+  const { limit, offset } = parsePaginationParams(req.query, {
+    defaultLimit: PAGE_SIZE,
+    maxLimit: 50,
+  });
 
   // creditSummary already scans the full ledger; thread its scalars into
   // walletSummary so the wallet view reuses that one scan instead of issuing a
   // second identical SUM (balance/deposited/used are a strict subset). This
   // serializes walletSummary after creditSummary — intended; it still runs its
   // own lockedCommission/nextUnlock/isFrozen queries.
-  const [summary, transactions] = await Promise.all([
+  const [summary, txnRows] = await Promise.all([
     packs.creditSummary(customerId),
     packs.listCreditTransactions(
       { customer_id: customerId },
-      { order: { created_at: "DESC" }, take: RECENT_TRANSACTIONS }
+      // id tiebreaker: batch buybacks land sibling rows in the same instant,
+      // and created_at alone gives no stable order across offset pages.
+      { order: { created_at: "DESC", id: "DESC" }, take: limit + 1, skip: offset }
     ),
   ]);
+  const hasMore = txnRows.length > limit;
+  const transactions = txnRows.slice(0, limit);
   const wallet = await packs.walletSummary(customerId, {
     balance: summary.balance,
     depositedCents: Math.round(summary.depositedPlaythroughTotal * 100),
@@ -47,6 +58,7 @@ export async function GET(
       pull_id: t.pull_id,
       created_at: t.created_at,
     })),
+    has_more: hasMore,
     wallet: {
       balance: wallet.balance,
       available: wallet.available,

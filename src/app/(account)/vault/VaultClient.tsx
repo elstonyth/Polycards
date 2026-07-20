@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Eye, Search, Star } from 'lucide-react';
 import { SlabImage } from '@/components/SlabImage';
@@ -130,6 +130,17 @@ export default function VaultClient({
         (!rarityFilter || i.card.rarity === rarityFilter),
     );
   }, [items, query, rarityFilter]);
+
+  // Progressive paging: render the grid in steps so a 500-card vault doesn't
+  // mount hundreds of slab images at once. Selection/select-all still operate
+  // on the FULL filtered set (`visible`), only rendering is windowed.
+  const PAGE_STEP = 30;
+  const [shownCount, setShownCount] = useState(PAGE_STEP);
+  useEffect(() => {
+    // New search/filter → back to the first window.
+    setShownCount(PAGE_STEP);
+  }, [query, rarityFilter]);
+  const shown = visible.slice(0, shownCount);
 
   const visibleIds = visible.map((i) => i.pullId);
   const allVisibleSelected =
@@ -402,7 +413,7 @@ export default function VaultClient({
         // Mobile-first: 3-up keeps a scroll rhythm of ~2 rows per screen —
         // 2-up slabs dominated the viewport and made browsing feel stuck.
         <div className="mt-5 grid grid-cols-3 gap-2 sm:gap-3 lg:grid-cols-4">
-          {visible.map((item) => {
+          {shown.map((item) => {
             const isSelected = selected.has(item.pullId);
             const glow = rarityRgb(item.card.rarity);
             const art = (
@@ -530,6 +541,25 @@ export default function VaultClient({
               </div>
             );
           })}
+        </div>
+      )}
+
+      {visible.length > 0 && (
+        <div className="mt-4 flex flex-col items-center gap-2.5">
+          <p className="text-[12px] text-neutral-400">
+            Showing {Math.min(shownCount, visible.length)} of {visible.length}{' '}
+            card{visible.length === 1 ? '' : 's'}
+          </p>
+          {visible.length > shownCount && (
+            <Pill
+              variant="secondary"
+              size="sm"
+              onClick={() => setShownCount((n) => n + PAGE_STEP)}
+              className="px-6"
+            >
+              Show more
+            </Pill>
+          )}
         </div>
       )}
 

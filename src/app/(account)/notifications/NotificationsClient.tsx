@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { Bell } from 'lucide-react';
 import { relativeTime } from '@/lib/format';
 import {
   getNotifications,
@@ -13,8 +14,10 @@ import { copyFor } from '@/lib/notifications/copy';
 
 export default function NotificationsClient({
   initial,
+  page = 1,
 }: {
   initial: Notification[];
+  page?: number;
 }) {
   const [items, setItems] = useState<Notification[]>(initial);
   const [clearing, setClearing] = useState(false);
@@ -38,13 +41,13 @@ export default function NotificationsClient({
   // row (a plain link firing no action). A mount-time re-sync races nothing.
   useEffect(() => {
     let live = true;
-    void getNotifications().then((r) => {
+    void getNotifications(page).then((r) => {
       if (live && r.ok) setItems(r.notifications);
     });
     return () => {
       live = false;
     };
-  }, []);
+  }, [page]);
 
   async function onRead(id: string) {
     // Optimistic — mark read locally immediately.
@@ -79,7 +82,37 @@ export default function NotificationsClient({
   }
 
   if (items.length === 0) {
-    return <p className="mt-4 text-sm text-white/50">No notifications yet.</p>;
+    return (
+      <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] px-6 py-12 text-center">
+        <Bell className="mx-auto h-8 w-8 text-white/25" aria-hidden />
+        {page > 1 ? (
+          <>
+            <p className="mt-3 text-sm font-semibold text-white">
+              Nothing on this page.
+            </p>
+            <p className="mt-1 text-[13px] text-white/50">
+              You&rsquo;ve reached the end of your notifications.
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="mt-3 text-sm font-semibold text-white">
+              No notifications yet.
+            </p>
+            <p className="mt-1 text-[13px] text-white/50">
+              VIP level-ups, unlocked commissions, and reward wins land here.{' '}
+              <Link
+                href="/"
+                className="font-semibold text-white underline underline-offset-2 hover:text-white/80"
+              >
+                Rip a pack
+              </Link>{' '}
+              to get things moving.
+            </p>
+          </>
+        )}
+      </div>
+    );
   }
 
   return (

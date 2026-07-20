@@ -443,6 +443,10 @@ export type Routes = {
         cards: typeof import("../../src/api/admin/cards/route") & {
             $handle: typeof import("../../src/api/admin/cards/[handle]/route");
         };
+        challenge: {
+            settings: typeof import("../../src/api/admin/challenge/settings/route");
+            stages: typeof import("../../src/api/admin/challenge/stages/route");
+        };
         commissions: {
             $id: {
                 reverse: typeof import("../../src/api/admin/commissions/[id]/reverse/route");
@@ -471,6 +475,7 @@ export type Routes = {
                 topHits: typeof import("../../src/api/admin/packs/[slug]/top-hits/route");
             };
         };
+        pixelPokemon: typeof import("../../src/api/admin/pixel-pokemon/route");
         pricecharting: {
             product: typeof import("../../src/api/admin/pricecharting/product/route");
             search: typeof import("../../src/api/admin/pricecharting/search/route");
@@ -479,10 +484,15 @@ export type Routes = {
             fx: typeof import("../../src/api/admin/pricing/fx/route") & {
                 history: typeof import("../../src/api/admin/pricing/fx/history/route");
             };
+            health: typeof import("../../src/api/admin/pricing/health/route");
         };
         pulls: typeof import("../../src/api/admin/pulls/route");
         rewardsSettings: typeof import("../../src/api/admin/rewards-settings/route");
         siteSettings: typeof import("../../src/api/admin/site-settings/route");
+        tcg: {
+            cardMeta: typeof import("../../src/api/admin/tcg/card-meta/route");
+        };
+        vipLevels: typeof import("../../src/api/admin/vip-levels/route");
     };
     auth: {
         $actorType: {
@@ -578,7 +588,9 @@ export type Routes = {
         cards: {
             $handle: typeof import("../../src/api/store/cards/[handle]/route");
         };
+        challenge: typeof import("../../src/api/store/challenge/route");
         credits: typeof import("../../src/api/store/credits/route") & {
+            balance: typeof import("../../src/api/store/credits/balance/route");
             topup: typeof import("../../src/api/store/credits/topup/route");
         };
         daily: typeof import("../../src/api/store/daily/route") & {
@@ -587,6 +599,7 @@ export type Routes = {
         deliveryOrders: typeof import("../../src/api/store/delivery-orders/route") & {
             $id: typeof import("../../src/api/store/delivery-orders/[id]/route") & {
                 address: typeof import("../../src/api/store/delivery-orders/[id]/address/route");
+                cancel: typeof import("../../src/api/store/delivery-orders/[id]/cancel/route");
             };
         };
         leaderboard: typeof import("../../src/api/store/leaderboard/route");
@@ -630,6 +643,7 @@ export type Routes = {
                 buyback: typeof import("../../src/api/store/vault/[id]/buyback/route");
                 showcase: typeof import("../../src/api/store/vault/[id]/showcase/route");
             };
+            buybackBatch: typeof import("../../src/api/store/vault/buyback-batch/route");
         };
         vip: typeof import("../../src/api/store/vip/route");
     };

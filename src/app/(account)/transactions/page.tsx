@@ -1,16 +1,32 @@
 import type { Metadata } from 'next';
-import { AccountHeader, StatCards } from '@/components/account/ui';
+import { AccountHeader, Pager, StatCards } from '@/components/account/ui';
 import { rm } from '@/lib/format';
 import { getTransactions } from '@/lib/actions/vault';
 import { reasonLabel, signedRm } from '@/lib/transactions';
 
 export const metadata: Metadata = { title: 'Transactions' };
 
-// The credit ledger: lifetime money in/out + the recent transactions. The
-// (account) layout already gates signed-out visitors; getTransactions reads the
-// httpOnly JWT. No interactivity → server component, no client island.
-export default async function TransactionsPage() {
-  const res = await getTransactions();
+const dateFmt = new Intl.DateTimeFormat('en-US', {
+  year: 'numeric',
+  month: 'short',
+  day: 'numeric',
+});
+const timeFmt = new Intl.DateTimeFormat('en-US', {
+  hour: 'numeric',
+  minute: '2-digit',
+});
+
+// The credit ledger: lifetime money in/out + a server-paged transaction list
+// (?page=N). The (account) layout already gates signed-out visitors;
+// getTransactions reads the httpOnly JWT. No interactivity → server component.
+export default async function TransactionsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
+  const { page: pageRaw } = await searchParams;
+  const page = Number(pageRaw);
+  const res = await getTransactions(Number.isInteger(page) ? page : 1);
 
   if (!res.ok) {
     return (
@@ -27,10 +43,7 @@ export default async function TransactionsPage() {
 
   return (
     <>
-      <AccountHeader
-        title="Transactions"
-        sub="Your latest 50 top-ups and spends."
-      />
+      <AccountHeader title="Transactions" sub="Your top-ups and spending." />
       <StatCards
         items={[
           { label: 'Current balance', value: rm(res.balance) },
@@ -40,9 +53,27 @@ export default async function TransactionsPage() {
       />
       <div className="mt-5 overflow-x-auto rounded-2xl border border-white/10 bg-white/[0.03]">
         {rows.length === 0 ? (
-          <p className="p-6 text-center text-sm text-white/50">
-            No transactions yet.
-          </p>
+          <div className="px-6 py-12 text-center">
+            {res.page > 1 ? (
+              <>
+                <p className="text-sm font-semibold text-white">
+                  Nothing on this page.
+                </p>
+                <p className="mt-1 text-[13px] text-white/50">
+                  You&rsquo;ve reached the end of your transaction history.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-sm font-semibold text-white">
+                  No transactions yet.
+                </p>
+                <p className="mt-1 text-[13px] text-white/50">
+                  Top-ups, pack opens, and sell-backs all land here.
+                </p>
+              </>
+            )}
+          </div>
         ) : (
           <table className="w-full text-left text-sm">
             <thead className="text-[12px] uppercase tracking-wide text-white/50">
@@ -53,34 +84,39 @@ export default async function TransactionsPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((t) => (
-                <tr
-                  key={t.id}
-                  className="border-b border-white/5 last:border-0"
-                >
-                  <td className="px-4 py-3 text-white/70">
-                    {new Date(t.createdAt).toLocaleDateString('en-US', {
-                      year: 'numeric',
-                      month: 'short',
-                      day: 'numeric',
-                    })}
-                  </td>
-                  <td className="px-4 py-3 text-white/90">
-                    {reasonLabel(t.reason)}
-                  </td>
-                  <td
-                    className={`px-4 py-3 text-right font-medium ${
-                      t.amount > 0 ? 'text-buyback-fg' : 'text-white/80'
-                    }`}
+              {rows.map((t) => {
+                const at = new Date(t.createdAt);
+                return (
+                  <tr
+                    key={t.id}
+                    className="border-b border-white/5 transition-colors last:border-0 hover:bg-white/[0.02]"
                   >
-                    {signedRm(t.amount)}
-                  </td>
-                </tr>
-              ))}
+                    <td className="whitespace-nowrap px-4 py-3">
+                      <span className="text-white/70">
+                        {dateFmt.format(at)}
+                      </span>
+                      <span className="ml-2 hidden text-[12px] text-white/40 sm:inline">
+                        {timeFmt.format(at)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-white/90">
+                      {reasonLabel(t.reason)}
+                    </td>
+                    <td
+                      className={`whitespace-nowrap px-4 py-3 text-right font-medium tabular-nums ${
+                        t.amount > 0 ? 'text-buyback-fg' : 'text-white/80'
+                      }`}
+                    >
+                      {signedRm(t.amount)}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
       </div>
+      <Pager page={res.page} hasMore={res.hasMore} basePath="/transactions" />
     </>
   );
 }

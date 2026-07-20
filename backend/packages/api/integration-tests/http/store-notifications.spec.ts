@@ -128,7 +128,7 @@ medusaIntegrationTestRunner({
         expect(res.status).toBe(401);
       });
 
-      it('(positive) returns A\'s own feed notification with correct shape', async () => {
+      it("(positive) returns A's own feed notification with correct shape", async () => {
         const res = await unwrapResponse(
           api.get('/store/notifications', { headers: authed(tokenA) }),
         );
@@ -156,13 +156,15 @@ medusaIntegrationTestRunner({
         expect(rowA.read_at).toBeNull();
       });
 
-      it('(IDOR) A\'s response never contains B\'s notification id', async () => {
+      it("(IDOR) A's response never contains B's notification id", async () => {
         const res = await unwrapResponse(
           api.get('/store/notifications', { headers: authed(tokenA) }),
         );
         expect(res.status).toBe(200);
 
-        const { notifications } = res.data as { notifications: Array<{ id: string }> };
+        const { notifications } = res.data as {
+          notifications: Array<{ id: string }>;
+        };
 
         // Must contain A's own row (positive gate — a vacuously-empty list would pass the IDOR check).
         expect(notifications.some((n) => n.id === notifIdA)).toBe(true);
@@ -220,10 +222,11 @@ medusaIntegrationTestRunner({
           api.get('/store/notifications', { headers: authed(tokenA) }),
         );
         expect(listRes.status).toBe(200);
-        const { notifications: beforeList, unread_count: beforeCount } = listRes.data as {
-          notifications: Array<{ id: string; read_at: string | null }>;
-          unread_count: number;
-        };
+        const { notifications: beforeList, unread_count: beforeCount } =
+          listRes.data as {
+            notifications: Array<{ id: string; read_at: string | null }>;
+            unread_count: number;
+          };
         expect(beforeList.length).toBeGreaterThan(0);
         const id = beforeList[0].id;
         // Initially all unread.
@@ -231,7 +234,11 @@ medusaIntegrationTestRunner({
 
         // Mark read.
         const markRes = await unwrapResponse(
-          api.post(`/store/notifications/${id}/read`, {}, { headers: authed(tokenA) }),
+          api.post(
+            `/store/notifications/${id}/read`,
+            {},
+            { headers: authed(tokenA) },
+          ),
         );
         expect(markRes.status).toBe(200);
         expect(markRes.data.id).toBe(id);
@@ -239,7 +246,11 @@ medusaIntegrationTestRunner({
 
         // Idempotent: second mark must not throw.
         const mark2Res = await unwrapResponse(
-          api.post(`/store/notifications/${id}/read`, {}, { headers: authed(tokenA) }),
+          api.post(
+            `/store/notifications/${id}/read`,
+            {},
+            { headers: authed(tokenA) },
+          ),
         );
         expect(mark2Res.status).toBe(200);
         expect(mark2Res.data.read_at).toBeTruthy();
@@ -249,15 +260,16 @@ medusaIntegrationTestRunner({
           api.get('/store/notifications', { headers: authed(tokenA) }),
         );
         expect(afterRes.status).toBe(200);
-        const { notifications: afterList, unread_count: afterCount } = afterRes.data as {
-          notifications: Array<{ id: string; read_at: string | null }>;
-          unread_count: number;
-        };
+        const { notifications: afterList, unread_count: afterCount } =
+          afterRes.data as {
+            notifications: Array<{ id: string; read_at: string | null }>;
+            unread_count: number;
+          };
         expect(afterList.find((n) => n.id === id)?.read_at).toBeTruthy();
         expect(afterCount).toBe(beforeCount - 1);
       });
 
-      it('mark-read IDOR: A cannot mark B\'s notification → 404', async () => {
+      it("mark-read IDOR: A cannot mark B's notification → 404", async () => {
         // Get B's notification id directly from the module.
         const container = getContainer();
         const notif = container.resolve(Modules.NOTIFICATION);
@@ -270,14 +282,128 @@ medusaIntegrationTestRunner({
 
         // A attempts to mark B's notification → must get 404 (no existence leak).
         const res = await unwrapResponse(
-          api.post(`/store/notifications/${bId}/read`, {}, { headers: authed(tokenA) }),
+          api.post(
+            `/store/notifications/${bId}/read`,
+            {},
+            { headers: authed(tokenA) },
+          ),
         );
         expect(res.status).toBe(404);
       });
 
+      it('(unread_count) is the TRUE total spanning beyond one page, and mark-read decrements it globally', async () => {
+        // Seed 4 more rows for A (beforeEach seeded 1) → 5 total unread.
+        const container = getContainer();
+        const notif = container.resolve(Modules.NOTIFICATION);
+        await notif.createNotifications(
+          Array.from({ length: 4 }, (_, i) => ({
+            to: customerIdA,
+            receiver_id: customerIdA,
+            channel: 'feed' as const,
+            template: 'reward_won',
+            data: { i },
+          })),
+        );
+
+        // A 2-row page must still report all 5 unread.
+        const p1 = await unwrapResponse(
+          api.get('/store/notifications?limit=2&offset=0', {
+            headers: authed(tokenA),
+          }),
+        );
+        expect(p1.status).toBe(200);
+        expect(p1.data.notifications.length).toBe(2);
+        expect(p1.data.unread_count).toBe(5);
+
+        // Mark one read → the total drops to 4 on EVERY page, including a page
+        // that does not contain the marked row.
+        const markId = p1.data.notifications[0].id as string;
+        const markRes = await unwrapResponse(
+          api.post(
+            `/store/notifications/${markId}/read`,
+            {},
+            { headers: authed(tokenA) },
+          ),
+        );
+        expect(markRes.status).toBe(200);
+
+        const p2 = await unwrapResponse(
+          api.get('/store/notifications?limit=2&offset=2', {
+            headers: authed(tokenA),
+          }),
+        );
+        expect(p2.status).toBe(200);
+        expect(
+          p2.data.notifications.some((n: { id: string }) => n.id === markId),
+        ).toBe(false);
+        expect(p2.data.unread_count).toBe(4);
+      });
+
+      it('(pagination) limit/offset walk the feed newest-first with has_more', async () => {
+        // Seed 2 more rows for A (beforeEach seeded 1) → 3 total.
+        const container = getContainer();
+        const notif = container.resolve(Modules.NOTIFICATION);
+        await notif.createNotifications([
+          {
+            to: customerIdA,
+            receiver_id: customerIdA,
+            channel: 'feed',
+            template: 'reward_won',
+            data: {},
+          },
+          {
+            to: customerIdA,
+            receiver_id: customerIdA,
+            channel: 'feed',
+            template: 'voucher_claimed',
+            data: {},
+          },
+        ]);
+
+        const p1 = await unwrapResponse(
+          api.get('/store/notifications?limit=2&offset=0', {
+            headers: authed(tokenA),
+          }),
+        );
+        expect(p1.status).toBe(200);
+        expect(p1.data.notifications.length).toBe(2);
+        expect(p1.data.has_more).toBe(true);
+
+        const p2 = await unwrapResponse(
+          api.get('/store/notifications?limit=2&offset=2', {
+            headers: authed(tokenA),
+          }),
+        );
+        expect(p2.status).toBe(200);
+        expect(p2.data.notifications.length).toBe(1);
+        expect(p2.data.has_more).toBe(false);
+
+        // Pages must not overlap.
+        const ids1 = p1.data.notifications.map((n: { id: string }) => n.id);
+        const ids2 = p2.data.notifications.map((n: { id: string }) => n.id);
+        for (const id of ids2) expect(ids1).not.toContain(id);
+      });
+
+      it('(pagination) clearly-invalid limit/offset → 400', async () => {
+        const badLimit = await unwrapResponse(
+          api.get('/store/notifications?limit=0', { headers: authed(tokenA) }),
+        );
+        expect(badLimit.status).toBe(400);
+        const badOffset = await unwrapResponse(
+          api.get('/store/notifications?offset=-1', {
+            headers: authed(tokenA),
+          }),
+        );
+        expect(badOffset.status).toBe(400);
+      });
+
       it('mark-read (unauth): no bearer → 401', async () => {
         const res = await unwrapResponse(
-          api.post(`/store/notifications/${notifIdA}/read`, {}, { headers: storeHeaders }),
+          api.post(
+            `/store/notifications/${notifIdA}/read`,
+            {},
+            { headers: storeHeaders },
+          ),
         );
         expect(res.status).toBe(401);
       });
