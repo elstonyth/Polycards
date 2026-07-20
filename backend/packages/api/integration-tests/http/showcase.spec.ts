@@ -149,7 +149,12 @@ medusaIntegrationTestRunner({
           api.post(
             '/store/credits/topup',
             { amount: PACK_PRICE },
-            { headers: { ...authed(token), 'idempotency-key': 'showcase-topup' } },
+            {
+              headers: {
+                ...authed(token),
+                'idempotency-key': 'showcase-topup',
+              },
+            },
           ),
         );
         const opened = await unwrapResponse(
@@ -188,6 +193,42 @@ medusaIntegrationTestRunner({
           status: 'vaulted',
           showcased: true,
         });
+      });
+
+      // The public profile route caches its body per handle for 30s. Toggling
+      // the star writes the DB but the profile read is what /me and
+      // /profile/:handle render — without an invalidation the star looks
+      // ignored for up to 30s (reported 2026-07-20).
+      it('makes the card visible on the public profile immediately', async () => {
+        const token = await registerCustomer('showcase-c@test.dev');
+        const pullId = await openOne(token);
+        const me = await unwrapResponse(
+          api.get('/store/profiles/me', { headers: authed(token) }),
+        );
+        const handle = me.data.handle as string;
+
+        // Prime the per-process profile cache with the pre-toggle body.
+        const before = await unwrapResponse(
+          api.get(`/store/profiles/${handle}`, { headers: storeHeaders }),
+        );
+        expect(before.status).toBe(200);
+        expect(before.data.collection).toEqual([]);
+
+        await showcase(pullId, true, token);
+
+        const after = await unwrapResponse(
+          api.get(`/store/profiles/${handle}`, { headers: storeHeaders }),
+        );
+        expect(
+          after.data.collection.map((c: { handle: string }) => c.handle),
+        ).toEqual([CARD_HANDLE]);
+
+        // …and un-starring is visible just as fast.
+        await showcase(pullId, false, token);
+        const off = await unwrapResponse(
+          api.get(`/store/profiles/${handle}`, { headers: storeHeaders }),
+        );
+        expect(off.data.collection).toEqual([]);
       });
 
       it('refuses to showcase a sold pull and never sets the flag', async () => {

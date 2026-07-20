@@ -3,6 +3,10 @@ import { MedusaError, Modules } from '@medusajs/framework/utils';
 import PacksModuleService from '../../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import { HANDLE_RE, seedOf } from '../../../../utils/profile-handle';
+import {
+  getCachedProfile,
+  setCachedProfile,
+} from '../../../../utils/profile-cache';
 import { findCustomerByHandle } from '../../../../utils/customer-by-handle';
 import {
   cardByHandle,
@@ -39,17 +43,11 @@ type Rarity = (typeof RARITIES)[number];
 type PullRow = Awaited<ReturnType<PacksModuleService['listPulls']>>[number];
 type CardRow = Awaited<ReturnType<PacksModuleService['listCards']>>[number];
 
-// ponytail: per-process 30s cache (leaderboard pattern) — profile stats are
-// per-customer aggregates over the pull/ledger history; upgrade to Redis if
-// we ever run >1 instance.
-const CACHE_TTL_MS = 30_000;
-const profileCache = new Map<string, { expires: number; body: unknown }>();
-
-/** Test seam: module state outlives a test's fixtures — the http suite runs in
- *  one process, so test A's cached profile would be served to test B. */
-export function clearProfileCache(): void {
-  profileCache.clear();
-}
+// The per-process 30s body cache now lives in utils/profile-cache so the
+// showcase toggle can evict this customer's entry (a star that stays invisible
+// for 30s reads as broken). Re-exported: the http suite clears it by importing
+// from this route.
+export { clearProfileCache } from '../../../../utils/profile-cache';
 
 export async function GET(
   req: MedusaRequest,
@@ -64,9 +62,9 @@ export async function GET(
 
   // Only successful bodies are ever stored (404 paths throw before the set
   // below), so a cache hit is always a real profile.
-  const cached = profileCache.get(handle);
-  if (cached && cached.expires > Date.now()) {
-    res.json(cached.body);
+  const cached = getCachedProfile(handle);
+  if (cached !== undefined) {
+    res.json(cached);
     return;
   }
 
@@ -271,6 +269,6 @@ export async function GET(
     collection,
     recent,
   };
-  profileCache.set(handle, { expires: Date.now() + CACHE_TTL_MS, body });
+  setCachedProfile(handle, body);
   res.json(body);
 }

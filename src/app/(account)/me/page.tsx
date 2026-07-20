@@ -234,9 +234,13 @@ export default async function MePage() {
               // reserved as padding (negative margins pull the rail back out to
               // the card's own padding — the PoolByRarity rail pattern).
               <div className="-mx-5 mt-2 flex gap-5 overflow-x-auto px-5 py-4">
-                {showcased.map((card) => (
+                {showcased.map((card, i) => (
                   <Link
-                    key={card.handle}
+                    // Two showcased pulls of the SAME card are two distinct
+                    // items (and can carry different tier frames — rarity is
+                    // per (pack, card)). The payload has no pull id, so the
+                    // index disambiguates; the public profile keys the same way.
+                    key={`${card.handle}-${i}`}
                     href={`/card/${card.handle}`}
                     className="w-20 shrink-0 transition-opacity hover:opacity-90"
                   >

@@ -5,6 +5,7 @@ import {
 import { MedusaError } from '@medusajs/framework/utils';
 import PacksModuleService from '../../../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../../../modules/packs';
+import { invalidateProfileForCustomer } from '../../../../../utils/profile-cache';
 
 // Pure validation logic — extracted so it can be unit-tested without Medusa.
 export function validateShowcaseRequest(
@@ -82,6 +83,12 @@ export async function POST(
       'Only vaulted pulls can be showcased',
     );
   }
+
+  // The star is only visible through GET /store/profiles/:handle (what /me and
+  // the public profile render), and that route caches its body per handle for
+  // 30s — without this eviction the toggle looks ignored for up to half a
+  // minute. Best-effort by contract: the write already stood.
+  await invalidateProfileForCustomer(req.scope, customerId);
 
   res.json({ pull_id: pullId, showcased });
 }
