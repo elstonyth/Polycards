@@ -530,7 +530,13 @@ function harness(order: Record<string, unknown> | undefined) {
   const json = jest.fn();
   return {
     notifications,
-    req: { params: { id: 'do_1' }, body: {}, scope } as never,
+    // NOT `body: {}` — coerceDeliveryUpdateBody rejects an empty body with a
+    // pre-existing "must provide at least one field" guard, which would fail
+    // every test before the route's notification code is even reached. Must
+    // not be `tracking_number` either: that would break the first test's
+    // "omitted tracking mirrors the previous value" assertion. Inert to every
+    // assertion here because the workflow itself is mocked.
+    req: { params: { id: 'do_1' }, body: { status: 'shipped' }, scope } as never,
     res: { json } as never,
     json,
   };
