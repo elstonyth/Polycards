@@ -114,7 +114,7 @@ export default function DailyClient({ initial }: { initial: DailyState }) {
           <p className="mt-1 text-[13px] text-neutral-400">
             <Link
               href="/vip"
-              className="text-white/80 underline-offset-2 hover:text-white hover:underline"
+              className="inline-flex min-h-6 items-center text-white/80 underline-offset-2 hover:text-white hover:underline"
             >
               Level up for better boxes →
             </Link>

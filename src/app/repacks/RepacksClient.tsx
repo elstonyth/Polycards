@@ -231,7 +231,7 @@ function PackCard({ pack }: { pack: CommunityPack }) {
       {/* Creator attribution */}
       <Link
         href={`/profile/${creator.username}`}
-        className="mb-3 flex items-center gap-1.5 text-[11px] text-white/40 transition-colors hover:text-white/70"
+        className="mb-3 flex min-h-6 items-center gap-1.5 text-[11px] text-white/40 transition-colors hover:text-white/70"
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img

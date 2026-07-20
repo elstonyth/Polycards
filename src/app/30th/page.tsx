@@ -67,7 +67,13 @@ export default function ThirtiethPage() {
               alt=""
               aria-hidden
               loading="lazy"
-              className="h-24 w-auto object-contain drop-shadow-[0_16px_40px_rgba(0,0,0,0.5)] sm:h-36"
+              // The fan is five fixed-height cards plus rotation, which is
+              // wider than a 320px viewport and pushed the whole page into
+              // horizontal scroll. Capping each card's width by viewport share
+              // (object-contain scales the art down inside it) fixes the narrow
+              // end without touching 375px+, where the natural width already
+              // sits under the cap.
+              className="h-24 w-auto max-w-[17vw] object-contain drop-shadow-[0_16px_40px_rgba(0,0,0,0.5)] sm:h-36 sm:max-w-none"
               style={{
                 transform: `translateY(${Math.abs(i - 2) * 10}px) rotate(${(i - 2) * 5}deg)`,
               }}

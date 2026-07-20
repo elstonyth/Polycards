@@ -28,8 +28,9 @@ const SHOTS = process.env.QA_SHOTS === '1';
 
 // Public routes plus one representative of each dynamic segment. Omitted on
 // purpose: /marketplace + /pack-party (feature-flagged off — they 404),
-// /daily (redirect to /vip), /slots/[slug]/spin (mid-flow, needs credits),
-// /profile|/card|/invite (need seeded records — see the coverage note).
+// /daily (redirect to /vip), /slots/[slug]/spin (mid-flow, needs credits).
+// The card handle below is a real catalog row (select handle from card); a
+// stale one 404s and the run skips it rather than silently passing.
 const PUBLIC = [
   '/',
   '/slots',
@@ -53,6 +54,9 @@ const PUBLIC = [
   '/reset-password',
   '/pokemon/generation/1',
   '/auth/google/failed',
+  '/profile/ProfessorOak',
+  '/invite/ProfessorOak',
+  '/card/pikachu-ex-238-psa-10-7800271',
 ];
 
 // Rendered against a freshly registered customer, so these are EMPTY-STATE
@@ -247,6 +251,31 @@ const paths = process.env.QA_PATHS
 
 const token = paths.some(([, a]) => a) ? await mintCustomer() : null;
 const browser = await chromium.launch();
+
+// A server serving a stale build 500s its stylesheet, and every page then
+// measures as unstyled — images at natural size, no padding, tiny controls.
+// That reads as a wall of real findings. Refuse to run instead.
+{
+  const probe = await browser.newPage();
+  await probe.goto(`${BASE}/`, { waitUntil: 'networkidle' });
+  const sheets = await probe.evaluate(() =>
+    [...document.querySelectorAll('link[rel=stylesheet]')].map((l) => l.href),
+  );
+  const sizes = await Promise.all(
+    sheets.map(async (href) => (await (await fetch(href)).text()).length),
+  );
+  await probe.close();
+  const total = sizes.reduce((a, b) => a + b, 0);
+  if (total < 50_000) {
+    console.error(
+      `stylesheets total ${total} bytes across ${sheets.length} file(s) — the ` +
+        `page is unstyled, so every measurement would be junk. Rebuild and ` +
+        `restart the server (rm -rf .next && npm run build && serve-standalone).`,
+    );
+    await browser.close();
+    process.exit(2);
+  }
+}
 const rows = [];
 
 for (const d of DEVICES) {

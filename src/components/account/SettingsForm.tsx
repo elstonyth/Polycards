@@ -86,7 +86,10 @@ export default function SettingsForm({ customer }: Props) {
           value={customer.email}
           readOnly
           aria-label="Email (read-only)"
-          className="h-11 w-full cursor-not-allowed rounded-xl border border-white/10 bg-white/[0.02] px-3 text-sm text-white/55 focus:outline-none"
+          // A long address overflows the field on a 320px screen. It's
+          // read-only, so there's no caret to scroll it into view — ellipsis at
+          // least reads as truncation rather than a cut-off word.
+          className="h-11 w-full cursor-not-allowed overflow-hidden rounded-xl border border-white/10 bg-white/[0.02] px-3 text-sm text-ellipsis text-white/55 focus:outline-none"
         />
         <span className="mt-1 block text-[11px] text-white/55">
           Email can&apos;t be changed here.

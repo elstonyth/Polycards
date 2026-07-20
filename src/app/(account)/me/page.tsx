@@ -224,7 +224,7 @@ export default async function MePage() {
               </p>
               <Link
                 href="/vault"
-                className="text-[12px] font-semibold text-white/70 underline-offset-2 hover:text-white hover:underline"
+                className="inline-flex min-h-6 items-center text-[12px] font-semibold text-white/70 underline-offset-2 hover:text-white hover:underline"
               >
                 Manage
               </Link>

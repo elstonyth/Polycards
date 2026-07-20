@@ -58,7 +58,7 @@ function Actor({ name }: { name: string }) {
   return (
     <Link
       href={`/profile/${name}`}
-      className="inline-flex items-center gap-1.5 text-white/80 hover:text-white hover:underline"
+      className="inline-flex min-h-6 items-center gap-1.5 text-white/80 hover:text-white hover:underline"
     >
       {u && (
         <Image

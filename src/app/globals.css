@@ -564,3 +564,15 @@
     }
   }
 }
+
+/* iOS Safari zooms the whole page when a focused field renders under 16px, and
+   it never zooms back out. Every form shape in the app is text-sm (14px), so
+   pin the floor once here rather than in eight copies of the same input class
+   string. Deliberately unlayered: an @layer base rule loses to Tailwind's
+   text-sm utility, while unlayered CSS wins the cascade against every layer.
+   max() leaves any deliberately larger field alone. */
+input:not([type='checkbox']):not([type='radio']),
+textarea,
+select {
+  font-size: max(16px, 1em);
+}
