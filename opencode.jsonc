@@ -6,9 +6,7 @@
         "uv",
         "run",
         "code-review-graph",
-        "serve",
-        "--repo",
-        "C:\\Users\\PC\\Desktop\\Projects\\PixelSlot"
+        "serve"
       ]
     }
   }

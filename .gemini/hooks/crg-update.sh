@@ -5,6 +5,8 @@ set -euo pipefail
 
 cat > /dev/null || true
 
-code-review-graph update --skip-flows --repo "C:/Users/PC/Desktop/Projects/PixelSlot" >/dev/null 2>&1 || true
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+
+code-review-graph update --skip-flows ${repo_root:+--repo "$repo_root"} >/dev/null 2>&1 || true
 echo '{"suppressOutput": true}'
 exit 0
