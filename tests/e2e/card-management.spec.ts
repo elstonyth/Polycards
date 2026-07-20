@@ -4,8 +4,10 @@
 // "Top Hits" is driven by the card's market_value via GET /store/packs/{slug} —
 // so a card FMV edit must surface there.
 //
-// Requires one eligible (un-registered) inventory product. Mint it once with:
-//   cd backend/packages/api && npx medusa exec ./src/scripts/create-test-product.ts
+// Requires one eligible (un-registered) inventory product with handle
+// 'pw-test-card'. The nightly's seed:e2e (seed-e2e-fixtures.ts) mints it; run it
+// locally the same way:
+//   cd backend/packages/api && corepack yarn seed:e2e
 import { test, expect } from '@playwright/test';
 import { BASE } from './helpers/constants';
 import {
@@ -48,7 +50,7 @@ test('card lifecycle: register from inventory → adjust FMV → reflects on sto
   const elig = await eligibleProducts(admin);
   test.skip(
     !elig.products.some((p) => p.handle === CARD_HANDLE),
-    `No eligible product '${CARD_HANDLE}' — run create-test-product.ts first.`,
+    `No eligible product '${CARD_HANDLE}' — run seed:e2e (seed-e2e-fixtures.ts) first.`,
   );
   lifecycleRan = true;
 
