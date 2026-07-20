@@ -1,9 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { relativeTime } from '@/lib/format';
-import { markRead, markAllRead } from '@/lib/actions/notifications';
+import {
+  getNotifications,
+  markRead,
+  markAllRead,
+} from '@/lib/actions/notifications';
 import type { Notification } from '@/lib/actions/notifications';
 import { copyFor } from '@/lib/notifications/copy';
 
@@ -15,6 +19,30 @@ export default function NotificationsClient({
   const [items, setItems] = useState<Notification[]>(initial);
   const [clearing, setClearing] = useState(false);
   const unread = items.filter((n) => !n.readAt).length;
+
+  // The feed rows are LINKS: acting on one navigates away and unmounts this
+  // page, so the optimistic state dies with the component. Coming back — via
+  // the browser Back button in particular — the router can restore the RSC
+  // payload rendered BEFORE the click, making `initial` a pre-click snapshot in
+  // which the row is unread again. (`cache: 'no-store'` on the fetch does not
+  // cover this: it governs the fetch, not the client router cache.)
+  //
+  // So re-sync from the server on mount, exactly as the header bell already
+  // does for its badge — the reason the badge never went stale. Doing it here
+  // rather than with revalidatePath() in the action is deliberate: a
+  // revalidation dispatched from markRead races the in-flight Link navigation
+  // and non-deterministically REPLACES the /notifications history entry, so
+  // Back skips the feed entirely (measured with scripts/probe-notifications.mjs
+  // — 6/8 clicks lost the entry). A mount-time re-sync races nothing.
+  useEffect(() => {
+    let live = true;
+    void getNotifications().then((r) => {
+      if (live && r.ok) setItems(r.notifications);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
 
   async function onRead(id: string) {
     // Optimistic — mark read locally immediately.
