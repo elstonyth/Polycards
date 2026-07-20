@@ -5,7 +5,7 @@ import { PACKS_MODULE } from '../../../../modules/packs';
 import { serializeDeliveryOrders } from '../../../../modules/packs/delivery-view';
 import { updateDeliveryOrderWorkflow } from '../../../../workflows/update-delivery-order';
 import { coerceDeliveryUpdateBody } from '../validate';
-import { notifyFeed } from '../../../../modules/packs/notify-feed';
+import { notifyFeedNonfatal } from '../../../../modules/packs/notify-feed';
 import {
   shouldNotifyDeliveryStatus,
   deliveryFeedKey,
@@ -61,25 +61,23 @@ export async function POST(
   // workflow-level producer would tell customers about their own
   // cancellations. Non-fatal: the status change is already committed.
   if (before && shouldNotifyDeliveryStatus(before.status, result.status)) {
-    try {
-      await notifyFeed(req.scope, {
-        receiverId: before.customer_id,
-        template: 'delivery_status',
-        data: {
-          order_id: result.order_id,
-          status: result.status,
-          // Mirrors the step's own nextTracking rule: an omitted
-          // tracking_number means "unchanged", not "cleared".
-          tracking_number:
-            input.tracking_number !== undefined
-              ? input.tracking_number
-              : (before.tracking_number ?? null),
-        },
-        idempotencyKey: deliveryFeedKey(result.order_id, result.status),
-      });
-    } catch {
-      // Non-fatal — never fail a committed status change over a notification.
-    }
+    // Non-fatal — never fail a committed status change over a notification.
+    // The wrapper logs a producer failure (PR #222) instead of swallowing.
+    await notifyFeedNonfatal(req.scope, 'admin/delivery-orders', {
+      receiverId: before.customer_id,
+      template: 'delivery_status',
+      data: {
+        order_id: result.order_id,
+        status: result.status,
+        // Mirrors the step's own nextTracking rule: an omitted
+        // tracking_number means "unchanged", not "cleared".
+        tracking_number:
+          input.tracking_number !== undefined
+            ? input.tracking_number
+            : (before.tracking_number ?? null),
+      },
+      idempotencyKey: deliveryFeedKey(result.order_id, result.status),
+    });
   }
 
   res.json(result);

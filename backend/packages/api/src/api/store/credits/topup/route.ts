@@ -4,7 +4,7 @@ import {
 } from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
 import { topUpCreditsWorkflow } from '../../../../workflows/topup-credits';
-import { notifyFeed } from '../../../../modules/packs/notify-feed';
+import { notifyFeedNonfatal } from '../../../../modules/packs/notify-feed';
 import {
   shouldNotifyTopup,
   topupFeedKey,
@@ -59,16 +59,14 @@ export async function POST(
   //
   // Non-fatal: the credit is already committed.
   if (shouldNotifyTopup(result)) {
-    try {
-      await notifyFeed(req.scope, {
-        receiverId: customerId,
-        template: 'topup_credited',
-        data: { amount_myr: result.amount, reference: result.reference },
-        idempotencyKey: topupFeedKey(result.reference),
-      });
-    } catch {
-      // Non-fatal — never fail a committed top-up over a notification.
-    }
+    // Non-fatal — never fail a committed top-up over a notification. The
+    // wrapper logs a producer failure (PR #222) instead of swallowing silently.
+    await notifyFeedNonfatal(req.scope, 'topup', {
+      receiverId: customerId,
+      template: 'topup_credited',
+      data: { amount_myr: result.amount, reference: result.reference },
+      idempotencyKey: topupFeedKey(result.reference),
+    });
   }
 
   res.json(result);

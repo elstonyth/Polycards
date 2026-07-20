@@ -5,7 +5,7 @@ import type {
 import { MedusaError } from '@medusajs/framework/utils';
 import { drawDailyBoxWorkflow } from '../../../../workflows/draw-daily-box';
 import { rewardsRedemptionEnabled } from '../../../../modules/packs/rewards-gate';
-import { notifyFeed } from '../../../../modules/packs/notify-feed';
+import { notifyFeedNonfatal } from '../../../../modules/packs/notify-feed';
 import {
   shouldNotifyRewardWon,
   rewardWonFeedKey,
@@ -48,25 +48,23 @@ export async function POST(
   //
   // Non-fatal: the draw is already committed.
   if (shouldNotifyRewardWon(result)) {
-    try {
-      await notifyFeed(req.scope, {
-        receiverId: customerId,
-        template: 'reward_won',
-        data: {
-          prize_kind: result.prize?.kind ?? '',
-          title: result.prize?.title ?? '',
-          amount_myr: result.prize?.amount_myr ?? 0,
-          draw_ordinal: result.draw_ordinal ?? 0,
-        },
-        idempotencyKey: rewardWonFeedKey(
-          customerId,
-          result.draw_day as string,
-          result.draw_ordinal as number,
-        ),
-      });
-    } catch {
-      // Non-fatal — never fail a committed draw over a notification.
-    }
+    // Non-fatal — never fail a committed draw over a notification. The wrapper
+    // logs a producer failure (PR #222) instead of swallowing silently.
+    await notifyFeedNonfatal(req.scope, 'daily-draw', {
+      receiverId: customerId,
+      template: 'reward_won',
+      data: {
+        prize_kind: result.prize?.kind ?? '',
+        title: result.prize?.title ?? '',
+        amount_myr: result.prize?.amount_myr ?? 0,
+        draw_ordinal: result.draw_ordinal ?? 0,
+      },
+      idempotencyKey: rewardWonFeedKey(
+        customerId,
+        result.draw_day as string,
+        result.draw_ordinal as number,
+      ),
+    });
   }
 
   // A "nothing" prize is a normal drawn outcome, not a failure — say so in
