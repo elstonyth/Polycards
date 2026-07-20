@@ -27,7 +27,7 @@
   Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
   ```
 
-## Scope correction — read before Task 8
+## Scope correction — read before Task 9
 
 Brainstorming Q7 chose "migrate the existing toast + add toasts to the money and irreversible flows," on the understanding that those flows confirmed nothing. Recon showed that is only half true:
 
@@ -45,7 +45,7 @@ Replacing either with a toast that vanishes after 5 seconds is a downgrade, and 
 | `VipVouchers` → claim | Nothing (row silently vanishes) | **Add** "{voucher} claimed." |
 | `WithdrawForm` | Inline panel, unmounts on a 1500 ms uncleared timer | **Add** toast + fix the timer |
 
-Net effect is the same as Q7's intent — every money/irreversible action confirms — with two fewer regressions. **If you disagree, say so before Task 8; Tasks 1–7 are unaffected.**
+Net effect is the same as Q7's intent — every money/irreversible action confirms — with two fewer regressions. **If you disagree, say so before Task 9; Tasks 1–8 are unaffected.**
 
 ---
 
