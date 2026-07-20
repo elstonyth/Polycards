@@ -2,7 +2,10 @@ import type {
   AuthenticatedMedusaRequest,
   MedusaResponse,
 } from '@medusajs/framework/http';
-import { MedusaError } from '@medusajs/framework/utils';
+import {
+  ContainerRegistrationKeys,
+  MedusaError,
+} from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../../modules/packs';
 import type PacksModuleService from '../../../../../modules/packs/service';
 import { rewardsRedemptionEnabled } from '../../../../../modules/packs/rewards-gate';
@@ -55,8 +58,21 @@ export async function POST(
         },
         idempotencyKey: `voucher_claimed:${grantId}`,
       });
-    } catch {
-      // Notification failure is non-fatal — the claim is already committed.
+    } catch (err) {
+      // Notification failure is non-fatal — the claim is already committed and the
+      // response is unchanged. Log it so a broken notification producer on this
+      // money-adjacent path is discoverable instead of silently dropped.
+      try {
+        req.scope
+          .resolve(ContainerRegistrationKeys.LOGGER)
+          .warn(
+            `[store/rewards/claim] notifyFeed('voucher_claimed') failed for receiver ${customerId} (grant ${grantId}) — claim committed, notification dropped: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+      } catch {
+        // logger not available in test container — silently ignore
+      }
     }
   }
 

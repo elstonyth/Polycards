@@ -1,4 +1,5 @@
 import { SubscriberArgs, type SubscriberConfig } from '@medusajs/framework';
+import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../modules/packs';
 import { notifyFeed } from '../modules/packs/notify-feed';
 import type PacksModuleService from '../modules/packs/service';
@@ -37,25 +38,22 @@ export default async function vipSpendSettledHandler({
       data: { levels: gained },
       idempotencyKey: `${data.open_id}:levelup`,
     });
-  } catch {
+  } catch (err) {
     // Notification failure is non-fatal: the grant rows and state upsert are
-    // already committed. Log a warning if a logger is available (it may not be
-    // in a unit-test container) so operators can diagnose provider issues.
-    resolveLoggerOrNull(container)?.warn(
-      `[vip-spend-settled] notification failed for customer ${data.customer_id} open ${data.open_id} — grants committed, notification dropped`,
-    );
-  }
-}
-
-// Resolve the container logger, or null when it is unavailable (e.g. a unit-test
-// container). Keeps the non-fatal notification path free of nested try/catch.
-function resolveLoggerOrNull(container: {
-  resolve: (key: string) => unknown;
-}): { warn: (msg: string) => void } | null {
-  try {
-    return container.resolve('logger') as { warn: (msg: string) => void };
-  } catch {
-    return null;
+    // already committed. Resolve AND emit inside one guard so a container
+    // without a real logger (e.g. a unit-test container) can't throw out of
+    // this path, while operators still get to see provider issues.
+    try {
+      container
+        .resolve(ContainerRegistrationKeys.LOGGER)
+        .warn(
+          `[vip-spend-settled] notifyFeed('vip_level_up') failed for receiver ${data.customer_id} (open ${data.open_id}) — grants committed, notification dropped: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+    } catch {
+      // logger not available in test container — silently ignore
+    }
   }
 }
 

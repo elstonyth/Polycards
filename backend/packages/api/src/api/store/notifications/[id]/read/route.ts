@@ -2,7 +2,11 @@ import {
   AuthenticatedMedusaRequest,
   MedusaResponse,
 } from '@medusajs/framework/http';
-import { Modules, MedusaError } from '@medusajs/framework/utils';
+import {
+  ContainerRegistrationKeys,
+  Modules,
+  MedusaError,
+} from '@medusajs/framework/utils';
 import type { INotificationModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../../../../modules/packs';
 import type PacksModuleService from '../../../../../modules/packs/service';
@@ -50,9 +54,13 @@ export async function POST(
     // Log unexpected infra errors (e.g. DB timeout) so operators can diagnose
     // them, while keeping fail-closed behavior (treat as not-found) intact.
     try {
-      (req.scope.resolve('logger') as { warn: (m: string) => void }).warn(
-        `[store/notifications/:id/read] retrieveNotification(${notificationId}) failed — treating as not-found: ${String(err)}`,
-      );
+      req.scope
+        .resolve(ContainerRegistrationKeys.LOGGER)
+        .warn(
+          `[store/notifications/:id/read] retrieveNotification(${notificationId}) failed — treating as not-found: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
     } catch {
       // logger not available in test container — silently ignore
     }

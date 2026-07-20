@@ -47,12 +47,20 @@ export const settleVipStep = createStep(
         });
       }
     } catch (error) {
-      const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
-      logger.warn(
-        `settle-vip: level-up grant failed for customer '${input.customer_id}' open '${input.open_id}' — open continues, vip.spend_settled event is the retry path. ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
+      // Best-effort log: resolve AND emit inside one guard, so a container
+      // without a real logger cannot throw out of this deliberately
+      // non-fatal step (see the BEST-EFFORT note above).
+      try {
+        container
+          .resolve(ContainerRegistrationKeys.LOGGER)
+          .warn(
+            `settle-vip: level-up grant or notifyFeed('vip_level_up') failed for receiver '${input.customer_id}' (open '${input.open_id}') — open continues, vip.spend_settled event is the retry path. ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+      } catch {
+        // logger not available in test container — silently ignore
+      }
     }
     return new StepResponse(undefined);
   },
