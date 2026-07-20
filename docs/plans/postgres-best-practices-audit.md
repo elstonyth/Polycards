@@ -531,7 +531,7 @@ Non-negotiable details:
 
 ---
 
-### C2 — Set the three session timeouts (all currently 0 / disabled)
+### C2 — Set the three session timeouts (none configured in-repo; prod values unverified)
 
 **Files:** `backend/packages/api/medusa-config.ts:159-165` (part a); prod `DATABASE_URL` / cluster role (part b).
 
