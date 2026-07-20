@@ -1,11 +1,11 @@
 # scripts/ — classified inventory (Plan 055, Step 1)
 
-> **STATUS: PROPOSED — deletions pending operator approval.**
-> Nothing has been deleted or moved. This file is the Step-1 deliverable of
-> plan `055-scripts-dir-triage.md`: a classified inventory of all **269**
-> tracked entries under `scripts/`, with a proposed DELETE list and an ASK
-> list. The DELETE/move execution (Step 3) happens **only after** an operator
-> approves the DELETE list quoted below.
+> **STATUS: DELETE executed 2026-07-21 (operator-approved). ASK list still open.**
+> This file is the deliverable of plan `055-scripts-dir-triage.md`: a
+> classified inventory of the (originally **269**) tracked entries under
+> `scripts/`. The 76-file DELETE list below was approved by the operator and
+> removed on 2026-07-21 (`git rm`, no reorganization). The **ASK** list remains
+> open — those files were NOT touched and still need a per-family decision.
 
 ## The rule (why this dir needs a README)
 
@@ -39,8 +39,9 @@ app or CI. It is the operator's local UI-measurement / QA / one-off toolbox:
   families with no external ref, and the Python image-processing toolchain.
   **When in doubt, ASK — never DELETE.**
 
-Verdict counts: **KEEP 86 · DELETE 76 (proposed) · ASK 107** (= 269, verified:
-every entry appears in exactly one bucket, no duplicates). `ls scripts` counts
+Verdict counts: **KEEP 86 · DELETE 76 (executed 2026-07-21) · ASK 107** (= 269,
+verified: every entry appeared in exactly one bucket, no duplicates). `ls scripts`
+counts
 `lib/` and `showcase/` as one entry each; their inner files are noted in the
 rows below.
 
@@ -98,9 +99,9 @@ Route scan: live-route target present, no deleted-route target. Grouped:
 | Responsive / mobile      | `qa-responsive`, `qa-mobile-cards`, `qa-mobile-reveal`, `qa-mobile-round3`, `qa-pack-detail-mobile`, `final-resp`                                                                                                                                                                                                                                                                                                                                                                                                                             | live routes                                |
 | Modals / pills / misc UI | `qa-modal2`, `qa-modal-portal`, `qa-modal-resp`, `qa-pills`, `qa-card-detail`, `qa-display-image`, `qa-idle-drift`, `qa-storefront-appearance`, `qa-appearance-part2`, `qa-phase5`, `qa-final`, `qa-full-route-sweep`, `film-hero-entry`, `verify-hero-stagger`, `verify-roll-shift`, `verify-card-images`, `verify-pages`, `verify-rate-limits`, `measure-meter`, `find-broken`, `shot-4k`, `final-shots`, `qa-forgot-password`, `capture-shell`, `capture-shell-auth`, `capture-tabs-polish`, `capture-odds-sheet`, `capture-images-verify` | live routes/components                     |
 
-### DELETE — proposed (76) — targets a deleted route/entity or brand-era rebrand
+### DELETE — EXECUTED 2026-07-21 (operator-approved) (76) — targeted a deleted route/entity or brand-era rebrand
 
-**Requires operator approval before any `git rm`.**
+**Operator approved the split ("approve"); these 76 were `git rm`'d on 2026-07-21.**
 
 Claw-machine era (route `/claw`, `/clawmaker` — deleted plan 024):
 `audit_claw.py`, `calibrate-claw.mjs`, `capture-claw.mjs`, `qa-claw-changes.mjs`,
