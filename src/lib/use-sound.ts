@@ -64,6 +64,16 @@ export function useSound() {
       audio.preload = 'auto';
       pool.current[name as SoundName] = audio;
     }
+    const pool_ = pool.current;
+    return () => {
+      // One-shots (bigwin fanfare etc.) must not bleed past the machine's
+      // unmount; the reveal-bed stop elsewhere doesn't cover them.
+      for (const audio of Object.values(pool_)) audio?.pause();
+      if (fadeTimer.current !== null) {
+        window.clearInterval(fadeTimer.current);
+        fadeTimer.current = null;
+      }
+    };
   }, []);
 
   const play = useCallback(
