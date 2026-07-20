@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Bell } from 'lucide-react';
 import { relativeTime } from '@/lib/format';
@@ -11,17 +11,32 @@ import {
 } from '@/lib/actions/notifications';
 import type { Notification } from '@/lib/actions/notifications';
 import { copyFor } from '@/lib/notifications/copy';
+import { displayUnreadTotal } from '@/lib/notifications/unread-total';
 
 export default function NotificationsClient({
   initial,
   page = 1,
+  unreadCount,
 }: {
   initial: Notification[];
   page?: number;
+  unreadCount: number;
 }) {
   const [items, setItems] = useState<Notification[]>(initial);
   const [clearing, setClearing] = useState(false);
   const unread = items.filter((n) => !n.readAt).length;
+  // Unread on THIS page at first render — frozen (the component remounts per
+  // page via key={res.page}), so it anchors how far local reads have drifted
+  // the server total below.
+  const initialUnreadOnPage = useMemo(
+    () => initial.filter((n) => !n.readAt).length,
+    [initial],
+  );
+  const totalUnread = displayUnreadTotal(
+    unreadCount,
+    initialUnreadOnPage,
+    unread,
+  );
 
   // The feed rows are LINKS: acting on one navigates away and unmounts this
   // page, so the optimistic state dies with the component. Coming back — via
@@ -117,10 +132,9 @@ export default function NotificationsClient({
 
   return (
     <>
-      {/* Derived from the rows we already hold — the server's unread_count is
-          page-scoped over the same 50 rows, so passing it in would be a second
-          source of truth for the same number. */}
-      {unread > 0 && (
+      {/* unreadCount is the server's true cross-page total (route.ts contract);
+          decremented locally as rows on this page get optimistically marked. */}
+      {totalUnread > 0 && (
         <div className="mt-4 flex justify-end">
           <button
             type="button"
@@ -128,7 +142,7 @@ export default function NotificationsClient({
             disabled={clearing}
             className="rounded-full border border-white/15 px-3 py-1.5 text-[12px] font-semibold text-white/70 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-50"
           >
-            {clearing ? 'Clearing…' : `Mark all read (${unread})`}
+            {clearing ? 'Clearing…' : `Mark all read (${totalUnread})`}
           </button>
         </div>
       )}
