@@ -410,6 +410,12 @@ export const MarkReadSchema = z.looseObject({
   read_at: z.union([z.string(), z.date()]),
 });
 
+/** POST /store/notifications/read-all — bulk mark-read response. */
+export const MarkAllReadSchema = z.looseObject({
+  marked: finite,
+  read_at: z.union([z.string(), z.date()]),
+});
+
 // --- actions/daily.ts --------------------------------------------------------
 
 /** A VIP voucher/frame grant row (GET /store/daily `vouchers.claimable|claimed`
