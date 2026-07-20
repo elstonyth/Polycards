@@ -72,6 +72,11 @@ jobs:
       #
       # Mock gateway: customer flows fund themselves via /store/credits/topup.
       ALLOW_MOCK_TOPUP: 'true'
+      # Reward-redemption UI specs (rewards.spec.ts voucher claim) need the gate
+      # open — the seed mints a claimable grant, but the /vip "Claim" button only
+      # renders when this is on. Prod default stays OFF (dormant economy); this
+      # only affects the ephemeral CI stack.
+      REWARDS_REDEMPTION_ENABLED: 'true'
       # CORS: locally these live in the gitignored backend .env; in CI they're
       # unset, so the browser's auth preflight comes back without
       # allow-origin and the login POST never fires (observed: only OPTIONS

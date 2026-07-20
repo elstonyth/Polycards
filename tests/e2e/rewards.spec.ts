@@ -3,11 +3,13 @@
 // redirects there).
 //
 // PRECONDITIONS (the "reward gate" phase):
-//   1. backend running with REWARDS_REDEMPTION_ENABLED=true
-//   2. medusa exec ./src/scripts/seed-reward-economy-demo.ts  (tier-c daily box)
-// The shared dev customer (test@polycards.app) already holds 'granted' VIP
-// vouchers from its level-25 progression. If redemption is dark (default
-// dormant backend), the test SKIPS rather than fails.
+//   1. backend running with REWARDS_REDEMPTION_ENABLED=true — the nightly's
+//      e2e.yml sets this at the job env; locally, export it before starting
+//      medusa. When it's off the "Claim" button reads "Coming soon" and the
+//      voucher test SKIPS rather than fails.
+//   2. seed:e2e (seed-e2e-fixtures.ts) mints a 'granted' VIP voucher for the
+//      shared dev customer (test@polycards.app) — no other seed path does. For
+//      the daily box, seed-reward-economy-demo.ts authors the tier-c box.
 import { test, expect } from '@playwright/test';
 import { BASE } from './helpers/constants';
 import * as sf from './helpers/storefront';
@@ -37,7 +39,8 @@ test.describe.skip('customer rewards — voucher + daily box on /vip', () => {
       .catch(() => false);
     test.skip(
       gated,
-      'reward redemption disabled (REWARDS_REDEMPTION_ENABLED unset)',
+      'reward redemption disabled (REWARDS_REDEMPTION_ENABLED unset — the ' +
+        'nightly sets it in e2e.yml; export it locally to exercise this)',
     );
 
     const claim = page
