@@ -1,7 +1,7 @@
 # Slot Machine Redesign — Source of Truth
 
-**Status:** PLANNING — nothing is being built yet.
-**Last updated:** 2026-07-04
+**Status:** SHIPPED (in stages, #147/#150/#176/#182 among others) — kept as the design record; no longer a live plan.
+**Last updated:** 2026-07-20
 **Rule:** this file always reflects the latest agreed plan. Every decision we make together gets recorded here before any code is written.
 
 ---

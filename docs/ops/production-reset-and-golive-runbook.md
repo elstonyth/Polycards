@@ -69,9 +69,10 @@ These were true when last checked but predate this runbook. Re-verify each befor
   Publishing the app is the last step for real customer Google login.
 - **Password-reset email is env-gated OFF** — code complete, no API key set. Envs must be
   app-level (subscribers run on the worker). Without it, customers cannot recover accounts.
-- **Vendor self-registration is open** — `seller_registration:false` is UI-only; an anonymous
-  `POST /vendor/sellers` creates a real seller. Flagged MEDIUM in a prior audit. Close before
-  a public launch.
+- **Vendor self-registration: CLOSED** (round-5 hardening, commit a44a5651) —
+  `blockUnusedVendorSelfRegistration` in `backend/packages/api/src/api/middlewares.ts`
+  hard-404s anonymous `POST /vendor/sellers` and member self-register. Pre-launch check:
+  verify the middleware entry is still mounted (grep the symbol), don't re-audit.
 
 ---
 
@@ -80,7 +81,7 @@ These were true when last checked but predate this runbook. Re-verify each befor
 1. **Take a manual DB backup/snapshot** even though the data is throwaway — it is the only
    undo, and "throwaway" judgements have been wrong before.
 2. **Media is not in the database.** Card art / slab composites live in Spaces
-   (`pokenic-media`). A DB wipe does not delete objects, but it does delete the rows that
+   (`polycards-media`, region `sgp1`). A DB wipe does not delete objects, but it does delete the rows that
    reference them; the catalog re-import must repoint or re-bake.
 3. **Decide what carries over.** A full wipe also destroys: admin users, customer accounts
    (incl. anyone who signed in with Google), publishable keys, sales channels, regions,

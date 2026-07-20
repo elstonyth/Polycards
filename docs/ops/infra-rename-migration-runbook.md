@@ -1,6 +1,6 @@
 # Runbook — rename prod infra `pokenic-*` → `polycards-*`
 
-**Status:** planned, NOT executed. Run only in a scheduled maintenance window.
+**Status:** EXECUTED 2026-07-15 — kept as historical record. Live infra is now `polycards-pg` / `polycards-valkey` / `polycards-media` (verified 2026-07-20: DO lists only the `polycards-*` clusters, and `pokenic-media` returns 404/NoSuchBucket while `polycards-media` returns 403). The "Current facts (2026-07-15)" section below is the pre-migration snapshot, left as-is.
 **Author:** 2026-07-15. **Owner to schedule the window + approve each phase.**
 
 ## Why this is a migration, not a rename
