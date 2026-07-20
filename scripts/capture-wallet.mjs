@@ -38,7 +38,9 @@ async function login(page) {
 }
 
 const browser = await chromium.launch();
-const ctx = await browser.newContext({ viewport: { width: 1280, height: 1400 } });
+const ctx = await browser.newContext({
+  viewport: { width: 1280, height: 1400 },
+});
 const page = await ctx.newPage();
 
 if (!PW) {
@@ -58,7 +60,10 @@ await page.screenshot({ path: `${OUT}/wallet-desktop.png`, fullPage: true });
 log('desktop shot done');
 
 // Dump the gate numbers so the screenshot can be sanity-checked against the ledger.
-const text = await page.locator('main').innerText().catch(() => '');
+const text = await page
+  .locator('main')
+  .innerText()
+  .catch(() => '');
 log('--- page text ---\n' + text.slice(0, 1200));
 
 await page.setViewportSize({ width: 390, height: 900 });
