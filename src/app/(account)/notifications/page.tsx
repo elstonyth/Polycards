@@ -35,6 +35,7 @@ export default async function NotificationsPage({
             key={res.page}
             initial={res.notifications}
             page={res.page}
+            unreadCount={res.unreadCount}
           />
           <Pager
             page={res.page}
