@@ -32,8 +32,9 @@ const BIG_FMV = 99_999;
 
 let admin: string;
 // The eligibility re-check below only means something after the lifecycle test
-// actually ran (it verifies that test's cleanup). On a fresh DB — CI — the
-// test product was never minted, the lifecycle test skips, and so must it.
+// actually ran (it verifies that test's cleanup). The product comes from
+// seed:e2e; if it's absent both tests skip — in CI that skip means the seed
+// didn't run and is a failure signal, not the expected state.
 let lifecycleRan = false;
 
 test.beforeAll(async () => {
