@@ -16,6 +16,11 @@ describe('displayUnreadTotal', () => {
     expect(displayUnreadTotal(5, 5, 0)).toBe(0);
   });
 
+  it('is zero after a full clear zeroes serverTotal (Mark-all-read success)', () => {
+    // onClearAll sets serverTotal=0 on r.ok; the page still shows its 20 rows.
+    expect(displayUnreadTotal(0, 20, 20)).toBe(0);
+  });
+
   it('clamps to zero — never negative — when serverTotal lags the page (stale RSC)', () => {
     // Pathological: server total smaller than the page's own unread.
     expect(displayUnreadTotal(3, 5, 0)).toBe(0);

@@ -24,6 +24,10 @@ export default function NotificationsClient({
 }) {
   const [items, setItems] = useState<Notification[]>(initial);
   const [clearing, setClearing] = useState(false);
+  // The cross-page total lives in state so Mark-all-read can zero it: the
+  // `unreadCount` prop is frozen and can't observe the clear this button does
+  // itself, which would otherwise leave a non-zero label after a full clear.
+  const [serverTotal, setServerTotal] = useState(unreadCount);
   const unread = items.filter((n) => !n.readAt).length;
   // Unread on THIS page at first render — frozen (the component remounts per
   // page via key={res.page}), so it anchors how far local reads have drifted
@@ -33,7 +37,7 @@ export default function NotificationsClient({
     [initial],
   );
   const totalUnread = displayUnreadTotal(
-    unreadCount,
+    serverTotal,
     initialUnreadOnPage,
     unread,
   );
@@ -91,7 +95,12 @@ export default function NotificationsClient({
     const now = new Date().toISOString();
     setItems((xs) => xs.map((n) => (n.readAt ? n : { ...n, readAt: now })));
     const r = await markAllRead();
-    if (!r.ok) {
+    if (r.ok) {
+      // Clears every page server-side → the true total is now 0. Test:
+      // displayUnreadTotal(0, 20, 20) === 0. On failure, leave serverTotal
+      // alone; the row rollback below restores the old (still-correct) total.
+      setServerTotal(0);
+    } else {
       const revert = new Set(wasUnread);
       setItems((xs) =>
         xs.map((n) => (revert.has(n.id) ? { ...n, readAt: null } : n)),
