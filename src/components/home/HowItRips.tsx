@@ -47,7 +47,9 @@ export default function HowItRips() {
       <div className="mt-4 flex flex-col gap-3 lg:flex-row">
         {STEPS.map((step, i) => (
           <Reveal key={step.num} delay={i * 90} className="flex-1">
-            <div className="flex items-start gap-4 rounded-2xl border border-white/10 bg-neutral-900 p-4">
+            {/* h-full: the 3rd step's copy runs two lines — without it the
+                cards size to content and the row's bottoms stop aligning. */}
+            <div className="flex h-full items-start gap-4 rounded-2xl border border-white/10 bg-neutral-900 p-4">
               <span className="font-heading text-4xl leading-none text-neutral-700">
                 {step.num}
               </span>
