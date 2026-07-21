@@ -3,7 +3,8 @@
  *
  * Demo seed for the Weekly Pulled Value Challenge the storefront /task page
  * renders (GET /store/challenge). Writes the cumulative milestone ladder (the
- * top-10 prize pool: cards → ranks 1-3, credits → ranks 4-10) + the weekly
+ * top-10 prize pool: a per-rank table, cards on ranks 1-3, credits on 4-10) +
+ * the weekly
  * reset through the SAME audited service methods the admin "Weekly Challenge"
  * page uses (saveChallengeStages / editChallengeSettings), so it exercises the
  * real validation path (featured card ids must exist).
@@ -22,6 +23,7 @@ import { ExecArgs } from '@medusajs/framework/types';
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import PacksModuleService from '../modules/packs/service';
 import { PACKS_MODULE } from '../modules/packs';
+import type { ChallengeRankReward } from '../modules/packs/challenge-validate';
 
 const ADMIN_ID = 'seed-challenge';
 const REASON = 'Demo seed (seed-challenge.ts)';
@@ -58,17 +60,23 @@ export default async function seedChallenge({
           ),
         ];
 
+  // A stage's prize table: the first three catalog cards go to ranks 1-3 (the
+  // storefront podium) and every rank 4-10 gets `credits` RM store credits —
+  // the demo shape the ladder shipped with, now expressed per rank.
+  const table = (start: number, credits: number): ChallengeRankReward[] => [
+    ...trio(start).map((card_id, i) => ({ rank: i + 1, card_id, credits: 0 })),
+    ...[4, 5, 6, 7, 8, 9, 10].map((rank) => ({ rank, card_id: null, credits })),
+  ];
+
   // Milestone stages — strictly increasing thresholds (the validator requires
-  // it). RM values; reward_credits are RM credits granted at each milestone.
-  // Sized so the current dev-DB pool (~RM 380k pulled this week) sits mid-
-  // ladder — stages 1-2 cleared, stage 3 in progress — for a truthful demo.
-  // THREE cards per stage, ORDERED: reward_card_ids[0] is the #1st-place
-  // featured card, [1] → #2nd, [2] → #3rd (the storefront prize grid).
+  // it). RM values. Sized so the current dev-DB pool (~RM 380k pulled this
+  // week) sits mid-ladder — stages 1-2 cleared, stage 3 in progress — for a
+  // truthful demo.
   const stages = [
-    { stage_number: 1, threshold_myr: 100_000, reward_credits: 1_000, reward_card_ids: trio(0) },
-    { stage_number: 2, threshold_myr: 250_000, reward_credits: 2_500, reward_card_ids: trio(3) },
-    { stage_number: 3, threshold_myr: 500_000, reward_credits: 5_000, reward_card_ids: trio(6) },
-    { stage_number: 4, threshold_myr: 1_000_000, reward_credits: 10_000, reward_card_ids: trio(9) },
+    { stage_number: 1, threshold_myr: 100_000, rank_rewards: table(0, 1_000) },
+    { stage_number: 2, threshold_myr: 250_000, rank_rewards: table(3, 2_500) },
+    { stage_number: 3, threshold_myr: 500_000, rank_rewards: table(6, 5_000) },
+    { stage_number: 4, threshold_myr: 1_000_000, rank_rewards: table(9, 10_000) },
   ];
 
   await packs.saveChallengeStages({ stages, adminId: ADMIN_ID, reason: REASON });

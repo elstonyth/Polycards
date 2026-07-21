@@ -82,6 +82,7 @@ import {
 import { foldRanges, type VoucherRange } from './voucher-ranges';
 import type { VipLevelInput } from './vip-levels-validate';
 import type {
+  ChallengeRankReward,
   ChallengeStageInput,
   ChallengeSettingsPatch,
   ChallengeSettingsView,
@@ -4696,14 +4697,20 @@ class PacksModuleService extends MedusaService({
 
   // Audited whole-set replace of the challenge milestone stages. Diff-upsert
   // keyed on `stage_number`, hard-delete removed rows (soft would collide on
-  // the unique key). reward_card_ids EXISTENCE is checked here (service-level).
+  // the unique key). Prize-card EXISTENCE is checked here (service-level).
   @InjectTransactionManager()
   async saveChallengeStages(
     input: { stages: ChallengeStageInput[]; adminId: string; reason: string },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<ChallengeStageInput[]> {
     const allCardIds = [
-      ...new Set(input.stages.flatMap((s) => s.reward_card_ids)),
+      ...new Set(
+        input.stages.flatMap((s) =>
+          s.rank_rewards
+            .map((r) => r.card_id)
+            .filter((id): id is string => Boolean(id)),
+        ),
+      ),
     ];
     if (allCardIds.length > 0) {
       const found = await this.listCards(
@@ -4723,13 +4730,7 @@ class PacksModuleService extends MedusaService({
     const existing = await this.listChallengeStages(
       {},
       {
-        select: [
-          'id',
-          'stage_number',
-          'threshold_myr',
-          'reward_credits',
-          'reward_card_ids',
-        ],
+        select: ['id', 'stage_number', 'threshold_myr', 'rank_rewards'],
         take: 1000,
       },
       sharedContext,
@@ -4741,23 +4742,19 @@ class PacksModuleService extends MedusaService({
       .map((r) => ({
         stage_number: r.stage_number,
         threshold_myr: Number(r.threshold_myr),
-        reward_credits: Number(r.reward_credits),
-        reward_card_ids: (r.reward_card_ids as unknown as string[]) ?? [],
+        rank_rewards:
+          (r.rank_rewards as unknown as ChallengeRankReward[]) ?? [],
       }));
 
     const inputStages = new Set(input.stages.map((s) => s.stage_number));
     for (const s of input.stages) {
       const data = {
         threshold_myr: s.threshold_myr,
-        reward_credits: s.reward_credits,
         // model.json() generates a Record<string, unknown> create/update input
-        // type — a plain string[] has no string index signature, so it needs
-        // the same double-cast update-pack.ts / seed-pixel-pokemon.ts use for
-        // their json columns; the DB just stores the array.
-        reward_card_ids: s.reward_card_ids as unknown as Record<
-          string,
-          unknown
-        >,
+        // type — a plain array has no string index signature, so it needs the
+        // same double-cast update-pack.ts / seed-pixel-pokemon.ts use for their
+        // json columns; the DB just stores the array.
+        rank_rewards: s.rank_rewards as unknown as Record<string, unknown>,
       };
       const row = byStage.get(s.stage_number);
       if (row) {
@@ -4998,7 +4995,7 @@ class PacksModuleService extends MedusaService({
       payout_credits: input.patch.payout_credits ?? before.payout_credits,
       payout_card_ids: input.patch.payout_card_ids ?? before.payout_card_ids,
     };
-    // Same json double-cast as saveChallengeStages' reward_card_ids — the
+    // Same json double-cast as saveChallengeStages' rank_rewards — the
     // generated create/update input types payout_card_ids as
     // Record<string, unknown> (json column), not string[].
     const data = {

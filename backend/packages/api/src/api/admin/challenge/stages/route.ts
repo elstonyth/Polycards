@@ -5,6 +5,7 @@ import type {
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
 import { validateChallengeStages } from '../../../../modules/packs/challenge-validate';
+import type { ChallengeRankReward } from '../../../../modules/packs/challenge-validate';
 import { reqReason } from '../../rewards-settings/validate';
 
 // GET /admin/challenge/stages — all milestone stages ordered by stage_number.
@@ -16,12 +17,7 @@ export async function GET(
   const rows = await packs.listChallengeStages(
     {},
     {
-      select: [
-        'stage_number',
-        'threshold_myr',
-        'reward_credits',
-        'reward_card_ids',
-      ],
+      select: ['stage_number', 'threshold_myr', 'rank_rewards'],
       take: 1000,
     },
   );
@@ -29,8 +25,9 @@ export async function GET(
     .map((r) => ({
       stage_number: r.stage_number,
       threshold_myr: Number(r.threshold_myr),
-      reward_credits: Number(r.reward_credits),
-      reward_card_ids: (r.reward_card_ids as unknown as string[]) ?? [],
+      rank_rewards: ((r.rank_rewards as unknown as ChallengeRankReward[]) ?? [])
+        .slice()
+        .sort((a, b) => a.rank - b.rank),
     }))
     .sort((a, b) => a.stage_number - b.stage_number);
   res.json({ stages });
