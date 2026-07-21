@@ -18,6 +18,15 @@ import { topUpAmountError } from './topup';
 export const GLOBEPAY_DEFAULT_METHOD = 'BQR';
 
 /**
+ * The MYR deposit methods (doc "Deposit Method Appendix"). The client sends
+ * CurrencyCode: MYR, but PaymentMethodCode comes from the request body — so
+ * without this list a caller could ask for a method belonging to another
+ * currency (UPI, MOMO, BKASH…) and depend on gateway-side behaviour we cannot
+ * see. Allow-list, not deny-list: an unknown code is rejected.
+ */
+export const GLOBEPAY_MYR_METHODS = ['FPX', 'DN', 'BQR', 'OB'] as const;
+
+/**
  * Is the real gateway switched on? Mirrors mockTopupAllowed's fail-closed
  * shape: absent config means "not configured", never a silent fallback that
  * mints free credit. Pure (env injected) so the policy is unit-testable.
@@ -92,10 +101,19 @@ export async function startGlobePayDeposit(
   }
   const amount = input.amount as number;
 
+  const paymentMethodCode = input.paymentMethodCode ?? GLOBEPAY_DEFAULT_METHOD;
+  if (
+    !(GLOBEPAY_MYR_METHODS as readonly string[]).includes(paymentMethodCode)
+  ) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      'Unsupported payment method.',
+    );
+  }
+
   const config = globepayConfigFromEnv();
   const packs = scope.resolve<PacksModuleService>(PACKS_MODULE);
   const merchantTransactionId = newMerchantTransactionId();
-  const paymentMethodCode = input.paymentMethodCode ?? GLOBEPAY_DEFAULT_METHOD;
 
   const [row] = await packs.createGlobePayDeposits([
     {

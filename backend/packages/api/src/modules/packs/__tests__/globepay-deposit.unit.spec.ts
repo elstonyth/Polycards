@@ -157,6 +157,24 @@ describe('startGlobePayDeposit', () => {
     expect(h.packs.createGlobePayDeposits).not.toHaveBeenCalled();
   });
 
+  it('rejects a payment method outside the MYR allow-list', async () => {
+    const h = harness();
+    // UPI is an INR method — asking for it here would depend on gateway-side
+    // behaviour we cannot see.
+    await expect(start(h, { paymentMethodCode: 'UPI' })).rejects.toThrow(
+      /unsupported payment method/i,
+    );
+    expect(submitMock).not.toHaveBeenCalled();
+    expect(h.packs.createGlobePayDeposits).not.toHaveBeenCalled();
+  });
+
+  it('accepts every documented MYR method', async () => {
+    for (const method of ['FPX', 'DN', 'BQR', 'OB']) {
+      const h = harness();
+      await expect(start(h, { paymentMethodCode: method })).resolves.toBeTruthy();
+    }
+  });
+
   it('refuses to run when the gateway is not enabled', async () => {
     process.env.GLOBEPAY_ENABLED = 'false';
     const h = harness();

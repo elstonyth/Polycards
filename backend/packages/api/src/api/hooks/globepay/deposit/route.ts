@@ -169,6 +169,21 @@ export async function POST(
   // documented only as "Net Amount submitted from client". We credit `Amount`
   // and record both, pending confirmation against the first genuinely settled
   // callback — see docs/payments/globepay365-setup.md.
+  // The ledger is Ringgit and credits 1:1. A settled callback in any other
+  // currency would silently credit e.g. 500 VND as RM 500. CurrencyCode IS
+  // signed, so this is not an attack surface — it is a guard against the
+  // account being reconfigured (or another currency enabled) without the
+  // ledger being taught the exchange rate.
+  if (data.CurrencyCode !== config.currencyCode) {
+    req.scope
+      .resolve('logger')
+      .error(
+        `[globepay] settled callback for ${merchantTransactionId} is ${data.CurrencyCode}, expected ${config.currencyCode} — refusing to credit`,
+      );
+    res.status(400).send('rejected');
+    return;
+  }
+
   const creditedAmount = Number(data.Amount);
   if (!Number.isFinite(creditedAmount) || creditedAmount <= 0) {
     req.scope

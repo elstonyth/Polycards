@@ -203,6 +203,14 @@ describe('deposit callback — ack contract', () => {
     expect(res.body).not.toBe('success');
   });
 
+  it('refuses to credit a settled callback in another currency', async () => {
+    const h = harness(pendingRow);
+    // The ledger is Ringgit and credits 1:1 — 500 VND is not RM 500.
+    const res = await run(h, callback({ ...settled, CurrencyCode: 'VND' }));
+    expect(res.statusCode).toBe(400);
+    expect(h.packs.mutateCreditAtomic).not.toHaveBeenCalled();
+  });
+
   it('refuses to credit a non-positive amount', async () => {
     const h = harness(pendingRow);
     const res = await run(h, callback({ ...settled, Amount: 0 }));

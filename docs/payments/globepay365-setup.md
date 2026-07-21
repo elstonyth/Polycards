@@ -122,6 +122,35 @@ So the usable band is roughly **26–1000 MYR**, exact bounds unconfirmed. Read
 (`ACDB`, `AFBQ`, `BIGB`, `KAFD` are missing from it), so drive the payout bank
 picker from this endpoint, never the appendix.
 
+### Signed vs unsigned callback fields (read before touching the route)
+
+Only `Data` is covered by the RSA signature. `TransactionId`,
+`MerchantTransactionId` and `Version` sit in the envelope **outside** it and can
+be altered on an otherwise-genuine body without invalidating anything.
+
+Nothing security-relevant may be derived from them. The idempotency anchor uses
+the **signed** `MerchantTransactionId`; the unsigned `TransactionId` is a
+display-only reconciliation handle. A security review found the original code
+anchoring on the unsigned field, which let one captured callback be replayed
+with varied ids to mint unlimited credit — and would have double-credited with
+no attacker at all if the gateway ever varied that id across its own retries.
+Fixed in `99fc439f`, with unit + integration regressions.
+
+### Reconciliation
+
+`src/jobs/globepay-reconcile.ts`, every 10 minutes. Requeries `pending`
+deposits (oldest first, 50 per sweep) because a dropped callback would
+otherwise mean a customer paid and never got credit, permanently.
+
+- Crediting uses the **same** anchor as the callback route, so a callback and a
+  sweep racing on one deposit produce exactly one credit.
+- Success settles at any age — the stale window never writes off money that
+  landed. Only non-final deposits older than `GLOBEPAY_STALE_AFTER_MS` (1 h,
+  vs their 10-minute cashier timeout) are expired.
+- A requery 400 `Not found` means SubmitDeposit never took; those expire once
+  old enough that an in-flight submit is impossible.
+- One failing deposit never aborts the sweep.
+
 ### OPEN QUESTION — `Amount` vs `NetAmount`
 
 The settled callback carries both. `Amount` is the deposit amount; `NetAmount`
