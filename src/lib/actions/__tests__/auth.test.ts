@@ -204,21 +204,37 @@ describe('googleCallback — OAuth callback branches', () => {
     const [body, , authHeader] = mocks.customerCreate.mock.calls[0]!;
     expect(body.email).toBe('mixed@example.com');
     expect(authHeader.Authorization).toBe(`Bearer ${first}`);
-    // Refresh happened against the first (register) token.
+    // Refresh happened against the first (register) token's Bearer.
     expect(mocks.clientFetch).toHaveBeenCalledWith(
       '/auth/token/refresh',
-      expect.objectContaining({ method: 'POST' }),
+      expect.objectContaining({
+        method: 'POST',
+        headers: { Authorization: `Bearer ${first}` },
+      }),
     );
     // The session cookie gets the refreshed token, never the register one.
     expect(mocks.setAuthToken).toHaveBeenCalledWith(refreshed);
   });
 
+  // Decoy PII rides in the payload (top-level `email`, and a `user_metadata`
+  // value) but `user_metadata.email` stays absent so the missing-email branch
+  // still fires. This makes the assertions load-bearing: a values-logging
+  // regression (e.g. Object.values instead of Object.keys) would put an `@`
+  // in the log and fail `not.toMatch(/@/)`, and would break the key-NAME check.
   it.each([
-    ['user_metadata empty', { actor_id: '', user_metadata: {} }],
-    ['user_metadata absent', { actor_id: '' }],
+    [
+      'user_metadata present, email absent',
+      {
+        actor_id: '',
+        email: 'decoy@leak.example',
+        user_metadata: { name: 'x@y.example' },
+      },
+      ['name'],
+    ],
+    ['user_metadata absent', { actor_id: '', email: 'decoy@leak.example' }, []],
   ])(
-    'missing email (%s) → keys-only log, no email value leaked',
-    async (_label, payload) => {
+    'missing email (%s) → keys-only log, no PII value leaked',
+    async (_label, payload, expectedUserMetadataKeys) => {
       mocks.clientFetch.mockResolvedValueOnce({ token: makeToken(payload) });
 
       const r = await googleCallback({ code: 'c', state: 's' });
@@ -230,12 +246,17 @@ describe('googleCallback — OAuth callback branches', () => {
       expect(mocks.customerCreate).not.toHaveBeenCalled();
       expect(mocks.logError).toHaveBeenCalledTimes(1);
       const errorCall = mocks.logError.mock.calls[0]!;
-      // Security: log carries ONLY key arrays, never values → no email anywhere.
+      // Security: no PII value (email) anywhere in the logged args.
       expect(JSON.stringify(errorCall)).not.toMatch(/@/);
-      expect(errorCall[1]).toEqual({
-        payloadKeys: expect.any(Array),
-        userMetadataKeys: expect.any(Array),
-      });
+      // Pin the key NAMES — an array of VALUES would not contain these strings.
+      const meta = errorCall[1] as {
+        payloadKeys: string[];
+        userMetadataKeys: string[];
+      };
+      expect(meta.payloadKeys).toEqual(
+        expect.arrayContaining(['actor_id', 'email']),
+      );
+      expect(meta.userMetadataKeys).toEqual(expectedUserMetadataKeys);
     },
   );
 
