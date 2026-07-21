@@ -55,7 +55,7 @@ export const settleVipStep = createStep(
         container
           .resolve(ContainerRegistrationKeys.LOGGER)
           .warn(
-            `settle-vip: level-up grant or notifyFeed('vip_level_up') failed for receiver '${input.customer_id}' (open '${input.open_id}') — open continues, vip.spend_settled event is the retry path. ${
+            `settle-vip: level-up grant failed for receiver '${input.customer_id}' (open '${input.open_id}') — open continues, vip.spend_settled event is the retry path. ${
               error instanceof Error ? error.message : String(error)
             }`,
           );
