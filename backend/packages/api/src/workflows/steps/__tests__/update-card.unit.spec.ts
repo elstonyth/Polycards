@@ -284,4 +284,28 @@ describe('updateCardInvoke rollback when the product mirror fails', () => {
       }),
     ]);
   });
+
+  it('mirror throws on an unchanged re-bake → does NOT delete the reused key, still restores', async () => {
+    // Content-hash filenames: an unchanged photo/label re-bake yields the SAME
+    // key as the card already has. Reclaiming it would destroy the card's only
+    // composite, then restore the card pointing at a deleted file.
+    jest
+      .mocked(bakeSlabImage)
+      .mockResolvedValue({ url: 'u', key: CARD.slab_image_key });
+    jest.mocked(updateProductsWorkflow).mockReturnValueOnce({
+      run: jest.fn().mockRejectedValue(new Error('mirror boom')),
+    } as unknown as ReturnType<typeof updateProductsWorkflow>);
+    const packs = packsStub();
+
+    await expect(
+      updateCardInvoke(CHANGED, { container: buildContainer(packs) }),
+    ).rejects.toThrow('mirror boom');
+
+    expect(deleteSlabFile).not.toHaveBeenCalledWith(
+      expect.anything(),
+      CARD.slab_image_key,
+    );
+    // The card restore still ran (forward + restore = 2 calls).
+    expect(packs.updateCards).toHaveBeenCalledTimes(2);
+  });
 });
