@@ -330,7 +330,10 @@ export const updateCardInvoke = async (
     // (deleteSlabFile never throws). If the throw came from the pixel resolve,
     // the mutation below never ran and this restore is an idempotent re-write
     // of the snapshot values — harmless and simpler than tracking that.
-    if (nextSlabKey) {
+    // Skip when the key is unchanged: content-hash filenames mean an unchanged
+    // photo/label re-bake yields nextSlabKey === the OLD key, and deleting it
+    // would destroy the card's only composite (matches the sibling guards).
+    if (nextSlabKey && nextSlabKey !== snapshot.slab_image_key) {
       await deleteSlabFile(container, nextSlabKey);
     }
     await packs.updateCards([
