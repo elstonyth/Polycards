@@ -3,6 +3,7 @@ import { DashboardModuleOptions } from '@mercurjs/types';
 import path from 'path';
 import { assertMockTopupSafe } from './src/modules/packs/topup';
 import { isResendConfigured } from './src/modules/resend/options';
+import { productionDatabaseDriverOptions } from './src/utils/db-driver-options';
 loadEnv(process.env.NODE_ENV || 'development', process.cwd());
 
 // Boot-guard (security audit 2026-06-30, Batch A): refuse to start a production
@@ -148,20 +149,14 @@ module.exports = defineConfig({
   admin: { disable: true },
   projectConfig: {
     databaseUrl: process.env.DATABASE_URL,
-    // DO Managed Postgres presents a SELF-SIGNED CA → node-postgres rejects it
-    // (SELF_SIGNED_CERT_IN_CHAIN), the connection times out, and migrate/boot
-    // fail. Skip CA verification for the DB connection in production (still
-    // TLS-encrypted, just not cert-verified — acceptable for DO's own managed
-    // DB). NOTE: DATABASE_URL must NOT carry `?sslmode=require` — the framework
-    // only strips `ssl_mode` (underscore), so a literal `sslmode=require`
-    // survives, forces strict verify, and overrides this option. Dev
-    // (localhost, no TLS) leaves driver options untouched.
+    // TLS for DO's self-signed CA, the per-process connection cap (an uncapped
+    // pool overruns the 25-connection cluster during a deploy), and the
+    // idle-in-transaction timeout. Every value, and why the keys sit where they
+    // do, is documented in src/utils/db-driver-options.ts — that indirection
+    // exists so the DB_POOL_MAX parse guard is unit-testable. Dev (localhost,
+    // no TLS) leaves driver options untouched.
     ...(isProduction
-      ? {
-          databaseDriverOptions: {
-            connection: { ssl: { rejectUnauthorized: false } },
-          },
-        }
+      ? { databaseDriverOptions: productionDatabaseDriverOptions(process.env) }
       : {}),
     // Redis-backed sessions (express-session). Without redisUrl Medusa falls
     // back to an in-memory MemoryStore ("not designed for production" warning —
