@@ -2,10 +2,11 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import ReactDOM from 'react-dom';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import { motion } from 'motion/react';
-import { usePrefersReducedMotion } from '@/lib/use-reveal';
+import { useMediaQuery, usePrefersReducedMotion } from '@/lib/use-reveal';
 import { useChromeInert } from '@/lib/use-chrome-inert';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { openAuth } from '@/components/AuthButton';
@@ -46,6 +47,7 @@ import { OddsSheet } from './OddsSheet';
 import { VaultRoom } from './VaultRoom';
 import { Meter } from './Meter';
 import { RevealStage } from './RevealStage';
+import { CARD_BACK_SRC } from './SlabCard';
 import type { SellBackOffer } from './useSellWindow';
 
 const COOLDOWN_MS = 600;
@@ -133,8 +135,15 @@ export default function SlotMachineClient({
   // Reel count — prop is the initial value (already clamped from ?count=); the
   // player adds/removes reels in-machine. cost * reels is the batch price.
   const [reels, setReels] = useState(count);
-  // Shrink the cell so multiple reels fit across the viewport.
-  const cellSize = reels > 1 ? 76 : 96;
+  // Shrink the cell so multiple reels fit across the viewport. On a roomy
+  // viewport the cell grows instead: the phone layout on a desktop left the
+  // machine a ~110px band floating in ~900px of empty room, which reads as an
+  // unfinished page rather than the "more air" the spec asks for. The machine
+  // is the subject — it scales with the stage it's standing on.
+  // ponytail: one breakpoint, not a resize observer — cellSize feeds the reel
+  // engine's pitch math, so a continuously-changing value would thrash it.
+  const roomy = useMediaQuery('(min-width: 768px) and (min-height: 720px)');
+  const idealCell = reels > 1 ? (roomy ? 116 : 76) : roomy ? 152 : 96;
 
   // Decoy flicker pool: the pack's OWN cards, each pairing its CONFIGURED
   // Pokémon with its CONFIGURED rarity, deduped by the (dex, rarity) PAIR —
@@ -163,6 +172,20 @@ export default function SlotMachineClient({
   const { balance, applyBalance } = useTopUp();
   const [recent, setRecent] = useState<RecentPull[]>(recentPulls);
   const [phase, setPhase] = useState<Phase>('idle');
+  // Warm the reveal art while the reels are still turning. Measured: mounting
+  // SlabCard was what first requested the card back, so the fetch + decode
+  // landed ~150ms INTO the transform beat (an 87ms main-thread task on top of
+  // the morph, plus the art visibly popping in). The spin gives us ~3s of
+  // otherwise-idle network to spend instead.
+  useEffect(() => {
+    if (phase === 'spinning') ReactDOM.preload(CARD_BACK_SRC, { as: 'image' });
+  }, [phase]);
+  // Commit the stage scale only while idle: cellSize is a ReelStrip engine
+  // dependency (pitch/travel/target), so resizing the window mid-spin would
+  // restart the rAF timeline under the player's eyes.
+  const cellRef = useRef(idealCell);
+  if (phase === 'idle') cellRef.current = idealCell;
+  const cellSize = cellRef.current;
   // Reshuffle every reel's decoy pool each time the machine goes idle: on
   // mount (post-hydration) and on every return-to-idle after a spin — the
   // same transition where ReelStrip snaps its position back to base, a cut
@@ -771,6 +794,7 @@ export default function SlotMachineClient({
                     winnerRects.current[i] = r;
                   }}
                   hideWinners={phase === 'transform' || phase === 'review'}
+                  frozen={inReveal}
                 />
               </motion.div>
             </motion.div>

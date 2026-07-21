@@ -349,6 +349,14 @@ export function ReelStrip({
               style={{
                 width: `${cellW}px`,
                 visibility: hideWinner && isWinnerCell ? 'hidden' : undefined,
+                // Only ~9 of the strip's 64 cells are inside the window at any
+                // moment, but each one still paints a border + outer/inner
+                // bloom. content-visibility lets the browser skip the rest
+                // entirely; the intrinsic size keeps the strip's layout (and so
+                // the engine's pitch math) identical. Measured: it roughly
+                // halves the main-thread block through the reveal.
+                contentVisibility: 'auto',
+                containIntrinsicSize: `${cellW}px ${cellSize}px`,
               }}
             >
               <CardTile

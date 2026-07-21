@@ -45,8 +45,18 @@ export function SlotStatusBar({
       </div>
       {/* RECENT WINS marquee — keyframe `sp-scroll-x` lives in globals.css;
           frozen under reduced motion. */}
+      {/* Edge fade (style mask): the track is clipped by overflow-hidden, so
+          without a mask the marquee guillotines a name mid-word at the plate's
+          rounded edge ("PW Pi"). Transparent-to-opaque on both ends makes
+          entries fade in and out of the plate instead. */}
       {recent.length > 0 && (
-        <div className="relative max-w-full overflow-hidden sm:max-w-[55%]">
+        <div
+          className="relative max-w-full overflow-hidden sm:max-w-[55%]"
+          style={{
+            maskImage:
+              'linear-gradient(90deg, transparent, #000 16px, #000 calc(100% - 16px), transparent)',
+          }}
+        >
           <div
             className={cn(
               'flex w-max gap-4',

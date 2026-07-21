@@ -40,8 +40,13 @@ export function CardTile({
     <div
       className={cn(
         'relative flex items-center justify-center rounded-xl border',
-        'transition-[box-shadow,border-color,transform] duration-300',
-        landed && 'scale-[1.06]',
+        // Only the WINNER animates its bloom. box-shadow is not composited, so
+        // when the strip settled every cell (64 per strip) spent 300ms
+        // repainting a 16px outer + 14px inset shadow at once — measured as the
+        // long-task cluster right after the reels stop. Decoys just cut to
+        // neutral; nobody is looking at them at that moment anyway.
+        landed &&
+          'scale-[1.06] transition-[box-shadow,border-color,transform] duration-300',
       )}
       style={
         {
