@@ -30,7 +30,7 @@ __metadata:
     "@acme/pokemon": "workspace:*"
     "@medusajs/admin-sdk": "npm:2.13.4"
     "@medusajs/admin-shared": "npm:2.13.4"
-    "@medusajs/auth-google": "npm:2.13.4"
+    "@medusajs/auth-google": "npm:2.13.6"
     "@medusajs/cli": "npm:2.13.4"
     "@medusajs/dashboard": "npm:2.13.4"
     "@medusajs/draft-order": "npm:2.13.4"
@@ -2853,6 +2853,17 @@ __metadata:
   peerDependencies:
     "@medusajs/framework": 2.13.4
   checksum: 10c0/3707a610d327b09546b2973d00a583a8327e2717985e0cb34b971abf10fdab6c2edacd677fce5b99024b397739dd2ebd25807e32e8aca0f09a15ff7909aad9a2
+  languageName: node
+  linkType: hard
+
+"@medusajs/auth-google@npm:2.13.6":
+  version: 2.13.6
+  resolution: "@medusajs/auth-google@npm:2.13.6"
+  dependencies:
+    jsonwebtoken: "npm:^9.0.2"
+  peerDependencies:
+    "@medusajs/framework": 2.13.6
+  checksum: 10c0/0098a90b46875d9c128103a3545c37fc613429959bee2fd7dd4e4bbd9cb423fa6ce8586ce33d5e125e5b220c64a25717a2da8e89e5f2e4ee5eb2586f30a1bdd4
   languageName: node
   linkType: hard
 
