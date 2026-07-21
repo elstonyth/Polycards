@@ -11,6 +11,7 @@ import {
 import type { VaultItem } from '@/lib/actions/vault';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { Pill } from '@/components/ui/pill';
+import { INPUT_CLASS } from '@/components/account/ui';
 import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
 
 type Props = {
@@ -21,9 +22,9 @@ type Props = {
   onSubmitted: (pullIds: string[]) => void; // parent removes them from the vault
 };
 
-// Reuses the input styling from SettingsForm.tsx for visual consistency.
-const INPUT_CLASS =
-  'h-11 w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 text-sm text-white placeholder:text-white/40 focus:border-white/25 focus:outline-none';
+// ponytail: was a fourth hand-copy of this string, and the only one left
+// without the focus-visible ring (a bare focus:border-white/25 is a 1px
+// 25%-alpha edge, under WCAG 2.4.11's 3:1). Canonical copy lives in ui.tsx.
 
 export default function RequestDeliveryModal({
   open,

@@ -14,7 +14,30 @@ Every item below is grounded at a file:line. Nothing here has been fixed.
 
 ## Tier 1 — ship first
 
-### 1. The body font is not loading (`src/app/globals.css:10`)
+### 1. ~~The body font is not loading~~ — RETRACTED, THIS FINDING WAS WRONG
+
+**Correction (2026-07-22, from code review):** the premise is false. Current
+`next/font/google` registers the REAL family name, not a hashed one. The built
+CSS emits `@font-face{font-family:Geist}` and `@font-face{font-family:Geist
+Fallback}` (verified in `.next/static/css/*.css`), so the old literal
+`--font-sans: 'Geist', 'Geist Fallback', ...` resolved correctly all along.
+**Body copy was never falling back to system-ui.**
+
+What shipped is behaviour-neutral: `var(--font-geist-sans)` resolves to those
+same two families, and is marginally more robust to a future font swap. The
+`--font-mono` half of the change WAS correct - no Geist Mono face is emitted
+anywhere (layout.tsx never imports it), so those two literals really were dead
+and now degrade honestly to `ui-monospace`.
+
+Process note worth keeping: this finding shipped with the instruction "expect
+the whole app to visibly change - screenshot before/after." Nothing visibly
+changed, and no one noticed until review, because the screenshot step was never
+performed. A claim of a global visual regression must be confirmed by looking
+at the rendered page before it is written down as fact.
+
+Original text follows for the record.
+
+### 1 (original, retracted). The body font is not loading (`src/app/globals.css:10`)
 
 `layout.tsx:15` declares `variable: '--font-geist-sans'` and puts it on
 `<html>`. Nothing reads it. `globals.css:10` instead hardcodes the literal
@@ -173,6 +196,12 @@ contradicts its own `:155,267` ("never below silver") — the code correctly
 ignores it (0 occurrences). Fix the doc, not the code.
 
 ### 12. Reduced motion has no global backstop
+
+**Partial correction:** the claim that `VaultRoom.tsx:46,118,141` are ungated is
+WRONG. All three sit behind `!reduced`, sourced from `usePrefersReducedMotion()`
+in `SlotMachineClient.tsx` and threaded through `RevealStage`; under reduced
+motion the dust and burst layers are not even rendered. The missing global CSS
+backstop was real and has shipped; the clack-scheduler half below was also real.
 
 The only `prefers-reduced-motion` block in CSS (`globals.css:549`) scopes to
 three `.challenge-*` classes. Most call sites use `motion-safe:` /
@@ -401,3 +430,48 @@ bundle. Then #7 (boundaries) and #8 (tokens), because #8 unblocks #9/#10/#11
 and collapses the ad-hoc radius sprawl. Tier 3 is a grab-bag — the highest
 value/effort ratios in it are #18 (price string), #19 (money format), #25/#26
 (forms, which fold into #9), and #33 (404 on transient error).
+
+---
+
+## Review corrections (2026-07-22)
+
+Two independent reviewers (one broad, one adversarial on the money path) went
+over commit `65c94af1`. What they changed about this document:
+
+**Retracted outright:**
+- Finding #1 (body font not loading). False premise; see the note inline. The
+  shipped change is harmless but fixed nothing user-visible.
+- Half of finding #12 (VaultRoom animations ungated). They were already gated.
+
+**Found by review, not by the audit** - a real regression the fix introduced:
+- The new transport catch in `SlotMachineClient` re-enabled Spin without
+  refetching the balance. Since the failure it exists for is precisely the one
+  where the server DID charge but the response never came back, the player
+  would see a stale pre-charge figure, follow the "check your balance" copy,
+  conclude the spin was free, and spin again. The fix traded a permanent freeze
+  for a double-charge window. Now refetches before re-enabling, and does the
+  same on the `{ok:false}` path, which `openBatch` can also return after a
+  charge has landed (an enrichment failure maps to "please try again").
+- `rm0(priceNum * qty)` on both buy CTAs under-displayed a non-integer charge
+  in both directions (RM 1.40 rendered "RM 1"), and contradicted the `rm()`
+  fine print two lines below it. Now `rm()`.
+
+**Confirmed sound under attack** (recorded so the next round does not re-audit):
+90% is a genuine floor on every sell path - `resolveBuybackRate` is the single
+source, admin validation rejects a per-pack rate below it, `UNQUOTED_BUYBACK` is
+keep-only, FX and the market multiplier scale the value not the percentage, and
+no fee is deducted. `res` has no use-before-assign hole; the catch leaves no
+wedged state; the settle watchdog and account-switch guard are unaffected;
+`priceValue` is populated at every construction site and non-finite prices are
+dropped by the schema before they can reach arithmetic.
+
+**Still open after this pass:**
+- `required` reached 2 of the 4 address forms. The other two
+  (`OrdersClient.EditAddressModal`, `RequestDeliveryModal`) are not wrapped in a
+  `<form>`, so `required` would be inert there - the real fix is the single
+  `<AddressFields>` component finding #25 asks for, which is the natural next PR.
+- Finding #32 (the `resolving` phase has no visual) is only half closed:
+  `aria-busy` now covers it, but a sighted user still reads "Spinning..." over a
+  static reel.
+- Entering the account group from outside still blocks on the layout's own
+  `await getCustomer()`, which sits outside the Suspense boundary.

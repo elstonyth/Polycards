@@ -169,7 +169,9 @@ export default function SlotMachineClient({
   // Balance comes from the app-shell provider (identity-tagged: values from
   // another account never render — push security review). Server-returned
   // balances from spins/sell-backs are pushed back up via applyBalance.
-  const { balance, applyBalance } = useTopUp();
+  // Aliased: a local `refreshBalance` further down is just `applyBalance`
+  // (it sets a known number). This one refetches from the server.
+  const { balance, applyBalance, refreshBalance: refetchBalance } = useTopUp();
   const [recent, setRecent] = useState<RecentPull[]>(recentPulls);
   const [phase, setPhase] = useState<Phase>('idle');
   // Warm the reveal art while the reels are still turning. Measured: mounting
@@ -374,6 +376,12 @@ export default function SlotMachineClient({
       res = await openBatch(pack.id, reels);
     } catch (err) {
       logger.error('[slots] openBatch transport failure', err);
+      // The charge may well have landed (the server executed, the response did
+      // not transport back). Telling the player to check their balance while
+      // showing the STALE pre-charge figure invites a second, real charge, so
+      // refetch before re-enabling Spin. Nothing spun, so hasSpun goes back.
+      await refetchBalance();
+      setHasSpun(false);
       setError(
         "Couldn't reach the machine. Check your balance before spinning again.",
       );
@@ -385,6 +393,10 @@ export default function SlotMachineClient({
       else {
         setError(res.error);
         setNeedsTopUp(res.needsTopUp === true);
+        // Same hazard, narrower: openBatch maps a post-charge enrichment
+        // failure to {ok:false} ("try again"), so the debit can already be
+        // real here too. Never invite a retry over a stale balance.
+        if (res.needsTopUp !== true) await refetchBalance();
       }
       setPhase('idle');
       return;

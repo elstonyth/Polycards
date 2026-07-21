@@ -15,7 +15,7 @@ import {
   Plus,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { rm, rm0 } from '@/lib/format';
+import { rm } from '@/lib/format';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { openAuth } from '@/components/AuthButton';
 import Reveal from '@/components/Reveal';
@@ -381,7 +381,7 @@ export default function PackDetailClient({
               >
                 {customer ? 'Open Pack' : 'Log in to open'}
                 <span className="flex items-center gap-1.5 font-heading text-base tracking-tight tabular-nums">
-                  {rm0(priceNum * qty)}
+                  {rm(priceNum * qty)}
                   <ArrowRight className="h-4 w-4" aria-hidden />
                 </span>
               </Pill>
@@ -576,7 +576,7 @@ export default function PackDetailClient({
         <div className="flex items-center gap-3">
           <div className="min-w-0 flex-1">
             <p className="truncate font-heading text-xl font-bold leading-none tracking-tight text-white tabular-nums">
-              {rm0(priceNum * qty)}
+              {rm(priceNum * qty)}
             </p>
             <p className="mt-1 text-[11px] leading-none text-white/60">
               {active.buybackPercent ?? FLAT_BUYBACK_PERCENT}% buyback
