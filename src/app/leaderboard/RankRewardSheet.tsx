@@ -1,7 +1,8 @@
 // src/app/leaderboard/RankRewardSheet.tsx
 'use client';
 
-import { useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import type { ChallengeRankReward } from '@/lib/data/challenge';
 import { useModalA11y } from '@/lib/use-modal-a11y';
@@ -13,7 +14,11 @@ import { useModalA11y } from '@/lib/use-modal-a11y';
  *
  *  Rows arrive pre-filtered by the data seam: a rank with neither a resolvable
  *  card nor credits is already absent, so nothing here renders empty. */
-export function RankRewardList({ rewards }: { rewards: ChallengeRankReward[] }) {
+export function RankRewardList({
+  rewards,
+}: {
+  rewards: ChallengeRankReward[];
+}) {
   if (rewards.length === 0) {
     return (
       <p className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-6 text-center text-[13px] text-white/60">
@@ -92,10 +97,20 @@ export function RankRewardSheet({
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   useModalA11y(panelRef, open, onClose);
+  // Portal target only exists client-side; render nothing until mounted so the
+  // server and first client pass agree.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
-  if (!open) return null;
+  if (!open || !mounted) return null;
 
-  return (
+  // PORTAL, not an in-place render. The trigger lives inside GalleryRail, whose
+  // ancestors carry a 3D transform (neighbour peek) AND overflow-hidden (rail
+  // clip). `position: fixed` inside a transformed ancestor resolves against
+  // THAT ancestor instead of the viewport, so the overlay was being positioned
+  // and then clipped inside the rail — backdrop missing, top rows cut off.
+  // Escaping to document.body is the fix; verified at 390px.
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 sm:items-center sm:p-4"
       onClick={onClose}
@@ -124,6 +139,7 @@ export function RankRewardSheet({
         </div>
         <RankRewardList rewards={rewards} />
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
