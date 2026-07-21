@@ -62,7 +62,7 @@ Silent always-skip is worse than no test: it reads as coverage in every green ru
   );
   ```
 - `backend/packages/api/src/scripts/seed-e2e-fixtures.ts` — the idempotent nightly seed (`yarn seed:e2e` era, plan 023/039 lineage): creates the active packs (`pokemon-rookie`/`pokemon-elite`), cards, odds, FIRM FX rate. Contains NO `pw-test-card` and NO claimable reward grant. Extend this file — it is the designated home for CI fixtures.
-- A separate hand-run script that mints the eligible product exists somewhere under `backend/packages/api/src/scripts/` (the skip message names `create-test-product.ts`) — read it and lift its product-minting logic into the seed (idempotently).
+- `backend/packages/api/src/scripts/create-test-product.ts` — the separate hand-run script that mints the eligible product (`HANDLE = "pw-test-card"` at :14, the sole definition of that handle in the repo) — read it and lift its product-minting logic into the seed (idempotently).
 - `.github/workflows/e2e.yml` — job-level `env:` at ~line 65 (`DATABASE_URL`, `REDIS_URL`, deliberate no-NODE_ENV comment, mock-gateway opt-in). `grep REWARDS_REDEMPTION_ENABLED e2e.yml` → nothing. The backend start step (~line 151) launches `corepack yarn start` with `NODE_ENV: development`.
 - Precedent for flag-on testing: `backend/packages/api/src/subscribers/__tests__/notify-feed-nonfatal.unit.spec.ts:129` drives `POST /store/rewards/claim/:grantId` with `REWARDS_REDEMPTION_ENABLED=true`.
 - E2E conventions: specs read seeded slugs and use the seed-presence guard from plan 039 (`tests/e2e/helpers/`); nightly = `e2e.yml` (schedule + dispatch); local runs need the backend on :9000 + storefront standalone on :4000.
