@@ -111,6 +111,27 @@ Other confirmed behaviour:
 - `DN`'s empty-error response is why the client treats `isSuccess:false` with
   no codes as a generic failure rather than assuming a code exists.
 
+### NO MYR method completes end-to-end on staging (2026-07-21)
+
+`BQR` was believed to work because `SubmitDeposit` returns a cashier URL. It
+does not. Opening that URL in a browser gives:
+
+1. a caution modal (`注意/Perhatian/Caution`, "This QR code only for one time
+   used") with **Cancel / I Agreed**, then
+2. after agreeing, **"Sorry, we're experiencing technical issues. Please try
+   again later."** — on a deposit barely a minute old, so this is not expiry.
+
+So the score is: four MYR methods fail at the API (`PMT10018` / `PMT10005` /
+empty errorList) and the fifth fails at the cashier. **Nothing is payable on
+staging right now.** A returned cashier URL is not evidence a channel works —
+only a rendered QR is.
+
+Also observed: two deposits created minutes earlier requeried as HTTP 400
+`Not found` while an older one resolved normally. Either their requery lags
+behind submit, or those deposits were never fully persisted. Unresolved — but
+it is why the reconciliation sweep only expires an unknown deposit after an
+hour instead of writing it off on the first `Not found`.
+
 ### BQR amount limits (probed live, `PMT10005` = out of range)
 
 | Amount               | Result                               |
