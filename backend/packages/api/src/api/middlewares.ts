@@ -587,7 +587,8 @@ export default defineMiddlewares({
     },
     {
       // Challenge settings singleton patch (POST /admin/challenge/settings) —
-      // writes payout_credits, so it shares the admin money-mutation budget.
+      // retimes the reward cycle (cadence/reset), so it shares the admin
+      // money-mutation budget.
       matcher: '/admin/challenge/settings',
       method: 'POST',
       middlewares: [adminActionRateLimit],
