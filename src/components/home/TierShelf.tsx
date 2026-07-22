@@ -102,7 +102,7 @@ function LadderRow({
       <div className="min-w-0 flex-1">
         <p
           className={`truncate font-semibold text-white ${
-            lead ? 'text-[15px] lg:text-lg' : 'text-[15px]'
+            lead ? 'text-base lg:text-xl' : 'text-base lg:text-lg'
           } ${soldOut ? 'opacity-50' : ''}`}
         >
           {pack.name}
@@ -121,11 +121,14 @@ function LadderRow({
         )}
       </div>
 
-      {/* Price, right-aligned in Nekst — the ladder's rung value */}
+      {/* Price, right-aligned in Nekst — the ladder's rung value. The price
+          steps down on phones so the pack name stops truncating to
+          "Diamond Pa…" at 390px; the `Rip it →` affordance is spec'd
+          (DESIGN.md §5 "Tier ladder") and stays at every width. */}
       <div className="flex shrink-0 flex-col items-end gap-1.5">
         <span
           className={`font-heading whitespace-nowrap text-white ${
-            lead ? 'text-2xl lg:text-3xl' : 'text-2xl'
+            lead ? 'text-xl lg:text-3xl' : 'text-lg lg:text-2xl'
           } ${soldOut ? 'opacity-50' : ''}`}
         >
           {pack.price}
@@ -141,16 +144,21 @@ function LadderRow({
 
   // h-full: grid cells stretch equal-height; the row must fill its cell so
   // 2-up card bottoms stay aligned if one card ever gains an extra line.
-  const rowClass =
-    'flex h-full w-full items-center gap-4 rounded-2xl border border-white/10 bg-neutral-900 p-3';
+  // The crown rung reads as the ladder's top through a brighter hairline, not a
+  // tinted surface: in-flow cards stay matte charcoal (DESIGN.md §6).
+  const rowClass = `flex h-full w-full items-center gap-4 rounded-2xl border bg-neutral-900 p-3 ${
+    lead ? 'border-white/15' : 'border-white/10'
+  }`;
 
   if (soldOut) {
     return <div className={rowClass}>{body}</div>;
   }
   return (
+    // Tailwind v4 emits `translate`/`scale`, not `transform` — naming
+    // `transform` here would transition the border and snap the lift.
     <Link
       href="/slots"
-      className={`${rowClass} transition-[transform,border-color] hover:border-white/30 active:scale-[0.99] motion-reduce:transition-colors motion-reduce:active:scale-100`}
+      className={`${rowClass} transition-[translate,scale,border-color] hover:-translate-y-0.5 hover:border-white/30 active:scale-[0.99] motion-reduce:transition-colors motion-reduce:hover:translate-y-0 motion-reduce:active:scale-100`}
     >
       {body}
     </Link>

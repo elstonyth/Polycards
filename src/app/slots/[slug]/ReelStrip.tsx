@@ -330,7 +330,9 @@ export function ReelStrip({
           // tier and then "changes" hue on stop. The color that lands on the
           // line IS the reward (orange ⟹ Immortal, gray ⟹ Common), matching the
           // reveal; it only intensifies (bloom + scale) when it locks. Decoys
-          // flicker their own tier while spinning, then fade neutral on settle.
+          // flicker their own tier while spinning, then CUT to neutral on
+          // settle (they no longer fade — only the winner keeps a transition,
+          // so the settle does not repaint ~190 blurred shadows at once).
           // Idle has no winner cell at all (winIdx is null), so the periodic
           // idle tiling never carries an off-pattern seam.
           const litColor =
@@ -349,6 +351,17 @@ export function ReelStrip({
               style={{
                 width: `${cellW}px`,
                 visibility: hideWinner && isWinnerCell ? 'hidden' : undefined,
+                // NOT content-visibility: auto here. It skips the ~55 of 64
+                // cells outside the window (worth ~90ms of main-thread block
+                // through the reveal) but its paint containment is
+                // unconditional, and it clips to THIS box — which is exactly
+                // the CardTile box. Every tier bloom that lives outside the
+                // tile (0 0 16px 3px decoys, 0 0 30px 7px on the landed winner)
+                // and the winner's scale-[1.06] overflow get guillotined into
+                // hard squares. Verified in a browser: the lit cells stop
+                // reading as lit. Any retry has to give the glow room inside
+                // the contained box without changing cellW (which IS the
+                // engine's pitch).
               }}
             >
               <CardTile

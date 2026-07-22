@@ -63,7 +63,9 @@ export default function HeroBoard({
             <p className="font-heading text-chase text-5xl leading-none lg:mt-3 lg:text-7xl">
               {chase.value}
             </p>
-            <p className="mt-2 max-w-xs truncate text-sm text-neutral-400 lg:max-w-md">
+            {/* No truncate: at 15px this line clipped inside max-w-xs on a
+                phone, and it wraps to two readable lines instead. */}
+            <p className="mt-3 max-w-xs text-[15px] text-neutral-300 lg:mt-4 lg:max-w-md lg:text-base">
               Top chase: {chase.name} · {pack.name}
             </p>
           </>
@@ -72,7 +74,9 @@ export default function HeroBoard({
             <p className="font-heading text-5xl leading-none text-white lg:mt-3 lg:text-7xl">
               Rip real graded cards
             </p>
-            <p className="mt-2 max-w-xs text-sm text-neutral-400 lg:max-w-md">
+            {/* text-sm/neutral-400 under a 72px headline was a hierarchy cliff,
+                and neutral-400 sits exactly ON the DESIGN.md contrast floor. */}
+            <p className="mt-3 max-w-xs text-[15px] text-neutral-300 lg:mt-4 lg:max-w-md lg:text-base">
               Every pack holds a real, professionally graded slab.
             </p>
           </>

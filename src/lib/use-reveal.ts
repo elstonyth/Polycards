@@ -1,6 +1,12 @@
 'use client';
 
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 
 const REDUCED_QUERY = '(prefers-reduced-motion: reduce)';
 
@@ -8,6 +14,28 @@ function subscribeReducedMotion(onChange: () => void) {
   const mql = window.matchMedia(REDUCED_QUERY);
   mql.addEventListener('change', onChange);
   return () => mql.removeEventListener('change', onChange);
+}
+
+/**
+ * SSR-safe media-query listener, same shape as `usePrefersReducedMotion`: the
+ * server snapshot is always `false`, so the first client paint matches the HTML
+ * and the query result lands on hydration (no flash). For layout that CSS can't
+ * express — a JS number a rendering engine consumes, not a class name.
+ */
+export function useMediaQuery(query: string): boolean {
+  const [subscribe, snapshot] = useMemo(
+    () =>
+      [
+        (onChange: () => void) => {
+          const mql = window.matchMedia(query);
+          mql.addEventListener('change', onChange);
+          return () => mql.removeEventListener('change', onChange);
+        },
+        () => window.matchMedia(query).matches,
+      ] as const,
+    [query],
+  );
+  return useSyncExternalStore(subscribe, snapshot, () => false);
 }
 
 /**

@@ -68,7 +68,9 @@ export default function TheGame({
         )}
 
         <Reveal delay={90} className="flex-1">
-          <div className="flex h-full flex-col justify-between rounded-2xl border border-white/10 bg-neutral-900 p-4">
+          {/* justify-center, not -between: this card is shorter than the podium
+              beside it, and pinning the link to the bottom left a dead band. */}
+          <div className="flex h-full flex-col justify-center gap-3 rounded-2xl border border-white/10 bg-neutral-900 p-4">
             <div>
               <p className="font-heading text-lg leading-snug text-white">
                 100 VIP LEVELS. TWO-TIER REFERRALS.
@@ -80,7 +82,7 @@ export default function TheGame({
             </div>
             <Link
               href="/how-it-works"
-              className="mt-3 flex min-h-11 w-fit items-center gap-1 text-[13px] font-semibold text-neutral-400 transition-colors hover:text-white"
+              className="flex min-h-11 w-fit items-center gap-1 text-[13px] font-semibold text-neutral-400 transition-colors hover:text-white"
             >
               Learn more
               <ArrowRight className="h-3.5 w-3.5" aria-hidden />
