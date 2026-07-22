@@ -56,6 +56,18 @@ const VAULT_RULES: ErrorRule[] = [
     /declined/i,
     'Payment declined by the demo gateway — amounts ending in .13 always decline.',
   ],
+  // Withdrawal messages are already customer-facing on the backend — pass
+  // them through instead of flattening a gateway refusal into the fallback.
+  [
+    /could not start your withdrawal/i,
+    'We could not start your withdrawal. Please check the bank details and try again.',
+  ],
+  [
+    /withdrawals must be between/i,
+    'Withdrawals must be between RM 30 and RM 1,000.',
+  ],
+  [/withdrawals are not open/i, 'Withdrawals are not open yet.'],
+  [/insufficient/i, 'Not enough balance for that.'],
   [/amount/i, 'Enter a valid amount (up to RM 10,000, whole cents).'],
   [/already sold/i, 'This card was already sold back.'],
   [/not found|404/i, 'This card is no longer in your vault.'],
