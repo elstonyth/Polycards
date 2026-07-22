@@ -57,7 +57,7 @@ export async function GET(
     }))
     .sort((a, b) => a.level - b.level);
 
-  const spend = summary.externalFundedSpendTotal;
+  const spend = summary.vipSpendTotal;
 
   // Prefer vip_member_state row (maintained by the settle-open saga) when
   // present; fall back to live levelForSpend when no row exists (e.g. customer

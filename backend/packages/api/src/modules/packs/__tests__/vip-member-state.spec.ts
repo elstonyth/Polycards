@@ -162,7 +162,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         // current_level must STRICTLY DROP: net basis = open_vms_1 only = 20 MYR
         // 20 MYR < L3 threshold (25 MYR) → current_level == 2
         const netBasis = (await service.creditSummary(customerId))
-          .externalFundedSpendTotal;
+          .vipSpendTotal;
         const expectedCurrentAfter = levelForSpend(netBasis, ladder);
         expect(rowAfter.current_level).toBe(expectedCurrentAfter);
         // Exact drop: 3 → 2

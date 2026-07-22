@@ -14,6 +14,7 @@ type FakeRow = {
   topup_cents: string | null;
   spend_cents: string | null;
   ext_spend_cents: string | null;
+  vip_spend_cents: string | null;
   deposited_pt_cents: string | null;
 };
 
@@ -43,6 +44,7 @@ describe("PacksModuleService.creditSummary (SQL aggregate)", () => {
       topupTotal: 0,
       spendTotal: 0,
       externalFundedSpendTotal: 0,
+      vipSpendTotal: 0,
       depositedPlaythroughTotal: 0,
     });
   });
@@ -53,6 +55,7 @@ describe("PacksModuleService.creditSummary (SQL aggregate)", () => {
       topup_cents: "10000",
       spend_cents: "7947",
       ext_spend_cents: "500",
+      vip_spend_cents: "7947",
       deposited_pt_cents: "8000",
     });
     expect(await svc.creditSummary("cus_1", { manager })).toEqual({
@@ -60,6 +63,7 @@ describe("PacksModuleService.creditSummary (SQL aggregate)", () => {
       topupTotal: 100,
       spendTotal: 79.47,
       externalFundedSpendTotal: 5,
+      vipSpendTotal: 79.47,
       depositedPlaythroughTotal: 80,
     });
   });
@@ -73,6 +77,7 @@ describe("PacksModuleService.creditSummary (SQL aggregate)", () => {
       topup_cents: "0",
       spend_cents: "0",
       ext_spend_cents: "0",
+      vip_spend_cents: "0",
       deposited_pt_cents: "0",
     });
     expect((await svc.creditSummary("cus_1", { manager })).balance).toBe(
@@ -86,6 +91,7 @@ describe("PacksModuleService.creditSummary (SQL aggregate)", () => {
       topup_cents: "0",
       spend_cents: "0",
       ext_spend_cents: "0",
+      vip_spend_cents: "0",
       deposited_pt_cents: "0",
     });
     await svc.creditSummary("cus_42", { manager });

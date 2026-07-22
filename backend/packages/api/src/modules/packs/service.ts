@@ -629,6 +629,9 @@ class PacksModuleService extends MedusaService({
     topupTotal: number;
     spendTotal: number;
     externalFundedSpendTotal: number;
+    // VIP turnover basis (MYR): net pack_open spend regardless of funding
+    // source — winnings-funded opens count (2026-07-22). Reversals net it down.
+    vipSpendTotal: number;
     // Playthrough-basis deposited total (MYR): topups that carry a basis column
     // (external_funded_cents IS NOT NULL), grandfathering pre-1b deposits out —
     // the SAME filter walletSummary's deposited_cents uses (plan 033). This is
@@ -644,6 +647,7 @@ class PacksModuleService extends MedusaService({
         topup_cents: string | null;
         spend_cents: string | null;
         ext_spend_cents: string | null;
+        vip_spend_cents: string | null;
         deposited_pt_cents: string | null;
       }[]
     >(
@@ -652,6 +656,7 @@ class PacksModuleService extends MedusaService({
         "  COALESCE(SUM(CASE WHEN reason = 'topup' AND amount > 0 THEN ROUND(amount * 100) ELSE 0 END), 0)::bigint AS topup_cents, " +
         '  COALESCE(SUM(CASE WHEN amount < 0 THEN ROUND(-amount * 100) ELSE 0 END), 0)::bigint AS spend_cents, ' +
         "  COALESCE(SUM(CASE WHEN reason = 'pack_open' THEN -external_funded_cents ELSE 0 END), 0)::bigint AS ext_spend_cents, " +
+        "  COALESCE(SUM(CASE WHEN reason = 'pack_open' THEN ROUND(-amount * 100) ELSE 0 END), 0)::bigint AS vip_spend_cents, " +
         `  COALESCE(SUM(CASE WHEN ${DEPOSITED_PT_FILTER} THEN ROUND(amount * 100) ELSE 0 END), 0)::bigint AS deposited_pt_cents ` +
         'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
       [customerId],
@@ -662,6 +667,7 @@ class PacksModuleService extends MedusaService({
       topupTotal: Number(r?.topup_cents ?? 0) / 100,
       spendTotal: Number(r?.spend_cents ?? 0) / 100,
       externalFundedSpendTotal: Number(r?.ext_spend_cents ?? 0) / 100,
+      vipSpendTotal: Number(r?.vip_spend_cents ?? 0) / 100,
       depositedPlaythroughTotal: Number(r?.deposited_pt_cents ?? 0) / 100,
     };
   }
@@ -3409,9 +3415,12 @@ class PacksModuleService extends MedusaService({
     return after;
   }
 
-  // Monotonic lifetime external spend for a single customer, in SEN. Sums
-  // ORIGINAL pack_open debits (amount<0) only — reversals are amount>0 and
-  // thus excluded, so the counter never drops on a clawback (spec §3).
+  // Monotonic lifetime VIP turnover for a single customer, in SEN: full
+  // pack_open spend regardless of funding source (2026-07-22 turnover-VIP —
+  // winnings-funded opens count; commissions/playthrough gate still use the
+  // external-funded basis). Sums ORIGINAL pack_open debits (amount<0) only —
+  // reversals are amount>0 and thus excluded, so the counter never drops on a
+  // clawback (spec §3).
   // This mirrors the `lifetimeExternalSen` pure fold but runs in raw SQL for
   // efficiency (one scan vs. N ORM fetches). Uses @InjectManager so a caller
   // outside a transaction gets a fresh connection.
@@ -3423,7 +3432,7 @@ class PacksModuleService extends MedusaService({
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
     const rows = await em.execute<{ sen: string | null }[]>(
-      `SELECT COALESCE(SUM(-external_funded_cents), 0)::bigint AS sen
+      `SELECT COALESCE(SUM(ROUND(-amount * 100)), 0)::bigint AS sen
          FROM credit_transaction
         WHERE customer_id = ? AND reason = 'pack_open' AND amount < 0 AND deleted_at IS NULL`,
       [customerId],
@@ -3485,7 +3494,7 @@ class PacksModuleService extends MedusaService({
   }
 
   // Shared VIP-state inputs read from the authoritative ledger: the monotonic
-  // lifetime counter (SEN), the net-basis external spend (MYR, the display axis),
+  // lifetime turnover counter (SEN), the net turnover spend (MYR, the display axis),
   // and the full ladder (threshold + reward columns). Both rebuildVipMemberState
   // and grantLevelUpRewards need exactly these, so they live in one place and can
   // never drift in what they read. Reads stay SEQUENTIAL: lifetimeExternalSenFor
@@ -3499,8 +3508,7 @@ class PacksModuleService extends MedusaService({
       customerId,
       sharedContext,
     );
-    const netBasisMyr = (await this.creditSummary(customerId))
-      .externalFundedSpendTotal;
+    const netBasisMyr = (await this.creditSummary(customerId)).vipSpendTotal;
     const ladderRows = await this.listVipLevels(
       {},
       {
@@ -3540,6 +3548,21 @@ class PacksModuleService extends MedusaService({
       },
       sharedContext,
     );
+  }
+
+  // Distinct customers that have ever touched the credit ledger — shared by
+  // rebuildAllVipMemberState and the turnover reconciliation script.
+  @InjectManager()
+  async listLedgerCustomerIds(
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<string[]> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ customer_id: string }[]>(
+      `SELECT DISTINCT customer_id FROM credit_transaction WHERE deleted_at IS NULL`,
+      [],
+    );
+    return rows.map((r) => r.customer_id);
   }
 
   // Rebuild the vip_member_state projection for every customer that has ever
@@ -3674,7 +3697,7 @@ class PacksModuleService extends MedusaService({
   // origin discriminates ladder grants (this method) from box-won grants, which
   // are repeatable per (customer, level, kind) and fall outside this index.
   //
-  // currentLevel uses the NET basis (creditSummary.externalFundedSpendTotal) so
+  // currentLevel uses the NET turnover basis (creditSummary.vipSpendTotal) so
   // it may drop below highest_level_ever after a clawback — that's by design.
   @InjectManager()
   async grantLevelUpRewards(

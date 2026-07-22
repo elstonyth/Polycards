@@ -20,6 +20,11 @@ export interface LedgerTotals {
   spendCents: number;
   externalBalanceCents: number;
   externalFundedSpendCents: number;
+  // VIP turnover basis (2026-07-22): net pack_open spend in cents regardless of
+  // funding source — winnings-funded opens count toward VIP. Reversal rows
+  // (amount>0, reason pack_open) net it back down. Referral commissions and the
+  // withdrawal playthrough gate still use the external-funded fields above.
+  vipSpendCents: number;
   // Plan 033/038 playthrough basis: topups that carry a non-null external basis
   // (external_funded_cents IS NOT NULL), grandfathering pre-1b NULL-basis deposits
   // OUT. NOT topupCents (which counts every positive topup regardless of basis).
@@ -35,6 +40,7 @@ export const EMPTY_TOTALS: Readonly<LedgerTotals> = Object.freeze({
   spendCents: 0,
   externalBalanceCents: 0,
   externalFundedSpendCents: 0,
+  vipSpendCents: 0,
   depositedPlaythroughCents: 0,
 });
 
@@ -60,6 +66,7 @@ export function foldLedgerRow(
     spendCents: acc.spendCents + (cents < 0 ? -cents : 0),
     externalBalanceCents: acc.externalBalanceCents + ext,
     externalFundedSpendCents: acc.externalFundedSpendCents + externalConsumed,
+    vipSpendCents: acc.vipSpendCents + (row.reason === "pack_open" ? -cents : 0),
     // Mirrors SQL DEPOSITED_PT_FILTER: reason='topup' AND amount>0 AND
     // external_funded_cents IS NOT NULL. A NULL-basis (pre-1b) topup is
     // grandfathered OUT — gate on `!= null`, not `> 0`.
@@ -78,6 +85,7 @@ export function totalsToUsd(t: LedgerTotals): {
   topupTotal: number;
   spendTotal: number;
   externalFundedSpendTotal: number;
+  vipSpendTotal: number;
   depositedPlaythroughTotal: number;
 } {
   return {
@@ -85,6 +93,7 @@ export function totalsToUsd(t: LedgerTotals): {
     topupTotal: t.topupCents / 100,
     spendTotal: t.spendCents / 100,
     externalFundedSpendTotal: t.externalFundedSpendCents / 100,
+    vipSpendTotal: t.vipSpendCents / 100,
     depositedPlaythroughTotal: t.depositedPlaythroughCents / 100,
   };
 }

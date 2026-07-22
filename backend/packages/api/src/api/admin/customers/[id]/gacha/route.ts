@@ -86,7 +86,7 @@ export async function GET(
   }));
   const liveLevel =
     ladder.length > 0
-      ? levelForSpend(summary.externalFundedSpendTotal, ladder)
+      ? levelForSpend(summary.vipSpendTotal, ladder)
       : null;
 
   const vip =
@@ -96,12 +96,12 @@ export async function GET(
         ? {
             level: Number(stateRow.current_level),
             highest_level_ever: Number(stateRow.highest_level_ever),
-            spend: summary.externalFundedSpendTotal,
+            spend: summary.vipSpendTotal,
           }
         : {
             level: liveLevel,
             highest_level_ever: liveLevel,
-            spend: summary.externalFundedSpendTotal,
+            spend: summary.vipSpendTotal,
           };
 
   res.json({

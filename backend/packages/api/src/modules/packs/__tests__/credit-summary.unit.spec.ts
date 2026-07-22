@@ -27,11 +27,13 @@ describe("foldLedgerRow + totalsToUsd (external-funded)", () => {
     expect(t.spendCents).toBe(12500); // |−75| + |−50|
     expect(t.externalBalanceCents).toBe(0); // 10000 − 7500 − 2500
     expect(t.externalFundedSpendCents).toBe(10000); // 7500 + 2500 consumed
+    expect(t.vipSpendCents).toBe(12500); // turnover: FULL open spend, funding-blind
     expect(totalsToUsd(t)).toEqual({
       balance: 20,
       topupTotal: 100,
       spendTotal: 125,
       externalFundedSpendTotal: 100,
+      vipSpendTotal: 125,
       depositedPlaythroughTotal: 100, // the RM100 topup carries a non-null basis
     });
   });
@@ -114,6 +116,17 @@ describe("foldLedgerRow + totalsToUsd (external-funded)", () => {
     expect(totalsToUsd(t).balance).toBe(0.3);
   });
 
+  // Turnover-VIP (2026-07-22): a fully winnings-funded open (external 0) still
+  // counts its FULL amount toward the VIP turnover basis.
+  it("a winnings-funded open counts toward vipSpend but not external spend", () => {
+    const t = foldAll([
+      { amount: 45, reason: "buyback", externalFundedCents: 0 },
+      { amount: -40, reason: "pack_open", externalFundedCents: 0 },
+    ]);
+    expect(t.externalFundedSpendCents).toBe(0); // no deposit consumed
+    expect(t.vipSpendCents).toBe(4000); // full open counts toward VIP
+  });
+
   it("a positive-external pack_open reversal nets the VIP basis back to zero", () => {
     // open RM75 consuming 7500 external, then a compensating +RM75 pack_open row
     // carrying +7500 external (the reversal). Basis must return to 0.
@@ -123,6 +136,7 @@ describe("foldLedgerRow + totalsToUsd (external-funded)", () => {
       { amount: 75, reason: "pack_open", externalFundedCents: 7500 },
     ]);
     expect(t.externalFundedSpendCents).toBe(0); // -(-7500) + -(+7500) = 0
+    expect(t.vipSpendCents).toBe(0); // turnover nets to zero on reversal too
     expect(t.externalBalanceCents).toBe(10000); // external balance fully restored
     expect(t.balanceCents).toBe(10000); // net wallet unchanged by the round-trip
   });
