@@ -3,14 +3,16 @@ import { Modules } from '@medusajs/framework/utils';
 import PacksModuleService from '../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../modules/packs';
 import { publicProfileFields, seedOf } from '../../../utils/profile-handle';
+import type { ChallengeRankReward } from '../../../modules/packs/challenge-validate';
 
 // GET /store/challenge — public read of the Weekly Pulled Value Challenge.
 // Plain publishable-key store route, read-only, mirrors GET /store/leaderboard.
 //
 // Standard ("Weekly Pulled Value Challenge"): every eligible pack draw feeds
 // BOTH the community pool and the personal Weekly Pull Value ranking; community
-// milestones unlock CUMULATIVE reward stages (top 3 → featured cards, ranks
-// 4-10 → credits); the week's top-10 receive everything unlocked. There is NO
+// milestones unlock CUMULATIVE reward stages, each carrying its own per-rank
+// prize table (ranks 1-10, card and/or credits); the week's top-10 receive
+// everything unlocked. There is NO
 // separate flat payout — stages ARE the prize pool (the old settings payout
 // fields are retired and not exposed here).
 //
@@ -61,32 +63,54 @@ export async function GET(
     packs.listChallengeStages(
       {},
       {
-        select: [
-          'stage_number',
-          'threshold_myr',
-          'reward_credits',
-          'reward_card_ids',
-        ],
+        select: ['stage_number', 'threshold_myr', 'rank_rewards'],
         take: 1000,
       },
     ),
   ]);
 
   const stages = stageRows
-    .map((r) => ({
-      stageNumber: r.stage_number,
-      thresholdMyr: Number(r.threshold_myr),
-      rewardCredits: Number(r.reward_credits),
-      rewardCardIds: (r.reward_card_ids as unknown as string[]) ?? [],
-    }))
+    .map((r) => {
+      const table = ((r.rank_rewards as unknown as ChallengeRankReward[]) ?? [])
+        .slice()
+        .sort((a, b) => a.rank - b.rank);
+      return {
+        stageNumber: r.stage_number,
+        thresholdMyr: Number(r.threshold_myr),
+        rankRewards: table.map((x) => ({
+          rank: x.rank,
+          cardId: x.card_id ?? null,
+          credits: Number(x.credits),
+        })),
+        // Legacy projection — the shipped storefront reads these until the
+        // per-rank UI lands (plan 057 phase 2): podium = ranks 1-3 cards,
+        // rewardCredits = the largest credits configured for ranks 4-10.
+        rewardCardIds: table
+          .filter((x) => x.rank <= 3 && x.card_id)
+          .map((x) => x.card_id as string),
+        rewardCredits: Math.max(
+          0,
+          ...table.filter((x) => x.rank >= 4).map((x) => Number(x.credits)),
+        ),
+      };
+    })
     .sort((a, b) => a.stageNumber - b.stageNumber);
 
   // Resolve every referenced card id to a thumbnail in ONE query so the
   // storefront renders featured-card art without a round-trip per id.
   // image = slab_image ?? image (graded composite preferred).
-  const cardIds = [...new Set(stages.flatMap((s) => s.rewardCardIds))];
+  const cardIds = [
+    ...new Set(
+      stages.flatMap((s) =>
+        s.rankRewards
+          .map((r) => r.cardId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ),
+  ];
   // slab_image is carried SEPARATELY from image so the storefront knows when
-  // the art is a real graded slab (frameable) vs raw card art (not).
+  // the art is a real graded slab (frameable, wears the prism frame) vs raw
+  // card art (not).
   const cards: Record<
     string,
     { name: string; image: string; slab_image: string | null }

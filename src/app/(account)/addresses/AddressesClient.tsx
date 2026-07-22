@@ -1,18 +1,14 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
-import { ChevronLeft, MapPin, Plus } from 'lucide-react';
+import { MapPin, Plus } from 'lucide-react';
 import {
   addAddress,
   type AddressView,
   type AddAddressInput,
 } from '@/lib/actions/delivery';
+import { INPUT_CLASS } from '@/components/account/ui';
 import { Pill } from '@/components/ui/pill';
-
-// Mirrors RequestDeliveryModal's form styling (which mirrors SettingsForm).
-const INPUT_CLASS =
-  'h-11 w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 text-sm text-white placeholder:text-white/40 focus:border-white/25 focus:outline-none';
 
 const EMPTY_FORM: AddAddressInput = {
   firstName: '',
@@ -104,20 +100,6 @@ export function AddressesClient({
 
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <Link
-          href="/me"
-          className="inline-flex items-center gap-1 text-[13px] font-semibold text-neutral-400 hover:text-white"
-        >
-          <ChevronLeft className="h-4 w-4" aria-hidden />
-          Me
-        </Link>
-        <h1 className="font-heading mt-2 text-2xl text-white">Addresses</h1>
-        <p className="mt-1 text-[13px] text-neutral-400">
-          Where we ship your cards.
-        </p>
-      </div>
-
       {addresses.length > 0 && (
         <ul className="flex flex-col gap-2">
           {addresses.map((a) => (
@@ -146,10 +128,8 @@ export function AddressesClient({
         </ul>
       )}
 
-      {addresses.length === 0 && !adding && (
-        <p className="text-sm text-neutral-400">No addresses saved yet.</p>
-      )}
-
+      {/* No empty state: `adding` starts true whenever the list is empty, so
+          the new-address form IS the empty state. */}
       {adding ? (
         <form
           onSubmit={(e) => {
@@ -162,21 +142,35 @@ export function AddressesClient({
             New address
           </p>
           <div className="mt-4 grid grid-cols-2 gap-2">
-            {field('First name', 'firstName', { autoComplete: 'given-name' })}
-            {field('Last name', 'lastName', { autoComplete: 'family-name' })}
+            {field('First name', 'firstName', {
+              autoComplete: 'given-name',
+              required: true,
+            })}
+            {field('Last name', 'lastName', {
+              autoComplete: 'family-name',
+              required: true,
+            })}
             <div className="col-span-2">
               {field('Address', 'address1', {
                 autoComplete: 'address-line1',
+                required: true,
               })}
             </div>
-            {field('City', 'city', { autoComplete: 'address-level2' })}
+            {field('City', 'city', {
+              autoComplete: 'address-level2',
+              required: true,
+            })}
             {field('Postal code', 'postalCode', {
               autoComplete: 'postal-code',
+              required: true,
             })}
             {field('Country code', 'countryCode', {
               autoComplete: 'country',
               placeholder: 'e.g. MY',
               maxLength: 2,
+              required: true,
+              pattern: '[A-Za-z]{2}',
+              title: 'Two-letter country code, for example MY',
             })}
             {field('Phone (optional)', 'phone', { autoComplete: 'tel' })}
           </div>

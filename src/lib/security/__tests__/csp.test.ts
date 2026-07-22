@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { buildCsp } from '../csp';
+import { buildCsp, cspEnforced } from '../csp';
 
 describe('buildCsp', () => {
   let prevBackend: string | undefined;
@@ -89,4 +89,24 @@ describe('buildCsp', () => {
     process.env.CSP_ENFORCE = 'true';
     expect(buildCsp()).toContain('upgrade-insecure-requests');
   });
+
+  // The flag fails open, so a near-miss spelling would silently ship the whole
+  // policy report-only with nothing to notice. Accept the truthy spellings; keep
+  // rejecting values that plainly mean "off".
+  it.each(['TRUE', ' true ', '1'])(
+    'treats CSP_ENFORCE=%j as enforcing',
+    (value) => {
+      process.env.CSP_ENFORCE = value;
+      expect(cspEnforced()).toBe(true);
+    },
+  );
+
+  it.each(['false', '0', ''])(
+    'treats CSP_ENFORCE=%j as report-only',
+    (value) => {
+      process.env.CSP_ENFORCE = value;
+      expect(cspEnforced()).toBe(false);
+      expect(buildCsp()).not.toContain('upgrade-insecure-requests');
+    },
+  );
 });

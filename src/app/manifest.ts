@@ -1,11 +1,11 @@
 import type { MetadataRoute } from 'next';
+import { BUYBACK_RATE_LABEL } from '@/lib/buyback-copy';
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
     name: 'Polycards — Physical & Digital Collectibles',
     short_name: 'Polycards',
-    description:
-      'Rip packs. Pull graded cards. Hold, redeem, or sell back at up to 90% value.',
+    description: `Rip packs. Pull graded cards. Hold, redeem, or sell back at ${BUYBACK_RATE_LABEL} value.`,
     start_url: '/',
     display: 'standalone',
     background_color: '#171717',

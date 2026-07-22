@@ -88,6 +88,13 @@ export default async function MePage() {
   return (
     <EquippedFrameProvider initial={equippedLevel}>
       <div className="flex flex-col gap-4">
+        {/* Page label, not a heading: MeHeader's display name is already this
+            page's h1 (see MeAppearance.tsx), so an AccountHeader here would
+            give the page two competing h1s. Matches the uppercase section
+            labels below ("Showcase", "Quick access"). */}
+        <p className="text-[12px] font-semibold uppercase tracking-wide text-neutral-400">
+          Me
+        </p>
         <MeHeader
           displayName={displayName}
           handle={handle}

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { updateProfile, type ProfileCustomer } from '@/lib/actions/customer';
 import { useAuth } from '@/components/auth/AuthProvider';
+import { INPUT_CLASS } from '@/components/account/ui';
 
 // Real, wired profile form for the logged-in customer ("me"). Submits via the
 // `updateProfile` server action (httpOnly-cookie Bearer, no client-side token).
@@ -89,7 +90,7 @@ export default function SettingsForm({ customer }: Props) {
           // A long address overflows the field on a 320px screen. It's
           // read-only, so there's no caret to scroll it into view — ellipsis at
           // least reads as truncation rather than a cut-off word.
-          className="h-11 w-full cursor-not-allowed overflow-hidden rounded-xl border border-white/10 bg-white/[0.02] px-3 text-sm text-ellipsis text-white/55 focus:outline-none"
+          className="h-11 w-full cursor-not-allowed overflow-hidden rounded-xl border border-white/10 bg-white/[0.02] px-3 text-sm text-ellipsis text-white/55 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-0"
         />
         <span className="mt-1 block text-[11px] text-white/55">
           Email can&apos;t be changed here.
@@ -130,7 +131,7 @@ function Field({
       <input
         aria-label={props['aria-label'] ?? label}
         {...props}
-        className="h-11 w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 text-sm text-white placeholder:text-white/40 focus:border-white/25 focus:outline-none"
+        className={INPUT_CLASS}
       />
     </label>
   );

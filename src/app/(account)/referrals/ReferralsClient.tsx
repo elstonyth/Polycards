@@ -4,38 +4,61 @@ import { useState } from 'react';
 import { Check, Copy, Share2 } from 'lucide-react';
 import { Pill } from '@/components/ui/pill';
 
+/** Copy the invite link. Returns false when the clipboard is unavailable. */
+async function copyLink(inviteUrl: string) {
+  try {
+    await navigator.clipboard.writeText(inviteUrl);
+    return true;
+  } catch {
+    /* clipboard denied (insecure context / permission): no-op */
+    return false;
+  }
+}
+
+/** Native share sheet, falling back to a clipboard copy. */
+async function shareLink(inviteUrl: string) {
+  try {
+    if (navigator.share) {
+      await navigator.share({
+        title: 'Polycards',
+        text: 'Rip packs, pull real graded cards. Join me on Polycards:',
+        url: inviteUrl,
+      });
+      return;
+    }
+  } catch {
+    /* user dismissed the share sheet: no-op */
+    return;
+  }
+  await copyLink(inviteUrl);
+}
+
+/**
+ * Standalone share button for the "No recruits yet" empty state, which lives
+ * in the server page. Same action as the card's button above it.
+ */
+export function ShareInviteButton({ inviteUrl }: { inviteUrl: string }) {
+  return (
+    <Pill onClick={() => void shareLink(inviteUrl)} className="mt-1">
+      <Share2 className="h-4 w-4" aria-hidden />
+      Share invite link
+    </Pill>
+  );
+}
+
 /** Invite-link card: copy + native share sheet (showgo's "Share Invite Link"). */
 export default function ReferralsClient({ inviteUrl }: { inviteUrl: string }) {
   const [copied, setCopied] = useState(false);
 
   async function copy() {
-    try {
-      await navigator.clipboard.writeText(inviteUrl);
+    if (await copyLink(inviteUrl)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    } catch {
-      /* clipboard denied (insecure context / permission) — no-op */
-    }
-  }
-
-  async function share() {
-    try {
-      if (navigator.share) {
-        await navigator.share({
-          title: 'Polycards',
-          text: 'Rip packs, pull real graded cards — join me on Polycards:',
-          url: inviteUrl,
-        });
-      } else {
-        await copy();
-      }
-    } catch {
-      /* user dismissed the share sheet — no-op */
     }
   }
 
   return (
-    <div className="mt-4 rounded-2xl border border-white/10 bg-neutral-900 p-4">
+    <div className="rounded-2xl border border-white/10 bg-neutral-900 p-4">
       <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
         Your invite link
       </p>
@@ -56,7 +79,11 @@ export default function ReferralsClient({ inviteUrl }: { inviteUrl: string }) {
           )}
         </button>
       </div>
-      <Pill onClick={share} size="lg" className="mt-3 w-full">
+      <Pill
+        onClick={() => void shareLink(inviteUrl)}
+        size="lg"
+        className="mt-3 w-full"
+      >
         <Share2 className="h-4 w-4" aria-hidden />
         Share invite link
       </Pill>

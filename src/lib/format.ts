@@ -27,6 +27,14 @@ export function money(
 export const rm = (n: number) => money(n, { prefix: 'RM ' });
 export const rm0 = (n: number) => money(n, { prefix: 'RM ', decimals: 0 });
 
+// Affordability compared in integer sen, never raw floats: a fractional pack
+// price times a reel/qty count (e.g. 1.1 * 3 === 3.3000000000000003) can read
+// as just over an exactly-equal balance and false-block a spin the player can
+// afford. Prices carry at most 2 decimals, so rounding to sen is exact.
+const sen = (n: number) => Math.round(n * 100);
+export const affordable = (balance: number, cost: number) =>
+  sen(balance) >= sen(cost);
+
 // Single wording for a VIP reward grant (voucher or frame), shared by /daily
 // and /vouchers — was two independently-drifted copies.
 export function voucherLabel(grant: {

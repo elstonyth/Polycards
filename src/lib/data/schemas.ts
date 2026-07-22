@@ -139,13 +139,28 @@ export const ChallengeSchema = z.looseObject({
     resetDay: finite,
     resetHour: finite,
   }),
-  /** A malformed stage is dropped, not fatal — surviving stages still render. */
+  /** A malformed stage is dropped, not fatal — surviving stages still render.
+   *  `rankRewards` is the per-rank prize table (plan 057): SPARSE — an absent
+   *  rank pays nothing, and a rank may carry a card AND/OR credits. A malformed
+   *  RANK ROW drops that row only (droppableArray), a non-array table degrades
+   *  to `[]`, and the whole field is optional for deploy skew (an older backend
+   *  without it renders the stage with no prize tiles rather than vanishing). */
   stages: droppableArray(
     z.looseObject({
       stageNumber: finite,
       thresholdMyr: finite,
-      rewardCredits: finite,
-      rewardCardIds: z.array(z.string()),
+      rankRewards: droppableArray(
+        z.looseObject({
+          // Strict 1-10 integer: StageCarousel indexes RANKS[rank-1] with a
+          // non-null assertion, so a 0 / negative / fractional rank would crash
+          // the whole challenge tile. droppableArray drops the bad row instead.
+          rank: z.number().int().min(1).max(10),
+          cardId: z.string().nullable().catch(null),
+          credits: finite,
+        }),
+      )
+        .optional()
+        .catch(undefined),
     }),
   ),
   /** A malformed card entry drops that thumbnail (getter tolerates unresolved

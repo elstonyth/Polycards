@@ -34,9 +34,11 @@ export default async function FairnessPage() {
         delay={80}
         className="mt-4 max-w-4xl text-sm leading-relaxed text-white/55"
       >
-        This page will list the selection proofs for your last 100 pulls. Each
-        proof contains a serverSeedHash (commitment), the revealed serverSeed,
-        your clientSeed (session), and deterministic selection details — enough
+        Every pull runs on commit-reveal: the server commits to a hashed seed
+        before you spin, and the outcome is derived from that seed plus your own
+        session seed. This page will list the proof behind each of your pulls,
+        the serverSeedHash (commitment), the revealed serverSeed, your
+        clientSeed (session), and the deterministic selection details, enough
         for anyone to reproduce the outcome from the seeds alone.
       </Reveal>
 
@@ -46,8 +48,8 @@ export default async function FairnessPage() {
           delay={140}
           className="mt-8 max-w-xl rounded-xl border border-white/10 bg-neutral-900 px-4 py-3.5 text-sm text-white/70"
         >
-          Proof publishing is being finalized — once live, every pull you make
-          will list its seeds and selection details here.
+          Proof publishing is being finalized. Once it is live, every pull you
+          make will list its seeds and selection details here.
         </Reveal>
       ) : (
         <Reveal delay={140} className="mt-8">

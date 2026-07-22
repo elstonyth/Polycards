@@ -15,7 +15,7 @@ import {
   Plus,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { rm, rm0 } from '@/lib/format';
+import { rm, affordable } from '@/lib/format';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { openAuth } from '@/components/AuthButton';
 import Reveal from '@/components/Reveal';
@@ -25,7 +25,6 @@ import {
   type ResolvedPack,
   type PackCard,
   FLAT_BUYBACK_PERCENT,
-  priceNumber,
   factoryVideo,
 } from '@/lib/packs-data';
 import { AmbientVideo } from '@/components/AmbientVideo';
@@ -84,7 +83,8 @@ export default function PackDetailClient({
   // so anyone's pull shows up here without a reload.
   const recent = useLiveRecentPulls(recentPulls);
 
-  const priceNum = priceNumber(active.price);
+  // Real backend price, never re-parsed from the rounded display string.
+  const priceNum = active.priceValue;
   // Baked Polycards tiers animate their factory stage (still poster otherwise).
   const heroVideo = factoryVideo(active.displayImage);
 
@@ -120,7 +120,7 @@ export default function PackDetailClient({
       openAuth('login');
       return;
     }
-    if (balance !== null && balance < priceNum * qty) {
+    if (balance !== null && !affordable(balance, priceNum * qty)) {
       setNeedsTopUp(true);
       setOpenError('Not enough credits to open.');
       return;
@@ -354,7 +354,8 @@ export default function PackDetailClient({
                   type="button"
                   aria-label="Increase quantity"
                   onClick={() => setQ(qty + 1)}
-                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+                  disabled={qty >= maxQty}
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/70 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-40"
                 >
                   <Plus className="h-4 w-4" aria-hidden />
                 </button>
@@ -380,7 +381,7 @@ export default function PackDetailClient({
               >
                 {customer ? 'Open Pack' : 'Log in to open'}
                 <span className="flex items-center gap-1.5 font-heading text-base tracking-tight tabular-nums">
-                  {rm0(priceNum * qty)}
+                  {rm(priceNum * qty)}
                   <ArrowRight className="h-4 w-4" aria-hidden />
                 </span>
               </Pill>
@@ -575,7 +576,7 @@ export default function PackDetailClient({
         <div className="flex items-center gap-3">
           <div className="min-w-0 flex-1">
             <p className="truncate font-heading text-xl font-bold leading-none tracking-tight text-white tabular-nums">
-              {rm0(priceNum * qty)}
+              {rm(priceNum * qty)}
             </p>
             <p className="mt-1 text-[11px] leading-none text-white/60">
               {active.buybackPercent ?? FLAT_BUYBACK_PERCENT}% buyback
@@ -598,7 +599,8 @@ export default function PackDetailClient({
               type="button"
               aria-label="Increase quantity"
               onClick={() => setQ(qty + 1)}
-              className="flex h-11 w-10 items-center justify-center rounded-full text-white/70 transition-colors hover:text-white"
+              disabled={qty >= maxQty}
+              className="flex h-11 w-10 items-center justify-center rounded-full text-white/70 transition-colors hover:text-white disabled:opacity-40"
             >
               <Plus className="h-4 w-4" aria-hidden />
             </button>

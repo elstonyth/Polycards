@@ -9,8 +9,14 @@ import { useReducedMotion } from 'motion/react';
 import { Check, Lock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { SlabImage } from '@/components/SlabImage';
-import type { ChallengeStage, ChallengeStageState } from '@/lib/data/challenge';
+import type {
+  ChallengeCard,
+  ChallengeRankReward,
+  ChallengeStage,
+  ChallengeStageState,
+} from '@/lib/data/challenge';
 import { GalleryRail } from '@/app/slots/[slug]/GalleryRail';
+import { RankRewardSheet } from './RankRewardSheet';
 
 // Medal-gradient rank numerals (#1ST gold / #2ND silver / #3RD bronze) — the
 // prize-grid treatment from the operator's reference design.
@@ -63,7 +69,19 @@ function StageCard({
   stage: ChallengeStage;
   pooled: string | null;
 }) {
+  const [sheetOpen, setSheetOpen] = useState(false);
   const pct = Math.round(stage.progressPct ?? 0);
+  // Podium = ranks 1-3 that actually have a card; the tile IS the card art, so
+  // it shows no credits. KNOWN LIMITATION: credits configured on ranks 1-3 are
+  // displayed NOWHERE — a credits-only top-3 rank has no tile, and the sheet
+  // below only ever receives ranks 4-10. Migrated config is card-only at ranks
+  // 1-3 (plan 057), so this can't occur yet; revisit when the admin editor can
+  // set credits on the podium.
+  const podium = stage.rankRewards.filter(
+    (r): r is ChallengeRankReward & { card: ChallengeCard } =>
+      r.rank <= 3 && r.card !== null,
+  );
+  const rest = stage.rankRewards.filter((r) => r.rank >= 4);
   return (
     <div
       className={cn(
@@ -101,36 +119,37 @@ function StageCard({
         </span>
       </p>
 
-      {/* Prize grid (reference design): each podium rank gets ITS card —
-          reward_card_ids order is the ranking, carried as `rank` so a dropped
-          card never shifts a lower one under the wrong numeral — plus the
-          4th-10th credits tile. Plain <img> (admin picker pattern) so
-          backend-hosted art needs no Next remote-image config. */}
+      {/* Prize grid (reference design): each podium rank gets ITS card — `rank`
+          is carried on the row, so a dropped card never shifts a lower one
+          under the wrong numeral — plus a 4th tile that OPENS the ranks 4-10
+          sheet (the per-rank table can hold seven more prizes than this grid
+          can show). Plain <img> (admin picker pattern) so backend-hosted art
+          needs no Next remote-image config. */}
       <div className="mt-4 grid grid-cols-2 gap-2">
-        {stage.rankCards.map((c) => (
+        {podium.map((r) => (
           <div
-            key={c.rank}
+            key={r.rank}
             className="flex flex-col rounded-xl border border-white/5 bg-white/[0.04] p-2.5"
           >
-            <RankNumeral rank={RANKS[c.rank - 1]!} />
-            {/* Graded prizes wear the prism frame (the challenge's own cosmetic
+            <RankNumeral rank={RANKS[r.rank - 1]!} />
+            {/* Graded prizes wear the prism frame (the challenge own cosmetic
                 frame); raw card art has the wrong aspect for the band, so it
                 stays a plain <img>. Halo scaled right down — at this size the
                 full 44px glow is wider than the card. */}
-            {c.slabImage ? (
+            {r.card.slabImage ? (
               <SlabImage
-                src={c.image}
-                slabSrc={c.slabImage}
+                src={r.card.image}
+                slabSrc={r.card.slabImage}
                 alt=""
                 frameVariant="prism"
                 glowScale={0.25}
-                sizes="96px"
+                sizes="256px"
                 className="mx-auto mt-2 h-20"
               />
             ) : (
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                src={c.image}
+                src={r.card.image}
                 alt=""
                 loading="lazy"
                 decoding="async"
@@ -138,11 +157,16 @@ function StageCard({
               />
             )}
             <p className="mt-2 line-clamp-2 text-[10px] leading-tight font-semibold tracking-wide text-neutral-300 uppercase">
-              {c.name}
+              {r.card.name}
             </p>
           </div>
         ))}
-        <div className="flex flex-col rounded-xl border border-white/5 bg-white/[0.04] p-2.5">
+        <button
+          type="button"
+          onClick={() => setSheetOpen(true)}
+          aria-label={`View rewards for ranks 4 to 10 of stage ${stage.stageNumber}`}
+          className="flex flex-col rounded-xl border border-white/5 bg-white/[0.04] p-2.5 text-left transition-colors hover:border-white/15 hover:bg-white/[0.07] focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:outline-none"
+        >
           <span className="font-heading bg-gradient-to-b from-yellow-200 via-chase to-amber-600 bg-clip-text text-2xl leading-none text-transparent italic">
             #4<span className="text-xs">–10TH</span>
           </span>
@@ -155,11 +179,22 @@ function StageCard({
             className="mx-auto mt-2 h-20 object-contain"
           />
           <p className="mt-2 text-[10px] leading-tight font-semibold tracking-wide text-neutral-300 uppercase">
-            Credits{' '}
-            <span className="text-chase block text-xs">{stage.reward}</span>
+            {rest.length > 0 ? `${rest.length} more prizes` : 'Credits'}
+            {/* stage.reward is the SUM across ranks 4-10, not one winner's
+                prize — ranks can now be configured individually, so a single
+                figure cannot mean "what you get". Labelled as a total. */}
+            <span className="text-chase block text-xs">
+              {stage.reward} total
+            </span>
           </p>
-        </div>
+        </button>
       </div>
+      <RankRewardSheet
+        open={sheetOpen}
+        onClose={() => setSheetOpen(false)}
+        stageNumber={stage.stageNumber}
+        rewards={rest}
+      />
 
       {/* Community-pool progress toward THIS stage (VIP-card bar pattern). */}
       {stage.progressPct !== null && (

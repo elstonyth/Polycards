@@ -14,19 +14,12 @@ import FaqAccordion, { type FaqItem } from '@/components/FaqAccordion';
 import Reveal from '@/components/Reveal';
 import HowItWorksSteps from '@/components/HowItWorksSteps';
 import HeroVideo from '@/components/HeroVideo';
-import { DEMO_STATS } from '@/lib/demo-stats';
+import { BUYBACK_RATE_LABEL } from '@/lib/buyback-copy';
 
 export const metadata: Metadata = {
   title: 'How It Works',
-  description:
-    'Open packs of real graded cards, own them instantly, and ship to your door or sell back at up to 90% of market value.',
+  description: `Open packs of real graded cards, own them instantly, and ship to your door or sell back at ${BUYBACK_RATE_LABEL} of market value.`,
 };
-
-const STATS = [
-  { value: DEMO_STATS.transactions, label: 'Transactions' },
-  { value: DEMO_STATS.volume, label: 'Volume traded' },
-  { value: DEMO_STATS.listings, label: 'Active listings' },
-];
 
 type VaultCard = { icon: LucideIcon; title: string; body: string };
 const VAULT_CARDS: VaultCard[] = [
@@ -116,11 +109,11 @@ const FAQS: FaqItem[] = [
   },
   {
     q: "What if I don't like my pull?",
-    a: 'You can sell any card back instantly for 85-90% of its market value — the credit lands on your balance immediately, ready for the next rip.',
+    a: `You can sell any card back instantly for ${BUYBACK_RATE_LABEL} of its market value. The credit lands on your balance immediately, ready for the next rip.`,
   },
   {
     q: 'How are pulls determined? Is it fair?',
-    a: 'Every pull is determined by a provably fair system: each result is committed to before the pull and verifiable afterwards (commit-reveal). The odds for each pack are published transparently, and every result can be independently checked. No one, including us, can influence the outcome.',
+    a: 'Every pull uses commit-reveal. Before you spin, the server commits to a hashed seed it cannot change afterwards; your outcome is derived from that seed plus your own session seed, so no one, including us, can steer the result once the pack is open. The odds for each pack are published up front. Per-pull proofs, the seeds and selection details you would need to reproduce a result yourself, are not published yet; that is being finalized on the fairness page.',
   },
   {
     q: 'Where are my cards stored?',
@@ -128,7 +121,7 @@ const FAQS: FaqItem[] = [
   },
   {
     q: 'Can I sell my cards?',
-    a: 'Absolutely. Every card comes with an instant sell-back at 85-90% of its market value — a guaranteed payout, with funds available immediately.',
+    a: `Absolutely. Every card comes with an instant sell-back at ${BUYBACK_RATE_LABEL} of its market value, a guaranteed payout with funds available immediately.`,
   },
 ];
 
@@ -148,7 +141,7 @@ const SectionHeading = ({ title, sub }: { title: string; sub?: string }) => (
 export default function HowItWorksPage() {
   return (
     <div className="mx-auto w-full px-fluid py-4">
-      {/* 1. HERO — wordings, pack, and stats each animate in (staggered) */}
+      {/* 1. HERO — wordings and pack each animate in (staggered) */}
       <section className="relative mb-6 overflow-hidden rounded-2xl border border-white/10 bg-neutral-950">
         {/* decorative blurred blob (static, not animated-in) */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -182,14 +175,14 @@ export default function HowItWorksPage() {
               className="mt-4 max-w-lg text-sm leading-relaxed text-white/65 sm:text-base 2xl:text-lg"
             >
               Open packs of real graded cards, own them instantly, and ship to
-              your door or sell back at up to 90% of market value.
+              your door or sell back at {BUYBACK_RATE_LABEL} of market value.
             </Reveal>
             <Reveal delay={270} className="mt-6 flex flex-wrap gap-3">
               <Link
                 href="/slots"
                 className="inline-flex items-center justify-center rounded-2xl bg-white/90 px-7 py-3 text-sm font-semibold text-neutral-950 shadow-lg transition-colors duration-300 hover:bg-white"
               >
-                Start Opening Packs
+                Open Your First Pack
               </Link>
             </Reveal>
           </div>
@@ -226,23 +219,6 @@ export default function HowItWorksPage() {
               />
             </div>
           </Reveal>
-        </div>
-        {/* stats bar — each stat staggers in */}
-        <div className="relative grid grid-cols-3 border-t border-white/10">
-          {STATS.map((s, i) => (
-            <Reveal
-              key={s.label}
-              delay={350 + i * 110}
-              className="px-4 py-5 text-center 2xl:py-7"
-            >
-              <div className="font-heading text-xl font-bold text-white sm:text-2xl lg:text-3xl 2xl:text-4xl">
-                {s.value}
-              </div>
-              <div className="mt-1 text-[11px] uppercase tracking-wide text-white/50 sm:text-xs">
-                {s.label}
-              </div>
-            </Reveal>
-          ))}
         </div>
       </section>
 
@@ -407,8 +383,8 @@ export default function HowItWorksPage() {
         </div>
       </section>
 
-      {/* 7. FAQ */}
-      <section className="mb-16">
+      {/* 7. FAQ. #faq is linked from /contact */}
+      <section id="faq" className="mb-16 scroll-mt-24">
         <Reveal>
           <SectionHeading
             title="Frequently Asked Questions"

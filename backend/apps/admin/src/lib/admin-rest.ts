@@ -716,11 +716,20 @@ export const saveVipLevels = (body: { levels: VipLevelDTO[]; reason: string }) =
 
 // ── Weekly Challenge (milestone stages + week/payout settings) ───────────────
 
+/** One rank's prize inside a stage. Mirrors ChallengeRankReward in
+ *  backend/packages/api/src/modules/packs/challenge-validate.ts. A rank may
+ *  carry a card AND/OR credits; ranks absent from the array pay nothing. */
+export interface ChallengeRankRewardDTO {
+  rank: number; // 1..10
+  card_id: string | null;
+  credits: number; // MYR credited as store credits
+}
+
 export interface ChallengeStageDTO {
   stage_number: number;
   threshold_myr: number; // MYR
-  reward_credits: number; // MYR credited as store credits
-  reward_card_ids: string[]; // featured card ids
+  /** SPARSE per-rank prize table, ranks 1..10, ascending. */
+  rank_rewards: ChallengeRankRewardDTO[];
 }
 
 export const getChallengeStages = () =>

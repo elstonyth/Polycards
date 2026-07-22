@@ -55,6 +55,7 @@ const toPack = (p: BackendPack): Pack => ({
   id: p.slug,
   name: p.title,
   price: formatPrice(p.price),
+  priceValue: p.price,
   image: p.image,
   displayImage: p.display_image || undefined,
   boost: p.boost || undefined,

@@ -5,7 +5,6 @@ import {
   Sparkles,
   Vault,
   Truck,
-  Boxes,
   Layers,
   Zap,
   Globe,
@@ -14,6 +13,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import Reveal from '@/components/Reveal';
+import { BUYBACK_RATE_LABEL } from '@/lib/buyback-copy';
 
 export const metadata: Metadata = {
   title: 'About',
@@ -41,18 +41,12 @@ const STEPS: Step[] = [
   {
     icon: Truck,
     title: 'Ship or Sell',
-    body: 'Redeem anytime with worldwide shipping, or sell back at 85%.',
+    body: `Redeem anytime with worldwide shipping, or sell back at ${BUYBACK_RATE_LABEL}.`,
   },
 ];
 
 type Feature = { icon: LucideIcon; stat: string; label: string; body: string };
 const FEATURES: Feature[] = [
-  {
-    icon: Boxes,
-    stat: '5+',
-    label: 'Card categories',
-    body: 'Sports, Pokemon, TCG, and more. One platform for every type of collectible card.',
-  },
   {
     icon: Layers,
     stat: '100%',
@@ -61,9 +55,9 @@ const FEATURES: Feature[] = [
   },
   {
     icon: Zap,
-    stat: '85%',
+    stat: BUYBACK_RATE_LABEL,
     label: 'Buyback rate',
-    body: '85% buyback guarantee on every card. Sell instantly without waiting for buyers.',
+    body: `${BUYBACK_RATE_LABEL} buyback guarantee on every card. Sell instantly without waiting for buyers.`,
   },
   {
     icon: Globe,
@@ -207,7 +201,7 @@ export default function AboutPage() {
             sub="Everything you need to collect, keep, and cash out."
           />
         </Reveal>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           {FEATURES.map((f, i) => {
             const Icon = f.icon;
             return (
@@ -251,24 +245,6 @@ export default function AboutPage() {
               branding, payment processing, vault storage, and worldwide
               fulfillment.
             </p>
-            <div className="mt-6 flex gap-8">
-              <div>
-                <div className="font-heading text-2xl font-bold text-white">
-                  520K+
-                </div>
-                <div className="text-[11px] uppercase tracking-wide text-white/50">
-                  Units sold
-                </div>
-              </div>
-              <div>
-                <div className="font-heading text-2xl font-bold text-white">
-                  5+
-                </div>
-                <div className="text-[11px] uppercase tracking-wide text-white/50">
-                  Brand partners
-                </div>
-              </div>
-            </div>
           </div>
           <div className="rounded-2xl border border-white/10 bg-neutral-950 p-6">
             <p className="mb-3 text-[11px] font-medium uppercase tracking-widest text-white/60">
@@ -343,13 +319,13 @@ export default function AboutPage() {
             href="/slots"
             className="inline-flex items-center justify-center rounded-2xl bg-white/90 px-8 py-3 text-sm font-semibold text-neutral-950 shadow-lg transition-colors duration-300 hover:bg-white"
           >
-            For Collectors
+            Explore Packs
           </Link>
           <a
             href="mailto:hello@polycards.com"
             className="inline-flex items-center justify-center rounded-2xl border border-white/15 bg-white/5 px-8 py-3 text-sm font-semibold text-white transition-colors duration-300 hover:bg-white/10"
           >
-            For Brands
+            Launch With Us
           </a>
         </div>
         <p className="mt-5 text-[13px] text-white/50">

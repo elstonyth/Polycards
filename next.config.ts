@@ -1,6 +1,6 @@
 import type { NextConfig } from 'next';
 import { withSentryConfig } from '@sentry/nextjs';
-import { buildCsp } from './src/lib/security/csp';
+import { buildCsp, cspEnforced } from './src/lib/security/csp';
 
 // next/image refuses remote hosts unless allowlisted. Card/product art is
 // served by the Medusa backend (POST /admin/media stores it; see
@@ -119,10 +119,9 @@ const securityHeaders = [
   // been verified clean (scripts/qa-csp.mjs). The toggle is read at build time,
   // so flipping it requires a redeploy (DO App Platform rebuilds on env change).
   {
-    key:
-      process.env.CSP_ENFORCE === 'true'
-        ? 'Content-Security-Policy'
-        : 'Content-Security-Policy-Report-Only',
+    key: cspEnforced()
+      ? 'Content-Security-Policy'
+      : 'Content-Security-Policy-Report-Only',
     value: buildCsp(),
   },
 ];

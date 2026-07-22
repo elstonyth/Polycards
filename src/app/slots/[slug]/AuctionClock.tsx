@@ -31,7 +31,10 @@ export function AuctionClock({
           className={cn(
             'h-full w-full origin-left rounded-full',
             amber ? 'bg-chase' : 'bg-white/70',
-            pulsing && !reduced && 'animate-pulse',
+            // 1Hz, per spec ("gentle pulse in the last 5s") — Tailwind's
+            // animate-pulse runs at 2s, which reads as a slow breath rather
+            // than the tick of a clock counting down.
+            pulsing && !reduced && 'animate-pulse [animation-duration:1s]',
           )}
           style={{
             transform: `scaleX(${pct / 100})`,

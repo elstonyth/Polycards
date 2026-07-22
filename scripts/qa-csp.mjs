@@ -2,10 +2,10 @@
 // browser reports ANY CSP violation. Run after `npm run build && serve :4000`.
 import { chromium } from 'playwright';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { QA_ROUTES } from './qa-routes.mjs';
+import { QA_CSP_ROUTES } from './qa-routes.mjs';
 
 const BASE = process.env.BASE_URL ?? 'http://localhost:4000';
-const ROUTES = QA_ROUTES;
+const ROUTES = QA_CSP_ROUTES;
 const OUT_DIR = 'docs/research/csp';
 
 const browser = await chromium.launch();

@@ -1,5 +1,28 @@
 import { describe, it, expect } from 'vitest';
-import { money, rm, rm0, num, relativeTime } from '../format';
+import { money, rm, rm0, num, relativeTime, affordable } from '../format';
+
+describe('affordable — integer-sen comparison', () => {
+  it('does not false-block a fractional cost that a float would', () => {
+    // 1.1 * 3 === 3.3000000000000003 > 3.3, so a raw `balance >= cost` would
+    // reject a player holding exactly 3.30 for three RM 1.10 packs.
+    expect(3.3 >= 1.1 * 3).toBe(false); // the bug this guards
+    expect(affordable(3.3, 1.1 * 3)).toBe(true); // the fix
+  });
+
+  it('treats an exactly-equal balance as affordable', () => {
+    expect(affordable(4.5, 4.5)).toBe(true);
+  });
+
+  it('still rejects a genuinely short balance', () => {
+    expect(affordable(3.29, 3.3)).toBe(false);
+    expect(affordable(0, 1.5)).toBe(false);
+  });
+
+  it('handles whole-ringgit prices unchanged', () => {
+    expect(affordable(25, 25)).toBe(true);
+    expect(affordable(24, 25)).toBe(false);
+  });
+});
 
 describe('money', () => {
   it('defaults to $ + 2dp', () => {

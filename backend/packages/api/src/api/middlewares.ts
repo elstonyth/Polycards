@@ -580,7 +580,7 @@ export default defineMiddlewares({
     },
     {
       // Challenge reward-stage write (POST /admin/challenge/stages) — rewrites
-      // the credit-minting reward_credits stages; same admin budget.
+      // the credit-minting per-rank reward stages; same admin budget.
       matcher: '/admin/challenge/stages',
       method: 'POST',
       middlewares: [adminActionRateLimit],

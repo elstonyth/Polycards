@@ -2,7 +2,7 @@
 
 import { useRef, useState } from 'react';
 import Link from 'next/link';
-import { Badge } from '@/components/account/ui';
+import { Badge, INPUT_CLASS } from '@/components/account/ui';
 import { SlabImage } from '@/components/SlabImage';
 import { Pill, pillVariants } from '@/components/ui/pill';
 import {
@@ -56,10 +56,6 @@ const orderDate = (value: string | Date) =>
     month: 'short',
     day: 'numeric',
   });
-
-// Reuses the input styling from RequestDeliveryModal / SettingsForm.
-const INPUT_CLASS =
-  'h-11 w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 text-sm text-white placeholder:text-white/40 focus:border-white/25 focus:outline-none';
 
 function DeliveryItems({ items }: { items: DeliveryOrderView['items'] }) {
   const first = items[0];

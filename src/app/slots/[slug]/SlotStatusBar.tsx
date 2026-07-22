@@ -5,6 +5,10 @@ import { cn } from '@/lib/utils';
 import type { RecentPull } from '@/lib/data/packs';
 import { Meter } from './Meter';
 
+/** Both ends of the recent-wins plate fade out instead of hard-clipping. */
+const MARQUEE_FADE =
+  'linear-gradient(90deg, transparent, #000 16px, #000 calc(100% - 16px), transparent)';
+
 export function SlotStatusBar({
   balance,
   recent,
@@ -45,8 +49,22 @@ export function SlotStatusBar({
       </div>
       {/* RECENT WINS marquee — keyframe `sp-scroll-x` lives in globals.css;
           frozen under reduced motion. */}
+      {/* Edge fade (style mask): the track is clipped by overflow-hidden, so
+          without a mask the marquee guillotines a name mid-word at the plate's
+          rounded edge ("PW Pi"). Transparent-to-opaque on both ends makes
+          entries fade in and out of the plate instead. */}
       {recent.length > 0 && (
-        <div className="relative max-w-full overflow-hidden sm:max-w-[55%]">
+        <div
+          className="relative max-w-full overflow-hidden sm:max-w-[55%]"
+          style={{
+            // -webkit- twin: Safari (including every iOS browser) still only
+            // honours the prefixed property, and this machine is designed
+            // phone-first — unprefixed alone would leave the guillotined name
+            // exactly where it matters most.
+            maskImage: MARQUEE_FADE,
+            WebkitMaskImage: MARQUEE_FADE,
+          }}
+        >
           <div
             className={cn(
               'flex w-max gap-4',

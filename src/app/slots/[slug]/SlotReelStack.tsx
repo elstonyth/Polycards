@@ -32,6 +32,7 @@ export function SlotReelStack({
   onCellCross,
   onWinnerRect,
   hideWinners,
+  frozen = false,
 }: {
   count: number;
   /** Numeric spin nonce, or 'idle' between spins — numeric because it also
@@ -50,6 +51,12 @@ export function SlotReelStack({
   onCellCross?: () => void;
   onWinnerRect?: (colIndex: number, rect: DOMRect) => void;
   hideWinners?: boolean;
+  /** True for the whole reveal. `layout` projection re-measures every strip
+   *  (getBoundingClientRect over 64 cells × N) on each commit, and the reveal
+   *  commits a lot — it was the top JS cost in the transform-beat long task.
+   *  Reels can't be added or removed during a reveal (spec #43), so nothing
+   *  needs measuring then; the add/remove reflow keeps it for idle. */
+  frozen?: boolean;
 }) {
   const settledRef = useRef(0);
   const onAllSettledRef = useRef(onAllSettled);
@@ -76,7 +83,7 @@ export function SlotReelStack({
             <motion.div
               key={`strip-${i}`}
               className="flex w-full min-w-0 justify-center"
-              layout={!reduced}
+              layout={!reduced && !frozen}
               initial={
                 reduced ? { opacity: 0 } : { opacity: 0, x: 60, scale: 0.96 }
               }

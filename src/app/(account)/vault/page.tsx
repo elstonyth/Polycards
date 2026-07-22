@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { getVault } from '@/lib/actions/vault';
 import { getAddresses } from '@/lib/actions/delivery';
+import { AccountHeader } from '@/components/account/ui';
 import VaultClient from './VaultClient';
 
 export const metadata: Metadata = { title: 'Vault' };
@@ -10,5 +11,13 @@ export const metadata: Metadata = { title: 'Vault' };
 // the client grid for the interactive sell-backs + delivery requests.
 export default async function VaultPage() {
   const [initial, addresses] = await Promise.all([getVault(), getAddresses()]);
-  return <VaultClient initial={initial} addresses={addresses} />;
+  return (
+    <>
+      <AccountHeader
+        title="Vault"
+        sub="Every card you’ve pulled. Hold, ship, or sell back instantly."
+      />
+      <VaultClient initial={initial} addresses={addresses} />
+    </>
+  );
 }

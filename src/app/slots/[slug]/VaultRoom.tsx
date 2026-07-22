@@ -45,6 +45,15 @@ export function VaultRoom({
         'relative flex min-h-0 flex-1 flex-col overflow-hidden bg-neutral-950',
         blast && !reduced && 'animate-[vault-shake_0.5s_ease-in-out]',
       )}
+      // The shake translates the WHOLE room (gradients, grain, the reel strips
+      // and their ~200 glowing cells). Without a layer already standing, the
+      // first shake frame has to promote and rasterize all of that at once —
+      // which is the hitch felt exactly when the screen starts shaking. Tension
+      // rises during the last reel's crawl, so promoting there buys the layer
+      // ahead of the impact, and it is dropped again when the room goes quiet.
+      style={{
+        willChange: !reduced && (tension || blast) ? 'transform' : undefined,
+      }}
     >
       {/* Ceiling spotlight — anchored top-center, MANY soft stops so no ring
           edge is ever visible. Neutral when idle, rarity color during reveal. */}
@@ -71,8 +80,11 @@ export function VaultRoom({
         style={
           {
             background: `radial-gradient(85% 70% at 50% 46%, rgba(${rgb}, 0.20) 0%, rgba(${rgb}, 0.11) 28%, rgba(${rgb}, 0.05) 48%, rgba(${rgb}, 0.015) 64%, transparent 80%)`,
+            // No `filter: saturate()` here: a filter on a full-viewport layer
+            // re-rasterizes the whole screen, and it switched on at the same
+            // frame as the shake. Opacity alone carries the punch and stays a
+            // composited property.
             opacity: floodRgb ? (blast ? 1 : 0.85) : 0,
-            filter: blast ? 'saturate(1.3)' : undefined,
           } as CSSProperties
         }
       />

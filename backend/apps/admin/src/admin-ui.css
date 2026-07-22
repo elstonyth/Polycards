@@ -1,0 +1,71 @@
+/*
+ * Polycards admin UX layer.
+ *
+ * Opt-in, NOT global: every rule is scoped under `.pc-admin`, which our custom
+ * routes put on their root element. Unscoped rules would also hit Medusa's own
+ * core dashboard routes (orders, products, ...) whose dense tables we do not
+ * own and must not reflow.
+ *
+ * Plain CSS custom properties (Medusa's own design tokens) rather than @apply
+ * or forked components, so this survives a @medusajs/ui upgrade.
+ */
+
+/* --- Hit targets -------------------------------------------------------- */
+/*
+ * Medusa buttons are padding-sized, not height-sized: `size="small"` is
+ * px-2 py-1 over a 20px line box = 28px. Raise the floor to 32px instead of
+ * forking the size variants. Inputs are already h-8; small Select triggers and
+ * IconButtons go 28 -> 32.
+ */
+.pc-admin :is(button, input, textarea, select, [role="combobox"]) {
+  min-height: 2rem;
+}
+
+/*
+ * Switch is a 16px track by design and Medusa clips its own overflow, so the
+ * track cannot be padded out to 32px from CSS without distorting the control.
+ * Exempt it from the floor and leave the visual as-is; a bigger hit area needs
+ * a padded label around the Switch, which is a per-route (phase B) change.
+ */
+.pc-admin [role='switch'] {
+  min-height: 0;
+}
+
+/* --- Destructive actions ------------------------------------------------ */
+/*
+ * A solid red button repeated on every row makes destruction the visual focus
+ * of the page. Inside table rows and row-action clusters, drop the resting
+ * weight to a quiet outline and bring the danger colour back on hover/focus.
+ * Page- and modal-level destructive buttons keep their full weight.
+ */
+.pc-admin :is(td, .pc-row-actions) button[class*="bg-ui-button-danger"] {
+  background: transparent;
+  color: var(--fg-error);
+  box-shadow: inset 0 0 0 1px var(--border-error);
+}
+.pc-admin :is(td, .pc-row-actions) button[class*="bg-ui-button-danger"]::after {
+  display: none;
+}
+.pc-admin
+  :is(td, .pc-row-actions)
+  button[class*="bg-ui-button-danger"]:is(:hover, :focus-visible) {
+  background: var(--button-danger);
+  color: var(--fg-on-color);
+}
+
+/*
+ * Destructive item inside a RowActions menu: same idea, one level quieter -
+ * neutral at rest, error-coloured when hovered or keyboard-highlighted.
+ * [data-highlighted] is how Radix marks the keyboard-focused item.
+ */
+.pc-danger-item:is(:hover, :focus-visible, [data-highlighted]) {
+  color: var(--fg-error);
+}
+
+/* --- Row action cluster ------------------------------------------------- */
+.pc-row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.25rem;
+}

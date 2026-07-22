@@ -14,7 +14,13 @@ export const FLAT_BUYBACK_PERCENT = 90;
 export type Pack = {
   id: string;
   name: string;
+  /** DISPLAY ONLY, e.g. "RM 1,000" — rounded for the eye. Never parse it back
+   *  into money: use `priceValue`. */
   price: string;
+  /** The pack's real price in RM, straight from the backend. Every cost/afford
+   *  calculation (bet meter, canAfford, shortfall) MUST use this — deriving the
+   *  number from the rounded display string would gate a RM 1.50 pack at 2. */
+  priceValue: number;
   /** Pack shot — /public path (public/images/polycards/) or an uploaded URL. */
   image: string;
   /** Pack-page HERO scene (wide landscape "factory" render, may be animated).
@@ -62,6 +68,7 @@ export const CATEGORIES: PackCategory[] = [
         id: 'bronze-pack',
         name: 'Bronze Pack',
         price: 'RM 50',
+        priceValue: 50,
         image: '/images/polycards/bronze-pack.webp',
         displayImage: '/images/polycards/bronze-factory.webp',
       },
@@ -69,6 +76,7 @@ export const CATEGORIES: PackCategory[] = [
         id: 'silver-pack',
         name: 'Silver Pack',
         price: 'RM 250',
+        priceValue: 250,
         image: '/images/polycards/silver-pack.webp',
         displayImage: '/images/polycards/silver-factory.webp',
       },
@@ -76,6 +84,7 @@ export const CATEGORIES: PackCategory[] = [
         id: 'gold-pack',
         name: 'Gold Pack',
         price: 'RM 1,000',
+        priceValue: 1000,
         image: '/images/polycards/gold-pack.webp',
         displayImage: '/images/polycards/gold-factory.webp',
       },
@@ -83,6 +92,7 @@ export const CATEGORIES: PackCategory[] = [
         id: 'platinum-pack',
         name: 'Platinum Pack',
         price: 'RM 2,500',
+        priceValue: 2500,
         image: '/images/polycards/platinum-pack.webp',
         displayImage: '/images/polycards/platinum-factory.webp',
       },
@@ -90,6 +100,7 @@ export const CATEGORIES: PackCategory[] = [
         id: 'diamond-pack',
         name: 'Diamond Pack',
         price: 'RM 5,000',
+        priceValue: 5000,
         image: '/images/polycards/diamond-pack.webp',
         displayImage: '/images/polycards/diamond-factory.webp',
       },
@@ -120,7 +131,9 @@ export function findCategory(slug: string): PackCategory | null {
   return CATEGORIES.find((c) => c.packs.some((p) => p.id === slug)) ?? null;
 }
 
-/** Numeric price, e.g. "RM 1,000" -> 1000. */
+/** Numeric price, e.g. "RM 1,000" -> 1000. SORTING/BUCKETING ONLY — the string
+ *  it parses is the ROUNDED display, so it can disagree with what the customer
+ *  is actually charged. Money math reads `Pack.priceValue`. */
 export function priceNumber(price: string): number {
   return parseFloat(price.replace(/^RM\s*/, '').replace(/,/g, '')) || 0;
 }

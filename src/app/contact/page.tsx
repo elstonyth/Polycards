@@ -8,34 +8,13 @@ export const metadata: Metadata = {
   description: 'How can we help? Our team typically responds within a day.',
 };
 
+// Published processing estimates, NOT a health feed. There is no vault status
+// endpoint, so this must never render live-status vocabulary (pulsing dot,
+// "Operational") for numbers that are hardcoded and can never change.
 const VAULTS = [
-  {
-    name: 'Vault 1',
-    status: 'Operational',
-    note: '5–7 day processing',
-    ok: true,
-  },
-  {
-    name: 'Vault 2',
-    status: 'Operational',
-    note: '5–7 day processing',
-    ok: true,
-  },
-  {
-    name: 'Vault 3',
-    status: 'Operational',
-    note: '7–10 day processing',
-    ok: true,
-  },
-];
-
-const FAQS = [
-  "Why is my card showing 'In Transit'?",
-  "Why is my order still 'Processing'?",
-  'How long does it take to receive cards after claiming?',
-  "Why hasn't my submitted card appeared in my inventory yet?",
-  'What grading companies do you accept?',
-  'How do I track my shipment?',
+  { name: 'Vault 1', note: '5-7 business days' },
+  { name: 'Vault 2', note: '5-7 business days' },
+  { name: 'Vault 3', note: '7-10 business days' },
 ];
 
 export default function ContactPage() {
@@ -68,19 +47,19 @@ export default function ContactPage() {
         </Reveal>
       </section>
 
-      {/* 2. VAULT STATUS + FAQ */}
+      {/* 2. PROCESSING TIMES + FAQ */}
       <div className="grid gap-4 md:grid-cols-2">
-        {/* Vault status */}
+        {/* Vault processing times */}
         <Reveal className="h-full">
           <div className="flex h-full flex-col rounded-2xl border border-white/10 bg-white/[0.03] p-6">
             <div className="mb-1 flex items-center gap-2.5">
               <Vault className="h-5 w-5 text-white/70" aria-hidden />
               <h2 className="font-heading text-lg font-bold tracking-tight text-white">
-                Vault Status
+                Vault Processing Times
               </h2>
             </div>
             <p className="mb-5 text-[13px] text-white/50">
-              Current processing &amp; shipping times
+              Typical turnaround once you request a shipment
             </p>
             <ul className="flex flex-col gap-2.5">
               {VAULTS.map((v) => (
@@ -88,21 +67,10 @@ export default function ContactPage() {
                   key={v.name}
                   className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3"
                 >
-                  <div className="flex items-center gap-2.5">
-                    <span className="relative flex h-2.5 w-2.5">
-                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-buyback/60 motion-reduce:animate-none" />
-                      <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-buyback" />
-                    </span>
-                    <span className="text-sm font-medium text-white">
-                      {v.name}
-                    </span>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-[13px] font-medium text-buyback-fg">
-                      {v.status}
-                    </div>
-                    <div className="text-[11px] text-white/60">{v.note}</div>
-                  </div>
+                  <span className="text-sm font-medium text-white">
+                    {v.name}
+                  </span>
+                  <span className="text-[13px] text-white/60">{v.note}</span>
                 </li>
               ))}
             </ul>
@@ -119,24 +87,21 @@ export default function ContactPage() {
               </h2>
             </div>
             <p className="mb-5 text-[13px] text-white/50">
-              Common questions answered
+              Shipping, storage, buyback, and how pulls are decided
             </p>
-            <ul className="flex flex-col gap-1.5">
-              {FAQS.map((q) => (
-                <li key={q}>
-                  <Link
-                    href="/how-it-works"
-                    className="group flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-left text-[13px] font-medium text-white/80 transition-colors hover:border-white/20 hover:bg-white/[0.06] hover:text-white"
-                  >
-                    {q}
-                    <ChevronRight
-                      className="h-4 w-4 shrink-0 text-white/30 transition-transform group-hover:translate-x-0.5 group-hover:text-white/60"
-                      aria-hidden
-                    />
-                  </Link>
-                </li>
-              ))}
-            </ul>
+            {/* One link that actually resolves. The six question shortcuts that
+                used to live here all pointed at /how-it-works and none of them
+                was answered there. */}
+            <Link
+              href="/how-it-works#faq"
+              className="group flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-left text-[13px] font-medium text-white/80 transition-colors hover:border-white/20 hover:bg-white/[0.06] hover:text-white"
+            >
+              Read the full FAQ
+              <ChevronRight
+                className="h-4 w-4 shrink-0 text-white/30 transition-transform group-hover:translate-x-0.5 group-hover:text-white/60"
+                aria-hidden
+              />
+            </Link>
           </div>
         </Reveal>
       </div>

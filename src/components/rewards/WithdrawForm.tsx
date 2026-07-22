@@ -4,10 +4,7 @@ import { useState } from 'react';
 import { openAuth } from '@/components/AuthButton';
 import { withdrawPrize } from '@/lib/actions/daily';
 import type { WithdrawAddressInput } from '@/lib/data/schemas';
-
-// ---- input style shared with the address form ------------------------------
-const INPUT_CLASS =
-  'h-11 w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 text-sm text-white placeholder:text-white/40 focus:border-white/25 focus:outline-none';
+import { INPUT_CLASS } from '@/components/account/ui';
 
 /** Simple inline address form for prize withdrawal. */
 export function WithdrawForm({
@@ -79,6 +76,7 @@ export function WithdrawForm({
           </span>
           <input
             aria-label="First name"
+            required
             autoComplete="given-name"
             value={form.firstName}
             onChange={(e) =>
@@ -93,6 +91,7 @@ export function WithdrawForm({
           </span>
           <input
             aria-label="Last name"
+            required
             autoComplete="family-name"
             value={form.lastName}
             onChange={(e) =>
@@ -107,6 +106,7 @@ export function WithdrawForm({
           </span>
           <input
             aria-label="Address"
+            required
             autoComplete="address-line1"
             value={form.address1}
             onChange={(e) =>
@@ -121,6 +121,7 @@ export function WithdrawForm({
           </span>
           <input
             aria-label="City"
+            required
             autoComplete="address-level2"
             value={form.city}
             onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))}
@@ -133,6 +134,7 @@ export function WithdrawForm({
           </span>
           <input
             aria-label="Postal code"
+            required
             autoComplete="postal-code"
             value={form.postalCode}
             onChange={(e) =>
@@ -147,6 +149,9 @@ export function WithdrawForm({
           </span>
           <input
             aria-label="Country code"
+            required
+            pattern="[A-Za-z]{2}"
+            title="Two-letter country code, for example MY"
             autoComplete="country"
             placeholder="e.g. MY"
             maxLength={2}

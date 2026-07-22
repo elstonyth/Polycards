@@ -45,29 +45,41 @@ describe('getChallenge', () => {
       {
         stageNumber: 1,
         thresholdMyr: 500,
-        rewardCredits: 50,
-        rewardCardIds: ['c1'],
+        // Sparse per-rank table: #1 card-only, #4 credits-only.
+        rankRewards: [
+          { rank: 1, cardId: 'c1', credits: 0 },
+          { rank: 4, cardId: null, credits: 50 },
+        ],
       },
       {
         stageNumber: 2,
         thresholdMyr: 1000,
-        rewardCredits: 100,
-        // Same featured card as stage 1 — the summary must dedupe it.
-        rewardCardIds: ['c1'],
+        // Same prize card as stage 1 — the summary must dedupe it.
+        rankRewards: [
+          { rank: 1, cardId: 'c1', credits: 0 },
+          { rank: 4, cardId: null, credits: 100 },
+        ],
       },
       {
         stageNumber: 3,
         thresholdMyr: 2000,
-        rewardCredits: 200,
-        rewardCardIds: [],
+        rankRewards: [{ rank: 4, cardId: null, credits: 200 }],
       },
     ],
     cards: {
-      c1: { name: 'Charizard', image: 'http://x/charizard.webp' },
+      c1: {
+        name: 'Charizard',
+        image: 'http://x/charizard.webp',
+        slab_image: 'http://x/charizard-slab.webp',
+      },
       c2: { name: 'Pikachu', image: 'http://x/pikachu.webp' },
       c3: { name: 'Mewtwo', image: 'http://x/mewtwo.webp' },
       // Distinct id, SAME image as c1 — the summary must NOT collapse these.
-      dup: { name: 'Alt Charizard', image: 'http://x/charizard.webp' },
+      dup: {
+        name: 'Alt Charizard',
+        image: 'http://x/charizard.webp',
+        slabImage: null,
+      },
     },
     top: [
       {
@@ -101,9 +113,67 @@ describe('getChallenge', () => {
       thresholdCompact: 'RM 500',
       reward: 'RM 50',
     });
-    expect(c!.stages[0]!.rankCards).toEqual([
-      { rank: 1, name: 'Charizard', image: 'http://x/charizard.webp' },
+    expect(c!.stages[0]!.rankRewards).toEqual([
+      {
+        rank: 1,
+        card: {
+          name: 'Charizard',
+          image: 'http://x/charizard.webp',
+          slabImage: 'http://x/charizard-slab.webp',
+        },
+        credits: 0,
+        creditsLabel: null,
+      },
+      { rank: 4, card: null, credits: 50, creditsLabel: 'RM 50' },
     ]);
+  });
+
+  it('lists every configured rank 1-10, sorted, with card and/or credits', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ...active,
+      stages: [
+        {
+          stageNumber: 1,
+          thresholdMyr: 500,
+          rankRewards: [
+            // Deliberately out of order; rank 7 pays BOTH; rank 9 pays nothing
+            // (no card, no credits) and must be omitted entirely.
+            { rank: 10, cardId: null, credits: 5 },
+            { rank: 9, cardId: null, credits: 0 },
+            { rank: 7, cardId: 'c3', credits: 25 },
+            { rank: 1, cardId: 'c1', credits: 0 },
+          ],
+        },
+        ...active.stages.slice(1),
+      ],
+    });
+    const c = await getChallenge();
+    expect(c!.stages[0]!.rankRewards).toEqual([
+      {
+        rank: 1,
+        card: {
+          name: 'Charizard',
+          image: 'http://x/charizard.webp',
+          slabImage: 'http://x/charizard-slab.webp',
+        },
+        credits: 0,
+        creditsLabel: null,
+      },
+      {
+        rank: 7,
+        card: {
+          name: 'Mewtwo',
+          image: 'http://x/mewtwo.webp',
+          slabImage: null,
+        },
+        credits: 25,
+        creditsLabel: 'RM 25',
+      },
+      { rank: 10, card: null, credits: 5, creditsLabel: 'RM 5' },
+    ]);
+    // `reward` is the SUM of credits across ranks 4-10 (25 + 5), not a
+    // per-winner figure — the sheet breaks it down per rank.
+    expect(c!.stages[0]!.reward).toBe('RM 30');
   });
 
   it('derives pool stats and stage states from the real pool', async () => {
@@ -131,7 +201,13 @@ describe('getChallenge', () => {
     const c = await getChallenge();
     expect(c!.summary).toEqual({
       unlockedCount: 1,
-      cards: [{ name: 'Charizard', image: 'http://x/charizard.webp' }],
+      cards: [
+        {
+          name: 'Charizard',
+          image: 'http://x/charizard.webp',
+          slabImage: 'http://x/charizard-slab.webp',
+        },
+      ],
       credits: 'RM 50',
     });
   });
@@ -150,7 +226,11 @@ describe('getChallenge', () => {
     });
     // c1 is featured by BOTH stage 1 and stage 2 — one thumb, not two.
     expect(c!.summary!.cards).toEqual([
-      { name: 'Charizard', image: 'http://x/charizard.webp' },
+      {
+        name: 'Charizard',
+        image: 'http://x/charizard.webp',
+        slabImage: 'http://x/charizard-slab.webp',
+      },
     ]);
   });
 
@@ -191,19 +271,62 @@ describe('getChallenge', () => {
     expect(await getChallenge()).toBeNull();
   });
 
-  it('preserves podium rank when a higher-rank card is unresolvable', async () => {
-    // #1 id is missing → #2/#3 must keep ranks 2/3, NOT shift up to 1/2.
+  it('preserves every rank 1-10 when a higher-rank card is unresolvable', async () => {
+    // #1's card id is missing and it pays no credits → the ROW drops, and every
+    // other rank must keep its own numeral instead of shifting up.
     fetchMock.mockResolvedValueOnce({
       ...active,
       stages: [
-        { ...active.stages[0], rewardCardIds: ['missing', 'c2', 'c3'] },
+        {
+          ...active.stages[0],
+          rankRewards: [
+            { rank: 1, cardId: 'missing', credits: 0 },
+            { rank: 2, cardId: 'c2', credits: 0 },
+            { rank: 3, cardId: 'c3', credits: 0 },
+            ...[4, 5, 6, 7, 8, 9, 10].map((rank) => ({
+              rank,
+              cardId: null,
+              credits: rank,
+            })),
+          ],
+        },
         ...active.stages.slice(1),
       ],
     });
     const c = await getChallenge();
-    expect(c!.stages[0]!.rankCards).toEqual([
-      { rank: 2, name: 'Pikachu', image: 'http://x/pikachu.webp' },
-      { rank: 3, name: 'Mewtwo', image: 'http://x/mewtwo.webp' },
+    const rows = c!.stages[0]!.rankRewards;
+    expect(rows.map((r) => r.rank)).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    expect(rows[0]).toEqual({
+      rank: 2,
+      card: {
+        name: 'Pikachu',
+        image: 'http://x/pikachu.webp',
+        slabImage: null,
+      },
+      credits: 0,
+      creditsLabel: null,
+    });
+    expect(rows[1]!.card).toEqual({
+      name: 'Mewtwo',
+      image: 'http://x/mewtwo.webp',
+      slabImage: null,
+    });
+  });
+
+  it('keeps a rank whose card is unresolvable but which still pays credits', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ...active,
+      stages: [
+        {
+          ...active.stages[0],
+          rankRewards: [{ rank: 2, cardId: 'missing', credits: 40 }],
+        },
+        ...active.stages.slice(1),
+      ],
+    });
+    const c = await getChallenge();
+    expect(c!.stages[0]!.rankRewards).toEqual([
+      { rank: 2, card: null, credits: 40, creditsLabel: 'RM 40' },
     ]);
   });
 
@@ -215,27 +338,42 @@ describe('getChallenge', () => {
       ...active,
       progress: { pooledMyr: 5000 },
       stages: [
-        { ...active.stages[0], rewardCardIds: ['c1', 'dup', 'c1'] },
+        {
+          ...active.stages[0],
+          rankRewards: [
+            { rank: 1, cardId: 'c1', credits: 0 },
+            { rank: 2, cardId: 'dup', credits: 0 },
+            { rank: 3, cardId: 'c1', credits: 0 },
+          ],
+        },
         ...active.stages.slice(1),
       ],
     });
     const c = await getChallenge();
     // c1 (repeated) collapses to one; dup survives as its own card.
     expect(c!.summary!.cards).toEqual([
-      { name: 'Charizard', image: 'http://x/charizard.webp' },
-      { name: 'Alt Charizard', image: 'http://x/charizard.webp' },
+      {
+        name: 'Charizard',
+        image: 'http://x/charizard.webp',
+        slabImage: 'http://x/charizard-slab.webp',
+      },
+      {
+        name: 'Alt Charizard',
+        image: 'http://x/charizard.webp',
+        slabImage: null,
+      },
     ]);
   });
 
   // --- graceful degradation: one bad section must not blank the challenge block ----
 
-  it('drops a malformed stage/reward row and keeps the survivors', async () => {
-    // Corrupt the middle stage's reward — a null `rewardCredits` fails `finite`.
+  it('drops a malformed stage row and keeps the survivors', async () => {
+    // Corrupt the middle stage — a null `thresholdMyr` fails `finite`.
     fetchMock.mockResolvedValueOnce({
       ...active,
       stages: [
         active.stages[0],
-        { ...active.stages[1], rewardCredits: null },
+        { ...active.stages[1], thresholdMyr: null },
         active.stages[2],
       ],
     });
@@ -268,9 +406,48 @@ describe('getChallenge', () => {
     const c = await getChallenge();
     expect(c).not.toBeNull();
     // The valid card still resolves for the stage that references it.
-    expect(c!.stages[0]!.rankCards).toEqual([
-      { rank: 1, name: 'Charizard', image: 'http://x/charizard.webp' },
-    ]);
+    expect(c!.stages[0]!.rankRewards[0]).toEqual({
+      rank: 1,
+      card: {
+        name: 'Charizard',
+        image: 'http://x/charizard.webp',
+        slabImage: 'http://x/charizard-slab.webp',
+      },
+      credits: 0,
+      creditsLabel: null,
+    });
+  });
+
+  it('drops a malformed RANK ROW without dropping the stage', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ...active,
+      stages: [
+        {
+          ...active.stages[0],
+          rankRewards: [
+            { rank: 1, cardId: 'c1', credits: 0 },
+            { rank: 'two', cardId: 'c2', credits: 0 }, // malformed rank
+            { rank: 4, cardId: null, credits: 50 },
+          ],
+        },
+        ...active.stages.slice(1),
+      ],
+    });
+    const c = await getChallenge();
+    expect(c!.stages).toHaveLength(3);
+    expect(c!.stages[0]!.rankRewards.map((r) => r.rank)).toEqual([1, 4]);
+  });
+
+  it('renders a stage with no rankRewards field (older backend)', async () => {
+    const { rankRewards: _drop, ...stage1 } = active.stages[0]!;
+    fetchMock.mockResolvedValueOnce({
+      ...active,
+      stages: [stage1, ...active.stages.slice(1)],
+    });
+    const c = await getChallenge();
+    expect(c!.stages).toHaveLength(3);
+    expect(c!.stages[0]!.rankRewards).toEqual([]);
+    expect(c!.stages[0]!.reward).toBe('RM 0');
   });
 
   it('degrades a malformed progress section to absent (stages still render)', async () => {

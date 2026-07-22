@@ -3,6 +3,7 @@ import { ArrowRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import Reveal from '@/components/Reveal';
 import { pillVariants } from '@/components/ui/pill';
+import { BUYBACK_RATE_LABEL } from '@/lib/buyback-copy';
 
 /** Board 06 — the closer. One lockup, one pill, one reassurance line. */
 export default function FinalCta() {
@@ -25,7 +26,7 @@ export default function FinalCta() {
           <ArrowRight className="h-4 w-4" aria-hidden />
         </Link>
         <p className="mt-4 text-[13px] text-neutral-400">
-          Real graded slabs · Up to 90% buyback
+          Real graded slabs · {BUYBACK_RATE_LABEL} buyback
         </p>
       </div>
     </Reveal>

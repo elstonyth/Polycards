@@ -8,15 +8,6 @@ export const metadata: Metadata = { title: 'Settings' };
 // Per-customer data behind the auth gate — always rendered fresh.
 export const dynamic = 'force-dynamic';
 
-// No backend representation yet (2FA/notifications are launch follow-ups in
-// docs/note.md) — so these render as plain "coming soon" rows, NOT as live
-// toggles. A money product must never show a 2FA switch that does nothing.
-const UPCOMING = [
-  'Email notifications',
-  'Pull alerts',
-  'Two-factor authentication',
-];
-
 export default async function SettingsPage() {
   const customer = await getCustomer();
   // The account layout gate redirects unauthenticated visitors, so this is a
@@ -25,11 +16,8 @@ export default async function SettingsPage() {
 
   return (
     <>
-      <AccountHeader
-        title="Settings"
-        sub="Manage your profile, security, and notifications."
-      />
-      <div className="grid gap-5 lg:grid-cols-2">
+      <AccountHeader title="Settings" sub="Manage your profile details." />
+      <div className="grid gap-3">
         <Panel>
           <h2 className="mb-4 font-heading text-lg font-bold text-white">
             Profile
@@ -44,24 +32,14 @@ export default async function SettingsPage() {
             }}
           />
         </Panel>
-        <Panel>
-          <h2 className="mb-4 font-heading text-lg font-bold text-white">
-            Notifications &amp; security
-          </h2>
-          <ul className="flex flex-col divide-y divide-white/5">
-            {UPCOMING.map((t) => (
-              <li key={t} className="flex items-center justify-between py-3">
-                <span className="text-sm text-white/80">{t}</span>
-                <span className="rounded-full border border-white/15 bg-white/5 px-2.5 py-1 text-[11px] font-semibold text-white/60">
-                  Coming soon
-                </span>
-              </li>
-            ))}
-          </ul>
-          <p className="mt-3 text-[12px] text-white/55">
-            These controls unlock as each feature ships.
-          </p>
-        </Panel>
+        {/* One quiet line, not a panel of dead "coming soon" rows: none of
+            these have a backend representation yet (launch follow-ups in
+            docs/note.md), and a money product must never show a 2FA switch
+            that does nothing. */}
+        <p className="text-[12px] text-white/55">
+          Email notifications, pull alerts, and two-factor authentication are
+          still to come.
+        </p>
       </div>
     </>
   );

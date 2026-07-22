@@ -182,7 +182,7 @@ export function WeeklyChallenge({ challenge }: { challenge: Challenge }) {
                           alt={c.name}
                           frameVariant="prism"
                           glowScale={0.4}
-                          sizes="152px"
+                          sizes="384px"
                           className="h-32"
                         />
                       ) : (
@@ -213,7 +213,8 @@ export function WeeklyChallenge({ challenge }: { challenge: Challenge }) {
                         {summary.credits}
                       </p>
                       <p className="text-sm text-neutral-400">
-                        Combined credits from stages 1–{summary.unlockedCount}
+                        Total credits across ranks 4–10, stages 1–
+                        {summary.unlockedCount}
                       </p>
                     </div>
                     {/* eslint-disable-next-line @next/next/no-img-element */}

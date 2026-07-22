@@ -8,6 +8,7 @@ import {
   staggerDelay,
 } from '@/lib/use-reveal';
 import StepInfoPill from '@/components/StepInfoPill';
+import { BUYBACK_RATE_LABEL } from '@/lib/buyback-copy';
 
 /**
  * The 3 "How It Works" step cards. SHARED by the homepage section and the
@@ -30,7 +31,7 @@ const STEPS: Step[] = [
   {
     num: '1',
     title: 'Open a pack',
-    body: 'Choose from a range of Pokémon packs. Every pack contains a random graded card with live odds and provably fair pulls powered by public VRF.',
+    body: 'Choose from a range of Pokémon packs. Every pack contains a random graded card, with live odds and commit-reveal pulls: the server commits to a hashed seed before you spin.',
     pill: 'View all packs',
     pillSub: 'Browse every category and rip',
     pillVariant: 'packs',
@@ -65,7 +66,7 @@ const STEPS: Step[] = [
     num: '2',
     title: 'Reveal your card',
     body: 'Tap to reveal what you pulled. Every card is real, vaulted by PSA, Fanatics, and Alt, and fully insured from the moment you own it.',
-    pill: '85-90% instant cash back',
+    pill: `${BUYBACK_RATE_LABEL} instant cash back`,
     pillSub: "Don't like your pull? Sell it back instantly",
     pillVariant: 'buyback',
     media: (
@@ -79,8 +80,8 @@ const STEPS: Step[] = [
   },
   {
     num: '3',
-    title: 'Keep, ship, or sell back for up to 90%',
-    body: "Hold your card in the vault, sell it back instantly for 85-90% of market value, or redeem and we'll ship the physical slab to your door.",
+    title: `Keep, ship, or sell back for ${BUYBACK_RATE_LABEL}`,
+    body: `Hold your card in the vault, sell it back instantly for ${BUYBACK_RATE_LABEL} of market value, or redeem and we'll ship the physical slab to your door.`,
     pill: 'Ships worldwide',
     pillSub: 'Fully tracked and insured to your door',
     pillVariant: 'ships',

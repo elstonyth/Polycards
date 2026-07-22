@@ -10,6 +10,9 @@ import { AuthProvider } from '@/components/auth/AuthProvider';
 import SkipLink from '@/components/SkipLink';
 import CookieConsent from '@/components/CookieConsent';
 import { SITE_URL } from '@/lib/site';
+import { BUYBACK_RATE_LABEL } from '@/lib/buyback-copy';
+
+const SITE_DESCRIPTION = `Rip packs. Pull graded cards. Hold, redeem, or sell back at ${BUYBACK_RATE_LABEL} value.`;
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -30,16 +33,14 @@ export const metadata: Metadata = {
     default: 'Polycards — Your Gateway to Physical & Digital Collectibles',
     template: '%s · Polycards',
   },
-  description:
-    'Rip packs. Pull graded cards. Hold, redeem, or sell back at up to 90% value.',
+  description: SITE_DESCRIPTION,
   applicationName: 'Polycards',
   alternates: { canonical: '/' },
   openGraph: {
     type: 'website',
     siteName: 'Polycards',
     title: 'Polycards — Your Gateway to Physical & Digital Collectibles',
-    description:
-      'Rip packs. Pull graded cards. Hold, redeem, or sell back at up to 90% value.',
+    description: SITE_DESCRIPTION,
     url: '/',
     images: [
       { url: '/seo/og.png', width: 2400, height: 1260, alt: 'Polycards' },
@@ -48,8 +49,7 @@ export const metadata: Metadata = {
   twitter: {
     card: 'summary_large_image',
     title: 'Polycards — Your Gateway to Physical & Digital Collectibles',
-    description:
-      'Rip packs. Pull graded cards. Hold, redeem, or sell back at up to 90% value.',
+    description: SITE_DESCRIPTION,
     images: ['/seo/og.png'],
   },
   appleWebApp: { capable: true, title: 'Polycards', statusBarStyle: 'black' },

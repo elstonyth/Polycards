@@ -4,7 +4,24 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { pillVariants } from '@/components/ui/pill';
 
-export function AccountHeader({ title, sub }: { title: string; sub?: string }) {
+/**
+ * The one text-input style for the account cluster (settings, addresses,
+ * orders, prize withdrawal). The focus ring is copied verbatim from
+ * AuthForm.tsx:360: `focus:border-white/25` alone is a 1px 25%-alpha edge on
+ * a near-black field, nowhere near the 3:1 WCAG 2.4.11 needs, so the visible
+ * indicator has to be the ring.
+ */
+export const INPUT_CLASS =
+  'h-11 w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 text-sm text-white placeholder:text-white/40 focus:border-white/25 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-0';
+
+export function AccountHeader({
+  title,
+  sub,
+}: {
+  title: string;
+  // ReactNode, not string: /referrals highlights part of its subtitle.
+  sub?: ReactNode;
+}) {
   return (
     <header className="mb-6">
       <h1 className="font-heading text-2xl font-bold tracking-tight text-white sm:text-3xl">
@@ -52,47 +69,6 @@ export function StatCards({
           {s.sub && <p className="mt-0.5 text-[12px] text-white/50">{s.sub}</p>}
         </div>
       ))}
-    </div>
-  );
-}
-
-export function MockTable({
-  head,
-  rows,
-}: {
-  head: string[];
-  rows: ReactNode[][];
-}) {
-  return (
-    <div className="overflow-x-auto rounded-2xl border border-white/10 bg-white/[0.03]">
-      <table className="w-full border-collapse text-sm">
-        <thead>
-          <tr className="border-b border-white/10 text-left text-[12px] uppercase tracking-wide text-white/60">
-            {head.map((h) => (
-              <th key={h} className="px-4 py-3 font-medium">
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r, i) => (
-            <tr
-              key={i}
-              className="border-b border-white/5 last:border-0 hover:bg-white/[0.02]"
-            >
-              {r.map((c, j) => (
-                <td
-                  key={j}
-                  className="whitespace-nowrap px-4 py-3 text-white/80"
-                >
-                  {c}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }
@@ -172,13 +148,5 @@ export function Pager({
         </span>
       )}
     </nav>
-  );
-}
-
-export function DemoNote() {
-  return (
-    <p className="mt-5 text-[11px] text-white/35">
-      Demo only — this account area connects to the backend in a later phase.
-    </p>
   );
 }

@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { getAddresses } from '@/lib/actions/delivery';
+import { AccountHeader } from '@/components/account/ui';
 import { AddressesClient } from './AddressesClient';
 
 export const metadata: Metadata = {
@@ -9,5 +10,10 @@ export const metadata: Metadata = {
 
 export default async function AddressesPage() {
   const addresses = await getAddresses();
-  return <AddressesClient initialAddresses={addresses} />;
+  return (
+    <>
+      <AccountHeader title="Addresses" sub="Where we ship your cards." />
+      <AddressesClient initialAddresses={addresses} />
+    </>
+  );
 }

@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom';
 import { ArrowRight, HelpCircle, Globe, DollarSign, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useModalA11y } from '@/lib/use-modal-a11y';
+import { BUYBACK_RATE_LABEL } from '@/lib/buyback-copy';
 
 type Variant = 'packs' | 'buyback' | 'ships';
 
@@ -125,12 +126,12 @@ export default function StepInfoPill({
                 id="buyback-title"
                 className="font-heading text-xl font-bold text-white sm:text-2xl"
               >
-                85-90% Instant Buyback
+                {BUYBACK_RATE_LABEL} Instant Buyback
               </h3>
               <p className="mt-3 text-[13px] leading-relaxed text-white/60 sm:text-sm">
-                Every card you pull has a guaranteed buyback price set at 85-90%
-                of its Alt Fair Market Value. Pull a card you don&apos;t want?
-                Sell it back instantly with one tap.
+                Every card you pull has a guaranteed buyback price set at{' '}
+                {BUYBACK_RATE_LABEL} of its Alt Fair Market Value. Pull a card
+                you don&apos;t want? Sell it back instantly with one tap.
               </p>
 
               {/* three mini steps */}
@@ -170,7 +171,7 @@ export default function StepInfoPill({
                 <div className="mt-2 flex items-center justify-between text-sm">
                   <span className="text-white/60">Instant buyback</span>
                   <span className="font-semibold text-buyback-fg">
-                    RM 85.00 - RM 90.00
+                    RM 90.00
                   </span>
                 </div>
               </div>

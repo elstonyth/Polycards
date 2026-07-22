@@ -7,8 +7,11 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: 'Geist', 'Geist Fallback', ui-sans-serif, system-ui, sans-serif;
-  --font-mono: 'Geist Mono', 'Geist Mono Fallback', ui-monospace, monospace;
+  /* next/font emits a HASHED family name reachable only via the CSS variable
+     layout.tsx puts on <html> — a literal 'Geist' matches nothing. */
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  /* No Geist_Mono is loaded in layout.tsx, so name only what actually resolves. */
+  --font-mono: ui-monospace, monospace;
   --font-nekst:
     var(--font-nekst), 'Nekst', ui-sans-serif, system-ui, sans-serif;
   --font-heading:
@@ -570,4 +573,22 @@ input:not([type='checkbox']):not([type='radio']):not([type='range']):not(
 textarea,
 select {
   font-size: max(16px, 1em);
+}
+
+/* Global prefers-reduced-motion backstop. Components that read the query in JS
+   (usePrefersReducedMotion) still gate themselves; this catches every CSS
+   animation/transition that doesn't. Unlayered + !important so it wins against
+   Tailwind's utilities layer. Near-zero (not 0s) durations keep `forwards`
+   animations landing on their end state instead of never running. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
 }

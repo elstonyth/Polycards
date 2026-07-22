@@ -264,15 +264,9 @@ export default function VaultClient({
 
   return (
     <>
-      <div>
-        <h1 className="font-heading text-3xl text-white">VAULT</h1>
-        <p className="mt-1 text-[13px] text-neutral-400">
-          Every card you&rsquo;ve pulled — hold, ship, or sell back instantly.
-        </p>
-      </div>
-
+      {/* Title + subtitle live in the server page (shared AccountHeader). */}
       {/* Stat strip */}
-      <div className="mt-4 grid grid-cols-3 divide-x divide-white/10 rounded-2xl border border-white/10 bg-neutral-900 py-4">
+      <div className="grid grid-cols-3 divide-x divide-white/10 rounded-2xl border border-white/10 bg-neutral-900 py-4">
         {[
           // rm0 (whole ringgit) keeps both money stats from clipping in the
           // 3-col strip on narrow phones; exact figures live per-card and in

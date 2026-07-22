@@ -7,8 +7,7 @@ import { MAX_VOUCHER_MYR } from '../voucher-ranges';
 const stage = (over: Partial<Record<string, unknown>> = {}) => ({
   stage_number: 1,
   threshold_myr: 100,
-  reward_credits: 10,
-  reward_card_ids: [],
+  rank_rewards: [{ rank: 1, card_id: null, credits: 10 }],
   ...over,
 });
 
@@ -21,11 +20,34 @@ describe('validateChallengeStages', () => {
     const out = validateChallengeStages({
       stages: [
         stage(),
-        stage({ stage_number: 2, threshold_myr: 200, reward_card_ids: ['card_1'] }),
+        stage({
+          stage_number: 2,
+          threshold_myr: 200,
+          rank_rewards: [{ rank: 1, card_id: 'card_1', credits: 0 }],
+        }),
       ],
     });
     expect(out).toHaveLength(2);
-    expect(out[1].reward_card_ids).toEqual(['card_1']);
+    expect(out[1].rank_rewards).toEqual([
+      { rank: 1, card_id: 'card_1', credits: 0 },
+    ]);
+  });
+
+  it('accepts a sparse table, a card AND credits on one rank, and sorts by rank', () => {
+    const out = validateChallengeStages({
+      stages: [
+        stage({
+          rank_rewards: [
+            { rank: 10, credits: 5 },
+            { rank: 1, card_id: 'card_1', credits: 250 },
+          ],
+        }),
+      ],
+    });
+    expect(out[0].rank_rewards).toEqual([
+      { rank: 1, card_id: 'card_1', credits: 250 },
+      { rank: 10, card_id: null, credits: 5 },
+    ]);
   });
 
   it('rejects a stage-number gap', () => {
@@ -40,25 +62,6 @@ describe('validateChallengeStages', () => {
     ).toThrow(/must exceed stage 1's/);
   });
 
-  it('rejects negative reward_credits', () => {
-    expect(() => validateChallengeStages({ stages: [stage({ reward_credits: -1 })] })).toThrow(
-      /reward_credits must be between 0 and/,
-    );
-  });
-
-  it('accepts reward_credits at the cap but rejects one above it', () => {
-    expect(
-      validateChallengeStages({
-        stages: [stage({ reward_credits: MAX_VOUCHER_MYR })],
-      }),
-    ).toHaveLength(1);
-    expect(() =>
-      validateChallengeStages({
-        stages: [stage({ reward_credits: MAX_VOUCHER_MYR + 1 })],
-      }),
-    ).toThrow(/reward_credits must be between 0 and/);
-  });
-
   it('accepts a large legal threshold_myr but rejects one above the ceiling', () => {
     expect(
       validateChallengeStages({ stages: [stage({ threshold_myr: 2_000_000 })] }),
@@ -70,7 +73,42 @@ describe('validateChallengeStages', () => {
     ).toThrow(/threshold_myr must be <=/);
   });
 
-  it('rejects non-finite thresholds and credits', () => {
+  it('rejects an out-of-range or non-integer rank', () => {
+    for (const rank of [0, 11, 1.5, '1']) {
+      expect(() =>
+        validateChallengeStages({ stages: [stage({ rank_rewards: [{ rank }] })] }),
+      ).toThrow(/rank must be an integer 1/);
+    }
+  });
+
+  it('rejects a duplicate rank', () => {
+    expect(() =>
+      validateChallengeStages({
+        stages: [stage({ rank_rewards: [{ rank: 2, credits: 1 }, { rank: 2, credits: 2 }] })],
+      }),
+    ).toThrow(/duplicate rank 2/);
+  });
+
+  it('rejects negative credits', () => {
+    expect(() =>
+      validateChallengeStages({ stages: [stage({ rank_rewards: [{ rank: 1, credits: -1 }] })] }),
+    ).toThrow(/credits must be between 0 and/);
+  });
+
+  it('accepts rank credits at the cap but rejects one above it', () => {
+    expect(
+      validateChallengeStages({
+        stages: [stage({ rank_rewards: [{ rank: 1, credits: MAX_VOUCHER_MYR }] })],
+      }),
+    ).toHaveLength(1);
+    expect(() =>
+      validateChallengeStages({
+        stages: [stage({ rank_rewards: [{ rank: 1, credits: MAX_VOUCHER_MYR + 1 }] })],
+      }),
+    ).toThrow(/credits must be between 0 and/);
+  });
+
+  it('rejects non-finite thresholds and rank credits', () => {
     // NaN/Infinity survive a bare `typeof === number` and every `<`/`>`
     // range comparison, so only the Number.isFinite guards catch them.
     for (const bad of [NaN, Infinity, -Infinity]) {
@@ -78,18 +116,23 @@ describe('validateChallengeStages', () => {
         validateChallengeStages({ stages: [stage({ threshold_myr: bad })] }),
       ).toThrow(/threshold_myr must be >= 0/);
       expect(() =>
-        validateChallengeStages({ stages: [stage({ reward_credits: bad })] }),
-      ).toThrow(/reward_credits must be between 0 and/);
+        validateChallengeStages({
+          stages: [stage({ rank_rewards: [{ rank: 1, credits: bad }] })],
+        }),
+      ).toThrow(/credits must be between 0 and/);
     }
   });
 
-  it('rejects a malformed reward_card_ids array', () => {
-    expect(() => validateChallengeStages({ stages: [stage({ reward_card_ids: [1] })] })).toThrow(
-      /card id strings/,
+  it('rejects a malformed rank_rewards table or card_id', () => {
+    expect(() => validateChallengeStages({ stages: [stage({ rank_rewards: 'x' })] })).toThrow(
+      /must be an array of rank rewards/,
     );
-    expect(() => validateChallengeStages({ stages: [stage({ reward_card_ids: 'x' })] })).toThrow(
-      /must be an array/,
+    expect(() => validateChallengeStages({ stages: [stage({ rank_rewards: [1] })] })).toThrow(
+      /each entry must be an object/,
     );
+    expect(() =>
+      validateChallengeStages({ stages: [stage({ rank_rewards: [{ rank: 1, card_id: '  ' }] })] }),
+    ).toThrow(/card_id must be a non-empty card id or null/);
   });
 });
 

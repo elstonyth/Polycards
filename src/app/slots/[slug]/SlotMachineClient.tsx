@@ -2,10 +2,11 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { preload } from 'react-dom';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import { motion } from 'motion/react';
-import { usePrefersReducedMotion } from '@/lib/use-reveal';
+import { useMediaQuery, usePrefersReducedMotion } from '@/lib/use-reveal';
 import { useChromeInert } from '@/lib/use-chrome-inert';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { openAuth } from '@/components/AuthButton';
@@ -14,7 +15,7 @@ import type { WonCard } from '@/lib/actions/packs';
 import { sellBackPull } from '@/lib/actions/vault';
 import { useTopUp } from '@/components/app-shell/TopUpProvider';
 import { useSound } from '@/lib/use-sound';
-import { rm } from '@/lib/format';
+import { rm, affordable } from '@/lib/format';
 import { logger } from '@/lib/logger';
 import { cn } from '@/lib/utils';
 import {
@@ -24,7 +25,6 @@ import {
   type Rarity,
   FLAT_BUYBACK_PERCENT,
   ODDS,
-  priceNumber,
 } from '@/lib/packs-data';
 import type { RecentPull } from '@/lib/data/packs';
 import { demoDraw } from '@/lib/demo-spin';
@@ -46,6 +46,7 @@ import { OddsSheet } from './OddsSheet';
 import { VaultRoom } from './VaultRoom';
 import { Meter } from './Meter';
 import { RevealStage } from './RevealStage';
+import { CARD_BACK_SRC } from './SlabCard';
 import type { SellBackOffer } from './useSellWindow';
 
 const COOLDOWN_MS = 600;
@@ -129,12 +130,20 @@ export default function SlotMachineClient({
   // "demo" spin whose result the settle identity-guard then silently drops.
   const modeUndecided = demoPool !== null && !customer && authLoading;
 
-  const cost = priceNumber(pack.price);
+  // Real backend price, never re-parsed from the rounded display string.
+  const cost = pack.priceValue;
   // Reel count — prop is the initial value (already clamped from ?count=); the
   // player adds/removes reels in-machine. cost * reels is the batch price.
   const [reels, setReels] = useState(count);
-  // Shrink the cell so multiple reels fit across the viewport.
-  const cellSize = reels > 1 ? 76 : 96;
+  // Shrink the cell so multiple reels fit across the viewport. On a roomy
+  // viewport the cell grows instead: the phone layout on a desktop left the
+  // machine a ~110px band floating in ~900px of empty room, which reads as an
+  // unfinished page rather than the "more air" the spec asks for. The machine
+  // is the subject — it scales with the stage it's standing on.
+  // ponytail: one breakpoint, not a resize observer — cellSize feeds the reel
+  // engine's pitch math, so a continuously-changing value would thrash it.
+  const roomy = useMediaQuery('(min-width: 768px) and (min-height: 720px)');
+  const idealCell = reels > 1 ? (roomy ? 116 : 76) : roomy ? 152 : 96;
 
   // Decoy flicker pool: the pack's OWN cards, each pairing its CONFIGURED
   // Pokémon with its CONFIGURED rarity, deduped by the (dex, rarity) PAIR —
@@ -160,9 +169,25 @@ export default function SlotMachineClient({
   // Balance comes from the app-shell provider (identity-tagged: values from
   // another account never render — push security review). Server-returned
   // balances from spins/sell-backs are pushed back up via applyBalance.
-  const { balance, applyBalance } = useTopUp();
+  // Aliased: a local `refreshBalance` further down is just `applyBalance`
+  // (it sets a known number). This one refetches from the server.
+  const { balance, applyBalance, refreshBalance: refetchBalance } = useTopUp();
   const [recent, setRecent] = useState<RecentPull[]>(recentPulls);
   const [phase, setPhase] = useState<Phase>('idle');
+  // Warm the reveal art while the reels are still turning. Measured: mounting
+  // SlabCard was what first requested the card back, so the fetch + decode
+  // landed ~150ms INTO the transform beat (an 87ms main-thread task on top of
+  // the morph, plus the art visibly popping in). The spin gives us ~3s of
+  // otherwise-idle network to spend instead.
+  useEffect(() => {
+    if (phase === 'spinning') preload(CARD_BACK_SRC, { as: 'image' });
+  }, [phase]);
+  // Commit the stage scale only while idle: cellSize is a ReelStrip engine
+  // dependency (pitch/travel/target), so resizing the window mid-spin would
+  // restart the rAF timeline under the player's eyes.
+  const cellRef = useRef(idealCell);
+  if (phase === 'idle') cellRef.current = idealCell;
+  const cellSize = cellRef.current;
   // Reshuffle every reel's decoy pool each time the machine goes idle: on
   // mount (post-hydration) and on every return-to-idle after a spin — the
   // same transition where ReelStrip snaps its position back to base, a cut
@@ -235,7 +260,7 @@ export default function SlotMachineClient({
     [],
   );
 
-  const canAfford = balance !== null && balance >= cost * reels;
+  const canAfford = balance !== null && affordable(balance, cost * reels);
   // Spin + reel add/remove are locked for the ENTIRE non-idle flow — resolve,
   // spin, the reveal theater (flood/transform), AND the review/sell window
   // (spec #43). They only re-enable once every card is sold/kept and the reveal
@@ -326,7 +351,7 @@ export default function SlotMachineClient({
       openAuth('login');
       return;
     }
-    if (balance !== null && balance < cost * reels) {
+    if (balance !== null && !affordable(balance, cost * reels)) {
       setNeedsTopUp(true);
       setError('Not enough credits to spin.');
       return;
@@ -340,12 +365,68 @@ export default function SlotMachineClient({
     setPhase('resolving');
     sfx('ratchet');
 
-    const res = await openBatch(pack.id, reels);
+    // openBatch handles BACKEND failures itself ({ok:false}); what escapes here
+    // is the Server Action RPC itself rejecting (offline, action endpoint 5xx,
+    // deployment-ID mismatch). Unhandled, phase stays 'resolving' forever and
+    // the Spin button never re-enables (spinGuarded). Whether the charge landed
+    // is genuinely unknown at this point, so the copy must claim NEITHER a free
+    // spin nor a charge — it points the player at their balance instead.
+    let res: Awaited<ReturnType<typeof openBatch>>;
+    try {
+      res = await openBatch(pack.id, reels);
+    } catch (err) {
+      logger.error('[slots] openBatch transport failure', err);
+      // The charge may well have landed (the server executed, the response did
+      // not transport back). Telling the player to check their balance while
+      // showing the STALE pre-charge figure invites a second, real charge, so
+      // refetch before re-enabling Spin. Nothing spun, so hasSpun goes back.
+      // Show the error NOW, before the refetch — this path fires when the
+      // server is unreachable, so awaiting a second call to it would leave the
+      // screen looking dead (no message, button still disabled) for the whole
+      // fetch timeout. The message lands immediately instead.
+      setError(
+        "Couldn't reach the machine. Check your balance before spinning again.",
+      );
+      // Then refetch BEFORE re-enabling Spin. Deliberately awaited, not
+      // fire-and-forget: the on-screen balance is the stale PRE-charge figure
+      // and the charge may have landed, so re-enabling over it invites a second
+      // real charge. Keeping phase on 'resolving' through the refetch holds the
+      // button disabled; when the refetch resolves (to the fresh value, or to
+      // null on failure — TopUpProvider swallows its own errors) canAfford is
+      // recomputed and the button gates correctly. finally guarantees the reset
+      // even if the refetch somehow rejects.
+      try {
+        await refetchBalance();
+      } catch (refetchErr) {
+        logger.error(
+          '[slots] balance refetch after transport failure',
+          refetchErr,
+        );
+      } finally {
+        setHasSpun(false);
+        setPhase('idle');
+      }
+      return;
+    }
     if (!res.ok) {
       if (res.needsAuth) openAuth('login');
       else {
         setError(res.error);
         setNeedsTopUp(res.needsTopUp === true);
+        // Same hazard, narrower: openBatch maps a post-charge enrichment
+        // failure to {ok:false} ("try again"), so the debit can already be
+        // real here too. Never invite a retry over a stale balance — but a
+        // failing refetch must not block the state reset below either.
+        if (res.needsTopUp !== true) {
+          try {
+            await refetchBalance();
+          } catch (refetchErr) {
+            logger.error(
+              '[slots] balance refetch after {ok:false}',
+              refetchErr,
+            );
+          }
+        }
       }
       setPhase('idle');
       return;
@@ -601,8 +682,11 @@ export default function SlotMachineClient({
 
   // Reel-stop clacks: the stack owns its per-column settle internally, so fire a
   // mechanical clack at each column's stop time from here (cleared on teardown).
+  // Reduced motion has no reel travel to punctuate (ReelStrip finishes on a 0ms
+  // timeout and the reveal beats collapse to 0), so these would clack seconds
+  // later over an already-landed card — same guard as the tension effect below.
   useEffect(() => {
-    if (phase !== 'spinning') return;
+    if (phase !== 'spinning' || reduced) return;
     const ids: number[] = [];
     for (let i = 0; i < reels; i++) {
       ids.push(
@@ -618,7 +702,7 @@ export default function SlotMachineClient({
       );
     }
     return () => ids.forEach((id) => clearTimeout(id));
-  }, [phase, spin?.nonce, reels, sfx, play]);
+  }, [phase, spin?.nonce, reels, reduced, sfx, play]);
 
   // Rising tension during the final strip's crawl (spec §7d).
   useEffect(() => {
@@ -696,11 +780,14 @@ export default function SlotMachineClient({
             to the viewport width and the reveal card sizes itself from stage
             height. overflow-y-auto stays as a last-resort fallback (extreme
             landscape phones); overflow-x is hard-locked — vertical overflow
-            must never re-enable sideways panning. */}
+            must never re-enable sideways panning.
+            aria-busy covers 'resolving' too: that's the pre-spin server
+            round-trip, where nothing moves yet but the machine IS busy and the
+            Spin button is already locked. */}
         <div
           data-testid="slot-stage"
           className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-fluid"
-          aria-busy={phase === 'spinning'}
+          aria-busy={phase === 'spinning' || phase === 'resolving'}
         >
           {/* my-auto on the machine (not justify-center here) — same safe
               centering as RevealStage: identical when content fits, but if the
@@ -771,6 +858,7 @@ export default function SlotMachineClient({
                     winnerRects.current[i] = r;
                   }}
                   hideWinners={phase === 'transform' || phase === 'review'}
+                  frozen={inReveal}
                 />
               </motion.div>
             </motion.div>

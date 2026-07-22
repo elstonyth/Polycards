@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { BUYBACK_RATE_LABEL } from '@/lib/buyback-copy';
 
 // Quiet site footer — the only place the trust/info routes (how-it-works,
 // fairness, about, contact) are discoverable; the 5-tab shell deliberately
@@ -36,7 +37,7 @@ export default function SiteFooter() {
       </nav>
       <p className="mt-1 text-[12px] text-white/55">
         © {new Date().getFullYear()} Polycards — rip packs, pull graded cards,
-        sell back at up to 90%.
+        sell back at {BUYBACK_RATE_LABEL}.
       </p>
     </footer>
   );

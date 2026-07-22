@@ -916,7 +916,7 @@ shipped, nothing snapshots or pays at week close (plan 056 spike).
 | 053  | Unit-test the Google OAuth server actions                               | P3       | M      | —          | DONE (APPROVE 2026-07-21 after 1 code-review revision; branch `advisor/053-oauth-action-tests`, commits `8a313903` + `0923710c`. Code review PROVED the headline keys-only-log assertion vacuous by mutation (Object.values leak left all 16 green); fix: decoy PII fixtures (`decoy@leak.example`) + key-NAME pins (reviewer-verified `:229/:257/:259`), mutation re-run confirmed 2 RED then restored clean. Refresh assertion tightened to enforce its Bearer-token comment. 16 targeted / 296 full green; still zero production-code changes)                                                                                                                                                               |
 | 054  | Extract the Weekly-Challenge slice + backfills out of service.ts        | P3       | M      | 044, 047   | TODO                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | 055  | scripts/ triage: inventory → operator-approved delete (269 files)       | P3       | S–M    | —          | DONE (APPROVE 2026-07-21; branch `advisor/055-scripts-triage`, commits `a87be597` (inventory) + `b69e78a8` (deletions), worktree `.worktrees/055-scripts-triage`. Operator approved the 76-file DELETE list (user: "approve" 2026-07-21); reviewer verified the commit = exactly 76 D + 1 M (README), all 16 externally-referenced KEEPs present post-delete, `ls scripts` = 194. Gates green: reference-scan primary (one benign stale comment in `seam_check.py`), `npm run check` secondary. STILL OPEN: 107 ASK files, 9 grouped family questions in scripts/README.md — per-family operator decisions pending. Repoint later: qa-csp ROUTES lists dead /claw; qa-demo-spin/qa-claw-e2e target dead routes) |
-| 056  | DESIGN SPIKE: Weekly-Challenge settlement engine                        | P2       | M      | —          | DONE (APPROVE 2026-07-21; worktree `agent-a0c3d9912dea85cad`, commit `f592f325` — new `docs/superpowers/specs/2026-07-20-challenge-settlement-design.md`, 320 lines, all 9 sections + sources + appendix; reviewer verified structure + spot-checked citations (reason enum = 11 values confirmed; `challenge_payout` would be the 12th, all four plan-005 mirror surfaces named). 4 operator open questions in §9 — ANSWER BEFORE building plan 057. STOP-greps clean: reward-box `drawDailyBox` correctly distinguished (the old `settleRewardDraw` was deleted by Task 7; comment-only hits), no existing challenge settlement)                                                                                                                                                |
+| 056  | DESIGN SPIKE: Weekly-Challenge settlement engine                        | P2       | M      | —          | DONE (APPROVE 2026-07-21; worktree `agent-a0c3d9912dea85cad`, commit `f592f325` — new `docs/superpowers/specs/2026-07-20-challenge-settlement-design.md`, 320 lines, all 9 sections + sources + appendix; reviewer verified structure + spot-checked citations (reason enum = 11 values confirmed; `challenge_payout` would be the 12th, all four plan-005 mirror surfaces named). 4 operator open questions in §9 — ANSWER BEFORE building plan 057. STOP-greps clean: reward-box `drawDailyBox` correctly distinguished (the old `settleRewardDraw` was deleted by Task 7; comment-only hits), no existing challenge settlement)                                                                              |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (reason) | REJECTED (reason)
 
@@ -1063,3 +1063,25 @@ Ordered by leverage. Confidence is the advisor's after re-reading the code.
   `scripts/` file bodies (classified by name/pattern — plan 055 opens them);
   i18n depth; `.claude/` hook scripts.
 - The ~570 test files outside the delta (scanned, not line-read).
+
+---
+
+## Round 7 — storefront design / UX audit, 2026-07-22
+
+Base commit `a15f88e1`. Four parallel read-only audits (global tokens + app
+shell, home/marketing, conversion funnel, account cluster). Scope was
+deliberately disjoint from rounds 1-6: design system, shipped UI, and
+user-facing copy truth only — no money, security, or backend correctness.
+
+Output is a single ranked findings doc, not per-item plans:
+
+| Doc | Title                                  | Items         | Status             |
+| --- | -------------------------------------- | ------------- | ------------------ |
+| 057 | Storefront design / UX audit (round 7) | 42 (6 tier-1) | TODO — unscheduled |
+
+Tier 1 (5 active; the sixth, a claimed dead `--font-geist-sans` / body-font
+regression, was RETRACTED on review as a false finding): buyback rate stated
+three ways, VRF vs commit-reveal contradiction, spin-screen freeze on Server
+Action transport rejection, fabricated live status on /contact, referrals
+dead-end for handle-less users. Tier 1 plus the boundary/a11y/money-path work
+shipped in PR #249; see doc 057's "Review corrections" for the full state.

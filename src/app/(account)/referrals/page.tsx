@@ -5,7 +5,8 @@ import { getReferralSummary } from '@/lib/actions/referral';
 import { getOwnProfileHandle } from '@/lib/data/profiles';
 import { rm } from '@/lib/format';
 import { SITE_URL } from '@/lib/site';
-import ReferralsClient from './ReferralsClient';
+import { AccountHeader } from '@/components/account/ui';
+import ReferralsClient, { ShareInviteButton } from './ReferralsClient';
 
 export const metadata: Metadata = { title: 'Invite Friends' };
 
@@ -18,8 +19,8 @@ export default async function ReferralsPage() {
   if (!res.ok) {
     return (
       <>
-        <h1 className="font-heading text-3xl text-white">INVITE FRIENDS</h1>
-        <p className="mt-4 rounded-xl border border-white/10 bg-neutral-900 p-4 text-sm text-neutral-400">
+        <AccountHeader title="Invite friends" />
+        <p className="rounded-xl border border-white/10 bg-neutral-900 p-4 text-sm text-neutral-400">
           {res.error}
         </p>
       </>
@@ -32,25 +33,38 @@ export default async function ReferralsPage() {
 
   return (
     <>
-      <h1 className="font-heading text-3xl text-white">INVITE FRIENDS</h1>
-      <p className="mt-1 text-[13px] text-neutral-400">
-        Earn credit on every pack your recruits rip —{' '}
-        <span className="text-chase font-semibold">
-          your rate grows with your VIP level
-        </span>
-        .
-      </p>
+      <AccountHeader
+        title="Invite friends"
+        sub={
+          <>
+            Earn credit on every pack your recruits rip.{' '}
+            <span className="text-chase font-semibold">
+              Your rate grows with your VIP level
+            </span>
+            .
+          </>
+        }
+      />
 
       {/* Invite link + share (showgo's invite screen, dark skin) */}
       {inviteUrl ? (
         <ReferralsClient inviteUrl={inviteUrl} />
       ) : (
-        <p className="mt-4 rounded-xl border border-white/10 bg-neutral-900 p-4 text-sm text-neutral-400">
-          Set a profile handle in{' '}
-          <Link href="/settings" className="font-semibold text-white underline">
-            Settings
+        // Handles are assigned by the backend on the first
+        // GET /store/profiles/me, never by the customer: getOwnProfileHandle
+        // returns null only when that call fails (fetchProfileHandle swallows
+        // the error), and the (account) layout has already bounced anyone who
+        // is signed out. So this is a transient backend fault, NOT a missing
+        // setting. There is no handle field in Settings and there should not
+        // be one; if this state ever turns out to be persistent for a
+        // customer, the fix belongs in the backend's lazy-assign path.
+        <p className="rounded-xl border border-white/10 bg-neutral-900 p-4 text-sm text-neutral-400">
+          We couldn&rsquo;t load your invite link just now. Refresh the page to
+          try again, or{' '}
+          <Link href="/contact" className="font-semibold text-white underline">
+            contact support
           </Link>{' '}
-          to get your invite link.
+          if it keeps happening.
         </p>
       )}
 
@@ -91,11 +105,17 @@ export default async function ReferralsPage() {
         YOUR RECRUITS
       </h2>
       {res.directRecruits.length === 0 ? (
-        <div className="rounded-2xl border border-white/10 bg-neutral-900 px-6 py-10 text-center">
-          <p className="text-sm text-neutral-400">
-            No recruits yet — share your invite link above and earn on their
-            very first rip.
+        <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-white/10 bg-neutral-900 px-6 py-10 text-center">
+          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white/5">
+            <UserPlus className="h-6 w-6 text-white/50" aria-hidden />
+          </span>
+          <h3 className="font-heading text-lg font-bold text-white">
+            No recruits yet
+          </h3>
+          <p className="max-w-sm text-sm text-neutral-400">
+            Share your invite link and you earn on their very first rip.
           </p>
+          {inviteUrl && <ShareInviteButton inviteUrl={inviteUrl} />}
         </div>
       ) : (
         <ul className="overflow-hidden rounded-2xl border border-white/10 bg-neutral-900">

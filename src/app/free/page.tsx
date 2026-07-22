@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Sparkles, UserPlus, Gamepad2, Banknote } from 'lucide-react';
 import Reveal from '@/components/Reveal';
 import AuthButton from '@/components/AuthButton';
+import { BUYBACK_RATE_LABEL } from '@/lib/buyback-copy';
 
 export const metadata: Metadata = {
   title: 'Your Free Pack is Waiting',
@@ -32,7 +33,7 @@ const STEPS = [
   {
     icon: Banknote,
     title: 'Keep or sell back for up to RM 500',
-    body: 'Hold it, ship it, or sell back instantly at 85–90%.',
+    body: `Hold it, ship it, or sell back instantly at ${BUYBACK_RATE_LABEL}.`,
   },
 ];
 
