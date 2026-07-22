@@ -27,9 +27,14 @@ function originOf(url: string | undefined): string | null {
  * Whether the policy ships enforcing (vs report-only). One predicate governs
  * both the header *name* (next.config.ts) and the `upgrade-insecure-requests`
  * directive below, so the two can never drift apart.
+ *
+ * The flag fails OPEN (report-only), so a near-miss spelling — `TRUE`, `1`, a
+ * trailing space from a copy-pasted dashboard value — would silently un-enforce
+ * the whole policy with no error anywhere. Accept the usual truthy spellings.
  */
 export function cspEnforced(): boolean {
-  return process.env.CSP_ENFORCE === 'true';
+  const flag = process.env.CSP_ENFORCE?.trim().toLowerCase();
+  return flag === 'true' || flag === '1';
 }
 
 export function buildCsp(): string {

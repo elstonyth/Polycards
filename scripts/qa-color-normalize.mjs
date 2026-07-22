@@ -55,7 +55,18 @@ export function installColorNormalizer() {
     let changed = 0;
     for (const el of document.querySelectorAll('*')) {
       const cs = getComputedStyle(el);
-      for (const prop of ['color', 'backgroundColor', 'borderColor']) {
+      // Exactly the properties axe reads: `color` + `background-color` for
+      // color-contrast, and `border-top-color` / `border-bottom-color` /
+      // `outline-color` for link-in-text-block. The `border-color` shorthand is
+      // NOT one of them, and getComputedStyle serializes it per-side anyway once
+      // the sides differ (unparseable, so it silently normalized nothing).
+      for (const prop of [
+        'color',
+        'backgroundColor',
+        'borderTopColor',
+        'borderBottomColor',
+        'outlineColor',
+      ]) {
         const rgb = toRgb(cs[prop]);
         if (rgb) {
           el.style[prop] = rgb;
