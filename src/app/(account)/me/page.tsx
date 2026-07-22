@@ -155,8 +155,17 @@ export default async function MePage() {
                         }}
                       />
                     </div>
+                    {/* Left = lifetime spend, right = next level's target —
+                        segment-bound labels read as "my spend" and confused
+                        real users (2026-07-22); the fill stays segment-
+                        relative. */}
                     <div className="mt-1 flex justify-between text-[10px] font-semibold text-neutral-500">
-                      <span>{rm0(levelStart)}</span>
+                      <span>
+                        {rm0(
+                          vipResult.vip.next.threshold -
+                            vipResult.vip.next.remaining,
+                        )}
+                      </span>
                       <span>{rm0(vipResult.vip.next.threshold)}</span>
                     </div>
                     <p className="text-[12px] text-neutral-400">

@@ -30,9 +30,14 @@ function LevelCard({
 }) {
   const state = stateFor(level.level, highestLevel);
   // Progress toward THIS rung, restarting at the previous rung's threshold —
-  // reached rungs read 100%, the next rung shows real progress within its
-  // segment instead of lifetime spend / threshold (which is ~98% forever).
-  const pct = levelProgressPct(spend, prevThreshold, level.threshold);
+  // reached rungs read 100%, the NEXT rung shows real progress within its
+  // segment. Deeper locked rungs stay empty: a part-filled gold bar on a
+  // locked card read as "nearly done" to real users (2026-07-22).
+  const isNext = level.level === highestLevel + 1;
+  const pct =
+    state === 'locked' && !isNext
+      ? 0
+      : levelProgressPct(spend, prevThreshold, level.threshold);
   return (
     <div
       className={cn(
@@ -77,8 +82,13 @@ function LevelCard({
 
       <div className="mt-4">
         <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+          {/* Dimmed on locked cards so in-progress gold never reads as
+              "completed" next to reached rungs' full bars. */}
           <div
-            className="bg-chase h-full rounded-full"
+            className={cn(
+              'h-full rounded-full',
+              state === 'locked' ? 'bg-chase/40' : 'bg-chase',
+            )}
             style={{ width: `${pct}%` }}
           />
         </div>
