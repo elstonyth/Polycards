@@ -180,13 +180,13 @@ export default function LeaderboardClient({
                     </div>
                     {/* Weekly board only: the CURRENT challenge prize for this
                       rank — card thumb and/or credits, from the unlocked
-                      stages' prize tables. Sits BEFORE the ranking figure
-                      (operator order: # player · reward · pulled value) so the
-                      reward never gets pinched against the row edge. Thumb
-                      height matches the avatar so the row keeps its one-line
-                      height. min-w-16 is the shared column basis (with a
-                      spacer on prizeless rows) keeping the RM figures aligned
-                      — sized for the widest single-type prize (cumulative
+                      stages' prize tables. The reward IS the row's right edge
+                      on weekly (operator 2026-07-23: value under the name,
+                      "right side all reward"). Thumb height matches the
+                      avatar so the row keeps its one-line height. min-w-16 is
+                      the shared column basis (with a spacer on prizeless
+                      rows) keeping the rewards column-aligned across rows —
+                      sized for the widest single-type prize (cumulative
                       credits, e.g. "RM 18,500"). A rank paying card AND
                       credits grows past it — deliberate: rewards never clip. */}
                     {prize ? (
