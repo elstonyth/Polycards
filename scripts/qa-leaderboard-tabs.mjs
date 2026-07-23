@@ -15,7 +15,11 @@ const accept = page.getByRole('button', { name: 'Accept' });
 if (await accept.isVisible().catch(() => false)) await accept.click();
 await page.waitForTimeout(800);
 
-const block = page.locator('div.px-fluid.mx-auto.w-full.max-w-md.pt-6').first();
+// The leaderboard wrapper is the parent of the (semantic, stable) timeframe
+// toggle group — no dependency on styling utility classes.
+const block = page
+  .getByRole('group', { name: 'Leaderboard timeframe' })
+  .locator('xpath=..');
 await block.screenshot({ path: `${OUT}/leaderboard-this-week.png` });
 
 await page.getByRole('button', { name: 'All Time' }).click();
