@@ -188,6 +188,15 @@ envs:
   - key: RESEND_REPLY_TO
     scope: RUN_TIME
     value: support@polycards.gg
+  # ── PriceCharting (daily market-price sync + admin add-from-PC search) ──────
+  # APP level like Resend, and that is load-bearing: the sync-market-prices job
+  # runs on the WORKER component, so a service-scoped token would leave every
+  # nightly card sync skipping "no token" (exactly what happened Jul 15-23
+  # after the rename cutover dropped this key from the new app's spec).
+  - key: PRICECHARTING_API_TOKEN
+    scope: RUN_TIME
+    type: SECRET
+    value: __SECRET__PRICECHARTING_API_TOKEN__
   # ╔═══════════════════════════════════════════════════════════════════════╗
   # ║ GO-LIVE BLOCKER — DELETE THIS ENV BEFORE REAL LAUNCH.                  ║
   # ║ 'unsafe-demo' runs the always-approving MOCK payment gateway in prod   ║
