@@ -82,7 +82,7 @@ export default function LeaderboardClient({
       <p className="mt-3 text-[12px] text-neutral-400">
         {period === 'This Week'
           ? 'This week ranks by pulled value — every eligible pack draw counts. It is the Weekly Challenge board.'
-          : 'All Time ranks by points — every ringgit you spend on packs.'}
+          : 'All Time — lifetime pulled value across every eligible pack draw.'}
       </p>
 
       {/* Standings */}
@@ -96,10 +96,10 @@ export default function LeaderboardClient({
           </div>
         ) : (
           <>
-            {/* Column header — operator-requested layout:
-                "# Player · reward · pulled value". Spacer mirrors the 36px
-                avatar so "Player" starts over the names; the two right labels
-                right-align with their (right-justified) columns. */}
+            {/* Column header — operator-requested layout (2026-07-23 voice
+                notes): weekly = "# Player · reward" (pulled value moved under
+                the name), All Time = "# Player · pulled value". Spacer mirrors
+                the 36px avatar so "Player" starts over the names. */}
             <div className="mt-3 flex items-center gap-3 px-4 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
               <span className="w-8 shrink-0 text-center">#</span>
               <span aria-hidden className="w-9 shrink-0" />
@@ -107,9 +107,9 @@ export default function LeaderboardClient({
               {showPrizeCol && (
                 <span className="min-w-16 shrink-0 text-right">Reward</span>
               )}
-              <span className="shrink-0 text-right">
-                {period === 'This Week' ? 'Pulled value' : 'Points'}
-              </span>
+              {period === 'All Time' && (
+                <span className="shrink-0 text-right">Pulled value</span>
+              )}
             </div>
             <ol className="mt-2 overflow-hidden rounded-2xl border border-white/10 bg-neutral-900">
               {entries.map((entry, i) => {
@@ -161,21 +161,37 @@ export default function LeaderboardClient({
                           {entry.name}
                         </span>
                       )}
-                      {/* Pulls only — the RM spend under a name on All Time was
+                      {/* Weekly: "RM 738,106.76 · 84 pulls" under the name
+                        (operator voice notes 2026-07-23). All Time keeps pulls
+                        only — the RM spend under a name there was
                         operator-rejected ("don't show how much money drawn"). */}
-                      <p className="truncate text-[12px] text-neutral-400">
-                        {`${entry.pulls} pulls`}
+                      {/* No truncate: with a 4-slab reward the cell narrows
+                        enough to clip "· 84 pulls" — wrap at the dot instead
+                        (each side is nowrap, so the value never splits). */}
+                      <p className="text-[12px] text-neutral-400">
+                        {period === 'This Week' ? (
+                          <>
+                            <span className="font-semibold whitespace-nowrap tabular-nums text-white">
+                              {entry.volume}
+                            </span>
+                            <span className="whitespace-nowrap">
+                              {` · ${entry.pulls} pulls`}
+                            </span>
+                          </>
+                        ) : (
+                          `${entry.pulls} pulls`
+                        )}
                       </p>
                     </div>
                     {/* Weekly board only: the CURRENT challenge prize for this
                       rank — card thumb and/or credits, from the unlocked
-                      stages' prize tables. Sits BEFORE the ranking figure
-                      (operator order: # player · reward · pulled value) so the
-                      reward never gets pinched against the row edge. Thumb
-                      height matches the avatar so the row keeps its one-line
-                      height. min-w-16 is the shared column basis (with a
-                      spacer on prizeless rows) keeping the RM figures aligned
-                      — sized for the widest single-type prize (cumulative
+                      stages' prize tables. The reward IS the row's right edge
+                      on weekly (operator 2026-07-23: value under the name,
+                      "right side all reward"). Thumb height matches the
+                      avatar so the row keeps its one-line height. min-w-16 is
+                      the shared column basis (with a spacer on prizeless
+                      rows) keeping the rewards column-aligned across rows —
+                      sized for the widest single-type prize (cumulative
                       credits, e.g. "RM 18,500"). A rank paying card AND
                       credits grows past it — deliberate: rewards never clip. */}
                     {prize ? (
@@ -227,10 +243,15 @@ export default function LeaderboardClient({
                     ) : showPrizeCol ? (
                       <span aria-hidden className="min-w-16 shrink-0" />
                     ) : null}
-                    {/* Big figure = the ranking metric for the active tab. */}
-                    <span className="font-heading shrink-0 text-base tabular-nums text-white">
-                      {period === 'This Week' ? entry.volume : entry.points}
-                    </span>
+                    {/* All Time only: pulled value figure (operator 2026-07-23
+                      "写回pulled value" — the old points figure is retired from
+                      the UI; ranking stays backend spend-order). Weekly rows
+                      end on the reward — the value lives under the name. */}
+                    {period === 'All Time' && (
+                      <span className="font-heading shrink-0 text-base tabular-nums text-white">
+                        {entry.volume}
+                      </span>
+                    )}
                   </li>
                 );
               })}
@@ -254,10 +275,10 @@ export default function LeaderboardClient({
               </div>
               <div className="text-right">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
-                  {period === 'This Week' ? 'Pulled' : 'Points'}
+                  Pulled
                 </p>
                 <p className="font-heading text-chase text-2xl tabular-nums">
-                  {period === 'This Week' ? own.volume : own.points}
+                  {own.volume}
                 </p>
               </div>
             </div>
