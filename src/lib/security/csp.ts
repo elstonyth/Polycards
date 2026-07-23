@@ -48,17 +48,25 @@ export function buildCsp(): string {
   // Sentry ingest (browser → SDK transport). Covers *.ingest.sentry.io / *.sentry.io.
   const sentry = 'https://*.sentry.io https://*.ingest.sentry.io';
 
-  const connect = ["'self'", backend, media, sentry].filter(Boolean).join(' ');
+  // Meta Pixel (components/MetaPixel.tsx): fbevents.js loads from
+  // connect.facebook.net, events fire to facebook.com (script beacons +
+  // the <noscript> tracking image).
+  const fbScript = 'https://connect.facebook.net';
+  const fbTrack = 'https://www.facebook.com';
+
+  const connect = ["'self'", backend, media, sentry, fbScript, fbTrack]
+    .filter(Boolean)
+    .join(' ');
   // jsDelivr hosts the pixel-Pokémon sprites (src/lib/mock/pokedex.ts) — an
   // enforced policy must allow it or every reel/pokédex sprite is blocked.
   const spriteCdn = 'https://cdn.jsdelivr.net';
-  const img = ["'self'", 'data:', 'blob:', backend, media, spriteCdn]
+  const img = ["'self'", 'data:', 'blob:', backend, media, spriteCdn, fbTrack]
     .filter(Boolean)
     .join(' ');
 
   const directives = [
     `default-src 'self'`,
-    `script-src 'self' 'unsafe-inline'`,
+    `script-src 'self' 'unsafe-inline' ${fbScript}`,
     `style-src 'self' 'unsafe-inline'`,
     `img-src ${img}`,
     `font-src 'self'`,

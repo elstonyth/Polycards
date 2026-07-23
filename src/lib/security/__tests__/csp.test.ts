@@ -55,6 +55,16 @@ describe('buildCsp', () => {
     expect(csp).toMatch(/img-src[^;]*http:\/\/localhost:9000/);
   });
 
+  // Meta Pixel (components/MetaPixel.tsx): fbevents.js from
+  // connect.facebook.net, event beacons + <noscript> image to facebook.com.
+  it('allows the Meta Pixel origins', () => {
+    const csp = buildCsp();
+    expect(csp).toMatch(/script-src[^;]*https:\/\/connect\.facebook\.net/);
+    expect(csp).toMatch(/connect-src[^;]*https:\/\/connect\.facebook\.net/);
+    expect(csp).toMatch(/connect-src[^;]*https:\/\/www\.facebook\.com/);
+    expect(csp).toMatch(/img-src[^;]*https:\/\/www\.facebook\.com/);
+  });
+
   it('allows the jsDelivr sprite CDN in img-src', () => {
     const csp = buildCsp();
     expect(csp).toMatch(/img-src[^;]*https:\/\/cdn\.jsdelivr\.net/);

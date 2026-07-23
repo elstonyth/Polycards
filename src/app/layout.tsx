@@ -9,6 +9,7 @@ import { TopUpProvider } from '@/components/app-shell/TopUpProvider';
 import { AuthProvider } from '@/components/auth/AuthProvider';
 import SkipLink from '@/components/SkipLink';
 import CookieConsent from '@/components/CookieConsent';
+import MetaPixel, { META_PIXEL_ID } from '@/components/MetaPixel';
 import { SITE_URL } from '@/lib/site';
 import { BUYBACK_RATE_LABEL } from '@/lib/buyback-copy';
 
@@ -81,7 +82,16 @@ export default async function RootLayout({
             This site needs JavaScript enabled for pack opening and live
             features.
           </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            height="1"
+            width="1"
+            className="hidden"
+            src={`https://www.facebook.com/tr?id=${META_PIXEL_ID}&ev=PageView&noscript=1`}
+            alt=""
+          />
         </noscript>
+        <MetaPixel />
         <AuthProvider>
           <TopUpProvider>
             <SkipLink />
