@@ -165,13 +165,18 @@ export default function LeaderboardClient({
                         (operator voice notes 2026-07-23). All Time keeps pulls
                         only — the RM spend under a name there was
                         operator-rejected ("don't show how much money drawn"). */}
-                      <p className="truncate text-[12px] text-neutral-400">
+                      {/* No truncate: with a 4-slab reward the cell narrows
+                        enough to clip "· 84 pulls" — wrap at the dot instead
+                        (each side is nowrap, so the value never splits). */}
+                      <p className="text-[12px] text-neutral-400">
                         {period === 'This Week' ? (
                           <>
-                            <span className="font-semibold tabular-nums text-white">
+                            <span className="font-semibold whitespace-nowrap tabular-nums text-white">
                               {entry.volume}
                             </span>
-                            {` · ${entry.pulls} pulls`}
+                            <span className="whitespace-nowrap">
+                              {` · ${entry.pulls} pulls`}
+                            </span>
                           </>
                         ) : (
                           `${entry.pulls} pulls`
