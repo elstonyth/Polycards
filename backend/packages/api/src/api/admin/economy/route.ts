@@ -21,9 +21,10 @@ function isoOrUndefined(v: unknown): string | undefined {
 
 // GET /admin/economy — the operator's money report: ledger totals
 // (revenue / payouts / top-ups / adjustments / net) for an optional [from, to)
-// period window (omit both = all time), the outstanding vault liability (FMV of
-// every vaulted pull), and a per-active-pack theoretical RTP table from the
-// CURRENT odds × FMVs. Only the ledger totals are period-scoped; liability and
+// period window (omit both = all time), the outstanding vault liability (raw
+// FMV of every vaulted pull), and a per-active-pack theoretical RTP table from
+// the CURRENT odds × card DISPLAY values (FMV × markup — the buyback basis).
+// Only the ledger totals are period-scoped; liability and
 // RTP are current-state snapshots. Reads only; pure math lives in
 // modules/packs/economy.ts.
 export async function GET(
@@ -55,7 +56,7 @@ export async function GET(
       displayMarketPrice(
         toMoney(c.market_value),
         fx,
-        toMoney(c.market_multiplier) || DEFAULT_MARKET_MULTIPLIER,
+        toMoney(c.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER),
       ),
     ]),
   );
