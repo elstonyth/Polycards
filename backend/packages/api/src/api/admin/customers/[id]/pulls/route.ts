@@ -76,7 +76,14 @@ export async function GET(
         );
         const { percent, rate_type } = resolveBuybackRate(
           packBySlug.get(p.pack_id),
-          { rolled_at: p.rolled_at, revealed_at: p.revealed_at },
+          {
+            rolled_at: p.rolled_at,
+            revealed_at: p.revealed_at,
+            // Thread the close stamp too, or admin's "payable now" quote would
+            // show the instant rate for a window the customer already closed
+            // (vault + sell credit are flat) — the two must agree.
+            instant_closed_at: p.instant_closed_at,
+          },
         );
         quote = {
           percent,

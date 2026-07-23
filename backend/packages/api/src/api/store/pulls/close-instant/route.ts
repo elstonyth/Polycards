@@ -6,9 +6,11 @@ import { PACKS_MODULE } from "../../../../modules/packs";
 import type PacksModuleService from "../../../../modules/packs/service";
 
 // POST /store/pulls/close-instant — end the instant-buyback window for the
-// caller's own pulls. The reveal client calls this the moment the reveal
-// concludes or the customer leaves it (page-hide beacon), so from then on the
-// vault and every later sell quote the flat rate, even inside the 30s. CLOSE-
+// caller's own pulls. The reveal client calls this when the reveal component
+// unmounts (concluding via "Spin again", or in-app navigation away), so from
+// then on the vault and every later sell quote the flat rate, even inside the
+// 30s. A HARD exit (tab close, app kill) can't run the client, so it falls back
+// to the 30s time deadline — the accepted backstop, not instant coverage. CLOSE-
 // ONLY + owner-scoped + idempotent (see closeInstantWindow): it can never
 // re-open the premium, so a replayed or spoofed call is harmless.
 //

@@ -380,19 +380,32 @@ export function RevealStage({
             />
           )}
       </div>
-      {/* Explicit "Spin again" — shown once every card is concluded (sold/kept/
-          expired). Replaces the old silent auto-conclude: the reveal now waits
-          for a DELIBERATE press, so a stray tap on the just-revealed cards can't
-          start a fresh spin. One press concludes the stage AND spins again
-          (onSpinAgain). Demo ends via its own footer buttons. */}
-      {!demo && allConcluded && onSpinAgain && (
-        <button
-          type="button"
-          onClick={onSpinAgain}
-          className="inline-flex h-12 w-full max-w-[300px] items-center justify-center rounded-xl bg-white text-sm font-bold text-neutral-950 transition-colors hover:bg-white/90"
-        >
-          Spin again
-        </button>
+      {/* Explicit end-of-reveal controls — shown once every card is concluded
+          (sold/kept/expired). Replaces the old silent auto-conclude: the reveal
+          now waits for a DELIBERATE press, so a stray tap on the just-revealed
+          cards can't start a fresh spin. "Spin again" concludes AND respins in
+          one press; "Done" just returns to the idle machine (no charge) — the
+          non-spinning exit for a solvent player who is finished, since the
+          machine chrome is hidden behind the reveal. Demo has its own buttons. */}
+      {!demo && allConcluded && (
+        <div className="flex w-full max-w-[300px] flex-col items-center gap-2">
+          {onSpinAgain && (
+            <button
+              type="button"
+              onClick={onSpinAgain}
+              className="inline-flex h-12 w-full items-center justify-center rounded-xl bg-white text-sm font-bold text-neutral-950 transition-colors hover:bg-white/90"
+            >
+              Spin again
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onConclude}
+            className="inline-flex h-11 w-full items-center justify-center rounded-xl border border-white/12 bg-white/5 text-[13px] font-semibold text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+          >
+            Done
+          </button>
+        </div>
       )}
       {confirmIndex !== null && offers[confirmIndex] && (
         <SellConfirmModal

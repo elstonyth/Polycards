@@ -384,10 +384,12 @@ export default defineMiddlewares({
     },
     {
       // Close the instant-buyback window (POST /store/pulls/close-instant) —
-      // the reveal client calls it on conclude / page-hide so the vault quotes
-      // the flat rate. Owner-scoped in the handler; close-only, so it shares the
-      // reveal limiter (same reveal-lifecycle cadence). Distinct 2-segment path,
-      // so the 3-segment '/store/pulls/*/reveal' matcher above doesn't cover it.
+      // the reveal client calls it on unmount (conclude / in-app nav) so the
+      // vault quotes the flat rate. Owner-scoped in the handler; close-only and
+      // idempotent, so it shares the reveal limiter (same reveal-lifecycle
+      // cadence) — a throttled close simply falls back to the 30s deadline, no
+      // harm. Distinct 2-segment path, so the 3-segment '/store/pulls/*/reveal'
+      // matcher above doesn't cover it.
       matcher: '/store/pulls/close-instant',
       method: 'POST',
       middlewares: [
