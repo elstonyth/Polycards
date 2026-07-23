@@ -33,6 +33,7 @@ export function RevealStage({
   onSkip,
   onConclude,
   onCloseInstant,
+  onSpinAgain,
   onSellBack,
   onReveal,
   onSold,
@@ -59,6 +60,10 @@ export function RevealStage({
    *  A: close-on-leave → the vault quotes the flat rate). Fire-and-forget; the
    *  30s deadline is the hard-tab-kill backstop. */
   onCloseInstant?: (pullIds: string[]) => void;
+  /** Deliberate "Spin again" from the concluded reveal: conclude the stage AND
+   *  start the next spin in one press. Replaces the old silent auto-conclude so
+   *  a stray tap can't trigger a spin. */
+  onSpinAgain?: () => void;
   onSellBack: SellBackFn;
   onReveal?: RevealFn;
   onSold?: (balance: number) => void;
@@ -116,18 +121,18 @@ export function RevealStage({
     vibrate([30, 40, 30]);
   }, [expired, sfx, vibrate]);
 
-  // Auto-conclude (spec #27): once every card is terminal, clear the stage after
-  // a short beat. Reduced motion still uses the beat so the credited/vault copy
-  // is readable before the machine returns; it is short either way.
-  useEffect(() => {
-    if (!allConcluded || demo) return;
-    const id = window.setTimeout(onConclude, reduced ? 400 : 1400);
-    return () => clearTimeout(id);
-  }, [allConcluded, demo, onConclude, reduced]);
+  // NO auto-conclude (was spec #27). Once every card is terminal the stage used
+  // to clear itself back to 'idle' after ~1.4s — but that silently returned the
+  // machine to a spin-ready state, so a tap the player meant for the just-
+  // revealed cards started a fresh spin instead. The reveal now STAYS until the
+  // player deliberately presses "Spin again" (the footer CTA below → onSpinAgain,
+  // which concludes and replays in one press). The demo path already ends on its
+  // own explicit buttons, so this only ever affected real pulls.
 
   // Close the instant-buyback window when the reveal ends. This component
-  // unmounts on BOTH auto-conclude (phase→idle) and navigate-away, so its
-  // cleanup is the single "left the reveal" signal (approach A). The pull ids
+  // unmounts when the player concludes (Spin again → phase→idle) or navigates
+  // away, so its cleanup is the single "left the reveal" signal (approach A).
+  // The pull ids
   // are captured ONCE at mount: handleConclude clears `offers` just before the
   // unmount, so reading it inside the cleanup would find nothing. Demo reveals
   // carry no real pulls. A hard tab-kill won't run this — the 30s deadline is
@@ -375,6 +380,20 @@ export function RevealStage({
             />
           )}
       </div>
+      {/* Explicit "Spin again" — shown once every card is concluded (sold/kept/
+          expired). Replaces the old silent auto-conclude: the reveal now waits
+          for a DELIBERATE press, so a stray tap on the just-revealed cards can't
+          start a fresh spin. One press concludes the stage AND spins again
+          (onSpinAgain). Demo ends via its own footer buttons. */}
+      {!demo && allConcluded && onSpinAgain && (
+        <button
+          type="button"
+          onClick={onSpinAgain}
+          className="inline-flex h-12 w-full max-w-[300px] items-center justify-center rounded-xl bg-white text-sm font-bold text-neutral-950 transition-colors hover:bg-white/90"
+        >
+          Spin again
+        </button>
+      )}
       {confirmIndex !== null && offers[confirmIndex] && (
         <SellConfirmModal
           open
