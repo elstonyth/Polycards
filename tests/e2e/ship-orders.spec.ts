@@ -1,12 +1,18 @@
 // Admin ship-orders workflow, end to end:
 //   a customer requests physical delivery of a vaulted card (set up via API for
-//   determinism) → the operator advances it requested → packing → shipped through
-//   the Deliveries dashboard → asserted in the UI (the modal closes on success)
-//   AND server-side (admin delivery-orders API reports 'shipped').
+//   determinism) → the operator advances it requested → processed →
+//   ready_to_ship → shipped through the All Orders dashboard → asserted in the
+//   UI (the modal closes on success) AND server-side (admin delivery-orders API
+//   reports 'shipped').
 //
 // Backend transitions are sequential (modules/packs/delivery.ts ALLOWED):
-//   requested → packing → shipped → delivered, and 'shipped' requires a tracking
-//   number. The operator therefore packs first, then ships.
+//   requested → processed → ready_to_ship → shipped → completed, and 'shipped'
+//   requires a tracking number. ready_to_ship is a mandatory hop — the operator
+//   cannot jump processed → shipped.
+//
+// The dashboard renders the OPERATOR labels (lib/format.ts
+// DELIVERY_STATUS_LABEL), not the raw enum, so the status options are located by
+// label ("Ready to ship"), not by token ('ready_to_ship').
 import { test, expect, type Page } from '@playwright/test';
 import { stamp } from './helpers/constants';
 import {
@@ -22,13 +28,17 @@ import { ensureAdmin } from './helpers/admin';
 
 const PACK = 'pokemon-rookie';
 
-// Advance the delivery order (located by customer email) to `status` via the
-// Deliveries modal. Success closes the modal (setDetail(null)); the toast
+// Operator-facing status labels — what the Manage modal's Select actually
+// renders. Keep in step with backend/apps/admin/src/lib/format.ts.
+type StatusLabel = 'Processed' | 'Ready to ship' | 'Shipped';
+
+// Advance the delivery order (located by customer email) to `label` via the
+// All Orders Manage modal. Success closes the modal (setDetail(null)); the toast
 // auto-dismisses, so the modal-hidden state is the reliable success signal.
 async function advance(
   page: Page,
   email: string,
-  status: 'packing' | 'shipped',
+  label: StatusLabel,
   tracking?: string,
 ): Promise<void> {
   const row = page.locator('tbody tr', { hasText: email });
@@ -36,8 +46,9 @@ async function advance(
   await row.first().getByRole('button', { name: 'Manage' }).click();
   const dialog = page.getByRole('dialog');
   await dialog.waitFor({ timeout: 15_000 });
+  // The modal holds exactly one Select (Status); the bulk bar's lives outside it.
   await dialog.getByRole('combobox').click();
-  await page.getByRole('option', { name: status }).click();
+  await page.getByRole('option', { name: label, exact: true }).click();
   if (tracking) {
     await dialog.getByPlaceholder('Required to mark shipped').fill(tracking);
   }
@@ -46,7 +57,7 @@ async function advance(
 }
 
 test.describe('admin ship-orders workflow', () => {
-  test('customer requests delivery → operator packs then ships it', async ({
+  test('customer requests delivery → operator processes, readies, ships it', async ({
     page,
   }) => {
     // --- Precondition (API): a fresh customer with one 'requested' delivery order.
@@ -60,12 +71,16 @@ test.describe('admin ship-orders workflow', () => {
     const orderId = await requestDelivery(cust.token, [pullId], addressId);
 
     const tok = await adminToken();
-    expect((await adminGetDeliveryOrder(tok, orderId)).status).toBe('requested');
+    expect((await adminGetDeliveryOrder(tok, orderId)).status).toBe(
+      'requested',
+    );
 
-    // --- Operator advances it through the Deliveries dashboard UI.
+    // --- Operator advances it through the All Orders dashboard UI. Each Save is
+    // server-confirmed before the modal closes, so the hops stay ordered.
     await ensureAdmin(page, '/deliveries');
-    await advance(page, cust.email, 'packing');
-    await advance(page, cust.email, 'shipped', `PW-TRK-${stamp()}`);
+    await advance(page, cust.email, 'Processed');
+    await advance(page, cust.email, 'Ready to ship');
+    await advance(page, cust.email, 'Shipped', `PW-TRK-${stamp()}`);
 
     // --- Persisted server-side as 'shipped'.
     await expect

@@ -98,7 +98,9 @@ describe('POST /store/delivery-orders/:id/cancel', () => {
 
   it.each([
     ['shipped', /already shipped .*contact support/i],
-    ['completed', /already completed .*contact support/i],
+    // DELIVERY_STATUS_LABEL.completed === 'delivered' — the customer is told
+    // their order was delivered, not "completed" (operator vocabulary).
+    ['completed', /already delivered .*contact support/i],
     ['canceled', /already canceled/i],
   ])('refuses a %s order with actionable copy', async (status, msg) => {
     await expect(

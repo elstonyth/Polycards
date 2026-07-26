@@ -7,6 +7,7 @@ import PacksModuleService from '../../../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../../../modules/packs';
 import { updateDeliveryOrderWorkflow } from '../../../../../workflows/update-delivery-order';
 import { serializeDeliveryOrders } from '../../../../../modules/packs/delivery-view';
+import { DELIVERY_STATUS_LABEL } from '../../../../../modules/packs/delivery';
 
 // POST /store/delivery-orders/:id/cancel — the customer cancels their OWN
 // delivery while it is still pre-ship. The covered pulls flip
@@ -41,7 +42,10 @@ export async function POST(
       MedusaError.Types.NOT_ALLOWED,
       order.status === 'canceled'
         ? 'This delivery is already canceled.'
-        : `This delivery is already ${order.status} and can no longer be canceled — please contact support.`,
+        : // Human wording, never the raw enum: "completed" is operator
+          // vocabulary and "ready_to_ship" is snake_case (same rule as the
+          // address-edit lock).
+          `This delivery is already ${DELIVERY_STATUS_LABEL[order.status]} and can no longer be canceled — please contact support.`,
     );
   }
 

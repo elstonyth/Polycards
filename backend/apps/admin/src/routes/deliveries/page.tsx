@@ -150,7 +150,10 @@ const PackPurchases = () => {
                   </Table.Cell>
                   <Table.Cell>
                     <div className="flex items-center gap-2">
-                      {p.card && (
+                      {/* `?.image` and not just `p.card`: a card row with an
+                          empty image would render <img src=""> — which the
+                          browser resolves to the page URL and refetches. */}
+                      {p.card?.image && (
                         <img
                           src={resolveImageUrl(p.card.image)}
                           alt=""
@@ -466,9 +469,7 @@ const DeliveriesPage = () => {
       {kind === 'shipping' &&
         (isError ? (
           <div className="px-6 py-8">
-            <Text className="text-ui-fg-subtle">
-              Failed to load deliveries.
-            </Text>
+            <Text className="text-ui-fg-subtle">Failed to load orders.</Text>
           </div>
         ) : orders === null ? (
           <div className="px-6 py-8">
