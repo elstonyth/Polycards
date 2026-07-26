@@ -18,6 +18,7 @@ import {
 } from './packs-api';
 import {
   adjustCustomerCredits,
+  bulkUpdateDeliveryOrders,
   createProductFromPriceCharting,
   deleteCard,
   deletePack,
@@ -250,10 +251,11 @@ export const useCustomerPulls = (
 export const useDeliveryOrders = (
   status?: DeliveryStatus,
   page = 0,
+  q?: string,
 ): UseQueryResult<DeliveryOrdersPage> =>
   useQuery({
-    queryKey: qk.deliveryOrders(status, page),
-    queryFn: () => listDeliveryOrders(status, page),
+    queryKey: qk.deliveryOrders(status, page, q),
+    queryFn: () => listDeliveryOrders(status, page, q),
     placeholderData: keepPreviousData,
   });
 
@@ -528,6 +530,17 @@ export const useUpdateDeliveryOrder = () => {
       }),
     // Status filters + pages vary, so drop the whole delivery-orders namespace.
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.deliveryOrdersKey }),
+  });
+};
+
+export const useBulkUpdateDeliveryOrders = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { ids: string[]; status: DeliveryStatus }) =>
+      bulkUpdateDeliveryOrders(vars.ids, vars.status),
+    // Partial success is the contract, so invalidate on SETTLE (not success):
+    // a throw here can still leave earlier ids in the batch already moved.
+    onSettled: () => qc.invalidateQueries({ queryKey: qk.deliveryOrdersKey }),
   });
 };
 

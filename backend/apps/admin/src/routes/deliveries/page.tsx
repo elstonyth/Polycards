@@ -1,9 +1,11 @@
-import { useRef, useState, type ChangeEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import {
+  Checkbox,
   Container,
   Heading,
   Text,
   Table,
+  Tabs,
   Button,
   Select,
   Input,
@@ -15,17 +17,23 @@ import {
 import { TruckFast, XMark } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
+  useBulkUpdateDeliveryOrders,
   useDeliveryOrders,
   useUpdateDeliveryOrder,
   useUploadImage,
 } from '../../lib/queries';
-import type { AdminDeliveryOrder, DeliveryStatus } from '../../lib/admin-rest';
+import type {
+  AdminDeliveryItem,
+  AdminDeliveryOrder,
+  DeliveryStatus,
+} from '../../lib/admin-rest';
+import { orderDateTime } from '../../lib/format';
 import { resolveImageUrl } from '../../lib/image-url';
 import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
 export const config: RouteConfig = {
-  label: 'Deliveries',
+  label: 'All Orders',
   icon: TruckFast,
   nested: '/orders',
   rank: 2,
@@ -33,40 +41,151 @@ export const config: RouteConfig = {
 
 const STATUSES: DeliveryStatus[] = [
   'requested',
-  'packing',
+  'processed',
+  'ready_to_ship',
   'shipped',
-  'delivered',
+  'completed',
   'canceled',
 ];
 const TONE: Record<DeliveryStatus, 'orange' | 'blue' | 'green' | 'grey'> = {
   requested: 'orange',
-  packing: 'orange',
+  processed: 'orange',
+  ready_to_ship: 'orange',
   shipped: 'blue',
-  delivered: 'green',
+  completed: 'green',
   canceled: 'grey',
 };
-// Display labels only — state/API keep the raw lowercase values.
+// Display labels only — state/API keep the raw lowercase values. This is the
+// OPERATOR surface: 'completed' reads "Completed" here, while the same status
+// is worded "delivered" to the customer (see delivery.ts).
 const STATUS_LABEL: Record<DeliveryStatus, string> = {
   requested: 'Requested',
-  packing: 'Packing',
+  processed: 'Processed',
+  ready_to_ship: 'Ready to ship',
   shipped: 'Shipped',
-  delivered: 'Delivered',
+  completed: 'Completed',
   canceled: 'Canceled',
+};
+
+// First item's thumbnail + name/handle with a "+N more" tail — the operator
+// scans for "which card", the full manifest lives in the Manage modal.
+const ItemCell = ({ items }: { items: AdminDeliveryItem[] }) => {
+  const first = items[0];
+  if (!first) {
+    return <span className="text-ui-fg-subtle">—</span>;
+  }
+  return (
+    <div className="flex items-center gap-2">
+      {first.card && (
+        <img
+          src={resolveImageUrl(first.card.slab_image || first.card.image)}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          className="h-8 w-6 shrink-0 rounded object-contain"
+        />
+      )}
+      <div className="flex min-w-0 flex-col">
+        <span className="truncate text-sm">
+          {first.card?.name ?? 'Unknown card'}
+        </span>
+        <span className="text-ui-fg-subtle truncate text-xs">
+          {first.card?.handle ?? first.pull_id}
+        </span>
+      </div>
+      {items.length > 1 && (
+        <span className="text-ui-fg-subtle whitespace-nowrap text-xs">
+          +{items.length - 1} more
+        </span>
+      )}
+    </div>
+  );
 };
 
 const DeliveriesPage = () => {
   const [filter, setFilter] = useState<DeliveryStatus | undefined>(undefined);
   const [page, setPage] = useState(0);
-  const { data, isError } = useDeliveryOrders(filter, page);
+  const [search, setSearch] = useState('');
+  const [q, setQ] = useState('');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkStatus, setBulkStatus] = useState<DeliveryStatus>('processed');
+  const { data, isError } = useDeliveryOrders(filter, page, q || undefined);
   const orders = data?.orders ?? null;
   const update = useUpdateDeliveryOrder();
+  const bulk = useBulkUpdateDeliveryOrders();
   const uploadImg = useUploadImage();
   const [detail, setDetail] = useState<AdminDeliveryOrder | null>(null);
-  const [nextStatus, setNextStatus] = useState<DeliveryStatus>('packing');
+  const [nextStatus, setNextStatus] = useState<DeliveryStatus>('processed');
   const [tracking, setTracking] = useState('');
   const [proofImages, setProofImages] = useState<string[]>([]);
   const proofRef = useRef<HTMLInputElement>(null);
   const uploading = uploadImg.isPending;
+
+  // 300 ms debounce — the list refetches on the settled value, not per keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setQ(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  // Anything that changes WHICH rows are on screen drops the selection: Apply
+  // must never send ids the operator can no longer see.
+  const clearSelection = () => setSelected(new Set());
+
+  const pageIds = orders?.map((o) => o.id) ?? [];
+  const allOnPage =
+    pageIds.length > 0 && pageIds.every((id) => selected.has(id));
+  const someOnPage = pageIds.some((id) => selected.has(id));
+
+  const toggleAll = () =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const id of pageIds) {
+        if (allOnPage) next.delete(id);
+        else next.add(id);
+      }
+      return next;
+    });
+
+  const toggleOne = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+
+  // Partial success is the endpoint's contract. Two classes of skip:
+  // `already <status>` is benign (the backend refuses to audit a no-op) and
+  // belongs in the summary line; everything else is a real refusal — a missing
+  // order or an illegal transition — and gets a red toast, capped at 5 so a
+  // 100-id mistake doesn't bury the screen.
+  const applyBulk = async () => {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    try {
+      const { updated, skipped } = await bulk.mutateAsync({
+        ids,
+        status: bulkStatus,
+      });
+      const benign = `already ${bulkStatus}`;
+      const refused = skipped.filter((s) => s.reason !== benign);
+      const noop = skipped.length - refused.length;
+      const summary = [
+        `${updated.length} updated`,
+        noop > 0 ? `${noop} already ${STATUS_LABEL[bulkStatus]}` : null,
+        refused.length > 0 ? `${refused.length} skipped` : null,
+      ]
+        .filter(Boolean)
+        .join(', ');
+      if (updated.length > 0) toast.success(summary);
+      else toast.warning(summary);
+      for (const s of refused.slice(0, 5)) {
+        toast.error(`#${s.id.slice(-6)}: ${s.reason}`);
+      }
+      clearSelection();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    }
+  };
 
   const openDetail = (o: AdminDeliveryOrder) => {
     setDetail(o);
@@ -119,33 +238,80 @@ const DeliveriesPage = () => {
 
   return (
     <Container className="divide-y p-0">
-      <div className="flex items-center justify-between gap-4 px-6 py-4">
-        <div>
-          <Heading level="h2">Deliveries</Heading>
-          <Text className="text-ui-fg-subtle mt-1" size="small">
-            Physical shipment requests for vaulted cards.
-          </Text>
+      <div className="flex flex-col gap-4 px-6 py-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <Heading level="h2">All Orders</Heading>
+            <Text className="text-ui-fg-subtle mt-1" size="small">
+              Orders and physical shipment requests.
+            </Text>
+          </div>
+          <Input
+            type="search"
+            className="w-64"
+            placeholder="Search order id"
+            aria-label="Search orders by id"
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(0);
+              clearSelection();
+            }}
+          />
         </div>
-        <Select
+        <Tabs
           value={filter ?? 'all'}
           onValueChange={(v) => {
             setPage(0);
+            clearSelection();
             setFilter(v === 'all' ? undefined : (v as DeliveryStatus));
           }}
         >
-          <Select.Trigger className="w-44" aria-label="Filter by status">
-            <Select.Value />
-          </Select.Trigger>
-          <Select.Content>
-            <Select.Item value="all">All statuses</Select.Item>
+          <Tabs.List>
+            <Tabs.Trigger value="all">All</Tabs.Trigger>
             {STATUSES.map((s) => (
-              <Select.Item key={s} value={s}>
+              <Tabs.Trigger key={s} value={s}>
                 {STATUS_LABEL[s]}
-              </Select.Item>
+              </Tabs.Trigger>
             ))}
-          </Select.Content>
-        </Select>
+          </Tabs.List>
+        </Tabs>
       </div>
+
+      {selected.size > 0 && (
+        <div
+          className="bg-ui-bg-subtle flex flex-wrap items-center gap-3 px-6 py-3"
+          role="region"
+          aria-label="Bulk actions"
+        >
+          <Text size="small" weight="plus">
+            {selected.size} selected
+          </Text>
+          <Select
+            value={bulkStatus}
+            onValueChange={(v) => setBulkStatus(v as DeliveryStatus)}
+          >
+            <Select.Trigger className="w-44" aria-label="Mark selected as">
+              <Select.Value />
+            </Select.Trigger>
+            <Select.Content>
+              {STATUSES.map((s) => (
+                <Select.Item key={s} value={s}>
+                  {STATUS_LABEL[s]}
+                </Select.Item>
+              ))}
+            </Select.Content>
+          </Select>
+          <Button size="small" onClick={applyBulk} isLoading={bulk.isPending}>
+            Apply
+          </Button>
+          {/* ponytail: Task 7 owns the print view AND its mounted route path —
+              a URL guessed here would 404 in a new tab, so this stays inert. */}
+          <Button size="small" variant="secondary" disabled>
+            Print
+          </Button>
+        </div>
+      )}
 
       {isError ? (
         <div className="px-6 py-8">
@@ -157,21 +323,34 @@ const DeliveriesPage = () => {
         </div>
       ) : orders.length === 0 ? (
         <div className="px-6 py-8">
-          <Text className="text-ui-fg-subtle">No delivery orders.</Text>
+          <Text className="text-ui-fg-subtle">
+            {filter || q ? 'No orders match this filter.' : 'No orders yet.'}
+          </Text>
         </div>
       ) : (
         <div
           className="overflow-x-auto"
           tabIndex={0}
           role="region"
-          aria-label="Deliveries table"
+          aria-label="Orders table"
         >
           <Table>
             <Table.Header>
               <Table.Row>
+                <Table.HeaderCell className="w-10">
+                  <Checkbox
+                    aria-label="Select all orders on this page"
+                    checked={
+                      allOnPage ? true : someOnPage ? 'indeterminate' : false
+                    }
+                    onCheckedChange={toggleAll}
+                  />
+                </Table.HeaderCell>
                 <Table.HeaderCell>Order</Table.HeaderCell>
-                <Table.HeaderCell>Customer</Table.HeaderCell>
-                <Table.HeaderCell>Cards</Table.HeaderCell>
+                <Table.HeaderCell>Date</Table.HeaderCell>
+                <Table.HeaderCell>Item</Table.HeaderCell>
+                <Table.HeaderCell>Qty</Table.HeaderCell>
+                <Table.HeaderCell>Player</Table.HeaderCell>
                 <Table.HeaderCell>Status</Table.HeaderCell>
                 <Table.HeaderCell className="text-right">
                   Actions
@@ -181,34 +360,27 @@ const DeliveriesPage = () => {
             <Table.Body>
               {orders.map((o) => (
                 <Table.Row key={o.id}>
+                  <Table.Cell>
+                    <Checkbox
+                      aria-label={`Select order #${o.id.slice(-6)}`}
+                      checked={selected.has(o.id)}
+                      onCheckedChange={() => toggleOne(o.id)}
+                    />
+                  </Table.Cell>
                   <Table.Cell className="font-mono text-xs">
                     #{o.id.slice(-6)}
                   </Table.Cell>
-                  <Table.Cell className="text-ui-fg-subtle">
-                    {o.customer_email ?? o.customer_id}
+                  <Table.Cell className="text-ui-fg-subtle whitespace-nowrap text-xs">
+                    {orderDateTime(o.created_at)}
                   </Table.Cell>
                   <Table.Cell>
-                    <div className="flex items-center gap-1">
-                      {o.items
-                        .slice(0, 4)
-                        .map((it) =>
-                          it.card ? (
-                            <img
-                              key={it.pull_id}
-                              src={resolveImageUrl(
-                                it.card.slab_image || it.card.image,
-                              )}
-                              alt={it.card.name}
-                              className="h-8 w-6 rounded object-contain"
-                            />
-                          ) : null,
-                        )}
-                      {o.items.length > 4 && (
-                        <span className="text-ui-fg-subtle text-xs">
-                          +{o.items.length - 4}
-                        </span>
-                      )}
-                    </div>
+                    <ItemCell items={o.items} />
+                  </Table.Cell>
+                  <Table.Cell className="tabular-nums">
+                    {o.items.length}
+                  </Table.Cell>
+                  <Table.Cell className="text-ui-fg-subtle">
+                    {o.customer_email ?? o.customer_id}
                   </Table.Cell>
                   <Table.Cell>
                     <StatusBadge color={TONE[o.status]}>
@@ -234,7 +406,10 @@ const DeliveriesPage = () => {
       {data && (
         <Pager
           page={page}
-          onPage={setPage}
+          onPage={(p) => {
+            setPage(p);
+            clearSelection();
+          }}
           pageSize={data.limit}
           count={data.orders.length}
           total={data.total}

@@ -44,6 +44,18 @@ export function timeAgo(iso: string, now: number = Date.now()): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+// `dd-MM-yyyy hh:mm a` in the operator's local timezone — the order-table and
+// packing-slip date format. Hand-rolled rather than Intl because no locale
+// gives this exact shape (en-GB → slashes + lowercase am/pm, en-US → MM/dd),
+// and formatToParts costs more than the four lines below.
+export function orderDateTime(iso: string): string {
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return '—';
+  const p = (n: number) => String(n).padStart(2, '0');
+  const h = d.getHours();
+  return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()} ${p(h % 12 || 12)}:${p(d.getMinutes())} ${h < 12 ? 'AM' : 'PM'}`;
+}
+
 export const fmtPct = (n: number): string =>
   `${Number.isInteger(n) ? n : n.toFixed(2)}%`;
 

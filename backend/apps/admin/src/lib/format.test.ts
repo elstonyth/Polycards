@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { rm, timeAgo, fmtPct, usdToMyr, gradeToGrader } from './format';
+import {
+  rm,
+  timeAgo,
+  fmtPct,
+  usdToMyr,
+  gradeToGrader,
+  orderDateTime,
+} from './format';
 
 describe('rm', () => {
   it('formats a number with two decimals and an RM prefix', () => {
@@ -99,6 +106,28 @@ describe('gradeToGrader', () => {
 
   it('falls back to the raw label as the grade when nothing matches', () => {
     expect(gradeToGrader('Loose')).toEqual({ grader: '', grade: 'Loose' });
+  });
+});
+
+describe('orderDateTime', () => {
+  // Built in LOCAL time and round-tripped through ISO, so the expectation
+  // holds in any timezone the operator's machine runs in.
+  const local = (h: number, min: number) =>
+    new Date(2026, 6, 4, h, min).toISOString();
+
+  it('formats as dd-MM-yyyy hh:mm a with zero padding', () => {
+    expect(orderDateTime(local(15, 7))).toBe('04-07-2026 03:07 PM');
+  });
+  // The `h % 12 || 12` branch: hour 0 and hour 12 are the only ones that don't
+  // fall out of a plain modulo.
+  it('renders midnight as 12 AM, not 00 AM', () => {
+    expect(orderDateTime(local(0, 5))).toBe('04-07-2026 12:05 AM');
+  });
+  it('renders noon as 12 PM', () => {
+    expect(orderDateTime(local(12, 0))).toBe('04-07-2026 12:00 PM');
+  });
+  it('returns an em dash for an unparseable date', () => {
+    expect(orderDateTime('not-a-date')).toBe('—');
   });
 });
 
