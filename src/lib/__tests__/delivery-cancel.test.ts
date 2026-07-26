@@ -18,7 +18,7 @@ vi.mock('@/lib/logger', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
 }));
 
-import { cancelDeliveryOrder } from '@/lib/actions/delivery';
+import { cancelDeliveryOrder, getDeliveryOrders } from '@/lib/actions/delivery';
 
 beforeEach(() => {
   fetchMock.mockReset();
@@ -125,5 +125,51 @@ describe('cancelDeliveryOrder', () => {
     if (!res.ok) {
       expect(res.error).toBe('Something went wrong. Please try again.');
     }
+  });
+});
+
+// Deploy skew: the storefront ships independently of the backend (and can roll
+// back), so an OLD backend still emits the pre-rename status names. `parseList`
+// DROPS a row its schema rejects — a narrow enum makes the customer's order
+// VANISH from /orders rather than read oddly, which tsc cannot see. These two
+// cases are the runtime proof of DeliveryOrderSchema's transitional union, and
+// they are what should go red when it is narrowed back to six next release.
+describe('getDeliveryOrders during deploy skew', () => {
+  const row = (status: string) => ({
+    id: `do_${status}`,
+    status,
+    created_at: '2026-07-11T00:00:00Z',
+    tracking_number: null,
+    address: { name: 'Ada', city: 'London', country_code: 'gb' },
+    items: [],
+  });
+
+  it('keeps rows carrying the old packing/delivered status names', async () => {
+    fetchMock.mockResolvedValue({
+      items: [
+        row('packing'),
+        row('processed'),
+        row('delivered'),
+        row('completed'),
+      ],
+    });
+    const res = await getDeliveryOrders();
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.orders.map((o) => o.status)).toEqual([
+      'packing',
+      'processed',
+      'delivered',
+      'completed',
+    ]);
+  });
+
+  it('still drops a row whose status is no known token at all', async () => {
+    // The widening is old ∪ new, not "anything goes".
+    fetchMock.mockResolvedValue({ items: [row('teleported'), row('shipped')] });
+    const res = await getDeliveryOrders();
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.orders.map((o) => o.status)).toEqual(['shipped']);
   });
 });
