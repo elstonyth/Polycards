@@ -6,7 +6,22 @@ import {
   usdToMyr,
   gradeToGrader,
   orderDateTime,
+  deliveryStatusLabel,
 } from './format';
+
+describe('deliveryStatusLabel', () => {
+  it('titles a canonical status', () => {
+    expect(deliveryStatusLabel('ready_to_ship')).toBe('Ready to ship');
+  });
+  // A rollback or the PRE_DEPLOY window can still write the pre-rename
+  // 'packing'/'delivered' (Migration20260727000000 keeps the CHECK widened),
+  // and an unlabeled status renders as an empty badge — which reads as a
+  // broken order rather than an old one.
+  it('falls back to the raw token for a legacy status', () => {
+    expect(deliveryStatusLabel('packing')).toBe('packing');
+    expect(deliveryStatusLabel('delivered')).toBe('delivered');
+  });
+});
 
 describe('rm', () => {
   it('formats a number with two decimals and an RM prefix', () => {

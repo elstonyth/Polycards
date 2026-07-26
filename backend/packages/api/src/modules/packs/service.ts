@@ -3304,7 +3304,7 @@ class PacksModuleService extends MedusaService({
 
     // Validate against the under-lock read — the ONLY status that matters.
     const verdict = validateDeliveryStatusTransition(
-      order.status as DeliveryStatus,
+      order.status,
       input.to,
       !!input.trackingNumber,
     );

@@ -45,7 +45,7 @@ export async function POST(
         : // Human wording, never the raw enum: "completed" is operator
           // vocabulary and "ready_to_ship" is snake_case (same rule as the
           // address-edit lock).
-          `This delivery is already ${CUSTOMER_STATUS_WORD[order.status]} and can no longer be canceled — please contact support.`,
+          `This delivery is already ${CUSTOMER_STATUS_WORD[order.status] ?? order.status} and can no longer be canceled — please contact support.`,
     );
   }
 

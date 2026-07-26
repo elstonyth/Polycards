@@ -18,6 +18,18 @@ export const DELIVERY_STATUS_LABEL: Record<DeliveryStatus, string> = {
   canceled: 'Canceled',
 };
 
+// Label for a status that came off the wire. Falls back to the raw token
+// because the delivery-order CHECK still accepts the pre-rename
+// 'packing'/'delivered' during the expand window (see
+// Migration20260727000000), so a rollback or PRE_DEPLOY skew can put a value
+// here that the six-key map has no entry for — and a bare lookup renders an
+// empty badge / empty packing slip, which reads as "the order is broken".
+// Use this for anything the API supplied; index DELIVERY_STATUS_LABEL directly
+// only for literals we control (the tab and select lists), which keeps the map
+// exhaustive so a seventh canonical status stays a compile error.
+export const deliveryStatusLabel = (status: string): string =>
+  DELIVERY_STATUS_LABEL[status as DeliveryStatus] ?? status;
+
 export const rm = (n: number | null): string =>
   n === null
     ? '—'

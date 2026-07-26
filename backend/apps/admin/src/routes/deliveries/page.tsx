@@ -29,7 +29,11 @@ import type {
   AdminDeliveryOrder,
   DeliveryStatus,
 } from '../../lib/admin-rest';
-import { DELIVERY_STATUS_LABEL, orderDateTime } from '../../lib/format';
+import {
+  DELIVERY_STATUS_LABEL,
+  deliveryStatusLabel,
+  orderDateTime,
+} from '../../lib/format';
 import { resolveImageUrl } from '../../lib/image-url';
 import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
@@ -538,7 +542,7 @@ const DeliveriesPage = () => {
                     </Table.Cell>
                     <Table.Cell>
                       <StatusBadge color={TONE[o.status]}>
-                        {DELIVERY_STATUS_LABEL[o.status]}
+                        {deliveryStatusLabel(o.status)}
                       </StatusBadge>
                     </Table.Cell>
                     <Table.Cell className="text-right">

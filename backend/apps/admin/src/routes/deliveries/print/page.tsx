@@ -2,7 +2,7 @@ import { createPortal } from 'react-dom';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Button } from '@medusajs/ui';
 import { useDeliveryOrder } from '../../../lib/queries';
-import { DELIVERY_STATUS_LABEL, orderDateTime } from '../../../lib/format';
+import { deliveryStatusLabel, orderDateTime } from '../../../lib/format';
 import { resolveImageUrl } from '../../../lib/image-url';
 import { parsePrintIds, PRINT_ID_CAP } from './ids';
 
@@ -115,7 +115,7 @@ const Slip = ({ id }: { id: string }) => {
         </div>
         <div>
           <p>{orderDateTime(order.created_at)}</p>
-          <p>{DELIVERY_STATUS_LABEL[order.status]}</p>
+          <p>{deliveryStatusLabel(order.status)}</p>
         </div>
       </div>
 

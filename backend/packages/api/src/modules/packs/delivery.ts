@@ -82,17 +82,36 @@ export type TransitionVerdict = "ok" | "invalid_transition" | "tracking_required
 
 // Allowed admin transitions. Cancel is only legal before the parcel ships
 // (a shipped parcel can't revert to the vault). completed/canceled are terminal.
-const ALLOWED: Record<DeliveryStatus, DeliveryStatus[]> = {
+//
+// Keyed by `string`, NOT Record<DeliveryStatus, …>, on purpose — losing the
+// exhaustiveness check is the price of staying routable across a rollback.
+// Migration20260727000000 deliberately leaves the DB CHECK on the UNION of the
+// old and new vocabularies (expand phase), so old code — rolled back, or still
+// serving during the PRE_DEPLOY window — can write the pre-rename
+// 'packing'/'delivered' tokens. Under an exhaustive six-key map every move out
+// of 'packing' returns invalid_transition, stranding the order AND leaving its
+// pulls stuck in 'delivering'. Delete the two legacy keys in the same release
+// as the CONTRACT migration named in Migration20260727000000.
+const ALLOWED: Record<string, DeliveryStatus[]> = {
   requested: ["processed", "canceled"],
   processed: ["ready_to_ship", "canceled"],
   ready_to_ship: ["shipped", "canceled"],
   shipped: ["completed"],
   completed: [],
   canceled: [],
+  // Legacy pre-rename tokens. 'packing' is what 'processed' is now, so one hop
+  // lands the row in the new pipeline (or cancels it — the pull restore in
+  // transitionDeliveryOrderStatus is keyed on `to`, so delivering → vaulted
+  // still runs). 'delivered' is what 'completed' is now: terminal.
+  packing: ["processed", "canceled"],
+  delivered: [],
 };
 
+// `from` is `string`, not DeliveryStatus: it is whatever the row actually
+// holds, which may be a legacy token (see ALLOWED). Anything unrecognized
+// falls through to invalid_transition. `to` stays narrow — it is admin input.
 export function validateDeliveryStatusTransition(
-  from: DeliveryStatus,
+  from: string,
   to: DeliveryStatus,
   hasTracking: boolean,
 ): TransitionVerdict {

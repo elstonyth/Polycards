@@ -159,6 +159,28 @@ describe("validateDeliveryStatusTransition", () => {
       validateDeliveryStatusTransition("canceled", "requested", false),
     ).toBe("invalid_transition");
   });
+
+  // Rollback / PRE_DEPLOY skew: old code can still write the pre-rename tokens
+  // while Migration20260727000000's widened CHECK stands. Those rows must stay
+  // routable rather than stranded, but must NOT gain transitions the canonical
+  // pipeline forbids.
+  it("routes legacy pre-rename statuses into the new pipeline", () => {
+    expect(
+      validateDeliveryStatusTransition("packing", "processed", false),
+    ).toBe("ok");
+    expect(validateDeliveryStatusTransition("packing", "canceled", false)).toBe(
+      "ok",
+    );
+    expect(validateDeliveryStatusTransition("packing", "shipped", true)).toBe(
+      "invalid_transition",
+    );
+    expect(
+      validateDeliveryStatusTransition("delivered", "canceled", false),
+    ).toBe("invalid_transition");
+    expect(
+      validateDeliveryStatusTransition("not_a_status", "processed", false),
+    ).toBe("invalid_transition");
+  });
 });
 
 describe("snapshotAddress", () => {

@@ -37,7 +37,7 @@ export async function POST(
   if (order.status !== 'requested' && order.status !== 'processed') {
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
-      `This order is already ${CUSTOMER_STATUS_WORD[order.status]} — its address can no longer be edited.`,
+      `This order is already ${CUSTOMER_STATUS_WORD[order.status] ?? order.status} — its address can no longer be edited.`,
     );
   }
 
