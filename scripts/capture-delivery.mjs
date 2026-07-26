@@ -191,7 +191,9 @@ try {
     .getByRole('heading', { name: /^orders$/i })
     .waitFor({ timeout: 15000 });
   ok('Orders tab renders (delivery-orders read, no crash)');
-  const requestedBadge = await page.getByText(/requested|packing/i).count();
+  const requestedBadge = await page
+    .getByText(/requested|processed|ready to ship/i)
+    .count();
   if (requestedBadge > 0)
     ok(`Orders tab lists a delivery order (status badge present)`);
   else soft('no delivery-order row visible (submit may not have completed)');
