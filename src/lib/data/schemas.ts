@@ -546,11 +546,18 @@ export const DailyStateSchema = z.looseObject({
 /** GET /store/delivery-orders item — guards the fields the mapper consumes. */
 export const DeliveryOrderSchema = z.looseObject({
   id: z.string(),
+  // TRANSITIONAL (one release): old ∪ new status vocabulary. During a deploy the
+  // storefront ships before/after the backend, so an old backend can still emit
+  // `packing`/`delivered` — and parseList DROPS a row that fails the schema, i.e.
+  // a stale status would make the customer's order VANISH from /orders rather
+  // than render with an odd label. Narrow to the 6 new values next release.
   status: z.enum([
     'requested',
+    'packing',
     'processed',
     'ready_to_ship',
     'shipped',
+    'delivered',
     'completed',
     'canceled',
   ]),
@@ -578,6 +585,9 @@ export const DeliveryOrderSchema = z.looseObject({
     )
     .optional(),
 });
+
+/** Single source of truth for the delivery status union (see the note above). */
+export type DeliveryOrderStatus = z.infer<typeof DeliveryOrderSchema>['status'];
 
 // --- data/cards.ts ------------------------------------------------------------
 

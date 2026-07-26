@@ -14,7 +14,12 @@ import type { HttpTypes } from '@medusajs/types';
 import { sdk } from '@/lib/medusa';
 import { logger } from '@/lib/logger';
 import { getAuthToken, getCustomer } from '@/lib/data/customer';
-import { parseList, parseOne, DeliveryOrderSchema } from '@/lib/data/schemas';
+import {
+  parseList,
+  parseOne,
+  DeliveryOrderSchema,
+  type DeliveryOrderStatus,
+} from '@/lib/data/schemas';
 import { friendlyError, isAuthError, type ErrorRule } from '@/lib/errors';
 import { DELIVERY_RULES, DELIVERY_FALLBACK } from '@/lib/delivery-errors';
 
@@ -29,13 +34,10 @@ export type DeliveryOrderItemView = {
 };
 export type DeliveryOrderView = {
   id: string;
-  status:
-    | 'requested'
-    | 'processed'
-    | 'ready_to_ship'
-    | 'shipped'
-    | 'completed'
-    | 'canceled';
+  // Derived from DeliveryOrderSchema so this can't drift from what actually
+  // parses. Currently the transitional old ∪ new union (deploy skew) — every
+  // consumer that switches on it must stay exhaustive over the widened set.
+  status: DeliveryOrderStatus;
   trackingNumber: string | null;
   createdAt: string;
   items: DeliveryOrderItemView[];

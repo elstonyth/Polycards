@@ -18,31 +18,42 @@ import { useModalA11y } from '@/lib/use-modal-a11y';
 
 type Tone = 'green' | 'sky' | 'amber' | 'neutral';
 
-// Map delivery-order status → badge tone.
+// Map delivery-order status → badge tone. `packing`/`delivered` are the OLD
+// names an old backend can still emit during a deploy (see DeliveryOrderSchema)
+// — they render as their new equivalents rather than falling to neutral.
 const STATUS_TONE: Record<DeliveryOrderView['status'], Tone> = {
   requested: 'amber',
+  packing: 'amber',
   processed: 'amber',
   ready_to_ship: 'amber',
   shipped: 'sky',
+  delivered: 'green',
   completed: 'green',
   canceled: 'neutral',
 };
 
-// Customer-facing label per status. Exhaustive Record, so a new status is a
-// type error here instead of a raw snake_case token leaking into the UI.
-// `completed` is operator vocabulary — a customer is told "Delivered".
+// Customer-facing label per status. Exhaustive Record over the (transitional)
+// status union, so a new status is a type error here instead of a raw snake_case
+// token leaking into the UI. `completed` is operator vocabulary — a customer is
+// told "Delivered"; the legacy `packing`/`delivered` map onto the same words as
+// the new names they were renamed to, so a skewed row reads identically.
 const STATUS_LABEL: Record<DeliveryOrderView['status'], string> = {
   requested: 'Requested',
+  packing: 'Processed',
   processed: 'Processed',
   ready_to_ship: 'Ready to ship',
   shipped: 'Shipped',
+  delivered: 'Delivered',
   completed: 'Delivered',
   canceled: 'Canceled',
 };
 
 // The two pre-ship windows mirror the backend's guards, and they differ:
 // the address locks from `ready_to_ship` on (a printed label must not diverge
-// from it), while cancel stays open until the parcel actually ships.
+// from it), while cancel stays open until the parcel actually ships. Legacy
+// tokens are deliberately absent: a skewed row just loses the affordance for
+// the minutes the deploy takes, rather than offering a call the new backend
+// would refuse.
 const ADDRESS_EDITABLE: ReadonlySet<DeliveryOrderView['status']> = new Set([
   'requested',
   'processed',
@@ -535,8 +546,11 @@ export default function OrdersClient({
                   )}
                 </td>
                 <td className="whitespace-nowrap px-4 py-3 text-white/80">
+                  {/* `?? o.status` alongside the exhaustive map: a status the
+                      schema starts allowing before this map learns it shows the
+                      raw token, never an empty badge. */}
                   <Badge tone={STATUS_TONE[o.status] ?? 'neutral'}>
-                    {STATUS_LABEL[o.status]}
+                    {STATUS_LABEL[o.status] ?? o.status}
                   </Badge>
                   {canceledIds.has(o.id) && (
                     <p className="mt-1.5 text-[11px] text-white/50">
