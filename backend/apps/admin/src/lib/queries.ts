@@ -31,6 +31,7 @@ import {
   getCustomerCommissions,
   getCustomerTransactions,
   getCustomerPulls,
+  getDeliveryOrder,
   getEconomyReport,
   getFxHistory,
   getFxRate,
@@ -65,6 +66,7 @@ import {
   updateDeliveryOrder,
   uploadImage,
   type AdminCommissionRow,
+  type AdminDeliveryOrder,
   type AvatarFramesView,
   type ChallengeSettingsDTO,
   type ChallengeStageDTO,
@@ -257,6 +259,17 @@ export const useDeliveryOrders = (
     queryKey: qk.deliveryOrders(status, page, q),
     queryFn: () => listDeliveryOrders(status, page, q),
     placeholderData: keepPreviousData,
+  });
+
+// One order by id. The packing-slip view mounts one of these per selected id so
+// a stale/deleted id fails inside its own block instead of blanking the sheet.
+export const useDeliveryOrder = (
+  id: string,
+): UseQueryResult<AdminDeliveryOrder> =>
+  useQuery({
+    queryKey: qk.deliveryOrder(id),
+    queryFn: () => getDeliveryOrder(id),
+    enabled: !!id,
   });
 
 export const useFxRate = (): UseQueryResult<FxRateState> =>

@@ -1,5 +1,22 @@
 // Shared display formatters for the gacha admin pages. Pure and dependency-free
-// so they can be unit-tested in a node environment (see format.test.ts).
+// so they can be unit-tested in a node environment (see format.test.ts). The
+// one import below is type-only, so it is erased at compile time and the node
+// test never loads admin-rest (which needs the injected __BACKEND_URL__).
+
+import type { DeliveryStatus } from './admin-rest';
+
+// Display labels only — state/API keep the raw lowercase values. This is the
+// OPERATOR surface: 'completed' reads "Completed" here, while the same status
+// is worded "delivered" to the customer (see delivery.ts). Shared rather than
+// per-page so the All Orders table and its packing slip can never drift.
+export const DELIVERY_STATUS_LABEL: Record<DeliveryStatus, string> = {
+  requested: 'Requested',
+  processed: 'Processed',
+  ready_to_ship: 'Ready to ship',
+  shipped: 'Shipped',
+  completed: 'Completed',
+  canceled: 'Canceled',
+};
 
 export const rm = (n: number | null): string =>
   n === null

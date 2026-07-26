@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { useHref } from 'react-router-dom';
 import {
   Checkbox,
   Container,
@@ -27,7 +28,7 @@ import type {
   AdminDeliveryOrder,
   DeliveryStatus,
 } from '../../lib/admin-rest';
-import { orderDateTime } from '../../lib/format';
+import { DELIVERY_STATUS_LABEL, orderDateTime } from '../../lib/format';
 import { resolveImageUrl } from '../../lib/image-url';
 import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
@@ -54,17 +55,6 @@ const TONE: Record<DeliveryStatus, 'orange' | 'blue' | 'green' | 'grey'> = {
   shipped: 'blue',
   completed: 'green',
   canceled: 'grey',
-};
-// Display labels only — state/API keep the raw lowercase values. This is the
-// OPERATOR surface: 'completed' reads "Completed" here, while the same status
-// is worded "delivered" to the customer (see delivery.ts).
-const STATUS_LABEL: Record<DeliveryStatus, string> = {
-  requested: 'Requested',
-  processed: 'Processed',
-  ready_to_ship: 'Ready to ship',
-  shipped: 'Shipped',
-  completed: 'Completed',
-  canceled: 'Canceled',
 };
 
 // First item's thumbnail + name/handle with a "+N more" tail — the operator
@@ -120,6 +110,11 @@ const DeliveriesPage = () => {
   const [proofImages, setProofImages] = useState<string[]>([]);
   const proofRef = useRef<HTMLInputElement>(null);
   const uploading = uploadImg.isPending;
+
+  // The packing slips live at the sibling /deliveries/print route. useHref
+  // prefixes the dashboard basename (/dashboard), which a hand-built href would
+  // miss — the SPA renders its own 404 for an unprefixed path.
+  const printHref = useHref(`/deliveries/print?ids=${[...selected].join(',')}`);
 
   // 300 ms debounce — the list refetches on the settled value, not per keystroke.
   useEffect(() => {
@@ -183,7 +178,7 @@ const DeliveriesPage = () => {
       const refused = skipped.filter((s) => s.reason !== benign);
       const noop = skipped.length - refused.length;
       const tail = [
-        noop > 0 ? `${noop} already ${STATUS_LABEL[bulkStatus]}` : null,
+        noop > 0 ? `${noop} already ${DELIVERY_STATUS_LABEL[bulkStatus]}` : null,
         refused.length > 0 ? `${refused.length} skipped` : null,
       ]
         .filter(Boolean)
@@ -293,7 +288,7 @@ const DeliveriesPage = () => {
             <Tabs.Trigger value="all">All</Tabs.Trigger>
             {STATUSES.map((s) => (
               <Tabs.Trigger key={s} value={s}>
-                {STATUS_LABEL[s]}
+                {DELIVERY_STATUS_LABEL[s]}
               </Tabs.Trigger>
             ))}
           </Tabs.List>
@@ -319,7 +314,7 @@ const DeliveriesPage = () => {
             <Select.Content>
               {STATUSES.map((s) => (
                 <Select.Item key={s} value={s}>
-                  {STATUS_LABEL[s]}
+                  {DELIVERY_STATUS_LABEL[s]}
                 </Select.Item>
               ))}
             </Select.Content>
@@ -327,10 +322,12 @@ const DeliveriesPage = () => {
           <Button size="small" onClick={applyBulk} isLoading={bulk.isPending}>
             Apply
           </Button>
-          {/* ponytail: Task 7 owns the print view AND its mounted route path —
-              a URL guessed here would 404 in a new tab, so this stays inert. */}
-          <Button size="small" variant="secondary" disabled>
-            Print
+          {/* A real link, not a window.open() button: middle/ctrl-click, "open
+              in new window" and screen-reader link semantics all come free. */}
+          <Button size="small" variant="secondary" asChild>
+            <a href={printHref} target="_blank" rel="noreferrer">
+              Print
+            </a>
           </Button>
         </div>
       )}
@@ -406,7 +403,7 @@ const DeliveriesPage = () => {
                   </Table.Cell>
                   <Table.Cell>
                     <StatusBadge color={TONE[o.status]}>
-                      {STATUS_LABEL[o.status]}
+                      {DELIVERY_STATUS_LABEL[o.status]}
                     </StatusBadge>
                   </Table.Cell>
                   <Table.Cell className="text-right">
@@ -492,7 +489,7 @@ const DeliveriesPage = () => {
                     <Select.Content>
                       {STATUSES.map((s) => (
                         <Select.Item key={s} value={s}>
-                          {STATUS_LABEL[s]}
+                          {DELIVERY_STATUS_LABEL[s]}
                         </Select.Item>
                       ))}
                     </Select.Content>
