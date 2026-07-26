@@ -1,0 +1,7 @@
+# Waived gitleaks false positives (fingerprint format:
+# <commit>:<file>:<rule>:<line> — see ci.yml gitleaks job).
+
+# Synthetic integration-test admin password ('bulk-delivery-test-pw-1'),
+# same fixture pattern as every sibling http spec; seeds an ephemeral
+# test-DB admin only. Not a credential.
+8dccef9feb8a4f95484fef1f63f42db364e6fe26:backend/packages/api/integration-tests/http/delivery-orders-bulk.spec.ts:generic-api-key:9
