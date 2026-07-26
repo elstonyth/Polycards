@@ -262,18 +262,29 @@ medusaIntegrationTestRunner({
           adminList.data.orders.some((o: { id: string }) => o.id === orderId),
         ).toBe(true);
 
-        // requested → packing
+        // requested → processed
         expect(
           (
             await reqApi(
               'post',
               `/admin/delivery-orders/${orderId}`,
               adminHeaders,
-              { status: 'packing' },
+              { status: 'processed' },
             )
           ).status,
         ).toBe(200);
-        // packing → shipped WITHOUT tracking → 400 (INVALID_DATA: tracking_required)
+        // processed → ready_to_ship
+        expect(
+          (
+            await reqApi(
+              'post',
+              `/admin/delivery-orders/${orderId}`,
+              adminHeaders,
+              { status: 'ready_to_ship' },
+            )
+          ).status,
+        ).toBe(200);
+        // ready_to_ship → shipped WITHOUT tracking → 400 (INVALID_DATA: tracking_required)
         expect(
           (
             await reqApi(
@@ -284,7 +295,7 @@ medusaIntegrationTestRunner({
             )
           ).status,
         ).toBe(400);
-        // packing → shipped WITH tracking → 200
+        // ready_to_ship → shipped WITH tracking → 200
         expect(
           (
             await reqApi(
@@ -295,14 +306,14 @@ medusaIntegrationTestRunner({
             )
           ).status,
         ).toBe(200);
-        // shipped → delivered → 200, pull becomes delivered
+        // shipped → completed → 200, pull (separate PULL enum) becomes delivered
         expect(
           (
             await reqApi(
               'post',
               `/admin/delivery-orders/${orderId}`,
               adminHeaders,
-              { status: 'delivered' },
+              { status: 'completed' },
             )
           ).status,
         ).toBe(200);
@@ -374,14 +385,25 @@ medusaIntegrationTestRunner({
           'admin-pass-3',
         );
         const adminHeaders = { authorization: `Bearer ${adminToken}` };
-        // Drive the order to shipped (requested → packing → shipped+tracking).
+        // Drive the order to shipped (requested → processed → ready_to_ship →
+        // shipped+tracking).
         expect(
           (
             await reqApi(
               'post',
               `/admin/delivery-orders/${orderId}`,
               adminHeaders,
-              { status: 'packing' },
+              { status: 'processed' },
+            )
+          ).status,
+        ).toBe(200);
+        expect(
+          (
+            await reqApi(
+              'post',
+              `/admin/delivery-orders/${orderId}`,
+              adminHeaders,
+              { status: 'ready_to_ship' },
             )
           ).status,
         ).toBe(200);
