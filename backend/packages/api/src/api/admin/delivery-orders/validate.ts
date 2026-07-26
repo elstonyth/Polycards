@@ -40,6 +40,45 @@ export function coerceStatusFilter(raw: unknown): DeliveryStatus | undefined {
   return raw as DeliveryStatus;
 }
 
+// Validate the id-search query filter (?q=). Returns undefined when absent.
+// The value becomes the middle of a SQL LIKE pattern, so the three pattern
+// metacharacters are escaped — `%` would silently widen the search and a lone
+// trailing `\` is an invalid escape sequence Postgres errors on.
+export function coerceIdSearch(raw: unknown): string | undefined {
+  if (raw === undefined || raw === '') return undefined;
+  if (typeof raw !== 'string' || raw.length > 64) {
+    bad('`q` must be a string of at most 64 characters.');
+  }
+  return (raw as string).replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
+export type BulkStatusBody = { ids: string[]; status: DeliveryStatus };
+
+// Body of POST /admin/delivery-orders/bulk. The 100-id cap is the contract the
+// route's sequential loop is sized for (one advisory-locked transaction per
+// order); duplicates are rejected rather than de-duped so the caller's
+// `updated`/`skipped` tally always lines up with what it sent.
+export function coerceBulkStatusBody(raw: unknown): BulkStatusBody {
+  if (!raw || typeof raw !== 'object') bad('Body must be an object.');
+  const b = raw as Record<string, unknown>;
+  if (
+    !Array.isArray(b.ids) ||
+    b.ids.length === 0 ||
+    b.ids.length > 100 ||
+    b.ids.some((v) => typeof v !== 'string') ||
+    new Set(b.ids).size !== b.ids.length
+  ) {
+    bad('`ids` must be 1-100 unique strings.');
+  }
+  if (
+    typeof b.status !== 'string' ||
+    !DELIVERY_STATUSES.includes(b.status as DeliveryStatus)
+  ) {
+    bad(`Invalid status '${String(b.status)}'.`);
+  }
+  return { ids: b.ids as string[], status: b.status as DeliveryStatus };
+}
+
 export function coerceDeliveryUpdateBody(raw: unknown): AdminDeliveryUpdate {
   if (!raw || typeof raw !== 'object') bad('Body must be an object.');
   const b = raw as Record<string, unknown>;

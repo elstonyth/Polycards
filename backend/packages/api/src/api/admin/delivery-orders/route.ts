@@ -4,7 +4,7 @@ import PacksModuleService from '../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../modules/packs';
 import { serializeDeliveryOrders } from '../../../modules/packs/delivery-view';
 import { parsePaginationParams } from '../../../utils/pagination';
-import { coerceStatusFilter } from './validate';
+import { coerceIdSearch, coerceStatusFilter } from './validate';
 
 export async function GET(
   req: MedusaRequest,
@@ -14,7 +14,12 @@ export async function GET(
   const customerService = req.scope.resolve(Modules.CUSTOMER);
 
   const status = coerceStatusFilter(req.query.status);
-  const filter = status ? { status } : {};
+  // ?q= is an id SUBSTRING search — operators paste the tail of an order id
+  // off a packing slip, not the whole `do_01J...` handle.
+  const q = coerceIdSearch(req.query.q);
+  const filter: Record<string, unknown> = {};
+  if (status) filter.status = status;
+  if (q) filter.id = { $like: `%${q}%` };
 
   const { limit, offset } = parsePaginationParams(
     { limit: req.query.limit, offset: req.query.offset },
