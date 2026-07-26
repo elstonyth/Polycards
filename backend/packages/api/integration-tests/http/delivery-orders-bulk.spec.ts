@@ -148,6 +148,27 @@ medusaIntegrationTestRunner({
         ]);
         expect(res.data.total).toBe(1);
         expect(res.data.orders[0].id).not.toBe(other);
+
+        // Tabs + search box is the primary admin interaction, so the two
+        // filters have to AND rather than one clobbering the other.
+        const both = await unwrapResponse(
+          api.get(
+            `/admin/delivery-orders?status=requested&q=${q}`,
+            adminHeaders(),
+          ),
+        );
+        expect(both.status).toBe(200);
+        expect(both.data.orders.map((o: { id: string }) => o.id)).toEqual([
+          target,
+        ]);
+        const mismatched = await unwrapResponse(
+          api.get(
+            `/admin/delivery-orders?status=shipped&q=${q}`,
+            adminHeaders(),
+          ),
+        );
+        expect(mismatched.status).toBe(200);
+        expect(mismatched.data.orders).toEqual([]);
       });
 
       it('rejects a ?q= longer than 64 characters with 400', async () => {
