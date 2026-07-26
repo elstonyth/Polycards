@@ -50,16 +50,20 @@ const STATUS_LABEL: Record<DeliveryOrderView['status'], string> = {
 
 // The two pre-ship windows mirror the backend's guards, and they differ:
 // the address locks from `ready_to_ship` on (a printed label must not diverge
-// from it), while cancel stays open until the parcel actually ships. Legacy
-// tokens are deliberately absent: a skewed row just loses the affordance for
-// the minutes the deploy takes, rather than offering a call the new backend
-// would refuse.
+// from it), while cancel stays open until the parcel actually ships. `packing`
+// is the legacy expand-window token (~`processed`): the backend's own EDITABLE
+// and CANCELABLE lists accept it, so offering the affordance here is a call it
+// honors, not one it refuses. These sets must keep agreeing with those two
+// backend lists — all three drop `packing` in the same release as the CONTRACT
+// migration named in Migration20260727000000.
 const ADDRESS_EDITABLE: ReadonlySet<DeliveryOrderView['status']> = new Set([
   'requested',
+  'packing',
   'processed',
 ]);
 const CANCELABLE: ReadonlySet<DeliveryOrderView['status']> = new Set([
   'requested',
+  'packing',
   'processed',
   'ready_to_ship',
 ]);

@@ -6,7 +6,7 @@ import { mintSuperAdmin, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
 
-const PASSWORD = 'bulk-delivery-test-pw-1';
+const PASSWORD = 'bulk-delivery-test-pw-1'; // gitleaks:allow
 const ADMIN_EMAIL = 'bulk-delivery-admin@test.dev';
 
 // Address snapshot columns are NOT NULL — orders are seeded straight through
