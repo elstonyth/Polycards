@@ -106,7 +106,9 @@ const ItemCell = ({ items }: { items: AdminDeliveryItem[] }) => {
 // its DIRECT children, so the table block and the Pager need to stay top-level.
 const PackPurchases = () => {
   const [page, setPage] = useState(0);
-  const { data, isError } = usePulls(page);
+  // source='pack' — reward-economy pulls are not purchases and must not
+  // render in this tab (CodeRabbit #270 finding).
+  const { data, isError } = usePulls(page, 'pack');
   const pulls = data?.pulls ?? null;
 
   return (
@@ -541,7 +543,7 @@ const DeliveriesPage = () => {
                       {o.customer_email ?? o.customer_id}
                     </Table.Cell>
                     <Table.Cell>
-                      <StatusBadge color={TONE[o.status]}>
+                      <StatusBadge color={TONE[o.status] ?? 'grey'}>
                         {deliveryStatusLabel(o.status)}
                       </StatusBadge>
                     </Table.Cell>

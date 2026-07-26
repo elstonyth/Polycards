@@ -100,8 +100,10 @@ export async function listEligibleProducts(): Promise<EligibleProduct[]> {
 
 // ── Pull ledger ───────────────────────────────────────────────────────────────
 
-export const getPulls = (page = 0, limit = 50) =>
-  getJson<PullsResponse>(`/admin/pulls?limit=${limit}&offset=${page * limit}`);
+export const getPulls = (page = 0, limit = 50, source?: 'pack' | 'reward') =>
+  getJson<PullsResponse>(
+    `/admin/pulls?limit=${limit}&offset=${page * limit}${source ? `&source=${source}` : ''}`,
+  );
 
 // ── Customer support view ────────────────────────────────────────────────────
 

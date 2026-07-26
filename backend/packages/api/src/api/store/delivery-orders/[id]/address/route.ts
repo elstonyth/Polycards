@@ -34,7 +34,10 @@ export async function POST(
   if (!order || order.customer_id !== customerId) {
     throw new MedusaError(MedusaError.Types.NOT_FOUND, 'Order not found.');
   }
-  if (order.status !== 'requested' && order.status !== 'processed') {
+  // 'packing' = legacy expand-window token (~processed) — stays editable
+  // until the contract migration.
+  const EDITABLE = ['requested', 'processed', 'packing'];
+  if (!EDITABLE.includes(order.status)) {
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
       `This order is already ${CUSTOMER_STATUS_WORD[order.status] ?? order.status} — its address can no longer be edited.`,

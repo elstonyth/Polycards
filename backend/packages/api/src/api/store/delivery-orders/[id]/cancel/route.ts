@@ -36,7 +36,9 @@ export async function POST(
 
   // Only a pre-ship order is customer-cancelable. Give an actionable message
   // rather than a bare transition error.
-  const CANCELABLE = ['requested', 'processed', 'ready_to_ship'];
+  // 'packing' = legacy expand-window token; ALLOWED routes packing -> canceled,
+  // so the customer window must agree until the contract migration.
+  const CANCELABLE = ['requested', 'processed', 'ready_to_ship', 'packing'];
   if (!CANCELABLE.includes(order.status)) {
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,

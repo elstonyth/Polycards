@@ -157,6 +157,13 @@ export class Migration20260727000000 extends Migration {
     this.addSql(`alter table if exists "delivery_order" drop constraint if exists "delivery_order_status_check";`);
     this.addSql(`update "delivery_order" set "status" = 'processed' where "status" = 'packing';`);
     this.addSql(`update "delivery_order" set "status" = 'completed' where "status" = 'delivered';`);
+    // AS-BUILT (final review F1): the shipped up() adds the EXPAND-phase
+    // 8-value union — ('requested','packing','processed','ready_to_ship',
+    // 'shipped','delivered','completed','canceled') — because rollback runs
+    // OLD code against the NEW schema and the PRE_DEPLOY migrate job creates
+    // a live old-code window. A follow-up CONTRACT migration next release
+    // narrows to the 6 new values. The plan's original 6-value snippet below
+    // is retained only as the eventual contract-phase shape.
     this.addSql(`alter table if exists "delivery_order" add constraint "delivery_order_status_check" check ("status" in ('requested','processed','ready_to_ship','shipped','completed','canceled'));`);
   }
 
@@ -430,7 +437,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
 }
 ```
 
-Sequential loop is deliberate (per-order advisory lock in the service; 100 max). `route.ts` GET list: when `q` present and non-empty, add `id: { $like: `%${q}%` }` to the filter object passed to `listDeliveryOrders` (validate `q` is a string ≤ 64 chars, else 400).
+Sequential loop is deliberate (per-order advisory lock in the service; 100 max). `route.ts` GET list: when `q` present and non-empty, add `id: { $like: `%${q}%` }` to the filter object passed to `listDeliveryOrders` (validate `q` is a string ≤ 64 chars, else 400). AS-BUILT NOTES: shipped code uses `$ilike` (ids are uppercase ULIDs — `$like` returns nothing for hand-typed fragments; final review F2); and the audit write above is NOT transactional with the workflow's status commit — an audit-write failure reports a changed order as `skipped` with no audit row. Accepted at final review as a rare-failure trade; making transition+audit atomic (returning the locked prior state from the workflow step) is a named follow-up, deferred from CodeRabbit PR-270 threads #2/#3.
 
 - [ ] **Step 4: Write the http spec (failing → passing)**
 
@@ -544,6 +551,13 @@ git commit -m "feat(orders): print details view for selected orders"
 - Produces: a record-kind toggle on All Orders: **Shipping** (default, everything from Tasks 6–7) | **Pack purchases** (read-only list of pack-open pulls).
 
 - [ ] **Step 1: Implement**
+
+AS-BUILT NOTE: spec §1.3's "All / Shipping / Pack purchases" collapsed to a
+two-value toggle — the two record kinds share no status/bulk semantics, so a
+combined "All" list had no workable columns; reviews accepted the deviation
+and spec 058 is the source of truth for any future combined view. The pulls
+hook is called with `source='pack'` so reward-economy pulls never render as
+purchases (`/admin/pulls?source=`).
 
 Add a two-value kind toggle above the status tabs (`Shipping` / `Pack purchases`). When `Pack purchases` is active: hide status tabs, search, and bulk bar; render a table using the pulls hook with columns Order (`#` + pull id slice) | Date (pull created) | Item (card thumb + name + pack title) | Qty (`1`) | Player (customer email/id as the pulls page shows it) | Status (constant `<StatusBadge color="green">Completed</StatusBadge>`). Paginate with the same `Pager`. No row actions.
 

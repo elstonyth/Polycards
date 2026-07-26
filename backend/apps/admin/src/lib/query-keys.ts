@@ -5,7 +5,8 @@ export const qk = {
   pack: (slug: string) => ['admin', 'pack', slug] as const,
   packOdds: (slug: string) => ['admin', 'pack', slug, 'odds'] as const,
   cards: ['admin', 'cards'] as const,
-  pulls: (page: number) => ['admin', 'pulls', page] as const,
+  pulls: (page: number, source?: string) =>
+    ['admin', 'pulls', page, source ?? 'all'] as const,
   // 2-segment prefix — invalidates ALL pages of the pull ledger in one call
   pullsKey: ['admin', 'pulls'] as const,
   economy: ['admin', 'economy'] as const,

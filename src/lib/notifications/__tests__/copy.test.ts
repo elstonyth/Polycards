@@ -81,6 +81,8 @@ describe('body rendering', () => {
     // The terminal status is `completed` on the wire (operator vocabulary);
     // the customer is still told their order was "delivered".
     expect(body({ status: 'completed' })).toBe('Your order was delivered.');
+    // Legacy token from persisted rows / rollback-era backends (expand window).
+    expect(body({ status: 'delivered' })).toBe('Your order was delivered.');
     expect(body({ status: 'canceled' })).toBe(
       'Your delivery was canceled. Contact support if this was unexpected.',
     );

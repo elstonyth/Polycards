@@ -18,13 +18,19 @@ export type DeliveryStatus = (typeof DELIVERY_STATUSES)[number];
 // Named …_WORD, not …_LABEL: the admin dashboard has its own operator-facing
 // DELIVERY_STATUS_LABEL (Title Case) in apps/admin/src/lib/format.ts, and one
 // name for two different vocabularies is how the wrong one gets imported.
-export const CUSTOMER_STATUS_WORD: Record<DeliveryStatus, string> = {
+// Legacy expand-window tokens (packing/delivered) map onto the canonical
+// customer words so a rollback-era row never leaks operator vocabulary.
+// Record<string, …> deliberately: the two extra keys die with the CONTRACT
+// migration named in Migration20260727000000.
+export const CUSTOMER_STATUS_WORD: Record<string, string> = {
   requested: "requested",
   processed: "processed",
   ready_to_ship: "ready to ship",
   shipped: "shipped",
   completed: "delivered",
   canceled: "canceled",
+  packing: "processed",
+  delivered: "delivered",
 };
 
 type PullLike = {

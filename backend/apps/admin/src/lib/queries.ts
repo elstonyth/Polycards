@@ -112,10 +112,13 @@ export const useCards = (
     enabled: opts.enabled ?? true,
   });
 
-export const usePulls = (page = 0): UseQueryResult<PullsResponse> =>
+export const usePulls = (
+  page = 0,
+  source?: 'pack' | 'reward',
+): UseQueryResult<PullsResponse> =>
   useQuery({
-    queryKey: qk.pulls(page),
-    queryFn: () => getPulls(page),
+    queryKey: qk.pulls(page, source),
+    queryFn: () => getPulls(page, 50, source),
     placeholderData: keepPreviousData,
   });
 

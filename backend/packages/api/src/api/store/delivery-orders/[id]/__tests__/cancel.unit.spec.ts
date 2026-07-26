@@ -96,6 +96,12 @@ describe('POST /store/delivery-orders/:id/cancel', () => {
     expect(run).not.toHaveBeenCalled();
   });
 
+  it('cancels a legacy expand-window packing order', async () => {
+    const { res } = mkRes();
+    await cancelOrder(mkReq([order({ status: 'packing' })]) as any, res);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     ['shipped', /already shipped .*contact support/i],
     // CUSTOMER_STATUS_WORD.completed === 'delivered' — the customer is told

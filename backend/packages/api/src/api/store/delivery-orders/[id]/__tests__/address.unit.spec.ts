@@ -53,7 +53,7 @@ beforeEach(() => {
 });
 
 describe('POST /store/delivery-orders/:id/address', () => {
-  it.each(['requested', 'processed'])(
+  it.each(['requested', 'processed', 'packing'])(
     'allows an address edit while %s',
     async (status) => {
       const { res, out } = mkRes();

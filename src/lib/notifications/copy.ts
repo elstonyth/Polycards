@@ -120,7 +120,11 @@ export const NOTIFICATION_COPY: Record<string, NotificationCopy> = {
           : 'Your order is on its way.';
       }
       // `completed` is the wire status; "delivered" is the customer's word.
-      if (status === 'completed') return 'Your order was delivered.';
+      // 'delivered' = legacy token — persisted notification rows and
+      // rollback-era backends still emit it during the expand window.
+      if (status === 'completed' || status === 'delivered') {
+        return 'Your order was delivered.';
+      }
       if (status === 'canceled') {
         return 'Your delivery was canceled. Contact support if this was unexpected.';
       }
