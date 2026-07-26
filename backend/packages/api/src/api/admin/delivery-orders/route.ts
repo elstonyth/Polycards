@@ -15,11 +15,12 @@ export async function GET(
 
   const status = coerceStatusFilter(req.query.status);
   // ?q= is an id SUBSTRING search — operators paste the tail of an order id
-  // off a packing slip, not the whole `do_01J...` handle.
+  // off a packing slip, not the whole `do_01J...` handle. $ilike, not $like:
+  // ULID tails are uppercase and a pasted/retyped id is often lowercased.
   const q = coerceIdSearch(req.query.q);
   const filter: Record<string, unknown> = {};
   if (status) filter.status = status;
-  if (q) filter.id = { $like: `%${q}%` };
+  if (q) filter.id = { $ilike: `%${q}%` };
 
   const { limit, offset } = parsePaginationParams(
     { limit: req.query.limit, offset: req.query.offset },

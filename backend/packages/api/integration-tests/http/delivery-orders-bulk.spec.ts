@@ -187,6 +187,20 @@ medusaIntegrationTestRunner({
         );
         expect(mismatched.status).toBe(200);
         expect(mismatched.data.orders).toEqual([]);
+
+        // The search must be case-INSENSITIVE ($ilike, not $like): the ULID part
+        // of an id is uppercase, but an operator retyping one off a slip types
+        // lower case. Probe the whole ULID lowercased — the `not.toBe` guard
+        // keeps the case from passing vacuously if the fragment had no letters.
+        const ulidLower = target.slice(3).toLowerCase();
+        expect(ulidLower).not.toBe(target.slice(3));
+        const lowercased = await unwrapResponse(
+          api.get(`/admin/delivery-orders?q=${ulidLower}`, adminHeaders()),
+        );
+        expect(lowercased.status).toBe(200);
+        expect(lowercased.data.orders.map((o: { id: string }) => o.id)).toEqual([
+          target,
+        ]);
       });
 
       it('rejects a ?q= longer than 64 characters with 400', async () => {

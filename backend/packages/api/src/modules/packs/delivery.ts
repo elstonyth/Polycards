@@ -15,7 +15,10 @@ export type DeliveryStatus = (typeof DELIVERY_STATUSES)[number];
 // and "completed" is operator vocabulary — a customer is told their order was
 // "delivered". Record<DeliveryStatus, string> makes it exhaustive, so a new
 // status is a type error here rather than a leaked token in production copy.
-export const DELIVERY_STATUS_LABEL: Record<DeliveryStatus, string> = {
+// Named …_WORD, not …_LABEL: the admin dashboard has its own operator-facing
+// DELIVERY_STATUS_LABEL (Title Case) in apps/admin/src/lib/format.ts, and one
+// name for two different vocabularies is how the wrong one gets imported.
+export const CUSTOMER_STATUS_WORD: Record<DeliveryStatus, string> = {
   requested: "requested",
   processed: "processed",
   ready_to_ship: "ready to ship",
