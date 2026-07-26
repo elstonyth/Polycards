@@ -164,8 +164,16 @@ const DeliveriesPage = () => {
   // order or an illegal transition — and gets a red toast, capped at 5 so a
   // 100-id mistake doesn't bury the screen.
   const applyBulk = async () => {
-    const ids = [...selected];
-    if (ids.length === 0) return;
+    // Clearing the selection on every view change isn't enough on its own:
+    // `keepPreviousData` keeps the OLD rows rendered and checkable for the whole
+    // refetch window, so a row ticked mid-flight survives into the new page's
+    // selection. Intersecting with what is on screen RIGHT NOW is what actually
+    // makes "Apply only touches visible rows" hold, race or no race.
+    const ids = [...selected].filter((id) => pageIds.includes(id));
+    if (ids.length === 0) {
+      clearSelection();
+      return;
+    }
     try {
       const { updated, skipped } = await bulk.mutateAsync({
         ids,
@@ -174,15 +182,24 @@ const DeliveriesPage = () => {
       const benign = `already ${bulkStatus}`;
       const refused = skipped.filter((s) => s.reason !== benign);
       const noop = skipped.length - refused.length;
-      const summary = [
-        `${updated.length} updated`,
+      const tail = [
         noop > 0 ? `${noop} already ${STATUS_LABEL[bulkStatus]}` : null,
         refused.length > 0 ? `${refused.length} skipped` : null,
       ]
         .filter(Boolean)
         .join(', ');
-      if (updated.length > 0) toast.success(summary);
-      else toast.warning(summary);
+      if (updated.length > 0) {
+        toast.success(
+          [`${updated.length} updated`, tail].filter(Boolean).join(', '),
+        );
+      } else if (refused.length > 0) {
+        // Nothing moved AND something was genuinely refused — worth a warning.
+        toast.warning(['0 updated', tail].filter(Boolean).join(', '));
+      } else {
+        // Every id was already at the target status. Benign: neutral, and no
+        // "0 updated" head to make a harmless no-op look like a failure.
+        toast.info(tail);
+      }
       for (const s of refused.slice(0, 5)) {
         toast.error(`#${s.id.slice(-6)}: ${s.reason}`);
       }
