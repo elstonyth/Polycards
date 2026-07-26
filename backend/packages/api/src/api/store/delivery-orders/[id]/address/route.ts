@@ -5,7 +5,10 @@ import {
 import { MedusaError, Modules } from '@medusajs/framework/utils';
 import PacksModuleService from '../../../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../../../modules/packs';
-import { snapshotAddress } from '../../../../../modules/packs/delivery';
+import {
+  snapshotAddress,
+  DELIVERY_STATUS_LABEL,
+} from '../../../../../modules/packs/delivery';
 
 // POST /store/delivery-orders/:id/address — re-snapshot the shipping address
 // from the caller's address book, allowed while requested|processed only.
@@ -34,7 +37,7 @@ export async function POST(
   if (order.status !== 'requested' && order.status !== 'processed') {
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
-      `This order is already ${order.status} — its address can no longer be edited.`,
+      `This order is already ${DELIVERY_STATUS_LABEL[order.status]} — its address can no longer be edited.`,
     );
   }
 

@@ -10,6 +10,20 @@ export const DELIVERY_STATUSES = [
 ] as const;
 export type DeliveryStatus = (typeof DELIVERY_STATUSES)[number];
 
+// Customer-facing wording for a delivery status. Every customer-visible string
+// MUST go through this: the raw enum tokens are snake_case ("ready_to_ship"),
+// and "completed" is operator vocabulary — a customer is told their order was
+// "delivered". Record<DeliveryStatus, string> makes it exhaustive, so a new
+// status is a type error here rather than a leaked token in production copy.
+export const DELIVERY_STATUS_LABEL: Record<DeliveryStatus, string> = {
+  requested: "requested",
+  processed: "processed",
+  ready_to_ship: "ready to ship",
+  shipped: "shipped",
+  completed: "delivered",
+  canceled: "canceled",
+};
+
 type PullLike = {
   id: string;
   customer_id: string;
