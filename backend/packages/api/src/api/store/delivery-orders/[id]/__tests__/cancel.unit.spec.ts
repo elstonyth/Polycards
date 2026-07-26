@@ -57,9 +57,18 @@ describe('POST /store/delivery-orders/:id/cancel', () => {
     expect(out.body.order.id).toBe('do_1');
   });
 
-  it('also allows cancel while packing', async () => {
+  it('also allows cancel while processed', async () => {
     const { res } = mkRes();
-    await cancelOrder(mkReq([order({ status: 'packing' })]) as any, res);
+    await cancelOrder(mkReq([order({ status: 'processed' })]) as any, res);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('also allows cancel while ready_to_ship', async () => {
+    const { res } = mkRes();
+    await cancelOrder(
+      mkReq([order({ status: 'ready_to_ship' })]) as any,
+      res,
+    );
     expect(run).toHaveBeenCalledTimes(1);
   });
 
@@ -89,7 +98,7 @@ describe('POST /store/delivery-orders/:id/cancel', () => {
 
   it.each([
     ['shipped', /already shipped .*contact support/i],
-    ['delivered', /already delivered .*contact support/i],
+    ['completed', /already completed .*contact support/i],
     ['canceled', /already canceled/i],
   ])('refuses a %s order with actionable copy', async (status, msg) => {
     await expect(

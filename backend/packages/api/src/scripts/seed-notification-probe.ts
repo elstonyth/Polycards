@@ -27,7 +27,7 @@ export default async function seedNotificationProbe({
     { template: "topup_credited", data: { amount_myr: 100 } },
     { template: "voucher_claimed", data: { amount_myr: 25, level: 10 } },
     { template: "reward_won", data: { title: "Holo Charizard" } },
-    { template: "delivery_status", data: { status: "delivered" } },
+    { template: "delivery_status", data: { status: "completed" } },
     {
       template: "delivery_status",
       data: { status: "shipped", tracking_number: "MY123456789" },
