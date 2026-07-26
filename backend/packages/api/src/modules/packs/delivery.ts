@@ -2,9 +2,10 @@ import type { HttpTypes } from "@medusajs/types";
 
 export const DELIVERY_STATUSES = [
   "requested",
-  "packing",
+  "processed",
+  "ready_to_ship",
   "shipped",
-  "delivered",
+  "completed",
   "canceled",
 ] as const;
 export type DeliveryStatus = (typeof DELIVERY_STATUSES)[number];
@@ -63,12 +64,13 @@ export function validateDeliveryRequest(
 export type TransitionVerdict = "ok" | "invalid_transition" | "tracking_required";
 
 // Allowed admin transitions. Cancel is only legal before the parcel ships
-// (a shipped parcel can't revert to the vault). delivered/canceled are terminal.
+// (a shipped parcel can't revert to the vault). completed/canceled are terminal.
 const ALLOWED: Record<DeliveryStatus, DeliveryStatus[]> = {
-  requested: ["packing", "canceled"],
-  packing: ["shipped", "canceled"],
-  shipped: ["delivered"],
-  delivered: [],
+  requested: ["processed", "canceled"],
+  processed: ["ready_to_ship", "canceled"],
+  ready_to_ship: ["shipped", "canceled"],
+  shipped: ["completed"],
+  completed: [],
   canceled: [],
 };
 

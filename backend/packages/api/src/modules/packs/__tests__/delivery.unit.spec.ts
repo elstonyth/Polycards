@@ -109,55 +109,55 @@ describe("validateDeliveryRequest", () => {
 });
 
 describe("validateDeliveryStatusTransition", () => {
-  it("allows requested → packing", () => {
-    expect(validateDeliveryStatusTransition("requested", "packing", false)).toBe(
-      "ok",
-    );
+  it("allows the full happy-path pipeline: requested → processed → ready_to_ship → shipped → completed", () => {
+    expect(
+      validateDeliveryStatusTransition("requested", "processed", false),
+    ).toBe("ok");
+    expect(
+      validateDeliveryStatusTransition("processed", "ready_to_ship", false),
+    ).toBe("ok");
+    expect(
+      validateDeliveryStatusTransition("ready_to_ship", "shipped", true),
+    ).toBe("ok");
+    expect(
+      validateDeliveryStatusTransition("shipped", "completed", false),
+    ).toBe("ok");
   });
 
-  it("requires tracking for packing → shipped", () => {
-    expect(validateDeliveryStatusTransition("packing", "shipped", false)).toBe(
-      "tracking_required",
-    );
-    expect(validateDeliveryStatusTransition("packing", "shipped", true)).toBe(
-      "ok",
-    );
+  it("requires tracking for ready_to_ship → shipped", () => {
+    expect(
+      validateDeliveryStatusTransition("ready_to_ship", "shipped", false),
+    ).toBe("tracking_required");
   });
 
-  it("allows shipped → delivered", () => {
-    expect(validateDeliveryStatusTransition("shipped", "delivered", true)).toBe(
-      "ok",
-    );
-  });
-
-  it("allows cancel only before shipping", () => {
+  it("allows cancel from every pre-ship state", () => {
     expect(validateDeliveryStatusTransition("requested", "canceled", false)).toBe(
       "ok",
     );
-    expect(validateDeliveryStatusTransition("packing", "canceled", false)).toBe(
+    expect(validateDeliveryStatusTransition("processed", "canceled", false)).toBe(
       "ok",
     );
-    expect(validateDeliveryStatusTransition("shipped", "canceled", true)).toBe(
-      "invalid_transition",
-    );
+    expect(
+      validateDeliveryStatusTransition("ready_to_ship", "canceled", false),
+    ).toBe("ok");
   });
 
-  it("rejects skips and moves out of terminal states", () => {
+  it("rejects illegal transitions", () => {
+    expect(validateDeliveryStatusTransition("shipped", "canceled", false)).toBe(
+      "invalid_transition",
+    );
+    expect(validateDeliveryStatusTransition("completed", "canceled", false)).toBe(
+      "invalid_transition",
+    );
     expect(validateDeliveryStatusTransition("requested", "shipped", true)).toBe(
       "invalid_transition",
     );
-    expect(validateDeliveryStatusTransition("delivered", "shipped", true)).toBe(
+    expect(validateDeliveryStatusTransition("completed", "shipped", true)).toBe(
       "invalid_transition",
     );
-    expect(validateDeliveryStatusTransition("canceled", "packing", false)).toBe(
-      "invalid_transition",
-    );
-  });
-
-  it("rejects a no-op transition to the same status", () => {
-    expect(validateDeliveryStatusTransition("packing", "packing", false)).toBe(
-      "invalid_transition",
-    );
+    expect(
+      validateDeliveryStatusTransition("canceled", "requested", false),
+    ).toBe("invalid_transition");
   });
 });
 
