@@ -39,6 +39,15 @@ export async function POST(
       skipped.push({ id, reason: 'not found' });
       continue;
     }
+    // One audit row per CHANGED order. updateDeliveryOrderStep short-circuits
+    // a same-status update (returns the unchanged status without throwing), so
+    // without this guard a select-all "mark processed" on the Processed tab
+    // would report 40 updated, change nothing, and leave 40 rows whose before
+    // and after are identical in an append-only audit table.
+    if (before.status === status) {
+      skipped.push({ id, reason: `already ${status}` });
+      continue;
+    }
     try {
       const { result } = await updateDeliveryOrderWorkflow(req.scope).run({
         input: { order_id: id, status },

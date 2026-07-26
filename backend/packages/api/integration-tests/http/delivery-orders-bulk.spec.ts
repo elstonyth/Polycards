@@ -125,6 +125,24 @@ medusaIntegrationTestRunner({
         expect(await auditsFor(requested)).toHaveLength(1);
       });
 
+      // updateDeliveryOrderStep short-circuits a same-status update without
+      // throwing, so the guard has to live in the route: an operator marking
+      // a whole Processed tab as processed must not mint an audit row per
+      // order whose before and after are identical.
+      it('skips an order already in the target status without auditing it', async () => {
+        const already = await seedOrder('cus_bulk_g', 'processed');
+
+        const res = await bulk({ ids: [already], status: 'processed' });
+        expect(res.status).toBe(200);
+        expect(res.data.updated).toEqual([]);
+        expect(res.data.skipped).toEqual([
+          { id: already, reason: 'already processed' },
+        ]);
+
+        expect(await statusOf(already)).toBe('processed');
+        expect(await auditsFor(already)).toHaveLength(0);
+      });
+
       it('rejects a batch over the 100-id cap with 400', async () => {
         const res = await bulk({
           ids: Array.from({ length: 101 }, (_, i) => `do_${i}`),
