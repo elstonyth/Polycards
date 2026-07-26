@@ -601,14 +601,55 @@ const DeliveriesPage = () => {
                 <FocusModal.Title asChild>
                   <Heading level="h2">Delivery #{detail.id.slice(-6)}</Heading>
                 </FocusModal.Title>
-                <Text className="text-ui-fg-subtle" size="small">
-                  {detail.address.name} — {detail.address.address_1},{' '}
-                  {detail.address.city} {detail.address.postal_code}{' '}
-                  {detail.address.country_code.toUpperCase()}
-                </Text>
-                <Text className="text-ui-fg-subtle" size="small">
-                  Customer: {detail.customer_email ?? detail.customer_id}
-                </Text>
+                {/* Who to chase when a shipment goes wrong. `Customer`, not
+                    `Email`: the value falls back to the customer id, which
+                    would read as bad data under an email label (same wording
+                    as the packing slip). */}
+                <Heading level="h3">Player</Heading>
+                {/* break-words (inherited by every dd) so an unbreakable value
+                    — a long email, or the cus_… id fallback — wraps instead of
+                    widening the 1fr track past the modal's max-width. */}
+                <dl className="grid grid-cols-[6rem_1fr] gap-x-4 gap-y-1 break-words text-sm">
+                  <dt className="text-ui-fg-subtle">Name</dt>
+                  <dd>{detail.address.name}</dd>
+                  <dt className="text-ui-fg-subtle">Customer</dt>
+                  <dd>{detail.customer_email ?? detail.customer_id}</dd>
+                  <dt className="text-ui-fg-subtle">Phone</dt>
+                  <dd>{detail.address.phone ?? '—'}</dd>
+                </dl>
+
+                {/* Headings, not <section>s: an h3 opens an implicit section, so
+                    screen-reader heading navigation already separates the two
+                    blocks. border-t is what makes them read as two on screen. */}
+                <Heading
+                  level="h3"
+                  className="border-ui-border-base border-t pt-5"
+                >
+                  Order details
+                </Heading>
+                <div className="flex flex-col gap-y-2">
+                  <Text size="small" weight="plus">
+                    Shipping address
+                  </Text>
+                  {/* filter(Boolean) so a null province doesn't leave a double
+                      space, and address_2 only prints when there is one. */}
+                  <div className="text-ui-fg-subtle text-sm">
+                    <div>{detail.address.address_1}</div>
+                    {detail.address.address_2 && (
+                      <div>{detail.address.address_2}</div>
+                    )}
+                    <div>
+                      {[
+                        detail.address.city,
+                        detail.address.province,
+                        detail.address.postal_code,
+                      ]
+                        .filter(Boolean)
+                        .join(' ')}
+                    </div>
+                    <div>{detail.address.country_code.toUpperCase()}</div>
+                  </div>
+                </div>
                 <div className="flex flex-col gap-y-2">
                   <Text size="small" weight="plus" id="delivery-status-label">
                     Status
@@ -702,19 +743,47 @@ const DeliveriesPage = () => {
                   )}
                 </div>
 
-                <div className="flex flex-wrap gap-2">
-                  {detail.items.map((it) =>
-                    it.card ? (
-                      <img
-                        key={it.pull_id}
-                        src={resolveImageUrl(
-                          it.card.slab_image || it.card.image,
+                {/* The full manifest — the table only shows the first card.
+                    Every item gets a row now, card or not: an item whose card
+                    row is missing used to render as nothing at all, so the
+                    modal silently disagreed with the table's Qty. Fallbacks
+                    match ItemCell and the packing slip. */}
+                <div className="flex flex-col gap-y-2">
+                  <Text size="small" weight="plus">
+                    Items ({detail.items.length})
+                  </Text>
+                  <ul className="flex flex-col gap-3">
+                    {detail.items.map((it) => (
+                      <li key={it.pull_id} className="flex items-center gap-3">
+                        {it.card && (
+                          // alt="" — the name is right beside it as text, so a
+                          // description here would just be read out twice.
+                          <img
+                            src={resolveImageUrl(
+                              it.card.slab_image || it.card.image,
+                            )}
+                            alt=""
+                            loading="lazy"
+                            decoding="async"
+                            className="h-24 w-16 shrink-0 rounded object-contain"
+                          />
                         )}
-                        alt={it.card.name}
-                        className="h-24 w-16 rounded object-contain"
-                      />
-                    ) : null,
-                  )}
+                        {/* Plain spans, same as ItemCell: `Text size` emits the
+                            preset's txt-* composite, which fights a text-xs
+                            utility for the handle. No truncate either — the
+                            modal is where the operator reads a handle in full,
+                            so it wraps instead. */}
+                        <div className="flex min-w-0 flex-col">
+                          <span className="text-sm">
+                            {it.card?.name ?? 'Unknown card'}
+                          </span>
+                          <span className="text-ui-fg-subtle break-words font-mono text-xs">
+                            {it.card?.handle ?? it.pull_id}
+                          </span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               </div>
             )}
