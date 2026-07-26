@@ -109,12 +109,12 @@ describe('PacksModuleService.transitionDeliveryOrderStatus', () => {
     );
   });
 
-  it('delivered: stamps delivered_at and flips pulls delivering → delivered', async () => {
+  it('completed: stamps delivered_at and flips pulls delivering → delivered', async () => {
     const f = fakeService({ id: 'do_1', status: 'shipped' });
     await f.svc.transitionDeliveryOrderStatus(
       {
         orderId: 'do_1',
-        to: 'delivered',
+        to: 'completed',
         trackingNumber: 'TRK1',
         pullIds: ['pull_1'],
       },
@@ -123,12 +123,14 @@ describe('PacksModuleService.transitionDeliveryOrderStatus', () => {
     expect(f.updateDeliveryOrders).toHaveBeenCalledWith(
       [
         expect.objectContaining({
-          status: 'delivered',
+          status: 'completed',
           delivered_at: expect.any(Date),
         }),
       ],
       f.ctx,
     );
+    // PULL enum is unchanged by the rename — a completed order still flips its
+    // pulls to pull-status 'delivered'.
     expect(f.transitionPullStatus).toHaveBeenCalledWith(
       { ids: ['pull_1'], from: 'delivering', to: 'delivered' },
       f.ctx,
@@ -136,7 +138,8 @@ describe('PacksModuleService.transitionDeliveryOrderStatus', () => {
   });
 
   it('shipped: stamps shipped_at and does NOT touch pulls', async () => {
-    const f = fakeService({ id: 'do_1', status: 'packing' });
+    // Only ready_to_ship → shipped is a legal transition post-rename.
+    const f = fakeService({ id: 'do_1', status: 'ready_to_ship' });
     await f.svc.transitionDeliveryOrderStatus(
       {
         orderId: 'do_1',
@@ -159,7 +162,9 @@ describe('PacksModuleService.transitionDeliveryOrderStatus', () => {
   });
 
   it('shipped without tracking refuses with INVALID_DATA before any write', async () => {
-    const f = fakeService({ id: 'do_1', status: 'packing' });
+    // ready_to_ship (not processed) so the transition itself is legal and the
+    // tracking-required check is actually exercised.
+    const f = fakeService({ id: 'do_1', status: 'ready_to_ship' });
     await expect(
       f.svc.transitionDeliveryOrderStatus(
         {
@@ -193,7 +198,7 @@ describe('PacksModuleService.transitionDeliveryOrderStatus', () => {
   it('proof_images pass through wholesale when provided', async () => {
     const f = fakeService({ id: 'do_1', status: 'requested' });
     await f.svc.transitionDeliveryOrderStatus(
-      { ...cancelInput, to: 'packing', pullIds: [], proofImages: ['a.webp'] },
+      { ...cancelInput, to: 'processed', pullIds: [], proofImages: ['a.webp'] },
       f.ctx,
     );
     expect(f.updateDeliveryOrders).toHaveBeenCalledWith(
