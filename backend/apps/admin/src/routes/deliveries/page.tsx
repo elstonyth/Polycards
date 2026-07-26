@@ -136,11 +136,16 @@ const DeliveriesPage = () => {
     pageIds.length > 0 && pageIds.every((id) => selected.has(id));
   const someOnPage = pageIds.some((id) => selected.has(id));
 
+  // Decide add-vs-remove from `prev` inside the updater, not from the rendered
+  // `allOnPage`: with keepPreviousData a refetch can swap `orders` between the
+  // click and the update, and a stale flag turns "select all" into a no-op.
   const toggleAll = () =>
     setSelected((prev) => {
       const next = new Set(prev);
+      const everyOnPage =
+        pageIds.length > 0 && pageIds.every((id) => prev.has(id));
       for (const id of pageIds) {
-        if (allOnPage) next.delete(id);
+        if (everyOnPage) next.delete(id);
         else next.add(id);
       }
       return next;
