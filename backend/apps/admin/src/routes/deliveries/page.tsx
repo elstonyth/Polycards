@@ -20,6 +20,7 @@ import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
   useBulkUpdateDeliveryOrders,
   useDeliveryOrders,
+  usePulls,
   useUpdateDeliveryOrder,
   useUploadImage,
 } from '../../lib/queries';
@@ -92,7 +93,119 @@ const ItemCell = ({ items }: { items: AdminDeliveryItem[] }) => {
   );
 };
 
+// Pack-open history. Read-only by design: a pull is an immutable audit row —
+// nothing to ship, cancel, or bulk-edit — so no checkboxes and no Actions column.
+// Its own component so `usePulls` (which also computes server-side rollups) only
+// fires while this tab is mounted, and so the Shipping tab's
+// filter/search/page/selection state survives untouched in the parent.
+// Returns a Fragment, not a wrapper: Container's `divide-y` only draws between
+// its DIRECT children, so the table block and the Pager need to stay top-level.
+const PackPurchases = () => {
+  const [page, setPage] = useState(0);
+  const { data, isError } = usePulls(page);
+  const pulls = data?.pulls ?? null;
+
+  return (
+    <>
+      {isError ? (
+        <div className="px-6 py-8">
+          <Text className="text-ui-fg-subtle">
+            Failed to load pack purchases.
+          </Text>
+        </div>
+      ) : pulls === null ? (
+        <div className="px-6 py-8">
+          <LoadingSkeleton />
+        </div>
+      ) : pulls.length === 0 ? (
+        <div className="px-6 py-8">
+          <Text className="text-ui-fg-subtle">No pack purchases yet.</Text>
+        </div>
+      ) : (
+        <div
+          className="overflow-x-auto"
+          tabIndex={0}
+          role="region"
+          aria-label="Pack purchases table"
+        >
+          <Table>
+            <Table.Header>
+              <Table.Row>
+                <Table.HeaderCell>Order</Table.HeaderCell>
+                <Table.HeaderCell>Date</Table.HeaderCell>
+                <Table.HeaderCell>Item</Table.HeaderCell>
+                <Table.HeaderCell>Qty</Table.HeaderCell>
+                <Table.HeaderCell>Player</Table.HeaderCell>
+                <Table.HeaderCell>Status</Table.HeaderCell>
+              </Table.Row>
+            </Table.Header>
+            <Table.Body>
+              {pulls.map((p) => (
+                <Table.Row key={p.id}>
+                  <Table.Cell className="font-mono text-xs">
+                    #{p.id.slice(-6)}
+                  </Table.Cell>
+                  <Table.Cell className="text-ui-fg-subtle whitespace-nowrap text-xs">
+                    {orderDateTime(p.rolled_at)}
+                  </Table.Cell>
+                  <Table.Cell>
+                    <div className="flex items-center gap-2">
+                      {p.card && (
+                        <img
+                          src={resolveImageUrl(p.card.image)}
+                          alt=""
+                          loading="lazy"
+                          decoding="async"
+                          className="h-8 w-6 shrink-0 rounded object-contain"
+                        />
+                      )}
+                      <div className="flex min-w-0 flex-col">
+                        <span className="truncate text-sm">
+                          {p.card?.name ?? 'Unknown card'}
+                        </span>
+                        <span className="text-ui-fg-subtle truncate text-xs">
+                          {p.pack_title ?? p.pack_id}
+                        </span>
+                      </div>
+                    </div>
+                  </Table.Cell>
+                  {/* One pack open yields one card. */}
+                  <Table.Cell className="tabular-nums">1</Table.Cell>
+                  <Table.Cell className="text-ui-fg-subtle">
+                    {p.customer_email ??
+                      p.customer_id?.slice(0, 8) ??
+                      'Anonymous'}
+                  </Table.Cell>
+                  {/* Constant: the purchase itself always completed at roll
+                      time. What happened to the card afterwards (vaulted vs
+                      bought back) is the Pull Ledger's story, not this table's. */}
+                  <Table.Cell>
+                    <StatusBadge color="green">Completed</StatusBadge>
+                  </Table.Cell>
+                </Table.Row>
+              ))}
+            </Table.Body>
+          </Table>
+        </div>
+      )}
+
+      {data && (
+        <Pager
+          page={page}
+          onPage={setPage}
+          pageSize={data.limit}
+          count={data.pulls.length}
+          total={data.total}
+        />
+      )}
+    </>
+  );
+};
+
 const DeliveriesPage = () => {
+  // Which kind of record the page is showing. 'shipping' is everything the page
+  // did before: status tabs, id search, bulk tool, Manage modal.
+  const [kind, setKind] = useState<'shipping' | 'purchases'>('shipping');
   const [filter, setFilter] = useState<DeliveryStatus | undefined>(undefined);
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState('');
@@ -263,39 +376,57 @@ const DeliveriesPage = () => {
               Orders and physical shipment requests.
             </Text>
           </div>
-          <Input
-            type="search"
-            className="w-64"
-            placeholder="Search order id"
-            aria-label="Search orders by id"
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setPage(0);
-              clearSelection();
-            }}
-          />
+          {kind === 'shipping' && (
+            <Input
+              type="search"
+              className="w-64"
+              placeholder="Search order id"
+              aria-label="Search orders by id"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(0);
+                clearSelection();
+              }}
+            />
+          )}
         </div>
+        {/* Two tablists now, so each needs its own name to tell them apart.
+            Switching kind deliberately leaves the shipping state (filter,
+            search, page, selection) alone — toggling back restores the view. */}
         <Tabs
-          value={filter ?? 'all'}
-          onValueChange={(v) => {
-            setPage(0);
-            clearSelection();
-            setFilter(v === 'all' ? undefined : (v as DeliveryStatus));
-          }}
+          value={kind}
+          onValueChange={(v) => setKind(v as 'shipping' | 'purchases')}
         >
-          <Tabs.List>
-            <Tabs.Trigger value="all">All</Tabs.Trigger>
-            {STATUSES.map((s) => (
-              <Tabs.Trigger key={s} value={s}>
-                {DELIVERY_STATUS_LABEL[s]}
-              </Tabs.Trigger>
-            ))}
+          <Tabs.List aria-label="Record kind">
+            <Tabs.Trigger value="shipping">Shipping</Tabs.Trigger>
+            <Tabs.Trigger value="purchases">Pack purchases</Tabs.Trigger>
           </Tabs.List>
         </Tabs>
+        {kind === 'shipping' && (
+          <Tabs
+            value={filter ?? 'all'}
+            onValueChange={(v) => {
+              setPage(0);
+              clearSelection();
+              setFilter(v === 'all' ? undefined : (v as DeliveryStatus));
+            }}
+          >
+            <Tabs.List aria-label="Order status">
+              <Tabs.Trigger value="all">All</Tabs.Trigger>
+              {STATUSES.map((s) => (
+                <Tabs.Trigger key={s} value={s}>
+                  {DELIVERY_STATUS_LABEL[s]}
+                </Tabs.Trigger>
+              ))}
+            </Tabs.List>
+          </Tabs>
+        )}
       </div>
 
-      {selected.size > 0 && (
+      {kind === 'purchases' && <PackPurchases />}
+
+      {kind === 'shipping' && selected.size > 0 && (
         <div
           className="bg-ui-bg-subtle flex flex-wrap items-center gap-3 px-6 py-3"
           role="region"
@@ -332,97 +463,100 @@ const DeliveriesPage = () => {
         </div>
       )}
 
-      {isError ? (
-        <div className="px-6 py-8">
-          <Text className="text-ui-fg-subtle">Failed to load deliveries.</Text>
-        </div>
-      ) : orders === null ? (
-        <div className="px-6 py-8">
-          <LoadingSkeleton />
-        </div>
-      ) : orders.length === 0 ? (
-        <div className="px-6 py-8">
-          <Text className="text-ui-fg-subtle">
-            {filter || q ? 'No orders match this filter.' : 'No orders yet.'}
-          </Text>
-        </div>
-      ) : (
-        <div
-          className="overflow-x-auto"
-          tabIndex={0}
-          role="region"
-          aria-label="Orders table"
-        >
-          <Table>
-            <Table.Header>
-              <Table.Row>
-                <Table.HeaderCell className="w-10">
-                  <Checkbox
-                    aria-label="Select all orders on this page"
-                    checked={
-                      allOnPage ? true : someOnPage ? 'indeterminate' : false
-                    }
-                    onCheckedChange={toggleAll}
-                  />
-                </Table.HeaderCell>
-                <Table.HeaderCell>Order</Table.HeaderCell>
-                <Table.HeaderCell>Date</Table.HeaderCell>
-                <Table.HeaderCell>Item</Table.HeaderCell>
-                <Table.HeaderCell>Qty</Table.HeaderCell>
-                <Table.HeaderCell>Player</Table.HeaderCell>
-                <Table.HeaderCell>Status</Table.HeaderCell>
-                <Table.HeaderCell className="text-right">
-                  Actions
-                </Table.HeaderCell>
-              </Table.Row>
-            </Table.Header>
-            <Table.Body>
-              {orders.map((o) => (
-                <Table.Row key={o.id}>
-                  <Table.Cell>
+      {kind === 'shipping' &&
+        (isError ? (
+          <div className="px-6 py-8">
+            <Text className="text-ui-fg-subtle">
+              Failed to load deliveries.
+            </Text>
+          </div>
+        ) : orders === null ? (
+          <div className="px-6 py-8">
+            <LoadingSkeleton />
+          </div>
+        ) : orders.length === 0 ? (
+          <div className="px-6 py-8">
+            <Text className="text-ui-fg-subtle">
+              {filter || q ? 'No orders match this filter.' : 'No orders yet.'}
+            </Text>
+          </div>
+        ) : (
+          <div
+            className="overflow-x-auto"
+            tabIndex={0}
+            role="region"
+            aria-label="Orders table"
+          >
+            <Table>
+              <Table.Header>
+                <Table.Row>
+                  <Table.HeaderCell className="w-10">
                     <Checkbox
-                      aria-label={`Select order #${o.id.slice(-6)}`}
-                      checked={selected.has(o.id)}
-                      onCheckedChange={() => toggleOne(o.id)}
+                      aria-label="Select all orders on this page"
+                      checked={
+                        allOnPage ? true : someOnPage ? 'indeterminate' : false
+                      }
+                      onCheckedChange={toggleAll}
                     />
-                  </Table.Cell>
-                  <Table.Cell className="font-mono text-xs">
-                    #{o.id.slice(-6)}
-                  </Table.Cell>
-                  <Table.Cell className="text-ui-fg-subtle whitespace-nowrap text-xs">
-                    {orderDateTime(o.created_at)}
-                  </Table.Cell>
-                  <Table.Cell>
-                    <ItemCell items={o.items} />
-                  </Table.Cell>
-                  <Table.Cell className="tabular-nums">
-                    {o.items.length}
-                  </Table.Cell>
-                  <Table.Cell className="text-ui-fg-subtle">
-                    {o.customer_email ?? o.customer_id}
-                  </Table.Cell>
-                  <Table.Cell>
-                    <StatusBadge color={TONE[o.status]}>
-                      {DELIVERY_STATUS_LABEL[o.status]}
-                    </StatusBadge>
-                  </Table.Cell>
-                  <Table.Cell className="text-right">
-                    <Button
-                      size="small"
-                      variant="secondary"
-                      onClick={() => openDetail(o)}
-                    >
-                      Manage
-                    </Button>
-                  </Table.Cell>
+                  </Table.HeaderCell>
+                  <Table.HeaderCell>Order</Table.HeaderCell>
+                  <Table.HeaderCell>Date</Table.HeaderCell>
+                  <Table.HeaderCell>Item</Table.HeaderCell>
+                  <Table.HeaderCell>Qty</Table.HeaderCell>
+                  <Table.HeaderCell>Player</Table.HeaderCell>
+                  <Table.HeaderCell>Status</Table.HeaderCell>
+                  <Table.HeaderCell className="text-right">
+                    Actions
+                  </Table.HeaderCell>
                 </Table.Row>
-              ))}
-            </Table.Body>
-          </Table>
-        </div>
-      )}
+              </Table.Header>
+              <Table.Body>
+                {orders.map((o) => (
+                  <Table.Row key={o.id}>
+                    <Table.Cell>
+                      <Checkbox
+                        aria-label={`Select order #${o.id.slice(-6)}`}
+                        checked={selected.has(o.id)}
+                        onCheckedChange={() => toggleOne(o.id)}
+                      />
+                    </Table.Cell>
+                    <Table.Cell className="font-mono text-xs">
+                      #{o.id.slice(-6)}
+                    </Table.Cell>
+                    <Table.Cell className="text-ui-fg-subtle whitespace-nowrap text-xs">
+                      {orderDateTime(o.created_at)}
+                    </Table.Cell>
+                    <Table.Cell>
+                      <ItemCell items={o.items} />
+                    </Table.Cell>
+                    <Table.Cell className="tabular-nums">
+                      {o.items.length}
+                    </Table.Cell>
+                    <Table.Cell className="text-ui-fg-subtle">
+                      {o.customer_email ?? o.customer_id}
+                    </Table.Cell>
+                    <Table.Cell>
+                      <StatusBadge color={TONE[o.status]}>
+                        {DELIVERY_STATUS_LABEL[o.status]}
+                      </StatusBadge>
+                    </Table.Cell>
+                    <Table.Cell className="text-right">
+                      <Button
+                        size="small"
+                        variant="secondary"
+                        onClick={() => openDetail(o)}
+                      >
+                        Manage
+                      </Button>
+                    </Table.Cell>
+                  </Table.Row>
+                ))}
+              </Table.Body>
+            </Table>
+          </div>
+        ))}
 
-      {data && (
+      {kind === 'shipping' && data && (
         <Pager
           page={page}
           onPage={(p) => {
