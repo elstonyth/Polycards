@@ -29,7 +29,13 @@ export type DeliveryOrderItemView = {
 };
 export type DeliveryOrderView = {
   id: string;
-  status: 'requested' | 'packing' | 'shipped' | 'delivered' | 'canceled';
+  status:
+    | 'requested'
+    | 'processed'
+    | 'ready_to_ship'
+    | 'shipped'
+    | 'completed'
+    | 'canceled';
   trackingNumber: string | null;
   createdAt: string;
   items: DeliveryOrderItemView[];
@@ -171,8 +177,9 @@ export async function requestDelivery(
 }
 
 // Re-point a pre-ship delivery order at a different saved address. The backend
-// only permits this while the order is `requested` or `packing` (it returns
-// NOT_ALLOWED→400 otherwise); the UI hides the affordance for other statuses.
+// only permits this while the order is `requested` or `processed` (it returns
+// NOT_ALLOWED→400 otherwise — from `ready_to_ship` on, a printed label must not
+// diverge from the address); the UI hides the affordance for other statuses.
 export async function editDeliveryAddress(
   orderId: string,
   addressId: string,
@@ -232,8 +239,8 @@ const CANCEL_RULES: ErrorRule[] = [
   [/not found|404/i, 'That order was not found.'],
 ];
 
-// Cancel a still-pre-ship (`requested`/`packing`) delivery order — the covered
-// cards return to the customer's vault. The backend enforces ownership and the
+// Cancel a still-pre-ship order (`requested`/`processed`/`ready_to_ship`) —
+// the cards return to the customer's vault. The backend enforces ownership and
 // status transition; the UI additionally hides the affordance post-ship.
 export async function cancelDeliveryOrder(
   orderId: string,

@@ -78,7 +78,9 @@ describe('body rendering', () => {
     expect(body({ status: 'shipped', tracking_number: null })).toBe(
       'Your order is on its way.',
     );
-    expect(body({ status: 'delivered' })).toBe('Your order was delivered.');
+    // The terminal status is `completed` on the wire (operator vocabulary);
+    // the customer is still told their order was "delivered".
+    expect(body({ status: 'completed' })).toBe('Your order was delivered.');
     expect(body({ status: 'canceled' })).toBe(
       'Your delivery was canceled. Contact support if this was unexpected.',
     );

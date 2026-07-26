@@ -546,7 +546,14 @@ export const DailyStateSchema = z.looseObject({
 /** GET /store/delivery-orders item — guards the fields the mapper consumes. */
 export const DeliveryOrderSchema = z.looseObject({
   id: z.string(),
-  status: z.enum(['requested', 'packing', 'shipped', 'delivered', 'canceled']),
+  status: z.enum([
+    'requested',
+    'processed',
+    'ready_to_ship',
+    'shipped',
+    'completed',
+    'canceled',
+  ]),
   created_at: z.string(),
   tracking_number: z.string().nullable().optional(),
   address: z

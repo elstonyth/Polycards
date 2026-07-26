@@ -21,21 +21,37 @@ type Tone = 'green' | 'sky' | 'amber' | 'neutral';
 // Map delivery-order status → badge tone.
 const STATUS_TONE: Record<DeliveryOrderView['status'], Tone> = {
   requested: 'amber',
-  packing: 'amber',
+  processed: 'amber',
+  ready_to_ship: 'amber',
   shipped: 'sky',
-  delivered: 'green',
+  completed: 'green',
   canceled: 'neutral',
 };
 
-// Pre-ship statuses: the address is editable and the order is cancelable only
-// before it ships (mirrors the backend's transition guards).
-const PRE_SHIP: ReadonlySet<DeliveryOrderView['status']> = new Set([
-  'requested',
-  'packing',
-]);
+// Customer-facing label per status. Exhaustive Record, so a new status is a
+// type error here instead of a raw snake_case token leaking into the UI.
+// `completed` is operator vocabulary — a customer is told "Delivered".
+const STATUS_LABEL: Record<DeliveryOrderView['status'], string> = {
+  requested: 'Requested',
+  processed: 'Processed',
+  ready_to_ship: 'Ready to ship',
+  shipped: 'Shipped',
+  completed: 'Delivered',
+  canceled: 'Canceled',
+};
 
-const humanize = (s: string) =>
-  s.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
+// The two pre-ship windows mirror the backend's guards, and they differ:
+// the address locks from `ready_to_ship` on (a printed label must not diverge
+// from it), while cancel stays open until the parcel actually ships.
+const ADDRESS_EDITABLE: ReadonlySet<DeliveryOrderView['status']> = new Set([
+  'requested',
+  'processed',
+]);
+const CANCELABLE: ReadonlySet<DeliveryOrderView['status']> = new Set([
+  'requested',
+  'processed',
+  'ready_to_ship',
+]);
 
 // Only render http(s) or same-origin root-relative proof URLs — never a
 // `javascript:`/`data:` scheme. Defense-in-depth: the admin API already rejects
@@ -520,7 +536,7 @@ export default function OrdersClient({
                 </td>
                 <td className="whitespace-nowrap px-4 py-3 text-white/80">
                   <Badge tone={STATUS_TONE[o.status] ?? 'neutral'}>
-                    {humanize(o.status)}
+                    {STATUS_LABEL[o.status]}
                   </Badge>
                   {canceledIds.has(o.id) && (
                     <p className="mt-1.5 text-[11px] text-white/50">
@@ -536,15 +552,17 @@ export default function OrdersClient({
                   )}
                 </td>
                 <td className="whitespace-nowrap px-4 py-3 text-right text-white/80">
-                  {PRE_SHIP.has(o.status) && (
+                  {CANCELABLE.has(o.status) && (
                     <span className="inline-flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setEditing(o)}
-                        className="rounded-lg border border-white/15 px-3 py-1.5 text-[12px] font-semibold text-white/70 transition-colors hover:text-white"
-                      >
-                        Edit address
-                      </button>
+                      {ADDRESS_EDITABLE.has(o.status) && (
+                        <button
+                          type="button"
+                          onClick={() => setEditing(o)}
+                          className="rounded-lg border border-white/15 px-3 py-1.5 text-[12px] font-semibold text-white/70 transition-colors hover:text-white"
+                        >
+                          Edit address
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => setCanceling(o)}
