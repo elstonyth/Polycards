@@ -15,6 +15,12 @@ const RATE_ENV = {
   AUTH_RATE_BURST_WINDOW_MS: "15000",
   AUTH_RATE_LIMIT: "1000",
   AUTH_RATE_WINDOW_MS: "60000",
+  // The app-under-test limiter must write to the SAME redis the probe in
+  // beforeAll inspects. CI exports REDIS_URL; locally default it to the
+  // probe fallback (pokenic-redis) — left unset, the limiter silently
+  // fails over to its in-memory store and the rl:auth:* assertions below
+  // read an empty redis.
+  REDIS_URL: process.env.REDIS_URL ?? "redis://localhost:6379",
 };
 
 medusaIntegrationTestRunner({
