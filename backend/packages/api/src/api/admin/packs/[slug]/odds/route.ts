@@ -2,7 +2,7 @@ import { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
 import PacksModuleService from '../../../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../../../modules/packs';
 import { savePackOddsWorkflow } from '../../../../../workflows/save-pack-odds';
-import { RARITIES, type OddsInput } from '@acme/odds-math';
+import { RARITIES, type SetEntry } from '@acme/odds-math';
 import { getCardStockByHandle } from '../../../../../modules/packs/card-stock';
 import { toMoney } from '../../../../../modules/packs/money';
 import {
@@ -130,7 +130,7 @@ export async function POST(
   }
 
   // Coerce to the workflow input shape; reject malformed rows up front.
-  const entries: OddsInput[] = [];
+  const entries: SetEntry[] = [];
   for (const raw of body.entries) {
     if (!raw || typeof raw !== 'object') {
       res.status(400).json({ message: 'Each entry must be an object.' });
@@ -157,6 +157,12 @@ export async function POST(
       locked: e.locked,
       pct: Number(e.pct ?? 0),
       rarity: e.rarity,
+      // Task 5 widens the body parse to accept per-set overrides. Until then
+      // every save is set-1-only — and these MUST be explicit nulls, not
+      // omitted keys: computeSetWeights treats `!== null` as "explicit", so an
+      // `undefined` would materialize weight_2/weight_3 on every card.
+      pct_2: null,
+      pct_3: null,
     });
   }
 

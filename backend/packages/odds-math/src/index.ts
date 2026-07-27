@@ -207,3 +207,101 @@ export function balanceOdds(entries: OddsInput[]): OddsResult {
     unlockedCount: balancers.length,
   };
 }
+
+// ── Win-rate SETS 2 and 3 (POLYCARD-BACK §2.4 / D2) ─────────────────────────
+// One pack carries three odds tables; a customer's group picks which one their
+// spin rolls against (set 1 = default). Sets 2/3 are stored SPARSELY: a NULL
+// weight_2/weight_3 means "inherit the previous set" for that card (3→2→1).
+//
+// STORAGE RULE (the invariant this function encodes):
+//   - Set 1 ALWAYS materializes (`weight` on every row).
+//   - For set s ∈ {2,3}: if NO entry carries an explicit `pct_s`, the whole set
+//     stays NULL — pure inheritance, and Σ is already guaranteed by set 1.
+//     Otherwise the set's EFFECTIVE rates (explicit `pct_s`, else the PREVIOUS
+//     set's resolved pct — so 3 chains off 2, not off 1) run through
+//     `balanceOdds`, and `weight_s` is stored for (a) every card with an
+//     explicit `pct_s` and (b) every unlocked Common (the balancer output).
+//     Cards that merely inherited stay NULL.
+//   - Because every save recomputes ALL THREE sets, a later set-1 edit
+//     refreshes the materialized Common of sets 2/3 — so each set's RESOLVED
+//     weights sum to exactly TOTAL_BPS after every save.
+//
+// Errors are per-set and short-circuit: set 1's message propagates verbatim,
+// sets 2/3 are prefixed 'Set N: ' so the editor can point at the right tab.
+
+/** An editor row: set-1 `pct` plus the optional per-set overrides (null = inherit). */
+export type SetEntry = OddsInput & {
+  pct_2: number | null;
+  pct_3: number | null;
+};
+
+export type SetWeightsResult = {
+  /** First error encountered, prefixed 'Set N: ' for sets 2/3. Non-null ⇒ do NOT save. */
+  error: string | null;
+  /** Per-card storage row, in input order. Empty when `error` is set. */
+  rows: {
+    card_id: string;
+    locked: boolean;
+    /** Set 1 basis points — always materialized. */
+    weight: number;
+    /** Basis points for set 2/3; null = inherit the previous set. */
+    weight_2: number | null;
+    weight_3: number | null;
+  }[];
+};
+
+export function computeSetWeights(entries: SetEntry[]): SetWeightsResult {
+  const set1 = balanceOdds(entries);
+  if (set1.error) return { error: set1.error, rows: [] };
+
+  const pctByCard = (r: OddsResult): Map<string, number> =>
+    new Map(r.computed.map((c) => [c.card_id, c.pct]));
+
+  let prev = pctByCard(set1);
+  const materialized: (Map<string, number> | null)[] = [];
+
+  for (const setNo of [2, 3] as const) {
+    const explicit = (e: SetEntry): number | null =>
+      setNo === 2 ? e.pct_2 : e.pct_3;
+
+    // No override anywhere ⇒ the whole set inherits; store nothing.
+    if (!entries.some((e) => explicit(e) !== null)) {
+      materialized.push(null);
+      continue;
+    }
+
+    const eff: OddsInput[] = entries.map((e) => ({
+      card_id: e.card_id,
+      locked: e.locked,
+      rarity: e.rarity,
+      pct: explicit(e) ?? prev.get(e.card_id) ?? 0,
+    }));
+
+    const r = balanceOdds(eff);
+    if (r.error) return { error: `Set ${setNo}: ${r.error}`, rows: [] };
+
+    const weights = new Map<string, number>();
+    for (const c of r.computed) {
+      const src = entries.find((e) => e.card_id === c.card_id);
+      if (!src) continue;
+      const isBalancer = src.locked === false && src.rarity === 'Common';
+      if (explicit(src) !== null || isBalancer) weights.set(c.card_id, c.weight);
+    }
+    materialized.push(weights);
+    prev = pctByCard(r);
+  }
+
+  const [m2, m3] = materialized;
+  const w1 = new Map(set1.computed.map((c) => [c.card_id, c.weight]));
+
+  return {
+    error: null,
+    rows: entries.map((e) => ({
+      card_id: e.card_id,
+      locked: e.locked,
+      weight: w1.get(e.card_id) ?? 0,
+      weight_2: m2 ? (m2.get(e.card_id) ?? null) : null,
+      weight_3: m3 ? (m3.get(e.card_id) ?? null) : null,
+    })),
+  };
+}
