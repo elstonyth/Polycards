@@ -3173,7 +3173,11 @@ class PacksModuleService extends MedusaService({
   // §4.2): ONE query per aggregate per page, never per-row. The credit SQL is
   // the GROUP BY twin of creditSummary (service.ts:661) and the vault SQL the
   // customer-scoped twin of vaultLiabilityMyr (service.ts:2735) — same FMV
-  // convention (multiplier 1), same 'vaulted' predicate, no source filter.
+  // convention (multiplier 1), same 'vaulted' predicate, no source filter, and
+  // the same INNER JOIN, so a vaulted pull whose card was soft-deleted drops out
+  // of BOTH vault_count and vault_value (profileStatsForCustomer deliberately
+  // differs — its LEFT JOIN still counts the pull at 0). Keeping the twin exact
+  // is what makes the Players list and the economy dashboard agree.
   @InjectManager()
   async playersOverview(
     ids: string[],
