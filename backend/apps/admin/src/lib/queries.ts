@@ -238,17 +238,23 @@ export const useCustomerTransactions = (
     placeholderData: keepPreviousData,
   });
 
+// `opts` narrows the history server-side and is part of the cache key, so the
+// Vault tab's vaulted-only view and the support page's full history are
+// separate entries instead of overwriting each other for the same (id, page).
 export const useCustomerPulls = (
   id: string | null,
   page = 0,
+  // status only — getCustomerPulls also accepts `source`, but nothing needs it
+  // here and an un-keyed filter would collide in the cache.
+  opts?: { status?: string },
 ): UseQueryResult<{
   items: SupportPull[];
   total: number;
   fx?: { rate: number; firm: boolean };
 }> =>
   useQuery({
-    queryKey: qk.customerPulls(id ?? '', page),
-    queryFn: () => getCustomerPulls(id!, page),
+    queryKey: qk.customerPulls(id ?? '', page, opts?.status),
+    queryFn: () => getCustomerPulls(id!, page, 25, opts),
     enabled: !!id,
     placeholderData: keepPreviousData,
   });

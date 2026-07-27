@@ -20,8 +20,14 @@ export const qk = {
     ['admin', 'customer', id, 'audit', page] as const,
   customerTransactions: (id: string, page: number) =>
     ['admin', 'customer', id, 'transactions', page] as const,
-  customerPulls: (id: string, page: number) =>
-    ['admin', 'customer', id, 'pulls', page] as const,
+  // The status segment always renders (defaulting to 'all', same shape as
+  // qk.pulls' source segment) rather than being appended only when filtered:
+  // an appended segment would make the unfiltered key a strict PREFIX of the
+  // filtered one, so an exact-key invalidation of the support page's full
+  // history would also nuke the Vault tab's vaulted-only cache. Disjoint
+  // siblings can't do that.
+  customerPulls: (id: string, page: number, status?: string) =>
+    ['admin', 'customer', id, 'pulls', page, status ?? 'all'] as const,
   // 4-segment prefix — invalidates ALL pages of a customer's commissions in one call
   customerCommissionsKey: (id: string) =>
     ['admin', 'customer', id, 'commissions'] as const,
