@@ -9,6 +9,7 @@
 // and their pre-disable bearer keeps reading /store/credits.
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
 import { Modules } from '@medusajs/framework/utils';
+import type { ICustomerModuleService } from '@medusajs/framework/types';
 import { mintSuperAdmin, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
@@ -149,6 +150,28 @@ medusaIntegrationTestRunner({
         const res = await login('disabled-login-nobody@test.dev');
         expect(res.status).toBe(401);
         expect(String(res.data.message ?? '')).not.toMatch(/disabled/i);
+      });
+
+      it('(6) the block survives a customer row whose email differs from the auth identity', async () => {
+        // Authentication keys on provider_identities.entity_id, NOT on the
+        // customer row's `email` column — nothing reconciles the two (POST
+        // /store/customers takes email straight from the body, and the unique
+        // index is on (email, has_account), so guest twins can coexist). A
+        // guard that joined on customer.email would hand a disabled player a
+        // token here.
+        const customers = getContainer().resolve<ICustomerModuleService>(
+          Modules.CUSTOMER,
+        );
+        await customers.updateCustomers(customerId, {
+          email: 'disabled-login-moved@test.dev',
+        });
+
+        expect((await setDisabled(true)).status).toBe(200);
+
+        // Login still uses the AUTH email — and must still be refused.
+        const res = await login();
+        expect(res.status).toBe(401);
+        expect(String(res.data.message)).toMatch(/disabled/i);
       });
     });
   },

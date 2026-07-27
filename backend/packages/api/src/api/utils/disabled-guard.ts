@@ -4,15 +4,31 @@ import type {
   MedusaResponse,
 } from '@medusajs/framework/http';
 import { MedusaError, Modules } from '@medusajs/framework/utils';
-import type { ICustomerModuleService } from '@medusajs/framework/types';
+import type { IAuthModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
 
 const DISABLED_MESSAGE = 'This account has been disabled. Please contact support.';
 
+// Both guards fail CLOSED: an unexpected error is handed to next(e), which the
+// framework error handler turns into a 500 — never a silent pass.
+
 // Login-time block (POLYCARD-BACK §4.2): reject emailpass login for a disabled
 // customer BEFORE the core route mints a token. Unknown emails fall through to
 // the core route, so this reveals nothing login itself would not.
+//
+// The customer is resolved through the AUTH IDENTITY, which is the key
+// authentication itself uses — never through customer.email. Nothing
+// reconciles the customer row's `email` column with
+// provider_identities.entity_id (POST /store/customers takes the email
+// straight from the request body, and the unique index is on
+// (email, has_account), so an anonymously-creatable guest twin can share an
+// email with a real account). Joining on email was therefore both bypassable
+// (a disabled player with a mismatched/null email logs in) and prone to
+// misfiring (a disabled guest twin locks out an innocent account). Resolving
+// entity_id -> app_metadata.customer_id is exactly how login derives the
+// token's actor_id (core-flows setAuthAppMetadataStep keys it
+// `${actorType}_id`), so this guard and the session guard now agree on one id.
 export async function blockDisabledEmailpassLogin(
   req: MedusaRequest,
   _res: MedusaResponse,
@@ -24,16 +40,21 @@ export async function blockDisabledEmailpassLogin(
       next();
       return;
     }
-    const customers = req.scope.resolve<ICustomerModuleService>(
-      Modules.CUSTOMER,
+    const auth = req.scope.resolve<IAuthModuleService>(Modules.AUTH);
+    const [identity] = await auth.listAuthIdentities(
+      { provider_identities: { provider: 'emailpass', entity_id: email } },
+      { take: 1 },
     );
-    const [customer] = await customers.listCustomers({ email }, { take: 1 });
-    if (!customer) {
+    const customerId = identity?.app_metadata?.customer_id;
+    // No identity, or one not yet linked to a customer (a register token
+    // carries no customer_id until POST /store/customers runs) — nothing to
+    // decide on, so fall through to the core route.
+    if (typeof customerId !== 'string' || customerId === '') {
       next();
       return;
     }
     const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
-    if (await packs.isAccountDisabled(customer.id)) {
+    if (await packs.isAccountDisabled(customerId)) {
       next(new MedusaError(MedusaError.Types.UNAUTHORIZED, DISABLED_MESSAGE));
       return;
     }
@@ -44,11 +65,15 @@ export async function blockDisabledEmailpassLogin(
 }
 
 // Session-time block: rejects any /store request whose verified bearer belongs
-// to a disabled customer. Registered as a blanket /store/* matcher placed AFTER
-// the per-route authenticate() entries so req.auth_context is populated when it
-// runs; unauthenticated/public routes pass through untouched. A Google-minted
-// token for a disabled customer is unusable for the same reason (the google
-// callback itself is not guarded — the token it mints works nowhere).
+// to a disabled customer. Registered as a blanket /store/* matcher. It does NOT
+// rely on this file's per-route authenticate() entries — the routes sorter
+// hoists a method-less matcher into the `global` bucket, AHEAD of them. What
+// populates req.auth_context is the framework's own store-wide auth pass, which
+// is registered before any middleware from middlewares.ts; see the full
+// mechanism at middlewares.ts:663-672. Unauthenticated/public routes carry no
+// auth_context and pass through untouched. A Google-minted token for a disabled
+// customer is unusable for the same reason (the google callback itself is not
+// guarded — the token it mints works nowhere).
 //
 // FORBIDDEN, not NOT_ALLOWED: this framework's error handler maps NOT_ALLOWED
 // to 400 and FORBIDDEN to 403 (node_modules/@medusajs/framework/dist/http/
