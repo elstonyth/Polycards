@@ -13,9 +13,10 @@
 //   corepack yarn test:integration:http                 -> all suites, SHARDS sequential shards
 //   corepack yarn test:integration:http economy.spec …  -> filtered single run (no sharding)
 //
-// Redis: the auth-rate-limit suite inspects a real redis (REDIS_URL, default
-// redis://localhost:6379 — `docker start pokenic-redis`). The other suites are
-// redis-free under TEST_TYPE (medusa-config forces the in-memory modules).
+// Redis: the rate-limit and password-reset suites probe a real redis
+// (TEST_REDIS_URL in http/utils.ts — REDIS_URL or redis://localhost:6379;
+// `docker start pokenic-redis`). Only the Medusa redis MODULES are forced
+// in-memory under TEST_TYPE (medusa-config), not those suites' probes.
 import { spawnSync } from 'node:child_process';
 
 // 8 shards ≈ 11 suites/process at the current 88 suites — matches CI's
@@ -32,8 +33,10 @@ const env = {
     process.env.NODE_OPTIONS,
     '--experimental-vm-modules',
     // CI exports its own; default it here so a plain local
-    // `corepack yarn test:integration:http` clears the heap too.
-    process.env.NODE_OPTIONS?.includes('--max-old-space-size')
+    // `corepack yarn test:integration:http` clears the heap too. The regex
+    // also matches node's underscore alias (--max_old_space_size) so a
+    // caller's cap is never silently overridden by last-flag-wins.
+    /--max[-_]old[-_]space[-_]size/.test(process.env.NODE_OPTIONS ?? '')
       ? null
       : '--max-old-space-size=6144',
   ]
