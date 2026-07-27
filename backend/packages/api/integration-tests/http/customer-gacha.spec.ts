@@ -103,6 +103,11 @@ medusaIntegrationTestRunner({
             grader: 'PSA',
             grade: '10',
             market_value: 12.5,
+            // Deliberately NOT the DEFAULT_MARKET_MULTIPLIER (1.2): at the
+            // default, display_value would equal FMV × 1.2 whether the route
+            // read this column or silently fell back, and the assertion below
+            // could not fail. At 2 a fallback bug is visible.
+            market_multiplier: 2,
             image: '/qa.png',
           },
         ]);
@@ -167,12 +172,13 @@ medusaIntegrationTestRunner({
           market_value: 62.5,
         });
 
-        // market_value = FMV at multiplier 1 (12.5 × 5); display_value = the
-        // storefront price, FMV × the card's market_multiplier (DB default 1.2).
+        // market_value = FMV at multiplier 1 (12.5 × 5 = 62.5); display_value =
+        // the storefront price, FMV × the card's own market_multiplier
+        // (12.5 × 5 × 2 = 125 — NOT 62.5 × the 1.2 default).
         expect(res.data.vault).toEqual({
           count: 1,
           market_value: 62.5,
-          display_value: 75,
+          display_value: 125,
         });
       });
 
