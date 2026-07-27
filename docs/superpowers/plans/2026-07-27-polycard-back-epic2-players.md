@@ -198,7 +198,7 @@ Message: `feat(players): disabled flag on customer_account_state + admin disable
 
 **Interfaces:**
 - Consumes: `isAccountDisabled` (Task 1).
-- Produces: `blockDisabledEmailpassLogin` and `blockDisabledCustomerSession` middlewares; disabled customers get 401 at emailpass login and 403 (`NOT_ALLOWED`) on every authenticated `/store` request (which also neutralizes Google-minted tokens — see note in Step 3).
+- Produces: `blockDisabledEmailpassLogin` and `blockDisabledCustomerSession` middlewares; disabled customers get 401 at emailpass login and 403 (`FORBIDDEN` — `NOT_ALLOWED` maps to 400 in this framework, so the as-built code uses `FORBIDDEN`) on every authenticated `/store` request (which also neutralizes Google-minted tokens — see note in Step 3).
 
 - [ ] **Step 1: Write the failing http spec**
 
@@ -262,7 +262,9 @@ export async function blockDisabledCustomerSession(
     if (!auth?.actor_id || auth.actor_type !== 'customer') { next(); return; }
     const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
     if (await packs.isAccountDisabled(auth.actor_id)) {
-      next(new MedusaError(MedusaError.Types.NOT_ALLOWED, DISABLED_MESSAGE));
+      // As built: FORBIDDEN, not NOT_ALLOWED — this framework's error handler
+      // maps NOT_ALLOWED to 400 and FORBIDDEN to the contracted 403.
+      next(new MedusaError(MedusaError.Types.FORBIDDEN, DISABLED_MESSAGE));
       return;
     }
     next();
@@ -642,7 +644,7 @@ Config: `export const config: RouteConfig = { label: 'Players', icon: Users, nes
 
 - State: `page`, `qInput` (+ 300 ms debounce → `q`, reset page on change), `modal: { id: string; email: string; disabled: boolean } | null`, `reason` string.
 - Search `<Input placeholder={t('players.searchPlaceholder')}>`.
-- Table columns (order per spec §4.2): Name (or em-dash) | Email | Phone | Group (first group name or —) | LVL (`Badge` `LV {vip_level}`) | Wallet (`rm(wallet_balance)`) | Vault (`rm(vault_value)` + small `({vault_count})`) | Spend (`rm(total_spend)`) | Pulls | Registered (`orderDateTime(registered_at)`) | Last spend (`last_spend_at ? orderDateTime(…) : '—'`) | Status.
+- Table columns (order per spec §4.2): Name (as built: falls back to the EMAIL, not an em-dash — a screen reader on a nameless row would otherwise announce "— button" with no way to tell which player it opens) | Email | Phone | Group (first group name or —) | LVL (`Badge` `LV {vip_level}`) | Wallet (`rm(wallet_balance)`) | Vault (`rm(vault_value)` + small `({vault_count})`) | Spend (`rm(total_spend)`) | Pulls | Registered (`orderDateTime(registered_at)`) | Last spend (`last_spend_at ? orderDateTime(…) : '—'`) | Status.
 - Status cell: `Switch` from `@medusajs/ui` — `checked={!p.disabled}`, `onCheckedChange` opens the confirm modal (NEVER toggles directly). Stop row-click propagation on the cell.
 - Row `onClick={() => navigate(`/customers/${p.id}`)}` (same idiom as the pulls page customer cell).
 - Confirm modal: reuse the `Prompt` pattern from `routes/customers/[id]/page.tsx` (its freeze modal, lines ~162-197): title/desc from `players.disableTitle/Desc` or `enableTitle/Desc`, mandatory reason textarea (confirm disabled while empty), confirm calls `useSetPlayerDisabled().mutateAsync({ id, disabled: !p.disabled, reason })`.
@@ -707,7 +709,7 @@ Move the table `Container` (NOT the rollup header) from `routes/pulls/page.tsx` 
 
 - [ ] **Step 3: Delete `routes/pulls/page.tsx`** — the config export dies with the file; grep `routes/pulls` and `'/pulls'` across `backend/apps/admin/src` → zero survivors (the two old `navigate('/customers/…')` call sites lived in this file and in support; support is untouched).
 
-- [ ] **Step 4: Verify** — `corepack yarn build` (catches any dangling import) + `lint` + `yarn test`; dev boot: all six tabs render; Pull Ledger gone from sidebar; player Pulls tab shows the same rows the old page showed for that player; Orders tab toggles.
+- [ ] **Step 4: Verify** — `corepack yarn build` (catches any dangling import) + `lint` + `yarn test`; dev boot: all seven tabs render (Profile, Lvl, Wallet, Vault, Orders, Pulls, History); Pull Ledger gone from sidebar; player Pulls tab shows the same rows the old page showed for that player; Orders tab toggles.
 
 - [ ] **Step 5: Commit** — `feat(players): LVL/Orders/Pulls tabs; retire standalone Pull Ledger (spec D6)`
 
