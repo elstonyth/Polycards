@@ -961,3 +961,33 @@ export const getCustomerDetail = (id: string) =>
   getJson<{ customer: AdminCustomerDetail }>(
     `/admin/customers/${encodeURIComponent(id)}`,
   );
+
+// ── Epic 3 (Odds) ────────────────────────────────────────────────────────────
+
+// Medusa's NATIVE admin customer-groups API (no repo-side route). The prebuilt
+// @mercurjs/admin bundle owns create/edit/membership at /customer-groups; this
+// app only reads the list and writes `metadata.odds_set` (1|2|3), which the
+// draw path resolves per customer (see packs/odds-sets.ts `coerceOddsSet` —
+// anything that is not 2 or 3, including no metadata at all, is set 1).
+export interface AdminCustomerGroup {
+  id: string;
+  name: string;
+  metadata: Record<string, unknown> | null;
+}
+
+// ponytail: limit=100, no pager — `count` reports the true total, so a shop
+// that ever grows past 100 groups will see it in the response before anyone
+// needs the pagination.
+export const listCustomerGroupsAdmin = () =>
+  getJson<{ customer_groups: AdminCustomerGroup[]; count: number }>(
+    '/admin/customer-groups?limit=100&fields=id,name,metadata',
+  );
+
+// Medusa MERGES metadata per key on update (verified live against the native
+// route: a sibling key survives this call), so posting only `odds_set` leaves
+// the rest of the group's metadata untouched — no read-modify-write needed.
+export const setGroupOddsSet = (id: string, set: 1 | 2 | 3) =>
+  postJson<{ customer_group: AdminCustomerGroup }>(
+    `/admin/customer-groups/${encodeURIComponent(id)}`,
+    { metadata: { odds_set: set } },
+  );

@@ -6,6 +6,10 @@
  * core dashboard routes (orders, products, ...) whose dense tables we do not
  * own and must not reflow.
  *
+ * ONE deliberate exception at the bottom of this file: the §2.1 sidebar-nav
+ * rule. The sidebar is rendered by the prebuilt @mercurjs/admin bundle, never
+ * by our routes, so `.pc-admin` can never reach it — see the comment there.
+ *
  * Plain CSS custom properties (Medusa's own design tokens) rather than @apply
  * or forked components, so this survives a @medusajs/ui upgrade.
  */
@@ -68,4 +72,14 @@
   align-items: center;
   justify-content: flex-end;
   gap: 0.25rem;
+}
+
+/* --- Sidebar nav -------------------------------------------------------- */
+/* POLYCARD-BACK §2.1: hide the core Collections/Categories sidebar entries.
+   Nav lives in the prebuilt @mercurjs/admin bundle (useCoreRoutes) — not
+   patchable from src/routes. CSS-hide only: the pages stay URL-reachable and
+   Medusa data is untouched (spec baked default). */
+nav a[href$="/collections"],
+nav a[href$="/categories"] {
+  display: none;
 }

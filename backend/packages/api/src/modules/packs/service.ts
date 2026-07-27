@@ -389,15 +389,25 @@ class PacksModuleService extends MedusaService({
   async applyPackMemberDiff(
     diff: {
       pack_id: string;
+      // weight_2/weight_3 ride along with weight: a membership edit recomputes
+      // ALL THREE odds sets, so writing only `weight` would leave a
+      // materialized set 2/3 resolving to something other than 10000.
       create: {
         pack_id: string;
         card_id: string;
         rarity: OddsRarity;
         weight: number;
+        weight_2?: number | null;
+        weight_3?: number | null;
         locked: boolean;
       }[];
       remove_ids: string[];
-      reweigh: { id: string; weight: number }[];
+      reweigh: {
+        id: string;
+        weight: number;
+        weight_2?: number | null;
+        weight_3?: number | null;
+      }[];
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ created_ids: string[] }> {

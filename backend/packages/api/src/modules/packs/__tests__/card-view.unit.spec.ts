@@ -1,4 +1,4 @@
-import { cardByHandle, makeRarityOf, toCardView } from "../card-view";
+import { cardByHandle, isGraded, makeRarityOf, toCardView } from "../card-view";
 
 const card = {
   handle: "pikachu-001",
@@ -16,6 +16,21 @@ describe("cardByHandle", () => {
     const m = cardByHandle([card]);
     expect(m.get("pikachu-001")).toBe(card);
     expect(m.size).toBe(1);
+  });
+});
+
+describe("isGraded", () => {
+  it("treats a non-blank grader as graded", () => {
+    expect(isGraded({ grader: "PSA" })).toBe(true);
+    expect(isGraded({ grader: " BGS " })).toBe(true);
+  });
+
+  // A raw card carries an EMPTY grader (the column is NOT NULL), and a
+  // whitespace-only one is the same thing typed sloppily — both must read RAW,
+  // or a pack of raw cards reports GRADED.
+  it("treats an empty or whitespace-only grader as raw", () => {
+    expect(isGraded({ grader: "" })).toBe(false);
+    expect(isGraded({ grader: "  " })).toBe(false);
   });
 });
 
