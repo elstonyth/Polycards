@@ -151,6 +151,54 @@ medusaIntegrationTestRunner({
             .sort(),
         ).toEqual([false, true]);
       });
+
+      it('disabled and frozen are orthogonal — neither write clears the other', async () => {
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        const cid = 'cust_disable_6';
+        const state = async () =>
+          (await packs.listCustomerAccountStates({ customer_id: cid }, { take: 1 }))[0];
+
+        // Freeze (funds lock) first, then disable (login block) on top of it.
+        await packs.setManualFreeze({
+          customerId: cid,
+          adminId: 'admin_setup',
+          reason: 'funds hold',
+        });
+        await unwrapResponse(
+          api.post(
+            `/admin/customers/${cid}/disable`,
+            { reason: 'login block' },
+            { headers: adminHeaders() },
+          ),
+        );
+        const afterDisable = await state();
+        expect(afterDisable.frozen).toBe(true);
+        expect(afterDisable.frozen_reason).toBe('funds hold');
+        expect(afterDisable.disabled).toBe(true);
+
+        // …and the other direction: a later freeze write must not clear the
+        // login block, nor an enable the funds lock.
+        await packs.setManualFreeze({
+          customerId: cid,
+          adminId: 'admin_setup',
+          reason: 'second hold',
+        });
+        const afterRefreeze = await state();
+        expect(afterRefreeze.disabled).toBe(true);
+        expect(afterRefreeze.disabled_reason).toBe('login block');
+
+        await unwrapResponse(
+          api.post(
+            `/admin/customers/${cid}/enable`,
+            { reason: 'lift login block' },
+            { headers: adminHeaders() },
+          ),
+        );
+        const afterEnable = await state();
+        expect(afterEnable.disabled).toBe(false);
+        expect(afterEnable.frozen).toBe(true);
+        expect(afterEnable.frozen_reason).toBe('second hold');
+      });
     });
   },
 });
