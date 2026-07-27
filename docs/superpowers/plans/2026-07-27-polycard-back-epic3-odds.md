@@ -286,16 +286,15 @@ export async function resolveOddsSetForCustomer(
 ### Task 3: `computeSetWeights` + save-pack-odds step (3-set save with balancer)
 
 **Files:**
-- Create: `backend/packages/api/src/workflows/steps/compute-set-weights.ts`
+- Modify: `backend/packages/odds-math/src/index.ts` (`computeSetWeights` lives HERE — pure math, no Medusa deps, and the admin editor imports it for live preview in Task 10; one implementation, zero client/server drift)
 - Modify: `backend/packages/api/src/workflows/steps/save-pack-odds.ts`
-- Test: `backend/packages/api/src/workflows/steps/__tests__/compute-set-weights.unit.spec.ts`
+- Test: `backend/packages/odds-math/src/__tests__/compute-set-weights.unit.spec.ts`
 
 **Interfaces:**
-- Consumes: `balanceOdds` (Task 1 — REBUILD odds-math dist first), `OddsInput`.
-- Produces:
+- Consumes: `balanceOdds` (Task 1 — same file). REBUILD odds-math dist after this task.
+- Produces (exported from `@acme/odds-math`):
 
 ```ts
-// compute-set-weights.ts
 export type SetEntry = OddsInput & { pct_2: number | null; pct_3: number | null };
 export type SetWeightsResult = {
   error: string | null;               // first error, prefixed 'Set N: ' for sets 2/3
@@ -320,11 +319,9 @@ export function computeSetWeights(entries: SetEntry[]): SetWeightsResult;
 5. Set-1 error propagates unprefixed.
 6. Explicit `pct_2: 0` materializes `weight_2: 0` (zero ≠ inherit).
 
-- [ ] **Step 2: Verify failure**, then **Step 3: Implement**
+- [ ] **Step 2: Verify failure**, then **Step 3: Implement** (append to `odds-math/src/index.ts`, below `balanceOdds` — CJS-safe syntax only)
 
 ```ts
-import { balanceOdds, type OddsInput } from '@acme/odds-math';
-
 export function computeSetWeights(entries: SetEntry[]): SetWeightsResult {
   const set1 = balanceOdds(entries);
   if (set1.error) return { error: set1.error, rows: [] };
@@ -366,7 +363,8 @@ export function computeSetWeights(entries: SetEntry[]): SetWeightsResult {
 
 - [ ] **Step 4: Wire into `save-pack-odds.ts`**
 
-- `SavePackOddsInput.entries` type: `OddsInput[]` → `SetEntry[]`.
+- Rebuild dist first: `corepack yarn build` in `backend/packages/odds-math`.
+- `SavePackOddsInput.entries` type: `OddsInput[]` → `SetEntry[]` (imported from `@acme/odds-math`).
 - Replace `const { computed, error } = computeOdds(input.entries);` (line ~88) with `const { rows, error } = computeSetWeights(input.entries);` and throw on error (same `MedusaError.Types.INVALID_DATA`).
 - `updates` map gains `weight_2: r.weight_2, weight_3: r.weight_3`; `OddsSnapshot` (lines 25-30) gains both fields and the snapshot builder copies them (`weight_2: o.weight_2 ?? null` …) — **compensation must restore sets 2/3 or a rollback silently wipes them**.
 - The step still returns the set-1 `computed`-equivalent (build `{ card_id, weight, locked, pct: weight/100 }` from `rows`) so the existing editor response contract holds.
@@ -632,16 +630,16 @@ export function publishedEv(
 // odds-rows.ts
 export type EditRow = { …existing…, pctInput2: string, pctInput3: string };  // '' = inherit
 export const mapOddsToRows: (odds: OddsRow[]) => EditRow[];   // pctInputN = weight_N == null ? '' : String(weight_N / 100)
-export const rowsToSetEntries: (rows: EditRow[]) => SetEntryLike[];  // pct_N = input === '' ? null : Number(input)
-export function previewSets(rows: EditRow[]): {                // client-side mirror of computeSetWeights
-  error: string | null;
-  pct: Record<1 | 2 | 3, Map<string, number>>;                 // effective % per set per card
-};
+export const rowsToSetEntries: (rows: EditRow[]) => SetEntry[]; // pct_N = input === '' ? null : Number(input); SetEntry from '@acme/odds-math'
+export function previewSets(rows: EditRow[]): {                // THIN wrapper over computeSetWeights from '@acme/odds-math'
+  error: string | null;                                        // (the SAME implementation the save step runs — no client mirror)
+  pct: Record<1 | 2 | 3, Map<string, number>>;                 // effective % per set per card, derived from the returned rows
+};                                                             // via the trivial fallback (w2 ?? w, w3 ?? w2 ?? w) / 100
 ```
 
 - [ ] **Step 1: Failing vitest** — `odds-rows.test.ts`: mapping round-trips (null weight_2 → `''` → null; explicit 0 → `'0'` → 0); `previewSets` on a 3-row fixture: set-2 explicit edit moves only Common in set 2; error string propagates with `Set 2:` prefix; inherited set-3 mirrors set 2.
 
-- [ ] **Step 2: Implement lib layer** — `previewSets` replicates `computeSetWeights`'s chain with `balanceOdds` (same algorithm, returns pct maps instead of storage rows — keep them adjacent in one function so the two cannot drift is impossible client-side; instead add a comment cross-referencing `workflows/steps/compute-set-weights.ts` and mirror its tests).
+- [ ] **Step 2: Implement lib layer** — `previewSets` calls `computeSetWeights` from `@acme/odds-math` (the exact function the save step runs — preview and save cannot drift) and derives per-set pct maps from the returned rows via the fallback chain (`weight_2 ?? weight`, `weight_3 ?? weight_2 ?? weight`, ÷100).
 
 - [ ] **Step 3: Rework the editor page**
 
