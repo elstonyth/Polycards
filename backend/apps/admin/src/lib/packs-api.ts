@@ -223,6 +223,13 @@ type PacksApi = {
     packs: {
       query: () => Promise<{ packs: AdminPack[] }>;
       mutate: (input: AdminPackWrite) => Promise<{ pack: { slug: string } }>;
+      reorder: {
+        // Batch rank writes (all-or-nothing) — the list reorder arrows. Rank
+        // is display-only, so this skips the full-update activation guard.
+        mutate: (input: {
+          order: { slug: string; rank: number }[];
+        }) => Promise<{ updated: number }>;
+      };
       $slug: {
         query: (input: { $slug: string }) => Promise<{ pack: AdminPack }>;
         mutate: (

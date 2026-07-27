@@ -24,6 +24,7 @@ import {
   useCreatePack,
   useDeletePack,
   usePacks,
+  useReorderPacks,
   useUpdatePack,
   useUploadImage,
 } from '../../lib/queries';
@@ -104,6 +105,7 @@ const PacksListPage = () => {
   const { data: packs = null, isError, refetch } = usePacks();
   const createPack = useCreatePack();
   const updatePack = useUpdatePack();
+  const reorderPacks = useReorderPacks();
   const removePack = useDeletePack();
   const uploadImg = useUploadImage();
   const [mode, setMode] = useState<'create' | 'edit' | null>(null);
@@ -251,6 +253,9 @@ const PacksListPage = () => {
   // Move a pack one position up/down within its category and persist rank =
   // position for every row that changed — this also normalizes duplicate
   // ranks (e.g. several rank-0 packs) the first time a group is reordered.
+  // One batch request: per-pack updates half-applied the swap when a single
+  // row was rejected (active pack with an empty pool trips the activation
+  // guard on full updates; the rank-only endpoint has no such guard).
   const movePack = async (p: AdminPack, dir: -1 | 1) => {
     const group = grouped.get(p.category) ?? [];
     const i = group.findIndex((x) => x.slug === p.slug);
@@ -258,13 +263,13 @@ const PacksListPage = () => {
     if (i < 0 || j < 0 || j >= group.length) return;
     const next = [...group];
     [next[i], next[j]] = [next[j], next[i]];
-    const writes = next
+    const order = next
       .map((pack, rank) => ({ pack, rank }))
-      .filter(({ pack, rank }) => pack.rank !== rank);
+      .filter(({ pack, rank }) => pack.rank !== rank)
+      .map(({ pack, rank }) => ({ slug: pack.slug, rank }));
+    if (order.length === 0) return;
     try {
-      await Promise.all(
-        writes.map(({ pack, rank }) => updatePack.mutateAsync({ ...pack, rank })),
-      );
+      await reorderPacks.mutateAsync({ order });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
     }
@@ -366,7 +371,7 @@ const PacksListPage = () => {
                       size="small"
                       variant="transparent"
                       aria-label={t('packs.list.moveUp')}
-                      disabled={filtering || pos <= 0 || updatePack.isPending}
+                      disabled={filtering || pos <= 0 || reorderPacks.isPending}
                       onClick={(e) => {
                         e.stopPropagation();
                         void movePack(p, -1);
@@ -381,7 +386,7 @@ const PacksListPage = () => {
                       disabled={
                         filtering ||
                         pos >= group.length - 1 ||
-                        updatePack.isPending
+                        reorderPacks.isPending
                       }
                       onClick={(e) => {
                         e.stopPropagation();
