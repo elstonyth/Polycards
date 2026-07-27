@@ -3169,6 +3169,91 @@ class PacksModuleService extends MedusaService({
     return { sponsorOf, vipLevel, lifetimeSen, frozen, recruitCount };
   }
 
+  // Batched per-player aggregates for the admin Players list (POLYCARD-BACK
+  // §4.2): ONE query per aggregate per page, never per-row. The credit SQL is
+  // the GROUP BY twin of creditSummary (service.ts:661) and the vault SQL the
+  // customer-scoped twin of vaultLiabilityMyr (service.ts:2735) — same FMV
+  // convention (multiplier 1), same 'vaulted' predicate, no source filter.
+  @InjectManager()
+  async playersOverview(
+    ids: string[],
+    fx: number,
+    @MedusaContext() sharedContext: Context = {},
+  ) {
+    const wallet = new Map<
+      string,
+      { balanceCents: number; spendCents: number; lastSpendAt: string | null }
+    >();
+    const vault = new Map<string, { count: number; cents: number }>();
+    const pullCount = new Map<string, number>();
+    const vipLevel = new Map<string, number>();
+    const state = new Map<string, { frozen: boolean; disabled: boolean }>();
+    if (ids.length === 0)
+      return { wallet, vault, pullCount, vipLevel, state };
+
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const ph = ids.map(() => '?').join(',');
+    // Sequential to avoid concurrent queries on the shared injected EntityManager.
+    const credits = await em.execute<
+      {
+        customer_id: string;
+        balance_cents: string;
+        spend_cents: string;
+        last_spend_at: string | null;
+      }[]
+    >(
+      'SELECT customer_id, ' +
+        '  COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents, ' +
+        "  COALESCE(SUM(CASE WHEN reason = 'pack_open' THEN ROUND(-amount * 100) ELSE 0 END), 0)::bigint AS spend_cents, " +
+        "  MAX(created_at) FILTER (WHERE reason = 'pack_open') AS last_spend_at " +
+        `FROM credit_transaction WHERE customer_id IN (${ph}) AND deleted_at IS NULL GROUP BY customer_id`,
+      ids,
+    );
+    const vaults = await em.execute<
+      { customer_id: string; n: string; cents: string }[]
+    >(
+      'SELECT p.customer_id, COUNT(*)::bigint AS n, ' +
+        '  COALESCE(SUM(ROUND(c.market_value * ? * 100)), 0)::bigint AS cents ' +
+        '  FROM pull p JOIN card c ON c.handle = p.card_id AND c.deleted_at IS NULL ' +
+        ` WHERE p.status = 'vaulted' AND p.deleted_at IS NULL AND p.customer_id IN (${ph}) GROUP BY p.customer_id`,
+      [fx, ...ids],
+    );
+    const pulls = await em.execute<{ customer_id: string; n: string }[]>(
+      `SELECT customer_id, COUNT(*)::bigint AS n FROM pull WHERE source = 'pack' AND deleted_at IS NULL AND customer_id IN (${ph}) GROUP BY customer_id`,
+      ids,
+    );
+    const vips = await em.execute<
+      { customer_id: string; current_level: number }[]
+    >(
+      `SELECT customer_id, current_level FROM vip_member_state WHERE customer_id IN (${ph}) AND deleted_at IS NULL`,
+      ids,
+    );
+    const states = await em.execute<
+      { customer_id: string; frozen: boolean; disabled: boolean }[]
+    >(
+      `SELECT customer_id, frozen, disabled FROM customer_account_state WHERE customer_id IN (${ph}) AND deleted_at IS NULL`,
+      ids,
+    );
+
+    for (const r of credits)
+      wallet.set(r.customer_id, {
+        balanceCents: Number(r.balance_cents),
+        spendCents: Number(r.spend_cents),
+        lastSpendAt: r.last_spend_at,
+      });
+    for (const r of vaults)
+      vault.set(r.customer_id, { count: Number(r.n), cents: Number(r.cents) });
+    for (const r of pulls) pullCount.set(r.customer_id, Number(r.n));
+    for (const r of vips) vipLevel.set(r.customer_id, Number(r.current_level));
+    for (const r of states)
+      state.set(r.customer_id, {
+        frozen: Boolean(r.frozen),
+        disabled: Boolean(r.disabled),
+      });
+    return { wallet, vault, pullCount, vipLevel, state };
+  }
+
   // Delete-guard (spec §3 invariant 1): money rows backing a commission are
   // append-only — never hard-deleted. Compensation MUST use
   // reverseCreditTransaction. This refuses an accidental delete of any row a

@@ -1,0 +1,68 @@
+import type { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
+import { Modules } from '@medusajs/framework/utils';
+import type { ICustomerModuleService } from '@medusajs/framework/types';
+import { PACKS_MODULE } from '../../../modules/packs';
+import type PacksModuleService from '../../../modules/packs/service';
+import { resolveFxRate } from '../../../modules/packs/pricing';
+import { parsePaginationParams } from '../../../utils/pagination';
+
+// GET /admin/players — the All Players list (POLYCARD-BACK §4.2). Page of
+// Medusa customers + batched per-player aggregates (playersOverview): one
+// query per aggregate per page, never per-row. The native /admin/customers
+// route is untouched; this is the UI-facing list.
+export async function GET(
+  req: MedusaRequest,
+  res: MedusaResponse,
+): Promise<void> {
+  const { limit, offset } = parsePaginationParams(
+    { limit: req.query.limit, offset: req.query.offset },
+    { defaultLimit: 50, maxLimit: 200 },
+  );
+  const rawQ = req.query.q;
+  const q =
+    typeof rawQ === 'string' && rawQ.trim() !== ''
+      ? rawQ.trim().slice(0, 100)
+      : undefined;
+
+  const customers = req.scope.resolve<ICustomerModuleService>(Modules.CUSTOMER);
+  const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+
+  // ponytail: to-many `groups` join under skip/take — Medusa paginates on the
+  // customer, so this is fine today; revisit if a grouped page ever short-counts.
+  const [page, total] = await customers.listAndCountCustomers(
+    q ? { q } : {},
+    { skip: offset, take: limit, order: { created_at: 'DESC' }, relations: ['groups'] },
+  );
+  const ids = page.map((c) => c.id);
+  const fx = await resolveFxRate(packs);
+  const agg = await packs.playersOverview(ids, fx);
+
+  res.json({
+    total,
+    offset,
+    limit,
+    players: page.map((c) => {
+      const w = agg.wallet.get(c.id);
+      const v = agg.vault.get(c.id);
+      const s = agg.state.get(c.id);
+      const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || null;
+      return {
+        id: c.id,
+        email: c.email,
+        name,
+        phone: c.phone ?? null,
+        groups: (c.groups ?? []).map((g) => g.name),
+        vip_level: agg.vipLevel.get(c.id) ?? 1,
+        wallet_balance: (w?.balanceCents ?? 0) / 100,
+        vault_value: (v?.cents ?? 0) / 100,
+        vault_count: v?.count ?? 0,
+        total_spend: (w?.spendCents ?? 0) / 100,
+        total_pulls: agg.pullCount.get(c.id) ?? 0,
+        registered_at: c.created_at,
+        last_spend_at: w?.lastSpendAt ?? null,
+        frozen: s?.frozen ?? false,
+        disabled: s?.disabled ?? false,
+      };
+    }),
+  });
+}
