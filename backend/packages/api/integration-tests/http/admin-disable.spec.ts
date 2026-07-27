@@ -103,6 +103,17 @@ medusaIntegrationTestRunner({
             { headers: adminHeaders() },
           ),
         );
+        // While disabled: the audit route must report disabled:true WITHOUT the
+        // account being frozen — the two are orthogonal, and the admin player
+        // header badges each off this same payload. Asserting only the
+        // post-enable `false` would leave the true case unpinned.
+        const whileDisabled = await unwrapResponse(
+          api.get(`/admin/customers/${cid}/audit`, { headers: adminHeaders() }),
+        );
+        expect(whileDisabled.status).toBe(200);
+        expect(whileDisabled.data.account_state.disabled).toBe(true);
+        expect(whileDisabled.data.account_state.frozen).toBe(false);
+
         await unwrapResponse(
           api.post(
             `/admin/customers/${cid}/enable`,
