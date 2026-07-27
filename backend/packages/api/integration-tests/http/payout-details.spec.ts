@@ -192,6 +192,88 @@ medusaIntegrationTestRunner({
           accountNumber,
         );
         expect(JSON.stringify([aud.before, aud.after])).not.toContain('Ada');
+        // First save: nothing before, last4 after.
+        expect(aud.before).toEqual({ bank_name: null, account_last4: null });
+        expect(aud.after).toEqual({
+          bank_name: 'Maybank',
+          account_last4: '3210',
+        });
+      });
+
+      // Without a last4 on both sides, redirecting a payout to a DIFFERENT
+      // account at the SAME bank produced an audit row identical to a no-op.
+      it('audits the account change via last4 on both sides', async () => {
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        const cid = 'cust_payout_7';
+        const first = '1111114321';
+        const second = '2222225678';
+
+        for (const bank_account_number of [first, second]) {
+          await unwrapResponse(
+            api.post(
+              `/admin/customers/${cid}/payout-details`,
+              {
+                bank_name: 'Maybank', // same bank both times
+                bank_account_number,
+                account_holder_name: 'Ada',
+              },
+              { headers: adminHeaders() },
+            ),
+          );
+        }
+
+        const rows = await packs.listAdminActionAudits(
+          { entity_type: 'customer', entity_id: cid },
+          {},
+        );
+        expect(rows).toHaveLength(2);
+        // No ordering guarantee on the list — key off the second save's last4.
+        const changeRow = rows.find(
+          (r) =>
+            (r.after as { account_last4?: string } | null)?.account_last4 ===
+            '5678',
+        );
+        expect(changeRow).toBeDefined();
+        expect(changeRow!.before).toEqual({
+          bank_name: 'Maybank',
+          account_last4: '4321',
+        });
+        // The full numbers still never reach the audit feed.
+        const dump = JSON.stringify(rows.map((r) => [r.before, r.after]));
+        expect(dump).not.toContain(first);
+        expect(dump).not.toContain(second);
+      });
+
+      // bank_account_number accepts 1–34 chars, so a <=4-digit account's
+      // "last4" would be the ENTIRE number. It must stay null instead.
+      it('omits last4 for an account too short to redact', async () => {
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        const cid = 'cust_payout_8';
+        const accountNumber = '4321';
+
+        await unwrapResponse(
+          api.post(
+            `/admin/customers/${cid}/payout-details`,
+            {
+              bank_name: 'Maybank',
+              bank_account_number: accountNumber,
+              account_holder_name: null,
+            },
+            { headers: adminHeaders() },
+          ),
+        );
+
+        const [aud] = await packs.listAdminActionAudits(
+          { entity_type: 'customer', entity_id: cid },
+          { take: 1 },
+        );
+        expect(aud.after).toEqual({
+          bank_name: 'Maybank',
+          account_last4: null,
+        });
+        expect(JSON.stringify([aud.before, aud.after])).not.toContain(
+          accountNumber,
+        );
       });
     });
   },

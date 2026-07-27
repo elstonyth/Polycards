@@ -1893,9 +1893,10 @@ class PacksModuleService extends MedusaService({
   // transaction (POLYCARD-BACK §4.3). Own advisory key — the row lives in its
   // own table, so this must not serialize against the credit ledger, but the
   // list-then-create still needs a lock or two concurrent first-saves race the
-  // unique customer_id to a 23505. The audit row deliberately records only the
-  // bank NAME: the account number is admin-auth-only and must not be copied
+  // unique customer_id to a 23505. The audit row records the bank NAME plus a
+  // last4: the FULL account number is admin-auth-only and must never be copied
   // into the audit feed (GET /admin/customers/:id/audit reads that table).
+  // Without the last4 a same-bank account redirect reads as a no-op edit.
   @InjectTransactionManager()
   async setPayoutDetails(
     input: {
@@ -1936,6 +1937,13 @@ class PacksModuleService extends MedusaService({
         sharedContext,
       );
     }
+    // Digits only (stored numbers may carry spaces/hyphens) and ONLY when there
+    // are more than four of them — for a <=4-digit account the "last4" would be
+    // the whole number, which is exactly what must not reach the audit feed.
+    const last4 = (n: string | null | undefined): string | null => {
+      const digits = (n ?? '').replace(/\D/g, '');
+      return digits.length > 4 ? digits.slice(-4) : null;
+    };
     await this.createAdminActionAudits(
       [
         {
@@ -1943,8 +1951,14 @@ class PacksModuleService extends MedusaService({
           entity_type: 'customer',
           entity_id: input.customerId,
           action: 'edit',
-          before: { bank_name: existing?.bank_name ?? null },
-          after: { bank_name: input.bankName },
+          before: {
+            bank_name: existing?.bank_name ?? null,
+            account_last4: last4(existing?.bank_account_number),
+          },
+          after: {
+            bank_name: input.bankName,
+            account_last4: last4(input.bankAccountNumber),
+          },
           reason: 'payout details updated',
         },
       ],
