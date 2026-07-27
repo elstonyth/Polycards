@@ -1221,6 +1221,9 @@ const Customer360Page = () => {
   // off the audit response — which is why that query stays here and not in the
   // History tab body (see the tab-body note above).
   const isFrozen = auditQ.data?.account_state?.frozen ?? false;
+  // frozen (funds) and disabled (login) are orthogonal — badge them separately
+  // off the same account_state, or a disabled player reads as a normal one.
+  const isDisabled = auditQ.data?.account_state?.disabled ?? false;
 
   // ── Modal state ─────────────────────────────────────────────────────────────
   const [modal, setModal] = useState<ModalKind | null>(null);
@@ -1345,6 +1348,11 @@ const Customer360Page = () => {
               {isFrozen && (
                 <Badge size="small" color="red">
                   {t('customer360.frozen')}
+                </Badge>
+              )}
+              {isDisabled && (
+                <Badge size="small" color="red">
+                  {t('players.disabled')}
                 </Badge>
               )}
             </div>
