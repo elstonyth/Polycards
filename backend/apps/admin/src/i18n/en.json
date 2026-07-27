@@ -410,6 +410,8 @@
     "enableDesc": "They will be able to log in again.",
     "reasonLabel": "Reason",
     "reasonPlaceholder": "Why is this happening? (recorded in the audit log)",
+    "confirm": "Confirm",
+    "cancel": "Cancel",
     "disabled": "Disabled",
     "active": "Active",
     "tabProfile": "Profile",
