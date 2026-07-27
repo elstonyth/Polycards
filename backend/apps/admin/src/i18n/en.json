@@ -178,7 +178,8 @@
       "selected": "{{count}} selected",
       "addToPack": "Add to gacha pack",
       "pickSubtitle": "Pick the pack to add {{count}} card(s) to. They are staged in that pack's win-rate editor — nothing is saved until you save there.",
-      "noPacks": "No packs yet — create a pack first."
+      "noPacks": "No packs yet — create a pack first.",
+      "packsError": "Could not load the packs list."
     },
     "register": {
       "title": "Add card from inventory",

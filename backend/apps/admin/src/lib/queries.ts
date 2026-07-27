@@ -849,8 +849,11 @@ export const useSetGroupOddsSet = () => {
     mutationFn: (vars: { id: string; set: 1 | 2 | 3 }) =>
       setGroupOddsSet(vars.id, vars.set),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: qk.customerGroups });
       toast.success('Odds set saved');
+      // Returned so the mutation stays pending until the refetch lands — the
+      // Odds Sets page drops its local override in ITS onSuccess, and doing so
+      // against a stale cache would flash the previous set.
+      return qc.invalidateQueries({ queryKey: qk.customerGroups });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });

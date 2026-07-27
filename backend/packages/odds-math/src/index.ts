@@ -67,7 +67,11 @@ export interface OddsResult {
   computed: ComputedOdd[];
   /** Non-null when the configuration is invalid and must NOT be saved. */
   error: string | null;
-  /** Σ of locked win rates, as a % (for the form summary). */
+  /** Σ of locked win rates, as a % (for the form summary). NOTE: under
+   *  `balanceOdds` this is the PINNED total (every non-Common row plus locked
+   *  Commons — its "locked" set), not just `locked: true` rows; `computeOdds`
+   *  keeps the literal meaning. No consumer reads it today — rename to a
+   *  separate pinnedTotalPct if one ever needs both. */
   lockedTotalPct: number;
   unlockedCount: number;
 }
@@ -179,7 +183,8 @@ export function balanceOdds(entries: OddsInput[]): OddsResult {
     error ??= 'Common win rate would go below 0%. Lower the other rates.';
   }
   if (balancers.length === 0 && pinnedBps !== TOTAL_BPS) {
-    error ??= 'Without an unlocked Common card, win rates must total exactly 100%.';
+    error ??=
+      'Without an unlocked Common card, win rates must total exactly 100%.';
   }
 
   const remainder = Math.max(0, TOTAL_BPS - pinnedBps);
@@ -197,7 +202,12 @@ export function balanceOdds(entries: OddsInput[]): OddsResult {
 
   const computed: ComputedOdd[] = safe.map((entry) => {
     const weight = bpsById.get(entry.card_id) ?? 0;
-    return { card_id: entry.card_id, weight, locked: entry.locked, pct: weight / 100 };
+    return {
+      card_id: entry.card_id,
+      weight,
+      locked: entry.locked,
+      pct: weight / 100,
+    };
   });
 
   return {
@@ -291,7 +301,8 @@ export function computeSetWeights(entries: SetEntry[]): SetWeightsResult {
       const src = byCard.get(c.card_id);
       if (!src) continue;
       const isBalancer = src.locked === false && src.rarity === 'Common';
-      if (explicit(src) !== null || isBalancer) weights.set(c.card_id, c.weight);
+      if (explicit(src) !== null || isBalancer)
+        weights.set(c.card_id, c.weight);
     }
     materialized.push(weights);
     prev = pctByCard(r);

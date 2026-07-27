@@ -103,6 +103,18 @@ describe('coerceOddsEntries — ported set-1 validation', () => {
     expect(coerceOddsEntries([{ ...valid, pct: undefined }])[0].pct).toBe(0);
     expect(coerceOddsEntries([{ ...valid, pct: '12.5' }])[0].pct).toBe(12.5);
   });
+
+  it('rejects a non-finite set-1 pct instead of clamping it to 0', () => {
+    expect(() => coerceOddsEntries([{ ...valid, pct: 'abc' }])).toThrow(
+      /finite numeric pct/,
+    );
+    expect(() => coerceOddsEntries([{ ...valid, pct: {} }])).toThrow(
+      /finite numeric pct/,
+    );
+    expect(() => coerceOddsEntries([{ ...valid, pct: Infinity }])).toThrow(
+      /finite numeric pct/,
+    );
+  });
 });
 
 // ── GET ─────────────────────────────────────────────────────────────────────

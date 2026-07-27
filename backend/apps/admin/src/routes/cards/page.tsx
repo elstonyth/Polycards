@@ -138,7 +138,11 @@ const GachaCardsPage = () => {
   // Only the bulk "add to pack" picker needs this list, and /admin/packs now
   // scans every odds + card row to compute EV/RTP — so it stays unfetched until
   // the picker opens (same pattern as the pool picker's useCards({ enabled })).
-  const { data: packs = null } = usePacks({ enabled: pickerOpen });
+  const {
+    data: packs = null,
+    isError: packsError,
+    refetch: refetchPacks,
+  } = usePacks({ enabled: pickerOpen });
   const fileRef = useRef<HTMLInputElement>(null);
   const uploading = uploadImg.isPending;
   const saving = updateCard.isPending;
@@ -601,7 +605,20 @@ const GachaCardsPage = () => {
                   </Text>
                 </FocusModal.Description>
               </div>
-              {packs === null ? (
+              {packsError ? (
+                <div className="flex flex-col items-start gap-y-3">
+                  <Text className="text-ui-fg-subtle">
+                    {t('cards.bulk.packsError')}
+                  </Text>
+                  <Button
+                    size="small"
+                    variant="secondary"
+                    onClick={() => refetchPacks()}
+                  >
+                    Retry
+                  </Button>
+                </div>
+              ) : packs === null ? (
                 <LoadingSkeleton />
               ) : packs.length === 0 ? (
                 <Text className="text-ui-fg-subtle">

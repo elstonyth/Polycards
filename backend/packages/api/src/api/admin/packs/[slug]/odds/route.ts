@@ -171,7 +171,21 @@ const bad = (message: string): never => {
   throw new MedusaError(MedusaError.Types.INVALID_DATA, message);
 };
 
-// A set-2/3 override is STRICT (`number | null`) where set-1 `pct` is lenient:
+// Set 1's pct is required-with-default: absent/null means 0, but a present
+// non-finite value ('abc', {}) must 400 — Number() would silently coerce it
+// to NaN and balanceOdds clamps NaN to 0%. Numeric strings stay accepted
+// (documented set-1 lenience; the editor itself always sends numbers).
+const basePct = (e: Record<string, unknown>): number => {
+  const v = e.pct;
+  if (v === undefined || v === null) return 0;
+  const n = Number(v);
+  if (!Number.isFinite(n)) {
+    bad(`Each entry needs a finite numeric pct (got ${typeof v}).`);
+  }
+  return n;
+};
+
+// A set-2/3 override is STRICT (`number | null`) where set-1 `pct` defaults to 0:
 // the per-set columns are new, so nothing legacy sends strings for them, and a
 // silently-coerced garbage value here would rewrite a whole alternate odds
 // table. An ABSENT key becomes an EXPLICIT null — computeSetWeights reads
@@ -223,7 +237,7 @@ export function coerceOddsEntries(raw: unknown): SetEntry[] {
     entries.push({
       card_id: e.card_id as string,
       locked: e.locked as boolean,
-      pct: Number(e.pct ?? 0),
+      pct: basePct(e),
       rarity: e.rarity as string,
       pct_2: setPct(e, 'pct_2'),
       pct_3: setPct(e, 'pct_3'),
