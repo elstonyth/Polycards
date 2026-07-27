@@ -475,6 +475,9 @@ export function solveOddsForRtp(
   if (safe.some((r) => !Number.isFinite(r.value) || r.value < 0)) {
     return fail('Every card needs a value of 0 or more.');
   }
+  if (safe.some((r) => r.locked && (!Number.isFinite(r.pct) || r.pct < 0 || r.pct > 100))) {
+    return fail('Locked win rates must each be a number between 0% and 100%.');
+  }
 
   const locked = safe.filter((r) => r.locked);
   const chase = safe.filter((r) => !r.locked && r.rarity !== 'Common');

@@ -65,4 +65,28 @@ describe('solveOddsForRtp', () => {
     expect(solveOddsForRtp(SIMPLE, 0, 0.7).error).toMatch(/Pack price/);
     expect(solveOddsForRtp([], 50, 0.7).error).toMatch(/No cards/);
   });
+
+  it('rejects a locked row whose rate is not a usable number', () => {
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, -1, 101]) {
+      const rows: RtpSolveRow[] = [
+        { card_id: 'pinned', locked: true, rarity: 'Rare', value: 500, pct: bad },
+        ...SIMPLE,
+      ];
+      const res = solveOddsForRtp(rows, 50, 0.7);
+      expect(res.error).toMatch(/Locked win rates must each be/);
+      expect(res.computed).toEqual([]);
+      expect(res.achievedRtp).toBeNull();
+    }
+  });
+
+  it('ignores an unusable rate on an UNLOCKED row', () => {
+    const rows: RtpSolveRow[] = [
+      { card_id: 'chase', locked: false, rarity: 'Rare', value: 500, pct: Number.NaN },
+      { card_id: 'cheap-a', locked: false, rarity: 'Common', value: 20, pct: 0 },
+      { card_id: 'cheap-b', locked: false, rarity: 'Common', value: 40, pct: 0 },
+    ];
+    const res = solveOddsForRtp(rows, 50, 0.7);
+    expect(res.error).toBeNull();
+    expect(res.achievedRtp).toBeCloseTo(0.7, 6);
+  });
 });
