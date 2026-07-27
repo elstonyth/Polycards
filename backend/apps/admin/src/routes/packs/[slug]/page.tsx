@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
+  Badge,
   Container,
   Heading,
   Text,
@@ -19,11 +20,12 @@ import {
 } from '@medusajs/ui';
 import { ArrowLeft } from '@medusajs/icons';
 import type {
+  AdminCard,
   AdminPack,
   PackOddsResponse,
   PublishedOdds,
 } from '../../../lib/packs-api';
-import { computeOdds, RARITIES } from '@acme/odds-math';
+import { RARITIES } from '@acme/odds-math';
 import {
   useCards,
   usePackOdds,
@@ -36,12 +38,39 @@ import {
 import { fmtPct, rm } from '../../../lib/format';
 import {
   mapOddsToRows,
-  rowsToOddsInputs,
+  previewSets,
+  publishedEvPreview,
+  rowsToSetEntries,
+  setEvRtp,
   type EditRow,
 } from '../../../lib/odds-rows';
 import { resolveImageUrl } from '../../../lib/image-url';
 import { shouldSeedBuffer } from '../../../lib/seed-buffer';
 import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
+
+// A card staged by the cards list's bulk "Add to gacha pack" — NOT a pool
+// member yet. It enters as an UNLOCKED COMMON, which is exactly how
+// set-pack-members admits a new member (it becomes a balancer and absorbs a
+// share of the remainder), so the live preview here matches what the save
+// persists. `currentPct` 0 = "no saved rate yet".
+const pendingRow = (c: AdminCard): EditRow => ({
+  card_id: c.handle,
+  name: c.name,
+  image: c.image,
+  slab_image: c.slab_image,
+  rarity: 'Common',
+  // DISPLAY price (FMV × fx × the card's markup) — the same number the odds
+  // route puts on a saved row, so the EV/RTP chips stay honest while pending.
+  market_value: c.priceBreakdown.displayPrice,
+  stock: c.stock,
+  currentPct: 0,
+  locked: false,
+  pctInput: '0',
+  pctInput2: '',
+  pctInput3: '',
+  topHitInput: '',
+  pending: true,
+});
 
 /**
  * Pack odds editor (`/packs/:slug`): edit a pack's prize-pool membership and
@@ -99,16 +128,74 @@ const PackOddsEditorPage = () => {
   const [seededFrom, setSeededFrom] = useState<PackOddsResponse | undefined>(
     undefined,
   );
-  if (shouldSeedBuffer(data, seededFrom, (s) => s.pack.slug !== slug)) {
-    setSeededFrom(data);
-    setRows(mapOddsToRows(data.odds));
-  }
 
-  // Prize-pool membership — which cards belong to this pack.
+  // ── Cards staged from the Gacha Cards list ──────────────────────────────
+  // The bulk "Add to gacha pack" action navigates here with the picked handles
+  // on router state. Latched into state at mount because the effect below
+  // clears that history entry immediately: a browser refresh replays the entry
+  // (state included), and an unlatched read would re-append the same rows on
+  // every reload. Consumed (emptied) by the seed below, so a pool save's
+  // reseed can't re-stage cards the operator has since dealt with.
+  const { state: navState } = useLocation();
+  const navAddCards = (navState as { addCards?: string[] } | null)?.addCards;
+  const [pendingAdd, setPendingAdd] = useState<string[]>(
+    () => navAddCards ?? [],
+  );
+  // Keyed off the ROUTER STATE, not the latch: the seed below empties
+  // pendingAdd DURING render, and React commits only the re-render — so when
+  // usePackOdds is a cache hit (the primary flow: editor → cards list → back to
+  // the same pack, inside React Query's gcTime) the first COMMITTED render
+  // already has an empty latch, and an effect keyed on it would never clear the
+  // history entry. Re-runs harmlessly once the state is null.
+  useEffect(() => {
+    if (navAddCards) navigate('.', { replace: true, state: null });
+  }, [navAddCards, navigate]);
+
+  // Prize-pool membership — which cards belong to this pack. The same catalog
+  // query supplies the display fields for staged rows, so it also loads when
+  // cards arrived to be staged (the cards list just warmed this cache).
   const [poolOpen, setPoolOpen] = useState(false);
-  const { data: allCards = null } = useCards({ enabled: poolOpen });
+  const cardsQuery = useCards({ enabled: poolOpen || pendingAdd.length > 0 });
+  const allCards = cardsQuery.data ?? null;
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const savingMembers = saveMembersMut.isPending;
+
+  // Staged rows need the catalog for their name/image/price, so hold the seed
+  // until that query SETTLES — gating on "loaded" would leave the whole editor
+  // on the skeleton forever if the catalog fetch fails.
+  const catalogSettled = cardsQuery.isSuccess || cardsQuery.isError;
+  // Same render-phase hazard as the clear above, plus the router state is
+  // already null by the time a later catalog error lands — so latch "cards
+  // arrived" once, at mount, and let the error itself trigger the toast.
+  const stagedAtMount = useRef(pendingAdd.length > 0);
+  useEffect(() => {
+    if (stagedAtMount.current && cardsQuery.isError) {
+      toast.error(t('packs.pool.loadError'));
+    }
+  }, [cardsQuery.isError, t]);
+
+  if (
+    shouldSeedBuffer(data, seededFrom, (s) => s.pack.slug !== slug) &&
+    (pendingAdd.length === 0 || catalogSettled)
+  ) {
+    setSeededFrom(data);
+    const seeded = mapOddsToRows(data.odds);
+    if (pendingAdd.length === 0) {
+      setRows(seeded);
+    } else {
+      // Only handles that are NOT already members become pending rows — adding
+      // a card the pack already holds is a no-op, not a duplicate row.
+      const inPool = new Set(seeded.map((r) => r.card_id));
+      const byHandle = new Map((allCards ?? []).map((c) => [c.handle, c]));
+      const staged = pendingAdd
+        .filter((h) => !inPool.has(h))
+        .map((h) => byHandle.get(h))
+        .filter((c): c is AdminCard => c !== undefined)
+        .map(pendingRow);
+      setRows([...seeded, ...staged]);
+      setPendingAdd([]);
+    }
+  }
 
   const openPool = () => {
     setSelected(new Set((rows ?? []).map((r) => r.card_id)));
@@ -193,17 +280,30 @@ const PackOddsEditorPage = () => {
     }
   };
 
-  // Live preview — the SAME rarity-weighted math the save workflow runs, so what
-  // the operator sees in "After save" is exactly what gets persisted. Changing a
-  // row's rarity re-splits the unlocked share immediately.
-  const { result, previewByCard } = useMemo(() => {
-    const inputs = rowsToOddsInputs(rows ?? []);
-    const result = computeOdds(inputs);
-    const previewByCard = new Map(
-      result.computed.map((c) => [c.card_id, c.pct]),
-    );
-    return { result, previewByCard };
-  }, [rows]);
+  // Live preview of ALL THREE odds sets — the SAME math the save workflow runs
+  // (computeSetWeights), so what the operator sees in "After save" is exactly
+  // what gets persisted. Changing a rate or a rarity re-splits the unlocked
+  // Common balancer's share immediately, in every set that resolves through it.
+  const preview = useMemo(() => previewSets(rows ?? []), [rows]);
+
+  // Per-set readouts: Σ (100% when valid) and the theoretical EV/RTP that set
+  // pays. All null while the preview is errored — nothing would be saved, so a
+  // number here would be a lie (see previewSets).
+  const sets = useMemo(
+    () =>
+      ([1, 2, 3] as const).map((n) => {
+        const pct = preview.pct[n];
+        const money = setEvRtp(rows ?? [], pct, data?.pack.price ?? 0);
+        const sum = [...pct.values()].reduce((s, p) => s + p, 0);
+        return {
+          n,
+          total: pct.size === 0 ? null : Math.round(sum * 100) / 100,
+          ev: money?.ev ?? null,
+          rtp: money?.rtp ?? null,
+        };
+      }),
+    [preview, rows, data],
+  );
 
   const setRow = (cardId: string, patch: Partial<EditRow>) =>
     setRows(
@@ -220,18 +320,34 @@ const PackOddsEditorPage = () => {
       pctInput: !r.locked ? String(r.currentPct) : r.pctInput,
     });
 
-  const newTotalPct = useMemo(
-    () => result.computed.reduce((s, c) => s + c.pct, 0),
-    [result],
-  );
-  const noneLocked = !!rows && rows.length > 0 && rows.every((r) => !r.locked);
-
   async function save() {
-    if (!rows || result.error || saving) return;
+    if (!rows || preview.error || saving || savingMembers) return;
     try {
-      const entries = rowsToOddsInputs(rows);
+      // TWO-PHASE when cards were staged from the cards list — membership MUST
+      // land first. save-pack-odds rejects any submission whose card set does
+      // not match the pack's saved pool ("Submitted cards do not match this
+      // pack's prize pool"), so an odds POST carrying staged rows would 400.
+      // The members step admits them as unlocked Commons (balancers) — exactly
+      // the shape the pending rows preview — and only then does the odds save
+      // below write every row's tuned rate, set-equality guard satisfied.
+      if (rows.some((r) => r.pending)) {
+        await saveMembersMut.mutateAsync({
+          slug,
+          card_ids: rows.map((r) => r.card_id),
+        });
+        // The cards are real pool members now: drop the flags immediately so a
+        // failing odds save can't leave badges claiming otherwise, and a retry
+        // goes straight to the odds phase.
+        setRows((prev) => prev?.map((r) => ({ ...r, pending: false })) ?? null);
+      }
+      const entries = rowsToSetEntries(rows);
       const res = await saveOdds.mutateAsync({ slug, entries });
       const byId = new Map(res.odds.map((c) => [c.card_id, c]));
+      // Set 1 only — that is all the response carries. The set-2/3 inputs are
+      // deliberately left as typed: they ARE what was just saved, and the save
+      // also materializes weight_2/weight_3 on the unlocked Common balancer,
+      // which would show up here as an override the operator never entered.
+      // That materialization surfaces on the next load instead (mapOddsToRows).
       setRows(
         (prev) =>
           prev?.map((r) => {
@@ -340,6 +456,7 @@ const PackOddsEditorPage = () => {
         <PublishedOddsSection
           key={fullPack.slug}
           pack={fullPack}
+          rows={rows ?? []}
           saving={updatePack.isPending}
           onSave={async (po) => {
             try {
@@ -358,6 +475,29 @@ const PackOddsEditorPage = () => {
         </div>
       ) : (
         <>
+          {/* What each odds set actually pays back, live against the buffer —
+              the same figures the packs list shows per pack, one click away. */}
+          <div className="flex flex-wrap items-center gap-2 px-6 py-4">
+            {sets.map((s) => (
+              <div
+                key={s.n}
+                className="bg-ui-bg-subtle flex flex-col rounded-lg px-3 py-2"
+              >
+                <Text size="xsmall" className="text-ui-fg-subtle">
+                  {t('packs.editor.set', { n: s.n })} · {t('packs.editor.evRtp')}
+                </Text>
+                <Text size="small" className="tabular-nums">
+                  {s.ev === null || s.rtp === null
+                    ? '—'
+                    : `${rm(s.ev)} · ${fmtPct(s.rtp)}`}
+                </Text>
+              </div>
+            ))}
+            <Text size="small" className="text-ui-fg-subtle ml-2 max-w-md">
+              {t('packs.editor.setsHint')}
+            </Text>
+          </div>
+
           <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Pack odds table">
           <Table>
             <Table.Header>
@@ -376,7 +516,11 @@ const PackOddsEditorPage = () => {
                 <Table.HeaderCell className="text-center">
                   {t('packs.editor.lock')}
                 </Table.HeaderCell>
-                <Table.HeaderCell>{t('packs.editor.winRate')}</Table.HeaderCell>
+                {([1, 2, 3] as const).map((n) => (
+                  <Table.HeaderCell key={n}>
+                    {t('packs.editor.set', { n })}
+                  </Table.HeaderCell>
+                ))}
                 <Table.HeaderCell className="text-right">
                   {t('packs.editor.result')}
                 </Table.HeaderCell>
@@ -384,8 +528,9 @@ const PackOddsEditorPage = () => {
             </Table.Header>
             <Table.Body>
               {rows.map((r) => {
-                const preview = previewByCard.get(r.card_id) ?? 0;
-                const changed = Math.abs(preview - r.currentPct) >= 0.005;
+                const next = preview.pct[1].get(r.card_id) ?? null;
+                const changed =
+                  next !== null && Math.abs(next - r.currentPct) >= 0.005;
                 return (
                   <Table.Row key={r.card_id}>
                     <Table.Cell>
@@ -395,10 +540,15 @@ const PackOddsEditorPage = () => {
                           alt=""
                           className="h-10 w-8 shrink-0 rounded object-contain"
                         />
-                        <div className="flex flex-col">
+                        <div className="flex flex-col items-start gap-y-0.5">
                           <span className="max-w-[18rem] truncate">
                             {r.name}
                           </span>
+                          {r.pending && (
+                            <Badge size="2xsmall" color="orange">
+                              {t('packs.editor.pendingRow')}
+                            </Badge>
+                          )}
                           {r.stock !== null && r.stock < 0 ? (
                             // Wins keep counting below 0 — this is how many
                             // physical units the operator owes winners.
@@ -468,22 +618,24 @@ const PackOddsEditorPage = () => {
                         onCheckedChange={() => toggleLock(r)}
                       />
                     </Table.Cell>
-                    <Table.Cell>
-                      <Input
-                        type="number"
-                        min={0}
-                        max={100}
-                        step={0.01}
-                        disabled={!r.locked}
-                        aria-label={`${t('packs.editor.winRate')}: ${r.name}`}
-                        value={r.locked ? r.pctInput : ''}
-                        placeholder={r.locked ? '' : 'auto'}
-                        onChange={(e) =>
-                          setRow(r.card_id, { pctInput: e.target.value })
+                    {([1, 2, 3] as const).map((n) => (
+                      <SetRateCell
+                        key={n}
+                        set={n}
+                        row={r}
+                        effective={preview.pct[n].get(r.card_id) ?? null}
+                        onChange={(v) =>
+                          setRow(
+                            r.card_id,
+                            n === 1
+                              ? { pctInput: v }
+                              : n === 2
+                                ? { pctInput2: v }
+                                : { pctInput3: v },
+                          )
                         }
-                        className="w-24 tabular-nums"
                       />
-                    </Table.Cell>
+                    ))}
                     <Table.Cell
                       className={clx(
                         'text-right tabular-nums',
@@ -492,7 +644,7 @@ const PackOddsEditorPage = () => {
                           : 'text-ui-fg-subtle',
                       )}
                     >
-                      {fmtPct(preview)}
+                      {next === null ? '—' : fmtPct(next)}
                     </Table.Cell>
                   </Table.Row>
                 );
@@ -502,34 +654,35 @@ const PackOddsEditorPage = () => {
           </div>
 
           <div className="flex flex-col gap-3 px-6 py-4">
-            {noneLocked && (
-              <Text size="small" className="text-ui-tag-orange-text">
-                {t('packs.editor.flattenWarning')}
-              </Text>
-            )}
-            {result.error && (
+            {preview.error && (
               <Text size="small" className="text-ui-tag-red-text">
-                {result.error}
+                {preview.error}
               </Text>
             )}
             <div className="flex items-center justify-between">
+              {/* Every set must total 100% — the balancer guarantees it, so a
+                  reading that is not 100 means the preview refused to resolve. */}
               <div className="text-ui-fg-subtle flex gap-6 text-sm tabular-nums">
-                <span>
-                  {t('packs.editor.lockedTotal')}:{' '}
-                  <span className="text-ui-fg-base">
-                    {fmtPct(result.lockedTotalPct)}
+                {sets.map((s) => (
+                  <span key={s.n}>
+                    {t('packs.editor.set', { n: s.n })}:{' '}
+                    <span
+                      className={
+                        s.total === 100
+                          ? 'text-ui-fg-base'
+                          : 'text-ui-tag-orange-text'
+                      }
+                    >
+                      {s.total === null ? '—' : fmtPct(s.total)}
+                    </span>
                   </span>
-                </span>
-                <span>
-                  {t('packs.editor.newTotal')}:{' '}
-                  <span className="text-ui-fg-base">{fmtPct(newTotalPct)}</span>
-                </span>
+                ))}
               </div>
               <Button
                 variant="primary"
                 onClick={save}
-                isLoading={saving}
-                disabled={saving || result.error !== null}
+                isLoading={saving || savingMembers}
+                disabled={saving || savingMembers || preview.error !== null}
               >
                 {saving ? t('packs.editor.saving') : t('packs.editor.save')}
               </Button>
@@ -640,6 +793,66 @@ const PackOddsEditorPage = () => {
   );
 };
 
+// ── One win-rate cell ────────────────────────────────────────────────────────
+// A pack carries THREE odds tables; a customer's group decides which one their
+// spin rolls against (set 1 = default).
+//
+//   - An UNLOCKED COMMON is the balancer (§2.4): its rate is whatever the other
+//     rows leave over, in every set. Typing into it would do nothing, so it
+//     renders as the derived value with a badge instead of an input.
+//   - Set 1 stays lock-gated (lock a row to type an exact rate). Sets 2/3 take
+//     an override on any pinned row; BLANK means "inherit the previous set"
+//     (3 → 2 → 1) and shows the resolved % as the placeholder.
+const SetRateCell = ({
+  set,
+  row,
+  effective,
+  onChange,
+}: {
+  set: 1 | 2 | 3;
+  row: EditRow;
+  /** Resolved % for this card in this set; null while the preview is errored. */
+  effective: number | null;
+  onChange: (value: string) => void;
+}) => {
+  const { t } = useTranslation();
+  const label = `${t('packs.editor.set', { n: set })} ${t('packs.editor.winRate')}: ${row.name}`;
+
+  if (!row.locked && row.rarity === 'Common') {
+    return (
+      <Table.Cell>
+        <div className="flex items-center gap-x-1.5">
+          <span className="text-ui-fg-subtle tabular-nums">
+            {effective === null ? '—' : fmtPct(effective)}
+          </span>
+          {set === 1 && (
+            <Badge size="2xsmall">{t('packs.editor.balancer')}</Badge>
+          )}
+        </div>
+      </Table.Cell>
+    );
+  }
+
+  const value =
+    set === 1 ? row.pctInput : set === 2 ? row.pctInput2 : row.pctInput3;
+  return (
+    <Table.Cell>
+      <Input
+        type="number"
+        min={0}
+        max={100}
+        step={0.01}
+        disabled={set === 1 && !row.locked}
+        aria-label={label}
+        value={value}
+        placeholder={set === 1 || effective === null ? '' : String(effective)}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-20 tabular-nums"
+      />
+    </Table.Cell>
+  );
+};
+
 // ── Published odds (PUBLIC) ──────────────────────────────────────────────────
 // The percentages players see on the storefront pack page ({ overall, per-tier }).
 // Display-only: saving here never touches the per-card win-rate weights.
@@ -647,10 +860,13 @@ const PackOddsEditorPage = () => {
 // can seed straight from props.
 const PublishedOddsSection = ({
   pack,
+  rows,
   saving,
   onSave,
 }: {
   pack: AdminPack;
+  /** The pool, for the live Published EV readout (tier average × tier %). */
+  rows: EditRow[];
   saving: boolean;
   onSave: (po: PublishedOdds) => Promise<void>;
 }) => {
@@ -680,6 +896,11 @@ const PublishedOddsSection = ({
     Math.round(
       RARITIES.reduce((s, r) => s + (Number(tiers[r]) || 0), 0) * 100,
     ) / 100;
+  // What the PUBLISHED percentages promise the player, priced off the pool the
+  // operator is looking at — live against the tier inputs being typed (the
+  // packs list carries the saved figure). The gap against the per-set EV chips
+  // above is the whole point of showing both.
+  const pubEv = useMemo(() => publishedEvPreview(rows, tiers), [rows, tiers]);
 
   const save = () =>
     onSave({
@@ -748,15 +969,19 @@ const PublishedOddsSection = ({
         ))}
       </div>
 
-      <Text
-        size="small"
-        className={clx(
-          'mt-2',
-          sum === 100 ? 'text-ui-fg-subtle' : 'text-ui-tag-orange-text',
-        )}
-      >
-        {t('packs.published.sum', { sum })}
-      </Text>
+      <div className="mt-2 flex flex-wrap items-center gap-x-4">
+        <Text
+          size="small"
+          className={
+            sum === 100 ? 'text-ui-fg-subtle' : 'text-ui-tag-orange-text'
+          }
+        >
+          {t('packs.published.sum', { sum })}
+        </Text>
+        <Text size="small" className="text-ui-fg-subtle tabular-nums">
+          {t('packs.published.ev')}: {pubEv === null ? '—' : rm(pubEv)}
+        </Text>
+      </div>
       {!pack.published_odds && (
         <Text size="small" className="text-ui-fg-subtle mt-1">
           {t('packs.published.notSet')}

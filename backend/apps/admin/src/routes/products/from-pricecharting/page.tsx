@@ -37,7 +37,7 @@ import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
 
 export const config: RouteConfig = {
   label: 'Add from PriceCharting',
-  nested: '/products',
+  nested: '/inventory',
   rank: 1,
 };
 

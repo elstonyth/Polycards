@@ -54,6 +54,30 @@ export function packTheoreticalRtp(
   return { ev, rtp_pct };
 }
 
+// Published EV (§2.3): Σ over published tiers of (avg card price in tier) ×
+// (published percent / 100). Tiers without a price average are skipped;
+// returns null when nothing contributes (no published odds, or none match).
+// Same integer-cent fold as packTheoreticalRtp, so the two EVs on the packs
+// list can't disagree by a float epsilon.
+export function publishedEv(
+  tierAvgPrice: Record<string, number>,
+  // The stored `published_odds.tiers` is a PARTIAL record (only the tiers the
+  // operator filled in), so a present key can still be undefined.
+  publishedTiers: Record<string, number | undefined> | null | undefined,
+): number | null {
+  if (!publishedTiers) return null;
+  let cents = 0;
+  let any = false;
+  for (const [tier, rawPct] of Object.entries(publishedTiers)) {
+    const avg = tierAvgPrice[tier];
+    const pct = rawPct ?? NaN;
+    if (!Number.isFinite(avg) || !Number.isFinite(pct)) continue;
+    any = true;
+    cents += Math.round(avg * 100) * (pct / 100);
+  }
+  return any ? Math.round(cents) / 100 : null;
+}
+
 export type LedgerRow = {
   reason: string;
   amount: number;

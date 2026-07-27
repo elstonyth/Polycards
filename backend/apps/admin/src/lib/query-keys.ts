@@ -85,4 +85,6 @@ export const qk = {
     ['admin', 'customer', id, 'payout-details'] as const,
   spendReport: (id: string) =>
     ['admin', 'customer', id, 'spend-report'] as const,
+  // ── Epic 3 (Odds) ──
+  customerGroups: ['admin', 'customer-groups'] as const,
 };

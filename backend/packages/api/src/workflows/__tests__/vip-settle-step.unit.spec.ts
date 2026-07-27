@@ -115,6 +115,12 @@ function buildHarness(opts: {
         return [n];
       },
     }),
+    // The draw resolves the customer's odds set from their group (§2.5). This
+    // harness's customer is in no group, so every draw rolls on set 1 — the
+    // weights these fixtures were written against.
+    [Modules.CUSTOMER]: asValue({
+      listCustomerGroups: async () => [],
+    }),
     logger: asValue({
       info: () => undefined,
       warn: () => undefined,
