@@ -323,6 +323,34 @@ describe('auto-split mapping helpers', () => {
     expect(set2[0].pctInput).toBe('1');
     expect(set2[0].pctInput2).toBe('42.5');
     expect(set2[0].pctInput3).toBe('');
+    // The helper must not mutate the row it was given — only the returned
+    // copy changes. A regression to in-place mutation of the row object
+    // would leave this passing on set2 while corrupting the original.
+    expect(rows[0].pctInput2).toBe('');
+  });
+
+  it('writes the set-1 success path into pctInput only, and 0% round-trips to "0"', () => {
+    const rows = [
+      row({ card_id: 'a', pctInput: '1', pctInput2: '5', pctInput3: '' }),
+      row({ card_id: 'b', pctInput: '99', pctInput2: '', pctInput3: '' }),
+    ];
+    const result = {
+      error: null,
+      computed: [
+        { card_id: 'a', pct: 33.3 },
+        { card_id: 'b', pct: 0 },
+      ],
+      floored: [],
+      tierCollapse: [],
+      achievedRtp: 0.5,
+    };
+    const set1 = applySolveResult(rows, result, 1);
+    expect(set1[0].pctInput).toBe('33.3');
+    expect(set1[0].pctInput2).toBe('5');
+    expect(set1[0].pctInput3).toBe('');
+    // An explicit 0% must round-trip to the string '0', never '' — '' means
+    // "inherit the previous set" in this editor, a different thing entirely.
+    expect(set1[1].pctInput).toBe('0');
   });
 
   it('applies nothing when the solve errored', () => {
