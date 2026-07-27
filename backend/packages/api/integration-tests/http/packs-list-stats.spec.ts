@@ -30,7 +30,10 @@ const PACK = 'stats-pack';
 const PUB_PACK = 'stats-pub-pack';
 const EMPTY_PACK = 'stats-empty-pack';
 const PACK_PRICE = 300;
-const PUB_PACK_PRICE = 100;
+// NOT the same as pub_ev's RM74: at price 100 the pub_rtp assertion below would
+// pass just as well against an implementation that dropped the division (or
+// ignored the price entirely). 74/200 = 37% — exact, and distinguishable.
+const PUB_PACK_PRICE = 200;
 
 medusaIntegrationTestRunner({
   inApp: true,
@@ -230,8 +233,9 @@ medusaIntegrationTestRunner({
 
       it('computes Published EV from the published tier percentages', async () => {
         const rows = await rowsOf();
-        // 150 × 20% + 55 × 80% = 30 + 44 = RM74 on a RM100 pack.
-        expect(rows.get(PUB_PACK)).toMatchObject({ pub_ev: 74, pub_rtp: 74 });
+        // 150 × 20% + 55 × 80% = 30 + 44 = RM74 promised on a RM200 pack ⇒ the
+        // published odds advertise a 37% return.
+        expect(rows.get(PUB_PACK)).toMatchObject({ pub_ev: 74, pub_rtp: 37 });
         // No published odds at all ⇒ nothing was promised ⇒ null, not 0.
         expect(rows.get(PACK)).toMatchObject({ pub_ev: null, pub_rtp: null });
       });
