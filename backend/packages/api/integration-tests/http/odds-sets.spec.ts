@@ -234,6 +234,9 @@ medusaIntegrationTestRunner({
       // Case 1 — no group at all: the default set. Also the anonymous/demo
       // shape, since the resolver short-circuits an absent customer id to 1.
       it('draws set 1 for an ungrouped customer', async () => {
+        // Decoy: a set-2 group customer A is NOT in. Proves the resolver filters
+        // by MEMBERSHIP, not just 'oldest group in the DB'.
+        await createGroup('decoy-set2-group', 2);
         const a = await registerCustomer('odds-a@test.dev', PACK_PRICE);
 
         const opened = await open(a.headers);
