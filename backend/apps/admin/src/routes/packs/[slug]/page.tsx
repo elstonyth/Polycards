@@ -137,12 +137,19 @@ const PackOddsEditorPage = () => {
   // every reload. Consumed (emptied) by the seed below, so a pool save's
   // reseed can't re-stage cards the operator has since dealt with.
   const { state: navState } = useLocation();
+  const navAddCards = (navState as { addCards?: string[] } | null)?.addCards;
   const [pendingAdd, setPendingAdd] = useState<string[]>(
-    () => (navState as { addCards?: string[] } | null)?.addCards ?? [],
+    () => navAddCards ?? [],
   );
+  // Keyed off the ROUTER STATE, not the latch: the seed below empties
+  // pendingAdd DURING render, and React commits only the re-render — so when
+  // usePackOdds is a cache hit (the primary flow: editor → cards list → back to
+  // the same pack, inside React Query's gcTime) the first COMMITTED render
+  // already has an empty latch, and an effect keyed on it would never clear the
+  // history entry. Re-runs harmlessly once the state is null.
   useEffect(() => {
-    if (pendingAdd.length > 0) navigate('.', { replace: true, state: null });
-  }, [pendingAdd, navigate]);
+    if (navAddCards) navigate('.', { replace: true, state: null });
+  }, [navAddCards, navigate]);
 
   // Prize-pool membership — which cards belong to this pack. The same catalog
   // query supplies the display fields for staged rows, so it also loads when
@@ -157,11 +164,15 @@ const PackOddsEditorPage = () => {
   // until that query SETTLES — gating on "loaded" would leave the whole editor
   // on the skeleton forever if the catalog fetch fails.
   const catalogSettled = cardsQuery.isSuccess || cardsQuery.isError;
+  // Same render-phase hazard as the clear above, plus the router state is
+  // already null by the time a later catalog error lands — so latch "cards
+  // arrived" once, at mount, and let the error itself trigger the toast.
+  const stagedAtMount = useRef(pendingAdd.length > 0);
   useEffect(() => {
-    if (pendingAdd.length > 0 && cardsQuery.isError) {
+    if (stagedAtMount.current && cardsQuery.isError) {
       toast.error(t('packs.pool.loadError'));
     }
-  }, [pendingAdd, cardsQuery.isError, t]);
+  }, [cardsQuery.isError, t]);
 
   if (
     shouldSeedBuffer(data, seededFrom, (s) => s.pack.slug !== slug) &&
