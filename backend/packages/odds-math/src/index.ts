@@ -257,6 +257,12 @@ export function computeSetWeights(entries: SetEntry[]): SetWeightsResult {
   const pctByCard = (r: OddsResult): Map<string, number> =>
     new Map(r.computed.map((c) => [c.card_id, c.pct]));
 
+  // Keyed lookup instead of a linear `entries.find` per computed row PER SET:
+  // this runs on every editor keystroke (previewSets) over pools the rest of
+  // the code sizes at 2000+ rows. First occurrence wins, exactly as `find` did.
+  const byCard = new Map<string, SetEntry>();
+  for (const e of entries) if (!byCard.has(e.card_id)) byCard.set(e.card_id, e);
+
   let prev = pctByCard(set1);
   const materialized: (Map<string, number> | null)[] = [];
 
@@ -282,7 +288,7 @@ export function computeSetWeights(entries: SetEntry[]): SetWeightsResult {
 
     const weights = new Map<string, number>();
     for (const c of r.computed) {
-      const src = entries.find((e) => e.card_id === c.card_id);
+      const src = byCard.get(c.card_id);
       if (!src) continue;
       const isBalancer = src.locked === false && src.rarity === 'Common';
       if (explicit(src) !== null || isBalancer) weights.set(c.card_id, c.weight);
