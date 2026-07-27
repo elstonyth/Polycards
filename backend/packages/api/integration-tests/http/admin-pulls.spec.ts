@@ -95,6 +95,76 @@ medusaIntegrationTestRunner({
         return login.data.token;
       };
 
+      const openOne = async (token: string, topupKey: string) => {
+        await api.post(
+          '/store/credits/topup',
+          { amount: PACK_PRICE },
+          { headers: { ...authed(token), 'idempotency-key': topupKey } },
+        );
+        return unwrapResponse(
+          api.post(
+            `/store/packs/${PACK_SLUG}/open`,
+            {},
+            { headers: authed(token) },
+          ),
+        );
+      };
+
+      // The player tab: ?customer_id= scopes the ledger and drops the GLOBAL
+      // rollups (showing site-wide top cards next to one player's pulls would
+      // read as that player's). Per-ROW rarity must survive the rollup skip —
+      // it is derived from the same odds lookup the skipped window fed.
+      it('scopes the ledger to ?customer_id=, empties the rollups, keeps row rarity', async () => {
+        const tokenA = await registerCustomer('admin-pulls-a@test.dev');
+        const tokenB = await registerCustomer('admin-pulls-b@test.dev');
+        expect((await openOne(tokenA, 'admin-pulls-topup-a')).status).toBe(200);
+        expect((await openOne(tokenB, 'admin-pulls-topup-b')).status).toBe(200);
+
+        const adminToken = await mintSuperAdmin(
+          getContainer(),
+          api,
+          ADMIN_EMAIL,
+          PASSWORD,
+        );
+        const adminHeaders = { authorization: `Bearer ${adminToken}` };
+
+        const all = await unwrapResponse(
+          api.get('/admin/pulls', { headers: adminHeaders }),
+        );
+        expect(all.data.total).toBe(2);
+        // Unscoped keeps its global rollups.
+        expect(all.data.topCards.length).toBeGreaterThan(0);
+        expect(all.data.topRarities.length).toBeGreaterThan(0);
+        const rowA = all.data.pulls.find(
+          (p: { customer_email: string | null }) =>
+            p.customer_email === 'admin-pulls-a@test.dev',
+        );
+        expect(rowA).toBeDefined();
+
+        const scoped = await unwrapResponse(
+          api.get(`/admin/pulls?customer_id=${rowA.customer_id}`, {
+            headers: adminHeaders,
+          }),
+        );
+        expect(scoped.status).toBe(200);
+        expect(scoped.data.total).toBe(1);
+        expect(
+          scoped.data.pulls.map(
+            (p: { customer_email: string | null }) => p.customer_email,
+          ),
+        ).toEqual(['admin-pulls-a@test.dev']);
+        // Per-row rarity still resolves from the (pack, card) odds row.
+        expect(scoped.data.pulls[0].card.rarity).toBe('Rare');
+        expect(scoped.data.topCards).toEqual([]);
+        expect(scoped.data.topRarities).toEqual([]);
+
+        // Empty value 400s rather than silently listing every customer.
+        const empty = await unwrapResponse(
+          api.get('/admin/pulls?customer_id=', { headers: adminHeaders }),
+        );
+        expect(empty.status).toBe(400);
+      });
+
       it('ledger row for an opened pack carries the pack title (not null)', async () => {
         const token = await registerCustomer('admin-pulls-customer@test.dev');
         await api.post(

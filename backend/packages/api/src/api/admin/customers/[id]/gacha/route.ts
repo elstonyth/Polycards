@@ -8,6 +8,7 @@ import { toMoney } from '../../../../../modules/packs/money';
 import {
   resolveFxRate,
   displayMarketPrice,
+  DEFAULT_MARKET_MULTIPLIER,
 } from '../../../../../modules/packs/pricing';
 import { cardByHandle } from '../../../../../modules/packs/card-view';
 import { levelForSpend } from '../../../../../modules/packs/vip-ladder';
@@ -61,13 +62,32 @@ export async function GET(
     : [];
   const byHandle = cardByHandle(cards);
 
-  const vaultValueCents = vaulted.reduce((sum, p) => {
-    const card = byHandle.get(p.card_id);
-    const value = card
-      ? displayMarketPrice(toMoney(card.market_value), fx, 1)
-      : 0;
-    return sum + (Number.isFinite(value) ? Math.round(value * 100) : 0);
-  }, 0);
+  // One pass, two integer-cent accumulators: `fmv` is the raw FMV owed
+  // (multiplier 1, what the operator would pay out), `display` is the same
+  // vault priced the way the storefront shows it (FMV × the card's own
+  // multiplier). Summed together so the two can't drift apart.
+  const cents = (value: number): number =>
+    Number.isFinite(value) ? Math.round(value * 100) : 0;
+  const vaultCents = vaulted.reduce(
+    (sum, p) => {
+      const card = byHandle.get(p.card_id);
+      if (!card) return sum;
+      const usd = toMoney(card.market_value);
+      return {
+        fmv: sum.fmv + cents(displayMarketPrice(usd, fx, 1)),
+        display:
+          sum.display +
+          cents(
+            displayMarketPrice(
+              usd,
+              fx,
+              toMoney(card.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER),
+            ),
+          ),
+      };
+    },
+    { fmv: 0, display: 0 },
+  );
 
   const [summary, ladderRows, stateRow] = await Promise.all([
     packs.creditSummary(id),
@@ -84,25 +104,39 @@ export async function GET(
     level: r.level,
     spend_threshold: Number(r.spend_threshold),
   }));
+  const spend = summary.vipSpendTotal;
   const liveLevel =
-    ladder.length > 0
-      ? levelForSpend(summary.vipSpendTotal, ladder)
-      : null;
+    ladder.length > 0 ? levelForSpend(spend, ladder) : null;
 
-  const vip =
-    liveLevel === null
-      ? null
-      : stateRow
+  let vip: {
+    level: number;
+    highest_level_ever: number;
+    spend: number;
+    next: { level: number; threshold: number; remaining: number } | null;
+  } | null = null;
+
+  if (liveLevel !== null) {
+    // Prefer the vip_member_state projection when the saga has written one.
+    const level = stateRow ? Number(stateRow.current_level) : liveLevel;
+    const highest = stateRow
+      ? Number(stateRow.highest_level_ever)
+      : liveLevel;
+    // Next rung — null at the top of the ladder. Same computation as
+    // GET /store/vip (minus the reward columns this route doesn't select).
+    const nextRung = ladder.find((r) => r.level === level + 1) ?? null;
+    vip = {
+      level,
+      highest_level_ever: highest,
+      spend,
+      next: nextRung
         ? {
-            level: Number(stateRow.current_level),
-            highest_level_ever: Number(stateRow.highest_level_ever),
-            spend: summary.vipSpendTotal,
+            level: nextRung.level,
+            threshold: nextRung.spend_threshold,
+            remaining: Math.max(0, nextRung.spend_threshold - spend),
           }
-        : {
-            level: liveLevel,
-            highest_level_ever: liveLevel,
-            spend: summary.vipSpendTotal,
-          };
+        : null,
+    };
+  }
 
   res.json({
     customer: {
@@ -138,7 +172,11 @@ export async function GET(
           : null,
       };
     }),
-    vault: { count: vaulted.length, market_value: vaultValueCents / 100 },
+    vault: {
+      count: vaulted.length,
+      market_value: vaultCents.fmv / 100,
+      display_value: vaultCents.display / 100,
+    },
     vip,
   });
 }

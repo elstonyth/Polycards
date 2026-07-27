@@ -33,6 +33,7 @@ import SiteSettings from './models/site-settings';
 import ReferralRelationship from './models/referral-relationship';
 import Commission from './models/commission';
 import CustomerAccountState from './models/customer-account-state';
+import PlayerPayoutDetails from './models/player-payout-details';
 import AdminActionAudit from './models/admin-action-audit';
 import VipMemberState from './models/vip-member-state';
 import VipRewardGrant from './models/vip-reward-grant';
@@ -366,6 +367,7 @@ class PacksModuleService extends MedusaService({
   ReferralRelationship,
   Commission,
   CustomerAccountState,
+  PlayerPayoutDetails,
   AdminActionAudit,
   VipMemberState,
   VipRewardGrant,
@@ -677,6 +679,40 @@ class PacksModuleService extends MedusaService({
       vipSpendTotal: Number(r?.vip_spend_cents ?? 0) / 100,
       depositedPlaythroughTotal: Number(r?.deposited_pt_cents ?? 0) / 100,
     };
+  }
+
+  // Monthly pack_open spend for one customer (MYR), newest first, capped at 24
+  // months. Months are bucketed in Asia/Kuala_Lumpur — every date boundary in
+  // this project is MYT, so an open at 17:00Z on the 28th belongs to the NEXT
+  // month. Months with no pack_open activity are omitted entirely (the HAVING),
+  // so a top-up-only month never shows up as a zero row. Same integer-cent
+  // idiom and index (customer_id, created_at) as creditSummary.
+  //
+  // KNOWN WART — a CROSS-MONTH reversal distorts BOTH months: reverseOpen writes
+  // its refund as a positive `pack_open` row stamped with the reversal's own
+  // created_at, so a March open reversed in April leaves March overstated and
+  // April negative. (Unlike creditSummary.vipSpendTotal, where the same rows net
+  // down one scalar and the distortion cancels.) Upgrade path when this matters:
+  // bucket a reversal by the reversed row's created_at, joining on the
+  // credit_transaction.source_transaction_id both rows already carry.
+  @InjectManager()
+  async spendReportForCustomer(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ period: string; spend: number }[]> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ period: string; spend_cents: string }[]>(
+      "SELECT to_char(date_trunc('month', created_at AT TIME ZONE 'Asia/Kuala_Lumpur'), 'YYYY-MM') AS period, " +
+        "  COALESCE(SUM(CASE WHEN reason = 'pack_open' THEN ROUND(-amount * 100) ELSE 0 END), 0)::bigint AS spend_cents " +
+        'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL ' +
+        "GROUP BY 1 HAVING SUM(CASE WHEN reason = 'pack_open' THEN 1 ELSE 0 END) > 0 ORDER BY 1 DESC LIMIT 24",
+      [customerId],
+    );
+    return rows.map((r) => ({
+      period: r.period,
+      spend: Number(r.spend_cents) / 100,
+    }));
   }
 
   // Customer credit balance = Σ(amount) over the append-only ledger. Kept as a
@@ -1851,6 +1887,70 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     return Boolean(state);
+  }
+
+  // Upsert a customer's manual-cashout bank destination + audit row in ONE
+  // transaction (POLYCARD-BACK §4.3). Own advisory key — the row lives in its
+  // own table, so this must not serialize against the credit ledger, but the
+  // list-then-create still needs a lock or two concurrent first-saves race the
+  // unique customer_id to a 23505. The audit row deliberately records only the
+  // bank NAME: the account number is admin-auth-only and must not be copied
+  // into the audit feed (GET /admin/customers/:id/audit reads that table).
+  @InjectTransactionManager()
+  async setPayoutDetails(
+    input: {
+      customerId: string;
+      adminId: string;
+      bankName: string;
+      bankAccountNumber: string;
+      accountHolderName: string | null;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{
+    bank_name: string;
+    bank_account_number: string;
+    account_holder_name: string | null;
+  }> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `payout:${input.customerId}`,
+    ]);
+    const [existing] = await this.listPlayerPayoutDetails(
+      { customer_id: input.customerId },
+      { take: 1 },
+      sharedContext,
+    );
+    const data = {
+      bank_name: input.bankName,
+      bank_account_number: input.bankAccountNumber,
+      account_holder_name: input.accountHolderName,
+    };
+    if (existing) {
+      await this.updatePlayerPayoutDetails(
+        { selector: { id: existing.id }, data },
+        sharedContext,
+      );
+    } else {
+      await this.createPlayerPayoutDetails(
+        [{ customer_id: input.customerId, ...data }],
+        sharedContext,
+      );
+    }
+    await this.createAdminActionAudits(
+      [
+        {
+          admin_id: input.adminId,
+          entity_type: 'customer',
+          entity_id: input.customerId,
+          action: 'edit',
+          before: { bank_name: existing?.bank_name ?? null },
+          after: { bank_name: input.bankName },
+          reason: 'payout details updated',
+        },
+      ],
+      sharedContext,
+    );
+    return data;
   }
 
   // FX manual-override edit + audit row in the same transaction. The audit row
