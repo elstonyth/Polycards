@@ -90,7 +90,7 @@ import {
   type VoucherLadderDTO,
   type VoucherRangeDTO,
 } from './admin-rest';
-import type { OddsInput } from '@acme/odds-math';
+import type { SetEntry } from '@acme/odds-math';
 import { qk } from './query-keys';
 
 // ── Display queries ──────────────────────────────────────────────────────────
@@ -394,7 +394,7 @@ export const useDeletePack = () => {
 // identical to the pre-refactor behavior. See the design spec.
 export const useSaveOdds = () =>
   useMutation({
-    mutationFn: (vars: { slug: string; entries: OddsInput[] }) =>
+    mutationFn: (vars: { slug: string; entries: SetEntry[] }) =>
       packsApi.admin.packs.$slug.odds.mutate({
         $slug: vars.slug,
         entries: vars.entries,
