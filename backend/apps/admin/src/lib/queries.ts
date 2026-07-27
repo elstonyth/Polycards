@@ -429,10 +429,16 @@ export const useDeletePack = () => {
 // identical to the pre-refactor behavior. See the design spec.
 export const useSaveOdds = () =>
   useMutation({
-    mutationFn: (vars: { slug: string; entries: SetEntry[] }) =>
+    mutationFn: (vars: {
+      slug: string;
+      entries: SetEntry[];
+      /** Basis points; omit to leave the pack's stored target unchanged. */
+      target_rtp_bps?: number;
+    }) =>
       packsApi.admin.packs.$slug.odds.mutate({
         $slug: vars.slug,
         entries: vars.entries,
+        target_rtp_bps: vars.target_rtp_bps,
       }),
   });
 

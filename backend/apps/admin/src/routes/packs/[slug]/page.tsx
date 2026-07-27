@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
+  Alert,
   Badge,
   Container,
   Heading,
@@ -25,7 +26,12 @@ import type {
   PackOddsResponse,
   PublishedOdds,
 } from '../../../lib/packs-api';
-import { RARITIES } from '@acme/odds-math';
+import {
+  MIN_PCT,
+  proposeRarities,
+  RARITIES,
+  solveOddsForRtp,
+} from '@acme/odds-math';
 import {
   useCards,
   usePackOdds,
@@ -37,10 +43,13 @@ import {
 } from '../../../lib/queries';
 import { fmtPct, rm } from '../../../lib/format';
 import {
+  applyRarityProposals,
+  applySolveResult,
   mapOddsToRows,
   previewSets,
   publishedEvPreview,
   rowsToSetEntries,
+  rowsToSolveInput,
   setEvRtp,
   type EditRow,
 } from '../../../lib/odds-rows';
@@ -88,6 +97,18 @@ const PackOddsEditorPage = () => {
   const saveTopHits = useSaveTopHits();
   const [rows, setRows] = useState<EditRow[] | null>(null);
   const saving = saveOdds.isPending;
+
+  // Auto-split (target-RTP) staging — local only until Save. `targetRtpInput`
+  // seeds from the pack's stored target_rtp_bps; the report says which chase
+  // cards got pinned at the storable floor and why, since that is how an
+  // operator learns a pack is mispriced.
+  const [targetRtpInput, setTargetRtpInput] = useState('70');
+  const [autoSplitError, setAutoSplitError] = useState<string | null>(null);
+  const [autoSplitReport, setAutoSplitReport] = useState<{
+    achievedRtp: number;
+    floored: { name: string; fairPct: number }[];
+    tierCollapse: string[];
+  } | null>(null);
   const packTitle = data?.pack.title ?? '';
   const packStatus = data?.pack.status ?? '';
 
@@ -179,6 +200,18 @@ const PackOddsEditorPage = () => {
     (pendingAdd.length === 0 || catalogSettled)
   ) {
     setSeededFrom(data);
+    // Read off `data` (the type guard above narrows it), not `seededFrom` —
+    // that state var will not reflect this `setSeededFrom` call until the
+    // NEXT render, so testing it here would silently skip the seed on the
+    // very first load (`shouldSeedBuffer` also re-gates false by then).
+    if (data.pack.target_rtp_bps != null) {
+      setTargetRtpInput(String(data.pack.target_rtp_bps / 100));
+    }
+    // Reseeding means a different snapshot is now authoritative (new pack,
+    // or membership just changed) — a report/error from the previous buffer
+    // no longer describes these rows.
+    setAutoSplitError(null);
+    setAutoSplitReport(null);
     const seeded = mapOddsToRows(data.odds);
     if (pendingAdd.length === 0) {
       setRows(seeded);
@@ -320,6 +353,43 @@ const PackOddsEditorPage = () => {
       pctInput: !r.locked ? String(r.currentPct) : r.pctInput,
     });
 
+  // Auto-split: propose value-banded rarities, solve the chase budget for the
+  // target RTP, and stage BOTH as unsaved edits. Nothing is persisted until
+  // the operator hits save — the report is how they learn the pack is
+  // mispriced. Set 1 ONLY: rowsToSolveInput always pins locked rows at their
+  // SET-1 rate regardless of which set is passed, so auto-splitting set 2/3
+  // would compute EV off the wrong pinned rate (see odds-rows.ts).
+  const autoSplit = (set: 1 | 2 | 3) => {
+    if (!rows || !seededFrom) return;
+    setAutoSplitError(null);
+    setAutoSplitReport(null);
+
+    const price = seededFrom.pack.price;
+    const target = Number(targetRtpInput) / 100;
+
+    const proposals = proposeRarities(
+      rows.map((r) => ({ card_id: r.card_id, value: r.market_value })),
+      price,
+    );
+    const retiered = applyRarityProposals(rows, proposals);
+
+    const result = solveOddsForRtp(rowsToSolveInput(retiered), price, target);
+    if (result.error) {
+      setAutoSplitError(result.error);
+      return;
+    }
+
+    setRows(applySolveResult(retiered, result, set));
+    setAutoSplitReport({
+      achievedRtp: result.achievedRtp ?? 0,
+      floored: result.floored.map((f) => ({
+        name: rows.find((r) => r.card_id === f.card_id)?.name ?? f.card_id,
+        fairPct: f.fairPct,
+      })),
+      tierCollapse: result.tierCollapse,
+    });
+  };
+
   async function save() {
     if (!rows || preview.error || saving || savingMembers) return;
     try {
@@ -341,7 +411,17 @@ const PackOddsEditorPage = () => {
         setRows((prev) => prev?.map((r) => ({ ...r, pending: false })) ?? null);
       }
       const entries = rowsToSetEntries(rows);
-      const res = await saveOdds.mutateAsync({ slug, entries });
+      // Blank/invalid target must not silently 400 the whole save — omit it
+      // (the server keeps the pack's stored target) rather than send a value
+      // it will reject.
+      const targetBps = Math.round(Number(targetRtpInput) * 100);
+      const res = await saveOdds.mutateAsync({
+        slug,
+        entries,
+        ...(Number.isFinite(targetBps) && targetBps >= 1
+          ? { target_rtp_bps: targetBps }
+          : {}),
+      });
       const byId = new Map(res.odds.map((c) => [c.card_id, c]));
       // Set 1 only — that is all the response carries. The set-2/3 inputs are
       // deliberately left as typed: they ARE what was just saved, and the save
@@ -496,7 +576,79 @@ const PackOddsEditorPage = () => {
             <Text size="small" className="text-ui-fg-subtle ml-2 max-w-md">
               {t('packs.editor.setsHint')}
             </Text>
+            <div className="ml-auto flex items-end gap-x-2">
+              <div>
+                <Label htmlFor="target-rtp" size="xsmall">
+                  {t('packs.editor.targetRtp')}
+                </Label>
+                <Input
+                  id="target-rtp"
+                  className="w-24"
+                  type="number"
+                  min={0.01}
+                  step={0.01}
+                  value={targetRtpInput}
+                  onChange={(e) => setTargetRtpInput(e.target.value)}
+                />
+              </div>
+              <Button
+                size="small"
+                variant="secondary"
+                disabled={!rows || saving}
+                onClick={() => autoSplit(1)}
+              >
+                {t('packs.editor.autoSplit')}
+              </Button>
+            </div>
           </div>
+
+          {autoSplitError && (
+            <Alert variant="error" className="mx-6 mb-4">
+              {autoSplitError}
+            </Alert>
+          )}
+          {autoSplitReport && (
+            <Alert variant="warning" className="mx-6 mb-4">
+              <Text size="small" weight="plus">
+                {t('packs.editor.autoSplitDone')}
+              </Text>
+              <Text size="small" className="mt-1">
+                {t('packs.editor.autoSplitRtp', {
+                  rtp: (autoSplitReport.achievedRtp * 100).toFixed(2),
+                  target: targetRtpInput,
+                })}
+              </Text>
+              {autoSplitReport.floored.length > 0 && (
+                <>
+                  <Text size="small" className="mt-1">
+                    {t('packs.editor.autoSplitFloored', {
+                      count: autoSplitReport.floored.length,
+                    })}
+                  </Text>
+                  <ul className="mt-1 list-disc pl-5">
+                    {autoSplitReport.floored.map((f) => (
+                      <li key={f.name}>
+                        <Text size="small">
+                          {t('packs.editor.autoSplitFlooredRow', {
+                            name: f.name,
+                            fair: Math.round(100 / f.fairPct).toLocaleString(),
+                            actual: Math.round(100 / MIN_PCT).toLocaleString(),
+                          })}
+                        </Text>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+              {autoSplitReport.tierCollapse.length > 0 && (
+                <Text size="small" className="mt-1">
+                  {t('packs.editor.autoSplitCollapse', {
+                    tiers: autoSplitReport.tierCollapse.join(', '),
+                  })}
+                </Text>
+              )}
+            </Alert>
+          )}
 
           <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Pack odds table">
           <Table>
