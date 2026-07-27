@@ -121,7 +121,10 @@ export const setEvRtp = (
     if (p === undefined || !Number.isFinite(r.market_value)) return sum;
     return sum + Math.round(r.market_value * 100) * (p / 100);
   }, 0);
-  return { ev: Math.round(cents) / 100, rtp: round2(((cents / 100) / price) * 100) };
+  return {
+    ev: Math.round(cents) / 100,
+    rtp: round2((cents / 100 / price) * 100),
+  };
 };
 
 /**
@@ -154,4 +157,61 @@ export const publishedEvPreview = (
     cents += Math.round(avg * 100) * (pct / 100);
   }
   return any ? Math.round(cents) / 100 : null;
+};
+
+import {
+  type RarityProposal,
+  type RtpSolveResult,
+  type RtpSolveRow,
+} from '@acme/odds-math';
+
+// A free-typed rate input ('' while the operator is mid-edit, '12.' etc.)
+// must never reach the solver as NaN — it would poison every downstream sum.
+const numOr0 = (s: string): number => {
+  const n = Number(s);
+  return Number.isFinite(n) ? n : 0;
+};
+
+/** Editor rows -> solver input. `value` is the DISPLAY price, matching the
+ *  Value column and the EV/RTP tiles. */
+export const rowsToSolveInput = (rows: EditRow[]): RtpSolveRow[] =>
+  rows.map((r) => ({
+    card_id: r.card_id,
+    locked: r.locked,
+    rarity: r.rarity,
+    value: r.market_value,
+    pct: numOr0(r.pctInput),
+  }));
+
+/** Stage proposed tiers as unsaved edits. Returns a new array; rows without a
+ *  proposal are untouched. */
+export const applyRarityProposals = (
+  rows: EditRow[],
+  proposals: RarityProposal[],
+): EditRow[] => {
+  const byId = new Map(proposals.map((p) => [p.card_id, p.rarity]));
+  return rows.map((r) => {
+    const rarity = byId.get(r.card_id);
+    return rarity ? { ...r, rarity } : { ...r };
+  });
+};
+
+/** Stage solved rates into the targeted set's input. A failed solve applies
+ *  nothing — the caller surfaces `result.error`. */
+export const applySolveResult = (
+  rows: EditRow[],
+  result: RtpSolveResult,
+  set: 1 | 2 | 3,
+): EditRow[] => {
+  if (result.error) return rows;
+  const byId = new Map(result.computed.map((c) => [c.card_id, c.pct]));
+  return rows.map((r) => {
+    const pct = byId.get(r.card_id);
+    if (pct === undefined) return { ...r };
+    // Trim float noise; the editor stores rates as free-typed strings.
+    const text = String(Math.round(pct * 1e6) / 1e6);
+    if (set === 1) return { ...r, pctInput: text };
+    if (set === 2) return { ...r, pctInput2: text };
+    return { ...r, pctInput3: text };
+  });
 };
