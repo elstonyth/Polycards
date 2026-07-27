@@ -20,6 +20,7 @@ const B_EMAIL = 'bravoplayer-yyr@test.dev';
 const CARD_HANDLE = 'players-list-card';
 const CARD_USD = 12.34;
 const PACK_SLUG = 'players-list-pack';
+const GROUP_NAME = 'Players List Whales';
 
 medusaIntegrationTestRunner({
   inApp: true,
@@ -67,6 +68,17 @@ medusaIntegrationTestRunner({
         const b = await customers.createCustomers({ email: B_EMAIL });
         bId = b.id;
 
+        // A carries a real customer group so the `groups` column is proven
+        // populated, not vacuously empty — this also exercises the to-many
+        // join under skip/take that the route flags as its known ceiling.
+        const group = await customers.createCustomerGroups({
+          name: GROUP_NAME,
+        });
+        await customers.addCustomerToGroup({
+          customer_id: aId,
+          customer_group_id: group.id,
+        });
+
         // A: +100 topup, −30 pack_open, one vaulted pack pull, VIP level 3.
         await packs.createCreditTransactions([
           { customer_id: aId, amount: 100, reason: 'topup' },
@@ -112,6 +124,15 @@ medusaIntegrationTestRunner({
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         res.data.players.find((p: any) => p.id === id);
 
+      // Regression guard, not a live hole: /admin/* is framework-auto-protected.
+      // This route hands back every customer's email, phone, wallet balance and
+      // vault value in one call, so a middlewares edit must never un-protect it
+      // silently (same guard as economy.spec.ts:30).
+      it('rejects an unauthenticated read with 401', async () => {
+        const res = await unwrapResponse(api.get('/admin/players'));
+        expect(res.status).toBe(401);
+      });
+
       it('200 — lists both customers, newest first, with total', async () => {
         const res = await list();
         expect(res.status).toBe(200);
@@ -145,7 +166,7 @@ medusaIntegrationTestRunner({
         expect(a.email).toBe(A_EMAIL);
         expect(a.name).toBe('Alpha Player');
         expect(a.phone).toBe('+60123456789');
-        expect(a.groups).toEqual([]);
+        expect(a.groups).toEqual([GROUP_NAME]);
         // Equality against the live oracle, not the seeded constants.
         expect(a.wallet_balance).toBe(summary.balance);
         expect(a.total_spend).toBe(summary.vipSpendTotal);
@@ -167,6 +188,7 @@ medusaIntegrationTestRunner({
 
         expect(b.email).toBe(B_EMAIL);
         expect(b.name).toBeNull();
+        expect(b.groups).toEqual([]); // the empty side of A's populated groups
         expect(b.wallet_balance).toBe(0);
         expect(b.total_spend).toBe(0);
         expect(b.total_pulls).toBe(0);

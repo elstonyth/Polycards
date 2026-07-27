@@ -3186,7 +3186,13 @@ class PacksModuleService extends MedusaService({
   ) {
     const wallet = new Map<
       string,
-      { balanceCents: number; spendCents: number; lastSpendAt: string | null }
+      {
+        balanceCents: number;
+        // VIP-basis net pack_open spend — the same expression creditSummary
+        // calls vip_spend_cents (NOT its differently-defined spend_cents).
+        vipSpendCents: number;
+        lastSpendAt: string | null;
+      }
     >();
     const vault = new Map<string, { count: number; cents: number }>();
     const pullCount = new Map<string, number>();
@@ -3203,13 +3209,13 @@ class PacksModuleService extends MedusaService({
       {
         customer_id: string;
         balance_cents: string;
-        spend_cents: string;
+        vip_spend_cents: string;
         last_spend_at: string | null;
       }[]
     >(
       'SELECT customer_id, ' +
         '  COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents, ' +
-        "  COALESCE(SUM(CASE WHEN reason = 'pack_open' THEN ROUND(-amount * 100) ELSE 0 END), 0)::bigint AS spend_cents, " +
+        "  COALESCE(SUM(CASE WHEN reason = 'pack_open' THEN ROUND(-amount * 100) ELSE 0 END), 0)::bigint AS vip_spend_cents, " +
         "  MAX(created_at) FILTER (WHERE reason = 'pack_open') AS last_spend_at " +
         `FROM credit_transaction WHERE customer_id IN (${ph}) AND deleted_at IS NULL GROUP BY customer_id`,
       ids,
@@ -3243,7 +3249,7 @@ class PacksModuleService extends MedusaService({
     for (const r of credits)
       wallet.set(r.customer_id, {
         balanceCents: Number(r.balance_cents),
-        spendCents: Number(r.spend_cents),
+        vipSpendCents: Number(r.vip_spend_cents),
         lastSpendAt: r.last_spend_at,
       });
     for (const r of vaults)

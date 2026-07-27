@@ -28,7 +28,8 @@ export async function GET(
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
 
   // ponytail: to-many `groups` join under skip/take — Medusa paginates on the
-  // customer, so this is fine today; revisit if a grouped page ever short-counts.
+  // customer, and players-list.spec.ts pages limit=1 with a grouped customer in
+  // the set, so this holds; revisit only if a page ever short-counts.
   const [page, total] = await customers.listAndCountCustomers(
     q ? { q } : {},
     { skip: offset, take: limit, order: { created_at: 'DESC' }, relations: ['groups'] },
@@ -56,7 +57,7 @@ export async function GET(
         wallet_balance: (w?.balanceCents ?? 0) / 100,
         vault_value: (v?.cents ?? 0) / 100,
         vault_count: v?.count ?? 0,
-        total_spend: (w?.spendCents ?? 0) / 100,
+        total_spend: (w?.vipSpendCents ?? 0) / 100,
         total_pulls: agg.pullCount.get(c.id) ?? 0,
         registered_at: c.created_at,
         last_spend_at: w?.lastSpendAt ?? null,
