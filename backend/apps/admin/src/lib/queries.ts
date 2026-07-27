@@ -99,10 +99,16 @@ import { qk } from './query-keys';
 
 // ── Display queries ──────────────────────────────────────────────────────────
 
-export const usePacks = (): UseQueryResult<AdminPack[]> =>
+// `enabled` matters more than usual here: the packs list now fans out to every
+// odds + card row to compute EV/RTP, so callers that only need the pack NAMES
+// (the cards page's bulk "add to pack" picker) must not pay for it on mount.
+export const usePacks = (
+  opts: { enabled?: boolean } = {},
+): UseQueryResult<AdminPack[]> =>
   useQuery({
     queryKey: qk.packs,
     queryFn: () => packsApi.admin.packs.query().then((r) => r.packs),
+    enabled: opts.enabled ?? true,
   });
 
 // `enabled` lets the pack odds editor's pool picker share this exact cache while

@@ -121,7 +121,6 @@ const GachaCardsPage = () => {
   const navigate = useNavigate();
   const prompt = usePrompt();
   const { data: cards = null, isError, refetch } = useCards();
-  const { data: packs = null } = usePacks();
   const updateCard = useUpdateCard();
   const removeCard = useDeleteCard();
   const uploadImg = useUploadImage();
@@ -136,6 +135,10 @@ const GachaCardsPage = () => {
   // Bulk "add to a pack's prize pool" selection, by card handle.
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [pickerOpen, setPickerOpen] = useState(false);
+  // Only the bulk "add to pack" picker needs this list, and /admin/packs now
+  // scans every odds + card row to compute EV/RTP — so it stays unfetched until
+  // the picker opens (same pattern as the pool picker's useCards({ enabled })).
+  const { data: packs = null } = usePacks({ enabled: pickerOpen });
   const fileRef = useRef<HTMLInputElement>(null);
   const uploading = uploadImg.isPending;
   const saving = updateCard.isPending;
