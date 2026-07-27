@@ -33,6 +33,7 @@ import SiteSettings from './models/site-settings';
 import ReferralRelationship from './models/referral-relationship';
 import Commission from './models/commission';
 import CustomerAccountState from './models/customer-account-state';
+import PlayerPayoutDetails from './models/player-payout-details';
 import AdminActionAudit from './models/admin-action-audit';
 import VipMemberState from './models/vip-member-state';
 import VipRewardGrant from './models/vip-reward-grant';
@@ -366,6 +367,7 @@ class PacksModuleService extends MedusaService({
   ReferralRelationship,
   Commission,
   CustomerAccountState,
+  PlayerPayoutDetails,
   AdminActionAudit,
   VipMemberState,
   VipRewardGrant,
@@ -1851,6 +1853,70 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     return Boolean(state);
+  }
+
+  // Upsert a customer's manual-cashout bank destination + audit row in ONE
+  // transaction (POLYCARD-BACK §4.3). Own advisory key — the row lives in its
+  // own table, so this must not serialize against the credit ledger, but the
+  // list-then-create still needs a lock or two concurrent first-saves race the
+  // unique customer_id to a 23505. The audit row deliberately records only the
+  // bank NAME: the account number is admin-auth-only and must not be copied
+  // into the audit feed (GET /admin/customers/:id/audit reads that table).
+  @InjectTransactionManager()
+  async setPayoutDetails(
+    input: {
+      customerId: string;
+      adminId: string;
+      bankName: string;
+      bankAccountNumber: string;
+      accountHolderName: string | null;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{
+    bank_name: string;
+    bank_account_number: string;
+    account_holder_name: string | null;
+  }> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `payout:${input.customerId}`,
+    ]);
+    const [existing] = await this.listPlayerPayoutDetails(
+      { customer_id: input.customerId },
+      { take: 1 },
+      sharedContext,
+    );
+    const data = {
+      bank_name: input.bankName,
+      bank_account_number: input.bankAccountNumber,
+      account_holder_name: input.accountHolderName,
+    };
+    if (existing) {
+      await this.updatePlayerPayoutDetails(
+        { selector: { id: existing.id }, data },
+        sharedContext,
+      );
+    } else {
+      await this.createPlayerPayoutDetails(
+        [{ customer_id: input.customerId, ...data }],
+        sharedContext,
+      );
+    }
+    await this.createAdminActionAudits(
+      [
+        {
+          admin_id: input.adminId,
+          entity_type: 'customer',
+          entity_id: input.customerId,
+          action: 'edit',
+          before: { bank_name: existing?.bank_name ?? null },
+          after: { bank_name: input.bankName },
+          reason: 'payout details updated',
+        },
+      ],
+      sharedContext,
+    );
+    return data;
   }
 
   // FX manual-override edit + audit row in the same transaction. The audit row

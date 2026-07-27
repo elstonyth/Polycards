@@ -557,6 +557,11 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      matcher: '/admin/customers/*/payout-details',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
       matcher: '/admin/commissions/*/reverse',
       method: 'POST',
       middlewares: [adminActionRateLimit],
