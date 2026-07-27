@@ -1,4 +1,4 @@
-import { ledgerTotals, packTheoreticalRtp } from '../economy';
+import { ledgerTotals, packTheoreticalRtp, publishedEv } from '../economy';
 
 // Economy dashboard math: theoretical RTP per pack (odds-weighted FMV vs
 // price) and lifetime ledger totals bucketed by reason. Pure functions —
@@ -46,6 +46,16 @@ describe('packTheoreticalRtp', () => {
     expect(packTheoreticalRtp(odds, 25)).toEqual({ ev: 15, rtp_pct: 60 });
   });
 
+  // POLYCARD-BACK §2 acceptance — docx arithmetic corrected: formula wins.
+  it('EV worked example: 300×0.2 + 200×0.3 + 100×0.5 = RM170, RTP 56.67%', () => {
+    const odds = [
+      { weight: 2000, market_value: 300 },
+      { weight: 3000, market_value: 200 },
+      { weight: 5000, market_value: 100 },
+    ];
+    expect(packTheoreticalRtp(odds, 300)).toEqual({ ev: 170, rtp_pct: 56.67 });
+  });
+
   it('rounds EV and RTP to cents / 2dp', () => {
     const odds = [
       { weight: 3333, market_value: 1 },
@@ -53,6 +63,25 @@ describe('packTheoreticalRtp', () => {
     ];
     const result = packTheoreticalRtp(odds, 10);
     expect(result).toEqual({ ev: 1.67, rtp_pct: 16.67 });
+  });
+});
+
+describe('publishedEv', () => {
+  it('PubEV worked example: (100+200)/2×20% + (50+60)/2×80% = RM74', () => {
+    expect(publishedEv({ Legendary: 150, Common: 55 }, { Legendary: 20, Common: 80 })).toBe(74);
+  });
+
+  it('publishedEv: null/empty published tiers → null; unknown tier keys skipped', () => {
+    expect(publishedEv({ Common: 50 }, null)).toBeNull();
+    expect(publishedEv({ Common: 50 }, {})).toBeNull();
+    expect(publishedEv({ Common: 50 }, { Immortal: 100 })).toBeNull();
+  });
+
+  // The tier keys a pack publishes and the tiers its pool actually holds drift
+  // apart (an operator publishes a Legendary % before adding one). A published
+  // tier with no cards contributes nothing rather than voiding the whole EV.
+  it('skips a published tier the pool has no cards for, keeping the rest', () => {
+    expect(publishedEv({ Common: 50 }, { Legendary: 20, Common: 80 })).toBe(40);
   });
 });
 

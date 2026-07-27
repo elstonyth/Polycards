@@ -15,7 +15,7 @@ import {
   weightForSet,
   type OddsSet,
 } from '../../../../../modules/packs/odds-sets';
-import { cardByHandle } from '../../../../../modules/packs/card-view';
+import { cardByHandle, isGraded } from '../../../../../modules/packs/card-view';
 import { clearPackDetailCache } from '../../../../store/packs/[slug]/route';
 import { pageAll } from '../../../../utils/page-all';
 
@@ -59,10 +59,6 @@ type OddsRow = {
 
 // Read-only pack composition (§2.4.8) — derived from the pool, never stored.
 type PackGroup = 'RAW' | 'GRADED' | 'MIX' | null;
-
-// ponytail: Task 8 exports a shared `isGraded`; swap this one-liner for it then.
-const isGraded = (c: { grader?: string | null }): boolean =>
-  (c.grader ?? '').trim() !== '';
 
 // GET /admin/packs/:slug/odds — load the editor state (admin-only, auto-protected).
 export async function GET(
