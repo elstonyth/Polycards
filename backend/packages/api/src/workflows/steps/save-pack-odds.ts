@@ -109,7 +109,7 @@ export const savePackOddsStep = createStep(
     // weight_2/weight_3 are written UNCONDITIONALLY (null included): dropping
     // the only explicit pct_2 returns that set to pure inheritance, and the
     // stale materialized bps must be cleared, not left behind.
-    const updates = rows.map((r) => ({
+    const updates: OddsSnapshot[] = rows.map((r) => ({
       id: idByCard.get(r.card_id)!,
       rarity: toRarity(rarityByCard.get(r.card_id)),
       weight: r.weight,
