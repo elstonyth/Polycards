@@ -197,12 +197,23 @@ const setPct = (
 export function coerceOddsEntries(raw: unknown): SetEntry[] {
   if (!Array.isArray(raw)) bad('Body must include an `entries` array.');
   const entries: SetEntry[] = [];
+  // A card_id may appear at most ONCE. The workflow's pool check compares Set
+  // sizes on both sides, so a duplicate slips past it and then collides in
+  // `idByCard`/`rarityByCard` — the pack persists a Σweight ≠ 10000 that the
+  // operator never typed. Cheapest closure is here, at the body boundary.
+  const seen = new Set<string>();
   for (const item of raw as unknown[]) {
     if (!item || typeof item !== 'object') bad('Each entry must be an object.');
     const e = item as Record<string, unknown>;
     if (typeof e.card_id !== 'string' || typeof e.locked !== 'boolean') {
       bad('Each entry needs a string card_id and boolean locked.');
     }
+    if (seen.has(e.card_id as string)) {
+      bad(
+        `Duplicate card_id '${e.card_id as string}' — each card may appear only once.`,
+      );
+    }
+    seen.add(e.card_id as string);
     if (
       typeof e.rarity !== 'string' ||
       !(RARITIES as readonly string[]).includes(e.rarity)

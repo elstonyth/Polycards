@@ -84,6 +84,21 @@ describe('coerceOddsEntries — ported set-1 validation', () => {
     );
   });
 
+  // The workflow's pool guard compares Set SIZES, so a duplicated id passes it
+  // and then collides in idByCard — the pack silently persists Σweight ≠ 10000.
+  it('rejects a duplicate card_id', () => {
+    expect(() =>
+      coerceOddsEntries([
+        { ...valid, pct: 20 },
+        { ...valid, pct: 20, rarity: 'Common' },
+      ]),
+    ).toThrow(/[Dd]uplicate card_id/);
+    // Distinct ids still pass.
+    expect(
+      coerceOddsEntries([valid, { ...valid, card_id: 'card-b' }]),
+    ).toHaveLength(2);
+  });
+
   it('stays lenient on set-1 pct (absent → 0, numeric string coerced)', () => {
     expect(coerceOddsEntries([{ ...valid, pct: undefined }])[0].pct).toBe(0);
     expect(coerceOddsEntries([{ ...valid, pct: '12.5' }])[0].pct).toBe(12.5);
