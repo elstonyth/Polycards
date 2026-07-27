@@ -332,6 +332,7 @@
     "accountStateFrozen": "Frozen",
     "accountStateActive": "Active",
     "accountStateCause": "Cause",
+    "accountStateBy": "By {{admin}}",
     "accountStateSince": "Since {{date}}",
     "btnFreeze": "Freeze",
     "btnUnfreeze": "Unfreeze",

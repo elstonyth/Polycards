@@ -1135,6 +1135,8 @@ const HistoryTab = ({
                 {t('customer360.accountStateSince', {
                   date: new Date(accountState.disabled_at).toLocaleDateString('en-US'),
                 })}
+                {accountState.disabled_by &&
+                  ` · ${t('customer360.accountStateBy', { admin: accountState.disabled_by })}`}
               </Text>
             )}
             {accountState.disabled && accountState.disabled_reason && (
