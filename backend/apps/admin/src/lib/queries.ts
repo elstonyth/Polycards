@@ -89,6 +89,10 @@ import {
   type VipLevelDTO,
   type VoucherLadderDTO,
   type VoucherRangeDTO,
+  // ── Epic 3 (Odds) ──
+  listCustomerGroupsAdmin,
+  setGroupOddsSet,
+  type AdminCustomerGroup,
 } from './admin-rest';
 import type { SetEntry } from '@acme/odds-math';
 import { qk } from './query-keys';
@@ -773,6 +777,26 @@ export const useSetPlayerDisabled = () => {
       qc.invalidateQueries({ queryKey: qk.playersKey });
       qc.invalidateQueries({ queryKey: qk.customerGacha(vars.id) });
       qc.invalidateQueries({ queryKey: qk.customerAuditKey(vars.id) });
+// ── Epic 3 (Odds) ────────────────────────────────────────────────────────────
+
+export type { AdminCustomerGroup } from './admin-rest';
+
+export const useCustomerGroupsAdmin = (): UseQueryResult<{
+  customer_groups: AdminCustomerGroup[];
+  count: number;
+}> =>
+  useQuery({ queryKey: qk.customerGroups, queryFn: listCustomerGroupsAdmin });
+
+// Writes one group's metadata.odds_set. Invalidates the list so the saved value
+// is re-read from the server rather than trusted from local state.
+export const useSetGroupOddsSet = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; set: 1 | 2 | 3 }) =>
+      setGroupOddsSet(vars.id, vars.set),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.customerGroups });
+      toast.success('Odds set saved');
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });

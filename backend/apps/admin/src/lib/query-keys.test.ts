@@ -151,5 +151,8 @@ describe('qk', () => {
     ]) {
       expect(key.slice(0, 3)).toEqual(prefix);
     }
+  // Epic 3 (Odds): flat list key for the customer-group -> odds_set page.
+  it('exposes the customer-groups key', () => {
+    expect(qk.customerGroups).toEqual(['admin', 'customer-groups']);
   });
 });
