@@ -167,21 +167,54 @@ import {
 
 // A free-typed rate input ('' while the operator is mid-edit, '12.' etc.)
 // must never reach the solver as NaN — it would poison every downstream sum.
+// UNLOCKED ONLY: the solver recomputes these rows and never reads this pct
+// (see rowsToSolveInput below), so a mid-typing '' or '12.' must not error.
 const numOr0 = (s: string): number => {
   const n = Number(s);
   return Number.isFinite(n) ? n : 0;
 };
 
+// LOCKED rows are the opposite: a blank or malformed rate must reach the
+// solver AS NaN so solveOddsForRtp's own range guard rejects it, instead of
+// silently pinning the card at 0% (a normal save would have refused this
+// same input). `Number('')` is 0, not NaN, so blank needs an explicit check.
+const numOrNaN = (s: string): number => (s.trim() === '' ? NaN : Number(s));
+
 /** Editor rows -> solver input. `value` is the DISPLAY price, matching the
- *  Value column and the EV/RTP tiles. */
+ *  Value column and the EV/RTP tiles.
+ *
+ *  WARNING (set-1 only): this ALWAYS reads set-1's `pctInput` for locked
+ *  rows, regardless of which set the solve targets — there is no pctInput2/
+ *  pctInput3 equivalent here. Solving for set 2/3 would compute the chase
+ *  budget off the wrong pinned rate, which is why the editor's `autoSplit`
+ *  handler (routes/packs/[slug]/page.tsx) only ever calls this for set 1.
+ *  See the matching warning on `applySolveResult` below. */
 export const rowsToSolveInput = (rows: EditRow[]): RtpSolveRow[] =>
   rows.map((r) => ({
     card_id: r.card_id,
     locked: r.locked,
     rarity: r.rarity,
     value: r.market_value,
-    pct: numOr0(r.pctInput),
+    pct: r.locked ? numOrNaN(r.pctInput) : numOr0(r.pctInput),
   }));
+
+/** True when any row carries a non-empty Set 2/3 input — i.e. that set is
+ *  MATERIALIZED for at least one card, not purely inherited (3 → 2 → 1).
+ *  True whether the operator actually typed an override OR the value merely
+ *  reflects a stored balancer share: mapOddsToRows seeds pctInput2/3 straight
+ *  from the raw weight_2/weight_3 columns, and computeSetWeights materializes
+ *  weight_s for every unlocked Common balancer too, not only for explicit
+ *  overrides — so the two are indistinguishable once loaded into the editor.
+ *
+ *  Callers must check this before auto-splitting: auto-split rewrites
+ *  `rarity` (applyRarityProposals below), a single column shared by all
+ *  three sets. If a card that WAS an unlocked Common balancer in set 2/3
+ *  gets retiered away from Common, computeSetWeights's set-2/3 recompute
+ *  stops treating it as a balancer and PINS it at whatever pctInput2/3
+ *  already held — silently, since balanceOdds only errors when pinned mass
+ *  exceeds 100%. */
+export const hasMaterializedSetOverrides = (rows: EditRow[]): boolean =>
+  rows.some((r) => r.pctInput2 !== '' || r.pctInput3 !== '');
 
 /** Stage proposed tiers as unsaved edits. Returns a new array; rows without a
  *  proposal are untouched. */
@@ -197,7 +230,17 @@ export const applyRarityProposals = (
 };
 
 /** Stage solved rates into the targeted set's input. A failed solve applies
- *  nothing — the caller surfaces `result.error`. */
+ *  nothing — the caller surfaces `result.error`.
+ *
+ *  WARNING (set-1 only in practice): `result` must come from
+ *  `solveOddsForRtp(rowsToSolveInput(rows), ...)`, which always pins LOCKED
+ *  rows at set-1's `pctInput` no matter which `set` is passed here. The unit
+ *  tests below exercise `set: 2` as a pure mapping check (stage into
+ *  pctInput2, leave everything else alone) — that is NOT sanctioning an
+ *  end-to-end auto-split of set 2/3. The editor's UI only ever calls this
+ *  with `set: 1` (see the `autoSplit` handler in routes/packs/[slug]/page.tsx,
+ *  which also guards against corrupting an already-materialized set 2/3 —
+ *  see `hasMaterializedSetOverrides` above). */
 export const applySolveResult = (
   rows: EditRow[],
   result: RtpSolveResult,

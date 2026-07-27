@@ -256,6 +256,7 @@ describe('publishedEvPreview', () => {
 import {
   applyRarityProposals,
   applySolveResult,
+  hasMaterializedSetOverrides,
   rowsToSolveInput,
 } from './odds-rows';
 
@@ -291,10 +292,32 @@ describe('auto-split mapping helpers', () => {
     ]);
   });
 
-  it('treats a blank or malformed pct as 0 rather than NaN', () => {
-    expect(rowsToSolveInput([row({ pctInput: '' })])[0].pct).toBe(0);
-    expect(rowsToSolveInput([row({ pctInput: '12.' })])[0].pct).toBe(12);
-    expect(rowsToSolveInput([row({ pctInput: 'abc' })])[0].pct).toBe(0);
+  it('treats an UNLOCKED blank or malformed pct as 0 rather than NaN', () => {
+    expect(
+      rowsToSolveInput([row({ locked: false, pctInput: '' })])[0].pct,
+    ).toBe(0);
+    expect(
+      rowsToSolveInput([row({ locked: false, pctInput: '12.' })])[0].pct,
+    ).toBe(12);
+    expect(
+      rowsToSolveInput([row({ locked: false, pctInput: 'abc' })])[0].pct,
+    ).toBe(0);
+  });
+
+  it("preserves NaN for a LOCKED blank or malformed pct, so solveOddsForRtp's own range guard rejects it instead of silently pinning at 0%", () => {
+    expect(
+      rowsToSolveInput([row({ locked: true, pctInput: '' })])[0].pct,
+    ).toBeNaN();
+    expect(
+      rowsToSolveInput([row({ locked: true, pctInput: '   ' })])[0].pct,
+    ).toBeNaN();
+    expect(
+      rowsToSolveInput([row({ locked: true, pctInput: 'abc' })])[0].pct,
+    ).toBeNaN();
+    // A LOCKED valid rate still passes through as a number, unaffected.
+    expect(
+      rowsToSolveInput([row({ locked: true, pctInput: '12.5' })])[0].pct,
+    ).toBe(12.5);
   });
 
   it('applies rarity proposals without touching other fields', () => {
@@ -363,5 +386,31 @@ describe('auto-split mapping helpers', () => {
       achievedRtp: null,
     };
     expect(applySolveResult(rows, result, 1)).toEqual(rows);
+  });
+});
+
+describe('hasMaterializedSetOverrides', () => {
+  it('is false when every row purely inherits sets 2/3 (both inputs blank)', () => {
+    const rows = [
+      row({ card_id: 'a', pctInput2: '', pctInput3: '' }),
+      row({ card_id: 'b', pctInput2: '', pctInput3: '' }),
+    ];
+    expect(hasMaterializedSetOverrides(rows)).toBe(false);
+  });
+
+  it('is false for an empty row set', () => {
+    expect(hasMaterializedSetOverrides([])).toBe(false);
+  });
+
+  it('is true when any row carries a non-empty set-2 input', () => {
+    const rows = [
+      row({ card_id: 'a' }),
+      row({ card_id: 'b', pctInput2: '12.5' }),
+    ];
+    expect(hasMaterializedSetOverrides(rows)).toBe(true);
+  });
+
+  it('is true when any row carries a non-empty set-3 input, including an explicit "0"', () => {
+    expect(hasMaterializedSetOverrides([row({ pctInput3: '0' })])).toBe(true);
   });
 });

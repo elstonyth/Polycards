@@ -18,6 +18,7 @@ import {
   Checkbox,
   toast,
   clx,
+  usePrompt,
 } from '@medusajs/ui';
 import { ArrowLeft } from '@medusajs/icons';
 import type {
@@ -45,6 +46,7 @@ import { fmtPct, rm } from '../../../lib/format';
 import {
   applyRarityProposals,
   applySolveResult,
+  hasMaterializedSetOverrides,
   mapOddsToRows,
   previewSets,
   publishedEvPreview,
@@ -95,6 +97,7 @@ const PackOddsEditorPage = () => {
   const saveOdds = useSaveOdds();
   const saveMembersMut = useSaveMembers();
   const saveTopHits = useSaveTopHits();
+  const prompt = usePrompt();
   const [rows, setRows] = useState<EditRow[] | null>(null);
   const saving = saveOdds.isPending;
 
@@ -359,10 +362,25 @@ const PackOddsEditorPage = () => {
   // mispriced. Set 1 ONLY: rowsToSolveInput always pins locked rows at their
   // SET-1 rate regardless of which set is passed, so auto-splitting set 2/3
   // would compute EV off the wrong pinned rate (see odds-rows.ts).
-  const autoSplit = (set: 1 | 2 | 3) => {
+  const autoSplit = async (set: 1 | 2 | 3) => {
     if (!rows || !seededFrom) return;
     setAutoSplitError(null);
     setAutoSplitReport(null);
+
+    // applyRarityProposals below rewrites `rarity`, a single per-pack column
+    // shared by all three odds sets. If set 2/3 already have materialized
+    // rates, a rarity change can silently re-pin a former Common-balancer
+    // card at a stale rate instead of letting it keep balancing (see
+    // hasMaterializedSetOverrides in odds-rows.ts) — confirm before risking
+    // that corruption.
+    if (hasMaterializedSetOverrides(rows)) {
+      const ok = await prompt({
+        title: t('packs.editor.autoSplit'),
+        description: t('packs.editor.autoSplitSetWarning'),
+        variant: 'confirmation',
+      });
+      if (!ok) return;
+    }
 
     const price = seededFrom.pack.price;
     const target = Number(targetRtpInput) / 100;
@@ -413,12 +431,15 @@ const PackOddsEditorPage = () => {
       const entries = rowsToSetEntries(rows);
       // Blank/invalid target must not silently 400 the whole save — omit it
       // (the server keeps the pack's stored target) rather than send a value
-      // it will reject.
+      // it will reject. Bounds mirror coerceTargetRtpBps in
+      // api/admin/packs/[slug]/odds/route.ts (1-1,000,000 bps).
       const targetBps = Math.round(Number(targetRtpInput) * 100);
       const res = await saveOdds.mutateAsync({
         slug,
         entries,
-        ...(Number.isFinite(targetBps) && targetBps >= 1
+        ...(Number.isFinite(targetBps) &&
+        targetBps >= 1 &&
+        targetBps <= 1_000_000
           ? { target_rtp_bps: targetBps }
           : {}),
       });
@@ -581,11 +602,14 @@ const PackOddsEditorPage = () => {
                 <Label htmlFor="target-rtp" size="xsmall">
                   {t('packs.editor.targetRtp')}
                 </Label>
+                {/* 0.01-10000% mirrors coerceTargetRtpBps's 1-1,000,000 bps
+                    bound in api/admin/packs/[slug]/odds/route.ts. */}
                 <Input
                   id="target-rtp"
                   className="w-24"
                   type="number"
                   min={0.01}
+                  max={10000}
                   step={0.01}
                   value={targetRtpInput}
                   onChange={(e) => setTargetRtpInput(e.target.value)}
