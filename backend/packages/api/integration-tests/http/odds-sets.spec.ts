@@ -355,10 +355,23 @@ medusaIntegrationTestRunner({
         expect(createdAtMs(newerRow)).toBe(Date.parse(NEWER_AT));
 
         const d = await registerCustomer('odds-d@test.dev', PACK_PRICE);
-        await customerModule().addCustomerToGroup([
-          { customer_id: d.id, customer_group_id: older.id },
-          { customer_id: d.id, customer_group_id: newer.id },
-        ]);
+        // DELIBERATELY joined NEWEST-GROUP-FIRST, in two separate calls — do
+        // NOT "tidy" this into one array. customer_group_customer carries its
+        // OWN created_at, so if the resolver's `order: { created_at: 'ASC' }`
+        // bound to the JOIN row instead of the GROUP, a batch insert in group-age
+        // order would still return beta — green for the wrong reason, and that
+        // ambiguity is the whole thing this case exists to rule out. Joining in
+        // the opposite order makes group age, join-row age and insertion order
+        // all point different ways, so beta is reachable ONLY via the group's
+        // backdated created_at.
+        await customerModule().addCustomerToGroup({
+          customer_id: d.id,
+          customer_group_id: newer.id,
+        });
+        await customerModule().addCustomerToGroup({
+          customer_id: d.id,
+          customer_group_id: older.id,
+        });
 
         const opened = await open(d.headers);
         expect(opened.status).toBe(200);
