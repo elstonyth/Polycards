@@ -5,9 +5,17 @@ describe('qk', () => {
   it('exposes the static list keys', () => {
     expect(qk.packs).toEqual(['admin', 'packs']);
     expect(qk.cards).toEqual(['admin', 'cards']);
-    // source segment defaults to 'all'; the Pack purchases tab keys 'pack'.
-    expect(qk.pulls(0)).toEqual(['admin', 'pulls', 0, 'all']);
-    expect(qk.pulls(2, 'pack')).toEqual(['admin', 'pulls', 2, 'pack']);
+    // source + customer segments default to 'all'; the Pack purchases tab keys
+    // 'pack', the player tabs key the customer id.
+    expect(qk.pulls(0)).toEqual(['admin', 'pulls', 0, 'all', 'all']);
+    expect(qk.pulls(2, 'pack')).toEqual(['admin', 'pulls', 2, 'pack', 'all']);
+    expect(qk.pulls(0, undefined, 'cus_1')).toEqual([
+      'admin',
+      'pulls',
+      0,
+      'all',
+      'cus_1',
+    ]);
     expect(qk.pullsKey).toEqual(['admin', 'pulls']);
     expect(qk.economy).toEqual(['admin', 'economy']);
     expect(qk.eligibleProducts).toEqual(['admin', 'eligible-products']);
@@ -78,6 +86,46 @@ describe('qk', () => {
     const vaulted = qk.customerPulls('cus_1', 0, 'vaulted');
     expect(unfiltered.length).toBe(vaulted.length);
     expect(unfiltered).not.toEqual(vaulted);
+  });
+
+  it('keys the pull ledger and the delivery-order list by customer', () => {
+    // Both customer segments ALWAYS render (defaulting to 'all'), same reason
+    // as qk.customerPulls' status segment: an appended-only segment would make
+    // the site-wide key a strict PREFIX of the player-scoped one, so an exact
+    // key invalidation of the All Orders table would also nuke a player's tab.
+    const global = qk.pulls(0);
+    const scoped = qk.pulls(0, undefined, 'cus_1');
+    expect(global.length).toBe(scoped.length);
+    expect(global).not.toEqual(scoped);
+    expect(qk.deliveryOrders(undefined, 0)).toEqual([
+      'admin',
+      'delivery-orders',
+      'all',
+      0,
+      '',
+      'all',
+    ]);
+    expect(qk.deliveryOrders('shipped', 2, 'abc', 'cus_1')).toEqual([
+      'admin',
+      'delivery-orders',
+      'shipped',
+      2,
+      'abc',
+      'cus_1',
+    ]);
+    // The 2-segment prefixes still reach every page/filter/customer, so the
+    // bulk-update invalidations keep working unchanged.
+    for (const key of [global, scoped]) {
+      expect(key.slice(0, qk.pullsKey.length)).toEqual([...qk.pullsKey]);
+    }
+    for (const key of [
+      qk.deliveryOrders(undefined, 0),
+      qk.deliveryOrders('shipped', 2, 'abc', 'cus_1'),
+    ]) {
+      expect(key.slice(0, qk.deliveryOrdersKey.length)).toEqual([
+        ...qk.deliveryOrdersKey,
+      ]);
+    }
   });
 
   it('nests payout details + spend report under the customer prefix', () => {

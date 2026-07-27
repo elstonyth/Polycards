@@ -436,6 +436,18 @@
     "memberSince": "Member since",
     "spendReport": "Spend report",
     "nextTier": "Next tier",
+    "levelHeading": "LV {{level}}",
+    "toNextLevel": "{{amount}} more to reach LV {{level}}",
+    "topTier": "Top tier — highest level reached.",
+    "noLevel": "This player has no VIP level yet.",
+    "period": "Period",
+    "spendEmpty": "No spend recorded yet.",
+    "ordersShipping": "Shipping",
+    "ordersPurchases": "Pack purchases",
+    "ordersEmpty": "No shipping orders yet.",
+    "order": "Order",
+    "date": "Date",
+    "items": "Items",
     "empty": "No players yet.",
     "loadError": "Could not load players."
   }

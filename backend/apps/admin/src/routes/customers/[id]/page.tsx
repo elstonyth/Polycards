@@ -24,20 +24,24 @@ import {
   useCustomerGacha,
   useCustomerPulls,
   useCustomerTransactions,
+  useDeliveryOrders,
   useFreezeCustomer,
   usePayoutDetails,
+  usePulls,
   useReferralTree,
   useCustomerCommissions,
   useReverseCommission,
   useSavePayoutDetails,
+  useSpendReport,
   useSuspendCommission,
   useUnfreezeCustomer,
   useUnsuspendCommission,
 } from '../../../lib/queries';
-import { orderDateTime, rm } from '../../../lib/format';
+import { deliveryStatusLabel, orderDateTime, rm } from '../../../lib/format';
 import type {
   AdminCommissionRow,
   CustomerAudit,
+  DeliveryStatus,
   PayoutDetails,
   ReferralTree,
   ReferralTreeNode,
@@ -45,6 +49,7 @@ import type {
 import { resolveImageUrl } from '../../../lib/image-url';
 import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
 import { Pager } from '../../../components/Pager';
+import { PullsTable } from '../../../components/PullsTable';
 
 // ponytail: no config export — keeps route out of sidebar nav (mirrors packs/[slug]/page.tsx)
 
@@ -58,6 +63,20 @@ const COMMISSION_STATUS_COLOR: Record<
   reversed: 'grey',
 };
 
+// StatusBadge tone per delivery status, mirroring the All Orders table. A
+// ternary chain rather than a second copy of that page's exhaustive Record: an
+// unknown status from the API lands on 'orange' instead of `undefined`.
+const deliveryTone = (
+  status: DeliveryStatus,
+): 'orange' | 'blue' | 'green' | 'grey' =>
+  status === 'completed'
+    ? 'green'
+    : status === 'canceled'
+      ? 'grey'
+      : status === 'shipped'
+        ? 'blue'
+        : 'orange';
+
 // Which modal is open. null = none.
 type ModalKind =
   | 'freeze'
@@ -67,9 +86,14 @@ type ModalKind =
   | 'suspend'
   | 'unsuspend';
 
-// One line per tab — Task 10 adds 'lvl' | 'orders' | 'pulls' here and one
-// Tabs.Trigger + one conditional render below.
-type TabKey = 'profile' | 'wallet' | 'vault' | 'history';
+type TabKey =
+  | 'profile'
+  | 'lvl'
+  | 'wallet'
+  | 'vault'
+  | 'orders'
+  | 'pulls'
+  | 'history';
 
 // ── Tab bodies ──────────────────────────────────────────────────────────────
 // One component per tab, following routes/deliveries/page.tsx: an inactive
@@ -244,6 +268,161 @@ const ProfileTab = ({ customerId }: { customerId: string | null }) => {
           // needs an effect, and that effect races the operator's typing on
           // every background refetch.
           <BankForm customerId={customerId} seed={payout.details} />
+        )}
+      </Container>
+    </>
+  );
+};
+
+const LvlTab = ({ customerId }: { customerId: string | null }) => {
+  const { t } = useTranslation();
+  // Same query key as the header's — served from cache, not a second request.
+  const { data: view, isError: viewError } = useCustomerGacha(customerId);
+  const { data: detail } = useCustomerDetail(customerId);
+  const { data: report, isError: reportError } = useSpendReport(customerId);
+  const vip = view?.vip ?? null;
+  const next = vip?.next ?? null;
+  const periods = report?.periods ?? [];
+
+  // Clamped both ends: a 0 threshold would divide by zero, and spend can sit
+  // PAST the next rung's threshold in the window between a qualifying purchase
+  // and the level-up saga writing the new projection.
+  const pct =
+    next && next.threshold > 0
+      ? Math.min(100, Math.max(0, (vip!.spend / next.threshold) * 100))
+      : 100;
+
+  return (
+    <>
+      <Container className="p-0">
+        {viewError ? (
+          <div className="px-6 py-6">
+            <Text size="small" className="text-ui-fg-error">
+              Failed to load.
+            </Text>
+          </div>
+        ) : !view ? (
+          <div className="px-6 py-6">
+            <LoadingSkeleton />
+          </div>
+        ) : !vip ? (
+          // The ladder is empty or this player has never spent — there is no
+          // level to draw, and a "LV 0 / 0% to LV 1" card would be a fiction.
+          <div className="px-6 py-6">
+            <Text className="text-ui-fg-subtle">{t('players.noLevel')}</Text>
+          </div>
+        ) : (
+          <>
+            <div className="flex flex-wrap items-baseline gap-3 px-6 py-4">
+              <Heading level="h1">
+                {t('players.levelHeading', { level: vip.level })}
+              </Heading>
+              <Badge size="small" color="purple">
+                {t('customer360.vipPeakLevel', {
+                  level: vip.highest_level_ever,
+                })}
+              </Badge>
+            </div>
+
+            <div className="grid grid-cols-1 gap-px border-t bg-ui-border-base md:grid-cols-2">
+              <div className="bg-ui-bg-subtle px-6 py-4">
+                <Text size="small" className="text-ui-fg-subtle">
+                  {t('players.memberSince')}
+                </Text>
+                <Heading level="h2" className="mt-1 tabular-nums">
+                  {detail ? orderDateTime(detail.customer.created_at) : '—'}
+                </Heading>
+              </div>
+              <div className="bg-ui-bg-subtle px-6 py-4">
+                <Text size="small" className="text-ui-fg-subtle">
+                  {t('customer360.vipSpend')}
+                </Text>
+                <Heading level="h2" className="mt-1 tabular-nums">
+                  {rm(vip.spend)}
+                </Heading>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2 border-t px-6 py-4">
+              <Text size="small" className="text-ui-fg-subtle">
+                {t('players.nextTier')}
+              </Text>
+              {/* Native progress semantics without the element: role+aria give
+                  a screen reader the same numbers the bar shows sighted eyes. */}
+              <div
+                className="bg-ui-bg-subtle h-2 w-full overflow-hidden rounded-full"
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={Math.round(pct)}
+                aria-label={t('players.nextTier')}
+              >
+                <div
+                  className="bg-ui-fg-interactive h-full rounded-full"
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+              <Text size="small" className="text-ui-fg-subtle">
+                {next
+                  ? t('players.toNextLevel', {
+                      amount: rm(next.remaining),
+                      level: next.level,
+                    })
+                  : t('players.topTier')}
+              </Text>
+            </div>
+          </>
+        )}
+      </Container>
+
+      <Container className="p-0">
+        <div className="px-6 py-4">
+          <Heading level="h2">{t('players.spendReport')}</Heading>
+        </div>
+        {reportError ? (
+          <div className="border-t px-6 py-6">
+            <Text size="small" className="text-ui-fg-error">
+              Failed to load.
+            </Text>
+          </div>
+        ) : !report ? (
+          <div className="border-t px-6 py-6">
+            <LoadingSkeleton />
+          </div>
+        ) : periods.length === 0 ? (
+          <div className="border-t px-6 py-6">
+            <Text className="text-ui-fg-subtle">{t('players.spendEmpty')}</Text>
+          </div>
+        ) : (
+          <div
+            className="overflow-x-auto border-t"
+            tabIndex={0}
+            role="region"
+            aria-label="Spend report table"
+          >
+            <Table>
+              <Table.Header>
+                <Table.Row>
+                  <Table.HeaderCell>{t('players.period')}</Table.HeaderCell>
+                  <Table.HeaderCell className="text-right">
+                    {t('players.spend')}
+                  </Table.HeaderCell>
+                </Table.Row>
+              </Table.Header>
+              <Table.Body>
+                {periods.map((p) => (
+                  <Table.Row key={p.period}>
+                    <Table.Cell className="tabular-nums">
+                      {p.period}
+                    </Table.Cell>
+                    <Table.Cell className="text-right tabular-nums">
+                      {rm(p.spend)}
+                    </Table.Cell>
+                  </Table.Row>
+                ))}
+              </Table.Body>
+            </Table>
+          </div>
         )}
       </Container>
     </>
@@ -460,6 +639,206 @@ const VaultTab = ({ customerId }: { customerId: string | null }) => {
         </>
       )}
     </Container>
+  );
+};
+
+// Shipping half of the Orders tab: this player's delivery orders, read-only.
+// Managing/bulk-editing a shipment stays on the All Orders page — this is the
+// player's record of what was sent, not a second place to change it.
+const ShippingOrders = ({ customerId }: { customerId: string }) => {
+  const { t } = useTranslation();
+  const [page, setPage] = useState(0);
+  const { data, isError } = useDeliveryOrders(
+    undefined,
+    page,
+    undefined,
+    customerId,
+  );
+  if (isError) {
+    return (
+      <div className="border-t px-6 py-6">
+        <Text size="small" className="text-ui-fg-error">
+          Failed to load.
+        </Text>
+      </div>
+    );
+  }
+  if (!data) {
+    return (
+      <div className="border-t px-6 py-6">
+        <LoadingSkeleton />
+      </div>
+    );
+  }
+  const orders = data.orders;
+  if (orders.length === 0) {
+    return (
+      <div className="border-t px-6 py-6">
+        <Text className="text-ui-fg-subtle">{t('players.ordersEmpty')}</Text>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div
+        className="overflow-x-auto border-t"
+        tabIndex={0}
+        role="region"
+        aria-label="Shipping orders table"
+      >
+        <Table>
+          <Table.Header>
+            <Table.Row>
+              <Table.HeaderCell>{t('players.order')}</Table.HeaderCell>
+              <Table.HeaderCell>{t('players.date')}</Table.HeaderCell>
+              <Table.HeaderCell>{t('players.items')}</Table.HeaderCell>
+              <Table.HeaderCell className="text-right">
+                {t('players.qty')}
+              </Table.HeaderCell>
+              <Table.HeaderCell>{t('players.status')}</Table.HeaderCell>
+            </Table.Row>
+          </Table.Header>
+          <Table.Body>
+            {orders.map((o) => (
+              <Table.Row key={o.id}>
+                <Table.Cell className="font-mono text-xs">
+                  #{o.id.slice(-6)}
+                </Table.Cell>
+                <Table.Cell className="text-ui-fg-subtle whitespace-nowrap text-xs">
+                  {orderDateTime(o.created_at)}
+                </Table.Cell>
+                {/* First card + a "+N more" tail, same summary the All Orders
+                    table shows. The full manifest lives in its Manage modal. */}
+                <Table.Cell>
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="truncate">
+                      {o.items[0]?.card?.name ??
+                        o.items[0]?.pull_id ??
+                        '—'}
+                    </span>
+                    {o.items.length > 1 && (
+                      <span className="text-ui-fg-subtle whitespace-nowrap text-xs">
+                        +{o.items.length - 1} more
+                      </span>
+                    )}
+                  </span>
+                </Table.Cell>
+                <Table.Cell className="text-right tabular-nums">
+                  {o.items.length}
+                </Table.Cell>
+                <Table.Cell>
+                  <StatusBadge color={deliveryTone(o.status)}>
+                    {deliveryStatusLabel(o.status)}
+                  </StatusBadge>
+                </Table.Cell>
+              </Table.Row>
+            ))}
+          </Table.Body>
+        </Table>
+      </div>
+      <Pager
+        page={page}
+        onPage={setPage}
+        pageSize={data.limit}
+        count={orders.length}
+        total={data.total}
+      />
+    </>
+  );
+};
+
+// Pack purchases half: source='pack', so reward-economy pulls (which are not
+// purchases) stay out — same filter the All Orders page applies.
+const PackPurchases = ({ customerId }: { customerId: string }) => {
+  const [page, setPage] = useState(0);
+  const { data, isError } = usePulls(page, 'pack', customerId);
+
+  if (isError) {
+    return (
+      <div className="border-t px-6 py-6">
+        <Text size="small" className="text-ui-fg-error">
+          Failed to load.
+        </Text>
+      </div>
+    );
+  }
+  return (
+    <div className="border-t">
+      <PullsTable
+        pulls={data?.pulls ?? null}
+        page={page}
+        onPage={setPage}
+        limit={data?.limit ?? 50}
+        total={data?.total ?? 0}
+        showCustomer={false}
+      />
+    </div>
+  );
+};
+
+// customerId is a plain string here, not `string | null` like the other tabs:
+// usePulls/useDeliveryOrders have no `enabled` flag, so a null id would fetch
+// the SITE-WIDE ledger under this player's header. The parent renders these two
+// only once the route param is in hand.
+const OrdersTab = ({ customerId }: { customerId: string }) => {
+  const { t } = useTranslation();
+  // Same two-value toggle as the All Orders page. Each half owns its own page
+  // offset, so flipping kinds doesn't carry an offset into the other table.
+  const [kind, setKind] = useState<'shipping' | 'purchases'>('shipping');
+
+  return (
+    <Container className="p-0">
+      <div className="px-6 py-4">
+        <Tabs
+          value={kind}
+          onValueChange={(v) => setKind(v as 'shipping' | 'purchases')}
+        >
+          <Tabs.List aria-label="Order kind">
+            <Tabs.Trigger value="shipping">
+              {t('players.ordersShipping')}
+            </Tabs.Trigger>
+            <Tabs.Trigger value="purchases">
+              {t('players.ordersPurchases')}
+            </Tabs.Trigger>
+          </Tabs.List>
+        </Tabs>
+      </div>
+      {kind === 'shipping' ? (
+        <ShippingOrders customerId={customerId} />
+      ) : (
+        <PackPurchases customerId={customerId} />
+      )}
+    </Container>
+  );
+};
+
+// The relocated Pull Ledger (spec D6): every pull this player has made, all
+// sources, buyback states included.
+const PullsTab = ({ customerId }: { customerId: string }) => {
+  const [page, setPage] = useState(0);
+  const { data, isError } = usePulls(page, undefined, customerId);
+
+  if (isError) {
+    return (
+      <Container className="p-0">
+        <div className="px-6 py-6">
+          <Text size="small" className="text-ui-fg-error">
+            Failed to load.
+          </Text>
+        </div>
+      </Container>
+    );
+  }
+  return (
+    <PullsTable
+      pulls={data?.pulls ?? null}
+      page={page}
+      onPage={setPage}
+      limit={data?.limit ?? 50}
+      total={data?.total ?? 0}
+      showCustomer={false}
+    />
   );
 };
 
@@ -1119,8 +1498,11 @@ const Customer360Page = () => {
           <Tabs value={tab} onValueChange={(v) => setTab(v as TabKey)}>
             <Tabs.List aria-label="Player detail sections">
               <Tabs.Trigger value="profile">{t('players.tabProfile')}</Tabs.Trigger>
+              <Tabs.Trigger value="lvl">{t('players.tabLvl')}</Tabs.Trigger>
               <Tabs.Trigger value="wallet">{t('players.tabWallet')}</Tabs.Trigger>
               <Tabs.Trigger value="vault">{t('players.tabVault')}</Tabs.Trigger>
+              <Tabs.Trigger value="orders">{t('players.tabOrders')}</Tabs.Trigger>
+              <Tabs.Trigger value="pulls">{t('players.tabPulls')}</Tabs.Trigger>
               <Tabs.Trigger value="history">{t('players.tabHistory')}</Tabs.Trigger>
             </Tabs.List>
           </Tabs>
@@ -1132,8 +1514,18 @@ const Customer360Page = () => {
           body would keep the previous player's table offset and — worse — the
           previous player's bank-form draft. */}
       {tab === 'profile' && <ProfileTab key={id} customerId={customerId} />}
+      {tab === 'lvl' && <LvlTab key={id} customerId={customerId} />}
       {tab === 'wallet' && <WalletTab key={id} customerId={customerId} />}
       {tab === 'vault' && <VaultTab key={id} customerId={customerId} />}
+      {/* Both take a non-null id — see the OrdersTab note. key={id} is what
+          makes their keepPreviousData safe: the body remounts on a customer
+          change, so there is no previous player's page to hold over. */}
+      {tab === 'orders' && customerId && (
+        <OrdersTab key={id} customerId={customerId} />
+      )}
+      {tab === 'pulls' && customerId && (
+        <PullsTab key={id} customerId={customerId} />
+      )}
       {tab === 'history' && (
         <HistoryTab
           treeQ={treeQ}

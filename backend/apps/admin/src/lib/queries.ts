@@ -112,13 +112,16 @@ export const useCards = (
     enabled: opts.enabled ?? true,
   });
 
+// `customerId` scopes the ledger to one player (the player-detail tabs). Blank
+// is OMITTED by getPulls, never sent as an empty param — the route 400s on one.
 export const usePulls = (
   page = 0,
   source?: 'pack' | 'reward',
+  customerId?: string,
 ): UseQueryResult<PullsResponse> =>
   useQuery({
-    queryKey: qk.pulls(page, source),
-    queryFn: () => getPulls(page, 50, source),
+    queryKey: qk.pulls(page, source, customerId),
+    queryFn: () => getPulls(page, 50, source, customerId),
     placeholderData: keepPreviousData,
   });
 
@@ -259,14 +262,17 @@ export const useCustomerPulls = (
     placeholderData: keepPreviousData,
   });
 
+// `customerId` scopes the table to one player. listDeliveryOrders takes `limit`
+// BEFORE it (4th arg), so the default 50 is passed explicitly here.
 export const useDeliveryOrders = (
   status?: DeliveryStatus,
   page = 0,
   q?: string,
+  customerId?: string,
 ): UseQueryResult<DeliveryOrdersPage> =>
   useQuery({
-    queryKey: qk.deliveryOrders(status, page, q),
-    queryFn: () => listDeliveryOrders(status, page, q),
+    queryKey: qk.deliveryOrders(status, page, q, customerId),
+    queryFn: () => listDeliveryOrders(status, page, q, 50, customerId),
     placeholderData: keepPreviousData,
   });
 
