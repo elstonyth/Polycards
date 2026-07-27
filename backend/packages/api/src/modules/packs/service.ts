@@ -687,6 +687,14 @@ class PacksModuleService extends MedusaService({
   // month. Months with no pack_open activity are omitted entirely (the HAVING),
   // so a top-up-only month never shows up as a zero row. Same integer-cent
   // idiom and index (customer_id, created_at) as creditSummary.
+  //
+  // KNOWN WART — a CROSS-MONTH reversal distorts BOTH months: reverseOpen writes
+  // its refund as a positive `pack_open` row stamped with the reversal's own
+  // created_at, so a March open reversed in April leaves March overstated and
+  // April negative. (Unlike creditSummary.vipSpendTotal, where the same rows net
+  // down one scalar and the distortion cancels.) Upgrade path when this matters:
+  // bucket a reversal by the reversed row's created_at, joining on the
+  // credit_transaction.source_transaction_id both rows already carry.
   @InjectManager()
   async spendReportForCustomer(
     customerId: string,
