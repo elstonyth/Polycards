@@ -26,6 +26,10 @@ import {
 import { createResetTokenSingleUseGuard } from './utils/reset-token-guard';
 import { rejectCustomerMetadata } from './utils/customer-metadata-guard';
 import { validateDeliverableAddress } from './utils/address-guard';
+import {
+  blockDisabledCustomerSession,
+  blockDisabledEmailpassLogin,
+} from './utils/disabled-guard';
 
 // Custom-route middleware. /store/* is NOT a default customer-protected prefix
 // (only /store/customers/me/* is), so every customer-owned route here must opt
@@ -222,6 +226,15 @@ export default defineMiddlewares({
       matcher: '/auth/*/emailpass/*',
       method: 'POST',
       middlewares: [authRateLimit],
+    },
+    {
+      // POLYCARD-BACK §4.2 login block: a disabled player is refused BEFORE the
+      // core route mints a token (401). Customer login only — an admin/member
+      // disable is a different lever. Unknown emails fall through untouched, so
+      // this is no account-existence oracle (see utils/disabled-guard.ts).
+      matcher: '/auth/customer/emailpass',
+      method: 'POST',
+      middlewares: [blockDisabledEmailpassLogin],
     },
     // Password-reset tokens are single-use: core validates the 15m JWT but
     // never invalidates it after a successful update, so a consumed link
@@ -547,6 +560,21 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      matcher: '/admin/customers/*/disable',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      matcher: '/admin/customers/*/enable',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      matcher: '/admin/customers/*/payout-details',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
       matcher: '/admin/commissions/*/reverse',
       method: 'POST',
       middlewares: [adminActionRateLimit],
@@ -630,6 +658,26 @@ export default defineMiddlewares({
       matcher: '/admin/avatar-frames',
       method: 'POST',
       middlewares: [adminActionRateLimit],
+    },
+    // POLYCARD-BACK §4.2 session block — LAST entry on purpose. Blocking login
+    // alone would leave every already-minted bearer (including a Google-minted
+    // one, whose callback this does not touch) working until it expired, so a
+    // disabled player is also cut off at the request door: any /store request
+    // carrying a disabled customer's verified bearer → 403.
+    //
+    // Why one blanket matcher is enough: the framework itself registers
+    // `app.use('/store', authenticate('customer', ['bearer','session'],
+    // { allowUnauthenticated: true }))` BEFORE any middleware from this file
+    // (router.js #applyAuthMiddleware), so req.auth_context is already
+    // populated whenever a valid bearer is present — no matter where the
+    // sorter places this entry — and is empty on public/anonymous store
+    // traffic, which the guard passes straight through. That also means this
+    // covers the framework-authed routes that have no entry in this array
+    // (/store/customers/me and its addresses), which per-matcher wiring would
+    // have missed.
+    {
+      matcher: '/store/*',
+      middlewares: [blockDisabledCustomerSession],
     },
   ],
 });

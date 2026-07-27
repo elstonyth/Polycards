@@ -69,6 +69,13 @@ const AUTH_RULES: ErrorRule[] = [
     'An account with this email already exists. Sign in with your password instead.',
   ],
   [/invalid email or password/i, 'Incorrect email or password.'],
+  // POLYCARD-BACK §4.2 — the backend blocks a disabled account at the emailpass
+  // token exchange. Keep the pattern tight (not a bare /disabled/i) so it can't
+  // hijack unrelated copy that merely contains the word.
+  [
+    /account has been disabled/i,
+    'This account has been disabled. Please contact support.',
+  ],
 ];
 
 async function exchangeToken(
