@@ -960,6 +960,8 @@ export interface AdminCustomerDetail {
 export const getCustomerDetail = (id: string) =>
   getJson<{ customer: AdminCustomerDetail }>(
     `/admin/customers/${encodeURIComponent(id)}`,
+  );
+
 // ── Epic 3 (Odds) ────────────────────────────────────────────────────────────
 
 // Medusa's NATIVE admin customer-groups API (no repo-side route). The prebuilt
