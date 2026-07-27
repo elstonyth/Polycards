@@ -107,6 +107,18 @@ const BRONZE: RtpSolveRow[] = [
   { card_id: 'mega-charizard-x', locked: false, rarity: 'Legendary', value: 9867.49, pct: 0 },
 ];
 
+// A pool where pass 0 floors one row (an Immortal so valuable that even its
+// forced MIN_PCT contributes huge EV) and pass 1 -- solving over the rows
+// still free -- is infeasible. Exercises the cascade's infeasible-band
+// branch on a pass AFTER at least one row has already floored, which the
+// single-pass Task 2 band test cannot reach (nothing floors there).
+const INFEASIBLE_AFTER_FLOOR: RtpSolveRow[] = [
+  { card_id: 'cheap-a', locked: false, rarity: 'Common', value: 20, pct: 0 },
+  { card_id: 'cheap-b', locked: false, rarity: 'Common', value: 40, pct: 0 },
+  { card_id: 'the-one', locked: false, rarity: 'Immortal', value: 1_000_000, pct: 0 },
+  { card_id: 'a-rare', locked: false, rarity: 'Rare', value: 300, pct: 0 },
+];
+
 describe('solveOddsForRtp — 1 bps floor', () => {
   it('never emits a chase row below the floor', () => {
     const res = solveOddsForRtp(BRONZE, 50, 0.7);
@@ -166,5 +178,33 @@ describe('solveOddsForRtp — 1 bps floor', () => {
     // Uncommon (weight 300) must stay above Rare (weight 150).
     expect(RARITY_WEIGHT.Uncommon).toBeGreaterThan(RARITY_WEIGHT.Rare);
     expect(pct('pw-jolteon')).toBeGreaterThan(pct('pw-gengar'));
+  });
+
+  it('scopes the infeasible-band bound to the rows still FREE on that pass, not the original group', () => {
+    // Pass 0 (free = {the-one, a-rare}): the-one's fair share (~0.00072%) is
+    // far below MIN_PCT, so it floors; a-rare's fair share (~0.108%) clears
+    // it easily and stays free. Pass 1 (free = {a-rare} only): the-one's
+    // forced floor EV alone (MIN_PCT/100 * 1,000,000 = RM 100) already
+    // exceeds the target EV (RM 37.5), so even 0% further chase mass
+    // overshoots -- infeasible on the low side.
+    const res = solveOddsForRtp(INFEASIBLE_AFTER_FLOOR, 50, 0.75);
+    expect(res.error).toMatch(/this pool reaches/);
+
+    const match = res.error!.match(
+      /this pool reaches RM ([\d.]+)-RM ([\d.]+) \(([\d.]+)%-([\d.]+)%\)/,
+    );
+    expect(match).not.toBeNull();
+    const maxEv = Number(match![2]);
+    const maxPct = Number(match![4]);
+
+    // Correct bound: flooredEv (RM 100, from the-one pinned at MIN_PCT) plus
+    // the remaining free mass valued at the FREE mean (a-rare alone, RM 300)
+    // -> ~RM 399.97 / ~799.94%. A regression back to using the pre-loop `vH`
+    // (the mean over {the-one, a-rare} BEFORE flooring, ~6920.53) would
+    // print ~RM 7019.84 / ~14039.68% instead -- off by ~18x, since it values
+    // the free mass as if the already-floored, far-more-valuable Immortal
+    // were still competing for it.
+    expect(maxEv).toBeCloseTo(399.97, 1);
+    expect(maxPct).toBeCloseTo(799.94, 1);
   });
 });

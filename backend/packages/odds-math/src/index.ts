@@ -550,7 +550,7 @@ export function solveOddsForRtp(
     const cFree = (targetEv - lockedEv - flooredEv - mFree * vC) / (vHFree - vC);
     if (cFree < 0 || cFree > mFree) {
       const a = lockedEv + flooredEv + mFree * vC;
-      const b = lockedEv + flooredEv + mFree * vH;
+      const b = lockedEv + flooredEv + mFree * vHFree;
       const minEv = Math.min(a, b);
       const maxEv = Math.max(a, b);
       bandError =
