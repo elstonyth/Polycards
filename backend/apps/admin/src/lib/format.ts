@@ -1,5 +1,34 @@
 // Shared display formatters for the gacha admin pages. Pure and dependency-free
-// so they can be unit-tested in a node environment (see format.test.ts).
+// so they can be unit-tested in a node environment (see format.test.ts). The
+// one import below is type-only, so it is erased at compile time and the node
+// test never loads admin-rest (which needs the injected __BACKEND_URL__).
+
+import type { DeliveryStatus } from './admin-rest';
+
+// Display labels only — state/API keep the raw lowercase values. This is the
+// OPERATOR surface: 'completed' reads "Completed" here, while the same status
+// is worded "delivered" to the customer (see delivery.ts). Shared rather than
+// per-page so the All Orders table and its packing slip can never drift.
+export const DELIVERY_STATUS_LABEL: Record<DeliveryStatus, string> = {
+  requested: 'Requested',
+  processed: 'Processed',
+  ready_to_ship: 'Ready to ship',
+  shipped: 'Shipped',
+  completed: 'Completed',
+  canceled: 'Canceled',
+};
+
+// Label for a status that came off the wire. Falls back to the raw token
+// because the delivery-order CHECK still accepts the pre-rename
+// 'packing'/'delivered' during the expand window (see
+// Migration20260727000000), so a rollback or PRE_DEPLOY skew can put a value
+// here that the six-key map has no entry for — and a bare lookup renders an
+// empty badge / empty packing slip, which reads as "the order is broken".
+// Use this for anything the API supplied; index DELIVERY_STATUS_LABEL directly
+// only for literals we control (the tab and select lists), which keeps the map
+// exhaustive so a seventh canonical status stays a compile error.
+export const deliveryStatusLabel = (status: string): string =>
+  DELIVERY_STATUS_LABEL[status as DeliveryStatus] ?? status;
 
 export const rm = (n: number | null): string =>
   n === null
@@ -42,6 +71,18 @@ export function timeAgo(iso: string, now: number = Date.now()): string {
   const hours = Math.floor(mins / 60);
   if (hours < 24) return `${hours}h ago`;
   return `${Math.floor(hours / 24)}d ago`;
+}
+
+// `dd-MM-yyyy hh:mm a` in the operator's local timezone — the order-table and
+// packing-slip date format. Hand-rolled rather than Intl because no locale
+// gives this exact shape (en-GB → slashes + lowercase am/pm, en-US → MM/dd),
+// and formatToParts costs more than the four lines below.
+export function orderDateTime(iso: string): string {
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return '—';
+  const p = (n: number) => String(n).padStart(2, '0');
+  const h = d.getHours();
+  return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()} ${p(h % 12 || 12)}:${p(d.getMinutes())} ${h < 12 ? 'AM' : 'PM'}`;
 }
 
 export const fmtPct = (n: number): string =>

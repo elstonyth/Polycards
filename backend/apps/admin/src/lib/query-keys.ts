@@ -5,7 +5,8 @@ export const qk = {
   pack: (slug: string) => ['admin', 'pack', slug] as const,
   packOdds: (slug: string) => ['admin', 'pack', slug, 'odds'] as const,
   cards: ['admin', 'cards'] as const,
-  pulls: (page: number) => ['admin', 'pulls', page] as const,
+  pulls: (page: number, source?: string) =>
+    ['admin', 'pulls', page, source ?? 'all'] as const,
   // 2-segment prefix — invalidates ALL pages of the pull ledger in one call
   pullsKey: ['admin', 'pulls'] as const,
   economy: ['admin', 'economy'] as const,
@@ -34,8 +35,8 @@ export const qk = {
   // 4-segment prefix — invalidates ALL depths of a customer's referral tree in one call
   referralTreeKey: (id: string) =>
     ['admin', 'customer', id, 'referral-tree'] as const,
-  deliveryOrders: (status: string | undefined, page: number) =>
-    ['admin', 'delivery-orders', status ?? 'all', page] as const,
+  deliveryOrders: (status: string | undefined, page: number, q?: string) =>
+    ['admin', 'delivery-orders', status ?? 'all', page, q ?? ''] as const,
   // 2-segment prefix — invalidates ALL delivery-order pages/filters in one call
   deliveryOrdersKey: ['admin', 'delivery-orders'] as const,
   deliveryOrder: (id: string) => ['admin', 'delivery-order', id] as const,

@@ -50,8 +50,9 @@ _Avoid_: inventory, collection, wallet
 
 **Delivery Order**:
 A customer's request to physically ship one or more vaulted Pulls, with its own
-`requested → packing → shipped → delivered → canceled` status. A shipment being
-_delivered_ is a different fact from a Pull being _delivered_ — do not conflate
+`requested → processed → ready_to_ship → shipped → completed` status (cancel is
+legal pre-ship). A shipment reaching _completed_ (the customer is told
+"delivered") is a different fact from a Pull being _delivered_ — do not conflate
 the two lifecycles.
 _Avoid_: order (a DeliveryOrder is not a Medusa checkout order)
 

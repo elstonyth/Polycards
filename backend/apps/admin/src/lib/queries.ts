@@ -18,6 +18,7 @@ import {
 } from './packs-api';
 import {
   adjustCustomerCredits,
+  bulkUpdateDeliveryOrders,
   createProductFromPriceCharting,
   deleteCard,
   deletePack,
@@ -30,6 +31,7 @@ import {
   getCustomerCommissions,
   getCustomerTransactions,
   getCustomerPulls,
+  getDeliveryOrder,
   getEconomyReport,
   getFxHistory,
   getFxRate,
@@ -64,6 +66,7 @@ import {
   updateDeliveryOrder,
   uploadImage,
   type AdminCommissionRow,
+  type AdminDeliveryOrder,
   type AvatarFramesView,
   type ChallengeSettingsDTO,
   type ChallengeStageDTO,
@@ -109,10 +112,13 @@ export const useCards = (
     enabled: opts.enabled ?? true,
   });
 
-export const usePulls = (page = 0): UseQueryResult<PullsResponse> =>
+export const usePulls = (
+  page = 0,
+  source?: 'pack' | 'reward',
+): UseQueryResult<PullsResponse> =>
   useQuery({
-    queryKey: qk.pulls(page),
-    queryFn: () => getPulls(page),
+    queryKey: qk.pulls(page, source),
+    queryFn: () => getPulls(page, 50, source),
     placeholderData: keepPreviousData,
   });
 
@@ -250,11 +256,23 @@ export const useCustomerPulls = (
 export const useDeliveryOrders = (
   status?: DeliveryStatus,
   page = 0,
+  q?: string,
 ): UseQueryResult<DeliveryOrdersPage> =>
   useQuery({
-    queryKey: qk.deliveryOrders(status, page),
-    queryFn: () => listDeliveryOrders(status, page),
+    queryKey: qk.deliveryOrders(status, page, q),
+    queryFn: () => listDeliveryOrders(status, page, q),
     placeholderData: keepPreviousData,
+  });
+
+// One order by id. The packing-slip view mounts one of these per selected id so
+// a stale/deleted id fails inside its own block instead of blanking the sheet.
+export const useDeliveryOrder = (
+  id: string,
+): UseQueryResult<AdminDeliveryOrder> =>
+  useQuery({
+    queryKey: qk.deliveryOrder(id),
+    queryFn: () => getDeliveryOrder(id),
+    enabled: !!id,
   });
 
 export const useFxRate = (): UseQueryResult<FxRateState> =>
@@ -528,6 +546,17 @@ export const useUpdateDeliveryOrder = () => {
       }),
     // Status filters + pages vary, so drop the whole delivery-orders namespace.
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.deliveryOrdersKey }),
+  });
+};
+
+export const useBulkUpdateDeliveryOrders = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { ids: string[]; status: DeliveryStatus }) =>
+      bulkUpdateDeliveryOrders(vars.ids, vars.status),
+    // Partial success is the contract, so invalidate on SETTLE (not success):
+    // a throw here can still leave earlier ids in the batch already moved.
+    onSettled: () => qc.invalidateQueries({ queryKey: qk.deliveryOrdersKey }),
   });
 };
 

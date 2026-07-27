@@ -3280,7 +3280,7 @@ class PacksModuleService extends MedusaService({
       trackingNumber: string | null;
       /** Replaces the proof-photo set wholesale when provided. */
       proofImages?: string[];
-      /** Every pull the order covers — flipped on delivered/canceled. */
+      /** Every pull the order covers — flipped on completed/canceled. */
       pullIds: string[];
     },
     @MedusaContext() sharedContext: Context = {},
@@ -3304,7 +3304,7 @@ class PacksModuleService extends MedusaService({
 
     // Validate against the under-lock read — the ONLY status that matters.
     const verdict = validateDeliveryStatusTransition(
-      order.status as DeliveryStatus,
+      order.status,
       input.to,
       !!input.trackingNumber,
     );
@@ -3330,21 +3330,22 @@ class PacksModuleService extends MedusaService({
     };
     if (input.proofImages !== undefined) patch.proof_images = input.proofImages;
     if (input.to === 'shipped') patch.shipped_at = new Date();
-    if (input.to === 'delivered') patch.delivered_at = new Date();
+    // delivered_at doubles as completed_at post-rename.
+    if (input.to === 'completed') patch.delivered_at = new Date();
     await this.updateDeliveryOrders([patch], sharedContext);
 
-    // Pull side-effects ride the SAME transaction: delivered → delivered
-    // (terminal); canceled → back to the vault. The guarded flip (WHERE
-    // status='delivering') throwing rolls back the order write with it.
+    // Pull side-effects ride the SAME transaction: completed → delivered
+    // (PULL enum, terminal); canceled → back to the vault. The guarded flip
+    // (WHERE status='delivering') throwing rolls back the order write with it.
     if (
       input.pullIds.length &&
-      (input.to === 'delivered' || input.to === 'canceled')
+      (input.to === 'completed' || input.to === 'canceled')
     ) {
       await this.transitionPullStatus(
         {
           ids: input.pullIds,
           from: 'delivering',
-          to: input.to === 'delivered' ? 'delivered' : 'vaulted',
+          to: input.to === 'completed' ? 'delivered' : 'vaulted',
         },
         sharedContext,
       );

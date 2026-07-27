@@ -462,6 +462,7 @@ export type Routes = {
         };
         deliveryOrders: typeof import("../../src/api/admin/delivery-orders/route") & {
             $id: typeof import("../../src/api/admin/delivery-orders/[id]/route");
+            bulk: typeof import("../../src/api/admin/delivery-orders/bulk/route");
         };
         economy: typeof import("../../src/api/admin/economy/route");
         gacha: {
@@ -607,6 +608,7 @@ export type Routes = {
             $id: {
                 read: typeof import("../../src/api/store/notifications/[id]/read/route");
             };
+            readAll: typeof import("../../src/api/store/notifications/read-all/route");
         };
         packs: typeof import("../../src/api/store/packs/route") & {
             $slug: typeof import("../../src/api/store/packs/[slug]/route") & {
@@ -629,6 +631,7 @@ export type Routes = {
             $id: {
                 reveal: typeof import("../../src/api/store/pulls/[id]/reveal/route");
             };
+            closeInstant: typeof import("../../src/api/store/pulls/close-instant/route");
             recent: typeof import("../../src/api/store/pulls/recent/route");
         };
         referral: typeof import("../../src/api/store/referral/route");

@@ -124,7 +124,7 @@ export const updateDeliveryOrderInvoke = async (
   });
 
   const prevPullStatus: 'delivering' | null =
-    pullIds.length && (input.status === 'delivered' || input.status === 'canceled')
+    pullIds.length && (input.status === 'completed' || input.status === 'canceled')
       ? 'delivering'
       : null;
   return new StepResponse({ order_id: order.id, status: input.status }, {

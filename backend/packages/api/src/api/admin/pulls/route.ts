@@ -33,12 +33,25 @@ export async function GET(
     { defaultLimit: 50, maxLimit: 100 },
   );
 
+  // Optional ?source= filter (pack | reward). The All Orders "Pack purchases"
+  // tab passes source=pack so reward-economy pulls never render as purchases;
+  // the Pull Ledger stays all-source. Rollups stay UNFILTERED on purpose —
+  // they are global stats, not a view of the current page.
+  const rawSource = req.query.source;
+  const source =
+    typeof rawSource === "string" && rawSource.length ? rawSource : undefined;
+  if (source !== undefined && source !== "pack" && source !== "reward") {
+    res.status(400).json({ message: "source must be 'pack' or 'reward'" });
+    return;
+  }
+  const ledgerFilter = source ? { source } : {};
+
   const allPulls = await packs.listPulls(
     {},
     { order: { rolled_at: "DESC" }, take: ROLLUP_WINDOW }
   );
   const [ledger, total] = await packs.listAndCountPulls(
-    {},
+    ledgerFilter,
     { order: { rolled_at: "DESC" }, skip: offset, take: limit }
   );
 

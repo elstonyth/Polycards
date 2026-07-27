@@ -100,8 +100,10 @@ export async function listEligibleProducts(): Promise<EligibleProduct[]> {
 
 // ── Pull ledger ───────────────────────────────────────────────────────────────
 
-export const getPulls = (page = 0, limit = 50) =>
-  getJson<PullsResponse>(`/admin/pulls?limit=${limit}&offset=${page * limit}`);
+export const getPulls = (page = 0, limit = 50, source?: 'pack' | 'reward') =>
+  getJson<PullsResponse>(
+    `/admin/pulls?limit=${limit}&offset=${page * limit}${source ? `&source=${source}` : ''}`,
+  );
 
 // ── Customer support view ────────────────────────────────────────────────────
 
@@ -469,9 +471,10 @@ export const getFxHistory = () =>
 
 export type DeliveryStatus =
   | 'requested'
-  | 'packing'
+  | 'processed'
+  | 'ready_to_ship'
   | 'shipped'
-  | 'delivered'
+  | 'completed'
   | 'canceled';
 
 export interface AdminDeliveryItem {
@@ -516,6 +519,7 @@ export interface DeliveryOrdersPage {
 export async function listDeliveryOrders(
   status?: DeliveryStatus,
   page = 0,
+  q?: string,
   limit = 50,
 ): Promise<DeliveryOrdersPage> {
   const params = new URLSearchParams({
@@ -523,8 +527,22 @@ export async function listDeliveryOrders(
     offset: String(page * limit),
   });
   if (status) params.set('status', status);
+  // Id-substring search; ANDs with ?status= server-side. The backend rejects
+  // anything over 64 chars, so don't send a longer one.
+  if (q) params.set('q', q.slice(0, 64));
   return getJson<DeliveryOrdersPage>(`/admin/delivery-orders?${params}`);
 }
+
+// Mark up to 100 orders with one status. Partial success is the contract:
+// `skipped` carries the refusal (or the benign `already <status>`) per id.
+export const bulkUpdateDeliveryOrders = (
+  ids: string[],
+  status: DeliveryStatus,
+) =>
+  postJson<{ updated: string[]; skipped: { id: string; reason: string }[] }>(
+    '/admin/delivery-orders/bulk',
+    { ids, status },
+  );
 
 export async function getDeliveryOrder(
   id: string,

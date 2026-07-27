@@ -22,6 +22,7 @@ export const AdminActionAudit = model
       'vip_levels',
       'challenge_stages',
       'challenge_settings',
+      'delivery_order',
     ]),
     entity_id: model.text(),
     action: model.enum([
@@ -41,6 +42,7 @@ export const AdminActionAudit = model
       'edit_avatar_frames',
       'replace',
       'edit',
+      'bulk_status',
     ]),
     before: model.json().nullable(),
     after: model.json().nullable(),

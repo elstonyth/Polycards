@@ -28,12 +28,21 @@ const pull = (i: number) => ({
 
 function mkScope(totalPulls: number) {
   const all = Array.from({ length: totalPulls }, (_, i) => pull(i));
+  // Filters each list call actually received — the ?source= tests assert the
+  // ledger is filtered while the rollup window stays global.
+  const seen: { rollup?: any; ledger?: any } = {};
   const packs = {
-    listPulls: async (_f: any, o: any) => all.slice(0, o?.take ?? all.length),
-    listAndCountPulls: async (_f: any, o: any) => [
-      all.slice(o?.skip ?? 0, (o?.skip ?? 0) + (o?.take ?? 50)),
-      all.length,
-    ],
+    listPulls: async (f: any, o: any) => {
+      seen.rollup = f;
+      return all.slice(0, o?.take ?? all.length);
+    },
+    listAndCountPulls: async (f: any, o: any) => {
+      seen.ledger = f;
+      return [
+        all.slice(o?.skip ?? 0, (o?.skip ?? 0) + (o?.take ?? 50)),
+        all.length,
+      ];
+    },
     listCards: async () => [
       { handle: 'card-a', name: 'Card A', market_value: 10, image: 'x.png' },
     ],
@@ -47,6 +56,7 @@ function mkScope(totalPulls: number) {
     listFxRates: async () => [],
   };
   return {
+    seen,
     resolve: (key: string) =>
       typeof key === 'string' && key.toLowerCase().includes('customer')
         ? { listCustomers: async () => [{ id: 'cus_1', email: 'a@b.c' }] }
@@ -78,5 +88,32 @@ describe('GET /admin/pulls pagination', () => {
     await expect(
       GET({ scope: mkScope(1), query: { limit: '500' } } as any, res),
     ).rejects.toThrow(/limit/);
+  });
+
+  // ?source= backs the All Orders "Pack purchases" tab: reward-economy pulls
+  // must not render as purchases.
+  it('passes ?source= through to the ledger query', async () => {
+    const { res } = mkRes();
+    const scope = mkScope(3);
+    await GET({ scope, query: { source: 'pack' } } as any, res);
+    expect(scope.seen.ledger).toEqual({ source: 'pack' });
+  });
+
+  it('leaves the rollup window unfiltered when ?source= is set', async () => {
+    const { res } = mkRes();
+    const scope = mkScope(3);
+    await GET({ scope, query: { source: 'pack' } } as any, res);
+    // Rollups are global stats, not a view of the current page.
+    expect(scope.seen.rollup).toEqual({});
+  });
+
+  it('rejects an unknown ?source=', async () => {
+    const { res, out } = mkRes();
+    const scope = mkScope(3);
+    await GET({ scope, query: { source: 'bogus' } } as any, res);
+    expect(out.status).toBe(400);
+    expect(out.body.message).toMatch(/source/i);
+    // Bailed before touching the ledger.
+    expect(scope.seen.ledger).toBeUndefined();
   });
 });

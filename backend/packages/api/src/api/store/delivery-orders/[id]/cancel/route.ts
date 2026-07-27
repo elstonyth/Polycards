@@ -7,6 +7,7 @@ import PacksModuleService from '../../../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../../../modules/packs';
 import { updateDeliveryOrderWorkflow } from '../../../../../workflows/update-delivery-order';
 import { serializeDeliveryOrders } from '../../../../../modules/packs/delivery-view';
+import { CUSTOMER_STATUS_WORD } from '../../../../../modules/packs/delivery';
 
 // POST /store/delivery-orders/:id/cancel — the customer cancels their OWN
 // delivery while it is still pre-ship. The covered pulls flip
@@ -35,12 +36,18 @@ export async function POST(
 
   // Only a pre-ship order is customer-cancelable. Give an actionable message
   // rather than a bare transition error.
-  if (order.status !== 'requested' && order.status !== 'packing') {
+  // 'packing' = legacy expand-window token; ALLOWED routes packing -> canceled,
+  // so the customer window must agree until the contract migration.
+  const CANCELABLE = ['requested', 'processed', 'ready_to_ship', 'packing'];
+  if (!CANCELABLE.includes(order.status)) {
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
       order.status === 'canceled'
         ? 'This delivery is already canceled.'
-        : `This delivery is already ${order.status} and can no longer be canceled — please contact support.`,
+        : // Human wording, never the raw enum: "completed" is operator
+          // vocabulary and "ready_to_ship" is snake_case (same rule as the
+          // address-edit lock).
+          `This delivery is already ${CUSTOMER_STATUS_WORD[order.status] ?? order.status} and can no longer be canceled — please contact support.`,
     );
   }
 

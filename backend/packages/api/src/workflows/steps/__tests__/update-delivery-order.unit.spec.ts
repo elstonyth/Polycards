@@ -55,6 +55,25 @@ describe('updateDeliveryOrderInvoke', () => {
     expect(res.output).toEqual({ order_id: 'do_1', status: 'canceled' });
   });
 
+  it('marks compensation to revert covered pulls to delivering on a completed transition', async () => {
+    // Guards the line-127 rename (input.status === 'delivered' -> 'completed'):
+    // without it, a failed completed transition's compensation would silently
+    // skip restoring the pulls to 'delivering' (prevPullStatus stays null).
+    const packs = makePacks({
+      transitionDeliveryOrderStatus: jest.fn(async () => ({
+        status: 'completed',
+      })),
+    });
+    const res = await updateDeliveryOrderInvoke(
+      { order_id: 'do_1', status: 'completed' },
+      { container: containerFor(packs) },
+    );
+    expect(res.compensateInput).toMatchObject({
+      pullIds: ['pull_1', 'pull_2'],
+      prevPullStatus: 'delivering',
+    });
+  });
+
   it('a refused transition propagates with NO revert write from the step', async () => {
     const packs = makePacks({
       transitionDeliveryOrderStatus: jest.fn(async () => {
