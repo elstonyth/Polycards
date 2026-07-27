@@ -322,3 +322,47 @@ export function computeSetWeights(entries: SetEntry[]): SetWeightsResult {
     })),
   };
 }
+
+// ── Rarity proposal (auto-split support) ────────────────────────────────────
+// Tier a card by its value as a MULTIPLE OF THE TICKET, so the mapping is
+// explainable and stays stable as prices drift. Pure: the caller supplies
+// display prices (FMV x fx x markup); odds-math never reads the DB.
+
+export interface RarityProposalRow {
+  card_id: string;
+  /** MYR display price (FMV x fx x per-card multiplier). */
+  value: number;
+}
+
+export interface RarityProposal {
+  card_id: string;
+  rarity: OddsRarity;
+}
+
+// EXCLUSIVE upper bound of each tier as a multiple of pack price; anything at
+// or above the last bound is Immortal.
+const RARITY_BANDS: { max: number; rarity: OddsRarity }[] = [
+  { max: 2, rarity: 'Common' },
+  { max: 10, rarity: 'Uncommon' },
+  { max: 50, rarity: 'Rare' },
+  { max: 150, rarity: 'Mythical' },
+  { max: 400, rarity: 'Legendary' },
+];
+
+export function proposeRarities(
+  rows: RarityProposalRow[],
+  packPrice: number,
+): RarityProposal[] {
+  const priceOk = Number.isFinite(packPrice) && packPrice > 0;
+  return (Array.isArray(rows) ? rows : []).map((row) => {
+    const value = Number(row.value);
+    // Unusable inputs degrade to Common rather than throwing — a stale form
+    // must not break the editor's preview.
+    if (!priceOk || !Number.isFinite(value) || value < 0) {
+      return { card_id: row.card_id, rarity: 'Common' as OddsRarity };
+    }
+    const multiple = value / packPrice;
+    const band = RARITY_BANDS.find((b) => multiple < b.max);
+    return { card_id: row.card_id, rarity: band ? band.rarity : 'Immortal' };
+  });
+}
