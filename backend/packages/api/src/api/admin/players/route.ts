@@ -32,7 +32,7 @@ export async function GET(
   // the set, so this holds; revisit only if a page ever short-counts.
   const [page, total] = await customers.listAndCountCustomers(
     q ? { q } : {},
-    { skip: offset, take: limit, order: { created_at: 'DESC' }, relations: ['groups'] },
+    { skip: offset, take: limit, order: { created_at: 'DESC', id: 'DESC' }, relations: ['groups'] },
   );
   const ids = page.map((c) => c.id);
   const fx = await resolveFxRate(packs);

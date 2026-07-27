@@ -9,7 +9,7 @@ const PASSWORD = 'payout-details-test-password-1'; // gitleaks:allow
 const ADMIN_EMAIL = 'payout-details@test.dev';
 
 const BANK_MSG =
-  'bank_account_number must be 1–34 chars of digits, spaces or hyphens.';
+  'bank_account_number must be 1–34 chars of digits, spaces or hyphens, with at least one digit.';
 
 medusaIntegrationTestRunner({
   inApp: true,
@@ -134,6 +134,8 @@ medusaIntegrationTestRunner({
             BANK_MSG,
           ],
           [{ bank_name: 'Maybank', bank_account_number: 'MY12ABC' }, BANK_MSG],
+          // digit-free but regex-legal chars (CodeRabbit: zero-digit acceptance)
+          [{ bank_name: 'Maybank', bank_account_number: '- -' }, BANK_MSG],
           [{ bank_name: 'Maybank', bank_account_number: 12345 }, BANK_MSG],
           // holder over 100
           [

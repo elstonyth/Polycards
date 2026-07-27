@@ -17,7 +17,7 @@ type Details = {
 
 // Digits, spaces and hyphens only — the formats banks actually print. Applied
 // to the TRIMMED value, so a whitespace-only number can't slip past the regex.
-const ACCOUNT_NUMBER = /^[0-9 -]+$/;
+const ACCOUNT_NUMBER = /^(?=.*[0-9])[0-9 -]+$/;
 
 // GET /admin/customers/:id/payout-details — the manual-cashout bank destination
 // (POLYCARD-BACK §4.3). Admin-only by the framework's /admin auth guard; these
@@ -65,7 +65,7 @@ export async function POST(
   ) {
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
-      'bank_account_number must be 1–34 chars of digits, spaces or hyphens.',
+      'bank_account_number must be 1–34 chars of digits, spaces or hyphens, with at least one digit.',
     );
   }
   // Optional: absent, non-string or blank all normalize to null (one stored

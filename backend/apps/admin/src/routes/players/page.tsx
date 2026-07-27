@@ -118,7 +118,9 @@ const PlayersPage = () => {
           </div>
         ) : data.players.length === 0 ? (
           <div className="border-t px-6 py-8">
-            <Text className="text-ui-fg-subtle">{t('players.empty')}</Text>
+            <Text className="text-ui-fg-subtle">
+              {q ? t('players.noResults') : t('players.empty')}
+            </Text>
           </div>
         ) : (
           <div
@@ -288,7 +290,10 @@ const PlayersPage = () => {
 
           <Prompt.Footer>
             <Prompt.Cancel>{t('players.cancel')}</Prompt.Cancel>
-            <Prompt.Action onClick={applyDisable} disabled={!reason.trim()}>
+            <Prompt.Action
+              onClick={applyDisable}
+              disabled={!reason.trim() || setDisabled.isPending}
+            >
               {t('players.confirm')}
             </Prompt.Action>
           </Prompt.Footer>

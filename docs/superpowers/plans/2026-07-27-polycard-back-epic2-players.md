@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A Players admin surface: an All Players list with batched per-player aggregates and an enable/disable switch that blocks login, a six-tab Player detail (Profile with new bank fields, LVL, Wallet, Vault, Orders, Pulls), and the Pull Ledger relocated from the sidebar into the Player detail.
+**Goal:** A Players admin surface: an All Players list with batched per-player aggregates and an enable/disable switch that blocks login, a seven-tab Player detail (Profile with new bank fields, LVL, Wallet, Vault, Orders, Pulls, History), and the Pull Ledger relocated from the sidebar into the Player detail.
 
 **Architecture:** Backend gains a `disabled` flag on the existing `customer_account_state` model (enforced by two auth guards), a batched `playersOverview` aggregate (GROUP BY SQL, `enrichReferralNodes` pattern), a new `player_payout_details` model, and small additive filters on existing admin routes. The admin app gains a new Players list page (the repo has NO customers list page today — the sidebar "Customers" entry is the prebuilt `@mercurjs/admin` bundle) and a tabbed rework of the existing `routes/customers/[id]/page.tsx` Customer-360 page. "Players" is a UI/i18n rename only; backend keeps Medusa `customer` naming and URLs stay `/customers/:id`.
 

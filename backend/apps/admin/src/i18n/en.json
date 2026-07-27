@@ -449,6 +449,7 @@
     "date": "Date",
     "items": "Items",
     "empty": "No players yet.",
+    "noResults": "No players match that search.",
     "loadError": "Could not load players."
   }
 }

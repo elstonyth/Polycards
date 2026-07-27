@@ -1097,11 +1097,17 @@ const HistoryTab = ({
               {t('customer360.accountStateTitle')}
             </Text>
             <div className="flex items-center gap-3">
-              {accountState.frozen ? (
+              {accountState.frozen && (
                 <Badge size="small" color="red">
                   {t('customer360.accountStateFrozen')}
                 </Badge>
-              ) : (
+              )}
+              {accountState.disabled && (
+                <Badge size="small" color="red">
+                  {t('players.disabled')}
+                </Badge>
+              )}
+              {!accountState.frozen && !accountState.disabled && (
                 <Badge size="small" color="green">
                   {t('customer360.accountStateActive')}
                 </Badge>
@@ -1122,6 +1128,18 @@ const HistoryTab = ({
             {accountState.freeze_reason && (
               <Text size="small" className="text-ui-fg-subtle mt-1">
                 &ldquo;{accountState.freeze_reason}&rdquo;
+              </Text>
+            )}
+            {accountState.disabled && accountState.disabled_at && (
+              <Text size="small" className="text-ui-fg-subtle mt-1">
+                {t('customer360.accountStateSince', {
+                  date: new Date(accountState.disabled_at).toLocaleDateString('en-US'),
+                })}
+              </Text>
+            )}
+            {accountState.disabled && accountState.disabled_reason && (
+              <Text size="small" className="text-ui-fg-subtle mt-1">
+                &ldquo;{accountState.disabled_reason}&rdquo;
               </Text>
             )}
           </div>
