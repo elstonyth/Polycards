@@ -32,6 +32,13 @@ export const PackOdds = model
     // locked rows keep their admin-set % verbatim on every save; unlocked rows
     // split the remaining (10000 − Σlocked) bps evenly. Phase 6b.
     locked: model.boolean().default(false),
+    // Win-rate sets 2 and 3 (POLYCARD-BACK §2.4 / D2). Basis points like
+    // `weight` (set 1). NULL = "inherit the previous set" PER CARD (2→1, 3→2)
+    // — resolution lives in odds-sets.ts weightForSet(). After any save, every
+    // set's RESOLVED weights sum to 10000 (save-pack-odds re-balances all
+    // three sets). `locked` is shared across sets; only the pinned % differs.
+    weight_2: model.number().nullable(),
+    weight_3: model.number().nullable(),
     // Admin-picked "Top Hits" display order (display only, no effect on the
     // draw): 1 renders leftmost on the pack page, then 2, 3, … null = not a
     // Top Hit. No ordered rows on a pack ⇒ the storefront HIDES the section
