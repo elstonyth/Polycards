@@ -366,3 +366,168 @@ export function proposeRarities(
     return { card_id: row.card_id, rarity: band ? band.rarity : 'Immortal' };
   });
 }
+
+// ── Target-RTP auto-split (POLYCARD-BACK auto-split spec) ───────────────────
+// Solve a single CHASE BUDGET `c` — the total probability mass across unlocked
+// non-Common rows. Inside the budget the rarity ladder's relative proportions
+// are preserved exactly; unlocked Commons absorb the rest. EV is LINEAR in `c`,
+// so this is a closed form, not a search.
+//
+// Rejected alternative: exponentiating the ladder. It hits the target but
+// collapses the tail (bronze-pack needs k ~ 6.15, pushing Legendary to 1 in
+// 4 trillion), which defeats the point of a chase card.
+
+/** Smallest storable non-zero win rate: 1 bps. */
+export const MIN_PCT = 100 / TOTAL_BPS;
+
+export interface RtpSolveRow {
+  card_id: string;
+  locked: boolean;
+  rarity: string;
+  /** MYR display price (FMV x fx x per-card multiplier). */
+  value: number;
+  /** Pinned win % (0-100). Read ONLY when `locked`. */
+  pct: number;
+}
+
+export interface FlooredRow {
+  card_id: string;
+  /** The rate the solve wanted (%), below the 1 bps floor. */
+  fairPct: number;
+  /** What it was pinned to instead — always MIN_PCT. */
+  appliedPct: number;
+}
+
+export interface RtpSolveResult {
+  /** Non-null => do NOT apply. */
+  error: string | null;
+  /** Win % (0-100) per card, INPUT ORDER. Empty when `error` is set. */
+  computed: { card_id: string; pct: number }[];
+  /** Chase rows pinned up to the floor. Empty when nothing floored. */
+  floored: FlooredRow[];
+  /** Tiers whose every chase row sits at the floor (only when >= 2 tiers). */
+  tierCollapse: OddsRarity[];
+  /** Achieved RTP as a FRACTION (0.703 = 70.3%); null when `error`. */
+  achievedRtp: number | null;
+}
+
+const round2 = (n: number): number => Math.round(n * 100) / 100;
+
+/** Ladder-weighted mean value; 0 for an empty group. */
+const ladderMean = (rows: RtpSolveRow[]): number => {
+  const w = rows.reduce((s, r) => s + rarityWeight(r.rarity), 0);
+  if (w <= 0) return 0;
+  return rows.reduce((s, r) => s + rarityWeight(r.rarity) * r.value, 0) / w;
+};
+
+/** Spread `c` over the free chase rows and `M - c` over the absorbers. */
+const distribute = (
+  all: RtpSolveRow[],
+  chaseFree: RtpSolveRow[],
+  absorbers: RtpSolveRow[],
+  fixedPct: Map<string, number>,
+  c: number,
+  M: number,
+): { card_id: string; pct: number }[] => {
+  const wH = chaseFree.reduce((s, r) => s + rarityWeight(r.rarity), 0);
+  const wC = absorbers.reduce((s, r) => s + rarityWeight(r.rarity), 0);
+  const byId = new Map<string, number>(fixedPct);
+  for (const r of chaseFree) {
+    byId.set(r.card_id, wH > 0 ? (100 * c * rarityWeight(r.rarity)) / wH : 0);
+  }
+  for (const r of absorbers) {
+    byId.set(r.card_id, wC > 0 ? (100 * (M - c) * rarityWeight(r.rarity)) / wC : 0);
+  }
+  return all.map((r) => ({ card_id: r.card_id, pct: byId.get(r.card_id) ?? 0 }));
+};
+
+const rtpOf = (
+  computed: { card_id: string; pct: number }[],
+  byId: Map<string, RtpSolveRow>,
+  packPrice: number,
+): number =>
+  computed.reduce(
+    (s, c) => s + (c.pct / 100) * (byId.get(c.card_id)?.value ?? 0),
+    0,
+  ) / packPrice;
+
+export function solveOddsForRtp(
+  rows: RtpSolveRow[],
+  packPrice: number,
+  targetRtp: number,
+): RtpSolveResult {
+  const fail = (error: string): RtpSolveResult => ({
+    error,
+    computed: [],
+    floored: [],
+    tierCollapse: [],
+    achievedRtp: null,
+  });
+
+  const safe = Array.isArray(rows) ? rows : [];
+  if (safe.length === 0) return fail('No cards to configure.');
+  if (!Number.isFinite(packPrice) || packPrice <= 0) {
+    return fail('Pack price must be greater than 0 to solve for RTP.');
+  }
+  if (!Number.isFinite(targetRtp) || targetRtp <= 0) {
+    return fail('Target RTP must be greater than 0%.');
+  }
+  if (safe.some((r) => !Number.isFinite(r.value) || r.value < 0)) {
+    return fail('Every card needs a value of 0 or more.');
+  }
+
+  const locked = safe.filter((r) => r.locked);
+  const chase = safe.filter((r) => !r.locked && r.rarity !== 'Common');
+  const absorbers = safe.filter((r) => !r.locked && r.rarity === 'Common');
+
+  if (absorbers.length === 0) {
+    return fail(
+      'No unlocked Common card to absorb the remainder. Set one card to Common and unlock it.',
+    );
+  }
+  if (chase.length === 0) {
+    return fail('No unlocked non-Common card to give a chase budget to.');
+  }
+
+  const lockedMass = locked.reduce((s, r) => s + r.pct / 100, 0);
+  const M = 1 - lockedMass;
+  if (M <= 0) {
+    return fail('Locked win rates already use the full 100%. Unlock a card to auto-split.');
+  }
+  const lockedEv = locked.reduce((s, r) => s + (r.pct / 100) * r.value, 0);
+
+  const targetEv = targetRtp * packPrice;
+  const vC = ladderMean(absorbers);
+  const vH = ladderMean(chase);
+  if (vH === vC) {
+    return fail(
+      'Chase and Common cards have the same average value, so no split changes the RTP.',
+    );
+  }
+
+  const c = (targetEv - lockedEv - M * vC) / (vH - vC);
+  if (c < 0 || c > M) {
+    const a = lockedEv + M * vC;
+    const b = lockedEv + M * vH;
+    const minEv = Math.min(a, b);
+    const maxEv = Math.max(a, b);
+    return fail(
+      `Target ${round2(targetRtp * 100)}% needs EV RM ${round2(targetEv)}; ` +
+        `this pool reaches RM ${round2(minEv)}-RM ${round2(maxEv)} ` +
+        `(${round2((minEv / packPrice) * 100)}%-${round2((maxEv / packPrice) * 100)}%). ` +
+        'Lower the target, raise the price, or change the pool.',
+    );
+  }
+
+  const fixedPct = new Map<string, number>(locked.map((r) => [r.card_id, r.pct]));
+  const computed = distribute(safe, chase, absorbers, fixedPct, c, M);
+  const byId = new Map(safe.map((r) => [r.card_id, r]));
+
+  return {
+    error: null,
+    computed,
+    floored: [],
+    tierCollapse: [],
+    achievedRtp: rtpOf(computed, byId, packPrice),
+  };
+}
