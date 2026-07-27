@@ -36,6 +36,11 @@ export const Pack = model.define("pack", {
   // from the vault/inventory always pay the FLAT rate — no per-pack vault rate.
   // in_stock=false renders a greyed "Out of Stock" tile on /claw.
   buyback_percent: model.number().default(90),
+  // Target RTP for the odds auto-split, in BASIS POINTS (7000 = 70%). Integer
+  // via model.number() on purpose: model.bigNumber() is two columns (numeric +
+  // a raw_* jsonb sidecar) and a hand-written migration that omits the raw_
+  // half passes mocked tests then fails on the first real insert.
+  target_rtp_bps: model.number().default(7000),
   in_stock: model.boolean().default(true),
   rank: model.number().default(0),
   status: model.enum(["active", "draft"]).default("active"),

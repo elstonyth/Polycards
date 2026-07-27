@@ -159,6 +159,7 @@ export async function GET(
       status: pack.status,
       // The editor's live RTP readout is Σ(pct × price) / price.
       price: toMoney(pack.price),
+      target_rtp_bps: pack.target_rtp_bps ?? 7000,
       group,
     },
     odds: rows,
@@ -202,6 +203,18 @@ const setPct = (
   }
   return v as number;
 };
+
+// Optional on every odds save: ABSENT means "leave the stored target alone".
+// Bounds are wide (0.01% - 10000%) because a target above 100% is a legitimate
+// loss-leader promo; only nonsense is rejected.
+export function coerceTargetRtpBps(raw: unknown): number | undefined {
+  const v = (raw as Record<string, unknown>)?.target_rtp_bps;
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > 1_000_000) {
+    bad(`'target_rtp_bps' must be an integer between 1 and 1000000.`);
+  }
+  return v as number;
+}
 
 /**
  * Coerce the POST body's `entries` to the workflow input shape, rejecting
@@ -256,10 +269,21 @@ export async function POST(
   const { slug } = req.params;
   const body = (req.body ?? {}) as SaveBody;
   const entries = coerceOddsEntries(body.entries);
+  // Coerced/validated BEFORE the workflow runs, so a bad target 400s without
+  // writing any odds (see coerceTargetRtpBps above `bad`'s throw).
+  const targetRtpBps = coerceTargetRtpBps(req.body ?? {});
 
   const { result } = await savePackOddsWorkflow(req.scope).run({
     input: { pack_id: slug, entries },
   });
+
+  if (targetRtpBps !== undefined) {
+    const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
+    const [pack] = await packs.listPacks({ slug }, { take: 1 });
+    if (pack) {
+      await packs.updatePacks([{ id: pack.id, target_rtp_bps: targetRtpBps }]);
+    }
+  }
 
   // A per-card rarity change is shown on the storefront detail (Top Hits +
   // the reel's rarity lighting), so bust the 30s detail cache to reflect it now.
