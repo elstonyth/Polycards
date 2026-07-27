@@ -52,4 +52,14 @@ export const qk = {
   vipLevels: ['admin', 'vip-levels'] as const,
   challengeStages: ['admin', 'challenge', 'stages'] as const,
   challengeSettings: ['admin', 'challenge', 'settings'] as const,
+
+  // ── Epic 2 (Players) ───────────────────────────────────────────────────────
+  players: (page: number, q?: string) =>
+    ['admin', 'players', page, q ?? ''] as const,
+  // 2-segment prefix — invalidates ALL pages/searches of the players list
+  playersKey: ['admin', 'players'] as const,
+  payoutDetails: (id: string) =>
+    ['admin', 'customer', id, 'payout-details'] as const,
+  spendReport: (id: string) =>
+    ['admin', 'customer', id, 'spend-report'] as const,
 };
