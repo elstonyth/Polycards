@@ -162,7 +162,11 @@ const PlayersPage = () => {
                     <Table.Cell>
                       {/* Real button so the row is reachable by keyboard too;
                           stopPropagation keeps the row handler from firing a
-                          second navigate to the same route. */}
+                          second navigate to the same route. Falls back to the
+                          EMAIL, not an em-dash: `name` is nullable, and a
+                          screen reader on a nameless row would otherwise
+                          announce "— button" with no way to tell which player
+                          it opens. Same fallback shape as the pulls page. */}
                       <button
                         type="button"
                         className="text-ui-fg-interactive hover:underline"
@@ -171,7 +175,7 @@ const PlayersPage = () => {
                           navigate(`/customers/${p.id}`);
                         }}
                       >
-                        {p.name ?? '—'}
+                        {p.name ?? p.email}
                       </button>
                     </Table.Cell>
                     <Table.Cell className="text-ui-fg-subtle break-words">
@@ -247,6 +251,9 @@ const PlayersPage = () => {
 
       {/* ── Confirm modal — mandatory audited reason, both directions ─────── */}
       <Prompt
+        // Prompt defaults to 'danger' (red confirm). Blocking a login is
+        // destructive; lifting the block is not.
+        variant={target?.disabled ? 'confirmation' : 'danger'}
         open={target !== null}
         onOpenChange={(open) => {
           if (!open) closeModal();
@@ -266,8 +273,12 @@ const PlayersPage = () => {
             <Label htmlFor="players-reason" size="small">
               {t('players.reasonLabel')}
             </Label>
+            {/* Server caps the reason at 500 chars. Capping here too, because
+                Radix closes the dialog on Action click — a 400 would take the
+                typed text down with it. */}
             <Textarea
               id="players-reason"
+              maxLength={500}
               value={reason}
               placeholder={t('players.reasonPlaceholder')}
               onChange={(e) => setReason(e.target.value)}
