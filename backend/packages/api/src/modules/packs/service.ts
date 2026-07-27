@@ -1778,6 +1778,81 @@ class PacksModuleService extends MedusaService({
     return { frozen: true };
   }
 
+  // Player disable switch (POLYCARD-BACK §4.2): blocks LOGIN/session use —
+  // orthogonal to `frozen` (funds lock), so neither flag reads or writes the
+  // other's columns. One row per customer, lazy-created like the freeze path.
+  // Takes the SAME advisory key as the freeze path — it guards the same
+  // customer_account_state row, whose customer_id is unique, against a
+  // duplicate list-then-create. State + audit share one transaction: an
+  // undisclosed disable (no audit row) is not an acceptable partial failure.
+  @InjectTransactionManager()
+  async setAccountDisabled(
+    input: {
+      customerId: string;
+      adminId: string;
+      disabled: boolean;
+      reason: string;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ disabled: boolean }> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `credit:${input.customerId}`,
+    ]);
+    const [existing] = await this.listCustomerAccountStates(
+      { customer_id: input.customerId },
+      { take: 1 },
+      sharedContext,
+    );
+    const patch = {
+      disabled: input.disabled,
+      disabled_reason: input.disabled ? input.reason : null,
+      disabled_by: input.disabled ? input.adminId : null,
+      disabled_at: input.disabled ? new Date() : null,
+    };
+    if (existing) {
+      await this.updateCustomerAccountStates(
+        { selector: { id: existing.id }, data: patch },
+        sharedContext,
+      );
+    } else {
+      await this.createCustomerAccountStates(
+        [{ customer_id: input.customerId, ...patch }],
+        sharedContext,
+      );
+    }
+    await this.createAdminActionAudits(
+      [
+        {
+          admin_id: input.adminId,
+          entity_type: 'customer',
+          entity_id: input.customerId,
+          action: input.disabled ? 'disable' : 'enable',
+          before: { disabled: existing?.disabled ?? false },
+          after: { disabled: input.disabled },
+          reason: input.reason,
+        },
+      ],
+      sharedContext,
+    );
+    return { disabled: input.disabled };
+  }
+
+  // True if the customer's login is administratively disabled. One indexed read
+  // on the auth path — mirrors isFrozen.
+  @InjectManager()
+  async isAccountDisabled(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<boolean> {
+    const [state] = await this.listCustomerAccountStates(
+      { customer_id: customerId, disabled: true },
+      { take: 1 },
+      sharedContext,
+    );
+    return Boolean(state);
+  }
+
   // FX manual-override edit + audit row in the same transaction. The audit row
   // is the only record of who repriced the catalog — never split these writes.
   @InjectTransactionManager()
