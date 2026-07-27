@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   Badge,
@@ -20,6 +20,7 @@ import {
 } from '@medusajs/ui';
 import { ArrowLeft } from '@medusajs/icons';
 import type {
+  AdminCard,
   AdminPack,
   PackOddsResponse,
   PublishedOdds,
@@ -46,6 +47,30 @@ import {
 import { resolveImageUrl } from '../../../lib/image-url';
 import { shouldSeedBuffer } from '../../../lib/seed-buffer';
 import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
+
+// A card staged by the cards list's bulk "Add to gacha pack" — NOT a pool
+// member yet. It enters as an UNLOCKED COMMON, which is exactly how
+// set-pack-members admits a new member (it becomes a balancer and absorbs a
+// share of the remainder), so the live preview here matches what the save
+// persists. `currentPct` 0 = "no saved rate yet".
+const pendingRow = (c: AdminCard): EditRow => ({
+  card_id: c.handle,
+  name: c.name,
+  image: c.image,
+  slab_image: c.slab_image,
+  rarity: 'Common',
+  // DISPLAY price (FMV × fx × the card's markup) — the same number the odds
+  // route puts on a saved row, so the EV/RTP chips stay honest while pending.
+  market_value: c.priceBreakdown.displayPrice,
+  stock: c.stock,
+  currentPct: 0,
+  locked: false,
+  pctInput: '0',
+  pctInput2: '',
+  pctInput3: '',
+  topHitInput: '',
+  pending: true,
+});
 
 /**
  * Pack odds editor (`/packs/:slug`): edit a pack's prize-pool membership and
@@ -103,16 +128,63 @@ const PackOddsEditorPage = () => {
   const [seededFrom, setSeededFrom] = useState<PackOddsResponse | undefined>(
     undefined,
   );
-  if (shouldSeedBuffer(data, seededFrom, (s) => s.pack.slug !== slug)) {
-    setSeededFrom(data);
-    setRows(mapOddsToRows(data.odds));
-  }
 
-  // Prize-pool membership — which cards belong to this pack.
+  // ── Cards staged from the Gacha Cards list ──────────────────────────────
+  // The bulk "Add to gacha pack" action navigates here with the picked handles
+  // on router state. Latched into state at mount because the effect below
+  // clears that history entry immediately: a browser refresh replays the entry
+  // (state included), and an unlatched read would re-append the same rows on
+  // every reload. Consumed (emptied) by the seed below, so a pool save's
+  // reseed can't re-stage cards the operator has since dealt with.
+  const { state: navState } = useLocation();
+  const [pendingAdd, setPendingAdd] = useState<string[]>(
+    () => (navState as { addCards?: string[] } | null)?.addCards ?? [],
+  );
+  useEffect(() => {
+    if (pendingAdd.length > 0) navigate('.', { replace: true, state: null });
+  }, [pendingAdd, navigate]);
+
+  // Prize-pool membership — which cards belong to this pack. The same catalog
+  // query supplies the display fields for staged rows, so it also loads when
+  // cards arrived to be staged (the cards list just warmed this cache).
   const [poolOpen, setPoolOpen] = useState(false);
-  const { data: allCards = null } = useCards({ enabled: poolOpen });
+  const cardsQuery = useCards({ enabled: poolOpen || pendingAdd.length > 0 });
+  const allCards = cardsQuery.data ?? null;
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const savingMembers = saveMembersMut.isPending;
+
+  // Staged rows need the catalog for their name/image/price, so hold the seed
+  // until that query SETTLES — gating on "loaded" would leave the whole editor
+  // on the skeleton forever if the catalog fetch fails.
+  const catalogSettled = cardsQuery.isSuccess || cardsQuery.isError;
+  useEffect(() => {
+    if (pendingAdd.length > 0 && cardsQuery.isError) {
+      toast.error(t('packs.pool.loadError'));
+    }
+  }, [pendingAdd, cardsQuery.isError, t]);
+
+  if (
+    shouldSeedBuffer(data, seededFrom, (s) => s.pack.slug !== slug) &&
+    (pendingAdd.length === 0 || catalogSettled)
+  ) {
+    setSeededFrom(data);
+    const seeded = mapOddsToRows(data.odds);
+    if (pendingAdd.length === 0) {
+      setRows(seeded);
+    } else {
+      // Only handles that are NOT already members become pending rows — adding
+      // a card the pack already holds is a no-op, not a duplicate row.
+      const inPool = new Set(seeded.map((r) => r.card_id));
+      const byHandle = new Map((allCards ?? []).map((c) => [c.handle, c]));
+      const staged = pendingAdd
+        .filter((h) => !inPool.has(h))
+        .map((h) => byHandle.get(h))
+        .filter((c): c is AdminCard => c !== undefined)
+        .map(pendingRow);
+      setRows([...seeded, ...staged]);
+      setPendingAdd([]);
+    }
+  }
 
   const openPool = () => {
     setSelected(new Set((rows ?? []).map((r) => r.card_id)));
@@ -238,8 +310,25 @@ const PackOddsEditorPage = () => {
     });
 
   async function save() {
-    if (!rows || preview.error || saving) return;
+    if (!rows || preview.error || saving || savingMembers) return;
     try {
+      // TWO-PHASE when cards were staged from the cards list — membership MUST
+      // land first. save-pack-odds rejects any submission whose card set does
+      // not match the pack's saved pool ("Submitted cards do not match this
+      // pack's prize pool"), so an odds POST carrying staged rows would 400.
+      // The members step admits them as unlocked Commons (balancers) — exactly
+      // the shape the pending rows preview — and only then does the odds save
+      // below write every row's tuned rate, set-equality guard satisfied.
+      if (rows.some((r) => r.pending)) {
+        await saveMembersMut.mutateAsync({
+          slug,
+          card_ids: rows.map((r) => r.card_id),
+        });
+        // The cards are real pool members now: drop the flags immediately so a
+        // failing odds save can't leave badges claiming otherwise, and a retry
+        // goes straight to the odds phase.
+        setRows((prev) => prev?.map((r) => ({ ...r, pending: false })) ?? null);
+      }
       const entries = rowsToSetEntries(rows);
       const res = await saveOdds.mutateAsync({ slug, entries });
       const byId = new Map(res.odds.map((c) => [c.card_id, c]));
@@ -440,10 +529,15 @@ const PackOddsEditorPage = () => {
                           alt=""
                           className="h-10 w-8 shrink-0 rounded object-contain"
                         />
-                        <div className="flex flex-col">
+                        <div className="flex flex-col items-start gap-y-0.5">
                           <span className="max-w-[18rem] truncate">
                             {r.name}
                           </span>
+                          {r.pending && (
+                            <Badge size="2xsmall" color="orange">
+                              {t('packs.editor.pendingRow')}
+                            </Badge>
+                          )}
                           {r.stock !== null && r.stock < 0 ? (
                             // Wins keep counting below 0 — this is how many
                             // physical units the operator owes winners.
@@ -576,8 +670,8 @@ const PackOddsEditorPage = () => {
               <Button
                 variant="primary"
                 onClick={save}
-                isLoading={saving}
-                disabled={saving || preview.error !== null}
+                isLoading={saving || savingMembers}
+                disabled={saving || savingMembers || preview.error !== null}
               >
                 {saving ? t('packs.editor.saving') : t('packs.editor.save')}
               </Button>

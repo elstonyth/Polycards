@@ -110,7 +110,8 @@
       "draftBanner": "Draft — hidden from the storefront. Add cards to the prize pool, save win rates, then activate.",
       "draftReadyBanner": "Draft — hidden from the storefront. The prize pool has cards; activate when the win rates look right.",
       "unitsOwed": "{{count}} owed to winners",
-      "topHit": "Top hit #"
+      "topHit": "Top hit #",
+      "pendingRow": "new — not in pool until saved"
     }
   },
   "pcAdd": {
@@ -170,7 +171,14 @@
       "listed": "Listed",
       "hidden": "Hidden",
       "empty": "No cards registered yet. Add one from the inventory to get started.",
-      "loadError": "Could not load cards."
+      "loadError": "Could not load cards.",
+      "created": "Added"
+    },
+    "bulk": {
+      "selected": "{{count}} selected",
+      "addToPack": "Add to gacha pack",
+      "pickSubtitle": "Pick the pack to add {{count}} card(s) to. They are staged in that pack's win-rate editor — nothing is saved until you save there.",
+      "noPacks": "No packs yet — create a pack first."
     },
     "register": {
       "title": "Add card from inventory",

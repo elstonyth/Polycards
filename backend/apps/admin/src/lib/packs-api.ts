@@ -110,6 +110,8 @@ export interface AdminCard {
    *  composite; null = blank (renders nothing). */
   label_year: string | null;
   label_note: string | null;
+  /** When the card was registered (ISO) — the list's "Added" sort key. */
+  created_at: string;
   /** USD -> MYR breakdown for the current market_value; always present (GET
    *  routes always resolve an fxRate before building the DTO). */
   priceBreakdown: {

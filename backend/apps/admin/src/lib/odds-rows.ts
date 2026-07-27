@@ -26,6 +26,9 @@ export type EditRow = {
   /** Admin-picked Top Hit display order as a free-typed string ('' = not a
    *  Top Hit; '1' renders leftmost on the pack page). Saved on blur/Enter. */
   topHitInput: string;
+  /** Staged from the cards list's bulk "Add to gacha pack" — NOT a pool member
+   *  yet. The editor's save persists the membership first, then the odds. */
+  pending?: boolean;
 };
 
 // Map a server odds snapshot into the editable row buffer. Used to seed the

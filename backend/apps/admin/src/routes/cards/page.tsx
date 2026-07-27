@@ -1,6 +1,8 @@
 import { useRef, useState, type ChangeEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
+  Checkbox,
   Container,
   Heading,
   Text,
@@ -21,6 +23,7 @@ import { type AdminCard, type AdminCardUpdate } from '../../lib/packs-api';
 import {
   useCards,
   useDeleteCard,
+  usePacks,
   useUpdateCard,
   useUploadImage,
 } from '../../lib/queries';
@@ -109,10 +112,16 @@ const formFromCard = (c: AdminCard): FormState => ({
 const gradeLabel = (c: AdminCard): string =>
   [c.grader, c.grade].filter(Boolean).join(' ');
 
+// Sortable columns. No 'stock' — physical units are a fulfilment concern, not a
+// catalog one, and the column was dropped from this table (§2.2).
+type SortKey = 'name' | 'value' | 'price' | 'created';
+
 const GachaCardsPage = () => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const prompt = usePrompt();
   const { data: cards = null, isError, refetch } = useCards();
+  const { data: packs = null } = usePacks();
   const updateCard = useUpdateCard();
   const removeCard = useDeleteCard();
   const uploadImg = useUploadImage();
@@ -121,9 +130,12 @@ const GachaCardsPage = () => {
   const [deleteTarget, setDeleteTarget] = useState<AdminCard | null>(null);
   const [q, setQ] = useState('');
   const [sort, setSort] = useState<{
-    key: 'name' | 'value' | 'stock';
+    key: SortKey;
     dir: 1 | -1;
   } | null>(null);
+  // Bulk "add to a pack's prize pool" selection, by card handle.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [pickerOpen, setPickerOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const uploading = uploadImg.isPending;
   const saving = updateCard.isPending;
@@ -282,20 +294,65 @@ const GachaCardsPage = () => {
           ? c.name.toLowerCase()
           : sort.key === 'value'
             ? (c.priceBreakdown.marketMyr ?? 0)
-            : (c.stock ?? Number.POSITIVE_INFINITY);
+            : sort.key === 'price'
+              ? // The column shows the sale price and falls back to the FMV-
+                // derived display price when none is set — sort the same number.
+                (c.price ?? c.priceBreakdown?.displayPrice ?? 0)
+              : Date.parse(c.created_at);
       const va = pick(a);
       const vb = pick(b);
       return va < vb ? -sort.dir : va > vb ? sort.dir : 0;
     });
 
-  const ariaSort = (key: 'name' | 'value' | 'stock') =>
+  // Unpaged list: "the rows on screen" IS the filtered set. Selecting is only
+  // ever offered for rows the operator can see, and the apply step intersects
+  // with this again (a refetch can drop a row mid-selection).
+  const pageIds = visible.map((c) => c.handle);
+  const allOnPage =
+    pageIds.length > 0 && pageIds.every((id) => selected.has(id));
+  const someOnPage = pageIds.some((id) => selected.has(id));
+
+  // Decide add-vs-remove from `prev` inside the updater, not from the rendered
+  // `allOnPage`: a refetch can swap the rows between the click and the update,
+  // and a stale flag turns "select all" into a no-op.
+  const toggleAll = () =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      const everyOnPage =
+        pageIds.length > 0 && pageIds.every((id) => prev.has(id));
+      for (const id of pageIds) {
+        if (everyOnPage) next.delete(id);
+        else next.add(id);
+      }
+      return next;
+    });
+
+  const toggleOne = (handle: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(handle)) next.add(handle);
+      return next;
+    });
+
+  // Stage the selected cards in a pack's win-rate editor. Nothing is written
+  // here: the editor appends them as PENDING rows and its save persists the
+  // membership + the odds in one operator-reviewed step.
+  const addToPack = (slug: string) => {
+    const addCards = [...selected].filter((id) => pageIds.includes(id));
+    setPickerOpen(false);
+    setSelected(new Set());
+    if (addCards.length === 0) return;
+    navigate(`/packs/${slug}`, { state: { addCards } });
+  };
+
+  const ariaSort = (key: SortKey) =>
     sort?.key === key
       ? sort.dir === 1
         ? ('ascending' as const)
         : ('descending' as const)
       : undefined;
 
-  const sortHeader = (key: 'name' | 'value' | 'stock', label: string) => (
+  const sortHeader = (key: SortKey, label: string) => (
     <button
       type="button"
       className="inline-flex items-center gap-1 hover:text-ui-fg-base"
@@ -324,7 +381,13 @@ const GachaCardsPage = () => {
           placeholder="Search name or handle…"
           aria-label="Search cards by name or handle"
           value={q}
-          onChange={(e) => setQ(e.target.value)}
+          onChange={(e) => {
+            setQ(e.target.value);
+            // Narrowing the list changes WHICH rows are on screen — drop the
+            // selection so the bulk bar's count can never include a row the
+            // operator can no longer see.
+            setSelected(new Set());
+          }}
         />
         <Button
           size="small"
@@ -343,6 +406,21 @@ const GachaCardsPage = () => {
             ? `${visible.length} of ${cards.length} cards`
             : `${cards.length} cards`}
         </Text>
+      )}
+
+      {selected.size > 0 && (
+        <div
+          className="bg-ui-bg-subtle flex flex-wrap items-center gap-3 px-6 py-3"
+          role="region"
+          aria-label="Bulk actions"
+        >
+          <Text size="small" weight="plus">
+            {t('cards.bulk.selected', { count: selected.size })}
+          </Text>
+          <Button size="small" onClick={() => setPickerOpen(true)}>
+            {t('cards.bulk.addToPack')}
+          </Button>
+        </div>
       )}
 
       {isError ? (
@@ -370,6 +448,15 @@ const GachaCardsPage = () => {
           <Table>
             <Table.Header>
               <Table.Row>
+                <Table.HeaderCell className="w-10">
+                  <Checkbox
+                    aria-label="Select all cards"
+                    checked={
+                      allOnPage ? true : someOnPage ? 'indeterminate' : false
+                    }
+                    onCheckedChange={toggleAll}
+                  />
+                </Table.HeaderCell>
                 <Table.HeaderCell aria-sort={ariaSort('name')}>
                   {sortHeader('name', t('cards.list.card'))}
                 </Table.HeaderCell>
@@ -380,14 +467,17 @@ const GachaCardsPage = () => {
                 >
                   {sortHeader('value', t('cards.list.value'))}
                 </Table.HeaderCell>
-                <Table.HeaderCell className="text-right">
-                  {t('cards.list.price')}
-                </Table.HeaderCell>
                 <Table.HeaderCell
-                  aria-sort={ariaSort('stock')}
+                  aria-sort={ariaSort('price')}
                   className="text-right"
                 >
-                  {sortHeader('stock', t('cards.list.stock'))}
+                  {sortHeader('price', t('cards.list.price'))}
+                </Table.HeaderCell>
+                <Table.HeaderCell
+                  aria-sort={ariaSort('created')}
+                  className="text-right"
+                >
+                  {sortHeader('created', t('cards.list.created'))}
                 </Table.HeaderCell>
                 <Table.HeaderCell>{t('cards.list.status')}</Table.HeaderCell>
                 <Table.HeaderCell className="text-right">
@@ -398,6 +488,13 @@ const GachaCardsPage = () => {
             <Table.Body>
               {visible.map((c) => (
                 <Table.Row key={c.handle}>
+                  <Table.Cell>
+                    <Checkbox
+                      aria-label={`Select ${c.name}`}
+                      checked={selected.has(c.handle)}
+                      onCheckedChange={() => toggleOne(c.handle)}
+                    />
+                  </Table.Cell>
                   <Table.Cell>
                     <div className="flex items-center gap-3">
                       <img
@@ -429,25 +526,8 @@ const GachaCardsPage = () => {
                       <span className="text-ui-fg-muted ml-1 text-xs">FMV</span>
                     )}
                   </Table.Cell>
-                  <Table.Cell
-                    title="Negative = units owed to winners; 0 = no physical stock (winners still keep it in vault — buyback fulfills; restock to ship); ∞ = untracked"
-                    className={
-                      // Negative = units OWED to winners (wins keep counting
-                      // below 0 by design) — red beats orange for "act now".
-                      c.stock !== null && c.stock < 0
-                        ? 'text-ui-tag-red-text text-right font-medium tabular-nums'
-                        : c.stock === 0
-                          ? 'text-ui-tag-orange-text text-right tabular-nums'
-                          : 'text-ui-fg-subtle text-right tabular-nums'
-                    }
-                  >
-                    {c.stock === null ? '∞' : c.stock.toLocaleString('en-US')}
-                    {c.stock !== null && c.stock < 0 && (
-                      <span className="ml-1 text-xs">owed</span>
-                    )}
-                    {c.stock === 0 && (
-                      <span className="ml-1 text-xs">restock to ship</span>
-                    )}
+                  <Table.Cell className="text-ui-fg-subtle whitespace-nowrap text-right text-xs">
+                    {timeAgo(c.created_at)}
                   </Table.Cell>
                   <Table.Cell>
                     <StatusBadge color={c.for_sale ? 'green' : 'grey'}>
@@ -485,6 +565,75 @@ const GachaCardsPage = () => {
         open={registerOpen}
         onClose={() => setRegisterOpen(false)}
       />
+
+      {/* Pack picker for the bulk action — pick the destination, land in that
+          pack's win-rate editor with the cards staged. */}
+      <FocusModal
+        open={pickerOpen}
+        onOpenChange={(open) => {
+          if (!open) setPickerOpen(false);
+        }}
+      >
+        <FocusModal.Content>
+          <FocusModal.Header>
+            <div className="flex items-center justify-end gap-x-2">
+              <Button
+                size="small"
+                variant="secondary"
+                onClick={() => setPickerOpen(false)}
+              >
+                {t('cards.form.cancel')}
+              </Button>
+            </div>
+          </FocusModal.Header>
+          <FocusModal.Body className="flex flex-col items-center overflow-auto p-10">
+            <div className="flex w-full max-w-[640px] flex-col gap-y-4">
+              <div>
+                <FocusModal.Title asChild>
+                  <Heading level="h2">{t('cards.bulk.addToPack')}</Heading>
+                </FocusModal.Title>
+                <FocusModal.Description asChild>
+                  <Text className="text-ui-fg-subtle mt-1" size="small">
+                    {t('cards.bulk.pickSubtitle', { count: selected.size })}
+                  </Text>
+                </FocusModal.Description>
+              </div>
+              {packs === null ? (
+                <LoadingSkeleton />
+              ) : packs.length === 0 ? (
+                <Text className="text-ui-fg-subtle">
+                  {t('cards.bulk.noPacks')}
+                </Text>
+              ) : (
+                <div className="divide-y rounded-lg border">
+                  {packs.map((p) => (
+                    <button
+                      key={p.slug}
+                      type="button"
+                      className="hover:bg-ui-bg-base-hover flex w-full items-center gap-3 px-4 py-3 text-left"
+                      onClick={() => addToPack(p.slug)}
+                    >
+                      <div className="flex flex-1 flex-col">
+                        <span className="truncate text-sm font-medium">
+                          {p.title}
+                        </span>
+                        <span className="text-ui-fg-subtle text-xs">
+                          {p.category}
+                        </span>
+                      </div>
+                      <StatusBadge
+                        color={p.status === 'active' ? 'green' : 'grey'}
+                      >
+                        {p.status}
+                      </StatusBadge>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </FocusModal.Body>
+        </FocusModal.Content>
+      </FocusModal>
 
       <FocusModal
         open={form !== null}
