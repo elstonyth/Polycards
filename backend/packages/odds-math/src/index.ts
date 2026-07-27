@@ -543,7 +543,7 @@ export function solveOddsForRtp(
     const vHFree = ladderMean(free);
     if (vHFree === vC) {
       bandError =
-        'Chase and Common cards have the same average value, so no split changes the RTP.';
+        'The remaining unfloored chase cards and Common cards have the same average value, so no further split changes the RTP.';
       break;
     }
 

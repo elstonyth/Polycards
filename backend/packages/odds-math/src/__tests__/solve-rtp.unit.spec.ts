@@ -119,6 +119,32 @@ const INFEASIBLE_AFTER_FLOOR: RtpSolveRow[] = [
   { card_id: 'a-rare', locked: false, rarity: 'Rare', value: 300, pct: 0 },
 ];
 
+// Exactly one tier (Legendary, one row) floors; Rare (the only other chase
+// tier) clears the floor comfortably and stays free. Verified against the
+// running solver at targetRtp 0.62: floored === ['legend'], rare's pct comes
+// out around 0.186% (>18x the floor). Margin either side is wide -- 0.60
+// floors both tiers, 0.65 floors neither -- so this isn't a knife-edge pick.
+const ONE_TIER_FLOORS: RtpSolveRow[] = [
+  { card_id: 'cheap-a', locked: false, rarity: 'Common', value: 20, pct: 0 },
+  { card_id: 'cheap-b', locked: false, rarity: 'Common', value: 40, pct: 0 },
+  { card_id: 'legend', locked: false, rarity: 'Legendary', value: 5000, pct: 0 },
+  { card_id: 'rare', locked: false, rarity: 'Rare', value: 300, pct: 0 },
+];
+
+// Four identical Rare rows, each worth 400x the pack price: pass 0 splits a
+// tiny chase budget four ways and every share lands below MIN_PCT, so all
+// four floor together in the SAME pass. That empties `free` for pass 1,
+// which can only succeed via the free.length === 0 early-break (there is no
+// other route to a non-error result once every chase row is floored).
+const ALL_CHASE_FLOORS: RtpSolveRow[] = [
+  { card_id: 'cheap-a', locked: false, rarity: 'Common', value: 20, pct: 0 },
+  { card_id: 'cheap-b', locked: false, rarity: 'Common', value: 40, pct: 0 },
+  { card_id: 'r1', locked: false, rarity: 'Rare', value: 20000, pct: 0 },
+  { card_id: 'r2', locked: false, rarity: 'Rare', value: 20000, pct: 0 },
+  { card_id: 'r3', locked: false, rarity: 'Rare', value: 20000, pct: 0 },
+  { card_id: 'r4', locked: false, rarity: 'Rare', value: 20000, pct: 0 },
+];
+
 describe('solveOddsForRtp — 1 bps floor', () => {
   it('never emits a chase row below the floor', () => {
     const res = solveOddsForRtp(BRONZE, 50, 0.7);
@@ -206,5 +232,38 @@ describe('solveOddsForRtp — 1 bps floor', () => {
     // were still competing for it.
     expect(maxEv).toBeCloseTo(399.97, 1);
     expect(maxPct).toBeCloseTo(799.94, 1);
+  });
+
+  it('does not flag tierCollapse when only ONE tier is fully floored', () => {
+    // Guards the `collapsed.size >= 2` gate (index.ts): a regression to
+    // `>= 1` would make this test see tierCollapse === ['Legendary'] instead
+    // of []. Confirming the premise inline (exactly one row floored, and it
+    // is the Legendary one) so this test fails loudly if a future change
+    // shifts which/how-many rows floor, rather than silently asserting
+    // something weaker.
+    const res = solveOddsForRtp(ONE_TIER_FLOORS, 50, 0.62);
+    expect(res.error).toBeNull();
+    expect(res.floored.map((f) => f.card_id)).toEqual(['legend']);
+    expect(res.tierCollapse).toEqual([]);
+  });
+
+  it('hits the free.length === 0 branch when every chase row floors in one pass', () => {
+    // All four identical Rare rows land below MIN_PCT together in pass 0
+    // (each would get roughly a quarter of a sub-0.03% budget), so pass 1
+    // finds free === [] -- the only route to a non-error result from there
+    // is the early-break `distribute(safe, [], absorbers, fixedPct, 0, mFree)`
+    // call (index.ts:521-524), which this exercises.
+    const res = solveOddsForRtp(ALL_CHASE_FLOORS, 50, 0.7);
+    expect(res.error).toBeNull();
+    expect(res.floored.map((f) => f.card_id).sort()).toEqual(['r1', 'r2', 'r3', 'r4']);
+
+    const total = res.computed.reduce((s, c) => s + c.pct, 0);
+    expect(total).toBeCloseTo(100, 6);
+
+    for (const id of ['r1', 'r2', 'r3', 'r4']) {
+      const pct = res.computed.find((c) => c.card_id === id)!.pct;
+      expect(pct).toBe(MIN_PCT);
+    }
+    for (const c of res.computed) expect(c.pct).toBeGreaterThan(0);
   });
 });
