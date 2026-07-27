@@ -204,17 +204,28 @@ export const setPackMembersInvoke = async (
     );
   })();
 
+  // DEGRADED PATH — collapse sets 2/3 to NULL (= inherit set 1) for every
+  // survivor that still carries an explicit one. Leaving them verbatim can
+  // strand a set at a resolved total of ZERO (remove the only card holding
+  // set 2's weight and the survivors' stored weight_2 = 0 is all that's left),
+  // which set 1's activation guard and rollablePool both miss — the customers
+  // in that group would then fail EVERY spin, forever, signalled by nothing but
+  // the console.warn above. Set 1 is already proven rollable by the guard, so
+  // inheriting it fails safe. Cost: the operator re-types those set-2/3 rates
+  // on the next successful save.
+  const collapse = rowByCard
+    ? []
+    : survivors.filter((o) => o.weight_2 != null || o.weight_3 != null);
+
   // Create + delete + reweigh land in ONE transaction (applyPackMemberDiff):
   // a failed step never runs its own compensation, so without the txn a
   // mid-diff crash could leave the pool half-migrated.
-  const reweighted = rowByCard
-    ? survivors.map((o) => ({
-        id: o.id,
-        weight: o.weight,
-        weight_2: o.weight_2 ?? null,
-        weight_3: o.weight_3 ?? null,
-      }))
-    : [];
+  const reweighted = (rowByCard ? survivors : collapse).map((o) => ({
+    id: o.id,
+    weight: o.weight,
+    weight_2: o.weight_2 ?? null,
+    weight_3: o.weight_3 ?? null,
+  }));
   const { created_ids: createdIds } = await packs.applyPackMemberDiff({
     pack_id: input.pack_id,
     create: toAdd.map((card_id) => {
@@ -250,7 +261,12 @@ export const setPackMembersInvoke = async (
           }
           return [{ id: o.id, ...row }];
         })
-      : [],
+      : collapse.map((o) => ({
+          id: o.id,
+          weight: o.weight,
+          weight_2: null,
+          weight_3: null,
+        })),
   });
 
   const removed: RemovedRow[] = toRemove.map((o) => ({

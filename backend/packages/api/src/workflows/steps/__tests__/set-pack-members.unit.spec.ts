@@ -244,11 +244,46 @@ describe('set-pack-members — balancer semantics', () => {
       ];
       const { diff, res } = await run(existing, ['alpha']);
 
-      expect(diff.reweigh).toEqual([]);
-      expect(res.compensateInput?.reweighted).toEqual([]);
+      // Set 1 is left verbatim (the draw is scale-invariant), but alpha's
+      // explicit weight_2 is collapsed to NULL so set 2 inherits it — see (g).
+      expect(diff.reweigh).toEqual([
+        { id: 'o_alpha', weight: 3000, weight_2: null, weight_3: null },
+      ]);
+      expect(res.compensateInput?.reweighted).toEqual([
+        { id: 'o_alpha', weight: 3000, weight_2: 4000, weight_3: null },
+      ]);
       expect(warn).toHaveBeenCalledWith(
         expect.stringContaining("skipped auto-reweight for 'test-pack'"),
       );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('(g) the degraded path cannot strand set 2 at a resolved total of 0', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      // Both sets are valid before the edit (Σ = 10000 each). Removing alpha
+      // takes ALL of set 2's weight with it and leaves pinned Rares at 50% —
+      // unbalanceable, so the reweight degrades. Set 1 survives at 5000 (beta
+      // always wins, and the activation guard passes on weight > 0), but beta's
+      // stored weight_2 = 0 would leave set 2 totalling 0 → every spin by a
+      // set-2 customer fails permanently. Nulling it makes set 2 inherit set 1.
+      const existing = [
+        odd('alpha', 'Rare', 5000, { weight_2: 10000 }),
+        odd('beta', 'Rare', 5000, { weight_2: 0 }),
+      ];
+      const { diff } = await run(existing, ['beta']);
+
+      expect(diff.reweigh).toEqual([
+        { id: 'o_beta', weight: 5000, weight_2: null, weight_3: null },
+      ]);
+      const rows = finalRows(existing, diff);
+      expect(resolvedSum(rows, 1)).toBe(5000);
+      // Not 10000 — the degraded path only promises a ROLLABLE set, and the
+      // draw is scale-invariant. Before the fix this was 0.
+      expect(resolvedSum(rows, 2)).toBe(5000);
+      expect(resolvedSum(rows, 3)).toBe(5000);
     } finally {
       warn.mockRestore();
     }
