@@ -681,6 +681,32 @@ class PacksModuleService extends MedusaService({
     };
   }
 
+  // Monthly pack_open spend for one customer (MYR), newest first, capped at 24
+  // months. Months are bucketed in Asia/Kuala_Lumpur — every date boundary in
+  // this project is MYT, so an open at 17:00Z on the 28th belongs to the NEXT
+  // month. Months with no pack_open activity are omitted entirely (the HAVING),
+  // so a top-up-only month never shows up as a zero row. Same integer-cent
+  // idiom and index (customer_id, created_at) as creditSummary.
+  @InjectManager()
+  async spendReportForCustomer(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ period: string; spend: number }[]> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ period: string; spend_cents: string }[]>(
+      "SELECT to_char(date_trunc('month', created_at AT TIME ZONE 'Asia/Kuala_Lumpur'), 'YYYY-MM') AS period, " +
+        "  COALESCE(SUM(CASE WHEN reason = 'pack_open' THEN ROUND(-amount * 100) ELSE 0 END), 0)::bigint AS spend_cents " +
+        'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL ' +
+        "GROUP BY 1 HAVING SUM(CASE WHEN reason = 'pack_open' THEN 1 ELSE 0 END) > 0 ORDER BY 1 DESC LIMIT 24",
+      [customerId],
+    );
+    return rows.map((r) => ({
+      period: r.period,
+      spend: Number(r.spend_cents) / 100,
+    }));
+  }
+
   // Customer credit balance = Σ(amount) over the append-only ledger. Kept as a
   // thin delegate so existing callers (pack detail affordability, etc.) are
   // unchanged.
