@@ -508,29 +508,96 @@ export function solveOddsForRtp(
     );
   }
 
-  const c = (targetEv - lockedEv - M * vC) / (vH - vC);
-  if (c < 0 || c > M) {
-    const a = lockedEv + M * vC;
-    const b = lockedEv + M * vH;
-    const minEv = Math.min(a, b);
-    const maxEv = Math.max(a, b);
-    return fail(
-      `Target ${round2(targetRtp * 100)}% needs EV RM ${round2(targetEv)}; ` +
+  // Solve, floor, re-solve. Flooring consumes mass and EV, which shrinks the
+  // next budget and can push further rows under the floor — so iterate until
+  // stable. Each pass only ADDS to `flooredIds`, bounded by the row count.
+  const flooredIds = new Set<string>();
+  const floored: FlooredRow[] = [];
+  const byId = new Map(safe.map((r) => [r.card_id, r]));
+  let computed: { card_id: string; pct: number }[] | null = null;
+  let bandError: string | null = null;
+
+  for (let pass = 0; pass <= chase.length; pass += 1) {
+    const free = chase.filter((r) => !flooredIds.has(r.card_id));
+    const flooredMass = (flooredIds.size * MIN_PCT) / 100;
+    const flooredEv = chase
+      .filter((r) => flooredIds.has(r.card_id))
+      .reduce((s, r) => s + (MIN_PCT / 100) * r.value, 0);
+
+    const mFree = M - flooredMass;
+    if (mFree <= 0) {
+      bandError =
+        'Too many cards need the 1 in 10,000 minimum to fit in 100%. Remove cards from the pool.';
+      break;
+    }
+
+    const fixedPct = new Map<string, number>(locked.map((r) => [r.card_id, r.pct]));
+    for (const id of flooredIds) fixedPct.set(id, MIN_PCT);
+
+    // Every chase row floored: the absorbers simply take what is left.
+    if (free.length === 0) {
+      computed = distribute(safe, [], absorbers, fixedPct, 0, mFree);
+      break;
+    }
+
+    const vHFree = ladderMean(free);
+    if (vHFree === vC) {
+      bandError =
+        'Chase and Common cards have the same average value, so no split changes the RTP.';
+      break;
+    }
+
+    const cFree = (targetEv - lockedEv - flooredEv - mFree * vC) / (vHFree - vC);
+    if (cFree < 0 || cFree > mFree) {
+      const a = lockedEv + flooredEv + mFree * vC;
+      const b = lockedEv + flooredEv + mFree * vH;
+      const minEv = Math.min(a, b);
+      const maxEv = Math.max(a, b);
+      bandError =
+        `Target ${round2(targetRtp * 100)}% needs EV RM ${round2(targetEv)}; ` +
         `this pool reaches RM ${round2(minEv)}-RM ${round2(maxEv)} ` +
         `(${round2((minEv / packPrice) * 100)}%-${round2((maxEv / packPrice) * 100)}%). ` +
-        'Lower the target, raise the price, or change the pool.',
-    );
+        'Lower the target, raise the price, or change the pool.';
+      break;
+    }
+
+    const trial = distribute(safe, free, absorbers, fixedPct, cFree, mFree);
+    const trialPct = new Map(trial.map((t) => [t.card_id, t.pct]));
+    const below = free.filter((r) => (trialPct.get(r.card_id) ?? 0) < MIN_PCT);
+
+    if (below.length === 0) {
+      computed = trial;
+      break;
+    }
+    for (const r of below) {
+      floored.push({
+        card_id: r.card_id,
+        fairPct: trialPct.get(r.card_id) ?? 0,
+        appliedPct: MIN_PCT,
+      });
+      flooredIds.add(r.card_id);
+    }
   }
 
-  const fixedPct = new Map<string, number>(locked.map((r) => [r.card_id, r.pct]));
-  const computed = distribute(safe, chase, absorbers, fixedPct, c, M);
-  const byId = new Map(safe.map((r) => [r.card_id, r]));
+  if (bandError) return fail(bandError);
+  if (!computed) return fail('Could not solve a distribution for this target.');
+
+  // A tier has "collapsed" when every one of its chase rows sits at the floor.
+  // Reported only when 2+ tiers collapse, since that is when the ladder stops
+  // conveying anything to the player.
+  const collapsed = new Set<OddsRarity>();
+  for (const rarity of RARITIES) {
+    const tierRows = chase.filter((r) => r.rarity === rarity);
+    if (tierRows.length > 0 && tierRows.every((r) => flooredIds.has(r.card_id))) {
+      collapsed.add(rarity);
+    }
+  }
 
   return {
     error: null,
     computed,
-    floored: [],
-    tierCollapse: [],
+    floored,
+    tierCollapse: collapsed.size >= 2 ? RARITIES.filter((r) => collapsed.has(r)) : [],
     achievedRtp: rtpOf(computed, byId, packPrice),
   };
 }
