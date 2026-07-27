@@ -145,3 +145,65 @@ export function computeOdds(entries: OddsInput[]): OddsResult {
     unlockedCount: unlocked.length,
   };
 }
+
+// ── Common as balancer (POLYCARD-BACK §2.4) ─────────────────────────────────
+// Replaces the rarity-weighted remainder split FOR PACK-ODDS SAVES: every
+// non-Common row keeps its submitted pct verbatim (locked or not), locked
+// Common rows are pinned too, and UNLOCKED Common rows absorb the remainder
+// (even split, largest-remainder rounding → Σ === TOTAL_BPS exactly,
+// input-order independent). computeOdds above STAYS for the reward/daily-box
+// editors — those pools have no Common-as-balancer concept.
+export function balanceOdds(entries: OddsInput[]): OddsResult {
+  const safe = Array.isArray(entries) ? entries : [];
+  let error: string | null = null;
+
+  const isBalancer = (entry: OddsInput): boolean =>
+    entry.locked === false && entry.rarity === 'Common';
+  const pinned = safe.filter((entry) => !isBalancer(entry));
+  const balancers = safe.filter(isBalancer);
+
+  let pinnedBps = 0;
+  const bpsById = new Map<string, number>();
+  for (const entry of pinned) {
+    const pct = Number(entry.pct);
+    if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
+      error ??= 'Each win rate must be between 0% and 100%.';
+    }
+    const bps = clampBps(Math.round((Number.isFinite(pct) ? pct : 0) * 100));
+    bpsById.set(entry.card_id, bps);
+    pinnedBps += bps;
+  }
+
+  if (safe.length === 0) error ??= 'No cards to configure.';
+  if (pinnedBps > TOTAL_BPS) {
+    error ??= 'Common win rate would go below 0%. Lower the other rates.';
+  }
+  if (balancers.length === 0 && pinnedBps !== TOTAL_BPS) {
+    error ??= 'Without an unlocked Common card, win rates must total exactly 100%.';
+  }
+
+  const remainder = Math.max(0, TOTAL_BPS - pinnedBps);
+  if (balancers.length > 0) {
+    const base = Math.floor(remainder / balancers.length);
+    let leftover = remainder - base * balancers.length;
+    const ordered = [...balancers].sort((a, b) =>
+      a.card_id < b.card_id ? -1 : a.card_id > b.card_id ? 1 : 0,
+    );
+    for (const entry of ordered) {
+      bpsById.set(entry.card_id, base + (leftover > 0 ? 1 : 0));
+      if (leftover > 0) leftover -= 1;
+    }
+  }
+
+  const computed: ComputedOdd[] = safe.map((entry) => {
+    const weight = bpsById.get(entry.card_id) ?? 0;
+    return { card_id: entry.card_id, weight, locked: entry.locked, pct: weight / 100 };
+  });
+
+  return {
+    computed,
+    error,
+    lockedTotalPct: pinnedBps / 100,
+    unlockedCount: balancers.length,
+  };
+}
