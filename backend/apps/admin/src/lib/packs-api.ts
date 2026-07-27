@@ -35,6 +35,21 @@ export interface AdminPack {
   buyback_percent: number;
   boost: boolean;
   published_odds: PublishedOdds | null;
+  /** RAW / GRADED / MIX composition of the prize pool — AUTO-DETECTED from the
+   *  members' graders, never operator-set. Null = empty pool (nothing to infer
+   *  from, which is not the same as "raw"). */
+  group: 'RAW' | 'GRADED' | 'MIX' | null;
+  /** Theoretical EV (RM) per odds set — s1 is the live default; s2/s3 are the
+   *  alternate weight columns (NULL weights inherit 3→2→1 per card). Null when
+   *  the pack has no priced pool. */
+  ev: { s1: number | null; s2: number | null; s3: number | null };
+  /** Theoretical RTP % per odds set — null exactly when the matching `ev` is. */
+  rtp: { s1: number | null; s2: number | null; s3: number | null };
+  /** EV/RTP implied by the PUBLISHED tier percentages (what the player is
+   *  promised) vs. what the secret weights above actually pay. Null when the
+   *  pack has no published odds. */
+  pub_ev: number | null;
+  pub_rtp: number | null;
 }
 
 // Create/update payload. `slug` is sent on create only (immutable thereafter —
