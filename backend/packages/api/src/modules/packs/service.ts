@@ -3711,11 +3711,35 @@ class PacksModuleService extends MedusaService({
   // settleOpen's own pre-check) rather than catching a unique-violation from
   // an ORM insert — MikroORM's Unit of Work buffers ORM creates until flush
   // (transaction commit), so a 23505 from createLedgerEntries would surface
-  // AFTER this method returns, where it can't be handled cleanly. The
-  // (type, ref_id) partial unique index is a defensive backstop for the
-  // theoretical case where two callers race for the same key with no shared
-  // outer lock; every real caller in this epic already holds one (the
-  // per-customer credit lock or the per-order delivery lock).
+  // AFTER this method returns, where it can't be handled cleanly.
+  //
+  // The (type, ref_id) partial unique index backs TWO distinct failure
+  // paths, and a caller-side lock only guards ONE of them:
+  //   1. CROSS-transaction race: two different callers/transactions racing
+  //      the same (type, ref_id) with no shared outer lock. Under READ
+  //      COMMITTED, the loser's pre-check can miss the winner's still-
+  //      uncommitted row, so the loser proceeds and its own insert 23505s at
+  //      flush, aborting the loser's entire transaction. Every real caller
+  //      in this epic holds a lock that prevents this (the per-customer
+  //      credit lock or the per-order delivery lock).
+  //   2. SAME-transaction self-duplication: a batch/loop writer that calls
+  //      this method twice with the same (type, ref_id) inside ONE already-
+  //      open transaction — e.g. a hypothetical Epic 6 payout job iterating
+  //      a list of commissions with ref_id = commission.id. The SAME UoW
+  //      buffering that motivated the raw-SQL pre-check also makes that
+  //      pre-check BLIND to the first call's still-unflushed insert (raw SQL
+  //      sees flushed/committed table state, never the UoW's pending
+  //      creates), so the second call sees nothing, proceeds, and queues a
+  //      second insert with the same (type, ref_id). That insert 23505s at
+  //      flush, hard-aborting the WHOLE transaction instead of returning a
+  //      graceful `replayed: true`.
+  // A caller-side lock guards ONLY path 1 — it does nothing for path 2.
+  // Per-transaction ref_id uniqueness is the CALLER's own responsibility:
+  // de-duplicate ref_ids in your input BEFORE looping calls to this method
+  // inside one transaction. This method will not do it for you — doing so
+  // would require either flushing mid-transaction or tracking written refs
+  // in memory, both out of scope here (and likely to mask a real bug in the
+  // caller, e.g. a genuinely duplicated commission row upstream).
   @InjectTransactionManager()
   async recordLedgerEntry(
     input: {
