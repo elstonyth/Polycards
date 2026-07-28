@@ -485,7 +485,7 @@
     "from": "From",
     "to": "To",
     "empty": "No transactions yet.",
-    "noResults": "No transactions match that search.",
+    "noResults": "No transactions match those filters.",
     "loadError": "Could not load transactions."
   }
 }

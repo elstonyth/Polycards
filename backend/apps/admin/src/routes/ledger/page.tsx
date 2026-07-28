@@ -126,11 +126,16 @@ const LedgerPage = () => {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {/* aria-pressed, not variant alone: `primary` vs `secondary` is a
+                colour-only cue, so a screen reader had no way to tell which
+                type tab was active. Same standard as the payload expander's
+                aria-expanded below. */}
             {TYPES.map((tp) => (
               <Button
                 key={tp ?? 'all'}
                 size="small"
                 variant={type === tp ? 'primary' : 'secondary'}
+                aria-pressed={type === tp}
                 onClick={() => onFilter(() => setType(tp))}
               >
                 {t(typeLabelKey(tp))}
