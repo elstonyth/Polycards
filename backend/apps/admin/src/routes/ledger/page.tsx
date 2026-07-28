@@ -9,7 +9,7 @@ import {
   Table,
   Text,
 } from '@medusajs/ui';
-import { Receipt } from '@medusajs/icons';
+import { ChevronDownMini, ChevronRightMini, Receipt } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import { useLedger } from '../../lib/queries';
 import type { LedgerType } from '../../lib/admin-rest';
@@ -42,7 +42,8 @@ const TYPES: (LedgerType | undefined)[] = [
 // Header cells above; the payload expander spans all of them.
 const COLUMN_COUNT = 6;
 
-// 'TP' -> 'ledger.typeTp'; the All tab -> 'ledger.typeAll'.
+// 'TP' -> 'ledger.typeTp'; the All tab -> 'ledger.typeAll'. Shared by the
+// filter tabs AND the Type column, so one code can never carry two names.
 const typeLabelKey = (tp: LedgerType | undefined): string =>
   `ledger.type${tp ? tp[0] + tp[1].toLowerCase() : 'All'}`;
 
@@ -214,7 +215,14 @@ const LedgerPage = () => {
                           {row.display_id}
                         </Table.Cell>
                         <Table.Cell>
-                          <Badge size="2xsmall">{row.type}</Badge>
+                          {/* The TRANSLATED label, not the raw 'TP' code: the
+                              page ships no legend, and the filter tab for the
+                              same value already says "Top-up". Nothing is lost
+                              — display_id is TYPE+YY+Q#+serial, so the code is
+                              still on the row, one cell to the left. */}
+                          <Badge size="2xsmall">
+                            {t(typeLabelKey(row.type))}
+                          </Badge>
                         </Table.Cell>
                         <Table.Cell className="break-words">
                           {/* Falls back to the EMAIL, not an em-dash: `name` is
@@ -234,12 +242,12 @@ const LedgerPage = () => {
                         <Table.Cell onClick={(e) => e.stopPropagation()}>
                           <button
                             type="button"
-                            className="text-ui-fg-interactive hover:underline"
+                            className="text-ui-fg-interactive"
                             aria-expanded={open}
                             aria-label={`${t('ledger.colDetails')} — ${row.display_id}`}
                             onClick={() => toggle(row.id)}
                           >
-                            {open ? '▾' : '▸'}
+                            {open ? <ChevronDownMini /> : <ChevronRightMini />}
                           </button>
                         </Table.Cell>
                       </Table.Row>
