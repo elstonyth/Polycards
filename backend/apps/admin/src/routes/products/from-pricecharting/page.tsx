@@ -291,11 +291,12 @@ const AddFromPriceChartingPage = () => {
     setQueue((q) => [...q, row]);
     // Reset the whole pick — the same fields runSearch() clears — so the
     // operator lands on a blank search for the next item. Bumping pickSeq is
-    // part of that reset and is NOT optional: pickMatch's getTcgCardMeta
-    // prefill is fire-and-forget and fills labelYear/labelNote only while they
-    // are blank, so without the bump a slow lookup for the card just queued
-    // would land on the NEXT card's freshly blanked form and stamp it with the
-    // previous card's year and rarity.
+    // part of that reset and is NOT optional, but for the INVARIANT rather
+    // than for a leak this one call site is the last line against: EVERY path
+    // that blanks labelYear/labelNote (runSearch, pickMatch, here) also bumps
+    // the token, so pickMatch's fire-and-forget getTcgCardMeta prefill is
+    // dropped by its seq check whichever path did the blanking — and no reset
+    // path has to reason about whether a sibling happens to re-clear after it.
     pickSeq.current++;
     setQuery('');
     setMatches(null);

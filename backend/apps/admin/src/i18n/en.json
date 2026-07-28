@@ -159,7 +159,7 @@
     "toast": {
       "queueDone": "{{n}} created.",
       "queueSkipped": "{{n}} created, {{skipped}} skipped.",
-      "queueSkippedCapped": "{{n}} created, {{skipped}} skipped — {{hidden}} more errors are not shown below."
+      "queueSkippedCapped": "{{n}} created, {{skipped}} skipped. Errors not shown: {{hidden}}."
     }
   },
   "cards": {
