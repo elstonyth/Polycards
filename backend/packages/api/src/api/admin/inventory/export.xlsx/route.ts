@@ -25,20 +25,31 @@ import {
 // the note on the money columns), and a spec that rebuilt its own column list
 // would prove nothing about what this route ships.
 //
-// This mirrors routes/inventory/list/page.tsx's Table.HeaderCell set, in the
-// same left-to-right order, with THREE deliberate differences -- stated rather
-// than papered over, because the "matches the screen" claim below is only worth
-// making if its exceptions are named:
+// This mirrors routes/inventory/list/page.tsx's DATA columns -- its
+// Table.HeaderCell set minus the leading select-all checkbox, which is a
+// control rather than data -- in the same left-to-right order, with FOUR
+// deliberate differences, stated rather than papered over, because the
+// "matches the screen" claim below is only worth making if its exceptions are
+// named. THREE are against that header set:
 //   * `handle` is ADDED as the leading column. The page uses it as the row key
 //     and the detail link (/inventory/list/:handle) but never prints it; in a
 //     spreadsheet it is the only stable join key back to the system.
 //   * `photo` is OMITTED. The page renders it as a 40px <img>; a URL in a cell
 //     is a different artifact, not the same one.
+//   * `is_card` is ADDED as its own "Registered Card" column: the page shows it
+//     inline next to the name as "(not a card)", so an export without it would
+//     show an unpromoted catalog product as though it were a registered gacha
+//     card.
+// The FOURTH is against InventoryRow's field set, not the header set -- it was
+// never a column on screen:
 //   * `product_id` is OMITTED. It is not on screen at all -- `handle` is the
 //     identifier the operator works in.
-// `is_card` IS here (as "Registered Card"): the page shows it inline next to
-// the name as "(not a card)", so an export without it would show an unpromoted
-// catalog product as though it were a registered gacha card.
+//
+// ROW ORDER also diverges, and that is NOT a spec miss: the page sorts
+// CLIENT-SIDE (its `sort` state, default created_at desc) while the sheet emits
+// loadInventoryRows order, so sorting by Cost desc and exporting gives a sheet
+// back in load order. Section 3.3 asks for the current FILTER applied, not the
+// current sort -- do NOT "fix" this by sorting in the route.
 export const INVENTORY_COLUMNS: Column<InventoryRow>[] = [
   { header: 'Handle', width: 28, cell: (r) => r.handle },
   { header: 'Name', width: 30, cell: (r) => r.name },

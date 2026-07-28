@@ -45,6 +45,7 @@ __metadata:
     "@types/jest": "npm:^29.5.13"
     "@types/multer": "npm:^2.2.0"
     "@types/node": "npm:^20.12.11"
+    fflate: "npm:^0.8.2"
     http-proxy-middleware: "npm:^3.0.7"
     ioredis: "npm:^5.4.1"
     jest: "npm:^29.7.0"
