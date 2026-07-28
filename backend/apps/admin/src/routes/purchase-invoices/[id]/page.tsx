@@ -2,6 +2,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Badge, Container, Heading, Table, Text } from '@medusajs/ui';
 import { ArrowLeft } from '@medusajs/icons';
 import { usePurchaseInvoice } from '../../../lib/queries';
+import { httpStatus } from '../../../lib/admin-rest';
 import { orderDateTime, rm } from '../../../lib/format';
 import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
 
@@ -11,7 +12,13 @@ import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
 const PurchaseInvoiceDetailPage = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { data, isError } = usePurchaseInvoice(id ?? null);
+  const { data, isError, error } = usePurchaseInvoice(id ?? null);
+
+  // A 404 is the ONLY failure that means "no such invoice". Reporting a 500, a
+  // dropped connection or an expired session as "not found" tells the operator
+  // a record vanished from a ledger that has no delete route — see the list
+  // page, which already distinguishes these.
+  const notFound = httpStatus(error) === 404;
 
   const inv = data?.invoice;
 
@@ -46,7 +53,9 @@ const PurchaseInvoiceDetailPage = () => {
 
           {isError ? (
             <Text className="text-ui-fg-subtle">
-              Purchase invoice not found.
+              {notFound
+                ? 'Purchase invoice not found.'
+                : 'Failed to load this purchase invoice.'}
             </Text>
           ) : !inv ? (
             <LoadingSkeleton />
@@ -70,13 +79,13 @@ const PurchaseInvoiceDetailPage = () => {
               ) : null}
 
               <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-4">
-                {/* agent_user_id, not an email: unlike the list route, GET
-                    /:id does not join the user module. */}
+                {/* Same fallback as the list page: the raw actor id shows only
+                    when the admin account behind it is gone. */}
                 {[
                   ['Invoice date', orderDateTime(inv.date)],
                   ['Recorded', orderDateTime(inv.created_at)],
                   ['Supplier', inv.supplier],
-                  ['Agent', inv.agent_user_id],
+                  ['Agent', inv.agent_email ?? inv.agent_user_id],
                 ].map(([label, value]) => (
                   <div key={label}>
                     <Text size="small" className="text-ui-fg-subtle">

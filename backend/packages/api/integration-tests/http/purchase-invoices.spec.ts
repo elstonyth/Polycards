@@ -395,6 +395,11 @@ medusaIntegrationTestRunner({
           // totals, by contrast, are already plain numbers via fromSen.
           expect(Number(res.data.invoice.lines[0].unit_cost)).toBe(150);
           expect(Number(res.data.invoice.lines[0].line_total)).toBe(1500);
+          // The user-module join, same as the list route asserts at :306. An
+          // exact email, not just truthiness: agent_user_id is also a non-empty
+          // string, so a truthiness check would pass on the un-joined actor id
+          // and on any other admin the fixture happens to have minted.
+          expect(res.data.invoice.agent_email).toBe(ADMIN_EMAIL);
         });
 
         it('GET /:id 404s on an unknown id', async () => {
