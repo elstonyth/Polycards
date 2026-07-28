@@ -29,8 +29,10 @@ moduleIntegrationTestRunner<PacksModuleService>({
     Pack, Card, PackOdds, Pull, CreditTransaction, DeliveryOrder,
     DeliveryOrderItem, VipLevel, RewardsSettings, ReferralRelationship,
     Commission, CustomerAccountState, AdminActionAudit, VipMemberState,
-    // adminAdjustCredit / reverseCommission write ledger rows (Epic 4); this
-    // runner generates schema from THIS list, so the tables must be listed here.
+    // adminAdjustCredit writes a ledger row (Epic 4 AD writer); this runner
+    // generates schema from THIS list ONLY — not from migrations — so a spec that
+    // reaches any recordLedgerEntry call site must list these two models.
+    // Canonical example: ledger-service.integration.spec.ts.
     LedgerEntry, LedgerSequence,
   ],
   testSuite: ({ service }) => {

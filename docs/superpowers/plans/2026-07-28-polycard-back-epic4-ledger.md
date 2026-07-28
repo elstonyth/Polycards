@@ -77,6 +77,15 @@ this epic is upstream of §6 Referral redo, which will add the RF call site).
   exist in this package). This epic owns `Migration20260728210000` (single
   migration, both new tables) — the existing tip on `origin/master` is
   `Migration20260728200000` (Epic 3); never renumber below it.
+- **`db:migrate` does NOT reach `TEST_TYPE=integration:modules`.** That runner
+  generates each spec's schema from that spec's own `moduleModels` array and
+  drops the schema after every test (`moduleIntegrationTestRunner` never passes
+  `pathToMigrations`, so MikroORM falls through to `refreshDatabase()`).
+  Corollary that bit Tasks 5-6: **adding a `recordLedgerEntry` call to an
+  existing service method breaks every module spec that calls that method**, with
+  `relation "ledger_entry" does not exist` — and no migrate command can fix it.
+  Fix is always to add `LedgerEntry` + `LedgerSequence` to that spec's
+  `moduleModels`. `TEST_TYPE=integration:http` is immune (real migrations).
 - **`model.bigNumber()` is TWO columns**: the field itself (numeric) plus a
   `raw_<field>` jsonb sidecar. A hand-written migration that omits the `raw_`
   half passes every mocked/unit test and fails on the first real insert. This
