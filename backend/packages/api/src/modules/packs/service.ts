@@ -3702,7 +3702,14 @@ class PacksModuleService extends MedusaService({
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ id: string; amount: number; balance: number }> {
-    const { id, balance } = await this.mutateCreditAtomic(
+    // `amount` here is mutateCreditAtomic's own cent-rounded value (matches
+    // the SUM(ROUND(...)) actually persisted to credit_transaction) — used
+    // below for the ledger row so it can't drift from input.amount when this
+    // method is called directly (bypassing the HTTP route's epsilon gate),
+    // same fix as Task 4's topUpCreditsWithLedger. The audit "before" calc
+    // and the return value below intentionally keep input.amount — untouched,
+    // out of this fix's scope.
+    const { id, balance, amount } = await this.mutateCreditAtomic(
       {
         customerId: input.customerId,
         amount: input.amount,
@@ -3731,7 +3738,7 @@ class PacksModuleService extends MedusaService({
         type: 'AD',
         customerId: input.customerId,
         refId: id, // the credit_transaction id already in scope
-        walletDelta: input.amount,
+        walletDelta: amount,
         vaultDelta: null,
         payload: {
           type: 'AD',
@@ -3744,6 +3751,39 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     return { id, amount: input.amount, balance };
+  }
+
+  // Wraps the buyback credit insert with its paired SE ledger row, same
+  // transaction. sp_ref_id links back to the ORIGINAL pack-open (if the pull
+  // still carries its open_id — reward pulls and pre-open_id-era rows won't),
+  // matching the spec's "[SP id]" payload field.
+  @InjectTransactionManager()
+  async recordBuybackCreditTransaction(
+    input: { customerId: string; amount: number; pullId: string; cardHandle: string; rate: number; openId: string | null },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<Awaited<ReturnType<PacksModuleService['createCreditTransactions']>>> {
+    const rows = await this.createCreditTransactions(
+      [{ customer_id: input.customerId, amount: input.amount, reason: 'buyback' as const, pull_id: input.pullId }],
+      sharedContext,
+    );
+    await this.recordLedgerEntry(
+      {
+        type: 'SE',
+        customerId: input.customerId,
+        refId: rows[0].id,
+        walletDelta: input.amount,
+        vaultDelta: -input.amount,
+        payload: {
+          type: 'SE',
+          card_handle: input.cardHandle,
+          sp_ref_id: input.openId,
+          price: input.amount,
+          rate: input.rate,
+        },
+      },
+      sharedContext,
+    );
+    return rows;
   }
 
   // recordLedgerEntry — THE write primitive for POLYCARD-BACK §5. Every
