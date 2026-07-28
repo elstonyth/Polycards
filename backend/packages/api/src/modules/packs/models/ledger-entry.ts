@@ -49,6 +49,15 @@ export const LedgerEntry = model
       on: ['type', 'occurred_at'],
       where: 'deleted_at IS NULL',
     },
+    // Admin list: the DEFAULT (unfiltered) tab — neither composite above has
+    // occurred_at as its leading column, so page 1 of "All" was a seq scan.
+    // Migration20260728211500 writes this one DESC; equivalent for a
+    // single-column btree, which scans either direction.
+    {
+      name: 'IDX_ledger_entry_occurred_at',
+      on: ['occurred_at'],
+      where: 'deleted_at IS NULL',
+    },
   ]);
 
 export default LedgerEntry;

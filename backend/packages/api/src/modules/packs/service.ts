@@ -4177,14 +4177,13 @@ class PacksModuleService extends MedusaService({
   // so it can run inside an ambient transaction — two concurrent executes on
   // one transactional connection is this repo's "pool is probably full" shape.
   //
-  // ponytail: no index serves the UNFILTERED `deleted_at IS NULL ORDER BY
-  // occurred_at DESC` default view (the two partial indexes are type- or
-  // customer-major, which doesn't satisfy that sort), so page 1 of an
-  // unfiltered Transactions tab is a seq scan + top-N sort on a
-  // forever-growing table. Fine while the table is young (go-forward only, no
-  // backfill); add `(occurred_at DESC) WHERE deleted_at IS NULL` when it
-  // stops being. `display_id ILIKE '%q%'` can never use the unique btree
-  // (leading wildcard) — inherent to substring search, not an index gap.
+  // Every WHERE shape here is indexed: the unfiltered default view by
+  // IDX_ledger_entry_occurred_at (Migration20260728211500 — added before the
+  // table had volume, since a non-concurrent CREATE INDEX on a busy
+  // ledger_entry would block the pack-open write path), the tabs by
+  // IDX_ledger_entry_type_occurred_at. `display_id ILIKE '%q%'` can never use
+  // the unique btree (leading wildcard) — inherent to substring search, not an
+  // index gap.
   @InjectManager()
   async listLedgerEntriesForAdmin(
     input: {
