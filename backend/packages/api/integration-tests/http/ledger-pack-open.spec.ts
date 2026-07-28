@@ -170,7 +170,11 @@ medusaIntegrationTestRunner({
         const rows = await ledgerEntryRowsFor(id, 'SP');
         expect(rows).toHaveLength(1);
         expect(Number(rows[0].wallet_delta)).toBe(-res.data.price);
-        expect(Number(rows[0].vault_delta)).toBeGreaterThan(0);
+        // Pinned to the exact display price, not just > 0 — a loose bound
+        // here is exactly what let the brief's own double-multiplier bug
+        // (240 vs the buggy 288) slip through cases 1-3 undetected; only
+        // case 4's round-trip math caught it.
+        expect(Number(rows[0].vault_delta)).toBe(DISPLAY_PRICE);
         expect(rows[0].display_id).toMatch(/^SP/);
       });
 
@@ -228,31 +232,21 @@ medusaIntegrationTestRunner({
       // THE round trip Task 7 must settle (task-7-brief.md "THE ONE THING THIS
       // TASK MUST SETTLE"). SP writes vault_delta = +DISPLAY_PRICE (the full
       // pull value — spec §5.3's "(pull value)" annotation, Open Item #4).
-      // SE (already shipped, Task 6, service.ts's recordBuybackCreditTransaction)
-      // writes vault_delta = -amount, where `amount` is the buyback PAYOUT
-      // (valueMyr x percent/100) — NOT the full display price. A pull-then-
-      // sell cycle therefore does NOT net vault_delta back to zero: it leaves
-      // a residual equal to the house's spread (DISPLAY_PRICE x (1 - percent
-      // /100) = 240 x 0.04 = RM 9.60 at this fixture's 96% instant rate).
       //
-      // VERDICT (full reasoning in task-7-report.md): this residual is a BUG,
-      // not intentional margin retention. The spec's own OD row (§5.3) is
-      // fully symmetric — vault - at order create, vault + on cancel,
-      // wallet_delta = 0 throughout — proving vault_delta is a pure
-      // inventory-value column, uncoupled from cash. SE's `vaultDelta:
-      // -input.amount` conflates the two; the fix belongs in the ALREADY-
-      // SHIPPED recordBuybackCreditTransaction (vaultDelta should be
-      // -valueMyr, the full display price already computed at
-      // buyback-pull.ts:136, not -amount). NOT applied here — out of this
-      // task's scope; flagged for a follow-up, per the brief's explicit
-      // instruction not to silently change SE.
-      //
-      // This test therefore pins CURRENT behavior (the 9.60 residual), not
-      // the intended target (0). If a future task fixes SE, this test's
-      // final assertion SHOULD go red — the correct response then is to
-      // update THIS test to expect 0 (round trip nets clean), never to
-      // "fix" SE back to keep this number green.
-      it('pull-then-sell round trip: vault_delta sums to the house spread, not zero (current SE behavior — see task-7-report.md)', async () => {
+      // VERDICT (full reasoning in task-7-report.md, upheld + sharpened on
+      // review): a payout-based vault_delta is a BUG, not intentional margin
+      // retention — decisively so, because it is unimplementable for the OD
+      // writer (physical delivery removes a card from the vault with
+      // wallet_delta = 0 and no buyback rate anywhere on that path, so
+      // there is nothing to apply a percentage TO). Only a full-value
+      // vault_delta is expressible across SP, SE, and OD alike. SE
+      // (recordBuybackCreditTransaction, service.ts) was fixed in the same
+      // pass as this test: vaultDelta is now -valueMyr (the card's full
+      // display price, already computed at buyback-pull.ts:136), not
+      // -input.amount (the payout). This test now asserts the round trip
+      // nets to EXACTLY ZERO — the number this comment originally predicted
+      // a future fix would require.
+      it('pull-then-sell round trip: vault_delta nets to zero', async () => {
         const { token, id } = await registerCustomer('ledger-test-10@test.dev');
         await topUp(PACK_PRICE, authed(token));
 
@@ -282,11 +276,16 @@ medusaIntegrationTestRunner({
         expect(spRows).toHaveLength(1);
         expect(seRows).toHaveLength(1);
         expect(Number(spRows[0].vault_delta)).toBe(DISPLAY_PRICE);
-        expect(Number(seRows[0].vault_delta)).toBe(-INSTANT_AMOUNT);
+        // -DISPLAY_PRICE, not -INSTANT_AMOUNT (the payout) — the fixed
+        // convention: vault_delta is the card's full value, same magnitude
+        // SP wrote on entry, regardless of what cash the sale actually paid.
+        expect(Number(seRows[0].vault_delta)).toBe(-DISPLAY_PRICE);
+        const sePayload = seRows[0].payload as Record<string, unknown>;
+        expect(sePayload.price).toBe(DISPLAY_PRICE); // also fixed — was the payout
 
         const roundTrip =
           Number(spRows[0].vault_delta) + Number(seRows[0].vault_delta);
-        expect(roundTrip).toBeCloseTo(DISPLAY_PRICE - INSTANT_AMOUNT, 2); // RM 9.60 — NOT 0
+        expect(roundTrip).toBe(0); // fixed: full value in, full value out
       });
     });
   },

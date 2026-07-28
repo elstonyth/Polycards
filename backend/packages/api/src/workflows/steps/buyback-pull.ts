@@ -146,6 +146,7 @@ export const buybackPullStep = createStep(
         packs.recordBuybackCreditTransaction({
           customerId: input.customer_id,
           amount,
+          valueMyr,
           pullId: pull.id,
           cardHandle: pull.card_id,
           rate: percent / 100,

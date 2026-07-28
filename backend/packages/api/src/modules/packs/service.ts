@@ -2496,6 +2496,15 @@ class PacksModuleService extends MedusaService({
   //
   // vault_delta uses the LENIENT resolveFxRate (see Global Constraints) —
   // this method never blocks a paid, already-committed pull on an FX gap.
+  // The rate is resolved by the CALLER (record-pull.ts / record-pulls-batch.ts,
+  // matching buyback-pull.ts:135's precedent) and passed in as
+  // input.ledger.fx — NOT resolved in here. resolveFxRate has no
+  // sharedContext, so calling it inside this @InjectTransactionManager()
+  // method would acquire a SECOND pool connection while this one is holding
+  // the write transaction (which itself holds a FOR UPDATE lock on
+  // ledger_sequence for the whole quarter's SP scope) — the exact shape of
+  // this codebase's prior KnexTimeoutError "pool is probably full" incidents.
+  // The 30s display-fx cache makes that rare, not safe.
   //
   // recorded_value_usd is ALREADY market_value x the card's multiplier
   // (roll-pack.ts's draw-time snapshot — proven by
@@ -2517,15 +2526,16 @@ class PacksModuleService extends MedusaService({
         price: number;
         packId: string;
         channel: 'single' | 'batch';
+        fx: number;
       };
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<Awaited<ReturnType<PacksModuleService['createPulls']>>> {
     const pulls = await this.createPulls(input.pulls, sharedContext);
 
-    const fx = await resolveFxRate(this);
     const vaultDelta = input.pulls.reduce(
-      (sum, p) => sum + displayMarketPrice(Number(p.recorded_value_usd), fx, 1),
+      (sum, p) =>
+        sum + displayMarketPrice(Number(p.recorded_value_usd), input.ledger.fx, 1),
       0,
     );
 
@@ -3828,9 +3838,26 @@ class PacksModuleService extends MedusaService({
   // transaction. sp_ref_id links back to the ORIGINAL pack-open (if the pull
   // still carries its open_id — reward pulls and pre-open_id-era rows won't),
   // matching the spec's "[SP id]" payload field.
+  //
+  // vaultDelta / payload.price are the card's full display value (valueMyr —
+  // computed at buyback-pull.ts:136, already FX+multiplier-applied, threaded
+  // in here), NOT input.amount (the buyback PAYOUT — percent of valueMyr).
+  // Corrected per Task 7 review: a payout-based vaultDelta is unimplementable
+  // for the OD writer (physical delivery has no buyback rate to apply — see
+  // task-7-report.md), and it silently drops the house spread out of every
+  // pull-then-sell round trip. wallet_delta stays input.amount — that IS the
+  // real cash paid, unchanged.
   @InjectTransactionManager()
   async recordBuybackCreditTransaction(
-    input: { customerId: string; amount: number; pullId: string; cardHandle: string; rate: number; openId: string | null },
+    input: {
+      customerId: string;
+      amount: number;
+      valueMyr: number;
+      pullId: string;
+      cardHandle: string;
+      rate: number;
+      openId: string | null;
+    },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<Awaited<ReturnType<PacksModuleService['createCreditTransactions']>>> {
     const rows = await this.createCreditTransactions(
@@ -3843,12 +3870,12 @@ class PacksModuleService extends MedusaService({
         customerId: input.customerId,
         refId: rows[0].id,
         walletDelta: input.amount,
-        vaultDelta: -input.amount,
+        vaultDelta: -input.valueMyr,
         payload: {
           type: 'SE',
           card_handle: input.cardHandle,
           sp_ref_id: input.openId,
-          price: input.amount,
+          price: input.valueMyr,
           rate: input.rate,
         },
       },

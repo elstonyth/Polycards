@@ -2352,6 +2352,17 @@ export default function LedgerPage() {
    vault_delta to match `vaultLiabilityMyr` instead, that is a one-line
    formula swap in Tasks 7 and 8 — flagged because the spec text doesn't
    pin which convention "pull value" means.
+   **CONFIRMED still true post-Task-7 (2026-07-28):** Task 7 shipped SP at
+   the display-price convention and, on review, fixed SE (previously
+   payout-based) to match it — so the ledger's SP and SE rows now agree
+   with EACH OTHER, but neither agrees with `vaultLiabilityMyr` /
+   `playersOverview`, which sum `market_value × fx` at multiplier 1 (no
+   multiplier term in either query at all). Concrete example: FMV 50,
+   multiplier 1.2, fx 4.0 → ledger vault_delta = RM 240; those two
+   dashboards' "vault value" for the same card = RM 200. This is a
+   genuinely THIRD basis, not a rounding difference — a future reconciliation
+   pass (or a decision that they're allowed to disagree, since one is a
+   live-recount and the other a historical ledger) needs to pick one.
 5. **Display-id case**: the spec's own two examples disagree (`TP26Q3A0001`
    uppercase vs. `last_serial: "a0413"` lowercase). This plan stores
    lowercase, renders uppercase (Task 2) — a resolved ambiguity, not a

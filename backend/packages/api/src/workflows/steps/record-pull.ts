@@ -1,6 +1,7 @@
 import { createStep, StepResponse } from "@medusajs/framework/workflows-sdk";
 import { PACKS_MODULE } from "../../modules/packs";
 import type PacksModuleService from "../../modules/packs/service";
+import { resolveFxRate } from "../../modules/packs/pricing";
 
 type RecordPullInput = {
   customer_id: string;
@@ -24,6 +25,11 @@ export const recordPullStep = createStep(
   "record-pull",
   async (input: RecordPullInput, { container }) => {
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
+    // Resolved HERE, before the transactional call — recordPullsWithLedger
+    // holds a write transaction (FOR UPDATE on ledger_sequence); resolving fx
+    // inside it would acquire a second pool connection while that lock is
+    // held (see service.ts's comment on recordPullsWithLedger).
+    const fx = await resolveFxRate(packs);
 
     const [pull] = await packs.recordPullsWithLedger({
       pulls: [
@@ -43,6 +49,7 @@ export const recordPullStep = createStep(
         price: input.price,
         packId: input.pack_id,
         channel: "single",
+        fx,
       },
     });
     return new StepResponse(pull, { id: pull.id, open_id: input.open_id });

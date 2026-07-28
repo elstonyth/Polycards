@@ -9,10 +9,16 @@ jest.setTimeout(240 * 1000);
 const PASSWORD = 'ledger-buyback-test-password-1'; // gitleaks:allow
 
 // Task 6 (POLYCARD-BACK Epic 4 §5.3) — the SE ledger writer wired into
-// buyback-pull: a sell-back appends exactly ONE SE ledger row (wallet_delta
-// +amount, vault_delta -amount, same magnitude — the plan's "Open items" #4
-// scopes the display-price vault_delta convention to Tasks 7/8, NOT this
-// writer) in the SAME transaction as the buyback's credit_transaction write.
+// buyback-pull: a sell-back appends exactly ONE SE ledger row in the SAME
+// transaction as the buyback's credit_transaction write. wallet_delta is
+// +amount (the actual cash payout). vault_delta is -valueMyr (the card's
+// full display price) — corrected on Task 7 review from the original
+// -amount (payout-based) convention, which made a pull-then-sell round trip
+// leave a permanent, unreconciled residual and is unimplementable for the
+// OD writer (physical delivery has no buyback rate to apply a percentage
+// of). See task-7-report.md for the full reasoning. wallet_delta and
+// vault_delta are therefore DIFFERENT magnitudes whenever percent < 100 —
+// not "same magnitude" as this file originally documented.
 // Buyback-flow behavior itself (rates, stock restore, foreign-customer 404s)
 // is vault-buyback.spec.ts's job; this file only tests the new ledger row.
 
@@ -23,6 +29,9 @@ const MULTIPLIER = 1.2;
 const MANUAL_RATE = 4.0;
 const INSTANT_PERCENT = 96;
 const PACK_PRICE = 10;
+// Display price = FMV x FX x multiplier (D1) = 50 x 4.0 x 1.2 = RM 240 — the
+// full card value vault_delta now carries on both entry (SP) and exit (SE).
+const DISPLAY_PRICE = 240;
 
 medusaIntegrationTestRunner({
   inApp: true,
@@ -146,7 +155,7 @@ medusaIntegrationTestRunner({
         return open.data.pull.id as string;
       };
 
-      it('a buyback writes ONE SE ledger row: wallet +, vault -, same magnitude', async () => {
+      it('a buyback writes ONE SE ledger row: wallet +payout, vault -full display price', async () => {
         const { token, id } = await registerCustomer('ledger-test-5@test.dev');
         const pullId = await openOne(token);
         const res = await api.post(
@@ -156,11 +165,17 @@ medusaIntegrationTestRunner({
         );
         expect(res.status).toBe(200);
         const amount = res.data.amount as number;
+        // Sanity: at this fixture's 96% instant rate the payout is strictly
+        // less than the full display price, so the two assertions below are
+        // pinning genuinely different numbers, not accidentally-equal ones.
+        expect(amount).toBeLessThan(DISPLAY_PRICE);
 
         const rows = await ledgerEntryRowsFor(id, 'SE');
         expect(rows).toHaveLength(1);
         expect(Number(rows[0].wallet_delta)).toBe(amount);
-        expect(Number(rows[0].vault_delta)).toBe(-amount);
+        expect(Number(rows[0].vault_delta)).toBe(-DISPLAY_PRICE);
+        const payload = rows[0].payload as Record<string, unknown>;
+        expect(payload.price).toBe(DISPLAY_PRICE);
       });
 
       it('a duplicate buyback attempt on the same pull writes no second ledger row', async () => {

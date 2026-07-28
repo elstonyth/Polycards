@@ -17,6 +17,8 @@ import Commission from '../models/commission';
 import CustomerAccountState from '../models/customer-account-state';
 import AdminActionAudit from '../models/admin-action-audit';
 import VipMemberState from '../models/vip-member-state';
+import LedgerEntry from '../models/ledger-entry';
+import LedgerSequence from '../models/ledger-sequence';
 
 jest.setTimeout(300 * 1000);
 
@@ -27,6 +29,9 @@ moduleIntegrationTestRunner<PacksModuleService>({
     Pack, Card, PackOdds, Pull, CreditTransaction, DeliveryOrder,
     DeliveryOrderItem, VipLevel, RewardsSettings, ReferralRelationship,
     Commission, CustomerAccountState, AdminActionAudit, VipMemberState,
+    // adminAdjustCredit / reverseCommission write ledger rows (Epic 4); this
+    // runner generates schema from THIS list, so the tables must be listed here.
+    LedgerEntry, LedgerSequence,
   ],
   testSuite: ({ service }) => {
     async function seedLadder() {

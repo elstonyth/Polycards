@@ -1,6 +1,7 @@
 import { createStep, StepResponse } from '@medusajs/framework/workflows-sdk';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
+import { resolveFxRate } from '../../modules/packs/pricing';
 
 export type RecordPullsBatchInput = {
   customer_id: string;
@@ -47,6 +48,9 @@ export const recordPullsBatchStep = createStep<
   'record-pulls-batch',
   async (input: RecordPullsBatchInput, { container }) => {
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
+    // Resolved HERE, before the transactional call — see record-pull.ts /
+    // recordPullsWithLedger's own comment (pool-exhaustion risk otherwise).
+    const fx = await resolveFxRate(packs);
 
     const pulls = (await packs.recordPullsWithLedger({
       pulls: input.cards.map((c) => ({
@@ -64,6 +68,7 @@ export const recordPullsBatchStep = createStep<
         price: input.price,
         packId: input.pack_id,
         channel: 'batch',
+        fx,
       },
     })) as PullRecord[];
 
