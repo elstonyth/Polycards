@@ -190,6 +190,28 @@ medusaIntegrationTestRunner({
         expect(res.data.message).toMatch(/reversing invoice/i);
       });
 
+      // The budget check is a read-then-write. Run in the route's own
+      // (separate) transaction it was a TOCTOU: two concurrent POSTs of the
+      // same -10 reversal both read a full budget and both returned 201 — ten
+      // units bought, twenty reversed, and nothing downstream catches it
+      // (weightedAverageCost just goes null, or skews once a second purchase
+      // is in play). Fixed by taking pg_advisory_xact_lock on the target
+      // inside the SAME transaction that writes the reversal.
+      it('serializes two concurrent reversals of the same invoice', async () => {
+        const original = await createOriginal();
+        const [a, b] = await Promise.all([
+          reverse(original.data.invoice.id, [{ ...LINE, qty: -10 }]),
+          reverse(original.data.invoice.id, [{ ...LINE, qty: -10 }]),
+        ]);
+        expect([a.status, b.status].sort()).toEqual([201, 400]);
+
+        const lines = await packs.listPurchaseInvoiceLines(
+          { card_handle: LINE.card_handle },
+          { take: 100 },
+        );
+        expect(lines.reduce((s, l) => s + Number(l.qty), 0)).toBe(0);
+      });
+
       // The FX gate is the one money-safety guard here that the rest of this
       // suite can only prove NEGATIVELY (the beforeEach pin makes every other
       // test take the happy branch), so it needs its own row-clearing test —

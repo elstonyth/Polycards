@@ -63,7 +63,7 @@ import {
 } from './referral-commission';
 import { levelForSpend } from './vip-ladder';
 import { levelsToGrant, rewardsForLevel } from './vip-rewards';
-import { fromSen } from './money';
+import { fromSen, toSen } from './money';
 import {
   DEFAULT_MARKET_MULTIPLIER,
   resolveFxRate,
@@ -5445,6 +5445,127 @@ class PacksModuleService extends MedusaService({
   // half-sen tolerance, and a pre-rounded total is what would sit ON that
   // boundary. unit_cost is already capped at 2dp by the route validator, so
   // the raw product is exact to ~1e-13 here.
+  // Cross-invoice reversal validation (D8). Deliberately lives INSIDE the
+  // create transaction: it is a read-then-write, and running it in the route
+  // — a SEPARATE transaction from the write — was a real TOCTOU, not a
+  // theoretical one. Two concurrent POSTs of the same -10 reversal both read a
+  // full budget and both returned 201: ten units bought, twenty reversed.
+  // Nothing downstream catches that (there is no unique constraint, and the
+  // line CHECK only validates per-line arithmetic).
+  //
+  // The advisory lock serializes reversals of ONE target for the rest of this
+  // transaction — same idiom as applyPackMemberDiff and the credit ledger — so
+  // the loser re-reads only after the winner commits and sees the budget gone.
+  // Reversals of different targets never contend.
+  //
+  // Matching is by exact card_handle + unit_cost, never FIFO/LIFO (operator
+  // decision). The real invariant is a BUDGET, not a match: what the target
+  // bought, minus everything prior reversals of that same target already took
+  // back, must still cover this body. reverses_invoice_id is what makes that
+  // sum knowable — it is why the column exists.
+  private async assertReversalCovered(
+    reversesInvoiceId: string,
+    lines: { card_handle: string; qty: number; unit_cost: number }[],
+    sharedContext: Context,
+  ): Promise<void> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `purchase-invoice-reversal:${reversesInvoiceId}`,
+    ]);
+
+    // Integer sen, not a float compare: a numeric round-trip ("150.0000") and
+    // the validator's 2dp-normalized body value must land on the same key.
+    const key = (card_handle: string, unit_cost: unknown): string =>
+      `${card_handle}|${toSen(unit_cost)}`;
+
+    const [target] = await this.listPurchaseInvoices(
+      { id: reversesInvoiceId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!target) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        "'reverses_invoice_id' does not match an existing invoice.",
+      );
+    }
+    // Undoing a reversal would need positive-qty lines, which the validator
+    // forbids outright — so anything reaching here could only double-subtract.
+    if (target.reverses_invoice_id) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        `Invoice ${target.display_no} is itself a reversing invoice and cannot be reversed — reverse the original.`,
+      );
+    }
+
+    // HAZARD for Task 4/5: this list (like every generated list) excludes
+    // soft-deleted rows. A future void/delete route that soft-deletes a
+    // reversing invoice would silently hand its headroom back. Unreachable
+    // today — nothing deletes an invoice except the compensation cascade,
+    // which hard-deletes an invoice that never became visible.
+    const priorReversals = await pageAll((opts) =>
+      this.listPurchaseInvoices(
+        { reverses_invoice_id: target.id },
+        opts,
+        sharedContext,
+      ),
+    );
+    // PAGED, not a take: cap — a truncated prior-reversal list fails OPEN.
+    const allLines = await pageAll((opts) =>
+      this.listPurchaseInvoiceLines(
+        { invoice_id: [target.id, ...priorReversals.map((r) => r.id)] },
+        opts,
+        sharedContext,
+      ),
+    );
+
+    // Signed sum: target lines positive, every prior reversal negative, so
+    // this map IS what is still un-reversed per (card_handle, unit_cost).
+    const remaining = new Map<string, number>();
+    for (const l of allLines) {
+      const k = key(l.card_handle, l.unit_cost);
+      remaining.set(k, (remaining.get(k) ?? 0) + Number(l.qty));
+    }
+    const onTarget = new Set(
+      allLines
+        .filter((l) => l.invoice_id === target.id)
+        .map((l) => key(l.card_handle, l.unit_cost)),
+    );
+
+    // Fold the incoming body the same way FIRST: two lines in one body for the
+    // same key must spend a single budget, not be checked twice against it.
+    const requested = new Map<
+      string,
+      { card_handle: string; unit_cost: number; qty: number }
+    >();
+    for (const line of lines) {
+      const k = key(line.card_handle, line.unit_cost);
+      const prev = requested.get(k);
+      if (prev) prev.qty += line.qty;
+      else requested.set(k, { ...line });
+    }
+
+    for (const [k, want] of requested) {
+      if (!onTarget.has(k)) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `Reversal line for '${want.card_handle}' at unit_cost ${want.unit_cost} does not match any line on invoice ${target.display_no}.`,
+        );
+      }
+      const left = remaining.get(k) ?? 0;
+      // want.qty is negative; `left` is what the target still has un-reversed.
+      // One-directional by design: a target line with no reversal line is just
+      // a legal partial reversal.
+      if (left + want.qty < 0) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `Reversing ${-want.qty} of '${want.card_handle}' at unit_cost ${want.unit_cost} exceeds the ${left} still un-reversed on invoice ${target.display_no}.`,
+        );
+      }
+    }
+  }
+
   @InjectTransactionManager()
   async createPurchaseInvoiceWithLines(
     input: {
@@ -5462,6 +5583,14 @@ class PacksModuleService extends MedusaService({
     },
     @MedusaContext() sharedContext: Context = {},
   ) {
+    if (input.reverses_invoice_id) {
+      await this.assertReversalCovered(
+        input.reverses_invoice_id,
+        input.lines,
+        sharedContext,
+      );
+    }
+
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
     const [{ n }] = await em.execute<{ n: string }[]>(
@@ -5519,17 +5648,17 @@ class PacksModuleService extends MedusaService({
     invoiceId: string,
     @MedusaContext() sharedContext: Context = {},
   ): Promise<void> {
-    const lines = await this.listPurchaseInvoiceLines(
-      { invoice_id: invoiceId },
-      { take: 1000 },
-      sharedContext,
+    // PAGED, not take: 1000. That cap was safe only because the validator's
+    // MAX_LINES is 200, with nothing asserting the coupling — and this is
+    // compensation code that HARD-DELETES money records, so a truncated list
+    // fails open and strands orphan lines/movements behind a deleted invoice.
+    const lines = await pageAll((opts) =>
+      this.listPurchaseInvoiceLines({ invoice_id: invoiceId }, opts, sharedContext),
     );
     const lineIds = lines.map((l) => l.id);
     if (lineIds.length) {
-      const movements = await this.listStockMovements(
-        { ref_id: lineIds },
-        { take: 1000 },
-        sharedContext,
+      const movements = await pageAll((opts) =>
+        this.listStockMovements({ ref_id: lineIds }, opts, sharedContext),
       );
       if (movements.length) {
         await this.deleteStockMovements(
