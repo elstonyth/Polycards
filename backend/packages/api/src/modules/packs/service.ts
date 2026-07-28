@@ -44,6 +44,9 @@ import RewardBoxPrize from './models/reward-box-prize';
 import PixelPokemon from './models/pixel-pokemon';
 import ChallengeStage from './models/challenge-stage';
 import ChallengeSettings from './models/challenge-settings';
+import PurchaseInvoice from './models/purchase-invoice';
+import PurchaseInvoiceLine from './models/purchase-invoice-line';
+import StockMovement from './models/stock-movement';
 import { pageAll } from '../../api/utils/page-all';
 import {
   resolveBuybackRate,
@@ -378,6 +381,9 @@ class PacksModuleService extends MedusaService({
   PixelPokemon,
   ChallengeStage,
   ChallengeSettings,
+  PurchaseInvoice,
+  PurchaseInvoiceLine,
+  StockMovement,
 }) {
   // Apply a pack-membership diff (add rows + delete rows + renormalize
   // survivor weights) as ONE transaction. The set-pack-members workflow step
