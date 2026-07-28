@@ -9,7 +9,7 @@ import {
   displayMarketPrice,
   resolveFxRate,
 } from './pricing';
-import { toMoney } from './money';
+import { toMoney, toOptionalMoney } from './money';
 import { pageAll } from '../../api/utils/page-all';
 
 export type InventoryRow = {
@@ -69,7 +69,7 @@ async function skuByHandle(
 // on_hand, which comes from the authoritative Medusa counter.
 export async function loadInventoryRows(
   container: MedusaContainer,
-  opts: { q?: string } = {},
+  opts: { q?: string; handle?: string } = {},
 ): Promise<InventoryRow[]> {
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
   const productModule = container.resolve(Modules.PRODUCT);
@@ -84,8 +84,18 @@ export async function loadInventoryRows(
   // applyFreeTextSearchFilter moves `q` onto the find config and then
   // `delete`s it from the filters object it was handed, so a hoisted object
   // would silently return the WHOLE catalog from page 2 onwards.
+  //
+  // `handle` is an EXACT scope (the item-detail route asks for one row), `q`
+  // is the list's free-text search; they are never both set. handle is NOT
+  // expressible as `q`: Medusa's free-text filter searches title / subtitle /
+  // description plus the variants' searchable fields, and `handle` is not
+  // `.searchable()` on Product -- `{ q: handle }` would silently miss the very
+  // row it was asking for.
   const products = await pageAll((page) =>
-    productModule.listProducts(opts.q ? { q: opts.q } : {}, page),
+    productModule.listProducts(
+      opts.handle ? { handle: opts.handle } : opts.q ? { q: opts.q } : {},
+      page,
+    ),
   );
   const cards = await pageAll((page) => packs.listCards({}, page));
   const fx = await resolveFxRate(packs);
@@ -110,9 +120,13 @@ export async function loadInventoryRows(
   return listed.map((p) => {
     const card = cardByHandle.get(p.handle);
     const meta = (p.metadata ?? {}) as Record<string, unknown>;
-    // `?? NaN`, not a bare Number(): a metadata.fmv of null coerces to 0, and
-    // "free" must stay distinguishable from "no FMV recorded".
-    const fmvUsd = toMoney(card ? card.market_value : (meta.fmv ?? NaN));
+    // toOptionalMoney, not a bare Number() and not `?? NaN`: a metadata.fmv
+    // of null OR '' coerces to 0, and "free" must stay distinguishable from
+    // "no FMV recorded". `''` is the case `??` misses (it is not nullish).
+    // Same predicate admin/gacha/eligible-products applies to this very field.
+    const fmvUsd = card
+      ? toMoney(card.market_value)
+      : (toOptionalMoney(meta.fmv) ?? NaN);
     const hasFmv = Number.isFinite(fmvUsd);
     // A product with no Card row has no configured multiplier, so price ===
     // fmv reads honestly as "no markup set". Inventing DEFAULT_MARKET_MULTIPLIER
@@ -133,6 +147,12 @@ export async function loadInventoryRows(
       graded: isGraded({ grader }),
       fmv: hasFmv ? displayMarketPrice(fmvUsd, fx, 1) : null,
       price: hasFmv ? displayMarketPrice(fmvUsd, fx, mult) : null,
+      // `??`, never `||`, on BOTH of the next two: 0 and null mean different
+      // things. cost 0 = bought and free (unit_cost 0 is legal and
+      // weightedAverageCost guards `< 0`, not `<= 0`); cost null = no purchase
+      // history. on_hand 0 = tracked with nothing shippable; on_hand null =
+      // the product tracks no inventory at all (untracked / infinite).
+      // Pinned by inventory-detail.spec.
       cost: costByHandle.get(p.handle) ?? null,
       created_at: p.created_at as string | Date,
       on_hand: stockByHandle.get(p.handle) ?? null,

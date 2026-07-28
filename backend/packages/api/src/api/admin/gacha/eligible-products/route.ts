@@ -2,6 +2,7 @@ import { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
 import { Modules } from '@medusajs/framework/utils';
 import PacksModuleService from '../../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../../modules/packs';
+import { toOptionalMoney } from '../../../../modules/packs/money';
 
 // GET /admin/gacha/eligible-products — inventory products that can be registered
 // as gacha cards (i.e. catalog products whose handle is not already a Card).
@@ -38,11 +39,6 @@ export async function GET(
   // Set / Grade / Grader / FMV on pick instead of making the operator retype them.
   const str = (v: unknown): string | null =>
     typeof v === 'string' && v.trim() !== '' ? v : null;
-  const num = (v: unknown): number | null => {
-    if (v === null || v === undefined || v === '') return null;
-    const n = Number(v);
-    return Number.isFinite(n) ? n : null;
-  };
 
   const eligible = products
     .filter((p) => p.handle && !registered.has(p.handle))
@@ -58,7 +54,7 @@ export async function GET(
         set: str(meta.set),
         grade: str(meta.grade),
         grader: str(meta.grader),
-        fmv: num(meta.fmv),
+        fmv: toOptionalMoney(meta.fmv),
         pc_product_id: str(meta.pc_product_id),
         pc_grade: str(meta.pc_grade),
       };
