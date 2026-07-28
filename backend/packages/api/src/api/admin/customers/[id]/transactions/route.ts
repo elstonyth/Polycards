@@ -37,8 +37,15 @@ export async function GET(
         { select: ['ref_id', 'display_id'] },
       )
     : [];
+  // Typed inline rather than `any`: the `select` above pins exactly these two
+  // columns, and the generated listLedgerEntries return type is too loose to
+  // say so. (The `t: any`s on credit_transaction rows are this file's
+  // pre-existing style, untouched here.)
   const displayIdByRefId = new Map<string, string>(
-    ledgerRows.map((l: any) => [l.ref_id, l.display_id]),
+    ledgerRows.map((l: { ref_id: string; display_id: string }) => [
+      l.ref_id,
+      l.display_id,
+    ]),
   );
   res.json({
     total,
