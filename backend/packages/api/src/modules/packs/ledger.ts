@@ -53,6 +53,39 @@ function nextLetterBlock(letters: string): string {
 }
 
 const MYT_OFFSET_MS = 8 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+// Coerce one admin date-range bound (GET /admin/ledger ?from=/?to=) into the
+// UTC instant to bind. A date-only 'YYYY-MM-DD' — what `<input type="date">`
+// submits — is the OPERATOR'S MYT CALENDAR DAY, the same zone the display-id
+// quarter math above uses, so the range is HALF-OPEN: `from` is that day's MYT
+// midnight and `to` is the NEXT MYT midnight, EXCLUSIVE (pair it with `<`, not
+// `<=`). Both halves matter: without the +1 day, from=X&to=X asked for a
+// zero-width window and returned nothing; without the -8h, "today" near
+// midnight MYT was off by the UTC+8 gap in both directions.
+//
+// Anything else (a full ISO instant) is taken literally — a caller that
+// already knows the exact instant it wants is not asking for a calendar day.
+// Unparseable input returns undefined so the caller DROPS the filter: binding
+// an Invalid Date to a timestamptz param makes pg throw, i.e. a 500 on
+// `?from=abc`.
+export function parseMytBound(
+  v: unknown,
+  edge: 'from' | 'to',
+): Date | undefined {
+  if (typeof v !== 'string' || v.trim() === '') return undefined;
+  const s = v.trim();
+  if (!DATE_ONLY_RE.test(s)) {
+    const d = new Date(s);
+    return Number.isNaN(d.getTime()) ? undefined : d;
+  }
+  // A date-only ISO string parses as UTC midnight; -8h lands on MYT midnight.
+  // Still NaN-guarded — the regex admits '2026-13-01', Date.parse doesn't.
+  const utcMidnight = Date.parse(s);
+  if (Number.isNaN(utcMidnight)) return undefined;
+  return new Date(utcMidnight - MYT_OFFSET_MS + (edge === 'to' ? DAY_MS : 0));
+}
 
 export function ymqInMyt(d: Date): { yy: string; q: 1 | 2 | 3 | 4 } {
   const myt = new Date(d.getTime() + MYT_OFFSET_MS);

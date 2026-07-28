@@ -4,7 +4,11 @@ import type { ICustomerModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
 import { parsePaginationParams } from '../../../utils/pagination';
-import type { LedgerPayload, LedgerType } from '../../../modules/packs/ledger';
+import {
+  parseMytBound,
+  type LedgerPayload,
+  type LedgerType,
+} from '../../../modules/packs/ledger';
 
 const LEDGER_TYPES: LedgerType[] = ['TP', 'SP', 'SE', 'OD', 'RF', 'AD', 'WP'];
 
@@ -24,15 +28,6 @@ export type AdminLedgerRow = {
 // one place so casts don't spread into callers.
 const asPayload = (v: unknown): LedgerPayload => v as unknown as LedgerPayload;
 
-// A YYYY-MM-DD (or any Date-parseable) bound, or undefined. Invalid input is
-// DROPPED, not passed through: `new Date('abc')` is an Invalid Date, and
-// binding one to a timestamptz param makes pg throw — a 500 on `?from=abc`.
-const parseBound = (v: unknown): Date | undefined => {
-  if (typeof v !== 'string' || v.trim() === '') return undefined;
-  const d = new Date(v);
-  return Number.isNaN(d.getTime()) ? undefined : d;
-};
-
 // GET /admin/ledger — the Transactions list (POLYCARD-BACK §5.4).
 //
 // RF and WP are offered as filters but no writer produces them yet (no
@@ -41,13 +36,9 @@ const parseBound = (v: unknown): Date | undefined => {
 // only (D4, no backfill) — an empty list before this epic deployed is correct,
 // not a bug.
 //
-// ponytail: from/to are UTC calendar-day boundaries (plain new Date on a
-// YYYY-MM-DD string), not MYT-aware, and `to` lands on that day's MIDNIGHT —
-// so `from=X&to=X` matches nothing and a "today" filter near midnight MYT is
-// off by the UTC+8 gap. The MYT-exactness requirement in this epic is the
-// display-id quarter math (§5.2); this filter is a read-only UI convenience.
-// Upgrade (bump `to` by a day, MYT-shift both) when the admin UI actually
-// ships a date picker and an operator hits it.
+// ?from/?to are MYT CALENDAR DAYS, half-open [from, to+1day) — see
+// parseMytBound. Task 10 shipped the date pickers this was waiting on, so the
+// day is now resolved in the operator's own zone rather than UTC.
 export async function GET(
   req: MedusaRequest,
   res: MedusaResponse,
@@ -69,8 +60,8 @@ export async function GET(
     typeof rawQ === 'string' && rawQ.trim() !== ''
       ? rawQ.trim().slice(0, 100)
       : undefined;
-  const from = parseBound(req.query.from);
-  const to = parseBound(req.query.to);
+  const from = parseMytBound(req.query.from, 'from');
+  const to = parseMytBound(req.query.to, 'to');
 
   // `q` also matches the player — resolved here because the customer table
   // lives in another module, so the ledger query can't join it.

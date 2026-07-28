@@ -4211,7 +4211,10 @@ class PacksModuleService extends MedusaService({
       params.push(input.from);
     }
     if (input.to) {
-      clauses.push('occurred_at <= ?');
+      // EXCLUSIVE. The caller hands us a half-open [from, to) window
+      // (parseMytBound turns `to=YYYY-MM-DD` into the NEXT MYT midnight), so
+      // `<=` here would spill one row-instant into the following day.
+      clauses.push('occurred_at < ?');
       params.push(input.to);
     }
     if (input.q) {
