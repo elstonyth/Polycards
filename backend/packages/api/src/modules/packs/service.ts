@@ -245,6 +245,20 @@ type LedgerSqlManager = {
   execute<T = unknown>(query: string, params?: unknown[]): Promise<T>;
 };
 
+/** One raw `ledger_entry` row as listLedgerEntriesForAdmin reads it. */
+export type LedgerEntryRow = {
+  id: string;
+  display_id: string;
+  type: LedgerType;
+  customer_id: string;
+  occurred_at: string;
+  // Raw driver values for the numeric columns — Number()'d at the route
+  // boundary, same discipline as every other raw-SQL money read in this file.
+  wallet_delta: string | null;
+  vault_delta: string | null;
+  payload: unknown;
+};
+
 // Live card value in USD: FMV × the card's multiplier (default when the row
 // carries none). Requires alias `card c`; binds ONE `?`
 // (DEFAULT_MARKET_MULTIPLIER). Shared by PULLED_VALUE_USD_SQL's fallback and
@@ -4152,6 +4166,74 @@ class PacksModuleService extends MedusaService({
   // never call it to "fix" a settled row.
   async deleteLedgerEntryByRef(type: LedgerType, refId: string): Promise<void> {
     await this.deleteLedgerEntries({ type, ref_id: refId } as never);
+  }
+
+  // The admin Transactions list (POLYCARD-BACK §5.4). Raw SQL because `q` is an
+  // OR across display_id and the customer-name/email match resolved by the
+  // CALLER (the customer table lives in another module — no join available),
+  // which a plain ORM AND-filter can't express.
+  //
+  // Sequential, not Promise.all: this resolves transactionManager ?? manager,
+  // so it can run inside an ambient transaction — two concurrent executes on
+  // one transactional connection is this repo's "pool is probably full" shape.
+  //
+  // ponytail: no index serves the UNFILTERED `deleted_at IS NULL ORDER BY
+  // occurred_at DESC` default view (the two partial indexes are type- or
+  // customer-major, which doesn't satisfy that sort), so page 1 of an
+  // unfiltered Transactions tab is a seq scan + top-N sort on a
+  // forever-growing table. Fine while the table is young (go-forward only, no
+  // backfill); add `(occurred_at DESC) WHERE deleted_at IS NULL` when it
+  // stops being. `display_id ILIKE '%q%'` can never use the unique btree
+  // (leading wildcard) — inherent to substring search, not an index gap.
+  @InjectManager()
+  async listLedgerEntriesForAdmin(
+    input: {
+      type?: LedgerType;
+      q?: string;
+      matchingCustomerIds?: string[];
+      from?: Date;
+      to?: Date;
+      limit: number;
+      offset: number;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ entries: LedgerEntryRow[]; total: number }> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const clauses: string[] = ['deleted_at IS NULL'];
+    const params: unknown[] = [];
+    if (input.type) {
+      clauses.push('type = ?');
+      params.push(input.type);
+    }
+    if (input.from) {
+      clauses.push('occurred_at >= ?');
+      params.push(input.from);
+    }
+    if (input.to) {
+      clauses.push('occurred_at <= ?');
+      params.push(input.to);
+    }
+    if (input.q) {
+      const ids = input.matchingCustomerIds ?? [];
+      const idClause = ids.length
+        ? ` OR customer_id IN (${ids.map(() => '?').join(',')})`
+        : '';
+      clauses.push(`(display_id ILIKE ?${idClause})`);
+      params.push(`%${input.q}%`, ...ids);
+    }
+    const where = clauses.join(' AND ');
+    const entries = await em.execute<LedgerEntryRow[]>(
+      'SELECT id, display_id, type, customer_id, occurred_at, wallet_delta, vault_delta, payload ' +
+        `  FROM ledger_entry WHERE ${where} ` +
+        '  ORDER BY occurred_at DESC, id DESC LIMIT ? OFFSET ?',
+      [...params, input.limit, input.offset],
+    );
+    const countRows = await em.execute<{ n: string }[]>(
+      `SELECT COUNT(*)::bigint AS n FROM ledger_entry WHERE ${where}`,
+      params,
+    );
+    return { entries, total: Number(countRows[0]?.n ?? 0) };
   }
 
   // Admin edit of the rewards-settings singleton — validates+clamps the patch,
