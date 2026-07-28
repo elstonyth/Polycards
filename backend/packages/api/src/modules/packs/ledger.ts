@@ -72,3 +72,14 @@ export function displayId(type: LedgerType, occurredAt: Date, serial: string): s
   const { yy, q } = ymqInMyt(occurredAt);
   return `${type}${yy}Q${q}${serial.toUpperCase()}`;
 }
+
+// Tallies a flat list of card handles (e.g. every pull a delivery order
+// covers) into the OD payload's `handles` shape — one { card_handle, qty }
+// per distinct handle, first-seen order. Task 8: Task 2 shipped this file
+// without foreseeing a multi-card payload; every other LedgerPayload variant
+// only ever names ONE card.
+export const countByHandle = (handles: string[]): { card_handle: string; qty: number }[] => {
+  const m = new Map<string, number>();
+  for (const h of handles) m.set(h, (m.get(h) ?? 0) + 1);
+  return [...m.entries()].map(([card_handle, qty]) => ({ card_handle, qty }));
+};

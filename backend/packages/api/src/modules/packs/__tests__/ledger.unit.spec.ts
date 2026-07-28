@@ -1,4 +1,4 @@
-import { nextSerial, ymqInMyt, sequenceScope, displayId } from '../ledger';
+import { nextSerial, ymqInMyt, sequenceScope, displayId, countByHandle } from '../ledger';
 
 describe('ledger — nextSerial (spec §5.2 rollovers)', () => {
   it('starts a fresh scope at a0001', () => {
@@ -53,5 +53,18 @@ describe('ledger — MYT year/quarter derivation', () => {
 describe('ledger — displayId', () => {
   it('renders TYPE + YY + Q# + UPPERCASE serial (spec example: TP26Q3A0001)', () => {
     expect(displayId('TP', new Date('2026-08-15T12:00:00Z'), 'a0001')).toBe('TP26Q3A0001');
+  });
+});
+
+describe('ledger — countByHandle', () => {
+  it('tallies quantity per distinct handle, first-seen order', () => {
+    expect(countByHandle(['a', 'b', 'a', 'c', 'b', 'a'])).toEqual([
+      { card_handle: 'a', qty: 3 },
+      { card_handle: 'b', qty: 2 },
+      { card_handle: 'c', qty: 1 },
+    ]);
+  });
+  it('returns [] for an empty list', () => {
+    expect(countByHandle([])).toEqual([]);
   });
 });

@@ -23,7 +23,7 @@ import PacksModuleService from '../service';
  *     after another run's terminal write.
  */
 
-type OrderRow = { id: string; status: string } | undefined;
+type OrderRow = { id: string; status: string; customer_id?: string; is_reward?: boolean } | undefined;
 
 const fakeService = (order: OrderRow) => {
   const svc = Object.create(PacksModuleService.prototype) as PacksModuleService;
@@ -45,10 +45,25 @@ const fakeService = (order: OrderRow) => {
   const transitionPullStatus = jest.fn(async () => {
     ops.push('flip');
   });
+  // Task 8's cancel-reversal OD write. Empty pulls short-circuits
+  // vaultValueForPulls before it ever touches listCards, so this suite (which
+  // only pins lock/atomicity ordering, not ledger content) doesn't need a
+  // listCards fake — same reason ledger-service.integration.spec.ts, not this
+  // file, is where recordLedgerEntry's own internals are pinned.
+  const listPulls = jest.fn(async () => {
+    ops.push('listPulls');
+    return [];
+  });
+  const recordLedgerEntry = jest.fn(async () => {
+    ops.push('ledger');
+    return { id: 'led_1', display_id: 'OD26Q3A0001', replayed: false };
+  });
   Object.assign(svc, {
     listDeliveryOrders,
     updateDeliveryOrders,
     transitionPullStatus,
+    listPulls,
+    recordLedgerEntry,
   });
   const ctx = { transactionManager: em } as never;
   return {
@@ -59,6 +74,8 @@ const fakeService = (order: OrderRow) => {
     listDeliveryOrders,
     updateDeliveryOrders,
     transitionPullStatus,
+    listPulls,
+    recordLedgerEntry,
   };
 };
 
@@ -67,6 +84,7 @@ const cancelInput = {
   to: 'canceled' as const,
   trackingNumber: null,
   pullIds: ['pull_1', 'pull_2'],
+  fx: 4.7, // never read — the fake listPulls returns [], so vaultValueForPulls short-circuits at 0
 };
 
 describe('PacksModuleService.transitionDeliveryOrderStatus', () => {
@@ -107,6 +125,19 @@ describe('PacksModuleService.transitionDeliveryOrderStatus', () => {
       { ids: ['pull_1', 'pull_2'], from: 'delivering', to: 'vaulted' },
       f.ctx,
     );
+    // Task 8's OD reversal rides the same transaction — exactly one row.
+    expect(f.recordLedgerEntry).toHaveBeenCalledTimes(1);
+  });
+
+  // Task 8: recordRewardWithdrawal creates a reward-prize shipment with NO OD
+  // debit (out of that task's scope — reward pulls are excluded from
+  // ledger/value tracking everywhere else too). Without this guard, canceling
+  // one would write a `vault +` row with no matching `vault -` ever having
+  // existed, drifting the ledger's cumulative vault_delta upward forever.
+  it('skips the OD reversal for a reward-sourced order (no matching debit exists)', async () => {
+    const f = fakeService({ id: 'do_1', status: 'requested', is_reward: true });
+    await f.svc.transitionDeliveryOrderStatus(cancelInput, f.ctx);
+    expect(f.recordLedgerEntry).not.toHaveBeenCalled();
   });
 
   it('completed: stamps delivered_at and flips pulls delivering → delivered', async () => {
@@ -117,6 +148,7 @@ describe('PacksModuleService.transitionDeliveryOrderStatus', () => {
         to: 'completed',
         trackingNumber: 'TRK1',
         pullIds: ['pull_1'],
+        fx: 4.7, // unread — only the 'canceled' branch touches fx
       },
       f.ctx,
     );
@@ -146,6 +178,7 @@ describe('PacksModuleService.transitionDeliveryOrderStatus', () => {
         to: 'shipped',
         trackingNumber: 'TRK1',
         pullIds: ['pull_1'],
+        fx: 4.7, // unread — only the 'canceled' branch touches fx
       },
       f.ctx,
     );
@@ -172,6 +205,7 @@ describe('PacksModuleService.transitionDeliveryOrderStatus', () => {
           to: 'shipped',
           trackingNumber: null,
           pullIds: [],
+          fx: 4.7, // unread — only the 'canceled' branch touches fx
         },
         f.ctx,
       ),

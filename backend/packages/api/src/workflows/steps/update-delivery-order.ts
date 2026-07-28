@@ -4,6 +4,7 @@ import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
 import type { DeliveryStatus } from '../../modules/packs/delivery';
+import { resolveFxRate } from '../../modules/packs/pricing';
 
 export type UpdateDeliveryOrderInput = {
   order_id: string;
@@ -108,6 +109,14 @@ export const updateDeliveryOrderInvoke = async (
   }
   const pullIds = items.map((i) => i.pull_id);
 
+  // Resolved HERE, before the transactional call — transitionDeliveryOrderStatus
+  // takes the `delivery:<id>` advisory lock as its FIRST statement; resolving
+  // fx inside it would acquire a second pool connection while that lock is
+  // held for the method's whole duration (see service.ts's comment on
+  // transitionDeliveryOrderStatus). Only the 'canceled' transition's OD
+  // reversal reads this — skip the (cached, but not free) resolve otherwise.
+  const fx = input.status === 'canceled' ? await resolveFxRate(packs) : 0;
+
   // Status transition — ONE atomic, per-order-serialized service call: fresh
   // re-read + validation + order write + pull flip commit or roll back
   // together under a `delivery:<id>` advisory lock (see
@@ -121,6 +130,7 @@ export const updateDeliveryOrderInvoke = async (
     trackingNumber: nextTracking ?? null,
     proofImages: input.proof_images,
     pullIds,
+    fx,
   });
 
   const prevPullStatus: 'delivering' | null =

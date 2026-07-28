@@ -50,6 +50,7 @@ import {
   displayId,
   nextSerial,
   sequenceScope,
+  countByHandle,
   type LedgerPayload,
   type LedgerType,
 } from './ledger';
@@ -1647,6 +1648,96 @@ class PacksModuleService extends MedusaService({
     );
 
     return { status: 'requested' };
+  }
+
+  // Collapses request-delivery's three writes (order, items, pull flip) plus
+  // the paired OD ledger row into ONE transaction (POLYCARD-BACK §5.3:
+  // "vault - at order CREATE"). Replaces the step's previous three-stage
+  // manual try/catch undo — a failure partway through this method rolls back
+  // via the transaction itself; the step's own compensation only needs to
+  // undo the WHOLE thing if a LATER workflow step fails afterward.
+  //
+  // Fires at CREATE, not at any later admin ship/deliver advance: vaultValue-
+  // ForPulls/playersOverview both key liability off status='vaulted', and
+  // transitionPullStatus flips vaulted -> delivering right here (below) —
+  // NOT at 'shipped'. A pull that's already 'delivering' has already left
+  // the counted pool for the whole requested/processed/ready_to_ship/shipped
+  // window, so the ledger row must match that same instant or it overstates
+  // vault liability for every pending order.
+  //
+  // input.fx is RESOLVED BY THE CALLER (request-delivery.ts, matching
+  // record-pull.ts:32's precedent) — never resolveFxRate(this) in here.
+  // resolveFxRate has no sharedContext, so calling it inside this
+  // @InjectTransactionManager() method would acquire a SECOND pool
+  // connection while this one already holds the write transaction — the
+  // exact KnexTimeoutError "pool is probably full" shape Task 7 fixed for
+  // the SP writer (service.ts recordPullsWithLedger).
+  @InjectTransactionManager()
+  async createDeliveryOrderWithLedger(
+    input: { customerId: string; snapshot: Record<string, unknown>; pullIds: string[]; fx: number },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ orderId: string; itemIds: string[] }> {
+    const [order] = await this.createDeliveryOrders(
+      [{ customer_id: input.customerId, status: 'requested' as const, ...input.snapshot }],
+      sharedContext,
+    );
+    const items = await this.createDeliveryOrderItems(
+      input.pullIds.map((pull_id) => ({ delivery_order_id: order.id, pull_id })),
+      sharedContext,
+    );
+    await this.transitionPullStatus(
+      { ids: input.pullIds, from: 'vaulted', to: 'delivering' },
+      sharedContext,
+    );
+
+    // ONE listPulls call feeds both the value sum and the payload tally —
+    // vaultValueForPulls takes the rows, not the ids, so this isn't fetched twice.
+    const pulls = await this.listPulls({ id: input.pullIds }, { take: input.pullIds.length }, sharedContext);
+    const vaultDelta = await this.vaultValueForPulls(pulls, input.fx, sharedContext);
+    await this.recordLedgerEntry(
+      {
+        type: 'OD',
+        customerId: input.customerId,
+        refId: order.id,
+        walletDelta: 0,
+        vaultDelta: -vaultDelta,
+        payload: {
+          type: 'OD',
+          handles: countByHandle(pulls.map((p) => p.card_id)),
+          status: 'requested',
+        },
+      },
+      sharedContext,
+    );
+    return { orderId: order.id, itemIds: items.map((i) => i.id) };
+  }
+
+  // Shared by createDeliveryOrderWithLedger and transitionDeliveryOrderStatus's
+  // cancel branch — Σ displayMarketPrice(card.market_value, fx, multiplier)
+  // over the given pulls' cards. Takes already-fetched pull rows (never
+  // re-queries) and an already-resolved `fx` (never resolveFxRate(this) —
+  // see createDeliveryOrderWithLedger's comment above; the SAME pool-
+  // exhaustion hazard applies to EVERY caller of this helper, including
+  // transitionDeliveryOrderStatus, which takes its own xact lock first).
+  // listCards/listPulls calls elsewhere in this file thread sharedContext
+  // through and are safe — only the fx resolver drops it.
+  private async vaultValueForPulls(
+    pulls: { card_id: string }[],
+    fx: number,
+    sharedContext: Context,
+  ): Promise<number> {
+    const handles = [...new Set(pulls.map((p) => p.card_id))];
+    if (handles.length === 0) return 0;
+    const cards = await this.listCards({ handle: handles }, { take: handles.length }, sharedContext);
+    const byHandle = new Map(cards.map((c) => [c.handle, c]));
+    const sum = pulls.reduce((total, p) => {
+      const card = byHandle.get(p.card_id);
+      if (!card) return total;
+      return total + displayMarketPrice(
+        Number(card.market_value), fx, Number(card.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER),
+      );
+    }, 0);
+    return Math.round(sum * 100) / 100;
   }
 
   // Admin per-commission status flip: available|pending → suspended.
@@ -3697,6 +3788,18 @@ class PacksModuleService extends MedusaService({
       proofImages?: string[];
       /** Every pull the order covers — flipped on completed/canceled. */
       pullIds: string[];
+      /**
+       * Resolved by the CALLER (updateDeliveryOrderInvoke), never in here —
+       * this method already takes the `delivery:<id>` advisory lock as its
+       * FIRST statement, so a nested resolveFxRate(this) would request a
+       * SECOND pool connection for the method's entire duration (the exact
+       * KnexTimeoutError shape Task 7 fixed for the SP writer). Only read on
+       * a transition INTO 'canceled' with covered pulls; every other
+       * transition ignores it, but it's required (not optional) so a caller
+       * can't silently ship a canceled-with-pulls transition with no FX
+       * resolved at all.
+       */
+      fx: number;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ status: DeliveryStatus }> {
@@ -3761,6 +3864,41 @@ class PacksModuleService extends MedusaService({
           ids: input.pullIds,
           from: 'delivering',
           to: input.to === 'completed' ? 'delivered' : 'vaulted',
+        },
+        sharedContext,
+      );
+    }
+
+    // Reverse the CREATE-time OD debit — ONE hook covers both the customer
+    // cancel route and the admin bulk "mark as canceled" tool, since both
+    // route through this method. Nothing fires on 'completed': those cards
+    // are gone for good, so the original debit stands permanently.
+    //
+    // !order.is_reward excludes B7 reward-prize shipments: recordRewardWithdrawal
+    // (this file) creates those orders with NO OD debit (out of this task's
+    // scope — reward pulls are excluded from ledger/value tracking
+    // everywhere else too, e.g. Pull.recorded_value_usd). Crediting the vault
+    // back here for an order that was never debited would drift the ledger's
+    // cumulative vault_delta upward forever with no corresponding liability.
+    if (input.to === 'canceled' && input.pullIds.length && !order.is_reward) {
+      const pulls = await this.listPulls(
+        { id: input.pullIds },
+        { take: input.pullIds.length },
+        sharedContext,
+      );
+      const vaultDelta = await this.vaultValueForPulls(pulls, input.fx, sharedContext);
+      await this.recordLedgerEntry(
+        {
+          type: 'OD',
+          customerId: order.customer_id,
+          refId: `cancel:${input.orderId}`,
+          walletDelta: 0,
+          vaultDelta,
+          payload: {
+            type: 'OD',
+            handles: countByHandle(pulls.map((p) => p.card_id)),
+            status: 'canceled',
+          },
         },
         sharedContext,
       );

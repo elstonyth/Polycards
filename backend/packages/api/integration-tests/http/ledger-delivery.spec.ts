@@ -1,0 +1,243 @@
+import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
+import { Modules } from '@medusajs/framework/utils';
+import { PACKS_MODULE } from '../../src/modules/packs';
+import type PacksModuleService from '../../src/modules/packs/service';
+import { clearFxDisplayCache } from '../../src/modules/packs/pricing';
+import { mintSuperAdmin } from './utils';
+
+jest.setTimeout(240 * 1000);
+
+// Task 8 (POLYCARD-BACK Epic 4 §5.3) — the OD ledger writer wired into
+// delivery-order create + cancel. A delivery request debits the vault at the
+// FULL display price (FMV x market_multiplier x fx — the vault-basis settled
+// on Task 7 review) the instant the covered pulls leave the 'vaulted' pool:
+// vaultLiabilityMyr/playersOverview both key liability off status='vaulted'
+// (service.ts), and transitionPullStatus already flips vaulted -> delivering
+// at order CREATE (not at any later admin ship/deliver advance) — so the
+// ledger row fires there too, or it would misstate liability for the whole
+// requested/processed/ready_to_ship/shipped window. wallet_delta stays 0
+// throughout: no cash moves for a physical shipment. Canceling reverses it
+// with a second row keyed `cancel:<order_id>`; ONE hook in
+// transitionDeliveryOrderStatus covers both the customer cancel route and the
+// admin bulk "mark as canceled" tool. Delivery-order behavior itself (status
+// pipeline, address edit lock, admin listing) is delivery-orders.spec.ts's
+// job; this file only tests the new ledger rows.
+
+const PASSWORD = 'ledger-delivery-test-password-1'; // gitleaks:allow
+const PACK_SLUG = 'ledger-od-pack';
+const CARD_HANDLE = 'ledger-od-card';
+const FMV = 25;
+const PACK_PRICE = 5;
+const TOPUP = 5 * PACK_PRICE;
+
+medusaIntegrationTestRunner({
+  inApp: true,
+  testSuite: ({ api, getContainer }) => {
+    describe('ledger: OD writer — delivery create + cancel', () => {
+      let storeHeaders: Record<string, string>;
+
+      // The runner resets the database between `it` blocks, so the publishable
+      // key, the gacha fixtures, and any customers are recreated per test.
+      beforeEach(async () => {
+        // vaultValueForPulls uses the LENIENT resolveFxRate (pricing.ts), which
+        // caches for 30s process-wide — clear it so an earlier ledger spec's
+        // manual FX rate (this file seeds none, relying on the DEFAULT_USD_MYR
+        // fallback) can't leak in under --runInBand (same fix as Task 7's SP spec).
+        clearFxDisplayCache();
+
+        const container = getContainer();
+        const apiKeyModule = container.resolve(Modules.API_KEY);
+        const key = await apiKeyModule.createApiKeys({
+          title: 'ledger-delivery-test',
+          type: 'publishable',
+          created_by: 'ledger-delivery-test',
+        });
+        storeHeaders = { 'x-publishable-api-key': key.token };
+
+        // Gacha fixtures: an active pack with a SINGLE-card pool, so the
+        // weighted roll is deterministic (the only card always wins).
+        const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
+        await packs.createPacks([
+          {
+            slug: PACK_SLUG,
+            title: 'Ledger OD Test Pack',
+            category: 'pokemon',
+            price: PACK_PRICE,
+            image: '/cdn/test-pack.webp',
+            buyback_percent: 90,
+          },
+        ]);
+        await packs.createCards([
+          {
+            handle: CARD_HANDLE,
+            name: 'Ledger OD Test Card',
+            set: 'Test Set',
+            grader: 'PSA',
+            grade: '10',
+            market_value: FMV,
+            image: '/cdn/test-card.webp',
+          },
+        ]);
+        await packs.createPackOdds([
+          {
+            pack_id: PACK_SLUG,
+            card_id: CARD_HANDLE,
+            weight: 100,
+            locked: false,
+            rarity: 'Rare' as const,
+          },
+        ]);
+      });
+
+      const authed = (token: string): Record<string, string> => ({
+        ...storeHeaders,
+        authorization: `Bearer ${token}`,
+      });
+
+      const registerCustomer = async (
+        email: string,
+      ): Promise<{ token: string; id: string }> => {
+        const reg = await api.post('/auth/customer/emailpass/register', {
+          email,
+          password: PASSWORD,
+        });
+        const created = await api.post(
+          '/store/customers',
+          { email },
+          {
+            headers: {
+              ...storeHeaders,
+              authorization: `Bearer ${reg.data.token}`,
+            },
+          },
+        );
+        const login = await api.post('/auth/customer/emailpass', {
+          email,
+          password: PASSWORD,
+        });
+        return { token: login.data.token, id: created.data.customer.id };
+      };
+
+      const ledgerEntryRowsFor = async (customerId: string, type?: string) => {
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        const filter: Record<string, unknown> = { customer_id: customerId };
+        if (type) filter.type = type;
+        return packs.listLedgerEntries(filter, {
+          order: { occurred_at: 'DESC' },
+        });
+      };
+
+      // Create a vaulted pull for `token` via the real open flow; returns pull id.
+      const openOne = async (
+        token: string,
+        topupKey = 'ledger-od-topup',
+      ): Promise<string> => {
+        await api.post(
+          '/store/credits/topup',
+          { amount: TOPUP },
+          { headers: { ...authed(token), 'idempotency-key': topupKey } },
+        );
+        const open = await api.post(
+          `/store/packs/${PACK_SLUG}/open`,
+          {},
+          { headers: authed(token) },
+        );
+        return open.data.pull.id as string;
+      };
+
+      // Add a Medusa customer address; returns its id.
+      const addAddress = async (token: string): Promise<string> => {
+        const res = await api.post(
+          '/store/customers/me/addresses',
+          {
+            first_name: 'Ada',
+            last_name: 'Lovelace',
+            address_1: '1 Analytical Way',
+            city: 'London',
+            postal_code: 'EC1',
+            country_code: 'gb',
+          },
+          { headers: authed(token) },
+        );
+        const list = res.data.customer.addresses;
+        return list[list.length - 1].id as string;
+      };
+
+      it('a delivery request writes ONE OD row: wallet 0, vault negative', async () => {
+        const { token, id } = await registerCustomer('ledger-test-10@test.dev');
+        const pullId = await openOne(token);
+        const addressId = await addAddress(token);
+        const res = await api.post(
+          '/store/delivery-orders',
+          { pull_ids: [pullId], address_id: addressId },
+          { headers: authed(token) },
+        );
+        expect(res.status).toBe(201); // matches delivery-orders.spec.ts's OWN create-order assertion
+
+        const rows = await ledgerEntryRowsFor(id, 'OD');
+        expect(rows).toHaveLength(1);
+        expect(Number(rows[0].wallet_delta)).toBe(0);
+        expect(Number(rows[0].vault_delta)).toBeLessThan(0);
+      });
+
+      it('canceling the order writes a SECOND OD row (ref_id cancel:<order_id>) that restores the vault', async () => {
+        const { token, id } = await registerCustomer('ledger-test-11@test.dev');
+        const pullId = await openOne(token);
+        const addressId = await addAddress(token);
+        const created = await api.post(
+          '/store/delivery-orders',
+          { pull_ids: [pullId], address_id: addressId },
+          { headers: authed(token) },
+        );
+        const orderId = created.data.order_id as string;
+
+        await api.post(
+          `/store/delivery-orders/${orderId}/cancel`,
+          {},
+          { headers: authed(token) },
+        );
+
+        const rows = await ledgerEntryRowsFor(id, 'OD');
+        expect(rows).toHaveLength(2);
+        const create = rows.find((r) => Number(r.vault_delta) < 0);
+        const cancel = rows.find((r) => Number(r.vault_delta) > 0);
+        expect(create).toBeDefined();
+        expect(cancel).toBeDefined();
+        expect(Number(cancel!.vault_delta)).toBe(-Number(create!.vault_delta)); // exact reversal
+        expect(cancel!.ref_id).toBe(`cancel:${orderId}`);
+      });
+
+      it('an admin bulk mark-as-canceled ALSO writes the reversing OD row (one hook, both paths)', async () => {
+        // Real route (verified on origin/master): POST /admin/delivery-orders/bulk
+        // { ids, status } -> updateDeliveryOrderWorkflow -> the SAME
+        // transitionDeliveryOrderStatus this task extends.
+        const { token, id: customerId } = await registerCustomer(
+          'ledger-test-12@test.dev',
+        );
+        const pullId = await openOne(token);
+        const addressId = await addAddress(token);
+        const created = await api.post(
+          '/store/delivery-orders',
+          { pull_ids: [pullId], address_id: addressId },
+          { headers: authed(token) },
+        );
+        const orderId = created.data.order_id as string;
+
+        const adminToken = await mintSuperAdmin(
+          getContainer(),
+          api,
+          'ledger-od-admin@test.dev',
+          'admin-pass-od-1',
+        );
+        await api.post(
+          '/admin/delivery-orders/bulk',
+          { ids: [orderId], status: 'canceled' },
+          { headers: { authorization: `Bearer ${adminToken}` } },
+        );
+
+        const rows = await ledgerEntryRowsFor(customerId, 'OD');
+        expect(rows.some((r) => Number(r.vault_delta) > 0)).toBe(true);
+      });
+    });
+  },
+});
