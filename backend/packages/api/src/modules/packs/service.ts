@@ -1,4 +1,4 @@
-import { randomInt } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
 import {
   MedusaService,
   MedusaError,
@@ -46,6 +46,13 @@ import ChallengeStage from './models/challenge-stage';
 import ChallengeSettings from './models/challenge-settings';
 import LedgerEntry from './models/ledger-entry';
 import LedgerSequence from './models/ledger-sequence';
+import {
+  displayId,
+  nextSerial,
+  sequenceScope,
+  type LedgerPayload,
+  type LedgerType,
+} from './ledger';
 import { pageAll } from '../../api/utils/page-all';
 import {
   resolveBuybackRate,
@@ -3691,6 +3698,101 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     return { id, amount: input.amount, balance };
+  }
+
+  // recordLedgerEntry — THE write primitive for POLYCARD-BACK §5. Every
+  // writer in this epic calls this from WITHIN its own
+  // @InjectTransactionManager() method, passing that method's sharedContext,
+  // so the ledger row lands in the SAME transaction as the domain write it
+  // describes (never called bare — a bare call opens its own transaction,
+  // which breaks "same DB transaction as the source write").
+  //
+  // Idempotency: an explicit pre-check via raw SQL (fires immediately, like
+  // settleOpen's own pre-check) rather than catching a unique-violation from
+  // an ORM insert — MikroORM's Unit of Work buffers ORM creates until flush
+  // (transaction commit), so a 23505 from createLedgerEntries would surface
+  // AFTER this method returns, where it can't be handled cleanly. The
+  // (type, ref_id) partial unique index is a defensive backstop for the
+  // theoretical case where two callers race for the same key with no shared
+  // outer lock; every real caller in this epic already holds one (the
+  // per-customer credit lock or the per-order delivery lock).
+  @InjectTransactionManager()
+  async recordLedgerEntry(
+    input: {
+      type: LedgerType;
+      customerId: string;
+      refId: string;
+      walletDelta: number | null;
+      vaultDelta: number | null;
+      payload: LedgerPayload;
+      occurredAt?: Date;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ id: string; display_id: string; replayed: boolean }> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    const occurredAt = input.occurredAt ?? new Date();
+
+    const [existing] = await em.execute<
+      { id: string; display_id: string }[]
+    >(
+      'SELECT id, display_id FROM ledger_entry WHERE type = ? AND ref_id = ? AND deleted_at IS NULL LIMIT 1',
+      [input.type, input.refId],
+    );
+    if (existing) {
+      return { id: existing.id, display_id: existing.display_id, replayed: true };
+    }
+
+    const scope = sequenceScope(input.type, occurredAt);
+
+    // Upsert-then-lock: a brand-new scope has no row for FOR UPDATE to hold,
+    // so create it first (ON CONFLICT DO NOTHING absorbs a concurrent
+    // first-writer race on the SAME fresh scope), then lock + read whoever's
+    // row won.
+    await em.execute(
+      'INSERT INTO ledger_sequence (id, scope, last_serial, created_at, updated_at) ' +
+        "VALUES (?, ?, NULL, now(), now()) ON CONFLICT (scope) WHERE deleted_at IS NULL DO NOTHING",
+      [randomUUID(), scope],
+    );
+    const [seqRow] = await em.execute<{ id: string; last_serial: string | null }[]>(
+      'SELECT id, last_serial FROM ledger_sequence WHERE scope = ? AND deleted_at IS NULL FOR UPDATE',
+      [scope],
+    );
+    const serial = nextSerial(seqRow.last_serial);
+    await em.execute(
+      'UPDATE ledger_sequence SET last_serial = ?, updated_at = now() WHERE id = ?',
+      [serial, seqRow.id],
+    );
+
+    const id = input.type + '_' + randomUUID(); // any unique text works; MedusaService ids are opaque anyway
+    const [row] = await this.createLedgerEntries(
+      [
+        {
+          id,
+          display_id: displayId(input.type, occurredAt, serial),
+          type: input.type,
+          customer_id: input.customerId,
+          occurred_at: occurredAt,
+          wallet_delta: input.walletDelta,
+          vault_delta: input.vaultDelta,
+          payload: input.payload,
+          ref_id: input.refId,
+        },
+      ],
+      sharedContext,
+    );
+    return { id: row.id, display_id: row.display_id, replayed: false };
+  }
+
+  // Compensation-only delete by (type, ref_id) — every writer's workflow-step
+  // compensation (Tasks 4-8) calls THIS, not the raw generated method, so the
+  // `as never` escape lives in exactly one place. Precedent:
+  // deleteCreditTransactionsGuarded (~line 3415) casts the same way — the
+  // MedusaService-generated delete accepts a filter selector at runtime, but
+  // its generated TS signature only declares id/id[]. This is for IN-FLIGHT
+  // workflow rollback only (see Global Constraints' two-mechanisms note) —
+  // never call it to "fix" a settled row.
+  async deleteLedgerEntryByRef(type: LedgerType, refId: string): Promise<void> {
+    await this.deleteLedgerEntries({ type, ref_id: refId } as never);
   }
 
   // Admin edit of the rewards-settings singleton — validates+clamps the patch,
