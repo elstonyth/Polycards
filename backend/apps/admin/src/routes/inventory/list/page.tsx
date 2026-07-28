@@ -300,7 +300,14 @@ const InventoryListPage = () => {
         <div>
           <Heading level="h2">{t('inventory.title')}</Heading>
           <Text className="text-ui-fg-subtle mt-1" size="small">
-            {t('inventory.subtitle')}
+            {/* `pageSubtitle`, NOT `subtitle`: the dashboard merges locales with
+                a RECURSIVE deepMerge whose leaf-vs-anything branch OVERWRITES,
+                and core Medusa already defines `inventory.subtitle` ("Manage
+                your inventory items") for its own Inventory Items screen. A key
+                named `subtitle` here silently retitles a core page we went out
+                of our way to keep intact. Nesting under `inventory` is still
+                correct — the other keys are additive and deepMerge recurses. */}
+            {t('inventory.pageSubtitle')}
           </Text>
         </div>
         <Input

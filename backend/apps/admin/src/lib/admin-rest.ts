@@ -1153,3 +1153,49 @@ export const listInventory = (q?: string) =>
   getJson<{ rows: InventoryRow[] }>(
     `/admin/inventory${q ? `?q=${encodeURIComponent(q)}` : ''}`,
   );
+
+/** One row of the append-only stock-movement audit log (spec §3.1).
+ *
+ *  `kind` is typed as a plain string, not the seven-member enum: the model
+ *  defines all seven but this epic only ever WRITES 'purchase', so the display
+ *  side resolves the label with a raw-token fallback rather than pretending a
+ *  map is exhaustive — same rule deliveryStatusLabel documents.
+ *
+ *  `qty` is SIGNED and is a `model.number()`, NOT a bigNumber — so unlike
+ *  AdminPurchaseInvoiceLine it needs no Number() wrap and there are no raw_*
+ *  sidecars on the wire. */
+export interface InventoryStockMovement {
+  id: string;
+  card_handle: string;
+  kind: string;
+  qty: number;
+  ref_id: string;
+  created_at: string;
+}
+
+/** GET /admin/inventory/:handle (spec §3.4) — the same row the list renders,
+ *  plus where the card is listed and its paged movement history. `item` is a
+ *  whole InventoryRow, so the same three-state `cost` / `on_hand` rules apply
+ *  here verbatim: null and 0 are different facts, and nothing may collapse
+ *  them with a truthiness test. */
+export interface InventoryDetail {
+  item: InventoryRow;
+  associated: {
+    packs: { slug: string; title: string }[];
+    rank_rewards: { stage_number: number; rank: number }[];
+  };
+  movements: {
+    total: number;
+    offset: number;
+    limit: number;
+    rows: InventoryStockMovement[];
+  };
+}
+
+// Only the MOVEMENTS are paged — `item` and `associated` are re-sent whole with
+// every page, so the page state belongs to the history table alone. The route
+// caps limit at 100 and defaults to 25.
+export const getInventoryItem = (handle: string, page = 0, limit = 25) =>
+  getJson<InventoryDetail>(
+    `/admin/inventory/${encodeURIComponent(handle)}?limit=${limit}&offset=${page * limit}`,
+  );

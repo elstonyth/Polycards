@@ -466,7 +466,7 @@
   },
   "inventory": {
     "title": "Inventory",
-    "subtitle": "Every catalog item — registered gacha cards and items not yet promoted.",
+    "pageSubtitle": "Every catalog item — registered gacha cards and items not yet promoted.",
     "searchPlaceholder": "Search name or SKU",
     "photo": "Photo",
     "name": "Name",
@@ -497,6 +497,29 @@
     "bulkDoneSkipped": "{{n}} card(s) created, {{skipped}} skipped",
     "bulkNone": "Nothing created, {{skipped}} skipped",
     "skipAlreadyCard": "already a gacha card",
-    "skipNoFmv": "no FMV recorded — set one on the product first"
+    "skipNoFmv": "no FMV recorded — set one on the product first",
+    "detail": {
+      "back": "Inventory",
+      "notFound": "Inventory item not found.",
+      "loadError": "Failed to load this inventory item.",
+      "associated": "Associated products ({{n}})",
+      "notListed": "Not listed anywhere.",
+      "rankReward": "Stage {{stage}} rank {{rank}}",
+      "history": "Stock movement history",
+      "when": "When",
+      "kindCol": "Kind",
+      "qty": "Qty",
+      "ref": "Ref",
+      "noMovements": "No stock movements recorded.",
+      "kind": {
+        "purchase": "Purchase",
+        "pull": "Pull",
+        "vault_out": "Vault out",
+        "requested": "Requested",
+        "shipped": "Shipped",
+        "completed": "Completed",
+        "adjustment": "Adjustment"
+      }
+    }
   }
 }

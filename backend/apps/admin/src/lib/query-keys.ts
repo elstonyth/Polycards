@@ -120,4 +120,14 @@ export const qk = {
   // other `q` values, so it has to reach the whole namespace; refetching just
   // the key on screen would leave the operator's earlier searches lying.
   inventoryKey: ['admin', 'inventory'] as const,
+  // SINGULAR sibling namespace, same shape as purchaseInvoice/purchaseInvoices
+  // and deliveryOrder/deliveryOrders. NOT nested under the list key: slot 2 of
+  // qk.inventory holds the operator's SEARCH STRING, so ['admin','inventory',
+  // handle, page] would make qk.inventory('charizard') a strict prefix of the
+  // detail key for the card 'charizard' — two unrelated concepts sharing a key
+  // space, which is exactly the prefix hazard every comment above guards
+  // against. `page` is the movement-history page; the item itself is re-sent
+  // whole with each one.
+  inventoryItem: (handle: string, page: number) =>
+    ['admin', 'inventory-item', handle, page] as const,
 };

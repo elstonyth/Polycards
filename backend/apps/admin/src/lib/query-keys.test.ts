@@ -235,4 +235,39 @@ describe('qk', () => {
     // Sibling of the purchase-invoice namespace, not nested under it.
     expect(qk.inventory().slice(0, 2)).not.toEqual([...qk.purchaseInvoicesKey]);
   });
+
+  it('keys one inventory item in a SIBLING namespace, not under the list', () => {
+    // Literal expectations on the builder, not just the prefix relation below:
+    // renaming the segment leaves every structural assertion in this test green
+    // while orphaning the cache entries the page already holds.
+    expect(qk.inventoryItem('charizard', 0)).toEqual([
+      'admin',
+      'inventory-item',
+      'charizard',
+      0,
+    ]);
+    expect(qk.inventoryItem('charizard', 2)).toEqual([
+      'admin',
+      'inventory-item',
+      'charizard',
+      2,
+    ]);
+    // THE POINT OF THE SIBLING NAMESPACE: slot 2 of qk.inventory is the
+    // operator's SEARCH STRING. Nested under the list key, a detail entry for
+    // the card 'charizard' would sit beneath the list entry for the search
+    // "charizard" — so a search key would prefix-match an unrelated item cache.
+    expect(
+      qk.inventoryItem('charizard', 0).slice(0, qk.inventoryKey.length),
+    ).not.toEqual([...qk.inventoryKey]);
+    expect(qk.inventoryItem('charizard', 0).slice(0, 3)).not.toEqual([
+      ...qk.inventory('charizard'),
+    ]);
+    // The movement page always renders, so no page's key can prefix another's.
+    expect(qk.inventoryItem('charizard', 0)).not.toEqual(
+      qk.inventoryItem('charizard', 2),
+    );
+    expect(qk.inventoryItem('charizard', 0).length).toBe(
+      qk.inventoryItem('charizard', 2).length,
+    );
+  });
 });

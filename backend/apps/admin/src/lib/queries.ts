@@ -335,7 +335,22 @@ export const useRegisterCard = () => {
     onSuccess: () => {
       // The product is no longer eligible once registered, and the card list grew.
       qc.invalidateQueries({ queryKey: qk.cards });
-      qc.invalidateQueries({ queryKey: qk.eligibleProducts });
+      // MARK STALE, DO NOT REFETCH. invalidateQueries defaults to
+      // refetchType:'active', and the Inventory list's bulk tool keeps
+      // useEligibleProducts(selected.size > 0) ACTIVE for the whole run — so an
+      // N-row run fired up to N refetches of /admin/gacha/eligible-products,
+      // which reads 1000 products + 1000 cards each time. (The loop itself is
+      // unaffected: it registers from a map closed over at click time, so a
+      // mid-loop refetch could never have changed its behaviour.)
+      //
+      // Safe for both consumers because this query is staleTime:0 and is
+      // enabled-gated, so it always refetches the moment it is switched back on
+      // — the register modal's picker on the next open (enabled:false while
+      // closed), the bulk tool's map on the next selection.
+      qc.invalidateQueries({
+        queryKey: qk.eligibleProducts,
+        refetchType: 'none',
+      });
     },
   });
 };
@@ -948,3 +963,23 @@ export const useInvalidateInventory = () => {
   const qc = useQueryClient();
   return () => qc.invalidateQueries({ queryKey: qk.inventoryKey });
 };
+
+import { getInventoryItem, type InventoryDetail } from './admin-rest';
+
+export type { InventoryDetail, InventoryStockMovement } from './admin-rest';
+
+// `page` pages the MOVEMENT HISTORY only — `item` and `associated` come back
+// whole with every page, which is why the whole response is one cache entry
+// keyed by (handle, page) rather than two queries. keepPreviousData keeps the
+// header and the previous page of movements on screen while the next one
+// loads, same call as usePurchaseInvoices.
+export const useInventoryItem = (
+  handle: string | null,
+  page = 0,
+): UseQueryResult<InventoryDetail> =>
+  useQuery({
+    queryKey: qk.inventoryItem(handle ?? '', page),
+    queryFn: () => getInventoryItem(handle as string, page),
+    enabled: !!handle,
+    placeholderData: keepPreviousData,
+  });
