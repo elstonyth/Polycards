@@ -97,6 +97,13 @@ describe('custom i18n keys do not shadow core dashboard keys', () => {
     // A silently empty extraction would find no shadows and pass vacuously.
     expect(Object.keys(core).length).toBeGreaterThan(50);
     expect(isObj(core.inventory)).toBe(true);
+    // ...and a NON-EMPTY extraction of the WRONG object would pass all three
+    // guards above. `commission` is bundled into en_default but absent from
+    // @medusajs/dashboard's raw src/i18n/translations/en.json, which carries 58
+    // top-level keys (> 50), `inventory` as an object, and
+    // `customers.domain === "Customers"` — so swapping this loader for a
+    // require() of that JSON stays green while hiding 298 bundle-only leaves.
+    expect(core.commission).toBeDefined();
 
     // `customers.domain` retitles core's "Customers" to "Players" — a
     // deliberate, pre-existing brand rename, and the positive control that
