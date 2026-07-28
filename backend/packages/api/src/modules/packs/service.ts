@@ -5431,6 +5431,116 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
   }
+
+  // Purchase Invoices (POLYCARD-BACK §3.5). display_no comes from
+  // purchase_invoice_seq (a real Postgres sequence — atomic under
+  // concurrency, immune to rollback) formatted "PI-00001". One
+  // stock_movement 'purchase' row per line — the append-only paper trail the
+  // item-detail history table reads; on-hand itself comes from card-stock.ts,
+  // never this log (§3.1 authority note).
+  //
+  // line_total stores the RAW qty * unit_cost product, deliberately NOT
+  // rounded to 2dp: purchase_invoice_line_line_total_check compares it against
+  // Postgres' own exact numeric evaluation of the same expression with a
+  // half-sen tolerance, and a pre-rounded total is what would sit ON that
+  // boundary. unit_cost is already capped at 2dp by the route validator, so
+  // the raw product is exact to ~1e-13 here.
+  @InjectTransactionManager()
+  async createPurchaseInvoiceWithLines(
+    input: {
+      date: string;
+      supplier: string;
+      agent_user_id: string;
+      reverses_invoice_id: string | null;
+      lines: {
+        card_handle: string;
+        card_name: string;
+        fmv_snapshot: number;
+        qty: number;
+        unit_cost: number;
+      }[];
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ) {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const [{ n }] = await em.execute<{ n: string }[]>(
+      "SELECT nextval('purchase_invoice_seq') AS n",
+    );
+    const display_no = `PI-${String(n).padStart(5, '0')}`;
+
+    const [invoice] = await this.createPurchaseInvoices(
+      [
+        {
+          display_no,
+          // The model column is a dateTime — the route hands over a
+          // validated ISO string, so the coercion happens exactly here.
+          date: new Date(input.date),
+          supplier: input.supplier,
+          agent_user_id: input.agent_user_id,
+          reverses_invoice_id: input.reverses_invoice_id,
+        },
+      ],
+      sharedContext,
+    );
+
+    const lines = await this.createPurchaseInvoiceLines(
+      input.lines.map((l) => ({
+        invoice_id: invoice.id,
+        card_handle: l.card_handle,
+        card_name: l.card_name,
+        fmv_snapshot: l.fmv_snapshot,
+        qty: l.qty,
+        unit_cost: l.unit_cost,
+        line_total: l.qty * l.unit_cost,
+      })),
+      sharedContext,
+    );
+
+    await this.createStockMovements(
+      lines.map((l) => ({
+        card_handle: l.card_handle,
+        kind: 'purchase' as const,
+        qty: l.qty,
+        ref_id: l.id,
+      })),
+      sharedContext,
+    );
+
+    return { ...invoice, lines };
+  }
+
+  // Compensation-only hard delete — fires ONLY from the create-purchase-invoice
+  // workflow's rollback path (the inventory-adjust step failing after this
+  // invoice already committed). Never reachable from a route a caller sees
+  // succeed; invoices stay immutable from the operator's perspective.
+  @InjectTransactionManager()
+  async deletePurchaseInvoiceCascade(
+    invoiceId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const lines = await this.listPurchaseInvoiceLines(
+      { invoice_id: invoiceId },
+      { take: 1000 },
+      sharedContext,
+    );
+    const lineIds = lines.map((l) => l.id);
+    if (lineIds.length) {
+      const movements = await this.listStockMovements(
+        { ref_id: lineIds },
+        { take: 1000 },
+        sharedContext,
+      );
+      if (movements.length) {
+        await this.deleteStockMovements(
+          movements.map((m) => m.id),
+          sharedContext,
+        );
+      }
+      await this.deletePurchaseInvoiceLines(lineIds, sharedContext);
+    }
+    await this.deletePurchaseInvoices(invoiceId, sharedContext);
+  }
 }
 
 export default PacksModuleService;

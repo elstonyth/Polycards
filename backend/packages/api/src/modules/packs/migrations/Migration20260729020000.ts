@@ -10,9 +10,12 @@ import { Migration } from '@medusajs/framework/mikro-orm/migrations';
 // Verified against this DB that Medusa's BigNumber writes JS float products
 // verbatim — `3 * 0.07` stores as 0.21000000000000002, not 0.21 — while
 // Postgres numeric arithmetic evaluates `qty * unit_cost` to exactly 0.21.
-// Strict equality therefore REJECTS a legitimate 2dp line. Task 3's validator
-// caps unit_cost at "finite and >= 0" with no decimal-place limit, so this is
-// a live insert path, not a hypothetical. Money is 2dp; "agrees to within
+// Strict equality therefore REJECTS a legitimate 2dp line — a live insert
+// path, not a hypothetical: createPurchaseInvoiceWithLines stores the RAW
+// qty * unit_cost product for exactly this reason (a 2dp-ROUNDED total is
+// what would sit ON this boundary). Task 3's validator caps unit_cost at 2
+// decimals, so the raw product is exact to ~1e-13 here and the tolerance is
+// pure headroom rather than a working allowance. Money is 2dp; "agrees to within
 // half a sen" is the strongest statement true of every valid line, and it
 // still rejects real drift (a wrong total, or a positive total on a
 // negative-qty reversal line) by orders of magnitude.

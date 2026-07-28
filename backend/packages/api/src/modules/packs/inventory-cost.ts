@@ -3,12 +3,14 @@ import { fromSen } from './money';
 export type CostLine = { qty: number; unit_cost: number };
 
 // Working scale for a line's extended cost: 1/10000 of a ringgit (4dp).
-// Deliberately FINER than sen. `unit_cost` is only validated "finite and
-// >= 0" — there is no decimal-place limit on it — so quantizing each unit
-// price to a whole sen BEFORE multiplying by qty would amplify a sub-sen
-// fraction by the quantity: 3 @ 1.006 + 1 @ 1.00 reports 1.01 that way, where
-// the true average is 1.0045 -> 1.00. Two orders finer than the money this
-// reports is enough headroom for that not to bite.
+// Deliberately FINER than sen — now DEFENCE IN DEPTH rather than a live
+// requirement: api/admin/purchase-invoices/validate.ts caps unit_cost at 2
+// decimals, so every persisted line is already whole sen. The finer scale
+// stays because quantizing each unit price to a whole sen BEFORE multiplying
+// by qty would amplify any sub-sen fraction by the quantity (3 @ 1.006 +
+// 1 @ 1.00 reports 1.01 that way, where the true average is 1.0045 -> 1.00),
+// and this function takes plain {qty, unit_cost} objects a future caller
+// could source from somewhere other than that validator.
 const COST_SCALE = 10_000;
 
 // D8: item cost = weighted average of unit_cost across every purchase-invoice
@@ -33,6 +35,11 @@ export function weightedAverageCost(lines: CostLine[]): number | null {
   for (const line of lines) {
     if (!Number.isFinite(line.qty) || !Number.isFinite(line.unit_cost)) continue;
     qtySum += line.qty;
+    // Math.round (not money.ts's toSen) assumes a NON-NEGATIVE unit_cost — it
+    // rounds half toward +inf, losing toSen's half-away-from-zero symmetry
+    // (-10000.5 -> -10000, not -10001). Unreachable: the model documents
+    // unit_cost as always positive, the route validator enforces >= 0, and the
+    // sign of a reversal lives in qty.
     costScaledSum += line.qty * Math.round(line.unit_cost * COST_SCALE);
   }
   if (qtySum <= 0 || costScaledSum < 0) return null;
