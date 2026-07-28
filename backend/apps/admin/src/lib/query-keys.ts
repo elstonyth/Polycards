@@ -87,4 +87,26 @@ export const qk = {
     ['admin', 'customer', id, 'spend-report'] as const,
   // ── Epic 3 (Odds) ──
   customerGroups: ['admin', 'customer-groups'] as const,
+
+  // ── Epic 5 (Inventory) ─────────────────────────────────────────────────────
+  // q and sort ALWAYS render (defaulting to '' / 'created_at:desc') rather than
+  // being appended only when set, same rule as qk.players/qk.pulls: an
+  // appended-only segment makes the unsorted key a strict PREFIX of the sorted
+  // one, so invalidating one would nuke the other.
+  purchaseInvoices: (page: number, q?: string, sort?: string) =>
+    [
+      'admin',
+      'purchase-invoices',
+      page,
+      q ?? '',
+      sort ?? 'created_at:desc',
+    ] as const,
+  // 2-segment prefix — invalidates ALL pages/searches/sorts of the list
+  purchaseInvoicesKey: ['admin', 'purchase-invoices'] as const,
+  // SINGULAR namespace, so the detail cache is a SIBLING of the list, not a
+  // descendant (same shape as deliveryOrder vs deliveryOrders, pack vs packs).
+  // An invoice is immutable — there is no PUT/DELETE route — so a detail entry
+  // never needs invalidating, and nesting it under purchaseInvoicesKey would
+  // only make every create refetch details nothing changed about.
+  purchaseInvoice: (id: string) => ['admin', 'purchase-invoice', id] as const,
 };

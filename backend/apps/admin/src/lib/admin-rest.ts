@@ -991,3 +991,100 @@ export const setGroupOddsSet = (id: string, set: 1 | 2 | 3) =>
     `/admin/customer-groups/${encodeURIComponent(id)}`,
     { metadata: { odds_set: set } },
   );
+
+// ── Epic 5 (Inventory) ───────────────────────────────────────────────────────
+
+/** One line of GET /admin/purchase-invoices/:id. All money is MYR (2dp) — the
+ *  purchase path never touches FX. `qty` is SIGNED: negative on a reversing
+ *  invoice, and the sign lives ONLY there (unit_cost / fmv_snapshot stay
+ *  positive so a reversal line reads the same as the line it undoes).
+ *
+ *  The detail route spreads the ORM row, so each line ALSO carries the
+ *  `raw_unit_cost` / `raw_line_total` / `raw_fmv_snapshot` bigNumber jsonb
+ *  sidecars and an always-null `deleted_at`. Bind the hydrated getters below,
+ *  never `raw_*`; the sidecars are deliberately left unprojected (admin-only
+ *  route) and are not modelled here. */
+export interface AdminPurchaseInvoiceLine {
+  id: string;
+  card_handle: string;
+  card_name: string;
+  fmv_snapshot: number;
+  qty: number;
+  unit_cost: number;
+  line_total: number;
+}
+
+/** One row of GET /admin/purchase-invoices. The three totals are folded
+ *  SERVER-side in integer sen (route.ts) — render them, never re-derive them
+ *  here: the list response carries no lines to re-derive from. */
+export interface AdminPurchaseInvoice {
+  id: string;
+  display_no: string;
+  /** Operator-entered invoice date. `model.dateTime()`, so a full ISO stamp. */
+  date: string;
+  supplier: string;
+  agent_user_id: string;
+  /** Joined from the user module; null if the admin account was removed. */
+  agent_email: string | null;
+  reverses_invoice_id: string | null;
+  created_at: string;
+  total_qty: number;
+  subtotal: number;
+  total_fmv: number;
+}
+
+export interface AdminPurchaseInvoiceDetail
+  extends Omit<
+    AdminPurchaseInvoice,
+    'total_qty' | 'subtotal' | 'total_fmv' | 'agent_email'
+  > {
+  lines: AdminPurchaseInvoiceLine[];
+}
+
+export interface PurchaseInvoicesPage {
+  total: number;
+  offset: number;
+  limit: number;
+  invoices: AdminPurchaseInvoice[];
+}
+
+// `sort` is `<column>:<asc|desc>`; the route allowlists the column and falls
+// back to created_at, so an unknown key can never 400. `q` matches supplier OR
+// display_no and is TRUNCATED to 100 chars server-side — the search input
+// carries a matching maxLength so the operator cannot type past the cut.
+export const listPurchaseInvoices = (
+  page = 0,
+  q?: string,
+  limit = 50,
+  sort = 'created_at:desc',
+) =>
+  getJson<PurchaseInvoicesPage>(
+    `/admin/purchase-invoices?limit=${limit}&offset=${page * limit}&sort=${encodeURIComponent(sort)}${q ? `&q=${encodeURIComponent(q)}` : ''}`,
+  );
+
+export const getPurchaseInvoice = (id: string) =>
+  getJson<{ invoice: AdminPurchaseInvoiceDetail }>(
+    `/admin/purchase-invoices/${encodeURIComponent(id)}`,
+  );
+
+export interface CreatePurchaseInvoiceLineBody {
+  card_handle: string;
+  card_name: string;
+  fmv_snapshot: number;
+  qty: number;
+  unit_cost: number;
+}
+
+export interface CreatePurchaseInvoiceBody {
+  date: string;
+  supplier: string;
+  reverses_invoice_id?: string | null;
+  lines: CreatePurchaseInvoiceLineBody[];
+}
+
+// agent_user_id is NOT sent — the route derives it from the session.
+export const createPurchaseInvoice = (body: CreatePurchaseInvoiceBody) =>
+  postJson<{ invoice: AdminPurchaseInvoiceDetail }>(
+    '/admin/purchase-invoices',
+    body,
+  );
