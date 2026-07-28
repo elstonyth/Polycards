@@ -75,6 +75,7 @@ import {
   resolveFxRate,
   DEFAULT_USD_MYR,
   effectiveRate,
+  displayMarketPrice,
 } from './pricing';
 import {
   validateRewardsPatch,
@@ -2480,6 +2481,76 @@ class PacksModuleService extends MedusaService({
       balance: (beforeCents + deltaCents) / 100,
       commissions,
     };
+  }
+
+  // Wraps createPulls with the paired SP ledger row, same transaction
+  // (POLYCARD-BACK §5.3). ONE row per open_id regardless of pull count — a
+  // batch open is one charge and one ledger event (the caller passes every
+  // pull for the open in a single input.pulls array, so there is exactly one
+  // recordLedgerEntry call per invocation — no per-pull loop, so the
+  // same-transaction self-duplication hazard the epic's idempotency rule
+  // warns about does not arise here). ref_id = open_id (already unique per
+  // open, single or batch; also what credit_transaction.source_transaction_id
+  // stores for pack_open rows, so the Wallet-tab join in Task 9 keys on that
+  // column for this type instead of credit_transaction.id).
+  //
+  // vault_delta uses the LENIENT resolveFxRate (see Global Constraints) —
+  // this method never blocks a paid, already-committed pull on an FX gap.
+  //
+  // recorded_value_usd is ALREADY market_value x the card's multiplier
+  // (roll-pack.ts's draw-time snapshot — proven by
+  // recorded-pull-value.integration.spec.ts, 20 x 1.2 = 24 — and consumed the
+  // same way everywhere else that reads it: leaderboardTop/PULLED_VALUE_USD_SQL
+  // convert it to MYR with `x fx` ONLY, never a second multiplier). So the
+  // third argument to displayMarketPrice here is fixed at 1 — passing the
+  // card's live market_multiplier again would double-count it (market_value x
+  // multiplier^2 x fx instead of x multiplier x fx). No card lookup is needed
+  // for this reason alone; every other displayMarketPrice call site in this
+  // codebase passes raw card.market_value, never a pre-multiplied snapshot.
+  @InjectTransactionManager()
+  async recordPullsWithLedger(
+    input: {
+      pulls: Parameters<PacksModuleService['createPulls']>[0];
+      ledger: {
+        customerId: string;
+        openId: string;
+        price: number;
+        packId: string;
+        channel: 'single' | 'batch';
+      };
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<Awaited<ReturnType<PacksModuleService['createPulls']>>> {
+    const pulls = await this.createPulls(input.pulls, sharedContext);
+
+    const fx = await resolveFxRate(this);
+    const vaultDelta = input.pulls.reduce(
+      (sum, p) => sum + displayMarketPrice(Number(p.recorded_value_usd), fx, 1),
+      0,
+    );
+
+    await this.recordLedgerEntry(
+      {
+        type: 'SP',
+        customerId: input.ledger.customerId,
+        refId: input.ledger.openId,
+        walletDelta: -input.ledger.price,
+        vaultDelta: Math.round(vaultDelta * 100) / 100,
+        payload: {
+          type: 'SP',
+          channel: input.ledger.channel,
+          pack_id: input.ledger.packId,
+          // String(...) rather than a bare p.card_id: the generated
+          // createPulls parameter type resolves card_id as string |
+          // undefined here (Parameters<> picks it up loosely), even though
+          // every real caller (record-pull.ts / record-pulls-batch.ts)
+          // always supplies a concrete Card.handle string.
+          prize_skus: input.pulls.map((p) => String(p.card_id)),
+        },
+      },
+      sharedContext,
+    );
+    return pulls;
   }
 
   // Locked (unspendable) commission credit for a customer, in cents, read inside
