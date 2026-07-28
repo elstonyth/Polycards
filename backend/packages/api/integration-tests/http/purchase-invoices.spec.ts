@@ -278,21 +278,26 @@ medusaIntegrationTestRunner({
             lines: [LINE],
           });
 
+        // Zephyr is created FIRST and Acme second on purpose: that makes
+        // alphabetical order the REVERSE of creation order, which is the only
+        // arrangement in which the ?sort= assertions below can fail. Sorting
+        // on display_no (or date) would pass even with the allowlist broken,
+        // because those already run in creation order.
         it('lists invoices newest-first with computed totals and the recording agent', async () => {
-          const first = await createOriginal();
-          const second = await zephyr();
+          const zeph = await zephyr();
+          const acme = await createOriginal();
 
           const res = await unwrapResponse(
             api.get('/admin/purchase-invoices', adminHeaders()),
           );
           expect(res.status).toBe(200);
           expect(res.data.total).toBe(2);
-          expect(res.data.invoices[0].id).toBe(second.data.invoice.id);
+          expect(res.data.invoices[0].id).toBe(acme.data.invoice.id); // newest first
 
           const row = res.data.invoices.find(
             (i: { supplier: string }) => i.supplier === 'Acme Cards Sdn Bhd',
           );
-          expect(row.id).toBe(first.data.invoice.id);
+          expect(row.id).toBe(acme.data.invoice.id);
           expect(row.total_qty).toBe(10);
           expect(row.subtotal).toBe(1500);
           expect(row.total_fmv).toBe(3000); // fmv_snapshot(300) * qty(10)
@@ -300,15 +305,21 @@ medusaIntegrationTestRunner({
           // human, so the join has to actually resolve, not just be present.
           expect(row.agent_email).toBe(ADMIN_EMAIL);
 
-          // ?sort= is an allowlist; an unhonoured key silently degrades to
-          // created_at, which would leave this on the wrong row.
+          // ?sort= is an allowlist: an unhonoured key degrades SILENTLY to
+          // created_at. Both rows below are wrong under that degradation (and
+          // under a dropped sort param, and under an ignored direction), which
+          // is the whole point of the reversed creation order above.
           const asc = await unwrapResponse(
+            api.get('/admin/purchase-invoices?sort=supplier:asc', adminHeaders()),
+          );
+          expect(asc.data.invoices[0].id).toBe(acme.data.invoice.id); // A < Z
+          const desc = await unwrapResponse(
             api.get(
-              '/admin/purchase-invoices?sort=display_no:asc',
+              '/admin/purchase-invoices?sort=supplier:desc',
               adminHeaders(),
             ),
           );
-          expect(asc.data.invoices[0].id).toBe(first.data.invoice.id);
+          expect(desc.data.invoices[0].id).toBe(zeph.data.invoice.id);
         });
 
         it('?q= filters by supplier or display_no substring', async () => {
@@ -345,6 +356,14 @@ medusaIntegrationTestRunner({
           );
           expect(res.data.invoice.lines).toHaveLength(1);
           expect(res.data.invoice.lines[0].card_handle).toBe(LINE.card_handle);
+          // Detail spreads ORM rows through (brief-specified), so money arrives
+          // in the raw column shape and each bigNumber ALSO ships its
+          // raw_<field> jsonb sidecar (raw_unit_cost, raw_line_total,
+          // raw_fmv_snapshot) — Task 5 must read `unit_cost`, not `raw_*`.
+          // Number() it, like Task 3's line_total assertions. The list route's
+          // totals, by contrast, are already plain numbers via fromSen.
+          expect(Number(res.data.invoice.lines[0].unit_cost)).toBe(150);
+          expect(Number(res.data.invoice.lines[0].line_total)).toBe(1500);
         });
 
         it('GET /:id 404s on an unknown id', async () => {
