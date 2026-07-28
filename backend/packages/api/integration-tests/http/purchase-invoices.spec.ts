@@ -190,6 +190,51 @@ medusaIntegrationTestRunner({
         expect(res.data.message).toMatch(/reversing invoice/i);
       });
 
+      // The FX gate is the one money-safety guard here that the rest of this
+      // suite can only prove NEGATIVELY (the beforeEach pin makes every other
+      // test take the happy branch), so it needs its own row-clearing test —
+      // otherwise deleting resolveFxRateStrict from the route leaves all of
+      // them green. resolveFxRateStrict is deliberately uncached (only the
+      // display resolver has the 30s process cache), so the clear bites at
+      // once. fmv_snapshot is frozen forever at create; recording one priced
+      // off the 4.7 display fallback during an FX-empty window is exactly the
+      // silent mispricing this refuses.
+      it('refuses to create when no firm FX rate exists', async () => {
+        const rows = await packs.listFxRates({}, { take: 10 });
+        await packs.deleteFxRates(rows.map((r) => r.id));
+        const res = await createOriginal();
+        expect(res.status).toBe(400);
+        expect(res.data.message).toMatch(/exchange rate unavailable/i);
+      });
+
+      // deletePurchaseInvoiceCascade is compensation-only, and the workflow's
+      // inventory step swallows per-line failures, so nothing in the normal
+      // flow can ever reach it — a hard delete of money records with zero
+      // executions is a bad thing to first exercise during a production
+      // rollback. Called directly here; this also covers all three generated
+      // delete signatures (movements array, lines array, invoice string).
+      it('deletePurchaseInvoiceCascade removes the invoice, its lines and its stock movements', async () => {
+        const created = await createOriginal();
+        const invoiceId = created.data.invoice.id;
+        await packs.deletePurchaseInvoiceCascade(invoiceId);
+
+        expect(
+          await packs.listPurchaseInvoices({ id: invoiceId }, { take: 1 }),
+        ).toHaveLength(0);
+        expect(
+          await packs.listPurchaseInvoiceLines(
+            { invoice_id: invoiceId },
+            { take: 10 },
+          ),
+        ).toHaveLength(0);
+        expect(
+          await packs.listStockMovements(
+            { card_handle: LINE.card_handle },
+            { take: 10 },
+          ),
+        ).toHaveLength(0);
+      });
+
       it('sums repeated card_handle+unit_cost lines within ONE reversal body', async () => {
         const original = await createOriginal();
         const res = await reverse(original.data.invoice.id, [
