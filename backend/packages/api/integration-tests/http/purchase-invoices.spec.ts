@@ -266,6 +266,94 @@ medusaIntegrationTestRunner({
         expect(res.status).toBe(400);
         expect(res.data.message).toMatch(/exceeds/i);
       });
+
+      // Nested (not a sibling) describe: the list/detail cases need the outer
+      // beforeEach's FX pin and the same adminHeaders/create/LINE closures.
+      describe('list + detail', () => {
+        const zephyr = () =>
+          create({
+            date: '2026-07-28T00:00:00.000Z',
+            supplier: 'Zephyr Supply',
+            reverses_invoice_id: null,
+            lines: [LINE],
+          });
+
+        it('lists invoices newest-first with computed totals and the recording agent', async () => {
+          const first = await createOriginal();
+          const second = await zephyr();
+
+          const res = await unwrapResponse(
+            api.get('/admin/purchase-invoices', adminHeaders()),
+          );
+          expect(res.status).toBe(200);
+          expect(res.data.total).toBe(2);
+          expect(res.data.invoices[0].id).toBe(second.data.invoice.id);
+
+          const row = res.data.invoices.find(
+            (i: { supplier: string }) => i.supplier === 'Acme Cards Sdn Bhd',
+          );
+          expect(row.id).toBe(first.data.invoice.id);
+          expect(row.total_qty).toBe(10);
+          expect(row.subtotal).toBe(1500);
+          expect(row.total_fmv).toBe(3000); // fmv_snapshot(300) * qty(10)
+          // agent_user_id is the minted admin's user id — the table shows a
+          // human, so the join has to actually resolve, not just be present.
+          expect(row.agent_email).toBe(ADMIN_EMAIL);
+
+          // ?sort= is an allowlist; an unhonoured key silently degrades to
+          // created_at, which would leave this on the wrong row.
+          const asc = await unwrapResponse(
+            api.get(
+              '/admin/purchase-invoices?sort=display_no:asc',
+              adminHeaders(),
+            ),
+          );
+          expect(asc.data.invoices[0].id).toBe(first.data.invoice.id);
+        });
+
+        it('?q= filters by supplier or display_no substring', async () => {
+          await createOriginal();
+          const made = await zephyr();
+          const bySupplier = await unwrapResponse(
+            api.get('/admin/purchase-invoices?q=Zephyr', adminHeaders()),
+          );
+          expect(bySupplier.status).toBe(200);
+          expect(bySupplier.data.total).toBe(1);
+          expect(bySupplier.data.invoices[0].id).toBe(made.data.invoice.id);
+
+          const byDisplayNo = await unwrapResponse(
+            api.get(
+              `/admin/purchase-invoices?q=${made.data.invoice.display_no}`,
+              adminHeaders(),
+            ),
+          );
+          expect(byDisplayNo.data.total).toBe(1);
+          expect(byDisplayNo.data.invoices[0].id).toBe(made.data.invoice.id);
+        });
+
+        it('GET /:id returns the full line list', async () => {
+          const made = await createOriginal();
+          const res = await unwrapResponse(
+            api.get(
+              `/admin/purchase-invoices/${made.data.invoice.id}`,
+              adminHeaders(),
+            ),
+          );
+          expect(res.status).toBe(200);
+          expect(res.data.invoice.display_no).toBe(
+            made.data.invoice.display_no,
+          );
+          expect(res.data.invoice.lines).toHaveLength(1);
+          expect(res.data.invoice.lines[0].card_handle).toBe(LINE.card_handle);
+        });
+
+        it('GET /:id 404s on an unknown id', async () => {
+          const res = await unwrapResponse(
+            api.get('/admin/purchase-invoices/pinv_nonexistent', adminHeaders()),
+          );
+          expect(res.status).toBe(404);
+        });
+      });
     });
   },
 });
