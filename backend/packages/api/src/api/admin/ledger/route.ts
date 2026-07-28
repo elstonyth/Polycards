@@ -51,7 +51,8 @@ function coerceTypeFilter(raw: unknown): LedgerType | undefined {
 function coerceMytBound(raw: unknown, edge: 'from' | 'to'): Date | undefined {
   if (raw === undefined || raw === '') return undefined;
   const d = parseMytBound(raw, edge);
-  if (!d) bad(`Invalid \`${edge}\` date '${String(raw)}' (expected YYYY-MM-DD).`);
+  if (!d)
+    bad(`Invalid \`${edge}\` date '${String(raw)}' (expected YYYY-MM-DD).`);
   return d;
 }
 
