@@ -5682,16 +5682,26 @@ class PacksModuleService extends MedusaService({
   // is deliberately best-effort, so a 'purchase' movement can sit against a
   // counter that never moved.
   //
-  // The three buckets are DISJOINT, and that rests on an invariant worth
-  // naming: the request path flips the pull out of 'vaulted' in the SAME
-  // transaction that writes the order and its items (request-delivery step;
-  // recordRewardWithdrawal at service.ts:1609), and
-  // transitionDeliveryOrderStatus drives completed -> 'delivered' and
-  // canceled -> back to 'vaulted'. inVault counts pull.status ALONE, so a
-  // future request path that left a pull vaulted would count one physical card
-  // in BOTH inVault and requested rather than moving it between them.
-  // A canceled order needs no clause of its own: it is in neither IN-list, and
-  // its pulls are already back in the vault.
+  // The three buckets are CONVERGENT, NOT STRUCTURAL: nothing in the schema
+  // stops one physical card from being counted twice, so callers must never
+  // treat them as a partition (no `total = inVault + requested + shipped`).
+  // Only ONE of the two request paths is transactional — recordRewardWithdrawal
+  // (service.ts:1609) writes the order, its items and the pull flip on a single
+  // sharedContext under @InjectTransactionManager(). requestDeliveryStep
+  // (workflows/steps/request-delivery.ts:153) is a MANUAL-UNDO sequence with no
+  // surrounding transaction, and two of its failure modes leave a vaulted pull
+  // against a live requested item -> {inVault: 1, requested: 1} for one card
+  // (probed on the real schema with these three queries verbatim):
+  //   (i)  transitionPullStatus throws AND the undo at :157-166 also throws
+  //        (logged 'UNDO FAILED ... repair manually');
+  //   (ii) the step's compensation at :186-194 restores the pull to 'vaulted'
+  //        BEFORE deleteDeliveryOrderItems, with no try/catch around it.
+  // Left convergent DELIBERATELY (operator decision): a NOT EXISTS (live item)
+  // clause on the vault query would make it structural, but it would HIDE a
+  // state the system already flags for manual repair and cost a join on every
+  // render. transitionDeliveryOrderStatus drives completed -> 'delivered' and
+  // canceled -> back to 'vaulted'; a canceled order needs no clause of its own
+  // (it is in neither IN-list, and its pulls are already back in the vault).
   //
   // `dord`, not `do`: DO is a RESERVED word in Postgres and cannot alias a
   // table even with AS (probed: syntax error at or near "do").

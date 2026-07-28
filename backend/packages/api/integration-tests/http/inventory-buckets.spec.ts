@@ -124,13 +124,16 @@ medusaIntegrationTestRunner({
           shipped: 0,
         });
 
-        // 3. DELIVERY REQUEST. The real request path flips the pull
-        // vaulted -> delivering in the SAME transaction that writes the order
-        // and its item (workflows/steps/request-delivery.ts:153, and
-        // recordRewardWithdrawal at service.ts:1609), so the card LEAVES the
-        // vault bucket instead of sitting in two buckets at once. Seeding the
-        // item WITHOUT that flip is an unreachable state, and it would let
-        // this step pass with the vault query broken.
+        // 3. DELIVERY REQUEST. Both request paths flip the pull
+        // vaulted -> delivering alongside the order + item write, so the card
+        // LEAVES the vault bucket instead of sitting in two buckets at once.
+        // Only recordRewardWithdrawal (service.ts:1609) does it in one
+        // transaction; requestDeliveryStep
+        // (workflows/steps/request-delivery.ts:153) undoes by hand and can
+        // fail leaving {inVault: 1, requested: 1} — see the note on
+        // inventoryLifecycleBuckets. That state is a repair case, not the
+        // steady state this spec pins: seeding the item WITHOUT the flip would
+        // let this step pass with the vault query broken.
         const [order] = await packs.createDeliveryOrders([
           { customer_id: 'cus_lifecycle', status: 'requested', ...ADDRESS },
         ]);

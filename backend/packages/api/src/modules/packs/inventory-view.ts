@@ -1,0 +1,145 @@
+import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
+import type { MedusaContainer } from '@medusajs/framework/types';
+import { PACKS_MODULE } from './index';
+import type PacksModuleService from './service';
+import { getCardStockByHandle } from './card-stock';
+import { isGraded } from './card-view';
+import {
+  DEFAULT_MARKET_MULTIPLIER,
+  displayMarketPrice,
+  resolveFxRate,
+} from './pricing';
+import { toMoney } from './money';
+import { pageAll } from '../../api/utils/page-all';
+
+export type InventoryRow = {
+  handle: string;
+  product_id: string;
+  photo: string | null;
+  name: string;
+  sku: string;
+  is_card: boolean;
+  graded: boolean; // title RAW/GRADED
+  fmv: number | null; // MYR
+  price: number | null; // MYR, FMV x multiplier
+  cost: number | null; // MYR, D8 weighted average
+  created_at: string | Date;
+  on_hand: number | null;
+  in_vault: number;
+  requested: number;
+  shipped: number;
+  listing_count: number;
+};
+
+// "SKU" is the Medusa variant's, where one exists — spec §3.1: Card has NO sku
+// column, the handle is the key. Same query.graph seam card-stock.ts uses over
+// the same products.
+async function skuByHandle(
+  container: MedusaContainer,
+  handles: string[],
+): Promise<Map<string, string | null>> {
+  const out = new Map<string, string | null>();
+  if (handles.length === 0) return out;
+  const query = container.resolve(ContainerRegistrationKeys.QUERY);
+  const { data } = await query.graph({
+    entity: 'product',
+    fields: ['handle', 'variants.sku'],
+    filters: { handle: handles },
+  });
+  for (const row of data as Array<{
+    handle: string | null;
+    variants?: Array<{ sku?: string | null } | null> | null;
+  }>) {
+    if (!row.handle) continue;
+    out.set(row.handle, row.variants?.[0]?.sku ?? null);
+  }
+  return out;
+}
+
+// Inventory's grain is PRODUCTS, not just registered gacha Cards — the importer
+// that feeds this list (create-product-from-pricecharting) creates a Product
+// with NO Card row, and "List to gacha card" only makes sense on a row that is
+// not yet a card. The Card row wins when present; otherwise the row falls back
+// to the product's own title + the gacha facts staged on product.metadata by
+// that importer (the same fields admin/gacha/eligible-products/route.ts reads).
+//
+// in_vault / requested / shipped are three INDEPENDENT counts, not a partition:
+// see inventoryLifecycleBuckets' own note — disjointness is convergent, not
+// structural. Never derive a total by summing them; total physical units is
+// on_hand, which comes from the authoritative Medusa counter.
+export async function loadInventoryRows(
+  container: MedusaContainer,
+  opts: { q?: string } = {},
+): Promise<InventoryRow[]> {
+  const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
+  const productModule = container.resolve(Modules.PRODUCT);
+
+  // PAGED, never `take: N`: every column below is money or a count, and a
+  // truncated read renders a plausible WRONG list instead of an obvious error
+  // (Task 4's rule). The ROUTE is unpaged by design — on_hand/in_vault/
+  // requested/shipped/cost are all computed after the products load, so the
+  // admin can only sort on them client-side.
+  //
+  // The filter literal is rebuilt per page ON PURPOSE: Medusa's
+  // applyFreeTextSearchFilter moves `q` onto the find config and then
+  // `delete`s it from the filters object it was handed, so a hoisted object
+  // would silently return the WHOLE catalog from page 2 onwards.
+  const products = await pageAll((page) =>
+    productModule.listProducts(opts.q ? { q: opts.q } : {}, page),
+  );
+  const cards = await pageAll((page) => packs.listCards({}, page));
+  const fx = await resolveFxRate(packs);
+
+  const listed = products.filter(
+    (p): p is typeof p & { handle: string } => !!p.handle,
+  );
+  const handles = listed.map((p) => p.handle);
+  const cardByHandle = new Map(cards.map((c) => [c.handle, c]));
+
+  // Sequential, NOT Promise.all: each of these checks out its own pool
+  // connection (@InjectManager on the three service methods, query.graph for
+  // the other two), and five at once is the shape of this repo's "pool is
+  // probably full" failures — the same rule inventoryLifecycleBuckets follows
+  // internally. This is an admin list; latency is not the constraint.
+  const stockByHandle = await getCardStockByHandle(container, handles);
+  const skus = await skuByHandle(container, handles);
+  const buckets = await packs.inventoryLifecycleBuckets(handles);
+  const costByHandle = await packs.weightedAverageCostByHandle(handles);
+  const listingCounts = await packs.listingCountByHandle(handles);
+
+  return listed.map((p) => {
+    const card = cardByHandle.get(p.handle);
+    const meta = (p.metadata ?? {}) as Record<string, unknown>;
+    // `?? NaN`, not a bare Number(): a metadata.fmv of null coerces to 0, and
+    // "free" must stay distinguishable from "no FMV recorded".
+    const fmvUsd = toMoney(card ? card.market_value : (meta.fmv ?? NaN));
+    const hasFmv = Number.isFinite(fmvUsd);
+    // A product with no Card row has no configured multiplier, so price ===
+    // fmv reads honestly as "no markup set". Inventing DEFAULT_MARKET_MULTIPLIER
+    // here would show the operator a price they never chose.
+    const mult = card
+      ? toMoney(card.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER)
+      : 1;
+    const grader =
+      card?.grader ?? (typeof meta.grader === 'string' ? meta.grader : '');
+    const b = buckets.get(p.handle);
+    return {
+      handle: p.handle,
+      product_id: p.id,
+      photo: p.thumbnail ?? null,
+      name: card?.name ?? p.title,
+      sku: skus.get(p.handle) || p.handle,
+      is_card: !!card,
+      graded: isGraded({ grader }),
+      fmv: hasFmv ? displayMarketPrice(fmvUsd, fx, 1) : null,
+      price: hasFmv ? displayMarketPrice(fmvUsd, fx, mult) : null,
+      cost: costByHandle.get(p.handle) ?? null,
+      created_at: p.created_at as string | Date,
+      on_hand: stockByHandle.get(p.handle) ?? null,
+      in_vault: b?.inVault ?? 0,
+      requested: b?.requested ?? 0,
+      shipped: b?.shipped ?? 0,
+      listing_count: listingCounts.get(p.handle) ?? 0,
+    };
+  });
+}
