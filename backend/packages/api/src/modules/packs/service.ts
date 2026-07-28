@@ -925,6 +925,35 @@ class PacksModuleService extends MedusaService({
     };
   }
 
+  // Wraps mutateCreditAtomic with the paired TP ledger row, same transaction
+  // (POLYCARD-BACK §5.3). ref_id = the credit_transaction's own id, so the
+  // Wallet-tab join (Task 9) is a plain equality on credit_transaction.id.
+  @InjectTransactionManager()
+  async topUpCreditsWithLedger(
+    input: CreditMutationInput,
+    @MedusaContext() sharedContext: Context = {},
+  ): ReturnType<PacksModuleService['mutateCreditAtomic']> {
+    const result = await this.mutateCreditAtomic(input, sharedContext);
+    if (!result.replayed) {
+      await this.recordLedgerEntry(
+        {
+          type: 'TP',
+          customerId: input.customerId,
+          refId: result.id,
+          walletDelta: result.amount,
+          vaultDelta: null,
+          payload: {
+            type: 'TP',
+            payment_method: 'mock',
+            gateway_ref: result.reference,
+          },
+        },
+        sharedContext,
+      );
+    }
+    return result;
+  }
+
   // Append-only reversal of a single ledger row (the open-saga compensation).
   // Holds the SAME per-customer advisory lock as mutateCreditAtomic, then writes
   // a mirror row: sign-flipped amount (refund) + sign-flipped external_funded_cents

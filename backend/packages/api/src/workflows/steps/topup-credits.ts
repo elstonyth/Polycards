@@ -85,7 +85,7 @@ export const topUpCreditsStep = createStep(
     // money in). Returns the post-write balance — no separate Σ-ledger read.
     // When idempotencyReference is set, a replay returns the original row
     // (replayed=true) instead of crediting again.
-    const mutation = await packs.mutateCreditAtomic({
+    const mutation = await packs.topUpCreditsWithLedger({
       customerId: input.customer_id,
       amount,
       reason: 'topup',
@@ -115,6 +115,7 @@ export const topUpCreditsStep = createStep(
     // single delete. (A real gateway adds a refund call here.)
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
     await packs.deleteCreditTransactionsGuarded([data.creditTransactionId]);
+    await packs.deleteLedgerEntryByRef('TP', data.creditTransactionId);
   },
 );
 
