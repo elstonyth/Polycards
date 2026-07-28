@@ -14,7 +14,7 @@ __metadata:
     "@acme/pokemon": "workspace:*"
     "@medusajs/ui-preset": "npm:2.15.5"
     "@mercurjs/admin": "npm:2.1.6"
-    "@types/node": "npm:^24.10.1"
+    "@types/node": "npm:^25.9.5"
     autoprefixer: "npm:^10.5.4"
     postcss: "npm:^8.5.20"
     tailwindcss: "npm:^3.4.17"
@@ -44,7 +44,7 @@ __metadata:
     "@swc/jest": "npm:^0.2.36"
     "@types/jest": "npm:^29.5.13"
     "@types/multer": "npm:^2.2.0"
-    "@types/node": "npm:^20.12.11"
+    "@types/node": "npm:^25.9.5"
     http-proxy-middleware: "npm:^3.0.7"
     ioredis: "npm:^5.4.1"
     jest: "npm:^29.7.0"
@@ -86,7 +86,7 @@ __metadata:
   dependencies:
     "@acme/api": "workspace:*"
     "@mercurjs/vendor": "npm:2.1.6"
-    "@types/node": "npm:^24.10.1"
+    "@types/node": "npm:^25.9.5"
   languageName: unknown
   linkType: soft
 
@@ -7857,15 +7857,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/node@npm:^20.12.11":
-  version: 20.19.42
-  resolution: "@types/node@npm:20.19.42"
-  dependencies:
-    undici-types: "npm:~6.21.0"
-  checksum: 10c0/e21d8ee6e45480688b933fd6d61c1e538efff5cbd88e3bd737fba4d41511ab0904ad5b5a86d3fe5977984496f51d25f7304c8652f5a0efdb6a44ec9458dd6b74
-  languageName: node
-  linkType: hard
-
 "@types/node@npm:^22.5.5":
   version: 22.19.20
   resolution: "@types/node@npm:22.19.20"
@@ -7875,12 +7866,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/node@npm:^24.10.1":
-  version: 24.13.1
-  resolution: "@types/node@npm:24.13.1"
+"@types/node@npm:^25.9.5":
+  version: 25.9.5
+  resolution: "@types/node@npm:25.9.5"
   dependencies:
-    undici-types: "npm:~7.18.0"
-  checksum: 10c0/ef58425ed71c7fefa95f30d370eeb0390f24c9337d66fa6617b5a14b53e2e831aa6a13e95d978d9057237bf257062b8fa60f773380abed1607183fe7065bc26b
+    undici-types: "npm:>=7.24.0 <7.24.7"
+  checksum: 10c0/addbfe55f14d6a7f149a8796c2fca68463ac6caf911c623f552d07385691d36c0669a9c38724350d0e958131827d59a63c18781e753dede8113a903dd62b7932
   languageName: node
   linkType: hard
 
@@ -16964,13 +16955,6 @@ __metadata:
   version: 6.21.0
   resolution: "undici-types@npm:6.21.0"
   checksum: 10c0/c01ed51829b10aa72fc3ce64b747f8e74ae9b60eafa19a7b46ef624403508a54c526ffab06a14a26b3120d055e1104d7abe7c9017e83ced038ea5cf52f8d5e04
-  languageName: node
-  linkType: hard
-
-"undici-types@npm:~7.18.0":
-  version: 7.18.2
-  resolution: "undici-types@npm:7.18.2"
-  checksum: 10c0/85a79189113a238959d7a647368e4f7c5559c3a404ebdb8fc4488145ce9426fcd82252a844a302798dfc0e37e6fb178ff481ed03bc4caf634c5757d9ef43521d
   languageName: node
   linkType: hard
 
