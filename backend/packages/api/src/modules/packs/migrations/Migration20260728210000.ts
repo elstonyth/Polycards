@@ -26,7 +26,7 @@ export class Migration20260728210000 extends Migration {
         `constraint "ledger_entry_pkey" primary key ("id"));`,
     );
     this.addSql(
-      `CREATE UNIQUE INDEX IF NOT EXISTS "IDX_ledger_entry_display_id" ON "ledger_entry" ("display_id") WHERE deleted_at IS NULL;`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS "IDX_ledger_entry_display_id_unique" ON "ledger_entry" ("display_id") WHERE deleted_at IS NULL;`,
     );
     this.addSql(
       `CREATE UNIQUE INDEX IF NOT EXISTS "IDX_ledger_entry_type_ref_id" ON "ledger_entry" ("type", "ref_id") WHERE deleted_at IS NULL;`,
@@ -48,7 +48,7 @@ export class Migration20260728210000 extends Migration {
         `constraint "ledger_sequence_pkey" primary key ("id"));`,
     );
     this.addSql(
-      `CREATE UNIQUE INDEX IF NOT EXISTS "IDX_ledger_sequence_scope" ON "ledger_sequence" ("scope") WHERE deleted_at IS NULL;`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS "IDX_ledger_sequence_scope_unique" ON "ledger_sequence" ("scope") WHERE deleted_at IS NULL;`,
     );
   }
 
