@@ -113,9 +113,14 @@ export const updateDeliveryOrderInvoke = async (
   // takes the `delivery:<id>` advisory lock as its FIRST statement; resolving
   // fx inside it would acquire a second pool connection while that lock is
   // held for the method's whole duration (see service.ts's comment on
-  // transitionDeliveryOrderStatus). Only the 'canceled' transition's OD
-  // reversal reads this — skip the (cached, but not free) resolve otherwise.
-  const fx = input.status === 'canceled' ? await resolveFxRate(packs) : 0;
+  // transitionDeliveryOrderStatus). Resolved UNCONDITIONALLY, even though only
+  // the 'canceled' branch currently reads it: `fx` is a required field
+  // specifically so a caller can't ship a canceled-with-pulls transition with
+  // no real rate resolved — a conditional 0-placeholder here would silently
+  // break that guarantee the moment any OTHER transition starts reading it.
+  // resolveFxRate caches for 30s, and this step already does up to 100
+  // paginated reads, so one more cached-friendly call is not the cost driver.
+  const fx = await resolveFxRate(packs);
 
   // Status transition — ONE atomic, per-order-serialized service call: fresh
   // re-read + validation + order write + pull flip commit or roll back
