@@ -20,9 +20,10 @@ export function topUpAmountError(value: unknown): string | null {
   if (value > TOPUP_MAX_RM) {
     return `Amount must be at most RM ${TOPUP_MAX_RM.toLocaleString('en-US')} per top-up.`;
   }
-  // 2dp max, checked against the binary representation: 10.1 * 100 is
-  // 1009.9999999999999, so an exact integer-cents comparison would reject
+  // 2dp max, checked against the binary representation: 0.07 * 100 is
+  // 7.000000000000001, so an exact integer-cents comparison would reject
   // valid money — the epsilon forgives float error, not sub-cent precision.
+  // (NOT 10.1, which this comment used to cite: 10.1 * 100 is exactly 1010.)
   const cents = value * 100;
   if (Math.abs(cents - Math.round(cents)) > 1e-6) {
     return 'Amount cannot be more precise than a cent.';

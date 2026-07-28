@@ -44,9 +44,7 @@ const MAX_QTY = 1_000_000;
 // (credit-adjust.ts, topup.ts, voucher-ranges.ts), and it is load-bearing:
 // 0.07 * 100 is 7.000000000000001 and 4.35 * 100 is 434.99999999999994, so an
 // exact integer-sen comparison would reject two ordinary prices. NOT 10.1 —
-// 10.1 * 100 is exactly 1010. Those three siblings still cite 10.1 (topup.ts
-// goes further and states "1009.9999999999999", a value JS never produces);
-// their comments are wrong and are outside this change's surface.
+// 10.1 * 100 is exactly 1010.
 //
 // The value is normalized back onto the nearest 2dp double on the way out so
 // float junk (0.1 + 0.2) never reaches line_total or the reversal match.
