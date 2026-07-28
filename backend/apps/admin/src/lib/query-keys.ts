@@ -109,4 +109,15 @@ export const qk = {
   // never needs invalidating, and nesting it under purchaseInvoicesKey would
   // only make every create refetch details nothing changed about.
   purchaseInvoice: (id: string) => ['admin', 'purchase-invoice', id] as const,
+  // The Inventory list is UNPAGED (the route returns every catalog row), so `q`
+  // is the only variable. It ALWAYS renders, defaulting to '' — same
+  // always-rendered-segment rule as qk.players/qk.purchaseInvoices: appended
+  // only when set, the unfiltered key would be a strict PREFIX of every
+  // filtered one and invalidating it would nuke them all.
+  inventory: (q?: string) => ['admin', 'inventory', q ?? ''] as const,
+  // 2-segment prefix — invalidates EVERY search of the inventory list. The bulk
+  // "List to gacha card" tool flips is_card on rows that are also cached under
+  // other `q` values, so it has to reach the whole namespace; refetching just
+  // the key on screen would leave the operator's earlier searches lying.
+  inventoryKey: ['admin', 'inventory'] as const,
 };

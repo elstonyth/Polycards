@@ -207,4 +207,32 @@ describe('qk', () => {
       qk.purchaseInvoice('pinv_1').slice(0, qk.purchaseInvoicesKey.length),
     ).not.toEqual([...qk.purchaseInvoicesKey]);
   });
+
+  it('keys the inventory list under a prefix that invalidates every search', () => {
+    // Literal expectations on BOTH the builder and the constant. A loop that
+    // only checks "the builder starts with the constant" stays green when the
+    // segment is renamed in both places at once — which is precisely the
+    // change that silently orphans every cache entry the page already holds.
+    expect(qk.inventoryKey).toEqual(['admin', 'inventory']);
+    expect(qk.inventory()).toEqual(['admin', 'inventory', '']);
+    expect(qk.inventory('charizard')).toEqual([
+      'admin',
+      'inventory',
+      'charizard',
+    ]);
+    for (const key of [qk.inventory(), qk.inventory('charizard')]) {
+      expect(key.slice(0, qk.inventoryKey.length)).toEqual([
+        ...qk.inventoryKey,
+      ]);
+    }
+    // The `q` segment always renders, so an unfiltered key can never be a
+    // strict prefix of a filtered one: same length, different contents.
+    expect(qk.inventory().length).toBe(qk.inventory('charizard').length);
+    expect(qk.inventory()).not.toEqual(qk.inventory('charizard'));
+    // Passing nothing and passing '' are the SAME cache entry — otherwise
+    // type-then-clear would double-cache the whole unfiltered catalog.
+    expect(qk.inventory()).toEqual(qk.inventory(''));
+    // Sibling of the purchase-invoice namespace, not nested under it.
+    expect(qk.inventory().slice(0, 2)).not.toEqual([...qk.purchaseInvoicesKey]);
+  });
 });

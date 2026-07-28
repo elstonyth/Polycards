@@ -1102,3 +1102,54 @@ export const createPurchaseInvoice = (body: CreatePurchaseInvoiceBody) =>
     '/admin/purchase-invoices',
     body,
   );
+
+/** One row of GET /admin/inventory (spec §3.3).
+ *
+ *  The grain is PRODUCTS, not registered gacha cards: a catalog product with no
+ *  Card row still gets a row — that is exactly what the "List to gacha card"
+ *  bulk tool acts on, and `is_card` tells the two apart.
+ *
+ *  `cost` and `on_hand` are THREE-STATE and the distinction is load-bearing:
+ *  `null` = no purchase history / tracks no inventory at all; `0` = bought and
+ *  free / tracked with nothing shippable. The route builds both with `??` and
+ *  never `||` (inventory-view.ts says so in as many words, and
+ *  inventory-detail.spec pins all four states) — so nothing on this side may
+ *  collapse them with a truthiness test either. `fmv`/`price` are null when the
+ *  product carries no FMV at all, never NaN and never 0-by-accident.
+ *
+ *  All money is MYR and arrives as plain JS numbers (the route folds through
+ *  displayMarketPrice / weightedAverageCost, not through a bigNumber getter),
+ *  so it feeds rm() unwrapped — see the Number() note on
+ *  AdminPurchaseInvoiceLine for the case where that is NOT true. */
+export interface InventoryRow {
+  handle: string;
+  product_id: string;
+  photo: string | null;
+  name: string;
+  sku: string;
+  is_card: boolean;
+  /** RAW vs GRADED, derived from the card's (or the product metadata's) grader. */
+  graded: boolean;
+  fmv: number | null;
+  price: number | null;
+  cost: number | null;
+  created_at: string;
+  on_hand: number | null;
+  in_vault: number;
+  requested: number;
+  shipped: number;
+  listing_count: number;
+}
+
+// UNPAGED by design (the route says why): on_hand/cost/buckets are all computed
+// after the product read, so ordering can only happen client-side.
+//
+// `q` is Medusa's own free-text search — title/subtitle/description plus the
+// variants' title/sku/barcode — and it is NOT wildcard-escaped, so this stays a
+// plain search box and never a pattern field. The route truncates it at 100
+// chars; the page's input carries a matching maxLength so the operator cannot
+// type past the cut.
+export const listInventory = (q?: string) =>
+  getJson<{ rows: InventoryRow[] }>(
+    `/admin/inventory${q ? `?q=${encodeURIComponent(q)}` : ''}`,
+  );

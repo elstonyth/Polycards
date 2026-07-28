@@ -916,3 +916,35 @@ export const useCreatePurchaseInvoice = () => {
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });
 };
+
+import { listInventory, type InventoryRow } from './admin-rest';
+
+export type { InventoryRow } from './admin-rest';
+
+// UNPAGED — the route returns every catalog row, because on_hand/cost/buckets
+// are computed after the product read and can only be ordered client-side. So
+// `q` is the only cache axis. keepPreviousData keeps the table on screen while
+// the debounced search refetches (this endpoint pages the whole catalog and
+// then makes five sequential per-handle service calls, so a blank-then-fill
+// would flash on every keystroke).
+export const useInventory = (
+  q?: string,
+): UseQueryResult<{ rows: InventoryRow[] }> =>
+  useQuery({
+    queryKey: qk.inventory(q),
+    queryFn: () => listInventory(q),
+    placeholderData: keepPreviousData,
+  });
+
+// Registering cards flips `is_card` on rows cached under EVERY search key, not
+// just the one on screen, so the bulk tool invalidates the whole namespace
+// rather than refetching its own query. Lives here rather than in the page
+// because no route file in this app touches useQueryClient or qk directly —
+// cache surgery is this module's job. NOT folded into useRegisterCard's
+// onSuccess: that hook is also the single-card register modal's, and the bulk
+// tool calls it in a loop, so N registrations would trigger N refetches of an
+// expensive list instead of one at the end.
+export const useInvalidateInventory = () => {
+  const qc = useQueryClient();
+  return () => qc.invalidateQueries({ queryKey: qk.inventoryKey });
+};
