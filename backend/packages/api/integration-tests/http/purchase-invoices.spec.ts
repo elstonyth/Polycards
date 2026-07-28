@@ -342,6 +342,37 @@ medusaIntegrationTestRunner({
           expect(byDisplayNo.data.invoices[0].id).toBe(made.data.invoice.id);
         });
 
+        // `q` lands in the MIDDLE of a LIKE pattern. Unescaped, the operator
+        // reads a table they believe they filtered and did not.
+        it('?q= treats LIKE metacharacters as literal text', async () => {
+          const withSupplier = (name: string) =>
+            create({
+              date: '2026-07-28T00:00:00.000Z',
+              supplier: name,
+              reverses_invoice_id: null,
+              lines: [LINE],
+            });
+          const literal = await withSupplier('A_B Trading');
+          await withSupplier('AXB Trading');
+
+          // Escaped, `%` is a literal nothing here contains. Unescaped it
+          // builds the pattern `%%%` and returns the WHOLE table.
+          const pct = await unwrapResponse(
+            api.get('/admin/purchase-invoices?q=%25', adminHeaders()),
+          );
+          expect(pct.status).toBe(200);
+          expect(pct.data.total).toBe(0);
+
+          // The discriminating case: `_` is LIKE's single-character wildcard,
+          // so unescaped `A_B` also matches `AXB` (total 2). Escaped it is one
+          // supplier; escaped-but-passed-through-as-a-literal-backslash is 0.
+          const wildcard = await unwrapResponse(
+            api.get('/admin/purchase-invoices?q=A_B', adminHeaders()),
+          );
+          expect(wildcard.data.total).toBe(1);
+          expect(wildcard.data.invoices[0].id).toBe(literal.data.invoice.id);
+        });
+
         it('GET /:id returns the full line list', async () => {
           const made = await createOriginal();
           const res = await unwrapResponse(
@@ -371,6 +402,13 @@ medusaIntegrationTestRunner({
             api.get('/admin/purchase-invoices/pinv_nonexistent', adminHeaders()),
           );
           expect(res.status).toBe(404);
+          // Status alone is VACUOUS: an unrouted path 404s too, so this case
+          // passed with [id]/route.ts deleted outright. Pin the handler's own
+          // message - entity name plus the id it echoes back - which nothing
+          // else in the stack emits.
+          expect(res.data.message).toMatch(
+            /purchase invoice 'pinv_nonexistent' not found/i,
+          );
         });
       });
     });

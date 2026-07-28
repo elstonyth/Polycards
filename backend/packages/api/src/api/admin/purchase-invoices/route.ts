@@ -83,9 +83,14 @@ export async function GET(
     { defaultLimit: 50, maxLimit: 100 },
   );
   const rawQ = req.query.q;
+  // Truncated FIRST, escaped SECOND: escaping before the cut could sever an
+  // escape pair and hand Postgres a dangling escape character.
   const q =
     typeof rawQ === 'string' && rawQ.trim() !== ''
-      ? rawQ.trim().slice(0, 100)
+      ? rawQ
+          .trim()
+          .slice(0, 100)
+          .replace(/[\\%_]/g, (c) => `\\${c}`)
       : undefined;
   const rawSort =
     typeof req.query.sort === 'string' ? req.query.sort : 'created_at:desc';
@@ -94,7 +99,12 @@ export async function GET(
   const orderDir = sortDir === 'asc' ? 'ASC' : 'DESC';
 
   // $ilike (not $like) for the same reason as admin/delivery-orders/route.ts:29
-  // — operators paste ?q= off a slip, in whatever case they typed it.
+  // — operators paste ?q= off a slip, in whatever case they typed it. `q` is
+  // the MIDDLE of a LIKE pattern, so `%`, `_` and `\` are escaped above the
+  // same way that precedent does it (delivery-orders/validate.ts:52). Not an
+  // injection fix — the value is bound. Unescaped, `?q=%` builds `%%%` and
+  // returns the WHOLE table while the operator believes they filtered, and a
+  // supplier genuinely named `A_B Trading` over-matches `AXB Trading`.
   const filter = q
     ? {
         $or: [
@@ -158,7 +168,11 @@ export async function GET(
         subtotal: fromSen(
           invLines.reduce((s, l) => s + toSen(l.line_total), 0),
         ),
-        // sen * integer qty stays exact — never toSen(fmv * qty).
+        // sen * integer qty stays exact — never toSen(fmv * qty). That holds
+        // ONLY because validate.ts:114 caps fmv_snapshot at 2dp. At 3dp the
+        // rejected form is the correct one: fmv=300.005 qty=1000 ships 300010
+        // where exact is 300005, an RM 5 error. Widen that cap and this line
+        // has to change with it.
         total_fmv: fromSen(
           invLines.reduce((s, l) => s + toSen(l.fmv_snapshot) * Number(l.qty), 0),
         ),
