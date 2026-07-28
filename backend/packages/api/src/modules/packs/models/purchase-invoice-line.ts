@@ -16,7 +16,11 @@ export const PurchaseInvoiceLine = model
     fmv_snapshot: model.bigNumber(), // MYR, frozen at create
     qty: model.number(), // signed integer
     unit_cost: model.bigNumber(), // MYR, always positive
-    line_total: model.bigNumber(), // qty * unit_cost — negative on a reversal line
+    // qty * unit_cost — negative on a reversal line. Enforced in the DB by
+    // purchase_invoice_line_line_total_check (Migration20260729020000), which
+    // is hand-written like every other check in this module rather than
+    // declared here via .checks().
+    line_total: model.bigNumber(),
   })
   .indexes([
     {
