@@ -92,6 +92,7 @@ import type {
   ChallengeSettingsView,
 } from './challenge-validate';
 import { getCardStockByHandle } from './card-stock';
+import { weightedAverageCost } from './inventory-cost';
 import type { MedusaContainer } from '@medusajs/framework/types';
 
 // plan-033 playthrough basis: the "post-1b deposited" ledger predicate. Shared
@@ -5669,6 +5670,192 @@ class PacksModuleService extends MedusaService({
       await this.deletePurchaseInvoiceLines(lineIds, sharedContext);
     }
     await this.deletePurchaseInvoices(invoiceId, sharedContext);
+  }
+
+  // ---- Inventory stock buckets (POLYCARD-BACK §3.2) ----
+
+  // inVault / requested / shipped read the REAL owning tables — Pull for vault
+  // state, DeliveryOrderItem -> Pull -> DeliveryOrder.status for the shipping
+  // pipeline (Epic 1's requested|processed|ready_to_ship|shipped|completed|
+  // canceled enum) — and NEVER stock_movement. §3.1 makes that table an
+  // append-only paper trail, and the purchase workflow's inventory adjustment
+  // is deliberately best-effort, so a 'purchase' movement can sit against a
+  // counter that never moved.
+  //
+  // The three buckets are DISJOINT, and that rests on an invariant worth
+  // naming: the request path flips the pull out of 'vaulted' in the SAME
+  // transaction that writes the order and its items (request-delivery step;
+  // recordRewardWithdrawal at service.ts:1609), and
+  // transitionDeliveryOrderStatus drives completed -> 'delivered' and
+  // canceled -> back to 'vaulted'. inVault counts pull.status ALONE, so a
+  // future request path that left a pull vaulted would count one physical card
+  // in BOTH inVault and requested rather than moving it between them.
+  // A canceled order needs no clause of its own: it is in neither IN-list, and
+  // its pulls are already back in the vault.
+  //
+  // `dord`, not `do`: DO is a RESERVED word in Postgres and cannot alias a
+  // table even with AS (probed: syntax error at or near "do").
+  // COUNT(DISTINCT p.id) rather than COUNT(*): delivery_order_item is unique
+  // per (order, pull), not per pull, so one physical card could span two item
+  // rows — it must still count once.
+  @InjectManager()
+  async inventoryLifecycleBuckets(
+    handles: string[],
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<
+    Map<string, { inVault: number; requested: number; shipped: number }>
+  > {
+    const out = new Map<
+      string,
+      { inVault: number; requested: number; shipped: number }
+    >();
+    if (handles.length === 0) return out;
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const ph = handles.map(() => '?').join(',');
+
+    // Sequential — concurrent queries on the shared injected EntityManager are
+    // what the pool-full failures look like (same rule as playersOverview).
+    const vaulted = await em.execute<{ card_id: string; n: string }[]>(
+      `SELECT card_id, COUNT(*)::bigint AS n FROM pull
+         WHERE status = 'vaulted' AND deleted_at IS NULL AND card_id IN (${ph})
+         GROUP BY card_id`,
+      handles,
+    );
+    const requested = await em.execute<{ card_id: string; n: string }[]>(
+      `SELECT p.card_id, COUNT(DISTINCT p.id)::bigint AS n
+         FROM delivery_order_item doi
+         JOIN delivery_order dord
+           ON dord.id = doi.delivery_order_id AND dord.deleted_at IS NULL
+         JOIN pull p ON p.id = doi.pull_id AND p.deleted_at IS NULL
+        WHERE doi.deleted_at IS NULL
+          AND dord.status IN ('requested','processed','ready_to_ship')
+          AND p.card_id IN (${ph})
+        GROUP BY p.card_id`,
+      handles,
+    );
+    const shipped = await em.execute<{ card_id: string; n: string }[]>(
+      `SELECT p.card_id, COUNT(DISTINCT p.id)::bigint AS n
+         FROM delivery_order_item doi
+         JOIN delivery_order dord
+           ON dord.id = doi.delivery_order_id AND dord.deleted_at IS NULL
+         JOIN pull p ON p.id = doi.pull_id AND p.deleted_at IS NULL
+        WHERE doi.deleted_at IS NULL
+          AND dord.status IN ('shipped','completed')
+          AND p.card_id IN (${ph})
+        GROUP BY p.card_id`,
+      handles,
+    );
+
+    // Pre-seed every requested handle: callers index this map by handle, so an
+    // unstocked card must read 0/0/0, never undefined.
+    for (const h of handles)
+      out.set(h, { inVault: 0, requested: 0, shipped: 0 });
+    for (const r of vaulted) out.get(r.card_id)!.inVault = Number(r.n);
+    for (const r of requested) out.get(r.card_id)!.requested = Number(r.n);
+    for (const r of shipped) out.get(r.card_id)!.shipped = Number(r.n);
+    return out;
+  }
+
+  // D8 item cost per handle, batched for one page of the Inventory list (never
+  // per row). The averaging itself is weightedAverageCost's and ONLY its: that
+  // function accumulates on an integer 1/10000-ringgit scale and rounds to sen
+  // exactly once, which is what keeps 1000 @ 1.005 minus 999 @ 1.004 at 2.00
+  // instead of 1.00. Nothing here re-rounds a per-handle figure.
+  //
+  // null, never 0, when there is no cost basis — no lines at all, a net qty of
+  // 0 after a full reversal, or a negative Σcost. A handle with no purchase
+  // history is not a free handle, and the two must stay distinguishable all
+  // the way to the caller.
+  //
+  // Reads `unit_cost` (the numeric column), never the raw_unit_cost bigNumber
+  // sidecar. Reversal lines carry a negative qty and subtract themselves back
+  // out, so no reversal-aware branch belongs here.
+  //
+  // HAZARD (dormant, the twin of assertReversalCovered's): this filters on the
+  // LINE's deleted_at only. Nothing soft-deletes an invoice today — the
+  // compensation cascade hard-deletes — but a future void/delete route would
+  // leave a voided invoice's lines still priced in here while the reversal
+  // budget silently forgot them. Fix BOTH together or neither.
+  @InjectManager()
+  async weightedAverageCostByHandle(
+    handles: string[],
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<Map<string, number | null>> {
+    const out = new Map<string, number | null>();
+    if (handles.length === 0) return out;
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const ph = handles.map(() => '?').join(',');
+    const rows = await em.execute<
+      { card_handle: string; qty: number; unit_cost: string }[]
+    >(
+      `SELECT card_handle, qty, unit_cost FROM purchase_invoice_line
+         WHERE deleted_at IS NULL AND card_handle IN (${ph})`,
+      handles,
+    );
+    const byHandle = new Map<string, { qty: number; unit_cost: number }[]>();
+    for (const r of rows) {
+      const list = byHandle.get(r.card_handle) ?? [];
+      list.push({ qty: Number(r.qty), unit_cost: Number(r.unit_cost) });
+      byHandle.set(r.card_handle, list);
+    }
+    for (const h of handles)
+      out.set(h, weightedAverageCost(byHandle.get(h) ?? []));
+    return out;
+  }
+
+  // Listing-show count (§3.3): the number of places a card is currently
+  // offered = distinct pack-pool membership + rank-reward slots.
+  //
+  // PAGED, not take: 5000 — a truncated read renders a plausible WRONG count
+  // instead of an obvious error (Task 4's reasoning for invoice totals).
+  // `kind: null` is provably redundant against pack_odds_kind_payout_check
+  // (a row WITH a kind always has card_id NULL, so card_id IN (...) already
+  // excludes reward-pool product/credit/nothing rows) but states the intent:
+  // real card entries only. rank_rewards is a sparse JSON array over a handful
+  // of stages — an in-memory scan, no index needed.
+  @InjectManager()
+  async listingCountByHandle(
+    handles: string[],
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    if (handles.length === 0) return out;
+
+    const packRows = await pageAll((opts) =>
+      this.listPackOdds({ card_id: handles, kind: null }, opts, sharedContext),
+    );
+    // UQ_pack_odds_pack_card already makes (pack, card) unique among live
+    // rows; the Set keeps the count right regardless of that index.
+    const packsByHandle = new Map<string, Set<string>>();
+    for (const o of packRows) {
+      if (!o.card_id) continue;
+      const set = packsByHandle.get(o.card_id) ?? new Set<string>();
+      set.add(o.pack_id);
+      packsByHandle.set(o.card_id, set);
+    }
+
+    const stages = await pageAll((opts) =>
+      this.listChallengeStages({}, opts, sharedContext),
+    );
+    const ranksByHandle = new Map<string, number>();
+    for (const stage of stages) {
+      const rewards =
+        (stage.rank_rewards as unknown as ChallengeRankReward[]) ?? [];
+      for (const r of rewards) {
+        if (!r.card_id) continue;
+        ranksByHandle.set(r.card_id, (ranksByHandle.get(r.card_id) ?? 0) + 1);
+      }
+    }
+
+    for (const h of handles) {
+      out.set(
+        h,
+        (packsByHandle.get(h)?.size ?? 0) + (ranksByHandle.get(h) ?? 0),
+      );
+    }
+    return out;
   }
 }
 
