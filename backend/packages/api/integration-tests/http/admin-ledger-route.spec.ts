@@ -137,19 +137,39 @@ medusaIntegrationTestRunner({
         // including today (`to` resolved to that day's midnight, so from=X&to=X
         // was a zero-width window) — the one wrong result an operator hits on
         // their first visit to the Transactions page.
-        const mytToday = new Date(Date.now() + 8 * 60 * 60 * 1000)
+        //
+        // The day comes from the SEEDED ROW, not Date.now(): a run that crosses
+        // MYT midnight between seeding and asserting would otherwise ask for
+        // the wrong day and fail spuriously.
+        const mytDay = new Date(
+          new Date((matched as AdminLedgerRow).occurred_at).getTime() +
+            8 * 60 * 60 * 1000,
+        )
           .toISOString()
           .slice(0, 10);
-        const sameDay = await listLedger(
-          `?from=${mytToday}&to=${mytToday}`,
-        );
+        const sameDay = await listLedger(`?from=${mytDay}&to=${mytDay}`);
         expect(sameDay.some((e) => e.customer.id === id)).toBe(true);
+      });
 
-        // An unparseable date is ignored, not a 500 (pg throws on Invalid Date).
-        const bad = await unwrapResponse(
-          api.get('/admin/ledger?from=not-a-date', { headers: adminHeaders() }),
+      it('400s an invalid type or date filter instead of silently widening it', async () => {
+        // Silently ignoring these returned ALL types / ALL dates — a mistyped
+        // filter showed the operator MORE money rows than they asked for,
+        // while a bad ?limit= in the same handler already threw INVALID_DATA.
+        for (const query of [
+          '?type=SPP',
+          '?from=not-a-date',
+          '?to=2026-13-01',
+        ]) {
+          const res = await unwrapResponse(
+            api.get(`/admin/ledger${query}`, { headers: adminHeaders() }),
+          );
+          expect([query, res.status]).toEqual([query, 400]);
+        }
+        // A CLEARED control submits '', which is "absent", not invalid.
+        const cleared = await unwrapResponse(
+          api.get('/admin/ledger?type=&from=&to=', { headers: adminHeaders() }),
         );
-        expect(bad.status).toBe(200);
+        expect(cleared.status).toBe(200);
       });
 
       it('401s an unauthenticated caller (the list carries every player email)', async () => {
