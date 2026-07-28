@@ -3726,6 +3726,23 @@ class PacksModuleService extends MedusaService({
       ],
       sharedContext,
     );
+    await this.recordLedgerEntry(
+      {
+        type: 'AD',
+        customerId: input.customerId,
+        refId: id, // the credit_transaction id already in scope
+        walletDelta: input.amount,
+        vaultDelta: null,
+        payload: {
+          type: 'AD',
+          admin_id: input.adminId,
+          reason: input.note,
+          detail: null,
+          card_handle: null,
+        },
+      },
+      sharedContext,
+    );
     return { id, amount: input.amount, balance };
   }
 
