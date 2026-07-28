@@ -29,10 +29,19 @@
     "zod": "3.25.76"
   },
   "resolutions": {
+    "@opentelemetry/core": "^2.10.0",
+    "@opentelemetry/exporter-prometheus": "^0.217.0",
+    "@opentelemetry/propagator-jaeger": "^2.9.0",
+    "@opentelemetry/sdk-node": "^0.217.0",
     "ajv@~8.13.0": "^8.20.0",
+    "esbuild@^0.21.3": "^0.25.0",
+    "i18next-http-backend@2.4.2": "^3.0.5",
     "lodash@~4.17.0": "^4.18.1",
+    "protobufjs": "^8.4.1",
     "react-router@6.30.3": "6.30.4",
-    "react-router-dom@6.30.3": "6.30.4"
+    "react-router-dom@6.30.3": "6.30.4",
+    "uuid@^9.0.0": "^11.1.1",
+    "vite@^5.4.21": "^6.4.3"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
