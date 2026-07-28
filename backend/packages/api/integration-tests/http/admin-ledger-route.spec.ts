@@ -132,6 +132,19 @@ medusaIntegrationTestRunner({
           0,
         );
 
+        // A SINGLE-DAY window covers that whole day. Before the bounds were
+        // read as MYT calendar days this returned zero rows for every day
+        // including today (`to` resolved to that day's midnight, so from=X&to=X
+        // was a zero-width window) — the one wrong result an operator hits on
+        // their first visit to the Transactions page.
+        const mytToday = new Date(Date.now() + 8 * 60 * 60 * 1000)
+          .toISOString()
+          .slice(0, 10);
+        const sameDay = await listLedger(
+          `?from=${mytToday}&to=${mytToday}`,
+        );
+        expect(sameDay.some((e) => e.customer.id === id)).toBe(true);
+
         // An unparseable date is ignored, not a 500 (pg throws on Invalid Date).
         const bad = await unwrapResponse(
           api.get('/admin/ledger?from=not-a-date', { headers: adminHeaders() }),
