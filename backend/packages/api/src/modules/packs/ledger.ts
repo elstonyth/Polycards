@@ -67,9 +67,10 @@ const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
 //
 // Anything else (a full ISO instant) is taken literally — a caller that
 // already knows the exact instant it wants is not asking for a calendar day.
-// Unparseable input returns undefined so the caller DROPS the filter: binding
-// an Invalid Date to a timestamptz param makes pg throw, i.e. a 500 on
-// `?from=abc`.
+// Unparseable input returns undefined rather than an Invalid Date (binding one
+// to a timestamptz param makes pg throw). This stays a PURE signal — it is the
+// route's coerceMytBound that turns it into a 400, so this file keeps its "no
+// Medusa imports" property.
 export function parseMytBound(
   v: unknown,
   edge: 'from' | 'to',

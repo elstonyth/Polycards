@@ -1,5 +1,5 @@
 import type { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
-import { Modules } from '@medusajs/framework/utils';
+import { MedusaError, Modules } from '@medusajs/framework/utils';
 import type { ICustomerModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
@@ -28,6 +28,33 @@ export type AdminLedgerRow = {
 // one place so casts don't spread into callers.
 const asPayload = (v: unknown): LedgerPayload => v as unknown as LedgerPayload;
 
+const bad = (message: string): never => {
+  throw new MedusaError(MedusaError.Types.INVALID_DATA, message);
+};
+
+// ?type= — reject anything not in the enum. Silently ignoring it returned
+// EVERY type, i.e. a mistyped filter showed the operator MORE money rows than
+// they asked for. '' is "absent" (a cleared control), matching
+// delivery-orders/validate.ts coerceStatusFilter.
+function coerceTypeFilter(raw: unknown): LedgerType | undefined {
+  if (raw === undefined || raw === '') return undefined;
+  if (typeof raw !== 'string' || !(LEDGER_TYPES as string[]).includes(raw)) {
+    bad(`Invalid type filter '${String(raw)}'.`);
+  }
+  return raw as LedgerType;
+}
+
+// ?from=/?to= — same rule for the date bounds: an unparseable one used to be
+// dropped, widening the window to ALL dates. parseMytBound stays pure (no
+// Medusa imports) and keeps signalling "not a date" with undefined; the 400
+// lives here, where the request boundary is.
+function coerceMytBound(raw: unknown, edge: 'from' | 'to'): Date | undefined {
+  if (raw === undefined || raw === '') return undefined;
+  const d = parseMytBound(raw, edge);
+  if (!d) bad(`Invalid \`${edge}\` date '${String(raw)}' (expected YYYY-MM-DD).`);
+  return d;
+}
+
 // GET /admin/ledger — the Transactions list (POLYCARD-BACK §5.4).
 //
 // RF and WP are offered as filters but no writer produces them yet (no
@@ -50,18 +77,14 @@ export async function GET(
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
   const customers = req.scope.resolve<ICustomerModuleService>(Modules.CUSTOMER);
 
-  const rawType = req.query.type;
-  const type =
-    typeof rawType === 'string' && (LEDGER_TYPES as string[]).includes(rawType)
-      ? (rawType as LedgerType)
-      : undefined;
+  const type = coerceTypeFilter(req.query.type);
   const rawQ = req.query.q;
   const q =
     typeof rawQ === 'string' && rawQ.trim() !== ''
       ? rawQ.trim().slice(0, 100)
       : undefined;
-  const from = parseMytBound(req.query.from, 'from');
-  const to = parseMytBound(req.query.to, 'to');
+  const from = coerceMytBound(req.query.from, 'from');
+  const to = coerceMytBound(req.query.to, 'to');
 
   // `q` also matches the player — resolved here because the customer table
   // lives in another module, so the ledger query can't join it.
