@@ -66,6 +66,7 @@ const InventoryItemDetailPage = () => {
         },
         { label: t('inventory.inVault'), value: item.in_vault },
         { label: t('inventory.requested'), value: item.requested },
+        { label: t('inventory.shipped'), value: item.shipped },
       ]
     : [];
 

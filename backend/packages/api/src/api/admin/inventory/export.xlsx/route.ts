@@ -7,11 +7,25 @@ import type { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
 // the compiler's own prescribed remedy, not a workaround:
 //   * the TYPE comes in with an explicit `resolution-mode: 'import'`, which
 //     is erased entirely at build time (verified in swc's emitted output);
-//   * the VALUE comes in via `await import()` inside GET. swc lowers that to
-//     `Promise.resolve().then(() => require("write-excel-file/node"))`, which
-//     hits the package's own `require` condition (node/index.cjs) -- so the
-//     runtime never actually loads ESM. Node caches the module after the
-//     first request, so this is not a per-request load.
+//   * the VALUE comes in via `await import()` inside GET. The two transpilers
+//     this repo uses take DIFFERENT paths through that one expression, so both
+//     were emitted and checked rather than one:
+//       - swc, the DEV AND TEST transpiler only (ts-node `swc: true`), lowers
+//         it to `Promise.resolve().then(() => require("write-excel-file/node"))`
+//         and so resolves the package's `require` condition (node/index.cjs).
+//         Those runs never load ESM at all.
+//       - tsc is the PRODUCTION compiler -- `medusa build` drives it through
+//         ts.createProgram spreading this package's own tsconfig, so `module`
+//         is Node16. It emits this file as CommonJS (the static imports above
+//         do become `require`) but PRESERVES `await import()` as a native
+//         dynamic import, the one form Node lets CommonJS use to reach ESM.
+//         Production therefore resolves the `import` condition and DOES load
+//         node/index.js.
+//     Both entries were executed and produce identical output, so the split is
+//     harmless -- but it is real, and a replacement package shipping only one of
+//     the two conditions would break exactly one of the two paths while the
+//     other stayed green. Node caches the module after the first request on
+//     either path, so this is not a per-request load.
 // The library was chosen over exceljs for its dependency surface: one
 // transitive (fflate) against exceljs's nine, and no unused read path.
 import type { Column } from 'write-excel-file/node' with { 'resolution-mode': 'import' };

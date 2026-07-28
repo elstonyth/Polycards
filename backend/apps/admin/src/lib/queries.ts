@@ -915,16 +915,28 @@ export const usePurchaseInvoice = (
     enabled: !!id,
   });
 
-// Only the LIST is invalidated: an invoice is immutable once written (no
-// PUT/DELETE route exists), so no cached detail can have gone stale.
+// Three caches move here and one deliberately does not. The purchase-invoice
+// LIST gains a row, so it goes. The purchase-invoice DETAIL does not: an invoice
+// is immutable once written (no PUT/DELETE route exists), so no cached invoice
+// detail can have gone stale — which is why qk.purchaseInvoice is a sibling
+// namespace the list prefix cannot reach. That reasoning covers ONLY the invoice
+// detail. The INVENTORY caches, list and item detail both, are a separate
+// question and the answer is the opposite one: an invoice is not merely a
+// document, it raises the Medusa stock counter and writes a `purchase` stock
+// movement, so on_hand and the weighted-average cost change on the list and the
+// movement history changes on the item detail. Without invalidating them the
+// dashboard's 90 s staleTime (with refetchOnWindowFocus off) shows On Hand 0 and
+// "No purchase history recorded" for stock the operator just bought.
 export const useCreatePurchaseInvoice = () => {
   const qc = useQueryClient();
+  const invalidateInventory = useInvalidateInventory();
   return useMutation({
     mutationFn: (body: CreatePurchaseInvoiceBody) =>
       createPurchaseInvoice(body),
     onSuccess: () => {
       toast.success('Purchase invoice created');
       qc.invalidateQueries({ queryKey: qk.purchaseInvoicesKey });
+      invalidateInventory();
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });
@@ -949,17 +961,31 @@ export const useInventory = (
     placeholderData: keepPreviousData,
   });
 
-// Registering cards flips `is_card` on rows cached under EVERY search key, not
-// just the one on screen, so the bulk tool invalidates the whole namespace
-// rather than refetching its own query. Lives here rather than in the page
-// because no route file in this app touches useQueryClient or qk directly —
-// cache surgery is this module's job. NOT folded into useRegisterCard's
-// onSuccess: that hook is also the single-card register modal's, and the bulk
-// tool calls it in a loop, so N registrations would trigger N refetches of an
-// expensive list instead of one at the end.
+// Reaches BOTH inventory namespaces, the list AND the item detail. They are
+// deliberate siblings (see qk.inventoryItem), so a prefix invalidation of one
+// cannot touch the other and every caller here mutates both: registering cards
+// flips `is_card` on list rows cached under EVERY search key, not just the one
+// on screen, and on each registered card's own detail page; creating a purchase
+// invoice moves on_hand and cost on the list and appends the movement row the
+// detail page exists to show. Lives here rather than in the pages because no
+// route file in this app touches useQueryClient or qk directly — cache surgery
+// is this module's job. NOT folded into useRegisterCard's onSuccess: that hook
+// is also the single-card register modal's, and the bulk tool calls it in a
+// loop, so N registrations would trigger N refetches of an expensive list
+// instead of one at the end.
 export const useInvalidateInventory = () => {
   const qc = useQueryClient();
-  return () => qc.invalidateQueries({ queryKey: qk.inventoryKey });
+  // Returns the PROMISE, the two invalidations folded with Promise.all. The
+  // bulk tool awaits this before it toasts (routes/inventory/list/page.tsx), so
+  // a statement body returning void would resolve that await immediately and
+  // announce "N registered" over a table that has not refetched yet. Awaiting a
+  // non-promise is legal TypeScript, so the type checker will not catch that
+  // regression -- do not "tidy" this back into a block.
+  return () =>
+    Promise.all([
+      qc.invalidateQueries({ queryKey: qk.inventoryKey }),
+      qc.invalidateQueries({ queryKey: qk.inventoryItemKey }),
+    ]);
 };
 
 import { getInventoryItem, type InventoryDetail } from './admin-rest';

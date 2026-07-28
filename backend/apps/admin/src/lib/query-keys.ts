@@ -118,7 +118,9 @@ export const qk = {
   // 2-segment prefix — invalidates EVERY search of the inventory list. The bulk
   // "List to gacha card" tool flips is_card on rows that are also cached under
   // other `q` values, so it has to reach the whole namespace; refetching just
-  // the key on screen would leave the operator's earlier searches lying.
+  // the key on screen would leave the operator's earlier searches lying. Creating
+  // a purchase invoice reaches it for the same reason — it moves on_hand and the
+  // weighted-average cost on rows cached under every `q`, not just the one shown.
   inventoryKey: ['admin', 'inventory'] as const,
   // SINGULAR sibling namespace, same shape as purchaseInvoice/purchaseInvoices
   // and deliveryOrder/deliveryOrders. NOT nested under the list key: slot 2 of
@@ -130,4 +132,10 @@ export const qk = {
   // whole with each one.
   inventoryItem: (handle: string, page: number) =>
     ['admin', 'inventory-item', handle, page] as const,
+  // 2-segment prefix — invalidates EVERY handle and EVERY movement page of
+  // the item detail. Sibling of inventoryKey, never a parent of it: because the
+  // two namespaces are disjoint by design (see above), a prefix invalidation of
+  // one cannot reach the other, so anything that mutates BOTH the list and a
+  // detail — a purchase invoice, a bulk register — has to name both roots.
+  inventoryItemKey: ['admin', 'inventory-item'] as const,
 };

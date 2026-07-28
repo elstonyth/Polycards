@@ -269,5 +269,34 @@ describe('qk', () => {
     expect(qk.inventoryItem('charizard', 0).length).toBe(
       qk.inventoryItem('charizard', 2).length,
     );
+    // The root useInvalidateInventory actually passes. invalidateQueries matches
+    // by PREFIX, so if this constant stops prefixing the builder the call
+    // silently matches NOTHING: creating a purchase invoice would leave the item
+    // detail showing the stock position from before the purchase, and the fix
+    // would still read as correct at the call site.
+    //
+    // Stated limit, because this file's other structural assertions have the
+    // same shape: with the constant AND the builder both pinned to literals, the
+    // loop below is logically implied by them and can never be the sole failure
+    // under a single mutation — the literal is what catches a one-sided rename,
+    // the loop is what catches a both-sides rename. query-core's own
+    // partialMatchKey would assert the real runtime semantics instead of
+    // restating the literals, but 5.64.2 exposes it only from the internal
+    // build/modern/utils chunk, never from the package entry, so importing it is
+    // a TS2305 and deep-importing a build chunk is worse than the redundancy.
+    expect(qk.inventoryItemKey).toEqual(['admin', 'inventory-item']);
+    for (const key of [
+      qk.inventoryItem('charizard', 0),
+      qk.inventoryItem('charizard', 2),
+    ]) {
+      expect(key.slice(0, qk.inventoryItemKey.length)).toEqual([
+        ...qk.inventoryItemKey,
+      ]);
+    }
+    // ...and it must NOT reach the list namespace, or invalidating the detail
+    // would drag the unpaged whole-catalog list along with it.
+    expect(
+      qk.inventory('charizard').slice(0, qk.inventoryItemKey.length),
+    ).not.toEqual([...qk.inventoryItemKey]);
   });
 });
