@@ -343,27 +343,25 @@ export const useRegisterCard = () => {
       // unaffected: it registers from a map closed over at click time, so a
       // mid-loop refetch could never have changed its behaviour.)
       //
-      // Safe for both consumers because this query is staleTime:0 and is
-      // enabled-gated, so it always refetches the moment it is switched back on
-      // — the register modal's picker on the next open (enabled:false while
-      // closed), the bulk tool's map on the next selection.
+      // Safe for all THREE consumers, by two different mechanisms. Two are
+      // enabled-gated, and this query is staleTime:0, so they refetch the
+      // moment they are switched back on — the register modal's picker on the
+      // next open (enabled:false while closed), and the Inventory bulk tool's
+      // map on the next selection, which is guaranteed to be a re-enable
+      // because routes/inventory/list/page.tsx clears `selected`
+      // unconditionally at the end of every run (see the comment on that line).
+      // The third, purchase-invoices/new/page.tsx, calls
+      // useEligibleProducts(true) — PERMANENTLY enabled, so the gate argument
+      // does not cover it. It is safe for a different reason: it is a route
+      // page, so it cannot be mounted while this mutation fires, which leaves
+      // its query INACTIVE at invalidation time (the old refetchType:'active'
+      // default skipped it too — zero behaviour change), and it refetches on
+      // mount anyway via shouldFetchOnMount -> isStale at staleTime:0.
       qc.invalidateQueries({
         queryKey: qk.eligibleProducts,
         refetchType: 'none',
       });
     },
-  });
-};
-
-export const useCreateProductFromPriceCharting = () => {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: createProductFromPriceCharting,
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: qk.cards });
-      qc.invalidateQueries({ queryKey: qk.eligibleProducts });
-    },
-    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });
 };
 
@@ -983,3 +981,47 @@ export const useInventoryItem = (
     enabled: !!handle,
     placeholderData: keepPreviousData,
   });
+
+/** One queued PriceCharting import — exactly the single-item creation body. */
+export type PcQueueItem = Parameters<typeof createProductFromPriceCharting>[0];
+
+// Runs a client-side queue against the single-item creation endpoint —
+// PriceCharting's API has no bulk-create endpoint for this to call instead
+// (verified 2026-07-28 against the live API docs: /api/offer-publish is one
+// item per POST, and PriceCharting's own docs point bulk-adders at a website
+// CSV-upload tool, not an API). Calls the raw createProductFromPriceCharting
+// rather than wrapping a per-item mutation: a per-item hook toasts its own
+// failures, which would double up with the page's one batch-summary toast.
+// The loop is deliberately SEQUENTIAL — each create re-fetches the card photo
+// through the media pipeline server-side, so a Promise.all would fan N image
+// ingests (and N pool connections) out at once.
+export const useCreateProductsFromPriceChartingBatch = () => {
+  const qc = useQueryClient();
+  const invalidateInventory = useInvalidateInventory();
+  return useMutation({
+    mutationFn: async (items: PcQueueItem[]) => {
+      let created = 0;
+      const skipped: string[] = [];
+      for (const item of items) {
+        try {
+          await createProductFromPriceCharting(item);
+          created += 1;
+        } catch (e) {
+          skipped.push(
+            `${item.name}: ${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
+      }
+      return { created, skipped };
+    },
+    onSuccess: ({ created }) => {
+      if (created > 0) {
+        qc.invalidateQueries({ queryKey: qk.cards });
+        qc.invalidateQueries({ queryKey: qk.eligibleProducts });
+        // This batch creates PRODUCTS, which is exactly the grain of the
+        // Inventory list — without this a batch add leaves that list stale.
+        invalidateInventory();
+      }
+    },
+  });
+};

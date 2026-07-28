@@ -116,7 +116,7 @@
   },
   "pcAdd": {
     "title": "Add from PriceCharting",
-    "subtitle": "Search PriceCharting, pick a graded tier, and create a marketplace product carrying that live-price link. Cards registered from this product auto-track its value daily.",
+    "subtitle": "Search PriceCharting, pick a graded tier, and queue a marketplace product carrying that live-price link. Queue as many cards as you like, then save the whole batch in one pass. Cards registered from these products auto-track their value daily.",
     "search": {
       "label": "Search PriceCharting",
       "placeholder": "Card name…",
@@ -148,10 +148,18 @@
     "pixel": {
       "required": "Required — the reel can't render this card without a pixel sprite. Link a library entry or upload one above."
     },
-    "submit": "Add product",
-    "created": "Created",
+    "queue": {
+      "add": "Add to queue",
+      "photo": "Photo",
+      "name": "Name",
+      "grade": "Grade",
+      "remove": "Remove from queue",
+      "save": "Save queue ({{n}})"
+    },
     "toast": {
-      "created": "Product created from {{name}}."
+      "queueDone": "{{n}} created.",
+      "queueSkipped": "{{n}} created, {{skipped}} skipped.",
+      "queueSkippedCapped": "{{n}} created, {{skipped}} skipped — {{hidden}} more errors are not shown below."
     }
   },
   "cards": {

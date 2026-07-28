@@ -255,6 +255,11 @@ const InventoryListPage = () => {
     for (const reason of skipped.slice(0, 5)) {
       toast.error(reason);
     }
+    // LOAD-BEARING for useRegisterCard's refetchType:'none' (queries.ts): this
+    // unconditional clear is what makes the NEXT selection an enabled
+    // false->true transition, and that transition is the only thing that
+    // refetches the eligible-products map this run just invalidated. Keeping
+    // the selection after a run would leave that map stale for the session.
     setSelected(new Set());
   };
 
