@@ -187,7 +187,7 @@ const NewPurchaseInvoicePage = () => {
     // 2dp is precisely the class of drift Tasks 2 and 3 hardened against, and
     // the server would 400 on it regardless — this only makes the message name
     // the row and the field.
-    const problem = draftError(supplier, lines);
+    const problem = draftError(date, supplier, lines);
     if (problem) {
       toast.error(problem);
       return;
@@ -208,9 +208,18 @@ const NewPurchaseInvoicePage = () => {
       });
       navigate(`/purchase-invoices/${res.invoice.id}`);
     } catch {
-      // useCreatePurchaseInvoice's onError already toasted the server message
-      // (over-reversal, no firm FX rate, ...). This catch only stops the
-      // rejection escaping the click handler unhandled — do NOT toast again.
+      // What this is FOR: create.mutateAsync's rejection. useCreatePurchaseInvoice's
+      // onError has ALREADY toasted the server message (over-reversal, no firm FX
+      // rate, ...), so toasting again here would double it — the catch exists only
+      // to stop that rejection escaping the click handler unhandled.
+      //
+      // It is NOT exhaustive, and that is the hazard to respect: anything else
+      // thrown in this block lands here SILENTLY. mytMidnightIso used to — a
+      // cleared date threw RangeError and the operator got no feedback at all —
+      // which is why draftError now rejects the date BEFORE the try. Still
+      // reachable and NOT hypothetical: a malformed 2xx body makes
+      // `res.invoice.id` throw and it is swallowed exactly the same way.
+      // Deliberately not fixed here — add a toast if it ever bites.
     }
   };
 

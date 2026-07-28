@@ -8,6 +8,12 @@ import {
   type DraftLine,
 } from './purchase-invoice-form';
 
+// A date every draftError case below can pass in without thinking about it.
+// Named rather than inlined so a site that loses it fails LOUDLY at the call
+// signature instead of quietly re-pointing a supplier/qty/money assertion at
+// the date message.
+const VALID_DATE = '2026-07-28';
+
 const line = (over: Partial<DraftLine> = {}): DraftLine => ({
   card_handle: 'charizard-psa-10',
   card_name: 'Charizard',
@@ -36,9 +42,12 @@ describe('moneyError', () => {
   test('does NOT reject values whose sen product is a float artefact', () => {
     // 0.07 * 100 === 7.000000000000001 and 4.35 * 100 === 434.99999999999994.
     // An exact `Number.isInteger(n * 100)` test would call both 3dp and refuse
-    // two perfectly ordinary prices; the 1e-6 epsilon is what stops it. (The
-    // server's own comment names 10.1 as the example — that one is exact, so
-    // it does not actually demonstrate the hazard. These do.)
+    // two perfectly ordinary prices; the 1e-6 epsilon is what stops it. (10.1
+    // does NOT demonstrate it — 10.1 * 100 is exactly 1010 — which is why this
+    // validator's comment and validate.ts's both cite these two instead.)
+    expect(0.07 * 100).toBe(7.000000000000001);
+    expect(4.35 * 100).toBe(434.99999999999994);
+    expect(10.1 * 100).toBe(1010);
     expect(Number.isInteger(0.07 * 100)).toBe(false);
     expect(Number.isInteger(4.35 * 100)).toBe(false);
     expect(moneyError('0.07', 'Cost')).toBeNull();
@@ -74,24 +83,82 @@ describe('qtyError', () => {
 
 describe('draftError', () => {
   test('passes a well-formed draft', () => {
-    expect(draftError('Acme Cards', [line()])).toBeNull();
+    expect(draftError(VALID_DATE, 'Acme Cards', [line()])).toBeNull();
   });
 
   test('requires a supplier and at least one line', () => {
-    expect(draftError('  ', [line()])).toBe('Supplier is required.');
-    expect(draftError('Acme Cards', [])).toBe('Add at least one line.');
+    expect(draftError(VALID_DATE, '  ', [line()])).toBe(
+      'Supplier is required.',
+    );
+    expect(draftError(VALID_DATE, 'Acme Cards', [])).toBe(
+      'Add at least one line.',
+    );
   });
 
   test('names the offending ROW, not just the field', () => {
-    expect(draftError('Acme', [line(), line({ unit_cost: '1.005' })])).toBe(
-      'Line 2 unit cost may carry at most 2 decimals.',
-    );
-    expect(draftError('Acme', [line({ qty: '0' })])).toBe(
+    expect(
+      draftError(VALID_DATE, 'Acme', [line(), line({ unit_cost: '1.005' })]),
+    ).toBe('Line 2 unit cost may carry at most 2 decimals.');
+    expect(draftError(VALID_DATE, 'Acme', [line({ qty: '0' })])).toBe(
       'Line 1 qty must be a non-zero whole number.',
     );
-    expect(draftError('Acme', [line({ fmv_snapshot: '2.001' })])).toBe(
+    expect(draftError(VALID_DATE, 'Acme', [line({ fmv_snapshot: '2.001' })])).toBe(
       'Line 1 FMV may carry at most 2 decimals.',
     );
+  });
+});
+
+describe('draftError: the invoice date', () => {
+  const MALFORMED = 'Invoice date must be a valid date (YYYY-MM-DD).';
+
+  test('REJECTS a cleared date — the silent-no-op class', () => {
+    // Regression pin. Before this guard draftError returned null, submit()
+    // entered its try, mytMidnightIso('') threw RangeError, and the bare catch
+    // swallowed it: no toast, no network request, no navigation, and the Save
+    // button stayed enabled (its `disabled` has no date term). Clicking again
+    // did nothing, forever.
+    expect(draftError('', 'Acme', [line()])).toBe('Invoice date is required.');
+    expect(draftError('   ', 'Acme', [line()])).toBe(
+      'Invoice date is required.',
+    );
+  });
+
+  test('BOTH clauses of the guard are load-bearing', () => {
+    // Date.parse ACCEPTS this one, so the shape regex is the only thing that
+    // rejects it — and mytMidnightIso throws on it (see the composition test).
+    expect(Number.isNaN(Date.parse('2026-2-3'))).toBe(false);
+    expect(draftError('2026-2-3', 'Acme', [line()])).toBe(MALFORMED);
+
+    // ...and this one is regex-shaped, so Date.parse is the only thing that
+    // rejects it.
+    expect(/^\d{4}-\d{2}-\d{2}$/.test('2026-13-45')).toBe(true);
+    expect(draftError('2026-13-45', 'Acme', [line()])).toBe(MALFORMED);
+
+    expect(draftError('abc', 'Acme', [line()])).toBe(MALFORMED);
+  });
+
+  test('is checked BEFORE the supplier, matching the order on the page', () => {
+    expect(draftError('', '', [])).toBe('Invoice date is required.');
+  });
+
+  test('ACCEPT SET MATCHES mytMidnightIso — the actual bug was these two disagreeing', () => {
+    // Asserting each half separately is what let the hole exist: draftError
+    // said "fine" for values mytMidnightIso threw on. So assert the
+    // composition, in both directions.
+    for (const d of [
+      '2026-01-01',
+      '2026-07-28',
+      '2026-12-31',
+      '1999-06-15',
+      '2026-02-30', // rolls to 1 March; accepted deliberately, see the source.
+    ]) {
+      expect(draftError(d, 'Acme', [line()])).toBeNull();
+      expect(() => mytMidnightIso(d)).not.toThrow();
+    }
+    for (const d of ['', '   ', 'abc', '2026-2-3', '2026-13-45', '0000-00-00']) {
+      expect(draftError(d, 'Acme', [line()])).not.toBeNull();
+      expect(() => mytMidnightIso(d)).toThrow(RangeError);
+    }
   });
 });
 
