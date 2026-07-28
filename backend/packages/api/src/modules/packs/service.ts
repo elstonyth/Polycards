@@ -13,6 +13,7 @@ import {
   validateDeliveryRequest,
   validateDeliveryStatusTransition,
   snapshotAddress,
+  type AddressSnapshot,
   type DeliveryStatus,
 } from './delivery';
 import { rewardsRedemptionEnabled } from './rewards-gate';
@@ -1674,7 +1675,7 @@ class PacksModuleService extends MedusaService({
   // the SP writer (service.ts recordPullsWithLedger).
   @InjectTransactionManager()
   async createDeliveryOrderWithLedger(
-    input: { customerId: string; snapshot: Record<string, unknown>; pullIds: string[]; fx: number },
+    input: { customerId: string; snapshot: AddressSnapshot; pullIds: string[]; fx: number },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ orderId: string; itemIds: string[] }> {
     const [order] = await this.createDeliveryOrders(
@@ -3874,34 +3875,46 @@ class PacksModuleService extends MedusaService({
     // route through this method. Nothing fires on 'completed': those cards
     // are gone for good, so the original debit stands permanently.
     //
-    // !order.is_reward excludes B7 reward-prize shipments: recordRewardWithdrawal
-    // (this file) creates those orders with NO OD debit (out of this task's
-    // scope — reward pulls are excluded from ledger/value tracking
-    // everywhere else too, e.g. Pull.recorded_value_usd). Crediting the vault
-    // back here for an order that was never debited would drift the ledger's
+    // The credit is gated on the CREATE-time debit ROW EXISTING, not on any
+    // field of the order — the invariant is existence-based. Crediting the
+    // vault back for an order that was never debited drifts the ledger's
     // cumulative vault_delta upward forever with no corresponding liability.
-    if (input.to === 'canceled' && input.pullIds.length && !order.is_reward) {
-      const pulls = await this.listPulls(
-        { id: input.pullIds },
-        { take: input.pullIds.length },
-        sharedContext,
+    // Two live sources of debit-less orders, both covered by this one check:
+    // (a) B7 reward-prize shipments — recordRewardWithdrawal (this file)
+    // creates those with NO OD debit, since reward pulls are excluded from
+    // ledger/value tracking everywhere (e.g. Pull.recorded_value_usd);
+    // (b) EVERY ordinary order already sitting in requested/processed/
+    // ready_to_ship when this ships — D4 is go-forward-only with no backfill,
+    // so those carry is_reward=false AND no debit. Runs on the same `em`
+    // (this transaction), so it takes no extra pool connection.
+    if (input.to === 'canceled' && input.pullIds.length) {
+      const [debit] = await em.execute<{ id: string }[]>(
+        "SELECT id FROM ledger_entry WHERE type = 'OD' AND ref_id = ? AND deleted_at IS NULL LIMIT 1",
+        [input.orderId],
       );
-      const vaultDelta = await this.vaultValueForPulls(pulls, input.fx, sharedContext);
-      await this.recordLedgerEntry(
-        {
-          type: 'OD',
-          customerId: order.customer_id,
-          refId: `cancel:${input.orderId}`,
-          walletDelta: 0,
-          vaultDelta,
-          payload: {
+      if (debit) {
+        const pulls = await this.listPulls(
+          { id: input.pullIds },
+          { take: input.pullIds.length },
+          sharedContext,
+        );
+        const vaultDelta = await this.vaultValueForPulls(pulls, input.fx, sharedContext);
+        await this.recordLedgerEntry(
+          {
             type: 'OD',
-            handles: countByHandle(pulls.map((p) => p.card_id)),
-            status: 'canceled',
+            customerId: order.customer_id,
+            refId: `cancel:${input.orderId}`,
+            walletDelta: 0,
+            vaultDelta,
+            payload: {
+              type: 'OD',
+              handles: countByHandle(pulls.map((p) => p.card_id)),
+              status: 'canceled',
+            },
           },
-        },
-        sharedContext,
-      );
+          sharedContext,
+        );
+      }
     }
     return { status: input.to };
   }

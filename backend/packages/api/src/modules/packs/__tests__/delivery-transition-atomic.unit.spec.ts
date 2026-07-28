@@ -25,12 +25,19 @@ import PacksModuleService from '../service';
 
 type OrderRow = { id: string; status: string; customer_id?: string; is_reward?: boolean } | undefined;
 
-const fakeService = (order: OrderRow) => {
+// hasDebit models whether the CREATE-time OD debit row exists for this order.
+// The cancel-side credit is gated on that row's EXISTENCE (never on a field of
+// the order), so the fake has to answer the lookup honestly or every
+// "recordLedgerEntry not called" assertion below would pass vacuously.
+const fakeService = (order: OrderRow, hasDebit = true) => {
   const svc = Object.create(PacksModuleService.prototype) as PacksModuleService;
   const ops: string[] = [];
   const em = {
-    execute: jest.fn(async (_q: string, _params?: unknown[]) => {
+    execute: jest.fn(async (q: string, _params?: unknown[]) => {
       ops.push('sql');
+      if (q.includes('ledger_entry')) {
+        return hasDebit ? [{ id: 'led_od_debit' }] : [];
+      }
       return [];
     }),
   };
@@ -125,17 +132,38 @@ describe('PacksModuleService.transitionDeliveryOrderStatus', () => {
       { ids: ['pull_1', 'pull_2'], from: 'delivering', to: 'vaulted' },
       f.ctx,
     );
-    // Task 8's OD reversal rides the same transaction — exactly one row.
+    // Task 8's OD reversal rides the same transaction — exactly one row, and
+    // only because the debit lookup found the CREATE-time row keyed on the
+    // order id (this half of the discriminating pair below).
     expect(f.recordLedgerEntry).toHaveBeenCalledTimes(1);
+    expect(f.em.execute).toHaveBeenCalledWith(
+      expect.stringContaining('ledger_entry'),
+      ['do_1'],
+    );
   });
 
-  // Task 8: recordRewardWithdrawal creates a reward-prize shipment with NO OD
-  // debit (out of that task's scope — reward pulls are excluded from
-  // ledger/value tracking everywhere else too). Without this guard, canceling
-  // one would write a `vault +` row with no matching `vault -` ever having
-  // existed, drifting the ledger's cumulative vault_delta upward forever.
-  it('skips the OD reversal for a reward-sourced order (no matching debit exists)', async () => {
-    const f = fakeService({ id: 'do_1', status: 'requested', is_reward: true });
+  // The OTHER half of the pair: byte-identical order and input, only the
+  // debit's existence differs. This is the case the old `!order.is_reward`
+  // guard missed — an ordinary (is_reward=false) order created BEFORE this
+  // writer shipped has no OD debit, because the rollout is go-forward-only
+  // with no backfill. Crediting it would write an unmatched `vault +` and
+  // permanently drift cumulative vault_delta.
+  it('skips the OD reversal when no CREATE-time debit row exists', async () => {
+    const f = fakeService({ id: 'do_1', status: 'requested' }, false);
+    await f.svc.transitionDeliveryOrderStatus(cancelInput, f.ctx);
+    expect(f.recordLedgerEntry).not.toHaveBeenCalled();
+  });
+
+  // The reward case is now a SPECIAL CASE of the rule above, not its own
+  // branch: recordRewardWithdrawal creates reward-prize shipments with no OD
+  // debit (reward pulls are excluded from ledger/value tracking everywhere),
+  // so the existence gate skips them for the same reason. `is_reward: true`
+  // here documents the real-world scenario; the gate never reads the field.
+  it('skips the OD reversal for a reward-sourced order (it never got a debit)', async () => {
+    const f = fakeService(
+      { id: 'do_1', status: 'requested', is_reward: true },
+      false,
+    );
     await f.svc.transitionDeliveryOrderStatus(cancelInput, f.ctx);
     expect(f.recordLedgerEntry).not.toHaveBeenCalled();
   });
@@ -167,6 +195,9 @@ describe('PacksModuleService.transitionDeliveryOrderStatus', () => {
       { ids: ['pull_1'], from: 'delivering', to: 'delivered' },
       f.ctx,
     );
+    // NOTHING fires on 'completed' (even with a debit row present): those cards
+    // are gone for good, so the CREATE-time debit stands permanently.
+    expect(f.recordLedgerEntry).not.toHaveBeenCalled();
   });
 
   it('shipped: stamps shipped_at and does NOT touch pulls', async () => {

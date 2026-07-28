@@ -180,6 +180,33 @@ medusaIntegrationTestRunner({
         expect(Number(rows[0].vault_delta)).toBeLessThan(0);
       });
 
+      it('a multi-pull order sums EVERY pull, not distinct handles', async () => {
+        // Two pulls of the SAME card. vaultValueForPulls reduces over `pulls`,
+        // NOT over the deduped `handles` set it builds for the listCards
+        // lookup — a dedupe bug there would silently halve the debit and leave
+        // the vault overstated forever. Expected: 2 x (FMV 25 x
+        // DEFAULT_USD_MYR 4.7 x DEFAULT_MARKET_MULTIPLIER 1.2) = 2 x 141 = 282,
+        // on ONE row (an order is one debit however many cards it covers).
+        const { token, id } = await registerCustomer('ledger-test-13@test.dev');
+        const firstPull = await openOne(token, 'ledger-od-topup-multi-1');
+        const secondPull = await openOne(token, 'ledger-od-topup-multi-2');
+        const addressId = await addAddress(token);
+        const res = await api.post(
+          '/store/delivery-orders',
+          { pull_ids: [firstPull, secondPull], address_id: addressId },
+          { headers: authed(token) },
+        );
+        expect(res.status).toBe(201);
+
+        const rows = await ledgerEntryRowsFor(id, 'OD');
+        expect(rows).toHaveLength(1);
+        expect(Number(rows[0].vault_delta)).toBe(-282);
+        expect(rows[0].payload).toMatchObject({
+          type: 'OD',
+          handles: [{ card_handle: CARD_HANDLE, qty: 2 }],
+        });
+      });
+
       it('canceling the order writes a SECOND OD row (ref_id cancel:<order_id>) that restores the vault', async () => {
         const { token, id } = await registerCustomer('ledger-test-11@test.dev');
         const pullId = await openOne(token);
