@@ -282,7 +282,19 @@ medusaIntegrationTestRunner({
         // to hold ACROSS a revaluation, not merely under frozen fixtures: the
         // ledger accumulates historical amounts while every balance view
         // recomputes, so a writer that stamped or reversed a stale value
-        // diverges HERE and nowhere else.
+        // drifts from the pinned values below.
+        //
+        // The assertConserved that closes this step is NOT what catches such a
+        // writer. It is TAUTOLOGICAL w.r.t. price: it sums credit_transaction
+        // rows and compares them to summaries derived from those same rows
+        // (creditSummary, walletSummary and GET /store/credits carry no price
+        // dependency), and no credit row is written between (c) and (c2), so
+        // it re-asserts identical state. The real discriminators are the
+        // exact-value pins in (d) (INSTANT_AMOUNT) and (e) (FINAL_BALANCE) -
+        // proven by mutation: freeze the buyback markup and those go RED while
+        // this assertConserved stays green. DO NOT delete them as "already
+        // covered by conservation" - that restores the vacuity this spec had
+        // before the price move was added.
         const [card] = await packs.listCards(
           { handle: CARD_HANDLE },
           { take: 1 },
@@ -301,7 +313,7 @@ medusaIntegrationTestRunner({
         expect(buyback.data.amount).toBeCloseTo(INSTANT_AMOUNT, 2);
         await assertConserved(customerId, headers);
 
-        // (e) Final exact-value pin: 100 − 10 + 230.4 = RM 320.40, and the
+        // (e) Final exact-value pin: 100 − 10 + 288 = RM 378.00, and the
         // deposit basis is the full topup. playthrough.used is intentionally NOT
         // pinned — plan 026 changes that basis; deposited is stable.
         const wallet = await packs.walletSummary(customerId);

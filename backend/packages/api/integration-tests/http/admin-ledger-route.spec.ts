@@ -151,7 +151,7 @@ medusaIntegrationTestRunner({
         expect(sameDay.some((e) => e.customer.id === id)).toBe(true);
       });
 
-      it('400s an invalid type or date filter instead of silently widening it', async () => {
+      it('400s an invalid type, date or q filter instead of silently widening it', async () => {
         // Silently ignoring these returned ALL types / ALL dates — a mistyped
         // filter showed the operator MORE money rows than they asked for,
         // while a bad ?limit= in the same handler already threw INVALID_DATA.
@@ -159,15 +159,23 @@ medusaIntegrationTestRunner({
           '?type=SPP',
           '?from=not-a-date',
           '?to=2026-13-01',
+          // `?q=a&q=b` arrives as an ARRAY. The old inline
+          // `typeof rawQ === 'string'` check dropped it, widening the result
+          // set to every row for the same reason a dropped ?type or ?from did.
+          '?q=a&q=b',
         ]) {
           const res = await unwrapResponse(
             api.get(`/admin/ledger${query}`, { headers: adminHeaders() }),
           );
           expect([query, res.status]).toEqual([query, 400]);
         }
-        // A CLEARED control submits '', which is "absent", not invalid.
+        // A CLEARED control submits '', which is "absent", not invalid. A
+        // whitespace-only q is the same - no filter, not a 400 - so the
+        // rejection above is the array shape, not "q looks empty".
         const cleared = await unwrapResponse(
-          api.get('/admin/ledger?type=&from=&to=', { headers: adminHeaders() }),
+          api.get('/admin/ledger?type=&from=&to=&q=%20%20', {
+            headers: adminHeaders(),
+          }),
         );
         expect(cleared.status).toBe(200);
       });
