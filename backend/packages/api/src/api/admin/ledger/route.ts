@@ -56,6 +56,17 @@ function coerceMytBound(raw: unknown, edge: 'from' | 'to'): Date | undefined {
   return d;
 }
 
+// ?q= — same rule again. `?q=a&q=b` arrives as an ARRAY, which the old
+// inline `typeof rawQ === 'string'` check dropped silently, widening the
+// result set to every row for the same reason ?type and ?from now reject.
+// A whitespace-only q stays "no filter" (a cleared control), not a 400.
+function coerceQ(raw: unknown): string | undefined {
+  if (raw === undefined || raw === '') return undefined;
+  if (typeof raw !== 'string') bad(`Invalid \`q\` filter '${String(raw)}'.`);
+  const trimmed = (raw as string).trim();
+  return trimmed === '' ? undefined : trimmed.slice(0, 100);
+}
+
 // GET /admin/ledger — the Transactions list (POLYCARD-BACK §5.4).
 //
 // RF and WP are offered as filters but no writer produces them yet (no
@@ -79,11 +90,7 @@ export async function GET(
   const customers = req.scope.resolve<ICustomerModuleService>(Modules.CUSTOMER);
 
   const type = coerceTypeFilter(req.query.type);
-  const rawQ = req.query.q;
-  const q =
-    typeof rawQ === 'string' && rawQ.trim() !== ''
-      ? rawQ.trim().slice(0, 100)
-      : undefined;
+  const q = coerceQ(req.query.q);
   const from = coerceMytBound(req.query.from, 'from');
   const to = coerceMytBound(req.query.to, 'to');
 

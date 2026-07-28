@@ -4143,6 +4143,15 @@ class PacksModuleService extends MedusaService({
       'SELECT id, last_serial FROM ledger_sequence WHERE scope = ? AND deleted_at IS NULL FOR UPDATE',
       [scope],
     );
+    // The upsert above guarantees a row, so this is unreachable — but an
+    // undefined here would surface as a bare TypeError from nextSerial rather
+    // than something an operator can act on. Fail closed with a named error.
+    if (!seqRow) {
+      throw new MedusaError(
+        MedusaError.Types.UNEXPECTED_STATE,
+        `Ledger sequence scope '${scope}' could not be locked for serial allocation.`,
+      );
+    }
     const serial = nextSerial(seqRow.last_serial);
     await em.execute(
       'UPDATE ledger_sequence SET last_serial = ?, updated_at = now() WHERE id = ?',
