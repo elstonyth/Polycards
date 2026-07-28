@@ -1,7 +1,6 @@
 import type { MedusaContainer } from '@medusajs/framework/types';
 import { MedusaError } from '@medusajs/framework/utils';
 import { updateDeliveryOrderInvoke } from '../update-delivery-order';
-import { DEFAULT_USD_MYR } from '../../../modules/packs/pricing';
 
 /**
  * update-delivery-order step — the transition path must delegate to the
@@ -49,11 +48,6 @@ describe('updateDeliveryOrderInvoke', () => {
       trackingNumber: null,
       proofImages: undefined,
       pullIds: ['pull_1', 'pull_2'],
-      // Task 8: the step resolves fx before this call (never inside the
-      // transactional seam — see update-delivery-order.ts's comment). The
-      // fake `packs` has no listFxRates, so resolveFxRate's try/catch falls
-      // through to the DEFAULT_USD_MYR display fallback deterministically.
-      fx: DEFAULT_USD_MYR,
     });
     // The step itself must not write the order row on a transition — the
     // atomic seam owns the write (updateDeliveryOrders is tracking-only).

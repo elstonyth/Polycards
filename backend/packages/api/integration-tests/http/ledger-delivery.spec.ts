@@ -27,6 +27,14 @@ const PASSWORD = 'ledger-delivery-test-password-1'; // gitleaks:allow
 const PACK_SLUG = 'ledger-od-pack';
 const CARD_HANDLE = 'ledger-od-card';
 const FMV = 25;
+// FX and the markup are BOTH pinned on the fixture (rather than riding
+// DEFAULT_USD_MYR / DEFAULT_MARKET_MULTIPLIER): the money assertions below are
+// exact numbers, and a default-derived expectation silently changes meaning the
+// day a bootstrap seeds an fx_rate row or the default markup moves.
+//   display value per pull = FMV x MANUAL_RATE x MULTIPLIER = 25 x 4 x 1.2 = 120
+const MULTIPLIER = 1.2;
+const MANUAL_RATE = 4.0;
+const VALUE_PER_PULL = 120;
 const PACK_PRICE = 5;
 const TOPUP = 5 * PACK_PRICE;
 
@@ -39,10 +47,11 @@ medusaIntegrationTestRunner({
       // The runner resets the database between `it` blocks, so the publishable
       // key, the gacha fixtures, and any customers are recreated per test.
       beforeEach(async () => {
-        // vaultValueForPulls uses the LENIENT resolveFxRate (pricing.ts), which
-        // caches for 30s process-wide — clear it so an earlier ledger spec's
-        // manual FX rate (this file seeds none, relying on the DEFAULT_USD_MYR
-        // fallback) can't leak in under --runInBand (same fix as Task 7's SP spec).
+        // The delivery paths resolve FX through the LENIENT resolveFxRate
+        // (pricing.ts), which caches for 30s process-wide — clear it so an
+        // earlier ledger spec's manual rate can't outlive its own file under
+        // --runInBand and shadow the MANUAL_RATE seeded at the end of this
+        // hook (same fix as Task 7's SP spec).
         clearFxDisplayCache();
 
         const container = getContainer();
@@ -75,6 +84,7 @@ medusaIntegrationTestRunner({
             grader: 'PSA',
             grade: '10',
             market_value: FMV,
+            market_multiplier: MULTIPLIER,
             image: '/cdn/test-card.webp',
           },
         ]);
@@ -85,6 +95,16 @@ medusaIntegrationTestRunner({
             weight: 100,
             locked: false,
             rarity: 'Rare' as const,
+          },
+        ]);
+        // Pin USD->MYR so every vault_delta below is a deterministic number.
+        await packs.createFxRates([
+          {
+            pair: 'USD_MYR',
+            rate: MANUAL_RATE,
+            source: 'test',
+            manual_override: true,
+            manual_rate: MANUAL_RATE,
           },
         ]);
       });
@@ -184,9 +204,8 @@ medusaIntegrationTestRunner({
         // Two pulls of the SAME card. vaultValueForPulls reduces over `pulls`,
         // NOT over the deduped `handles` set it builds for the listCards
         // lookup — a dedupe bug there would silently halve the debit and leave
-        // the vault overstated forever. Expected: 2 x (FMV 25 x
-        // DEFAULT_USD_MYR 4.7 x DEFAULT_MARKET_MULTIPLIER 1.2) = 2 x 141 = 282,
-        // on ONE row (an order is one debit however many cards it covers).
+        // the vault overstated forever. Expected: 2 x VALUE_PER_PULL = 240, on
+        // ONE row (an order is one debit however many cards it covers).
         const { token, id } = await registerCustomer('ledger-test-13@test.dev');
         const firstPull = await openOne(token, 'ledger-od-topup-multi-1');
         const secondPull = await openOne(token, 'ledger-od-topup-multi-2');
@@ -200,7 +219,7 @@ medusaIntegrationTestRunner({
 
         const rows = await ledgerEntryRowsFor(id, 'OD');
         expect(rows).toHaveLength(1);
-        expect(Number(rows[0].vault_delta)).toBe(-282);
+        expect(Number(rows[0].vault_delta)).toBe(-2 * VALUE_PER_PULL);
         expect(rows[0].payload).toMatchObject({
           type: 'OD',
           handles: [{ card_handle: CARD_HANDLE, qty: 2 }],
@@ -232,6 +251,58 @@ medusaIntegrationTestRunner({
         expect(cancel).toBeDefined();
         expect(Number(cancel!.vault_delta)).toBe(-Number(create!.vault_delta)); // exact reversal
         expect(cancel!.ref_id).toBe(`cancel:${orderId}`);
+      });
+
+      it('a price move BETWEEN create and cancel still nets the order to exactly 0', async () => {
+        // THE reversal invariant. A delivery order sits in 'requested' for
+        // days while PriceCharting syncs FMV on a schedule and admins edit
+        // market_multiplier — so create-time and cancel-time valuations of the
+        // same cards routinely disagree. A cancel that RE-VALUES the pulls at
+        // cancel time (rather than negating the stored debit) is therefore a
+        // reversal that does not reverse: the round trip is a no-op on actual
+        // holdings but writes a permanent, silent non-zero net to cumulative
+        // vault_delta with nothing underlying it. Pinned as a sum over BOTH
+        // rows so it fails on any drift, in either direction.
+        const { token, id } = await registerCustomer('ledger-test-14@test.dev');
+        const pullId = await openOne(token);
+        const addressId = await addAddress(token);
+        const created = await api.post(
+          '/store/delivery-orders',
+          { pull_ids: [pullId], address_id: addressId },
+          { headers: authed(token) },
+        );
+        const orderId = created.data.order_id as string;
+
+        // Move BOTH price inputs — an FMV sync and a markup edit are the two
+        // real-world movers, and each alone would drift the net.
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        const [card] = await packs.listCards(
+          { handle: CARD_HANDLE },
+          { take: 1 },
+        );
+        await packs.updateCards([
+          {
+            id: card.id,
+            market_value: FMV * 3,
+            market_multiplier: MULTIPLIER * 2,
+          },
+        ]);
+
+        await api.post(
+          `/store/delivery-orders/${orderId}/cancel`,
+          {},
+          { headers: authed(token) },
+        );
+
+        const rows = await ledgerEntryRowsFor(id, 'OD');
+        expect(rows).toHaveLength(2);
+        const create = rows.find((r) => r.ref_id === orderId);
+        const cancel = rows.find((r) => r.ref_id === `cancel:${orderId}`);
+        // The debit is still the CREATE-time value, untouched by the move.
+        expect(Number(create!.vault_delta)).toBe(-VALUE_PER_PULL);
+        expect(Number(cancel!.vault_delta)).toBe(VALUE_PER_PULL);
+        const net = rows.reduce((sum, r) => sum + Number(r.vault_delta), 0);
+        expect(net).toBe(0);
       });
 
       it('an admin bulk mark-as-canceled ALSO writes the reversing OD row (one hook, both paths)', async () => {

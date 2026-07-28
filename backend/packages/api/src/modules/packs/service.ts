@@ -1727,15 +1727,16 @@ class PacksModuleService extends MedusaService({
     return { orderId: order.id, itemIds: items.map((i) => i.id) };
   }
 
-  // Shared by createDeliveryOrderWithLedger and transitionDeliveryOrderStatus's
-  // cancel branch — Σ displayMarketPrice(card.market_value, fx, multiplier)
-  // over the given pulls' cards. Takes already-fetched pull rows (never
-  // re-queries) and an already-resolved `fx` (never resolveFxRate(this) —
-  // see createDeliveryOrderWithLedger's comment above; the SAME pool-
-  // exhaustion hazard applies to EVERY caller of this helper, including
-  // transitionDeliveryOrderStatus, which takes its own xact lock first).
-  // listCards/listPulls calls elsewhere in this file thread sharedContext
-  // through and are safe — only the fx resolver drops it.
+  // The OD debit's value: Σ displayMarketPrice(card.market_value, fx,
+  // multiplier) over the given pulls' cards. ONE caller —
+  // createDeliveryOrderWithLedger — because an order is valued exactly once,
+  // at create; the cancel arm reverses that stored amount rather than
+  // re-pricing the cards at a later instant. Takes already-fetched pull rows
+  // (never re-queries) and an already-resolved `fx` (never resolveFxRate(this)
+  // — see createDeliveryOrderWithLedger's comment above; the same pool-
+  // exhaustion hazard applies to any future caller). listCards/listPulls calls
+  // elsewhere in this file thread sharedContext through and are safe — only
+  // the fx resolver drops it.
   private async vaultValueForPulls(
     pulls: { card_id: string }[],
     fx: number,
@@ -3803,18 +3804,6 @@ class PacksModuleService extends MedusaService({
       proofImages?: string[];
       /** Every pull the order covers — flipped on completed/canceled. */
       pullIds: string[];
-      /**
-       * Resolved by the CALLER (updateDeliveryOrderInvoke), never in here —
-       * this method already takes the `delivery:<id>` advisory lock as its
-       * FIRST statement, so a nested resolveFxRate(this) would request a
-       * SECOND pool connection for the method's entire duration (the exact
-       * KnexTimeoutError shape Task 7 fixed for the SP writer). Only read on
-       * a transition INTO 'canceled' with covered pulls; every other
-       * transition ignores it, but it's required (not optional) so a caller
-       * can't silently ship a canceled-with-pulls transition with no FX
-       * resolved at all.
-       */
-      fx: number;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ status: DeliveryStatus }> {
@@ -3902,24 +3891,48 @@ class PacksModuleService extends MedusaService({
     // so those carry is_reward=false AND no debit. Runs on the same `em`
     // (this transaction), so it takes no extra pool connection.
     if (input.to === 'canceled' && input.pullIds.length) {
-      const [debit] = await em.execute<{ id: string }[]>(
-        "SELECT id FROM ledger_entry WHERE type = 'OD' AND ref_id = ? AND deleted_at IS NULL LIMIT 1",
+      const [debit] = await em.execute<
+        { id: string; vault_delta: string | number | null }[]
+      >(
+        "SELECT id, vault_delta FROM ledger_entry WHERE type = 'OD' AND ref_id = ? AND deleted_at IS NULL LIMIT 1",
         [input.orderId],
       );
       if (debit) {
+        // NEGATE THE STORED DEBIT — never re-value the cards at cancel time.
+        // An order sits in 'requested' for days while PriceCharting syncs FMV
+        // on a schedule and admins edit market_multiplier, so a cancel-time
+        // vaultValueForPulls would price the same cards at a different
+        // instant: the round trip is a no-op on actual holdings, yet it would
+        // write a permanent, silent non-zero net to cumulative vault_delta
+        // with nothing underlying it. Reversing the whole stored amount is
+        // unconditionally correct here because this method is the ONE seam
+        // every transition routes through (updateDeliveryOrderInvoke) and its
+        // caller pages the order's item set to exhaustion — there is no
+        // partial cancel to reverse a fraction of.
+        const stored = Number(debit.vault_delta);
+        if (!Number.isFinite(stored)) {
+          // The create arm always writes a finite number, so this is real data
+          // corruption. Fail closed: a NaN on a money reversal is worse than a
+          // refused cancel.
+          throw new MedusaError(
+            MedusaError.Types.UNEXPECTED_STATE,
+            `OD debit '${debit.id}' for order '${input.orderId}' has a non-numeric vault_delta — refusing to reverse it.`,
+          );
+        }
+        // Still needed for the payload's handle tally (countByHandle) — the
+        // reversal amount no longer comes from these rows.
         const pulls = await this.listPulls(
           { id: input.pullIds },
           { take: input.pullIds.length },
           sharedContext,
         );
-        const vaultDelta = await this.vaultValueForPulls(pulls, input.fx, sharedContext);
         await this.recordLedgerEntry(
           {
             type: 'OD',
             customerId: order.customer_id,
             refId: `cancel:${input.orderId}`,
             walletDelta: 0,
-            vaultDelta,
+            vaultDelta: -stored,
             payload: {
               type: 'OD',
               handles: countByHandle(pulls.map((p) => p.card_id)),

@@ -29,6 +29,12 @@ type OrderRow = { id: string; status: string; customer_id?: string; is_reward?: 
 // The cancel-side credit is gated on that row's EXISTENCE (never on a field of
 // the order), so the fake has to answer the lookup honestly or every
 // "recordLedgerEntry not called" assertion below would pass vacuously.
+//
+// The fake row carries a real vault_delta because the cancel arm now REVERSES
+// that stored amount; a row without the column would make the reversal read
+// undefined and every assertion here pass on a -0 write.
+const DEBIT_VAULT_DELTA = -141.55;
+
 const fakeService = (order: OrderRow, hasDebit = true) => {
   const svc = Object.create(PacksModuleService.prototype) as PacksModuleService;
   const ops: string[] = [];
@@ -36,7 +42,11 @@ const fakeService = (order: OrderRow, hasDebit = true) => {
     execute: jest.fn(async (q: string, _params?: unknown[]) => {
       ops.push('sql');
       if (q.includes('ledger_entry')) {
-        return hasDebit ? [{ id: 'led_od_debit' }] : [];
+        // numeric comes back from pg as a STRING — mirror that, so the
+        // Number() coercion in the reversal is exercised, not bypassed.
+        return hasDebit
+          ? [{ id: 'led_od_debit', vault_delta: String(DEBIT_VAULT_DELTA) }]
+          : [];
       }
       return [];
     }),
@@ -52,11 +62,11 @@ const fakeService = (order: OrderRow, hasDebit = true) => {
   const transitionPullStatus = jest.fn(async () => {
     ops.push('flip');
   });
-  // Task 8's cancel-reversal OD write. Empty pulls short-circuits
-  // vaultValueForPulls before it ever touches listCards, so this suite (which
-  // only pins lock/atomicity ordering, not ledger content) doesn't need a
-  // listCards fake — same reason ledger-service.integration.spec.ts, not this
-  // file, is where recordLedgerEntry's own internals are pinned.
+  // Task 8's cancel-reversal OD write. The cancel arm no longer values cards
+  // at all (it negates the stored debit), so listPulls feeds only the
+  // payload's handle tally and no listCards fake is needed — same reason
+  // ledger-service.integration.spec.ts, not this file, is where
+  // recordLedgerEntry's own internals are pinned.
   const listPulls = jest.fn(async () => {
     ops.push('listPulls');
     return [];
@@ -91,7 +101,6 @@ const cancelInput = {
   to: 'canceled' as const,
   trackingNumber: null,
   pullIds: ['pull_1', 'pull_2'],
-  fx: 4.7, // never read — the fake listPulls returns [], so vaultValueForPulls short-circuits at 0
 };
 
 describe('PacksModuleService.transitionDeliveryOrderStatus', () => {
@@ -140,6 +149,35 @@ describe('PacksModuleService.transitionDeliveryOrderStatus', () => {
       expect.stringContaining('ledger_entry'),
       ['do_1'],
     );
+    // The reversal is the NEGATED STORED DEBIT, not a fresh valuation. The
+    // fake never supplies a card price or an fx rate, so a re-valuing cancel
+    // could not produce this number at all — which is the point: create and
+    // cancel must never price the same cards at two different instants.
+    expect(f.recordLedgerEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'OD',
+        refId: 'cancel:do_1',
+        walletDelta: 0,
+        vaultDelta: -DEBIT_VAULT_DELTA,
+      }),
+      f.ctx,
+    );
+  });
+
+  it('refuses to reverse a debit whose vault_delta is not a number', async () => {
+    // Fail closed on real data corruption — a NaN written to a money column is
+    // worse than a refused cancel (and the create arm always writes a number,
+    // so this is unreachable in normal operation).
+    const f = fakeService({ id: 'do_1', status: 'requested' });
+    f.em.execute.mockImplementation(async (q: string) =>
+      q.includes('ledger_entry')
+        ? [{ id: 'led_od_debit', vault_delta: 'not-a-number' }]
+        : [],
+    );
+    await expect(
+      f.svc.transitionDeliveryOrderStatus(cancelInput, f.ctx),
+    ).rejects.toMatchObject({ type: MedusaError.Types.UNEXPECTED_STATE });
+    expect(f.recordLedgerEntry).not.toHaveBeenCalled();
   });
 
   // The OTHER half of the pair: byte-identical order and input, only the
@@ -176,7 +214,6 @@ describe('PacksModuleService.transitionDeliveryOrderStatus', () => {
         to: 'completed',
         trackingNumber: 'TRK1',
         pullIds: ['pull_1'],
-        fx: 4.7, // unread — only the 'canceled' branch touches fx
       },
       f.ctx,
     );
@@ -209,7 +246,6 @@ describe('PacksModuleService.transitionDeliveryOrderStatus', () => {
         to: 'shipped',
         trackingNumber: 'TRK1',
         pullIds: ['pull_1'],
-        fx: 4.7, // unread — only the 'canceled' branch touches fx
       },
       f.ctx,
     );
@@ -236,7 +272,6 @@ describe('PacksModuleService.transitionDeliveryOrderStatus', () => {
           to: 'shipped',
           trackingNumber: null,
           pullIds: [],
-          fx: 4.7, // unread — only the 'canceled' branch touches fx
         },
         f.ctx,
       ),
