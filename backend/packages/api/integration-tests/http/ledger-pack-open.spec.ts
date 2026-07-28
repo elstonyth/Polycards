@@ -3,11 +3,12 @@ import { Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
 import { clearFxDisplayCache } from '../../src/modules/packs/pricing';
-import { unwrapResponse } from './utils';
+import { mintSuperAdmin, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
 
 const PASSWORD = 'ledger-pack-open-test-password-1'; // gitleaks:allow
+const ADMIN_EMAIL = 'ledger-pack-open-admin@test.dev';
 
 // Task 7 (POLYCARD-BACK Epic 4 §5.3) — the SP ledger writer wired into
 // open-pack / open-batch: a pack open appends exactly ONE SP ledger row
@@ -35,6 +36,9 @@ medusaIntegrationTestRunner({
   testSuite: ({ api, getContainer }) => {
     describe('ledger: SP writer — pack-open spend (single + batch)', () => {
       let storeHeaders: Record<string, string>;
+      // Only for the Wallet-tab assertion below (Task 9) — the SP writer
+      // itself needs no admin.
+      let adminToken: string;
 
       // The runner resets the database between `it` blocks, so the publishable
       // key, the gacha fixtures, and any customers are recreated per test.
@@ -55,6 +59,8 @@ medusaIntegrationTestRunner({
           created_by: 'ledger-pack-open-test',
         });
         storeHeaders = { 'x-publishable-api-key': key.token };
+
+        adminToken = await mintSuperAdmin(container, api, ADMIN_EMAIL, PASSWORD);
 
         // Gacha fixtures: an active pack with a SINGLE-card pool, so the
         // weighted roll is deterministic (the only card always wins). No
@@ -176,6 +182,19 @@ medusaIntegrationTestRunner({
         // case 4's round-trip math caught it.
         expect(Number(rows[0].vault_delta)).toBe(DISPLAY_PRICE);
         expect(rows[0].display_id).toMatch(/^SP/);
+
+        // The Wallet tab's SP arm (Task 9): a pack_open credit_transaction
+        // keys on source_transaction_id (the open id), NOT on its own id the
+        // way TP/AD/SE do. Asserted here rather than in
+        // admin-ledger-route.spec.ts because this file already owns the pack /
+        // odds / FX scaffolding a real open needs.
+        const wallet = await api.get(`/admin/customers/${id}/transactions`, {
+          headers: { authorization: `Bearer ${adminToken}` },
+        });
+        const openRow = wallet.data.items.find(
+          (t: { reason: string }) => t.reason === 'pack_open',
+        );
+        expect(openRow.ledger_display_id).toBe(rows[0].display_id);
       });
 
       it('a batch open (count=3) writes ONE SP row for the whole batch, not three', async () => {

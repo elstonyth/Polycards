@@ -139,6 +139,11 @@ medusaIntegrationTestRunner({
         expect(bad.status).toBe(200);
       });
 
+      it('401s an unauthenticated caller (the list carries every player email)', async () => {
+        const res = await unwrapResponse(api.get('/admin/ledger'));
+        expect(res.status).toBe(401);
+      });
+
       it('customer.email/name are batch-resolved, not per-row queried', async () => {
         await seedAdjustment('admin-ledger-route-b@test.dev');
         const entries = await listLedger('');

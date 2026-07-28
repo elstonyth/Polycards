@@ -31,7 +31,10 @@ export async function GET(
   const ledgerRows = refIds.length
     ? await packs.listLedgerEntries(
         { ref_id: refIds },
-        { select: ['ref_id', 'display_id'], take: refIds.length },
+        // Deliberately uncapped: buildQuery leaves limit undefined without
+        // `take`, and a cap here would silently drop display ids (no error) if
+        // two ledger types ever shared a ref_id.
+        { select: ['ref_id', 'display_id'] },
       )
     : [];
   const displayIdByRefId = new Map<string, string>(
