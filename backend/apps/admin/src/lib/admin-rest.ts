@@ -1199,3 +1199,40 @@ export const getInventoryItem = (handle: string, page = 0, limit = 25) =>
   getJson<InventoryDetail>(
     `/admin/inventory/${encodeURIComponent(handle)}?limit=${limit}&offset=${page * limit}`,
   );
+
+// GET /admin/inventory/export.xlsx -- the same rows GET /admin/inventory
+// returns, as a workbook, with the CURRENT FILTER applied (spec section 3.3).
+//
+// A raw fetch rather than getJson for the same reason uploadImage is one: the
+// response is a binary .xlsx, so parsing it as JSON would throw on a perfectly
+// good download. Errors still route through httpError, so a failed export
+// carries its HTTP status like every other call in this file.
+//
+// `q` is passed through unchanged -- the route truncates at 100 chars exactly
+// as the list route does, so the sheet's rows are the visible list's rows.
+export async function exportInventoryXlsx(q?: string): Promise<void> {
+  const res = await fetch(
+    `${__BACKEND_URL__}/admin/inventory/export.xlsx${q ? `?q=${encodeURIComponent(q)}` : ''}`,
+    { credentials: 'include' },
+  );
+  if (!res.ok) {
+    throw await httpError(res);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  // Wins over the response's Content-Disposition, and must: the blob URL is
+  // same-origin to this page, so the backend's filename never reaches the
+  // browser here. Same YYYY-MM-DD shape either way.
+  a.download = `inventory-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // DEFERRED, not revoked on the next line: click() only SCHEDULES the
+  // download, and revoking the object URL in the same task can leave the
+  // browser fetching a URL that no longer resolves -- an empty or cancelled
+  // file. Handing the revoke to the next task lets the download claim the blob
+  // first, while still releasing it (a leaked object URL lives until reload).
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}

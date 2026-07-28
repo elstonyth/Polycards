@@ -19,7 +19,10 @@ import {
   useInvalidateInventory,
   useRegisterCard,
 } from '../../../lib/queries';
-import type { InventoryRow } from '../../../lib/admin-rest';
+import {
+  exportInventoryXlsx,
+  type InventoryRow,
+} from '../../../lib/admin-rest';
 import { orderDateTime, rm } from '../../../lib/format';
 import { resolveImageUrl } from '../../../lib/image-url';
 import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
@@ -96,6 +99,7 @@ const InventoryListPage = () => {
   const [search, setSearch] = useState('');
   const [q, setQ] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [exporting, setExporting] = useState(false);
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({
     key: 'created_at',
     dir: 'desc',
@@ -263,6 +267,23 @@ const InventoryListPage = () => {
     setSelected(new Set());
   };
 
+  // Exports `q`, the APPLIED filter, and never `search`: `search` is the raw
+  // input and only becomes the filter 300 ms later, so exporting it would hand
+  // back a sheet for a search the operator is still typing. Blank goes as
+  // undefined so the query string is omitted entirely, matching useInventory.
+  //
+  // Guarded by `exporting` rather than left to fire freely: this endpoint pages
+  // the WHOLE product catalog and then makes five sequential per-handle service
+  // calls, each checking out its own pool connection -- the same cost that made
+  // the search box debounce in the first place, and an impatient double-click
+  // would pay it twice concurrently.
+  const runExport = () => {
+    setExporting(true);
+    exportInventoryXlsx(q || undefined)
+      .catch((e) => toast.error(e instanceof Error ? e.message : String(e)))
+      .finally(() => setExporting(false));
+  };
+
   // A new column starts descending (newest/biggest first, what an operator
   // scanning stock wants); clicking the active column flips it.
   const toggleSort = (key: SortKey) =>
@@ -315,18 +336,28 @@ const InventoryListPage = () => {
             {t('inventory.pageSubtitle')}
           </Text>
         </div>
-        <Input
-          type="search"
-          className="w-72"
-          maxLength={MAX_Q}
-          placeholder={t('inventory.searchPlaceholder')}
-          aria-label={t('inventory.searchPlaceholder')}
-          value={search}
-          onChange={(e) => {
-            setSearch(e.target.value);
-            setSelected(new Set());
-          }}
-        />
+        <div className="flex flex-wrap items-center gap-3">
+          <Input
+            type="search"
+            className="w-72"
+            maxLength={MAX_Q}
+            placeholder={t('inventory.searchPlaceholder')}
+            aria-label={t('inventory.searchPlaceholder')}
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setSelected(new Set());
+            }}
+          />
+          <Button
+            variant="secondary"
+            isLoading={exporting}
+            disabled={exporting}
+            onClick={runExport}
+          >
+            {t('inventory.export')}
+          </Button>
+        </div>
       </div>
 
       {selected.size > 0 && (

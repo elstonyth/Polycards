@@ -476,6 +476,7 @@
     "title": "Inventory",
     "pageSubtitle": "Every catalog item — registered gacha cards and items not yet promoted.",
     "searchPlaceholder": "Search name or SKU",
+    "export": "Export to Excel",
     "photo": "Photo",
     "name": "Name",
     "sku": "SKU",
