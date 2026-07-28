@@ -266,6 +266,156 @@ medusaIntegrationTestRunner({
         expect(res.status).toBe(400);
         expect(res.data.message).toMatch(/exceeds/i);
       });
+
+      // Nested (not a sibling) describe: the list/detail cases need the outer
+      // beforeEach's FX pin and the same adminHeaders/create/LINE closures.
+      describe('list + detail', () => {
+        const zephyr = () =>
+          create({
+            date: '2026-07-28T00:00:00.000Z',
+            supplier: 'Zephyr Supply',
+            reverses_invoice_id: null,
+            lines: [LINE],
+          });
+
+        // Zephyr is created FIRST and Acme second on purpose: that makes
+        // alphabetical order the REVERSE of creation order, which is the only
+        // arrangement in which the ?sort= assertions below can fail. Sorting
+        // on display_no (or date) would pass even with the allowlist broken,
+        // because those already run in creation order.
+        it('lists invoices newest-first with computed totals and the recording agent', async () => {
+          const zeph = await zephyr();
+          const acme = await createOriginal();
+
+          const res = await unwrapResponse(
+            api.get('/admin/purchase-invoices', adminHeaders()),
+          );
+          expect(res.status).toBe(200);
+          expect(res.data.total).toBe(2);
+          expect(res.data.invoices[0].id).toBe(acme.data.invoice.id); // newest first
+
+          const row = res.data.invoices.find(
+            (i: { supplier: string }) => i.supplier === 'Acme Cards Sdn Bhd',
+          );
+          expect(row.id).toBe(acme.data.invoice.id);
+          expect(row.total_qty).toBe(10);
+          expect(row.subtotal).toBe(1500);
+          expect(row.total_fmv).toBe(3000); // fmv_snapshot(300) * qty(10)
+          // agent_user_id is the minted admin's user id — the table shows a
+          // human, so the join has to actually resolve, not just be present.
+          expect(row.agent_email).toBe(ADMIN_EMAIL);
+
+          // ?sort= is an allowlist: an unhonoured key degrades SILENTLY to
+          // created_at. Both rows below are wrong under that degradation (and
+          // under a dropped sort param, and under an ignored direction), which
+          // is the whole point of the reversed creation order above.
+          const asc = await unwrapResponse(
+            api.get('/admin/purchase-invoices?sort=supplier:asc', adminHeaders()),
+          );
+          expect(asc.data.invoices[0].id).toBe(acme.data.invoice.id); // A < Z
+          const desc = await unwrapResponse(
+            api.get(
+              '/admin/purchase-invoices?sort=supplier:desc',
+              adminHeaders(),
+            ),
+          );
+          expect(desc.data.invoices[0].id).toBe(zeph.data.invoice.id);
+        });
+
+        it('?q= filters by supplier or display_no substring', async () => {
+          await createOriginal();
+          const made = await zephyr();
+          const bySupplier = await unwrapResponse(
+            api.get('/admin/purchase-invoices?q=Zephyr', adminHeaders()),
+          );
+          expect(bySupplier.status).toBe(200);
+          expect(bySupplier.data.total).toBe(1);
+          expect(bySupplier.data.invoices[0].id).toBe(made.data.invoice.id);
+
+          const byDisplayNo = await unwrapResponse(
+            api.get(
+              `/admin/purchase-invoices?q=${made.data.invoice.display_no}`,
+              adminHeaders(),
+            ),
+          );
+          expect(byDisplayNo.data.total).toBe(1);
+          expect(byDisplayNo.data.invoices[0].id).toBe(made.data.invoice.id);
+        });
+
+        // `q` lands in the MIDDLE of a LIKE pattern. Unescaped, the operator
+        // reads a table they believe they filtered and did not.
+        it('?q= treats LIKE metacharacters as literal text', async () => {
+          const withSupplier = (name: string) =>
+            create({
+              date: '2026-07-28T00:00:00.000Z',
+              supplier: name,
+              reverses_invoice_id: null,
+              lines: [LINE],
+            });
+          const literal = await withSupplier('A_B Trading');
+          await withSupplier('AXB Trading');
+
+          // Escaped, `%` is a literal nothing here contains. Unescaped it
+          // builds the pattern `%%%` and returns the WHOLE table.
+          const pct = await unwrapResponse(
+            api.get('/admin/purchase-invoices?q=%25', adminHeaders()),
+          );
+          expect(pct.status).toBe(200);
+          expect(pct.data.total).toBe(0);
+
+          // The discriminating case: `_` is LIKE's single-character wildcard,
+          // so unescaped `A_B` also matches `AXB` (total 2). Escaped it is one
+          // supplier; escaped-but-passed-through-as-a-literal-backslash is 0.
+          const wildcard = await unwrapResponse(
+            api.get('/admin/purchase-invoices?q=A_B', adminHeaders()),
+          );
+          expect(wildcard.data.total).toBe(1);
+          expect(wildcard.data.invoices[0].id).toBe(literal.data.invoice.id);
+        });
+
+        it('GET /:id returns the full line list', async () => {
+          const made = await createOriginal();
+          const res = await unwrapResponse(
+            api.get(
+              `/admin/purchase-invoices/${made.data.invoice.id}`,
+              adminHeaders(),
+            ),
+          );
+          expect(res.status).toBe(200);
+          expect(res.data.invoice.display_no).toBe(
+            made.data.invoice.display_no,
+          );
+          expect(res.data.invoice.lines).toHaveLength(1);
+          expect(res.data.invoice.lines[0].card_handle).toBe(LINE.card_handle);
+          // Detail spreads ORM rows through (brief-specified), so money arrives
+          // in the raw column shape and each bigNumber ALSO ships its
+          // raw_<field> jsonb sidecar (raw_unit_cost, raw_line_total,
+          // raw_fmv_snapshot) — Task 5 must read `unit_cost`, not `raw_*`.
+          // Number() it, like Task 3's line_total assertions. The list route's
+          // totals, by contrast, are already plain numbers via fromSen.
+          expect(Number(res.data.invoice.lines[0].unit_cost)).toBe(150);
+          expect(Number(res.data.invoice.lines[0].line_total)).toBe(1500);
+          // The user-module join, same as the list route asserts at :306. An
+          // exact email, not just truthiness: agent_user_id is also a non-empty
+          // string, so a truthiness check would pass on the un-joined actor id
+          // and on any other admin the fixture happens to have minted.
+          expect(res.data.invoice.agent_email).toBe(ADMIN_EMAIL);
+        });
+
+        it('GET /:id 404s on an unknown id', async () => {
+          const res = await unwrapResponse(
+            api.get('/admin/purchase-invoices/pinv_nonexistent', adminHeaders()),
+          );
+          expect(res.status).toBe(404);
+          // Status alone is VACUOUS: an unrouted path 404s too, so this case
+          // passed with [id]/route.ts deleted outright. Pin the handler's own
+          // message - entity name plus the id it echoes back - which nothing
+          // else in the stack emits.
+          expect(res.data.message).toMatch(
+            /purchase invoice 'pinv_nonexistent' not found/i,
+          );
+        });
+      });
     });
   },
 });

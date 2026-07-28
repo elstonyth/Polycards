@@ -157,4 +157,54 @@ describe('qk', () => {
   it('exposes the customer-groups key', () => {
     expect(qk.customerGroups).toEqual(['admin', 'customer-groups']);
   });
+
+  // ── Epic 5 (Inventory) ────────────────────────────────────────────────────
+
+  it('keys the purchase-invoice list under a prefix that invalidates every page', () => {
+    // Literal expectations, not just the prefix loop below: renaming the
+    // segment in BOTH the builder and the constant would satisfy the loop
+    // while silently orphaning every cache entry the pages already hold.
+    expect(qk.purchaseInvoicesKey).toEqual(['admin', 'purchase-invoices']);
+    expect(qk.purchaseInvoices(0)).toEqual([
+      'admin',
+      'purchase-invoices',
+      0,
+      '',
+      'created_at:desc',
+    ]);
+    expect(qk.purchaseInvoices(2, 'acme', 'supplier:asc')).toEqual([
+      'admin',
+      'purchase-invoices',
+      2,
+      'acme',
+      'supplier:asc',
+    ]);
+    for (const key of [
+      qk.purchaseInvoices(0),
+      qk.purchaseInvoices(2, 'acme', 'supplier:asc'),
+    ]) {
+      expect(key.slice(0, qk.purchaseInvoicesKey.length)).toEqual([
+        ...qk.purchaseInvoicesKey,
+      ]);
+    }
+    // Same length + different contents => neither filtered key can be a prefix
+    // of the other, so a search/sort change swaps caches instead of nesting.
+    expect(qk.purchaseInvoices(0).length).toBe(
+      qk.purchaseInvoices(0, 'acme').length,
+    );
+    expect(qk.purchaseInvoices(0)).not.toEqual(qk.purchaseInvoices(0, 'acme'));
+  });
+
+  it('keys one purchase invoice in a SIBLING namespace, not under the list', () => {
+    expect(qk.purchaseInvoice('pinv_1')).toEqual([
+      'admin',
+      'purchase-invoice',
+      'pinv_1',
+    ]);
+    // The list prefix must NOT reach the detail cache: invoices are immutable,
+    // so a post-create list invalidation has no business refetching them.
+    expect(
+      qk.purchaseInvoice('pinv_1').slice(0, qk.purchaseInvoicesKey.length),
+    ).not.toEqual([...qk.purchaseInvoicesKey]);
+  });
 });

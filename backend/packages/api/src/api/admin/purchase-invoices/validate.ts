@@ -40,10 +40,16 @@ const MAX_QTY = 1_000_000;
 // forbidding it here is what makes the D8 weighted average (inventory-cost.ts)
 // and the stored line_total exact rather than merely well-approximated.
 //
-// Same 1e-6 binary-representation epsilon as the sibling validators: an exact
-// integer-sen comparison would reject valid money like 10.1. The value is
-// normalized back onto the nearest 2dp double on the way out so float junk
-// (0.1 + 0.2) never reaches line_total or the reversal match.
+// Same 1e-6 binary-representation epsilon as the sibling validators
+// (credit-adjust.ts, topup.ts, voucher-ranges.ts), and it is load-bearing:
+// 0.07 * 100 is 7.000000000000001 and 4.35 * 100 is 434.99999999999994, so an
+// exact integer-sen comparison would reject two ordinary prices. NOT 10.1 —
+// 10.1 * 100 is exactly 1010. Those three siblings still cite 10.1 (topup.ts
+// goes further and states "1009.9999999999999", a value JS never produces);
+// their comments are wrong and are outside this change's surface.
+//
+// The value is normalized back onto the nearest 2dp double on the way out so
+// float junk (0.1 + 0.2) never reaches line_total or the reversal match.
 const money = (value: unknown, label: string): number => {
   if (typeof value !== 'number' && typeof value !== 'string') {
     bad(`${label} must be a number >= 0.`);

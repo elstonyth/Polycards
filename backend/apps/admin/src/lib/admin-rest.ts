@@ -7,14 +7,29 @@ import type { PullsResponse } from './packs-api';
 
 declare const __BACKEND_URL__: string;
 
-async function errorMessage(res: Response): Promise<string> {
+// Every failing call in this file rejects through here, so the HTTP status is
+// carried on the Error everywhere rather than only on the one route that needed
+// it. Without it a page can only match on `message`, and an unrouted Medusa 404
+// carries NO message field at all — so "not found" and "the backend restarted"
+// are indistinguishable, and the operator reads a 500 as a deleted record.
+async function httpError(res: Response): Promise<Error> {
+  let message: string;
   try {
     const data = await res.json();
-    return (data && data.message) || `Request failed (${res.status}).`;
+    message = (data && data.message) || `Request failed (${res.status}).`;
   } catch {
-    return `Request failed (${res.status}).`;
+    message = `Request failed (${res.status}).`;
   }
+  return Object.assign(new Error(message), { status: res.status });
 }
+
+/** The HTTP status a rejected admin-rest call failed with, or undefined when
+ *  the request never got a response (offline, DNS, CORS) — in which case the
+ *  failure is emphatically NOT a 404 and must not be reported as one. */
+export const httpStatus = (err: unknown): number | undefined => {
+  const s = (err as { status?: unknown } | null | undefined)?.status;
+  return typeof s === 'number' ? s : undefined;
+};
 
 // Upload one image to the validated POST /admin/media route (type/resolution/
 // aspect/size gated server-side; stores the original untouched). Returns the
@@ -34,7 +49,7 @@ export async function uploadImage(
     credentials: 'include',
   });
   if (!res.ok) {
-    throw new Error(await errorMessage(res));
+    throw await httpError(res);
   }
   const data = (await res.json()) as { url?: string };
   const url = data.url;
@@ -50,7 +65,7 @@ export async function deleteCard(handle: string): Promise<void> {
     { method: 'DELETE', credentials: 'include' },
   );
   if (!res.ok) {
-    throw new Error(await errorMessage(res));
+    throw await httpError(res);
   }
 }
 
@@ -60,7 +75,7 @@ export async function deletePack(slug: string): Promise<void> {
     { method: 'DELETE', credentials: 'include' },
   );
   if (!res.ok) {
-    throw new Error(await errorMessage(res));
+    throw await httpError(res);
   }
 }
 
@@ -69,7 +84,7 @@ async function getJson<T>(path: string): Promise<T> {
     credentials: 'include',
   });
   if (!res.ok) {
-    throw new Error(await errorMessage(res));
+    throw await httpError(res);
   }
   return (await res.json()) as T;
 }
@@ -307,7 +322,7 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    throw new Error(await errorMessage(res));
+    throw await httpError(res);
   }
   return (await res.json()) as T;
 }
@@ -359,7 +374,7 @@ export async function adjustCustomerCredits(
     },
   );
   if (!res.ok) {
-    throw new Error(await errorMessage(res));
+    throw await httpError(res);
   }
   return (await res.json()) as { amount: number; balance: number };
 }
@@ -610,7 +625,7 @@ export async function updateDeliveryOrder(
     },
   );
   if (!res.ok) {
-    throw new Error(await errorMessage(res));
+    throw await httpError(res);
   }
   return (await res.json()) as { order_id: string; status: DeliveryStatus };
 }
@@ -684,7 +699,7 @@ export async function getDailyBox(tier: string): Promise<DailyBoxEditorDTO> {
 }
 
 // Replace-all a tier's box + prizes. Throws Error(message) on a 400 validation
-// failure (errorMessage surfaces the backend MedusaError message).
+// failure (httpError surfaces the backend MedusaError message).
 export async function saveDailyBox(
   tier: string,
   body: DailyBoxSaveBody,
@@ -767,7 +782,7 @@ export const getVipLevels = () =>
   getJson<{ levels: VipLevelDTO[] }>('/admin/vip-levels');
 
 // Replace-all the ladder. Audited edit; `reason` mandatory. Throws
-// Error(message) on a 400 (errorMessage surfaces the backend MedusaError).
+// Error(message) on a 400 (httpError surfaces the backend MedusaError).
 export const saveVipLevels = (body: { levels: VipLevelDTO[]; reason: string }) =>
   postJson<{ levels: VipLevelDTO[] }>('/admin/vip-levels', body);
 
@@ -990,4 +1005,100 @@ export const setGroupOddsSet = (id: string, set: 1 | 2 | 3) =>
   postJson<{ customer_group: AdminCustomerGroup }>(
     `/admin/customer-groups/${encodeURIComponent(id)}`,
     { metadata: { odds_set: set } },
+  );
+
+// ── Epic 5 (Inventory) ───────────────────────────────────────────────────────
+
+/** One line of GET /admin/purchase-invoices/:id. All money is MYR (2dp) — the
+ *  purchase path never touches FX. `qty` is SIGNED: negative on a reversing
+ *  invoice, and the sign lives ONLY there (unit_cost / fmv_snapshot stay
+ *  positive so a reversal line reads the same as the line it undoes).
+ *
+ *  The detail route spreads the ORM row, so each line ALSO carries the
+ *  `raw_unit_cost` / `raw_line_total` / `raw_fmv_snapshot` bigNumber jsonb
+ *  sidecars and an always-null `deleted_at`. Bind the hydrated getters below,
+ *  never `raw_*`; the sidecars are deliberately left unprojected (admin-only
+ *  route) and are not modelled here. */
+export interface AdminPurchaseInvoiceLine {
+  id: string;
+  card_handle: string;
+  card_name: string;
+  fmv_snapshot: number;
+  qty: number;
+  unit_cost: number;
+  line_total: number;
+}
+
+/** One row of GET /admin/purchase-invoices. The three totals are folded
+ *  SERVER-side in integer sen (route.ts) — render them, never re-derive them
+ *  here: the list response carries no lines to re-derive from. */
+export interface AdminPurchaseInvoice {
+  id: string;
+  display_no: string;
+  /** Operator-entered invoice date. `model.dateTime()`, so a full ISO stamp. */
+  date: string;
+  supplier: string;
+  agent_user_id: string;
+  /** Joined from the user module; null if the admin account was removed. */
+  agent_email: string | null;
+  reverses_invoice_id: string | null;
+  created_at: string;
+  total_qty: number;
+  subtotal: number;
+  total_fmv: number;
+}
+
+// agent_email is NOT omitted: GET /:id joins the user module the same way the
+// list route does, so both pages name the same person for one invoice.
+export interface AdminPurchaseInvoiceDetail
+  extends Omit<AdminPurchaseInvoice, 'total_qty' | 'subtotal' | 'total_fmv'> {
+  lines: AdminPurchaseInvoiceLine[];
+}
+
+export interface PurchaseInvoicesPage {
+  total: number;
+  offset: number;
+  limit: number;
+  invoices: AdminPurchaseInvoice[];
+}
+
+// `sort` is `<column>:<asc|desc>`; the route allowlists the column and falls
+// back to created_at, so an unknown key can never 400. `q` matches supplier OR
+// display_no and is TRUNCATED to 100 chars server-side — the search input
+// carries a matching maxLength so the operator cannot type past the cut.
+export const listPurchaseInvoices = (
+  page = 0,
+  q?: string,
+  limit = 50,
+  sort = 'created_at:desc',
+) =>
+  getJson<PurchaseInvoicesPage>(
+    `/admin/purchase-invoices?limit=${limit}&offset=${page * limit}&sort=${encodeURIComponent(sort)}${q ? `&q=${encodeURIComponent(q)}` : ''}`,
+  );
+
+export const getPurchaseInvoice = (id: string) =>
+  getJson<{ invoice: AdminPurchaseInvoiceDetail }>(
+    `/admin/purchase-invoices/${encodeURIComponent(id)}`,
+  );
+
+export interface CreatePurchaseInvoiceLineBody {
+  card_handle: string;
+  card_name: string;
+  fmv_snapshot: number;
+  qty: number;
+  unit_cost: number;
+}
+
+export interface CreatePurchaseInvoiceBody {
+  date: string;
+  supplier: string;
+  reverses_invoice_id?: string | null;
+  lines: CreatePurchaseInvoiceLineBody[];
+}
+
+// agent_user_id is NOT sent — the route derives it from the session.
+export const createPurchaseInvoice = (body: CreatePurchaseInvoiceBody) =>
+  postJson<{ invoice: AdminPurchaseInvoiceDetail }>(
+    '/admin/purchase-invoices',
+    body,
   );

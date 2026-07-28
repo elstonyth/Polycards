@@ -858,3 +858,61 @@ export const useSetGroupOddsSet = () => {
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });
 };
+
+// ── Epic 5 (Inventory) ───────────────────────────────────────────────────────
+// Own import block (not merged into the one at the top) so this whole section
+// stays append-only while a parallel epic edits the same file.
+import {
+  createPurchaseInvoice,
+  getPurchaseInvoice,
+  listPurchaseInvoices,
+  type AdminPurchaseInvoiceDetail,
+  type CreatePurchaseInvoiceBody,
+  type PurchaseInvoicesPage,
+} from './admin-rest';
+
+export type {
+  AdminPurchaseInvoice,
+  AdminPurchaseInvoiceDetail,
+  AdminPurchaseInvoiceLine,
+  CreatePurchaseInvoiceBody,
+  CreatePurchaseInvoiceLineBody,
+  PurchaseInvoicesPage,
+} from './admin-rest';
+
+// Paged + searchable + sortable, not id-scoped, so plain keepPreviousData is
+// right here (same call as usePlayers — the whole page swaps together).
+export const usePurchaseInvoices = (
+  page = 0,
+  q?: string,
+  sort = 'created_at:desc',
+): UseQueryResult<PurchaseInvoicesPage> =>
+  useQuery({
+    queryKey: qk.purchaseInvoices(page, q, sort),
+    queryFn: () => listPurchaseInvoices(page, q, 50, sort),
+    placeholderData: keepPreviousData,
+  });
+
+export const usePurchaseInvoice = (
+  id: string | null,
+): UseQueryResult<{ invoice: AdminPurchaseInvoiceDetail }> =>
+  useQuery({
+    queryKey: qk.purchaseInvoice(id ?? ''),
+    queryFn: () => getPurchaseInvoice(id!),
+    enabled: !!id,
+  });
+
+// Only the LIST is invalidated: an invoice is immutable once written (no
+// PUT/DELETE route exists), so no cached detail can have gone stale.
+export const useCreatePurchaseInvoice = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreatePurchaseInvoiceBody) =>
+      createPurchaseInvoice(body),
+    onSuccess: () => {
+      toast.success('Purchase invoice created');
+      qc.invalidateQueries({ queryKey: qk.purchaseInvoicesKey });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
