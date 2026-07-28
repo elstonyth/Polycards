@@ -157,4 +157,33 @@ describe('qk', () => {
   it('exposes the customer-groups key', () => {
     expect(qk.customerGroups).toEqual(['admin', 'customer-groups']);
   });
+
+  // ── Epic 4 (Ledger) ───────────────────────────────────────────────────────
+
+  it('keys the ledger under a prefix that invalidates every page/filter', () => {
+    expect(qk.ledger(0)).toEqual(['admin', 'ledger', 0, 'all', '', '', '']);
+    expect(qk.ledger(2, 'TP', 'ada', '2026-07-01', '2026-07-31')).toEqual([
+      'admin',
+      'ledger',
+      2,
+      'TP',
+      'ada',
+      '2026-07-01',
+      '2026-07-31',
+    ]);
+    // Mirrors the players/playersKey rule: ledgerKey must be a strict prefix of
+    // every page key, or one invalidation would miss the visible page.
+    for (const key of [
+      qk.ledger(0),
+      qk.ledger(2, 'TP', 'ada', '2026-07-01', '2026-07-31'),
+    ]) {
+      expect(key.slice(0, qk.ledgerKey.length)).toEqual([...qk.ledgerKey]);
+    }
+    // Same length + different contents ⇒ neither filter key is a prefix of the
+    // other, so a filtered cache can never be nuked by an unfiltered one.
+    const unfiltered = qk.ledger(0);
+    const filtered = qk.ledger(0, 'TP');
+    expect(unfiltered.length).toBe(filtered.length);
+    expect(unfiltered).not.toEqual(filtered);
+  });
 });
