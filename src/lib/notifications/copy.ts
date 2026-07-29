@@ -6,6 +6,7 @@ import {
   Sparkles,
   Ticket,
   TrendingUp,
+  Trophy,
   type LucideIcon,
 } from 'lucide-react';
 import { rm } from '@/lib/format';
@@ -194,6 +195,29 @@ export const NOTIFICATION_COPY: Record<string, NotificationCopy> = {
     },
     href: '/transactions',
     action: 'View ledger',
+  },
+
+  challenge_payout: {
+    icon: Trophy,
+    variant: 'reward',
+    // Nothing else announces the weekly settlement — it happens server-side
+    // between sessions.
+    policy: 'always',
+    title: 'Weekly Challenge payout',
+    body: (data) => {
+      const rank = numOf(data, 'rank');
+      const credits = numOf(data, 'credits');
+      const cards = numOf(data, 'card_count');
+      if (rank === null) return null;
+      const parts: string[] = [];
+      if (credits && credits > 0) parts.push(`${rm(credits)} in credit`);
+      if (cards && cards > 0)
+        parts.push(cards === 1 ? 'a featured card' : `${cards} featured cards`);
+      if (parts.length === 0) return null;
+      return `You finished #${rank} — ${parts.join(' and ')} added to your account.`;
+    },
+    href: '/leaderboard',
+    action: 'View challenge',
   },
 };
 
