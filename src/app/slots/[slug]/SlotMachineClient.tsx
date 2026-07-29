@@ -161,6 +161,8 @@ export default function SlotMachineClient({
   // via name-derive — threading the custom sprite_image into decoy cells is the
   // upgrade path if that ever matters.
   const basePool = useMemo<HReelCell[]>(() => buildDecoyPool(pool), [pool]);
+  // Card-value range for the odds sheet — same pool, same memo convention.
+  const valueRange = useMemo(() => poolValueRange(pool), [pool]);
   // Per-reel decoy pools: strip i tiles its OWN shuffled copy of basePool, so
   // stacked reels read independently and the idle sequence is never the same
   // twice (reshuffled per idle cycle — see the phase effect below). SSR-safe:
@@ -1028,7 +1030,7 @@ export default function SlotMachineClient({
         open={oddsOpen}
         onClose={() => setOddsOpen(false)}
         odds={publishedOdds ? publishedOddsRows(publishedOdds) : null}
-        range={poolValueRange(pool)}
+        range={valueRange}
       />
     </div>
   );
