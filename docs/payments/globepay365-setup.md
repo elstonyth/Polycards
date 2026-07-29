@@ -113,6 +113,11 @@ Other confirmed behaviour:
 
 ### NO MYR method completes end-to-end on staging (2026-07-21)
 
+> **Partly superseded (2026-07-22 afternoon).** BQR later rendered scannable
+> DuitNow QRs on every attempt, and an OB cashier rendered a bank-list page.
+> Still true: nobody has ever completed a payment through either. See
+> "Operator visibility + callback probe" at the end of this file.
+
 `BQR` was believed to work because `SubmitDeposit` returns a cashier URL. It
 does not. Opening that URL in a browser gives:
 
@@ -208,6 +213,10 @@ Asked twice. Without it no genuine callback can ever reach us.
 **OB does not work, despite being recommended.** Retested across the stated
 band after their reply:
 
+> **Superseded same day (2026-07-22 afternoon):** an OB SubmitDeposit did take
+> and its cashier rendered a bank-list page. The rejections below were real at
+> 12:21; treat OB as unproven, not dead. No OB payment has ever completed.
+
 | OB amount | Result |
 | --- | --- |
 | 30 / 50 / 100 / 200 | `PMT10005 Invalid Transaction Amount` |
@@ -292,3 +301,57 @@ Rules to bank now:
   `/api/Withdrawal/...`) — use them for reconciliation, never trust a lost
   callback.
 - `ALLOW_MOCK_TOPUP=unsafe-demo` must come **off** the prod spec when this ships.
+
+## Operator visibility + callback probe (added 2026-07-29)
+
+Two gaps closed after the decision NOT to run a human scan-and-pay test before
+launch. Neither replaces that test — they make an unattended launch survivable.
+
+### Admin "Deposits" page
+
+`GET /admin/globepay/deposits` (`src/api/admin/globepay/deposits/route.ts`) plus
+`apps/admin/src/routes/deposits/page.tsx` — Orders → Deposits in the dashboard.
+
+Read-only by design. There is no settle/requery button: the 10-minute sweep is
+the authoritative repair path, and a manual credit button would be a second,
+unaudited way to mint credit. Views: pending (default, OLDEST first), settled,
+failed, all. A pending row older than `GLOBEPAY_STALE_AFTER_MS` is flagged
+**Overdue** — same constant the sweep uses, so the page and the job can never
+disagree. Overdue means the sweep has had ~6 chances to resolve that deposit and
+has not: check the deposit in their back office before crediting by hand.
+
+Before this existed, finding a stranded payment meant hand-written SQL against
+production.
+
+### `scripts/probe-globepay-callback.mjs`
+
+```sh
+node scripts/probe-globepay-callback.mjs https://admin.polycards.gg
+node scripts/probe-globepay-callback.mjs            # localhost:9000
+node scripts/probe-globepay-callback.mjs --self-check
+```
+
+POSTs two unverifiable bodies at `/hooks/globepay/deposit` and demands
+`400 rejected`. Safe against production — an unsigned body can never pass
+`openCallback`, so it cannot credit anything.
+
+It distinguishes the failure modes that matter: UNREACHABLE (DNS/firewall/host),
+NOT_DEPLOYED (404), ACCEPTS_UNSIGNED (a 2xx on junk — the route acks with
+`success` to stop retries, so a broken deploy that acked everything would look
+healthy to a naive check), SERVER_ERROR (500, usually missing `GLOBEPAY_*` env).
+
+**Run it against production the moment this branch deploys, before enabling
+deposits.** A missing callback is the most likely way a real payment goes
+uncredited, and no spec can catch it — every spec runs against a server we
+booted ourselves.
+
+Baseline recorded 2026-07-29: `https://admin.polycards.gg` → **404 on both
+probes**, as expected — PR #252 is unmerged and prod carries no `GLOBEPAY_*`
+env. That is the "not deployed" reading, not a fault.
+
+### Still open
+
+- No human has ever paid through BQR or OB. Organic callback delivery and
+  `ReturnUrl` behaviour remain unobserved.
+- Alerting on pending-past-window is not built; the Deposits page shows it, but
+  someone has to look.

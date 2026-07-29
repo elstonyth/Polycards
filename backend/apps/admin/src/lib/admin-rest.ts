@@ -813,3 +813,46 @@ export interface CreatePixelPokemonBody {
 // Add a custom pixel-pokémon (sprite already uploaded via uploadImage → url).
 export const createPixelPokemon = (body: CreatePixelPokemonBody) =>
   postJson<{ pixel_pokemon: PixelPokemonRow }>('/admin/pixel-pokemon', body);
+
+// GlobePay365 deposits (GET /admin/globepay/deposits) — the operator's only
+// window into money-in. 'stale' means the row is still pending past the
+// reconciliation sweep's window, i.e. a payment that may have landed at the
+// gateway without ever being credited here.
+export type GlobePayDepositView = 'pending' | 'settled' | 'failed' | 'all';
+
+export interface GlobePayDeposit {
+  id: string;
+  merchant_transaction_id: string;
+  gateway_transaction_id: string | null;
+  customer_id: string;
+  customer_email: string | null;
+  amount_requested: number;
+  amount_settled: number | null;
+  payment_method_code: string;
+  status: 'pending' | 'settled' | 'failed';
+  gateway_status: number | null;
+  created_at: string;
+  settled_at: string | null;
+  stale: boolean;
+}
+
+export interface GlobePayDepositsResponse {
+  total: number;
+  offset: number;
+  limit: number;
+  status: GlobePayDepositView;
+  deposits: GlobePayDeposit[];
+}
+
+export function getGlobePayDeposits(
+  page: number,
+  status: GlobePayDepositView,
+  pageSize = 50,
+): Promise<GlobePayDepositsResponse> {
+  const params = new URLSearchParams({
+    status,
+    limit: String(pageSize),
+    offset: String(page * pageSize),
+  });
+  return getJson<GlobePayDepositsResponse>(`/admin/globepay/deposits?${params}`);
+}

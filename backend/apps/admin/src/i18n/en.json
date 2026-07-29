@@ -230,6 +230,32 @@
       "confirm": "Remove card"
     }
   },
+  "deposits": {
+    "title": "Deposits",
+    "subtitle": "GlobePay365 top-ups — what a customer started paying, and what actually settled.",
+    "view": {
+      "pending": "Pending",
+      "settled": "Settled",
+      "failed": "Failed",
+      "all": "All"
+    },
+    "when": "Started",
+    "customer": "Customer",
+    "method": "Method",
+    "requested": "Requested",
+    "settled": "Credited",
+    "status": "Status",
+    "reference": "References",
+    "statusLabel": {
+      "pending": "Pending",
+      "settled": "Settled",
+      "failed": "Failed"
+    },
+    "statusStale": "Overdue",
+    "staleWarning": "{{n}} row(s) on this page are past the reconcile window. Check the deposit in the GlobePay back office before crediting anyone by hand.",
+    "empty": "No deposits in this view.",
+    "loadError": "Could not load deposits."
+  },
   "pulls": {
     "title": "Pull Ledger",
     "subtitle": "Every pack opened, the card won, and who pulled it.",

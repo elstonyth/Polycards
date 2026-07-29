@@ -34,6 +34,9 @@ import {
   getFxHistory,
   getFxRate,
   getPulls,
+  getGlobePayDeposits,
+  type GlobePayDepositView,
+  type GlobePayDepositsResponse,
   getPixelPokemon,
   createPixelPokemon,
   type PixelPokemonPage,
@@ -687,3 +690,16 @@ export const useSaveChallengeSettings = () => {
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });
 };
+
+// GlobePay deposits. Polls once a minute: this is the money-in watch list, and a
+// stranded payment should surface without an operator remembering to reload.
+export const useGlobePayDeposits = (
+  page = 0,
+  status: GlobePayDepositView = 'pending',
+): UseQueryResult<GlobePayDepositsResponse> =>
+  useQuery({
+    queryKey: qk.globepayDeposits(page, status),
+    queryFn: () => getGlobePayDeposits(page, status),
+    placeholderData: keepPreviousData,
+    refetchInterval: 60_000,
+  });

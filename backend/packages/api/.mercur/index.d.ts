@@ -467,6 +467,9 @@ export type Routes = {
         gacha: {
             eligibleProducts: typeof import("../../src/api/admin/gacha/eligible-products/route");
         };
+        globepay: {
+            deposits: typeof import("../../src/api/admin/globepay/deposits/route");
+        };
         media: typeof import("../../src/api/admin/media/route");
         packs: typeof import("../../src/api/admin/packs/route") & {
             $slug: typeof import("../../src/api/admin/packs/[slug]/route") & {
