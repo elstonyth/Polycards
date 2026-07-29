@@ -33,9 +33,9 @@ export default async function HomePage() {
 
   // Chase lookups cover the first N tiles PLUS the featured pack, so the hero
   // never silently loses its chase when featured falls outside the first N.
-  // ponytail: while every pack shares one card pool (see getPackDetail's
-  // Phase-5a note) these N parallel lookups fetch identical payloads — collapse
-  // to one fetch or a short-TTL cache when per-pack pools ship (Phase 3).
+  // ponytail: pools are per-pack (listPackOdds is pack_id-scoped), so these N
+  // lookups are genuinely distinct; collapse to a short-TTL cache only if the
+  // home render cost ever shows up in traces.
   const lookupPacks = [
     ...new Set([
       ...(featured ? [featured] : []),
@@ -45,8 +45,14 @@ export default async function HomePage() {
   const details = await Promise.all(
     lookupPacks.map((p) => getPackDetail(p.id)),
   );
+  // pool is value-sorted desc, so the first PRICED entry is the pack's
+  // highest-value card ('—' = an older backend omitted marketPriceMyr; falling
+  // through it keeps a fake headline off the shelf).
   const chaseByPack = new Map<string, PackCard | null>(
-    lookupPacks.map((p, i) => [p.id, details[i]?.topHits[0] ?? null]),
+    lookupPacks.map((p, i) => [
+      p.id,
+      details[i]?.pool.find((c) => c.value !== '—') ?? null,
+    ]),
   );
 
   const featuredChase = featured
