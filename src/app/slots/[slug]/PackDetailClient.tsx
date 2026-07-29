@@ -32,6 +32,7 @@ import { Pill } from '@/components/ui/pill';
 import { PublishedOddsList } from './OddsSheet';
 import { PoolByRarity } from './PoolByRarity';
 import { publishedOddsRows, poolValueRange } from '@/lib/packs-format';
+import { isTopRarity } from '@/lib/rarity';
 import { useLiveRecentPulls } from '@/lib/use-recent-pulls';
 import { useTopUp } from '@/components/app-shell/TopUpProvider';
 import { CardTile } from '@/components/cards/CardTile';
@@ -109,6 +110,11 @@ export default function PackDetailClient({
   // pack" grid AND gates the guest demo-spin CTA (pure theater on the reel,
   // /spin?demo=1 — no charge, nothing won).
   const pool = liveDetail?.pool ?? [];
+
+  // Mythical+ subset for the "Cards in this pack" section (spec 2026-07-29):
+  // commons/rares are catalogue noise there. Order inherited (pool is
+  // value-sorted desc). The FULL pool still feeds the demo spin + odds range.
+  const topPool = pool.filter((c) => isTopRarity(c.rarity));
 
   // Do NOT open/charge here — navigate to the reel, which performs
   // the single charge via openBatch when the user pulls the lever. Auth + balance
@@ -467,19 +473,19 @@ export default function PackDetailClient({
             </Reveal>
           )}
 
-          {/* All cards in this pack — the full public prize pool as rarity
-              shelves (rarest first, per-tier pull chance when published, each
-              tier one swipeable rail so big pools stay one row per tier). */}
-          {pool.length > 0 && (
+          {/* Cards in this pack — Mythical+ only, as a collapsed teaser rail
+              that expands to rarity shelves (rarest first, per-tier pull
+              chance when published). */}
+          {topPool.length > 0 && (
             <Reveal as="section">
               <h2 className="mb-1 font-heading text-lg font-bold tracking-tight text-white">
                 Cards in this pack
               </h2>
               <p className="mb-3 text-[13px] text-white/70">
-                Every card and its current market price, rarest first.
+                The rarest cards in this pack and their current market price.
               </p>
               <PoolByRarity
-                pool={pool}
+                pool={topPool}
                 tierChances={liveDetail?.publishedOdds?.tiers ?? null}
                 onOpen={(card) => setOpenCard(toSeed(card))}
               />
