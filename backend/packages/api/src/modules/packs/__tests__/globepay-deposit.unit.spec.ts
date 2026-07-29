@@ -148,6 +148,24 @@ describe('startGlobePayDeposit', () => {
     });
   });
 
+  // The other half of that rule, and the one that costs real money if it is
+  // wrong. A timeout/socket reset does NOT mean the gateway refused — the
+  // submit may have landed. The reconciliation sweep only scans
+  // status='pending', so marking this row 'failed' would take a live deposit
+  // out of requery forever and strand whatever the customer paid.
+  it.each([
+    ['a timeout', new Error('ETIMEDOUT')],
+    ['an unparseable response', new SyntaxError('Unexpected token < in JSON')],
+  ])('leaves the row pending on %s, so the sweep can still requery it', async (
+    _label,
+    error,
+  ) => {
+    const h = harness();
+    submitMock.mockRejectedValue(error);
+    await expect(start(h)).rejects.toThrow(error);
+    expect(h.packs.updateGlobePayDeposits).not.toHaveBeenCalled();
+  });
+
   it('rejects an invalid amount before touching the gateway', async () => {
     const h = harness();
     await expect(start(h, { amount: -5 })).rejects.toThrow(

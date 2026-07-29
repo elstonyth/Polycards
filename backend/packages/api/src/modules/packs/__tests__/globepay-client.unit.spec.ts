@@ -45,15 +45,29 @@ afterEach(() => {
 });
 
 describe('globepayConfigFromEnv', () => {
-  it('reads config and defaults base URL + currency', () => {
+  it('defaults the currency but never the API host', () => {
     const cfg = globepayConfigFromEnv({
+      GLOBEPAY_API_BASE: 'https://mapi.example.test',
       GLOBEPAY_MERCHANT_CODE: 'Testpolycard',
       GLOBEPAY_AES_KEY: 'k',
       GLOBEPAY_MERCHANT_PRIVATE_KEY: 'priv',
       GLOBEPAY_PUBLIC_KEY: 'pub',
     } as NodeJS.ProcessEnv);
     expect(cfg.currencyCode).toBe('MYR');
-    expect(cfg.baseUrl).toBe('https://mapi.GlobePay365stg.com');
+    expect(cfg.baseUrl).toBe('https://mapi.example.test');
+  });
+
+  // Regression: a missing host used to fall back to STAGING, which would have
+  // pointed production credentials at the wrong environment silently.
+  it('throws rather than falling back to the staging host', () => {
+    expect(() =>
+      globepayConfigFromEnv({
+        GLOBEPAY_MERCHANT_CODE: 'Testpolycard',
+        GLOBEPAY_AES_KEY: 'k',
+        GLOBEPAY_MERCHANT_PRIVATE_KEY: 'priv',
+        GLOBEPAY_PUBLIC_KEY: 'pub',
+      } as NodeJS.ProcessEnv),
+    ).toThrow(/missing required env var GLOBEPAY_API_BASE/);
   });
 
   it('strips a trailing slash so paths do not double up', () => {
@@ -69,7 +83,10 @@ describe('globepayConfigFromEnv', () => {
 
   it('throws on a missing secret rather than signing with an empty key', () => {
     expect(() =>
-      globepayConfigFromEnv({ GLOBEPAY_AES_KEY: 'k' } as NodeJS.ProcessEnv),
+      globepayConfigFromEnv({
+        GLOBEPAY_API_BASE: 'https://mapi.example.test',
+        GLOBEPAY_AES_KEY: 'k',
+      } as NodeJS.ProcessEnv),
     ).toThrow(/missing required env var GLOBEPAY_MERCHANT_CODE/);
   });
 });

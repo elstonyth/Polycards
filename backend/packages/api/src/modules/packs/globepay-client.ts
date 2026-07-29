@@ -35,7 +35,11 @@ export function globepayConfigFromEnv(
     return value;
   };
   return {
-    baseUrl: (env.GLOBEPAY_API_BASE ?? 'https://mapi.GlobePay365stg.com').replace(
+    // Required, not defaulted. A default would point a production deploy that
+    // forgot this one var at the STAGING host — production credentials, wrong
+    // environment, no error — which is exactly the half-configured start this
+    // function exists to prevent.
+    baseUrl: required('GLOBEPAY_API_BASE').replace(
       /\/+$/,
       '',
     ),

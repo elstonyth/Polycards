@@ -164,11 +164,12 @@ export async function startGlobePayDeposit(
       config,
     );
   } catch (error) {
-    // The gateway refused, so no deposit exists on their side and no callback
-    // will ever arrive. Close the row out rather than leaving it pending and
-    // polluting the reconciliation sweep forever.
-    await packs.updateGlobePayDeposits({ id: row.id, status: 'failed' });
     if (error instanceof GlobePayError) {
+      // A GlobePayError is a DEFINITIVE rejection: their API answered and said
+      // no, so no deposit exists on their side and no callback will ever
+      // arrive. Close the row out rather than leaving it pending and polluting
+      // the reconciliation sweep forever.
+      await packs.updateGlobePayDeposits({ id: row.id, status: 'failed' });
       // Their validation errors are the customer's problem to fix (amount out
       // of range, method unavailable), not a 500.
       throw new MedusaError(
@@ -176,6 +177,12 @@ export async function startGlobePayDeposit(
         'We could not start your top-up. Please try a different amount or payment method.',
       );
     }
+    // Anything else — timeout, socket reset, an unparseable response — is
+    // AMBIGUOUS: the submit may well have landed at the gateway. Leave the row
+    // 'pending' so the reconciliation sweep requeries it, because requery is
+    // the authoritative answer (globepay-reconcile.ts). Marking it 'failed'
+    // here would drop it out of the sweep's status='pending' scan permanently
+    // and strand a real payment.
     throw error;
   }
 

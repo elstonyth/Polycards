@@ -33,7 +33,7 @@ salt=aesKey, 1000 iters, 32 bytes)`, `AES-256-CBC` + PKCS7, random 16-byte IV
 | `GLOBEPAY_MERCHANT_PRIVATE_KEY` | our RSA 1024 private key (PEM)               |
 | `GLOBEPAY_PUBLIC_KEY`           | their RSA public key (base64 SPKI)           |
 | `GLOBEPAY_AES_KEY`              | their AES key                                |
-| `GLOBEPAY_API_BASE`             | `https://mapi.GlobePay365stg.com` on staging |
+| `GLOBEPAY_API_BASE`             | **required, no default** — staging `https://mapi.GlobePay365stg.com`, production `https://mapi.GlobePay365.com` |
 | `GLOBEPAY_ENABLED`              | `true` to arm the real gateway (fails closed) |
 | `GLOBEPAY_NOTIFY_URL`           | public callback URL — their POST target |
 | `GLOBEPAY_RETURN_URL`           | where the customer lands after paying |
