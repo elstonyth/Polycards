@@ -26,9 +26,7 @@ export interface RankPayout {
 /** Union of every unlocked stage's prize table, keyed by rank (spec rule 5):
  *  credits summed, card ids collected in stage order. Ranks absent from all
  *  tables are absent from the map. */
-export function payoutByRank(
-  unlocked: SettleStage[],
-): Map<number, RankPayout> {
+export function payoutByRank(unlocked: SettleStage[]): Map<number, RankPayout> {
   const by = new Map<number, RankPayout>();
   for (const s of unlocked) {
     for (const r of s.rank_rewards) {

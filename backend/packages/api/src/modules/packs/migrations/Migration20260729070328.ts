@@ -1,4 +1,4 @@
-import { Migration } from "@medusajs/framework/mikro-orm/migrations";
+import { Migration } from '@medusajs/framework/mikro-orm/migrations';
 
 // challenge_payout — the settled-week record (weekly challenge auto-payout,
 // spec 2026-07-29). Purely additive: one table, two partial indexes.

@@ -32,7 +32,5 @@ export default async function settleChallengeNow({
     getStock: (handles) => getCardStockByHandle(container, handles),
   });
 
-  logger.info(
-    `[settle-challenge-now] ${JSON.stringify(result, null, 2)}`,
-  );
+  logger.info(`[settle-challenge-now] ${JSON.stringify(result, null, 2)}`);
 }

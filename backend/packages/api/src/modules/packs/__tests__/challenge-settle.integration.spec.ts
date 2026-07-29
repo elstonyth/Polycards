@@ -62,7 +62,8 @@ function currentWeekStartUtc(): Date {
   return d;
 }
 const HOUR = 60 * 60 * 1000;
-const priorWeekDate = () => new Date(currentWeekStartUtc().getTime() - 12 * HOUR);
+const priorWeekDate = () =>
+  new Date(currentWeekStartUtc().getTime() - 12 * HOUR);
 const currentWeekDate = () =>
   new Date(currentWeekStartUtc().getTime() + 12 * HOUR);
 
