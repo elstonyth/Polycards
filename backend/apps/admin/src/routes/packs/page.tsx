@@ -411,7 +411,12 @@ const PacksListPage = () => {
                       size="small"
                       variant="transparent"
                       aria-label={t('packs.list.moveUp')}
-                      disabled={filtering || pos <= 0 || reorderPacks.isPending}
+                      disabled={
+                        filtering ||
+                        pos <= 0 ||
+                        reorderPacks.isPending ||
+                        updatePack.isPending
+                      }
                       onClick={(e) => {
                         e.stopPropagation();
                         void movePack(p, -1);
@@ -426,7 +431,8 @@ const PacksListPage = () => {
                       disabled={
                         filtering ||
                         pos >= group.length - 1 ||
-                        reorderPacks.isPending
+                        reorderPacks.isPending ||
+                        updatePack.isPending
                       }
                       onClick={(e) => {
                         e.stopPropagation();
