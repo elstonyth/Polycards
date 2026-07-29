@@ -518,6 +518,7 @@
     "typeRf": "Referral",
     "typeAd": "Adjustment",
     "typeWp": "Challenge",
+    "typeWd": "Withdrawal",
     "colId": "Transaction",
     "colType": "Type",
     "colPlayer": "Player",

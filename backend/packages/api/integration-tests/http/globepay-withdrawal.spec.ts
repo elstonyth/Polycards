@@ -109,6 +109,13 @@ medusaIntegrationTestRunner({
       const post = (body: unknown) =>
         unwrapResponse(api.post('/hooks/globepay/withdrawal', body));
 
+      // POLYCARD-BACK §5 rows for money leaving by payout.
+      const wdEntries = async () =>
+        packs().listLedgerEntries(
+          { customer_id: CUSTOMER_ID, type: 'WD' },
+          { take: 100 },
+        );
+
       const result = (
         merchantTransactionId: string,
         status: number,
@@ -152,6 +159,9 @@ medusaIntegrationTestRunner({
       it('status 5 refunds the debit against the real ledger', async () => {
         const mtid = `PC-wd-int-refund-${++seq}`;
         const { row, balanceAfterDebit } = await seedWithdrawal(mtid);
+        // WD rows accumulate across this describe (one customer), so the
+        // assertion below is a delta rather than a total.
+        const wdBefore = await wdEntries();
 
         const res = await post(callback(result(mtid, 5)));
         expect(res.status).toBe(200);
@@ -173,6 +183,22 @@ medusaIntegrationTestRunner({
         );
         expect(refundRows).toHaveLength(1);
         expect(Number(refundRows[0].amount)).toBe(50);
+
+        // The paired WD row. Money leaving (and coming back) by payout has to
+        // appear in the POLYCARD-BACK ledger or Σ(ledger) drifts from the
+        // balance the moment payouts are armed. The refund is the only half
+        // this route owns — the debit's row is written by
+        // startGlobePayWithdrawal, which this spec seeds directly.
+        const wdAfter = await wdEntries();
+        const fresh = wdAfter.filter(
+          (e: { id: string }) => !wdBefore.some((b: { id: string }) => b.id === e.id),
+        );
+        expect(fresh).toHaveLength(1);
+        expect(Number(fresh[0].wallet_delta)).toBe(50);
+        expect(fresh[0].payload).toMatchObject({
+          type: 'WD',
+          outcome: 'refunded',
+        });
       });
 
       it('a retried failure callback refunds exactly once — even with a varied unsigned TransactionId', async () => {

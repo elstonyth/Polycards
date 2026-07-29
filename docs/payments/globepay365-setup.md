@@ -370,25 +370,79 @@ env. That is the "not deployed" reading, not a fault.
 
 ### Still open
 
-- **The GlobePay money paths bypass the POLYCARD-BACK ledger (found 2026-07-29).**
-  `ledger-conservation.spec.ts` asserts `Σ(ledger rows) == creditSummary().balance`.
-  Four sites mutate the balance through raw `mutateCreditAtomic` and write no
-  ledger row: the deposit callback (`api/hooks/globepay/deposit/route.ts`), the
-  deposit sweep (`jobs/globepay-reconcile.ts`), the withdrawal debit
-  (`modules/packs/globepay-withdrawal.ts`) and the withdrawal refunds (same file
-  + `api/hooks/globepay/withdrawal/route.ts`). Only the MOCK top-up path calls
-  `topUpCreditsWithLedger`. So the invariant holds today and breaks the moment
-  `GLOBEPAY_ENABLED=true`: real deposits would credit a balance the ledger never
-  saw, and the Wallet tab would under-report every gateway top-up.
-  CI does not catch it — the conservation spec drives the mock gateway.
-  Deposits map cleanly onto the existing `TP` type (its payload already carries
-  `payment_method` + `gateway_ref`; `topUpCreditsWithLedger` hardcodes `'mock'`
-  and needs parameterizing). **Withdrawals have no `LedgerType` at all** — `WP`
-  is the weekly challenge payout, `RF` is period rakeback, `AD` is an admin
-  adjustment — so money leaving by payout needs either a new type or a decision
-  that it is represented some other way. That is an Epic-4 spec call, not a
-  wiring fix. **Close this before arming the gateway.**
 - No human has ever paid through BQR or OB. Organic callback delivery and
   `ReturnUrl` behaviour remain unobserved.
 - Alerting on pending-past-window is not built; the Deposits page shows it, but
   someone has to look.
+
+## Production cutover (written 2026-07-29, NOT yet executed)
+
+The account handover moved us from the `Testpolycard` staging merchant to the
+live one. Nothing below is done automatically — the secret values are pasted by
+a human into the DigitalOcean app, never into this repo.
+
+### Blockers, in order. Each one stops the next.
+
+1. **Rotate the back-office password.** It was pasted into a chat transcript.
+   Ask GlobePay to reissue the AES key at the same time, for the same reason.
+2. **Generate the production RSA keypair locally** (`openssl genrsa … 1024`,
+   §"Secrets" above) **outside the repo** — `.pem` is not gitignored. Do NOT use
+   devglan.com or any other web tool, whatever their onboarding mail says: that
+   private key signs payout requests, so a key that ever touched a third-party
+   site is a drain-the-balance risk. Send them the **public** half only.
+3. **Give them our outgoing IP, and have one to give.** `polycards-backend` runs
+   on DO App Platform with no `egress` block, so it has no static outbound
+   address, while their account has `IP Whitelist Check: Active`. Needs
+   `spec.egress.type: DEDICATED_IP` (paid) or a fixed-IP proxy. Until this is
+   done **every API call from production is rejected** — no env var fixes it.
+4. **Both API whitelists.** `Setting → Whitelist Setting` has a BackOffice list
+   and an API list. Doing only the first is the default mistake: logins work,
+   every API call fails.
+
+### Then the spec update — one edit, both halves together
+
+`ALLOW_MOCK_TOPUP` must come OFF in the SAME update that adds the GlobePay vars.
+The boot guard now refuses to start a production server with that variable set
+to any value, and until `NEXT_PUBLIC_PAYMENTS_PROVIDER` flips, the mock sheet is
+the only way a customer can top up — so removing it early is a customer-facing
+outage and removing it late is a failed deploy.
+
+On **polycards-backend** (`doctl apps update` or the console UI; mark the keys
+as SECRET):
+
+| Var | Value |
+| --- | --- |
+| `GLOBEPAY_ENABLED` | `true` |
+| `GLOBEPAY_MERCHANT_CODE` | `Polycard` — confirm against `Merchant Management` in the live back office before trusting it |
+| `GLOBEPAY_API_BASE` | `https://mapi.GlobePay365.com` (production host; there is no default any more) |
+| `GLOBEPAY_AES_KEY` | from their handover message — SECRET |
+| `GLOBEPAY_PUBLIC_KEY` | their RSA public key from the handover, base64 SPKI body only — SECRET |
+| `GLOBEPAY_MERCHANT_PRIVATE_KEY` | the PEM from step 2 — SECRET |
+| `GLOBEPAY_NOTIFY_URL` | `https://admin.polycards.gg/hooks/globepay/deposit` |
+| `GLOBEPAY_RETURN_URL` | `https://polycards.gg/transactions` |
+| `ALLOW_MOCK_TOPUP` | **DELETE the key** |
+
+Withdrawals stay off for the first cutover — deposits are the launch path, and
+nothing has ever been paid out through this account. When they do go live, add
+`GLOBEPAY_WITHDRAWALS_ENABLED=true`,
+`GLOBEPAY_WITHDRAW_NOTIFY_URL=https://admin.polycards.gg/hooks/globepay/withdrawal`
+and `GLOBEPAY_PAYOUT_VERIFY_URL=https://admin.polycards.gg/hooks/globepay/payout-verify`
+(Payout Verification is inactive on the account, so the last one is a placeholder
+until they enable it).
+
+On **polycards-storefront**: `NEXT_PUBLIC_PAYMENTS_PROVIDER=globepay`. Add
+`NEXT_PUBLIC_WITHDRAWALS_ENABLED=true` only alongside the backend withdrawal
+vars. Both apps redeploy; the backend's `PRE_DEPLOY` `migrate` job applies the
+GlobePay tables and the `WD` ledger constraint on its own.
+
+### Verify, in this order
+
+1. `node scripts/probe-globepay-callback.mjs https://admin.polycards.gg` —
+   demands a 400 on two unsigned bodies. A 404 means the route did not deploy;
+   a 2xx means it is acking junk. Run it BEFORE telling anyone deposits work.
+2. `POST /api/Merchant/CheckBalance` from the production host — read-only, and
+   it exercises the whole chain: whitelist, MerchantCode, AES, RSA signature.
+3. **One human scan-and-pay through BQR.** No spec can replace it: every test
+   in this repo runs against a server we booted ourselves, and nobody has ever
+   completed a payment through this gateway on any environment. Watch the
+   deposit land in Orders → Deposits and the matching `TP` row in the ledger.

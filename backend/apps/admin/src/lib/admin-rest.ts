@@ -1056,7 +1056,7 @@ export const setGroupOddsSet = (id: string, set: 1 | 2 | 3) =>
  *  WP (challenge settlement) are filterable but have no writer yet, so they
  *  return zero rows — kept because the ledger stores them and a later epic may
  *  wire them, not because they are broken. */
-export type LedgerType = 'TP' | 'SP' | 'SE' | 'OD' | 'RF' | 'AD' | 'WP';
+export type LedgerType = 'TP' | 'SP' | 'SE' | 'OD' | 'RF' | 'AD' | 'WP' | 'WD';
 
 /** One row of GET /admin/ledger. Deltas are MYR and NULLABLE — an event that
  *  touches only one side leaves the other null (not 0). `payload` is the raw

@@ -78,10 +78,13 @@ export default async function globepayReconcileJob(container: MedusaContainer) {
       if (action.kind === 'wait') continue;
 
       if (action.kind === 'settle') {
-        const mutation = await packs.mutateCreditAtomic({
+        const mutation = await packs.topUpCreditsWithLedger({
           customerId: deposit.customer_id,
           amount: action.amount,
           reason: 'topup',
+          ledgerPaymentMethod: deposit.payment_method_code,
+          ledgerGatewayRef:
+            deposit.gateway_transaction_id ?? deposit.merchant_transaction_id,
           reference:
             deposit.gateway_transaction_id ?? deposit.merchant_transaction_id,
           // SAME anchor as the callback route, so a callback that arrives while

@@ -34,45 +34,52 @@ export function topUpAmountError(value: unknown): string | null {
 // Security audit 2026-06-23: the mock gateway always approves, so it MINTS free
 // spendable credit. FAIL CLOSED — only explicit local/test environments allow
 // the mock by default; EVERY other environment (production, staging, unset, or
-// any custom NODE_ENV) requires an explicit operator opt-in (ALLOW_MOCK_TOPUP=
-// true, or 'unsafe-demo' — the only value the production boot-guard below
-// accepts). A misconfigured public deploy with NODE_ENV unset/staging must
-// never mint credits. Pure (env injected) so the policy is unit-testable.
+// any custom NODE_ENV) requires an explicit operator opt-in
+// (ALLOW_MOCK_TOPUP=true). A misconfigured public deploy with NODE_ENV
+// unset/staging must never mint credits. Pure (env injected) so the policy is
+// unit-testable.
+//
+// The 'unsafe-demo' value is GONE (2026-07-29). It existed only to run the
+// always-approving mock in production while there was no real gateway; the
+// GlobePay365 gateway is that gateway, so production has no legitimate reason
+// to mint credit again — see assertMockTopupSafe below.
 export function mockTopupAllowed(
   env: { NODE_ENV?: string; ALLOW_MOCK_TOPUP?: string } = process.env,
 ): boolean {
-  if (env.ALLOW_MOCK_TOPUP === 'true' || env.ALLOW_MOCK_TOPUP === 'unsafe-demo') {
+  if (env.ALLOW_MOCK_TOPUP === 'true') {
     return true;
   }
   return env.NODE_ENV === 'development' || env.NODE_ENV === 'test';
 }
 
-// Production boot-guard (security audit 2026-06-30, Batch A). mockTopupAllowed
-// above honours ALLOW_MOCK_TOPUP=true in ANY env — a legitimate opt-in for a
-// staging/demo box that has no real gateway yet. But in PRODUCTION that same flag
-// would mint free spendable credit through the always-approving mock, so a single
-// copy-pasted prod env var becomes a money leak. This guard is the harder
-// backstop: it refuses to START a production server with the dangerous
-// combination (called at medusa-config load, alongside the JWT/COOKIE secret
-// checks). Uses the framework's definition of production ('production' | 'prod').
-// Pure (env injected) so the policy is unit-testable without booting.
+// Production boot-guard (security audit 2026-06-30, Batch A; hardened
+// 2026-07-29). mockTopupAllowed above honours ALLOW_MOCK_TOPUP=true in ANY env
+// — a legitimate opt-in for a staging box with no real gateway. In PRODUCTION
+// that same flag mints free spendable credit through the always-approving mock,
+// so this guard refuses to START a production server with the variable set to
+// ANYTHING (called at medusa-config load, alongside the JWT/COOKIE secret
+// checks). Uses the framework's definition of production ('production' |
+// 'prod'). Pure (env injected) so the policy is unit-testable without booting.
 //
-// Demo escape hatch (2026-07-02): prod currently doubles as the DEMO box, so an
-// operator can set ALLOW_MOCK_TOPUP=unsafe-demo to run the mock gateway in
-// production ON PURPOSE. 'true' (the value every local .env carries) still
-// refuses to boot — the guard protects against copy-paste, not against a
-// deliberate, weird-looking value. Remove 'unsafe-demo' from the prod spec when
-// the real gateway (Batch B) ships.
+// It rejects any value, not just 'true', because the old 'unsafe-demo' escape
+// hatch is gone: it existed to run the mock in production while there was no
+// real gateway, and GlobePay365 is now that gateway. A value the guard did not
+// recognise must fail loudly rather than boot a server whose top-up path is
+// silently disabled — an operator who set the variable meant something by it.
+//
+// DEPLOY ORDER: the production spec still carried ALLOW_MOCK_TOPUP=unsafe-demo
+// when this shipped. It has to come OFF in the same spec update that adds the
+// GLOBEPAY_* vars, or the first deploy after this change refuses to boot.
 export function assertMockTopupSafe(
   env: { NODE_ENV?: string; ALLOW_MOCK_TOPUP?: string } = process.env,
 ): void {
   const isProduction = env.NODE_ENV === 'production' || env.NODE_ENV === 'prod';
-  if (isProduction && env.ALLOW_MOCK_TOPUP === 'true') {
+  if (isProduction && env.ALLOW_MOCK_TOPUP !== undefined) {
     throw new Error(
-      'ALLOW_MOCK_TOPUP=true is not permitted in production: the mock payment ' +
-        'gateway always approves and mints free spendable credit. Unset ' +
-        'ALLOW_MOCK_TOPUP (and wire a real payment provider) before deploying. ' +
-        'For a deliberate demo deployment, set ALLOW_MOCK_TOPUP=unsafe-demo.',
+      `ALLOW_MOCK_TOPUP is set (${env.ALLOW_MOCK_TOPUP}) but is not permitted ` +
+        'in production: the mock payment gateway always approves and mints ' +
+        'free spendable credit. Remove the variable from the production spec ' +
+        'and use the real payment gateway (GLOBEPAY_ENABLED=true).',
     );
   }
 }

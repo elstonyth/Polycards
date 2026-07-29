@@ -61,7 +61,7 @@ function harness(withdrawal: Record<string, unknown> | null) {
       .fn()
       .mockResolvedValue(withdrawal ? [withdrawal] : []),
     updateGlobePayWithdrawals: jest.fn().mockResolvedValue(undefined),
-    mutateCreditAtomic: jest.fn().mockResolvedValue({
+    withdrawCreditsWithLedger: jest.fn().mockResolvedValue({
       id: 'ct_1',
       balance: 50,
       amount: 50,
@@ -117,7 +117,7 @@ describe('withdrawal callback — authentication', () => {
     const h = harness(pendingRow);
     const res = await run(h, callback(paid, { signWith: attacker.privateKey }));
     expect(res.statusCode).toBe(400);
-    expect(h.packs.mutateCreditAtomic).not.toHaveBeenCalled();
+    expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
     expect(h.packs.updateGlobePayWithdrawals).not.toHaveBeenCalled();
   });
 
@@ -135,7 +135,7 @@ describe('withdrawal callback — authentication', () => {
       MerchantTransactionId: 'PC-W1',
     });
     expect(res.statusCode).toBe(400);
-    expect(h.packs.mutateCreditAtomic).not.toHaveBeenCalled();
+    expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
   });
 });
 
@@ -145,7 +145,7 @@ describe('withdrawal callback — status 4 (paid)', () => {
     const res = await run(h, callback(paid));
     expect(res.statusCode).toBe(200);
     expect(res.body).toBe('success');
-    expect(h.packs.mutateCreditAtomic).not.toHaveBeenCalled();
+    expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
     expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith(
       expect.objectContaining({
         selector: { id: 'gpw_1', status: 'pending' },
@@ -172,7 +172,7 @@ describe('withdrawal callback — status 5 (failed) refunds', () => {
     const res = await run(h, callback({ ...paid, Status: 5 }));
     expect(res.statusCode).toBe(200);
     expect(res.body).toBe('success');
-    expect(h.packs.mutateCreditAtomic).toHaveBeenCalledWith(
+    expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledWith(
       expect.objectContaining({
         customerId: 'cus_1',
         amount: 50,
@@ -195,7 +195,7 @@ describe('withdrawal callback — status 5 (failed) refunds', () => {
       h,
       callback({ ...paid, Status: 5 }, { transactionId: 'W-VARIED-2' }),
     );
-    const anchors = h.packs.mutateCreditAtomic.mock.calls.map(
+    const anchors = h.packs.withdrawCreditsWithLedger.mock.calls.map(
       (c: [{ idempotencyReference: string }]) => c[0].idempotencyReference,
     );
     expect(new Set(anchors).size).toBe(1);
@@ -203,7 +203,7 @@ describe('withdrawal callback — status 5 (failed) refunds', () => {
 
   it('does NOT ack when the refund throws, so the money comes back on retry', async () => {
     const h = harness(pendingRow);
-    h.packs.mutateCreditAtomic.mockRejectedValue(new Error('lock timeout'));
+    h.packs.withdrawCreditsWithLedger.mockRejectedValue(new Error('lock timeout'));
     const res = await run(h, callback({ ...paid, Status: 5 }));
     expect(res.statusCode).toBe(500);
     expect(res.body).not.toBe('success');
@@ -218,7 +218,7 @@ describe('withdrawal callback — non-final and edge states', () => {
     const res = await run(h, callback({ ...paid, Status: 2 }));
     expect(res.statusCode).toBe(200);
     expect(res.body).toBe('success');
-    expect(h.packs.mutateCreditAtomic).not.toHaveBeenCalled();
+    expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
     expect(h.packs.updateGlobePayWithdrawals).not.toHaveBeenCalled();
   });
 
@@ -234,7 +234,7 @@ describe('withdrawal callback — non-final and edge states', () => {
     const h = harness({ ...pendingRow, status: 'settled' });
     const res = await run(h, callback({ ...paid, Status: 5 }));
     expect(res.body).toBe('success');
-    expect(h.packs.mutateCreditAtomic).not.toHaveBeenCalled();
+    expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
     expect(h.packs.updateGlobePayWithdrawals).not.toHaveBeenCalled();
   });
 
@@ -242,14 +242,14 @@ describe('withdrawal callback — non-final and edge states', () => {
     const h = harness({ ...pendingRow, status: 'failed' });
     const res = await run(h, callback({ ...paid, Status: 5 }));
     expect(res.body).toBe('success');
-    expect(h.packs.mutateCreditAtomic).not.toHaveBeenCalled();
+    expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
   });
 
   it('refuses a final callback in another currency', async () => {
     const h = harness(pendingRow);
     const res = await run(h, callback({ ...paid, CurrencyCode: 'VND' }));
     expect(res.statusCode).toBe(400);
-    expect(h.packs.mutateCreditAtomic).not.toHaveBeenCalled();
+    expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
     expect(h.packs.updateGlobePayWithdrawals).not.toHaveBeenCalled();
   });
 });

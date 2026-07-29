@@ -150,7 +150,7 @@ export async function POST(
     // so this callback retried N times — or racing the reconcile sweep —
     // appends exactly one refund.
     try {
-      const refund = await packs.mutateCreditAtomic({
+      const refund = await packs.withdrawCreditsWithLedger({
         customerId: withdrawal.customer_id,
         amount: Number(withdrawal.amount),
         reason: 'cashout',
@@ -159,6 +159,12 @@ export async function POST(
           withdrawal.customer_id,
           merchantTransactionId,
         ),
+        ledger: {
+          outcome: 'refunded',
+          bankCode: withdrawal.bank_code,
+          accountNumber: withdrawal.account_number,
+          gatewayRef: gatewayTransactionId || merchantTransactionId,
+        },
       });
 
       await packs.updateGlobePayWithdrawals({

@@ -77,6 +77,11 @@ medusaIntegrationTestRunner({
           { take: 50 },
         );
 
+      // POLYCARD-BACK §5 rows, as opposed to `ledger()` above which reads the
+      // credit_transaction balance ledger. Both must move together.
+      const entries = async () =>
+        packs().listLedgerEntries({ customer_id: CUSTOMER_ID }, { take: 50 });
+
       const post = (body: unknown) =>
         unwrapResponse(api.post('/hooks/globepay/deposit', body));
 
@@ -116,6 +121,20 @@ medusaIntegrationTestRunner({
         });
         expect(Number(rows[0].amount)).toBe(50);
 
+        // The paired TP row, written in the SAME transaction as the credit.
+        // Without it Σ(ledger_entry) drifts from the balance on every real
+        // deposit — the conservation invariant only ever exercised the mock.
+        const ledgerRows = await entries();
+        expect(ledgerRows).toHaveLength(1);
+        expect(ledgerRows[0].type).toBe('TP');
+        expect(Number(ledgerRows[0].wallet_delta)).toBe(50);
+        expect(ledgerRows[0].payload).toMatchObject({
+          type: 'TP',
+          // The REAL method off the deposit row, not the mock default.
+          payment_method: 'BQR',
+          gateway_ref: 'D2026072112415767',
+        });
+
         const [after] = await packs().listGlobePayDeposits(
           { id: row.id },
           { take: 1 },
@@ -124,6 +143,16 @@ medusaIntegrationTestRunner({
         expect(after.gateway_status).toBe(6);
         expect(Number(after.amount_settled)).toBe(50);
         expect(after.settled_at).toBeTruthy();
+      });
+
+      it('writes exactly ONE ledger row when the callback is retried', async () => {
+        const mtid = 'PC-integration-ledger-retry';
+        await seedDeposit(mtid);
+        await post(callback(settled(mtid)));
+        await post(callback(settled(mtid)));
+        // Same idempotency anchor collapses to one credit, and refId is that
+        // credit's id, so the ledger cannot double either.
+        expect(await entries()).toHaveLength(1);
       });
 
       it('does not double-credit when the same callback is retried', async () => {

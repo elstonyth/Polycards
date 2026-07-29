@@ -201,10 +201,15 @@ export async function POST(
     // per-customer locked dedupe in mutateCreditAtomic collapses them to one
     // credit. This is what makes the status check below a consistency guard
     // rather than the thing standing between us and a double credit.
-    const mutation = await packs.mutateCreditAtomic({
+    const mutation = await packs.topUpCreditsWithLedger({
       customerId: deposit.customer_id,
       amount: creditedAmount,
       reason: 'topup',
+      // The paired TP ledger row lands in the same transaction as the credit.
+      // Without it Σ(ledger) would drift from the balance on every real
+      // top-up (ledger-conservation.spec).
+      ledgerPaymentMethod: deposit.payment_method_code,
+      ledgerGatewayRef: gatewayTransactionId || merchantTransactionId,
       // Their id is the reconciliation handle a human quotes in support — it is
       // display-only, and unsigned, so it never gates anything.
       reference: gatewayTransactionId || merchantTransactionId,

@@ -37,7 +37,7 @@ function harness() {
   const packs = {
     createGlobePayWithdrawals: jest.fn().mockResolvedValue([{ id: 'gpw_1' }]),
     updateGlobePayWithdrawals: jest.fn().mockResolvedValue(undefined),
-    mutateCreditAtomic: jest.fn().mockResolvedValue({
+    withdrawCreditsWithLedger: jest.fn().mockResolvedValue({
       id: 'ct_1',
       balance: 50,
       amount: -50,
@@ -155,7 +155,7 @@ describe('startGlobePayWithdrawal — money ordering', () => {
       order.push('row');
       return [{ id: 'gpw_1' }];
     });
-    h.packs.mutateCreditAtomic.mockImplementation(async () => {
+    h.packs.withdrawCreditsWithLedger.mockImplementation(async () => {
       order.push('debit');
       return { id: 'ct_1', balance: 0, amount: -50, replayed: false };
     });
@@ -173,7 +173,7 @@ describe('startGlobePayWithdrawal — money ordering', () => {
   it('debits with floor 0 and the wd: anchor', async () => {
     const h = harness();
     await start(h);
-    expect(h.packs.mutateCreditAtomic).toHaveBeenCalledWith(
+    expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledWith(
       expect.objectContaining({
         customerId: 'cus_1',
         amount: -50,
@@ -181,6 +181,17 @@ describe('startGlobePayWithdrawal — money ordering', () => {
         floor: 0,
         idempotencyReference: expect.stringMatching(/^wd:/),
       }),
+    );
+  });
+
+  // The WD ledger row is what keeps Σ(ledger) == balance once payouts are
+  // armed. Account number is stored last-4 only by the service wrapper; the
+  // caller hands it the full one off the row.
+  it('hands the debit a WD ledger payload marked as requested', async () => {
+    const h = harness();
+    await start(h);
+    expect(h.packs.withdrawCreditsWithLedger.mock.calls[0][0].ledger).toMatchObject(
+      { outcome: 'requested' },
     );
   });
 
@@ -193,14 +204,14 @@ describe('startGlobePayWithdrawal — money ordering', () => {
     await expect(start(h)).rejects.toThrow(/could not start your withdrawal/i);
 
     // Second mutate call is the refund: positive amount, wd-refund: anchor.
-    expect(h.packs.mutateCreditAtomic).toHaveBeenCalledTimes(2);
-    expect(h.packs.mutateCreditAtomic.mock.calls[1][0]).toMatchObject({
+    expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(2);
+    expect(h.packs.withdrawCreditsWithLedger.mock.calls[1][0]).toMatchObject({
       customerId: 'cus_1',
       amount: 50,
       reason: 'cashout',
     });
     expect(
-      h.packs.mutateCreditAtomic.mock.calls[1][0].idempotencyReference,
+      h.packs.withdrawCreditsWithLedger.mock.calls[1][0].idempotencyReference,
     ).toMatch(/^wd-refund:/);
     expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith({
       id: 'gpw_1',
@@ -224,7 +235,7 @@ describe('startGlobePayWithdrawal — money ordering', () => {
       // sweep resolves the payout, exactly like a slow-processing one.
       expect(result.transactionId).toBeNull();
       // ONE ledger write (the debit) — no refund.
-      expect(h.packs.mutateCreditAtomic).toHaveBeenCalledTimes(1);
+      expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
       // The row is NOT closed — the sweep must still be able to claim it.
       expect(h.packs.updateGlobePayWithdrawals).not.toHaveBeenCalled();
       expect(h.logger.error).toHaveBeenCalledWith(
@@ -248,7 +259,7 @@ describe('startGlobePayWithdrawal — money ordering', () => {
       /RM 60\.00 of your deposits must be spent on packs/,
     );
     expect(h.packs.createGlobePayWithdrawals).not.toHaveBeenCalled();
-    expect(h.packs.mutateCreditAtomic).not.toHaveBeenCalled();
+    expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
     expect(submitMock).not.toHaveBeenCalled();
   });
 
@@ -264,7 +275,7 @@ describe('startGlobePayWithdrawal — money ordering', () => {
       playthrough: { deposited: 0, used: 0, remaining: 0 },
     });
     await expect(start(h)).rejects.toThrow(/under review/i);
-    expect(h.packs.mutateCreditAtomic).not.toHaveBeenCalled();
+    expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
   });
 
   it('caps at withdrawable when locked commissions shrink it below the balance', async () => {
@@ -281,17 +292,17 @@ describe('startGlobePayWithdrawal — money ordering', () => {
     await expect(start(h)).rejects.toThrow(
       /withdraw up to RM 40\.00 right now/,
     );
-    expect(h.packs.mutateCreditAtomic).not.toHaveBeenCalled();
+    expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
   });
 
   it('closes the row WITHOUT refunding when the debit itself fails (insufficient balance)', async () => {
     const h = harness();
-    h.packs.mutateCreditAtomic.mockRejectedValue(
+    h.packs.withdrawCreditsWithLedger.mockRejectedValue(
       new Error('Insufficient credits'),
     );
     await expect(start(h)).rejects.toThrow(/insufficient/i);
     // Nothing was debited, so nothing to refund — one call only.
-    expect(h.packs.mutateCreditAtomic).toHaveBeenCalledTimes(1);
+    expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
     expect(submitMock).not.toHaveBeenCalled();
     expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith({
       id: 'gpw_1',
@@ -318,7 +329,7 @@ describe('startGlobePayWithdrawal — money ordering', () => {
         /between RM 30 and RM 1,000/,
       );
       expect(h.packs.createGlobePayWithdrawals).not.toHaveBeenCalled();
-      expect(h.packs.mutateCreditAtomic).not.toHaveBeenCalled();
+      expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
     },
   );
 
@@ -328,14 +339,14 @@ describe('startGlobePayWithdrawal — money ordering', () => {
       /account number/i,
     );
     expect(h.packs.createGlobePayWithdrawals).not.toHaveBeenCalled();
-    expect(h.packs.mutateCreditAtomic).not.toHaveBeenCalled();
+    expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
   });
 
   it('refuses to run when withdrawals are not enabled', async () => {
     process.env.GLOBEPAY_WITHDRAWALS_ENABLED = 'false';
     const h = harness();
     await expect(start(h)).rejects.toThrow(/not open yet/i);
-    expect(h.packs.mutateCreditAtomic).not.toHaveBeenCalled();
+    expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
   });
 });
 

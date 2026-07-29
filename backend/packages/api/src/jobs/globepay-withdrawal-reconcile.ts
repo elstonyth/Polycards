@@ -152,7 +152,7 @@ export default async function globepayWithdrawalReconcileJob(
         );
         continue;
       }
-      const refund = await packs.mutateCreditAtomic({
+      const refund = await packs.withdrawCreditsWithLedger({
         customerId: withdrawal.customer_id,
         amount: Number(withdrawal.amount),
         reason: 'cashout',
@@ -163,6 +163,14 @@ export default async function globepayWithdrawalReconcileJob(
           withdrawal.customer_id,
           withdrawal.merchant_transaction_id,
         ),
+        ledger: {
+          outcome: 'refunded',
+          bankCode: withdrawal.bank_code,
+          accountNumber: withdrawal.account_number,
+          gatewayRef:
+            withdrawal.gateway_transaction_id ??
+            withdrawal.merchant_transaction_id,
+        },
       });
       await packs.updateGlobePayWithdrawals({
         selector: { id: withdrawal.id, status: 'pending' },

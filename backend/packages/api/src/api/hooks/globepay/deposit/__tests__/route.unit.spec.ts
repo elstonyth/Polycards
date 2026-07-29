@@ -57,7 +57,7 @@ function harness(deposit: Record<string, unknown> | null) {
   const packs = {
     listGlobePayDeposits: jest.fn().mockResolvedValue(deposit ? [deposit] : []),
     updateGlobePayDeposits: jest.fn().mockResolvedValue(undefined),
-    mutateCreditAtomic: jest.fn().mockResolvedValue({
+    topUpCreditsWithLedger: jest.fn().mockResolvedValue({
       id: 'ct_1',
       balance: 50,
       amount: 50,
@@ -117,7 +117,7 @@ describe('deposit callback — authentication', () => {
     );
     expect(res.statusCode).toBe(400);
     expect(res.body).not.toBe('success');
-    expect(h.packs.mutateCreditAtomic).not.toHaveBeenCalled();
+    expect(h.packs.topUpCreditsWithLedger).not.toHaveBeenCalled();
   });
 
   it('rejects a callback with a tampered amount', async () => {
@@ -130,14 +130,14 @@ describe('deposit callback — authentication', () => {
     };
     const res = await run(h, forged);
     expect(res.statusCode).toBe(400);
-    expect(h.packs.mutateCreditAtomic).not.toHaveBeenCalled();
+    expect(h.packs.topUpCreditsWithLedger).not.toHaveBeenCalled();
   });
 
   it('rejects a body with no Signature', async () => {
     const h = harness(pendingRow);
     const res = await run(h, { TransactionId: 'D1', Data: 'x' });
     expect(res.statusCode).toBe(400);
-    expect(h.packs.mutateCreditAtomic).not.toHaveBeenCalled();
+    expect(h.packs.topUpCreditsWithLedger).not.toHaveBeenCalled();
   });
 });
 
@@ -147,7 +147,7 @@ describe('deposit callback — ack contract', () => {
     const res = await run(h, callback(settled));
     expect(res.statusCode).toBe(200);
     expect(res.body).toBe('success');
-    expect(h.packs.mutateCreditAtomic).toHaveBeenCalledWith(
+    expect(h.packs.topUpCreditsWithLedger).toHaveBeenCalledWith(
       expect.objectContaining({
         customerId: 'cus_1',
         amount: 50,
@@ -157,11 +157,26 @@ describe('deposit callback — ack contract', () => {
     );
   });
 
+  // Conservation: a credit with no ledger row makes Σ(ledger) drift from the
+  // balance (integration-tests/http/ledger-conservation.spec.ts). The route
+  // must credit through the ledger-writing wrapper AND label the TP row with
+  // the real method, not the mock default.
+  it('labels the TP ledger row with the real method and their reference', async () => {
+    const h = harness(pendingRow);
+    await run(h, callback(settled));
+    expect(h.packs.topUpCreditsWithLedger).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ledgerPaymentMethod: pendingRow.payment_method_code,
+        ledgerGatewayRef: 'D2026072112415767',
+      }),
+    );
+  });
+
   it('credits the amount THEY confirmed, not the amount we requested', async () => {
     const h = harness({ ...pendingRow, amount_requested: 50 });
     // Customer actually paid 30.
     await run(h, callback({ ...settled, Amount: 30 }));
-    expect(h.packs.mutateCreditAtomic).toHaveBeenCalledWith(
+    expect(h.packs.topUpCreditsWithLedger).toHaveBeenCalledWith(
       expect.objectContaining({ amount: 30 }),
     );
   });
@@ -171,7 +186,7 @@ describe('deposit callback — ack contract', () => {
     const res = await run(h, callback({ ...settled, Status: 7 }));
     expect(res.statusCode).toBe(200);
     expect(res.body).toBe('success');
-    expect(h.packs.mutateCreditAtomic).not.toHaveBeenCalled();
+    expect(h.packs.topUpCreditsWithLedger).not.toHaveBeenCalled();
     expect(h.packs.updateGlobePayDeposits).toHaveBeenCalledWith(
       expect.objectContaining({
         selector: { id: 'gpd_1', status: 'pending' },
@@ -185,7 +200,7 @@ describe('deposit callback — ack contract', () => {
     const res = await run(h, callback({ ...settled, Status: 4 }));
     expect(res.statusCode).toBe(200);
     expect(res.body).toBe('success');
-    expect(h.packs.mutateCreditAtomic).not.toHaveBeenCalled();
+    expect(h.packs.topUpCreditsWithLedger).not.toHaveBeenCalled();
     expect(h.packs.updateGlobePayDeposits).not.toHaveBeenCalled();
   });
 
@@ -194,13 +209,13 @@ describe('deposit callback — ack contract', () => {
     const res = await run(h, callback(settled));
     expect(res.statusCode).toBe(200);
     expect(res.body).toBe('success');
-    expect(h.packs.mutateCreditAtomic).not.toHaveBeenCalled();
+    expect(h.packs.topUpCreditsWithLedger).not.toHaveBeenCalled();
     expect(h.logger.error).toHaveBeenCalled();
   });
 
   it('does NOT ack when crediting throws, so the money still lands on retry', async () => {
     const h = harness(pendingRow);
-    h.packs.mutateCreditAtomic.mockRejectedValue(new Error('lock timeout'));
+    h.packs.topUpCreditsWithLedger.mockRejectedValue(new Error('lock timeout'));
     const res = await run(h, callback(settled));
     expect(res.statusCode).toBe(500);
     expect(res.body).not.toBe('success');
@@ -211,14 +226,14 @@ describe('deposit callback — ack contract', () => {
     // The ledger is Ringgit and credits 1:1 — 500 VND is not RM 500.
     const res = await run(h, callback({ ...settled, CurrencyCode: 'VND' }));
     expect(res.statusCode).toBe(400);
-    expect(h.packs.mutateCreditAtomic).not.toHaveBeenCalled();
+    expect(h.packs.topUpCreditsWithLedger).not.toHaveBeenCalled();
   });
 
   it('refuses to credit a non-positive amount', async () => {
     const h = harness(pendingRow);
     const res = await run(h, callback({ ...settled, Amount: 0 }));
     expect(res.statusCode).toBe(400);
-    expect(h.packs.mutateCreditAtomic).not.toHaveBeenCalled();
+    expect(h.packs.topUpCreditsWithLedger).not.toHaveBeenCalled();
   });
 });
 
@@ -236,7 +251,7 @@ describe('deposit callback — already-resolved rows', () => {
     const h = harness({ ...pendingRow, status: 'settled' });
     const res = await run(h, callback(settled));
     expect(res.body).toBe('success');
-    expect(h.packs.mutateCreditAtomic).not.toHaveBeenCalled();
+    expect(h.packs.topUpCreditsWithLedger).not.toHaveBeenCalled();
   });
 });
 
@@ -245,7 +260,7 @@ describe('deposit callback — idempotency', () => {
     const h = harness(pendingRow);
     await run(h, callback(settled));
     await run(h, callback(settled));
-    const [first, second] = h.packs.mutateCreditAtomic.mock.calls;
+    const [first, second] = h.packs.topUpCreditsWithLedger.mock.calls;
     expect(first[0].idempotencyReference).toBe(second[0].idempotencyReference);
   });
 
@@ -261,7 +276,7 @@ describe('deposit callback — idempotency', () => {
     await run(h, callback(settled, { transactionId: 'D-ATTACKER-2' }));
     await run(h, callback(settled, { transactionId: 'D-ATTACKER-3' }));
 
-    const anchors = h.packs.mutateCreditAtomic.mock.calls.map(
+    const anchors = h.packs.topUpCreditsWithLedger.mock.calls.map(
       (c: [{ idempotencyReference: string }]) => c[0].idempotencyReference,
     );
     expect(new Set(anchors).size).toBe(1);
@@ -271,7 +286,7 @@ describe('deposit callback — idempotency', () => {
     const h = harness(pendingRow);
     await run(h, callback(settled));
     await run(h, callback({ ...settled, MerchantTransactionId: 'PG-2' }));
-    const [first, second] = h.packs.mutateCreditAtomic.mock.calls;
+    const [first, second] = h.packs.topUpCreditsWithLedger.mock.calls;
     expect(first[0].idempotencyReference).not.toBe(
       second[0].idempotencyReference,
     );
@@ -287,7 +302,7 @@ describe('deposit callback — idempotency', () => {
       MerchantTransactionId: 'PG-1',
     });
     expect(res.statusCode).toBe(400);
-    expect(h.packs.mutateCreditAtomic).not.toHaveBeenCalled();
+    expect(h.packs.topUpCreditsWithLedger).not.toHaveBeenCalled();
   });
 
   it('claims the row only while it is still pending', async () => {

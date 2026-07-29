@@ -232,7 +232,7 @@ export async function startGlobePayWithdrawal(
   // read — no separate check-then-debit race.
   let debit;
   try {
-    debit = await packs.mutateCreditAtomic({
+    debit = await packs.withdrawCreditsWithLedger({
       customerId: input.customerId,
       amount: -amount,
       reason: 'cashout',
@@ -242,6 +242,13 @@ export async function startGlobePayWithdrawal(
         merchantTransactionId,
       ),
       floor: 0,
+      ledger: {
+        outcome: 'requested',
+        bankCode: bankCode,
+        accountNumber: accountNumber,
+        // Their id does not exist yet — SubmitWithdrawal has not run.
+        gatewayRef: merchantTransactionId,
+      },
     });
   } catch (error) {
     // Nothing was debited; the row must not sit pending or the sweep would
@@ -271,7 +278,7 @@ export async function startGlobePayWithdrawal(
     if (error instanceof GlobePayError && error.definite) {
       // The gateway PARSEABLY refused, so no payout exists on their side.
       // Refund the debit (idempotent) and close the row.
-      await packs.mutateCreditAtomic({
+      await packs.withdrawCreditsWithLedger({
         customerId: input.customerId,
         amount,
         reason: 'cashout',
@@ -280,6 +287,12 @@ export async function startGlobePayWithdrawal(
           input.customerId,
           merchantTransactionId,
         ),
+        ledger: {
+          outcome: 'refunded',
+          bankCode: bankCode,
+          accountNumber: accountNumber,
+          gatewayRef: merchantTransactionId,
+        },
       });
       await packs.updateGlobePayWithdrawals({ id: row.id, status: 'failed' });
       throw new MedusaError(

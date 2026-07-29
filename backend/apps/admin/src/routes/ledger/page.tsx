@@ -37,6 +37,7 @@ const TYPES: (LedgerType | undefined)[] = [
   'RF',
   'AD',
   'WP',
+  'WD',
 ];
 
 // Header cells above; the payload expander spans all of them.
