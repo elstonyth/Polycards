@@ -927,6 +927,8 @@ export function getGlobePayDeposits(
     offset: String(page * pageSize),
   });
   return getJson<GlobePayDepositsResponse>(`/admin/globepay/deposits?${params}`);
+}
+
 // ── Epic 2 (Players) ─────────────────────────────────────────────────────────
 
 /** One row of GET /admin/players. All money fields are MYR (the route divides

@@ -225,11 +225,11 @@ export const NOTIFICATION_COPY: Record<string, NotificationCopy> = {
       const amount = numOf(data, 'amount_myr');
       return amount === null
         ? null
-        // Cause-agnostic on purpose: this fires on any status-5 failure and
-        // via the reconcile sweep (ambiguous/stale payouts too), so blaming the
-        // bank would misinform the customer whenever the failure was
-        // gateway-side or a timeout.
-        : `The transfer could not be completed — ${rm(amount)} is back in your balance.`;
+        : // Cause-agnostic on purpose: this fires on any status-5 failure and
+          // via the reconcile sweep (ambiguous/stale payouts too), so blaming the
+          // bank would misinform the customer whenever the failure was
+          // gateway-side or a timeout.
+          `The transfer could not be completed — ${rm(amount)} is back in your balance.`;
     },
     href: '/bank-withdrawal',
     action: 'Try again',

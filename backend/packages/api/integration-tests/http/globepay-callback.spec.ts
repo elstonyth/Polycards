@@ -26,6 +26,9 @@ const AES_KEY = 'integration-aes-key';
 const CUSTOMER_ID = 'cus_globepay_integration';
 
 process.env.GLOBEPAY_ENABLED = 'true';
+// No default for the host (globepayConfigFromEnv): the booted server's
+// callback routes 500 without it, and CI has no .env to fall back on.
+process.env.GLOBEPAY_API_BASE = 'https://mapi.example.test';
 process.env.GLOBEPAY_MERCHANT_CODE = 'Testpolycard';
 process.env.GLOBEPAY_AES_KEY = AES_KEY;
 process.env.GLOBEPAY_MERCHANT_PRIVATE_KEY = privateKey;

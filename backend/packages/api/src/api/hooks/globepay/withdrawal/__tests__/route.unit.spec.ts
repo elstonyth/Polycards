@@ -18,6 +18,9 @@ const { privateKey, publicKey } = generateKeyPairSync('rsa', {
 const AES_KEY = 'test-aes-key';
 
 beforeEach(() => {
+  // The host has no default (see globepayConfigFromEnv): CI has no .env,
+  // so a spec that leans on an ambient value passes locally and fails there.
+  process.env.GLOBEPAY_API_BASE = 'https://mapi.example.test';
   process.env.GLOBEPAY_MERCHANT_CODE = 'Testpolycard';
   process.env.GLOBEPAY_AES_KEY = AES_KEY;
   process.env.GLOBEPAY_MERCHANT_PRIVATE_KEY = privateKey;
