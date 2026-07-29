@@ -54,7 +54,7 @@ describe('GET /admin/pricecharting/collection', () => {
 
   beforeEach(() => {
     process.env.PRICECHARTING_API_TOKEN = 'test-token-0123456789';
-    delete process.env.PRICECHARTING_SELLER_ID;
+    process.env.PRICECHARTING_SELLER_ID = 'seller_42';
   });
 
   afterEach(() => {
@@ -62,16 +62,31 @@ describe('GET /admin/pricecharting/collection', () => {
     jest.restoreAllMocks();
   });
 
-  it('asks PriceCharting for this account\'s collection, with no seller', async () => {
+  it("scopes the query to the configured seller's collection", async () => {
     const { url } = await runGet({}, { status: 'success', offers: [OFFER] });
 
     expect(url.pathname).toBe('/api/offers');
     expect(url.searchParams.get('status')).toBe('collection');
-    // The token identifies the account; sending a seller we don't have would
-    // 400 upstream with "user not found".
-    expect(url.searchParams.has('seller')).toBe(false);
+    // The seller is what makes this OUR collection. The token only
+    // authenticates: without a seller PriceCharting answers with every user's
+    // offers, which would onboard strangers' cards as our stock.
+    expect(url.searchParams.get('seller')).toBe('seller_42');
     expect(url.searchParams.has('cursor')).toBe(false);
     expect(url.searchParams.get('t')).toBe('test-token-0123456789');
+  });
+
+  it('refuses to call upstream at all when no seller is configured', async () => {
+    delete process.env.PRICECHARTING_SELLER_ID;
+    const { captured, url } = await runGet(
+      {},
+      { status: 'success', offers: [OFFER] },
+    );
+
+    expect(captured.status).toBe(503);
+    expect(captured.body.message).toContain('PRICECHARTING_SELLER_ID');
+    // Nothing was fetched — a seller-less call is not a degraded result, it is
+    // the WRONG result (everybody's offers).
+    expect(url).toBeUndefined();
   });
 
   it('forwards the cursor — page 2 of the scan depends on it', async () => {
@@ -90,10 +105,10 @@ describe('GET /admin/pricecharting/collection', () => {
     expect(url.searchParams.has('cursor')).toBe(false);
   });
 
-  it('sends the seller only when one is configured', async () => {
-    process.env.PRICECHARTING_SELLER_ID = ' seller_42 ';
+  it('trims a padded seller id', async () => {
+    process.env.PRICECHARTING_SELLER_ID = ' seller_99 ';
     const { url } = await runGet({}, { status: 'success', offers: [] });
-    expect(url.searchParams.get('seller')).toBe('seller_42');
+    expect(url.searchParams.get('seller')).toBe('seller_99');
   });
 
   it('returns normalized offers plus the next cursor', async () => {

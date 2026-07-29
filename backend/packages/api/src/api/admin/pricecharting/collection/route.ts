@@ -7,17 +7,30 @@ import { normalizeOffer, type PcOffer } from '../collection-offers';
 // cursor for the next page. Proxied server-side like the other PriceCharting
 // routes so the paid API token never reaches the browser.
 //
-// One page per request, NOT a server-side walk: this account's collection is
-// 9,000+ offers (measured 2026-07-30) and still growing, so walking it inside a
-// single HTTP call would mean a multi-minute request that reports no progress
-// and dies on any timeout. The admin page pages through with live counters and
-// can stop early once it has what the operator was looking for.
+// One page per request, NOT a server-side walk: a collection can run to five
+// figures of offers, so walking it inside a single HTTP call would mean a
+// multi-minute request that reports no progress and dies on any timeout. The
+// admin page pages through with live counters and can stop early.
 //
 // The route reports what PriceCharting holds — it does NOT price anything. The
 // import re-reads each picked product's per-grade FMV through
 // /admin/pricecharting/product, so market_value lands on the same basis the
 // nightly sync job writes (an offer's `value` is the collection valuation and
 // would be overwritten on the first re-sync).
+
+// `seller` is REQUIRED, not optional. PriceCharting's /api/offers takes `status`
+// as its only mandatory parameter and the token is authentication ONLY — it does
+// NOT scope the query to the token's account. Omitting `seller` returns EVERY
+// user's offers with that status (verified 2026-07-30: a no-seller call came
+// back with thousands of strangers' cards, every row carrying
+// `user-viewing-own-offers: false`, while the operator's own collection was
+// empty). Importing from that feed would onboard other people's cards as our
+// stock, so the route refuses to run without an id.
+export const PC_SELLER_MISSING =
+  'PriceCharting collection is not configured: set PRICECHARTING_SELLER_ID to ' +
+  'your PriceCharting user id (the 26-character code in the URL of your ' +
+  'pricecharting.com/selling-available page). Without it PriceCharting returns ' +
+  "every user's offers, not your collection.";
 
 type PcOffersResponse = {
   status: string;
@@ -30,19 +43,19 @@ export async function GET(
   req: MedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
+  const seller = process.env.PRICECHARTING_SELLER_ID?.trim();
+  if (!seller) {
+    res.status(503).json({ message: PC_SELLER_MISSING });
+    return;
+  }
+
   // The cursor is the one operator-supplied value that reaches the upstream
   // URL. Real ones are ~40 chars; anything longer is not a cursor.
-  const raw = typeof req.query.cursor === 'string' ? req.query.cursor.trim() : '';
+  const raw =
+    typeof req.query.cursor === 'string' ? req.query.cursor.trim() : '';
   const cursor = raw.length <= 512 ? raw : '';
 
-  // The API token identifies the account, so `seller` is OPTIONAL and normally
-  // omitted (verified against the live API 2026-07-30: status=collection with
-  // no seller returns this account's collection, while a wrong seller 400s with
-  // "user not found"). PRICECHARTING_SELLER_ID stays supported for the case
-  // where the token's account is not the collection's owner.
-  const params: Record<string, string> = { status: 'collection' };
-  const seller = process.env.PRICECHARTING_SELLER_ID?.trim();
-  if (seller) params.seller = seller;
+  const params: Record<string, string> = { status: 'collection', seller };
   if (cursor) params.cursor = cursor;
 
   const result = await pcFetch<PcOffersResponse>('/api/offers', params);
