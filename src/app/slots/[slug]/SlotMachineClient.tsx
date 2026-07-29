@@ -28,7 +28,11 @@ import {
 } from '@/lib/packs-data';
 import type { RecentPull } from '@/lib/data/packs';
 import { demoDraw } from '@/lib/demo-spin';
-import { publishedOddsRows, type PublishedOdds } from '@/lib/packs-format';
+import {
+  publishedOddsRows,
+  poolValueRange,
+  type PublishedOdds,
+} from '@/lib/packs-format';
 import { isTopRarity, rarityRgb, RARITY_ORDER } from '@/lib/rarity';
 import {
   spinTotalMs,
@@ -1024,7 +1028,7 @@ export default function SlotMachineClient({
         open={oddsOpen}
         onClose={() => setOddsOpen(false)}
         odds={publishedOdds ? publishedOddsRows(publishedOdds) : null}
-        overall={publishedOdds?.overall ?? null}
+        range={poolValueRange(pool)}
       />
     </div>
   );

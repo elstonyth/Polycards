@@ -31,7 +31,7 @@ import { AmbientVideo } from '@/components/AmbientVideo';
 import { Pill } from '@/components/ui/pill';
 import { PublishedOddsList } from './OddsSheet';
 import { PoolByRarity } from './PoolByRarity';
-import { publishedOddsRows } from '@/lib/packs-format';
+import { publishedOddsRows, poolValueRange } from '@/lib/packs-format';
 import { useLiveRecentPulls } from '@/lib/use-recent-pulls';
 import { useTopUp } from '@/components/app-shell/TopUpProvider';
 import { CardTile } from '@/components/cards/CardTile';
@@ -501,7 +501,7 @@ export default function PackDetailClient({
             </div>
             <PublishedOddsList
               odds={publishedRows}
-              overall={liveDetail.publishedOdds.overall}
+              range={poolValueRange(pool)}
               rounded="2xl"
             />
           </Reveal>

@@ -4,22 +4,23 @@
 import { useRef } from 'react';
 import { X } from 'lucide-react';
 import type { Rarity } from '@/lib/packs-data';
+import type { PoolValueRange } from '@/lib/packs-format';
 import { rarityRgb } from '@/lib/rarity';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
 
-/** The published-odds list itself — overall row + per-rarity rows + caption.
+/** The published-odds list itself — value-range row + per-rarity rows + caption.
  *  Shared between this sheet and the pack page's odds panel so the two can't
  *  drift (they did during the Epic→Mythical rename). */
 export function PublishedOddsList({
   odds,
-  overall,
+  range,
   rounded = 'xl',
 }: {
   /** Published rows (rarest-first). */
   odds: { rarity: Rarity; chance: string }[];
-  /** Overall win rate %; null hides the overall row. */
-  overall: number | null;
+  /** Pack card-value range (display prices, markup included); null hides the row. */
+  range: PoolValueRange | null;
   rounded?: 'xl' | '2xl';
 }) {
   return (
@@ -29,13 +30,13 @@ export function PublishedOddsList({
           rounded === '2xl' ? 'rounded-2xl' : 'rounded-xl'
         }`}
       >
-        {overall !== null && (
+        {range !== null && (
           <li className="flex items-center justify-between border-b border-white/5 bg-white/[0.03] px-4 py-3">
             <span className="text-[13px] font-semibold text-white">
-              Overall win rate
+              Card value range
             </span>
             <span className="text-[13px] font-semibold tabular-nums text-white">
-              {overall}%
+              {range.min} – {range.max}
             </span>
           </li>
         )}
@@ -70,13 +71,13 @@ export function OddsSheet({
   open,
   onClose,
   odds,
-  overall,
+  range,
 }: {
   open: boolean;
   onClose: () => void;
   /** Published rows (rarest-first); null = this pack has no published odds. */
   odds: { rarity: Rarity; chance: string }[] | null;
-  overall: number | null;
+  range: PoolValueRange | null;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   useModalA11y(panelRef, open, onClose);
@@ -116,7 +117,7 @@ export function OddsSheet({
         {/* Published ⇢ render (even overall-only, tiers empty) — matching the
             pack page's gate, which keys off publishedOdds being set. */}
         {odds ? (
-          <PublishedOddsList odds={odds} overall={overall} />
+          <PublishedOddsList odds={odds} range={range} />
         ) : (
           <p className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-6 text-center text-[13px] text-white/60">
             Odds for this pack haven&apos;t been published yet.

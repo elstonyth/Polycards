@@ -6,7 +6,7 @@
  * and the open-pack server action (`src/lib/actions/packs.ts`) so the two can't
  * drift. Pure + isomorphic (no server-only imports), safe to import anywhere.
  */
-import type { Rarity } from '@/lib/packs-data';
+import { priceNumber, type Rarity } from '@/lib/packs-data';
 import { RARITY_ORDER } from '@/lib/rarity';
 import { money } from './format';
 
@@ -40,3 +40,19 @@ export const publishedOddsRows = (
  * never cents — formatted as-is.
  */
 export const formatValue = (mv: number): string => money(mv, { prefix: 'RM ' });
+
+/** Min–max of a pool's PRICED display values ('—' rows skipped); null when
+ *  nothing is priced. Display prices already carry FX × per-card markup —
+ *  this is a pure read, no new pricing math. */
+export type PoolValueRange = { min: string; max: string };
+
+export function poolValueRange(
+  pool: readonly { value: string }[],
+): PoolValueRange | null {
+  const values = pool.map((c) => priceNumber(c.value)).filter((v) => v > 0);
+  if (values.length === 0) return null;
+  return {
+    min: formatValue(Math.min(...values)),
+    max: formatValue(Math.max(...values)),
+  };
+}
