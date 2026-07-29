@@ -26,4 +26,20 @@ describe('poolValueRange', () => {
     expect(poolValueRange([{ value: '—' }])).toBeNull();
     expect(poolValueRange([])).toBeNull();
   });
+
+  // Documented conflation: '—' parses to 0, so a genuine RM 0.00 is
+  // indistinguishable from unpriced and is dropped the same way.
+  it('drops zero-priced cards', () => {
+    expect(poolValueRange([{ value: 'RM 0.00' }])).toBeNull();
+    expect(
+      poolValueRange([{ value: 'RM 0.00' }, { value: 'RM 12.50' }]),
+    ).toEqual({ min: 'RM 12.50', max: 'RM 12.50' });
+  });
+
+  it('collapses a single priced card to min === max', () => {
+    expect(poolValueRange([{ value: 'RM 1,200.00' }])).toEqual({
+      min: 'RM 1,200.00',
+      max: 'RM 1,200.00',
+    });
+  });
 });

@@ -43,7 +43,12 @@ export const formatValue = (mv: number): string => money(mv, { prefix: 'RM ' });
 
 /** Min–max of a pool's PRICED display values ('—' rows skipped); null when
  *  nothing is priced. Display prices already carry FX × per-card markup —
- *  this is a pure read, no new pricing math. */
+ *  this is a pure read, no new pricing math.
+ *
+ *  Only values > 0 count. The unpriced sentinel '—' parses to 0, so a card
+ *  genuinely worth RM 0.00 (or a negative, which is always bad data) is dropped
+ *  alongside it — deliberate: "RM 0.00 – RM 9,869.90" reads as a broken range,
+ *  and the two cases are indistinguishable after priceNumber(). */
 export type PoolValueRange = { min: string; max: string };
 
 export function poolValueRange(
