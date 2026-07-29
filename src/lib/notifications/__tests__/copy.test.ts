@@ -48,6 +48,25 @@ describe('NOTIFICATION_COPY', () => {
       expect(Boolean(c.href)).toBe(Boolean(c.action));
     }
   });
+
+  it('never links into the suspended VIP surfaces', () => {
+    // /vip, /vouchers, /daily, /referrals 404 while the reward economy is
+    // suspended (spec 2026-07-29) — a feed row must not deep-link to them.
+    const dead = ['/vip', '/vouchers', '/daily', '/referrals'];
+    for (const t of TEMPLATES) {
+      const c = copyFor(t);
+      expect(dead).not.toContain(c.href);
+      // Body copy must not instruct a claim on the VIP page either.
+      const body = c.body({
+        amount_myr: 25,
+        level: 3,
+        levels: [3],
+        prize_kind: 'voucher',
+        status: 'shipped',
+      });
+      if (body) expect(body.toLowerCase()).not.toContain('vip page');
+    }
+  });
 });
 
 describe('body rendering', () => {
@@ -102,9 +121,9 @@ describe('body rendering', () => {
     // The draw builds a voucher prize as { kind: 'voucher', amount_myr } with
     // NO title, so this used to fall through to the amount branch and announce
     // a payment that never happened — nothing reaches the balance until the
-    // grant is claimed on /vip.
+    // grant is claimed (claiming is suspended alongside the VIP page).
     expect(body({ prize_kind: 'voucher', amount_myr: 5, title: '' })).toBe(
-      'You won a RM 5.00 voucher — claim it on the VIP page.',
+      'You won a RM 5.00 voucher.',
     );
     expect(body({ prize_kind: 'credit', amount_myr: 5, title: '' })).toBe(
       'You won RM 5.00 in credit.',

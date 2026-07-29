@@ -89,8 +89,8 @@ export const NOTIFICATION_COPY: Record<string, NotificationCopy> = {
         ? `You reached level ${levels[0]}.`
         : `You reached levels ${joinNatural(levels)}.`;
     },
-    href: '/vip',
-    action: 'View VIP',
+    href: null,
+    action: null,
   },
 
   commission_matured: {
@@ -146,12 +146,13 @@ export const NOTIFICATION_COPY: Record<string, NotificationCopy> = {
       if (title) return `You won ${title}.`;
       if (amount && amount > 0) {
         // A voucher is a grant, not money: nothing reaches the balance until
-        // it is claimed on /vip (at which point voucher_claimed fires). Saying
-        // "in credit" here would claim a payment that has not happened, and
-        // could leave the grant sitting unclaimed. PrizeReveal already draws
-        // this distinction — the feed row must not contradict it.
+        // it is claimed (claiming is suspended alongside the VIP page — spec
+        // 2026-07-29). Saying "in credit" here would claim a payment that has
+        // not happened, and could leave the grant sitting unclaimed.
+        // PrizeReveal already draws this distinction — the feed row must not
+        // contradict it.
         return strOf(data, 'prize_kind') === 'voucher'
-          ? `You won a ${rm(amount)} voucher — claim it on the VIP page.`
+          ? `You won a ${rm(amount)} voucher.`
           : `You won ${rm(amount)} in credit.`;
       }
       return null;
@@ -174,8 +175,8 @@ export const NOTIFICATION_COPY: Record<string, NotificationCopy> = {
         ? `${rm(amount)} credited from your Level ${level} voucher.`
         : `${rm(amount)} credited to your balance.`;
     },
-    href: '/vip',
-    action: 'View VIP',
+    href: null,
+    action: null,
   },
 
   topup_credited: {
