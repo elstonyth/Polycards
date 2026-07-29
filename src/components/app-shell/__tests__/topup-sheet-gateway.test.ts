@@ -132,6 +132,9 @@ describe('TopUpSheet gateway branch', () => {
     expect(text).toContain('GlobePay365');
     expect(payButton().textContent).toBe('Pay RM 50.00');
     expect(text).not.toContain('add RM');
+    // The mock sheet's "Demo" badge must not ride along on a flow that takes
+    // real money at a real cashier.
+    expect(text).not.toContain('Demo');
   });
 
   it.each(['20', '1001'])(

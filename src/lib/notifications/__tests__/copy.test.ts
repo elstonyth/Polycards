@@ -165,7 +165,7 @@ describe('body rendering', () => {
       'RM 50.00 has been sent to your bank.',
     );
     expect(copyFor('withdrawal_refunded').body({ amount_myr: 50 })).toBe(
-      'Your bank rejected the transfer — RM 50.00 is back in your balance.',
+      'The transfer could not be completed — RM 50.00 is back in your balance.',
     );
   });
 

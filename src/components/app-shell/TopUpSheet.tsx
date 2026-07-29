@@ -158,9 +158,14 @@ export default function TopUpSheet({
         <div className="flex items-center justify-between">
           <h2 className="font-heading text-xl text-white">TOP UP</h2>
           <div className="flex items-center gap-2">
-            <span className="rounded-md border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider text-amber-300">
-              Demo
-            </span>
+            {/* Never in gateway mode: this sheet redirects to a real cashier
+                and takes real money, so a "Demo" badge would be a lie on the
+                one screen where it matters most. */}
+            {!USE_GATEWAY && (
+              <span className="rounded-md border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider text-amber-300">
+                Demo
+              </span>
+            )}
             <button
               type="button"
               onClick={onClose}
