@@ -2,8 +2,10 @@
 // QA for the 2026-07-29 storefront display changes:
 //   1. Home: How It Rips section gone.
 //   2. Home: top chase == the featured pack's highest-value pool card.
-//   3. /slots/bronze-pack: "Cards in this pack" = Mythical+ teaser (<=6 tiles),
-//      expandable to tier shelves with only Mythical+ labels.
+//   3. /slots/bronze-pack: "Cards in this pack" = Mythical+ teaser (<=6 tiles,
+//      NO tier headers), expandable to tier shelves with only Mythical+ labels.
+//      The expand half only runs when a pack seeds >6 Mythical+ cards; it is
+//      reported as SKIP (never a pass) otherwise.
 //   4. /slots/bronze-pack: odds panel shows "Card value range", never
 //      "Overall win rate".
 //   5. /slots/bronze-pack/spin?demo=1: odds sheet shows the same range row.
@@ -13,19 +15,41 @@ import { mkdirSync, readFileSync } from 'node:fs';
 
 const BASE = process.env.PW_BASE ?? 'http://localhost:4120';
 const BACKEND = process.env.PW_BACKEND ?? 'http://localhost:9000';
-// The storefront's own PUBLIC publishable key (.env.local NEXT_PUBLIC_*) — for
-// the pool fallback check when a pack renders neither odds nor cards surface.
-const PK =
-  process.env.PW_PK ??
-  readFileSync('.env.local', 'utf8').match(/pk_[a-z0-9]+/)?.[0];
 const TOP_RARITIES = ['Immortal', 'Legendary', 'Mythical'];
 const RANGE_RE = /RM [\d,.]+ – RM [\d,.]+/;
 mkdirSync('docs/research', { recursive: true });
 
+// The storefront's own PUBLIC publishable key (.env.local NEXT_PUBLIC_*) — only
+// the backend-pool fallback needs it, so read it LAZILY and repo-relative: an
+// eager cwd-relative read threw ENOENT before a single assertion ran whenever
+// the script was invoked from another cwd or a fresh checkout.
+const publishableKey = () => {
+  if (process.env.PW_PK) return process.env.PW_PK;
+  let env;
+  try {
+    env = readFileSync(new URL('../.env.local', import.meta.url), 'utf8');
+  } catch {
+    throw new Error(
+      'backend-pool fallback needs a publishable key, but .env.local is unreadable — set PW_PK=pk_… and re-run',
+    );
+  }
+  const key = env.match(/pk_[a-z0-9]+/)?.[0];
+  if (!key)
+    throw new Error('no pk_… key in .env.local — set PW_PK=pk_… instead');
+  return key;
+};
+
 let failures = 0;
+let skips = 0;
 const check = (ok, msg) => {
   console.log(`${ok ? 'PASS' : 'FAIL'}: ${msg}`);
   if (!ok) failures += 1;
+};
+// A check that could NOT run against this data set. Counted and reported so a
+// green exit can never be read as "everything was verified".
+const skip = (msg) => {
+  console.log(`SKIP: ${msg}`);
+  skips += 1;
 };
 
 const browser = await chromium.launch();
@@ -93,40 +117,30 @@ try {
     waitUntil: 'networkidle',
     timeout: 30000,
   });
-  // The hero chase == the featured pack's highest-value pool card. Prefer the
-  // on-page surfaces (teaser first tile / odds-range max); when the pack
-  // publishes no odds AND has no Mythical+ cards (both surfaces hidden),
-  // fall back to the store pool itself — same endpoint the page consumed.
-  const cardsSection = page.locator('section', {
-    has: page.locator('h2', { hasText: 'Cards in this pack' }),
-  });
+  // The hero chase == the featured pack's highest-value pool card, over the
+  // FULL pool. Only two surfaces read the full pool: the odds panel's value-
+  // range row and the store endpoint itself. The "Cards in this pack" teaser is
+  // NOT a valid oracle — it is pre-filtered to Mythical+, so any cheaper-tier
+  // card that out-prices every Mythical+ makes its first tile legitimately
+  // differ from the hero chase (comparing them fails on CORRECT code).
   const oddsSection = page.locator('section', {
     has: page.locator('h2', { hasText: 'Pull Odds (by rarity)' }),
   });
-  if ((await cardsSection.count()) > 0) {
-    const firstTileValue = (
-      await cardsSection
-        .locator('button[aria-label^="View details for"]')
-        .first()
-        .locator('span.whitespace-nowrap')
-        .innerText()
-    ).trim();
+  // The range row is the first <li> only when something in the pool is priced;
+  // otherwise the first row is a rarity row and would never end with an RM value.
+  const rangeRow =
+    (await oddsSection.count()) > 0
+      ? (await oddsSection.locator('ul > li').first().innerText()).trim()
+      : '';
+  if (/^Card value range/.test(rangeRow)) {
     check(
-      firstTileValue.startsWith(heroChase),
-      `featured pack top card value "${firstTileValue}" matches hero chase "${heroChase}"`,
-    );
-  } else if ((await oddsSection.count()) > 0) {
-    const row = (
-      await oddsSection.locator('ul > li').first().innerText()
-    ).trim();
-    check(
-      row.endsWith(heroChase),
-      `featured pack value-range max matches hero chase "${heroChase}" (${row.replace(/\s+/g, ' ')})`,
+      rangeRow.endsWith(heroChase),
+      `featured pack value-range max matches hero chase "${heroChase}" (${rangeRow.replace(/\s+/g, ' ')})`,
     );
   } else {
     const slug = featuredHref.replace(/^\/slots\//, '').replace(/\?.*$/, '');
     const res = await fetch(`${BACKEND}/store/packs/${slug}`, {
-      headers: { 'x-publishable-api-key': PK },
+      headers: { 'x-publishable-api-key': publishableKey() },
     });
     const { odds = [] } = await res.json();
     const poolMax = Math.max(
@@ -136,7 +150,7 @@ try {
     const heroNum = Number(heroChase.replace(/[^\d.]/g, ''));
     check(
       poolMax > 0 && Math.abs(poolMax - heroNum) < 0.005,
-      `hero chase ${heroNum} equals store pool max ${poolMax} for ${slug} (no odds/cards surface on page)`,
+      `hero chase ${heroNum} equals store pool max ${poolMax} for ${slug} (no value-range row on page)`,
     );
   }
   await page.screenshot({ path: 'docs/research/qa-display-featured-pack.png' });
@@ -156,30 +170,51 @@ try {
     `teaser renders ${tileCount} tiles (<= 6)`,
   );
 
-  const labelsOk = async () => {
-    const labels = await bronzeSection.locator('h3').allInnerTexts();
-    return labels.every((l) => TOP_RARITIES.includes(l.trim()));
-  };
-  check(await labelsOk(), 'collapsed: every tier label is Mythical+');
+  // Tier labels only exist in the EXPANDED state — PoolByRarity's collapsed
+  // teaser is one flat rail with no <h3> at all (CardTile renders the card name
+  // as a <span>, so nothing else contributes an h3 here). The collapsed
+  // contract is therefore "zero tier headers", NOT "every header is Mythical+"
+  // — the latter is vacuously true over an empty list and can never fail.
+  const tierLabels = () => bronzeSection.locator('h3').allInnerTexts();
+  const collapsedLabels = await tierLabels();
+  check(
+    collapsedLabels.length === 0,
+    `collapsed: no tier headers (${collapsedLabels.length} found)`,
+  );
   await page.screenshot({ path: 'docs/research/qa-display-bronze-cards.png' });
 
   const showAll = bronzeSection.locator('button', {
-    hasText: /^Show all \d+ cards$/,
+    hasText: /^Show all \d+ rare cards$/,
   });
   if (await showAll.isVisible().catch(() => false)) {
-    await showAll.click();
-    const headerCount = await bronzeSection.locator('h3').count();
-    check(headerCount > 0, `expanded: ${headerCount} tier header(s) render`);
     check(
-      await labelsOk(),
-      'expanded: no Common/Uncommon/Rare label in section',
+      (await showAll.getAttribute('aria-expanded')) === 'false',
+      'collapsed: toggle reports aria-expanded="false"',
+    );
+    await showAll.click();
+    const expandedLabels = await tierLabels();
+    check(
+      expandedLabels.length > 0,
+      `expanded: ${expandedLabels.length} tier header(s) render`,
+    );
+    check(
+      expandedLabels.every((l) => TOP_RARITIES.includes(l.trim())),
+      `expanded: every tier label is Mythical+ (${expandedLabels.join(', ')})`,
+    );
+    check(
+      (await showAll.getAttribute('aria-expanded')) === 'true',
+      'expanded: toggle reports aria-expanded="true"',
     );
     await page.screenshot({
       path: 'docs/research/qa-display-bronze-expanded.png',
     });
   } else {
-    console.log(
-      'INFO: no "Show all" button (pool <= 6 Mythical+ cards) — teaser is the whole set',
+    // NOT a pass: the expand interaction is the headline change of this PR and
+    // no local pack seeds >6 Mythical+ cards, so it goes unverified here. The
+    // collapsed/expanded contract is unit-tested only if a component harness
+    // exists; today it does not (see the PR discussion).
+    skip(
+      'expand path: bronze-pack has <= 6 Mythical+ cards, so no "Show all" toggle renders — tier shelves, aria-expanded and the "Show less" label were NOT exercised',
     );
   }
 
@@ -245,7 +280,11 @@ try {
 }
 
 if (failures > 0) {
-  console.error(`\n${failures} assertion(s) FAILED`);
+  console.error(`\n${failures} assertion(s) FAILED, ${skips} skipped`);
   process.exit(1);
 }
-console.log('\nAll display-change QA assertions passed.');
+console.log(
+  skips > 0
+    ? `\nDisplay-change QA: every assertion that RAN passed, but ${skips} check(s) were SKIPPED and are unverified — see the SKIP line(s) above.`
+    : '\nAll display-change QA assertions passed; nothing skipped.',
+);
