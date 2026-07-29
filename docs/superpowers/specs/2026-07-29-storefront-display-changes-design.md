@@ -50,6 +50,16 @@ because the backend computes `marketPriceMyr = FMV × FX × multiplier`.
 
 `HeroBoard.tsx` and `TierShelf.tsx` need no edit — same `PackCard` shape.
 
+**Verified: pools are per-pack.** The `ponytail:` comment at `page.tsx:38` and
+the "Phase 5a" note at `packs.ts:225` both claim every pack shares one card
+pool — that is **stale**. `GET /store/packs/:slug` queries
+`listPackOdds({ pack_id: slug })`
+(`backend/.../api/store/packs/[slug]/route.ts:71`), which is genuinely
+pack-scoped, and live data confirms it (Diamond's top card RM 22,377.23 vs
+Bronze's RM 9,869.90). So `pool[0]` differs per pack and the shelf will not
+render one identical chase value down every row. Fix the two stale comments
+while in the file.
+
 ### Consequences (accepted)
 
 - A pack with no admin-curated Top Hits now shows a chase value where it

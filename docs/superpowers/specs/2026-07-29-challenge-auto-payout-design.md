@@ -238,3 +238,8 @@ nothing.
 
 Ship **after** Spec A and Spec B. This is the only one of the three that moves
 money; keeping it on its own branch and its own PR keeps the revert cheap.
+
+**Conflict warning:** Spec A edits `src/lib/notifications/copy.ts` (stripping
+`href: '/vip'` from the VIP templates) and this spec adds a
+`challenge_payout` template to the same file. Branch C off post-A `master`, or
+resolve by hand.

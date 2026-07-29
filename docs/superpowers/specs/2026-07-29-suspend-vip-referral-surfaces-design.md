@@ -25,8 +25,23 @@ level, and `/me` still shows the level number and progress bar. Only the
 | --- | --- |
 | Dead routes: 404 or redirect? | **Delete the route directories → 404.** Matches the 2026-07-20 orphan-route purge precedent. Old `/invite/<handle>` links in the wild will 404. |
 | Feature flags? | **No.** `src/lib/features.ts` was deleted 2026-07-20 for exactly this reason — flags that gate removed routes are dead weight. Git history is the undo. |
-| Backend grants? | **Unchanged.** `grantLevelUpRewards` keeps writing `vip_reward_grant` rows; the daily-box roll keeps working. Nothing renders them. Resuming later is pure UI work with no backfill. |
-| Server actions / libs? | **Left in place, unreferenced** (`lib/actions/daily.ts`, `lib/actions/vip.ts`, `lib/actions/referral.ts`, `lib/referral-cookie.ts`). `lib/actions/vip.ts` stays *referenced* — `/me` still calls `getVip()`. Deleting the others buys nothing and makes the restore a rewrite instead of a revert. |
+| Server actions / libs? | **Left in place, unreferenced** (`lib/actions/daily.ts`, `lib/actions/referral.ts`, `lib/referral-cookie.ts`). `lib/actions/vip.ts` stays *referenced* — `/me` still calls `getVip()`. Deleting the others buys nothing and makes the restore a rewrite instead of a revert. |
+
+### Assumption — NOT answered by the operator
+
+**Backend VIP grants keep running unchanged.** `grantLevelUpRewards` keeps
+writing `vip_reward_grant` rows on level-up; the daily-box roll keeps working.
+Nothing renders them.
+
+This was asked and the answer that came back described the `/me` UI ("still
+shows the progress, just unable to tap into the VIP pages") — which settles the
+display question, not the grant question. Defaulted to *keep granting* because
+it makes unsuspending a UI-only change with no backfill: every level a customer
+crossed while suspended already has its grant row waiting.
+
+**Say so if you want grants stopped instead** — that is a one-line change in
+`grantLevelUpRewards`, but levels crossed during the suspension would then never
+pay, and resuming would need a backfill script.
 | `/me` VIP card | Keeps the LV number, progress bar, and threshold labels. Loses the link, the voucher tail, and the daily-box line. |
 
 ## Changes
@@ -34,17 +49,28 @@ level, and `/me` still shows the level number and progress bar. Only the
 ### 1. Routes deleted
 
 ```
-src/app/(account)/vip/          (page.tsx, VipBenefits.tsx, VipVouchers.tsx,
-                                 VipLevelCarousel.tsx, vip-benefits.ts, __tests__/)
+src/app/(account)/vip/page.tsx
+src/app/(account)/vip/VipBenefits.tsx
+src/app/(account)/vip/VipVouchers.tsx
+src/app/(account)/vip/VipLevelCarousel.tsx
 src/app/(account)/referrals/    (page.tsx, ReferralsClient.tsx)
 src/app/vouchers/
 src/app/daily/                  (page.tsx, DailyClient.tsx)
 src/app/invite/[handle]/        (page.tsx, InviteClient.tsx)
 ```
 
-`src/app/(account)/vip/__tests__/vip-benefits.test.ts` goes with the route it
-covers. `src/lib/actions/__tests__/vip-levels.test.ts` and `vip-map.test.ts`
-**stay** — they cover level maths, which is still live.
+**`src/app/(account)/vip/vip-benefits.ts` and its `__tests__/vip-benefits.test.ts`
+stay.** They are the benefit-copy data map, not UI — deleting them would make
+resuming a data-restore rather than the pure-UI change this whole no-flags
+decision rests on. They keep their current path (unreferenced but tested), so
+restoring `/vip` is: re-add the page + its three components, done.
+
+`src/lib/actions/__tests__/vip-levels.test.ts` and `vip-map.test.ts` also stay —
+they cover level maths, which is still live.
+
+Next.js only treats `page.tsx`/`route.ts` as routable, so leaving non-route
+files under `(account)/vip/` does not resurrect the URL. Verify the 404 anyway
+(see Verification).
 
 ### 2. Entry points stripped
 
