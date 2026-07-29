@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { poolValueRange } from '../packs-format';
+import { poolValueRange, tierValueRanges } from '../packs-format';
 
 describe('poolValueRange', () => {
   it('returns the min and max of priced cards, formatted', () => {
@@ -41,5 +41,41 @@ describe('poolValueRange', () => {
       min: 'RM 1,200.00',
       max: 'RM 1,200.00',
     });
+  });
+});
+
+describe('tierValueRanges', () => {
+  const pool = [
+    { rarity: 'Immortal', value: 'RM 22,377.23' },
+    { rarity: 'Immortal', value: 'RM 9,869.90' },
+    { rarity: 'Rare', value: 'RM 1,676.90' },
+    { rarity: 'Common', value: '—' },
+  ];
+
+  it('gives each tier its own min–max, independent of the pack-wide range', () => {
+    expect(tierValueRanges(pool)).toEqual({
+      Immortal: { min: 'RM 9,869.90', max: 'RM 22,377.23' },
+      Rare: { min: 'RM 1,676.90', max: 'RM 1,676.90' },
+    });
+  });
+
+  it('omits tiers with nothing priced, and unknown tier strings', () => {
+    const ranges = tierValueRanges([
+      ...pool,
+      { rarity: 'Epic', value: 'RM 500.00' }, // pre-rename tier, no longer valid
+    ]);
+    // Common is present in the pool but unpriced; Epic is not a tier at all.
+    expect(ranges).not.toHaveProperty('Common');
+    expect(ranges).not.toHaveProperty('Epic');
+    expect(ranges).not.toHaveProperty('Legendary');
+  });
+
+  it('never disagrees with poolValueRange on the overall span', () => {
+    const ranges = tierValueRanges(pool);
+    const mins = Object.values(ranges).map((r) => r.min);
+    const maxes = Object.values(ranges).map((r) => r.max);
+    const overall = poolValueRange(pool);
+    expect(mins).toContain(overall?.min);
+    expect(maxes).toContain(overall?.max);
   });
 });

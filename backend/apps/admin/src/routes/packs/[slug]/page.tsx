@@ -18,7 +18,6 @@ import {
   Checkbox,
   toast,
   clx,
-  usePrompt,
 } from '@medusajs/ui';
 import { ArrowLeft } from '@medusajs/icons';
 import type {
@@ -28,10 +27,12 @@ import type {
   PublishedOdds,
 } from '../../../lib/packs-api';
 import {
+  DEFAULT_TIER_PCT,
   MIN_PCT,
-  proposeRarities,
   RARITIES,
-  solveOddsForRtp,
+  type OddsRarity,
+  type TierSplitResult,
+  type TierSplitTier,
 } from '@acme/odds-math';
 import {
   useCards,
@@ -44,16 +45,17 @@ import {
 } from '../../../lib/queries';
 import { fmtPct, rm } from '../../../lib/format';
 import {
-  applyRarityProposals,
-  applySolveResult,
-  hasMaterializedSetOverrides,
+  applyTierSplit,
   mapOddsToRows,
   previewSets,
+  publishedEvByTier,
   publishedEvPreview,
   rowsToSetEntries,
-  rowsToSolveInput,
+  setEvByTier,
   setEvRtp,
+  tierSplit,
   type EditRow,
+  type TierEv,
 } from '../../../lib/odds-rows';
 import { resolveImageUrl } from '../../../lib/image-url';
 import { shouldSeedBuffer } from '../../../lib/seed-buffer';
@@ -83,6 +85,11 @@ const pendingRow = (c: AdminCard): EditRow => ({
   pending: true,
 });
 
+/** The house recipe as free-typed strings — the editor's starting point and
+ *  what "Reset to house default" restores. */
+const houseDefaults = (): Record<string, string> =>
+  Object.fromEntries(RARITIES.map((r) => [r, String(DEFAULT_TIER_PCT[r])]));
+
 /**
  * Pack odds editor (`/packs/:slug`): edit a pack's prize-pool membership and
  * per-card odds. The odds buffer seeds once per slug and reseeds after a pool
@@ -97,21 +104,27 @@ const PackOddsEditorPage = () => {
   const saveOdds = useSaveOdds();
   const saveMembersMut = useSaveMembers();
   const saveTopHits = useSaveTopHits();
-  const prompt = usePrompt();
   const [rows, setRows] = useState<EditRow[] | null>(null);
   const saving = saveOdds.isPending;
 
-  // Auto-split (target-RTP) staging — local only until Save. `targetRtpInput`
-  // seeds from the pack's stored target_rtp_bps; the report says which chase
-  // cards got pinned at the storable floor and why, since that is how an
-  // operator learns a pack is mispriced.
-  const [targetRtpInput, setTargetRtpInput] = useState('70');
-  const [autoSplitError, setAutoSplitError] = useState<string | null>(null);
-  const [autoSplitReport, setAutoSplitReport] = useState<{
-    achievedRtp: number;
-    floored: { name: string; fairPct: number }[];
-    tierCollapse: string[];
-  } | null>(null);
+  // The house odds recipe: each tier's share of the 100%, free-typed so the
+  // operator can retune it per pack. Feeds the win rates below AND the public
+  // published-odds inputs — the two used to be filled in by hand and drift
+  // apart. Local to the editor: every pack opens on the house default.
+  const [defaults, setDefaults] =
+    useState<Record<string, string>>(houseDefaults);
+  // A half-typed field ('' or '1.') is NaN — coerced to 0 here rather than
+  // asserted away, so the Record<OddsRarity, number> type stays honest.
+  const defaultsNum = useMemo(
+    () =>
+      Object.fromEntries(
+        RARITIES.map((r) => {
+          const n = Number(defaults[r]);
+          return [r, Number.isFinite(n) ? n : 0];
+        }),
+      ) as Record<OddsRarity, number>,
+    [defaults],
+  );
   const packTitle = data?.pack.title ?? '';
   const packStatus = data?.pack.status ?? '';
 
@@ -207,14 +220,10 @@ const PackOddsEditorPage = () => {
     // that state var will not reflect this `setSeededFrom` call until the
     // NEXT render, so testing it here would silently skip the seed on the
     // very first load (`shouldSeedBuffer` also re-gates false by then).
-    if (data.pack.target_rtp_bps != null) {
-      setTargetRtpInput(String(data.pack.target_rtp_bps / 100));
-    }
-    // Reseeding means a different snapshot is now authoritative (new pack,
-    // or membership just changed) — a report/error from the previous buffer
-    // no longer describes these rows.
-    setAutoSplitError(null);
-    setAutoSplitReport(null);
+    // The tier table resets on reseed: the router reuses this component across
+    // :slug changes, so a share edited on pack A would otherwise follow the
+    // operator to pack B while the panel still calls itself the house recipe.
+    setDefaults(houseDefaults());
     const seeded = mapOddsToRows(data.odds);
     if (pendingAdd.length === 0) {
       setRows(seeded);
@@ -316,11 +325,29 @@ const PackOddsEditorPage = () => {
     }
   };
 
+  // The default-odds split against the pool's CURRENT rarities. Null until the
+  // pool loads — an empty buffer would report every tier as "no cards".
+  const split = useMemo(
+    () => (rows === null ? null : tierSplit(rows, defaultsNum)),
+    [rows, defaultsNum],
+  );
+
+  // THE rows: unlocked non-Common cards take their tier's default share, live.
+  // There is no "apply" step — an unlocked card simply follows the recipe, the
+  // same way an unlocked Common simply balances. Lock is the ONLY way a rate
+  // gets typed by hand, which makes the switch mean one thing instead of two.
+  //
+  // Everything downstream (preview, EV/RTP, save) reads THIS, never `rows`, so
+  // what the table shows is exactly what gets persisted.
+  const effective = useMemo(
+    () => (rows && split ? applyTierSplit(rows, split) : (rows ?? [])),
+    [rows, split],
+  );
+
   // Live preview of ALL THREE odds sets — the SAME math the save workflow runs
-  // (computeSetWeights), so what the operator sees in "After save" is exactly
-  // what gets persisted. Changing a rate or a rarity re-splits the unlocked
-  // Common balancer's share immediately, in every set that resolves through it.
-  const preview = useMemo(() => previewSets(rows ?? []), [rows]);
+  // (computeSetWeights), so the rates on screen are exactly what gets persisted.
+  // Editing a share or a rarity re-splits every dependent row immediately.
+  const preview = useMemo(() => previewSets(effective), [effective]);
 
   // Per-set readouts: Σ (100% when valid) and the theoretical EV/RTP that set
   // pays. All null while the preview is errored — nothing would be saved, so a
@@ -329,16 +356,23 @@ const PackOddsEditorPage = () => {
     () =>
       ([1, 2, 3] as const).map((n) => {
         const pct = preview.pct[n];
-        const money = setEvRtp(rows ?? [], pct, data?.pack.price ?? 0);
+        const money = setEvRtp(effective, pct, data?.pack.price ?? 0);
         const sum = [...pct.values()].reduce((s, p) => s + p, 0);
         return {
           n,
           total: pct.size === 0 ? null : Math.round(sum * 100) / 100,
           ev: money?.ev ?? null,
           rtp: money?.rtp ?? null,
+          // Whether this set has a table of its OWN, rather than inheriting
+          // 3 → 2 → 1. Keyed off materialization, never off "its EV matches
+          // set 1" — EV is rounded to the ringgit, so two genuinely different
+          // tables can collide there and a live alternate set would go unlisted.
+          materialized:
+            n === 1 ||
+            effective.some((r) => (n === 2 ? r.pctInput2 : r.pctInput3) !== ''),
         };
       }),
-    [preview, rows, data],
+    [preview, effective, data],
   );
 
   const setRow = (cardId: string, patch: Partial<EditRow>) =>
@@ -348,63 +382,20 @@ const PackOddsEditorPage = () => {
         null,
     );
 
-  // Locking captures the card's CURRENT real % so the operator can pin a card to
-  // preserve it (rather than letting the even-split flatten it).
-  const toggleLock = (r: EditRow) =>
+  // Locking hands the operator the wheel, pre-filled with the rate the card has
+  // right now — rounded to the 2dp the 1 bps storage floor can actually hold, so
+  // a derived 0.0333 does not land in the input as an out-of-step value.
+  const toggleLock = (r: EditRow) => {
+    // While the preview is errored `previewSets` returns empty maps, so fall
+    // back to the card's last SAVED rate. Without this the newly editable field
+    // would open on whatever stale text `pctInput` still held — a number the
+    // operator never typed and the table never showed.
+    const derived = preview.pct[1].get(r.card_id) ?? r.currentPct;
     setRow(r.card_id, {
       locked: !r.locked,
-      pctInput: !r.locked ? String(r.currentPct) : r.pctInput,
-    });
-
-  // Auto-split: propose value-banded rarities, solve the chase budget for the
-  // target RTP, and stage BOTH as unsaved edits. Nothing is persisted until
-  // the operator hits save — the report is how they learn the pack is
-  // mispriced. Set 1 ONLY: rowsToSolveInput always pins locked rows at their
-  // SET-1 rate regardless of which set is passed, so auto-splitting set 2/3
-  // would compute EV off the wrong pinned rate (see odds-rows.ts).
-  const autoSplit = async (set: 1 | 2 | 3) => {
-    if (!rows || !seededFrom) return;
-    setAutoSplitError(null);
-    setAutoSplitReport(null);
-
-    // applyRarityProposals below rewrites `rarity`, a single per-pack column
-    // shared by all three odds sets. If set 2/3 already have materialized
-    // rates, a rarity change can silently re-pin a former Common-balancer
-    // card at a stale rate instead of letting it keep balancing (see
-    // hasMaterializedSetOverrides in odds-rows.ts) — confirm before risking
-    // that corruption.
-    if (hasMaterializedSetOverrides(rows)) {
-      const ok = await prompt({
-        title: t('packs.editor.autoSplit'),
-        description: t('packs.editor.autoSplitSetWarning'),
-        variant: 'confirmation',
-      });
-      if (!ok) return;
-    }
-
-    const price = seededFrom.pack.price;
-    const target = Number(targetRtpInput) / 100;
-
-    const proposals = proposeRarities(
-      rows.map((r) => ({ card_id: r.card_id, value: r.market_value })),
-      price,
-    );
-    const retiered = applyRarityProposals(rows, proposals);
-
-    const result = solveOddsForRtp(rowsToSolveInput(retiered), price, target);
-    if (result.error) {
-      setAutoSplitError(result.error);
-      return;
-    }
-
-    setRows(applySolveResult(retiered, result, set));
-    setAutoSplitReport({
-      achievedRtp: result.achievedRtp ?? 0,
-      floored: result.floored.map((f) => ({
-        name: rows.find((r) => r.card_id === f.card_id)?.name ?? f.card_id,
-        fairPct: f.fairPct,
-      })),
-      tierCollapse: result.tierCollapse,
+      ...(r.locked
+        ? {}
+        : { pctInput: String(Math.round(derived * 100) / 100) }),
     });
   };
 
@@ -428,21 +419,12 @@ const PackOddsEditorPage = () => {
         // goes straight to the odds phase.
         setRows((prev) => prev?.map((r) => ({ ...r, pending: false })) ?? null);
       }
-      const entries = rowsToSetEntries(rows);
-      // Blank/invalid target must not silently 400 the whole save — omit it
-      // (the server keeps the pack's stored target) rather than send a value
-      // it will reject. Bounds mirror coerceTargetRtpBps in
-      // api/admin/packs/[slug]/odds/route.ts (1-1,000,000 bps).
-      const targetBps = Math.round(Number(targetRtpInput) * 100);
-      const res = await saveOdds.mutateAsync({
-        slug,
-        entries,
-        ...(Number.isFinite(targetBps) &&
-        targetBps >= 1 &&
-        targetBps <= 1_000_000
-          ? { target_rtp_bps: targetBps }
-          : {}),
-      });
+      // `effective`, not `rows` — unlocked non-Common rows carry no hand-typed
+      // rate any more, so submitting the raw buffer would persist whatever
+      // stale text was last in `pctInput` instead of the derived share on
+      // screen. This is the one line that keeps preview and storage identical.
+      const entries = rowsToSetEntries(effective);
+      const res = await saveOdds.mutateAsync({ slug, entries });
       const byId = new Map(res.odds.map((c) => [c.card_id, c]));
       // Set 1 only — that is all the response carries. The set-2/3 inputs are
       // deliberately left as typed: they ARE what was just saved, and the save
@@ -551,13 +533,25 @@ const PackOddsEditorPage = () => {
         </div>
       )}
 
-      {/* Published odds — the PUBLIC percentages players see. Display-only,
-          fully decoupled from the per-card win rates in the table below. */}
+      {/* The recipe. Drives every unlocked row below, live, and seeds the
+          public odds. */}
+      <DefaultOddsSection
+        defaults={defaults}
+        onChange={(rarity, value) =>
+          setDefaults((m) => ({ ...m, [rarity]: value }))
+        }
+        onReset={() => setDefaults(houseDefaults())}
+        split={split}
+      />
+
+      {/* The PUBLIC percentages players see. Display-only: saving here never
+          touches the per-card win rates in the table below. */}
       {fullPack && (
         <PublishedOddsSection
           key={fullPack.slug}
           pack={fullPack}
           rows={rows ?? []}
+          defaults={defaults}
           saving={updatePack.isPending}
           onSave={async (po) => {
             try {
@@ -576,257 +570,173 @@ const PackOddsEditorPage = () => {
         </div>
       ) : (
         <>
-          {/* What each odds set actually pays back, live against the buffer —
-              the same figures the packs list shows per pack, one click away. */}
-          <div className="flex flex-wrap items-center gap-2 px-6 py-4">
-            {sets.map((s) => (
-              <div
-                key={s.n}
-                className="bg-ui-bg-subtle flex flex-col rounded-lg px-3 py-2"
-              >
-                <Text size="xsmall" className="text-ui-fg-subtle">
-                  {t('packs.editor.set', { n: s.n })} · {t('packs.editor.evRtp')}
-                </Text>
-                <Text size="small" className="tabular-nums">
-                  {s.ev === null || s.rtp === null
+          {/* What each set pays back, broken out by tier — rates and prices
+              side by side don't reveal that a 22% Rare outspends a 0.1%
+              Immortal on a card worth twice as much. Inherited sets are
+              omitted: they ARE set 1. */}
+          <TierEvBreakdown
+            columns={sets
+              .filter((s) => s.materialized)
+              .map((s) => ({
+                key: t('packs.editor.set', { n: s.n }),
+                rows: setEvByTier(effective, preview.pct[s.n]),
+                total:
+                  s.ev === null || s.rtp === null
                     ? '—'
-                    : `${rm(s.ev)} · ${fmtPct(s.rtp)}`}
-                </Text>
-              </div>
-            ))}
-            <Text size="small" className="text-ui-fg-subtle ml-2 max-w-md">
-              {t('packs.editor.setsHint')}
-            </Text>
-            <div className="ml-auto flex items-end gap-x-2">
-              <div>
-                <Label htmlFor="target-rtp" size="xsmall">
-                  {t('packs.editor.targetRtp')}
-                </Label>
-                {/* 0.01-10000% mirrors coerceTargetRtpBps's 1-1,000,000 bps
-                    bound in api/admin/packs/[slug]/odds/route.ts. */}
-                <Input
-                  id="target-rtp"
-                  className="w-24"
-                  type="number"
-                  min={0.01}
-                  max={10000}
-                  step={0.01}
-                  value={targetRtpInput}
-                  onChange={(e) => setTargetRtpInput(e.target.value)}
-                />
-              </div>
-              <Button
-                size="small"
-                variant="secondary"
-                disabled={!rows || saving}
-                onClick={() => autoSplit(1)}
-              >
-                {t('packs.editor.autoSplit')}
-              </Button>
-            </div>
-          </div>
+                    : `${rm(s.ev)} · ${fmtPct(s.rtp)}`,
+              }))}
+          />
 
-          {autoSplitError && (
-            <Alert variant="error" className="mx-6 mb-4">
-              {autoSplitError}
-            </Alert>
-          )}
-          {autoSplitReport && (
-            <Alert variant="warning" className="mx-6 mb-4">
-              <Text size="small" weight="plus">
-                {t('packs.editor.autoSplitDone')}
-              </Text>
-              <Text size="small" className="mt-1">
-                {t('packs.editor.autoSplitRtp', {
-                  rtp: (autoSplitReport.achievedRtp * 100).toFixed(2),
-                  target: targetRtpInput,
-                })}
-              </Text>
-              {autoSplitReport.floored.length > 0 && (
-                <>
-                  <Text size="small" className="mt-1">
-                    {t('packs.editor.autoSplitFloored', {
-                      count: autoSplitReport.floored.length,
-                    })}
-                  </Text>
-                  <ul className="mt-1 list-disc pl-5">
-                    {autoSplitReport.floored.map((f) => (
-                      <li key={f.name}>
-                        <Text size="small">
-                          {t('packs.editor.autoSplitFlooredRow', {
-                            name: f.name,
-                            fair: Math.round(100 / f.fairPct).toLocaleString(),
-                            actual: Math.round(100 / MIN_PCT).toLocaleString(),
-                          })}
-                        </Text>
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              )}
-              {autoSplitReport.tierCollapse.length > 0 && (
-                <Text size="small" className="mt-1">
-                  {t('packs.editor.autoSplitCollapse', {
-                    tiers: autoSplitReport.tierCollapse.join(', '),
-                  })}
-                </Text>
-              )}
-            </Alert>
-          )}
-
-          <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Pack odds table">
-          <Table>
-            <Table.Header>
-              <Table.Row>
-                <Table.HeaderCell>{t('packs.editor.card')}</Table.HeaderCell>
-                <Table.HeaderCell>{t('packs.editor.rarity')}</Table.HeaderCell>
-                <Table.HeaderCell className="text-center">
-                  {t('packs.editor.topHit')}
-                </Table.HeaderCell>
-                <Table.HeaderCell className="text-right">
-                  {t('packs.editor.value')}
-                </Table.HeaderCell>
-                <Table.HeaderCell className="text-right">
-                  {t('packs.editor.current')}
-                </Table.HeaderCell>
-                <Table.HeaderCell className="text-center">
-                  {t('packs.editor.lock')}
-                </Table.HeaderCell>
-                {([1, 2, 3] as const).map((n) => (
-                  <Table.HeaderCell key={n}>
-                    {t('packs.editor.set', { n })}
+          <div
+            className="overflow-x-auto"
+            tabIndex={0}
+            role="region"
+            aria-label="Pack odds table"
+          >
+            <Table>
+              <Table.Header>
+                <Table.Row>
+                  <Table.HeaderCell>{t('packs.editor.card')}</Table.HeaderCell>
+                  <Table.HeaderCell>
+                    {t('packs.editor.rarity')}
                   </Table.HeaderCell>
-                ))}
-                <Table.HeaderCell className="text-right">
-                  {t('packs.editor.result')}
-                </Table.HeaderCell>
-              </Table.Row>
-            </Table.Header>
-            <Table.Body>
-              {rows.map((r) => {
-                const next = preview.pct[1].get(r.card_id) ?? null;
-                const changed =
-                  next !== null && Math.abs(next - r.currentPct) >= 0.005;
-                return (
-                  <Table.Row key={r.card_id}>
-                    <Table.Cell>
-                      <div className="flex items-center gap-3">
-                        <img
-                          src={resolveImageUrl(r.slab_image || r.image)}
-                          alt=""
-                          className="h-10 w-8 shrink-0 rounded object-contain"
-                        />
-                        <div className="flex flex-col items-start gap-y-0.5">
-                          <span className="max-w-[18rem] truncate">
-                            {r.name}
-                          </span>
-                          {r.pending && (
-                            <Badge size="2xsmall" color="orange">
-                              {t('packs.editor.pendingRow')}
-                            </Badge>
-                          )}
-                          {r.stock !== null && r.stock < 0 ? (
-                            // Wins keep counting below 0 — this is how many
-                            // physical units the operator owes winners.
-                            <span className="text-ui-tag-red-text text-xs font-medium">
-                              {t('packs.editor.unitsOwed', {
-                                count: Math.abs(r.stock),
-                              })}
+                  <Table.HeaderCell className="text-center">
+                    {t('packs.editor.topHit')}
+                  </Table.HeaderCell>
+                  <Table.HeaderCell className="text-right">
+                    {t('packs.editor.value')}
+                  </Table.HeaderCell>
+                  <Table.HeaderCell className="text-right">
+                    {t('packs.editor.current')}
+                  </Table.HeaderCell>
+                  <Table.HeaderCell className="text-center">
+                    {t('packs.editor.lock')}
+                  </Table.HeaderCell>
+                  {([1, 2, 3] as const).map((n) => (
+                    <Table.HeaderCell key={n}>
+                      {t('packs.editor.set', { n })}
+                    </Table.HeaderCell>
+                  ))}
+                </Table.Row>
+              </Table.Header>
+              <Table.Body>
+                {/* `effective`, not `rows` — the preview, the EV tiles and the
+                    save all read it, so the body must too or the table is one
+                    derivation behind them. Same card_ids either way; edits
+                    still write through `setRow` to `rows`. */}
+                {effective.map((r) => {
+                  return (
+                    <Table.Row key={r.card_id}>
+                      <Table.Cell>
+                        <div className="flex items-center gap-3">
+                          <img
+                            src={resolveImageUrl(r.slab_image || r.image)}
+                            alt=""
+                            className="h-10 w-8 shrink-0 rounded object-contain"
+                          />
+                          <div className="flex flex-col items-start gap-y-0.5">
+                            <span className="max-w-[18rem] truncate">
+                              {r.name}
                             </span>
-                          ) : (
-                            r.stock === 0 && (
-                              <span className="text-ui-tag-orange-text text-xs">
-                                {t('packs.editor.buybackOnly')}
+                            {r.pending && (
+                              <Badge size="2xsmall" color="orange">
+                                {t('packs.editor.pendingRow')}
+                              </Badge>
+                            )}
+                            {r.stock !== null && r.stock < 0 ? (
+                              // Wins keep counting below 0 — this is how many
+                              // physical units the operator owes winners.
+                              <span className="text-ui-tag-red-text text-xs font-medium">
+                                {t('packs.editor.unitsOwed', {
+                                  count: Math.abs(r.stock),
+                                })}
                               </span>
-                            )
-                          )}
+                            ) : (
+                              r.stock === 0 && (
+                                <span className="text-ui-tag-orange-text text-xs">
+                                  {t('packs.editor.buybackOnly')}
+                                </span>
+                              )
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    </Table.Cell>
-                    <Table.Cell>
-                      <Select
-                        size="small"
-                        value={r.rarity}
-                        onValueChange={(v) => setRow(r.card_id, { rarity: v })}
-                      >
-                        <Select.Trigger
-                          className="w-32"
-                          aria-label={`${t('packs.editor.rarity')}: ${r.name}`}
+                      </Table.Cell>
+                      <Table.Cell>
+                        <Select
+                          size="small"
+                          value={r.rarity}
+                          onValueChange={(v) =>
+                            setRow(r.card_id, { rarity: v })
+                          }
                         >
-                          <Select.Value />
-                        </Select.Trigger>
-                        <Select.Content>
-                          {RARITIES.map((rarity) => (
-                            <Select.Item key={rarity} value={rarity}>
-                              {rarity}
-                            </Select.Item>
-                          ))}
-                        </Select.Content>
-                      </Select>
-                    </Table.Cell>
-                    <Table.Cell className="text-center">
-                      <Input
-                        size="small"
-                        inputMode="numeric"
-                        placeholder="—"
-                        className="mx-auto w-14 text-center tabular-nums"
-                        value={r.topHitInput}
-                        aria-label={`${t('packs.editor.topHit')}: ${r.name}`}
-                        onChange={(e) =>
-                          setTopHitInput(r.card_id, e.target.value)
-                        }
-                        onBlur={() => void commitTopHits()}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') e.currentTarget.blur();
-                        }}
-                      />
-                    </Table.Cell>
-                    <Table.Cell className="text-ui-fg-subtle text-right tabular-nums">
-                      {rm(r.market_value)}
-                    </Table.Cell>
-                    <Table.Cell className="text-ui-fg-subtle text-right tabular-nums">
-                      {fmtPct(r.currentPct)}
-                    </Table.Cell>
-                    <Table.Cell className="text-center">
-                      <Switch
-                        checked={r.locked}
-                        aria-label={`${t('packs.editor.lock')}: ${r.name}`}
-                        onCheckedChange={() => toggleLock(r)}
-                      />
-                    </Table.Cell>
-                    {([1, 2, 3] as const).map((n) => (
-                      <SetRateCell
-                        key={n}
-                        set={n}
-                        row={r}
-                        effective={preview.pct[n].get(r.card_id) ?? null}
-                        onChange={(v) =>
-                          setRow(
-                            r.card_id,
-                            n === 1
-                              ? { pctInput: v }
-                              : n === 2
-                                ? { pctInput2: v }
-                                : { pctInput3: v },
-                          )
-                        }
-                      />
-                    ))}
-                    <Table.Cell
-                      className={clx(
-                        'text-right tabular-nums',
-                        changed
-                          ? 'text-ui-fg-base font-medium'
-                          : 'text-ui-fg-subtle',
-                      )}
-                    >
-                      {next === null ? '—' : fmtPct(next)}
-                    </Table.Cell>
-                  </Table.Row>
-                );
-              })}
-            </Table.Body>
-          </Table>
+                          <Select.Trigger
+                            className="w-32"
+                            aria-label={`${t('packs.editor.rarity')}: ${r.name}`}
+                          >
+                            <Select.Value />
+                          </Select.Trigger>
+                          <Select.Content>
+                            {RARITIES.map((rarity) => (
+                              <Select.Item key={rarity} value={rarity}>
+                                {rarity}
+                              </Select.Item>
+                            ))}
+                          </Select.Content>
+                        </Select>
+                      </Table.Cell>
+                      <Table.Cell className="text-center">
+                        <Input
+                          size="small"
+                          inputMode="numeric"
+                          placeholder="—"
+                          className="mx-auto w-14 text-center tabular-nums"
+                          value={r.topHitInput}
+                          aria-label={`${t('packs.editor.topHit')}: ${r.name}`}
+                          onChange={(e) =>
+                            setTopHitInput(r.card_id, e.target.value)
+                          }
+                          onBlur={() => void commitTopHits()}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') e.currentTarget.blur();
+                          }}
+                        />
+                      </Table.Cell>
+                      <Table.Cell className="text-ui-fg-subtle text-right tabular-nums">
+                        {rm(r.market_value)}
+                      </Table.Cell>
+                      <Table.Cell className="text-ui-fg-subtle text-right tabular-nums">
+                        {fmtPct(r.currentPct)}
+                      </Table.Cell>
+                      <Table.Cell className="text-center">
+                        <Switch
+                          checked={r.locked}
+                          aria-label={`${t('packs.editor.lock')}: ${r.name}`}
+                          onCheckedChange={() => toggleLock(r)}
+                        />
+                      </Table.Cell>
+                      {([1, 2, 3] as const).map((n) => (
+                        <SetRateCell
+                          key={n}
+                          set={n}
+                          row={r}
+                          effective={preview.pct[n].get(r.card_id) ?? null}
+                          onChange={(v) =>
+                            setRow(
+                              r.card_id,
+                              n === 1
+                                ? { pctInput: v }
+                                : n === 2
+                                  ? { pctInput2: v }
+                                  : { pctInput3: v },
+                            )
+                          }
+                        />
+                      ))}
+                    </Table.Row>
+                  );
+                })}
+              </Table.Body>
+            </Table>
           </div>
 
           <div className="flex flex-col gap-3 px-6 py-4">
@@ -837,22 +747,25 @@ const PackOddsEditorPage = () => {
             )}
             <div className="flex items-center justify-between">
               {/* Every set must total 100% — the balancer guarantees it, so a
-                  reading that is not 100 means the preview refused to resolve. */}
-              <div className="text-ui-fg-subtle flex gap-6 text-sm tabular-nums">
-                {sets.map((s) => (
-                  <span key={s.n}>
-                    {t('packs.editor.set', { n: s.n })}:{' '}
-                    <span
-                      className={
-                        s.total === 100
-                          ? 'text-ui-fg-base'
-                          : 'text-ui-tag-orange-text'
-                      }
-                    >
-                      {s.total === null ? '—' : fmtPct(s.total)}
+                  reading that is not 100 means the preview refused to resolve.
+                  Inherited sets are omitted: they are set 1 by definition. */}
+              <div className="text-ui-fg-subtle flex gap-5 text-sm tabular-nums">
+                {sets
+                  .filter((s) => s.materialized)
+                  .map((s) => (
+                    <span key={s.n}>
+                      {t('packs.editor.set', { n: s.n })}{' '}
+                      <span
+                        className={
+                          s.total === 100
+                            ? 'text-ui-fg-base'
+                            : 'text-ui-tag-orange-text'
+                        }
+                      >
+                        {s.total === null ? '—' : fmtPct(s.total)}
+                      </span>
                     </span>
-                  </span>
-                ))}
+                  ))}
               </div>
               <Button
                 variant="primary"
@@ -910,7 +823,9 @@ const PackOddsEditorPage = () => {
                     size="small"
                     variant="secondary"
                     onClick={() =>
-                      setSelected(new Set((allCards ?? []).map((c) => c.handle)))
+                      setSelected(
+                        new Set((allCards ?? []).map((c) => c.handle)),
+                      )
                     }
                   >
                     Select all
@@ -969,16 +884,244 @@ const PackOddsEditorPage = () => {
   );
 };
 
+// ── Per-tier EV breakdown ────────────────────────────────────────────────────
+// One tier per row, one odds SET per column, so "where does the payout come
+// from" is a glance instead of arithmetic. The published (public) EV gets the
+// same per-tier split, but printed under its own inputs rather than here — that
+// section already has a labelled tier grid, and repeating the labels to reuse
+// this component would cost more space than it saves.
+//
+// Tiers with no card in the pool are dropped entirely rather than rendered as
+// '—': an empty ladder rung is noise, and the Default odds panel above already
+// says which tiers are empty.
+const TierEvBreakdown = ({
+  columns,
+}: {
+  columns: { key: string; rows: TierEv[]; total: string }[];
+}) => {
+  const { t } = useTranslation();
+  if (columns.length === 0) return null;
+  const live = RARITIES.filter((r) =>
+    columns.some((c) => c.rows.find((x) => x.rarity === r)?.ev != null),
+  );
+  if (live.length === 0) return null;
+
+  return (
+    <div className="px-6 py-3">
+      {/* CSS grid for the layout, ARIA table roles for the semantics — without
+          them a screen reader reads the cells as one flat run with no idea
+          which tier or which set a figure belongs to. */}
+      <div
+        role="table"
+        aria-label={t('packs.editor.evByTier')}
+        className="grid w-fit gap-x-6 gap-y-0.5 text-sm tabular-nums"
+        style={{
+          gridTemplateColumns: `auto repeat(${columns.length}, minmax(0, 1fr))`,
+        }}
+      >
+        {columns.length > 1 && (
+          <div role="row" className="contents">
+            <span role="columnheader" />
+            {columns.map((c) => (
+              <span
+                key={c.key}
+                role="columnheader"
+                className="text-ui-fg-muted text-right text-xs uppercase"
+              >
+                {c.key}
+              </span>
+            ))}
+          </div>
+        )}
+        {live.map((rarity) => (
+          <div role="row" className="contents" key={rarity}>
+            <span role="rowheader" className="text-ui-fg-subtle">
+              {rarity}
+            </span>
+            {columns.map((c) => {
+              const ev = c.rows.find((x) => x.rarity === rarity)?.ev ?? null;
+              return (
+                <span key={c.key} role="cell" className="text-right">
+                  {ev === null ? '—' : rm(ev)}
+                </span>
+              );
+            })}
+          </div>
+        ))}
+        <div role="row" className="contents">
+          <span
+            role="rowheader"
+            className="text-ui-fg-base border-ui-border-base mt-1 border-t pt-1"
+          >
+            {t('packs.editor.evRtp')}
+          </span>
+          {columns.map((c) => (
+            <span
+              key={c.key}
+              role="cell"
+              className="text-ui-fg-base border-ui-border-base mt-1 border-t pt-1 text-right font-medium"
+            >
+              {c.total}
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ── Default odds (the recipe) ────────────────────────────────────────────────
+// Each tier owns a fixed share of the 100%; the cards in a tier split it evenly
+// (2 Immortals → 0.05% each). There is no apply step — every unlocked row in the
+// table below follows these numbers live. The same numbers seed the published
+// odds, so the secret rates and the public ones start in sync.
+const DefaultOddsSection = ({
+  defaults,
+  onChange,
+  onReset,
+  split,
+}: {
+  defaults: Record<string, string>;
+  onChange: (rarity: OddsRarity, value: string) => void;
+  onReset: () => void;
+  /** Live preview of the split against the pool's CURRENT rarities. Null while
+   *  the pool is still loading — the shares stay editable, the explanation of
+   *  where they land waits until there are cards to explain. */
+  split: TierSplitResult | null;
+}) => {
+  const { t } = useTranslation();
+  const total =
+    Math.round(
+      RARITIES.reduce((s, r) => s + (Number(defaults[r]) || 0), 0) * 100,
+    ) / 100;
+  const byRarity = new Map((split?.tiers ?? []).map((x) => [x.rarity, x]));
+  const noBalancer =
+    split !== null && (byRarity.get('Common')?.balancerCount ?? 0) === 0;
+  const floored = (split?.tiers ?? []).filter((x) => x.floored);
+  const zeroed = (split?.tiers ?? []).filter((x) => x.zeroed);
+  const overspent = (split?.tiers ?? []).filter((x) => x.overspent);
+
+  /** The per-tier line under each input. Says what the tier's cards actually
+   *  get, including when locks have eaten the share — the panel contradicting
+   *  the table below is worse than no panel. */
+  const tierNote = (r: OddsRarity, tier: TierSplitTier | undefined) => {
+    if (split === null || r === 'Common') return null;
+    if (!tier || (tier.count === 0 && tier.lockedCount === 0)) {
+      return t('packs.defaults.perCardEmpty');
+    }
+    if (tier.count === 0) {
+      return t('packs.defaults.allLocked', { n: tier.lockedCount });
+    }
+    const each = t('packs.defaults.perCard', {
+      n: tier.count,
+      pct: fmtPct(tier.perCardPct),
+    });
+    return tier.lockedCount > 0
+      ? `${each} · ${t('packs.defaults.plusLocked', {
+          n: tier.lockedCount,
+          pct: fmtPct(Math.round(tier.lockedPct * 100) / 100),
+        })}`
+      : each;
+  };
+
+  return (
+    <div className="px-6 py-4">
+      <div className="flex items-center justify-between gap-4">
+        <Heading level="h3">{t('packs.defaults.title')}</Heading>
+        <Button size="small" variant="transparent" onClick={onReset}>
+          {t('packs.defaults.reset')}
+        </Button>
+      </div>
+
+      {/* One row of shares. The per-card result lives under each field so the
+          "0.1% across 3 cards" arithmetic never has to be done by hand. */}
+      <div className="mt-3 grid grid-cols-3 gap-x-3 gap-y-2 lg:grid-cols-6">
+        {RARITIES.map((r) => {
+          const tier = byRarity.get(r);
+          const each = tierNote(r, tier);
+          return (
+            <div key={r} className="flex flex-col gap-y-1">
+              <Label size="xsmall" htmlFor={`default-tier-${r}`}>
+                {r}
+              </Label>
+              <Input
+                id={`default-tier-${r}`}
+                size="small"
+                type="number"
+                min={0}
+                max={100}
+                step={0.01}
+                value={defaults[r] ?? ''}
+                onChange={(e) => onChange(r, e.target.value)}
+                className="tabular-nums"
+              />
+              <Text size="xsmall" className="text-ui-fg-muted">
+                {r === 'Common' ? t('packs.editor.balancer') : (each ?? ' ')}
+              </Text>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* One status line, not four. Everything that needs saying about where
+          the shares actually landed says it here. */}
+      <Text size="xsmall" className="text-ui-fg-subtle mt-2">
+        <span className={total === 100 ? undefined : 'text-ui-tag-orange-text'}>
+          {t('packs.defaults.total', { total })}
+        </span>
+        {(split?.unusedPct ?? 0) > 0 &&
+          ` · ${t('packs.defaults.unused', {
+            pct: fmtPct(Math.round((split?.unusedPct ?? 0) * 100) / 100),
+          })}`}
+      </Text>
+
+      {/* Everything that makes a tier NOT do what its number says, in one
+          place: a floored tier costs more than its share, a zeroed one makes
+          its cards unpullable, an overspent one has locks past its budget, and
+          without a balancer nothing absorbs the remainder. */}
+      {(floored.length > 0 ||
+        zeroed.length > 0 ||
+        overspent.length > 0 ||
+        noBalancer) && (
+        <Alert variant="warning" className="mt-3">
+          {[
+            floored.length > 0 &&
+              t('packs.defaults.floored', {
+                tiers: floored.map((x) => x.rarity).join(', '),
+                min: fmtPct(MIN_PCT),
+              }),
+            zeroed.length > 0 &&
+              t('packs.defaults.zeroed', {
+                tiers: zeroed.map((x) => x.rarity).join(', '),
+              }),
+            overspent.length > 0 &&
+              t('packs.defaults.overspent', {
+                tiers: overspent.map((x) => x.rarity).join(', '),
+              }),
+            noBalancer && t('packs.defaults.noBalancer'),
+          ]
+            .filter(Boolean)
+            .join(' ')}
+        </Alert>
+      )}
+    </div>
+  );
+};
+
 // ── One win-rate cell ────────────────────────────────────────────────────────
 // A pack carries THREE odds tables; a customer's group decides which one their
 // spin rolls against (set 1 = default).
 //
-//   - An UNLOCKED COMMON is the balancer (§2.4): its rate is whatever the other
-//     rows leave over, in every set. Typing into it would do nothing, so it
-//     renders as the derived value with a badge instead of an input.
-//   - Set 1 stays lock-gated (lock a row to type an exact rate). Sets 2/3 take
-//     an override on any pinned row; BLANK means "inherit the previous set"
-//     (3 → 2 → 1) and shows the resolved % as the placeholder.
+// Rates are DERIVED unless the row is locked — that is the whole model:
+//   - An UNLOCKED COMMON is the balancer (§2.4): it takes whatever the other
+//     rows leave over, in every set.
+//   - Any other UNLOCKED row takes its tier's default share, split evenly with
+//     its tier-mates.
+//   - LOCKED rows are the only hand-typed ones. Lock a card to override it.
+// So an unlocked row shows a value with a tag and no input; locking swaps in
+// the field, pre-filled with the rate the card had.
+//   - Sets 2/3 take an override on any locked row; BLANK means "inherit the
+//     previous set" (3 → 2 → 1) and shows the resolved % as the placeholder.
 const SetRateCell = ({
   set,
   row,
@@ -994,7 +1137,15 @@ const SetRateCell = ({
   const { t } = useTranslation();
   const label = `${t('packs.editor.set', { n: set })} ${t('packs.editor.winRate')}: ${row.name}`;
 
-  if (!row.locked && row.rarity === 'Common') {
+  // The lock gate applies to SET 1 ONLY. An unlocked Common balances in every
+  // set, so it is never typed. But an unlocked non-Common row must still accept
+  // a set-2/3 override: those are alternate tables for other customer groups,
+  // and gating them behind set 1's lock would mean changing set 1 just to edit
+  // set 2 — and would leave an already-stored override visible nowhere while it
+  // kept driving that set's payout.
+  const derived = !row.locked && (set === 1 || row.rarity === 'Common');
+  if (derived) {
+    const isBalancer = row.rarity === 'Common';
     return (
       <Table.Cell>
         <div className="flex items-center gap-x-1.5">
@@ -1002,7 +1153,11 @@ const SetRateCell = ({
             {effective === null ? '—' : fmtPct(effective)}
           </span>
           {set === 1 && (
-            <Badge size="2xsmall">{t('packs.editor.balancer')}</Badge>
+            <Badge size="2xsmall">
+              {isBalancer
+                ? t('packs.editor.balancer')
+                : t('packs.editor.fromDefault')}
+            </Badge>
           )}
         </div>
       </Table.Cell>
@@ -1011,20 +1166,49 @@ const SetRateCell = ({
 
   const value =
     set === 1 ? row.pctInput : set === 2 ? row.pctInput2 : row.pctInput3;
+  // Weights store as whole basis points, so a typed 7.567 persists as 7.57.
+  // The input keeps what the operator is typing (clobbering it mid-keystroke is
+  // worse), and the resolved rate shows beside it ONLY when the two differ —
+  // otherwise "what you see is what's saved" quietly stops being true.
+  const typed = Number(value);
+  // A rate under half a basis point rounds to weight 0 — the card can never be
+  // pulled, and nothing else in the editor would say so. Called out separately
+  // from ordinary rounding because it is a different kind of wrong.
+  const unpullable =
+    effective === 0 &&
+    value.trim() !== '' &&
+    Number.isFinite(typed) &&
+    typed > 0;
+  const rounds =
+    effective !== null &&
+    value.trim() !== '' &&
+    Math.abs(effective - typed) >= 0.005;
   return (
     <Table.Cell>
-      <Input
-        type="number"
-        min={0}
-        max={100}
-        step={0.01}
-        disabled={set === 1 && !row.locked}
-        aria-label={label}
-        value={value}
-        placeholder={set === 1 || effective === null ? '' : String(effective)}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-20 tabular-nums"
-      />
+      <div className="flex items-center gap-x-1.5">
+        <Input
+          type="number"
+          min={0}
+          max={100}
+          step={0.01}
+          aria-label={label}
+          value={value}
+          placeholder={set === 1 || effective === null ? '' : String(effective)}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-20 tabular-nums"
+        />
+        {(rounds || unpullable) && (
+          <span
+            className={clx(
+              'whitespace-nowrap text-xs tabular-nums',
+              unpullable ? 'text-ui-tag-orange-text' : 'text-ui-fg-muted',
+            )}
+            title={unpullable ? t('packs.editor.unpullable') : undefined}
+          >
+            {unpullable ? t('packs.editor.never') : fmtPct(effective)}
+          </span>
+        )}
+      </div>
     </Table.Cell>
   );
 };
@@ -1037,12 +1221,17 @@ const SetRateCell = ({
 const PublishedOddsSection = ({
   pack,
   rows,
+  defaults,
   saving,
   onSave,
 }: {
   pack: AdminPack;
   /** The pool, for the live Published EV readout (tier average × tier %). */
   rows: EditRow[];
+  /** The default-odds table above — seeds a pack that has never published, and
+   *  backs "Fill from default odds". Nothing is written until Save, so this
+   *  cannot change what the storefront shows on its own. */
+  defaults: Record<string, string>;
   saving: boolean;
   onSave: (po: PublishedOdds) => Promise<void>;
 }) => {
@@ -1050,16 +1239,29 @@ const PublishedOddsSection = ({
   const [overall, setOverall] = useState<string>(
     pack.published_odds ? String(pack.published_odds.overall) : '100',
   );
-  const [tiers, setTiers] = useState<Record<string, string>>(() =>
-    Object.fromEntries(
+  // Seeded once (the section is mounted with key={slug}); a pack that HAS
+  // published odds keeps them verbatim — the preset must never silently
+  // overwrite live public numbers.
+  //
+  // The seed reads the HOUSE constant, not the editable `defaults` prop. This
+  // section remounts on `fullPack.slug` (the `usePacks` query) while `defaults`
+  // resets on the separate `usePackOdds` query, so during a pack A → B
+  // navigation with one cache warm and the other cold, the prop can still hold
+  // pack A's edited recipe for a render or two. `defaults` is still what the
+  // "Use defaults" button copies — that is an explicit click, never a race.
+  const [tiers, setTiers] = useState<Record<string, string>>(() => {
+    const house = houseDefaults();
+    return Object.fromEntries(
       RARITIES.map((r) => [
         r,
         pack.published_odds?.tiers[r] !== undefined
           ? String(pack.published_odds.tiers[r])
-          : '',
+          : pack.published_odds
+            ? ''
+            : (house[r] ?? ''),
       ]),
-    ),
-  );
+    );
+  });
 
   const validPct = (v: string) =>
     v.trim() === '' ||
@@ -1077,6 +1279,13 @@ const PublishedOddsSection = ({
   // packs list carries the saved figure). The gap against the per-set EV chips
   // above is the whole point of showing both.
   const pubEv = useMemo(() => publishedEvPreview(rows, tiers), [rows, tiers]);
+  // Same number, split per tier — which advertised rate is actually carrying
+  // the promise. Sits under each input rather than in its own grid so the tier
+  // labels are not printed twice.
+  const pubEvTiers = useMemo(
+    () => publishedEvByTier(rows, tiers),
+    [rows, tiers],
+  );
 
   const save = () =>
     onSave({
@@ -1091,78 +1300,86 @@ const PublishedOddsSection = ({
 
   return (
     <div className="px-6 py-5">
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex items-center justify-between gap-4">
         <div>
           <Heading level="h3">{t('packs.published.title')}</Heading>
-          <Text className="text-ui-fg-subtle mt-1 max-w-2xl" size="small">
+          <Text className="text-ui-fg-subtle" size="xsmall">
             {t('packs.published.subtitle')}
           </Text>
         </div>
-        <Button
-          size="small"
-          variant="secondary"
-          onClick={save}
-          isLoading={saving}
-          disabled={!allValid}
-        >
-          {t('packs.published.save')}
-        </Button>
+        <div className="flex shrink-0 items-center gap-x-2">
+          <Button
+            size="small"
+            variant="transparent"
+            onClick={() => setTiers({ ...defaults })}
+          >
+            {t('packs.published.fillFromDefaults')}
+          </Button>
+          <Button
+            size="small"
+            variant="secondary"
+            onClick={save}
+            isLoading={saving}
+            disabled={!allValid}
+          >
+            {t('packs.published.save')}
+          </Button>
+        </div>
       </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+      <div className="mt-3 grid grid-cols-3 gap-x-3 gap-y-2 lg:grid-cols-7">
         <div className="flex flex-col gap-y-1">
-          <Label size="xsmall" weight="plus" htmlFor="published-overall">
+          <Label size="xsmall" htmlFor="published-overall">
             {t('packs.published.overall')}
           </Label>
           <Input
             id="published-overall"
+            size="small"
             type="number"
             min={0}
             max={100}
             step={0.1}
             value={overall}
             onChange={(e) => setOverall(e.target.value)}
+            className="tabular-nums"
           />
         </div>
-        {RARITIES.map((r) => (
-          <div key={r} className="flex flex-col gap-y-1">
-            <Label size="xsmall" weight="plus" htmlFor={`published-tier-${r}`}>
-              {r}
-            </Label>
-            <Input
-              id={`published-tier-${r}`}
-              type="number"
-              min={0}
-              max={100}
-              step={0.1}
-              placeholder="—"
-              value={tiers[r] ?? ''}
-              onChange={(e) =>
-                setTiers((m) => ({ ...m, [r]: e.target.value }))
-              }
-            />
-          </div>
-        ))}
+        {RARITIES.map((r) => {
+          const ev = pubEvTiers.find((x) => x.rarity === r)?.ev ?? null;
+          return (
+            <div key={r} className="flex flex-col gap-y-1">
+              <Label size="xsmall" htmlFor={`published-tier-${r}`}>
+                {r}
+              </Label>
+              <Input
+                id={`published-tier-${r}`}
+                size="small"
+                type="number"
+                min={0}
+                max={100}
+                step={0.1}
+                placeholder="—"
+                value={tiers[r] ?? ''}
+                onChange={(e) =>
+                  setTiers((m) => ({ ...m, [r]: e.target.value }))
+                }
+                className="tabular-nums"
+              />
+              <Text size="xsmall" className="text-ui-fg-muted tabular-nums">
+                {ev === null ? ' ' : rm(ev)}
+              </Text>
+            </div>
+          );
+        })}
       </div>
 
-      <div className="mt-2 flex flex-wrap items-center gap-x-4">
-        <Text
-          size="small"
-          className={
-            sum === 100 ? 'text-ui-fg-subtle' : 'text-ui-tag-orange-text'
-          }
-        >
+      <Text size="xsmall" className="text-ui-fg-subtle mt-1 tabular-nums">
+        <span className={sum === 100 ? undefined : 'text-ui-tag-orange-text'}>
           {t('packs.published.sum', { sum })}
-        </Text>
-        <Text size="small" className="text-ui-fg-subtle tabular-nums">
-          {t('packs.published.ev')}: {pubEv === null ? '—' : rm(pubEv)}
-        </Text>
-      </div>
-      {!pack.published_odds && (
-        <Text size="small" className="text-ui-fg-subtle mt-1">
-          {t('packs.published.notSet')}
-        </Text>
-      )}
+        </span>
+        {` · ${t('packs.published.ev')} ${pubEv === null ? '—' : rm(pubEv)}`}
+        {!pack.published_odds && ` · ${t('packs.published.notSet')}`}
+      </Text>
     </div>
   );
 };

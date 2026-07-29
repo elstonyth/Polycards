@@ -113,7 +113,7 @@ const FAQS: FaqItem[] = [
   },
   {
     q: 'How are pulls determined? Is it fair?',
-    a: 'Every pull uses commit-reveal. Before you spin, the server commits to a hashed seed it cannot change afterwards; your outcome is derived from that seed plus your own session seed, so no one, including us, can steer the result once the pack is open. The odds for each pack are published up front. Per-pull proofs, the seeds and selection details you would need to reproduce a result yourself, are not published yet; that is being finalized on the fairness page.',
+    a: 'Every pull uses commit-reveal. Before you spin, the server commits to a hashed seed it cannot change afterwards; your outcome is derived from that seed plus your own session seed, so no one, including us, can steer the result once the pack is open. The odds for each pack are shown up front. Per-pull proofs, the seeds and selection details you would need to reproduce a result yourself, are not available yet; that is being finalized on the fairness page.',
   },
   {
     q: 'Where are my cards stored?',

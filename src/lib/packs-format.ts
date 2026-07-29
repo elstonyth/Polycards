@@ -61,3 +61,30 @@ export function poolValueRange(
     max: formatValue(Math.max(...values)),
   };
 }
+
+/** Per-tier value ranges — the same derivation as `poolValueRange`, run over
+ *  each rarity's slice of the pool, so "what is a Legendary actually worth in
+ *  THIS pack" is answerable without opening the card grid. A pack-wide range
+ *  alone hides that: it spans Common to Immortal and describes no tier.
+ *
+ *  Tiers with nothing priced are absent (not null-valued), so a caller can
+ *  simply check for the key. `rarity` is typed loosely because pool rows come
+ *  from the backend, where an unknown tier string must be skipped rather than
+ *  crash the odds panel. */
+export function tierValueRanges(
+  pool: readonly { rarity: string; value: string }[],
+): Partial<Record<Rarity, PoolValueRange>> {
+  const byTier = new Map<string, { value: string }[]>();
+  for (const card of pool) {
+    if (!isRarity(card.rarity)) continue;
+    const bucket = byTier.get(card.rarity);
+    if (bucket) bucket.push(card);
+    else byTier.set(card.rarity, [card]);
+  }
+  const out: Partial<Record<Rarity, PoolValueRange>> = {};
+  for (const rarity of RARITIES) {
+    const range = poolValueRange(byTier.get(rarity) ?? []);
+    if (range) out[rarity] = range;
+  }
+  return out;
+}

@@ -12,9 +12,9 @@ export const metadata: Metadata = {
 // read getCustomer(), matching settings/bank-withdrawal).
 export const dynamic = 'force-dynamic';
 
-// Proofs are per-account and the proof-publishing endpoint isn't live yet, so
-// this page has two honest states: signed-out visitors get an auth prompt, and
-// signed-in customers get a quiet "publishing is being finalized" notice. It
+// Proofs are per-account and the proof endpoint isn't live yet, so this page
+// has two honest states: signed-out visitors get an auth prompt, and signed-in
+// customers get a quiet "being finalized" notice. It
 // must never render a fake "Failed to load proofs" error — a fairness page
 // that always looks broken is worse for trust than no page at all.
 
@@ -48,8 +48,8 @@ export default async function FairnessPage() {
           delay={140}
           className="mt-8 max-w-xl rounded-xl border border-white/10 bg-neutral-900 px-4 py-3.5 text-sm text-white/70"
         >
-          Proof publishing is being finalized. Once it is live, every pull you
-          make will list its seeds and selection details here.
+          Per-pull proofs are being finalized. Once they are live, every pull
+          you make will list its seeds and selection details here.
         </Reveal>
       ) : (
         <Reveal delay={140} className="mt-8">
