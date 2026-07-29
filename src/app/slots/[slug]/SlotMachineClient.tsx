@@ -31,6 +31,7 @@ import { demoDraw } from '@/lib/demo-spin';
 import {
   publishedOddsRows,
   poolValueRange,
+  tierValueRanges,
   type PublishedOdds,
 } from '@/lib/packs-format';
 import { isTopRarity, rarityRgb, RARITY_ORDER } from '@/lib/rarity';
@@ -163,6 +164,8 @@ export default function SlotMachineClient({
   const basePool = useMemo<HReelCell[]>(() => buildDecoyPool(pool), [pool]);
   // Card-value range for the odds sheet — same pool, same memo convention.
   const valueRange = useMemo(() => poolValueRange(pool), [pool]);
+  // Per-tier ranges, so the sheet matches the pack page's odds panel row for row.
+  const tierRanges = useMemo(() => tierValueRanges(pool), [pool]);
   // Per-reel decoy pools: strip i tiles its OWN shuffled copy of basePool, so
   // stacked reels read independently and the idle sequence is never the same
   // twice (reshuffled per idle cycle — see the phase effect below). SSR-safe:
@@ -1031,6 +1034,7 @@ export default function SlotMachineClient({
         onClose={() => setOddsOpen(false)}
         odds={publishedOdds ? publishedOddsRows(publishedOdds) : null}
         range={valueRange}
+        tierRanges={tierRanges}
       />
     </div>
   );

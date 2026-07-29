@@ -1,5 +1,10 @@
 import type { OddsRow } from './packs-api';
-import { computeSetWeights, type SetEntry } from '@acme/odds-math';
+import {
+  computeSetWeights,
+  RARITIES,
+  type OddsRarity,
+  type SetEntry,
+} from '@acme/odds-math';
 
 // One editable row in the pack odds editor: the immutable card facts + its
 // current saved %, plus the editable PER-PACK rarity (drives the balancer
@@ -159,11 +164,122 @@ export const publishedEvPreview = (
   return any ? Math.round(cents) / 100 : null;
 };
 
+// ── Per-tier EV breakdowns ──────────────────────────────────────────────────
+// "Which tier is the payout actually coming from." A 0.1% Immortal on a
+// RM 22,000 card contributes less than a 22% Rare on a RM 11,000 one, which is
+// impossible to eyeball from rates and prices side by side.
+//
+// ROUNDING: each tier is rounded to the cent for display, but the TOTALS above
+// stay a single round of the unrounded sum — that is what keeps them equal to
+// the server's figures on the packs list. So the displayed rows can differ from
+// the displayed total by a cent or two. Deliberate: agreeing with the backend
+// matters more than a column that adds up on screen.
+
+export type TierEv = {
+  rarity: OddsRarity;
+  /** EV contribution in RM, or null when the tier has no card in this pack. */
+  ev: number | null;
+};
+
+/**
+ * Per-tier EV for ONE odds set: Σ(pct × price) over the cards in that tier.
+ * Same integer-cent fold as `setEvRtp`, whose total these rows decompose.
+ * Every tier is returned, rarest first, so the column lines up across sets.
+ */
+export const setEvByTier = (
+  rows: EditRow[],
+  pct: Map<string, number>,
+): TierEv[] => {
+  const cents = new Map<string, number>();
+  for (const r of rows) {
+    const p = pct.get(r.card_id);
+    if (p === undefined || !Number.isFinite(r.market_value)) continue;
+    cents.set(
+      r.rarity,
+      (cents.get(r.rarity) ?? 0) + Math.round(r.market_value * 100) * (p / 100),
+    );
+  }
+  return RARITIES.map((rarity) => {
+    const c = cents.get(rarity);
+    return { rarity, ev: c === undefined ? null : Math.round(c) / 100 };
+  });
+};
+
+/**
+ * Per-tier EV for the PUBLISHED odds: (average card price in that tier) ×
+ * (published % / 100) — the same per-tier term `publishedEvPreview` sums, so
+ * these rows decompose that number. Null for a tier with no card in the pool or
+ * no percentage typed.
+ */
+export const publishedEvByTier = (
+  rows: EditRow[],
+  tiers: Record<string, string>,
+): TierEv[] => {
+  const sums = new Map<string, { sum: number; n: number }>();
+  for (const r of rows) {
+    const t = sums.get(r.rarity) ?? { sum: 0, n: 0 };
+    t.sum += r.market_value;
+    t.n += 1;
+    sums.set(r.rarity, t);
+  }
+  return RARITIES.map((rarity) => {
+    const t = sums.get(rarity);
+    const raw = tiers[rarity] ?? '';
+    const pct = raw.trim() === '' ? NaN : Number(raw);
+    if (!t || !Number.isFinite(pct)) return { rarity, ev: null };
+    const avg = t.sum / t.n;
+    if (!Number.isFinite(avg)) return { rarity, ev: null };
+    return {
+      rarity,
+      ev: Math.round(Math.round(avg * 100) * (pct / 100)) / 100,
+    };
+  });
+};
+
 import {
+  splitByTier,
   type RarityProposal,
   type RtpSolveResult,
   type RtpSolveRow,
+  type TierSplitResult,
 } from '@acme/odds-math';
+
+/** Run the default-odds preset over the editor buffer. Thin wrapper so the
+ *  panel's explanation and the rates it stages come from one call. */
+export const tierSplit = (
+  rows: EditRow[],
+  tierPct: Record<string, number>,
+): TierSplitResult =>
+  splitByTier(
+    rows.map((r) => ({
+      card_id: r.card_id,
+      locked: r.locked,
+      rarity: r.rarity,
+      // Locked rows spend their tier's budget, so the split needs their rate.
+      // A mid-typing '' or '12.' arrives as NaN and splitByTier ignores it —
+      // the tier just reads as unspent until the operator finishes typing.
+      pct: Number(r.pctInput),
+    })),
+    tierPct,
+  );
+
+/** Resolve the preset's rates into SET 1.
+ *
+ *  Writes NO `rarity`, so it cannot re-pin a Set 2/3 Common balancer at a stale
+ *  rate — that hazard belonged to the removed auto-split, which re-tiered cards.
+ *  Sets 2/3 keep their own overrides on purpose: they are alternate tables. */
+export const applyTierSplit = (
+  rows: EditRow[],
+  result: TierSplitResult,
+): EditRow[] => {
+  const byId = new Map(result.computed.map((c) => [c.card_id, c.pct]));
+  return rows.map((r) => {
+    const pct = byId.get(r.card_id);
+    if (pct === undefined) return { ...r };
+    // Trim float noise; the editor stores rates as free-typed strings.
+    return { ...r, pctInput: String(Math.round(pct * 1e6) / 1e6) };
+  });
+};
 
 // A free-typed rate input ('' while the operator is mid-edit, '12.' etc.)
 // must never reach the solver as NaN — it would poison every downstream sum.

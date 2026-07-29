@@ -1,11 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import type { OddsRow } from './packs-api';
+import { DEFAULT_TIER_PCT } from '@acme/odds-math';
 import {
+  applyTierSplit,
   mapOddsToRows,
   previewSets,
+  publishedEvByTier,
   publishedEvPreview,
   rowsToSetEntries,
+  setEvByTier,
   setEvRtp,
+  tierSplit,
   type EditRow,
 } from './odds-rows';
 
@@ -412,5 +417,158 @@ describe('hasMaterializedSetOverrides', () => {
 
   it('is true when any row carries a non-empty set-3 input, including an explicit "0"', () => {
     expect(hasMaterializedSetOverrides([row({ pctInput3: '0' })])).toBe(true);
+  });
+});
+
+describe('tierSplit / applyTierSplit', () => {
+  const row = (over: Partial<EditRow> = {}): EditRow => editRow(over);
+
+  it('stages the tier share into Set 1 and leaves Sets 2/3 alone', () => {
+    const rows = [
+      row({ card_id: 'i1', rarity: 'Immortal', pctInput: '9', pctInput2: '4' }),
+      row({ card_id: 'i2', rarity: 'Immortal', pctInput: '9' }),
+      row({ card_id: 'c', rarity: 'Common', pctInput: '9' }),
+    ];
+    const next = applyTierSplit(rows, tierSplit(rows, DEFAULT_TIER_PCT));
+    // 0.1% across two Immortals.
+    expect(next[0].pctInput).toBe('0.05');
+    expect(next[1].pctInput).toBe('0.05');
+    // Set 2/3 overrides are alternate tables — the preset must not touch them.
+    expect(next[0].pctInput2).toBe('4');
+  });
+
+  it('leaves locked rows and the unlocked Common balancer untouched', () => {
+    const rows = [
+      row({ card_id: 'r', rarity: 'Rare', locked: true, pctInput: '5' }),
+      row({ card_id: 'c', rarity: 'Common', pctInput: '77' }),
+    ];
+    const next = applyTierSplit(rows, tierSplit(rows, DEFAULT_TIER_PCT));
+    expect(next[0].pctInput).toBe('5');
+    expect(next[1].pctInput).toBe('77');
+  });
+});
+
+// The load-bearing invariant of the derive-unless-locked model: what gets SAVED
+// for an unlocked row is its tier share, never whatever text `pctInput` still
+// holds from an earlier edit. Submitting the raw buffer instead of the derived
+// rows would silently persist the stale number the table stopped showing.
+describe('save path: derived rates win over stale pctInput', () => {
+  const row = (over: Partial<EditRow> = {}): EditRow => editRow(over);
+
+  it('submits the tier share for unlocked rows and the typed rate for locked', () => {
+    const rows = [
+      // Stale text from before the card was retiered / the recipe was edited.
+      row({ card_id: 'i1', rarity: 'Immortal', pctInput: '99' }),
+      row({ card_id: 'i2', rarity: 'Immortal', pctInput: '' }),
+      row({ card_id: 'r', rarity: 'Rare', locked: true, pctInput: '7.5' }),
+      row({ card_id: 'c', rarity: 'Common', pctInput: '12345' }),
+    ];
+    const entries = rowsToSetEntries(
+      applyTierSplit(rows, tierSplit(rows, DEFAULT_TIER_PCT)),
+    );
+    const pctOf = (id: string) => entries.find((e) => e.card_id === id)?.pct;
+
+    expect(pctOf('i1')).toBe(0.05); // 0.1% / 2, not the stale 99
+    expect(pctOf('i2')).toBe(0.05); // blank input still resolves
+    expect(pctOf('r')).toBe(7.5); // locked — the operator's number stands
+    // The unlocked Common is the balancer; balanceOdds ignores its submitted
+    // pct entirely, so the stale 12345 cannot leak into a saved weight.
+    const { error, pct } = previewSets(
+      applyTierSplit(rows, tierSplit(rows, DEFAULT_TIER_PCT)),
+    );
+    expect(error).toBeNull();
+    expect(pct[1].get('c')).toBe(100 - 0.05 - 0.05 - 7.5);
+  });
+});
+
+describe('per-tier EV breakdowns', () => {
+  const row = (over: Partial<EditRow> = {}): EditRow => editRow(over);
+  const pool = [
+    row({ card_id: 'imm', rarity: 'Immortal', market_value: 20000 }),
+    row({ card_id: 'r1', rarity: 'Rare', market_value: 1000 }),
+    row({ card_id: 'r2', rarity: 'Rare', market_value: 500 }),
+    row({ card_id: 'c', rarity: 'Common', market_value: 100 }),
+  ];
+
+  it('groups a set EV by tier and decomposes setEvRtp', () => {
+    const pct = new Map([
+      ['imm', 0.1],
+      ['r1', 20],
+      ['r2', 20],
+      ['c', 59.9],
+    ]);
+    const byTier = setEvByTier(pool, pct);
+    const evOf = (r: string) => byTier.find((x) => x.rarity === r)?.ev;
+
+    expect(evOf('Immortal')).toBe(20); // 0.1% × 20000
+    expect(evOf('Rare')).toBe(300); // 20% × 1000 + 20% × 500
+    expect(evOf('Common')).toBe(59.9); // 59.9% × 100
+    // Tiers with no card in the pool are null, not 0 — the UI drops them.
+    expect(evOf('Legendary')).toBeNull();
+
+    const total = setEvRtp(pool, pct, 50);
+    const summed = byTier.reduce((s, x) => s + (x.ev ?? 0), 0);
+    expect(Math.abs(summed - (total?.ev ?? 0))).toBeLessThan(0.02);
+  });
+
+  it('groups published EV by tier and decomposes publishedEvPreview', () => {
+    // Rare's term uses the tier AVERAGE (1000 + 500) / 2 = 750.
+    const tiers = { Immortal: '0.1', Rare: '22', Common: '43' };
+    const byTier = publishedEvByTier(pool, tiers);
+    const evOf = (r: string) => byTier.find((x) => x.rarity === r)?.ev;
+
+    expect(evOf('Immortal')).toBe(20); // 0.1% × 20000
+    expect(evOf('Rare')).toBe(165); // 22% × 750
+    expect(evOf('Common')).toBe(43); // 43% × 100
+    // A tier with cards but no percentage typed contributes nothing.
+    expect(evOf('Uncommon')).toBeNull();
+
+    const summed = byTier.reduce((s, x) => s + (x.ev ?? 0), 0);
+    const total = publishedEvPreview(pool, tiers) ?? 0;
+    expect(Math.abs(summed - total)).toBeLessThan(0.02);
+  });
+
+  it('returns every tier, rarest first, so columns line up across sets', () => {
+    expect(setEvByTier(pool, new Map()).map((x) => x.rarity)).toEqual([
+      'Immortal',
+      'Legendary',
+      'Mythical',
+      'Rare',
+      'Uncommon',
+      'Common',
+    ]);
+  });
+});
+
+// tierSplit must forward a LOCKED row's typed rate into the split, or the
+// tier budget is computed as if the lock were free and the panel over-reports.
+describe('tierSplit forwards locked rates', () => {
+  const row = (over: Partial<EditRow> = {}): EditRow => editRow(over);
+
+  it('spends a locked rate out of its tier budget', () => {
+    const rows = [
+      row({ card_id: 'r1', rarity: 'Rare' }),
+      row({ card_id: 'r2', rarity: 'Rare', locked: true, pctInput: '10' }),
+      row({ card_id: 'c', rarity: 'Common' }),
+    ];
+    const tier = tierSplit(rows, DEFAULT_TIER_PCT).tiers.find(
+      (x) => x.rarity === 'Rare',
+    );
+    expect(tier?.lockedPct).toBe(10);
+    // 22 − 10 = 12 for the single free Rare.
+    expect(tier?.perCardPct).toBe(12);
+  });
+
+  it('ignores a half-typed locked rate rather than reading NaN', () => {
+    const rows = [
+      row({ card_id: 'r1', rarity: 'Rare' }),
+      row({ card_id: 'r2', rarity: 'Rare', locked: true, pctInput: '' }),
+      row({ card_id: 'c', rarity: 'Common' }),
+    ];
+    const tier = tierSplit(rows, DEFAULT_TIER_PCT).tiers.find(
+      (x) => x.rarity === 'Rare',
+    );
+    expect(tier?.lockedPct).toBe(0);
+    expect(tier?.perCardPct).toBe(22);
   });
 });
