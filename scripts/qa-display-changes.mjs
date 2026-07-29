@@ -30,7 +30,9 @@ const check = (ok, msg) => {
 
 const browser = await chromium.launch();
 try {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const page = await browser.newPage({
+    viewport: { width: 1440, height: 900 },
+  });
 
   // Cookie banner is role=dialog too — reject it once so screenshots and
   // dialog-scoped selectors stay clean (privacy default: reject).
@@ -51,25 +53,46 @@ try {
   const heroChase = (
     await page.locator('p.font-heading.text-chase').first().innerText()
   ).trim();
-  check(/^RM [\d,.]+$/.test(heroChase), `hero top chase is an RM value (${heroChase})`);
+  check(
+    /^RM [\d,.]+$/.test(heroChase),
+    `hero top chase is an RM value (${heroChase})`,
+  );
   // "Top chase: {card} · {pack}" — take the pack name after the interpunct.
   const chaseLine = (
-    await page.locator('p', { hasText: /^Top chase:/ }).first().innerText()
+    await page
+      .locator('p', { hasText: /^Top chase:/ })
+      .first()
+      .innerText()
   ).trim();
   const featuredPackName = chaseLine.split('·').pop().trim();
-  check(featuredPackName.length > 0, `featured pack name parsed (${featuredPackName})`);
-  await page.screenshot({ path: 'docs/research/qa-display-home.png', fullPage: false });
+  check(
+    featuredPackName.length > 0,
+    `featured pack name parsed (${featuredPackName})`,
+  );
+  await page.screenshot({
+    path: 'docs/research/qa-display-home.png',
+    fullPage: false,
+  });
 
   // ---- 2b: featured pack detail shows the same RM as its top card ----
   // Home rows all route to /slots (routing rule), so resolve the slug there.
-  await page.goto(`${BASE}/slots`, { waitUntil: 'networkidle', timeout: 30000 });
+  await page.goto(`${BASE}/slots`, {
+    waitUntil: 'networkidle',
+    timeout: 30000,
+  });
   const featuredHref = await page
     .locator(`a[href^="/slots/"]`, { hasText: featuredPackName })
     .first()
     .getAttribute('href');
-  check(!!featuredHref, `catalog link found for "${featuredPackName}" (${featuredHref})`);
+  check(
+    !!featuredHref,
+    `catalog link found for "${featuredPackName}" (${featuredHref})`,
+  );
 
-  await page.goto(`${BASE}${featuredHref}`, { waitUntil: 'networkidle', timeout: 30000 });
+  await page.goto(`${BASE}${featuredHref}`, {
+    waitUntil: 'networkidle',
+    timeout: 30000,
+  });
   // The hero chase == the featured pack's highest-value pool card. Prefer the
   // on-page surfaces (teaser first tile / odds-range max); when the pack
   // publishes no odds AND has no Mythical+ cards (both surfaces hidden),
@@ -93,7 +116,9 @@ try {
       `featured pack top card value "${firstTileValue}" matches hero chase "${heroChase}"`,
     );
   } else if ((await oddsSection.count()) > 0) {
-    const row = (await oddsSection.locator('ul > li').first().innerText()).trim();
+    const row = (
+      await oddsSection.locator('ul > li').first().innerText()
+    ).trim();
     check(
       row.endsWith(heroChase),
       `featured pack value-range max matches hero chase "${heroChase}" (${row.replace(/\s+/g, ' ')})`,
@@ -117,13 +142,19 @@ try {
   await page.screenshot({ path: 'docs/research/qa-display-featured-pack.png' });
 
   // ---- 3: bronze-pack cards teaser ----
-  await page.goto(`${BASE}/slots/bronze-pack`, { waitUntil: 'networkidle', timeout: 30000 });
+  await page.goto(`${BASE}/slots/bronze-pack`, {
+    waitUntil: 'networkidle',
+    timeout: 30000,
+  });
   const bronzeSection = page.locator('section', {
     has: page.locator('h2', { hasText: 'Cards in this pack' }),
   });
   const tiles = bronzeSection.locator('button[aria-label^="View details for"]');
   const tileCount = await tiles.count();
-  check(tileCount > 0 && tileCount <= 6, `teaser renders ${tileCount} tiles (<= 6)`);
+  check(
+    tileCount > 0 && tileCount <= 6,
+    `teaser renders ${tileCount} tiles (<= 6)`,
+  );
 
   const labelsOk = async () => {
     const labels = await bronzeSection.locator('h3').allInnerTexts();
@@ -132,26 +163,46 @@ try {
   check(await labelsOk(), 'collapsed: every tier label is Mythical+');
   await page.screenshot({ path: 'docs/research/qa-display-bronze-cards.png' });
 
-  const showAll = bronzeSection.locator('button', { hasText: /^Show all \d+ cards$/ });
+  const showAll = bronzeSection.locator('button', {
+    hasText: /^Show all \d+ cards$/,
+  });
   if (await showAll.isVisible().catch(() => false)) {
     await showAll.click();
     const headerCount = await bronzeSection.locator('h3').count();
     check(headerCount > 0, `expanded: ${headerCount} tier header(s) render`);
-    check(await labelsOk(), 'expanded: no Common/Uncommon/Rare label in section');
-    await page.screenshot({ path: 'docs/research/qa-display-bronze-expanded.png' });
+    check(
+      await labelsOk(),
+      'expanded: no Common/Uncommon/Rare label in section',
+    );
+    await page.screenshot({
+      path: 'docs/research/qa-display-bronze-expanded.png',
+    });
   } else {
-    console.log('INFO: no "Show all" button (pool <= 6 Mythical+ cards) — teaser is the whole set');
+    console.log(
+      'INFO: no "Show all" button (pool <= 6 Mythical+ cards) — teaser is the whole set',
+    );
   }
 
   // ---- 4: bronze-pack odds panel ----
   const pageText = await page.locator('body').innerText();
-  check(!pageText.includes('Overall win rate'), 'no "Overall win rate" anywhere on the pack page');
+  check(
+    !pageText.includes('Overall win rate'),
+    'no "Overall win rate" anywhere on the pack page',
+  );
   const oddsPanel = page.locator('section', {
     has: page.locator('h2', { hasText: 'Pull Odds (by rarity)' }),
   });
-  const firstRow = (await oddsPanel.locator('ul > li').first().innerText()).trim();
-  check(/^Card value range/.test(firstRow), `odds first row is "Card value range" (${firstRow.replace(/\s+/g, ' ')})`);
-  check(RANGE_RE.test(firstRow), `odds range matches RM min – max (${firstRow.replace(/\s+/g, ' ')})`);
+  const firstRow = (
+    await oddsPanel.locator('ul > li').first().innerText()
+  ).trim();
+  check(
+    /^Card value range/.test(firstRow),
+    `odds first row is "Card value range" (${firstRow.replace(/\s+/g, ' ')})`,
+  );
+  check(
+    RANGE_RE.test(firstRow),
+    `odds range matches RM min – max (${firstRow.replace(/\s+/g, ' ')})`,
+  );
   await oddsPanel
     .locator('h2', { hasText: 'Pull Odds (by rarity)' })
     .scrollIntoViewIfNeeded();
@@ -176,11 +227,19 @@ try {
   const sheet = page.locator('[role="dialog"][aria-modal="true"]');
   await sheet.waitFor({ timeout: 5000 });
   const sheetRow = (await sheet.locator('ul > li').first().innerText()).trim();
-  check(/^Card value range/.test(sheetRow), `demo odds sheet first row is "Card value range" (${sheetRow.replace(/\s+/g, ' ')})`);
+  check(
+    /^Card value range/.test(sheetRow),
+    `demo odds sheet first row is "Card value range" (${sheetRow.replace(/\s+/g, ' ')})`,
+  );
   check(RANGE_RE.test(sheetRow), `demo odds sheet range matches RM min – max`);
   const sheetText = await sheet.innerText();
-  check(!sheetText.includes('Overall win rate'), 'demo odds sheet has no "Overall win rate"');
-  await page.screenshot({ path: 'docs/research/qa-display-demo-odds-sheet.png' });
+  check(
+    !sheetText.includes('Overall win rate'),
+    'demo odds sheet has no "Overall win rate"',
+  );
+  await page.screenshot({
+    path: 'docs/research/qa-display-demo-odds-sheet.png',
+  });
 } finally {
   await browser.close();
 }
