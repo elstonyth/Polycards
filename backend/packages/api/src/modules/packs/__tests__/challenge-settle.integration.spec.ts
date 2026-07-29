@@ -116,7 +116,9 @@ moduleIntegrationTestRunner<PacksModuleService>({
           reset_day: WEEK.resetDay,
           reset_hour: WEEK.resetHour,
           payout_credits: 0,
-          payout_card_ids: [],
+          // model.json() generates Record<string, unknown> create types — a
+          // plain array needs the same double-cast the service uses.
+          payout_card_ids: [] as unknown as Record<string, unknown>,
         },
       ]);
       const [card] = await service.createCards([
@@ -186,7 +188,9 @@ moduleIntegrationTestRunner<PacksModuleService>({
           {
             stage_number: 1,
             threshold_myr: 100,
-            rank_rewards: [{ rank: 1, card_id: card.id, credits: 50 }],
+            rank_rewards: [
+              { rank: 1, card_id: card.id, credits: 50 },
+            ] as unknown as Record<string, unknown>,
           },
         ]);
         await seedPriorWeekPull('cus_a', card);
@@ -226,7 +230,9 @@ moduleIntegrationTestRunner<PacksModuleService>({
           {
             stage_number: 1,
             threshold_myr: 100,
-            rank_rewards: [{ rank: 1, card_id: card.id, credits: 0 }],
+            rank_rewards: [
+              { rank: 1, card_id: card.id, credits: 0 },
+            ] as unknown as Record<string, unknown>,
           },
         ]);
         await seedPriorWeekPull('cus_a', card);
