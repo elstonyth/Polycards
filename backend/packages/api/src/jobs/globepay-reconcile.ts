@@ -10,6 +10,7 @@ import {
 } from '../modules/packs/globepay-client';
 import { topupIdempotencyReference } from '../modules/packs/topup';
 import { notifyFeed } from '../modules/packs/notify-feed';
+import { sendTopupReceipt } from '../modules/packs/topup-receipt';
 import { topupFeedKey } from '../modules/packs/feed-events';
 import {
   GLOBEPAY_RECONCILE_BATCH,
@@ -125,6 +126,18 @@ export default async function globepayReconcileJob(container: MedusaContainer) {
           } catch {
             // Never fail a committed credit over a notification.
           }
+
+          // Same receipt the callback would have sent. The shared idempotency
+          // anchor means a late callback cannot produce a second one.
+          await sendTopupReceipt(container, {
+            customerId: deposit.customer_id,
+            amount: action.amount,
+            reference:
+              deposit.gateway_transaction_id ??
+              deposit.merchant_transaction_id,
+            merchantTransactionId: deposit.merchant_transaction_id,
+            paymentMethodCode: deposit.payment_method_code,
+          });
         }
         continue;
       }

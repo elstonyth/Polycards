@@ -8,6 +8,7 @@ import {
 } from '../../../../modules/packs/globepay';
 import { globepayConfigFromEnv } from '../../../../modules/packs/globepay-client';
 import { topupIdempotencyReference } from '../../../../modules/packs/topup';
+import { sendTopupReceipt } from '../../../../modules/packs/topup-receipt';
 import { notifyFeed } from '../../../../modules/packs/notify-feed';
 import { topupFeedKey } from '../../../../modules/packs/feed-events';
 
@@ -255,6 +256,17 @@ export async function POST(
       } catch {
         // Never fail a committed credit over a notification.
       }
+
+      // The emailed receipt. Same replay guard as the feed row, and its own
+      // send is already non-throwing — the credit is committed and must not be
+      // undone by an email problem.
+      await sendTopupReceipt(req.scope, {
+        customerId: deposit.customer_id,
+        amount: creditedAmount,
+        reference: gatewayTransactionId || merchantTransactionId,
+        merchantTransactionId,
+        paymentMethodCode: deposit.payment_method_code,
+      });
     }
   } catch (error) {
     // Transient (DB down, lock timeout): do NOT ack, so they retry and the
