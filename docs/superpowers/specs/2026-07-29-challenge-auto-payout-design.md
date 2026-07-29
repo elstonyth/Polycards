@@ -41,11 +41,16 @@ top-10 whatever the community pool unlocked.
 `config.schedule` is static at boot; Medusa cannot reschedule cron from a DB
 row, so "the cadence admins configured" cannot drive the cron expression. The
 job runs **hourly** (`0 * * * *`, same as `jobs/mature-commissions.ts`) and
-self-gates: compute the most recently *ended* challenge week; if a payout row
-for that `week_start` already exists, return immediately.
+self-gates **per winner**: compute the most recently *ended* challenge week,
+fetch the customer_ids that already hold payout rows for that `week_start` in
+one read, and skip those winners before opening any transaction. A fully
+settled week is a read-only no-op.
 
-This also makes the job self-healing — a week missed to downtime settles on the
-next hourly tick rather than being lost until the following reset.
+The gate is deliberately NOT "any row for the week exists → return": a crash
+mid-batch leaves some winners paid and some not, and a whole-week gate would
+lock the unpaid remainder out forever. Per-winner gating (backed by the
+in-transaction check, §Transaction shape) is what makes the hourly cadence a
+retry net — a missed or half-finished week settles the rest on the next tick.
 
 New file: `backend/packages/api/src/jobs/settle-challenge-week.ts`.
 
@@ -115,13 +120,16 @@ export const ChallengePayout = model
   ]);
 ```
 
-Insert via raw `INSERT … ON CONFLICT … DO NOTHING` matching the partial index —
-the `grantLevelUpRewards` pattern (`service.ts:4665`), which exists precisely to
-avoid a 23505 poisoning the transaction (Postgres 25P02). A re-run no-ops at the
-DB layer, not in application code.
+Rows are inserted through the **generated** `createChallengePayouts` under the
+per-customer advisory lock (§Transaction shape) — the lock makes the
+check-then-insert atomic, so the unique index never fires in normal operation
+and exists purely as the last-resort backstop against a code path that forgets
+the lock. (No raw `INSERT`: the bigNumber `raw_credits` twin makes hand-written
+inserts a trap — see the migration note below.)
 
-Credits and cards are **separate rows** so a card that fails its stock gate
-cannot roll back the credits payout.
+Credits and cards are **separate rows**; a card that fails its stock gate is
+recorded `skipped_no_stock` alongside a granted credits row in the same
+transaction.
 
 > **Migration trap:** `credits` is `model.bigNumber()`, which is **two**
 > columns — `credits` numeric **and** `raw_credits` jsonb. A hand-written
@@ -191,23 +199,32 @@ Follow `matureDueCommissions` (`service.ts:4720-4760`) for the outer shape:
   blocks every money path until the batch commits.
 - Notifications fire **after** each winner's transaction commits.
 
-**Inside each winner's transaction the ORDER is load-bearing.** `createPulls`
-has no idempotency of its own, so "grant, then record" is racy: two concurrent
-runs could both create the reward pull, then both hit
-`ON CONFLICT DO NOTHING` on the payout row — the loser commits an orphan
-duplicate pull. Instead the payout row is the **claim**:
+**Inside each winner's transaction, serialize before you check.** `createPulls`
+has no idempotency of its own, so "check, grant, record" without serialization
+is racy: two concurrent runs could both pass the check and both create the
+reward pull. The winner transaction is:
 
-1. `INSERT` the payout row(s) `ON CONFLICT DO NOTHING`, check the affected-row
-   count. Zero rows = another run (or a previous tick) already claimed this
-   payout → **skip granting entirely**.
-2. Only after a successful claim: `mutateCreditAtomic` / `createPulls`.
-3. `UPDATE` the claimed row with `credit_transaction_id` / `pull_id`.
+1. `SELECT pg_advisory_xact_lock(hashtextextended(?, 0))` on
+   `credit:${customerId}` — the **same key** `mutateCreditAtomic` uses, so the
+   settlement serializes against every other money path for this customer, and
+   the later `mutateCreditAtomic` call just re-acquires a lock the transaction
+   already holds (advisory xact locks are reentrant).
+2. Under the lock, `listChallengePayouts({ week_start, customer_id }, take 1)`
+   **with the shared context**. Any row ⇒ already settled ⇒ skip entirely.
+3. Grant: `mutateCreditAtomic` (credits), stock-gate + `createPulls` (cards).
+4. `createChallengePayouts([...])` — one call, credits row + card rows, with
+   `credit_transaction_id` / `pull_id` / `status` already filled in.
 
-All three in the one transaction — a grant failure rolls back the claim too, so
-the next tick retries cleanly. A concurrent loser blocks on the uncommitted
-unique-index conflict until the winner commits, then reads 0 affected rows and
-skips. This is why the claim-row insert must be a raw `INSERT … ON CONFLICT`
-(the `grantLevelUpRewards` pattern) and not `createChallengePayouts`.
+All in the one transaction — a grant failure rolls everything back, and the
+next tick retries cleanly. A concurrent loser waits on the advisory lock, then
+its step-2 check sees the winner's committed rows and skips. This is the
+`mutateCreditAtomic` check-then-insert discipline ("the lock makes the
+check-then-insert atomic per customer — no DB unique required"); the payout
+rows go through the **generated** `createChallengePayouts` (which writes the
+`raw_credits` bigNumber twin correctly — a raw `INSERT` would have to
+hand-write that jsonb, the exact trap the migration note above warns about).
+The unique index remains as the last-resort backstop: if it ever fires, that
+winner's transaction aborts alone and the next tick re-checks.
 
 > Per the VIP backfill lesson: never call a grant inside an uncommitted ledger
 > transaction — a context-less `creditSummary` read inside one sees stale data.
@@ -235,8 +252,8 @@ suspension removes `/vip` links — this template must not use one.
 | Pool below every threshold | Same — no unlocked stage, no payout rows, no re-settlement churn. Guarded by an early return so the "already settled" check stays meaningful. |
 | Zero participants | `challengeWeekTop` returns `[]`; nothing to pay. |
 | Card handle missing / out of stock | Row recorded `skipped_no_stock`, no pull, warning logged. |
-| Job crashes mid-batch | Committed winners stay paid (unique index); the next hourly tick retries the rest. |
-| Job runs twice concurrently | Claim-first ordering (§Transaction shape): the loser's claim insert affects 0 rows and it skips granting. |
+| Job crashes mid-batch | Committed winners stay paid; the next hourly tick's per-winner gate skips them and settles the rest. |
+| Job runs twice concurrently | Advisory-lock serialization (§Transaction shape): the loser waits on the per-customer lock, then its check sees the winner's committed payout rows and skips. |
 | Outage spanning >1 full week | **Accepted limitation:** the job only ever settles the most recently ended week (`weeksBack: 1`). Weeks older than that are never auto-settled — an outage that long is an incident; the operator settles manually (the payout table + `medusa exec` make that scriptable). |
 
 **Open decision, defaulted:** the "no stages configured / pool below threshold"
