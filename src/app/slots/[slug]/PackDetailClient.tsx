@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
@@ -29,7 +29,7 @@ import {
 } from '@/lib/packs-data';
 import { AmbientVideo } from '@/components/AmbientVideo';
 import { Pill } from '@/components/ui/pill';
-import { PublishedOddsList } from './OddsSheet';
+import { PublishedOddsList, hasPublishedOddsContent } from './OddsSheet';
 import { PoolByRarity } from './PoolByRarity';
 import { publishedOddsRows, poolValueRange } from '@/lib/packs-format';
 import { isTopRarity } from '@/lib/rarity';
@@ -109,12 +109,18 @@ export default function PackDetailClient({
   // The full public prize pool (value-sorted) — feeds the "Cards in this
   // pack" grid AND gates the guest demo-spin CTA (pure theater on the reel,
   // /spin?demo=1 — no charge, nothing won).
-  const pool = liveDetail?.pool ?? [];
+  // Memoized so the `?? []` fallback doesn't mint a fresh array every render —
+  // that identity churn would make the valueRange memo below recompute always.
+  const pool = useMemo(() => liveDetail?.pool ?? [], [liveDetail?.pool]);
 
   // Mythical+ subset for the "Cards in this pack" section (spec 2026-07-29):
   // commons/rares are catalogue noise there. Order inherited (pool is
   // value-sorted desc). The FULL pool still feeds the demo spin + odds range.
   const topPool = pool.filter((c) => isTopRarity(c.rarity));
+
+  // Card-value range over the FULL pool (not topPool) — one derivation feeding
+  // both the odds-panel gate and its range row.
+  const valueRange = useMemo(() => poolValueRange(pool), [pool]);
 
   // Do NOT open/charge here — navigate to the reel, which performs
   // the single charge via openBatch when the user pulls the lever. Auth + balance
@@ -496,9 +502,11 @@ export default function PackDetailClient({
 
       {/* ===== Pull Odds + Recent Pulls (below the fold) =====
           The odds panel renders ONLY the admin-published rates from the
-          backend; a pack with no published odds shows no panel at all. */}
+          backend; a pack with no published odds shows no panel at all. Nor does
+          a pack whose published odds carry no per-tier rows AND nothing priced
+          — that would be a bare heading over an empty box. */}
       <div className="mb-10 mt-8 grid gap-6 lg:grid-cols-2">
-        {liveDetail?.publishedOdds && publishedRows && (
+        {hasPublishedOddsContent(publishedRows, valueRange) && (
           <Reveal as="section" className="h-full min-w-0">
             <div className="mb-3 flex items-center gap-2">
               <h2 className="font-heading text-lg font-bold tracking-tight text-white">
@@ -507,7 +515,7 @@ export default function PackDetailClient({
             </div>
             <PublishedOddsList
               odds={publishedRows}
-              range={poolValueRange(pool)}
+              range={valueRange}
               rounded="2xl"
             />
           </Reveal>

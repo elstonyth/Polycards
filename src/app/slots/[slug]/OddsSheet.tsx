@@ -9,6 +9,17 @@ import { rarityRgb } from '@/lib/rarity';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
 
+/** True when there is at least one row to render — a pack can publish odds with
+ *  no per-tier percentages AND have nothing priced (a backend without
+ *  `marketPriceMyr` prices every card as '—', so poolValueRange returns null),
+ *  which would otherwise paint an empty bordered box. Callers gate on this so
+ *  they can fall back to their own "not published yet" copy. */
+export const hasPublishedOddsContent = (
+  odds: { rarity: Rarity; chance: string }[] | null,
+  range: PoolValueRange | null,
+): odds is { rarity: Rarity; chance: string }[] =>
+  odds !== null && (odds.length > 0 || range !== null);
+
 /** The published-odds list itself — value-range row + per-rarity rows + caption.
  *  Shared between this sheet and the pack page's odds panel so the two can't
  *  drift (they did during the Epic→Mythical rename). */
@@ -23,6 +34,10 @@ export function PublishedOddsList({
   range: PoolValueRange | null;
   rounded?: 'xl' | '2xl';
 }) {
+  // Nothing to show: render nothing rather than an empty bordered <ul> + a
+  // "Published rates for this pack." caption over zero rates.
+  if (!hasPublishedOddsContent(odds, range)) return null;
+
   return (
     <>
       <ul
@@ -114,9 +129,11 @@ export function OddsSheet({
             <X className="h-5 w-5" aria-hidden />
           </button>
         </div>
-        {/* Published ⇢ render (even overall-only, tiers empty) — matching the
-            pack page's gate, which keys off publishedOdds being set. */}
-        {odds ? (
+        {/* Published AND non-empty ⇢ render. Odds can be published with no
+            per-tier rows; if nothing in the pool is priced either, the range row
+            is gone too and the list would be an empty box — so fall through to
+            the not-published copy. Same gate as the pack page's odds panel. */}
+        {hasPublishedOddsContent(odds, range) ? (
           <PublishedOddsList odds={odds} range={range} />
         ) : (
           <p className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-6 text-center text-[13px] text-white/60">
