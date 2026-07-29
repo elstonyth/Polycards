@@ -113,6 +113,19 @@ const PackOddsEditorPage = () => {
   // apart. Local to the editor: every pack opens on the house default.
   const [defaults, setDefaults] =
     useState<Record<string, string>>(houseDefaults);
+
+  // The recipe belongs to a PACK, so it resets on a pack change and ONLY on a
+  // pack change. It cannot live in the seeding block below: saveMembers clears
+  // `seededFrom` to force a reseed of the SAME pack, so resetting there would
+  // wipe a tuned recipe the instant the operator adds a card — and because
+  // unlocked rows derive live, every rate in the table would jump with no
+  // notice. Keyed off `slug` rather than the snapshot for the same reason.
+  const [defaultsFor, setDefaultsFor] = useState(slug);
+  if (defaultsFor !== slug) {
+    setDefaultsFor(slug);
+    setDefaults(houseDefaults());
+  }
+
   // A half-typed field ('' or '1.') is NaN — coerced to 0 here rather than
   // asserted away, so the Record<OddsRarity, number> type stays honest.
   const defaultsNum = useMemo(
@@ -220,10 +233,8 @@ const PackOddsEditorPage = () => {
     // that state var will not reflect this `setSeededFrom` call until the
     // NEXT render, so testing it here would silently skip the seed on the
     // very first load (`shouldSeedBuffer` also re-gates false by then).
-    // The tier table resets on reseed: the router reuses this component across
-    // :slug changes, so a share edited on pack A would otherwise follow the
-    // operator to pack B while the panel still calls itself the house recipe.
-    setDefaults(houseDefaults());
+    // NOTE: the tier recipe is deliberately NOT reset here — this block also
+    // runs after a pool save on the same pack. See `defaultsFor` above.
     const seeded = mapOddsToRows(data.odds);
     if (pendingAdd.length === 0) {
       setRows(seeded);
