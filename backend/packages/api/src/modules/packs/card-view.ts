@@ -23,6 +23,13 @@ export function cardByHandle<T extends { handle: string }>(
   return new Map(cards.map((c) => [c.handle, c]));
 }
 
+// A card is GRADED iff it carries a grader (Card.grader is NOT NULL, so raw
+// cards store ''). Trimmed: a whitespace-only grader is a raw card typed
+// sloppily, and counting it as graded would flip a pack's composition (§2.4.8).
+// Shared so the odds editor and the packs list can never disagree on RAW/GRADED.
+export const isGraded = (c: { grader: string }): boolean =>
+  c.grader.trim() !== '';
+
 // card_id/rarity are nullable on the row (reward rows have neither); the lookup
 // keys defensively and defaults to "Common", so a reward row passed in here is
 // harmless — it just never matches a real (pack, card) card lookup.

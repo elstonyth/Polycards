@@ -52,6 +52,20 @@ export function coerceIdSearch(raw: unknown): string | undefined {
   return (raw as string).replace(/[\\%_]/g, (c) => `\\${c}`);
 }
 
+// Validate the per-player query filter (?customer_id=). Returns undefined only
+// when the param is ABSENT. Deliberately stricter than the ?q=/?status=
+// coercers above, which treat '' as absent: this one scopes the table to one
+// player, and silently widening an empty value back to every customer's orders
+// is a leak, not a convenience. A repeated param arrives as string[] → 400.
+export function coerceCustomerId(raw: unknown): string | undefined {
+  if (raw === undefined) return undefined;
+  const trimmed = typeof raw === 'string' ? raw.trim() : '';
+  if (!trimmed || trimmed.length > 64) {
+    bad('`customer_id` must be a string of 1-64 characters.');
+  }
+  return trimmed;
+}
+
 export type BulkStatusBody = { ids: string[]; status: DeliveryStatus };
 
 // Body of POST /admin/delivery-orders/bulk. The 100-id cap is the contract the

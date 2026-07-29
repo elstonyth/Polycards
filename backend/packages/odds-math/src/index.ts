@@ -67,7 +67,11 @@ export interface OddsResult {
   computed: ComputedOdd[];
   /** Non-null when the configuration is invalid and must NOT be saved. */
   error: string | null;
-  /** Σ of locked win rates, as a % (for the form summary). */
+  /** Σ of locked win rates, as a % (for the form summary). NOTE: under
+   *  `balanceOdds` this is the PINNED total (every non-Common row plus locked
+   *  Commons — its "locked" set), not just `locked: true` rows; `computeOdds`
+   *  keeps the literal meaning. No consumer reads it today — rename to a
+   *  separate pinnedTotalPct if one ever needs both. */
   lockedTotalPct: number;
   unlockedCount: number;
 }
@@ -143,5 +147,178 @@ export function computeOdds(entries: OddsInput[]): OddsResult {
     error,
     lockedTotalPct: lockedBpsTotal / 100,
     unlockedCount: unlocked.length,
+  };
+}
+
+// ── Common as balancer (POLYCARD-BACK §2.4) ─────────────────────────────────
+// Replaces the rarity-weighted remainder split FOR PACK-ODDS SAVES: every
+// non-Common row keeps its submitted pct verbatim (locked or not), locked
+// Common rows are pinned too, and UNLOCKED Common rows absorb the remainder
+// (even split, largest-remainder rounding → Σ === TOTAL_BPS exactly,
+// input-order independent). computeOdds above STAYS for the reward/daily-box
+// editors — those pools have no Common-as-balancer concept.
+export function balanceOdds(entries: OddsInput[]): OddsResult {
+  const safe = Array.isArray(entries) ? entries : [];
+  let error: string | null = null;
+
+  const isBalancer = (entry: OddsInput): boolean =>
+    entry.locked === false && entry.rarity === 'Common';
+  const pinned = safe.filter((entry) => !isBalancer(entry));
+  const balancers = safe.filter(isBalancer);
+
+  let pinnedBps = 0;
+  const bpsById = new Map<string, number>();
+  for (const entry of pinned) {
+    const pct = Number(entry.pct);
+    if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
+      error ??= 'Each win rate must be between 0% and 100%.';
+    }
+    const bps = clampBps(Math.round((Number.isFinite(pct) ? pct : 0) * 100));
+    bpsById.set(entry.card_id, bps);
+    pinnedBps += bps;
+  }
+
+  if (safe.length === 0) error ??= 'No cards to configure.';
+  if (pinnedBps > TOTAL_BPS) {
+    error ??= 'Common win rate would go below 0%. Lower the other rates.';
+  }
+  if (balancers.length === 0 && pinnedBps !== TOTAL_BPS) {
+    error ??=
+      'Without an unlocked Common card, win rates must total exactly 100%.';
+  }
+
+  const remainder = Math.max(0, TOTAL_BPS - pinnedBps);
+  if (balancers.length > 0) {
+    const base = Math.floor(remainder / balancers.length);
+    let leftover = remainder - base * balancers.length;
+    const ordered = [...balancers].sort((a, b) =>
+      a.card_id < b.card_id ? -1 : a.card_id > b.card_id ? 1 : 0,
+    );
+    for (const entry of ordered) {
+      bpsById.set(entry.card_id, base + (leftover > 0 ? 1 : 0));
+      if (leftover > 0) leftover -= 1;
+    }
+  }
+
+  const computed: ComputedOdd[] = safe.map((entry) => {
+    const weight = bpsById.get(entry.card_id) ?? 0;
+    return {
+      card_id: entry.card_id,
+      weight,
+      locked: entry.locked,
+      pct: weight / 100,
+    };
+  });
+
+  return {
+    computed,
+    error,
+    lockedTotalPct: pinnedBps / 100,
+    unlockedCount: balancers.length,
+  };
+}
+
+// ── Win-rate SETS 2 and 3 (POLYCARD-BACK §2.4 / D2) ─────────────────────────
+// One pack carries three odds tables; a customer's group picks which one their
+// spin rolls against (set 1 = default). Sets 2/3 are stored SPARSELY: a NULL
+// weight_2/weight_3 means "inherit the previous set" for that card (3→2→1).
+//
+// STORAGE RULE (the invariant this function encodes):
+//   - Set 1 ALWAYS materializes (`weight` on every row).
+//   - For set s ∈ {2,3}: if NO entry carries an explicit `pct_s`, the whole set
+//     stays NULL — pure inheritance, and Σ is already guaranteed by set 1.
+//     Otherwise the set's EFFECTIVE rates (explicit `pct_s`, else the PREVIOUS
+//     set's resolved pct — so 3 chains off 2, not off 1) run through
+//     `balanceOdds`, and `weight_s` is stored for (a) every card with an
+//     explicit `pct_s` and (b) every unlocked Common (the balancer output).
+//     Cards that merely inherited stay NULL.
+//   - Because every save recomputes ALL THREE sets, a later set-1 edit
+//     refreshes the materialized Common of sets 2/3 — so each set's RESOLVED
+//     weights sum to exactly TOTAL_BPS after every save.
+//
+// Errors are per-set and short-circuit: set 1's message propagates verbatim,
+// sets 2/3 are prefixed 'Set N: ' so the editor can point at the right tab.
+
+/** An editor row: set-1 `pct` plus the optional per-set overrides (null = inherit). */
+export type SetEntry = OddsInput & {
+  pct_2: number | null;
+  pct_3: number | null;
+};
+
+export type SetWeightsResult = {
+  /** First error encountered, prefixed 'Set N: ' for sets 2/3. Non-null ⇒ do NOT save. */
+  error: string | null;
+  /** Per-card storage row, in input order. Empty when `error` is set. */
+  rows: {
+    card_id: string;
+    locked: boolean;
+    /** Set 1 basis points — always materialized. */
+    weight: number;
+    /** Basis points for set 2/3; null = inherit the previous set. */
+    weight_2: number | null;
+    weight_3: number | null;
+  }[];
+};
+
+export function computeSetWeights(entries: SetEntry[]): SetWeightsResult {
+  const set1 = balanceOdds(entries);
+  if (set1.error) return { error: set1.error, rows: [] };
+
+  const pctByCard = (r: OddsResult): Map<string, number> =>
+    new Map(r.computed.map((c) => [c.card_id, c.pct]));
+
+  // Keyed lookup instead of a linear `entries.find` per computed row PER SET:
+  // this runs on every editor keystroke (previewSets) over pools the rest of
+  // the code sizes at 2000+ rows. First occurrence wins, exactly as `find` did.
+  const byCard = new Map<string, SetEntry>();
+  for (const e of entries) if (!byCard.has(e.card_id)) byCard.set(e.card_id, e);
+
+  let prev = pctByCard(set1);
+  const materialized: (Map<string, number> | null)[] = [];
+
+  for (const setNo of [2, 3] as const) {
+    const explicit = (e: SetEntry): number | null =>
+      setNo === 2 ? e.pct_2 : e.pct_3;
+
+    // No override anywhere ⇒ the whole set inherits; store nothing.
+    if (!entries.some((e) => explicit(e) !== null)) {
+      materialized.push(null);
+      continue;
+    }
+
+    const eff: OddsInput[] = entries.map((e) => ({
+      card_id: e.card_id,
+      locked: e.locked,
+      rarity: e.rarity,
+      pct: explicit(e) ?? prev.get(e.card_id) ?? 0,
+    }));
+
+    const r = balanceOdds(eff);
+    if (r.error) return { error: `Set ${setNo}: ${r.error}`, rows: [] };
+
+    const weights = new Map<string, number>();
+    for (const c of r.computed) {
+      const src = byCard.get(c.card_id);
+      if (!src) continue;
+      const isBalancer = src.locked === false && src.rarity === 'Common';
+      if (explicit(src) !== null || isBalancer)
+        weights.set(c.card_id, c.weight);
+    }
+    materialized.push(weights);
+    prev = pctByCard(r);
+  }
+
+  const [m2, m3] = materialized;
+  const w1 = new Map(set1.computed.map((c) => [c.card_id, c.weight]));
+
+  return {
+    error: null,
+    rows: entries.map((e) => ({
+      card_id: e.card_id,
+      locked: e.locked,
+      weight: w1.get(e.card_id) ?? 0,
+      weight_2: m2 ? (m2.get(e.card_id) ?? null) : null,
+      weight_3: m3 ? (m3.get(e.card_id) ?? null) : null,
+    })),
   };
 }

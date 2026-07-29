@@ -43,6 +43,8 @@ export const AdminActionAudit = model
       'replace',
       'edit',
       'bulk_status',
+      'disable',
+      'enable',
     ]),
     before: model.json().nullable(),
     after: model.json().nullable(),

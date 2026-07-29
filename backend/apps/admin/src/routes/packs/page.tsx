@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { Fragment, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -6,6 +6,7 @@ import {
   Heading,
   Text,
   Table,
+  Badge,
   Button,
   IconButton,
   Switch,
@@ -17,7 +18,13 @@ import {
   Prompt,
   toast,
 } from '@medusajs/ui';
-import { ArrowDownMini, ArrowUpMini, Gift } from '@medusajs/icons';
+import {
+  ArrowDownMini,
+  ArrowUpMini,
+  ChevronDownMini,
+  ChevronRightMini,
+  Gift,
+} from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import { type AdminPack, type AdminPackWrite } from '../../lib/packs-api';
 import {
@@ -30,7 +37,7 @@ import {
 } from '../../lib/queries';
 import { resolveImageUrl } from '../../lib/image-url';
 import { validateImageFile } from '../../lib/image-validation';
-import { rm } from '../../lib/format';
+import { fmtPct, rm } from '../../lib/format';
 import { GachaPipelineHint } from '../../components/GachaPipelineHint';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
@@ -56,6 +63,21 @@ const CATEGORIES = [
   'riftbound',
 ] as const;
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+// Columns in the packs table — the expander row spans all of them. Keep in
+// step with the <Table.Header> row below.
+const COLUMN_COUNT = 9;
+
+// Pool composition (auto-detected server-side). Graded slabs read as the
+// premium tier, so they get the purple tag; a mixed pool gets its own colour
+// rather than being lumped in with either pure pool.
+const GROUP_COLOR = { RAW: 'grey', GRADED: 'purple', MIX: 'blue' } as const;
+
+// "RM 12.34 · 82.5%", or an em-dash when the pack has no priced pool. EV and
+// RTP come out of the same computation, so they are null together — the pair
+// is checked here once instead of at each of the four call sites.
+const evRtp = (ev: number | null, rtp: number | null): string =>
+  ev === null || rtp === null ? '—' : `${rm(ev)} · ${fmtPct(rtp)}`;
 
 type FormState = {
   slug: string;
@@ -115,6 +137,10 @@ const PacksListPage = () => {
   const [statusFilter, setStatusFilter] = useState<'all' | 'draft' | 'active'>(
     'all',
   );
+  // Slugs whose per-set EV/RTP detail row is open (see the chevron in the
+  // EV / RTP cell). Filtering a row out leaves its entry here — harmless, and
+  // it keeps the row open if the operator clears the filter again.
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const filtering = q.trim() !== '' || statusFilter !== 'all';
   const fileRef = useRef<HTMLInputElement>(null);
   const displayFileRef = useRef<HTMLInputElement>(null);
@@ -122,6 +148,13 @@ const PacksListPage = () => {
   const saving = createPack.isPending || updatePack.isPending;
 
   const patch = (p: Partial<FormState>) => setForm((f) => ({ ...f, ...p }));
+
+  const toggleExpanded = (slug: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(slug)) next.add(slug);
+      return next;
+    });
 
   const openCreate = () => {
     setForm(EMPTY_FORM);
@@ -345,6 +378,12 @@ const PacksListPage = () => {
               <Table.HeaderCell>{t('packs.list.pack')}</Table.HeaderCell>
               <Table.HeaderCell>{t('packs.list.category')}</Table.HeaderCell>
               <Table.HeaderCell>{t('packs.list.status')}</Table.HeaderCell>
+              <Table.HeaderCell>Group</Table.HeaderCell>
+              {/* Set 1 only — sets 2/3 and the published pair live in the row
+                  expander so this stays a readable table, not ten columns. */}
+              <Table.HeaderCell className="text-right">
+                EV / RTP
+              </Table.HeaderCell>
               <Table.HeaderCell>Odds</Table.HeaderCell>
               <Table.HeaderCell>{t('packs.list.price')}</Table.HeaderCell>
               <Table.HeaderCell className="text-right">
@@ -356,9 +395,10 @@ const PacksListPage = () => {
             {visibleRows.map((p) => {
               const group = grouped.get(p.category) ?? [];
               const pos = group.findIndex((x) => x.slug === p.slug);
+              const open = expanded.has(p.slug);
               return (
+              <Fragment key={p.slug}>
               <Table.Row
-                key={p.slug}
                 className="cursor-pointer"
                 onClick={() => navigate(`/packs/${p.slug}`)}
               >
@@ -407,6 +447,34 @@ const PacksListPage = () => {
                   </StatusBadge>
                 </Table.Cell>
                 <Table.Cell>
+                  {p.group ? (
+                    <Badge size="2xsmall" color={GROUP_COLOR[p.group]}>
+                      {p.group}
+                    </Badge>
+                  ) : (
+                    <span className="text-ui-fg-muted">—</span>
+                  )}
+                </Table.Cell>
+                <Table.Cell className="text-right">
+                  <div className="flex items-center justify-end gap-x-1">
+                    <span className="tabular-nums">
+                      {evRtp(p.ev.s1, p.rtp.s1)}
+                    </span>
+                    <Button
+                      size="small"
+                      variant="transparent"
+                      aria-expanded={open}
+                      aria-label={`${open ? 'Hide' : 'Show'} odds-set detail for ${p.title}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleExpanded(p.slug);
+                      }}
+                    >
+                      {open ? <ChevronDownMini /> : <ChevronRightMini />}
+                    </Button>
+                  </div>
+                </Table.Cell>
+                <Table.Cell>
                   <StatusBadge color={p.published_odds ? 'green' : 'orange'}>
                     {p.published_odds ? 'Published' : 'Not set'}
                   </StatusBadge>
@@ -447,6 +515,38 @@ const PacksListPage = () => {
                   </div>
                 </Table.Cell>
               </Table.Row>
+              {open && (
+                /* Sets 2 and 3 read IDENTICAL to set 1 while a pack is pure
+                   inheritance (no card carries a weight_2/weight_3 override) —
+                   expected, not a bug: an unset per-set weight falls back
+                   3→2→1. They diverge as soon as the odds editor overrides one. */
+                <Table.Row className="bg-ui-bg-subtle">
+                  {/* Plain <td>: Medusa types Table.Cell as HTMLAttributes,
+                      which has no colSpan (its runtime <td> forwards it fine),
+                      so the spanning cell can't use the component. */}
+                  <td colSpan={COLUMN_COUNT} className="pl-0 pr-6">
+                    <div className="grid max-w-xl grid-cols-3 gap-x-6 py-2">
+                      {(
+                        [
+                          ['Set 2', evRtp(p.ev.s2, p.rtp.s2)],
+                          ['Set 3', evRtp(p.ev.s3, p.rtp.s3)],
+                          ['Published', evRtp(p.pub_ev, p.pub_rtp)],
+                        ] as const
+                      ).map(([label, value]) => (
+                        <div key={label} className="flex flex-col">
+                          <Text size="xsmall" className="text-ui-fg-subtle">
+                            {label}
+                          </Text>
+                          <Text size="small" className="tabular-nums">
+                            {value}
+                          </Text>
+                        </div>
+                      ))}
+                    </div>
+                  </td>
+                </Table.Row>
+              )}
+              </Fragment>
               );
             })}
           </Table.Body>

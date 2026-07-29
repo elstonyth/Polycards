@@ -1,5 +1,5 @@
 import { client } from './client';
-import type { ComputedOdd, OddsInput, OddsRarity } from '@acme/odds-math';
+import type { ComputedOdd, OddsRarity, SetEntry } from '@acme/odds-math';
 
 // Typed facade for the custom gacha admin routes.
 //
@@ -35,6 +35,21 @@ export interface AdminPack {
   buyback_percent: number;
   boost: boolean;
   published_odds: PublishedOdds | null;
+  /** RAW / GRADED / MIX composition of the prize pool — AUTO-DETECTED from the
+   *  members' graders, never operator-set. Null = empty pool (nothing to infer
+   *  from, which is not the same as "raw"). */
+  group: 'RAW' | 'GRADED' | 'MIX' | null;
+  /** Theoretical EV (RM) per odds set — s1 is the live default; s2/s3 are the
+   *  alternate weight columns (NULL weights inherit 3→2→1 per card). Null when
+   *  the pack has no priced pool. */
+  ev: { s1: number | null; s2: number | null; s3: number | null };
+  /** Theoretical RTP % per odds set — null exactly when the matching `ev` is. */
+  rtp: { s1: number | null; s2: number | null; s3: number | null };
+  /** EV/RTP implied by the PUBLISHED tier percentages (what the player is
+   *  promised) vs. what the secret weights above actually pay. Null when the
+   *  pack has no published odds. */
+  pub_ev: number | null;
+  pub_rtp: number | null;
 }
 
 // Create/update payload. `slug` is sent on create only (immutable thereafter —
@@ -95,6 +110,8 @@ export interface AdminCard {
    *  composite; null = blank (renders nothing). */
   label_year: string | null;
   label_note: string | null;
+  /** When the card was registered (ISO) — the list's "Added" sort key. */
+  created_at: string;
   /** USD -> MYR breakdown for the current market_value; always present (GET
    *  routes always resolve an fxRate before building the DTO). */
   priceBreakdown: {
@@ -158,19 +175,36 @@ export interface OddsRow {
   slab_image: string | null;
   /** The card's tier IN THIS PACK (PackOdds.rarity) — editable per pack. */
   rarity: string;
+  /** DISPLAY PRICE (FMV × fx × the card's markup), not raw FMV — §2.4. */
   market_value: number;
   /** Available physical units; `null` = untracked (infinite). */
   stock: number | null;
   weight: number;
+  /** RAW set-2/3 basis points; null = this card inherits the previous set. The
+   *  editor seeds its override inputs from these (not from pct_2/pct_3) so
+   *  "overridden" stays distinguishable from "inherited". */
+  weight_2: number | null;
+  weight_3: number | null;
   locked: boolean;
-  /** Current win % = weight / Σweight × 100. */
+  /** Current win % = weight / Σweight × 100, per set (inheritance resolved). */
   pct: number;
+  pct_2: number;
+  pct_3: number;
   /** Admin-picked Top Hit display order (1-based; null = not a Top Hit). */
   top_hit_order: number | null;
 }
 
 export interface PackOddsResponse {
-  pack: { slug: string; title: string; category: string; status: string };
+  pack: {
+    slug: string;
+    title: string;
+    category: string;
+    status: string;
+    /** Pack price (RM) — the denominator of the editor's live RTP readout. */
+    price: number;
+    /** Auto-detected pool composition (§2.4.8); null = empty pool. */
+    group: 'RAW' | 'GRADED' | 'MIX' | null;
+  };
   odds: OddsRow[];
 }
 
@@ -237,9 +271,11 @@ type PacksApi = {
         ) => Promise<{ pack: { slug: string } }>;
         odds: {
           query: (input: { $slug: string }) => Promise<PackOddsResponse>;
+          // SetEntry = OddsInput + the set-2/3 overrides (number | null —
+          // STRICT server-side, a string 400s). The response stays SET 1 only.
           mutate: (input: {
             $slug: string;
-            entries: OddsInput[];
+            entries: SetEntry[];
           }) => Promise<{ odds: ComputedOdd[] }>;
         };
         members: {

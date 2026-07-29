@@ -33,6 +33,7 @@ import SiteSettings from './models/site-settings';
 import ReferralRelationship from './models/referral-relationship';
 import Commission from './models/commission';
 import CustomerAccountState from './models/customer-account-state';
+import PlayerPayoutDetails from './models/player-payout-details';
 import AdminActionAudit from './models/admin-action-audit';
 import VipMemberState from './models/vip-member-state';
 import VipRewardGrant from './models/vip-reward-grant';
@@ -366,6 +367,7 @@ class PacksModuleService extends MedusaService({
   ReferralRelationship,
   Commission,
   CustomerAccountState,
+  PlayerPayoutDetails,
   AdminActionAudit,
   VipMemberState,
   VipRewardGrant,
@@ -387,15 +389,25 @@ class PacksModuleService extends MedusaService({
   async applyPackMemberDiff(
     diff: {
       pack_id: string;
+      // weight_2/weight_3 ride along with weight: a membership edit recomputes
+      // ALL THREE odds sets, so writing only `weight` would leave a
+      // materialized set 2/3 resolving to something other than 10000.
       create: {
         pack_id: string;
         card_id: string;
         rarity: OddsRarity;
         weight: number;
+        weight_2?: number | null;
+        weight_3?: number | null;
         locked: boolean;
       }[];
       remove_ids: string[];
-      reweigh: { id: string; weight: number }[];
+      reweigh: {
+        id: string;
+        weight: number;
+        weight_2?: number | null;
+        weight_3?: number | null;
+      }[];
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ created_ids: string[] }> {
@@ -677,6 +689,40 @@ class PacksModuleService extends MedusaService({
       vipSpendTotal: Number(r?.vip_spend_cents ?? 0) / 100,
       depositedPlaythroughTotal: Number(r?.deposited_pt_cents ?? 0) / 100,
     };
+  }
+
+  // Monthly pack_open spend for one customer (MYR), newest first, capped at 24
+  // months. Months are bucketed in Asia/Kuala_Lumpur — every date boundary in
+  // this project is MYT, so an open at 17:00Z on the 28th belongs to the NEXT
+  // month. Months with no pack_open activity are omitted entirely (the HAVING),
+  // so a top-up-only month never shows up as a zero row. Same integer-cent
+  // idiom and index (customer_id, created_at) as creditSummary.
+  //
+  // KNOWN WART — a CROSS-MONTH reversal distorts BOTH months: reverseOpen writes
+  // its refund as a positive `pack_open` row stamped with the reversal's own
+  // created_at, so a March open reversed in April leaves March overstated and
+  // April negative. (Unlike creditSummary.vipSpendTotal, where the same rows net
+  // down one scalar and the distortion cancels.) Upgrade path when this matters:
+  // bucket a reversal by the reversed row's created_at, joining on the
+  // credit_transaction.source_transaction_id both rows already carry.
+  @InjectManager()
+  async spendReportForCustomer(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ period: string; spend: number }[]> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ period: string; spend_cents: string }[]>(
+      "SELECT to_char(date_trunc('month', created_at AT TIME ZONE 'Asia/Kuala_Lumpur'), 'YYYY-MM') AS period, " +
+        "  COALESCE(SUM(CASE WHEN reason = 'pack_open' THEN ROUND(-amount * 100) ELSE 0 END), 0)::bigint AS spend_cents " +
+        'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL ' +
+        "GROUP BY 1 HAVING SUM(CASE WHEN reason = 'pack_open' THEN 1 ELSE 0 END) > 0 ORDER BY 1 DESC LIMIT 24",
+      [customerId],
+    );
+    return rows.map((r) => ({
+      period: r.period,
+      spend: Number(r.spend_cents) / 100,
+    }));
   }
 
   // Customer credit balance = Σ(amount) over the append-only ledger. Kept as a
@@ -1776,6 +1822,159 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     return { frozen: true };
+  }
+
+  // Player disable switch (POLYCARD-BACK §4.2): blocks LOGIN/session use —
+  // orthogonal to `frozen` (funds lock), so neither flag reads or writes the
+  // other's columns. One row per customer, lazy-created like the freeze path.
+  // Takes the SAME advisory key as the freeze path — it guards the same
+  // customer_account_state row, whose customer_id is unique, against a
+  // duplicate list-then-create. State + audit share one transaction: an
+  // undisclosed disable (no audit row) is not an acceptable partial failure.
+  @InjectTransactionManager()
+  async setAccountDisabled(
+    input: {
+      customerId: string;
+      adminId: string;
+      disabled: boolean;
+      reason: string;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ disabled: boolean }> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `credit:${input.customerId}`,
+    ]);
+    const [existing] = await this.listCustomerAccountStates(
+      { customer_id: input.customerId },
+      { take: 1 },
+      sharedContext,
+    );
+    const patch = {
+      disabled: input.disabled,
+      disabled_reason: input.disabled ? input.reason : null,
+      disabled_by: input.disabled ? input.adminId : null,
+      disabled_at: input.disabled ? new Date() : null,
+    };
+    if (existing) {
+      await this.updateCustomerAccountStates(
+        { selector: { id: existing.id }, data: patch },
+        sharedContext,
+      );
+    } else {
+      await this.createCustomerAccountStates(
+        [{ customer_id: input.customerId, ...patch }],
+        sharedContext,
+      );
+    }
+    await this.createAdminActionAudits(
+      [
+        {
+          admin_id: input.adminId,
+          entity_type: 'customer',
+          entity_id: input.customerId,
+          action: input.disabled ? 'disable' : 'enable',
+          before: { disabled: existing?.disabled ?? false },
+          after: { disabled: input.disabled },
+          reason: input.reason,
+        },
+      ],
+      sharedContext,
+    );
+    return { disabled: input.disabled };
+  }
+
+  // True if the customer's login is administratively disabled. One indexed read
+  // on the auth path — mirrors isFrozen.
+  @InjectManager()
+  async isAccountDisabled(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<boolean> {
+    const [state] = await this.listCustomerAccountStates(
+      { customer_id: customerId, disabled: true },
+      { take: 1 },
+      sharedContext,
+    );
+    return Boolean(state);
+  }
+
+  // Upsert a customer's manual-cashout bank destination + audit row in ONE
+  // transaction (POLYCARD-BACK §4.3). Own advisory key — the row lives in its
+  // own table, so this must not serialize against the credit ledger, but the
+  // list-then-create still needs a lock or two concurrent first-saves race the
+  // unique customer_id to a 23505. The audit row records the bank NAME plus a
+  // last4: the FULL account number is admin-auth-only and must never be copied
+  // into the audit feed (GET /admin/customers/:id/audit reads that table).
+  // Without the last4 a same-bank account redirect reads as a no-op edit.
+  @InjectTransactionManager()
+  async setPayoutDetails(
+    input: {
+      customerId: string;
+      adminId: string;
+      bankName: string;
+      bankAccountNumber: string;
+      accountHolderName: string | null;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{
+    bank_name: string;
+    bank_account_number: string;
+    account_holder_name: string | null;
+  }> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `payout:${input.customerId}`,
+    ]);
+    const [existing] = await this.listPlayerPayoutDetails(
+      { customer_id: input.customerId },
+      { take: 1 },
+      sharedContext,
+    );
+    const data = {
+      bank_name: input.bankName,
+      bank_account_number: input.bankAccountNumber,
+      account_holder_name: input.accountHolderName,
+    };
+    if (existing) {
+      await this.updatePlayerPayoutDetails(
+        { selector: { id: existing.id }, data },
+        sharedContext,
+      );
+    } else {
+      await this.createPlayerPayoutDetails(
+        [{ customer_id: input.customerId, ...data }],
+        sharedContext,
+      );
+    }
+    // Digits only (stored numbers may carry spaces/hyphens) and ONLY when there
+    // are more than four of them — for a <=4-digit account the "last4" would be
+    // the whole number, which is exactly what must not reach the audit feed.
+    const last4 = (n: string | null | undefined): string | null => {
+      const digits = (n ?? '').replace(/\D/g, '');
+      return digits.length > 4 ? digits.slice(-4) : null;
+    };
+    await this.createAdminActionAudits(
+      [
+        {
+          admin_id: input.adminId,
+          entity_type: 'customer',
+          entity_id: input.customerId,
+          action: 'edit',
+          before: {
+            bank_name: existing?.bank_name ?? null,
+            account_last4: last4(existing?.bank_account_number),
+          },
+          after: {
+            bank_name: input.bankName,
+            account_last4: last4(input.bankAccountNumber),
+          },
+          reason: 'payout details updated',
+        },
+      ],
+      sharedContext,
+    );
+    return data;
   }
 
   // FX manual-override edit + audit row in the same transaction. The audit row
@@ -3092,6 +3291,101 @@ class PacksModuleService extends MedusaService({
     for (const r of cas) frozen.set(r.customer_id, Boolean(r.frozen));
     for (const r of counts) recruitCount.set(r.sponsor_id, Number(r.n));
     return { sponsorOf, vipLevel, lifetimeSen, frozen, recruitCount };
+  }
+
+  // Batched per-player aggregates for the admin Players list (POLYCARD-BACK
+  // §4.2): ONE query per aggregate per page, never per-row. The credit SQL is
+  // the GROUP BY twin of creditSummary (service.ts:661) and the vault SQL the
+  // customer-scoped twin of vaultLiabilityMyr (service.ts:2735) — same FMV
+  // convention (multiplier 1), same 'vaulted' predicate, no source filter, and
+  // the same INNER JOIN, so a vaulted pull whose card was soft-deleted drops out
+  // of BOTH vault_count and vault_value (profileStatsForCustomer deliberately
+  // differs — its LEFT JOIN still counts the pull at 0). Keeping the twin exact
+  // is what makes the Players list and the economy dashboard agree.
+  @InjectManager()
+  async playersOverview(
+    ids: string[],
+    fx: number,
+    @MedusaContext() sharedContext: Context = {},
+  ) {
+    const wallet = new Map<
+      string,
+      {
+        balanceCents: number;
+        // VIP-basis net pack_open spend — the same expression creditSummary
+        // calls vip_spend_cents (NOT its differently-defined spend_cents).
+        vipSpendCents: number;
+        lastSpendAt: string | null;
+      }
+    >();
+    const vault = new Map<string, { count: number; cents: number }>();
+    const pullCount = new Map<string, number>();
+    const vipLevel = new Map<string, number>();
+    const state = new Map<string, { frozen: boolean; disabled: boolean }>();
+    if (ids.length === 0)
+      return { wallet, vault, pullCount, vipLevel, state };
+
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const ph = ids.map(() => '?').join(',');
+    // Sequential to avoid concurrent queries on the shared injected EntityManager.
+    const credits = await em.execute<
+      {
+        customer_id: string;
+        balance_cents: string;
+        vip_spend_cents: string;
+        last_spend_at: string | null;
+      }[]
+    >(
+      'SELECT customer_id, ' +
+        '  COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents, ' +
+        "  COALESCE(SUM(CASE WHEN reason = 'pack_open' THEN ROUND(-amount * 100) ELSE 0 END), 0)::bigint AS vip_spend_cents, " +
+        "  MAX(created_at) FILTER (WHERE reason = 'pack_open') AS last_spend_at " +
+        `FROM credit_transaction WHERE customer_id IN (${ph}) AND deleted_at IS NULL GROUP BY customer_id`,
+      ids,
+    );
+    const vaults = await em.execute<
+      { customer_id: string; n: string; cents: string }[]
+    >(
+      'SELECT p.customer_id, COUNT(*)::bigint AS n, ' +
+        '  COALESCE(SUM(ROUND(c.market_value * ? * 100)), 0)::bigint AS cents ' +
+        '  FROM pull p JOIN card c ON c.handle = p.card_id AND c.deleted_at IS NULL ' +
+        ` WHERE p.status = 'vaulted' AND p.deleted_at IS NULL AND p.customer_id IN (${ph}) GROUP BY p.customer_id`,
+      [fx, ...ids],
+    );
+    const pulls = await em.execute<{ customer_id: string; n: string }[]>(
+      `SELECT customer_id, COUNT(*)::bigint AS n FROM pull WHERE source = 'pack' AND deleted_at IS NULL AND customer_id IN (${ph}) GROUP BY customer_id`,
+      ids,
+    );
+    const vips = await em.execute<
+      { customer_id: string; current_level: number }[]
+    >(
+      `SELECT customer_id, current_level FROM vip_member_state WHERE customer_id IN (${ph}) AND deleted_at IS NULL`,
+      ids,
+    );
+    const states = await em.execute<
+      { customer_id: string; frozen: boolean; disabled: boolean }[]
+    >(
+      `SELECT customer_id, frozen, disabled FROM customer_account_state WHERE customer_id IN (${ph}) AND deleted_at IS NULL`,
+      ids,
+    );
+
+    for (const r of credits)
+      wallet.set(r.customer_id, {
+        balanceCents: Number(r.balance_cents),
+        vipSpendCents: Number(r.vip_spend_cents),
+        lastSpendAt: r.last_spend_at,
+      });
+    for (const r of vaults)
+      vault.set(r.customer_id, { count: Number(r.n), cents: Number(r.cents) });
+    for (const r of pulls) pullCount.set(r.customer_id, Number(r.n));
+    for (const r of vips) vipLevel.set(r.customer_id, Number(r.current_level));
+    for (const r of states)
+      state.set(r.customer_id, {
+        frozen: Boolean(r.frozen),
+        disabled: Boolean(r.disabled),
+      });
+    return { wallet, vault, pullCount, vipLevel, state };
   }
 
   // Delete-guard (spec §3 invariant 1): money rows backing a commission are

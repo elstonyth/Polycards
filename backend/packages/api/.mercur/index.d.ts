@@ -61,10 +61,14 @@ export type Routes = {
                 audit: typeof import("../../src/api/admin/customers/[id]/audit/route");
                 commissions: typeof import("../../src/api/admin/customers/[id]/commissions/route");
                 credits: typeof import("../../src/api/admin/customers/[id]/credits/route");
+                disable: typeof import("../../src/api/admin/customers/[id]/disable/route");
+                enable: typeof import("../../src/api/admin/customers/[id]/enable/route");
                 freeze: typeof import("../../src/api/admin/customers/[id]/freeze/route");
                 gacha: typeof import("../../src/api/admin/customers/[id]/gacha/route");
+                payoutDetails: typeof import("../../src/api/admin/customers/[id]/payout-details/route");
                 pulls: typeof import("../../src/api/admin/customers/[id]/pulls/route");
                 referralTree: typeof import("../../src/api/admin/customers/[id]/referral-tree/route");
+                spendReport: typeof import("../../src/api/admin/customers/[id]/spend-report/route");
                 transactions: typeof import("../../src/api/admin/customers/[id]/transactions/route");
                 unfreeze: typeof import("../../src/api/admin/customers/[id]/unfreeze/route");
             };
@@ -477,6 +481,7 @@ export type Routes = {
             };
         };
         pixelPokemon: typeof import("../../src/api/admin/pixel-pokemon/route");
+        players: typeof import("../../src/api/admin/players/route");
         pricecharting: {
             product: typeof import("../../src/api/admin/pricecharting/product/route");
             search: typeof import("../../src/api/admin/pricecharting/search/route");

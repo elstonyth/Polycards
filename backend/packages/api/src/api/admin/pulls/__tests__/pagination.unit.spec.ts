@@ -116,4 +116,43 @@ describe('GET /admin/pulls pagination', () => {
     // Bailed before touching the ledger.
     expect(scope.seen.ledger).toBeUndefined();
   });
+
+  // ?customer_id= is the player tab: scoped table, no global rollups.
+  it('scopes the ledger to ?customer_id= and skips the rollup fetch', async () => {
+    const { res, out } = mkRes();
+    const scope = mkScope(3);
+    await GET({ scope, query: { customer_id: ' cus_1 ' } } as any, res);
+    expect(scope.seen.ledger).toEqual({ customer_id: 'cus_1' });
+    // The rollup window is never fetched for a scoped view.
+    expect(scope.seen.rollup).toBeUndefined();
+    expect(out.body.topCards).toEqual([]);
+    expect(out.body.topRarities).toEqual([]);
+    // The page itself still renders.
+    expect(out.body.pulls).toHaveLength(3);
+  });
+
+  it('combines ?customer_id= with ?source=', async () => {
+    const { res } = mkRes();
+    const scope = mkScope(3);
+    await GET(
+      { scope, query: { customer_id: 'cus_1', source: 'pack' } } as any,
+      res,
+    );
+    expect(scope.seen.ledger).toEqual({ source: 'pack', customer_id: 'cus_1' });
+  });
+
+  it.each([
+    ['empty', ''],
+    ['whitespace-only', '   '],
+    ['over-long', 'c'.repeat(65)],
+    ['repeated param', ['cus_1', 'cus_2']],
+  ])('rejects a %s ?customer_id=', async (_label, raw) => {
+    const { res, out } = mkRes();
+    const scope = mkScope(3);
+    await GET({ scope, query: { customer_id: raw } } as any, res);
+    expect(out.status).toBe(400);
+    expect(out.body.message).toMatch(/customer_id/i);
+    // Bailed before touching the ledger.
+    expect(scope.seen.ledger).toBeUndefined();
+  });
 });

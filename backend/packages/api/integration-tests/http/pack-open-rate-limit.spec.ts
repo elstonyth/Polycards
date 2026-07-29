@@ -1,7 +1,11 @@
 import { medusaIntegrationTestRunner } from "@medusajs/test-utils";
 import { Modules } from "@medusajs/framework/utils";
 import type Redis from "ioredis";
-import { connectTestRedisOrFail, unwrapResponse } from "./utils";
+import {
+  connectTestRedisOrFail,
+  TEST_REDIS_URL,
+  unwrapResponse,
+} from "./utils";
 
 jest.setTimeout(240 * 1000);
 
@@ -23,6 +27,10 @@ const RATE_ENV = {
   PACK_OPEN_RATE_BURST_WINDOW_MS: String(BURST_WINDOW_MS),
   PACK_OPEN_RATE_LIMIT: "5",
   PACK_OPEN_RATE_WINDOW_MS: "120000",
+  // See auth-rate-limit.spec.ts: the app's limiter must write to the same
+  // redis the probe inspects, or the zcard assertion below reads the
+  // in-memory failover store's nothing.
+  REDIS_URL: TEST_REDIS_URL,
 };
 
 const PASSWORD = "rl-test-password-1";

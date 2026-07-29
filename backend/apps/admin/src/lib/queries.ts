@@ -89,16 +89,26 @@ import {
   type VipLevelDTO,
   type VoucherLadderDTO,
   type VoucherRangeDTO,
+  // ── Epic 3 (Odds) ──
+  listCustomerGroupsAdmin,
+  setGroupOddsSet,
+  type AdminCustomerGroup,
 } from './admin-rest';
-import type { OddsInput } from '@acme/odds-math';
+import type { SetEntry } from '@acme/odds-math';
 import { qk } from './query-keys';
 
 // ── Display queries ──────────────────────────────────────────────────────────
 
-export const usePacks = (): UseQueryResult<AdminPack[]> =>
+// `enabled` matters more than usual here: the packs list now fans out to every
+// odds + card row to compute EV/RTP, so callers that only need the pack NAMES
+// (the cards page's bulk "add to pack" picker) must not pay for it on mount.
+export const usePacks = (
+  opts: { enabled?: boolean } = {},
+): UseQueryResult<AdminPack[]> =>
   useQuery({
     queryKey: qk.packs,
     queryFn: () => packsApi.admin.packs.query().then((r) => r.packs),
+    enabled: opts.enabled ?? true,
   });
 
 // `enabled` lets the pack odds editor's pool picker share this exact cache while
@@ -112,13 +122,16 @@ export const useCards = (
     enabled: opts.enabled ?? true,
   });
 
+// `customerId` scopes the ledger to one player (the player-detail tabs). Blank
+// is OMITTED by getPulls, never sent as an empty param — the route 400s on one.
 export const usePulls = (
   page = 0,
   source?: 'pack' | 'reward',
+  customerId?: string,
 ): UseQueryResult<PullsResponse> =>
   useQuery({
-    queryKey: qk.pulls(page, source),
-    queryFn: () => getPulls(page, 50, source),
+    queryKey: qk.pulls(page, source, customerId),
+    queryFn: () => getPulls(page, 50, source, customerId),
     placeholderData: keepPreviousData,
   });
 
@@ -238,29 +251,38 @@ export const useCustomerTransactions = (
     placeholderData: keepPreviousData,
   });
 
+// `opts` narrows the history server-side and is part of the cache key, so the
+// Vault tab's vaulted-only view and the support page's full history are
+// separate entries instead of overwriting each other for the same (id, page).
 export const useCustomerPulls = (
   id: string | null,
   page = 0,
+  // status only — getCustomerPulls also accepts `source`, but nothing needs it
+  // here and an un-keyed filter would collide in the cache.
+  opts?: { status?: string },
 ): UseQueryResult<{
   items: SupportPull[];
   total: number;
   fx?: { rate: number; firm: boolean };
 }> =>
   useQuery({
-    queryKey: qk.customerPulls(id ?? '', page),
-    queryFn: () => getCustomerPulls(id!, page),
+    queryKey: qk.customerPulls(id ?? '', page, opts?.status),
+    queryFn: () => getCustomerPulls(id!, page, 25, opts),
     enabled: !!id,
     placeholderData: keepPreviousData,
   });
 
+// `customerId` scopes the table to one player. listDeliveryOrders takes `limit`
+// BEFORE it (4th arg), so the default 50 is passed explicitly here.
 export const useDeliveryOrders = (
   status?: DeliveryStatus,
   page = 0,
   q?: string,
+  customerId?: string,
 ): UseQueryResult<DeliveryOrdersPage> =>
   useQuery({
-    queryKey: qk.deliveryOrders(status, page, q),
-    queryFn: () => listDeliveryOrders(status, page, q),
+    queryKey: qk.deliveryOrders(status, page, q, customerId),
+    queryFn: () => listDeliveryOrders(status, page, q, 50, customerId),
     placeholderData: keepPreviousData,
   });
 
@@ -394,7 +416,7 @@ export const useDeletePack = () => {
 // identical to the pre-refactor behavior. See the design spec.
 export const useSaveOdds = () =>
   useMutation({
-    mutationFn: (vars: { slug: string; entries: OddsInput[] }) =>
+    mutationFn: (vars: { slug: string; entries: SetEntry[] }) =>
       packsApi.admin.packs.$slug.odds.mutate({
         $slug: vars.slug,
         entries: vars.entries,
@@ -724,6 +746,126 @@ export const useSaveChallengeSettings = () => {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.challengeSettings });
       toast.success('Week & payout saved');
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+// ── Epic 2 (Players) ─────────────────────────────────────────────────────────
+// Own import block (not merged into the one at the top) so this whole section
+// stays append-only while a parallel epic edits the same file.
+import {
+  disablePlayer,
+  enablePlayer,
+  getCustomerDetail,
+  getPayoutDetails,
+  getSpendReport,
+  listPlayers,
+  savePayoutDetails,
+  type AdminCustomerDetail,
+  type PayoutDetails,
+  type PlayersPage,
+} from './admin-rest';
+
+export type { PlayerRow, PlayersPage, PayoutDetails } from './admin-rest';
+
+// Paged + searchable, but NOT id-scoped, so plain keepPreviousData is right
+// here (no stale-row-click hazard — the whole page swaps together).
+export const usePlayers = (
+  page = 0,
+  q?: string,
+): UseQueryResult<PlayersPage> =>
+  useQuery({
+    queryKey: qk.players(page, q),
+    queryFn: () => listPlayers(page, q),
+    placeholderData: keepPreviousData,
+  });
+
+// `disabled` is the TARGET state: true → block login, false → lift the block.
+export const useSetPlayerDisabled = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; disabled: boolean; reason: string }) =>
+      vars.disabled
+        ? disablePlayer(vars.id, vars.reason)
+        : enablePlayer(vars.id, vars.reason),
+    onSuccess: (_data, vars) => {
+      toast.success(vars.disabled ? 'Player disabled' : 'Player enabled');
+      // The list row shows the status, and the block writes an audit row.
+      qc.invalidateQueries({ queryKey: qk.playersKey });
+      qc.invalidateQueries({ queryKey: qk.customerGacha(vars.id) });
+      qc.invalidateQueries({ queryKey: qk.customerAuditKey(vars.id) });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+export const usePayoutDetails = (
+  id: string | null,
+): UseQueryResult<{ details: PayoutDetails | null }> =>
+  useQuery({
+    queryKey: qk.payoutDetails(id ?? ''),
+    queryFn: () => getPayoutDetails(id!),
+    enabled: !!id,
+  });
+
+export const useSavePayoutDetails = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; details: PayoutDetails }) =>
+      savePayoutDetails(vars.id, vars.details),
+    onSuccess: (_data, vars) => {
+      toast.success('Bank details saved');
+      qc.invalidateQueries({ queryKey: qk.payoutDetails(vars.id) });
+      qc.invalidateQueries({ queryKey: qk.customerAuditKey(vars.id) });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+export const useSpendReport = (
+  id: string | null,
+): UseQueryResult<{ periods: { period: string; spend: number }[] }> =>
+  useQuery({
+    queryKey: qk.spendReport(id ?? ''),
+    queryFn: () => getSpendReport(id!),
+    enabled: !!id,
+  });
+
+// Keyed inline (qk carries no customerDetail entry) so the per-customer prefix
+// still reaches it — same pattern as useEconomy's inline period segments.
+export const useCustomerDetail = (
+  id: string | null,
+): UseQueryResult<{ customer: AdminCustomerDetail }> =>
+  useQuery({
+    queryKey: ['admin', 'customer', id ?? '', 'detail'],
+    queryFn: () => getCustomerDetail(id!),
+    enabled: !!id,
+  });
+
+// ── Epic 3 (Odds) ────────────────────────────────────────────────────────────
+
+export type { AdminCustomerGroup } from './admin-rest';
+
+export const useCustomerGroupsAdmin = (): UseQueryResult<{
+  customer_groups: AdminCustomerGroup[];
+  count: number;
+}> =>
+  useQuery({ queryKey: qk.customerGroups, queryFn: listCustomerGroupsAdmin });
+
+// Writes one group's metadata.odds_set. Invalidates the list so the saved value
+// is re-read from the server rather than trusted from local state.
+export const useSetGroupOddsSet = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; set: 1 | 2 | 3 }) =>
+      setGroupOddsSet(vars.id, vars.set),
+    onSuccess: () => {
+      toast.success('Odds set saved');
+      // Returned so the mutation stays pending until the refetch lands — the
+      // Odds Sets page drops its local override in ITS onSuccess, and doing so
+      // against a stale cache would flash the previous set.
+      return qc.invalidateQueries({ queryKey: qk.customerGroups });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });

@@ -104,6 +104,18 @@ medusaIntegrationTestRunner({
         // 4. Assign a card; win rates are saveable ON THE DRAFT (draft is the
         //    designated authoring state — the editor must work pre-activation);
         //    then activation succeeds.
+        //
+        //    The lone row is saved at 100% (POLYCARD-BACK §2.4, Common as
+        //    balancer). It used to be saved at 0%: under the old rarity-split
+        //    semantics an UNLOCKED row floated and absorbed the whole 10000
+        //    bps, so 0% in meant 100% out. Under the balancer only unlocked
+        //    COMMON rows float — a lone unlocked Rare is pinned verbatim, so
+        //    0% now both 400s ("Without an unlocked Common card, win rates
+        //    must total exactly 100%") and would leave the pool unwinnable.
+        //    Saving it pinned at 100 restores the pre-balancer OUTCOME (one
+        //    card at the full 10000 bps), which is what this activation guard
+        //    has always been about — it tests the pack LIFECYCLE, not the
+        //    odds math (that lives in the odds-math + odds-route specs).
         const setMembers = await unwrapResponse(
           api.post(
             '/admin/packs/guard-pack/members',
@@ -121,7 +133,7 @@ medusaIntegrationTestRunner({
                 {
                   card_id: CARD_HANDLE,
                   locked: false,
-                  pct: 0,
+                  pct: 100,
                   rarity: 'Rare',
                 },
               ],
