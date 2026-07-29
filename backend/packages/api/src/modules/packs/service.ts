@@ -6116,6 +6116,11 @@ class PacksModuleService extends MedusaService({
     //     exactly at this start and the next begins exactly at this end, so
     //     neither is ever blocked. A shift of >= 7 days produces a DISJOINT
     //     window — paying that is correct, not a re-pay.
+    //     By design, and NOT a bug: moving the anchor EARLIER also blocks
+    //     the FOLLOWING week for anyone already paid, because that window
+    //     still overlaps the paid one by up to 6 days and paying it would
+    //     double-pay those days. It self-heals a week later, once the windows
+    //     no longer overlap.
     //     The week_start lower bound is index bait for IDX_challenge_payout_week
     //     (there is no customer_id-leading index): an overlapping stored window
     //     has week_end > this start, and week_start = week_end − (7d ± 1h).
