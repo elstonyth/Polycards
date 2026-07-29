@@ -120,13 +120,33 @@ picked because it needs no backend deploy and unsuspending is a copy revert.
     does nothing.
   - `/vip`, `/vouchers`, `/daily`, `/referrals`, `/invite/anything` all 404.
   - The Me tab does not highlight on those URLs.
-- `grep -rn "href=\"/vip\|href=\"/referrals\|href=\"/vouchers\|href=\"/daily" src`
-  returns only `components/rewards/PrizeReveal.tsx:114` — an orphan whose sole
-  importer (`DailyClient`) is deleted, kept dead-code-with-dead-link by the
-  revert-friendly decision above. No *reachable* component links to a deleted
-  route. (The full link inventory before this change: `me/page.tsx` lines 121,
-  205, 218 → `/vip`; 227 → `/vouchers`; 348 → `/referrals`; plus
-  `PrizeReveal.tsx:114` — the first five die with the §2 edits.)
+**A JSX-literal grep is NOT sufficient** — this was a real defect in the first
+draft of this spec. `grep 'href="/vip'` sees JSX string literals only; it misses
+`redirect()`, `router.push()`, `<Link href={someVar}>`, route-config arrays,
+and test files. It missed `src/app/(account)/rewards/page.tsx`, which was never
+a page at all — just `redirect('/vip')` — so `/rewards` 404'd the moment `/vip`
+did, while `reward_won`'s `href: '/rewards'` kept rendering a live "View
+rewards" affordance on every historical feed row. Run all four parts:
+
+1. `grep -rn "href=\"/vip\|href=\"/referrals\|href=\"/vouchers\|href=\"/daily\|href=\"/rewards" src`
+2. `grep -rnE "(redirect|router\.push|router\.replace)\((['\"\`])/(vip|vouchers|daily|referrals|invite|rewards)" src tests`
+3. Route inventory — `find src/app -name page.tsx` — read any survivor whose
+   name matches the suspended surfaces; a 4-line redirect stub does not look
+   like a route in a file list.
+4. `grep -rl "/(vip|vouchers|daily|referrals|invite)" tests .github` — the
+   nightly e2e suite drives these URLs and is not run per-PR, so route rot
+   there is invisible until it fails on a schedule.
+
+After the sweep, (1) returns only `components/rewards/PrizeReveal.tsx:114` — an
+orphan whose sole importer (`DailyClient`) is deleted, kept dead-code-with-dead-link
+by the revert-friendly decision above. No *reachable* component links to a
+deleted route. (Full link inventory before this change: `me/page.tsx` lines 121,
+205, 218 → `/vip`; 227 → `/vouchers`; 348 → `/referrals`;
+`copy.ts` `reward_won` → `/rewards`; plus `PrizeReveal.tsx:114`.)
+
+The copy test's dead-route assertion must be a **prefix regex**, not literal
+equality against the deleted-directory list — equality is what let `/rewards`
+through, and it would equally miss a nested `/vip/levels`.
 
 ## Reversal
 
