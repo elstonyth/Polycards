@@ -10,7 +10,6 @@ import {
   Package,
   Receipt,
   Settings,
-  Ticket,
   type LucideIcon,
 } from 'lucide-react';
 import { getCustomer } from '@/lib/data/customer';
@@ -20,7 +19,6 @@ import { getOwnProfileHandle, getPublicProfile } from '@/lib/data/profiles';
 import { getWallet } from '@/lib/actions/wallet';
 import { getVip } from '@/lib/actions/vip';
 import { levelProgressPct } from '@/lib/actions/vip-map';
-import { getDaily } from '@/lib/actions/daily';
 import { getAvatarFrames } from '@/lib/data/avatar-frames';
 import { rm, rm0 } from '@/lib/format';
 import { SlabImage } from '@/components/SlabImage';
@@ -34,12 +32,11 @@ export const metadata: Metadata = {
 };
 
 // Quick-access grid (Show's Me pattern). VIP, Daily Box, and Withdraw tiles
-// were dropped 2026-07-15: the level card, its daily lines, and the wallet bar
-// are their entry points now.
+// were dropped 2026-07-15; Vouchers went with the 2026-07-29 reward-surface
+// suspension (routes 404 while the reward economy is paused).
 const QUICK_ACCESS: { label: string; href: string; icon: LucideIcon }[] = [
   { label: 'History', href: '/transactions', icon: Receipt },
   { label: 'Orders', href: '/orders', icon: Package },
-  { label: 'Vouchers', href: '/vouchers', icon: Ticket },
   { label: 'Inbox', href: '/notifications', icon: Bell },
   { label: 'Download', href: '/download', icon: Download },
   { label: 'Address', href: '/addresses', icon: MapPin },
@@ -57,14 +54,12 @@ const ABOUT_LINKS: { label: string; href: string }[] = [
 export default async function MePage() {
   // Layout guard guarantees a customer here.
   const customer = (await getCustomer())!;
-  const [walletResult, handle, vipResult, dailyResult, avatarFrames] =
-    await Promise.all([
-      getWallet(),
-      getOwnProfileHandle(),
-      getVip(),
-      getDaily(),
-      getAvatarFrames(),
-    ]);
+  const [walletResult, handle, vipResult, avatarFrames] = await Promise.all([
+    getWallet(),
+    getOwnProfileHandle(),
+    getVip(),
+    getAvatarFrames(),
+  ]);
   // Second wave — needs the handle. Supplies header stats and the showcase
   // strip in one cached public-route read.
   const profileResult = handle ? await getPublicProfile(handle) : null;
@@ -118,8 +113,8 @@ export default async function MePage() {
             mix-blend-screen so it melts into the card background. */}
         {vipResult.ok && (
           <div className="rounded-2xl border border-white/10 bg-neutral-900 px-4 py-3">
-            <Link href="/vip" className="group flex items-center gap-3">
-              <div className="min-w-0 flex-1 transition-opacity group-hover:opacity-90">
+            <div className="flex items-center gap-3">
+              <div className="min-w-0 flex-1">
                 <span className="font-heading text-chase text-xl">
                   LV {vipResult.vip.level}
                 </span>
@@ -171,8 +166,6 @@ export default async function MePage() {
                     <p className="text-[12px] text-neutral-400">
                       {rm0(vipResult.vip.next.remaining)} more to LV{' '}
                       {vipResult.vip.next.level}
-                      {vipResult.vip.next.reward.voucherAmount > 0 &&
-                        ` — unlocks a ${rm0(vipResult.vip.next.reward.voucherAmount)} voucher`}
                     </p>
                   </>
                 ) : (
@@ -199,41 +192,7 @@ export default async function MePage() {
                   className="relative h-9 w-auto"
                 />
               </span>
-            </Link>
-            {dailyResult.ok && (
-              <p className="mt-2 border-t border-white/5 pt-2 text-[12px] text-neutral-400">
-                <Link href="/vip" className="hover:text-white">
-                  Today&rsquo;s box:{' '}
-                  <span className="font-semibold text-white">
-                    {dailyResult.state.box &&
-                    dailyResult.state.box.drawsToday >=
-                      dailyResult.state.box.drawsPerDay
-                      ? 'opened'
-                      : dailyResult.state.box
-                        ? 'ready'
-                        : '—'}
-                  </span>
-                </Link>{' '}
-                ·{' '}
-                <Link href="/vip" className="hover:text-white">
-                  {
-                    dailyResult.state.vouchers.claimable.filter(
-                      (g) => g.kind === 'voucher',
-                    ).length
-                  }{' '}
-                  to claim
-                </Link>{' '}
-                ·{' '}
-                <Link href="/vouchers" className="hover:text-white">
-                  {
-                    dailyResult.state.vouchers.claimed.filter(
-                      (g) => g.kind === 'voucher',
-                    ).length
-                  }{' '}
-                  claimed
-                </Link>
-              </p>
-            )}
+            </div>
           </div>
         )}
 
@@ -342,31 +301,6 @@ export default async function MePage() {
             </p>
           )}
         </section>
-
-        {/* Invite friends */}
-        <Link
-          href="/referrals"
-          className="border-chase/30 bg-chase/10 hover:border-chase/60 block rounded-2xl border p-4 transition-colors"
-        >
-          <Image
-            src="/images/app/invite-gift.webp"
-            alt=""
-            aria-hidden
-            width={239}
-            height={240}
-            className="h-12 w-12 mix-blend-screen"
-          />
-          <p className="mt-3 flex items-center gap-1 text-sm font-semibold text-white">
-            Invite friends
-            <ChevronRight
-              className="h-3.5 w-3.5 text-neutral-500"
-              aria-hidden
-            />
-          </p>
-          <p className="mt-0.5 text-[12px] text-neutral-400">
-            Easy cash rewards
-          </p>
-        </Link>
 
         {/* Quick access grid */}
         <section className="rounded-2xl border border-white/10 bg-neutral-900 p-5">

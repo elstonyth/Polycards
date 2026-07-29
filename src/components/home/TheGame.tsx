@@ -13,7 +13,7 @@ const MEDAL = [
 
 /**
  * Board 05 — THE FLOOR PAYS OUT. Phase 1 renders two moments: top-3 weekly
- * rippers (hidden when the ledger is empty) and the VIP/referral loop teaser.
+ * rippers (hidden when the ledger is empty) and the VIP loop teaser.
  * The stat trio (paid out / packs ripped / collectors) arrives with the Phase 3
  * backend aggregate — no fake zeros before then.
  */
@@ -73,11 +73,10 @@ export default function TheGame({
           <div className="flex h-full flex-col justify-center gap-3 rounded-2xl border border-white/10 bg-neutral-900 p-4">
             <div>
               <p className="font-heading text-lg leading-snug text-white">
-                100 VIP LEVELS. TWO-TIER REFERRALS.
+                100 VIP LEVELS.
               </p>
               <p className="mt-1 text-[13px] leading-relaxed text-neutral-400">
-                Every rip levels you up — and your crew&apos;s rips pay you
-                twice.
+                Every rip levels you up.
               </p>
             </div>
             <Link

@@ -219,10 +219,6 @@ const parsePublishedOdds = (raw: unknown): PublishedOdds | null => {
  * The customer-facing Pull Odds are intentionally NOT computed here — they are
  * decoupled from the secret per-card weights and rendered from the static
  * published `ODDS` display in packs-data.ts (see PackDetailClient).
- *
- * Phase 5a: every pack draws from one shared card pool, so this detail is
- * pool-wide (identical across packs) — the storefront reuses it when the user
- * switches sibling packs.
  */
 export async function getPackDetail(slug: string): Promise<PackDetail | null> {
   try {

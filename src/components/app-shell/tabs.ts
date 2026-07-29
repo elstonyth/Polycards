@@ -33,11 +33,8 @@ export const TABS: Tab[] = [
       '/settings',
       '/orders',
       '/transactions',
-      '/referrals',
-      '/vouchers',
       '/bank-withdrawal',
       '/notifications',
-      '/vip',
     ],
   },
 ];

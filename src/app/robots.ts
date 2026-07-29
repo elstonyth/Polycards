@@ -7,13 +7,7 @@ export default function robots(): MetadataRoute.Robots {
       userAgent: '*',
       allow: '/',
       // Keep private surfaces out of the index.
-      disallow: [
-        '/vault',
-        '/transactions',
-        '/settings',
-        '/orders',
-        '/referrals',
-      ],
+      disallow: ['/vault', '/transactions', '/settings', '/orders'],
     },
     sitemap: `${SITE_URL}/sitemap.xml`,
     host: SITE_URL,
