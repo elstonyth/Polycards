@@ -24,12 +24,19 @@
 ### Task 1: Delete the five route directories
 
 **Files:**
+> ⚠️ **Two similarly-named files, opposite fates.** `VipBenefits.tsx`
+> (PascalCase, `.tsx`) is a React component and is **deleted**.
+> `vip-benefits.ts` (kebab-case, `.ts`) is the benefit-copy data map and is
+> **kept**. On a case-insensitive filesystem a careless glob like
+> `vip*benefits*` matches both. Delete by exact path, never by glob, and
+> re-read the Keep line below before running the `git rm`.
+
 - Delete: `src/app/(account)/vip/page.tsx`, `src/app/(account)/vip/VipBenefits.tsx`, `src/app/(account)/vip/VipVouchers.tsx`, `src/app/(account)/vip/VipLevelCarousel.tsx`
 - Delete: `src/app/(account)/referrals/` (entire dir: `page.tsx`, `ReferralsClient.tsx`)
 - Delete: `src/app/vouchers/` (entire dir)
 - Delete: `src/app/daily/` (entire dir: `page.tsx`, `DailyClient.tsx`)
 - Delete: `src/app/invite/` (entire dir: `[handle]/page.tsx`, `[handle]/InviteClient.tsx` — after this the `invite` folder is empty; remove the folder)
-- Keep: `src/app/(account)/vip/vip-benefits.ts`, `src/app/(account)/vip/__tests__/vip-benefits.test.ts`
+- Keep: `src/app/(account)/vip/vip-benefits.ts` (the **data map** — NOT the deleted `VipBenefits.tsx` component), `src/app/(account)/vip/__tests__/vip-benefits.test.ts`
 
 **Interfaces:**
 - Produces: 404s on `/vip`, `/vouchers`, `/daily`, `/referrals`, `/invite/*`. Later tasks assume these routes no longer exist.
