@@ -423,45 +423,64 @@ a human into the DigitalOcean app, never into this repo.
    address, while their account has `IP Whitelist Check: Active`. Needs
    `spec.egress.type: DEDICATED_IP` (paid) or a fixed-IP proxy. Until this is
    done **every API call from production is rejected** — no env var fixes it.
-4. **Both API whitelists.** `Setting → Whitelist Setting` has a BackOffice list
-   and an API list. Doing only the first is the default mistake: logins work,
-   every API call fails.
+4. **Both whitelists — and GlobePay has to do them.** Their `Setting →
+   Whitelist Setting` has a BackOffice list (who may log in) and an API list
+   (which servers may call). Confirmed 2026-07-29: the production account
+   enforces the BackOffice list and our address is NOT on it — the login page
+   answers `Access Denied: Your IP address is not authorized to perform this
+   action`. So we cannot reach the portal to add the API entries ourselves;
+   both lists have to be set by them. Send: our office IP for the BackOffice
+   list, and BOTH server IPs (**206.189.94.252** and **168.144.35.100**) for the
+   API list. One IP per component — the service takes customer traffic, the
+   worker runs the reconciliation sweeps, and whitelisting only one means live
+   payments work while the sweep that catches a dropped callback fails silently.
+   Note the office IP is likely dynamic; ask whether they can allow a range.
 
-### Then the spec update — one edit, both halves together
+### Then the spec update — committed IaC, not the DO UI
 
-`ALLOW_MOCK_TOPUP` must come OFF in the SAME update that adds the GlobePay vars.
-The boot guard now refuses to start a production server with that variable set
-to any value, and until `NEXT_PUBLIC_PAYMENTS_PROVIDER` flips, the mock sheet is
-the only way a customer can top up — so removing it early is a customer-facing
-outage and removing it late is a failed deploy.
+The variables are **already written** into `.do/backend.app.yaml` and
+`.do/storefront.app.yaml` (this branch). Nothing is typed into the DO console —
+that causes drift, and `scripts/do-apply.ps1` treats the committed spec as the
+source of truth.
 
-On **polycards-backend** (`doctl apps update` or the console UI; mark the keys
-as SECRET):
+What you supply is three secret values in the gitignored `deploy/.env.deploy`:
 
-| Var | Value |
-| --- | --- |
-| `GLOBEPAY_ENABLED` | `true` |
-| `GLOBEPAY_MERCHANT_CODE` | `Polycard` — confirm against `Merchant Management` in the live back office before trusting it |
-| `GLOBEPAY_API_BASE` | `https://mapi.GlobePay365.com` (production host; there is no default any more) |
-| `GLOBEPAY_AES_KEY` | from their handover message — SECRET |
-| `GLOBEPAY_PUBLIC_KEY` | their RSA public key from the handover, base64 SPKI body only — SECRET |
-| `GLOBEPAY_MERCHANT_PRIVATE_KEY` | the PEM from step 2 — SECRET |
-| `GLOBEPAY_NOTIFY_URL` | `https://admin.polycards.gg/hooks/globepay/deposit` |
-| `GLOBEPAY_RETURN_URL` | `https://polycards.gg/transactions` |
-| `ALLOW_MOCK_TOPUP` | **DELETE the key** |
+    GLOBEPAY_AES_KEY=<their AES key>
+    GLOBEPAY_PUBLIC_KEY=<their RSA public key, bare base64 body, ONE line>
+    GLOBEPAY_MERCHANT_PRIVATE_KEY=<our private key, bare base64 body, ONE line>
 
-Withdrawals stay off for the first cutover — deposits are the launch path, and
-nothing has ever been paid out through this account. When they do go live, add
-`GLOBEPAY_WITHDRAWALS_ENABLED=true`,
-`GLOBEPAY_WITHDRAW_NOTIFY_URL=https://admin.polycards.gg/hooks/globepay/withdrawal`
-and `GLOBEPAY_PAYOUT_VERIFY_URL=https://admin.polycards.gg/hooks/globepay/payout-verify`
-(Payout Verification is inactive on the account, so the last one is a placeholder
-until they enable it).
+Bare base64 **body only** for both keys — no `-----BEGIN-----` armor and no
+newlines. `packs/globepay.ts` `toPem()` re-wraps them, a multi-line value would
+break the YAML, and `do-apply` substitutes literally. Get our private key's body
+with:
 
-On **polycards-storefront**: `NEXT_PUBLIC_PAYMENTS_PROVIDER=globepay`. Add
-`NEXT_PUBLIC_WITHDRAWALS_ENABLED=true` only alongside the backend withdrawal
-vars. Both apps redeploy; the backend's `PRE_DEPLOY` `migrate` job applies the
-GlobePay tables and the `WD` ledger constraint on its own.
+    (Get-Content "$env:USERPROFILE\.secrets\globepay\merchant_private_prod.pem" | Where-Object { $_ -notmatch '^-----' }) -join ''
+
+Then:
+
+    pwsh scripts/do-apply.ps1 backend -Validate   # no live change
+    pwsh scripts/do-apply.ps1 backend             # REDEPLOYS production
+
+`do-apply` aborts if any `__SECRET__` placeholder is still unresolved, so a
+missing value fails loudly instead of pushing a redacted string to production.
+
+**Order matters, and the spec enforces it by being wrong until the merge.** The
+committed spec has `ALLOW_MOCK_TOPUP` REMOVED and the GlobePay vars ADDED. Apply
+it before PR #252 merges and customers get a storefront whose deposit route does
+not exist; apply it after, and it is exactly right — the boot guard now refuses
+to start production with `ALLOW_MOCK_TOPUP` set to any value at all. So: merge,
+then apply, in that window.
+
+**The storefront switch is a code change, not a variable.** Next inlines
+`NEXT_PUBLIC_*` at build time and App Platform does not reliably pass build-time
+env, so the root `Dockerfile`'s `ARG NEXT_PUBLIC_PAYMENTS_PROVIDER` default is
+what actually lands in the bundle. It ships as `mock`. The cutover is a one-line
+commit changing it to `globepay`, with the matching value in
+`.do/storefront.app.yaml` moved in the same commit. Flipping the spec alone
+leaves every customer on the mock sheet.
+
+Withdrawals stay off for the first cutover; the vars to add later are listed
+inline in the backend spec.
 
 ### Verify, in this order
 

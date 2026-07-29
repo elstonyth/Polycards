@@ -38,7 +38,10 @@ if ($App -eq 'backend') {
     $kv = $line -split '=', 2
     $secrets[$kv[0].Trim()] = $kv[1].Trim()
   }
-  foreach ($k in 'DATABASE_URL', 'REDIS_URL', 'JWT_SECRET', 'COOKIE_SECRET', 'ADMIN_PASSWORD', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY', 'GOOGLE_CLIENT_SECRET', 'RESEND_API_KEY', 'PRICECHARTING_API_TOKEN') {
+  # GLOBEPAY_* added 2026-07-29 with the real gateway. Both key values are the
+  # bare base64 body on ONE line (no PEM armor) — the module re-wraps them, and
+  # a multi-line value would break the literal substitution below.
+  foreach ($k in 'DATABASE_URL', 'REDIS_URL', 'JWT_SECRET', 'COOKIE_SECRET', 'ADMIN_PASSWORD', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY', 'GOOGLE_CLIENT_SECRET', 'RESEND_API_KEY', 'PRICECHARTING_API_TOKEN', 'GLOBEPAY_AES_KEY', 'GLOBEPAY_PUBLIC_KEY', 'GLOBEPAY_MERCHANT_PRIVATE_KEY') {
     if (-not $secrets.ContainsKey($k) -or [string]::IsNullOrWhiteSpace($secrets[$k])) {
       throw "deploy/.env.deploy is missing a value for $k"
     }
