@@ -183,15 +183,24 @@ try {
   );
   await page.screenshot({ path: 'docs/research/qa-display-bronze-cards.png' });
 
-  const showAll = bronzeSection.locator('button', {
-    hasText: /^Show all \d+ rare cards$/,
-  });
-  if (await showAll.isVisible().catch(() => false)) {
+  // Locate the toggle by aria-controls, NOT by its text: the label flips to
+  // "Show less" on expand, so a text-filtered locator would resolve to zero
+  // elements afterwards and the post-click getAttribute would sit out the full
+  // timeout and throw, instead of reporting a clean FAIL. This also exercises
+  // the aria-controls wiring itself.
+  const toggle = bronzeSection.locator(
+    'button[aria-controls="pack-cards-pool"]',
+  );
+  if (await toggle.isVisible().catch(() => false)) {
     check(
-      (await showAll.getAttribute('aria-expanded')) === 'false',
+      /^Show all \d+ rare cards$/.test((await toggle.innerText()).trim()),
+      `collapsed: toggle label names the rare subset ("${(await toggle.innerText()).trim()}")`,
+    );
+    check(
+      (await toggle.getAttribute('aria-expanded')) === 'false',
       'collapsed: toggle reports aria-expanded="false"',
     );
-    await showAll.click();
+    await toggle.click();
     const expandedLabels = await tierLabels();
     check(
       expandedLabels.length > 0,
@@ -202,8 +211,12 @@ try {
       `expanded: every tier label is Mythical+ (${expandedLabels.join(', ')})`,
     );
     check(
-      (await showAll.getAttribute('aria-expanded')) === 'true',
+      (await toggle.getAttribute('aria-expanded')) === 'true',
       'expanded: toggle reports aria-expanded="true"',
+    );
+    check(
+      (await toggle.innerText()).trim() === 'Show less',
+      `expanded: toggle label becomes "Show less" ("${(await toggle.innerText()).trim()}")`,
     );
     await page.screenshot({
       path: 'docs/research/qa-display-bronze-expanded.png',
