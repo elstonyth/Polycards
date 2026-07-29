@@ -5,6 +5,7 @@ import {
   fmtPct,
   usdToMyr,
   gradeToGrader,
+  graderFromInclude,
   orderDateTime,
   deliveryStatusLabel,
 } from './format';
@@ -50,13 +51,19 @@ describe('timeAgo', () => {
     expect(timeAgo(new Date(now - 30_000).toISOString(), now)).toBe('just now');
   });
   it('returns whole minutes', () => {
-    expect(timeAgo(new Date(now - 5 * 60_000).toISOString(), now)).toBe('5m ago');
+    expect(timeAgo(new Date(now - 5 * 60_000).toISOString(), now)).toBe(
+      '5m ago',
+    );
   });
   it('returns whole hours', () => {
-    expect(timeAgo(new Date(now - 3 * 3_600_000).toISOString(), now)).toBe('3h ago');
+    expect(timeAgo(new Date(now - 3 * 3_600_000).toISOString(), now)).toBe(
+      '3h ago',
+    );
   });
   it('returns whole days', () => {
-    expect(timeAgo(new Date(now - 2 * 86_400_000).toISOString(), now)).toBe('2d ago');
+    expect(timeAgo(new Date(now - 2 * 86_400_000).toISOString(), now)).toBe(
+      '2d ago',
+    );
   });
   it('returns an em dash for an invalid ISO string', () => {
     expect(timeAgo('not-a-date', now)).toBe('—');
@@ -65,10 +72,14 @@ describe('timeAgo', () => {
     expect(timeAgo(new Date(now - 60_000).toISOString(), now)).toBe('1m ago');
   });
   it('returns "1h ago" at exactly 60 minutes', () => {
-    expect(timeAgo(new Date(now - 3_600_000).toISOString(), now)).toBe('1h ago');
+    expect(timeAgo(new Date(now - 3_600_000).toISOString(), now)).toBe(
+      '1h ago',
+    );
   });
   it('returns "1d ago" at exactly 24 hours', () => {
-    expect(timeAgo(new Date(now - 86_400_000).toISOString(), now)).toBe('1d ago');
+    expect(timeAgo(new Date(now - 86_400_000).toISOString(), now)).toBe(
+      '1d ago',
+    );
   });
   it('clamps a future timestamp to "just now"', () => {
     expect(timeAgo(new Date(now + 5_000).toISOString(), now)).toBe('just now');
@@ -151,6 +162,26 @@ describe('orderDateTime', () => {
   });
   it('returns an em dash for an unparseable date', () => {
     expect(orderDateTime('not-a-date')).toBe('—');
+  });
+});
+
+describe('graderFromInclude', () => {
+  it('keeps the grader a collection offer asserts', () => {
+    expect(graderFromInclude('PSA 9')).toEqual({ grader: 'PSA', grade: '9' });
+    expect(graderFromInclude('bgs10')).toEqual({ grader: 'BGS', grade: '10' });
+    expect(graderFromInclude(' cgc 8 ')).toEqual({ grader: 'CGC', grade: '8' });
+  });
+
+  it('drops half grades — the catalog scale has no 9.5', () => {
+    expect(graderFromInclude('BGS 9.5')).toEqual({ grader: '', grade: '' });
+    expect(graderFromInclude('PSA 8.5')).toEqual({ grader: '', grade: '' });
+  });
+
+  it('asserts nothing from a tag that names no grader', () => {
+    expect(graderFromInclude('Loose')).toEqual({ grader: '', grade: '' });
+    expect(graderFromInclude('Grade 9')).toEqual({ grader: '', grade: '' });
+    expect(graderFromInclude('Gem Mint')).toEqual({ grader: '', grade: '' });
+    expect(graderFromInclude('')).toEqual({ grader: '', grade: '' });
   });
 });
 

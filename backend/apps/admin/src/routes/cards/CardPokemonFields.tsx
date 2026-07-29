@@ -26,6 +26,11 @@ type Props = {
   currentDex?: number | null;
   /** Card/product title — the default name for a custom-uploaded entry. */
   suggestionName: string;
+  /** Namespaces this instance's DOM ids. REQUIRED when more than one picker is
+   *  on screen (the bulk collection import renders one per draft): without it
+   *  every instance shares `card-pokemon-search`, so clicking any label focuses
+   *  the FIRST input and every aria-controls points at the first listbox. */
+  idPrefix?: string;
 };
 
 const PICKER_LIMIT = 40;
@@ -46,7 +51,10 @@ const CardPokemonFields = ({
   currentSprite,
   currentDex,
   suggestionName,
+  idPrefix = 'card',
 }: Props) => {
+  const searchId = `${idPrefix}-pokemon-search`;
+  const listboxId = `${idPrefix}-pokemon-listbox`;
   const [search, setSearch] = useState('');
   // The entry chosen THIS session — drives the preview once picked. On first
   // load it's null and the preview falls back to the card's mirrored sprite.
@@ -174,7 +182,7 @@ const CardPokemonFields = ({
 
   return (
     <div className="bg-ui-bg-subtle flex flex-col gap-y-3 rounded-lg p-4">
-      <Label size="small" weight="plus" htmlFor="card-pokemon-search">
+      <Label size="small" weight="plus" htmlFor={searchId}>
         Pixel Pokémon
       </Label>
 
@@ -207,18 +215,18 @@ const CardPokemonFields = ({
           which fires too late to beat Radix's Escape-to-close). */}
       <Input
         ref={searchRef}
-        id="card-pokemon-search"
+        id={searchId}
         placeholder="Search the Pokédex library by name…"
         aria-label="Search the Pokédex library by name"
         role="combobox"
         aria-expanded={q.length >= 1}
-        aria-controls="card-pokemon-listbox"
+        aria-controls={listboxId}
         value={search}
         onChange={(e) => setSearch(e.target.value)}
       />
       {q.length >= 1 && (
         <div
-          id="card-pokemon-listbox"
+          id={listboxId}
           role="listbox"
           aria-label="Library matches"
           aria-busy={isFetching}

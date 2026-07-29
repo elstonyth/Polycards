@@ -448,6 +448,39 @@ export async function getPriceChartingProduct(id: string): Promise<PcProduct> {
   return data.product;
 }
 
+// One holding in the operator's own PriceCharting collection. Carries no FMV:
+// `value_usd` is PriceCharting's valuation of that offer, shown for triage only —
+// the import re-reads the per-grade price so market_value matches what the
+// nightly sync will write. A 503 means PRICECHARTING_API_TOKEN is not
+// configured; surface the message and use the search page instead.
+export interface PcOffer {
+  offer_id: string | null;
+  product_id: string;
+  name: string;
+  set: string;
+  /** PriceCharting's own grade tag, verbatim ("PSA 10", "Graded 9"). */
+  include: string;
+  condition: string;
+  value_usd: number | null;
+  /** `include` mapped to a priceable grade tier, or null — operator picks. */
+  grade: string | null;
+  image: string | null;
+  /** Upstream `is-card`: a real collection also holds games and hardware. */
+  is_card: boolean;
+}
+
+/** One page (~30) of the collection plus the cursor for the next one; an empty
+ *  cursor means the collection is exhausted. Paged rather than walked server
+ *  side because the collection runs to five figures. */
+export async function getPriceChartingCollection(
+  cursor = '',
+): Promise<{ offers: PcOffer[]; cursor: string }> {
+  return getJson<{ offers: PcOffer[]; cursor: string }>(
+    '/admin/pricecharting/collection' +
+      (cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''),
+  );
+}
+
 // §7a label prefill: year (set release) + note (rarity) from pokemontcg.io,
 // proxied server-side. Always resolves — a lookup miss/outage returns nulls,
 // never throws (see api/admin/tcg/tcg-meta.ts).

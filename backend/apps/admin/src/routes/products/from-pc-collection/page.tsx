@@ -1,0 +1,835 @@
+import { useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import {
+  Container,
+  Heading,
+  Text,
+  Input,
+  Label,
+  Button,
+  IconButton,
+  Checkbox,
+  Select,
+  StatusBadge,
+  Switch,
+  Table,
+  toast,
+} from '@medusajs/ui';
+import { XMark } from '@medusajs/icons';
+import type { RouteConfig } from '@mercurjs/dashboard-sdk';
+import {
+  getPriceChartingCollection,
+  getPriceChartingProduct,
+  getTcgCardMeta,
+  type PcOffer,
+} from '../../../lib/admin-rest';
+import {
+  useFxRate,
+  useCreateProductsFromPriceChartingBatch,
+  type PcQueueItem,
+} from '../../../lib/queries';
+import { resolveImageUrl } from '../../../lib/image-url';
+import {
+  rm,
+  usdToMyr,
+  gradeToGrader,
+  graderFromInclude,
+} from '../../../lib/format';
+import CardPokemonFields, {
+  type CardPokemonValue,
+} from '../../cards/CardPokemonFields';
+import { GachaPipelineHint } from '../../../components/GachaPipelineHint';
+
+export const config: RouteConfig = {
+  label: 'Add from PC Collection',
+  nested: '/inventory',
+  rank: 3,
+};
+
+// Bulk sibling of /products/from-pricecharting: instead of searching PriceCharting
+// one card at a time, scan the operator's own PriceCharting collection and onboard
+// many holdings in one pass. Everything downstream is shared — the same per-grade
+// price lookup, the same single-item creation endpoint, the same batch runner —
+// so an imported product is indistinguishable from a hand-searched one.
+//
+// An offer's own `value_usd` is NEVER written as market_value: it is
+// PriceCharting's valuation of that offer, and the nightly sync would overwrite
+// it with the grade price on its first run. Import re-reads the per-grade FMV.
+
+// ponytail: per-failure error toasts are capped so a big import cannot bury the
+// screen; the summary names how many were hidden. Same cap as the search page.
+const ERROR_TOAST_CAP = 5;
+
+// @medusajs/ui's Select rejects '' as an item value (see GraderGradeSelect), so
+// "no tier picked yet" travels as a sentinel through the select only.
+const NO_TIER = '__none__';
+
+// Hard stop on the scan loop. The measured collection is ~9,000 offers at 30 per
+// request; this covers it with headroom and still bounds a runaway cursor.
+const MAX_SCAN_PAGES = 500;
+
+// Rows rendered at once. The scan can hold five figures of offers, and every row
+// carries a thumbnail — rendering them all would fire thousands of image
+// requests for rows nobody can see. Anything past this is reached by filtering.
+const MAX_VISIBLE_ROWS = 300;
+
+// Server backstop (api/admin/products/from-pricecharting/route.ts). Enforced
+// here too so a typo fails the field, not the whole batch at save time.
+const MAX_STOCK = 10_000;
+
+const offerKey = (o: PcOffer): string =>
+  o.offer_id ?? `${o.product_id}|${o.include}`;
+
+/** Two holdings of the SAME product at the SAME grade tier become ONE product:
+ *  the created handle is name-grader-grade-pc_product_id, so importing them
+ *  separately would collide (the second create fails) and the units held would
+ *  be undercounted. Grouped on import, with stock summed instead. */
+const productKey = (o: PcOffer): string => `${o.product_id}|${o.include}`;
+
+/** Graded in PriceCharting's sense: anything it did not tag "Ungraded". The
+ *  slab tier is what a gacha storefront onboards, so the table defaults to it. */
+const isGraded = (o: PcOffer): boolean => !/^\s*ungraded\s*$/i.test(o.include);
+
+/** One imported holding, pending the facts PriceCharting cannot supply: the
+ *  pixel Pokémon (required by the backend) and the units actually held. */
+type Draft = {
+  key: string;
+  productId: string;
+  name: string;
+  set: string;
+  /** Per-grade values from /admin/pricecharting/product — the tier options. */
+  prices: { grade: string; usd: number }[];
+  /** Chosen tier; '' when the offer's PriceCharting tag named no priced field. */
+  pcGrade: string;
+  /** The offer's PriceCharting grade tag, verbatim — the operator's own record
+   *  of what the physical slab is, which the price tier alone can't carry
+   *  (every 9 prices off the same generic "Grade 9" field). */
+  include: string;
+  image: string;
+  stock: string;
+  /** How many collection holdings collapsed into this draft (see productKey).
+   *  Shown so a preset stock of 3 reads as deliberate, not as a bug. */
+  merged: number;
+  /** Slab-label text (§8), prefilled from pokemontcg.io like the search page. */
+  labelYear: string;
+  labelNote: string;
+  pokemon: CardPokemonValue;
+};
+
+const draftUsd = (d: Draft): number | null =>
+  d.prices.find((p) => p.grade === d.pcGrade)?.usd ?? null;
+
+const stockValid = (raw: string): boolean =>
+  raw.trim() !== '' &&
+  Number.isInteger(Number(raw)) &&
+  Number(raw) >= 0 &&
+  Number(raw) <= MAX_STOCK;
+
+/** A draft is savable only once it carries every field the creation endpoint
+ *  requires; returns null while it doesn't. */
+const toItem = (d: Draft): PcQueueItem | null => {
+  const usd = draftUsd(d);
+  if (usd === null) return null;
+  if (d.pokemon.pixel_pokemon_id === null) return null;
+  // name is required server-side; upstream can return a blank product name.
+  if (d.name.trim() === '') return null;
+  if (d.image.trim() === '' || !stockValid(d.stock)) return null;
+  // The offer's own tag wins: it names the slab ("PSA 10"), where the price tier
+  // is only the field that prices it (every 9 shares "Grade 9"). Falls back to
+  // the tier when the tag asserts no grader — PriceCharting drops the grading
+  // company on everything below its top-tier fields ("Graded 9"), and then the
+  // same §3a rule as the search page applies: a generic tier is a price comp,
+  // not a grading claim, so it carries no grader.
+  const asserted = graderFromInclude(d.include);
+  const derived = asserted.grader !== '' ? asserted : gradeToGrader(d.pcGrade);
+  return {
+    pc_product_id: d.productId,
+    pc_grade: d.pcGrade,
+    name: d.name,
+    set: d.set,
+    grader: derived.grader,
+    grade: derived.grader ? derived.grade : '',
+    market_value: usd,
+    image: d.image,
+    stock: Number(d.stock),
+    pixel_pokemon_id: d.pokemon.pixel_pokemon_id,
+    label_year: d.labelYear.trim() || null,
+    label_note: d.labelNote.trim() || null,
+  };
+};
+
+const AddFromPcCollectionPage = () => {
+  const { t } = useTranslation();
+  const { data: fx } = useFxRate();
+  const batchCreate = useCreateProductsFromPriceChartingBatch();
+  const draftSeq = useRef(0);
+
+  // Step 1 — scan the collection, page by page. It runs to five figures, so the
+  // operator watches counters climb and stops as soon as the rows they came for
+  // are on screen rather than waiting out the whole walk.
+  const [offers, setOffers] = useState<PcOffer[] | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [scannedPages, setScannedPages] = useState(0);
+  const [exhausted, setExhausted] = useState(false);
+  const stopScanRef = useRef(false);
+  const cursorRef = useRef('');
+
+  // Step 2 — narrow. A real collection mixes cards with games and hardware, and
+  // is overwhelmingly ungraded, so both filters default ON.
+  const [cardsOnly, setCardsOnly] = useState(true);
+  const [gradedOnly, setGradedOnly] = useState(true);
+  const [filter, setFilter] = useState('');
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
+
+  // Step 3 — import (one per-grade price lookup per picked product, sequential:
+  // PriceCharting's API is rate-limited and each call also scrapes the photo).
+  const [importing, setImporting] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
+  const stopImportRef = useRef(false);
+
+  // Step 4 — the drafts, finished by hand and saved as one batch.
+  const [drafts, setDrafts] = useState<Draft[]>([]);
+
+  const saving = batchCreate.isPending;
+  const fxEffective = fx?.effective ?? null;
+
+  const usdLabel = (usd: number | null): string =>
+    usd === null
+      ? '—'
+      : fxEffective !== null
+        ? rm(usdToMyr(usd, fxEffective))
+        : `$${usd.toFixed(2)}`;
+
+  const scan = async (restart: boolean) => {
+    if (scanning) return;
+    stopScanRef.current = false;
+    setScanning(true);
+    if (restart) {
+      cursorRef.current = '';
+      setOffers([]);
+      setScannedPages(0);
+      setExhausted(false);
+      setSelected({});
+    }
+    try {
+      for (let page = 0; page < MAX_SCAN_PAGES; page++) {
+        if (stopScanRef.current) break;
+        const data = await getPriceChartingCollection(cursorRef.current);
+        setOffers((prev) => {
+          const rows = prev ?? [];
+          const seen = new Set(rows.map(offerKey));
+          // Dedupe on append: a cursor replay would otherwise double rows and
+          // let the same holding be imported twice.
+          return [
+            ...rows,
+            ...data.offers.filter((o) => !seen.has(offerKey(o))),
+          ];
+        });
+        setScannedPages((n) => n + 1);
+        cursorRef.current = data.cursor;
+        if (!data.cursor) {
+          setExhausted(true);
+          break;
+        }
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  const matches = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    return (offers ?? []).filter((o) => {
+      if (cardsOnly && !o.is_card) return false;
+      if (gradedOnly && !isGraded(o)) return false;
+      if (q === '') return true;
+      return (
+        o.name.toLowerCase().includes(q) || o.set.toLowerCase().includes(q)
+      );
+    });
+  }, [offers, filter, cardsOnly, gradedOnly]);
+
+  const visible = matches.slice(0, MAX_VISIBLE_ROWS);
+
+  // Picks survive a filter change: selecting a row and then narrowing the
+  // filter must not silently drop it from the import.
+  const picked = (offers ?? []).filter((o) => selected[offerKey(o)]);
+  const allVisibleSelected =
+    visible.length > 0 && visible.every((o) => selected[offerKey(o)]);
+
+  const toggleAllVisible = () => {
+    setSelected((prev) => {
+      const next = { ...prev };
+      for (const o of visible) {
+        if (allVisibleSelected) delete next[offerKey(o)];
+        else next[offerKey(o)] = true;
+      }
+      return next;
+    });
+  };
+
+  const importSelected = async () => {
+    if (picked.length === 0 || importing) return;
+    stopImportRef.current = false;
+
+    // Collapse holdings that would mint the same product (same PriceCharting
+    // product at the same grade tag) into one draft carrying their unit count.
+    const groups = new Map<string, PcOffer[]>();
+    for (const o of picked) {
+      const k = productKey(o);
+      groups.set(k, [...(groups.get(k) ?? []), o]);
+    }
+    const work = [...groups.values()];
+
+    setImporting({ done: 0, total: work.length });
+    const rows: Draft[] = [];
+    const skipped: string[] = [];
+    const done: PcOffer[] = [];
+
+    for (const [i, group] of work.entries()) {
+      if (stopImportRef.current) break;
+      const offer = group[0];
+      try {
+        const product = await getPriceChartingProduct(offer.product_id);
+        // The offer carries its own photo on PriceCharting's bucket, so it can
+        // stand in when the product-page scrape comes back empty — the backend
+        // ingests either through the same media pipeline.
+        const image = product.image ?? offer.image ?? '';
+        const name = product.name || offer.name;
+        if (image === '') {
+          skipped.push(t('pcCollection.skip.noImage', { name }));
+        } else if (product.prices.length === 0) {
+          skipped.push(t('pcCollection.skip.noPrices', { name }));
+        } else {
+          // Keep the mapped tier only if PriceCharting actually prices it for
+          // this product; otherwise leave it unset for the operator to pick.
+          const mapped =
+            offer.grade !== null &&
+            product.prices.some((p) => p.grade === offer.grade)
+              ? offer.grade
+              : '';
+          const key = String(++draftSeq.current);
+          rows.push({
+            key,
+            productId: offer.product_id,
+            name,
+            set: product.set || offer.set,
+            prices: product.prices,
+            pcGrade: mapped,
+            include: offer.include,
+            image,
+            // These holdings are physically in hand — that is what makes them a
+            // collection — so units default to how many were picked.
+            stock: String(group.length),
+            merged: group.length,
+            labelYear: '',
+            labelNote: '',
+            pokemon: { pixel_pokemon_id: null },
+          });
+          // §7a label prefill, same as the search page: year (set release) +
+          // note (rarity) from pokemontcg.io. Fire-and-forget and fill-only —
+          // it lands on THIS draft by key, and a lookup failure just leaves the
+          // fields blank for the operator.
+          const num = name.match(/#\s*([A-Za-z0-9/-]+)\s*$/)?.[1] ?? '';
+          void getTcgCardMeta(product.set || offer.set, num)
+            .then((meta) => {
+              setDrafts((all) =>
+                all.map((r) =>
+                  r.key === key
+                    ? {
+                        ...r,
+                        labelYear: r.labelYear || meta.year || '',
+                        labelNote: r.labelNote || meta.note || '',
+                      }
+                    : r,
+                ),
+              );
+            })
+            .catch(() => {});
+          done.push(...group);
+        }
+      } catch (err) {
+        skipped.push(
+          `${offer.name}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      setImporting({ done: i + 1, total: work.length });
+    }
+
+    setDrafts((d) => [...d, ...rows]);
+    // Only the offers that actually became drafts leave the selection, so a
+    // stopped or failed import can be retried without re-picking.
+    setSelected((prev) => {
+      const next = { ...prev };
+      for (const o of done) delete next[offerKey(o)];
+      return next;
+    });
+    setImporting(null);
+
+    if (rows.length > 0) {
+      toast.success(t('pcCollection.toast.imported', { n: rows.length }));
+    }
+    const hidden = Math.max(0, skipped.length - ERROR_TOAST_CAP);
+    if (skipped.length > 0) {
+      toast.warning(
+        hidden > 0
+          ? t('pcCollection.toast.skippedCapped', {
+              skipped: skipped.length,
+              hidden,
+            })
+          : t('pcCollection.toast.skipped', { skipped: skipped.length }),
+      );
+      for (const reason of skipped.slice(0, ERROR_TOAST_CAP))
+        toast.error(reason);
+    }
+  };
+
+  const patchDraft = (key: string, patch: Partial<Draft>) =>
+    setDrafts((rows) =>
+      rows.map((r) => (r.key === key ? { ...r, ...patch } : r)),
+    );
+
+  const removeDraft = (key: string) =>
+    setDrafts((rows) => rows.filter((r) => r.key !== key));
+
+  const items = drafts.map(toItem);
+  const canSave =
+    drafts.length > 0 && items.every((i) => i !== null) && !saving;
+
+  const saveDrafts = async () => {
+    if (!canSave) return;
+    const { created, skipped } = await batchCreate.mutateAsync(
+      items.filter((i): i is PcQueueItem => i !== null),
+    );
+    const hidden = Math.max(0, skipped.length - ERROR_TOAST_CAP);
+    if (skipped.length === 0) {
+      toast.success(t('pcAdd.toast.queueDone', { n: created }));
+    } else {
+      const summary =
+        hidden > 0
+          ? t('pcAdd.toast.queueSkippedCapped', {
+              n: created,
+              skipped: skipped.length,
+              hidden,
+            })
+          : t('pcAdd.toast.queueSkipped', {
+              n: created,
+              skipped: skipped.length,
+            });
+      if (created > 0) toast.success(summary);
+      else toast.warning(summary);
+    }
+    for (const reason of skipped.slice(0, ERROR_TOAST_CAP)) toast.error(reason);
+    // ponytail: clears every draft, failures included — a failed one is
+    // re-imported by hand. Per-row retry needs per-row error state; add it if
+    // imports start failing in practice.
+    setDrafts([]);
+  };
+
+  const scanned = offers?.length ?? 0;
+
+  return (
+    <Container className="divide-y p-0">
+      <div className="px-6 py-4">
+        <Heading level="h2">{t('pcCollection.title')}</Heading>
+        <Text className="text-ui-fg-subtle mt-1" size="small">
+          {t('pcCollection.subtitle')}
+        </Text>
+      </div>
+
+      <GachaPipelineHint current="product" />
+
+      <div className="flex flex-col gap-y-6 px-6 py-6">
+        {/* Step 1 — scan */}
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            size="small"
+            variant="secondary"
+            type="button"
+            onClick={() => void scan(true)}
+            isLoading={scanning}
+          >
+            {offers === null
+              ? t('pcCollection.fetch')
+              : t('pcCollection.refetch')}
+          </Button>
+          {scanning && (
+            <Button
+              size="small"
+              variant="secondary"
+              type="button"
+              onClick={() => {
+                stopScanRef.current = true;
+              }}
+            >
+              {t('pcCollection.stop')}
+            </Button>
+          )}
+          {!scanning && offers !== null && !exhausted && (
+            <Button
+              size="small"
+              variant="secondary"
+              type="button"
+              onClick={() => void scan(false)}
+            >
+              {t('pcCollection.continue')}
+            </Button>
+          )}
+          {offers !== null && (
+            <Text className="text-ui-fg-subtle" size="small">
+              {t('pcCollection.progress', {
+                scanned,
+                pages: scannedPages,
+                shown: matches.length,
+              })}
+            </Text>
+          )}
+          {exhausted && (
+            <StatusBadge color="green">
+              {t('pcCollection.complete')}
+            </StatusBadge>
+          )}
+          {!exhausted && !scanning && offers !== null && (
+            <StatusBadge color="orange">
+              {t('pcCollection.partial')}
+            </StatusBadge>
+          )}
+        </div>
+
+        {offers !== null && scanned === 0 && !scanning && (
+          <Text className="text-ui-fg-subtle" size="small">
+            {t('pcCollection.empty')}
+          </Text>
+        )}
+
+        {/* Step 2 — narrow + pick */}
+        {offers !== null && scanned > 0 && (
+          <div className="flex flex-col gap-y-3">
+            <div className="flex flex-wrap items-center gap-4">
+              <Input
+                className="max-w-xs"
+                placeholder={t('pcCollection.filter')}
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+              />
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="pc-cards-only"
+                  checked={cardsOnly}
+                  onCheckedChange={setCardsOnly}
+                />
+                <Label size="small" htmlFor="pc-cards-only">
+                  {t('pcCollection.cardsOnly')}
+                </Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="pc-graded-only"
+                  checked={gradedOnly}
+                  onCheckedChange={setGradedOnly}
+                />
+                <Label size="small" htmlFor="pc-graded-only">
+                  {t('pcCollection.gradedOnly')}
+                </Label>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <Button
+                size="small"
+                variant="secondary"
+                type="button"
+                onClick={toggleAllVisible}
+                disabled={visible.length === 0}
+              >
+                {allVisibleSelected
+                  ? t('pcCollection.deselectAll')
+                  : t('pcCollection.selectAll')}
+              </Button>
+              <Button
+                size="small"
+                type="button"
+                onClick={importSelected}
+                isLoading={importing !== null}
+                disabled={picked.length === 0}
+              >
+                {t('pcCollection.import', { n: picked.length })}
+              </Button>
+              {importing !== null && (
+                <>
+                  <Button
+                    size="small"
+                    variant="secondary"
+                    type="button"
+                    onClick={() => {
+                      stopImportRef.current = true;
+                    }}
+                  >
+                    {t('pcCollection.stopImport')}
+                  </Button>
+                  <Text className="text-ui-fg-subtle" size="small">
+                    {t('pcCollection.importing', importing)}
+                  </Text>
+                </>
+              )}
+            </div>
+
+            {matches.length > visible.length && (
+              <Text className="text-ui-fg-subtle text-xs">
+                {t('pcCollection.rowCap', {
+                  shown: visible.length,
+                  total: matches.length,
+                })}
+              </Text>
+            )}
+
+            <div className="max-h-[28rem] overflow-y-auto rounded-lg border">
+              <Table>
+                <Table.Header>
+                  <Table.Row>
+                    <Table.HeaderCell />
+                    <Table.HeaderCell>
+                      {t('pcCollection.col.item')}
+                    </Table.HeaderCell>
+                    <Table.HeaderCell>
+                      {t('pcCollection.col.pcTag')}
+                    </Table.HeaderCell>
+                    <Table.HeaderCell>
+                      {t('pcCollection.col.tier')}
+                    </Table.HeaderCell>
+                    <Table.HeaderCell>
+                      {t('pcCollection.col.offerValue')}
+                    </Table.HeaderCell>
+                  </Table.Row>
+                </Table.Header>
+                <Table.Body>
+                  {visible.map((o) => {
+                    const key = offerKey(o);
+                    return (
+                      <Table.Row key={key}>
+                        <Table.Cell>
+                          <Checkbox
+                            checked={!!selected[key]}
+                            onCheckedChange={(v) =>
+                              setSelected((s) => ({ ...s, [key]: v === true }))
+                            }
+                          />
+                        </Table.Cell>
+                        <Table.Cell>
+                          <div className="flex items-center gap-3">
+                            {o.image ? (
+                              <img
+                                src={resolveImageUrl(o.image)}
+                                alt=""
+                                loading="lazy"
+                                className="h-10 w-8 rounded object-contain"
+                              />
+                            ) : (
+                              <div className="border-ui-border-base bg-ui-bg-subtle text-ui-fg-muted flex h-10 w-8 items-center justify-center rounded border text-xs">
+                                —
+                              </div>
+                            )}
+                            <div className="flex flex-col">
+                              <span className="text-sm font-medium">
+                                {o.name}
+                              </span>
+                              <span className="text-ui-fg-subtle text-xs">
+                                {o.set}
+                              </span>
+                            </div>
+                          </div>
+                        </Table.Cell>
+                        <Table.Cell>
+                          <span className="text-ui-fg-subtle text-xs">
+                            {o.include || o.condition || '—'}
+                          </span>
+                        </Table.Cell>
+                        <Table.Cell>
+                          {o.grade ?? (
+                            <StatusBadge color="grey">
+                              {t('pcCollection.tierUnmapped')}
+                            </StatusBadge>
+                          )}
+                        </Table.Cell>
+                        <Table.Cell>{usdLabel(o.value_usd)}</Table.Cell>
+                      </Table.Row>
+                    );
+                  })}
+                </Table.Body>
+              </Table>
+            </div>
+            <Text className="text-ui-fg-subtle text-xs">
+              {t('pcCollection.valueHint')}
+            </Text>
+          </div>
+        )}
+
+        {/* Step 3 — finish each import: tier, units, label, pixel Pokémon */}
+        {drafts.length > 0 && (
+          <div className="flex flex-col gap-y-4">
+            <Heading level="h3">
+              {t('pcCollection.drafts', { n: drafts.length })}
+            </Heading>
+            {drafts.map((d) => {
+              const asserted = graderFromInclude(d.include);
+              return (
+                <div
+                  key={d.key}
+                  className="bg-ui-bg-subtle flex flex-col gap-y-4 rounded-lg p-4"
+                >
+                  <div className="flex items-start gap-4">
+                    <img
+                      src={resolveImageUrl(d.image)}
+                      alt=""
+                      loading="lazy"
+                      className="border-ui-border-base h-20 w-14 shrink-0 rounded border object-contain"
+                    />
+                    <div className="flex flex-1 flex-col">
+                      <span className="text-sm font-medium">{d.name}</span>
+                      <span className="text-ui-fg-subtle text-xs">{d.set}</span>
+                      <span className="text-ui-fg-muted text-xs">
+                        {t('pcCollection.slabLine', {
+                          tag: d.include || '—',
+                          grader:
+                            asserted.grader === ''
+                              ? t('pcCollection.noGrader')
+                              : `${asserted.grader} ${asserted.grade}`,
+                        })}
+                      </span>
+                      {d.merged > 1 && (
+                        <span className="text-ui-fg-muted text-xs">
+                          {t('pcCollection.merged', { n: d.merged })}
+                        </span>
+                      )}
+                    </div>
+                    <IconButton
+                      size="small"
+                      variant="transparent"
+                      aria-label={t('pcCollection.remove')}
+                      onClick={() => removeDraft(d.key)}
+                    >
+                      <XMark className="h-3 w-3" />
+                    </IconButton>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="flex flex-col gap-y-2">
+                      <Label
+                        size="small"
+                        weight="plus"
+                        htmlFor={`draft-${d.key}-tier`}
+                      >
+                        {t('pcAdd.grade.label')}
+                      </Label>
+                      <Select
+                        value={d.pcGrade === '' ? NO_TIER : d.pcGrade}
+                        onValueChange={(v) =>
+                          patchDraft(d.key, { pcGrade: v === NO_TIER ? '' : v })
+                        }
+                      >
+                        <Select.Trigger id={`draft-${d.key}-tier`}>
+                          <Select.Value
+                            placeholder={t('pcCollection.pickTier')}
+                          />
+                        </Select.Trigger>
+                        <Select.Content>
+                          <Select.Item value={NO_TIER}>
+                            {t('pcCollection.pickTier')}
+                          </Select.Item>
+                          {d.prices.map((p) => (
+                            <Select.Item key={p.grade} value={p.grade}>
+                              {p.grade}: {usdLabel(p.usd)}
+                            </Select.Item>
+                          ))}
+                        </Select.Content>
+                      </Select>
+                    </div>
+                    <div className="flex flex-col gap-y-2">
+                      <Label
+                        size="small"
+                        weight="plus"
+                        htmlFor={`draft-${d.key}-stock`}
+                      >
+                        {t('pcAdd.stock.label')}
+                      </Label>
+                      <Input
+                        id={`draft-${d.key}-stock`}
+                        type="number"
+                        min={0}
+                        max={MAX_STOCK}
+                        step={1}
+                        className="max-w-[8rem]"
+                        value={d.stock}
+                        onChange={(e) =>
+                          patchDraft(d.key, { stock: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div className="flex flex-col gap-y-2">
+                      <Label
+                        size="small"
+                        weight="plus"
+                        htmlFor={`draft-${d.key}-label-year`}
+                      >
+                        {t('cards.form.labelYear')}
+                      </Label>
+                      <Input
+                        id={`draft-${d.key}-label-year`}
+                        value={d.labelYear}
+                        onChange={(e) =>
+                          patchDraft(d.key, { labelYear: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div className="flex flex-col gap-y-2">
+                      <Label
+                        size="small"
+                        weight="plus"
+                        htmlFor={`draft-${d.key}-label-note`}
+                      >
+                        {t('cards.form.labelNote')}
+                      </Label>
+                      <Input
+                        id={`draft-${d.key}-label-note`}
+                        value={d.labelNote}
+                        onChange={(e) =>
+                          patchDraft(d.key, { labelNote: e.target.value })
+                        }
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-y-2">
+                    <CardPokemonFields
+                      value={d.pokemon}
+                      onChange={(p) =>
+                        patchDraft(d.key, { pokemon: { ...d.pokemon, ...p } })
+                      }
+                      suggestionName={d.name}
+                      idPrefix={`draft-${d.key}`}
+                    />
+                    {d.pokemon.pixel_pokemon_id === null && (
+                      <Text size="small" className="text-ui-fg-error">
+                        {t('pcAdd.pixel.required')}
+                      </Text>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+
+            <Button onClick={saveDrafts} isLoading={saving} disabled={!canSave}>
+              {t('pcCollection.save', { n: drafts.length })}
+            </Button>
+          </div>
+        )}
+      </div>
+    </Container>
+  );
+};
+
+export default AddFromPcCollectionPage;
