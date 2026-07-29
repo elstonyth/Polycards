@@ -105,6 +105,12 @@ import type {
   ChallengeSettingsView,
 } from './challenge-validate';
 import { getCardStockByHandle } from './card-stock';
+import {
+  unlockedStages,
+  payoutByRank,
+  type SettleStage,
+  type RankPayout,
+} from './challenge-settle';
 import { weightedAverageCost } from './inventory-cost';
 import type { MedusaContainer } from '@medusajs/framework/types';
 
@@ -400,6 +406,22 @@ const challengeWeekAnchorParams = (
   w.timezone,
   w.timezone,
 ];
+
+// Weekly-challenge settlement (spec 2026-07-29) — dependency + result shapes
+// for settleChallengeWeek. getStock is injected because physical stock lives
+// in Medusa's inventory module, reachable only through the container the JOB
+// holds — the module service must stay container-free.
+export interface SettleDeps {
+  /** Available stock per card HANDLE (job binds getCardStockByHandle). */
+  getStock: (handles: string[]) => Promise<Map<string, number | null>>;
+}
+export interface SettledWinner {
+  customerId: string;
+  rank: number;
+  credits: number;
+  cardHandles: string[]; // granted
+  skippedCardIds: string[]; // recorded skipped_no_stock
+}
 
 class PacksModuleService extends MedusaService({
   Pack,
@@ -5848,6 +5870,261 @@ class PacksModuleService extends MedusaService({
     return {
       startUtc: new Date(row!.start_utc),
       endUtc: new Date(row!.end_utc),
+    };
+  }
+
+  // Settle the most recently ENDED challenge week (weeksBack: 1): pay the
+  // week's top-10 the union of every pool-unlocked stage's rank rewards,
+  // exactly once. Enumerator only — @InjectManager (plain read context, NO
+  // transaction at this level, mirroring matureDueCommissions): each winner
+  // settles in their OWN short transaction via settleChallengeWinner.
+  @InjectManager()
+  async settleChallengeWeek(
+    deps: SettleDeps,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{
+    weekStartIso: string;
+    settled: boolean;
+    winners: SettledWinner[];
+  }> {
+    const settings = await this.challengeSettings(sharedContext);
+    const week = {
+      timezone: settings.timezone,
+      resetDay: settings.reset_day,
+      resetHour: settings.reset_hour,
+      weeksBack: 1,
+    };
+    const { startUtc } = await this.challengeWeekBounds(week, sharedContext);
+    const weekStartIso = startUtc.toISOString();
+
+    // Hourly self-gate, PER WINNER (spec §Scheduling): customers who already
+    // hold payout rows for this week are skipped before any transaction opens.
+    // Deliberately NOT a whole-week early return — a crash mid-batch leaves
+    // some winners paid and some not, and a whole-week gate would lock the
+    // unpaid remainder out forever. Racy by itself; the in-transaction
+    // lock+check in settleChallengeWinner is the real guard.
+    const existingRows = await this.listChallengePayouts(
+      { week_start: startUtc },
+      { select: ['customer_id'], take: 1000 },
+    );
+    const settledCustomers = new Set(existingRows.map((r) => r.customer_id));
+
+    const [stageRows, poolMyr] = await Promise.all([
+      this.listChallengeStages(
+        {},
+        {
+          select: ['stage_number', 'threshold_myr', 'rank_rewards'],
+          take: 1000,
+        },
+      ),
+      this.challengeWeekPool(week, sharedContext),
+    ]);
+    const stages: SettleStage[] = stageRows.map((r) => ({
+      stage_number: r.stage_number,
+      threshold_myr: Number(r.threshold_myr),
+      rank_rewards: (r.rank_rewards as unknown as ChallengeRankReward[]) ?? [],
+    }));
+    const unlocked = unlockedStages(stages, poolMyr);
+    if (unlocked.length === 0) {
+      return { weekStartIso, settled: false, winners: [] };
+    }
+
+    const top = await this.challengeWeekTop(
+      { ...week, limit: 10 },
+      sharedContext,
+    );
+    if (top.length === 0) return { weekStartIso, settled: false, winners: [] };
+    const byRank = payoutByRank(unlocked);
+
+    // Resolve card ids -> handles ONCE (spec: rank_rewards holds Card.id,
+    // pull.card_id holds Card.handle — never pass ids into createPulls).
+    const allCardIds = [
+      ...new Set([...byRank.values()].flatMap((p) => p.cardIds)),
+    ];
+    const cardRows = allCardIds.length
+      ? await this.listCards(
+          { id: allCardIds },
+          { select: ['id', 'handle'], take: allCardIds.length },
+        )
+      : [];
+    const handleById = new Map(cardRows.map((c) => [c.id, c.handle]));
+
+    const snapshot = {
+      pool_myr: poolMyr,
+      unlocked_stages: unlocked.map((s) => s.stage_number),
+    };
+    const winners: SettledWinner[] = [];
+    for (const [i, t] of top.entries()) {
+      if (settledCustomers.has(t.customer_id)) continue; // paid on a prior tick
+      const payout = byRank.get(i + 1);
+      if (!payout || (payout.credits <= 0 && payout.cardIds.length === 0)) {
+        continue; // rank pays nothing this week
+      }
+      // One SHORT transaction per winner — deliberately NO sharedContext
+      // forwarding (matureDueCommissions invariant: one credit: advisory-lock
+      // chain per transaction, never accumulated across winners).
+      const settled = await this.settleChallengeWinner({
+        weekStart: startUtc,
+        customerId: t.customer_id,
+        rank: i + 1,
+        payout,
+        handleById,
+        snapshot,
+        getStock: deps.getStock,
+      });
+      if (settled) winners.push(settled);
+    }
+    return { weekStartIso, settled: winners.length > 0, winners };
+  }
+
+  // Per-winner settlement: ONE winner, ONE short transaction, ONE credit:
+  // advisory lock (same keyspace as mutateCreditAtomic — xact locks are
+  // reentrant, so the credits call below re-acquiring it is a no-op). The
+  // whole winner settles or rolls back.
+  @InjectTransactionManager()
+  protected async settleChallengeWinner(
+    input: {
+      weekStart: Date;
+      customerId: string;
+      rank: number;
+      payout: RankPayout;
+      handleById: Map<string, string>;
+      snapshot: { pool_myr: number; unlocked_stages: number[] };
+      getStock: (handles: string[]) => Promise<Map<string, number | null>>;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<SettledWinner | null> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    const { weekStart, customerId, rank, payout } = input;
+    const weekStartIso = weekStart.toISOString();
+
+    // 1) Serialize against every money path for this customer — SAME lock key
+    //    as mutateCreditAtomic.
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `credit:${customerId}`,
+    ]);
+
+    // 2) Check under the lock, INSIDE this txn (sharedContext!) — any existing
+    //    row means a concurrent run or earlier tick already settled this
+    //    customer's week. The unique index stays as the last-resort backstop.
+    const [already] = await this.listChallengePayouts(
+      { week_start: weekStart, customer_id: customerId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (already) return null;
+
+    const rows: {
+      week_start: Date;
+      customer_id: string;
+      rank: number;
+      kind: 'credits' | 'card';
+      card_id: string;
+      credits: number;
+      credit_transaction_id: string | null;
+      pull_id: string | null;
+      status: 'granted' | 'skipped_no_stock';
+      snapshot: Record<string, unknown>;
+    }[] = [];
+
+    // 3a) Credits — one ledger mutation for the summed amount.
+    let creditTxnId: string | null = null;
+    if (payout.credits > 0) {
+      const { id } = await this.mutateCreditAtomic(
+        {
+          customerId,
+          amount: payout.credits,
+          reason: 'reward_credit',
+          idempotencyReference: `challenge:${weekStartIso}:${customerId}`,
+        },
+        sharedContext,
+      );
+      creditTxnId = id;
+      rows.push({
+        week_start: weekStart,
+        customer_id: customerId,
+        rank,
+        kind: 'credits',
+        card_id: '',
+        credits: payout.credits,
+        credit_transaction_id: creditTxnId,
+        pull_id: null,
+        status: 'granted',
+        snapshot: input.snapshot,
+      });
+    }
+
+    // 3b) Cards — dedupe ids into (id, qty); resolve handle; stock-gate; mint
+    //     qty pulls or record skipped_no_stock (spec: no credit substitution).
+    const qtyById = new Map<string, number>();
+    for (const id of payout.cardIds) {
+      qtyById.set(id, (qtyById.get(id) ?? 0) + 1);
+    }
+    const cardHandles: string[] = [];
+    const skippedCardIds: string[] = [];
+    const handles = [...qtyById.keys()]
+      .map((id) => input.handleById.get(id))
+      .filter((h): h is string => Boolean(h));
+    const stockByHandle = handles.length
+      ? await input.getStock(handles)
+      : new Map<string, number | null>();
+
+    for (const [cardId, qty] of qtyById) {
+      const handle = input.handleById.get(cardId);
+      const stock = handle ? stockByHandle.get(handle) : undefined;
+      // In stock: tracked with >= qty available, or untracked (null). An
+      // unresolvable id (deleted card) or absent stock row = skipped.
+      const inStock =
+        Boolean(handle) &&
+        stockByHandle.has(handle!) &&
+        (stock === null || (stock !== undefined && stock >= qty));
+
+      let pullId: string | null = null;
+      if (inStock) {
+        for (let i = 0; i < qty; i += 1) {
+          const [pull] = await this.createPulls(
+            [
+              {
+                customer_id: customerId,
+                pack_id: `challenge-${weekStartIso.slice(0, 10)}`,
+                card_id: handle!,
+                order_id: null,
+                rolled_at: new Date(),
+                source: 'reward',
+              },
+            ],
+            sharedContext,
+          );
+          pullId = pull.id;
+        }
+        cardHandles.push(handle!);
+      } else {
+        skippedCardIds.push(cardId);
+      }
+      rows.push({
+        week_start: weekStart,
+        customer_id: customerId,
+        rank,
+        kind: 'card',
+        card_id: cardId,
+        credits: 0,
+        credit_transaction_id: null,
+        pull_id: pullId, // last pull when qty > 1; qty recorded in snapshot
+        status: inStock ? 'granted' : 'skipped_no_stock',
+        snapshot: { ...input.snapshot, qty },
+      });
+    }
+
+    if (rows.length === 0) return null;
+    // 4) The settled-week record — generated create (writes raw_credits).
+    await this.createChallengePayouts(rows, sharedContext);
+
+    return {
+      customerId,
+      rank,
+      credits: payout.credits,
+      cardHandles,
+      skippedCardIds,
     };
   }
 
