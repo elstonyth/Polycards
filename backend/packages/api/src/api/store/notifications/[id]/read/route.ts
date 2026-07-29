@@ -10,14 +10,15 @@ import {
 import type { INotificationModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../../../../modules/packs';
 import type PacksModuleService from '../../../../../modules/packs/service';
+import { CUSTOMER_FEED_CHANNEL } from '../../../../../modules/packs/notify-feed';
 
 // POST /store/notifications/:id/read
 //
 // Marks an in-app feed notification as read for the authenticated customer.
 //
-// Only 'feed' channel notifications can be marked read here. Non-feed
-// notifications (e.g. email, SMS) are not markable via this endpoint — the
-// channel check in the IDOR guard returns 404 for any non-feed notification id.
+// Only customer-feed channel notifications can be marked read here. Other
+// channels (email, SMS, the admin dashboard's own 'feed') are not markable via
+// this endpoint — the channel check in the IDOR guard returns 404 for them.
 //
 // IDOR guard: the notification is fetched scoped to both the supplied id AND
 // the verified bearer's actor_id as receiver_id — a missing row returns 404
@@ -67,7 +68,7 @@ export async function POST(
     owned = null;
   }
   // Fail-closed: treat wrong owner as not-found (no existence leak).
-  if (!owned || owned.receiver_id !== customerId || owned.channel !== 'feed') {
+  if (!owned || owned.receiver_id !== customerId || owned.channel !== CUSTOMER_FEED_CHANNEL) {
     throw new MedusaError(
       MedusaError.Types.NOT_FOUND,
       'Notification not found',

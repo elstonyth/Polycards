@@ -66,7 +66,7 @@ it('notifies the order owner when an admin ships it', async () => {
   expect(h.notifications).toHaveLength(1);
   expect(h.notifications[0]).toMatchObject({
     receiver_id: 'cus_1',
-    channel: 'feed',
+    channel: 'customer_feed',
     template: 'delivery_status',
     data: { order_id: 'do_1', status: 'shipped', tracking_number: 'TRK1' },
     idempotency_key: 'delivery:do_1:shipped',

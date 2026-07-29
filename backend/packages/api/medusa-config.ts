@@ -257,7 +257,7 @@ module.exports = defineConfig({
           {
             resolve: '@medusajs/medusa/notification-local',
             id: 'local',
-            options: { channels: ['feed'] },
+            options: { channels: ['feed', 'customer_feed'] },
           },
           // Transactional email (password reset today). ABSOLUTE path for the same
           // reason as the packs module below: Medusa resolves `resolve` against

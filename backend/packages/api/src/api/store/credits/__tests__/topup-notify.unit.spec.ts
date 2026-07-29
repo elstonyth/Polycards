@@ -50,7 +50,7 @@ it('writes a topup_credited receipt for a real credit', async () => {
   expect(h.notifications).toHaveLength(1);
   expect(h.notifications[0]).toMatchObject({
     receiver_id: 'cus_1',
-    channel: 'feed',
+    channel: 'customer_feed',
     template: 'topup_credited',
     data: { amount_myr: 50, reference: 'mock_abc' },
     idempotency_key: 'topup:mock_abc',

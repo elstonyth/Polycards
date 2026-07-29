@@ -9,6 +9,7 @@
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
 import { Modules } from '@medusajs/framework/utils';
 import { unwrapResponse } from './utils';
+import { CUSTOMER_FEED_CHANNEL } from '../../src/modules/packs/notify-feed';
 
 jest.setTimeout(120 * 1000);
 
@@ -98,7 +99,7 @@ medusaIntegrationTestRunner({
           {
             to: customerIdA,
             receiver_id: customerIdA,
-            channel: 'feed',
+            channel: CUSTOMER_FEED_CHANNEL,
             template: 'vip_level_up',
             data: { level: 2, label: 'Silver I' },
           },
@@ -109,7 +110,7 @@ medusaIntegrationTestRunner({
           {
             to: customerIdB,
             receiver_id: customerIdB,
-            channel: 'feed',
+            channel: CUSTOMER_FEED_CHANNEL,
             template: 'commission_matured',
             data: { amount_usd: 5 },
           },
@@ -176,7 +177,7 @@ medusaIntegrationTestRunner({
         const container = getContainer();
         const notif = container.resolve(Modules.NOTIFICATION);
         const bRows = await notif.listNotifications(
-          { receiver_id: customerIdB, channel: 'feed' },
+          { receiver_id: customerIdB, channel: CUSTOMER_FEED_CHANNEL },
           { take: 10 },
         );
         // Guard: an empty bIds would make the loop below pass vacuously.
@@ -206,7 +207,7 @@ medusaIntegrationTestRunner({
         const container = getContainer();
         const notif = container.resolve(Modules.NOTIFICATION);
         const bRows = await notif.listNotifications(
-          { receiver_id: customerIdB, channel: 'feed' },
+          { receiver_id: customerIdB, channel: CUSTOMER_FEED_CHANNEL },
           { take: 10 },
         );
         expect(bRows.length).toBeGreaterThan(0);
@@ -274,7 +275,7 @@ medusaIntegrationTestRunner({
         const container = getContainer();
         const notif = container.resolve(Modules.NOTIFICATION);
         const bRows = await notif.listNotifications(
-          { receiver_id: customerIdB, channel: 'feed' },
+          { receiver_id: customerIdB, channel: CUSTOMER_FEED_CHANNEL },
           { take: 1 },
         );
         expect(bRows.length).toBeGreaterThan(0);
@@ -291,6 +292,36 @@ medusaIntegrationTestRunner({
         expect(res.status).toBe(404);
       });
 
+      // The admin dashboard's own bell drawer lists channel 'feed' and renders
+      // null for any row lacking data.title. Customer payloads are domain
+      // primitives, so a customer row on that channel made the drawer render
+      // nothing AND skip its empty state — it looked like it was loading
+      // forever. Customer notifications must stay off that channel.
+      it('(channel) keeps customer notifications off the admin dashboard feed channel', async () => {
+        const container = getContainer();
+        const notif = container.resolve(Modules.NOTIFICATION);
+
+        expect(CUSTOMER_FEED_CHANNEL).not.toBe('feed');
+
+        // The beforeEach row is visible to its owner on the customer channel...
+        const mine = await unwrapResponse(
+          api.get('/store/notifications', { headers: authed(tokenA) }),
+        );
+        expect(mine.status).toBe(200);
+        expect(mine.data.notifications.length).toBeGreaterThan(0);
+
+        // ...and nothing this suite seeded shows up on the admin channel.
+        const adminFeed = await notif.listNotifications(
+          { channel: 'feed' },
+          { take: 50 },
+        );
+        expect(
+          adminFeed.filter((n: { receiver_id?: string | null }) =>
+            [customerIdA, customerIdB].includes(n.receiver_id as string),
+          ),
+        ).toEqual([]);
+      });
+
       it('(unread_count) is the TRUE total spanning beyond one page, and mark-read decrements it globally', async () => {
         // Seed 4 more rows for A (beforeEach seeded 1) → 5 total unread.
         const container = getContainer();
@@ -299,7 +330,7 @@ medusaIntegrationTestRunner({
           Array.from({ length: 4 }, (_, i) => ({
             to: customerIdA,
             receiver_id: customerIdA,
-            channel: 'feed' as const,
+            channel: CUSTOMER_FEED_CHANNEL,
             template: 'reward_won',
             data: { i },
           })),
@@ -347,14 +378,14 @@ medusaIntegrationTestRunner({
           {
             to: customerIdA,
             receiver_id: customerIdA,
-            channel: 'feed',
+            channel: CUSTOMER_FEED_CHANNEL,
             template: 'reward_won',
             data: {},
           },
           {
             to: customerIdA,
             receiver_id: customerIdA,
-            channel: 'feed',
+            channel: CUSTOMER_FEED_CHANNEL,
             template: 'voucher_claimed',
             data: {},
           },

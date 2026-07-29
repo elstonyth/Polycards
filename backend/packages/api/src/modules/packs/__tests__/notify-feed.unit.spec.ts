@@ -20,7 +20,7 @@ it('calls createNotifications with feed channel, receiver_id + to + idempotency_
   expect(created[0]).toMatchObject({
     to: 'cus_1',
     receiver_id: 'cus_1',
-    channel: 'feed',
+    channel: 'customer_feed',
     template: 'vip_level_up',
     data: { levels: [2, 3] },
     idempotency_key: 'open_1:levelup',
