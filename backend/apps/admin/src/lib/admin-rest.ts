@@ -454,7 +454,8 @@ export async function getPriceChartingProduct(id: string): Promise<PcProduct> {
 // nightly sync will write. A 503 means PRICECHARTING_API_TOKEN is not
 // configured; surface the message and use the search page instead.
 export interface PcOffer {
-  offer_id: string | null;
+  /** Per-row id — always present; the API drops rows without one. */
+  offer_id: string;
   product_id: string;
   name: string;
   set: string;

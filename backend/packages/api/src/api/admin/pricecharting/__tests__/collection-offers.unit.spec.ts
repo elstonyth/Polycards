@@ -92,11 +92,22 @@ describe('penniesToUsd', () => {
     expect(penniesToUsd('$1,999')).toBe(19.99);
   });
 
-  it('treats absent / zero / junk as no price', () => {
+  it('tolerates padding and sub-cent values', () => {
+    expect(penniesToUsd(' 1999 ')).toBe(19.99);
+    // Upstream is integer pennies; a fractional one rounds rather than
+    // producing a sub-cent price the money columns can't represent.
+    expect(penniesToUsd(1.5)).toBe(0.02);
+  });
+
+  it('treats absent / zero / negative / junk as no price', () => {
     expect(penniesToUsd(0)).toBeNull();
     expect(penniesToUsd(null)).toBeNull();
     expect(penniesToUsd(undefined)).toBeNull();
     expect(penniesToUsd('abc')).toBeNull();
+    // A negative valuation is not a price — it must read as "no price", never
+    // as a negative money value flowing into the table.
+    expect(penniesToUsd(-100)).toBeNull();
+    expect(penniesToUsd(Number.POSITIVE_INFINITY)).toBeNull();
   });
 });
 
@@ -136,6 +147,15 @@ describe('normalizeOffer', () => {
   it('drops an offer with no product id — it cannot be priced or linked', () => {
     expect(normalizeOffer({ ...RAW, id: undefined })).toBeNull();
     expect(normalizeOffer({ ...RAW, id: '  ' })).toBeNull();
+  });
+
+  it('drops an offer with no offer id — two holdings would collapse into one', () => {
+    // The admin keys a row by offer_id. Without one, a second copy of the same
+    // card at the same grade would share the first one's key, get deduped away
+    // during the scan, and the units held would be undercounted.
+    expect(normalizeOffer({ ...RAW, 'offer-id': undefined })).toBeNull();
+    expect(normalizeOffer({ ...RAW, 'offer-id': '   ' })).toBeNull();
+    expect(normalizeOffer({ ...RAW, 'offer-id': 42 })).toBeNull();
   });
 
   it('falls back to the listed price when the valuation is absent', () => {
@@ -178,8 +198,8 @@ describe('normalizeOffer', () => {
   });
 
   it('survives an offer missing every optional field', () => {
-    expect(normalizeOffer({ id: 7 })).toEqual({
-      offer_id: null,
+    expect(normalizeOffer({ id: 7, 'offer-id': 'o7' })).toEqual({
+      offer_id: 'o7',
       product_id: '7',
       name: '',
       set: '',

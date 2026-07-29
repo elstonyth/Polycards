@@ -77,14 +77,21 @@ const MAX_VISIBLE_ROWS = 300;
 // here too so a typo fails the field, not the whole batch at save time.
 const MAX_STOCK = 10_000;
 
-const offerKey = (o: PcOffer): string =>
-  o.offer_id ?? `${o.product_id}|${o.include}`;
+/** Identity of ONE holding. The API guarantees a per-row offer id (rows without
+ *  one are dropped there), so this never falls back to product+tag — which is
+ *  productKey, and would make two distinct holdings look like one. */
+const offerKey = (o: PcOffer): string => o.offer_id;
+
+/** PriceCharting's tag is free text, so compare it case- and spacing-blind. */
+const normalizedInclude = (include: string): string =>
+  include.trim().toLowerCase().replace(/\s+/g, ' ');
 
 /** Two holdings of the SAME product at the SAME grade tier become ONE product:
  *  the created handle is name-grader-grade-pc_product_id, so importing them
  *  separately would collide (the second create fails) and the units held would
  *  be undercounted. Grouped on import, with stock summed instead. */
-const productKey = (o: PcOffer): string => `${o.product_id}|${o.include}`;
+const productKey = (o: PcOffer): string =>
+  `${o.product_id}|${normalizedInclude(o.include)}`;
 
 /** Graded in PriceCharting's sense: anything it did not tag "Ungraded". The
  *  slab tier is what a gacha storefront onboards, so the table defaults to it. */
@@ -247,8 +254,13 @@ const AddFromPcCollectionPage = () => {
       if (cardsOnly && !o.is_card) return false;
       if (gradedOnly && !isGraded(o)) return false;
       if (q === '') return true;
+      // Grade tag + condition are searchable too: inside a five-figure
+      // collection "psa 10" is as natural a query as a card name.
       return (
-        o.name.toLowerCase().includes(q) || o.set.toLowerCase().includes(q)
+        o.name.toLowerCase().includes(q) ||
+        o.set.toLowerCase().includes(q) ||
+        o.include.toLowerCase().includes(q) ||
+        o.condition.toLowerCase().includes(q)
       );
     });
   }, [offers, filter, cardsOnly, gradedOnly]);
@@ -286,7 +298,7 @@ const AddFromPcCollectionPage = () => {
     const work = [...groups.values()];
 
     setImporting({ done: 0, total: work.length });
-    const rows: Draft[] = [];
+    let imported = 0;
     const skipped: string[] = [];
     const done: PcOffer[] = [];
 
@@ -313,7 +325,7 @@ const AddFromPcCollectionPage = () => {
               ? offer.grade
               : '';
           const key = String(++draftSeq.current);
-          rows.push({
+          const row: Draft = {
             key,
             productId: offer.product_id,
             name,
@@ -329,7 +341,13 @@ const AddFromPcCollectionPage = () => {
             labelYear: '',
             labelNote: '',
             pokemon: { pixel_pokemon_id: null },
-          });
+          };
+          // Land the draft in state NOW, not in a bulk append after the loop:
+          // the label prefill below patches by key, and while later products
+          // are still being priced that key would not exist yet — every
+          // prefill but the last would silently no-op.
+          setDrafts((all) => [...all, row]);
+          imported += 1;
           // §7a label prefill, same as the search page: year (set release) +
           // note (rarity) from pokemontcg.io. Fire-and-forget and fill-only —
           // it lands on THIS draft by key, and a lookup failure just leaves the
@@ -360,7 +378,7 @@ const AddFromPcCollectionPage = () => {
       setImporting({ done: i + 1, total: work.length });
     }
 
-    setDrafts((d) => [...d, ...rows]);
+    // Drafts were already committed one by one above (see the prefill note).
     // Only the offers that actually became drafts leave the selection, so a
     // stopped or failed import can be retried without re-picking.
     setSelected((prev) => {
@@ -370,8 +388,8 @@ const AddFromPcCollectionPage = () => {
     });
     setImporting(null);
 
-    if (rows.length > 0) {
-      toast.success(t('pcCollection.toast.imported', { n: rows.length }));
+    if (imported > 0) {
+      toast.success(t('pcCollection.toast.imported', { n: imported }));
     }
     const hidden = Math.max(0, skipped.length - ERROR_TOAST_CAP);
     if (skipped.length > 0) {
@@ -402,9 +420,20 @@ const AddFromPcCollectionPage = () => {
 
   const saveDrafts = async () => {
     if (!canSave) return;
-    const { created, skipped } = await batchCreate.mutateAsync(
-      items.filter((i): i is PcQueueItem => i !== null),
-    );
+    // The batch runner folds per-item failures into `skipped`, but a rejection
+    // of the mutation itself (the backend went away mid-batch) would otherwise
+    // be an unhandled promise from an onClick — the operator would see nothing
+    // happen and the drafts would stay on screen with no explanation.
+    let result: { created: number; skipped: string[] };
+    try {
+      result = await batchCreate.mutateAsync(
+        items.filter((i): i is PcQueueItem => i !== null),
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+      return;
+    }
+    const { created, skipped } = result;
     const hidden = Math.max(0, skipped.length - ERROR_TOAST_CAP);
     if (skipped.length === 0) {
       toast.success(t('pcAdd.toast.queueDone', { n: created }));
@@ -614,6 +643,10 @@ const AddFromPcCollectionPage = () => {
                         <Table.Cell>
                           <Checkbox
                             checked={!!selected[key]}
+                            aria-label={t('pcCollection.selectRow', {
+                              name: o.name || o.product_id,
+                              tag: o.include || '—',
+                            })}
                             onCheckedChange={(v) =>
                               setSelected((s) => ({ ...s, [key]: v === true }))
                             }

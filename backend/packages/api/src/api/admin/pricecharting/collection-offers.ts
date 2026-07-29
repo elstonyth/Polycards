@@ -11,8 +11,10 @@ import { isPcImageUrl } from '../media/ingest-pc-image';
 
 export type PcOffer = {
   /** PriceCharting's per-offer id — the same product can be held twice (one
-   *  raw, one graded), so this, not product_id, keys a row. */
-  offer_id: string | null;
+   *  raw, one graded), so this, not product_id, keys a row. Never null: a row
+   *  without one is rejected below, because any fallback key would be shared by
+   *  two distinct holdings of the same card at the same grade. */
+  offer_id: string;
   /** PriceCharting product id — what the import prices and links against. */
   product_id: string;
   name: string;
@@ -50,19 +52,24 @@ const pcImageOrNull = (raw: unknown): string | null =>
   typeof raw === 'string' && isPcImageUrl(raw) ? raw : null;
 
 /**
- * Map one raw offer onto PcOffer. Returns null for an offer with no product id
- * — it cannot be priced or linked, so it must never reach the import table.
+ * Map one raw offer onto PcOffer. Returns null for an offer the import cannot
+ * handle, so it never reaches the table:
+ *  - no product id — it cannot be priced or linked;
+ *  - no offer id — it cannot be told apart from another holding of the same
+ *    card at the same grade, so the two would collapse into one and undercount
+ *    the units held. Every offer in the live collection carries one.
  */
 export function normalizeOffer(raw: Record<string, unknown>): PcOffer | null {
   const productId = raw.id != null ? String(raw.id).trim() : '';
   if (productId === '') return null;
 
+  const offerId =
+    typeof raw['offer-id'] === 'string' ? raw['offer-id'].trim() : '';
+  if (offerId === '') return null;
+
   const include = String(raw['include-string'] ?? '');
   return {
-    offer_id:
-      typeof raw['offer-id'] === 'string' && raw['offer-id'] !== ''
-        ? raw['offer-id']
-        : null,
+    offer_id: offerId,
     product_id: productId,
     name: String(raw['product-name'] ?? ''),
     set: String(raw['console-name'] ?? ''),

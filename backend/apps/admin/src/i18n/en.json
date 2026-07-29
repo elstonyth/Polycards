@@ -222,7 +222,8 @@
     },
     "stopImport": "Stop import",
     "rowCap": "Showing the first {{shown}} of {{total}} matches — narrow the filter to reach the rest.",
-    "merged": "{{n}} holdings of this card at this grade — one product, units preset to {{n}}."
+    "merged": "{{n}} holdings of this card at this grade — one product, units preset to {{n}}.",
+    "selectRow": "Select {{name}} ({{tag}})"
   },
   "cards": {
     "title": "Gacha Cards",
