@@ -40,13 +40,24 @@ try {
     // <Reveal> fades this section in on scroll-into-view; screenshotting before
     // the IntersectionObserver fires captures it at opacity ~0 (see CLAUDE.md).
     await panel.scrollIntoViewIfNeeded();
-    await page
-      .waitForFunction(
-        (el) => Number(getComputedStyle(el).opacity) > 0.99,
-        await panel.elementHandle(),
-        { timeout: 5000 },
-      )
-      .catch(() => console.log(`[${name}] Reveal never reached full opacity`));
+    // elementHandle() is null if the selector stopped matching (a re-render
+    // between locating and resolving). Passing that straight to waitForFunction
+    // fails inside getComputedStyle with an opaque error, so say what happened
+    // and still take the shot — a visibly-faded capture beats no capture.
+    const panelHandle = await panel.elementHandle();
+    if (panelHandle === null) {
+      console.log(`[${name}] panel element vanished before the opacity wait`);
+    } else {
+      await page
+        .waitForFunction(
+          (el) => Number(getComputedStyle(el).opacity) > 0.99,
+          panelHandle,
+          { timeout: 5000 },
+        )
+        .catch(() =>
+          console.log(`[${name}] Reveal never reached full opacity`),
+        );
+    }
     await page.waitForTimeout(400);
     await panel.screenshot({ path: `${OUT}/${name}.png` });
 

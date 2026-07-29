@@ -78,4 +78,27 @@ describe('tierValueRanges', () => {
     expect(mins).toContain(overall?.min);
     expect(maxes).toContain(overall?.max);
   });
+
+  // A backend without marketPriceMyr prices every card as '—'. The odds panel
+  // must then render tier rows with no range line rather than blow up, so the
+  // empty and fully-unpriced pools have to come back as a plain empty object.
+  it('returns an empty object for an empty pool', () => {
+    expect(tierValueRanges([])).toEqual({});
+  });
+
+  it('returns an empty object when every card is unpriced', () => {
+    expect(
+      tierValueRanges([
+        { rarity: 'Immortal', value: '—' },
+        { rarity: 'Rare', value: '—' },
+        { rarity: 'Common', value: '—' },
+      ]),
+    ).toEqual({});
+  });
+
+  it('agrees with poolValueRange that an unpriced pool has no range at all', () => {
+    const unpriced = [{ rarity: 'Rare', value: '—' }];
+    expect(poolValueRange(unpriced)).toBeNull();
+    expect(tierValueRanges(unpriced)).toEqual({});
+  });
 });
