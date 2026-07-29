@@ -18,9 +18,14 @@ export const ChallengePayout = model
     credits: model.bigNumber().default(0),
     // Audit links: the ledger row / vault pull this payout produced.
     credit_transaction_id: model.text().nullable(),
+    // PRIMARY (first) pull only — a card row can mint qty > 1 pulls when two
+    // unlocked stages award the same card to the same rank. The complete list
+    // lives in snapshot.pull_ids; this scalar stays for the common qty === 1
+    // case and for cheap indexed lookups.
     pull_id: model.text().nullable(),
     status: model.enum(['granted', 'skipped_no_stock']).default('granted'),
-    // { pool_myr, unlocked_stages: number[] } — why this payout happened.
+    // { pool_myr, unlocked_stages: number[] } (+ qty, pull_ids on card rows)
+    // — why this payout happened and exactly what it minted.
     snapshot: model.json(),
   })
   .indexes([

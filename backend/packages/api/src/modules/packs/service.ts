@@ -5867,9 +5867,21 @@ class PacksModuleService extends MedusaService({
       CHALLENGE_WEEK_ANCHOR_CTE + 'SELECT start_utc, end_utc FROM anchor',
       challengeWeekAnchorParams(opts),
     );
+    // No row = the anchor CTE resolved nothing (misconfigured
+    // challenge_settings, e.g. an unknown timezone). Fail loud, naming the
+    // inputs, so the job log says WHY: settlement must never fall back to a
+    // fabricated week — a wrong boundary pays the wrong people.
+    if (!row) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        `Challenge week anchor resolved no row — check challenge_settings ` +
+          `(timezone '${opts.timezone}', resetDay ${opts.resetDay}, ` +
+          `resetHour ${opts.resetHour}, weeksBack ${opts.weeksBack ?? 0}).`,
+      );
+    }
     return {
-      startUtc: new Date(row!.start_utc),
-      endUtc: new Date(row!.end_utc),
+      startUtc: new Date(row.start_utc),
+      endUtc: new Date(row.end_utc),
     };
   }
 
@@ -6079,24 +6091,22 @@ class PacksModuleService extends MedusaService({
         stockByHandle.has(handle!) &&
         (stock === null || (stock !== undefined && stock >= qty));
 
-      let pullId: string | null = null;
+      // qty copies = ONE createPulls call (one round-trip); every minted id is
+      // kept — the row's scalar pull_id can only hold the first.
+      let pullIds: string[] = [];
       if (inStock) {
-        for (let i = 0; i < qty; i += 1) {
-          const [pull] = await this.createPulls(
-            [
-              {
-                customer_id: customerId,
-                pack_id: `challenge-${weekStartIso.slice(0, 10)}`,
-                card_id: handle!,
-                order_id: null,
-                rolled_at: new Date(),
-                source: 'reward',
-              },
-            ],
-            sharedContext,
-          );
-          pullId = pull.id;
-        }
+        const minted = await this.createPulls(
+          Array.from({ length: qty }, () => ({
+            customer_id: customerId,
+            pack_id: `challenge-${weekStartIso.slice(0, 10)}`,
+            card_id: handle!,
+            order_id: null,
+            rolled_at: new Date(),
+            source: 'reward' as const,
+          })),
+          sharedContext,
+        );
+        pullIds = minted.map((p) => p.id);
         cardHandles.push(handle!);
       } else {
         skippedCardIds.push(cardId);
@@ -6109,9 +6119,11 @@ class PacksModuleService extends MedusaService({
         card_id: cardId,
         credits: 0,
         credit_transaction_id: null,
-        pull_id: pullId, // last pull when qty > 1; qty recorded in snapshot
+        pull_id: pullIds[0] ?? null, // primary; full set in snapshot.pull_ids
         status: inStock ? 'granted' : 'skipped_no_stock',
-        snapshot: { ...input.snapshot, qty },
+        // pull_ids always present (empty on skip) so the audit trail is
+        // queryable without a key-exists check.
+        snapshot: { ...input.snapshot, qty, pull_ids: pullIds },
       });
     }
 

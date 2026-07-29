@@ -225,6 +225,64 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(payoutRows).toHaveLength(2); // credits row + card row, once
       });
 
+      it('mints qty pulls in one call and records every id when two stages award the same card', async () => {
+        const { card } = await seedBase();
+        // Pool = MYR 400, so BOTH stages unlock and rank 1 collects the same
+        // card twice (spec rule 5: union of every unlocked stage's table,
+        // credits summed).
+        await service.createChallengeStages([
+          {
+            stage_number: 1,
+            threshold_myr: 100,
+            rank_rewards: [
+              { rank: 1, card_id: card.id, credits: 50 },
+            ] as unknown as Record<string, unknown>,
+          },
+          {
+            stage_number: 2,
+            threshold_myr: 200,
+            rank_rewards: [
+              { rank: 1, card_id: card.id, credits: 25 },
+            ] as unknown as Record<string, unknown>,
+          },
+        ]);
+        await seedPriorWeekPull('cus_a', card);
+
+        const result = await service.settleChallengeWeek({
+          // Tracked with exactly 2 available — proves the stock gate compares
+          // against qty, not against a single copy.
+          getStock: async () =>
+            new Map<string, number | null>([[card.handle, 2]]),
+        });
+        expect(result.winners[0]!.skippedCardIds).toEqual([]);
+        expect(await service.creditBalance('cus_a')).toBe(75); // 50 + 25
+
+        const rewardPulls = await service.listPulls(
+          { customer_id: 'cus_a', source: 'reward' },
+          { take: 10 },
+        );
+        expect(rewardPulls).toHaveLength(2);
+
+        // ONE card payout row (both copies dedupe into one qty entry) carrying
+        // BOTH minted pull ids; the scalar column keeps the first.
+        const cardRows = await service.listChallengePayouts(
+          { kind: 'card' },
+          { take: 5 },
+        );
+        expect(cardRows).toHaveLength(1);
+        const snapshot = cardRows[0]!.snapshot as unknown as {
+          qty: number;
+          pull_ids: string[];
+        };
+        expect(snapshot.qty).toBe(2);
+        // Set-equality: listPulls has no guaranteed ordering and the copies are
+        // identical, so order carries no meaning.
+        expect([...snapshot.pull_ids].sort()).toEqual(
+          rewardPulls.map((p) => p.id).sort(),
+        );
+        expect(cardRows[0]!.pull_id).toBe(snapshot.pull_ids[0]);
+      });
+
       it('records skipped_no_stock and mints no pull when stock is short', async () => {
         const { card } = await seedBase();
         await service.createChallengeStages([
@@ -250,6 +308,9 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(rows).toHaveLength(1);
         expect(rows[0]!.status).toBe('skipped_no_stock');
         expect(rows[0]!.pull_id).toBeNull();
+        expect(
+          (rows[0]!.snapshot as unknown as { pull_ids: string[] }).pull_ids,
+        ).toEqual([]); // always present, empty when nothing minted
         expect(
           await service.listPulls(
             { customer_id: 'cus_a', source: 'reward' },
