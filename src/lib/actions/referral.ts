@@ -1,6 +1,11 @@
 'use server';
 
 /**
+ * SUSPENDED 2026-07-29 — every referral surface was removed from the
+ * storefront (docs/superpowers/specs/2026-07-29-suspend-vip-referral-surfaces-design.md).
+ * Kept unreferenced, not deleted, so un-suspending is a revert; the backend
+ * referral module is untouched and still live.
+ *
  * Referral server actions — summary read + apply-sponsor write.
  *
  * Backend routes:

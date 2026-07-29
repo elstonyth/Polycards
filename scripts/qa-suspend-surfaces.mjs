@@ -143,11 +143,17 @@ if (PUB_KEY) {
     check(/LV \d+/.test(meText), '/me still shows the VIP level number');
     check(!meText.includes('Invite friends'), '/me has no Invite friends card');
     check(!meText.includes('Vouchers'), '/me has no Vouchers tile');
-    check(!meText.includes("Today's box"), "/me has no Today's box line");
+    // `Today.s` not `Today's`: the deleted markup was `Today&rsquo;s box`,
+    // which renders with U+2019 — an ASCII-apostrophe check passed against the
+    // UNMODIFIED page and proved nothing.
+    check(!/Today.s box/.test(meText), "/me has no Today's box line");
     const deadLinks = await page.evaluate(() =>
       Array.from(document.querySelectorAll('a[href]'))
         .map((a) => a.getAttribute('href'))
-        .filter((h) => /^\/(vip|vouchers|daily|referrals)(\/|$)/.test(h)),
+        // /rewards was a redirect stub into /vip, so it 404s too.
+        .filter((h) =>
+          /^\/(vip|vouchers|daily|referrals|invite|rewards)(\/|$)/.test(h),
+        ),
     );
     check(
       deadLinks.length === 0,
@@ -177,6 +183,11 @@ if (failures.length) {
   console.error(`\n${failures.length} assertion(s) FAILED`);
   process.exit(1);
 }
-console.log(
-  `\nAll assertions passed${loggedInChecked ? ' (incl. logged-in /me)' : ' (logged-in /me: manual gap)'}`,
-);
+// Exit 2, not 0, when the logged-in half never ran: six of the nine assertions
+// live in that block, and a plain 0 would read as "verified" to anything
+// automated. Green-but-incomplete is its own state.
+if (!loggedInChecked) {
+  console.warn('\nPASSED WITH SKIPS — logged-in /me not verified (exit 2)');
+  process.exit(2);
+}
+console.log('\nAll assertions passed (incl. logged-in /me)');

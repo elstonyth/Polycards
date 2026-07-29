@@ -50,12 +50,16 @@ describe('NOTIFICATION_COPY', () => {
   });
 
   it('never links into the suspended VIP surfaces', () => {
-    // /vip, /vouchers, /daily, /referrals 404 while the reward economy is
-    // suspended (spec 2026-07-29) — a feed row must not deep-link to them.
-    const dead = ['/vip', '/vouchers', '/daily', '/referrals'];
+    // /vip, /vouchers, /daily, /referrals, /invite and /rewards all 404 while
+    // the reward economy is suspended (spec 2026-07-29) — a feed row must not
+    // deep-link to them. /rewards was a redirect STUB into /vip, which is why
+    // a literal-equality check against the deleted dirs missed it.
+    // Prefix-matched, not equality: a nested path like /vip/levels is just as
+    // dead as /vip itself.
+    const dead = /^\/(vip|vouchers|daily|referrals|invite|rewards)(\/|$)/;
     for (const t of TEMPLATES) {
       const c = copyFor(t);
-      expect(dead).not.toContain(c.href);
+      if (c.href) expect(c.href).not.toMatch(dead);
       // Body copy must not instruct a claim on the VIP page either.
       const body = c.body({
         amount_myr: 25,

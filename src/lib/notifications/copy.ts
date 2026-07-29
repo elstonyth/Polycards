@@ -157,8 +157,11 @@ export const NOTIFICATION_COPY: Record<string, NotificationCopy> = {
       }
       return null;
     },
-    href: '/rewards',
-    action: 'View rewards',
+    // /rewards was a redirect stub into /vip, so it 404s with the rest of the
+    // suspended reward surfaces (spec 2026-07-29) — historical reward_won rows
+    // would otherwise still render a live "View rewards →" into a dead route.
+    href: null,
+    action: null,
   },
 
   voucher_claimed: {
