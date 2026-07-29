@@ -45,6 +45,7 @@ import RewardBoxPrize from './models/reward-box-prize';
 import PixelPokemon from './models/pixel-pokemon';
 import ChallengeStage from './models/challenge-stage';
 import ChallengeSettings from './models/challenge-settings';
+import ChallengePayout from './models/challenge-payout';
 import LedgerEntry from './models/ledger-entry';
 import LedgerSequence from './models/ledger-sequence';
 import {
@@ -427,6 +428,7 @@ class PacksModuleService extends MedusaService({
   PixelPokemon,
   ChallengeStage,
   ChallengeSettings,
+  ChallengePayout,
   LedgerEntry,
   LedgerSequence,
   PurchaseInvoice,
