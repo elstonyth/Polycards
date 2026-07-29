@@ -5,6 +5,11 @@ import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
 import { pickWonRow } from '../../modules/packs/pick';
 import { DEFAULT_MARKET_MULTIPLIER } from '../../modules/packs/pricing';
+import {
+  resolveOddsSetForCustomer,
+  weightForSet,
+  type OddsSet,
+} from '../../modules/packs/odds-sets';
 import { pageAll } from '../../api/utils/page-all';
 
 // Cryptographically-secure, UNBIASED integer roll in [0, bound). This is a
@@ -26,8 +31,10 @@ export function secureRoll(bound: number): number {
 
 type RollPackInput = {
   pack_id: string; // = Pack.slug
-  // customer_id is carried on the workflow input but unused here — the roll is
-  // anonymous; the authenticated id is attached when the pull is recorded.
+  // customer_id is carried here to resolve the customer's ODDS SET server-side
+  // at spin time (§2.5) — the group's set decides which weight column this draw
+  // rolls on. The roll itself is still recorded against the authenticated id
+  // downstream (recordPullStep), not here.
   customer_id?: string;
 };
 
@@ -76,9 +83,12 @@ export type PackData = {
 // rows, and a bare cap would make cards past the 1000th unwinnable AND compute
 // totalWeight over a truncated pool (skewing every published odds ratio). The
 // read runs once per batch, so paging cost is amortized across all draws.
+// `set` is the customer's odds set (§2.5), resolved by the caller — it selects
+// which weight column each row rolls on; 1 is the default group's set.
 export async function fetchPackData(
   packs: PacksModuleService,
   packId: string,
+  set: OddsSet = 1,
 ): Promise<PackData> {
   const [pack] = await packs.listPacks(
     { slug: packId, status: 'active' },
@@ -100,7 +110,13 @@ export async function fetchPackData(
   );
   // Normal pack draw rolls cards only — drop reward rows (card_id null). This
   // narrows card_id/rarity to string and keeps totalWeight over the card pool.
-  const odds = allOdds.filter((o): o is CardOddsRow => o.card_id != null);
+  // Odds-set resolution happens HERE, once, on the filtered card pool: each row
+  // gets its set-resolved value written back onto plain `weight`, so pickWonRow,
+  // totalWeight and every consumer below stay set-agnostic (no weight_2/weight_3
+  // anywhere past this line).
+  const odds = allOdds
+    .filter((o): o is CardOddsRow => o.card_id != null)
+    .map((o) => ({ ...o, weight: weightForSet(o, set) }));
   if (odds.length === 0)
     throw new MedusaError(
       MedusaError.Types.NOT_FOUND,
@@ -169,8 +185,9 @@ export async function drawFromData(
 export async function rollOne(
   packs: PacksModuleService,
   packId: string,
+  set: OddsSet = 1,
 ): Promise<RolledCard> {
-  const d = await fetchPackData(packs, packId);
+  const d = await fetchPackData(packs, packId, set);
   return drawFromData(packs, d.odds, d.totalWeight);
 }
 
@@ -182,7 +199,10 @@ export const rollPackStep = createStep(
   'roll-pack',
   async (input: RollPackInput, { container }) => {
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
-    return new StepResponse(await rollOne(packs, input.pack_id));
+    // Odds set comes from the customer's group, resolved server-side — never
+    // from the request. Anonymous/ungrouped → set 1 (handled by the resolver).
+    const set = await resolveOddsSetForCustomer(container, input.customer_id);
+    return new StepResponse(await rollOne(packs, input.pack_id, set));
   },
 );
 

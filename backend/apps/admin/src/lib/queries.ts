@@ -89,16 +89,26 @@ import {
   type VipLevelDTO,
   type VoucherLadderDTO,
   type VoucherRangeDTO,
+  // ── Epic 3 (Odds) ──
+  listCustomerGroupsAdmin,
+  setGroupOddsSet,
+  type AdminCustomerGroup,
 } from './admin-rest';
-import type { OddsInput } from '@acme/odds-math';
+import type { SetEntry } from '@acme/odds-math';
 import { qk } from './query-keys';
 
 // ── Display queries ──────────────────────────────────────────────────────────
 
-export const usePacks = (): UseQueryResult<AdminPack[]> =>
+// `enabled` matters more than usual here: the packs list now fans out to every
+// odds + card row to compute EV/RTP, so callers that only need the pack NAMES
+// (the cards page's bulk "add to pack" picker) must not pay for it on mount.
+export const usePacks = (
+  opts: { enabled?: boolean } = {},
+): UseQueryResult<AdminPack[]> =>
   useQuery({
     queryKey: qk.packs,
     queryFn: () => packsApi.admin.packs.query().then((r) => r.packs),
+    enabled: opts.enabled ?? true,
   });
 
 // `enabled` lets the pack odds editor's pool picker share this exact cache while
@@ -381,6 +391,18 @@ export const useUpdatePack = () => {
   });
 };
 
+// One request for the whole swap: the old per-pack Promise.all half-applied
+// the reorder when a single row's update was rejected (active pack, empty
+// pool), leaving the list order corrupted until reload.
+export const useReorderPacks = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { order: { slug: string; rank: number }[] }) =>
+      packsApi.admin.packs.reorder.mutate(vars),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.packs }),
+  });
+};
+
 export const useDeletePack = () => {
   const qc = useQueryClient();
   return useMutation({
@@ -394,7 +416,7 @@ export const useDeletePack = () => {
 // identical to the pre-refactor behavior. See the design spec.
 export const useSaveOdds = () =>
   useMutation({
-    mutationFn: (vars: { slug: string; entries: OddsInput[] }) =>
+    mutationFn: (vars: { slug: string; entries: SetEntry[] }) =>
       packsApi.admin.packs.$slug.odds.mutate({
         $slug: vars.slug,
         entries: vars.entries,
@@ -820,3 +842,31 @@ export const useCustomerDetail = (
     queryFn: () => getCustomerDetail(id!),
     enabled: !!id,
   });
+
+// ── Epic 3 (Odds) ────────────────────────────────────────────────────────────
+
+export type { AdminCustomerGroup } from './admin-rest';
+
+export const useCustomerGroupsAdmin = (): UseQueryResult<{
+  customer_groups: AdminCustomerGroup[];
+  count: number;
+}> =>
+  useQuery({ queryKey: qk.customerGroups, queryFn: listCustomerGroupsAdmin });
+
+// Writes one group's metadata.odds_set. Invalidates the list so the saved value
+// is re-read from the server rather than trusted from local state.
+export const useSetGroupOddsSet = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; set: 1 | 2 | 3 }) =>
+      setGroupOddsSet(vars.id, vars.set),
+    onSuccess: () => {
+      toast.success('Odds set saved');
+      // Returned so the mutation stays pending until the refetch lands — the
+      // Odds Sets page drops its local override in ITS onSuccess, and doing so
+      // against a stale cache would flash the previous set.
+      return qc.invalidateQueries({ queryKey: qk.customerGroups });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};

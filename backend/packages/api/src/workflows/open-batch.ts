@@ -38,8 +38,9 @@ export const openBatchWorkflow = createWorkflow(
   "open-batch",
   function (input: OpenBatchInput) {
     // 1. Roll N winners (independent weighted draws; no compensation — read-only).
-    //    rollPackBatchStep only reads pack_id + count from its input type, so
-    //    passing the full OpenBatchInput is safe (structural subtyping).
+    //    rollPackBatchStep reads pack_id + count + customer_id from its input
+    //    type (customer_id resolves the odds set, §2.5), so passing the full
+    //    OpenBatchInput is safe (structural subtyping).
     const cards = rollPackBatchStep(input);
 
     // One open_id for the whole batch — a count=N open is ONE charge row and pays

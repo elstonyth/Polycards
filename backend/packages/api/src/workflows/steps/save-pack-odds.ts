@@ -3,15 +3,17 @@ import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
 import {
-  computeOdds,
+  computeSetWeights,
   RARITIES,
-  type OddsInput,
+  type SetEntry,
   type OddsRarity,
 } from '@acme/odds-math';
 
 export type SavePackOddsInput = {
   pack_id: string; // = Pack.slug
-  entries: OddsInput[]; // one per card in the pack ({ card_id, locked, pct, rarity })
+  // One per card in the pack: { card_id, locked, pct, rarity } plus the set-2/3
+  // overrides (pct_2 / pct_3 — null = inherit the previous set for that card).
+  entries: SetEntry[];
 };
 
 // OddsInput carries rarity as a plain string (the route validates it); narrow it
@@ -21,17 +23,24 @@ const toRarity = (s: string | undefined): OddsRarity =>
     ? (s as OddsRarity)
     : 'Common';
 
-// Snapshot used to restore the prior odds if a later step ever fails.
+// Snapshot used to restore the prior odds if a later step ever fails. It MUST
+// carry weight_2/weight_3: a compensation that restored only `weight` would
+// silently wipe the pack's set-2/3 tables.
 type OddsSnapshot = {
   id: string;
   rarity: OddsRarity;
   weight: number;
+  weight_2: number | null;
+  weight_3: number | null;
   locked: boolean;
 };
 
 // save-pack-odds — the one mutation in the win-rate editor: normalize a pack's
-// per-card weights to basis points (Σ = 10000) per the rarity-weighted rules and
-// persist rarity + weight + locked. Compensated by restoring the pre-save snapshot.
+// per-card weights to basis points (Σ = 10000) with Common as the balancer and
+// persist rarity + weight/weight_2/weight_3 + locked. All THREE sets are
+// recomputed on every save (see computeSetWeights' storage rule), so a set-1
+// edit keeps sets 2/3 summing to 10000. Compensated by restoring the pre-save
+// snapshot.
 //
 // Validation (reject → 400/404 via MedusaError, BEFORE any write):
 //   - pack must exist — DRAFT included: draft is the designated authoring
@@ -39,8 +48,9 @@ type OddsSnapshot = {
 //     editor must be able to save before activation
 //   - entries must cover exactly the pack's existing card set (no stale form /
 //     injected card_ids)
-//   - computeOdds must return no error (Σlocked ≤ 100; all-locked ⇒ Σ == 100;
-//     each locked rate in 0–100)
+//   - computeSetWeights must return no error, for EVERY set (Σpinned ≤ 100;
+//     no unlocked Common ⇒ Σ == 100 exactly; each rate in 0–100). Set 2/3
+//     failures come back prefixed 'Set N: '.
 export const savePackOddsStep = createStep(
   'save-pack-odds',
   async (input: SavePackOddsInput, { container }) => {
@@ -85,7 +95,7 @@ export const savePackOddsStep = createStep(
       );
     }
 
-    const { computed, error } = computeOdds(input.entries);
+    const { rows, error } = computeSetWeights(input.entries);
     if (error) {
       throw new MedusaError(MedusaError.Types.INVALID_DATA, error);
     }
@@ -96,21 +106,36 @@ export const savePackOddsStep = createStep(
     const rarityByCard = new Map(
       input.entries.map((e) => [e.card_id, e.rarity]),
     );
-    const updates = computed.map((c) => ({
-      id: idByCard.get(c.card_id)!,
-      rarity: toRarity(rarityByCard.get(c.card_id)),
-      weight: c.weight,
-      locked: c.locked,
+    // weight_2/weight_3 are written UNCONDITIONALLY (null included): dropping
+    // the only explicit pct_2 returns that set to pure inheritance, and the
+    // stale materialized bps must be cleared, not left behind.
+    const updates: OddsSnapshot[] = rows.map((r) => ({
+      id: idByCard.get(r.card_id)!,
+      rarity: toRarity(rarityByCard.get(r.card_id)),
+      weight: r.weight,
+      weight_2: r.weight_2,
+      weight_3: r.weight_3,
+      locked: r.locked,
     }));
 
     const snapshot: OddsSnapshot[] = existing.map((o) => ({
       id: o.id,
       rarity: o.rarity,
       weight: o.weight,
+      weight_2: o.weight_2 ?? null,
+      weight_3: o.weight_3 ?? null,
       locked: o.locked,
     }));
 
     await packs.updatePackOdds(updates);
+
+    // Response contract (unchanged for the editor): the SET-1 computed odds.
+    const computed = rows.map((r) => ({
+      card_id: r.card_id,
+      weight: r.weight,
+      locked: r.locked,
+      pct: r.weight / 100,
+    }));
 
     // Return the computed odds; carry the snapshot as the compensation payload.
     return new StepResponse(computed, snapshot);
