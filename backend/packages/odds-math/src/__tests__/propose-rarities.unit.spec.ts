@@ -55,5 +55,13 @@ describe('proposeRarities', () => {
     expect(tierOf(rows, 0)).toEqual({ a: 'Common' });
     expect(tierOf(rows, Number.NaN)).toEqual({ a: 'Common' });
     expect(tierOf([{ card_id: 'a', value: Number.NaN }], 50)).toEqual({ a: 'Common' });
+    expect(tierOf([{ card_id: 'a', value: -10 }], 50)).toEqual({ a: 'Common' });
+  });
+
+  it('returns an empty list when rows is not an array', () => {
+    // The editor can call this with a half-built form; a non-array must yield
+    // an empty proposal rather than throwing.
+    expect(proposeRarities(null as never, 50)).toEqual([]);
+    expect(proposeRarities(undefined as never, 50)).toEqual([]);
   });
 });

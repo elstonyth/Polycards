@@ -220,10 +220,16 @@ medusaIntegrationTestRunner({
         // OddsValue's field is `market_value` (not `fmv`) and PackRtp returns
         // `rtp_pct` as a PERCENTAGE — verified against economy.ts.
         const rtp = packTheoreticalRtp(
-          cardRows.map((o) => ({
-            weight: o.weight,
-            market_value: byId.get(o.card_id) ?? 0,
-          })),
+          cardRows.map((o) => {
+            // A `?? 0` fallback here would silently drag rtp_pct down if the
+            // GET route and listPackOdds ever disagree on the card_id set —
+            // the same silent-underCount shape this spec exists to catch.
+            const marketValue = byId.get(o.card_id);
+            if (marketValue === undefined) {
+              throw new Error(`reread odds are missing card_id ${o.card_id}`);
+            }
+            return { weight: o.weight, market_value: marketValue };
+          }),
           PRICE,
         );
         expect(rtp).not.toBeNull();

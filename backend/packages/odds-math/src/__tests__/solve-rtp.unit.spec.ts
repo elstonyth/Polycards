@@ -66,6 +66,26 @@ describe('solveOddsForRtp', () => {
     expect(solveOddsForRtp([], 50, 0.7).error).toMatch(/No cards/);
   });
 
+  it('rejects an unusable target RTP or card value', () => {
+    for (const bad of [0, -0.1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const res = solveOddsForRtp(SIMPLE, 50, bad);
+      expect(res.error).toBe('Target RTP must be greater than 0%.');
+      expect(res.computed).toEqual([]);
+      expect(res.achievedRtp).toBeNull();
+    }
+
+    for (const bad of [-1, Number.NaN]) {
+      const rows: RtpSolveRow[] = [
+        { card_id: 'broken', locked: false, rarity: 'Rare', value: bad, pct: 0 },
+        ...SIMPLE,
+      ];
+      const res = solveOddsForRtp(rows, 50, 0.7);
+      expect(res.error).toBe('Every card needs a value of 0 or more.');
+      expect(res.computed).toEqual([]);
+      expect(res.achievedRtp).toBeNull();
+    }
+  });
+
   it('rejects a locked row whose rate is not a usable number', () => {
     for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, -1, 101]) {
       const rows: RtpSolveRow[] = [
