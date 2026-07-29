@@ -61,8 +61,17 @@ $out = Join-Path $root "deploy/$App.app.yaml"
 [System.IO.File]::WriteAllText($out, $spec)
 
 Write-Host "Validating $out ..."
-doctl apps spec validate $out
-if ($LASTEXITCODE -ne 0) { throw 'doctl apps spec validate failed' }
+# Output SUPPRESSED on purpose: doctl echoes the fully RESOLVED spec, which at
+# this point holds every production secret in plaintext (DB/Redis URLs, JWT and
+# COOKIE secrets, admin password, S3 and API keys). Printing it put the lot in a
+# terminal scrollback and a chat log on 2026-07-29. Only the failure output is
+# surfaced, and only when validation actually fails.
+$validateOutput = doctl apps spec validate $out 2>&1
+if ($LASTEXITCODE -ne 0) {
+  # Even here, print only the lines that look like errors — never the spec body.
+  $validateOutput | Where-Object { $_ -match '(?i)error|invalid|failed' } | Write-Host
+  throw 'doctl apps spec validate failed (spec body withheld: it contains resolved secrets)'
+}
 
 if ($Validate) {
   Write-Host 'Validation OK (no live change; -Validate set).' -ForegroundColor Green
