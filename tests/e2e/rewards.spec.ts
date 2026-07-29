@@ -16,7 +16,13 @@ const PACK = process.env.PW_REWARD_PACK ?? 'pokemon-rookie';
 const EMAIL = process.env.PW_REWARD_EMAIL ?? 'test@polycards.app';
 const PASSWORD = process.env.PW_REWARD_PASSWORD ?? 'PolycardsTest123!';
 
-test.describe('customer rewards — voucher + daily box on /vip', () => {
+// SUSPENDED 2026-07-29 — both routes this spec drives (`/vip`, `/daily`) were
+// deleted with the reward-surface suspension
+// (docs/superpowers/specs/2026-07-29-suspend-vip-referral-surfaces-design.md),
+// so every step here would time out against a 404. Skipped rather than deleted:
+// the suspension is meant to be revertible, and this spec is the coverage that
+// comes back with it. Un-skip when the reward surfaces return.
+test.describe.skip('customer rewards — voucher + daily box on /vip', () => {
   test('claim a voucher grant on /vip', async ({ page }) => {
     await sf.login(page, PACK, EMAIL, PASSWORD);
     await page.goto(`${BASE}/vip`, { waitUntil: 'domcontentloaded' });

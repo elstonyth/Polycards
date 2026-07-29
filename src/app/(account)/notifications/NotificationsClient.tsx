@@ -173,9 +173,17 @@ export default function NotificationsClient({
             </>
           );
 
+          // Hover response is split OUT of the base shell: a read row with no
+          // href renders as a plain <div>, and a non-interactive element that
+          // lights up under the cursor reads as clickable. Suspending the VIP
+          // surfaces made that reachable — vip_level_up and voucher_claimed
+          // are the first templates to carry href: null (spec 2026-07-29).
           const shell = isUnread
-            ? 'flex w-full items-start gap-3 rounded-xl border border-white/25 bg-white/[0.06] p-3 text-left transition-colors hover:bg-white/10'
-            : 'flex w-full items-start gap-3 rounded-xl border border-white/10 bg-white/[0.02] p-3 text-left opacity-70 transition-colors hover:opacity-100';
+            ? 'flex w-full items-start gap-3 rounded-xl border border-white/25 bg-white/[0.06] p-3 text-left transition-colors'
+            : 'flex w-full items-start gap-3 rounded-xl border border-white/10 bg-white/[0.02] p-3 text-left opacity-70 transition-colors';
+          const interactive = isUnread
+            ? 'hover:bg-white/10'
+            : 'hover:opacity-100';
 
           return (
             <li key={n.id}>
@@ -187,7 +195,7 @@ export default function NotificationsClient({
                   onClick={() => {
                     if (isUnread) void onRead(n.id);
                   }}
-                  className={shell}
+                  className={`${shell} ${interactive}`}
                 >
                   {inner}
                   {isUnread && <span className="sr-only">, unread</span>}
@@ -196,7 +204,7 @@ export default function NotificationsClient({
                 <button
                   type="button"
                   onClick={() => void onRead(n.id)}
-                  className={shell}
+                  className={`${shell} ${interactive}`}
                 >
                   {inner}
                   <span className="sr-only">, unread — mark as read</span>

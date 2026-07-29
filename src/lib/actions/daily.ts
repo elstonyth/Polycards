@@ -1,6 +1,11 @@
 'use server';
 
 /**
+ * SUSPENDED 2026-07-29 — the `/daily` route was deleted with the reward
+ * surfaces (docs/superpowers/specs/2026-07-29-suspend-vip-referral-surfaces-design.md).
+ * Kept unreferenced, not deleted, so un-suspending is a revert rather than a
+ * rewrite; the backend routes these call are all still live.
+ *
  * Daily Rewards server actions — the consolidated `/daily` surface (Task 12).
  * Absorbs the old `actions/rewards.ts` (all four actions moved/merged here);
  * the legacy streak check-in (`getDailyStatus`/`claimDailyReward` against

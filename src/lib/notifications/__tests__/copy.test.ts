@@ -10,6 +10,17 @@ const TEMPLATES = [
   'topup_credited',
 ] as const;
 
+// /vip, /vouchers, /daily, /referrals, /invite and /rewards all 404 while the
+// reward economy is suspended (spec 2026-07-29) — a feed row must not deep-link
+// to any of them. /rewards was a redirect STUB into /vip, which is exactly why
+// the first version of this guard (literal equality against the deleted
+// directories) missed it.
+//
+// Prefix + delimiter, not equality: `/vip/levels`, `/vip?source=notif` and
+// `/vip#top` are all just as dead as `/vip`, while `/vip-status` — a route that
+// merely shares the prefix — must NOT trip it.
+const DEAD_ROUTE = /^\/(vip|vouchers|daily|referrals|invite|rewards)([/?#]|$)/;
+
 describe('NOTIFICATION_COPY', () => {
   it('covers every template the backend can produce', () => {
     for (const t of TEMPLATES) {
@@ -46,6 +57,51 @@ describe('NOTIFICATION_COPY', () => {
     for (const t of TEMPLATES) {
       const c = copyFor(t);
       expect(Boolean(c.href)).toBe(Boolean(c.action));
+    }
+  });
+
+  it('never links into the suspended VIP surfaces', () => {
+    for (const t of TEMPLATES) {
+      const c = copyFor(t);
+      if (c.href) expect(c.href).not.toMatch(DEAD_ROUTE);
+      // Body copy must not instruct a claim on the VIP page either.
+      const body = c.body({
+        amount_myr: 25,
+        level: 3,
+        levels: [3],
+        prize_kind: 'voucher',
+        status: 'shipped',
+      });
+      if (body) expect(body.toLowerCase()).not.toContain('vip page');
+    }
+  });
+
+  it('rejects every URL variant that reaches a suspended surface', () => {
+    // The delimiter class is the point: `(\/|$)` alone misses `/vip?x=1` and
+    // `/vip#top`, and a `\b` boundary would over-match `/vip-status` — a
+    // hypothetical LIVE route that merely starts with the same letters.
+    for (const href of [
+      '/vip',
+      '/vip/levels',
+      '/vip?source=notif',
+      '/vip#rewards',
+      '/vouchers',
+      '/daily',
+      '/referrals/tree',
+      '/invite/abc123',
+      '/rewards',
+    ]) {
+      expect(href).toMatch(DEAD_ROUTE);
+    }
+    for (const href of [
+      '/vault',
+      '/transactions',
+      '/leaderboard',
+      '/orders',
+      '/vip-status',
+      '/dailies',
+    ]) {
+      expect(href).not.toMatch(DEAD_ROUTE);
     }
   });
 });
@@ -102,9 +158,9 @@ describe('body rendering', () => {
     // The draw builds a voucher prize as { kind: 'voucher', amount_myr } with
     // NO title, so this used to fall through to the amount branch and announce
     // a payment that never happened — nothing reaches the balance until the
-    // grant is claimed on /vip.
+    // grant is claimed (claiming is suspended alongside the VIP page).
     expect(body({ prize_kind: 'voucher', amount_myr: 5, title: '' })).toBe(
-      'You won a RM 5.00 voucher — claim it on the VIP page.',
+      'You won a RM 5.00 voucher.',
     );
     expect(body({ prize_kind: 'credit', amount_myr: 5, title: '' })).toBe(
       'You won RM 5.00 in credit.',
