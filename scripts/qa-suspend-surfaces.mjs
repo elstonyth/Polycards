@@ -35,12 +35,23 @@ const check = (ok, label) => {
 
 await mkdir(OUT_DIR, { recursive: true });
 const browser = await chromium.launch();
-const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+const context = await browser.newContext({
+  viewport: { width: 390, height: 844 },
+});
 const page = await context.newPage();
 
 // 1. Suspended routes must 404.
-for (const route of ['/vip', '/vouchers', '/daily', '/referrals', '/invite/anything']) {
-  const resp = await page.goto(BASE + route, { waitUntil: 'load', timeout: 30_000 });
+for (const route of [
+  '/vip',
+  '/vouchers',
+  '/daily',
+  '/referrals',
+  '/invite/anything',
+]) {
+  const resp = await page.goto(BASE + route, {
+    waitUntil: 'load',
+    timeout: 30_000,
+  });
   check(resp?.status() === 404, `${route} returns 404 (got ${resp?.status()})`);
 }
 
@@ -48,9 +59,18 @@ for (const route of ['/vip', '/vouchers', '/daily', '/referrals', '/invite/anyth
 await page.goto(BASE + '/', { waitUntil: 'load', timeout: 30_000 });
 await page.waitForTimeout(1500); // let Reveal sections fire
 const homeText = await page.evaluate(() => document.body.innerText);
-check(!homeText.includes('TWO-TIER REFERRALS'), 'home has no TWO-TIER REFERRALS copy');
-check(homeText.includes('100 VIP LEVELS'), 'home keeps the 100 VIP LEVELS teaser');
-await page.screenshot({ path: `${OUT_DIR}/qa-suspend-home.png`, fullPage: false });
+check(
+  !homeText.includes('TWO-TIER REFERRALS'),
+  'home has no TWO-TIER REFERRALS copy',
+);
+check(
+  homeText.includes('100 VIP LEVELS'),
+  'home keeps the 100 VIP LEVELS teaser',
+);
+await page.screenshot({
+  path: `${OUT_DIR}/qa-suspend-home.png`,
+  fullPage: false,
+});
 
 // 3. Logged-out /me → bounced home (the AuthModal consumes ?auth=login and
 //    strips it from the URL, so only the pathname is stable to assert).
@@ -99,10 +119,19 @@ if (PUB_KEY) {
       }),
     );
     await context.addCookies([
-      { name: '_polycards_jwt', value: token, url: BASE, httpOnly: true, sameSite: 'Lax' },
+      {
+        name: '_polycards_jwt',
+        value: token,
+        url: BASE,
+        httpOnly: true,
+        sameSite: 'Lax',
+      },
     ]);
     await page.goto(BASE + '/me', { waitUntil: 'load', timeout: 30_000 });
-    check(new URL(page.url()).pathname === '/me', 'logged-in /me renders (no bounce)');
+    check(
+      new URL(page.url()).pathname === '/me',
+      'logged-in /me renders (no bounce)',
+    );
     // The page streams its server components — wait for a late section to land
     // before reading text, or the asserts run against the loading skeleton.
     await page
@@ -120,17 +149,27 @@ if (PUB_KEY) {
         .map((a) => a.getAttribute('href'))
         .filter((h) => /^\/(vip|vouchers|daily|referrals)(\/|$)/.test(h)),
     );
-    check(deadLinks.length === 0, `/me links into no dead route (found: ${deadLinks.join(', ') || 'none'})`);
-    await page.screenshot({ path: `${OUT_DIR}/qa-suspend-me.png`, fullPage: true });
+    check(
+      deadLinks.length === 0,
+      `/me links into no dead route (found: ${deadLinks.join(', ') || 'none'})`,
+    );
+    await page.screenshot({
+      path: `${OUT_DIR}/qa-suspend-me.png`,
+      fullPage: true,
+    });
     loggedInChecked = true;
   } catch (err) {
     console.warn(`WARN  logged-in /me check skipped: ${err.message}`);
   }
 } else {
-  console.warn('WARN  no NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY in .env.local — logged-in /me skipped');
+  console.warn(
+    'WARN  no NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY in .env.local — logged-in /me skipped',
+  );
 }
 if (!loggedInChecked) {
-  console.warn('WARN  MANUAL GAP: verify a logged-in /me shows the level card unlinked, no voucher/daily/invite blocks');
+  console.warn(
+    'WARN  MANUAL GAP: verify a logged-in /me shows the level card unlinked, no voucher/daily/invite blocks',
+  );
 }
 
 await browser.close();
@@ -138,4 +177,6 @@ if (failures.length) {
   console.error(`\n${failures.length} assertion(s) FAILED`);
   process.exit(1);
 }
-console.log(`\nAll assertions passed${loggedInChecked ? ' (incl. logged-in /me)' : ' (logged-in /me: manual gap)'}`);
+console.log(
+  `\nAll assertions passed${loggedInChecked ? ' (incl. logged-in /me)' : ' (logged-in /me: manual gap)'}`,
+);
