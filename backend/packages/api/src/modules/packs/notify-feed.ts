@@ -6,7 +6,8 @@ export type FeedTemplate =
   | 'reward_won'
   | 'voucher_claimed'
   | 'delivery_status'
-  | 'topup_credited';
+  | 'topup_credited'
+  | 'challenge_payout';
 
 // The channel our CUSTOMER in-app feed lives on. Deliberately NOT 'feed':
 // that channel is the Medusa admin dashboard's own notification drawer, which
