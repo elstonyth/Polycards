@@ -348,21 +348,28 @@ export type DrawDailyBoxResult = {
 // is belt-and-suspenders against a corrupted edge so COUNT(*) can never loop.
 const DOWNSTREAM_DEPTH_CAP = 100;
 
-// The (timezone, reset-day, reset-hour) anchor a challenge-week query filters on.
+// The (timezone, reset-day, reset-hour) anchor a challenge-week query filters
+// on. weeksBack selects a PAST week: 0 (default) = the running week, 1 = the
+// most recently ended week (settlement's window).
 type ChallengeWeekAnchor = {
   timezone: string;
   resetDay: number;
   resetHour: number;
+  weeksBack?: number;
 };
 
-// Shared CTE that resolves the CURRENT challenge week's UTC start from a
+// Shared CTE resolving one challenge week's UTC [start, end) from a
 // ChallengeWeekAnchor. Downstream queries append their SELECT and filter
-// `pu.rolled_at >= (SELECT start_utc FROM anchor)`. Kept in ONE place so the
-// community pool and the pull-value ranking can never drift onto different week
-// boundaries. Anchor computed via AT TIME ZONE (DST-correct); EXTRACT(DOW) uses
-// 0=Sunday…6=Saturday, matching challenge_settings. wkfix: if today IS the reset
-// day but before the reset hour, the naive anchor lands in the future — step
-// back one week. Takes 4 params (timezone, resetDay, resetHour, timezone).
+// `pu.rolled_at >= (SELECT start_utc FROM anchor) AND
+//  pu.rolled_at <  (SELECT end_utc   FROM anchor)`. Kept in ONE place so the
+// community pool, the pull-value ranking, AND settlement can never drift onto
+// different week boundaries. Anchor computed via AT TIME ZONE (DST-correct);
+// EXTRACT(DOW) uses 0=Sunday…6=Saturday, matching challenge_settings. wkfix:
+// if today IS the reset day but before the reset hour, the naive anchor lands
+// in the future — step back one week. weeksBack shifts the whole week left in
+// LOCAL time (before the AT TIME ZONE conversion), so a DST transition inside
+// the shifted week still lands on the wall-clock reset hour. Takes 6 params
+// (timezone, resetDay, resetHour, weeksBack, timezone, timezone).
 const CHALLENGE_WEEK_ANCHOR_CTE =
   'WITH nowtz AS (SELECT now() AT TIME ZONE ? AS t), ' +
   'wk AS ( ' +
@@ -372,14 +379,26 @@ const CHALLENGE_WEEK_ANCHOR_CTE =
   '    FROM nowtz ' +
   '), wkfix AS ( ' +
   '  SELECT CASE WHEN start_local > t ' +
-  "         THEN start_local - interval '7 days' ELSE start_local END AS start_local " +
+  "         THEN start_local - interval '7 days' ELSE start_local END " +
+  "         - ? * interval '7 days' AS start_local " +
   '    FROM wk ' +
-  '), anchor AS (SELECT start_local AT TIME ZONE ? AS start_utc FROM wkfix) ';
-// resetDay/resetHour stay NUMBERS — they feed integer arithmetic in the CTE
-// (`EXTRACT(DOW) - ?`), so a string would change the query's typing.
+  '), anchor AS ( ' +
+  '  SELECT start_local AT TIME ZONE ? AS start_utc, ' +
+  "         (start_local + interval '7 days') AT TIME ZONE ? AS end_utc " +
+  '    FROM wkfix ' +
+  ') ';
+// resetDay/resetHour/weeksBack stay NUMBERS — they feed integer arithmetic in
+// the CTE, so a string would change the query's typing.
 const challengeWeekAnchorParams = (
   w: ChallengeWeekAnchor,
-): (string | number)[] => [w.timezone, w.resetDay, w.resetHour, w.timezone];
+): (string | number)[] => [
+  w.timezone,
+  w.resetDay,
+  w.resetHour,
+  w.weeksBack ?? 0,
+  w.timezone,
+  w.timezone,
+];
 
 class PacksModuleService extends MedusaService({
   Pack,
@@ -5758,7 +5777,8 @@ class PacksModuleService extends MedusaService({
         '  FROM pull pu ' +
         '  LEFT JOIN card c ON c.handle = pu.card_id AND c.deleted_at IS NULL ' +
         " WHERE pu.deleted_at IS NULL AND pu.customer_id IS NOT NULL AND pu.source <> 'reward' " +
-        '   AND pu.rolled_at >= (SELECT start_utc FROM anchor)',
+        '   AND pu.rolled_at >= (SELECT start_utc FROM anchor) ' +
+        '   AND pu.rolled_at <  (SELECT end_utc FROM anchor)',
       [...challengeWeekAnchorParams(opts), DEFAULT_MARKET_MULTIPLIER, fxRate],
     );
     return Number(row?.pooled_myr ?? 0);
@@ -5789,6 +5809,7 @@ class PacksModuleService extends MedusaService({
         '  LEFT JOIN card c ON c.handle = pu.card_id AND c.deleted_at IS NULL ' +
         " WHERE pu.deleted_at IS NULL AND pu.customer_id IS NOT NULL AND pu.source <> 'reward' " +
         '   AND pu.rolled_at >= (SELECT start_utc FROM anchor) ' +
+        '   AND pu.rolled_at <  (SELECT end_utc FROM anchor) ' +
         ' GROUP BY pu.customer_id ' +
         ' ORDER BY volume_myr DESC NULLS LAST, pu.customer_id ASC ' +
         ' LIMIT ?',
@@ -5804,6 +5825,28 @@ class PacksModuleService extends MedusaService({
       pulls: Number(r.pulls ?? 0),
       volumeMyr: Number(r.volume_myr ?? 0),
     }));
+  }
+
+  // Resolve one challenge week's UTC [start, end) — settlement's payout key
+  // comes from the SAME CTE as the aggregates, so they can never disagree on
+  // the boundary. (All queries in a settlement run execute after the cron
+  // fire, which is at-or-after the reset instant — see the spec's
+  // boundary-race note.)
+  @InjectManager()
+  async challengeWeekBounds(
+    opts: ChallengeWeekAnchor,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ startUtc: Date; endUtc: Date }> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const [row] = await em.execute<{ start_utc: string; end_utc: string }[]>(
+      CHALLENGE_WEEK_ANCHOR_CTE + 'SELECT start_utc, end_utc FROM anchor',
+      challengeWeekAnchorParams(opts),
+    );
+    return {
+      startUtc: new Date(row!.start_utc),
+      endUtc: new Date(row!.end_utc),
+    };
   }
 
   // One-shot backfill for the recorded-pull-value follow-up (spec 2026-07-19
