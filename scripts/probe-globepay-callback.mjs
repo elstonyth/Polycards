@@ -16,7 +16,7 @@
  * Safe to run against production: an unsigned body can never pass
  * openCallback()'s RSA check, so this cannot credit anything. It writes nothing.
  *
- *   node scripts/probe-globepay-callback.mjs https://api.polycards.gg
+ *   node scripts/probe-globepay-callback.mjs https://admin.polycards.gg
  *   node scripts/probe-globepay-callback.mjs            # localhost:9000
  *   node scripts/probe-globepay-callback.mjs --self-check
  *
