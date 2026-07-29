@@ -110,6 +110,50 @@ const coercePublishedOdds = (v: unknown): PublishedOdds | null | undefined => {
   return { overall: pct(o.overall ?? 100, 'published_odds.overall'), tiers };
 };
 
+// Batch rank writes from the packs-list reorder arrows. Rank-only by design:
+// reordering must not travel through the full-payload update (whose activation
+// guard correctly rejects an active empty-pool pack and used to half-apply the
+// swap when the neighbour's write succeeded).
+export type ReorderInput = { order: { slug: string; rank: number }[] };
+
+// One screenful of packs is ~10 rows; 200 bounds a malicious/buggy payload
+// while never limiting a real category.
+const MAX_REORDER = 200;
+
+export function coerceReorderBody(raw: unknown): ReorderInput {
+  if (!raw || typeof raw !== 'object') {
+    bad('Body must be an object.');
+  }
+  const order = (raw as Record<string, unknown>).order;
+  if (!Array.isArray(order) || order.length === 0) {
+    bad(`'order' must be a non-empty array.`);
+  }
+  const entries = order as unknown[];
+  if (entries.length > MAX_REORDER) {
+    bad(`'order' is too large (max ${MAX_REORDER} entries).`);
+  }
+  const seen = new Set<string>();
+  const out = entries.map((e, i) => {
+    if (!e || typeof e !== 'object') {
+      bad(`'order[${i}]' must be an object.`);
+    }
+    const { slug, rank } = e as Record<string, unknown>;
+    if (typeof slug !== 'string' || !HANDLE_RE.test(slug)) {
+      bad(`'order[${i}].slug' must be lowercase kebab-case.`);
+    }
+    const s = slug as string;
+    if (seen.has(s)) {
+      bad(`'order' repeats slug '${s}'.`);
+    }
+    seen.add(s);
+    if (typeof rank !== 'number' || !Number.isInteger(rank) || rank < 0) {
+      bad(`'order[${i}].rank' must be an integer >= 0.`);
+    }
+    return { slug: s, rank: rank as number };
+  });
+  return { order: out };
+}
+
 // Coerce + validate the pack form body. `slug` comes from the route params on
 // update (immutable) and from the body on create.
 export function coercePackBody(raw: unknown, slug: string): PackWriteInput {

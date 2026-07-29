@@ -404,6 +404,18 @@ export const useUpdatePack = () => {
   });
 };
 
+// One request for the whole swap: the old per-pack Promise.all half-applied
+// the reorder when a single row's update was rejected (active pack, empty
+// pool), leaving the list order corrupted until reload.
+export const useReorderPacks = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { order: { slug: string; rank: number }[] }) =>
+      packsApi.admin.packs.reorder.mutate(vars),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.packs }),
+  });
+};
+
 export const useDeletePack = () => {
   const qc = useQueryClient();
   return useMutation({
