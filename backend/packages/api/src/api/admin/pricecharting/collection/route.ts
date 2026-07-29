@@ -1,6 +1,10 @@
 import { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
 import { pcFetch, PC_TOKEN_MISSING } from '../client';
-import { normalizeOffer, type PcOffer } from '../collection-offers';
+import {
+  isForeignOffer,
+  normalizeOffer,
+  type PcOffer,
+} from '../collection-offers';
 
 // GET /admin/pricecharting/collection[?cursor=…] — ONE page (~30) of the
 // operator's own PriceCharting collection, normalized for bulk import, plus the
@@ -70,14 +74,25 @@ export async function GET(
 
   const page = Array.isArray(result.data.offers) ? result.data.offers : [];
   const offers: PcOffer[] = [];
+  // Rows upstream says are NOT ours never reach the import table. The seller id
+  // being set proves configuration, not correctness; this proves correctness.
+  let foreign = 0;
   for (const raw of page) {
     if (!raw || typeof raw !== 'object') continue;
+    if (isForeignOffer(raw)) {
+      foreign++;
+      continue;
+    }
     const offer = normalizeOffer(raw);
     if (offer) offers.push(offer);
   }
 
   res.json({
     offers,
+    // Surfaced, not swallowed: a non-zero count means the configured seller id
+    // is not the account the token is reading, and the operator has to know
+    // that rather than see a short page.
+    foreign_dropped: foreign,
     // Empty when the collection is exhausted — that, not an empty page, is how
     // the client knows to stop.
     cursor: typeof result.data.cursor === 'string' ? result.data.cursor : '',

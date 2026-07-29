@@ -37,6 +37,20 @@ export type PcOffer = {
   is_card: boolean;
 };
 
+/**
+ * Upstream marks each row with whether the requesting account owns it. FALSE is
+ * the signature of the bug that shipped once already: /api/offers without a
+ * `seller` returns everyone's offers, and every row came back false. The route
+ * drops those rather than trusting that PRICECHARTING_SELLER_ID is OUR id — a
+ * typo'd or stale one is otherwise indistinguishable from a correct one.
+ *
+ * Absent is tolerated, not rejected: a correctly-scoped response has never been
+ * observed with rows in it (the collection is empty), so demanding `=== true`
+ * could empty a working page.
+ */
+export const isForeignOffer = (raw: Record<string, unknown>): boolean =>
+  raw['user-viewing-own-offers'] === false;
+
 /** Upstream offer values are integer PENNIES (number or digit string). */
 export function penniesToUsd(raw: unknown): number | null {
   const n = typeof raw === 'string' ? Number(raw.replace(/[$,\s]/g, '')) : raw;
@@ -63,8 +77,10 @@ export function normalizeOffer(raw: Record<string, unknown>): PcOffer | null {
   const productId = raw.id != null ? String(raw.id).trim() : '';
   if (productId === '') return null;
 
+  // String OR number: dropping a numerically-keyed row would empty the page
+  // in a way indistinguishable from a genuinely empty collection.
   const offerId =
-    typeof raw['offer-id'] === 'string' ? raw['offer-id'].trim() : '';
+    raw['offer-id'] != null ? String(raw['offer-id']).trim() : '';
   if (offerId === '') return null;
 
   const include = String(raw['include-string'] ?? '');

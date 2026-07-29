@@ -475,8 +475,13 @@ export interface PcOffer {
  *  side because the collection runs to five figures. */
 export async function getPriceChartingCollection(
   cursor = '',
-): Promise<{ offers: PcOffer[]; cursor: string }> {
-  return getJson<{ offers: PcOffer[]; cursor: string }>(
+): Promise<{ offers: PcOffer[]; cursor: string; foreign_dropped: number }> {
+  return getJson<{
+    offers: PcOffer[];
+    cursor: string;
+    /** Rows upstream said belong to another account; the API dropped them. */
+    foreign_dropped: number;
+  }>(
     '/admin/pricecharting/collection' +
       (cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''),
   );

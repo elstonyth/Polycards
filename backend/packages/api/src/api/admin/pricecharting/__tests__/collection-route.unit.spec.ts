@@ -128,6 +128,28 @@ describe('GET /admin/pricecharting/collection', () => {
     });
   });
 
+  it('drops rows upstream says are not ours, and says how many', async () => {
+    // The seller id being SET proves configuration, not correctness — a stale
+    // or typo'd id returns another account's holdings, which would import as
+    // our stock. This is the flag that exposed exactly that bug.
+    const { captured } = await runGet(
+      {},
+      {
+        status: 'success',
+        offers: [
+          { ...OFFER, 'user-viewing-own-offers': false },
+          { ...OFFER, 'offer-id': 'mine_1', 'user-viewing-own-offers': true },
+          { ...OFFER, 'offer-id': 'mine_2' }, // flag absent — tolerated
+        ],
+      },
+    );
+
+    expect(captured.body.foreign_dropped).toBe(1);
+    expect(
+      captured.body.offers.map((o: { offer_id: string }) => o.offer_id),
+    ).toEqual(['mine_1', 'mine_2']);
+  });
+
   it('reports an exhausted collection as an empty cursor', async () => {
     const { captured } = await runGet({}, { status: 'success', offers: [] });
     expect(captured.body.cursor).toBe('');
@@ -152,10 +174,13 @@ describe('GET /admin/pricecharting/collection', () => {
   });
 
   it('502s when PriceCharting reports an error', async () => {
-    const { captured } = await runGet({}, {
-      status: 'error',
-      'error-message': 'user not found: me',
-    });
+    const { captured } = await runGet(
+      {},
+      {
+        status: 'error',
+        'error-message': 'user not found: me',
+      },
+    );
     expect(captured.status).toBe(502);
     expect(captured.body.message).toContain('user not found');
   });

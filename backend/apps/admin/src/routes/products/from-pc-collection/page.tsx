@@ -39,6 +39,7 @@ import CardPokemonFields, {
   type CardPokemonValue,
 } from '../../cards/CardPokemonFields';
 import { GachaPipelineHint } from '../../../components/GachaPipelineHint';
+import { GraderGradeSelect } from '../../../components/GraderGradeSelect';
 
 export const config: RouteConfig = {
   label: 'Add from PC Collection',
@@ -112,6 +113,13 @@ type Draft = {
    *  of what the physical slab is, which the price tier alone can't carry
    *  (every 9 prices off the same generic "Grade 9" field). */
   include: string;
+  /** Grader + grade the operator asserts for THIS slab. Seeded from the offer's
+   *  tag when it names a grading company, blank otherwise — PriceCharting drops
+   *  the company below its top-tier fields ("Graded 9"), and §3a forbids
+   *  inventing one, so the operator states it. This single value is both what
+   *  the row displays and what is submitted. */
+  grader: string;
+  grade: string;
   image: string;
   stock: string;
   /** How many collection holdings collapsed into this draft (see productKey).
@@ -141,21 +149,15 @@ const toItem = (d: Draft): PcQueueItem | null => {
   // name is required server-side; upstream can return a blank product name.
   if (d.name.trim() === '') return null;
   if (d.image.trim() === '' || !stockValid(d.stock)) return null;
-  // The offer's own tag wins: it names the slab ("PSA 10"), where the price tier
-  // is only the field that prices it (every 9 shares "Grade 9"). Falls back to
-  // the tier when the tag asserts no grader — PriceCharting drops the grading
-  // company on everything below its top-tier fields ("Graded 9"), and then the
-  // same §3a rule as the search page applies: a generic tier is a price comp,
-  // not a grading claim, so it carries no grader.
-  const asserted = graderFromInclude(d.include);
-  const derived = asserted.grader !== '' ? asserted : gradeToGrader(d.pcGrade);
+  // Whatever the operator has on screen, verbatim — no second derivation. A
+  // grade without a grader is unrepresentable (§3a), so it travels blank.
   return {
     pc_product_id: d.productId,
     pc_grade: d.pcGrade,
     name: d.name,
     set: d.set,
-    grader: derived.grader,
-    grade: derived.grader ? derived.grade : '',
+    grader: d.grader,
+    grade: d.grader === '' ? '' : d.grade,
     market_value: usd,
     image: d.image,
     stock: Number(d.stock),
@@ -178,8 +180,13 @@ const AddFromPcCollectionPage = () => {
   const [scanning, setScanning] = useState(false);
   const [scannedPages, setScannedPages] = useState(0);
   const [exhausted, setExhausted] = useState(false);
+  // A failed scan must not render as "your collection is empty" — the most
+  // likely first-run failure is a missing PRICECHARTING_SELLER_ID, whose 503
+  // explains exactly what to do.
+  const [scanError, setScanError] = useState<string | null>(null);
   const stopScanRef = useRef(false);
   const cursorRef = useRef('');
+  const foreignRef = useRef(0);
 
   // Step 2 — narrow. A real collection mixes cards with games and hardware, and
   // is overwhelmingly ungraded, so both filters default ON.
@@ -213,8 +220,10 @@ const AddFromPcCollectionPage = () => {
     if (scanning) return;
     stopScanRef.current = false;
     setScanning(true);
+    setScanError(null);
     if (restart) {
       cursorRef.current = '';
+      foreignRef.current = 0;
       setOffers([]);
       setScannedPages(0);
       setExhausted(false);
@@ -224,6 +233,11 @@ const AddFromPcCollectionPage = () => {
       for (let page = 0; page < MAX_SCAN_PAGES; page++) {
         if (stopScanRef.current) break;
         const data = await getPriceChartingCollection(cursorRef.current);
+        // Upstream said these rows belong to somebody else — the seller id is
+        // set but is not the account the token reads. Importing them would put
+        // other people's cards in our catalog, so the API already dropped them;
+        // say so instead of quietly serving a short page.
+        if (data.foreign_dropped > 0) foreignRef.current += data.foreign_dropped;
         setOffers((prev) => {
           const rows = prev ?? [];
           const seen = new Set(rows.map(offerKey));
@@ -242,9 +256,17 @@ const AddFromPcCollectionPage = () => {
         }
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      setScanError(message);
+      toast.error(message);
     } finally {
       setScanning(false);
+      if (foreignRef.current > 0) {
+        toast.warning(
+          t('pcCollection.foreignDropped', { n: foreignRef.current }),
+        );
+        foreignRef.current = 0;
+      }
     }
   };
 
@@ -325,6 +347,12 @@ const AddFromPcCollectionPage = () => {
               ? offer.grade
               : '';
           const key = String(++draftSeq.current);
+          // Seed from the offer's tag when it names a grader ("PSA 10"), else
+          // from the picked tier when THAT names one; a generic tier leaves it
+          // blank for the operator to state.
+          const asserted = graderFromInclude(offer.include);
+          const seeded =
+            asserted.grader !== '' ? asserted : gradeToGrader(mapped);
           const row: Draft = {
             key,
             productId: offer.product_id,
@@ -333,6 +361,8 @@ const AddFromPcCollectionPage = () => {
             prices: product.prices,
             pcGrade: mapped,
             include: offer.include,
+            grader: seeded.grader,
+            grade: seeded.grader === '' ? '' : seeded.grade,
             image,
             // These holdings are physically in hand — that is what makes them a
             // collection — so units default to how many were picked.
@@ -522,14 +552,20 @@ const AddFromPcCollectionPage = () => {
               {t('pcCollection.complete')}
             </StatusBadge>
           )}
-          {!exhausted && !scanning && offers !== null && (
+          {!exhausted && !scanning && offers !== null && scanError === null && (
             <StatusBadge color="orange">
               {t('pcCollection.partial')}
             </StatusBadge>
           )}
         </div>
 
-        {offers !== null && scanned === 0 && !scanning && (
+        {scanError !== null && !scanning && (
+          <Text className="text-ui-fg-error" size="small">
+            {scanError}
+          </Text>
+        )}
+
+        {offers !== null && scanned === 0 && !scanning && scanError === null && (
           <Text className="text-ui-fg-subtle" size="small">
             {t('pcCollection.empty')}
           </Text>
@@ -579,6 +615,16 @@ const AddFromPcCollectionPage = () => {
                   ? t('pcCollection.deselectAll')
                   : t('pcCollection.selectAll')}
               </Button>
+              {picked.length > 0 && (
+                <Button
+                  size="small"
+                  variant="secondary"
+                  type="button"
+                  onClick={() => setSelected({})}
+                >
+                  {t('pcCollection.clearSelection', { n: picked.length })}
+                </Button>
+              )}
               <Button
                 size="small"
                 type="button"
@@ -708,7 +754,6 @@ const AddFromPcCollectionPage = () => {
               {t('pcCollection.drafts', { n: drafts.length })}
             </Heading>
             {drafts.map((d) => {
-              const asserted = graderFromInclude(d.include);
               return (
                 <div
                   key={d.key}
@@ -728,9 +773,9 @@ const AddFromPcCollectionPage = () => {
                         {t('pcCollection.slabLine', {
                           tag: d.include || '—',
                           grader:
-                            asserted.grader === ''
+                            d.grader === ''
                               ? t('pcCollection.noGrader')
-                              : `${asserted.grader} ${asserted.grade}`,
+                              : `${d.grader} ${d.grade}`,
                         })}
                       </span>
                       {d.merged > 1 && (
@@ -812,6 +857,7 @@ const AddFromPcCollectionPage = () => {
                       </Label>
                       <Input
                         id={`draft-${d.key}-label-year`}
+                        maxLength={64}
                         value={d.labelYear}
                         onChange={(e) =>
                           patchDraft(d.key, { labelYear: e.target.value })
@@ -828,6 +874,7 @@ const AddFromPcCollectionPage = () => {
                       </Label>
                       <Input
                         id={`draft-${d.key}-label-note`}
+                        maxLength={64}
                         value={d.labelNote}
                         onChange={(e) =>
                           patchDraft(d.key, { labelNote: e.target.value })
@@ -835,6 +882,13 @@ const AddFromPcCollectionPage = () => {
                       />
                     </div>
                   </div>
+
+                  <GraderGradeSelect
+                    grader={d.grader}
+                    grade={d.grade}
+                    onChange={(v) => patchDraft(d.key, v)}
+                    idPrefix={`draft-${d.key}`}
+                  />
 
                   <div className="flex flex-col gap-y-2">
                     <CardPokemonFields

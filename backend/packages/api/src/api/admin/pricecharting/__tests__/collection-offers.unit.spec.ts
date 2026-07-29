@@ -1,4 +1,8 @@
-import { normalizeOffer, penniesToUsd } from '../collection-offers';
+import {
+  isForeignOffer,
+  normalizeOffer,
+  penniesToUsd,
+} from '../collection-offers';
 import {
   gradeForIncludeString,
   priceFieldForGrade,
@@ -111,6 +115,19 @@ describe('penniesToUsd', () => {
   });
 });
 
+describe('isForeignOffer', () => {
+  it('flags only an explicit false', () => {
+    // A seller-less call comes back with every row false — that is the bug
+    // signature. Absent is tolerated: a correctly-scoped response with rows in
+    // it has never been observed (the collection is empty), so demanding
+    // `=== true` could empty a page that is working fine.
+    expect(isForeignOffer({ 'user-viewing-own-offers': false })).toBe(true);
+    expect(isForeignOffer({ 'user-viewing-own-offers': true })).toBe(false);
+    expect(isForeignOffer({})).toBe(false);
+    expect(isForeignOffer({ 'user-viewing-own-offers': 'false' })).toBe(false);
+  });
+});
+
 describe('normalizeOffer', () => {
   // Field-for-field the shape the live /api/offers returns (trimmed to the keys
   // the import uses — upstream rows carry ~60).
@@ -155,7 +172,12 @@ describe('normalizeOffer', () => {
     // during the scan, and the units held would be undercounted.
     expect(normalizeOffer({ ...RAW, 'offer-id': undefined })).toBeNull();
     expect(normalizeOffer({ ...RAW, 'offer-id': '   ' })).toBeNull();
-    expect(normalizeOffer({ ...RAW, 'offer-id': 42 })).toBeNull();
+  });
+
+  it('accepts a numeric offer id rather than emptying the page', () => {
+    // Dropping numerically-keyed rows would render as "collection is empty",
+    // indistinguishable from the operator's real empty-collection state.
+    expect(normalizeOffer({ ...RAW, 'offer-id': 42 })?.offer_id).toBe('42');
   });
 
   it('falls back to the listed price when the valuation is absent', () => {
