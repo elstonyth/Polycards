@@ -102,13 +102,13 @@ describe('WithdrawForm', () => {
     expect(submitButton().disabled).toBe(false);
   });
 
-  it.each(['20', '1001'])(
+  it.each(['49', '50001'])(
     'rejects RM %s in the form without touching the backend',
     async (amount) => {
       fillValidForm(amount);
       await submit();
       expect(container.querySelector('[role="alert"]')?.textContent).toBe(
-        'Withdrawals must be between RM 30 and RM 1,000.',
+        'Withdrawals must be between RM 50 and RM 50,000.',
       );
       expect(startWithdrawal).not.toHaveBeenCalled();
     },
