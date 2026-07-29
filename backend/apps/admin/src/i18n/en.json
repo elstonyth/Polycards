@@ -116,7 +116,7 @@
   },
   "pcAdd": {
     "title": "Add from PriceCharting",
-    "subtitle": "Search PriceCharting, pick a graded tier, and create a marketplace product carrying that live-price link. Cards registered from this product auto-track its value daily.",
+    "subtitle": "Search PriceCharting, pick a graded tier, and queue a marketplace product carrying that live-price link. Queue as many cards as you like, then save the whole batch in one pass. Cards registered from these products auto-track their value daily.",
     "search": {
       "label": "Search PriceCharting",
       "placeholder": "Card name…",
@@ -148,10 +148,18 @@
     "pixel": {
       "required": "Required — the reel can't render this card without a pixel sprite. Link a library entry or upload one above."
     },
-    "submit": "Add product",
-    "created": "Created",
+    "queue": {
+      "add": "Add to queue",
+      "photo": "Photo",
+      "name": "Name",
+      "grade": "Grade",
+      "remove": "Remove from queue",
+      "save": "Save queue ({{n}})"
+    },
     "toast": {
-      "created": "Product created from {{name}}."
+      "queueDone": "{{n}} created.",
+      "queueSkipped": "{{n}} created, {{skipped}} skipped.",
+      "queueSkippedCapped": "{{n}} created, {{skipped}} skipped. Errors not shown: {{hidden}}."
     }
   },
   "cards": {
@@ -487,5 +495,64 @@
     "empty": "No transactions yet.",
     "noResults": "No transactions match those filters.",
     "loadError": "Could not load transactions."
+  },
+  "inventory": {
+    "title": "Inventory",
+    "pageSubtitle": "Every catalog item — registered gacha cards and items not yet promoted.",
+    "searchPlaceholder": "Search name or SKU",
+    "export": "Export to Excel",
+    "photo": "Photo",
+    "name": "Name",
+    "sku": "SKU",
+    "titleCol": "Title",
+    "fmv": "FMV",
+    "price": "Price",
+    "cost": "Cost",
+    "created": "Created",
+    "onHand": "On Hand",
+    "inVault": "In Vault",
+    "requested": "Requested",
+    "shipped": "Shipped",
+    "listingShow": "Listing Show",
+    "graded": "GRADED",
+    "raw": "RAW",
+    "notACard": "not a card",
+    "noCost": "No purchase history recorded.",
+    "noStock": "This product tracks no inventory.",
+    "empty": "No catalog items yet.",
+    "noResults": "No items match that search.",
+    "loadError": "Could not load inventory.",
+    "selectAll": "Select all items",
+    "selectOne": "Select {{name}}",
+    "selected": "{{n}} selected",
+    "listToCard": "List to gacha card",
+    "bulkDone": "{{n}} card(s) created",
+    "bulkDoneSkipped": "{{n}} card(s) created, {{skipped}} skipped",
+    "bulkNone": "Nothing created, {{skipped}} skipped",
+    "skipAlreadyCard": "already a gacha card",
+    "skipNoFmv": "no FMV recorded — set one on the product first",
+    "detail": {
+      "back": "Inventory",
+      "notFound": "Inventory item not found.",
+      "loadError": "Failed to load this inventory item.",
+      "associated": "Associated products ({{n}})",
+      "notListed": "Not listed anywhere.",
+      "rankReward": "Stage {{stage}} rank {{rank}}",
+      "history": "Stock movement history",
+      "when": "When",
+      "kindCol": "Kind",
+      "qty": "Qty",
+      "ref": "Ref",
+      "noMovements": "No stock movements recorded.",
+      "kind": {
+        "purchase": "Purchase",
+        "pull": "Pull",
+        "vault_out": "Vault out",
+        "requested": "Requested",
+        "shipped": "Shipped",
+        "completed": "Completed",
+        "adjustment": "Adjustment"
+      }
+    }
   }
 }

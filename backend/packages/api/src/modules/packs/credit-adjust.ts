@@ -20,7 +20,8 @@ export function adjustAmountError(value: unknown): string | null {
     return `Amount must be at most RM ${ADJUST_MAX_RM.toLocaleString("en-US")} per adjustment.`;
   }
   // 2dp max with the same binary-representation epsilon as topUpAmountError:
-  // an exact integer-cents comparison would reject valid money like 10.1.
+  // an exact integer-cents comparison would reject valid money like 0.07
+  // (0.07 * 100 is 7.000000000000001). NOT 10.1 — that one is exactly 1010.
   const cents = value * 100;
   if (Math.abs(cents - Math.round(cents)) > 1e-6) {
     return "Amount cannot be more precise than a cent.";

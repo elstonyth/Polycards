@@ -110,4 +110,54 @@ export const qk = {
     ] as const,
   // 2-segment prefix — invalidates ALL pages/filters of the ledger in one call
   ledgerKey: ['admin', 'ledger'] as const,
+  // ── Epic 5 (Inventory) ─────────────────────────────────────────────────────
+  // q and sort ALWAYS render (defaulting to '' / 'created_at:desc') rather than
+  // being appended only when set, same rule as qk.players/qk.pulls: an
+  // appended-only segment makes the unsorted key a strict PREFIX of the sorted
+  // one, so invalidating one would nuke the other.
+  purchaseInvoices: (page: number, q?: string, sort?: string) =>
+    [
+      'admin',
+      'purchase-invoices',
+      page,
+      q ?? '',
+      sort ?? 'created_at:desc',
+    ] as const,
+  // 2-segment prefix — invalidates ALL pages/searches/sorts of the list
+  purchaseInvoicesKey: ['admin', 'purchase-invoices'] as const,
+  // SINGULAR namespace, so the detail cache is a SIBLING of the list, not a
+  // descendant (same shape as deliveryOrder vs deliveryOrders, pack vs packs).
+  // An invoice is immutable — there is no PUT/DELETE route — so a detail entry
+  // never needs invalidating, and nesting it under purchaseInvoicesKey would
+  // only make every create refetch details nothing changed about.
+  purchaseInvoice: (id: string) => ['admin', 'purchase-invoice', id] as const,
+  // The Inventory list is UNPAGED (the route returns every catalog row), so `q`
+  // is the only variable. It ALWAYS renders, defaulting to '' — same
+  // always-rendered-segment rule as qk.players/qk.purchaseInvoices: appended
+  // only when set, the unfiltered key would be a strict PREFIX of every
+  // filtered one and invalidating it would nuke them all.
+  inventory: (q?: string) => ['admin', 'inventory', q ?? ''] as const,
+  // 2-segment prefix — invalidates EVERY search of the inventory list. The bulk
+  // "List to gacha card" tool flips is_card on rows that are also cached under
+  // other `q` values, so it has to reach the whole namespace; refetching just
+  // the key on screen would leave the operator's earlier searches lying. Creating
+  // a purchase invoice reaches it for the same reason — it moves on_hand and the
+  // weighted-average cost on rows cached under every `q`, not just the one shown.
+  inventoryKey: ['admin', 'inventory'] as const,
+  // SINGULAR sibling namespace, same shape as purchaseInvoice/purchaseInvoices
+  // and deliveryOrder/deliveryOrders. NOT nested under the list key: slot 2 of
+  // qk.inventory holds the operator's SEARCH STRING, so ['admin','inventory',
+  // handle, page] would make qk.inventory('charizard') a strict prefix of the
+  // detail key for the card 'charizard' — two unrelated concepts sharing a key
+  // space, which is exactly the prefix hazard every comment above guards
+  // against. `page` is the movement-history page; the item itself is re-sent
+  // whole with each one.
+  inventoryItem: (handle: string, page: number) =>
+    ['admin', 'inventory-item', handle, page] as const,
+  // 2-segment prefix — invalidates EVERY handle and EVERY movement page of
+  // the item detail. Sibling of inventoryKey, never a parent of it: because the
+  // two namespaces are disjoint by design (see above), a prefix invalidation of
+  // one cannot reach the other, so anything that mutates BOTH the list and a
+  // detail — a purchase invoice, a bulk register — has to name both roots.
+  inventoryItemKey: ['admin', 'inventory-item'] as const,
 };

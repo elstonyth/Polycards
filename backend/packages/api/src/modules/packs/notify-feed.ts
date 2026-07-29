@@ -8,7 +8,15 @@ export type FeedTemplate =
   | 'delivery_status'
   | 'topup_credited';
 
-// Thin wrapper over the Notification Module 'feed' channel. receiver_id is the
+// The channel our CUSTOMER in-app feed lives on. Deliberately NOT 'feed':
+// that channel is the Medusa admin dashboard's own notification drawer, which
+// lists every 'feed' row and renders null for any row without a data.title. Our
+// payloads are domain primitives (no title), so sharing the channel left the
+// admin bell permanently blank — it never reached its empty state either, so it
+// read as "loading forever". Keep customer rows on their own channel.
+export const CUSTOMER_FEED_CHANNEL = 'customer_feed';
+
+// Thin wrapper over the Notification Module customer-feed channel. receiver_id is the
 // owner-scoping column the store route filters on; `to` is the provider's
 // required recipient field (local provider). idempotency_key makes redelivery
 // exactly-once. data is primitives-only (no HTML, no free-text) — spec §13.
@@ -25,7 +33,7 @@ export async function notifyFeed(
   await notif.createNotifications({
     to: args.receiverId,
     receiver_id: args.receiverId,
-    channel: 'feed',
+    channel: CUSTOMER_FEED_CHANNEL,
     template: args.template,
     data: args.data,
     idempotency_key: args.idempotencyKey,

@@ -335,20 +335,33 @@ export const useRegisterCard = () => {
     onSuccess: () => {
       // The product is no longer eligible once registered, and the card list grew.
       qc.invalidateQueries({ queryKey: qk.cards });
-      qc.invalidateQueries({ queryKey: qk.eligibleProducts });
+      // MARK STALE, DO NOT REFETCH. invalidateQueries defaults to
+      // refetchType:'active', and the Inventory list's bulk tool keeps
+      // useEligibleProducts(selected.size > 0) ACTIVE for the whole run — so an
+      // N-row run fired up to N refetches of /admin/gacha/eligible-products,
+      // which reads 1000 products + 1000 cards each time. (The loop itself is
+      // unaffected: it registers from a map closed over at click time, so a
+      // mid-loop refetch could never have changed its behaviour.)
+      //
+      // Safe for all THREE consumers, by two different mechanisms. Two are
+      // enabled-gated, and this query is staleTime:0, so they refetch the
+      // moment they are switched back on — the register modal's picker on the
+      // next open (enabled:false while closed), and the Inventory bulk tool's
+      // map on the next selection, which is guaranteed to be a re-enable
+      // because routes/inventory/list/page.tsx clears `selected`
+      // unconditionally at the end of every run (see the comment on that line).
+      // The third, purchase-invoices/new/page.tsx, calls
+      // useEligibleProducts(true) — PERMANENTLY enabled, so the gate argument
+      // does not cover it. It is safe for a different reason: it is a route
+      // page, so it cannot be mounted while this mutation fires, which leaves
+      // its query INACTIVE at invalidation time (the old refetchType:'active'
+      // default skipped it too — zero behaviour change), and it refetches on
+      // mount anyway via shouldFetchOnMount -> isStale at staleTime:0.
+      qc.invalidateQueries({
+        queryKey: qk.eligibleProducts,
+        refetchType: 'none',
+      });
     },
-  });
-};
-
-export const useCreateProductFromPriceCharting = () => {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: createProductFromPriceCharting,
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: qk.cards });
-      qc.invalidateQueries({ queryKey: qk.eligibleProducts });
-    },
-    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });
 };
 
@@ -388,6 +401,18 @@ export const useUpdatePack = () => {
       qc.invalidateQueries({ queryKey: qk.packs });
       qc.invalidateQueries({ queryKey: qk.packOdds(vars.slug) });
     },
+  });
+};
+
+// One request for the whole swap: the old per-pack Promise.all half-applied
+// the reorder when a single row's update was rejected (active pack, empty
+// pool), leaving the list order corrupted until reload.
+export const useReorderPacks = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { order: { slug: string; rank: number }[] }) =>
+      packsApi.admin.packs.reorder.mutate(vars),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.packs }),
   });
 };
 
@@ -885,3 +910,188 @@ export const useLedger = (
     queryFn: () => listLedger(page, { type, q, from, to }),
     placeholderData: keepPreviousData,
   });
+// ── Epic 5 (Inventory) ───────────────────────────────────────────────────────
+// Own import block (not merged into the one at the top) so this whole section
+// stays append-only while a parallel epic edits the same file.
+import {
+  createPurchaseInvoice,
+  getPurchaseInvoice,
+  listPurchaseInvoices,
+  type AdminPurchaseInvoiceDetail,
+  type CreatePurchaseInvoiceBody,
+  type PurchaseInvoicesPage,
+} from './admin-rest';
+
+export type {
+  AdminPurchaseInvoice,
+  AdminPurchaseInvoiceDetail,
+  AdminPurchaseInvoiceLine,
+  CreatePurchaseInvoiceBody,
+  CreatePurchaseInvoiceLineBody,
+  PurchaseInvoicesPage,
+} from './admin-rest';
+
+// Paged + searchable + sortable, not id-scoped, so plain keepPreviousData is
+// right here (same call as usePlayers — the whole page swaps together).
+export const usePurchaseInvoices = (
+  page = 0,
+  q?: string,
+  sort = 'created_at:desc',
+): UseQueryResult<PurchaseInvoicesPage> =>
+  useQuery({
+    queryKey: qk.purchaseInvoices(page, q, sort),
+    queryFn: () => listPurchaseInvoices(page, q, 50, sort),
+    placeholderData: keepPreviousData,
+  });
+
+export const usePurchaseInvoice = (
+  id: string | null,
+): UseQueryResult<{ invoice: AdminPurchaseInvoiceDetail }> =>
+  useQuery({
+    queryKey: qk.purchaseInvoice(id ?? ''),
+    queryFn: () => getPurchaseInvoice(id!),
+    enabled: !!id,
+  });
+
+// Three caches move here and one deliberately does not. The purchase-invoice
+// LIST gains a row, so it goes. The purchase-invoice DETAIL does not: an invoice
+// is immutable once written (no PUT/DELETE route exists), so no cached invoice
+// detail can have gone stale — which is why qk.purchaseInvoice is a sibling
+// namespace the list prefix cannot reach. That reasoning covers ONLY the invoice
+// detail. The INVENTORY caches, list and item detail both, are a separate
+// question and the answer is the opposite one: an invoice is not merely a
+// document, it raises the Medusa stock counter and writes a `purchase` stock
+// movement, so on_hand and the weighted-average cost change on the list and the
+// movement history changes on the item detail. Without invalidating them the
+// dashboard's 90 s staleTime (with refetchOnWindowFocus off) shows On Hand 0 and
+// "No purchase history recorded" for stock the operator just bought.
+export const useCreatePurchaseInvoice = () => {
+  const qc = useQueryClient();
+  const invalidateInventory = useInvalidateInventory();
+  return useMutation({
+    mutationFn: (body: CreatePurchaseInvoiceBody) =>
+      createPurchaseInvoice(body),
+    onSuccess: () => {
+      toast.success('Purchase invoice created');
+      qc.invalidateQueries({ queryKey: qk.purchaseInvoicesKey });
+      invalidateInventory();
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+import { listInventory, type InventoryRow } from './admin-rest';
+
+export type { InventoryRow } from './admin-rest';
+
+// UNPAGED — the route returns every catalog row, because on_hand/cost/buckets
+// are computed after the product read and can only be ordered client-side. So
+// `q` is the only cache axis. keepPreviousData keeps the table on screen while
+// the debounced search refetches (this endpoint pages the whole catalog and
+// then makes five sequential per-handle service calls, so a blank-then-fill
+// would flash on every keystroke).
+export const useInventory = (
+  q?: string,
+): UseQueryResult<{ rows: InventoryRow[] }> =>
+  useQuery({
+    queryKey: qk.inventory(q),
+    queryFn: () => listInventory(q),
+    placeholderData: keepPreviousData,
+  });
+
+// Reaches BOTH inventory namespaces, the list AND the item detail. They are
+// deliberate siblings (see qk.inventoryItem), so a prefix invalidation of one
+// cannot touch the other. TWO of the three callers mutate both: the bulk
+// register tool (routes/inventory/list/page.tsx) flips `is_card` on list rows
+// cached under EVERY search key, not just the one on screen, and on each
+// registered card's own detail page; creating a purchase invoice moves on_hand
+// and cost on the list and appends the movement row the detail page exists to
+// show. The THIRD, useCreateProductsFromPriceChartingBatch, moves the list only
+// — a product that did not exist a moment ago has no cached detail to stale,
+// and its page (/products/from-pricecharting) mounts no useInventoryItem, so
+// the detail half marks nothing and refetches nothing. Harmless, and not worth
+// a second list-only invalidator; just do not read this hook as proof that
+// every caller needs both halves. Lives here rather than in the pages because no
+// route file in this app touches useQueryClient or qk directly — cache surgery
+// is this module's job. NOT folded into useRegisterCard's onSuccess: that hook
+// is also the single-card register modal's, and the bulk tool calls it in a
+// loop, so N registrations would trigger N refetches of an expensive list
+// instead of one at the end.
+export const useInvalidateInventory = () => {
+  const qc = useQueryClient();
+  // Returns the PROMISE, the two invalidations folded with Promise.all. The
+  // bulk tool awaits this before it toasts (routes/inventory/list/page.tsx), so
+  // a statement body returning void would resolve that await immediately and
+  // announce "N registered" over a table that has not refetched yet. Awaiting a
+  // non-promise is legal TypeScript, so the type checker will not catch that
+  // regression -- do not "tidy" this back into a block.
+  return () =>
+    Promise.all([
+      qc.invalidateQueries({ queryKey: qk.inventoryKey }),
+      qc.invalidateQueries({ queryKey: qk.inventoryItemKey }),
+    ]);
+};
+
+import { getInventoryItem, type InventoryDetail } from './admin-rest';
+
+export type { InventoryDetail, InventoryStockMovement } from './admin-rest';
+
+// `page` pages the MOVEMENT HISTORY only — `item` and `associated` come back
+// whole with every page, which is why the whole response is one cache entry
+// keyed by (handle, page) rather than two queries. keepPreviousData keeps the
+// header and the previous page of movements on screen while the next one
+// loads, same call as usePurchaseInvoices.
+export const useInventoryItem = (
+  handle: string | null,
+  page = 0,
+): UseQueryResult<InventoryDetail> =>
+  useQuery({
+    queryKey: qk.inventoryItem(handle ?? '', page),
+    queryFn: () => getInventoryItem(handle as string, page),
+    enabled: !!handle,
+    placeholderData: keepPreviousData,
+  });
+
+/** One queued PriceCharting import — exactly the single-item creation body. */
+export type PcQueueItem = Parameters<typeof createProductFromPriceCharting>[0];
+
+// Runs a client-side queue against the single-item creation endpoint —
+// PriceCharting's API has no bulk-create endpoint for this to call instead
+// (verified 2026-07-28 against the live API docs: /api/offer-publish is one
+// item per POST, and PriceCharting's own docs point bulk-adders at a website
+// CSV-upload tool, not an API). Calls the raw createProductFromPriceCharting
+// rather than wrapping a per-item mutation: a per-item hook toasts its own
+// failures, which would double up with the page's one batch-summary toast.
+// The loop is deliberately SEQUENTIAL — each create re-fetches the card photo
+// through the media pipeline server-side, so a Promise.all would fan N image
+// ingests (and N pool connections) out at once.
+export const useCreateProductsFromPriceChartingBatch = () => {
+  const qc = useQueryClient();
+  const invalidateInventory = useInvalidateInventory();
+  return useMutation({
+    mutationFn: async (items: PcQueueItem[]) => {
+      let created = 0;
+      const skipped: string[] = [];
+      for (const item of items) {
+        try {
+          await createProductFromPriceCharting(item);
+          created += 1;
+        } catch (e) {
+          skipped.push(
+            `${item.name}: ${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
+      }
+      return { created, skipped };
+    },
+    onSuccess: ({ created }) => {
+      if (created > 0) {
+        qc.invalidateQueries({ queryKey: qk.cards });
+        qc.invalidateQueries({ queryKey: qk.eligibleProducts });
+        // This batch creates PRODUCTS, which is exactly the grain of the
+        // Inventory list — without this a batch add leaves that list stale.
+        invalidateInventory();
+      }
+    },
+  });
+};

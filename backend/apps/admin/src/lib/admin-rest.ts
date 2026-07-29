@@ -7,14 +7,29 @@ import type { PullsResponse } from './packs-api';
 
 declare const __BACKEND_URL__: string;
 
-async function errorMessage(res: Response): Promise<string> {
+// Every failing call in this file rejects through here, so the HTTP status is
+// carried on the Error everywhere rather than only on the one route that needed
+// it. Without it a page can only match on `message`, and an unrouted Medusa 404
+// carries NO message field at all — so "not found" and "the backend restarted"
+// are indistinguishable, and the operator reads a 500 as a deleted record.
+async function httpError(res: Response): Promise<Error> {
+  let message: string;
   try {
     const data = await res.json();
-    return (data && data.message) || `Request failed (${res.status}).`;
+    message = (data && data.message) || `Request failed (${res.status}).`;
   } catch {
-    return `Request failed (${res.status}).`;
+    message = `Request failed (${res.status}).`;
   }
+  return Object.assign(new Error(message), { status: res.status });
 }
+
+/** The HTTP status a rejected admin-rest call failed with, or undefined when
+ *  the request never got a response (offline, DNS, CORS) — in which case the
+ *  failure is emphatically NOT a 404 and must not be reported as one. */
+export const httpStatus = (err: unknown): number | undefined => {
+  const s = (err as { status?: unknown } | null | undefined)?.status;
+  return typeof s === 'number' ? s : undefined;
+};
 
 // Upload one image to the validated POST /admin/media route (type/resolution/
 // aspect/size gated server-side; stores the original untouched). Returns the
@@ -34,7 +49,7 @@ export async function uploadImage(
     credentials: 'include',
   });
   if (!res.ok) {
-    throw new Error(await errorMessage(res));
+    throw await httpError(res);
   }
   const data = (await res.json()) as { url?: string };
   const url = data.url;
@@ -50,7 +65,7 @@ export async function deleteCard(handle: string): Promise<void> {
     { method: 'DELETE', credentials: 'include' },
   );
   if (!res.ok) {
-    throw new Error(await errorMessage(res));
+    throw await httpError(res);
   }
 }
 
@@ -60,7 +75,7 @@ export async function deletePack(slug: string): Promise<void> {
     { method: 'DELETE', credentials: 'include' },
   );
   if (!res.ok) {
-    throw new Error(await errorMessage(res));
+    throw await httpError(res);
   }
 }
 
@@ -69,7 +84,7 @@ async function getJson<T>(path: string): Promise<T> {
     credentials: 'include',
   });
   if (!res.ok) {
-    throw new Error(await errorMessage(res));
+    throw await httpError(res);
   }
   return (await res.json()) as T;
 }
@@ -307,7 +322,7 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    throw new Error(await errorMessage(res));
+    throw await httpError(res);
   }
   return (await res.json()) as T;
 }
@@ -359,7 +374,7 @@ export async function adjustCustomerCredits(
     },
   );
   if (!res.ok) {
-    throw new Error(await errorMessage(res));
+    throw await httpError(res);
   }
   return (await res.json()) as { amount: number; balance: number };
 }
@@ -610,7 +625,7 @@ export async function updateDeliveryOrder(
     },
   );
   if (!res.ok) {
-    throw new Error(await errorMessage(res));
+    throw await httpError(res);
   }
   return (await res.json()) as { order_id: string; status: DeliveryStatus };
 }
@@ -684,7 +699,7 @@ export async function getDailyBox(tier: string): Promise<DailyBoxEditorDTO> {
 }
 
 // Replace-all a tier's box + prizes. Throws Error(message) on a 400 validation
-// failure (errorMessage surfaces the backend MedusaError message).
+// failure (httpError surfaces the backend MedusaError message).
 export async function saveDailyBox(
   tier: string,
   body: DailyBoxSaveBody,
@@ -767,7 +782,7 @@ export const getVipLevels = () =>
   getJson<{ levels: VipLevelDTO[] }>('/admin/vip-levels');
 
 // Replace-all the ladder. Audited edit; `reason` mandatory. Throws
-// Error(message) on a 400 (errorMessage surfaces the backend MedusaError).
+// Error(message) on a 400 (httpError surfaces the backend MedusaError).
 export const saveVipLevels = (body: { levels: VipLevelDTO[]; reason: string }) =>
   postJson<{ levels: VipLevelDTO[] }>('/admin/vip-levels', body);
 
@@ -1046,3 +1061,232 @@ export const listLedger = (
   if (opts.to) params.set('to', opts.to);
   return getJson<AdminLedgerPage>(`/admin/ledger?${params.toString()}`);
 };
+// ── Epic 5 (Inventory) ───────────────────────────────────────────────────────
+
+/** One line of GET /admin/purchase-invoices/:id. All money is MYR (2dp) — the
+ *  purchase path never touches FX. `qty` is SIGNED: negative on a reversing
+ *  invoice, and the sign lives ONLY there (unit_cost / fmv_snapshot stay
+ *  positive so a reversal line reads the same as the line it undoes).
+ *
+ *  The detail route spreads the ORM row, so each line ALSO carries the
+ *  `raw_unit_cost` / `raw_line_total` / `raw_fmv_snapshot` bigNumber jsonb
+ *  sidecars and an always-null `deleted_at`. Bind the hydrated getters below,
+ *  never `raw_*`; the sidecars are deliberately left unprojected (admin-only
+ *  route) and are not modelled here. */
+export interface AdminPurchaseInvoiceLine {
+  id: string;
+  card_handle: string;
+  card_name: string;
+  fmv_snapshot: number;
+  qty: number;
+  unit_cost: number;
+  line_total: number;
+}
+
+/** One row of GET /admin/purchase-invoices. The three totals are folded
+ *  SERVER-side in integer sen (route.ts) — render them, never re-derive them
+ *  here: the list response carries no lines to re-derive from. */
+export interface AdminPurchaseInvoice {
+  id: string;
+  display_no: string;
+  /** Operator-entered invoice date. `model.dateTime()`, so a full ISO stamp. */
+  date: string;
+  supplier: string;
+  agent_user_id: string;
+  /** Joined from the user module; null if the admin account was removed. */
+  agent_email: string | null;
+  reverses_invoice_id: string | null;
+  created_at: string;
+  total_qty: number;
+  subtotal: number;
+  total_fmv: number;
+}
+
+// agent_email is NOT omitted: GET /:id joins the user module the same way the
+// list route does, so both pages name the same person for one invoice.
+export interface AdminPurchaseInvoiceDetail
+  extends Omit<AdminPurchaseInvoice, 'total_qty' | 'subtotal' | 'total_fmv'> {
+  lines: AdminPurchaseInvoiceLine[];
+}
+
+export interface PurchaseInvoicesPage {
+  total: number;
+  offset: number;
+  limit: number;
+  invoices: AdminPurchaseInvoice[];
+}
+
+// `sort` is `<column>:<asc|desc>`; the route allowlists the column and falls
+// back to created_at, so an unknown key can never 400. `q` matches supplier OR
+// display_no and is TRUNCATED to 100 chars server-side — the search input
+// carries a matching maxLength so the operator cannot type past the cut.
+export const listPurchaseInvoices = (
+  page = 0,
+  q?: string,
+  limit = 50,
+  sort = 'created_at:desc',
+) =>
+  getJson<PurchaseInvoicesPage>(
+    `/admin/purchase-invoices?limit=${limit}&offset=${page * limit}&sort=${encodeURIComponent(sort)}${q ? `&q=${encodeURIComponent(q)}` : ''}`,
+  );
+
+export const getPurchaseInvoice = (id: string) =>
+  getJson<{ invoice: AdminPurchaseInvoiceDetail }>(
+    `/admin/purchase-invoices/${encodeURIComponent(id)}`,
+  );
+
+export interface CreatePurchaseInvoiceLineBody {
+  card_handle: string;
+  card_name: string;
+  fmv_snapshot: number;
+  qty: number;
+  unit_cost: number;
+}
+
+export interface CreatePurchaseInvoiceBody {
+  date: string;
+  supplier: string;
+  reverses_invoice_id?: string | null;
+  lines: CreatePurchaseInvoiceLineBody[];
+}
+
+// agent_user_id is NOT sent — the route derives it from the session.
+export const createPurchaseInvoice = (body: CreatePurchaseInvoiceBody) =>
+  postJson<{ invoice: AdminPurchaseInvoiceDetail }>(
+    '/admin/purchase-invoices',
+    body,
+  );
+
+/** One row of GET /admin/inventory (spec §3.3).
+ *
+ *  The grain is PRODUCTS, not registered gacha cards: a catalog product with no
+ *  Card row still gets a row — that is exactly what the "List to gacha card"
+ *  bulk tool acts on, and `is_card` tells the two apart.
+ *
+ *  `cost` and `on_hand` are THREE-STATE and the distinction is load-bearing:
+ *  `null` = no purchase history / tracks no inventory at all; `0` = bought and
+ *  free / tracked with nothing shippable. The route builds both with `??` and
+ *  never `||` (inventory-view.ts says so in as many words, and
+ *  inventory-detail.spec pins all four states) — so nothing on this side may
+ *  collapse them with a truthiness test either. `fmv`/`price` are null when the
+ *  product carries no FMV at all, never NaN and never 0-by-accident.
+ *
+ *  All money is MYR and arrives as plain JS numbers (the route folds through
+ *  displayMarketPrice / weightedAverageCost, not through a bigNumber getter),
+ *  so it feeds rm() unwrapped — see the Number() note on
+ *  AdminPurchaseInvoiceLine for the case where that is NOT true. */
+export interface InventoryRow {
+  handle: string;
+  product_id: string;
+  photo: string | null;
+  name: string;
+  sku: string;
+  is_card: boolean;
+  /** RAW vs GRADED, derived from the card's (or the product metadata's) grader. */
+  graded: boolean;
+  fmv: number | null;
+  price: number | null;
+  cost: number | null;
+  created_at: string;
+  on_hand: number | null;
+  in_vault: number;
+  requested: number;
+  shipped: number;
+  listing_count: number;
+}
+
+// UNPAGED by design (the route says why): on_hand/cost/buckets are all computed
+// after the product read, so ordering can only happen client-side.
+//
+// `q` is Medusa's own free-text search — title/subtitle/description plus the
+// variants' title/sku/barcode — and it is NOT wildcard-escaped, so this stays a
+// plain search box and never a pattern field. The route truncates it at 100
+// chars; the page's input carries a matching maxLength so the operator cannot
+// type past the cut.
+export const listInventory = (q?: string) =>
+  getJson<{ rows: InventoryRow[] }>(
+    `/admin/inventory${q ? `?q=${encodeURIComponent(q)}` : ''}`,
+  );
+
+/** One row of the append-only stock-movement audit log (spec §3.1).
+ *
+ *  `kind` is typed as a plain string, not the seven-member enum: the model
+ *  defines all seven but this epic only ever WRITES 'purchase', so the display
+ *  side resolves the label with a raw-token fallback rather than pretending a
+ *  map is exhaustive — same rule deliveryStatusLabel documents.
+ *
+ *  `qty` is SIGNED and is a `model.number()`, NOT a bigNumber — so unlike
+ *  AdminPurchaseInvoiceLine it needs no Number() wrap and there are no raw_*
+ *  sidecars on the wire. */
+export interface InventoryStockMovement {
+  id: string;
+  card_handle: string;
+  kind: string;
+  qty: number;
+  ref_id: string;
+  created_at: string;
+}
+
+/** GET /admin/inventory/:handle (spec §3.4) — the same row the list renders,
+ *  plus where the card is listed and its paged movement history. `item` is a
+ *  whole InventoryRow, so the same three-state `cost` / `on_hand` rules apply
+ *  here verbatim: null and 0 are different facts, and nothing may collapse
+ *  them with a truthiness test. */
+export interface InventoryDetail {
+  item: InventoryRow;
+  associated: {
+    packs: { slug: string; title: string }[];
+    rank_rewards: { stage_number: number; rank: number }[];
+  };
+  movements: {
+    total: number;
+    offset: number;
+    limit: number;
+    rows: InventoryStockMovement[];
+  };
+}
+
+// Only the MOVEMENTS are paged — `item` and `associated` are re-sent whole with
+// every page, so the page state belongs to the history table alone. The route
+// caps limit at 100 and defaults to 25.
+export const getInventoryItem = (handle: string, page = 0, limit = 25) =>
+  getJson<InventoryDetail>(
+    `/admin/inventory/${encodeURIComponent(handle)}?limit=${limit}&offset=${page * limit}`,
+  );
+
+// GET /admin/inventory/export.xlsx -- the same rows GET /admin/inventory
+// returns, as a workbook, with the CURRENT FILTER applied (spec section 3.3).
+//
+// A raw fetch rather than getJson for the same reason uploadImage is one: the
+// response is a binary .xlsx, so parsing it as JSON would throw on a perfectly
+// good download. Errors still route through httpError, so a failed export
+// carries its HTTP status like every other call in this file.
+//
+// `q` is passed through unchanged -- the route truncates at 100 chars exactly
+// as the list route does, so the sheet's rows are the visible list's rows.
+export async function exportInventoryXlsx(q?: string): Promise<void> {
+  const res = await fetch(
+    `${__BACKEND_URL__}/admin/inventory/export.xlsx${q ? `?q=${encodeURIComponent(q)}` : ''}`,
+    { credentials: 'include' },
+  );
+  if (!res.ok) {
+    throw await httpError(res);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  // Wins over the response's Content-Disposition, and must: the blob URL is
+  // same-origin to this page, so the backend's filename never reaches the
+  // browser here. Same YYYY-MM-DD shape either way.
+  a.download = `inventory-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // DEFERRED, not revoked on the next line: click() only SCHEDULES the
+  // download, and revoking the object URL in the same task can leave the
+  // browser fetching a URL that no longer resolves -- an empty or cancelled
+  // file. Handing the revoke to the next task lets the download claim the blob
+  // first, while still releasing it (a leaked object URL lives until reload).
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}

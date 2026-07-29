@@ -21,9 +21,11 @@ describe('topUpAmountError', () => {
   });
 
   it('accepts 2dp amounts that are not exactly representable in binary', () => {
-    // 10.1 * 100 = 1009.9999999999999 — a naive integer-cents check would
-    // wrongly reject a perfectly valid amount.
-    expect(topUpAmountError(10.1)).toBeNull();
+    // 0.07 * 100 = 7.000000000000001 and 0.29 * 100 = 28.999999999999996 — a
+    // naive integer-cents check would wrongly reject both. NOT 10.1: that one
+    // is exactly 1010, so it passes with or without the epsilon and asserts
+    // nothing.
+    expect(topUpAmountError(0.07)).toBeNull();
     expect(topUpAmountError(0.29)).toBeNull();
   });
 

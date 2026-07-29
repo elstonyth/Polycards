@@ -10,6 +10,9 @@ yarn-error.log
 coverage
 
 !src/**
+# ...but that negation also re-includes the root .gitignore's `**/.impeccable/`
+# tool cache under src/, so re-ignore it here.
+src/**/.impeccable/
 
 ./tsconfig.tsbuildinfo
 medusa-db.sql

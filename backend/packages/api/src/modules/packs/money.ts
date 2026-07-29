@@ -29,6 +29,24 @@ export function fromSen(sen: number): number {
   return sen / 100;
 }
 
+/**
+ * An OPTIONAL money value read off untrusted JSON (product.metadata), where
+ * "absent" and "zero" must stay distinguishable: null for null / undefined /
+ * blank / non-numeric, the finite number otherwise.
+ *
+ * The EMPTY STRING is the load-bearing case. `Number('')` is 0 and `''` is not
+ * nullish, so a `?? NaN` guard lets a blank metadata.fmv through as RM 0.00 --
+ * "free" -- where it means "not recorded". Shared by the two readers of
+ * product.metadata.fmv (api/admin/gacha/eligible-products and
+ * modules/packs/inventory-view) so the same field cannot mean different things
+ * on two screens.
+ */
+export function toOptionalMoney(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
 /** Whole-percent of a sen amount, staying in sen, half-up. */
 export function pctOfSen(sen: number, percent: number): number {
   return Math.round((sen * percent) / 100);

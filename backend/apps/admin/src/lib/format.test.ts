@@ -33,6 +33,14 @@ describe('rm', () => {
   it('returns an em dash for null', () => {
     expect(rm(null)).toBe('—');
   });
+  // 0 and null are DIFFERENT FACTS for the inventory pages' `cost` column
+  // ("bought and free" vs "no purchase history"), and both of them delegate the
+  // whole distinction to this one function — `{rm(r.cost)}`, no ternary. Pinned
+  // so a `n ? ... : '—'` "simplification" of the guard above goes red here
+  // rather than on an operator's screen.
+  it('formats zero as RM 0.00, not as the null em dash', () => {
+    expect(rm(0)).toBe('RM 0.00');
+  });
 });
 
 describe('timeAgo', () => {
