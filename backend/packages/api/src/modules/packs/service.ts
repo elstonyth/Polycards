@@ -44,6 +44,9 @@ import RewardBoxPrize from './models/reward-box-prize';
 import PixelPokemon from './models/pixel-pokemon';
 import ChallengeStage from './models/challenge-stage';
 import ChallengeSettings from './models/challenge-settings';
+import PurchaseInvoice from './models/purchase-invoice';
+import PurchaseInvoiceLine from './models/purchase-invoice-line';
+import StockMovement from './models/stock-movement';
 import { pageAll } from '../../api/utils/page-all';
 import {
   resolveBuybackRate,
@@ -60,7 +63,7 @@ import {
 } from './referral-commission';
 import { levelForSpend } from './vip-ladder';
 import { levelsToGrant, rewardsForLevel } from './vip-rewards';
-import { fromSen } from './money';
+import { fromSen, toSen } from './money';
 import {
   DEFAULT_MARKET_MULTIPLIER,
   resolveFxRate,
@@ -89,6 +92,7 @@ import type {
   ChallengeSettingsView,
 } from './challenge-validate';
 import { getCardStockByHandle } from './card-stock';
+import { weightedAverageCost } from './inventory-cost';
 import type { MedusaContainer } from '@medusajs/framework/types';
 
 // plan-033 playthrough basis: the "post-1b deposited" ledger predicate. Shared
@@ -378,6 +382,9 @@ class PacksModuleService extends MedusaService({
   PixelPokemon,
   ChallengeStage,
   ChallengeSettings,
+  PurchaseInvoice,
+  PurchaseInvoiceLine,
+  StockMovement,
 }) {
   // Apply a pack-membership diff (add rows + delete rows + renormalize
   // survivor weights) as ONE transaction. The set-pack-members workflow step
@@ -5424,6 +5431,441 @@ class PacksModuleService extends MedusaService({
       ],
       sharedContext,
     );
+  }
+
+  // Purchase Invoices (POLYCARD-BACK §3.5). display_no comes from
+  // purchase_invoice_seq (a real Postgres sequence — atomic under
+  // concurrency, immune to rollback) formatted "PI-00001". One
+  // stock_movement 'purchase' row per line — the append-only paper trail the
+  // item-detail history table reads; on-hand itself comes from card-stock.ts,
+  // never this log (§3.1 authority note).
+  //
+  // line_total stores the RAW qty * unit_cost product, deliberately NOT
+  // rounded to 2dp: purchase_invoice_line_line_total_check compares it against
+  // Postgres' own exact numeric evaluation of the same expression with a
+  // half-sen tolerance, and a pre-rounded total is what would sit ON that
+  // boundary. unit_cost is already capped at 2dp by the route validator, so
+  // the raw product is exact to ~1e-13 here.
+  // Cross-invoice reversal validation (D8). Deliberately lives INSIDE the
+  // create transaction: it is a read-then-write, and running it in the route
+  // — a SEPARATE transaction from the write — was a real TOCTOU, not a
+  // theoretical one. Two concurrent POSTs of the same -10 reversal both read a
+  // full budget and both returned 201: ten units bought, twenty reversed.
+  // Nothing downstream catches that (there is no unique constraint, and the
+  // line CHECK only validates per-line arithmetic).
+  //
+  // The advisory lock serializes reversals of ONE target for the rest of this
+  // transaction — same idiom as applyPackMemberDiff and the credit ledger — so
+  // the loser re-reads only after the winner commits and sees the budget gone.
+  // Reversals of different targets never contend.
+  //
+  // Matching is by exact card_handle + unit_cost, never FIFO/LIFO (operator
+  // decision). The real invariant is a BUDGET, not a match: what the target
+  // bought, minus everything prior reversals of that same target already took
+  // back, must still cover this body. reverses_invoice_id is what makes that
+  // sum knowable — it is why the column exists.
+  private async assertReversalCovered(
+    reversesInvoiceId: string,
+    lines: { card_handle: string; qty: number; unit_cost: number }[],
+    sharedContext: Context,
+  ): Promise<void> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `purchase-invoice-reversal:${reversesInvoiceId}`,
+    ]);
+
+    // Integer sen, not a float compare: a numeric round-trip ("150.0000") and
+    // the validator's 2dp-normalized body value must land on the same key.
+    const key = (card_handle: string, unit_cost: unknown): string =>
+      `${card_handle}|${toSen(unit_cost)}`;
+
+    const [target] = await this.listPurchaseInvoices(
+      { id: reversesInvoiceId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!target) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        "'reverses_invoice_id' does not match an existing invoice.",
+      );
+    }
+    // Undoing a reversal would need positive-qty lines, which the validator
+    // forbids outright — so anything reaching here could only double-subtract.
+    if (target.reverses_invoice_id) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        `Invoice ${target.display_no} is itself a reversing invoice and cannot be reversed — reverse the original.`,
+      );
+    }
+
+    // HAZARD for Task 4/5: this list (like every generated list) excludes
+    // soft-deleted rows. A future void/delete route that soft-deletes a
+    // reversing invoice would silently hand its headroom back. Unreachable
+    // today — nothing deletes an invoice except the compensation cascade,
+    // which hard-deletes an invoice that never became visible.
+    const priorReversals = await pageAll((opts) =>
+      this.listPurchaseInvoices(
+        { reverses_invoice_id: target.id },
+        opts,
+        sharedContext,
+      ),
+    );
+    // PAGED, not a take: cap — a truncated prior-reversal list fails OPEN.
+    const allLines = await pageAll((opts) =>
+      this.listPurchaseInvoiceLines(
+        { invoice_id: [target.id, ...priorReversals.map((r) => r.id)] },
+        opts,
+        sharedContext,
+      ),
+    );
+
+    // Signed sum: target lines positive, every prior reversal negative, so
+    // this map IS what is still un-reversed per (card_handle, unit_cost).
+    const remaining = new Map<string, number>();
+    for (const l of allLines) {
+      const k = key(l.card_handle, l.unit_cost);
+      remaining.set(k, (remaining.get(k) ?? 0) + Number(l.qty));
+    }
+    const onTarget = new Set(
+      allLines
+        .filter((l) => l.invoice_id === target.id)
+        .map((l) => key(l.card_handle, l.unit_cost)),
+    );
+
+    // Fold the incoming body the same way FIRST: two lines in one body for the
+    // same key must spend a single budget, not be checked twice against it.
+    const requested = new Map<
+      string,
+      { card_handle: string; unit_cost: number; qty: number }
+    >();
+    for (const line of lines) {
+      const k = key(line.card_handle, line.unit_cost);
+      const prev = requested.get(k);
+      if (prev) prev.qty += line.qty;
+      else requested.set(k, { ...line });
+    }
+
+    for (const [k, want] of requested) {
+      if (!onTarget.has(k)) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `Reversal line for '${want.card_handle}' at unit_cost ${want.unit_cost} does not match any line on invoice ${target.display_no}.`,
+        );
+      }
+      const left = remaining.get(k) ?? 0;
+      // want.qty is negative; `left` is what the target still has un-reversed.
+      // One-directional by design: a target line with no reversal line is just
+      // a legal partial reversal.
+      if (left + want.qty < 0) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `Reversing ${-want.qty} of '${want.card_handle}' at unit_cost ${want.unit_cost} exceeds the ${left} still un-reversed on invoice ${target.display_no}.`,
+        );
+      }
+    }
+  }
+
+  @InjectTransactionManager()
+  async createPurchaseInvoiceWithLines(
+    input: {
+      date: string;
+      supplier: string;
+      agent_user_id: string;
+      reverses_invoice_id: string | null;
+      lines: {
+        card_handle: string;
+        card_name: string;
+        fmv_snapshot: number;
+        qty: number;
+        unit_cost: number;
+      }[];
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ) {
+    if (input.reverses_invoice_id) {
+      await this.assertReversalCovered(
+        input.reverses_invoice_id,
+        input.lines,
+        sharedContext,
+      );
+    }
+
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const [{ n }] = await em.execute<{ n: string }[]>(
+      "SELECT nextval('purchase_invoice_seq') AS n",
+    );
+    const display_no = `PI-${String(n).padStart(5, '0')}`;
+
+    const [invoice] = await this.createPurchaseInvoices(
+      [
+        {
+          display_no,
+          // The model column is a dateTime — the route hands over a
+          // validated ISO string, so the coercion happens exactly here.
+          date: new Date(input.date),
+          supplier: input.supplier,
+          agent_user_id: input.agent_user_id,
+          reverses_invoice_id: input.reverses_invoice_id,
+        },
+      ],
+      sharedContext,
+    );
+
+    const lines = await this.createPurchaseInvoiceLines(
+      input.lines.map((l) => ({
+        invoice_id: invoice.id,
+        card_handle: l.card_handle,
+        card_name: l.card_name,
+        fmv_snapshot: l.fmv_snapshot,
+        qty: l.qty,
+        unit_cost: l.unit_cost,
+        line_total: l.qty * l.unit_cost,
+      })),
+      sharedContext,
+    );
+
+    await this.createStockMovements(
+      lines.map((l) => ({
+        card_handle: l.card_handle,
+        kind: 'purchase' as const,
+        qty: l.qty,
+        ref_id: l.id,
+      })),
+      sharedContext,
+    );
+
+    return { ...invoice, lines };
+  }
+
+  // Compensation-only hard delete — fires ONLY from the create-purchase-invoice
+  // workflow's rollback path (the inventory-adjust step failing after this
+  // invoice already committed). Never reachable from a route a caller sees
+  // succeed; invoices stay immutable from the operator's perspective.
+  @InjectTransactionManager()
+  async deletePurchaseInvoiceCascade(
+    invoiceId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    // PAGED, not take: 1000. That cap was safe only because the validator's
+    // MAX_LINES is 200, with nothing asserting the coupling — and this is
+    // compensation code that HARD-DELETES money records, so a truncated list
+    // fails open and strands orphan lines/movements behind a deleted invoice.
+    const lines = await pageAll((opts) =>
+      this.listPurchaseInvoiceLines({ invoice_id: invoiceId }, opts, sharedContext),
+    );
+    const lineIds = lines.map((l) => l.id);
+    if (lineIds.length) {
+      const movements = await pageAll((opts) =>
+        this.listStockMovements({ ref_id: lineIds }, opts, sharedContext),
+      );
+      if (movements.length) {
+        await this.deleteStockMovements(
+          movements.map((m) => m.id),
+          sharedContext,
+        );
+      }
+      await this.deletePurchaseInvoiceLines(lineIds, sharedContext);
+    }
+    await this.deletePurchaseInvoices(invoiceId, sharedContext);
+  }
+
+  // ---- Inventory stock buckets (POLYCARD-BACK §3.2) ----
+
+  // inVault / requested / shipped read the REAL owning tables — Pull for vault
+  // state, DeliveryOrderItem -> Pull -> DeliveryOrder.status for the shipping
+  // pipeline (Epic 1's requested|processed|ready_to_ship|shipped|completed|
+  // canceled enum) — and NEVER stock_movement. §3.1 makes that table an
+  // append-only paper trail, and the purchase workflow's inventory adjustment
+  // is deliberately best-effort, so a 'purchase' movement can sit against a
+  // counter that never moved.
+  //
+  // The three buckets are CONVERGENT, NOT STRUCTURAL: nothing in the schema
+  // stops one physical card from being counted twice, so callers must never
+  // treat them as a partition (no `total = inVault + requested + shipped`).
+  // Only ONE of the two request paths is transactional — recordRewardWithdrawal
+  // (service.ts:1609) writes the order, its items and the pull flip on a single
+  // sharedContext under @InjectTransactionManager(). requestDeliveryStep
+  // (workflows/steps/request-delivery.ts:153) is a MANUAL-UNDO sequence with no
+  // surrounding transaction, and two of its failure modes leave a vaulted pull
+  // against a live requested item -> {inVault: 1, requested: 1} for one card
+  // (probed on the real schema with these three queries verbatim):
+  //   (i)  transitionPullStatus throws AND the undo at :157-166 also throws
+  //        (logged 'UNDO FAILED ... repair manually');
+  //   (ii) the step's compensation at :186-194 restores the pull to 'vaulted'
+  //        BEFORE deleteDeliveryOrderItems, with no try/catch around it.
+  // Left convergent DELIBERATELY (operator decision): a NOT EXISTS (live item)
+  // clause on the vault query would make it structural, but it would HIDE a
+  // state the system already flags for manual repair and cost a join on every
+  // render. transitionDeliveryOrderStatus drives completed -> 'delivered' and
+  // canceled -> back to 'vaulted'; a canceled order needs no clause of its own
+  // (it is in neither IN-list, and its pulls are already back in the vault).
+  //
+  // `dord`, not `do`: DO is a RESERVED word in Postgres and cannot alias a
+  // table even with AS (probed: syntax error at or near "do").
+  // COUNT(DISTINCT p.id) rather than COUNT(*): delivery_order_item is unique
+  // per (order, pull), not per pull, so one physical card could span two item
+  // rows — it must still count once.
+  @InjectManager()
+  async inventoryLifecycleBuckets(
+    handles: string[],
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<
+    Map<string, { inVault: number; requested: number; shipped: number }>
+  > {
+    const out = new Map<
+      string,
+      { inVault: number; requested: number; shipped: number }
+    >();
+    if (handles.length === 0) return out;
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const ph = handles.map(() => '?').join(',');
+
+    // Sequential — concurrent queries on the shared injected EntityManager are
+    // what the pool-full failures look like (same rule as playersOverview).
+    const vaulted = await em.execute<{ card_id: string; n: string }[]>(
+      `SELECT card_id, COUNT(*)::bigint AS n FROM pull
+         WHERE status = 'vaulted' AND deleted_at IS NULL AND card_id IN (${ph})
+         GROUP BY card_id`,
+      handles,
+    );
+    const requested = await em.execute<{ card_id: string; n: string }[]>(
+      `SELECT p.card_id, COUNT(DISTINCT p.id)::bigint AS n
+         FROM delivery_order_item doi
+         JOIN delivery_order dord
+           ON dord.id = doi.delivery_order_id AND dord.deleted_at IS NULL
+         JOIN pull p ON p.id = doi.pull_id AND p.deleted_at IS NULL
+        WHERE doi.deleted_at IS NULL
+          AND dord.status IN ('requested','processed','ready_to_ship')
+          AND p.card_id IN (${ph})
+        GROUP BY p.card_id`,
+      handles,
+    );
+    const shipped = await em.execute<{ card_id: string; n: string }[]>(
+      `SELECT p.card_id, COUNT(DISTINCT p.id)::bigint AS n
+         FROM delivery_order_item doi
+         JOIN delivery_order dord
+           ON dord.id = doi.delivery_order_id AND dord.deleted_at IS NULL
+         JOIN pull p ON p.id = doi.pull_id AND p.deleted_at IS NULL
+        WHERE doi.deleted_at IS NULL
+          AND dord.status IN ('shipped','completed')
+          AND p.card_id IN (${ph})
+        GROUP BY p.card_id`,
+      handles,
+    );
+
+    // Pre-seed every requested handle: callers index this map by handle, so an
+    // unstocked card must read 0/0/0, never undefined.
+    for (const h of handles)
+      out.set(h, { inVault: 0, requested: 0, shipped: 0 });
+    for (const r of vaulted) out.get(r.card_id)!.inVault = Number(r.n);
+    for (const r of requested) out.get(r.card_id)!.requested = Number(r.n);
+    for (const r of shipped) out.get(r.card_id)!.shipped = Number(r.n);
+    return out;
+  }
+
+  // D8 item cost per handle, batched for one page of the Inventory list (never
+  // per row). The averaging itself is weightedAverageCost's and ONLY its: that
+  // function accumulates on an integer 1/10000-ringgit scale and rounds to sen
+  // exactly once, which is what keeps 1000 @ 1.005 minus 999 @ 1.004 at 2.00
+  // instead of 1.00. Nothing here re-rounds a per-handle figure.
+  //
+  // null, never 0, when there is no cost basis — no lines at all, a net qty of
+  // 0 after a full reversal, or a negative Σcost. A handle with no purchase
+  // history is not a free handle, and the two must stay distinguishable all
+  // the way to the caller.
+  //
+  // Reads `unit_cost` (the numeric column), never the raw_unit_cost bigNumber
+  // sidecar. Reversal lines carry a negative qty and subtract themselves back
+  // out, so no reversal-aware branch belongs here.
+  //
+  // HAZARD (dormant, the twin of assertReversalCovered's): this filters on the
+  // LINE's deleted_at only. Nothing soft-deletes an invoice today — the
+  // compensation cascade hard-deletes — but a future void/delete route would
+  // leave a voided invoice's lines still priced in here while the reversal
+  // budget silently forgot them. Fix BOTH together or neither.
+  @InjectManager()
+  async weightedAverageCostByHandle(
+    handles: string[],
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<Map<string, number | null>> {
+    const out = new Map<string, number | null>();
+    if (handles.length === 0) return out;
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const ph = handles.map(() => '?').join(',');
+    const rows = await em.execute<
+      { card_handle: string; qty: number; unit_cost: string }[]
+    >(
+      `SELECT card_handle, qty, unit_cost FROM purchase_invoice_line
+         WHERE deleted_at IS NULL AND card_handle IN (${ph})`,
+      handles,
+    );
+    const byHandle = new Map<string, { qty: number; unit_cost: number }[]>();
+    for (const r of rows) {
+      const list = byHandle.get(r.card_handle) ?? [];
+      list.push({ qty: Number(r.qty), unit_cost: Number(r.unit_cost) });
+      byHandle.set(r.card_handle, list);
+    }
+    for (const h of handles)
+      out.set(h, weightedAverageCost(byHandle.get(h) ?? []));
+    return out;
+  }
+
+  // Listing-show count (§3.3): the number of places a card is currently
+  // offered = distinct pack-pool membership + rank-reward slots.
+  //
+  // PAGED, not take: 5000 — a truncated read renders a plausible WRONG count
+  // instead of an obvious error (Task 4's reasoning for invoice totals).
+  // `kind: null` is provably redundant against pack_odds_kind_payout_check
+  // (a row WITH a kind always has card_id NULL, so card_id IN (...) already
+  // excludes reward-pool product/credit/nothing rows) but states the intent:
+  // real card entries only. rank_rewards is a sparse JSON array over a handful
+  // of stages — an in-memory scan, no index needed.
+  @InjectManager()
+  async listingCountByHandle(
+    handles: string[],
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    if (handles.length === 0) return out;
+
+    const packRows = await pageAll((opts) =>
+      this.listPackOdds({ card_id: handles, kind: null }, opts, sharedContext),
+    );
+    // UQ_pack_odds_pack_card already makes (pack, card) unique among live
+    // rows; the Set keeps the count right regardless of that index.
+    const packsByHandle = new Map<string, Set<string>>();
+    for (const o of packRows) {
+      if (!o.card_id) continue;
+      const set = packsByHandle.get(o.card_id) ?? new Set<string>();
+      set.add(o.pack_id);
+      packsByHandle.set(o.card_id, set);
+    }
+
+    const stages = await pageAll((opts) =>
+      this.listChallengeStages({}, opts, sharedContext),
+    );
+    const ranksByHandle = new Map<string, number>();
+    for (const stage of stages) {
+      const rewards =
+        (stage.rank_rewards as unknown as ChallengeRankReward[]) ?? [];
+      for (const r of rewards) {
+        if (!r.card_id) continue;
+        ranksByHandle.set(r.card_id, (ranksByHandle.get(r.card_id) ?? 0) + 1);
+      }
+    }
+
+    for (const h of handles) {
+      out.set(
+        h,
+        (packsByHandle.get(h)?.size ?? 0) + (ranksByHandle.get(h) ?? 0),
+      );
+    }
+    return out;
   }
 }
 

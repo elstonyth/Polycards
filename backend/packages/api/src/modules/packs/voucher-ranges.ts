@@ -23,7 +23,8 @@ export function foldRanges(ranges: VoucherRange[]): number[] {
       throw new Error(`Invalid range ${r.from}–${r.to}: levels must be integers within 1–${LEVELS}.`);
     }
     // Same binary-representation epsilon as credit-adjust's adjustAmountError:
-    // an exact integer-cents comparison would reject valid money like 10.1.
+    // an exact integer-cents comparison would reject valid money like 0.07
+    // (0.07 * 100 is 7.000000000000001). NOT 10.1 — that one is exactly 1010.
     const cents = r.amount_myr * 100;
     if (
       !(Number.isFinite(r.amount_myr) && r.amount_myr >= 0 && r.amount_myr <= MAX_VOUCHER_MYR) ||

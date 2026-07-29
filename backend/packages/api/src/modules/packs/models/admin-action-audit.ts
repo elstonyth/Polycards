@@ -23,6 +23,7 @@ export const AdminActionAudit = model
       'challenge_stages',
       'challenge_settings',
       'delivery_order',
+      'purchase_invoice',
     ]),
     entity_id: model.text(),
     action: model.enum([
@@ -45,6 +46,7 @@ export const AdminActionAudit = model
       'bulk_status',
       'disable',
       'enable',
+      'create',
     ]),
     before: model.json().nullable(),
     after: model.json().nullable(),
