@@ -8,7 +8,6 @@ import { priceNumber, type PackCard } from '@/lib/packs-data';
 import HeroBoard from '@/components/home/HeroBoard';
 import PullsMarquee from '@/components/home/PullsMarquee';
 import TierShelf from '@/components/home/TierShelf';
-import HowItRips from '@/components/home/HowItRips';
 import RecentPullsSection from '@/components/RecentPullsSection';
 import TheGame from '@/components/home/TheGame';
 import FinalCta from '@/components/home/FinalCta';
@@ -67,16 +66,13 @@ export default async function HomePage() {
       {/* 02 — tier-racked shelf */}
       <TierShelf packs={packs} chaseByPack={chaseByPack} />
 
-      {/* 03 — trust engine */}
-      <HowItRips />
-
-      {/* 04 — live proof */}
+      {/* 03 — live proof */}
       <RecentPullsSection initialPulls={pulls} />
 
-      {/* 05 — podium + loop teaser */}
+      {/* 04 — podium + loop teaser */}
       <TheGame topRippers={topRippers} />
 
-      {/* 06 — closer */}
+      {/* 05 — closer */}
       <FinalCta />
     </div>
   );
