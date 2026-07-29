@@ -25,7 +25,8 @@ level, and `/me` still shows the level number and progress bar. Only the
 | --- | --- |
 | Dead routes: 404 or redirect? | **Delete the route directories → 404.** Matches the 2026-07-20 orphan-route purge precedent. Old `/invite/<handle>` links in the wild will 404. |
 | Feature flags? | **No.** `src/lib/features.ts` was deleted 2026-07-20 for exactly this reason — flags that gate removed routes are dead weight. Git history is the undo. |
-| Server actions / libs? | **Left in place, unreferenced** (`lib/actions/daily.ts`, `lib/actions/referral.ts`, `lib/referral-cookie.ts`). `lib/actions/vip.ts` stays *referenced* — `/me` still calls `getVip()`. Deleting the others buys nothing and makes the restore a rewrite instead of a revert. |
+| Server actions / libs? | **Left in place, unreferenced** (`lib/actions/daily.ts`, `lib/actions/referral.ts`, `lib/referral-cookie.ts`, `components/rewards/PrizeReveal.tsx`). `lib/actions/vip.ts` stays *referenced* — `/me` still calls `getVip()`. Deleting the others buys nothing and makes the restore a rewrite instead of a revert. |
+| `/me` VIP card | Keeps the LV number, progress bar, and threshold labels. Loses the link, the voucher tail, and the daily-box line. |
 
 ### Assumption — NOT answered by the operator
 
@@ -42,7 +43,6 @@ crossed while suspended already has its grant row waiting.
 **Say so if you want grants stopped instead** — that is a one-line change in
 `grantLevelUpRewards`, but levels crossed during the suspension would then never
 pay, and resuming would need a backfill script.
-| `/me` VIP card | Keeps the LV number, progress bar, and threshold labels. Loses the link, the voucher tail, and the daily-box line. |
 
 ## Changes
 
@@ -120,8 +120,13 @@ picked because it needs no backend deploy and unsuspending is a copy revert.
     does nothing.
   - `/vip`, `/vouchers`, `/daily`, `/referrals`, `/invite/anything` all 404.
   - The Me tab does not highlight on those URLs.
-- `grep -rn "'/vip'\|'/referrals'\|'/vouchers'\|'/daily'\|/invite/" src` returns
-  only `lib/referral-cookie.ts` and unreferenced actions.
+- `grep -rn "href=\"/vip\|href=\"/referrals\|href=\"/vouchers\|href=\"/daily" src`
+  returns only `components/rewards/PrizeReveal.tsx:114` — an orphan whose sole
+  importer (`DailyClient`) is deleted, kept dead-code-with-dead-link by the
+  revert-friendly decision above. No *reachable* component links to a deleted
+  route. (The full link inventory before this change: `me/page.tsx` lines 121,
+  205, 218 → `/vip`; 227 → `/vouchers`; 348 → `/referrals`; plus
+  `PrizeReveal.tsx:114` — the first five die with the §2 edits.)
 
 ## Reversal
 

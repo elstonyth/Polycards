@@ -103,8 +103,15 @@ horizontally-swipeable rail, rarest first. A 40-card pool is 6 stacked rails.
   where N is the Mythical+ count. Hidden entirely when the Mythical+ count
   ≤ 6 (nothing to expand to).
 - **Empty:** zero Mythical+ cards → the whole "Cards in this pack" section is
-  not rendered (the caller already guards on `pool.length > 0`; add a second
-  guard on the filtered set).
+  not rendered.
+- **Where the filter lives:** in the **caller** (`PackDetailClient`), not
+  inside `PoolByRarity` — the caller renders the section heading, so it must
+  know when the filtered set is empty. It computes
+  `topPool = pool.filter((c) => isTopRarity(c.rarity))` (helper already exists
+  in `src/lib/rarity.ts` beside `TOP_RARITIES`), guards the section on
+  `topPool.length > 0`, and passes `topPool` down. `PoolByRarity` keeps its
+  unknown-rarity→Common tolerance unchanged (moot on a pre-filtered pool) and
+  gains only the collapsed/expanded UI.
 
 The subhead copy `Every card and its current market price, rarest first.`
 becomes `The rarest cards in this pack and their current market price.` — the

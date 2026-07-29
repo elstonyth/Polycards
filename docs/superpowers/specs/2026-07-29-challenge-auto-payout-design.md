@@ -2,7 +2,9 @@
 
 **Date:** 2026-07-29
 **Status:** Approved (design)
-**Scope:** Backend (`backend/packages/api`). No storefront change.
+**Scope:** Backend (`backend/packages/api`), plus one storefront notification
+template entry in `src/lib/notifications/copy.ts` (see §Notifications). No
+other storefront change.
 
 ## Problem
 
@@ -70,6 +72,13 @@ the whole point of the constant:
 The job also needs the resolved `start_utc` itself as the payout key. Add a
 small `challengeWeekBounds(anchor)` returning `{ startUtc, endUtc }` from the
 same CTE, so the key and the aggregates can never disagree.
+
+**Boundary-race note (why relative-to-now is safe here):** the CTE resolves
+against `now()`, and the bounds query + two aggregates run milliseconds apart —
+they could only disagree on which week is "last" if the reset boundary fell
+*between* them. Cron fires at minute 0 (`0 * * * *`) and resets anchor at a
+whole hour, so every query in a run executes strictly *after* the boundary,
+never straddling it. No explicit-timestamp plumbing needed.
 
 ### Idempotency — a DB unique index, not app logic
 
@@ -149,6 +158,17 @@ challenge wins broken out in the customer-facing history.
   order_id: null, rolled_at: new Date(), source: 'reward' }
 ```
 
+> **ID-vs-handle trap (verified):** `rank_rewards[].card_id` is a Card **id**
+> (`challenge-validate.ts` calls it "a non-empty card id"; the store challenge
+> route resolves it via `listCards({ id: cardIds })`), but `pull.card_id` holds
+> the Card **handle** (`models/pull.ts:16` — "= Card.handle"). The settlement
+> MUST resolve `id → handle` (one `listCards({ id: [...] })` batch up front)
+> before creating pulls, and check stock **by handle**
+> (`getCardStockByHandle`). Passing the id straight through would mint pulls
+> that join to no card — invisible in the vault, wrong in the ledger feed. A
+> card id that no longer resolves (deleted card) takes the `skipped_no_stock`
+> path.
+
 `source: 'reward'` is **already excluded** by both challenge aggregates
 (`WHERE … pu.source <> 'reward'`), so a reward card cannot inflate the winner's
 next-week pool contribution or ranking. No new exclusion logic needed.
@@ -161,15 +181,33 @@ that would change the advertised prize. The row is the operator's record for
 manual fulfillment, and the unique index means a later manual grant can't be
 double-paid by a re-run.
 
-### Transaction shape
+### Transaction shape — claim first, then grant
 
-Follow `matureDueCommissions` (`service.ts:4720-4760`) exactly:
+Follow `matureDueCommissions` (`service.ts:4720-4760`) for the outer shape:
 
 - The job's enumerator runs **outside** any transaction.
 - **One short transaction per winner** — never forward a shared context across
   winners, or every `credit:` advisory lock accumulates in one transaction and
   blocks every money path until the batch commits.
 - Notifications fire **after** each winner's transaction commits.
+
+**Inside each winner's transaction the ORDER is load-bearing.** `createPulls`
+has no idempotency of its own, so "grant, then record" is racy: two concurrent
+runs could both create the reward pull, then both hit
+`ON CONFLICT DO NOTHING` on the payout row — the loser commits an orphan
+duplicate pull. Instead the payout row is the **claim**:
+
+1. `INSERT` the payout row(s) `ON CONFLICT DO NOTHING`, check the affected-row
+   count. Zero rows = another run (or a previous tick) already claimed this
+   payout → **skip granting entirely**.
+2. Only after a successful claim: `mutateCreditAtomic` / `createPulls`.
+3. `UPDATE` the claimed row with `credit_transaction_id` / `pull_id`.
+
+All three in the one transaction — a grant failure rolls back the claim too, so
+the next tick retries cleanly. A concurrent loser blocks on the uncommitted
+unique-index conflict until the winner commits, then reads 0 affected rows and
+skips. This is why the claim-row insert must be a raw `INSERT … ON CONFLICT`
+(the `grantLevelUpRewards` pattern) and not `createChallengePayouts`.
 
 > Per the VIP backfill lesson: never call a grant inside an uncommitted ledger
 > transaction — a context-less `creditSummary` read inside one sees stale data.
@@ -198,7 +236,8 @@ suspension removes `/vip` links — this template must not use one.
 | Zero participants | `challengeWeekTop` returns `[]`; nothing to pay. |
 | Card handle missing / out of stock | Row recorded `skipped_no_stock`, no pull, warning logged. |
 | Job crashes mid-batch | Committed winners stay paid (unique index); the next hourly tick retries the rest. |
-| Job runs twice concurrently | Per-customer advisory lock + unique index; the loser no-ops. |
+| Job runs twice concurrently | Claim-first ordering (§Transaction shape): the loser's claim insert affects 0 rows and it skips granting. |
+| Outage spanning >1 full week | **Accepted limitation:** the job only ever settles the most recently ended week (`weeksBack: 1`). Weeks older than that are never auto-settled — an outage that long is an incident; the operator settles manually (the payout table + `medusa exec` make that scriptable). |
 
 **Open decision, defaulted:** the "no stages configured / pool below threshold"
 case records nothing at all, so the job re-evaluates that week every hour
