@@ -100,6 +100,9 @@ const pendingRow = {
   merchant_transaction_id: 'PG-1',
   gateway_transaction_id: null,
   amount_requested: 50,
+  // The method the TP ledger row is labelled with — the row is where the
+  // route learns it, so the fixture has to carry it.
+  payment_method_code: 'BQR',
   status: 'pending',
 };
 
