@@ -204,6 +204,9 @@ export interface PackOddsResponse {
     price: number;
     /** Auto-detected pool composition (§2.4.8); null = empty pool. */
     group: 'RAW' | 'GRADED' | 'MIX' | null;
+    /** Target RTP in basis points (7000 = 70%) — the auto-split's default
+     *  input and the value a save persists back onto the pack. */
+    target_rtp_bps: number;
   };
   odds: OddsRow[];
 }
@@ -276,6 +279,8 @@ type PacksApi = {
           mutate: (input: {
             $slug: string;
             entries: SetEntry[];
+            /** Basis points; omit to leave the pack's stored target unchanged. */
+            target_rtp_bps?: number;
           }) => Promise<{ odds: ComputedOdd[] }>;
         };
         members: {

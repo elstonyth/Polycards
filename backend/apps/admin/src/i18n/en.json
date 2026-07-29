@@ -111,7 +111,15 @@
       "draftReadyBanner": "Draft — hidden from the storefront. The prize pool has cards; activate when the win rates look right.",
       "unitsOwed": "{{count}} owed to winners",
       "topHit": "Top hit #",
-      "pendingRow": "new — not in pool until saved"
+      "pendingRow": "new — not in pool until saved",
+      "targetRtp": "Target RTP %",
+      "autoSplit": "Auto-split odds",
+      "autoSplitDone": "Applied — review the rarities and rates, then save.",
+      "autoSplitRtp": "Solved RTP: {{rtp}}% (target {{target}}%) — saving rounds rates to whole basis points. Check the Set 1 EV / RTP tile above for what the pack actually pays.",
+      "autoSplitFloored": "{{count}} card(s) pinned at the 1 in 10,000 minimum — they will drop more often than the target implies:",
+      "autoSplitFlooredRow": "{{name}}: fair 1 in {{fair}}, actual 1 in {{actual}}",
+      "autoSplitCollapse": "These tiers are all at the minimum and are indistinguishable to players: {{tiers}}. Raise the pack price or remove the most valuable cards.",
+      "autoSplitSetWarning": "Sets 2 and 3 already have their own saved rates. Auto-split changes rarities, and that can silently re-pin a Set 2/3 balancer card at its old rate instead of letting it keep balancing — skewing that set's payout with no error on save. Review Sets 2 and 3 after applying, or clear their overrides first."
     }
   },
   "pcAdd": {

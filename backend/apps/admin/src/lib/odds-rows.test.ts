@@ -125,7 +125,9 @@ describe('rowsToSetEntries', () => {
   });
 
   it('maps an explicit "0" to the NUMBER 0 (a real 0% override)', () => {
-    const [e] = rowsToSetEntries([editRow({ pctInput2: '0', pctInput3: '7.5' })]);
+    const [e] = rowsToSetEntries([
+      editRow({ pctInput2: '0', pctInput3: '7.5' }),
+    ]);
     expect(e.pct_2).toBe(0);
     expect(e.pct_3).toBe(7.5);
   });
@@ -248,5 +250,167 @@ describe('publishedEvPreview', () => {
     expect(publishedEvPreview(rows, { Legendary: '1' })).toBeNull();
     expect(publishedEvPreview([], { Rare: '5' })).toBeNull();
     expect(publishedEvPreview(rows, {})).toBeNull();
+  });
+});
+
+import {
+  applyRarityProposals,
+  applySolveResult,
+  hasMaterializedSetOverrides,
+  rowsToSolveInput,
+} from './odds-rows';
+
+const row = (over: Partial<EditRow> = {}): EditRow => ({
+  card_id: 'c1',
+  name: 'Card',
+  image: '',
+  slab_image: null,
+  rarity: 'Common',
+  market_value: 100,
+  stock: null,
+  currentPct: 0,
+  locked: false,
+  pctInput: '0',
+  pctInput2: '',
+  pctInput3: '',
+  topHitInput: '',
+  ...over,
+});
+
+describe('auto-split mapping helpers', () => {
+  it('maps editor rows to solver rows using the display price', () => {
+    const rows = [
+      row({
+        card_id: 'a',
+        market_value: 24.55,
+        locked: true,
+        pctInput: '12.5',
+      }),
+    ];
+    expect(rowsToSolveInput(rows)).toEqual([
+      { card_id: 'a', locked: true, rarity: 'Common', value: 24.55, pct: 12.5 },
+    ]);
+  });
+
+  it('treats an UNLOCKED blank or malformed pct as 0 rather than NaN', () => {
+    expect(
+      rowsToSolveInput([row({ locked: false, pctInput: '' })])[0].pct,
+    ).toBe(0);
+    expect(
+      rowsToSolveInput([row({ locked: false, pctInput: '12.' })])[0].pct,
+    ).toBe(12);
+    expect(
+      rowsToSolveInput([row({ locked: false, pctInput: 'abc' })])[0].pct,
+    ).toBe(0);
+  });
+
+  it("preserves NaN for a LOCKED blank or malformed pct, so solveOddsForRtp's own range guard rejects it instead of silently pinning at 0%", () => {
+    expect(
+      rowsToSolveInput([row({ locked: true, pctInput: '' })])[0].pct,
+    ).toBeNaN();
+    expect(
+      rowsToSolveInput([row({ locked: true, pctInput: '   ' })])[0].pct,
+    ).toBeNaN();
+    expect(
+      rowsToSolveInput([row({ locked: true, pctInput: 'abc' })])[0].pct,
+    ).toBeNaN();
+    // A LOCKED valid rate still passes through as a number, unaffected.
+    expect(
+      rowsToSolveInput([row({ locked: true, pctInput: '12.5' })])[0].pct,
+    ).toBe(12.5);
+  });
+
+  it('applies rarity proposals without touching other fields', () => {
+    const rows = [row({ card_id: 'a' }), row({ card_id: 'b' })];
+    const out = applyRarityProposals(rows, [
+      { card_id: 'b', rarity: 'Legendary' },
+    ]);
+    expect(out[0].rarity).toBe('Common');
+    expect(out[1].rarity).toBe('Legendary');
+    expect(out).not.toBe(rows);
+    expect(rows[1].rarity).toBe('Common');
+  });
+
+  it('writes solved rates into the input for the targeted set only', () => {
+    const rows = [
+      row({ card_id: 'a', pctInput: '1', pctInput2: '', pctInput3: '' }),
+    ];
+    const result = {
+      error: null,
+      computed: [{ card_id: 'a', pct: 42.5 }],
+      floored: [],
+      tierCollapse: [],
+      achievedRtp: 0.7,
+    };
+    const set2 = applySolveResult(rows, result, 2);
+    expect(set2[0].pctInput).toBe('1');
+    expect(set2[0].pctInput2).toBe('42.5');
+    expect(set2[0].pctInput3).toBe('');
+    // The helper must not mutate the row it was given — only the returned
+    // copy changes. A regression to in-place mutation of the row object
+    // would leave this passing on set2 while corrupting the original.
+    expect(rows[0].pctInput2).toBe('');
+  });
+
+  it('writes the set-1 success path into pctInput only, and 0% round-trips to "0"', () => {
+    const rows = [
+      row({ card_id: 'a', pctInput: '1', pctInput2: '5', pctInput3: '' }),
+      row({ card_id: 'b', pctInput: '99', pctInput2: '', pctInput3: '' }),
+    ];
+    const result = {
+      error: null,
+      computed: [
+        { card_id: 'a', pct: 33.3 },
+        { card_id: 'b', pct: 0 },
+      ],
+      floored: [],
+      tierCollapse: [],
+      achievedRtp: 0.5,
+    };
+    const set1 = applySolveResult(rows, result, 1);
+    expect(set1[0].pctInput).toBe('33.3');
+    expect(set1[0].pctInput2).toBe('5');
+    expect(set1[0].pctInput3).toBe('');
+    // An explicit 0% must round-trip to the string '0', never '' — '' means
+    // "inherit the previous set" in this editor, a different thing entirely.
+    expect(set1[1].pctInput).toBe('0');
+  });
+
+  it('applies nothing when the solve errored', () => {
+    const rows = [row({ card_id: 'a', pctInput: '1' })];
+    const result = {
+      error: 'nope',
+      computed: [],
+      floored: [],
+      tierCollapse: [],
+      achievedRtp: null,
+    };
+    expect(applySolveResult(rows, result, 1)).toEqual(rows);
+  });
+});
+
+describe('hasMaterializedSetOverrides', () => {
+  it('is false when every row purely inherits sets 2/3 (both inputs blank)', () => {
+    const rows = [
+      row({ card_id: 'a', pctInput2: '', pctInput3: '' }),
+      row({ card_id: 'b', pctInput2: '', pctInput3: '' }),
+    ];
+    expect(hasMaterializedSetOverrides(rows)).toBe(false);
+  });
+
+  it('is false for an empty row set', () => {
+    expect(hasMaterializedSetOverrides([])).toBe(false);
+  });
+
+  it('is true when any row carries a non-empty set-2 input', () => {
+    const rows = [
+      row({ card_id: 'a' }),
+      row({ card_id: 'b', pctInput2: '12.5' }),
+    ];
+    expect(hasMaterializedSetOverrides(rows)).toBe(true);
+  });
+
+  it('is true when any row carries a non-empty set-3 input, including an explicit "0"', () => {
+    expect(hasMaterializedSetOverrides([row({ pctInput3: '0' })])).toBe(true);
   });
 });
