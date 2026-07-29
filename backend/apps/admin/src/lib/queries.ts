@@ -963,11 +963,17 @@ export const useInventory = (
 
 // Reaches BOTH inventory namespaces, the list AND the item detail. They are
 // deliberate siblings (see qk.inventoryItem), so a prefix invalidation of one
-// cannot touch the other and every caller here mutates both: registering cards
-// flips `is_card` on list rows cached under EVERY search key, not just the one
-// on screen, and on each registered card's own detail page; creating a purchase
-// invoice moves on_hand and cost on the list and appends the movement row the
-// detail page exists to show. Lives here rather than in the pages because no
+// cannot touch the other. TWO of the three callers mutate both: the bulk
+// register tool (routes/inventory/list/page.tsx) flips `is_card` on list rows
+// cached under EVERY search key, not just the one on screen, and on each
+// registered card's own detail page; creating a purchase invoice moves on_hand
+// and cost on the list and appends the movement row the detail page exists to
+// show. The THIRD, useCreateProductsFromPriceChartingBatch, moves the list only
+// — a product that did not exist a moment ago has no cached detail to stale,
+// and its page (/products/from-pricecharting) mounts no useInventoryItem, so
+// the detail half marks nothing and refetches nothing. Harmless, and not worth
+// a second list-only invalidator; just do not read this hook as proof that
+// every caller needs both halves. Lives here rather than in the pages because no
 // route file in this app touches useQueryClient or qk directly — cache surgery
 // is this module's job. NOT folded into useRegisterCard's onSuccess: that hook
 // is also the single-card register modal's, and the bulk tool calls it in a

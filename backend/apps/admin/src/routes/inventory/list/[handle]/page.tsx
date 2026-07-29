@@ -127,7 +127,7 @@ const InventoryItemDetailPage = () => {
                 </div>
               </div>
 
-              <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
+              <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-7">
                 {stats.map((s) => (
                   <div key={s.label} title={s.title}>
                     <Text size="small" className="text-ui-fg-subtle">
