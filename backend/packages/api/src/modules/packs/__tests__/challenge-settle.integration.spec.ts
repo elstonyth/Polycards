@@ -139,6 +139,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
     async function seedPriorWeekPull(
       customerId: string,
       card: { handle: string },
+      valueUsd = 100,
     ) {
       await service.createPulls([
         {
@@ -148,7 +149,23 @@ moduleIntegrationTestRunner<PacksModuleService>({
           order_id: null,
           rolled_at: priorWeekDate(),
           source: 'pack',
-          recorded_value_usd: 100,
+          recorded_value_usd: valueUsd,
+        },
+      ]);
+    }
+
+    /** One stage whose rank table is the argument. */
+    async function seedStage(
+      stageNumber: number,
+      thresholdMyr: number,
+      rankRewards: { rank: number; card_id?: string; credits: number }[],
+    ) {
+      await service.createChallengeStages([
+        {
+          stage_number: stageNumber,
+          threshold_myr: thresholdMyr,
+          // model.json() generates Record<string, unknown> create types.
+          rank_rewards: rankRewards as unknown as Record<string, unknown>,
         },
       ]);
     }
@@ -255,6 +272,8 @@ moduleIntegrationTestRunner<PacksModuleService>({
             new Map<string, number | null>([[card.handle, 2]]),
         });
         expect(result.winners[0]!.skippedCardIds).toEqual([]);
+        expect(result.winners[0]!.cardCount).toBe(2); // MINTED, not distinct
+        expect(result.winners[0]!.cardHandles).toEqual([card.handle]); // distinct
         expect(await service.creditBalance('cus_a')).toBe(75); // 50 + 25
 
         const rewardPulls = await service.listPulls(
@@ -326,6 +345,177 @@ moduleIntegrationTestRunner<PacksModuleService>({
             })
           ).settled,
         ).toBe(false);
+      });
+
+      it('maps rank from ranking position: three winners each get THEIR prize', async () => {
+        const { card } = await seedBase();
+        await seedStage(1, 100, [
+          { rank: 1, card_id: card.id, credits: 100 },
+          { rank: 2, credits: 50 },
+          { rank: 3, credits: 25 },
+        ]);
+        // Clearly separated volumes — equal volumes leave challengeWeekTop's
+        // ordering undefined and the rank assertions flaky in CI.
+        await seedPriorWeekPull('cus_a', card, 300);
+        await seedPriorWeekPull('cus_b', card, 200);
+        await seedPriorWeekPull('cus_c', card, 100);
+
+        const r = await service.settleChallengeWeek({
+          getStock: async () =>
+            new Map<string, number | null>([[card.handle, null]]),
+        });
+        expect(
+          r.winners.map((w) => [w.customerId, w.rank, w.credits, w.cardCount]),
+        ).toEqual([
+          ['cus_a', 1, 100, 1],
+          ['cus_b', 2, 50, 0],
+          ['cus_c', 3, 25, 0],
+        ]);
+        expect(await service.creditBalance('cus_a')).toBe(100);
+        expect(await service.creditBalance('cus_b')).toBe(50);
+        expect(await service.creditBalance('cus_c')).toBe(25);
+      });
+
+      it('an admin anchor change cannot re-pay a week overlapping a paid one', async () => {
+        const { card } = await seedBase();
+        await seedStage(1, 100, [{ rank: 1, credits: 50 }]);
+        // Spread over ~2 weeks: reset_day is admin-editable in BOTH directions
+        // and the resulting shift depends on today's weekday, so a single pull
+        // could leave the shifted window empty — which would make this test
+        // pass for the wrong reason (empty window, guard never reached).
+        const weekStart = currentWeekStartUtc().getTime();
+        for (const days of [0.5, 3, 6, 9, 12]) {
+          await service.createPulls([
+            {
+              customer_id: 'cus_a',
+              pack_id: 'bronze-pack',
+              card_id: card.handle,
+              order_id: null,
+              rolled_at: new Date(weekStart - days * 24 * HOUR),
+              source: 'pack',
+              recorded_value_usd: 100,
+            },
+          ]);
+        }
+
+        const first = await service.settleChallengeWeek({
+          getStock: async () => new Map<string, number | null>(),
+        });
+        expect(first.settled).toBe(true);
+        expect(await service.creditBalance('cus_a')).toBe(50);
+        const rowsBefore = await service.listChallengePayouts({}, { take: 20 });
+
+        // Admin moves the weekly reset Monday -> Tuesday. week_start is the key
+        // behind EVERY idempotency layer (payout rows, the unique index, the
+        // ledger idempotencyReference), so the next tick resolves a different
+        // one: without the interval-overlap guard it finds nothing and re-pays.
+        await service.updateChallengeSettings({ id: 'global', reset_day: 2 });
+        const shifted = { ...WEEK, resetDay: 2, weeksBack: 1 };
+        // Discriminators: cus_a is STILL ranked under the new anchor and the
+        // stage still unlocks, so settled:false below can ONLY be the guard.
+        expect(
+          (await service.challengeWeekTop({ ...shifted, limit: 10 })).map(
+            (t) => t.customer_id,
+          ),
+        ).toContain('cus_a');
+        expect(await service.challengeWeekPool(shifted)).toBeGreaterThanOrEqual(
+          100,
+        );
+
+        const second = await service.settleChallengeWeek({
+          getStock: async () => new Map<string, number | null>(),
+        });
+        expect(second.settled).toBe(false);
+        expect(await service.creditBalance('cus_a')).toBe(50); // NOT re-paid
+        expect(await service.listChallengePayouts({}, { take: 20 })).toHaveLength(
+          rowsBefore.length,
+        );
+      });
+
+      it('replays the frozen snapshot after a mid-batch crash — a reversal cannot re-rank a closed week', async () => {
+        const { card } = await seedBase();
+        await seedStage(1, 100, [
+          { rank: 1, card_id: card.id, credits: 100 },
+          { rank: 2, card_id: card.id, credits: 50 },
+        ]);
+        await seedPriorWeekPull('cus_a', card, 300);
+        await seedPriorWeekPull('cus_b', card, 200);
+        await seedPriorWeekPull('cus_c', card, 100);
+
+        // Tick 1 commits rank 1, then dies inside rank 2's transaction.
+        let stockCalls = 0;
+        await expect(
+          service.settleChallengeWeek({
+            getStock: async () => {
+              stockCalls += 1;
+              if (stockCalls === 2) throw new Error('simulated mid-batch crash');
+              return new Map<string, number | null>([[card.handle, null]]);
+            },
+          }),
+        ).rejects.toThrow('simulated mid-batch crash');
+        expect(await service.creditBalance('cus_a')).toBe(100);
+        expect(await service.creditBalance('cus_b')).toBe(0);
+
+        // An admin reversal soft-deletes the rank-1 pull. Both aggregates
+        // filter deleted_at IS NULL, so the LIVE ranking is now
+        // [cus_b, cus_c] — a recomputing tick would hand cus_b the rank-1
+        // prize and promote cus_c into the rank-2 prize, paying a second
+        // prize table for one week with nobody paid twice.
+        const [aPull] = await service.listPulls(
+          { customer_id: 'cus_a', source: 'pack' },
+          { take: 1 },
+        );
+        await service.softDeletePulls([aPull!.id]);
+
+        const second = await service.settleChallengeWeek({
+          getStock: async () =>
+            new Map<string, number | null>([[card.handle, null]]),
+        });
+        expect(
+          second.winners.map((w) => [w.customerId, w.rank, w.credits]),
+        ).toEqual([['cus_b', 2, 50]]); // FROZEN rank 2, not the re-ranked 1
+        expect(await service.creditBalance('cus_b')).toBe(50);
+        expect(await service.creditBalance('cus_c')).toBe(0); // never promoted
+      });
+
+      it('early-returns with no participants and with no unlocked stage', async () => {
+        const { card } = await seedBase();
+        // Threshold 0 unlocks on an empty pool, so this reaches the ranking
+        // step with nobody ranked.
+        await seedStage(1, 0, [{ rank: 1, credits: 50 }]);
+        const empty = await service.settleChallengeWeek({
+          getStock: async () => new Map<string, number | null>(),
+        });
+        expect(empty).toEqual({
+          weekStartIso: expect.any(String),
+          settled: false,
+          winners: [],
+        });
+
+        // Now there IS a participant (pool 400) but no stage it can unlock.
+        await service.createChallengeStages([
+          {
+            stage_number: 2,
+            threshold_myr: 10_000,
+            rank_rewards: [
+              { rank: 1, credits: 50 },
+            ] as unknown as Record<string, unknown>,
+          },
+        ]);
+        await service.deleteChallengeStages(
+          (await service.listChallengeStages({ stage_number: 1 }, { take: 1 })).map(
+            (r) => r.id,
+          ),
+        );
+        await seedPriorWeekPull('cus_a', card);
+        const locked = await service.settleChallengeWeek({
+          getStock: async () => new Map<string, number | null>(),
+        });
+        expect(locked.settled).toBe(false);
+        expect(await service.creditBalance('cus_a')).toBe(0);
+        expect(await service.listChallengePayouts({}, { take: 5 })).toHaveLength(
+          0,
+        );
       });
     });
   },

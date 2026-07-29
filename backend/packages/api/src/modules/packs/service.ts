@@ -414,13 +414,33 @@ const challengeWeekAnchorParams = (
 export interface SettleDeps {
   /** Available stock per card HANDLE (job binds getCardStockByHandle). */
   getStock: (handles: string[]) => Promise<Map<string, number | null>>;
+  /** Fired after each winner's transaction COMMITS — notifications, operator
+   *  warnings. Optional + best-effort (matureDueCommissions' notify
+   *  precedent): the module stays container-free, so the JOB supplies it, and
+   *  a throw here can never roll back an already-committed payout. Per winner
+   *  rather than after the batch, so a later crash cannot permanently drop an
+   *  already-paid winner's notification (the next tick's gate skips them). */
+  onSettled?: (winner: SettledWinner, weekStartIso: string) => Promise<void>;
 }
 export interface SettledWinner {
   customerId: string;
   rank: number;
   credits: number;
-  cardHandles: string[]; // granted
+  cardHandles: string[]; // granted — DISTINCT handles
+  cardCount: number; // pulls actually minted (a handle repeats when qty > 1)
   skippedCardIds: string[]; // recorded skipped_no_stock
+}
+// The frozen decision inputs, written verbatim onto EVERY payout row of a week
+// (card rows extend it with qty/pull_ids, the credits row with
+// credits_replayed). A later tick REPLAYS this instead of recomputing — see
+// settleChallengeWeek.
+interface SettleSnapshot {
+  pool_myr: number;
+  unlocked_stages: number[];
+  /** end_utc of the paid week — what the anchor-shift guard interval-tests. */
+  week_end: string;
+  /** Top-10 customer ids in rank order; index + 1 IS the rank. */
+  ranking: string[];
 }
 
 class PacksModuleService extends MedusaService({
@@ -5906,7 +5926,10 @@ class PacksModuleService extends MedusaService({
       resetHour: settings.reset_hour,
       weeksBack: 1,
     };
-    const { startUtc } = await this.challengeWeekBounds(week, sharedContext);
+    const { startUtc, endUtc } = await this.challengeWeekBounds(
+      week,
+      sharedContext,
+    );
     const weekStartIso = startUtc.toISOString();
 
     // Hourly self-gate, PER WINNER (spec §Scheduling): customers who already
@@ -5917,9 +5940,15 @@ class PacksModuleService extends MedusaService({
     // lock+check in settleChallengeWinner is the real guard.
     const existingRows = await this.listChallengePayouts(
       { week_start: startUtc },
-      { select: ['customer_id'], take: 1000 },
+      { select: ['customer_id', 'snapshot'], take: 1000 },
     );
     const settledCustomers = new Set(existingRows.map((r) => r.customer_id));
+    // Every row of a week carries the SAME base snapshot (one shared object
+    // per settleChallengeWinner call), so row 0 is representative — this is
+    // not an ordering assumption.
+    const prior = existingRows[0]?.snapshot as unknown as
+      | SettleSnapshot
+      | undefined;
 
     // Sequential, not Promise.all: challengeWeekPool resolves
     // transactionManager ?? manager and listChallengeStages resolves the SAME
@@ -5934,22 +5963,43 @@ class PacksModuleService extends MedusaService({
         take: 1000,
       },
     );
-    const poolMyr = await this.challengeWeekPool(week, sharedContext);
+    const poolMyr = prior
+      ? prior.pool_myr
+      : await this.challengeWeekPool(week, sharedContext);
     const stages: SettleStage[] = stageRows.map((r) => ({
       stage_number: r.stage_number,
       threshold_myr: Number(r.threshold_myr),
       rank_rewards: (r.rank_rewards as unknown as ChallengeRankReward[]) ?? [],
     }));
-    const unlocked = unlockedStages(stages, poolMyr);
+    // A PARTIALLY settled week (tick 1 crashed mid-batch) replays tick 1's
+    // frozen snapshot rather than recomputing. Both aggregates filter
+    // `deleted_at IS NULL`, so an admin reversal landing between ticks
+    // re-ranks a CLOSED window: the per-customer gate skips the already-paid,
+    // everyone below shifts up, and the week pays out MORE than one prize
+    // table — with nobody paid twice, so no idempotency guard fires. The pool
+    // has the mirror problem: challengeWeekPool multiplies by a LIVE FX rate,
+    // so stages can re-lock mid-week and strand the unpaid remainder behind
+    // the empty-unlocked early return, permanently.
+    // Residual, documented not fixed: each stage's rank_rewards are still read
+    // live, so editing a prize table mid-week changes what the remainder gets.
+    const unlocked = prior
+      ? stages
+          .filter((s) => prior.unlocked_stages.includes(s.stage_number))
+          .sort((a, b) => a.stage_number - b.stage_number)
+      : unlockedStages(stages, poolMyr);
     if (unlocked.length === 0) {
       return { weekStartIso, settled: false, winners: [] };
     }
 
-    const top = await this.challengeWeekTop(
-      { ...week, limit: 10 },
-      sharedContext,
-    );
-    if (top.length === 0) return { weekStartIso, settled: false, winners: [] };
+    // Rank is frozen with everything else — index + 1 in this list IS the rank.
+    const ranking: string[] = prior?.ranking?.length
+      ? prior.ranking
+      : (
+          await this.challengeWeekTop({ ...week, limit: 10 }, sharedContext)
+        ).map((t) => t.customer_id);
+    if (ranking.length === 0) {
+      return { weekStartIso, settled: false, winners: [] };
+    }
     const byRank = payoutByRank(unlocked);
 
     // Resolve card ids -> handles ONCE (spec: rank_rewards holds Card.id,
@@ -5965,13 +6015,15 @@ class PacksModuleService extends MedusaService({
       : [];
     const handleById = new Map(cardRows.map((c) => [c.id, c.handle]));
 
-    const snapshot = {
+    const snapshot: SettleSnapshot = {
       pool_myr: poolMyr,
       unlocked_stages: unlocked.map((s) => s.stage_number),
+      week_end: endUtc.toISOString(),
+      ranking,
     };
     const winners: SettledWinner[] = [];
-    for (const [i, t] of top.entries()) {
-      if (settledCustomers.has(t.customer_id)) continue; // paid on a prior tick
+    for (const [i, customerId] of ranking.entries()) {
+      if (settledCustomers.has(customerId)) continue; // paid on a prior tick
       const payout = byRank.get(i + 1);
       if (!payout || (payout.credits <= 0 && payout.cardIds.length === 0)) {
         continue; // rank pays nothing this week
@@ -5981,14 +6033,31 @@ class PacksModuleService extends MedusaService({
       // chain per transaction, never accumulated across winners).
       const settled = await this.settleChallengeWinner({
         weekStart: startUtc,
-        customerId: t.customer_id,
+        weekEnd: endUtc,
+        customerId,
         rank: i + 1,
         payout,
         handleById,
         snapshot,
         getStock: deps.getStock,
       });
-      if (settled) winners.push(settled);
+      if (!settled) continue;
+      winners.push(settled);
+      // Fired AFTER this winner's transaction committed, never inside it.
+      if (!deps.onSettled) continue;
+      try {
+        await deps.onSettled(settled, weekStartIso);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          '[settleChallengeWeek] onSettled failed (payout already committed)',
+          {
+            customer_id: customerId,
+            week_start: weekStartIso,
+            error: String(err),
+          },
+        );
+      }
     }
     return { weekStartIso, settled: winners.length > 0, winners };
   }
@@ -6001,11 +6070,12 @@ class PacksModuleService extends MedusaService({
   protected async settleChallengeWinner(
     input: {
       weekStart: Date;
+      weekEnd: Date;
       customerId: string;
       rank: number;
       payout: RankPayout;
       handleById: Map<string, string>;
-      snapshot: { pool_myr: number; unlocked_stages: number[] };
+      snapshot: SettleSnapshot;
       getStock: (handles: string[]) => Promise<Map<string, number | null>>;
     },
     @MedusaContext() sharedContext: Context = {},
@@ -6030,6 +6100,43 @@ class PacksModuleService extends MedusaService({
     );
     if (already) return null;
 
+    // 2b) ANCHOR-SHIFT guard. reset_day / reset_hour / timezone are all
+    //     admin-editable (PATCH /admin/challenge/settings) and all three feed
+    //     the week-anchor CTE, so an edit MOVES startUtc — and every key above
+    //     (payout rows, the unique index, mutateCreditAtomic's
+    //     idempotencyReference) is keyed on it. Without this, the next tick
+    //     computes a fresh key, finds nothing, and re-pays the same customers
+    //     for an overlapping window.
+    //     This is a true INTERVAL-OVERLAP test, not a distance window:
+    //     consecutive weeks are exactly contiguous (week N's end_utc IS week
+    //     N+1's start_utc, DST included), while a UTC week is 6d23h / 7d /
+    //     7d1h long — so no distance constant can separate a legitimate
+    //     neighbour from a shifted duplicate. Overlap ⟺ stored.week_start <
+    //     this end AND stored.week_end > this start: the previous week ends
+    //     exactly at this start and the next begins exactly at this end, so
+    //     neither is ever blocked. A shift of >= 7 days produces a DISJOINT
+    //     window — paying that is correct, not a re-pay.
+    //     The week_start lower bound is index bait for IDX_challenge_payout_week
+    //     (there is no customer_id-leading index): an overlapping stored window
+    //     has week_end > this start, and week_start = week_end − (7d ± 1h).
+    //     COALESCE covers rows written before week_end was snapshotted.
+    const [overlap] = await em.execute<{ one: number }[]>(
+      `SELECT 1 AS one FROM challenge_payout
+         WHERE customer_id = ? AND deleted_at IS NULL
+           AND week_start > ?::timestamptz - interval '8 days'
+           AND week_start < ?::timestamptz
+           AND COALESCE((snapshot->>'week_end')::timestamptz,
+                        week_start + interval '7 days') > ?::timestamptz
+         LIMIT 1`,
+      [
+        customerId,
+        weekStartIso,
+        input.weekEnd.toISOString(),
+        weekStartIso,
+      ],
+    );
+    if (overlap) return null;
+
     const rows: {
       week_start: Date;
       customer_id: string;
@@ -6046,7 +6153,7 @@ class PacksModuleService extends MedusaService({
     // 3a) Credits — one ledger mutation for the summed amount.
     let creditTxnId: string | null = null;
     if (payout.credits > 0) {
-      const { id } = await this.mutateCreditAtomic(
+      const { id, replayed } = await this.mutateCreditAtomic(
         {
           customerId,
           amount: payout.credits,
@@ -6066,7 +6173,10 @@ class PacksModuleService extends MedusaService({
         credit_transaction_id: creditTxnId,
         pull_id: null,
         status: 'granted',
-        snapshot: input.snapshot,
+        // replayed = the ledger recognised this idempotencyReference and did
+        // NOT move money. The row still says 'granted' (the grant IS this
+        // reference), so record the distinction rather than discarding it.
+        snapshot: { ...input.snapshot, credits_replayed: replayed },
       });
     }
 
@@ -6077,6 +6187,7 @@ class PacksModuleService extends MedusaService({
       qtyById.set(id, (qtyById.get(id) ?? 0) + 1);
     }
     const cardHandles: string[] = [];
+    let cardCount = 0; // pulls minted, NOT distinct handles (qty can exceed 1)
     const skippedCardIds: string[] = [];
     const handles = [...qtyById.keys()]
       .map((id) => input.handleById.get(id))
@@ -6111,6 +6222,7 @@ class PacksModuleService extends MedusaService({
           sharedContext,
         );
         pullIds = minted.map((p) => p.id);
+        cardCount += pullIds.length;
         cardHandles.push(handle!);
       } else {
         skippedCardIds.push(cardId);
@@ -6140,6 +6252,7 @@ class PacksModuleService extends MedusaService({
       rank,
       credits: payout.credits,
       cardHandles,
+      cardCount,
       skippedCardIds,
     };
   }
