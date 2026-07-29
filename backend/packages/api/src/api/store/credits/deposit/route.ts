@@ -42,13 +42,16 @@ export async function POST(
     );
   }
 
-  // THEIR requirement is the paying customer's IP, not ours. Trust the proxy
-  // header only for its first hop; Express' req.ip already honours `trust proxy`
-  // when configured, so prefer it and fall back to the socket.
+  // THEIR requirement is the paying customer's IP, not ours. req.ip FIRST:
+  // Medusa's express-loader sets `trust proxy` 1 unconditionally, so req.ip is
+  // derived from the proxy chain and a client cannot set it. The raw
+  // X-Forwarded-For first hop is client-controlled — reading it first let a
+  // caller choose the IP we report to GlobePay365, so it is only a fallback for
+  // a deployment where req.ip is somehow empty.
   const forwarded = req.headers['x-forwarded-for'];
   const ipAddress =
-    (typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : '') ||
     req.ip ||
+    (typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : '') ||
     req.socket?.remoteAddress ||
     '0.0.0.0';
 

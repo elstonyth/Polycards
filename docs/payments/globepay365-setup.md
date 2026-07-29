@@ -37,6 +37,14 @@ salt=aesKey, 1000 iters, 32 bytes)`, `AES-256-CBC` + PKCS7, random 16-byte IV
 | `GLOBEPAY_ENABLED`              | `true` to arm the real gateway (fails closed) |
 | `GLOBEPAY_NOTIFY_URL`           | public callback URL — their POST target |
 | `GLOBEPAY_RETURN_URL`           | where the customer lands after paying |
+| `GLOBEPAY_WITHDRAWALS_ENABLED`  | `true` to arm payouts — a SECOND switch on top of `GLOBEPAY_ENABLED`; deposits can ship without it |
+| `GLOBEPAY_WITHDRAW_NOTIFY_URL`  | their POST target for payout outcomes |
+| `GLOBEPAY_PAYOUT_VERIFY_URL`    | their POST target for Payout Verification (inactive on our account) |
+| `GLOBEPAY_CURRENCY`             | optional, defaults to `MYR` |
+
+Set the withdrawal three only when payouts are meant to be live: without them
+`globepayWithdrawalsEnabled()` is false and the withdrawal path fails closed —
+which looks identical to "the feature is broken" if you expected it on.
 
 Storefront (public, not a secret): `NEXT_PUBLIC_PAYMENTS_PROVIDER=globepay`
 switches the top-up sheet from the mock gateway to the redirect flow; anything
@@ -289,7 +297,13 @@ The real flow is **async redirect + callback**, not a synchronous swap for
 Rules to bank now:
 
 - Verify the RSA-SHA1 signature with **their** public key before trusting any
-  callback field; also allowlist the source IP (table above).
+  callback field. The signature is the ONLY gate: we deliberately do **not**
+  allowlist the callback source IP. Behind DO's load balancer the address we
+  observe is not theirs, so an IP gate would reject genuine settlement callbacks
+  — losing money to defend something the RSA check already covers.
+  `GLOBEPAY_CALLBACK_IPS` in `globepay.ts` records their egress addresses for
+  reference (it is what you give THEM, and what to expect in their logs); it is
+  intentionally not wired into any route.
 - Credit **idempotently keyed on their `TransactionId`** — reuse
   `mutateCreditAtomic` + `topupIdempotencyReference`.
 - Deposit status: `6` = success, `7` = fail, `4` = verify-fail (**not final**),
