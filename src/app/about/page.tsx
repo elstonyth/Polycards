@@ -155,7 +155,8 @@ export default function AboutPage() {
         </Reveal>
       </section>
 
-      {/* 02 — how it works: numbered editorial rows (HowItRips idiom) */}
+      {/* 02 — how it works: numbered editorial rows (same idiom as /contact's
+          quick answers) */}
       <section aria-labelledby="how-heading" className="mt-10 w-full">
         <BoardHead
           id="how-heading"
