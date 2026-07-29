@@ -143,14 +143,15 @@ export const buybackPullStep = createStep(
     // 1. Credit row first — the unique pull_id kills concurrent duplicates here.
     const [txn] = await insertOrMapDuplicate({
       insert: () =>
-        packs.createCreditTransactions([
-          {
-            customer_id: input.customer_id,
-            amount,
-            reason: 'buyback' as const,
-            pull_id: pull.id,
-          },
-        ]),
+        packs.recordBuybackCreditTransaction({
+          customerId: input.customer_id,
+          amount,
+          valueMyr,
+          pullId: pull.id,
+          cardHandle: pull.card_id,
+          rate: percent / 100,
+          openId: pull.open_id ?? null,
+        }),
       probeDuplicate: async () => {
         const [existing] = await packs.listCreditTransactions(
           { pull_id: pull.id },
@@ -182,6 +183,7 @@ export const buybackPullStep = createStep(
       // inconsistent pair (pull, txn) can be repaired by hand.
       try {
         await packs.deleteCreditTransactionsGuarded([creditTransactionId]);
+        await packs.deleteLedgerEntryByRef('SE', creditTransactionId);
       } catch (undoError) {
         logger.error(
           `buyback-pull: UNDO FAILED — credit txn '${creditTransactionId}' exists but pull '${pull.id}' was not flipped; repair manually. ${
@@ -259,6 +261,7 @@ export const buybackPullStep = createStep(
     if (!data) return;
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
     await packs.deleteCreditTransactionsGuarded([data.creditTransactionId]);
+    await packs.deleteLedgerEntryByRef('SE', data.creditTransactionId);
     await packs.updatePulls([
       {
         id: data.pullId,

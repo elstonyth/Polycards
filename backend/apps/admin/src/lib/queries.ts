@@ -884,6 +884,32 @@ export const useSetGroupOddsSet = () => {
   });
 };
 
+// ── Epic 4 (Ledger) ──────────────────────────────────────────────────────────
+// Own import block (same reason as Epic 2's above): keeps the section
+// append-only while a parallel epic edits the top of this file.
+import {
+  listLedger,
+  type AdminLedgerPage,
+  type LedgerType,
+} from './admin-rest';
+
+export type { AdminLedgerRow, AdminLedgerPage, LedgerType } from './admin-rest';
+
+// Paged + filtered, read-only, never id-scoped, so plain keepPreviousData is
+// right (the whole page swaps together — no stale-row-click hazard, and this
+// page has no row action to mis-fire anyway).
+export const useLedger = (
+  page: number,
+  type?: LedgerType,
+  q?: string,
+  from?: string,
+  to?: string,
+): UseQueryResult<AdminLedgerPage> =>
+  useQuery({
+    queryKey: qk.ledger(page, type, q, from, to),
+    queryFn: () => listLedger(page, { type, q, from, to }),
+    placeholderData: keepPreviousData,
+  });
 // ── Epic 5 (Inventory) ───────────────────────────────────────────────────────
 // Own import block (not merged into the one at the top) so this whole section
 // stays append-only while a parallel epic edits the same file.

@@ -1,6 +1,7 @@
 import { createStep, StepResponse } from '@medusajs/framework/workflows-sdk';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
+import { resolveFxRate } from '../../modules/packs/pricing';
 
 export type RecordPullsBatchInput = {
   customer_id: string;
@@ -10,11 +11,12 @@ export type RecordPullsBatchInput = {
   open_id: string;
   // One entry per won card: Card.handle + the draw-time USD value snapshot.
   cards: { card_id: string; recorded_value_usd: number }[];
+  price: number; // price × count, the whole batch's debit
 };
 
 // Compensation data: the IDs of every pull row inserted, so we can delete
 // them all if a later step in the workflow fails.
-type CompensateData = { pullIds: string[] } | undefined;
+type CompensateData = { pullIds: string[]; open_id: string } | undefined;
 
 // Structural Pull type — mirrors what createPulls returns (same shape as
 // record-pull.ts single-pull step), so downstream steps can read id/card_id
@@ -46,9 +48,12 @@ export const recordPullsBatchStep = createStep<
   'record-pulls-batch',
   async (input: RecordPullsBatchInput, { container }) => {
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
+    // Resolved HERE, before the transactional call — see record-pull.ts /
+    // recordPullsWithLedger's own comment (pool-exhaustion risk otherwise).
+    const fx = await resolveFxRate(packs);
 
-    const pulls = (await packs.createPulls(
-      input.cards.map((c) => ({
+    const pulls = (await packs.recordPullsWithLedger({
+      pulls: input.cards.map((c) => ({
         customer_id: input.customer_id,
         pack_id: input.pack_id,
         card_id: c.card_id,
@@ -57,16 +62,26 @@ export const recordPullsBatchStep = createStep<
         recorded_value_usd: c.recorded_value_usd,
         open_id: input.open_id,
       })),
-    )) as PullRecord[];
+      ledger: {
+        customerId: input.customer_id,
+        openId: input.open_id,
+        price: input.price,
+        packId: input.pack_id,
+        channel: 'batch',
+        fx,
+      },
+    })) as PullRecord[];
 
     return new StepResponse(pulls, {
       pullIds: pulls.map((p) => p.id),
+      open_id: input.open_id,
     });
   },
   async (data: CompensateData, { container }) => {
     if (!data?.pullIds?.length) return;
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
     await packs.deletePulls(data.pullIds);
+    await packs.deleteLedgerEntryByRef('SP', data.open_id);
   },
 );
 

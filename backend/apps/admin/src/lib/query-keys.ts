@@ -88,6 +88,28 @@ export const qk = {
   // ── Epic 3 (Odds) ──
   customerGroups: ['admin', 'customer-groups'] as const,
 
+  // ── Epic 4 (Ledger) ──
+  // Every filter segment always renders (defaulting to 'all'/'') — same rule as
+  // qk.players/qk.pulls: an appended-only segment would make the unfiltered key
+  // a strict PREFIX of a filtered one.
+  ledger: (
+    page: number,
+    type?: string,
+    q?: string,
+    from?: string,
+    to?: string,
+  ) =>
+    [
+      'admin',
+      'ledger',
+      page,
+      type ?? 'all',
+      q ?? '',
+      from ?? '',
+      to ?? '',
+    ] as const,
+  // 2-segment prefix — invalidates ALL pages/filters of the ledger in one call
+  ledgerKey: ['admin', 'ledger'] as const,
   // ── Epic 5 (Inventory) ─────────────────────────────────────────────────────
   // q and sort ALWAYS render (defaulting to '' / 'created_at:desc') rather than
   // being appended only when set, same rule as qk.players/qk.pulls: an

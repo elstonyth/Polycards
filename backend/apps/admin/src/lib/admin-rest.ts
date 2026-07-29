@@ -1007,6 +1007,60 @@ export const setGroupOddsSet = (id: string, set: 1 | 2 | 3) =>
     { metadata: { odds_set: set } },
   );
 
+// ── Epic 4 (Ledger) ──────────────────────────────────────────────────────────
+
+/** The seven ledger event types (POLYCARD-BACK §5.1). RF (referral payout) and
+ *  WP (challenge settlement) are filterable but have no writer yet, so they
+ *  return zero rows — kept because the ledger stores them and a later epic may
+ *  wire them, not because they are broken. */
+export type LedgerType = 'TP' | 'SP' | 'SE' | 'OD' | 'RF' | 'AD' | 'WP';
+
+/** One row of GET /admin/ledger. Deltas are MYR and NULLABLE — an event that
+ *  touches only one side leaves the other null (not 0). `payload` is the raw
+ *  per-type detail blob, rendered as JSON in the row expander. */
+export interface AdminLedgerRow {
+  id: string;
+  display_id: string;
+  type: LedgerType;
+  customer: { id: string; email: string; name: string | null };
+  occurred_at: string;
+  wallet_delta: number | null;
+  vault_delta: number | null;
+  payload: Record<string, unknown>;
+}
+
+export interface AdminLedgerPage {
+  total: number;
+  offset: number;
+  limit: number;
+  entries: AdminLedgerRow[];
+}
+
+// `from`/`to` are plain YYYY-MM-DD, exactly what `<input type="date">` emits.
+// Do NOT convert them here: the route reads a date-only bound as the operator's
+// MYT calendar day and makes the range half-open, so a client-side shift would
+// double-apply the offset (see modules/packs/ledger.ts parseMytBound).
+export const listLedger = (
+  page = 0,
+  opts: {
+    type?: LedgerType;
+    q?: string;
+    from?: string;
+    to?: string;
+    limit?: number;
+  } = {},
+) => {
+  const limit = opts.limit ?? 50;
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(page * limit),
+  });
+  if (opts.type) params.set('type', opts.type);
+  if (opts.q) params.set('q', opts.q);
+  if (opts.from) params.set('from', opts.from);
+  if (opts.to) params.set('to', opts.to);
+  return getJson<AdminLedgerPage>(`/admin/ledger?${params.toString()}`);
+};
 // ── Epic 5 (Inventory) ───────────────────────────────────────────────────────
 
 /** One line of GET /admin/purchase-invoices/:id. All money is MYR (2dp) — the

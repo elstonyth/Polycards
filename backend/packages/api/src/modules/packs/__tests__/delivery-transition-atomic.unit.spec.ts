@@ -23,14 +23,31 @@ import PacksModuleService from '../service';
  *     after another run's terminal write.
  */
 
-type OrderRow = { id: string; status: string } | undefined;
+type OrderRow = { id: string; status: string; customer_id?: string; is_reward?: boolean } | undefined;
 
-const fakeService = (order: OrderRow) => {
+// hasDebit models whether the CREATE-time OD debit row exists for this order.
+// The cancel-side credit is gated on that row's EXISTENCE (never on a field of
+// the order), so the fake has to answer the lookup honestly or every
+// "recordLedgerEntry not called" assertion below would pass vacuously.
+//
+// The fake row carries a real vault_delta because the cancel arm now REVERSES
+// that stored amount; a row without the column would make the reversal read
+// undefined and every assertion here pass on a -0 write.
+const DEBIT_VAULT_DELTA = -141.55;
+
+const fakeService = (order: OrderRow, hasDebit = true) => {
   const svc = Object.create(PacksModuleService.prototype) as PacksModuleService;
   const ops: string[] = [];
   const em = {
-    execute: jest.fn(async (_q: string, _params?: unknown[]) => {
+    execute: jest.fn(async (q: string, _params?: unknown[]) => {
       ops.push('sql');
+      if (q.includes('ledger_entry')) {
+        // numeric comes back from pg as a STRING — mirror that, so the
+        // Number() coercion in the reversal is exercised, not bypassed.
+        return hasDebit
+          ? [{ id: 'led_od_debit', vault_delta: String(DEBIT_VAULT_DELTA) }]
+          : [];
+      }
       return [];
     }),
   };
@@ -45,10 +62,25 @@ const fakeService = (order: OrderRow) => {
   const transitionPullStatus = jest.fn(async () => {
     ops.push('flip');
   });
+  // Task 8's cancel-reversal OD write. The cancel arm no longer values cards
+  // at all (it negates the stored debit), so listPulls feeds only the
+  // payload's handle tally and no listCards fake is needed — same reason
+  // ledger-service.integration.spec.ts, not this file, is where
+  // recordLedgerEntry's own internals are pinned.
+  const listPulls = jest.fn(async () => {
+    ops.push('listPulls');
+    return [];
+  });
+  const recordLedgerEntry = jest.fn(async () => {
+    ops.push('ledger');
+    return { id: 'led_1', display_id: 'OD26Q3A0001', replayed: false };
+  });
   Object.assign(svc, {
     listDeliveryOrders,
     updateDeliveryOrders,
     transitionPullStatus,
+    listPulls,
+    recordLedgerEntry,
   });
   const ctx = { transactionManager: em } as never;
   return {
@@ -59,6 +91,8 @@ const fakeService = (order: OrderRow) => {
     listDeliveryOrders,
     updateDeliveryOrders,
     transitionPullStatus,
+    listPulls,
+    recordLedgerEntry,
   };
 };
 
@@ -107,6 +141,69 @@ describe('PacksModuleService.transitionDeliveryOrderStatus', () => {
       { ids: ['pull_1', 'pull_2'], from: 'delivering', to: 'vaulted' },
       f.ctx,
     );
+    // Task 8's OD reversal rides the same transaction — exactly one row, and
+    // only because the debit lookup found the CREATE-time row keyed on the
+    // order id (this half of the discriminating pair below).
+    expect(f.recordLedgerEntry).toHaveBeenCalledTimes(1);
+    expect(f.em.execute).toHaveBeenCalledWith(
+      expect.stringContaining('ledger_entry'),
+      ['do_1'],
+    );
+    // The reversal is the NEGATED STORED DEBIT, not a fresh valuation. The
+    // fake never supplies a card price or an fx rate, so a re-valuing cancel
+    // could not produce this number at all — which is the point: create and
+    // cancel must never price the same cards at two different instants.
+    expect(f.recordLedgerEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'OD',
+        refId: 'cancel:do_1',
+        walletDelta: 0,
+        vaultDelta: -DEBIT_VAULT_DELTA,
+      }),
+      f.ctx,
+    );
+  });
+
+  it('refuses to reverse a debit whose vault_delta is not a number', async () => {
+    // Fail closed on real data corruption — a NaN written to a money column is
+    // worse than a refused cancel (and the create arm always writes a number,
+    // so this is unreachable in normal operation).
+    const f = fakeService({ id: 'do_1', status: 'requested' });
+    f.em.execute.mockImplementation(async (q: string) =>
+      q.includes('ledger_entry')
+        ? [{ id: 'led_od_debit', vault_delta: 'not-a-number' }]
+        : [],
+    );
+    await expect(
+      f.svc.transitionDeliveryOrderStatus(cancelInput, f.ctx),
+    ).rejects.toMatchObject({ type: MedusaError.Types.UNEXPECTED_STATE });
+    expect(f.recordLedgerEntry).not.toHaveBeenCalled();
+  });
+
+  // The OTHER half of the pair: byte-identical order and input, only the
+  // debit's existence differs. This is the case the old `!order.is_reward`
+  // guard missed — an ordinary (is_reward=false) order created BEFORE this
+  // writer shipped has no OD debit, because the rollout is go-forward-only
+  // with no backfill. Crediting it would write an unmatched `vault +` and
+  // permanently drift cumulative vault_delta.
+  it('skips the OD reversal when no CREATE-time debit row exists', async () => {
+    const f = fakeService({ id: 'do_1', status: 'requested' }, false);
+    await f.svc.transitionDeliveryOrderStatus(cancelInput, f.ctx);
+    expect(f.recordLedgerEntry).not.toHaveBeenCalled();
+  });
+
+  // The reward case is now a SPECIAL CASE of the rule above, not its own
+  // branch: recordRewardWithdrawal creates reward-prize shipments with no OD
+  // debit (reward pulls are excluded from ledger/value tracking everywhere),
+  // so the existence gate skips them for the same reason. `is_reward: true`
+  // here documents the real-world scenario; the gate never reads the field.
+  it('skips the OD reversal for a reward-sourced order (it never got a debit)', async () => {
+    const f = fakeService(
+      { id: 'do_1', status: 'requested', is_reward: true },
+      false,
+    );
+    await f.svc.transitionDeliveryOrderStatus(cancelInput, f.ctx);
+    expect(f.recordLedgerEntry).not.toHaveBeenCalled();
   });
 
   it('completed: stamps delivered_at and flips pulls delivering → delivered', async () => {
@@ -135,6 +232,9 @@ describe('PacksModuleService.transitionDeliveryOrderStatus', () => {
       { ids: ['pull_1'], from: 'delivering', to: 'delivered' },
       f.ctx,
     );
+    // NOTHING fires on 'completed' (even with a debit row present): those cards
+    // are gone for good, so the CREATE-time debit stands permanently.
+    expect(f.recordLedgerEntry).not.toHaveBeenCalled();
   });
 
   it('shipped: stamps shipped_at and does NOT touch pulls', async () => {

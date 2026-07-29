@@ -72,7 +72,9 @@ export const openBatchWorkflow = createWorkflow(
         recorded_value_usd: c.recorded_value_usd,
       })),
     }));
-    const pulls = recordPullsBatchStep(recordInput);
+    const pulls = recordPullsBatchStep(
+      transform({ recordInput, charge }, (d) => ({ ...d.recordInput, price: d.charge.total })),
+    );
 
     // 2b. Earmark one physical unit per winning pull (best-effort — a 0-stock
     //     card still wins fine; buyback fulfills it). Compensated by +1 per item.

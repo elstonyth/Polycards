@@ -17,6 +17,8 @@ import Commission from '../models/commission';
 import CustomerAccountState from '../models/customer-account-state';
 import AdminActionAudit from '../models/admin-action-audit';
 import VipMemberState from '../models/vip-member-state';
+import LedgerEntry from '../models/ledger-entry';
+import LedgerSequence from '../models/ledger-sequence';
 
 jest.setTimeout(300 * 1000);
 
@@ -27,6 +29,11 @@ moduleIntegrationTestRunner<PacksModuleService>({
     Pack, Card, PackOdds, Pull, CreditTransaction, DeliveryOrder,
     DeliveryOrderItem, VipLevel, RewardsSettings, ReferralRelationship,
     Commission, CustomerAccountState, AdminActionAudit, VipMemberState,
+    // adminAdjustCredit writes a ledger row (Epic 4 AD writer); this runner
+    // generates schema from THIS list ONLY — not from migrations — so a spec that
+    // reaches any recordLedgerEntry call site must list these two models.
+    // Canonical example: ledger-service.integration.spec.ts.
+    LedgerEntry, LedgerSequence,
   ],
   testSuite: ({ service }) => {
     async function seedLadder() {

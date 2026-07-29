@@ -65,6 +65,7 @@ export const adjustCreditsStep = createStep(
     // and removes the last caller of the raw base-delete (Task 11 seals it).
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
     await packs.deleteCreditTransactionsGuarded([data.creditTransactionId]);
+    await packs.deleteLedgerEntryByRef('AD', data.creditTransactionId);
   },
 );
 

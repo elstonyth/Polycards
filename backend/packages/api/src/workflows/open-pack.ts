@@ -58,7 +58,9 @@ export const openPackWorkflow = createWorkflow(
       recorded_value_usd: d.card.recorded_value_usd,
       open_id: d.charged.open_id,
     }));
-    const pull = recordPullStep(recordInput);
+    const pull = recordPullStep(
+      transform({ recordInput, charge }, (d) => ({ ...d.recordInput, price: d.charge.price })),
+    );
 
     // 2b. Earmark one physical unit for the win (stock is a fulfillment
     //     COUNTER, never a gate — the step is best-effort and a 0-stock card
