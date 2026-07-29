@@ -46,9 +46,14 @@ Set the withdrawal three only when payouts are meant to be live: without them
 `globepayWithdrawalsEnabled()` is false and the withdrawal path fails closed —
 which looks identical to "the feature is broken" if you expected it on.
 
-Storefront (public, not a secret): `NEXT_PUBLIC_PAYMENTS_PROVIDER=globepay`
-switches the top-up sheet from the mock gateway to the redirect flow; anything
-else keeps the mock. `GLOBEPAY_NOTIFY_URL` and `GLOBEPAY_RETURN_URL` are
+Storefront (public, not secrets — set on the **polycards-storefront** app, not
+the backend): `NEXT_PUBLIC_PAYMENTS_PROVIDER=globepay` switches the top-up
+sheet from the mock gateway to the redirect flow; anything else keeps the mock.
+`NEXT_PUBLIC_WITHDRAWALS_ENABLED=true` reveals the withdrawal form; without it
+/bank-withdrawal shows the "not open yet" notice. Both mirror a backend switch
+(`GLOBEPAY_ENABLED`, `GLOBEPAY_WITHDRAWALS_ENABLED`) and BOTH sides must be set
+— storefront-only turns on a UI whose backend refuses, backend-only leaves a
+working API nothing links to. `GLOBEPAY_NOTIFY_URL` and `GLOBEPAY_RETURN_URL` are
 explicit rather than derived — production names its storefront var
 `MERCUR_STOREFRONT_URL`, so deriving would silently fall back to a localhost
 default and the gateway would call an address that does not exist.
@@ -365,6 +370,24 @@ env. That is the "not deployed" reading, not a fault.
 
 ### Still open
 
+- **The GlobePay money paths bypass the POLYCARD-BACK ledger (found 2026-07-29).**
+  `ledger-conservation.spec.ts` asserts `Σ(ledger rows) == creditSummary().balance`.
+  Four sites mutate the balance through raw `mutateCreditAtomic` and write no
+  ledger row: the deposit callback (`api/hooks/globepay/deposit/route.ts`), the
+  deposit sweep (`jobs/globepay-reconcile.ts`), the withdrawal debit
+  (`modules/packs/globepay-withdrawal.ts`) and the withdrawal refunds (same file
+  + `api/hooks/globepay/withdrawal/route.ts`). Only the MOCK top-up path calls
+  `topUpCreditsWithLedger`. So the invariant holds today and breaks the moment
+  `GLOBEPAY_ENABLED=true`: real deposits would credit a balance the ledger never
+  saw, and the Wallet tab would under-report every gateway top-up.
+  CI does not catch it — the conservation spec drives the mock gateway.
+  Deposits map cleanly onto the existing `TP` type (its payload already carries
+  `payment_method` + `gateway_ref`; `topUpCreditsWithLedger` hardcodes `'mock'`
+  and needs parameterizing). **Withdrawals have no `LedgerType` at all** — `WP`
+  is the weekly challenge payout, `RF` is period rakeback, `AD` is an admin
+  adjustment — so money leaving by payout needs either a new type or a decision
+  that it is represented some other way. That is an Epic-4 spec call, not a
+  wiring fix. **Close this before arming the gateway.**
 - No human has ever paid through BQR or OB. Organic callback delivery and
   `ReturnUrl` behaviour remain unobserved.
 - Alerting on pending-past-window is not built; the Deposits page shows it, but
