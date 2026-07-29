@@ -100,9 +100,18 @@ export async function listEligibleProducts(): Promise<EligibleProduct[]> {
 
 // ── Pull ledger ───────────────────────────────────────────────────────────────
 
-export const getPulls = (page = 0, limit = 50, source?: 'pack' | 'reward') =>
+// `customerId` scopes the ledger to one player. Blank values are OMITTED — the
+// route 400s on an empty customer_id rather than falling back to every player.
+export const getPulls = (
+  page = 0,
+  limit = 50,
+  source?: 'pack' | 'reward',
+  customerId?: string,
+) =>
   getJson<PullsResponse>(
-    `/admin/pulls?limit=${limit}&offset=${page * limit}${source ? `&source=${source}` : ''}`,
+    `/admin/pulls?limit=${limit}&offset=${page * limit}${source ? `&source=${source}` : ''}${
+      customerId ? `&customer_id=${encodeURIComponent(customerId)}` : ''
+    }`,
   );
 
 // ── Customer support view ────────────────────────────────────────────────────
@@ -154,8 +163,16 @@ export interface CustomerGacha {
   balance: number;
   transactions: SupportTransaction[];
   pulls: SupportPull[];
-  vault: { count: number; market_value: number };
-  vip: { level: number; highest_level_ever: number; spend: number } | null;
+  /** market_value = raw FMV owed; display_value = FMV × the card's own markup,
+   *  i.e. the number the storefront shows the player. */
+  vault: { count: number; market_value: number; display_value: number };
+  vip: {
+    level: number;
+    highest_level_ever: number;
+    spend: number;
+    /** null at the top of the ladder. */
+    next: { level: number; threshold: number; remaining: number } | null;
+  } | null;
 }
 
 // Core Medusa admin customer search (?q matches email/name).
@@ -177,16 +194,29 @@ export const getCustomerTransactions = (id: string, page = 0, limit = 25) =>
     `/admin/customers/${encodeURIComponent(id)}/transactions?limit=${limit}&offset=${page * limit}`,
   );
 
-export const getCustomerPulls = (id: string, page = 0, limit = 25) =>
-  getJson<{
+// `opts` narrows the history server-side (status = vaulted | bought_back |
+// delivering | delivered, source = pack | reward). Blank values are OMITTED so
+// every filter param follows one rule (see getPulls).
+export const getCustomerPulls = (
+  id: string,
+  page = 0,
+  limit = 25,
+  opts?: { status?: string; source?: string },
+) => {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(page * limit),
+  });
+  if (opts?.status) params.set('status', opts.status);
+  if (opts?.source) params.set('source', opts.source);
+  return getJson<{
     items: SupportPull[];
     total: number;
     /** firm:false = the backend is on its FX display fallback — every
      *  customer sell is being refused while quotes still show amounts. */
     fx?: { rate: number; firm: boolean };
-  }>(
-    `/admin/customers/${encodeURIComponent(id)}/pulls?limit=${limit}&offset=${page * limit}`,
-  );
+  }>(`/admin/customers/${encodeURIComponent(id)}/pulls?${params}`);
+};
 
 // ── Customer 360: referral tree + commissions (Phase 4 P4.1) ─────────────────
 
@@ -246,11 +276,17 @@ export interface AuditRow {
   admin_id: string;
 }
 
+// frozen (funds) and disabled (login) are orthogonal — one can be set without
+// the other, and each carries its own reason/actor/timestamp.
 export interface AccountState {
   frozen: boolean;
   freeze_reason: string | null;
   freeze_cause: string | null;
   frozen_at: string | null;
+  disabled: boolean;
+  disabled_reason: string | null;
+  disabled_by: string | null;
+  disabled_at: string | null;
 }
 
 export interface CustomerAudit {
@@ -521,6 +557,7 @@ export async function listDeliveryOrders(
   page = 0,
   q?: string,
   limit = 50,
+  customerId?: string,
 ): Promise<DeliveryOrdersPage> {
   const params = new URLSearchParams({
     limit: String(limit),
@@ -530,6 +567,8 @@ export async function listDeliveryOrders(
   // Id-substring search; ANDs with ?status= server-side. The backend rejects
   // anything over 64 chars, so don't send a longer one.
   if (q) params.set('q', q.slice(0, 64));
+  // Scopes the table to one player. Blank is OMITTED, never sent empty.
+  if (customerId) params.set('customer_id', customerId);
   return getJson<DeliveryOrdersPage>(`/admin/delivery-orders?${params}`);
 }
 
@@ -831,3 +870,124 @@ export interface CreatePixelPokemonBody {
 // Add a custom pixel-pokémon (sprite already uploaded via uploadImage → url).
 export const createPixelPokemon = (body: CreatePixelPokemonBody) =>
   postJson<{ pixel_pokemon: PixelPokemonRow }>('/admin/pixel-pokemon', body);
+
+// ── Epic 2 (Players) ─────────────────────────────────────────────────────────
+
+/** One row of GET /admin/players. All money fields are MYR (the route divides
+ *  the stored cents). Dates serialize as ISO strings over JSON. */
+export interface PlayerRow {
+  id: string;
+  email: string;
+  name: string | null;
+  phone: string | null;
+  /** Customer-group names — the odds-set membership the operator sees. */
+  groups: string[];
+  vip_level: number;
+  wallet_balance: number;
+  vault_value: number;
+  vault_count: number;
+  total_spend: number;
+  total_pulls: number;
+  registered_at: string;
+  last_spend_at: string | null;
+  /** Funds hold. Orthogonal to `disabled` (login block). */
+  frozen: boolean;
+  disabled: boolean;
+}
+
+export interface PlayersPage {
+  total: number;
+  offset: number;
+  limit: number;
+  players: PlayerRow[];
+}
+
+export const listPlayers = (page = 0, q?: string, limit = 50) =>
+  getJson<PlayersPage>(
+    `/admin/players?limit=${limit}&offset=${page * limit}${q ? `&q=${encodeURIComponent(q)}` : ''}`,
+  );
+
+// Login block / unblock. `reason` is mandatory (1–500 chars) and audited; the
+// admin actor is taken from the session server-side, never sent from here.
+export const disablePlayer = (id: string, reason: string) =>
+  postJson<{ disabled: boolean }>(
+    `/admin/customers/${encodeURIComponent(id)}/disable`,
+    { reason },
+  );
+
+export const enablePlayer = (id: string, reason: string) =>
+  postJson<{ disabled: boolean }>(
+    `/admin/customers/${encodeURIComponent(id)}/enable`,
+    { reason },
+  );
+
+/** Manual-cashout bank destination. Admin-only — never exposed on /store. */
+export interface PayoutDetails {
+  bank_name: string;
+  bank_account_number: string;
+  account_holder_name: string | null;
+}
+
+export const getPayoutDetails = (id: string) =>
+  getJson<{ details: PayoutDetails | null }>(
+    `/admin/customers/${encodeURIComponent(id)}/payout-details`,
+  );
+
+export const savePayoutDetails = (id: string, details: PayoutDetails) =>
+  postJson<{ details: PayoutDetails }>(
+    `/admin/customers/${encodeURIComponent(id)}/payout-details`,
+    details,
+  );
+
+// Pack spend per calendar month (MYR), newest first, at most 24 months.
+// `period` is a YYYY-MM bucket in Asia/Kuala_Lumpur; empty months are omitted.
+export const getSpendReport = (id: string) =>
+  getJson<{ periods: { period: string; spend: number }[] }>(
+    `/admin/customers/${encodeURIComponent(id)}/spend-report`,
+  );
+
+/** Core Medusa customer record (the Profile tab), not the gacha projection. */
+export interface AdminCustomerDetail {
+  id: string;
+  email: string;
+  first_name: string | null;
+  last_name: string | null;
+  phone: string | null;
+  created_at: string;
+  metadata: Record<string, unknown> | null;
+}
+
+export const getCustomerDetail = (id: string) =>
+  getJson<{ customer: AdminCustomerDetail }>(
+    `/admin/customers/${encodeURIComponent(id)}`,
+  );
+
+// ── Epic 3 (Odds) ────────────────────────────────────────────────────────────
+
+// Medusa's NATIVE admin customer-groups API (no repo-side route). The prebuilt
+// @mercurjs/admin bundle owns create/edit/membership at /customer-groups; this
+// app only reads the list and writes `metadata.odds_set` (1|2|3), which the
+// draw path resolves per customer (see packs/odds-sets.ts `coerceOddsSet` —
+// anything that is not 2 or 3, including no metadata at all, is set 1).
+export interface AdminCustomerGroup {
+  id: string;
+  name: string;
+  metadata: Record<string, unknown> | null;
+}
+
+// ponytail: limit=100, no pager — `count` reports the true total, so a shop
+// that ever grows past 100 groups will see it in the response before anyone
+// needs the pagination.
+export const listCustomerGroupsAdmin = () =>
+  getJson<{ customer_groups: AdminCustomerGroup[]; count: number }>(
+    '/admin/customer-groups?limit=100&fields=id,name,metadata',
+  );
+
+// Medusa MERGES metadata per key on update (verified live against the native
+// route: a sibling key survives this call), so posting only `odds_set` leaves
+// the rest of the group's metadata untouched — no read-modify-write needed.
+export const setGroupOddsSet = (id: string, set: 1 | 2 | 3) =>
+  postJson<{ customer_group: AdminCustomerGroup }>(
+    `/admin/customer-groups/${encodeURIComponent(id)}`,
+    { metadata: { odds_set: set } },
+  );

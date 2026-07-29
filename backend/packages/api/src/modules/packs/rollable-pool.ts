@@ -7,6 +7,10 @@ import { pageAll } from '../../api/utils/page-all';
 // set-pack-members) check this BEFORE a pack can go/stay active, so a customer
 // can never see a spinnable pack whose every spin would fail.
 //
+// Checks set 1 only — sufficient because every save re-balances all sets to
+// Σ=10000 bps (computeSetWeights), so a pack rollable on set 1 is rollable on
+// every set.
+//
 // Paged (not take:1000): a pack may hold 2000+ card rows, and a bare cap could
 // scan only rows that are all zero-weight/locked and wrongly report the pool
 // unrollable. Short-circuit is impossible through pageAll, but the pool read is

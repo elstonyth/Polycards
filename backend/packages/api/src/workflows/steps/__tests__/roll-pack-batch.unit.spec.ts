@@ -1,5 +1,7 @@
-import { MedusaError } from '@medusajs/framework/utils';
+import { MedusaError, Modules } from '@medusajs/framework/utils';
+import type { MedusaContainer } from '@medusajs/framework/types';
 import { rollOne, fetchPackData, drawFromData, secureRoll } from '../roll-pack';
+import { rollBatch } from '../roll-pack-batch';
 
 // Stub shape matching the fields rollOne reads from PacksModuleService.
 // We drive rollOne directly (it's exported) — not the step wrapper — so
@@ -152,12 +154,123 @@ describe('batch path (fetchPackData + drawFromData)', () => {
   });
 });
 
-// NOTE: Fix 3's count guard (count < 1 / non-integer → INVALID_DATA) lives in
-// rollPackBatchStep's createStep handler, which requires a live Medusa container
-// to invoke. Exercising the step wrapper in a unit harness is impractical
-// (createStep returns an opaque step object, not a callable function). The guard
-// is a two-line boundary check; the helper-level coverage above is what matters
-// for this batch path. The guard is visible in roll-pack-batch.ts line 22–27.
+// ---------------------------------------------------------------------------
+// rollBatch — the batch step's whole body, driven through a stub container.
+// createStep returns an opaque step object (not a callable), so the body lives
+// in an exported function and the step is a two-line wrapper. That is what lets
+// the count guard AND the odds-set resolution be asserted here for real.
+// ---------------------------------------------------------------------------
+
+// Set 1 gives pikachu all the weight, set 2 gives it all to charizard, so the
+// winner is fully determined by the RESOLVED set — no injected roll needed.
+const SET_SPLIT_ODDS = [
+  {
+    id: 'o1',
+    pack_id: 'test-pack',
+    card_id: 'pikachu',
+    rarity: 'common',
+    weight: 10000,
+    weight_2: 0,
+    weight_3: null,
+  },
+  {
+    id: 'o2',
+    pack_id: 'test-pack',
+    card_id: 'charizard',
+    rarity: 'rare',
+    weight: 0,
+    weight_2: 10000,
+    weight_3: null,
+  },
+];
+
+/** Stub container: PACKS_MODULE → packs stub, CUSTOMER → group lookup stub. */
+function buildContainer(oddsSet?: number) {
+  const listCustomerGroups = jest
+    .fn()
+    .mockResolvedValue(
+      oddsSet === undefined ? [] : [{ id: 'cg_1', metadata: { odds_set: oddsSet } }],
+    );
+  const listPackOdds = jest.fn().mockResolvedValue(SET_SPLIT_ODDS);
+  const listPacks = jest.fn().mockResolvedValue([PACK]);
+  const listCards = jest
+    .fn()
+    .mockImplementation(({ handle }: { handle: string }) =>
+      Promise.resolve([
+        handle === 'pikachu' ? CARD_PIKACHU : CARD_CHARIZARD,
+      ]),
+    );
+  const container = {
+    resolve: (key: string) =>
+      key === Modules.CUSTOMER
+        ? { listCustomerGroups }
+        : { listPacks, listPackOdds, listCards },
+  } as unknown as MedusaContainer;
+  return { container, listCustomerGroups, listPacks, listPackOdds, listCards };
+}
+
+describe('rollBatch — customer odds set', () => {
+  it('resolves the set ONCE per batch, not once per draw', async () => {
+    const { container, listCustomerGroups, listPacks, listPackOdds, listCards } =
+      buildContainer(2);
+
+    const cards = await rollBatch(container, {
+      pack_id: 'test-pack',
+      count: 3,
+      customer_id: 'cus_1',
+    });
+
+    expect(cards).toHaveLength(3);
+    // One group lookup and one odds read for the whole batch; one card fetch per draw.
+    expect(listCustomerGroups).toHaveBeenCalledTimes(1);
+    expect(listPacks).toHaveBeenCalledTimes(1);
+    expect(listPackOdds).toHaveBeenCalledTimes(1);
+    expect(listCards).toHaveBeenCalledTimes(3);
+  });
+
+  it('every draw in the batch uses the resolved set-2 weights', async () => {
+    const { container } = buildContainer(2);
+    const cards = await rollBatch(container, {
+      pack_id: 'test-pack',
+      count: 3,
+      customer_id: 'cus_1',
+    });
+    // Set 2 puts all the weight on charizard — set 1 would give pikachu ×3.
+    expect(cards.map((c) => c.handle)).toEqual([
+      'charizard',
+      'charizard',
+      'charizard',
+    ]);
+  });
+
+  it('a customer in no group draws on set 1', async () => {
+    const { container, listCustomerGroups } = buildContainer();
+    const cards = await rollBatch(container, {
+      pack_id: 'test-pack',
+      count: 2,
+      customer_id: 'cus_nogroup',
+    });
+    expect(cards.map((c) => c.handle)).toEqual(['pikachu', 'pikachu']);
+    expect(listCustomerGroups).toHaveBeenCalledTimes(1);
+  });
+
+  it('an anonymous batch (no customer_id) draws on set 1 without a group lookup', async () => {
+    const { container, listCustomerGroups } = buildContainer(2);
+    const cards = await rollBatch(container, { pack_id: 'test-pack', count: 2 });
+    expect(cards.map((c) => c.handle)).toEqual(['pikachu', 'pikachu']);
+    expect(listCustomerGroups).not.toHaveBeenCalled();
+  });
+
+  it('rejects a non-positive / non-integer count before any draw (Fix 3)', async () => {
+    for (const count of [0, -1, 1.5, Number.NaN]) {
+      const { container, listPacks } = buildContainer(2);
+      await expect(
+        rollBatch(container, { pack_id: 'test-pack', count }),
+      ).rejects.toMatchObject({ type: MedusaError.Types.INVALID_DATA });
+      expect(listPacks).not.toHaveBeenCalled();
+    }
+  });
+});
 
 describe('rollOne', () => {
   it('returns a RolledCard with pokemon_dex and sprite_image keys', async () => {

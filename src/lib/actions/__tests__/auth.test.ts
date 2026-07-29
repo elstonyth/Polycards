@@ -131,6 +131,59 @@ describe('login — handle lookup is non-fatal (#9)', () => {
   });
 });
 
+// POLYCARD-BACK §4.2 — a disabled account is blocked at the emailpass token
+// exchange (blockDisabledEmailpassLogin), so the 401 surfaces on the FIRST
+// clientFetch. Without a matching AUTH_RULES pattern the operator-mandated
+// message collapsed into the generic "Could not log in" fallback, leaving the
+// player with no idea why they can't sign in.
+const DISABLED_MESSAGE =
+  'This account has been disabled. Please contact support.';
+
+describe('login — disabled account message (§4.2)', () => {
+  it('maps the backend disabled 401 to the clear message', async () => {
+    mocks.clientFetch.mockRejectedValueOnce(new Error(DISABLED_MESSAGE));
+
+    const r = await login({
+      email: 'off@polycards.app',
+      password: 'PolycardsTest123!',
+    });
+
+    expect(r).toEqual({ ok: false, error: DISABLED_MESSAGE });
+    expect(mocks.setAuthToken).not.toHaveBeenCalled();
+  });
+
+  it('still falls back to the generic message for an unrelated failure', async () => {
+    mocks.clientFetch.mockRejectedValueOnce(new Error('socket hang up'));
+
+    const r = await login({
+      email: 'a@polycards.app',
+      password: 'PolycardsTest123!',
+    });
+
+    expect(r).toEqual({
+      ok: false,
+      error: 'Could not log in. Please try again.',
+    });
+  });
+
+  // The rule must stay tight: a bare /disabled/i would hijack unrelated copy.
+  it('does not hijack an unrelated error containing the word "disabled"', async () => {
+    mocks.clientFetch.mockRejectedValueOnce(
+      new Error('Google sign-in is disabled for this project.'),
+    );
+
+    const r = await login({
+      email: 'a@polycards.app',
+      password: 'PolycardsTest123!',
+    });
+
+    expect(r).toEqual({
+      ok: false,
+      error: 'Could not log in. Please try again.',
+    });
+  });
+});
+
 // --- Google OAuth server actions (plan 053) -------------------------------
 
 // Mirrors decodeJwtPayload: split('.')[1] base64url-decoded to JSON.

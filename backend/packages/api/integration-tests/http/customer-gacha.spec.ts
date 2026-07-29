@@ -103,6 +103,11 @@ medusaIntegrationTestRunner({
             grader: 'PSA',
             grade: '10',
             market_value: 12.5,
+            // Deliberately NOT the DEFAULT_MARKET_MULTIPLIER (1.2): at the
+            // default, display_value would equal FMV × 1.2 whether the route
+            // read this column or silently fell back, and the assertion below
+            // could not fail. At 2 a fallback bug is visible.
+            market_multiplier: 2,
             image: '/qa.png',
           },
         ]);
@@ -167,7 +172,72 @@ medusaIntegrationTestRunner({
           market_value: 62.5,
         });
 
-        expect(res.data.vault).toEqual({ count: 1, market_value: 62.5 });
+        // market_value = FMV at multiplier 1 (12.5 × 5 = 62.5); display_value =
+        // the storefront price, FMV × the card's own market_multiplier
+        // (12.5 × 5 × 2 = 125 — NOT 62.5 × the 1.2 default).
+        expect(res.data.vault).toEqual({
+          count: 1,
+          market_value: 62.5,
+          display_value: 125,
+        });
+      });
+
+      it('vip.next carries the next rung (threshold + remaining); null at the top', async () => {
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        await packs.createVipLevels(
+          [
+            { level: 1, spend_threshold: 0 },
+            { level: 2, spend_threshold: 100 },
+            { level: 3, spend_threshold: 500 },
+          ].map((r) => ({
+            ...r,
+            voucher_amount: 0,
+            box_tier: 'bronze',
+            frame_unlock: false,
+            direct_referral_pct: 1,
+            prizes: null,
+          })),
+        );
+
+        // Mid-ladder: RM150 of pack_open turnover → L2, next rung is L3.
+        const midId = await registerCustomer('gacha-view-vip-mid@test.dev');
+        await packs.createCreditTransactions([
+          {
+            customer_id: midId,
+            amount: -150,
+            reason: 'pack_open' as const,
+            pull_id: null,
+            reference: null,
+          },
+        ]);
+        const mid = await view(midId, adminHeaders());
+        expect(mid.status).toBe(200);
+        expect(mid.data.vip).toMatchObject({
+          level: 2,
+          highest_level_ever: 2,
+          spend: 150,
+        });
+        expect(mid.data.vip.next).toEqual({
+          level: 3,
+          threshold: 500,
+          remaining: 350,
+        });
+
+        // Top of the ladder: no rung above L3 → next is null (not undefined).
+        const topId = await registerCustomer('gacha-view-vip-top@test.dev');
+        await packs.createCreditTransactions([
+          {
+            customer_id: topId,
+            amount: -500,
+            reason: 'pack_open' as const,
+            pull_id: null,
+            reference: null,
+          },
+        ]);
+        const top = await view(topId, adminHeaders());
+        expect(top.status).toBe(200);
+        expect(top.data.vip.level).toBe(3);
+        expect(top.data.vip.next).toBeNull();
       });
     });
   },
