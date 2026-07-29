@@ -19,14 +19,18 @@ const USE_GATEWAY = process.env.NEXT_PUBLIC_PAYMENTS_PROVIDER === 'globepay';
 // The gateway's band is narrower than the mock's on both ends, and it rejects
 // anything outside it with a generic "Invalid Transaction Amount" that names no
 // numbers. Catch it in the sheet so the customer gets a message they can act on.
-// Confirmed by the provider 2026-07-22 and verified live: 1000 accepted, 1001
-// rejected (docs/payments/globepay365-setup.md).
+// Production band, confirmed by the provider 2026-07-29: RM 30 – RM 10,000 for
+// both Online Banking and QR (docs/payments/globepay365-setup.md). Mirrors the
+// backend's GLOBEPAY_MIN_RM/GLOBEPAY_MAX_RM.
 const GATEWAY_MIN_RM = 30;
-const GATEWAY_MAX_RM = 1000;
+const GATEWAY_MAX_RM = 10000;
 
 // The mock's 10/25 rungs are below the gateway's floor, so offering them would
-// guarantee a rejection on the real path.
-const PRESETS = USE_GATEWAY ? [30, 50, 100, 200] : [10, 25, 50, 100];
+// guarantee a rejection on the real path. The gateway rungs span the production
+// band (RM 30 – 10,000) rather than hugging its floor — 5,000 is a real ticket
+// size now that the ceiling is 10,000, and it was impossible under the test
+// account's RM 1,000 cap.
+const PRESETS = USE_GATEWAY ? [50, 250, 500, 5000] : [10, 25, 50, 100];
 const DEFAULT_AMOUNT = USE_GATEWAY ? '50' : '25';
 
 /**

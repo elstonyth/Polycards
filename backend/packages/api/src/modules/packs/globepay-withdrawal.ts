@@ -24,12 +24,17 @@ import { newMerchantTransactionId } from './globepay-deposit';
 // reconcile sweep, never a double refund.
 
 /**
- * Per-transaction payout band. The provider has NOT confirmed payout-specific
- * limits (deposit band is RM 30–1000, confirmed 2026-07-22); until they do,
- * mirror it. Their own rejection names no numbers, so we say them.
+ * Per-transaction payout band, confirmed by the provider 2026-07-29 (Sean):
+ * MYR Payout is RM 50 – RM 50,000, a DIFFERENT band from deposits (RM 30 –
+ * 10,000) — the floor is higher and the ceiling is five times larger. They also
+ * noted that anything above RM 10,000 is settled as several bank slips on their
+ * side; that is their internal batching, invisible to us, and it does not change
+ * what we submit or what a callback reports.
+ *
+ * Their own rejection names no numbers, so we say them.
  */
-export const GLOBEPAY_WD_MIN_RM = 30;
-export const GLOBEPAY_WD_MAX_RM = 1000;
+export const GLOBEPAY_WD_MIN_RM = 50;
+export const GLOBEPAY_WD_MAX_RM = 50000;
 
 /**
  * Withdrawals get their OWN switch on top of globepayEnabled(): deposits can

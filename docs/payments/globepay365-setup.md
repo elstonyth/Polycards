@@ -211,7 +211,7 @@ credits `Amount`; no change was needed.
 
 | Question | Answer |
 | --- | --- |
-| Amount limits | Min **RM 30**, max **RM 1000** (Bryan) |
+| Amount limits (TEST account) | Min **RM 30**, max **RM 1000** (Bryan) |
 | Which methods to use | "使用 OB 和 BQR 即可" (Sean) |
 | Which field to credit | `Amount`, not `NetAmount` (Mizuko) |
 
@@ -374,6 +374,34 @@ env. That is the "not deployed" reading, not a fault.
   `ReturnUrl` behaviour remain unobserved.
 - Alerting on pending-past-window is not built; the Deposits page shows it, but
   someone has to look.
+
+## Production limits — confirmed by Sean, 2026-07-29
+
+These are the LIVE account's, and they are not the test account's. Both bands
+are enforced in the storefront and again in the backend so an impossible amount
+never costs a round-trip.
+
+| Flow | Method codes | Min | Max |
+| --- | --- | --- | --- |
+| Deposit — Online Banking, bank to bank | `OB` | RM 30 | RM 10,000 |
+| Deposit — QR / e-wallet | `BQR` | RM 30 | RM 10,000 |
+| Payout | `WD` | **RM 50** | RM 50,000 |
+
+Two things to notice. The payout FLOOR is higher than the deposit floor (50 vs
+30) — they are separate bands, not one shared band, which is why
+`GLOBEPAY_WD_MIN_RM` no longer mirrors `GLOBEPAY_MIN_RM`. And the deposit
+ceiling now coincides exactly with the site-wide `TOPUP_MAX_RM` (RM 10,000),
+which is checked first, so an over-ceiling top-up is refused with the site's
+wording and the gateway band effectively only guards the floor. Both checks
+stay: one answers to us, the other to them, and they can move apart again.
+
+Storefront presets follow the wider band: RM 50 / 250 / 500 / 5,000. The old
+30/50/100/200 rungs hugged a RM 1,000 ceiling that no longer exists.
+
+Still stated rather than verified: nobody has submitted RM 10,000 or RM 50,000
+against the live account. Re-probe the edges once the gateway is armed — the
+test account's stated max turned out to be exact (1000 accepted, 1001
+`PMT10005`), so theirs are probably right, but "probably" is not a receipt.
 
 ## Production cutover (written 2026-07-29, NOT yet executed)
 

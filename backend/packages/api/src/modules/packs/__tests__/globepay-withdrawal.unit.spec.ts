@@ -321,12 +321,12 @@ describe('startGlobePayWithdrawal — money ordering', () => {
     expect(result.balance).toBe(50);
   });
 
-  it.each([29, 1001])(
+  it.each([49, 50001])(
     'rejects RM %s — outside the payout band — before any row or debit',
     async (amount) => {
       const h = harness();
       await expect(start(h, { amount })).rejects.toThrow(
-        /between RM 30 and RM 1,000/,
+        /between RM 50 and RM 50,000/,
       );
       expect(h.packs.createGlobePayWithdrawals).not.toHaveBeenCalled();
       expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();

@@ -111,7 +111,7 @@ function typeAmount(value: string) {
 describe('TopUpSheet gateway branch', () => {
   it('offers only gateway-band presets and defaults to RM 50', () => {
     const labels = buttons().map((b) => b.textContent);
-    for (const preset of ['RM 30', 'RM 50', 'RM 100', 'RM 200']) {
+    for (const preset of ['RM 50', 'RM 250', 'RM 500', 'RM 5,000']) {
       expect(labels).toContain(preset);
     }
     // The mock's RM 10 / RM 25 rungs sit below the gateway floor and would
@@ -137,18 +137,27 @@ describe('TopUpSheet gateway branch', () => {
     expect(text).not.toContain('Demo');
   });
 
-  it.each(['20', '1001'])(
-    'rejects RM %s in the sheet without calling the gateway',
-    async (amount) => {
-      typeAmount(amount);
-      await click(payButton());
-      expect(container.querySelector('[role="alert"]')?.textContent).toBe(
-        'Top-ups must be between RM 30 and RM 1,000.',
-      );
-      expect(startDeposit).not.toHaveBeenCalled();
-      expect(leaveFor).not.toHaveBeenCalled();
-    },
-  );
+  it('rejects an amount under the gateway floor without calling it', async () => {
+    typeAmount('20');
+    await click(payButton());
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+      'Top-ups must be between RM 30 and RM 10,000.',
+    );
+    expect(startDeposit).not.toHaveBeenCalled();
+    expect(leaveFor).not.toHaveBeenCalled();
+  });
+
+  // Above the ceiling there is no Pay button to press: the gateway's max now
+  // coincides with the site-wide RM 10,000 top-up cap, which disables the
+  // control outright. Pinned because it means the band error above can only
+  // ever fire for the floor.
+  it('offers no Pay button above the RM 10,000 ceiling', async () => {
+    typeAmount('10001');
+    expect(buttons().some((b) => /^Pay RM/.test(b.textContent ?? ''))).toBe(
+      false,
+    );
+    expect(startDeposit).not.toHaveBeenCalled();
+  });
 
   it('submits the amount and leaves for the cashier URL on success', async () => {
     startDeposit.mockResolvedValue({

@@ -27,16 +27,18 @@ export const GLOBEPAY_DEFAULT_METHOD = 'BQR';
 export const GLOBEPAY_MYR_METHODS = ['FPX', 'DN', 'BQR', 'OB'] as const;
 
 /**
- * Per-transaction limits, confirmed by the provider 2026-07-22 ("目前最低设置金额
- * 是30 而目前最高金额设置是1000") and verified against the live gateway: 1000 is
- * accepted, 1001 returns PMT10005.
+ * Per-transaction limits for the PRODUCTION merchant account, confirmed by the
+ * provider 2026-07-29 (Sean): Online Banking bank-to-bank and QR e-wallet both
+ * RM 30 – RM 10,000. The old RM 30–1,000 ceiling was the TEST account's, probed
+ * live on 2026-07-22 (1000 accepted, 1001 → PMT10005) — re-probe on production
+ * before treating 10,000 as verified rather than stated.
  *
  * Enforced HERE as well as in the storefront so an amount that cannot possibly
  * succeed never costs a network round-trip or leaves a failed row behind. Their
  * own rejection is a bare "Invalid Transaction Amount" with no bounds in it.
  */
 export const GLOBEPAY_MIN_RM = 30;
-export const GLOBEPAY_MAX_RM = 1000;
+export const GLOBEPAY_MAX_RM = 10000;
 
 /**
  * Is the real gateway switched on? Mirrors mockTopupAllowed's fail-closed
@@ -113,9 +115,13 @@ export async function startGlobePayDeposit(
   }
   const amount = input.amount as number;
 
-  // The site-wide ceiling (TOPUP_MAX_RM) is far above what this gateway
-  // accepts, so check its own band too — and say the numbers, because the
-  // gateway's refusal does not.
+  // The gateway's own band, said in numbers because their refusal is a bare
+  // "Invalid Transaction Amount". Since 2026-07-29 the production ceiling
+  // (RM 10,000) is EXACTLY the site-wide TOPUP_MAX_RM, which is checked above,
+  // so in practice only the floor arrives here — anything over 10,000 is
+  // already refused as "at most RM 10,000 per top-up". Both bounds stay
+  // asserted anyway: TOPUP_MAX_RM is an anti-typo guard that answers to us,
+  // the band answers to them, and they are free to move apart again.
   if (amount < GLOBEPAY_MIN_RM || amount > GLOBEPAY_MAX_RM) {
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,

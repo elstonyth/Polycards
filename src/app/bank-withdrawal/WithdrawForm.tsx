@@ -10,10 +10,12 @@ import {
 } from '@/lib/actions/vault';
 import { Pill } from '@/components/ui/pill';
 
-// The real payout band (mirrors the backend's GLOBEPAY_WD_MIN/MAX). The
-// gateway's own rejection names no numbers, so the form does.
-const WD_MIN_RM = 30;
-const WD_MAX_RM = 1000;
+// The real payout band (mirrors the backend's GLOBEPAY_WD_MIN/MAX): RM 50 –
+// RM 50,000, confirmed by the provider 2026-07-29. NOT the same band as
+// deposits — the payout floor is higher. The gateway's own rejection names no
+// numbers, so the form does.
+const WD_MIN_RM = 50;
+const WD_MAX_RM = 50000;
 
 /**
  * Bank-withdrawal form. The balance is debited the moment the request is

@@ -178,12 +178,28 @@ describe('startGlobePayDeposit', () => {
   // Provider-confirmed band (RM 30–1000, 2026-07-22). Checked before the
   // network call: their own refusal is a bare "Invalid Transaction Amount"
   // that names no numbers, and a doomed request would still leave a failed row.
-  it.each([29, 1001, 5000])(
+  it.each([29])(
     'rejects RM %s — outside the gateway band — without calling the gateway',
     async (amount) => {
       const h = harness();
       await expect(start(h, { amount })).rejects.toThrow(
-        /between RM 30 and RM 1,000/,
+        /between RM 30 and RM 10,000/,
+      );
+      expect(submitMock).not.toHaveBeenCalled();
+      expect(h.packs.createGlobePayDeposits).not.toHaveBeenCalled();
+    },
+  );
+
+  // The production ceiling now coincides with the site-wide TOPUP_MAX_RM, which
+  // is checked first — so over-the-top amounts are refused with THAT wording.
+  // Same outcome, different sentence; pinned so a future change to either
+  // number cannot silently let one through.
+  it.each([10001, 50000])(
+    'rejects RM %s at the site-wide top-up ceiling, before the gateway',
+    async (amount) => {
+      const h = harness();
+      await expect(start(h, { amount })).rejects.toThrow(
+        /at most RM 10,000 per top-up/,
       );
       expect(submitMock).not.toHaveBeenCalled();
       expect(h.packs.createGlobePayDeposits).not.toHaveBeenCalled();
