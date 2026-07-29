@@ -178,7 +178,8 @@ export default function ContactPage() {
       </section>
 
       {/* 03 — quick answers: the three questions support hears most, answered
-          before the DM (HowItRips numbered-row idiom, each row a real link) */}
+          before the DM (numbered-row idiom, same as /about's how-it-works; each
+          row a real link) */}
       <section aria-labelledby="quick-heading" className="mt-14 w-full">
         <div className="flex items-baseline justify-between">
           <h2 id="quick-heading" className="font-heading text-2xl text-white">

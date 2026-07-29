@@ -8,7 +8,8 @@ export type FeedTemplate =
   | 'delivery_status'
   | 'topup_credited'
   | 'withdrawal_paid'
-  | 'withdrawal_refunded';
+  | 'withdrawal_refunded'
+  | 'challenge_payout';
 
 // The channel our CUSTOMER in-app feed lives on. Deliberately NOT 'feed':
 // that channel is the Medusa admin dashboard's own notification drawer, which

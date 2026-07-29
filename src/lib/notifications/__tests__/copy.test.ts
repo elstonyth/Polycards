@@ -10,6 +10,7 @@ const TEMPLATES = [
   'topup_credited',
   'withdrawal_paid',
   'withdrawal_refunded',
+  'challenge_payout',
 ] as const;
 
 // /vip, /vouchers, /daily, /referrals, /invite and /rewards all 404 while the
@@ -50,10 +51,12 @@ describe('NOTIFICATION_COPY', () => {
     const always = TEMPLATES.filter((t) => copyFor(t).policy === 'always');
     // voucher_claimed / topup_credited have their own client toast;
     // reward_won has PrizeReveal. Toasting them would double up. The two
-    // withdrawal outcomes land asynchronously with no owning tab, so they
-    // DO toast.
+    // withdrawal outcomes land asynchronously with no owning tab, and
+    // challenge_payout settles server-side between sessions — nothing else
+    // announces any of them, so all three DO toast.
     expect(always.sort()).toEqual(
       [
+        'challenge_payout',
         'commission_matured',
         'delivery_status',
         'vip_level_up',
@@ -167,6 +170,30 @@ describe('body rendering', () => {
     expect(copyFor('withdrawal_refunded').body({ amount_myr: 50 })).toBe(
       'The transfer could not be completed — RM 50.00 is back in your balance.',
     );
+  });
+
+  it('describes a challenge payout without linking to suspended surfaces', () => {
+    const c = copyFor('challenge_payout');
+    expect(c.href).toBe('/leaderboard');
+    const body = c.body({ rank: 2, credits: 150, card_count: 1 });
+    expect(body).toContain('#2');
+    expect(body).toContain('RM');
+  });
+
+  it('challenge_payout composes credits and cards naturally', () => {
+    const body = copyFor('challenge_payout').body;
+    expect(body({ rank: 1, credits: 150, card_count: 0 })).toBe(
+      'You finished #1 — RM 150.00 in credit added to your account.',
+    );
+    expect(body({ rank: 3, credits: 0, card_count: 2 })).toBe(
+      'You finished #3 — 2 featured cards added to your account.',
+    );
+    expect(body({ rank: 2, credits: 50, card_count: 1 })).toBe(
+      'You finished #2 — RM 50.00 in credit and a featured card added to your account.',
+    );
+    // Nothing granted (all cards skipped, no credits) → no detail line.
+    expect(body({ rank: 4, credits: 0, card_count: 0 })).toBeNull();
+    expect(body({ credits: 50, card_count: 1 })).toBeNull(); // rank missing
   });
 
   it('reward_won never calls a voucher win "credit"', () => {
