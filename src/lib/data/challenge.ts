@@ -83,16 +83,15 @@ export interface ChallengeSummary {
 }
 /** What a standings rank wins RIGHT NOW — the cumulative prize across every
  *  UNLOCKED stage at that rank (rewards stack stage over stage, same rule as
- *  the summary). The card shown is the highest unlocked stage's (the headline
- *  prize); cards from earlier unlocked stages collapse into `moreCards`;
- *  credits sum. Empty until a stage unlocks or when the backend sent no
- *  progress — the standings then render without a prize column. */
+ *  the summary). EVERY card is listed (operator: no `+N` collapse), highest
+ *  unlocked stage's first; credits sum. Empty until a stage unlocks or when
+ *  the backend sent no progress — the standings then render without a prize
+ *  column. */
 export interface ChallengeRankPrize {
   rank: number;
-  /** Headline prize card; null when this rank currently pays credits only. */
-  card: ChallengeCard | null;
-  /** ADDITIONAL prize cards from other unlocked stages at this rank. */
-  moreCards: number;
+  /** All prize cards across unlocked stages, highest stage first; [] when
+   *  this rank currently pays credits only. */
+  cards: ChallengeCard[];
   /** Formatted credit sum, e.g. "RM 1,000"; null when no credits. */
   creditsLabel: string | null;
 }
@@ -224,9 +223,9 @@ export async function getChallenge(): Promise<Challenge | null> {
       pooled === null ? [] : ordered.filter((s) => pooled >= s.thresholdMyr);
 
     // What each rank wins right now: rewards are cumulative, so a rank's prize
-    // is every unlocked stage's row at that rank. `unlocked` is ascending, so
-    // the LAST resolvable card is the highest unlocked stage's — the headline;
-    // earlier ones become a `+N` count and credits sum across stages.
+    // is every unlocked stage's row at that rank. `unlocked` is ascending;
+    // cards list highest-stage-first (the headline leads) — ALL of them, the
+    // operator rejected the +N collapse — and credits sum across stages.
     const rankPrizes: ChallengeRankPrize[] = Array.from(
       { length: 10 },
       (_, i) => i + 1,
@@ -239,19 +238,17 @@ export async function getChallenge(): Promise<Challenge | null> {
         return c ? [c] : [];
       });
       const credits = rows.reduce((sum, r) => sum + Math.max(0, r.credits), 0);
-      const headline = cards[cards.length - 1];
-      if (!headline && credits === 0) return [];
+      if (cards.length === 0 && credits === 0) return [];
       return [
         {
           rank,
-          card: headline
-            ? {
-                name: headline.name,
-                image: headline.image,
-                slabImage: headline.slab_image ?? null,
-              }
-            : null,
-          moreCards: Math.max(0, cards.length - 1),
+          cards: cards
+            .map((c) => ({
+              name: c.name,
+              image: c.image,
+              slabImage: c.slab_image ?? null,
+            }))
+            .reverse(),
           creditsLabel: credits > 0 ? rm0(credits) : null,
         },
       ];

@@ -1,0 +1,13 @@
+# Waived gitleaks false positives (fingerprint format:
+# <commit>:<file>:<rule>:<line> — see ci.yml gitleaks job).
+
+# Synthetic integration-test admin password ('bulk-delivery-test-pw-1'),
+# same fixture pattern as every sibling http spec; seeds an ephemeral
+# test-DB admin only. Not a credential.
+#
+# Paired with an inline `// gitleaks:allow` on that line. The fingerprint below
+# pins ONE commit sha, and this repo squash-merges — master re-authors the line
+# under a new sha, which this entry would no longer match. The inline comment is
+# what waives it going forward (sha-independent); the entry stays because the
+# branch commit itself is still scanned in history.
+8dccef9feb8a4f95484fef1f63f42db364e6fe26:backend/packages/api/integration-tests/http/delivery-orders-bulk.spec.ts:generic-api-key:9

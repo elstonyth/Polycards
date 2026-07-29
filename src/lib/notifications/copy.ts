@@ -90,8 +90,8 @@ export const NOTIFICATION_COPY: Record<string, NotificationCopy> = {
         ? `You reached level ${levels[0]}.`
         : `You reached levels ${joinNatural(levels)}.`;
     },
-    href: '/vip',
-    action: 'View VIP',
+    href: null,
+    action: null,
   },
 
   commission_matured: {
@@ -120,7 +120,12 @@ export const NOTIFICATION_COPY: Record<string, NotificationCopy> = {
           ? `Your order is on its way. Tracking: ${tracking}`
           : 'Your order is on its way.';
       }
-      if (status === 'delivered') return 'Your order was delivered.';
+      // `completed` is the wire status; "delivered" is the customer's word.
+      // 'delivered' = legacy token — persisted notification rows and
+      // rollback-era backends still emit it during the expand window.
+      if (status === 'completed' || status === 'delivered') {
+        return 'Your order was delivered.';
+      }
       if (status === 'canceled') {
         return 'Your delivery was canceled. Contact support if this was unexpected.';
       }
@@ -142,18 +147,22 @@ export const NOTIFICATION_COPY: Record<string, NotificationCopy> = {
       if (title) return `You won ${title}.`;
       if (amount && amount > 0) {
         // A voucher is a grant, not money: nothing reaches the balance until
-        // it is claimed on /vip (at which point voucher_claimed fires). Saying
-        // "in credit" here would claim a payment that has not happened, and
-        // could leave the grant sitting unclaimed. PrizeReveal already draws
-        // this distinction — the feed row must not contradict it.
+        // it is claimed (claiming is suspended alongside the VIP page — spec
+        // 2026-07-29). Saying "in credit" here would claim a payment that has
+        // not happened, and could leave the grant sitting unclaimed.
+        // PrizeReveal already draws this distinction — the feed row must not
+        // contradict it.
         return strOf(data, 'prize_kind') === 'voucher'
-          ? `You won a ${rm(amount)} voucher — claim it on the VIP page.`
+          ? `You won a ${rm(amount)} voucher.`
           : `You won ${rm(amount)} in credit.`;
       }
       return null;
     },
-    href: '/rewards',
-    action: 'View rewards',
+    // /rewards was a redirect stub into /vip, so it 404s with the rest of the
+    // suspended reward surfaces (spec 2026-07-29) — historical reward_won rows
+    // would otherwise still render a live "View rewards →" into a dead route.
+    href: null,
+    action: null,
   },
 
   voucher_claimed: {
@@ -170,8 +179,8 @@ export const NOTIFICATION_COPY: Record<string, NotificationCopy> = {
         ? `${rm(amount)} credited from your Level ${level} voucher.`
         : `${rm(amount)} credited to your balance.`;
     },
-    href: '/vip',
-    action: 'View VIP',
+    href: null,
+    action: null,
   },
 
   topup_credited: {

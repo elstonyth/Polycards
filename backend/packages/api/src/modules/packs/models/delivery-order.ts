@@ -10,7 +10,14 @@ export const DeliveryOrder = model
     id: model.id().primaryKey(),
     customer_id: model.text(),
     status: model
-      .enum(["requested", "packing", "shipped", "delivered", "canceled"])
+      .enum([
+        "requested",
+        "processed",
+        "ready_to_ship",
+        "shipped",
+        "completed",
+        "canceled",
+      ])
       .default("requested"),
     // Address snapshot (denormalized from StoreCustomerAddress at request time).
     ship_name: model.text(),
@@ -31,6 +38,8 @@ export const DeliveryOrder = model
     // Reserved for a future "price the shipping" pass; never set in v1.
     shipping_fee: model.bigNumber().nullable(),
     shipped_at: model.dateTime().nullable(),
+    // Column name predates the processed/ready_to_ship/completed rename — it
+    // now stamps when status hits 'completed', not a literal "delivered" status.
     delivered_at: model.dateTime().nullable(),
     // True when this shipment fulfils a reward-economy prize (Pull.source='reward').
     // Used by recordRewardWithdrawal for the daily withdrawal cap COUNT.

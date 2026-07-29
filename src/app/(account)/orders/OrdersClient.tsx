@@ -18,24 +18,55 @@ import { useModalA11y } from '@/lib/use-modal-a11y';
 
 type Tone = 'green' | 'sky' | 'amber' | 'neutral';
 
-// Map delivery-order status → badge tone.
+// Map delivery-order status → badge tone. `packing`/`delivered` are the OLD
+// names an old backend can still emit during a deploy (see DeliveryOrderSchema)
+// — they render as their new equivalents rather than falling to neutral.
 const STATUS_TONE: Record<DeliveryOrderView['status'], Tone> = {
   requested: 'amber',
   packing: 'amber',
+  processed: 'amber',
+  ready_to_ship: 'amber',
   shipped: 'sky',
   delivered: 'green',
+  completed: 'green',
   canceled: 'neutral',
 };
 
-// Pre-ship statuses: the address is editable and the order is cancelable only
-// before it ships (mirrors the backend's transition guards).
-const PRE_SHIP: ReadonlySet<DeliveryOrderView['status']> = new Set([
+// Customer-facing label per status. Exhaustive Record over the (transitional)
+// status union, so a new status is a type error here instead of a raw snake_case
+// token leaking into the UI. `completed` is operator vocabulary — a customer is
+// told "Delivered"; the legacy `packing`/`delivered` map onto the same words as
+// the new names they were renamed to, so a skewed row reads identically.
+const STATUS_LABEL: Record<DeliveryOrderView['status'], string> = {
+  requested: 'Requested',
+  packing: 'Processed',
+  processed: 'Processed',
+  ready_to_ship: 'Ready to ship',
+  shipped: 'Shipped',
+  delivered: 'Delivered',
+  completed: 'Delivered',
+  canceled: 'Canceled',
+};
+
+// The two pre-ship windows mirror the backend's guards, and they differ:
+// the address locks from `ready_to_ship` on (a printed label must not diverge
+// from it), while cancel stays open until the parcel actually ships. `packing`
+// is the legacy expand-window token (~`processed`): the backend's own EDITABLE
+// and CANCELABLE lists accept it, so offering the affordance here is a call it
+// honors, not one it refuses. These sets must keep agreeing with those two
+// backend lists — all three drop `packing` in the same release as the CONTRACT
+// migration named in Migration20260727000000.
+const ADDRESS_EDITABLE: ReadonlySet<DeliveryOrderView['status']> = new Set([
   'requested',
   'packing',
+  'processed',
 ]);
-
-const humanize = (s: string) =>
-  s.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
+const CANCELABLE: ReadonlySet<DeliveryOrderView['status']> = new Set([
+  'requested',
+  'packing',
+  'processed',
+  'ready_to_ship',
+]);
 
 // Only render http(s) or same-origin root-relative proof URLs — never a
 // `javascript:`/`data:` scheme. Defense-in-depth: the admin API already rejects
@@ -519,8 +550,11 @@ export default function OrdersClient({
                   )}
                 </td>
                 <td className="whitespace-nowrap px-4 py-3 text-white/80">
+                  {/* `?? o.status` alongside the exhaustive map: a status the
+                      schema starts allowing before this map learns it shows the
+                      raw token, never an empty badge. */}
                   <Badge tone={STATUS_TONE[o.status] ?? 'neutral'}>
-                    {humanize(o.status)}
+                    {STATUS_LABEL[o.status] ?? o.status}
                   </Badge>
                   {canceledIds.has(o.id) && (
                     <p className="mt-1.5 text-[11px] text-white/50">
@@ -536,15 +570,17 @@ export default function OrdersClient({
                   )}
                 </td>
                 <td className="whitespace-nowrap px-4 py-3 text-right text-white/80">
-                  {PRE_SHIP.has(o.status) && (
+                  {CANCELABLE.has(o.status) && (
                     <span className="inline-flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setEditing(o)}
-                        className="rounded-lg border border-white/15 px-3 py-1.5 text-[12px] font-semibold text-white/70 transition-colors hover:text-white"
-                      >
-                        Edit address
-                      </button>
+                      {ADDRESS_EDITABLE.has(o.status) && (
+                        <button
+                          type="button"
+                          onClick={() => setEditing(o)}
+                          className="rounded-lg border border-white/15 px-3 py-1.5 text-[12px] font-semibold text-white/70 transition-colors hover:text-white"
+                        >
+                          Edit address
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => setCanceling(o)}

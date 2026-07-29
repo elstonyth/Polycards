@@ -8,14 +8,20 @@ import {
 } from '../feed-events';
 
 describe('shouldNotifyDeliveryStatus', () => {
-  it('notifies on shipped, delivered and canceled', () => {
-    expect(shouldNotifyDeliveryStatus('packing', 'shipped')).toBe(true);
-    expect(shouldNotifyDeliveryStatus('shipped', 'delivered')).toBe(true);
+  it('notifies on shipped, completed and canceled', () => {
+    expect(shouldNotifyDeliveryStatus('processed', 'shipped')).toBe(true);
+    expect(shouldNotifyDeliveryStatus('shipped', 'completed')).toBe(true);
     expect(shouldNotifyDeliveryStatus('requested', 'canceled')).toBe(true);
   });
 
-  it('does NOT notify on packing — the noisiest operator transition', () => {
-    expect(shouldNotifyDeliveryStatus('requested', 'packing')).toBe(false);
+  it('does NOT notify on processed — an operator back-office step', () => {
+    expect(shouldNotifyDeliveryStatus('requested', 'processed')).toBe(false);
+  });
+
+  it('does NOT notify on ready_to_ship — an operator back-office step', () => {
+    expect(shouldNotifyDeliveryStatus('processed', 'ready_to_ship')).toBe(
+      false,
+    );
   });
 
   it('does NOT notify on requested — that is the customer own action', () => {
@@ -26,21 +32,21 @@ describe('shouldNotifyDeliveryStatus', () => {
     // A tracking-only admin update returns the UNCHANGED status from the step,
     // so this guard is what stops a tracking edit from firing a notification.
     expect(shouldNotifyDeliveryStatus('shipped', 'shipped')).toBe(false);
-    expect(shouldNotifyDeliveryStatus('delivered', 'delivered')).toBe(false);
+    expect(shouldNotifyDeliveryStatus('completed', 'completed')).toBe(false);
   });
 
   it('does NOT notify on missing or unknown next status', () => {
-    expect(shouldNotifyDeliveryStatus('packing', null)).toBe(false);
-    expect(shouldNotifyDeliveryStatus('packing', undefined)).toBe(false);
-    expect(shouldNotifyDeliveryStatus('packing', '')).toBe(false);
-    expect(shouldNotifyDeliveryStatus('packing', 'teleported')).toBe(false);
+    expect(shouldNotifyDeliveryStatus('processed', null)).toBe(false);
+    expect(shouldNotifyDeliveryStatus('processed', undefined)).toBe(false);
+    expect(shouldNotifyDeliveryStatus('processed', '')).toBe(false);
+    expect(shouldNotifyDeliveryStatus('processed', 'teleported')).toBe(false);
   });
 });
 
 describe('idempotency keys', () => {
   it('delivery key is one per order per status', () => {
     expect(deliveryFeedKey('do_1', 'shipped')).toBe('delivery:do_1:shipped');
-    expect(deliveryFeedKey('do_1', 'delivered')).not.toBe(
+    expect(deliveryFeedKey('do_1', 'completed')).not.toBe(
       deliveryFeedKey('do_1', 'shipped'),
     );
   });

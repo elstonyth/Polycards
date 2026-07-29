@@ -33,12 +33,46 @@ export async function GET(
     { defaultLimit: 50, maxLimit: 100 },
   );
 
-  const allPulls = await packs.listPulls(
-    {},
-    { order: { rolled_at: "DESC" }, take: ROLLUP_WINDOW }
-  );
+  // Optional ?source= filter (pack | reward). The All Orders "Pack purchases"
+  // tab passes source=pack so reward-economy pulls never render as purchases;
+  // the Pull Ledger stays all-source. Rollups stay UNFILTERED on purpose —
+  // they are global stats, not a view of the current page.
+  const rawSource = req.query.source;
+  const source =
+    typeof rawSource === "string" && rawSource.length ? rawSource : undefined;
+  if (source !== undefined && source !== "pack" && source !== "reward") {
+    res.status(400).json({ message: "source must be 'pack' or 'reward'" });
+    return;
+  }
+  const ledgerFilter: Record<string, unknown> = source ? { source } : {};
+
+  // Optional ?customer_id= — the per-player view. Stricter than ?source=:
+  // absent means unscoped, but an empty/blank value 400s instead of silently
+  // falling back to every customer's pulls. A repeated param arrives as an
+  // array and 400s too.
+  const rawCustomerId = req.query.customer_id;
+  const customerId =
+    typeof rawCustomerId === "string" ? rawCustomerId.trim() : undefined;
+  if (rawCustomerId !== undefined && (!customerId || customerId.length > 64)) {
+    res
+      .status(400)
+      .json({ message: "customer_id must be a string of 1-64 characters" });
+    return;
+  }
+  if (customerId) ledgerFilter.customer_id = customerId;
+
+  // Rollups are GLOBAL stats, so a scoped view gets NONE rather than site-wide
+  // numbers that read as this one player's — skip the window fetch entirely and
+  // let topCards/topRarities fall out empty. Ledger rows still resolve their own
+  // card + per-pack rarity below (`handles` also spreads `ledger`).
+  const allPulls = customerId
+    ? []
+    : await packs.listPulls(
+        {},
+        { order: { rolled_at: "DESC" }, take: ROLLUP_WINDOW }
+      );
   const [ledger, total] = await packs.listAndCountPulls(
-    {},
+    ledgerFilter,
     { order: { rolled_at: "DESC" }, skip: offset, take: limit }
   );
 

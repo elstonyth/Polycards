@@ -19,6 +19,34 @@ export async function GET(
     { customer_id: id },
     { order: { created_at: 'DESC' }, skip: offset, take: limit },
   );
+  // Ledger display id where present (POLYCARD-BACK §4.3 Wallet tab). SP rows
+  // key on source_transaction_id (the open_id); TP/SE/AD key on the
+  // credit_transaction's own id (see each writer's ref_id choice in the
+  // ledger epic plan). ONE batched lookup, not per-row.
+  const refIds = rows
+    .map((t: any) =>
+      t.reason === 'pack_open' ? t.source_transaction_id : t.id,
+    )
+    .filter((r: unknown): r is string => typeof r === 'string' && r !== '');
+  const ledgerRows = refIds.length
+    ? await packs.listLedgerEntries(
+        { ref_id: refIds },
+        // Deliberately uncapped: buildQuery leaves limit undefined without
+        // `take`, and a cap here would silently drop display ids (no error) if
+        // two ledger types ever shared a ref_id.
+        { select: ['ref_id', 'display_id'] },
+      )
+    : [];
+  // Typed inline rather than `any`: the `select` above pins exactly these two
+  // columns, and the generated listLedgerEntries return type is too loose to
+  // say so. (The `t: any`s on credit_transaction rows are this file's
+  // pre-existing style, untouched here.)
+  const displayIdByRefId = new Map<string, string>(
+    ledgerRows.map((l: { ref_id: string; display_id: string }) => [
+      l.ref_id,
+      l.display_id,
+    ]),
+  );
   res.json({
     total,
     items: rows.map((t: any) => ({
@@ -27,6 +55,10 @@ export async function GET(
       reason: t.reason,
       reference: t.reference ?? null,
       created_at: t.created_at,
+      ledger_display_id:
+        displayIdByRefId.get(
+          t.reason === 'pack_open' ? t.source_transaction_id : t.id,
+        ) ?? null,
     })),
   });
 }

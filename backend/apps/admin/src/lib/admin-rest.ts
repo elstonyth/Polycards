@@ -7,14 +7,29 @@ import type { PullsResponse } from './packs-api';
 
 declare const __BACKEND_URL__: string;
 
-async function errorMessage(res: Response): Promise<string> {
+// Every failing call in this file rejects through here, so the HTTP status is
+// carried on the Error everywhere rather than only on the one route that needed
+// it. Without it a page can only match on `message`, and an unrouted Medusa 404
+// carries NO message field at all — so "not found" and "the backend restarted"
+// are indistinguishable, and the operator reads a 500 as a deleted record.
+async function httpError(res: Response): Promise<Error> {
+  let message: string;
   try {
     const data = await res.json();
-    return (data && data.message) || `Request failed (${res.status}).`;
+    message = (data && data.message) || `Request failed (${res.status}).`;
   } catch {
-    return `Request failed (${res.status}).`;
+    message = `Request failed (${res.status}).`;
   }
+  return Object.assign(new Error(message), { status: res.status });
 }
+
+/** The HTTP status a rejected admin-rest call failed with, or undefined when
+ *  the request never got a response (offline, DNS, CORS) — in which case the
+ *  failure is emphatically NOT a 404 and must not be reported as one. */
+export const httpStatus = (err: unknown): number | undefined => {
+  const s = (err as { status?: unknown } | null | undefined)?.status;
+  return typeof s === 'number' ? s : undefined;
+};
 
 // Upload one image to the validated POST /admin/media route (type/resolution/
 // aspect/size gated server-side; stores the original untouched). Returns the
@@ -34,7 +49,7 @@ export async function uploadImage(
     credentials: 'include',
   });
   if (!res.ok) {
-    throw new Error(await errorMessage(res));
+    throw await httpError(res);
   }
   const data = (await res.json()) as { url?: string };
   const url = data.url;
@@ -50,7 +65,7 @@ export async function deleteCard(handle: string): Promise<void> {
     { method: 'DELETE', credentials: 'include' },
   );
   if (!res.ok) {
-    throw new Error(await errorMessage(res));
+    throw await httpError(res);
   }
 }
 
@@ -60,7 +75,7 @@ export async function deletePack(slug: string): Promise<void> {
     { method: 'DELETE', credentials: 'include' },
   );
   if (!res.ok) {
-    throw new Error(await errorMessage(res));
+    throw await httpError(res);
   }
 }
 
@@ -69,7 +84,7 @@ async function getJson<T>(path: string): Promise<T> {
     credentials: 'include',
   });
   if (!res.ok) {
-    throw new Error(await errorMessage(res));
+    throw await httpError(res);
   }
   return (await res.json()) as T;
 }
@@ -100,8 +115,19 @@ export async function listEligibleProducts(): Promise<EligibleProduct[]> {
 
 // ── Pull ledger ───────────────────────────────────────────────────────────────
 
-export const getPulls = (page = 0, limit = 50) =>
-  getJson<PullsResponse>(`/admin/pulls?limit=${limit}&offset=${page * limit}`);
+// `customerId` scopes the ledger to one player. Blank values are OMITTED — the
+// route 400s on an empty customer_id rather than falling back to every player.
+export const getPulls = (
+  page = 0,
+  limit = 50,
+  source?: 'pack' | 'reward',
+  customerId?: string,
+) =>
+  getJson<PullsResponse>(
+    `/admin/pulls?limit=${limit}&offset=${page * limit}${source ? `&source=${source}` : ''}${
+      customerId ? `&customer_id=${encodeURIComponent(customerId)}` : ''
+    }`,
+  );
 
 // ── Customer support view ────────────────────────────────────────────────────
 
@@ -152,8 +178,16 @@ export interface CustomerGacha {
   balance: number;
   transactions: SupportTransaction[];
   pulls: SupportPull[];
-  vault: { count: number; market_value: number };
-  vip: { level: number; highest_level_ever: number; spend: number } | null;
+  /** market_value = raw FMV owed; display_value = FMV × the card's own markup,
+   *  i.e. the number the storefront shows the player. */
+  vault: { count: number; market_value: number; display_value: number };
+  vip: {
+    level: number;
+    highest_level_ever: number;
+    spend: number;
+    /** null at the top of the ladder. */
+    next: { level: number; threshold: number; remaining: number } | null;
+  } | null;
 }
 
 // Core Medusa admin customer search (?q matches email/name).
@@ -175,16 +209,29 @@ export const getCustomerTransactions = (id: string, page = 0, limit = 25) =>
     `/admin/customers/${encodeURIComponent(id)}/transactions?limit=${limit}&offset=${page * limit}`,
   );
 
-export const getCustomerPulls = (id: string, page = 0, limit = 25) =>
-  getJson<{
+// `opts` narrows the history server-side (status = vaulted | bought_back |
+// delivering | delivered, source = pack | reward). Blank values are OMITTED so
+// every filter param follows one rule (see getPulls).
+export const getCustomerPulls = (
+  id: string,
+  page = 0,
+  limit = 25,
+  opts?: { status?: string; source?: string },
+) => {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(page * limit),
+  });
+  if (opts?.status) params.set('status', opts.status);
+  if (opts?.source) params.set('source', opts.source);
+  return getJson<{
     items: SupportPull[];
     total: number;
     /** firm:false = the backend is on its FX display fallback — every
      *  customer sell is being refused while quotes still show amounts. */
     fx?: { rate: number; firm: boolean };
-  }>(
-    `/admin/customers/${encodeURIComponent(id)}/pulls?limit=${limit}&offset=${page * limit}`,
-  );
+  }>(`/admin/customers/${encodeURIComponent(id)}/pulls?${params}`);
+};
 
 // ── Customer 360: referral tree + commissions (Phase 4 P4.1) ─────────────────
 
@@ -244,11 +291,17 @@ export interface AuditRow {
   admin_id: string;
 }
 
+// frozen (funds) and disabled (login) are orthogonal — one can be set without
+// the other, and each carries its own reason/actor/timestamp.
 export interface AccountState {
   frozen: boolean;
   freeze_reason: string | null;
   freeze_cause: string | null;
   frozen_at: string | null;
+  disabled: boolean;
+  disabled_reason: string | null;
+  disabled_by: string | null;
+  disabled_at: string | null;
 }
 
 export interface CustomerAudit {
@@ -269,7 +322,7 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    throw new Error(await errorMessage(res));
+    throw await httpError(res);
   }
   return (await res.json()) as T;
 }
@@ -321,7 +374,7 @@ export async function adjustCustomerCredits(
     },
   );
   if (!res.ok) {
-    throw new Error(await errorMessage(res));
+    throw await httpError(res);
   }
   return (await res.json()) as { amount: number; balance: number };
 }
@@ -469,9 +522,10 @@ export const getFxHistory = () =>
 
 export type DeliveryStatus =
   | 'requested'
-  | 'packing'
+  | 'processed'
+  | 'ready_to_ship'
   | 'shipped'
-  | 'delivered'
+  | 'completed'
   | 'canceled';
 
 export interface AdminDeliveryItem {
@@ -516,15 +570,33 @@ export interface DeliveryOrdersPage {
 export async function listDeliveryOrders(
   status?: DeliveryStatus,
   page = 0,
+  q?: string,
   limit = 50,
+  customerId?: string,
 ): Promise<DeliveryOrdersPage> {
   const params = new URLSearchParams({
     limit: String(limit),
     offset: String(page * limit),
   });
   if (status) params.set('status', status);
+  // Id-substring search; ANDs with ?status= server-side. The backend rejects
+  // anything over 64 chars, so don't send a longer one.
+  if (q) params.set('q', q.slice(0, 64));
+  // Scopes the table to one player. Blank is OMITTED, never sent empty.
+  if (customerId) params.set('customer_id', customerId);
   return getJson<DeliveryOrdersPage>(`/admin/delivery-orders?${params}`);
 }
+
+// Mark up to 100 orders with one status. Partial success is the contract:
+// `skipped` carries the refusal (or the benign `already <status>`) per id.
+export const bulkUpdateDeliveryOrders = (
+  ids: string[],
+  status: DeliveryStatus,
+) =>
+  postJson<{ updated: string[]; skipped: { id: string; reason: string }[] }>(
+    '/admin/delivery-orders/bulk',
+    { ids, status },
+  );
 
 export async function getDeliveryOrder(
   id: string,
@@ -553,7 +625,7 @@ export async function updateDeliveryOrder(
     },
   );
   if (!res.ok) {
-    throw new Error(await errorMessage(res));
+    throw await httpError(res);
   }
   return (await res.json()) as { order_id: string; status: DeliveryStatus };
 }
@@ -627,7 +699,7 @@ export async function getDailyBox(tier: string): Promise<DailyBoxEditorDTO> {
 }
 
 // Replace-all a tier's box + prizes. Throws Error(message) on a 400 validation
-// failure (errorMessage surfaces the backend MedusaError message).
+// failure (httpError surfaces the backend MedusaError message).
 export async function saveDailyBox(
   tier: string,
   body: DailyBoxSaveBody,
@@ -710,7 +782,7 @@ export const getVipLevels = () =>
   getJson<{ levels: VipLevelDTO[] }>('/admin/vip-levels');
 
 // Replace-all the ladder. Audited edit; `reason` mandatory. Throws
-// Error(message) on a 400 (errorMessage surfaces the backend MedusaError).
+// Error(message) on a 400 (httpError surfaces the backend MedusaError).
 export const saveVipLevels = (body: { levels: VipLevelDTO[]; reason: string }) =>
   postJson<{ levels: VipLevelDTO[] }>('/admin/vip-levels', body);
 
@@ -855,4 +927,407 @@ export function getGlobePayDeposits(
     offset: String(page * pageSize),
   });
   return getJson<GlobePayDepositsResponse>(`/admin/globepay/deposits?${params}`);
+// ── Epic 2 (Players) ─────────────────────────────────────────────────────────
+
+/** One row of GET /admin/players. All money fields are MYR (the route divides
+ *  the stored cents). Dates serialize as ISO strings over JSON. */
+export interface PlayerRow {
+  id: string;
+  email: string;
+  name: string | null;
+  phone: string | null;
+  /** Customer-group names — the odds-set membership the operator sees. */
+  groups: string[];
+  vip_level: number;
+  wallet_balance: number;
+  vault_value: number;
+  vault_count: number;
+  total_spend: number;
+  total_pulls: number;
+  registered_at: string;
+  last_spend_at: string | null;
+  /** Funds hold. Orthogonal to `disabled` (login block). */
+  frozen: boolean;
+  disabled: boolean;
+}
+
+export interface PlayersPage {
+  total: number;
+  offset: number;
+  limit: number;
+  players: PlayerRow[];
+}
+
+export const listPlayers = (page = 0, q?: string, limit = 50) =>
+  getJson<PlayersPage>(
+    `/admin/players?limit=${limit}&offset=${page * limit}${q ? `&q=${encodeURIComponent(q)}` : ''}`,
+  );
+
+// Login block / unblock. `reason` is mandatory (1–500 chars) and audited; the
+// admin actor is taken from the session server-side, never sent from here.
+export const disablePlayer = (id: string, reason: string) =>
+  postJson<{ disabled: boolean }>(
+    `/admin/customers/${encodeURIComponent(id)}/disable`,
+    { reason },
+  );
+
+export const enablePlayer = (id: string, reason: string) =>
+  postJson<{ disabled: boolean }>(
+    `/admin/customers/${encodeURIComponent(id)}/enable`,
+    { reason },
+  );
+
+/** Manual-cashout bank destination. Admin-only — never exposed on /store. */
+export interface PayoutDetails {
+  bank_name: string;
+  bank_account_number: string;
+  account_holder_name: string | null;
+}
+
+export const getPayoutDetails = (id: string) =>
+  getJson<{ details: PayoutDetails | null }>(
+    `/admin/customers/${encodeURIComponent(id)}/payout-details`,
+  );
+
+export const savePayoutDetails = (id: string, details: PayoutDetails) =>
+  postJson<{ details: PayoutDetails }>(
+    `/admin/customers/${encodeURIComponent(id)}/payout-details`,
+    details,
+  );
+
+// Pack spend per calendar month (MYR), newest first, at most 24 months.
+// `period` is a YYYY-MM bucket in Asia/Kuala_Lumpur; empty months are omitted.
+export const getSpendReport = (id: string) =>
+  getJson<{ periods: { period: string; spend: number }[] }>(
+    `/admin/customers/${encodeURIComponent(id)}/spend-report`,
+  );
+
+/** Core Medusa customer record (the Profile tab), not the gacha projection. */
+export interface AdminCustomerDetail {
+  id: string;
+  email: string;
+  first_name: string | null;
+  last_name: string | null;
+  phone: string | null;
+  created_at: string;
+  metadata: Record<string, unknown> | null;
+}
+
+export const getCustomerDetail = (id: string) =>
+  getJson<{ customer: AdminCustomerDetail }>(
+    `/admin/customers/${encodeURIComponent(id)}`,
+  );
+
+// ── Epic 3 (Odds) ────────────────────────────────────────────────────────────
+
+// Medusa's NATIVE admin customer-groups API (no repo-side route). The prebuilt
+// @mercurjs/admin bundle owns create/edit/membership at /customer-groups; this
+// app only reads the list and writes `metadata.odds_set` (1|2|3), which the
+// draw path resolves per customer (see packs/odds-sets.ts `coerceOddsSet` —
+// anything that is not 2 or 3, including no metadata at all, is set 1).
+export interface AdminCustomerGroup {
+  id: string;
+  name: string;
+  metadata: Record<string, unknown> | null;
+}
+
+// ponytail: limit=100, no pager — `count` reports the true total, so a shop
+// that ever grows past 100 groups will see it in the response before anyone
+// needs the pagination.
+export const listCustomerGroupsAdmin = () =>
+  getJson<{ customer_groups: AdminCustomerGroup[]; count: number }>(
+    '/admin/customer-groups?limit=100&fields=id,name,metadata',
+  );
+
+// Medusa MERGES metadata per key on update (verified live against the native
+// route: a sibling key survives this call), so posting only `odds_set` leaves
+// the rest of the group's metadata untouched — no read-modify-write needed.
+export const setGroupOddsSet = (id: string, set: 1 | 2 | 3) =>
+  postJson<{ customer_group: AdminCustomerGroup }>(
+    `/admin/customer-groups/${encodeURIComponent(id)}`,
+    { metadata: { odds_set: set } },
+  );
+
+// ── Epic 4 (Ledger) ──────────────────────────────────────────────────────────
+
+/** The seven ledger event types (POLYCARD-BACK §5.1). RF (referral payout) and
+ *  WP (challenge settlement) are filterable but have no writer yet, so they
+ *  return zero rows — kept because the ledger stores them and a later epic may
+ *  wire them, not because they are broken. */
+export type LedgerType = 'TP' | 'SP' | 'SE' | 'OD' | 'RF' | 'AD' | 'WP';
+
+/** One row of GET /admin/ledger. Deltas are MYR and NULLABLE — an event that
+ *  touches only one side leaves the other null (not 0). `payload` is the raw
+ *  per-type detail blob, rendered as JSON in the row expander. */
+export interface AdminLedgerRow {
+  id: string;
+  display_id: string;
+  type: LedgerType;
+  customer: { id: string; email: string; name: string | null };
+  occurred_at: string;
+  wallet_delta: number | null;
+  vault_delta: number | null;
+  payload: Record<string, unknown>;
+}
+
+export interface AdminLedgerPage {
+  total: number;
+  offset: number;
+  limit: number;
+  entries: AdminLedgerRow[];
+}
+
+// `from`/`to` are plain YYYY-MM-DD, exactly what `<input type="date">` emits.
+// Do NOT convert them here: the route reads a date-only bound as the operator's
+// MYT calendar day and makes the range half-open, so a client-side shift would
+// double-apply the offset (see modules/packs/ledger.ts parseMytBound).
+export const listLedger = (
+  page = 0,
+  opts: {
+    type?: LedgerType;
+    q?: string;
+    from?: string;
+    to?: string;
+    limit?: number;
+  } = {},
+) => {
+  const limit = opts.limit ?? 50;
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(page * limit),
+  });
+  if (opts.type) params.set('type', opts.type);
+  if (opts.q) params.set('q', opts.q);
+  if (opts.from) params.set('from', opts.from);
+  if (opts.to) params.set('to', opts.to);
+  return getJson<AdminLedgerPage>(`/admin/ledger?${params.toString()}`);
+};
+// ── Epic 5 (Inventory) ───────────────────────────────────────────────────────
+
+/** One line of GET /admin/purchase-invoices/:id. All money is MYR (2dp) — the
+ *  purchase path never touches FX. `qty` is SIGNED: negative on a reversing
+ *  invoice, and the sign lives ONLY there (unit_cost / fmv_snapshot stay
+ *  positive so a reversal line reads the same as the line it undoes).
+ *
+ *  The detail route spreads the ORM row, so each line ALSO carries the
+ *  `raw_unit_cost` / `raw_line_total` / `raw_fmv_snapshot` bigNumber jsonb
+ *  sidecars and an always-null `deleted_at`. Bind the hydrated getters below,
+ *  never `raw_*`; the sidecars are deliberately left unprojected (admin-only
+ *  route) and are not modelled here. */
+export interface AdminPurchaseInvoiceLine {
+  id: string;
+  card_handle: string;
+  card_name: string;
+  fmv_snapshot: number;
+  qty: number;
+  unit_cost: number;
+  line_total: number;
+}
+
+/** One row of GET /admin/purchase-invoices. The three totals are folded
+ *  SERVER-side in integer sen (route.ts) — render them, never re-derive them
+ *  here: the list response carries no lines to re-derive from. */
+export interface AdminPurchaseInvoice {
+  id: string;
+  display_no: string;
+  /** Operator-entered invoice date. `model.dateTime()`, so a full ISO stamp. */
+  date: string;
+  supplier: string;
+  agent_user_id: string;
+  /** Joined from the user module; null if the admin account was removed. */
+  agent_email: string | null;
+  reverses_invoice_id: string | null;
+  created_at: string;
+  total_qty: number;
+  subtotal: number;
+  total_fmv: number;
+}
+
+// agent_email is NOT omitted: GET /:id joins the user module the same way the
+// list route does, so both pages name the same person for one invoice.
+export interface AdminPurchaseInvoiceDetail
+  extends Omit<AdminPurchaseInvoice, 'total_qty' | 'subtotal' | 'total_fmv'> {
+  lines: AdminPurchaseInvoiceLine[];
+}
+
+export interface PurchaseInvoicesPage {
+  total: number;
+  offset: number;
+  limit: number;
+  invoices: AdminPurchaseInvoice[];
+}
+
+// `sort` is `<column>:<asc|desc>`; the route allowlists the column and falls
+// back to created_at, so an unknown key can never 400. `q` matches supplier OR
+// display_no and is TRUNCATED to 100 chars server-side — the search input
+// carries a matching maxLength so the operator cannot type past the cut.
+export const listPurchaseInvoices = (
+  page = 0,
+  q?: string,
+  limit = 50,
+  sort = 'created_at:desc',
+) =>
+  getJson<PurchaseInvoicesPage>(
+    `/admin/purchase-invoices?limit=${limit}&offset=${page * limit}&sort=${encodeURIComponent(sort)}${q ? `&q=${encodeURIComponent(q)}` : ''}`,
+  );
+
+export const getPurchaseInvoice = (id: string) =>
+  getJson<{ invoice: AdminPurchaseInvoiceDetail }>(
+    `/admin/purchase-invoices/${encodeURIComponent(id)}`,
+  );
+
+export interface CreatePurchaseInvoiceLineBody {
+  card_handle: string;
+  card_name: string;
+  fmv_snapshot: number;
+  qty: number;
+  unit_cost: number;
+}
+
+export interface CreatePurchaseInvoiceBody {
+  date: string;
+  supplier: string;
+  reverses_invoice_id?: string | null;
+  lines: CreatePurchaseInvoiceLineBody[];
+}
+
+// agent_user_id is NOT sent — the route derives it from the session.
+export const createPurchaseInvoice = (body: CreatePurchaseInvoiceBody) =>
+  postJson<{ invoice: AdminPurchaseInvoiceDetail }>(
+    '/admin/purchase-invoices',
+    body,
+  );
+
+/** One row of GET /admin/inventory (spec §3.3).
+ *
+ *  The grain is PRODUCTS, not registered gacha cards: a catalog product with no
+ *  Card row still gets a row — that is exactly what the "List to gacha card"
+ *  bulk tool acts on, and `is_card` tells the two apart.
+ *
+ *  `cost` and `on_hand` are THREE-STATE and the distinction is load-bearing:
+ *  `null` = no purchase history / tracks no inventory at all; `0` = bought and
+ *  free / tracked with nothing shippable. The route builds both with `??` and
+ *  never `||` (inventory-view.ts says so in as many words, and
+ *  inventory-detail.spec pins all four states) — so nothing on this side may
+ *  collapse them with a truthiness test either. `fmv`/`price` are null when the
+ *  product carries no FMV at all, never NaN and never 0-by-accident.
+ *
+ *  All money is MYR and arrives as plain JS numbers (the route folds through
+ *  displayMarketPrice / weightedAverageCost, not through a bigNumber getter),
+ *  so it feeds rm() unwrapped — see the Number() note on
+ *  AdminPurchaseInvoiceLine for the case where that is NOT true. */
+export interface InventoryRow {
+  handle: string;
+  product_id: string;
+  photo: string | null;
+  name: string;
+  sku: string;
+  is_card: boolean;
+  /** RAW vs GRADED, derived from the card's (or the product metadata's) grader. */
+  graded: boolean;
+  fmv: number | null;
+  price: number | null;
+  cost: number | null;
+  created_at: string;
+  on_hand: number | null;
+  in_vault: number;
+  requested: number;
+  shipped: number;
+  listing_count: number;
+}
+
+// UNPAGED by design (the route says why): on_hand/cost/buckets are all computed
+// after the product read, so ordering can only happen client-side.
+//
+// `q` is Medusa's own free-text search — title/subtitle/description plus the
+// variants' title/sku/barcode — and it is NOT wildcard-escaped, so this stays a
+// plain search box and never a pattern field. The route truncates it at 100
+// chars; the page's input carries a matching maxLength so the operator cannot
+// type past the cut.
+export const listInventory = (q?: string) =>
+  getJson<{ rows: InventoryRow[] }>(
+    `/admin/inventory${q ? `?q=${encodeURIComponent(q)}` : ''}`,
+  );
+
+/** One row of the append-only stock-movement audit log (spec §3.1).
+ *
+ *  `kind` is typed as a plain string, not the seven-member enum: the model
+ *  defines all seven but this epic only ever WRITES 'purchase', so the display
+ *  side resolves the label with a raw-token fallback rather than pretending a
+ *  map is exhaustive — same rule deliveryStatusLabel documents.
+ *
+ *  `qty` is SIGNED and is a `model.number()`, NOT a bigNumber — so unlike
+ *  AdminPurchaseInvoiceLine it needs no Number() wrap and there are no raw_*
+ *  sidecars on the wire. */
+export interface InventoryStockMovement {
+  id: string;
+  card_handle: string;
+  kind: string;
+  qty: number;
+  ref_id: string;
+  created_at: string;
+}
+
+/** GET /admin/inventory/:handle (spec §3.4) — the same row the list renders,
+ *  plus where the card is listed and its paged movement history. `item` is a
+ *  whole InventoryRow, so the same three-state `cost` / `on_hand` rules apply
+ *  here verbatim: null and 0 are different facts, and nothing may collapse
+ *  them with a truthiness test. */
+export interface InventoryDetail {
+  item: InventoryRow;
+  associated: {
+    packs: { slug: string; title: string }[];
+    rank_rewards: { stage_number: number; rank: number }[];
+  };
+  movements: {
+    total: number;
+    offset: number;
+    limit: number;
+    rows: InventoryStockMovement[];
+  };
+}
+
+// Only the MOVEMENTS are paged — `item` and `associated` are re-sent whole with
+// every page, so the page state belongs to the history table alone. The route
+// caps limit at 100 and defaults to 25.
+export const getInventoryItem = (handle: string, page = 0, limit = 25) =>
+  getJson<InventoryDetail>(
+    `/admin/inventory/${encodeURIComponent(handle)}?limit=${limit}&offset=${page * limit}`,
+  );
+
+// GET /admin/inventory/export.xlsx -- the same rows GET /admin/inventory
+// returns, as a workbook, with the CURRENT FILTER applied (spec section 3.3).
+//
+// A raw fetch rather than getJson for the same reason uploadImage is one: the
+// response is a binary .xlsx, so parsing it as JSON would throw on a perfectly
+// good download. Errors still route through httpError, so a failed export
+// carries its HTTP status like every other call in this file.
+//
+// `q` is passed through unchanged -- the route truncates at 100 chars exactly
+// as the list route does, so the sheet's rows are the visible list's rows.
+export async function exportInventoryXlsx(q?: string): Promise<void> {
+  const res = await fetch(
+    `${__BACKEND_URL__}/admin/inventory/export.xlsx${q ? `?q=${encodeURIComponent(q)}` : ''}`,
+    { credentials: 'include' },
+  );
+  if (!res.ok) {
+    throw await httpError(res);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  // Wins over the response's Content-Disposition, and must: the blob URL is
+  // same-origin to this page, so the backend's filename never reaches the
+  // browser here. Same YYYY-MM-DD shape either way.
+  a.download = `inventory-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // DEFERRED, not revoked on the next line: click() only SCHEDULES the
+  // download, and revoking the object URL in the same task can leave the
+  // browser fetching a URL that no longer resolves -- an empty or cancelled
+  // file. Handing the revoke to the next task lets the download claim the blob
+  // first, while still releasing it (a leaked object URL lives until reload).
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }

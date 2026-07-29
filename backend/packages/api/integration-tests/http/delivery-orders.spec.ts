@@ -107,11 +107,14 @@ medusaIntegrationTestRunner({
       };
 
       // Create a vaulted pull for `token` via the real open flow; returns pull id.
-      const openOne = async (token: string): Promise<string> => {
+      const openOne = async (
+        token: string,
+        topupKey = 'delivery-orders-topup',
+      ): Promise<string> => {
         await api.post(
           '/store/credits/topup',
           { amount: TOPUP },
-          { headers: { ...authed(token), 'idempotency-key': 'delivery-orders-topup' } },
+          { headers: { ...authed(token), 'idempotency-key': topupKey } },
         );
         const open = await reqApi(
           'post',
@@ -262,18 +265,29 @@ medusaIntegrationTestRunner({
           adminList.data.orders.some((o: { id: string }) => o.id === orderId),
         ).toBe(true);
 
-        // requested → packing
+        // requested → processed
         expect(
           (
             await reqApi(
               'post',
               `/admin/delivery-orders/${orderId}`,
               adminHeaders,
-              { status: 'packing' },
+              { status: 'processed' },
             )
           ).status,
         ).toBe(200);
-        // packing → shipped WITHOUT tracking → 400 (INVALID_DATA: tracking_required)
+        // processed → ready_to_ship
+        expect(
+          (
+            await reqApi(
+              'post',
+              `/admin/delivery-orders/${orderId}`,
+              adminHeaders,
+              { status: 'ready_to_ship' },
+            )
+          ).status,
+        ).toBe(200);
+        // ready_to_ship → shipped WITHOUT tracking → 400 (INVALID_DATA: tracking_required)
         expect(
           (
             await reqApi(
@@ -284,7 +298,7 @@ medusaIntegrationTestRunner({
             )
           ).status,
         ).toBe(400);
-        // packing → shipped WITH tracking → 200
+        // ready_to_ship → shipped WITH tracking → 200
         expect(
           (
             await reqApi(
@@ -295,14 +309,14 @@ medusaIntegrationTestRunner({
             )
           ).status,
         ).toBe(200);
-        // shipped → delivered → 200, pull becomes delivered
+        // shipped → completed → 200, pull (separate PULL enum) becomes delivered
         expect(
           (
             await reqApi(
               'post',
               `/admin/delivery-orders/${orderId}`,
               adminHeaders,
-              { status: 'delivered' },
+              { status: 'completed' },
             )
           ).status,
         ).toBe(200);
@@ -354,6 +368,64 @@ medusaIntegrationTestRunner({
         expect(pull.status).toBe('vaulted'); // returned to the vault
       });
 
+      // The player tab lists one customer's orders: ?customer_id= must scope
+      // BOTH the rows and the total, and an empty value must 400 rather than
+      // fall back to every customer's orders.
+      it('admin list scopes to ?customer_id= and rejects an empty one', async () => {
+        const tokenE = await registerCustomer('del-e@test.dev');
+        const tokenF = await registerCustomer('del-f@test.dev');
+        const pullE = await openOne(tokenE, 'delivery-orders-topup-e');
+        const pullF = await openOne(tokenF, 'delivery-orders-topup-f');
+        const orderE = (
+          await reqApi('post', '/store/delivery-orders', authed(tokenE), {
+            pull_ids: [pullE],
+            address_id: await addAddress(tokenE),
+          })
+        ).data.order_id;
+        const orderF = (
+          await reqApi('post', '/store/delivery-orders', authed(tokenF), {
+            pull_ids: [pullF],
+            address_id: await addAddress(tokenF),
+          })
+        ).data.order_id;
+
+        const adminToken = await mintSuperAdmin(
+          getContainer(),
+          api,
+          'del-admin4@test.dev',
+          'admin-pass-4',
+        );
+        const adminHeaders = { authorization: `Bearer ${adminToken}` };
+
+        const all = await reqApi('get', '/admin/delivery-orders', adminHeaders);
+        expect(all.status).toBe(200);
+        const rowE = all.data.orders.find(
+          (o: { id: string }) => o.id === orderE,
+        );
+        expect(rowE.customer_email).toBe('del-e@test.dev');
+
+        const scoped = await reqApi(
+          'get',
+          `/admin/delivery-orders?customer_id=${rowE.customer_id}`,
+          adminHeaders,
+        );
+        expect(scoped.status).toBe(200);
+        expect(scoped.data.orders.map((o: { id: string }) => o.id)).toEqual([
+          orderE,
+        ]);
+        expect(scoped.data.orders.map((o: { id: string }) => o.id)).not.toContain(
+          orderF,
+        );
+        expect(scoped.data.total).toBe(1);
+
+        const empty = await reqApi(
+          'get',
+          '/admin/delivery-orders?customer_id=',
+          adminHeaders,
+        );
+        expect(empty.status).toBe(400);
+      });
+
       it('blocks an address edit once the order has shipped', async () => {
         const token = await registerCustomer('del-d@test.dev');
         const pullId = await openOne(token);
@@ -374,14 +446,25 @@ medusaIntegrationTestRunner({
           'admin-pass-3',
         );
         const adminHeaders = { authorization: `Bearer ${adminToken}` };
-        // Drive the order to shipped (requested → packing → shipped+tracking).
+        // Drive the order to shipped (requested → processed → ready_to_ship →
+        // shipped+tracking).
         expect(
           (
             await reqApi(
               'post',
               `/admin/delivery-orders/${orderId}`,
               adminHeaders,
-              { status: 'packing' },
+              { status: 'processed' },
+            )
+          ).status,
+        ).toBe(200);
+        expect(
+          (
+            await reqApi(
+              'post',
+              `/admin/delivery-orders/${orderId}`,
+              adminHeaders,
+              { status: 'ready_to_ship' },
             )
           ).status,
         ).toBe(200);

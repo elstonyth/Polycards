@@ -61,10 +61,14 @@ export type Routes = {
                 audit: typeof import("../../src/api/admin/customers/[id]/audit/route");
                 commissions: typeof import("../../src/api/admin/customers/[id]/commissions/route");
                 credits: typeof import("../../src/api/admin/customers/[id]/credits/route");
+                disable: typeof import("../../src/api/admin/customers/[id]/disable/route");
+                enable: typeof import("../../src/api/admin/customers/[id]/enable/route");
                 freeze: typeof import("../../src/api/admin/customers/[id]/freeze/route");
                 gacha: typeof import("../../src/api/admin/customers/[id]/gacha/route");
+                payoutDetails: typeof import("../../src/api/admin/customers/[id]/payout-details/route");
                 pulls: typeof import("../../src/api/admin/customers/[id]/pulls/route");
                 referralTree: typeof import("../../src/api/admin/customers/[id]/referral-tree/route");
+                spendReport: typeof import("../../src/api/admin/customers/[id]/spend-report/route");
                 transactions: typeof import("../../src/api/admin/customers/[id]/transactions/route");
                 unfreeze: typeof import("../../src/api/admin/customers/[id]/unfreeze/route");
             };
@@ -462,6 +466,7 @@ export type Routes = {
         };
         deliveryOrders: typeof import("../../src/api/admin/delivery-orders/route") & {
             $id: typeof import("../../src/api/admin/delivery-orders/[id]/route");
+            bulk: typeof import("../../src/api/admin/delivery-orders/bulk/route");
         };
         economy: typeof import("../../src/api/admin/economy/route");
         gacha: {
@@ -479,6 +484,7 @@ export type Routes = {
             };
         };
         pixelPokemon: typeof import("../../src/api/admin/pixel-pokemon/route");
+        players: typeof import("../../src/api/admin/players/route");
         pricecharting: {
             product: typeof import("../../src/api/admin/pricecharting/product/route");
             search: typeof import("../../src/api/admin/pricecharting/search/route");
@@ -637,6 +643,7 @@ export type Routes = {
             $id: {
                 reveal: typeof import("../../src/api/store/pulls/[id]/reveal/route");
             };
+            closeInstant: typeof import("../../src/api/store/pulls/close-instant/route");
             recent: typeof import("../../src/api/store/pulls/recent/route");
         };
         referral: typeof import("../../src/api/store/referral/route");

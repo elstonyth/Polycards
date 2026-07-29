@@ -4,7 +4,11 @@ import PacksModuleService from '../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../modules/packs';
 import { serializeDeliveryOrders } from '../../../modules/packs/delivery-view';
 import { parsePaginationParams } from '../../../utils/pagination';
-import { coerceStatusFilter } from './validate';
+import {
+  coerceCustomerId,
+  coerceIdSearch,
+  coerceStatusFilter,
+} from './validate';
 
 export async function GET(
   req: MedusaRequest,
@@ -14,7 +18,16 @@ export async function GET(
   const customerService = req.scope.resolve(Modules.CUSTOMER);
 
   const status = coerceStatusFilter(req.query.status);
-  const filter = status ? { status } : {};
+  // ?q= is an id SUBSTRING search — operators paste the tail of an order id
+  // off a packing slip, not the whole `do_01J...` handle. $ilike, not $like:
+  // ULID tails are uppercase and a pasted/retyped id is often lowercased.
+  const q = coerceIdSearch(req.query.q);
+  // ?customer_id= scopes the table to one player (the player-detail tab).
+  const customerId = coerceCustomerId(req.query.customer_id);
+  const filter: Record<string, unknown> = {};
+  if (status) filter.status = status;
+  if (q) filter.id = { $ilike: `%${q}%` };
+  if (customerId) filter.customer_id = customerId;
 
   const { limit, offset } = parsePaginationParams(
     { limit: req.query.limit, offset: req.query.offset },

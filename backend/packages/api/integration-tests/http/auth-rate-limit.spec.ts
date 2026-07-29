@@ -1,6 +1,10 @@
 import { medusaIntegrationTestRunner } from "@medusajs/test-utils";
 import type Redis from "ioredis";
-import { connectTestRedisOrFail, unwrapResponse } from "./utils";
+import {
+  connectTestRedisOrFail,
+  TEST_REDIS_URL,
+  unwrapResponse,
+} from "./utils";
 
 jest.setTimeout(240 * 1000);
 
@@ -15,6 +19,13 @@ const RATE_ENV = {
   AUTH_RATE_BURST_WINDOW_MS: "15000",
   AUTH_RATE_LIMIT: "1000",
   AUTH_RATE_WINDOW_MS: "60000",
+  // The app-under-test limiter must write to the SAME redis the probe in
+  // beforeAll inspects (TEST_REDIS_URL) — left unset, it silently fails over
+  // to its in-memory store and the rl:auth:* assertions below read an empty
+  // redis. The runner never restores env, so this (like the tight limits
+  // above) deliberately leaks into later suites in the shard — matching CI,
+  // which exports REDIS_URL globally.
+  REDIS_URL: TEST_REDIS_URL,
 };
 
 medusaIntegrationTestRunner({

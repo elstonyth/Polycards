@@ -119,7 +119,13 @@ export async function POST(
         );
         const buyback = await packsService.quoteBuyback(
           slug,
-          { rolled_at: pull.rolled_at, revealed_at: pull.revealed_at },
+          {
+            rolled_at: pull.rolled_at,
+            revealed_at: pull.revealed_at,
+            // Freshly rolled here, so the window is definitionally open — the
+            // batch's PullRecord doesn't carry the column, and null is exact.
+            instant_closed_at: null,
+          },
           marketPriceMyr,
         );
         return {

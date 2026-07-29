@@ -57,7 +57,7 @@ it('notifies the order owner when an admin ships it', async () => {
   const h = harness({
     id: 'do_1',
     customer_id: 'cus_1',
-    status: 'packing',
+    status: 'processed',
     tracking_number: 'TRK1',
   });
 
@@ -66,7 +66,7 @@ it('notifies the order owner when an admin ships it', async () => {
   expect(h.notifications).toHaveLength(1);
   expect(h.notifications[0]).toMatchObject({
     receiver_id: 'cus_1',
-    channel: 'feed',
+    channel: 'customer_feed',
     template: 'delivery_status',
     data: { order_id: 'do_1', status: 'shipped', tracking_number: 'TRK1' },
     idempotency_key: 'delivery:do_1:shipped',
@@ -94,9 +94,9 @@ it('does NOT notify a tracking-only update (status unchanged)', async () => {
   expect(h.json).toHaveBeenCalled();
 });
 
-it('does NOT notify on packing', async () => {
+it('does NOT notify on processed', async () => {
   runMock.mockResolvedValue({
-    result: { order_id: 'do_1', status: 'packing' },
+    result: { order_id: 'do_1', status: 'processed' },
   });
   const h = harness({
     id: 'do_1',
@@ -112,7 +112,7 @@ it('does NOT notify on packing', async () => {
 
 it('a notification failure never fails the committed status change', async () => {
   runMock.mockResolvedValue({
-    result: { order_id: 'do_1', status: 'delivered' },
+    result: { order_id: 'do_1', status: 'completed' },
   });
   const h = harness({
     id: 'do_1',
@@ -135,6 +135,6 @@ it('a notification failure never fails the committed status change', async () =>
   await expect(POST(h.req, h.res)).resolves.toBeUndefined();
   expect(h.json).toHaveBeenCalledWith({
     order_id: 'do_1',
-    status: 'delivered',
+    status: 'completed',
   });
 });

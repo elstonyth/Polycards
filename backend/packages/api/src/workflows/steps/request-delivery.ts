@@ -1,15 +1,12 @@
 import { createStep, StepResponse } from "@medusajs/framework/workflows-sdk";
-import {
-  ContainerRegistrationKeys,
-  MedusaError,
-  Modules,
-} from "@medusajs/framework/utils";
+import { MedusaError, Modules } from "@medusajs/framework/utils";
 import { PACKS_MODULE } from "../../modules/packs";
 import type PacksModuleService from "../../modules/packs/service";
 import {
   validateDeliveryRequest,
   snapshotAddress,
 } from "../../modules/packs/delivery";
+import { resolveFxRate } from "../../modules/packs/pricing";
 
 export type RequestDeliveryInput = {
   customer_id: string; // from the authenticated token — NEVER the request body
@@ -83,7 +80,6 @@ export const requestDeliveryStep = createStep(
   async (input: RequestDeliveryInput, { container }) => {
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
     const customerModule = container.resolve(Modules.CUSTOMER);
-    const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
 
     // 1. Validate the selection (ownership + vaulted).
     const pulls = input.pull_ids.length
@@ -122,67 +118,36 @@ export const requestDeliveryStep = createStep(
       );
     }
 
-    // 3. Create the order.
-    const [order] = await packs.createDeliveryOrders([
-      { customer_id: input.customer_id, status: "requested", ...snapshot },
-    ]);
-
-    // 4. Create the items (manual undo if this throws — order already exists).
-    let itemIds: string[] = [];
-    try {
-      const items = await packs.createDeliveryOrderItems(
-        input.pull_ids.map((pull_id) => ({
-          delivery_order_id: order.id,
-          pull_id,
-        })),
-      );
-      itemIds = items.map((i) => i.id);
-    } catch (error) {
-      try {
-        await packs.deleteDeliveryOrders([order.id]);
-      } catch (undoError) {
-        logger.error(
-          `request-delivery: UNDO FAILED — order '${order.id}' exists with no items; repair manually. ${
-            undoError instanceof Error ? undoError.message : String(undoError)
-          }`,
-        );
-      }
-      throw error;
-    }
-
-    // 5. Flip pulls vaulted → delivering (manual undo on failure).
-    try {
-      await packs.transitionPullStatus({
-        ids: input.pull_ids,
-        from: "vaulted",
-        to: "delivering",
-      });
-    } catch (error) {
-      try {
-        await packs.deleteDeliveryOrderItems(itemIds);
-        await packs.deleteDeliveryOrders([order.id]);
-      } catch (undoError) {
-        logger.error(
-          `request-delivery: UNDO FAILED after pull flip — order '${order.id}'; repair manually. ${
-            undoError instanceof Error ? undoError.message : String(undoError)
-          }`,
-        );
-      }
-      throw error;
-    }
+    // 3. Create the order + items + pull flip, plus the paired OD ledger row,
+    //    all in ONE atomic transaction (see createDeliveryOrderWithLedger).
+    //    A failure partway through rolls back via that method's own
+    //    transaction — nothing left to manually unwind here, unlike the old
+    //    three-stage try/catch this replaced.
+    //
+    //    fx resolved HERE, before the transactional call, matching
+    //    record-pull.ts's precedent — see createDeliveryOrderWithLedger's
+    //    own comment for why resolving it INSIDE that method would risk a
+    //    second pool connection while its transaction is open.
+    const fx = await resolveFxRate(packs);
+    const { orderId, itemIds } = await packs.createDeliveryOrderWithLedger({
+      customerId: input.customer_id,
+      snapshot,
+      pullIds: input.pull_ids,
+      fx,
+    });
 
     const result: RequestDeliveryResult = {
-      order_id: order.id,
+      order_id: orderId,
       status: "requested",
       pull_ids: input.pull_ids,
     };
     return new StepResponse(result, {
-      orderId: order.id,
+      orderId,
       itemIds,
       pullIds: input.pull_ids,
     } satisfies CompensateData);
   },
-  // COMPENSATION — reverse everything if a later step fails.
+  // COMPENSATION — reverse everything if a LATER workflow step fails.
   async (data: CompensateData, { container }) => {
     if (!data) return;
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
@@ -191,6 +156,7 @@ export const requestDeliveryStep = createStep(
     );
     await packs.deleteDeliveryOrderItems(data.itemIds);
     await packs.deleteDeliveryOrders([data.orderId]);
+    await packs.deleteLedgerEntryByRef("OD", data.orderId);
   },
 );
 

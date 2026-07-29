@@ -1,5 +1,27 @@
 import { describe, it, expect } from 'vitest';
-import { rm, timeAgo, fmtPct, usdToMyr, gradeToGrader } from './format';
+import {
+  rm,
+  timeAgo,
+  fmtPct,
+  usdToMyr,
+  gradeToGrader,
+  orderDateTime,
+  deliveryStatusLabel,
+} from './format';
+
+describe('deliveryStatusLabel', () => {
+  it('titles a canonical status', () => {
+    expect(deliveryStatusLabel('ready_to_ship')).toBe('Ready to ship');
+  });
+  // A rollback or the PRE_DEPLOY window can still write the pre-rename
+  // 'packing'/'delivered' (Migration20260727000000 keeps the CHECK widened),
+  // and an unlabeled status renders as an empty badge — which reads as a
+  // broken order rather than an old one.
+  it('falls back to the raw token for a legacy status', () => {
+    expect(deliveryStatusLabel('packing')).toBe('packing');
+    expect(deliveryStatusLabel('delivered')).toBe('delivered');
+  });
+});
 
 describe('rm', () => {
   it('formats a number with two decimals and an RM prefix', () => {
@@ -10,6 +32,14 @@ describe('rm', () => {
   });
   it('returns an em dash for null', () => {
     expect(rm(null)).toBe('—');
+  });
+  // 0 and null are DIFFERENT FACTS for the inventory pages' `cost` column
+  // ("bought and free" vs "no purchase history"), and both of them delegate the
+  // whole distinction to this one function — `{rm(r.cost)}`, no ternary. Pinned
+  // so a `n ? ... : '—'` "simplification" of the guard above goes red here
+  // rather than on an operator's screen.
+  it('formats zero as RM 0.00, not as the null em dash', () => {
+    expect(rm(0)).toBe('RM 0.00');
   });
 });
 
@@ -99,6 +129,28 @@ describe('gradeToGrader', () => {
 
   it('falls back to the raw label as the grade when nothing matches', () => {
     expect(gradeToGrader('Loose')).toEqual({ grader: '', grade: 'Loose' });
+  });
+});
+
+describe('orderDateTime', () => {
+  // Built in LOCAL time and round-tripped through ISO, so the expectation
+  // holds in any timezone the operator's machine runs in.
+  const local = (h: number, min: number) =>
+    new Date(2026, 6, 4, h, min).toISOString();
+
+  it('formats as dd-MM-yyyy hh:mm a with zero padding', () => {
+    expect(orderDateTime(local(15, 7))).toBe('04-07-2026 03:07 PM');
+  });
+  // The `h % 12 || 12` branch: hour 0 and hour 12 are the only ones that don't
+  // fall out of a plain modulo.
+  it('renders midnight as 12 AM, not 00 AM', () => {
+    expect(orderDateTime(local(0, 5))).toBe('04-07-2026 12:05 AM');
+  });
+  it('renders noon as 12 PM', () => {
+    expect(orderDateTime(local(12, 0))).toBe('04-07-2026 12:00 PM');
+  });
+  it('returns an em dash for an unparseable date', () => {
+    expect(orderDateTime('not-a-date')).toBe('—');
   });
 });
 

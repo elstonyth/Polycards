@@ -2,12 +2,43 @@ import type { HttpTypes } from "@medusajs/types";
 
 export const DELIVERY_STATUSES = [
   "requested",
-  "packing",
+  "processed",
+  "ready_to_ship",
   "shipped",
-  "delivered",
+  "completed",
   "canceled",
 ] as const;
 export type DeliveryStatus = (typeof DELIVERY_STATUSES)[number];
+
+// Customer-facing wording for a delivery status. Every customer-visible string
+// MUST go through this: the raw enum tokens are snake_case ("ready_to_ship"),
+// and "completed" is operator vocabulary — a customer is told their order was
+// "delivered". Record<DeliveryStatus, string> makes it exhaustive, so a new
+// status is a type error here rather than a leaked token in production copy.
+// Named …_WORD, not …_LABEL: the admin dashboard has its own operator-facing
+// DELIVERY_STATUS_LABEL (Title Case) in apps/admin/src/lib/format.ts, and one
+// name for two different vocabularies is how the wrong one gets imported.
+// Two layers on purpose. The CANONICAL map is Record<DeliveryStatus, string>,
+// so it stays exhaustive — a new status is a type error here rather than a
+// leaked token in production copy. The exported OVERLAY widens the key type to
+// `string` and adds the legacy expand-window tokens (packing/delivered), which
+// map onto the canonical customer words so a rollback-era row never leaks
+// operator vocabulary; callers index it with a raw `order.status`. The overlay's
+// two extra keys die with the CONTRACT migration named in
+// Migration20260727000000 — the canonical map outlives them.
+const CANONICAL_CUSTOMER_WORD: Record<DeliveryStatus, string> = {
+  requested: "requested",
+  processed: "processed",
+  ready_to_ship: "ready to ship",
+  shipped: "shipped",
+  completed: "delivered",
+  canceled: "canceled",
+};
+export const CUSTOMER_STATUS_WORD: Record<string, string> = {
+  ...CANONICAL_CUSTOMER_WORD,
+  packing: "processed",
+  delivered: "delivered",
+};
 
 type PullLike = {
   id: string;
@@ -63,17 +94,42 @@ export function validateDeliveryRequest(
 export type TransitionVerdict = "ok" | "invalid_transition" | "tracking_required";
 
 // Allowed admin transitions. Cancel is only legal before the parcel ships
-// (a shipped parcel can't revert to the vault). delivered/canceled are terminal.
-const ALLOWED: Record<DeliveryStatus, DeliveryStatus[]> = {
-  requested: ["packing", "canceled"],
-  packing: ["shipped", "canceled"],
-  shipped: ["delivered"],
-  delivered: [],
+// (a shipped parcel can't revert to the vault). completed/canceled are terminal.
+//
+// Same two-layer shape as CUSTOMER_STATUS_WORD, for the same reason.
+// CANONICAL_ALLOWED is Record<DeliveryStatus, …>, so the real pipeline keeps
+// its exhaustiveness check — adding a status without giving it transitions is a
+// type error. The overlay widens the key to `string` and adds the legacy
+// tokens: Migration20260727000000 deliberately leaves the DB CHECK on the UNION
+// of the old and new vocabularies (expand phase), so old code — rolled back, or
+// still serving during the PRE_DEPLOY window — can write the pre-rename
+// 'packing'/'delivered' tokens. Without those overlay keys every move out of
+// 'packing' returns invalid_transition, stranding the order AND leaving its
+// pulls stuck in 'delivering'. Delete the overlay's two keys in the same release
+// as the CONTRACT migration named in Migration20260727000000.
+const CANONICAL_ALLOWED: Record<DeliveryStatus, DeliveryStatus[]> = {
+  requested: ["processed", "canceled"],
+  processed: ["ready_to_ship", "canceled"],
+  ready_to_ship: ["shipped", "canceled"],
+  shipped: ["completed"],
+  completed: [],
   canceled: [],
 };
+const ALLOWED: Record<string, DeliveryStatus[]> = {
+  ...CANONICAL_ALLOWED,
+  // Legacy pre-rename tokens. 'packing' is what 'processed' is now, so one hop
+  // lands the row in the new pipeline (or cancels it — the pull restore in
+  // transitionDeliveryOrderStatus is keyed on `to`, so delivering → vaulted
+  // still runs). 'delivered' is what 'completed' is now: terminal.
+  packing: ["processed", "canceled"],
+  delivered: [],
+};
 
+// `from` is `string`, not DeliveryStatus: it is whatever the row actually
+// holds, which may be a legacy token (see ALLOWED). Anything unrecognized
+// falls through to invalid_transition. `to` stays narrow — it is admin input.
 export function validateDeliveryStatusTransition(
-  from: DeliveryStatus,
+  from: string,
   to: DeliveryStatus,
   hasTracking: boolean,
 ): TransitionVerdict {

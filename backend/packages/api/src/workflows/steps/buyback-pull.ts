@@ -101,9 +101,20 @@ export const buybackPullStep = createStep(
     // spot"), the flat rate after — decided HERE from rolled_at, never by the
     // caller, so the better rate can't be claimed late via the raw API.
     const [pack] = await packs.listPacks({ slug: pull.pack_id }, { take: 1 });
+    // Re-read the closure stamp right before pricing. `pull` was read several
+    // awaits ago (frozen check + card + pack lookups); the reveal's async
+    // close-instant POST could have landed in that gap, and pricing the instant
+    // premium off the stale pre-close read would let a quick vault sell beat the
+    // close and claim 99% (CodeRabbit). The fresh read collapses that window to
+    // the sub-ms between here and the conditional status flip below.
+    const [fresh] = await packs.listPulls({ id: pull.id }, { take: 1 });
     const { percent, rate_type } = resolveBuybackRate(pack, {
       rolled_at: pull.rolled_at,
       revealed_at: pull.revealed_at,
+      // Once the reveal has closed the window (left it / concluded), the credit
+      // is the flat vault rate even inside the 30s — the credit must match what
+      // the vault quoted.
+      instant_closed_at: fresh?.instant_closed_at ?? pull.instant_closed_at,
     });
 
     // A money amount must never be computed from a corrupt FMV — refuse rather
@@ -132,14 +143,15 @@ export const buybackPullStep = createStep(
     // 1. Credit row first — the unique pull_id kills concurrent duplicates here.
     const [txn] = await insertOrMapDuplicate({
       insert: () =>
-        packs.createCreditTransactions([
-          {
-            customer_id: input.customer_id,
-            amount,
-            reason: 'buyback' as const,
-            pull_id: pull.id,
-          },
-        ]),
+        packs.recordBuybackCreditTransaction({
+          customerId: input.customer_id,
+          amount,
+          valueMyr,
+          pullId: pull.id,
+          cardHandle: pull.card_id,
+          rate: percent / 100,
+          openId: pull.open_id ?? null,
+        }),
       probeDuplicate: async () => {
         const [existing] = await packs.listCreditTransactions(
           { pull_id: pull.id },
@@ -171,6 +183,7 @@ export const buybackPullStep = createStep(
       // inconsistent pair (pull, txn) can be repaired by hand.
       try {
         await packs.deleteCreditTransactionsGuarded([creditTransactionId]);
+        await packs.deleteLedgerEntryByRef('SE', creditTransactionId);
       } catch (undoError) {
         logger.error(
           `buyback-pull: UNDO FAILED — credit txn '${creditTransactionId}' exists but pull '${pull.id}' was not flipped; repair manually. ${
@@ -248,6 +261,7 @@ export const buybackPullStep = createStep(
     if (!data) return;
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
     await packs.deleteCreditTransactionsGuarded([data.creditTransactionId]);
+    await packs.deleteLedgerEntryByRef('SE', data.creditTransactionId);
     await packs.updatePulls([
       {
         id: data.pullId,

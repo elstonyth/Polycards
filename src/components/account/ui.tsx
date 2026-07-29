@@ -19,7 +19,8 @@ export function AccountHeader({
   sub,
 }: {
   title: string;
-  // ReactNode, not string: /referrals highlights part of its subtitle.
+  // ReactNode, not string: the (suspended 2026-07-29) /referrals page
+  // highlighted part of its subtitle; kept for the revert.
   sub?: ReactNode;
 }) {
   return (

@@ -99,6 +99,10 @@ export async function GET(
       const { percent, rate_type } = resolveBuybackRate(pack, {
         rolled_at: p.rolled_at,
         revealed_at: p.revealed_at,
+        // Reaching the vault means the reveal was left, so the window is closed
+        // and this always quotes the flat rate (the stamp is set on leave; the
+        // 30s timer is only the hard-tab-kill backstop).
+        instant_closed_at: p.instant_closed_at,
       });
       // MYR Value (raw USD × FX × markup) — the buyback percent is a cut of this
       // shown Value, not raw USD, matching what selling actually credits.

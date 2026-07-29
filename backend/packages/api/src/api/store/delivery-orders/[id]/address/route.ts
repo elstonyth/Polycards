@@ -5,10 +5,15 @@ import {
 import { MedusaError, Modules } from '@medusajs/framework/utils';
 import PacksModuleService from '../../../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../../../modules/packs';
-import { snapshotAddress } from '../../../../../modules/packs/delivery';
+import {
+  snapshotAddress,
+  CUSTOMER_STATUS_WORD,
+} from '../../../../../modules/packs/delivery';
 
 // POST /store/delivery-orders/:id/address — re-snapshot the shipping address
-// from the caller's address book, allowed while requested|packing only.
+// from the caller's address book, allowed while requested|processed only.
+// Locked from ready_to_ship on — a printed label must not diverge from the
+// address (mirrors the old requested/packing window).
 export async function POST(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
@@ -29,10 +34,13 @@ export async function POST(
   if (!order || order.customer_id !== customerId) {
     throw new MedusaError(MedusaError.Types.NOT_FOUND, 'Order not found.');
   }
-  if (order.status !== 'requested' && order.status !== 'packing') {
+  // 'packing' = legacy expand-window token (~processed) — stays editable
+  // until the contract migration.
+  const EDITABLE = ['requested', 'processed', 'packing'];
+  if (!EDITABLE.includes(order.status)) {
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
-      'This order has already shipped — its address is locked.',
+      `This order is already ${CUSTOMER_STATUS_WORD[order.status] ?? order.status} — its address can no longer be edited.`,
     );
   }
 

@@ -9,6 +9,7 @@ import { TopUpProvider } from '@/components/app-shell/TopUpProvider';
 import { AuthProvider } from '@/components/auth/AuthProvider';
 import SkipLink from '@/components/SkipLink';
 import CookieConsent from '@/components/CookieConsent';
+import MetaPixel from '@/components/MetaPixel';
 import { SITE_URL } from '@/lib/site';
 import { BUYBACK_RATE_LABEL } from '@/lib/buyback-copy';
 
@@ -82,6 +83,10 @@ export default async function RootLayout({
             features.
           </div>
         </noscript>
+        {/* No <noscript> tracking image: the cookie banner is JS-only, so a
+            no-JS visitor can never consent — an unconditional pixel there
+            would contradict the consent gate in MetaPixel.tsx. */}
+        <MetaPixel />
         <AuthProvider>
           <TopUpProvider>
             <SkipLink />

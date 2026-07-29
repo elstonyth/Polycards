@@ -7,6 +7,7 @@ import { toMoney } from '../../../modules/packs/money';
 import {
   resolveFxRate,
   displayMarketPrice,
+  DEFAULT_MARKET_MULTIPLIER,
 } from '../../../modules/packs/pricing';
 
 // Accept an ISO date string only when it parses; anything else → undefined (no
@@ -20,9 +21,10 @@ function isoOrUndefined(v: unknown): string | undefined {
 
 // GET /admin/economy — the operator's money report: ledger totals
 // (revenue / payouts / top-ups / adjustments / net) for an optional [from, to)
-// period window (omit both = all time), the outstanding vault liability (FMV of
-// every vaulted pull), and a per-active-pack theoretical RTP table from the
-// CURRENT odds × FMVs. Only the ledger totals are period-scoped; liability and
+// period window (omit both = all time), the outstanding vault liability (raw
+// FMV of every vaulted pull), and a per-active-pack theoretical RTP table from
+// the CURRENT odds × card DISPLAY values (FMV × markup — the buyback basis).
+// Only the ledger totals are period-scoped; liability and
 // RTP are current-state snapshots. Reads only; pure math lives in
 // modules/packs/economy.ts.
 export async function GET(
@@ -43,14 +45,19 @@ export async function GET(
   // (audit 2026-07-07 #5b) instead of paging every vaulted pull into Node.
   const allCards = await pageAll((opts) => packs.listCards({}, opts));
   const fx = await resolveFxRate(packs);
-  // Card FMV is stored in USD; the economy report shows MYR at the live FX rate
-  // (multiplier 1 — markup lives on the sale price, not the FMV). Converting here
-  // makes liability, EV, and RTP all MYR, so RTP compares like-for-like (MYR EV
-  // ÷ MYR pack price) instead of the prior USD-FMV-vs-MYR-price mix.
+  // Card FMV is stored in USD; the economy report shows MYR at the live FX rate.
+  // EV/RTP use each card's DISPLAY value (FMV × market_multiplier, default +20%)
+  // because that is the value buyback percents apply to — multiplier 1 here
+  // understated the real payout per open by the markup (operator request
+  // 2026-07-23). RTP stays like-for-like: MYR EV ÷ MYR pack price.
   const valueByHandle = new Map(
     allCards.map((c) => [
       c.handle,
-      displayMarketPrice(toMoney(c.market_value), fx, 1),
+      displayMarketPrice(
+        toMoney(c.market_value),
+        fx,
+        toMoney(c.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER),
+      ),
     ]),
   );
   const { count: liabilityCount, liability } =

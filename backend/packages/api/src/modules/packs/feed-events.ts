@@ -4,13 +4,13 @@
 
 // Which delivery transitions are worth telling a customer about.
 //
-// 'packing' is deliberately excluded: it is the transition an operator flips
-// most casually while working through a queue, so it would be the noisiest and
-// least informative of the four. 'requested' is the customer's own action and
-// is never news.
+// 'processed' and 'ready_to_ship' are deliberately excluded: they are the
+// transitions an operator flips most casually while working through a queue,
+// so they would be the noisiest and least informative of the set. 'requested'
+// is the customer's own action and is never news.
 const NOTIFIABLE_DELIVERY_STATUSES: readonly string[] = [
   'shipped',
-  'delivered',
+  'completed',
   'canceled',
 ];
 

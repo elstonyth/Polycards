@@ -37,6 +37,8 @@ export const affordable = (balance: number, cost: number) =>
 
 // Single wording for a VIP reward grant (voucher or frame), shared by /daily
 // and /vouchers — was two independently-drifted copies.
+// UNUSED while the reward surfaces are suspended (2026-07-29): both callers
+// were deleted. Kept so the revert stays a revert — don't prune it.
 export function voucherLabel(grant: {
   kind: 'voucher' | 'frame';
   level: number;

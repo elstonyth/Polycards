@@ -50,6 +50,32 @@ describe("resolveBuybackRate", () => {
     ).toEqual({ percent: 95, rate_type: "instant" });
   });
 
+  it("forces the FLAT vault rate once the instant window is CLOSED, even inside the 30s", () => {
+    // The reveal was left / concluded (close-on-leave): the pull is still well
+    // within its time window, but instant_closed_at ends the premium for good.
+    expect(
+      resolveBuybackRate(
+        pack,
+        {
+          rolled_at: ago(5_000),
+          revealed_at: ago(5_000),
+          instant_closed_at: ago(1_000),
+        },
+        NOW,
+      ),
+    ).toEqual({ percent: FLAT_PERCENT, rate_type: "vault" });
+  });
+
+  it("still credits the pack rate while the window is OPEN (instant_closed_at null)", () => {
+    expect(
+      resolveBuybackRate(
+        pack,
+        { rolled_at: ago(5_000), revealed_at: ago(5_000), instant_closed_at: null },
+        NOW,
+      ),
+    ).toEqual({ percent: 95, rate_type: "instant" });
+  });
+
   it("floors a below-flat pack rate at the flat rate inside the window", () => {
     expect(
       resolveBuybackRate({ buyback_percent: 80 }, { rolled_at: ago(1_000) }, NOW),

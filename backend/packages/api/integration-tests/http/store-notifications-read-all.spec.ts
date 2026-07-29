@@ -11,6 +11,7 @@
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
 import { Modules } from '@medusajs/framework/utils';
 import { unwrapResponse } from './utils';
+import { CUSTOMER_FEED_CHANNEL } from '../../src/modules/packs/notify-feed';
 
 jest.setTimeout(120 * 1000);
 
@@ -93,7 +94,7 @@ medusaIntegrationTestRunner({
             {
               to: customerIdA,
               receiver_id: customerIdA,
-              channel: 'feed',
+              channel: CUSTOMER_FEED_CHANNEL,
               template,
               data: {},
             },
@@ -104,7 +105,7 @@ medusaIntegrationTestRunner({
             {
               to: customerIdB,
               receiver_id: customerIdB,
-              channel: 'feed',
+              channel: CUSTOMER_FEED_CHANNEL,
               template,
               data: {},
             },
@@ -221,7 +222,7 @@ medusaIntegrationTestRunner({
         const container = getContainer();
         const notif = container.resolve(Modules.NOTIFICATION);
         const bRows = await notif.listNotifications(
-          { receiver_id: customerIdB, channel: 'feed' },
+          { receiver_id: customerIdB, channel: CUSTOMER_FEED_CHANNEL },
           { take: 10 },
         );
         expect(bRows.length).toBeGreaterThan(0);

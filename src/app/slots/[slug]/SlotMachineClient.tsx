@@ -10,7 +10,7 @@ import { useMediaQuery, usePrefersReducedMotion } from '@/lib/use-reveal';
 import { useChromeInert } from '@/lib/use-chrome-inert';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { openAuth } from '@/components/AuthButton';
-import { openBatch, revealPull } from '@/lib/actions/packs';
+import { openBatch, revealPull, closeInstantWindow } from '@/lib/actions/packs';
 import type { WonCard } from '@/lib/actions/packs';
 import { sellBackPull } from '@/lib/actions/vault';
 import { useTopUp } from '@/components/app-shell/TopUpProvider';
@@ -646,6 +646,33 @@ export default function SlotMachineClient({
     setPhase('idle');
   }, []);
 
+  // Deliberate "Spin again" from the concluded reveal — replaces the old silent
+  // auto-conclude (spec #27) that let a stray tap start a spin. Conclude the
+  // stage, then start the next spin. Two steps because handleSpin's guard reads
+  // `phase` synchronously and must see 'idle', which only lands after
+  // handleConclude's state flush; the ref + the phase effect below chain them
+  // across that render.
+  const replayAfterConclude = useRef(false);
+  const handleSpinAgain = useCallback(() => {
+    replayAfterConclude.current = true;
+    handleConclude();
+  }, [handleConclude]);
+  // Call handleSpin through a ref so this effect doesn't depend on it (it's a
+  // per-render function; depending on it would churn the effect and trip
+  // exhaustive-deps). The ref always holds the latest closure.
+  const handleSpinRef = useRef(handleSpin);
+  handleSpinRef.current = handleSpin;
+  useEffect(() => {
+    if (phase !== 'idle' || !replayAfterConclude.current) return;
+    replayAfterConclude.current = false;
+    // Only auto-replay when a spin is actually possible right now; otherwise
+    // land on the idle machine so the player sees why (can't afford / cooling
+    // down) — the same gates as the Spin button's `disabled`.
+    if (!modeUndecided && !cooldown && (customer == null || canAfford)) {
+      void handleSpinRef.current();
+    }
+  }, [phase, modeUndecided, cooldown, customer, canAfford]);
+
   // Settle watchdog: the customer is charged the moment openBatch returns ok,
   // but the reveal only lands when the reel engine reports completion. If that
   // settle is ever missed (a remounted column, a browser hiccup), force the
@@ -890,6 +917,8 @@ export default function SlotMachineClient({
                   onSignUp={isDemo ? () => openAuth('signup') : undefined}
                   onSkip={skipToCards}
                   onConclude={handleConclude}
+                  onCloseInstant={closeInstantWindow}
+                  onSpinAgain={handleSpinAgain}
                   onSellBack={sellBackPull}
                   onReveal={revealPull}
                   onSold={refreshBalance}

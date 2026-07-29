@@ -26,21 +26,59 @@ import {
 //   - buyback_amount + buyback_at on bought-back pulls — what was actually paid.
 // A justified difference is settled with the existing credit-adjust action
 // (POST /admin/customers/:id/credits), so no new money mutation is needed.
+//
+// Optional ?status= / ?source= narrow the list (e.g. "still in their vault",
+// "pack pulls only"). The customer scope is always kept on the filter.
+// PULL lifecycle enum — NOT the delivery-order enum: a 'shipped' here is as
+// invalid as gibberish.
+const PULL_STATUSES = ['vaulted', 'bought_back', 'delivering', 'delivered'];
+const PULL_SOURCES = ['pack', 'reward'];
+
 export async function GET(
   req: MedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
   const { id } = req.params;
+  const status =
+    req.query.status === undefined || req.query.status === ''
+      ? undefined
+      : req.query.status;
+  if (
+    status !== undefined &&
+    (typeof status !== 'string' || !PULL_STATUSES.includes(status))
+  ) {
+    res
+      .status(400)
+      .json({ message: `status must be one of ${PULL_STATUSES.join(', ')}` });
+    return;
+  }
+  const source =
+    req.query.source === undefined || req.query.source === ''
+      ? undefined
+      : req.query.source;
+  if (
+    source !== undefined &&
+    (typeof source !== 'string' || !PULL_SOURCES.includes(source))
+  ) {
+    res
+      .status(400)
+      .json({ message: `source must be one of ${PULL_SOURCES.join(', ')}` });
+    return;
+  }
   const { limit, offset } = parsePaginationParams(
     { limit: req.query.limit, offset: req.query.offset },
     { defaultLimit: 25, maxLimit: 100 },
   );
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
   const { rate: fx, firm: fxFirm } = await resolveFxRateInfo(packs);
-  const [rows, total] = await packs.listAndCountPulls(
-    { customer_id: id },
-    { order: { rolled_at: 'DESC' }, skip: offset, take: limit },
-  );
+  const filter: Record<string, unknown> = { customer_id: id };
+  if (status) filter.status = status;
+  if (source) filter.source = source;
+  const [rows, total] = await packs.listAndCountPulls(filter, {
+    order: { rolled_at: 'DESC' },
+    skip: offset,
+    take: limit,
+  });
   const handles = [...new Set(rows.map((p: any) => p.card_id))];
   const cards = handles.length
     ? await packs.listCards({ handle: handles }, { take: handles.length })
@@ -76,7 +114,14 @@ export async function GET(
         );
         const { percent, rate_type } = resolveBuybackRate(
           packBySlug.get(p.pack_id),
-          { rolled_at: p.rolled_at, revealed_at: p.revealed_at },
+          {
+            rolled_at: p.rolled_at,
+            revealed_at: p.revealed_at,
+            // Thread the close stamp too, or admin's "payable now" quote would
+            // show the instant rate for a window the customer already closed
+            // (vault + sell credit are flat) — the two must agree.
+            instant_closed_at: p.instant_closed_at,
+          },
         );
         quote = {
           percent,

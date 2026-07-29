@@ -90,6 +90,20 @@ medusaIntegrationTestRunner({
         expect(aud.reason).toBe(note);
         expect(aud.entity_type).toBe('credit');
         expect(aud.action).toBe('adjust_credit');
+
+        // Cross-check (POLYCARD-BACK Epic 4 Task 5): the AD ledger row and
+        // this audit row describe the SAME event from two angles — join on
+        // ref_id/entity_id (both are the credit_transaction id) and confirm
+        // they carry the same reason/note text, so a reviewer can cross-check
+        // either view.
+        const [ledgerRow] = await packs.listLedgerEntries(
+          { type: 'AD', ref_id: aud.entity_id },
+          { take: 1 },
+        );
+        expect(ledgerRow).toBeDefined();
+        expect((ledgerRow.payload as { reason: string } | null)?.reason).toBe(
+          aud.reason,
+        );
       });
 
       it('audit admin_id is not taken from the request body', async () => {

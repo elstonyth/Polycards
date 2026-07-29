@@ -90,6 +90,20 @@ function buildHarness(opts: {
         revealed_at: null,
         stock_earmarked: false,
       })),
+    // record-pull.ts / record-pulls-batch.ts call this instead of createPulls
+    // (Task 7 — SP ledger writer). This harness doesn't exercise ledger
+    // writes (that's ledger-pack-open.spec.ts's job); it only needs the same
+    // pull-shaping createPulls already provided, since VIP settlement here
+    // only reads the returned pulls' length/ids.
+    recordPullsWithLedger: async (input: {
+      pulls: Array<Record<string, unknown>>;
+    }) =>
+      input.pulls.map((r, i) => ({
+        id: `pull_${i + 1}`,
+        ...r,
+        revealed_at: null,
+        stock_earmarked: false,
+      })),
     createPull: async (row: Record<string, unknown>) => ({
       id: 'pull_1',
       ...row,
@@ -114,6 +128,12 @@ function buildHarness(opts: {
         calls.notifications.push(n);
         return [n];
       },
+    }),
+    // The draw resolves the customer's odds set from their group (§2.5). This
+    // harness's customer is in no group, so every draw rolls on set 1 — the
+    // weights these fixtures were written against.
+    [Modules.CUSTOMER]: asValue({
+      listCustomerGroups: async () => [],
     }),
     logger: asValue({
       info: () => undefined,

@@ -6,6 +6,10 @@
  * core dashboard routes (orders, products, ...) whose dense tables we do not
  * own and must not reflow.
  *
+ * ONE deliberate exception at the bottom of this file: the §2.1 sidebar-nav
+ * rule. The sidebar is rendered by the prebuilt @mercurjs/admin bundle, never
+ * by our routes, so `.pc-admin` can never reach it — see the comment there.
+ *
  * Plain CSS custom properties (Medusa's own design tokens) rather than @apply
  * or forked components, so this survives a @medusajs/ui upgrade.
  */
@@ -68,4 +72,33 @@
   align-items: center;
   justify-content: flex-end;
   gap: 0.25rem;
+}
+
+/* --- Sidebar nav -------------------------------------------------------- */
+/* POLYCARD-BACK §2.1: hide the core Collections/Categories sidebar entries.
+   Nav lives in the prebuilt @mercurjs/admin bundle (useCoreRoutes) — not
+   patchable from src/routes. CSS-hide only: the pages stay URL-reachable and
+   Medusa data is untouched (spec baked default). */
+nav a[href$="/collections"],
+nav a[href$="/categories"] {
+  display: none;
+}
+
+/* Hiding only the <a> left a 28px hole for each entry: the vendored markup
+   wraps every nav row in `<li class="flex h-7 items-center">`, and that FIXED
+   height does not collapse just because its child is invisible. Two hidden
+   entries = ~56px of dead space between Products and the Gacha entries under
+   it, which reads as a rendering glitch rather than a deliberate omission.
+   Collapse the row itself.
+
+   `> * >` scopes this to the entry's OWN <li> (the anchor sits exactly one
+   wrapper deep), so an ancestor <li> that merely contains the link somewhere
+   below it can never match and take a whole nav group down with it.
+
+   The anchor rule above is deliberately kept rather than replaced: it is the
+   fallback where `:has()` is unavailable. Worst case the hole comes back --
+   the hidden link does not. */
+nav li:has(> * > a[href$="/collections"]),
+nav li:has(> * > a[href$="/categories"]) {
+  display: none;
 }

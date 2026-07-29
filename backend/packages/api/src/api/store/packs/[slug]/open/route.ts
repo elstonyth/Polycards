@@ -85,7 +85,11 @@ export async function POST(
     // recompute this. Freshly rolled, so this is inside the instant window.
     const quoted = await packsService.quoteBuyback(
       slug,
-      { rolled_at: result.pull.rolled_at, revealed_at: result.pull.revealed_at },
+      {
+        rolled_at: result.pull.rolled_at,
+        revealed_at: result.pull.revealed_at,
+        instant_closed_at: result.pull.instant_closed_at,
+      },
       marketPriceMyr,
     );
 

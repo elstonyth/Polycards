@@ -82,7 +82,7 @@ export default function LeaderboardClient({
       <p className="mt-3 text-[12px] text-neutral-400">
         {period === 'This Week'
           ? 'This week ranks by pulled value — every eligible pack draw counts. It is the Weekly Challenge board.'
-          : 'All Time ranks by points — every ringgit you spend on packs.'}
+          : 'All Time — lifetime pulled value across every eligible pack draw.'}
       </p>
 
       {/* Standings */}
@@ -95,132 +95,168 @@ export default function LeaderboardClient({
             </p>
           </div>
         ) : (
-          <ol className="mt-3 overflow-hidden rounded-2xl border border-white/10 bg-neutral-900">
-            {entries.map((entry, i) => {
-              const medal = medalStyle(entry.rank);
-              const isOwn = own != null && entry.handle === ownHandle;
-              const prize =
-                period === 'This Week'
-                  ? prizeByRank.get(entry.rank)
-                  : undefined;
-              return (
-                <li
-                  key={`${entry.rank}-${entry.name}`}
-                  className={cn(
-                    'flex items-center gap-3 px-4 py-3',
-                    i > 0 && 'border-t border-white/5',
-                    isOwn && 'bg-white/[0.04]',
-                  )}
-                >
-                  <span
+          <>
+            {/* Column header — operator-requested layout (2026-07-23 voice
+                notes): weekly = "# Player · reward" (pulled value moved under
+                the name), All Time = "# Player · pulled value". Spacer mirrors
+                the 36px avatar so "Player" starts over the names. */}
+            <div className="mt-3 flex items-center gap-3 px-4 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+              <span className="w-8 shrink-0 text-center">#</span>
+              <span aria-hidden className="w-9 shrink-0" />
+              <span className="min-w-0 flex-1">Player</span>
+              {showPrizeCol && (
+                <span className="min-w-16 shrink-0 text-right">Reward</span>
+              )}
+              {period === 'All Time' && (
+                <span className="shrink-0 text-right">Pulled value</span>
+              )}
+            </div>
+            <ol className="mt-2 overflow-hidden rounded-2xl border border-white/10 bg-neutral-900">
+              {entries.map((entry, i) => {
+                const medal = medalStyle(entry.rank);
+                const isOwn = own != null && entry.handle === ownHandle;
+                const prize =
+                  period === 'This Week'
+                    ? prizeByRank.get(entry.rank)
+                    : undefined;
+                return (
+                  <li
+                    key={`${entry.rank}-${entry.name}`}
                     className={cn(
-                      'flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[13px] font-bold',
-                      medal.bg,
-                      medal.text,
+                      'flex items-center gap-3 px-4 py-3',
+                      i > 0 && 'border-t border-white/5',
+                      isOwn && 'bg-white/[0.04]',
                     )}
-                    aria-label={`Rank ${entry.rank}`}
                   >
-                    {entry.rank}
-                  </span>
-                  <FramedAvatar
-                    src={entry.avatar}
-                    frameSrc={entry.frame}
-                    size={36}
-                  />
-                  <div className="min-w-0 flex-1">
-                    {entry.handle ? (
-                      <Link
-                        href={`/profile/${entry.handle}`}
-                        className="block truncate text-sm font-semibold text-white hover:underline"
+                    <span
+                      className={cn(
+                        'flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[13px] font-bold',
+                        medal.bg,
+                        medal.text,
+                      )}
+                      aria-label={`Rank ${entry.rank}`}
+                    >
+                      {entry.rank}
+                    </span>
+                    <FramedAvatar
+                      src={entry.avatar}
+                      frameSrc={entry.frame}
+                      size={36}
+                    />
+                    <div className="min-w-0 flex-1">
+                      {entry.handle ? (
+                        <Link
+                          href={`/profile/${entry.handle}`}
+                          className="block truncate text-sm font-semibold text-white hover:underline"
+                        >
+                          {entry.name}
+                          {isOwn && (
+                            <span className="ml-1.5 text-[11px] font-bold text-chase">
+                              YOU
+                            </span>
+                          )}
+                        </Link>
+                      ) : (
+                        <span className="block truncate text-sm font-semibold text-white">
+                          {entry.name}
+                        </span>
+                      )}
+                      {/* Weekly: "RM 738,106.76 · 84 pulls" under the name
+                        (operator voice notes 2026-07-23). All Time keeps pulls
+                        only — the RM spend under a name there was
+                        operator-rejected ("don't show how much money drawn"). */}
+                      {/* No truncate: with a 4-slab reward the cell narrows
+                        enough to clip "· 84 pulls" — wrap at the dot instead
+                        (each side is nowrap, so the value never splits). */}
+                      <p className="text-[12px] text-neutral-400">
+                        {period === 'This Week' ? (
+                          <>
+                            <span className="font-semibold whitespace-nowrap tabular-nums text-white">
+                              {entry.volume}
+                            </span>
+                            <span className="whitespace-nowrap">
+                              {` · ${entry.pulls} pulls`}
+                            </span>
+                          </>
+                        ) : (
+                          `${entry.pulls} pulls`
+                        )}
+                      </p>
+                    </div>
+                    {/* Weekly board only: the CURRENT challenge prize for this
+                      rank — card thumb and/or credits, from the unlocked
+                      stages' prize tables. The reward IS the row's right edge
+                      on weekly (operator 2026-07-23: value under the name,
+                      "right side all reward"). Thumb height matches the
+                      avatar so the row keeps its one-line height. min-w-16 is
+                      the shared column basis (with a spacer on prizeless
+                      rows) keeping the rewards column-aligned across rows —
+                      sized for the widest single-type prize (cumulative
+                      credits, e.g. "RM 18,500"). A rank paying card AND
+                      credits grows past it — deliberate: rewards never clip. */}
+                    {prize ? (
+                      <span
+                        className="flex min-w-16 flex-wrap items-center justify-end gap-1"
+                        aria-label={`Current prize: ${[
+                          ...prize.cards.map((c) => c.name),
+                          prize.creditsLabel
+                            ? `${prize.creditsLabel} credits`
+                            : null,
+                        ]
+                          .filter(Boolean)
+                          .join(', ')}`}
                       >
-                        {entry.name}
-                        {isOwn && (
-                          <span className="ml-1.5 text-[11px] font-bold text-chase">
-                            YOU
+                        {/* EVERY prize card renders (operator rejected the +N
+                            collapse). Graded prizes wear the prism frame (same
+                            treatment as the stage podium); raw card art stays
+                            a plain <img> — wrong aspect for the band. */}
+                        {prize.cards.map((card, ci) =>
+                          card.slabImage ? (
+                            <SlabImage
+                              key={`${card.name}-${ci}`}
+                              src={card.image}
+                              slabSrc={card.slabImage}
+                              alt=""
+                              frameVariant="prism"
+                              glowScale={0.15}
+                              sizes="96px"
+                              className="h-10 shrink-0"
+                            />
+                          ) : (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              key={`${card.name}-${ci}`}
+                              src={card.image}
+                              alt=""
+                              loading="lazy"
+                              decoding="async"
+                              className="h-10 w-7 shrink-0 object-contain drop-shadow-[0_4px_8px_rgba(0,0,0,0.6)]"
+                            />
+                          ),
+                        )}
+                        {prize.creditsLabel && (
+                          <span className="text-chase text-xs font-semibold whitespace-nowrap">
+                            {prize.creditsLabel}
                           </span>
                         )}
-                      </Link>
-                    ) : (
-                      <span className="block truncate text-sm font-semibold text-white">
-                        {entry.name}
+                      </span>
+                    ) : showPrizeCol ? (
+                      <span aria-hidden className="min-w-16 shrink-0" />
+                    ) : null}
+                    {/* All Time only: pulled value figure (operator 2026-07-23
+                      "写回pulled value" — the old points figure is retired from
+                      the UI; ranking stays backend spend-order). Weekly rows
+                      end on the reward — the value lives under the name. */}
+                    {period === 'All Time' && (
+                      <span className="font-heading shrink-0 text-base tabular-nums text-white">
+                        {entry.volume}
                       </span>
                     )}
-                    <p className="truncate text-[12px] text-neutral-400">
-                      {period === 'This Week'
-                        ? `${entry.pulls} pulls`
-                        : `${entry.volume} · ${entry.pulls} pulls`}
-                    </p>
-                  </div>
-                  {/* Big figure = the ranking metric for the active tab. */}
-                  <span className="font-heading shrink-0 text-base tabular-nums text-white">
-                    {period === 'This Week' ? entry.volume : entry.points}
-                  </span>
-                  {/* Weekly board only: the CURRENT challenge prize for this
-                      rank, inline at the row's end (reference design's REWARD
-                      column) — card thumb and/or credits, from the unlocked
-                      stages' prize tables. Thumb height matches the avatar so
-                      the row keeps its one-line height. min-w-16 is the shared
-                      column basis (with a spacer on prizeless rows) keeping the
-                      RM figures aligned — sized for the widest single-type
-                      prize (cumulative credits, e.g. "RM 18,500"). A rank
-                      paying card AND credits grows past it (that row's RM
-                      shifts left) — deliberate: money never clips. */}
-                  {prize ? (
-                    <span
-                      className="flex min-w-16 shrink-0 items-center justify-end gap-1"
-                      aria-label={`Current prize: ${[
-                        prize.card?.name,
-                        prize.moreCards > 0
-                          ? `plus ${prize.moreCards} more card${prize.moreCards > 1 ? 's' : ''}`
-                          : null,
-                        prize.creditsLabel
-                          ? `${prize.creditsLabel} credits`
-                          : null,
-                      ]
-                        .filter(Boolean)
-                        .join(', ')}`}
-                    >
-                      {/* Graded prizes wear the prism frame (same treatment
-                            as the stage podium); raw card art stays a plain
-                            <img> — wrong aspect for the band. */}
-                      {prize.card?.slabImage ? (
-                        <SlabImage
-                          src={prize.card.image}
-                          slabSrc={prize.card.slabImage}
-                          alt=""
-                          frameVariant="prism"
-                          glowScale={0.15}
-                          sizes="96px"
-                          className="h-10 shrink-0"
-                        />
-                      ) : prize.card ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={prize.card.image}
-                          alt=""
-                          loading="lazy"
-                          decoding="async"
-                          className="h-10 w-7 shrink-0 object-contain drop-shadow-[0_4px_8px_rgba(0,0,0,0.6)]"
-                        />
-                      ) : null}
-                      {prize.moreCards > 0 && (
-                        <span className="text-[10px] font-semibold text-neutral-400">
-                          +{prize.moreCards}
-                        </span>
-                      )}
-                      {prize.creditsLabel && (
-                        <span className="text-chase text-xs font-semibold whitespace-nowrap">
-                          {prize.creditsLabel}
-                        </span>
-                      )}
-                    </span>
-                  ) : showPrizeCol ? (
-                    <span aria-hidden className="min-w-16 shrink-0" />
-                  ) : null}
-                </li>
-              );
-            })}
-          </ol>
+                  </li>
+                );
+              })}
+            </ol>
+          </>
         )}
       </section>
 
@@ -239,10 +275,10 @@ export default function LeaderboardClient({
               </div>
               <div className="text-right">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
-                  {period === 'This Week' ? 'Pulled' : 'Points'}
+                  Pulled
                 </p>
                 <p className="font-heading text-chase text-2xl tabular-nums">
-                  {period === 'This Week' ? own.volume : own.points}
+                  {own.volume}
                 </p>
               </div>
             </div>

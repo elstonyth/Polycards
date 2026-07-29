@@ -20,6 +20,7 @@ export type AdminCardLike = CardLike & {
   pc_synced_at: Date | string | null;
   label_year: string | null;
   label_note: string | null;
+  created_at: Date | string;
 };
 
 // `fxRate` is optional so existing callers/tests that only need the base DTO
@@ -54,6 +55,9 @@ export function toAdminCardDto(card: AdminCardLike, fxRate?: number) {
     pc_synced_at: card.pc_synced_at ?? null,
     label_year: card.label_year ?? null,
     label_note: card.label_note ?? null,
+    // Registration timestamp, verbatim (serializes to ISO over JSON) — the
+    // admin cards list sorts newest-first on it.
+    created_at: card.created_at,
   };
   if (fxRate === undefined) return base;
 

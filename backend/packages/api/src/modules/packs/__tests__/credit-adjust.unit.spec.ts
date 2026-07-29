@@ -19,10 +19,13 @@ describe("adjustAmountError", () => {
   });
 
   it("accepts 2dp amounts that are not exactly representable in binary", () => {
-    // 10.1 * 100 = 1009.9999999999999 — a naive integer-cents check would
-    // wrongly reject a perfectly valid amount.
-    expect(adjustAmountError(10.1)).toBeNull();
-    expect(adjustAmountError(-10.1)).toBeNull();
+    // 0.07 * 100 = 7.000000000000001 and -0.29 * 100 = -28.999999999999996 —
+    // a naive integer-cents check would wrongly reject both, and the negative
+    // keeps sign symmetry on this signed validator. NOT 10.1/-10.1: both are
+    // exactly +-1010, so they pass with or without the epsilon and assert
+    // nothing.
+    expect(adjustAmountError(0.07)).toBeNull();
+    expect(adjustAmountError(-0.29)).toBeNull();
   });
 
   it("rejects zero (an adjustment must move the balance)", () => {

@@ -6,6 +6,7 @@ import { Modules, MedusaError } from '@medusajs/framework/utils';
 import type { INotificationModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
+import { CUSTOMER_FEED_CHANNEL } from '../../../../modules/packs/notify-feed';
 
 // POST /store/notifications/read-all
 //
@@ -45,7 +46,7 @@ export async function POST(
     Modules.NOTIFICATION,
   );
   const notifications = await notif.listNotifications(
-    { receiver_id: customerId, channel: 'feed' },
+    { receiver_id: customerId, channel: CUSTOMER_FEED_CHANNEL },
     { take: RECENT_NOTIFICATIONS, order: { created_at: 'DESC' } },
   );
 

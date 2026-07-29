@@ -103,11 +103,23 @@ const sanePercent = (value: unknown): number | null => {
 
 export function resolveBuybackRate(
   pack: { buyback_percent: unknown } | undefined | null,
-  pull: { rolled_at: Date | string; revealed_at?: Date | string | null },
+  pull: {
+    rolled_at: Date | string;
+    revealed_at?: Date | string | null;
+    // Set the moment the reveal ends or the customer leaves it (the reveal
+    // client stamps it via POST /store/pulls/close-instant, and the reveal's
+    // auto-conclude does the same). Once set, the instant premium is OVER no
+    // matter what the 30s timer still says — every sell is the flat vault rate.
+    // This is what makes the vault (which you only reach by leaving the reveal)
+    // always quote 90%, and closes the window for good even inside the 30s. The
+    // time deadline below is the backstop for a hard tab-kill that never stamps.
+    instant_closed_at?: Date | string | null;
+  },
   nowMs: number = Date.now(),
 ): BuybackRate {
   const deadline = instantDeadlineMs(pull.rolled_at, pull.revealed_at ?? null);
-  const isInstant = Number.isFinite(deadline) && nowMs <= deadline;
+  const closed = pull.instant_closed_at != null;
+  const isInstant = !closed && Number.isFinite(deadline) && nowMs <= deadline;
 
   // Floor the instant rate at flat: legacy rows predating admin validation must
   // never make selling now pay less than vaulting would.

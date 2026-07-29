@@ -25,16 +25,22 @@ const CARD_HANDLE = "ledger-card";
 const PACK_PRICE = 10;
 const FMV = 50;
 const MULTIPLIER = 1.2;
+// The markup is MOVED between the open and the sell (see step (c2)). Buyback
+// pays a cut of the LIVE display value, so the payout pinned below is the
+// BUMPED one. Without a price move this spec asserted conservation only under
+// frozen fixtures - the case that cannot fail - while reading in the PR as
+// general conservation proof.
+const BUMPED_MULTIPLIER = 1.5;
 const MANUAL_RATE = 4.0;
 const INSTANT_PERCENT = 96;
 // Buyback credits a cut of the FX-converted MYR Value, not raw USD:
-//   FMV × MANUAL_RATE × MULTIPLIER = 50 × 4.0 × 1.2 = RM 240 (the shown Value)
-//   × 96% instant = RM 230.40.  FX pinned in beforeEach for determinism.
-const INSTANT_AMOUNT = 230.4;
+//   FMV × MANUAL_RATE × BUMPED_MULTIPLIER = 50 × 4.0 × 1.5 = RM 300 (the
+//   shown Value AT SELL TIME) × 96% instant = RM 288.00. FX pinned in beforeEach.
+const INSTANT_AMOUNT = 288;
 const TOPUP = 100;
 // Deposit-funded open, so the final balance is exact:
-//   topup − price + buyback = 100 − 10 + 230.4 = RM 320.40.
-const FINAL_BALANCE = 320.4;
+//   topup − price + buyback = 100 − 10 + 288 = RM 378.00.
+const FINAL_BALANCE = 378;
 
 // The two fields assertConserved reads off each raw ledger row. amount is RM
 // (decimal); external_funded_cents is SEN (integer, signed). They are summed
@@ -271,6 +277,33 @@ medusaIntegrationTestRunner({
         expect(opened.data.balance).toBeCloseTo(TOPUP - PACK_PRICE, 2);
         await assertConserved(customerId, headers);
 
+        // (c2) MOVE THE PRICE mid-flow - a PriceCharting FMV sync or an admin
+        // markup edit landing between the open and the sell. Conservation has
+        // to hold ACROSS a revaluation, not merely under frozen fixtures: the
+        // ledger accumulates historical amounts while every balance view
+        // recomputes, so a writer that stamped or reversed a stale value
+        // drifts from the pinned values below.
+        //
+        // The assertConserved that closes this step is NOT what catches such a
+        // writer. It is TAUTOLOGICAL w.r.t. price: it sums credit_transaction
+        // rows and compares them to summaries derived from those same rows
+        // (creditSummary, walletSummary and GET /store/credits carry no price
+        // dependency), and no credit row is written between (c) and (c2), so
+        // it re-asserts identical state. The real discriminators are the
+        // exact-value pins in (d) (INSTANT_AMOUNT) and (e) (FINAL_BALANCE) -
+        // proven by mutation: freeze the buyback markup and those go RED while
+        // this assertConserved stays green. DO NOT delete them as "already
+        // covered by conservation" - that restores the vacuity this spec had
+        // before the price move was added.
+        const [card] = await packs.listCards(
+          { handle: CARD_HANDLE },
+          { take: 1 },
+        );
+        await packs.updateCards([
+          { id: card.id, market_multiplier: BUMPED_MULTIPLIER },
+        ]);
+        await assertConserved(customerId, headers);
+
         // (d) Instant-buyback the freshly-opened pull (inside the instant window).
         const pullId: string = opened.data.pull.id;
         const buyback = await unwrapResponse(
@@ -280,7 +313,7 @@ medusaIntegrationTestRunner({
         expect(buyback.data.amount).toBeCloseTo(INSTANT_AMOUNT, 2);
         await assertConserved(customerId, headers);
 
-        // (e) Final exact-value pin: 100 − 10 + 230.4 = RM 320.40, and the
+        // (e) Final exact-value pin: 100 − 10 + 288 = RM 378.00, and the
         // deposit basis is the full topup. playthrough.used is intentionally NOT
         // pinned — plan 026 changes that basis; deposited is stable.
         const wallet = await packs.walletSummary(customerId);

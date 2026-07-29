@@ -1,6 +1,5 @@
 import { useRef, useState, type ChangeEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link } from 'react-router-dom';
 import {
   Container,
   Heading,
@@ -8,10 +7,13 @@ import {
   Input,
   Label,
   Button,
+  IconButton,
   StatusBadge,
+  Table,
   toast,
   clx,
 } from '@medusajs/ui';
+import { XMark } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
   searchPriceCharting,
@@ -22,8 +24,9 @@ import {
 } from '../../../lib/admin-rest';
 import {
   useFxRate,
-  useCreateProductFromPriceCharting,
+  useCreateProductsFromPriceChartingBatch,
   useUploadImage,
+  type PcQueueItem,
 } from '../../../lib/queries';
 import { resolveImageUrl } from '../../../lib/image-url';
 import { validateImageFile } from '../../../lib/image-validation';
@@ -37,7 +40,7 @@ import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
 
 export const config: RouteConfig = {
   label: 'Add from PriceCharting',
-  nested: '/products',
+  nested: '/inventory',
   rank: 1,
 };
 
@@ -64,10 +67,21 @@ const isPcImageUrl = (url: string): boolean => {
   }
 };
 
+// A queued pick plus a stable row key. The key exists because the per-row
+// remove button shifts every later index, and these rows carry <img> elements —
+// with `key={idx}` React would reuse the removed row's DOM node (and its photo)
+// for its successor.
+type QueueRow = { key: string; item: PcQueueItem };
+
+// ponytail: per-failure error toasts are capped so a 20-item batch cannot bury
+// the screen; the summary toast names how many were hidden. Swap in a failures
+// panel if operators ever need to read them all.
+const ERROR_TOAST_CAP = 5;
+
 const AddFromPriceChartingPage = () => {
   const { t } = useTranslation();
   const { data: fx, isError: fxError } = useFxRate();
-  const createProduct = useCreateProductFromPriceCharting();
+  const batchCreate = useCreateProductsFromPriceChartingBatch();
   const uploadImg = useUploadImage();
   const fileRef = useRef<HTMLInputElement>(null);
   // Monotonic pick token: the tcg-meta prefill below is fire-and-forget, so a
@@ -109,13 +123,15 @@ const AddFromPriceChartingPage = () => {
     pixel_pokemon_id: null,
   });
 
-  // Result.
-  const [created, setCreated] = useState<{ id: string; handle: string } | null>(
-    null,
-  );
+  // Step 6 — the queue. Each completed pick is parked here so the operator can
+  // onboard a whole purchase in one pass; nothing is written until "Save queue".
+  // ponytail: in-memory only, so a refresh or a navigation away drops the whole
+  // queue. Persist it to localStorage if operators start losing real work.
+  const [queue, setQueue] = useState<QueueRow[]>([]);
+  const queueSeq = useRef(0);
 
   const uploading = uploadImg.isPending;
-  const saving = createProduct.isPending;
+  const saving = batchCreate.isPending;
 
   const runSearch = async () => {
     const q = query.trim();
@@ -239,7 +255,7 @@ const AddFromPriceChartingPage = () => {
     !saving &&
     !uploading;
 
-  const save = async () => {
+  const addToQueue = () => {
     if (
       !canSave ||
       !match ||
@@ -249,8 +265,13 @@ const AddFromPriceChartingPage = () => {
       pokemon.pixel_pokemon_id === null
     )
       return;
-    try {
-      const product = await createProduct.mutateAsync({
+    // Built OUTSIDE the updater on purpose. The guard above narrows
+    // pokemon.pixel_pokemon_id to a string, but TS drops property narrowing
+    // inside a callback, and React double-invokes state updaters under
+    // StrictMode — which would burn two keys per add.
+    const row: QueueRow = {
+      key: String(++queueSeq.current),
+      item: {
         pc_product_id: match.id,
         pc_grade: pcGrade,
         name: pcProduct.name,
@@ -265,12 +286,64 @@ const AddFromPriceChartingPage = () => {
         pixel_pokemon_id: pokemon.pixel_pokemon_id,
         label_year: labelYear.trim() || null,
         label_note: labelNote.trim() || null,
-      });
-      setCreated(product);
-      toast.success(t('pcAdd.toast.created', { name: pcProduct.name }));
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err));
+      },
+    };
+    setQueue((q) => [...q, row]);
+    // Reset the whole pick — the same fields runSearch() clears — so the
+    // operator lands on a blank search for the next item. Bumping pickSeq is
+    // part of that reset and is NOT optional, but for the INVARIANT rather
+    // than for a leak this one call site is the last line against: EVERY path
+    // that blanks labelYear/labelNote (runSearch, pickMatch, here) also bumps
+    // the token, so pickMatch's fire-and-forget getTcgCardMeta prefill is
+    // dropped by its seq check whichever path did the blanking — and no reset
+    // path has to reason about whether a sibling happens to re-clear after it.
+    pickSeq.current++;
+    setQuery('');
+    setMatches(null);
+    setMatch(null);
+    setPcProduct(null);
+    setPcGrade(null);
+    setMarketValue(null);
+    setGrader('');
+    setGrade('');
+    setLabelYear('');
+    setLabelNote('');
+    setStock('0');
+    setImage('');
+    setPokemon({ pixel_pokemon_id: null });
+  };
+
+  const removeFromQueue = (key: string) =>
+    setQueue((q) => q.filter((r) => r.key !== key));
+
+  const saveQueue = async () => {
+    if (queue.length === 0 || saving) return;
+    const { created, skipped } = await batchCreate.mutateAsync(
+      queue.map((r) => r.item),
+    );
+    const hidden = Math.max(0, skipped.length - ERROR_TOAST_CAP);
+    if (skipped.length === 0) {
+      toast.success(t('pcAdd.toast.queueDone', { n: created }));
+    } else {
+      const summary =
+        hidden > 0
+          ? t('pcAdd.toast.queueSkippedCapped', {
+              n: created,
+              skipped: skipped.length,
+              hidden,
+            })
+          : t('pcAdd.toast.queueSkipped', {
+              n: created,
+              skipped: skipped.length,
+            });
+      if (created > 0) toast.success(summary);
+      else toast.warning(summary);
     }
+    for (const reason of skipped.slice(0, ERROR_TOAST_CAP)) toast.error(reason);
+    // ponytail: clears the whole queue, failures included — a failed item has
+    // to be re-picked by hand. Keeping failed rows queued needs a per-row error
+    // state and a retry affordance; add it if batches start failing in practice.
+    setQueue([]);
   };
 
   return (
@@ -537,28 +610,56 @@ const AddFromPriceChartingPage = () => {
           </div>
         )}
 
-        {/* Step 6 — submit */}
+        {/* Step 6 — add to queue */}
         {pcGrade !== null && (
           <div className="flex items-center gap-3">
-            <Button
-              size="small"
-              onClick={save}
-              isLoading={saving}
-              disabled={!canSave}
-            >
-              {t('pcAdd.submit')}
+            <Button size="small" onClick={addToQueue} disabled={!canSave}>
+              {t('pcAdd.queue.add')}
             </Button>
-            {created && (
-              <div className="flex items-center gap-2">
-                <StatusBadge color="green">{t('pcAdd.created')}</StatusBadge>
-                <Link
-                  to={`/products/${created.id}`}
-                  className="text-ui-fg-interactive text-sm hover:underline"
-                >
-                  {created.handle}
-                </Link>
-              </div>
-            )}
+          </div>
+        )}
+
+        {/* Step 7 — queue + batch save */}
+        {queue.length > 0 && (
+          <div className="flex flex-col gap-y-3">
+            <Table>
+              <Table.Header>
+                <Table.Row>
+                  <Table.HeaderCell>{t('pcAdd.queue.photo')}</Table.HeaderCell>
+                  <Table.HeaderCell>{t('pcAdd.queue.name')}</Table.HeaderCell>
+                  <Table.HeaderCell>{t('pcAdd.queue.grade')}</Table.HeaderCell>
+                  <Table.HeaderCell />
+                </Table.Row>
+              </Table.Header>
+              <Table.Body>
+                {queue.map((row) => (
+                  <Table.Row key={row.key}>
+                    <Table.Cell>
+                      <img
+                        src={resolveImageUrl(row.item.image)}
+                        alt=""
+                        className="h-10 w-8 rounded object-contain"
+                      />
+                    </Table.Cell>
+                    <Table.Cell>{row.item.name}</Table.Cell>
+                    <Table.Cell>{row.item.pc_grade}</Table.Cell>
+                    <Table.Cell>
+                      <IconButton
+                        size="small"
+                        variant="transparent"
+                        aria-label={t('pcAdd.queue.remove')}
+                        onClick={() => removeFromQueue(row.key)}
+                      >
+                        <XMark className="h-3 w-3" />
+                      </IconButton>
+                    </Table.Cell>
+                  </Table.Row>
+                ))}
+              </Table.Body>
+            </Table>
+            <Button onClick={saveQueue} isLoading={saving} disabled={saving}>
+              {t('pcAdd.queue.save', { n: queue.length })}
+            </Button>
           </div>
         )}
       </div>

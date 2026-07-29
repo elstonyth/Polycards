@@ -1,4 +1,4 @@
-import { randomInt } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
 import {
   MedusaService,
   MedusaError,
@@ -13,6 +13,7 @@ import {
   validateDeliveryRequest,
   validateDeliveryStatusTransition,
   snapshotAddress,
+  type AddressSnapshot,
   type DeliveryStatus,
 } from './delivery';
 import { rewardsRedemptionEnabled } from './rewards-gate';
@@ -33,6 +34,7 @@ import SiteSettings from './models/site-settings';
 import ReferralRelationship from './models/referral-relationship';
 import Commission from './models/commission';
 import CustomerAccountState from './models/customer-account-state';
+import PlayerPayoutDetails from './models/player-payout-details';
 import AdminActionAudit from './models/admin-action-audit';
 import VipMemberState from './models/vip-member-state';
 import VipRewardGrant from './models/vip-reward-grant';
@@ -45,6 +47,19 @@ import ChallengeStage from './models/challenge-stage';
 import ChallengeSettings from './models/challenge-settings';
 import GlobePayDeposit from './models/globepay-deposit';
 import GlobePayWithdrawal from './models/globepay-withdrawal';
+import LedgerEntry from './models/ledger-entry';
+import LedgerSequence from './models/ledger-sequence';
+import {
+  displayId,
+  nextSerial,
+  sequenceScope,
+  countByHandle,
+  type LedgerPayload,
+  type LedgerType,
+} from './ledger';
+import PurchaseInvoice from './models/purchase-invoice';
+import PurchaseInvoiceLine from './models/purchase-invoice-line';
+import StockMovement from './models/stock-movement';
 import { pageAll } from '../../api/utils/page-all';
 import {
   resolveBuybackRate,
@@ -61,12 +76,13 @@ import {
 } from './referral-commission';
 import { levelForSpend } from './vip-ladder';
 import { levelsToGrant, rewardsForLevel } from './vip-rewards';
-import { fromSen } from './money';
+import { fromSen, toSen } from './money';
 import {
   DEFAULT_MARKET_MULTIPLIER,
   resolveFxRate,
   DEFAULT_USD_MYR,
   effectiveRate,
+  displayMarketPrice,
 } from './pricing';
 import {
   validateRewardsPatch,
@@ -90,6 +106,7 @@ import type {
   ChallengeSettingsView,
 } from './challenge-validate';
 import { getCardStockByHandle } from './card-stock';
+import { weightedAverageCost } from './inventory-cost';
 import type { MedusaContainer } from '@medusajs/framework/types';
 
 // plan-033 playthrough basis: the "post-1b deposited" ledger predicate. Shared
@@ -234,6 +251,20 @@ type LedgerSqlManager = {
   execute<T = unknown>(query: string, params?: unknown[]): Promise<T>;
 };
 
+/** One raw `ledger_entry` row as listLedgerEntriesForAdmin reads it. */
+export type LedgerEntryRow = {
+  id: string;
+  display_id: string;
+  type: LedgerType;
+  customer_id: string;
+  occurred_at: string;
+  // Raw driver values for the numeric columns — Number()'d at the route
+  // boundary, same discipline as every other raw-SQL money read in this file.
+  wallet_delta: string | null;
+  vault_delta: string | null;
+  payload: unknown;
+};
+
 // Live card value in USD: FMV × the card's multiplier (default when the row
 // carries none). Requires alias `card c`; binds ONE `?`
 // (DEFAULT_MARKET_MULTIPLIER). Shared by PULLED_VALUE_USD_SQL's fallback and
@@ -368,6 +399,7 @@ class PacksModuleService extends MedusaService({
   ReferralRelationship,
   Commission,
   CustomerAccountState,
+  PlayerPayoutDetails,
   AdminActionAudit,
   VipMemberState,
   VipRewardGrant,
@@ -380,6 +412,11 @@ class PacksModuleService extends MedusaService({
   ChallengeSettings,
   GlobePayDeposit,
   GlobePayWithdrawal,
+  LedgerEntry,
+  LedgerSequence,
+  PurchaseInvoice,
+  PurchaseInvoiceLine,
+  StockMovement,
 }) {
   // Apply a pack-membership diff (add rows + delete rows + renormalize
   // survivor weights) as ONE transaction. The set-pack-members workflow step
@@ -391,15 +428,25 @@ class PacksModuleService extends MedusaService({
   async applyPackMemberDiff(
     diff: {
       pack_id: string;
+      // weight_2/weight_3 ride along with weight: a membership edit recomputes
+      // ALL THREE odds sets, so writing only `weight` would leave a
+      // materialized set 2/3 resolving to something other than 10000.
       create: {
         pack_id: string;
         card_id: string;
         rarity: OddsRarity;
         weight: number;
+        weight_2?: number | null;
+        weight_3?: number | null;
         locked: boolean;
       }[];
       remove_ids: string[];
-      reweigh: { id: string; weight: number }[];
+      reweigh: {
+        id: string;
+        weight: number;
+        weight_2?: number | null;
+        weight_3?: number | null;
+      }[];
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ created_ids: string[] }> {
@@ -603,7 +650,14 @@ class PacksModuleService extends MedusaService({
   // resolveBuybackRate re-query the open route did inline.
   async quoteBuyback(
     packSlug: string,
-    pull: { rolled_at: Date | string; revealed_at?: Date | string | null },
+    pull: {
+      rolled_at: Date | string;
+      revealed_at?: Date | string | null;
+      // Forwarded to resolveBuybackRate so a quote through this helper also goes
+      // flat once the reveal closed the window — matching the vault + credit
+      // paths (CodeRabbit). Null/absent for a fresh open-time quote (window open).
+      instant_closed_at?: Date | string | null;
+    },
     // The MYR display Value (raw USD × FX × per-card markup), NOT raw USD —
     // buyback pays MYR credits, so the percent is of what the customer sees.
     valueMyr: number,
@@ -674,6 +728,40 @@ class PacksModuleService extends MedusaService({
       vipSpendTotal: Number(r?.vip_spend_cents ?? 0) / 100,
       depositedPlaythroughTotal: Number(r?.deposited_pt_cents ?? 0) / 100,
     };
+  }
+
+  // Monthly pack_open spend for one customer (MYR), newest first, capped at 24
+  // months. Months are bucketed in Asia/Kuala_Lumpur — every date boundary in
+  // this project is MYT, so an open at 17:00Z on the 28th belongs to the NEXT
+  // month. Months with no pack_open activity are omitted entirely (the HAVING),
+  // so a top-up-only month never shows up as a zero row. Same integer-cent
+  // idiom and index (customer_id, created_at) as creditSummary.
+  //
+  // KNOWN WART — a CROSS-MONTH reversal distorts BOTH months: reverseOpen writes
+  // its refund as a positive `pack_open` row stamped with the reversal's own
+  // created_at, so a March open reversed in April leaves March overstated and
+  // April negative. (Unlike creditSummary.vipSpendTotal, where the same rows net
+  // down one scalar and the distortion cancels.) Upgrade path when this matters:
+  // bucket a reversal by the reversed row's created_at, joining on the
+  // credit_transaction.source_transaction_id both rows already carry.
+  @InjectManager()
+  async spendReportForCustomer(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ period: string; spend: number }[]> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ period: string; spend_cents: string }[]>(
+      "SELECT to_char(date_trunc('month', created_at AT TIME ZONE 'Asia/Kuala_Lumpur'), 'YYYY-MM') AS period, " +
+        "  COALESCE(SUM(CASE WHEN reason = 'pack_open' THEN ROUND(-amount * 100) ELSE 0 END), 0)::bigint AS spend_cents " +
+        'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL ' +
+        "GROUP BY 1 HAVING SUM(CASE WHEN reason = 'pack_open' THEN 1 ELSE 0 END) > 0 ORDER BY 1 DESC LIMIT 24",
+      [customerId],
+    );
+    return rows.map((r) => ({
+      period: r.period,
+      spend: Number(r.spend_cents) / 100,
+    }));
   }
 
   // Customer credit balance = Σ(amount) over the append-only ledger. Kept as a
@@ -863,6 +951,35 @@ class PacksModuleService extends MedusaService({
       replayed: false,
       reference: input.reference ?? null,
     };
+  }
+
+  // Wraps mutateCreditAtomic with the paired TP ledger row, same transaction
+  // (POLYCARD-BACK §5.3). ref_id = the credit_transaction's own id, so the
+  // Wallet-tab join (Task 9) is a plain equality on credit_transaction.id.
+  @InjectTransactionManager()
+  async topUpCreditsWithLedger(
+    input: CreditMutationInput,
+    @MedusaContext() sharedContext: Context = {},
+  ): ReturnType<PacksModuleService['mutateCreditAtomic']> {
+    const result = await this.mutateCreditAtomic(input, sharedContext);
+    if (!result.replayed) {
+      await this.recordLedgerEntry(
+        {
+          type: 'TP',
+          customerId: input.customerId,
+          refId: result.id,
+          walletDelta: result.amount,
+          vaultDelta: null,
+          payload: {
+            type: 'TP',
+            payment_method: 'mock',
+            gateway_ref: result.reference,
+          },
+        },
+        sharedContext,
+      );
+    }
+    return result;
   }
 
   // Append-only reversal of a single ledger row (the open-saga compensation).
@@ -1559,6 +1676,97 @@ class PacksModuleService extends MedusaService({
     return { status: 'requested' };
   }
 
+  // Collapses request-delivery's three writes (order, items, pull flip) plus
+  // the paired OD ledger row into ONE transaction (POLYCARD-BACK §5.3:
+  // "vault - at order CREATE"). Replaces the step's previous three-stage
+  // manual try/catch undo — a failure partway through this method rolls back
+  // via the transaction itself; the step's own compensation only needs to
+  // undo the WHOLE thing if a LATER workflow step fails afterward.
+  //
+  // Fires at CREATE, not at any later admin ship/deliver advance: vaultValue-
+  // ForPulls/playersOverview both key liability off status='vaulted', and
+  // transitionPullStatus flips vaulted -> delivering right here (below) —
+  // NOT at 'shipped'. A pull that's already 'delivering' has already left
+  // the counted pool for the whole requested/processed/ready_to_ship/shipped
+  // window, so the ledger row must match that same instant or it overstates
+  // vault liability for every pending order.
+  //
+  // input.fx is RESOLVED BY THE CALLER (request-delivery.ts, matching
+  // record-pull.ts:32's precedent) — never resolveFxRate(this) in here.
+  // resolveFxRate has no sharedContext, so calling it inside this
+  // @InjectTransactionManager() method would acquire a SECOND pool
+  // connection while this one already holds the write transaction — the
+  // exact KnexTimeoutError "pool is probably full" shape Task 7 fixed for
+  // the SP writer (service.ts recordPullsWithLedger).
+  @InjectTransactionManager()
+  async createDeliveryOrderWithLedger(
+    input: { customerId: string; snapshot: AddressSnapshot; pullIds: string[]; fx: number },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ orderId: string; itemIds: string[] }> {
+    const [order] = await this.createDeliveryOrders(
+      [{ customer_id: input.customerId, status: 'requested' as const, ...input.snapshot }],
+      sharedContext,
+    );
+    const items = await this.createDeliveryOrderItems(
+      input.pullIds.map((pull_id) => ({ delivery_order_id: order.id, pull_id })),
+      sharedContext,
+    );
+    await this.transitionPullStatus(
+      { ids: input.pullIds, from: 'vaulted', to: 'delivering' },
+      sharedContext,
+    );
+
+    // ONE listPulls call feeds both the value sum and the payload tally —
+    // vaultValueForPulls takes the rows, not the ids, so this isn't fetched twice.
+    const pulls = await this.listPulls({ id: input.pullIds }, { take: input.pullIds.length }, sharedContext);
+    const vaultDelta = await this.vaultValueForPulls(pulls, input.fx, sharedContext);
+    await this.recordLedgerEntry(
+      {
+        type: 'OD',
+        customerId: input.customerId,
+        refId: order.id,
+        walletDelta: 0,
+        vaultDelta: -vaultDelta,
+        payload: {
+          type: 'OD',
+          handles: countByHandle(pulls.map((p) => p.card_id)),
+          status: 'requested',
+        },
+      },
+      sharedContext,
+    );
+    return { orderId: order.id, itemIds: items.map((i) => i.id) };
+  }
+
+  // The OD debit's value: Σ displayMarketPrice(card.market_value, fx,
+  // multiplier) over the given pulls' cards. ONE caller —
+  // createDeliveryOrderWithLedger — because an order is valued exactly once,
+  // at create; the cancel arm reverses that stored amount rather than
+  // re-pricing the cards at a later instant. Takes already-fetched pull rows
+  // (never re-queries) and an already-resolved `fx` (never resolveFxRate(this)
+  // — see createDeliveryOrderWithLedger's comment above; the same pool-
+  // exhaustion hazard applies to any future caller). listCards/listPulls calls
+  // elsewhere in this file thread sharedContext through and are safe — only
+  // the fx resolver drops it.
+  private async vaultValueForPulls(
+    pulls: { card_id: string }[],
+    fx: number,
+    sharedContext: Context,
+  ): Promise<number> {
+    const handles = [...new Set(pulls.map((p) => p.card_id))];
+    if (handles.length === 0) return 0;
+    const cards = await this.listCards({ handle: handles }, { take: handles.length }, sharedContext);
+    const byHandle = new Map(cards.map((c) => [c.handle, c]));
+    const sum = pulls.reduce((total, p) => {
+      const card = byHandle.get(p.card_id);
+      if (!card) return total;
+      return total + displayMarketPrice(
+        Number(card.market_value), fx, Number(card.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER),
+      );
+    }, 0);
+    return Math.round(sum * 100) / 100;
+  }
+
   // Admin per-commission status flip: available|pending → suspended.
   // The suspended status is counted as locked in lockedCommissionCents, so
   // the beneficiary's availableBalance drops automatically without any
@@ -1773,6 +1981,159 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     return { frozen: true };
+  }
+
+  // Player disable switch (POLYCARD-BACK §4.2): blocks LOGIN/session use —
+  // orthogonal to `frozen` (funds lock), so neither flag reads or writes the
+  // other's columns. One row per customer, lazy-created like the freeze path.
+  // Takes the SAME advisory key as the freeze path — it guards the same
+  // customer_account_state row, whose customer_id is unique, against a
+  // duplicate list-then-create. State + audit share one transaction: an
+  // undisclosed disable (no audit row) is not an acceptable partial failure.
+  @InjectTransactionManager()
+  async setAccountDisabled(
+    input: {
+      customerId: string;
+      adminId: string;
+      disabled: boolean;
+      reason: string;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ disabled: boolean }> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `credit:${input.customerId}`,
+    ]);
+    const [existing] = await this.listCustomerAccountStates(
+      { customer_id: input.customerId },
+      { take: 1 },
+      sharedContext,
+    );
+    const patch = {
+      disabled: input.disabled,
+      disabled_reason: input.disabled ? input.reason : null,
+      disabled_by: input.disabled ? input.adminId : null,
+      disabled_at: input.disabled ? new Date() : null,
+    };
+    if (existing) {
+      await this.updateCustomerAccountStates(
+        { selector: { id: existing.id }, data: patch },
+        sharedContext,
+      );
+    } else {
+      await this.createCustomerAccountStates(
+        [{ customer_id: input.customerId, ...patch }],
+        sharedContext,
+      );
+    }
+    await this.createAdminActionAudits(
+      [
+        {
+          admin_id: input.adminId,
+          entity_type: 'customer',
+          entity_id: input.customerId,
+          action: input.disabled ? 'disable' : 'enable',
+          before: { disabled: existing?.disabled ?? false },
+          after: { disabled: input.disabled },
+          reason: input.reason,
+        },
+      ],
+      sharedContext,
+    );
+    return { disabled: input.disabled };
+  }
+
+  // True if the customer's login is administratively disabled. One indexed read
+  // on the auth path — mirrors isFrozen.
+  @InjectManager()
+  async isAccountDisabled(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<boolean> {
+    const [state] = await this.listCustomerAccountStates(
+      { customer_id: customerId, disabled: true },
+      { take: 1 },
+      sharedContext,
+    );
+    return Boolean(state);
+  }
+
+  // Upsert a customer's manual-cashout bank destination + audit row in ONE
+  // transaction (POLYCARD-BACK §4.3). Own advisory key — the row lives in its
+  // own table, so this must not serialize against the credit ledger, but the
+  // list-then-create still needs a lock or two concurrent first-saves race the
+  // unique customer_id to a 23505. The audit row records the bank NAME plus a
+  // last4: the FULL account number is admin-auth-only and must never be copied
+  // into the audit feed (GET /admin/customers/:id/audit reads that table).
+  // Without the last4 a same-bank account redirect reads as a no-op edit.
+  @InjectTransactionManager()
+  async setPayoutDetails(
+    input: {
+      customerId: string;
+      adminId: string;
+      bankName: string;
+      bankAccountNumber: string;
+      accountHolderName: string | null;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{
+    bank_name: string;
+    bank_account_number: string;
+    account_holder_name: string | null;
+  }> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `payout:${input.customerId}`,
+    ]);
+    const [existing] = await this.listPlayerPayoutDetails(
+      { customer_id: input.customerId },
+      { take: 1 },
+      sharedContext,
+    );
+    const data = {
+      bank_name: input.bankName,
+      bank_account_number: input.bankAccountNumber,
+      account_holder_name: input.accountHolderName,
+    };
+    if (existing) {
+      await this.updatePlayerPayoutDetails(
+        { selector: { id: existing.id }, data },
+        sharedContext,
+      );
+    } else {
+      await this.createPlayerPayoutDetails(
+        [{ customer_id: input.customerId, ...data }],
+        sharedContext,
+      );
+    }
+    // Digits only (stored numbers may carry spaces/hyphens) and ONLY when there
+    // are more than four of them — for a <=4-digit account the "last4" would be
+    // the whole number, which is exactly what must not reach the audit feed.
+    const last4 = (n: string | null | undefined): string | null => {
+      const digits = (n ?? '').replace(/\D/g, '');
+      return digits.length > 4 ? digits.slice(-4) : null;
+    };
+    await this.createAdminActionAudits(
+      [
+        {
+          admin_id: input.adminId,
+          entity_type: 'customer',
+          entity_id: input.customerId,
+          action: 'edit',
+          before: {
+            bank_name: existing?.bank_name ?? null,
+            account_last4: last4(existing?.bank_account_number),
+          },
+          after: {
+            bank_name: input.bankName,
+            account_last4: last4(input.bankAccountNumber),
+          },
+          reason: 'payout details updated',
+        },
+      ],
+      sharedContext,
+    );
+    return data;
   }
 
   // FX manual-override edit + audit row in the same transaction. The audit row
@@ -2238,6 +2599,86 @@ class PacksModuleService extends MedusaService({
       balance: (beforeCents + deltaCents) / 100,
       commissions,
     };
+  }
+
+  // Wraps createPulls with the paired SP ledger row, same transaction
+  // (POLYCARD-BACK §5.3). ONE row per open_id regardless of pull count — a
+  // batch open is one charge and one ledger event (the caller passes every
+  // pull for the open in a single input.pulls array, so there is exactly one
+  // recordLedgerEntry call per invocation — no per-pull loop, so the
+  // same-transaction self-duplication hazard the epic's idempotency rule
+  // warns about does not arise here). ref_id = open_id (already unique per
+  // open, single or batch; also what credit_transaction.source_transaction_id
+  // stores for pack_open rows, so the Wallet-tab join in Task 9 keys on that
+  // column for this type instead of credit_transaction.id).
+  //
+  // vault_delta uses the LENIENT resolveFxRate (see Global Constraints) —
+  // this method never blocks a paid, already-committed pull on an FX gap.
+  // The rate is resolved by the CALLER (record-pull.ts / record-pulls-batch.ts,
+  // matching buyback-pull.ts:135's precedent) and passed in as
+  // input.ledger.fx — NOT resolved in here. resolveFxRate has no
+  // sharedContext, so calling it inside this @InjectTransactionManager()
+  // method would acquire a SECOND pool connection while this one is holding
+  // the write transaction (which itself holds a FOR UPDATE lock on
+  // ledger_sequence for the whole quarter's SP scope) — the exact shape of
+  // this codebase's prior KnexTimeoutError "pool is probably full" incidents.
+  // The 30s display-fx cache makes that rare, not safe.
+  //
+  // recorded_value_usd is ALREADY market_value x the card's multiplier
+  // (roll-pack.ts's draw-time snapshot — proven by
+  // recorded-pull-value.integration.spec.ts, 20 x 1.2 = 24 — and consumed the
+  // same way everywhere else that reads it: leaderboardTop/PULLED_VALUE_USD_SQL
+  // convert it to MYR with `x fx` ONLY, never a second multiplier). So the
+  // third argument to displayMarketPrice here is fixed at 1 — passing the
+  // card's live market_multiplier again would double-count it (market_value x
+  // multiplier^2 x fx instead of x multiplier x fx). No card lookup is needed
+  // for this reason alone; every other displayMarketPrice call site in this
+  // codebase passes raw card.market_value, never a pre-multiplied snapshot.
+  @InjectTransactionManager()
+  async recordPullsWithLedger(
+    input: {
+      pulls: Parameters<PacksModuleService['createPulls']>[0];
+      ledger: {
+        customerId: string;
+        openId: string;
+        price: number;
+        packId: string;
+        channel: 'single' | 'batch';
+        fx: number;
+      };
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<Awaited<ReturnType<PacksModuleService['createPulls']>>> {
+    const pulls = await this.createPulls(input.pulls, sharedContext);
+
+    const vaultDelta = input.pulls.reduce(
+      (sum, p) =>
+        sum + displayMarketPrice(Number(p.recorded_value_usd), input.ledger.fx, 1),
+      0,
+    );
+
+    await this.recordLedgerEntry(
+      {
+        type: 'SP',
+        customerId: input.ledger.customerId,
+        refId: input.ledger.openId,
+        walletDelta: -input.ledger.price,
+        vaultDelta: Math.round(vaultDelta * 100) / 100,
+        payload: {
+          type: 'SP',
+          channel: input.ledger.channel,
+          pack_id: input.ledger.packId,
+          // String(...) rather than a bare p.card_id: the generated
+          // createPulls parameter type resolves card_id as string |
+          // undefined here (Parameters<> picks it up loosely), even though
+          // every real caller (record-pull.ts / record-pulls-batch.ts)
+          // always supplies a concrete Card.handle string.
+          prize_skus: input.pulls.map((p) => String(p.card_id)),
+        },
+      },
+      sharedContext,
+    );
+    return pulls;
   }
 
   // Locked (unspendable) commission credit for a customer, in cents, read inside
@@ -3091,6 +3532,101 @@ class PacksModuleService extends MedusaService({
     return { sponsorOf, vipLevel, lifetimeSen, frozen, recruitCount };
   }
 
+  // Batched per-player aggregates for the admin Players list (POLYCARD-BACK
+  // §4.2): ONE query per aggregate per page, never per-row. The credit SQL is
+  // the GROUP BY twin of creditSummary (service.ts:661) and the vault SQL the
+  // customer-scoped twin of vaultLiabilityMyr (service.ts:2735) — same FMV
+  // convention (multiplier 1), same 'vaulted' predicate, no source filter, and
+  // the same INNER JOIN, so a vaulted pull whose card was soft-deleted drops out
+  // of BOTH vault_count and vault_value (profileStatsForCustomer deliberately
+  // differs — its LEFT JOIN still counts the pull at 0). Keeping the twin exact
+  // is what makes the Players list and the economy dashboard agree.
+  @InjectManager()
+  async playersOverview(
+    ids: string[],
+    fx: number,
+    @MedusaContext() sharedContext: Context = {},
+  ) {
+    const wallet = new Map<
+      string,
+      {
+        balanceCents: number;
+        // VIP-basis net pack_open spend — the same expression creditSummary
+        // calls vip_spend_cents (NOT its differently-defined spend_cents).
+        vipSpendCents: number;
+        lastSpendAt: string | null;
+      }
+    >();
+    const vault = new Map<string, { count: number; cents: number }>();
+    const pullCount = new Map<string, number>();
+    const vipLevel = new Map<string, number>();
+    const state = new Map<string, { frozen: boolean; disabled: boolean }>();
+    if (ids.length === 0)
+      return { wallet, vault, pullCount, vipLevel, state };
+
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const ph = ids.map(() => '?').join(',');
+    // Sequential to avoid concurrent queries on the shared injected EntityManager.
+    const credits = await em.execute<
+      {
+        customer_id: string;
+        balance_cents: string;
+        vip_spend_cents: string;
+        last_spend_at: string | null;
+      }[]
+    >(
+      'SELECT customer_id, ' +
+        '  COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents, ' +
+        "  COALESCE(SUM(CASE WHEN reason = 'pack_open' THEN ROUND(-amount * 100) ELSE 0 END), 0)::bigint AS vip_spend_cents, " +
+        "  MAX(created_at) FILTER (WHERE reason = 'pack_open') AS last_spend_at " +
+        `FROM credit_transaction WHERE customer_id IN (${ph}) AND deleted_at IS NULL GROUP BY customer_id`,
+      ids,
+    );
+    const vaults = await em.execute<
+      { customer_id: string; n: string; cents: string }[]
+    >(
+      'SELECT p.customer_id, COUNT(*)::bigint AS n, ' +
+        '  COALESCE(SUM(ROUND(c.market_value * ? * 100)), 0)::bigint AS cents ' +
+        '  FROM pull p JOIN card c ON c.handle = p.card_id AND c.deleted_at IS NULL ' +
+        ` WHERE p.status = 'vaulted' AND p.deleted_at IS NULL AND p.customer_id IN (${ph}) GROUP BY p.customer_id`,
+      [fx, ...ids],
+    );
+    const pulls = await em.execute<{ customer_id: string; n: string }[]>(
+      `SELECT customer_id, COUNT(*)::bigint AS n FROM pull WHERE source = 'pack' AND deleted_at IS NULL AND customer_id IN (${ph}) GROUP BY customer_id`,
+      ids,
+    );
+    const vips = await em.execute<
+      { customer_id: string; current_level: number }[]
+    >(
+      `SELECT customer_id, current_level FROM vip_member_state WHERE customer_id IN (${ph}) AND deleted_at IS NULL`,
+      ids,
+    );
+    const states = await em.execute<
+      { customer_id: string; frozen: boolean; disabled: boolean }[]
+    >(
+      `SELECT customer_id, frozen, disabled FROM customer_account_state WHERE customer_id IN (${ph}) AND deleted_at IS NULL`,
+      ids,
+    );
+
+    for (const r of credits)
+      wallet.set(r.customer_id, {
+        balanceCents: Number(r.balance_cents),
+        vipSpendCents: Number(r.vip_spend_cents),
+        lastSpendAt: r.last_spend_at,
+      });
+    for (const r of vaults)
+      vault.set(r.customer_id, { count: Number(r.n), cents: Number(r.cents) });
+    for (const r of pulls) pullCount.set(r.customer_id, Number(r.n));
+    for (const r of vips) vipLevel.set(r.customer_id, Number(r.current_level));
+    for (const r of states)
+      state.set(r.customer_id, {
+        frozen: Boolean(r.frozen),
+        disabled: Boolean(r.disabled),
+      });
+    return { wallet, vault, pullCount, vipLevel, state };
+  }
+
   // Delete-guard (spec §3 invariant 1): money rows backing a commission are
   // append-only — never hard-deleted. Compensation MUST use
   // reverseCreditTransaction. This refuses an accidental delete of any row a
@@ -3178,6 +3714,40 @@ class PacksModuleService extends MedusaService({
     };
   }
 
+  // Close the instant-buyback window for the caller's OWN pulls — called when
+  // the reveal ends or the customer leaves it, so the vault (and every later
+  // sell) quotes the flat rate even inside the 30s. CLOSE-ONLY and idempotent:
+  // the filtered update stamps only where instant_closed_at IS NULL, so it can
+  // end the premium early but never re-open it, and a foreign/already-closed id
+  // is a silent no-op (no existence leak). The 30s time deadline stays the
+  // backstop for a hard tab-kill that never calls this.
+  async closeInstantWindow(
+    pullIds: string[],
+    customerId: string,
+    nowMs: number = Date.now(),
+  ): Promise<{ closed: number }> {
+    // Dedupe + bound defensively (the route already does, but a direct caller
+    // must not be able to drive an oversized IN(...) either).
+    const ids = [
+      ...new Set(
+        (pullIds ?? []).filter(
+          (x): x is string => typeof x === 'string' && x.length > 0,
+        ),
+      ),
+    ].slice(0, 50);
+    if (ids.length === 0) return { closed: 0 };
+    const open = await this.listPulls(
+      { id: ids, customer_id: customerId, instant_closed_at: null },
+      { take: ids.length },
+    );
+    if (open.length === 0) return { closed: 0 };
+    await this.updatePulls({
+      selector: { id: open.map((p) => p.id), instant_closed_at: null },
+      data: { instant_closed_at: new Date(nowMs) },
+    });
+    return { closed: open.length };
+  }
+
   // Atomic, guarded pull-status transition — THE seam every vaulted→X flip must
   // use (buyback, delivery request, deliver/cancel). One conditional UPDATE
   // (`WHERE status = from`) inside a transaction: if ANY requested pull is not
@@ -3243,7 +3813,7 @@ class PacksModuleService extends MedusaService({
       trackingNumber: string | null;
       /** Replaces the proof-photo set wholesale when provided. */
       proofImages?: string[];
-      /** Every pull the order covers — flipped on delivered/canceled. */
+      /** Every pull the order covers — flipped on completed/canceled. */
       pullIds: string[];
     },
     @MedusaContext() sharedContext: Context = {},
@@ -3267,7 +3837,7 @@ class PacksModuleService extends MedusaService({
 
     // Validate against the under-lock read — the ONLY status that matters.
     const verdict = validateDeliveryStatusTransition(
-      order.status as DeliveryStatus,
+      order.status,
       input.to,
       !!input.trackingNumber,
     );
@@ -3293,24 +3863,96 @@ class PacksModuleService extends MedusaService({
     };
     if (input.proofImages !== undefined) patch.proof_images = input.proofImages;
     if (input.to === 'shipped') patch.shipped_at = new Date();
-    if (input.to === 'delivered') patch.delivered_at = new Date();
+    // delivered_at doubles as completed_at post-rename.
+    if (input.to === 'completed') patch.delivered_at = new Date();
     await this.updateDeliveryOrders([patch], sharedContext);
 
-    // Pull side-effects ride the SAME transaction: delivered → delivered
-    // (terminal); canceled → back to the vault. The guarded flip (WHERE
-    // status='delivering') throwing rolls back the order write with it.
+    // Pull side-effects ride the SAME transaction: completed → delivered
+    // (PULL enum, terminal); canceled → back to the vault. The guarded flip
+    // (WHERE status='delivering') throwing rolls back the order write with it.
     if (
       input.pullIds.length &&
-      (input.to === 'delivered' || input.to === 'canceled')
+      (input.to === 'completed' || input.to === 'canceled')
     ) {
       await this.transitionPullStatus(
         {
           ids: input.pullIds,
           from: 'delivering',
-          to: input.to === 'delivered' ? 'delivered' : 'vaulted',
+          to: input.to === 'completed' ? 'delivered' : 'vaulted',
         },
         sharedContext,
       );
+    }
+
+    // Reverse the CREATE-time OD debit — ONE hook covers both the customer
+    // cancel route and the admin bulk "mark as canceled" tool, since both
+    // route through this method. Nothing fires on 'completed': those cards
+    // are gone for good, so the original debit stands permanently.
+    //
+    // The credit is gated on the CREATE-time debit ROW EXISTING, not on any
+    // field of the order — the invariant is existence-based. Crediting the
+    // vault back for an order that was never debited drifts the ledger's
+    // cumulative vault_delta upward forever with no corresponding liability.
+    // Two live sources of debit-less orders, both covered by this one check:
+    // (a) B7 reward-prize shipments — recordRewardWithdrawal (this file)
+    // creates those with NO OD debit, since reward pulls are excluded from
+    // ledger/value tracking everywhere (e.g. Pull.recorded_value_usd);
+    // (b) EVERY ordinary order already sitting in requested/processed/
+    // ready_to_ship when this ships — D4 is go-forward-only with no backfill,
+    // so those carry is_reward=false AND no debit. Runs on the same `em`
+    // (this transaction), so it takes no extra pool connection.
+    if (input.to === 'canceled' && input.pullIds.length) {
+      const [debit] = await em.execute<
+        { id: string; vault_delta: string | number | null }[]
+      >(
+        "SELECT id, vault_delta FROM ledger_entry WHERE type = 'OD' AND ref_id = ? AND deleted_at IS NULL LIMIT 1",
+        [input.orderId],
+      );
+      if (debit) {
+        // NEGATE THE STORED DEBIT — never re-value the cards at cancel time.
+        // An order sits in 'requested' for days while PriceCharting syncs FMV
+        // on a schedule and admins edit market_multiplier, so a cancel-time
+        // vaultValueForPulls would price the same cards at a different
+        // instant: the round trip is a no-op on actual holdings, yet it would
+        // write a permanent, silent non-zero net to cumulative vault_delta
+        // with nothing underlying it. Reversing the whole stored amount is
+        // unconditionally correct here because this method is the ONE seam
+        // every transition routes through (updateDeliveryOrderInvoke) and its
+        // caller pages the order's item set to exhaustion — there is no
+        // partial cancel to reverse a fraction of.
+        const stored = Number(debit.vault_delta);
+        if (!Number.isFinite(stored)) {
+          // The create arm always writes a finite number, so this is real data
+          // corruption. Fail closed: a NaN on a money reversal is worse than a
+          // refused cancel.
+          throw new MedusaError(
+            MedusaError.Types.UNEXPECTED_STATE,
+            `OD debit '${debit.id}' for order '${input.orderId}' has a non-numeric vault_delta — refusing to reverse it.`,
+          );
+        }
+        // Still needed for the payload's handle tally (countByHandle) — the
+        // reversal amount no longer comes from these rows.
+        const pulls = await this.listPulls(
+          { id: input.pullIds },
+          { take: input.pullIds.length },
+          sharedContext,
+        );
+        await this.recordLedgerEntry(
+          {
+            type: 'OD',
+            customerId: order.customer_id,
+            refId: `cancel:${input.orderId}`,
+            walletDelta: 0,
+            vaultDelta: -stored,
+            payload: {
+              type: 'OD',
+              handles: countByHandle(pulls.map((p) => p.card_id)),
+              status: 'canceled',
+            },
+          },
+          sharedContext,
+        );
+      }
     }
     return { status: input.to };
   }
@@ -3330,7 +3972,14 @@ class PacksModuleService extends MedusaService({
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ id: string; amount: number; balance: number }> {
-    const { id, balance } = await this.mutateCreditAtomic(
+    // `amount` here is mutateCreditAtomic's own cent-rounded value (matches
+    // the SUM(ROUND(...)) actually persisted to credit_transaction) — used
+    // below for the ledger row so it can't drift from input.amount when this
+    // method is called directly (bypassing the HTTP route's epsilon gate),
+    // same fix as Task 4's topUpCreditsWithLedger. The audit "before" calc
+    // and the return value below intentionally keep input.amount — untouched,
+    // out of this fix's scope.
+    const { id, balance, amount } = await this.mutateCreditAtomic(
       {
         customerId: input.customerId,
         amount: input.amount,
@@ -3354,7 +4003,272 @@ class PacksModuleService extends MedusaService({
       ],
       sharedContext,
     );
+    await this.recordLedgerEntry(
+      {
+        type: 'AD',
+        customerId: input.customerId,
+        refId: id, // the credit_transaction id already in scope
+        walletDelta: amount,
+        vaultDelta: null,
+        payload: {
+          type: 'AD',
+          admin_id: input.adminId,
+          reason: input.note,
+          detail: null,
+          card_handle: null,
+        },
+      },
+      sharedContext,
+    );
     return { id, amount: input.amount, balance };
+  }
+
+  // Wraps the buyback credit insert with its paired SE ledger row, same
+  // transaction. sp_ref_id links back to the ORIGINAL pack-open (if the pull
+  // still carries its open_id — reward pulls and pre-open_id-era rows won't),
+  // matching the spec's "[SP id]" payload field.
+  //
+  // vaultDelta / payload.price are the card's full display value (valueMyr —
+  // computed at buyback-pull.ts:136, already FX+multiplier-applied, threaded
+  // in here), NOT input.amount (the buyback PAYOUT — percent of valueMyr).
+  // Corrected per Task 7 review: a payout-based vaultDelta is unimplementable
+  // for the OD writer (physical delivery has no buyback rate to apply — see
+  // task-7-report.md), and it silently drops the house spread out of every
+  // pull-then-sell round trip. wallet_delta stays input.amount — that IS the
+  // real cash paid, unchanged.
+  @InjectTransactionManager()
+  async recordBuybackCreditTransaction(
+    input: {
+      customerId: string;
+      amount: number;
+      valueMyr: number;
+      pullId: string;
+      cardHandle: string;
+      rate: number;
+      openId: string | null;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<Awaited<ReturnType<PacksModuleService['createCreditTransactions']>>> {
+    const rows = await this.createCreditTransactions(
+      [{ customer_id: input.customerId, amount: input.amount, reason: 'buyback' as const, pull_id: input.pullId }],
+      sharedContext,
+    );
+    await this.recordLedgerEntry(
+      {
+        type: 'SE',
+        customerId: input.customerId,
+        refId: rows[0].id,
+        walletDelta: input.amount,
+        vaultDelta: -input.valueMyr,
+        payload: {
+          type: 'SE',
+          card_handle: input.cardHandle,
+          sp_ref_id: input.openId,
+          price: input.valueMyr,
+          rate: input.rate,
+        },
+      },
+      sharedContext,
+    );
+    return rows;
+  }
+
+  // recordLedgerEntry — THE write primitive for POLYCARD-BACK §5. Every
+  // writer in this epic calls this from WITHIN its own
+  // @InjectTransactionManager() method, passing that method's sharedContext,
+  // so the ledger row lands in the SAME transaction as the domain write it
+  // describes (never called bare — a bare call opens its own transaction,
+  // which breaks "same DB transaction as the source write").
+  //
+  // Idempotency: an explicit pre-check via raw SQL (fires immediately, like
+  // settleOpen's own pre-check) rather than catching a unique-violation from
+  // an ORM insert — MikroORM's Unit of Work buffers ORM creates until flush
+  // (transaction commit), so a 23505 from createLedgerEntries would surface
+  // AFTER this method returns, where it can't be handled cleanly.
+  //
+  // The (type, ref_id) partial unique index backs TWO distinct failure
+  // paths, and a caller-side lock only guards ONE of them:
+  //   1. CROSS-transaction race: two different callers/transactions racing
+  //      the same (type, ref_id) with no shared outer lock. Under READ
+  //      COMMITTED, the loser's pre-check can miss the winner's still-
+  //      uncommitted row, so the loser proceeds and its own insert 23505s at
+  //      flush, aborting the loser's entire transaction. Every real caller
+  //      in this epic holds a lock that prevents this (the per-customer
+  //      credit lock or the per-order delivery lock).
+  //   2. SAME-transaction self-duplication: a batch/loop writer that calls
+  //      this method twice with the same (type, ref_id) inside ONE already-
+  //      open transaction — e.g. a hypothetical Epic 6 payout job iterating
+  //      a list of commissions with ref_id = commission.id. The SAME UoW
+  //      buffering that motivated the raw-SQL pre-check also makes that
+  //      pre-check BLIND to the first call's still-unflushed insert (raw SQL
+  //      sees flushed/committed table state, never the UoW's pending
+  //      creates), so the second call sees nothing, proceeds, and queues a
+  //      second insert with the same (type, ref_id). That insert 23505s at
+  //      flush, hard-aborting the WHOLE transaction instead of returning a
+  //      graceful `replayed: true`.
+  // A caller-side lock guards ONLY path 1 — it does nothing for path 2.
+  // Per-transaction ref_id uniqueness is the CALLER's own responsibility:
+  // de-duplicate ref_ids in your input BEFORE looping calls to this method
+  // inside one transaction. This method will not do it for you — doing so
+  // would require either flushing mid-transaction or tracking written refs
+  // in memory, both out of scope here (and likely to mask a real bug in the
+  // caller, e.g. a genuinely duplicated commission row upstream).
+  @InjectTransactionManager()
+  async recordLedgerEntry(
+    input: {
+      type: LedgerType;
+      customerId: string;
+      refId: string;
+      walletDelta: number | null;
+      vaultDelta: number | null;
+      payload: LedgerPayload;
+      occurredAt?: Date;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ id: string; display_id: string; replayed: boolean }> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    const occurredAt = input.occurredAt ?? new Date();
+
+    const [existing] = await em.execute<
+      { id: string; display_id: string }[]
+    >(
+      'SELECT id, display_id FROM ledger_entry WHERE type = ? AND ref_id = ? AND deleted_at IS NULL LIMIT 1',
+      [input.type, input.refId],
+    );
+    if (existing) {
+      return { id: existing.id, display_id: existing.display_id, replayed: true };
+    }
+
+    const scope = sequenceScope(input.type, occurredAt);
+
+    // Upsert-then-lock: a brand-new scope has no row for FOR UPDATE to hold,
+    // so create it first (ON CONFLICT DO NOTHING absorbs a concurrent
+    // first-writer race on the SAME fresh scope), then lock + read whoever's
+    // row won.
+    await em.execute(
+      'INSERT INTO ledger_sequence (id, scope, last_serial, created_at, updated_at) ' +
+        "VALUES (?, ?, NULL, now(), now()) ON CONFLICT (scope) WHERE deleted_at IS NULL DO NOTHING",
+      [randomUUID(), scope],
+    );
+    const [seqRow] = await em.execute<{ id: string; last_serial: string | null }[]>(
+      'SELECT id, last_serial FROM ledger_sequence WHERE scope = ? AND deleted_at IS NULL FOR UPDATE',
+      [scope],
+    );
+    // The upsert above guarantees a row, so this is unreachable — but an
+    // undefined here would surface as a bare TypeError from nextSerial rather
+    // than something an operator can act on. Fail closed with a named error.
+    if (!seqRow) {
+      throw new MedusaError(
+        MedusaError.Types.UNEXPECTED_STATE,
+        `Ledger sequence scope '${scope}' could not be locked for serial allocation.`,
+      );
+    }
+    const serial = nextSerial(seqRow.last_serial);
+    await em.execute(
+      'UPDATE ledger_sequence SET last_serial = ?, updated_at = now() WHERE id = ?',
+      [serial, seqRow.id],
+    );
+
+    const id = input.type + '_' + randomUUID(); // any unique text works; MedusaService ids are opaque anyway
+    const [row] = await this.createLedgerEntries(
+      [
+        {
+          id,
+          display_id: displayId(input.type, occurredAt, serial),
+          type: input.type,
+          customer_id: input.customerId,
+          occurred_at: occurredAt,
+          wallet_delta: input.walletDelta,
+          vault_delta: input.vaultDelta,
+          payload: input.payload,
+          ref_id: input.refId,
+        },
+      ],
+      sharedContext,
+    );
+    return { id: row.id, display_id: row.display_id, replayed: false };
+  }
+
+  // Compensation-only delete by (type, ref_id) — every writer's workflow-step
+  // compensation (Tasks 4-8) calls THIS, not the raw generated method, so the
+  // `as never` escape lives in exactly one place. Precedent:
+  // deleteCreditTransactionsGuarded (~line 3415) casts the same way — the
+  // MedusaService-generated delete accepts a filter selector at runtime, but
+  // its generated TS signature only declares id/id[]. This is for IN-FLIGHT
+  // workflow rollback only (see Global Constraints' two-mechanisms note) —
+  // never call it to "fix" a settled row.
+  async deleteLedgerEntryByRef(type: LedgerType, refId: string): Promise<void> {
+    await this.deleteLedgerEntries({ type, ref_id: refId } as never);
+  }
+
+  // The admin Transactions list (POLYCARD-BACK §5.4). Raw SQL because `q` is an
+  // OR across display_id and the customer-name/email match resolved by the
+  // CALLER (the customer table lives in another module — no join available),
+  // which a plain ORM AND-filter can't express.
+  //
+  // Sequential, not Promise.all: this resolves transactionManager ?? manager,
+  // so it can run inside an ambient transaction — two concurrent executes on
+  // one transactional connection is this repo's "pool is probably full" shape.
+  //
+  // Every WHERE shape here is indexed: the unfiltered default view by
+  // IDX_ledger_entry_occurred_at (Migration20260728211500 — added before the
+  // table had volume, since a non-concurrent CREATE INDEX on a busy
+  // ledger_entry would block the pack-open write path), the tabs by
+  // IDX_ledger_entry_type_occurred_at. `display_id ILIKE '%q%'` can never use
+  // the unique btree (leading wildcard) — inherent to substring search, not an
+  // index gap.
+  @InjectManager()
+  async listLedgerEntriesForAdmin(
+    input: {
+      type?: LedgerType;
+      q?: string;
+      matchingCustomerIds?: string[];
+      from?: Date;
+      to?: Date;
+      limit: number;
+      offset: number;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ entries: LedgerEntryRow[]; total: number }> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const clauses: string[] = ['deleted_at IS NULL'];
+    const params: unknown[] = [];
+    if (input.type) {
+      clauses.push('type = ?');
+      params.push(input.type);
+    }
+    if (input.from) {
+      clauses.push('occurred_at >= ?');
+      params.push(input.from);
+    }
+    if (input.to) {
+      // EXCLUSIVE. The caller hands us a half-open [from, to) window
+      // (parseMytBound turns `to=YYYY-MM-DD` into the NEXT MYT midnight), so
+      // `<=` here would spill one row-instant into the following day.
+      clauses.push('occurred_at < ?');
+      params.push(input.to);
+    }
+    if (input.q) {
+      const ids = input.matchingCustomerIds ?? [];
+      const idClause = ids.length
+        ? ` OR customer_id IN (${ids.map(() => '?').join(',')})`
+        : '';
+      clauses.push(`(display_id ILIKE ?${idClause})`);
+      params.push(`%${input.q}%`, ...ids);
+    }
+    const where = clauses.join(' AND ');
+    const entries = await em.execute<LedgerEntryRow[]>(
+      'SELECT id, display_id, type, customer_id, occurred_at, wallet_delta, vault_delta, payload ' +
+        `  FROM ledger_entry WHERE ${where} ` +
+        '  ORDER BY occurred_at DESC, id DESC LIMIT ? OFFSET ?',
+      [...params, input.limit, input.offset],
+    );
+    const countRows = await em.execute<{ n: string }[]>(
+      `SELECT COUNT(*)::bigint AS n FROM ledger_entry WHERE ${where}`,
+      params,
+    );
+    return { entries, total: Number(countRows[0]?.n ?? 0) };
   }
 
   // Admin edit of the rewards-settings singleton — validates+clamps the patch,
@@ -5092,6 +6006,441 @@ class PacksModuleService extends MedusaService({
       ],
       sharedContext,
     );
+  }
+
+  // Purchase Invoices (POLYCARD-BACK §3.5). display_no comes from
+  // purchase_invoice_seq (a real Postgres sequence — atomic under
+  // concurrency, immune to rollback) formatted "PI-00001". One
+  // stock_movement 'purchase' row per line — the append-only paper trail the
+  // item-detail history table reads; on-hand itself comes from card-stock.ts,
+  // never this log (§3.1 authority note).
+  //
+  // line_total stores the RAW qty * unit_cost product, deliberately NOT
+  // rounded to 2dp: purchase_invoice_line_line_total_check compares it against
+  // Postgres' own exact numeric evaluation of the same expression with a
+  // half-sen tolerance, and a pre-rounded total is what would sit ON that
+  // boundary. unit_cost is already capped at 2dp by the route validator, so
+  // the raw product is exact to ~1e-13 here.
+  // Cross-invoice reversal validation (D8). Deliberately lives INSIDE the
+  // create transaction: it is a read-then-write, and running it in the route
+  // — a SEPARATE transaction from the write — was a real TOCTOU, not a
+  // theoretical one. Two concurrent POSTs of the same -10 reversal both read a
+  // full budget and both returned 201: ten units bought, twenty reversed.
+  // Nothing downstream catches that (there is no unique constraint, and the
+  // line CHECK only validates per-line arithmetic).
+  //
+  // The advisory lock serializes reversals of ONE target for the rest of this
+  // transaction — same idiom as applyPackMemberDiff and the credit ledger — so
+  // the loser re-reads only after the winner commits and sees the budget gone.
+  // Reversals of different targets never contend.
+  //
+  // Matching is by exact card_handle + unit_cost, never FIFO/LIFO (operator
+  // decision). The real invariant is a BUDGET, not a match: what the target
+  // bought, minus everything prior reversals of that same target already took
+  // back, must still cover this body. reverses_invoice_id is what makes that
+  // sum knowable — it is why the column exists.
+  private async assertReversalCovered(
+    reversesInvoiceId: string,
+    lines: { card_handle: string; qty: number; unit_cost: number }[],
+    sharedContext: Context,
+  ): Promise<void> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `purchase-invoice-reversal:${reversesInvoiceId}`,
+    ]);
+
+    // Integer sen, not a float compare: a numeric round-trip ("150.0000") and
+    // the validator's 2dp-normalized body value must land on the same key.
+    const key = (card_handle: string, unit_cost: unknown): string =>
+      `${card_handle}|${toSen(unit_cost)}`;
+
+    const [target] = await this.listPurchaseInvoices(
+      { id: reversesInvoiceId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!target) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        "'reverses_invoice_id' does not match an existing invoice.",
+      );
+    }
+    // Undoing a reversal would need positive-qty lines, which the validator
+    // forbids outright — so anything reaching here could only double-subtract.
+    if (target.reverses_invoice_id) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        `Invoice ${target.display_no} is itself a reversing invoice and cannot be reversed — reverse the original.`,
+      );
+    }
+
+    // HAZARD for Task 4/5: this list (like every generated list) excludes
+    // soft-deleted rows. A future void/delete route that soft-deletes a
+    // reversing invoice would silently hand its headroom back. Unreachable
+    // today — nothing deletes an invoice except the compensation cascade,
+    // which hard-deletes an invoice that never became visible.
+    const priorReversals = await pageAll((opts) =>
+      this.listPurchaseInvoices(
+        { reverses_invoice_id: target.id },
+        opts,
+        sharedContext,
+      ),
+    );
+    // PAGED, not a take: cap — a truncated prior-reversal list fails OPEN.
+    const allLines = await pageAll((opts) =>
+      this.listPurchaseInvoiceLines(
+        { invoice_id: [target.id, ...priorReversals.map((r) => r.id)] },
+        opts,
+        sharedContext,
+      ),
+    );
+
+    // Signed sum: target lines positive, every prior reversal negative, so
+    // this map IS what is still un-reversed per (card_handle, unit_cost).
+    const remaining = new Map<string, number>();
+    for (const l of allLines) {
+      const k = key(l.card_handle, l.unit_cost);
+      remaining.set(k, (remaining.get(k) ?? 0) + Number(l.qty));
+    }
+    const onTarget = new Set(
+      allLines
+        .filter((l) => l.invoice_id === target.id)
+        .map((l) => key(l.card_handle, l.unit_cost)),
+    );
+
+    // Fold the incoming body the same way FIRST: two lines in one body for the
+    // same key must spend a single budget, not be checked twice against it.
+    const requested = new Map<
+      string,
+      { card_handle: string; unit_cost: number; qty: number }
+    >();
+    for (const line of lines) {
+      const k = key(line.card_handle, line.unit_cost);
+      const prev = requested.get(k);
+      if (prev) prev.qty += line.qty;
+      else requested.set(k, { ...line });
+    }
+
+    for (const [k, want] of requested) {
+      if (!onTarget.has(k)) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `Reversal line for '${want.card_handle}' at unit_cost ${want.unit_cost} does not match any line on invoice ${target.display_no}.`,
+        );
+      }
+      const left = remaining.get(k) ?? 0;
+      // want.qty is negative; `left` is what the target still has un-reversed.
+      // One-directional by design: a target line with no reversal line is just
+      // a legal partial reversal.
+      if (left + want.qty < 0) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `Reversing ${-want.qty} of '${want.card_handle}' at unit_cost ${want.unit_cost} exceeds the ${left} still un-reversed on invoice ${target.display_no}.`,
+        );
+      }
+    }
+  }
+
+  @InjectTransactionManager()
+  async createPurchaseInvoiceWithLines(
+    input: {
+      date: string;
+      supplier: string;
+      agent_user_id: string;
+      reverses_invoice_id: string | null;
+      lines: {
+        card_handle: string;
+        card_name: string;
+        fmv_snapshot: number;
+        qty: number;
+        unit_cost: number;
+      }[];
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ) {
+    if (input.reverses_invoice_id) {
+      await this.assertReversalCovered(
+        input.reverses_invoice_id,
+        input.lines,
+        sharedContext,
+      );
+    }
+
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const [{ n }] = await em.execute<{ n: string }[]>(
+      "SELECT nextval('purchase_invoice_seq') AS n",
+    );
+    const display_no = `PI-${String(n).padStart(5, '0')}`;
+
+    const [invoice] = await this.createPurchaseInvoices(
+      [
+        {
+          display_no,
+          // The model column is a dateTime — the route hands over a
+          // validated ISO string, so the coercion happens exactly here.
+          date: new Date(input.date),
+          supplier: input.supplier,
+          agent_user_id: input.agent_user_id,
+          reverses_invoice_id: input.reverses_invoice_id,
+        },
+      ],
+      sharedContext,
+    );
+
+    const lines = await this.createPurchaseInvoiceLines(
+      input.lines.map((l) => ({
+        invoice_id: invoice.id,
+        card_handle: l.card_handle,
+        card_name: l.card_name,
+        fmv_snapshot: l.fmv_snapshot,
+        qty: l.qty,
+        unit_cost: l.unit_cost,
+        line_total: l.qty * l.unit_cost,
+      })),
+      sharedContext,
+    );
+
+    await this.createStockMovements(
+      lines.map((l) => ({
+        card_handle: l.card_handle,
+        kind: 'purchase' as const,
+        qty: l.qty,
+        ref_id: l.id,
+      })),
+      sharedContext,
+    );
+
+    return { ...invoice, lines };
+  }
+
+  // Compensation-only hard delete — fires ONLY from the create-purchase-invoice
+  // workflow's rollback path (the inventory-adjust step failing after this
+  // invoice already committed). Never reachable from a route a caller sees
+  // succeed; invoices stay immutable from the operator's perspective.
+  @InjectTransactionManager()
+  async deletePurchaseInvoiceCascade(
+    invoiceId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    // PAGED, not take: 1000. That cap was safe only because the validator's
+    // MAX_LINES is 200, with nothing asserting the coupling — and this is
+    // compensation code that HARD-DELETES money records, so a truncated list
+    // fails open and strands orphan lines/movements behind a deleted invoice.
+    const lines = await pageAll((opts) =>
+      this.listPurchaseInvoiceLines({ invoice_id: invoiceId }, opts, sharedContext),
+    );
+    const lineIds = lines.map((l) => l.id);
+    if (lineIds.length) {
+      const movements = await pageAll((opts) =>
+        this.listStockMovements({ ref_id: lineIds }, opts, sharedContext),
+      );
+      if (movements.length) {
+        await this.deleteStockMovements(
+          movements.map((m) => m.id),
+          sharedContext,
+        );
+      }
+      await this.deletePurchaseInvoiceLines(lineIds, sharedContext);
+    }
+    await this.deletePurchaseInvoices(invoiceId, sharedContext);
+  }
+
+  // ---- Inventory stock buckets (POLYCARD-BACK §3.2) ----
+
+  // inVault / requested / shipped read the REAL owning tables — Pull for vault
+  // state, DeliveryOrderItem -> Pull -> DeliveryOrder.status for the shipping
+  // pipeline (Epic 1's requested|processed|ready_to_ship|shipped|completed|
+  // canceled enum) — and NEVER stock_movement. §3.1 makes that table an
+  // append-only paper trail, and the purchase workflow's inventory adjustment
+  // is deliberately best-effort, so a 'purchase' movement can sit against a
+  // counter that never moved.
+  //
+  // The three buckets are CONVERGENT, NOT STRUCTURAL: nothing in the schema
+  // stops one physical card from being counted twice, so callers must never
+  // treat them as a partition (no `total = inVault + requested + shipped`).
+  // Only ONE of the two request paths is transactional — recordRewardWithdrawal
+  // (service.ts:1609) writes the order, its items and the pull flip on a single
+  // sharedContext under @InjectTransactionManager(). requestDeliveryStep
+  // (workflows/steps/request-delivery.ts:153) is a MANUAL-UNDO sequence with no
+  // surrounding transaction, and two of its failure modes leave a vaulted pull
+  // against a live requested item -> {inVault: 1, requested: 1} for one card
+  // (probed on the real schema with these three queries verbatim):
+  //   (i)  transitionPullStatus throws AND the undo at :157-166 also throws
+  //        (logged 'UNDO FAILED ... repair manually');
+  //   (ii) the step's compensation at :186-194 restores the pull to 'vaulted'
+  //        BEFORE deleteDeliveryOrderItems, with no try/catch around it.
+  // Left convergent DELIBERATELY (operator decision): a NOT EXISTS (live item)
+  // clause on the vault query would make it structural, but it would HIDE a
+  // state the system already flags for manual repair and cost a join on every
+  // render. transitionDeliveryOrderStatus drives completed -> 'delivered' and
+  // canceled -> back to 'vaulted'; a canceled order needs no clause of its own
+  // (it is in neither IN-list, and its pulls are already back in the vault).
+  //
+  // `dord`, not `do`: DO is a RESERVED word in Postgres and cannot alias a
+  // table even with AS (probed: syntax error at or near "do").
+  // COUNT(DISTINCT p.id) rather than COUNT(*): delivery_order_item is unique
+  // per (order, pull), not per pull, so one physical card could span two item
+  // rows — it must still count once.
+  @InjectManager()
+  async inventoryLifecycleBuckets(
+    handles: string[],
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<
+    Map<string, { inVault: number; requested: number; shipped: number }>
+  > {
+    const out = new Map<
+      string,
+      { inVault: number; requested: number; shipped: number }
+    >();
+    if (handles.length === 0) return out;
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const ph = handles.map(() => '?').join(',');
+
+    // Sequential — concurrent queries on the shared injected EntityManager are
+    // what the pool-full failures look like (same rule as playersOverview).
+    const vaulted = await em.execute<{ card_id: string; n: string }[]>(
+      `SELECT card_id, COUNT(*)::bigint AS n FROM pull
+         WHERE status = 'vaulted' AND deleted_at IS NULL AND card_id IN (${ph})
+         GROUP BY card_id`,
+      handles,
+    );
+    const requested = await em.execute<{ card_id: string; n: string }[]>(
+      `SELECT p.card_id, COUNT(DISTINCT p.id)::bigint AS n
+         FROM delivery_order_item doi
+         JOIN delivery_order dord
+           ON dord.id = doi.delivery_order_id AND dord.deleted_at IS NULL
+         JOIN pull p ON p.id = doi.pull_id AND p.deleted_at IS NULL
+        WHERE doi.deleted_at IS NULL
+          AND dord.status IN ('requested','processed','ready_to_ship')
+          AND p.card_id IN (${ph})
+        GROUP BY p.card_id`,
+      handles,
+    );
+    const shipped = await em.execute<{ card_id: string; n: string }[]>(
+      `SELECT p.card_id, COUNT(DISTINCT p.id)::bigint AS n
+         FROM delivery_order_item doi
+         JOIN delivery_order dord
+           ON dord.id = doi.delivery_order_id AND dord.deleted_at IS NULL
+         JOIN pull p ON p.id = doi.pull_id AND p.deleted_at IS NULL
+        WHERE doi.deleted_at IS NULL
+          AND dord.status IN ('shipped','completed')
+          AND p.card_id IN (${ph})
+        GROUP BY p.card_id`,
+      handles,
+    );
+
+    // Pre-seed every requested handle: callers index this map by handle, so an
+    // unstocked card must read 0/0/0, never undefined.
+    for (const h of handles)
+      out.set(h, { inVault: 0, requested: 0, shipped: 0 });
+    for (const r of vaulted) out.get(r.card_id)!.inVault = Number(r.n);
+    for (const r of requested) out.get(r.card_id)!.requested = Number(r.n);
+    for (const r of shipped) out.get(r.card_id)!.shipped = Number(r.n);
+    return out;
+  }
+
+  // D8 item cost per handle, batched for one page of the Inventory list (never
+  // per row). The averaging itself is weightedAverageCost's and ONLY its: that
+  // function accumulates on an integer 1/10000-ringgit scale and rounds to sen
+  // exactly once, which is what keeps 1000 @ 1.005 minus 999 @ 1.004 at 2.00
+  // instead of 1.00. Nothing here re-rounds a per-handle figure.
+  //
+  // null, never 0, when there is no cost basis — no lines at all, a net qty of
+  // 0 after a full reversal, or a negative Σcost. A handle with no purchase
+  // history is not a free handle, and the two must stay distinguishable all
+  // the way to the caller.
+  //
+  // Reads `unit_cost` (the numeric column), never the raw_unit_cost bigNumber
+  // sidecar. Reversal lines carry a negative qty and subtract themselves back
+  // out, so no reversal-aware branch belongs here.
+  //
+  // HAZARD (dormant, the twin of assertReversalCovered's): this filters on the
+  // LINE's deleted_at only. Nothing soft-deletes an invoice today — the
+  // compensation cascade hard-deletes — but a future void/delete route would
+  // leave a voided invoice's lines still priced in here while the reversal
+  // budget silently forgot them. Fix BOTH together or neither.
+  @InjectManager()
+  async weightedAverageCostByHandle(
+    handles: string[],
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<Map<string, number | null>> {
+    const out = new Map<string, number | null>();
+    if (handles.length === 0) return out;
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const ph = handles.map(() => '?').join(',');
+    const rows = await em.execute<
+      { card_handle: string; qty: number; unit_cost: string }[]
+    >(
+      `SELECT card_handle, qty, unit_cost FROM purchase_invoice_line
+         WHERE deleted_at IS NULL AND card_handle IN (${ph})`,
+      handles,
+    );
+    const byHandle = new Map<string, { qty: number; unit_cost: number }[]>();
+    for (const r of rows) {
+      const list = byHandle.get(r.card_handle) ?? [];
+      list.push({ qty: Number(r.qty), unit_cost: Number(r.unit_cost) });
+      byHandle.set(r.card_handle, list);
+    }
+    for (const h of handles)
+      out.set(h, weightedAverageCost(byHandle.get(h) ?? []));
+    return out;
+  }
+
+  // Listing-show count (§3.3): the number of places a card is currently
+  // offered = distinct pack-pool membership + rank-reward slots.
+  //
+  // PAGED, not take: 5000 — a truncated read renders a plausible WRONG count
+  // instead of an obvious error (Task 4's reasoning for invoice totals).
+  // `kind: null` is provably redundant against pack_odds_kind_payout_check
+  // (a row WITH a kind always has card_id NULL, so card_id IN (...) already
+  // excludes reward-pool product/credit/nothing rows) but states the intent:
+  // real card entries only. rank_rewards is a sparse JSON array over a handful
+  // of stages — an in-memory scan, no index needed.
+  @InjectManager()
+  async listingCountByHandle(
+    handles: string[],
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    if (handles.length === 0) return out;
+
+    const packRows = await pageAll((opts) =>
+      this.listPackOdds({ card_id: handles, kind: null }, opts, sharedContext),
+    );
+    // UQ_pack_odds_pack_card already makes (pack, card) unique among live
+    // rows; the Set keeps the count right regardless of that index.
+    const packsByHandle = new Map<string, Set<string>>();
+    for (const o of packRows) {
+      if (!o.card_id) continue;
+      const set = packsByHandle.get(o.card_id) ?? new Set<string>();
+      set.add(o.pack_id);
+      packsByHandle.set(o.card_id, set);
+    }
+
+    const stages = await pageAll((opts) =>
+      this.listChallengeStages({}, opts, sharedContext),
+    );
+    const ranksByHandle = new Map<string, number>();
+    for (const stage of stages) {
+      const rewards =
+        (stage.rank_rewards as unknown as ChallengeRankReward[]) ?? [];
+      for (const r of rewards) {
+        if (!r.card_id) continue;
+        ranksByHandle.set(r.card_id, (ranksByHandle.get(r.card_id) ?? 0) + 1);
+      }
+    }
+
+    for (const h of handles) {
+      out.set(
+        h,
+        (packsByHandle.get(h)?.size ?? 0) + (ranksByHandle.get(h) ?? 0),
+      );
+    }
+    return out;
   }
 }
 

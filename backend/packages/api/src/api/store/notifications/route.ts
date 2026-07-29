@@ -7,6 +7,7 @@ import type { INotificationModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
 import { parsePaginationParams } from '../../../utils/pagination';
+import { CUSTOMER_FEED_CHANNEL } from '../../../modules/packs/notify-feed';
 
 // GET /store/notifications — the authenticated customer's own in-app feed.
 //
@@ -46,7 +47,7 @@ export async function GET(
   // listAndCount: the count is the TOTAL matching feed rows (independent of
   // take/skip), which the true unread_count needs anyway — no extra query.
   const [rows, totalFeed] = await notif.listAndCountNotifications(
-    { receiver_id: receiverId, channel: 'feed' },
+    { receiver_id: receiverId, channel: CUSTOMER_FEED_CHANNEL },
     // id tiebreaker: batch creates land sibling rows in the same instant, and
     // created_at alone gives no stable order across offset pages.
     { take: limit + 1, skip: offset, order: { created_at: 'DESC', id: 'DESC' } },
