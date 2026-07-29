@@ -5921,16 +5921,20 @@ class PacksModuleService extends MedusaService({
     );
     const settledCustomers = new Set(existingRows.map((r) => r.customer_id));
 
-    const [stageRows, poolMyr] = await Promise.all([
-      this.listChallengeStages(
-        {},
-        {
-          select: ['stage_number', 'threshold_myr', 'rank_rewards'],
-          take: 1000,
-        },
-      ),
-      this.challengeWeekPool(week, sharedContext),
-    ]);
+    // Sequential, not Promise.all: challengeWeekPool resolves
+    // transactionManager ?? manager and listChallengeStages resolves the SAME
+    // injected manager, so overlapping them is two concurrent queries on one
+    // connection — this repo's "pool is probably full" shape (same rule as
+    // playersOverview / enrichReferralNodes / inventoryLifecycleBuckets).
+    // Two cheap reads once an hour: the parallelism bought nothing.
+    const stageRows = await this.listChallengeStages(
+      {},
+      {
+        select: ['stage_number', 'threshold_myr', 'rank_rewards'],
+        take: 1000,
+      },
+    );
+    const poolMyr = await this.challengeWeekPool(week, sharedContext);
     const stages: SettleStage[] = stageRows.map((r) => ({
       stage_number: r.stage_number,
       threshold_myr: Number(r.threshold_myr),
