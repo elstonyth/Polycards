@@ -197,6 +197,17 @@ envs:
     scope: RUN_TIME
     type: SECRET
     value: __SECRET__PRICECHARTING_API_TOKEN__
+  # Required by Inventory > "Add from PC Collection". NOT a secret: it is the
+  # public 26-char PriceCharting user id (their docs publish an example one), so
+  # it is a plain value rather than a redacted-secret placeholder (do-apply.ps1
+  # scans the WHOLE spec, comments included, so the literal placeholder token
+  # must never appear in prose here). The token above
+  # only AUTHENTICATES — it does NOT scope /api/offers to our account, so
+  # without this key PriceCharting answers with EVERY user's offers and the
+  # route refuses to run rather than import strangers' cards as our stock.
+  - key: PRICECHARTING_SELLER_ID
+    scope: RUN_TIME
+    value: pwoe4lsq4pkxegdsoyyzvfjuza
   # ╔═══════════════════════════════════════════════════════════════════════╗
   # ║ DO NOT APPLY THIS SPEC UNTIL PR #252 IS MERGED.                        ║
   # ║ ALLOW_MOCK_TOPUP is GONE (the go-live blocker is cleared) and the      ║
@@ -255,11 +266,18 @@ envs:
   # (…/hooks/globepay/payout-verify), and set NEXT_PUBLIC_WITHDRAWALS_ENABLED on
   # the storefront in the same window.
 
-# Dedicated outbound IPs — 206.189.94.252 and 168.144.35.100, assigned
-# 2026-07-29 and already live. GlobePay365 runs an ACTIVE API whitelist keyed on
-# these exact addresses, so dropping this block silently breaks every call to
-# them. DO assigns one IP per component: the service makes the customer-facing
-# calls, the worker runs the reconciliation sweeps, and BOTH are on their list.
+# Dedicated outbound IPs. DO assigns one per component (the service makes the
+# customer-facing calls, the worker runs the reconciliation sweeps) and
+# GlobePay365 runs an ACTIVE API whitelist keyed on those exact addresses, so
+# BOTH have to be on their list.
+#
+# This block lives here because `doctl apps update` replaces the whole spec:
+# on 2026-07-30 a do-apply from a spec without it silently released the IPs
+# assigned the day before (deployment 2779c7a6, egress null — app stayed
+# ACTIVE and healthy, only outbound calls to them would have been rejected).
+# Never drop it. After any egress toggle, re-read the assigned addresses
+# (`doctl apps get <id> -o json` → dedicated_ips) and re-send them to
+# GlobePay365 if they changed — a reallocation is invisible from our side.
 egress:
   type: DEDICATED_IP
 

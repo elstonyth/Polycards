@@ -26,12 +26,16 @@ export const hasPublishedOddsContent = (
 export function PublishedOddsList({
   odds,
   range,
+  tierRanges,
   rounded = 'xl',
 }: {
   /** Published rows (rarest-first). */
   odds: { rarity: Rarity; chance: string }[];
   /** Pack card-value range (display prices, markup included); null hides the row. */
   range: PoolValueRange | null;
+  /** Per-tier value ranges. A tier absent here (nothing priced in that tier, or
+   *  the caller did not supply them) simply renders without a range line. */
+  tierRanges?: Partial<Record<Rarity, PoolValueRange>>;
   rounded?: 'xl' | '2xl';
 }) {
   // Nothing to show: render nothing rather than an empty bordered <ul> + a
@@ -55,26 +59,55 @@ export function PublishedOddsList({
             </span>
           </li>
         )}
-        {odds.map((o) => (
-          <li
-            key={o.rarity}
-            className="flex items-center justify-between border-b border-white/5 px-4 py-3 last:border-b-0"
-          >
-            <span className="flex items-center gap-2.5 text-[13px] font-medium text-white">
-              <span
-                className="h-2.5 w-2.5 rounded-full"
-                style={{ background: `rgb(${rarityRgb(o.rarity)})` }}
-              />
-              {o.rarity}
-            </span>
-            <span className="text-[13px] tabular-nums text-white/60">
-              {o.chance}
-            </span>
-          </li>
-        ))}
+        {odds.map((o) => {
+          const tr = tierRanges?.[o.rarity];
+          return (
+            <li
+              key={o.rarity}
+              className="flex items-center justify-between gap-3 border-b border-white/5 px-4 py-3 last:border-b-0"
+            >
+              {/* Tier name, with its own value range beneath. The range is a
+                  second line rather than a third column so a long
+                  "RM 1,676.90 – RM 22,377.23" never crushes the percentage on a
+                  narrow phone — this panel is mobile-first. */}
+              <span className="flex min-w-0 items-start gap-2.5">
+                <span
+                  className="mt-[5px] h-2.5 w-2.5 shrink-0 rounded-full"
+                  style={{ background: `rgb(${rarityRgb(o.rarity)})` }}
+                />
+                <span className="min-w-0">
+                  <span className="block text-[13px] font-medium text-white">
+                    {o.rarity}
+                  </span>
+                  {tr && (
+                    // The en-dash reads as nothing to a screen reader, so
+                    // without a label the range runs into the percentage as
+                    // one unbroken string of numbers.
+                    <span
+                      className="block text-[11px] tabular-nums text-white/45"
+                      aria-label={
+                        tr.min === tr.max
+                          ? `Card value ${tr.min}`
+                          : `Card value ${tr.min} to ${tr.max}`
+                      }
+                    >
+                      {tr.min === tr.max ? tr.min : `${tr.min} – ${tr.max}`}
+                    </span>
+                  )}
+                </span>
+              </span>
+              <span className="shrink-0 text-[13px] tabular-nums text-white/60">
+                {o.chance}
+              </span>
+            </li>
+          );
+        })}
       </ul>
+      {/* Customer-facing copy never says "published". It implies a second,
+          UNPUBLISHED set of odds — which invites exactly the question we do not
+          want a player asking. These are simply "the rates for this pack". */}
       <p className="mt-2 px-1 text-[11px] text-white/60">
-        Published rates for this pack.
+        Rates for this pack.
       </p>
     </>
   );
@@ -87,12 +120,14 @@ export function OddsSheet({
   onClose,
   odds,
   range,
+  tierRanges,
 }: {
   open: boolean;
   onClose: () => void;
   /** Published rows (rarest-first); null = this pack has no published odds. */
   odds: { rarity: Rarity; chance: string }[] | null;
   range: PoolValueRange | null;
+  tierRanges?: Partial<Record<Rarity, PoolValueRange>>;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   useModalA11y(panelRef, open, onClose);
@@ -111,7 +146,7 @@ export function OddsSheet({
         ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Published pull odds by rarity"
+        aria-label="Pull odds by rarity"
         tabIndex={-1}
         className="glass-panel max-h-[85vh] w-full overflow-y-auto rounded-t-2xl border-t p-5 pb-[env(safe-area-inset-bottom)] outline-none sm:inset-x-auto sm:bottom-auto sm:max-w-sm sm:rounded-2xl sm:border"
         onClick={(e) => e.stopPropagation()}
@@ -134,10 +169,14 @@ export function OddsSheet({
             is gone too and the list would be an empty box — so fall through to
             the not-published copy. Same gate as the pack page's odds panel. */}
         {hasPublishedOddsContent(odds, range) ? (
-          <PublishedOddsList odds={odds} range={range} />
+          <PublishedOddsList
+            odds={odds}
+            range={range}
+            tierRanges={tierRanges}
+          />
         ) : (
           <p className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-6 text-center text-[13px] text-white/60">
-            Odds for this pack haven&apos;t been published yet.
+            Odds for this pack aren&apos;t available yet.
           </p>
         )}
       </div>

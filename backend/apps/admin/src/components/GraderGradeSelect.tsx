@@ -1,24 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { Label, Select } from '@medusajs/ui';
-
-// Client mirror of PSA's canonical 11-point scale (backend source of truth:
-// packages/api/src/api/admin/media/label.ts PSA_GRADES — keep in sync).
-// Qualifier half-grades (2.5–9.5) deliberately excluded (§3a): the catalog
-// doesn't carry them, and 9.5 is a PriceCharting tier, never a PSA grade.
-// 1.5 stays — PSA's base FR grade.
-const PSA_GRADES = [
-  '10',
-  '9',
-  '8',
-  '7',
-  '6',
-  '5',
-  '4',
-  '3',
-  '2',
-  '1.5',
-  '1',
-] as const;
+import { PSA_GRADES } from '../lib/format';
 
 const GRADERS = ['PSA', 'BGS', 'CGC', 'SGC'] as const;
 const NONE = '__none__'; // @medusajs/ui Select rejects '' as an item value

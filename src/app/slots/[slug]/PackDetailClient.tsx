@@ -31,7 +31,11 @@ import { AmbientVideo } from '@/components/AmbientVideo';
 import { Pill } from '@/components/ui/pill';
 import { PublishedOddsList, hasPublishedOddsContent } from './OddsSheet';
 import { PoolByRarity } from './PoolByRarity';
-import { publishedOddsRows, poolValueRange } from '@/lib/packs-format';
+import {
+  publishedOddsRows,
+  poolValueRange,
+  tierValueRanges,
+} from '@/lib/packs-format';
 import { isTopRarity } from '@/lib/rarity';
 import { useLiveRecentPulls } from '@/lib/use-recent-pulls';
 import { useTopUp } from '@/components/app-shell/TopUpProvider';
@@ -121,6 +125,11 @@ export default function PackDetailClient({
   // Card-value range over the FULL pool (not topPool) — one derivation feeding
   // both the odds-panel gate and its range row.
   const valueRange = useMemo(() => poolValueRange(pool), [pool]);
+
+  // Same derivation per rarity, so each published tier row can state what a
+  // card of THAT tier is worth here. The pack-wide range above spans Common to
+  // Immortal and so describes no tier in particular.
+  const tierRanges = useMemo(() => tierValueRanges(pool), [pool]);
 
   // Do NOT open/charge here — navigate to the reel, which performs
   // the single charge via openBatch when the user pulls the lever. Auth + balance
@@ -516,6 +525,7 @@ export default function PackDetailClient({
             <PublishedOddsList
               odds={publishedRows}
               range={valueRange}
+              tierRanges={tierRanges}
               rounded="2xl"
             />
           </Reveal>

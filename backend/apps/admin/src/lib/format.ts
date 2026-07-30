@@ -94,7 +94,53 @@ export const fmtPct = (n: number): string =>
 // wired through a new workspace package. Keep in sync if the backend changes.
 // Used by both the from-PriceCharting page and the register-card modal to
 // derive an operator-facing grader/grade suggestion from a PC tier label.
-export function gradeToGrader(label: string): { grader: string; grade: string } {
+// PSA's canonical 11-point scale (backend source of truth:
+// packages/api/src/api/admin/media/label.ts PSA_GRADES — keep in sync).
+// Qualifier half-grades (2.5–9.5) deliberately excluded (§3a): the catalog
+// doesn't carry them, and 9.5 is a PriceCharting tier, never a PSA grade.
+// 1.5 stays — PSA's base FR grade.
+export const PSA_GRADES = [
+  '10',
+  '9',
+  '8',
+  '7',
+  '6',
+  '5',
+  '4',
+  '3',
+  '2',
+  '1.5',
+  '1',
+] as const;
+
+/**
+ * Grader + grade asserted by a PriceCharting collection offer's own grade tag
+ * ("PSA 9"). Unlike a search hit — where PriceCharting supplies only a price
+ * COMP and the operator states the slab — a collection offer IS the slab, so
+ * the tag is ground truth worth keeping even though it prices off the generic
+ * "Grade 9" field.
+ *
+ * Half grades return blank on purpose: PSA_GRADES carries no 8.5/9.5, so a
+ * "BGS 9.5" offer imports grader-less rather than minting an off-scale grade
+ * the card editor would render as legacy.
+ */
+export function graderFromInclude(include: string): {
+  grader: string;
+  grade: string;
+} {
+  const m = /^\s*(psa|bgs|cgc|sgc)\s*(\d+(?:\.5)?)\s*$/i.exec(include);
+  if (!m) return { grader: '', grade: '' };
+  const grade = m[2];
+  if (!PSA_GRADES.includes(grade as (typeof PSA_GRADES)[number])) {
+    return { grader: '', grade: '' };
+  }
+  return { grader: m[1].toUpperCase(), grade };
+}
+
+export function gradeToGrader(label: string): {
+  grader: string;
+  grade: string;
+} {
   for (const g of ['PSA', 'BGS', 'CGC', 'SGC']) {
     if (label.startsWith(g + ' ')) {
       return { grader: g, grade: label.slice(g.length + 1) };

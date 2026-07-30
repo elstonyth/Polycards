@@ -1,6 +1,27 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { mercurDashboardPlugin } from '@mercurjs/dashboard-sdk';
+
+// @acme/odds-math is consumed from SOURCE here, not from its CJS `dist`.
+//
+// The package's exports map points runtime at ./dist/index.js for the Medusa
+// backend (which requires it at runtime), so `dist` has to stay. But the admin
+// previously pulled that same CJS build in via `optimizeDeps.include`, and
+// Vite's dep-optimizer cache keys on the lockfile and config — NOT on a
+// workspace package's rebuilt output. So editing odds-math and rebuilding it
+// left node_modules/.vite/deps/@acme_odds-math.js frozen at whatever the dev
+// server first bundled: the admin silently imported the OLD module and any
+// newly added export came through `undefined`, crashing the page at render
+// with no clue pointing back at the cache.
+//
+// Aliasing to the TypeScript source removes the whole class of failure — no
+// prebundle to go stale, no `yarn build` prerequisite for the admin, and HMR
+// on odds-math edits. tsc already resolves this package's types from src (see
+// its exports map), so source is what typechecking has always described.
+const ODDS_MATH_SRC = fileURLToPath(
+  new URL('../../packages/odds-math/src/index.ts', import.meta.url),
+);
 
 // Backend origin baked into the admin bundle. It must be a VALID ABSOLUTE URL
 // — @mercurjs/client does `new URL(baseUrl)` with no fallback, so an
@@ -38,16 +59,10 @@ export default defineConfig(() => ({
   define: {
     __STOREFRONT_URL__: JSON.stringify(process.env.MERCUR_STOREFRONT_URL || ''),
   },
-  // @acme/odds-math ships CJS-only. Because it is a workspace symlink Rollup
-  // resolves it to ../../packages/odds-math/dist/index.js — outside the default
-  // /node_modules/ CJS-plugin scope. Extend the include list to cover it while
-  // keeping the default node_modules coverage so React etc. still work.
-  optimizeDeps: { include: ['@acme/odds-math'] },
-  build: {
-    commonjsOptions: {
-      include: [/node_modules/, /packages[\\/]odds-math/],
-    },
-  },
+  // Source, not the CJS dist — see ODDS_MATH_SRC above. This also retires the
+  // old `optimizeDeps.include` / `commonjsOptions` pair that existed only to
+  // drag that CJS build through Rollup's node_modules-scoped CJS plugin.
+  resolve: { alias: { '@acme/odds-math': ODDS_MATH_SRC } },
   server: { port: 7000 },
   plugins: [
     react(),

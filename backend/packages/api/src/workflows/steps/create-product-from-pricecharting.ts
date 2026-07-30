@@ -55,6 +55,34 @@ const slug = (s: string) =>
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
 
+/**
+ * Product handle for a PriceCharting import. The grader + grade the operator
+ * asserted identify the physical slab, so they key the handle — one product per
+ * (card, grade) rather than per card.
+ *
+ * The tier is the fallback for holdings that assert NEITHER. PriceCharting
+ * drops the grading company below its own top-tier price fields, so a "Graded 9"
+ * offer arrives grader-less, and §3a forbids inventing one; without the tier,
+ * "Ungraded" and "Graded 9" of the same card slug identically and the second
+ * create fails on the unique handle/sku index — which is exactly what a bulk
+ * collection import does routinely.
+ *
+ * Ordering note: the tier sits where grader/grade would be, so a handle that
+ * HAS a grader is byte-identical to what this produced before the fallback
+ * existed. Only previously-impossible (colliding) handles change shape.
+ */
+export const buildPcProductHandle = (input: {
+  name: string;
+  grader: string;
+  grade: string;
+  pc_grade: string;
+  pc_product_id: string;
+}): string => {
+  const asserted = `${input.grader}-${input.grade}`.replace(/-/g, '').trim();
+  const key = asserted === '' ? input.pc_grade : `${input.grader}-${input.grade}`;
+  return slug(`${input.name}-${key}-${input.pc_product_id}`);
+};
+
 // Minimal typed view of the remote-query row (strict mode, no `any`).
 type NewProductRow = {
   variants?: Array<{
@@ -85,9 +113,7 @@ export const createProductFromPcInvoke = async (
     ? await ingestPcImage(container, input.image)
     : input.image;
 
-  const handle = slug(
-    `${input.name}-${input.grader}-${input.grade}-${input.pc_product_id}`,
-  );
+  const handle = buildPcProductHandle(input);
 
   const productInput = buildCardProductInput(
     {

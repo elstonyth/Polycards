@@ -323,6 +323,165 @@ export function computeSetWeights(entries: SetEntry[]): SetWeightsResult {
   };
 }
 
+// ── Default rarity odds (the house preset) ──────────────────────────────────
+// The distribution operators actually reason about: each TIER owns a fixed
+// share of the 100%, and the cards in a tier split that share EVENLY — two
+// Immortals get 0.05% each, two Legendaries 0.7% each. Flat and readable, which
+// the relative RARITY_WEIGHT ladder (still used by computeOdds for the
+// reward/daily-box pools) is not.
+//
+// Common's 43% is listed for readability but never written per-card: an
+// unlocked Common is the balancer (see balanceOdds), so it takes whatever the
+// other five tiers leave — 43% when they all land on their defaults, plus the
+// budget of any tier with no card in this pack.
+export const DEFAULT_TIER_PCT: Record<OddsRarity, number> = {
+  Immortal: 0.1,
+  Legendary: 1.4,
+  Mythical: 3.5,
+  Rare: 22,
+  Uncommon: 30,
+  Common: 43,
+};
+
+export interface TierSplitRow {
+  card_id: string;
+  locked: boolean;
+  rarity: string;
+  /** Pinned win % (0–100). Read ONLY when `locked` — a locked card spends its
+   *  tier's budget, so the split has to know how much it takes. */
+  pct?: number;
+}
+
+export interface TierSplitTier {
+  rarity: OddsRarity;
+  /** The tier's share of the 100%. */
+  budgetPct: number;
+  /** Unlocked cards splitting what the tier's locked cards leave.
+   *  Common is always 0 — it balances instead of taking a fixed share. */
+  count: number;
+  /** Locked cards in this tier. They keep their own rate. */
+  lockedCount: number;
+  /** Σ of the locked cards' pinned rates — spent out of `budgetPct`. */
+  lockedPct: number;
+  /** Applied % per unlocked card: (budget − lockedPct) / count, raised to
+   *  MIN_PCT when that would round to 0 bps (a 0-weight card is unpullable and
+   *  nothing else would say so). */
+  perCardPct: number;
+  /** True when the share fell under MIN_PCT and was raised to it, so the tier
+   *  now costs MORE than its budget. */
+  floored: boolean;
+  /** True when the operator set this tier's budget to 0 while it still holds
+   *  unlocked cards — honoured verbatim (0%, unpullable), NOT floored, because
+   *  zeroing a tier is a legitimate edit and must not silently become 0.01%. */
+  zeroed: boolean;
+  /** Locked rates alone already exceed the tier's budget. */
+  overspent: boolean;
+  /** Unlocked Common rows available to absorb the remainder. Common only. */
+  balancerCount?: number;
+}
+
+export interface TierSplitResult {
+  /** Win % per card, INPUT ORDER — only for the rows the preset writes. Locked
+   *  rows and unlocked Commons are absent by design (locks are the operator's;
+   *  Commons derive from balanceOdds). */
+  computed: { card_id: string; pct: number }[];
+  /** Σ of every non-Common tier's UNSPENT budget — an empty tier's whole share,
+   *  plus whatever an all-locked tier's pins left over. The Common balancer
+   *  absorbs it, which is why Common can read above its 43%. */
+  tiers: TierSplitTier[];
+  unusedPct: number;
+}
+
+/**
+ * Split each tier's budget across its cards. Pure; never throws.
+ *
+ * Rules, in the order an operator would state them:
+ *   1. A tier owns its share of the 100% — that share is the WHOLE tier's, and
+ *      a locked card spends from it. So a Rare locked at 10% leaves 12% for the
+ *      other Rares to split, and the tier still costs 22% in total.
+ *   2. Unlocked non-Common cards split what is left of their tier, evenly.
+ *   3. Unlocked Commons are the balancer and are left alone — balanceOdds gives
+ *      them the remainder, so Σ is still exactly 100%.
+ *
+ * Rule 1 is why `pct` is read for locked rows. The earlier version let locked
+ * cards take their rate ON TOP of a full tier budget, so a partly-locked tier
+ * quietly cost more than its share while the editor's panel still reported the
+ * budget — the panel and the table disagreed with no way to tell which was
+ * right.
+ */
+export function splitByTier(
+  rows: TierSplitRow[],
+  tierPct: Record<string, number> = DEFAULT_TIER_PCT,
+): TierSplitResult {
+  const safe = Array.isArray(rows) ? rows : [];
+  const pctById = new Map<string, number>();
+  const tiers: TierSplitTier[] = [];
+  let unusedPct = 0;
+
+  // RARITIES puts Common last, so `unusedPct` is complete by the time the
+  // Common row is built and can report what the balancer actually absorbs.
+  for (const rarity of RARITIES) {
+    const raw = Number(tierPct[rarity]);
+    const budgetPct = Number.isFinite(raw) && raw >= 0 ? raw : 0;
+
+    if (rarity === 'Common') {
+      tiers.push({
+        rarity,
+        budgetPct,
+        count: 0,
+        lockedCount: safe.filter((r) => r.locked && r.rarity === 'Common')
+          .length,
+        lockedPct: 0,
+        perCardPct: 0,
+        floored: false,
+        zeroed: false,
+        overspent: false,
+        balancerCount: safe.filter((r) => !r.locked && r.rarity === 'Common')
+          .length,
+      });
+      continue;
+    }
+
+    const inTier = safe.filter((r) => r.rarity === rarity);
+    const free = inTier.filter((r) => !r.locked);
+    const lockedRows = inTier.filter((r) => r.locked);
+    const lockedPct = lockedRows.reduce((sum, r) => {
+      const p = Number(r.pct);
+      return sum + (Number.isFinite(p) && p > 0 ? p : 0);
+    }, 0);
+
+    const left = Math.max(0, budgetPct - lockedPct);
+    const even = free.length > 0 ? left / free.length : 0;
+    // A deliberate 0 budget is honoured, never floored — see `zeroed`.
+    const zeroed = free.length > 0 && budgetPct === 0;
+    const floored = free.length > 0 && !zeroed && even < MIN_PCT;
+    const perCardPct = zeroed ? 0 : floored ? MIN_PCT : even;
+
+    for (const m of free) pctById.set(m.card_id, perCardPct);
+    tiers.push({
+      rarity,
+      budgetPct,
+      count: free.length,
+      lockedCount: lockedRows.length,
+      lockedPct,
+      perCardPct,
+      floored,
+      zeroed,
+      overspent: lockedPct > budgetPct,
+    });
+    // Nothing unlocked to spend the rest ⇒ it falls to the balancer.
+    if (free.length === 0) unusedPct += left;
+  }
+
+  return {
+    computed: safe
+      .filter((r) => pctById.has(r.card_id))
+      .map((r) => ({ card_id: r.card_id, pct: pctById.get(r.card_id) ?? 0 })),
+    tiers,
+    unusedPct,
+  };
+}
+
 // ── Rarity proposal (auto-split support) ────────────────────────────────────
 // Tier a card by its value as a MULTIPLE OF THE TICKET, so the mapping is
 // explainable and stays stable as prices drift. Pure: the caller supplies
@@ -436,9 +595,15 @@ const distribute = (
     byId.set(r.card_id, wH > 0 ? (100 * c * rarityWeight(r.rarity)) / wH : 0);
   }
   for (const r of absorbers) {
-    byId.set(r.card_id, wC > 0 ? (100 * (M - c) * rarityWeight(r.rarity)) / wC : 0);
+    byId.set(
+      r.card_id,
+      wC > 0 ? (100 * (M - c) * rarityWeight(r.rarity)) / wC : 0,
+    );
   }
-  return all.map((r) => ({ card_id: r.card_id, pct: byId.get(r.card_id) ?? 0 }));
+  return all.map((r) => ({
+    card_id: r.card_id,
+    pct: byId.get(r.card_id) ?? 0,
+  }));
 };
 
 const rtpOf = (
@@ -475,7 +640,11 @@ export function solveOddsForRtp(
   if (safe.some((r) => !Number.isFinite(r.value) || r.value < 0)) {
     return fail('Every card needs a value of 0 or more.');
   }
-  if (safe.some((r) => r.locked && (!Number.isFinite(r.pct) || r.pct < 0 || r.pct > 100))) {
+  if (
+    safe.some(
+      (r) => r.locked && (!Number.isFinite(r.pct) || r.pct < 0 || r.pct > 100),
+    )
+  ) {
     return fail('Locked win rates must each be a number between 0% and 100%.');
   }
 
@@ -495,7 +664,9 @@ export function solveOddsForRtp(
   const lockedMass = locked.reduce((s, r) => s + r.pct / 100, 0);
   const M = 1 - lockedMass;
   if (M <= 0) {
-    return fail('Locked win rates already use the full 100%. Unlock a card to auto-split.');
+    return fail(
+      'Locked win rates already use the full 100%. Unlock a card to auto-split.',
+    );
   }
   const lockedEv = locked.reduce((s, r) => s + (r.pct / 100) * r.value, 0);
 
@@ -531,7 +702,9 @@ export function solveOddsForRtp(
       break;
     }
 
-    const fixedPct = new Map<string, number>(locked.map((r) => [r.card_id, r.pct]));
+    const fixedPct = new Map<string, number>(
+      locked.map((r) => [r.card_id, r.pct]),
+    );
     for (const id of flooredIds) fixedPct.set(id, MIN_PCT);
 
     // Every chase row floored: the absorbers simply take what is left.
@@ -547,7 +720,8 @@ export function solveOddsForRtp(
       break;
     }
 
-    const cFree = (targetEv - lockedEv - flooredEv - mFree * vC) / (vHFree - vC);
+    const cFree =
+      (targetEv - lockedEv - flooredEv - mFree * vC) / (vHFree - vC);
     if (cFree < 0 || cFree > mFree) {
       const a = lockedEv + flooredEv + mFree * vC;
       const b = lockedEv + flooredEv + mFree * vHFree;
@@ -588,7 +762,10 @@ export function solveOddsForRtp(
   const collapsed = new Set<OddsRarity>();
   for (const rarity of RARITIES) {
     const tierRows = chase.filter((r) => r.rarity === rarity);
-    if (tierRows.length > 0 && tierRows.every((r) => flooredIds.has(r.card_id))) {
+    if (
+      tierRows.length > 0 &&
+      tierRows.every((r) => flooredIds.has(r.card_id))
+    ) {
       collapsed.add(rarity);
     }
   }
@@ -597,7 +774,8 @@ export function solveOddsForRtp(
     error: null,
     computed,
     floored,
-    tierCollapse: collapsed.size >= 2 ? RARITIES.filter((r) => collapsed.has(r)) : [],
+    tierCollapse:
+      collapsed.size >= 2 ? RARITIES.filter((r) => collapsed.has(r)) : [],
     achievedRtp: rtpOf(computed, byId, packPrice),
   };
 }

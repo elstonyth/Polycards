@@ -24,11 +24,26 @@
       "empty": "No packs found.",
       "loadError": "Could not load packs."
     },
+    "defaults": {
+      "title": "Default odds",
+      "reset": "Reset",
+      "total": "Total {{total}}%",
+      "perCard": "{{n}} cards · {{pct}} each",
+      "perCardEmpty": "no cards",
+      "allLocked": "{{n}} locked",
+      "plusLocked": "{{n}} locked · {{pct}}",
+      "unused": "{{pct}} unused → Common",
+      "floored": "{{tiers}}: more cards than the share allows, so each sits at the {{min}} floor and the tier costs more than its share.",
+      "zeroed": "{{tiers}}: share is 0%, so those cards can never be pulled.",
+      "overspent": "{{tiers}}: locked rates already exceed the share, so the tier costs more than its number says.",
+      "noBalancer": "No unlocked Common to absorb the remainder — set one card to Common and leave it unlocked."
+    },
     "published": {
       "title": "Published odds (public)",
-      "subtitle": "The PUBLIC win rates shown to players on the pack page — overall win rate plus a rate per rarity tier. Display-only: completely independent of the internal per-card win rates below.",
+      "subtitle": "What players see on the pack page. Display-only — independent of the real win rates below.",
       "overall": "Overall win %",
-      "save": "Save published odds",
+      "fillFromDefaults": "Use defaults",
+      "save": "Save",
       "saved": "Published odds saved.",
       "sum": "Tier total: {{sum}}% (tiers usually sum to 100%)",
       "ev": "Published EV",
@@ -84,7 +99,7 @@
     },
     "editor": {
       "title": "Win rates",
-      "subtitle": "Pick each card's rarity for THIS pack — the same card can be a different tier in other packs. Lock a card to type its exact win rate; the unlocked Common card is the balancer and absorbs whatever is left, so every set totals 100%. These weights are secret — customers never see them.",
+      "subtitle": "Set each card's rarity for this pack. Unlocked cards follow the default odds above; lock one to type its own rate. Secret — customers never see these.",
       "card": "Card",
       "rarity": "Rarity",
       "value": "Value",
@@ -93,9 +108,11 @@
       "winRate": "Win rate (%)",
       "set": "Set {{n}}",
       "evRtp": "EV / RTP",
+      "evByTier": "Expected value by rarity tier",
       "balancer": "balancer",
-      "setsHint": "Sets 2 and 3 are alternate tables for specific customer groups. Leave a cell blank to inherit (3 → 2 → 1). The unlocked Common card is the balancer — it absorbs whatever the other rates leave over.",
-      "result": "After save",
+      "fromDefault": "default",
+      "never": "never drops",
+      "unpullable": "Below 0.01% — this saves as a 0 weight, so the card can never be pulled. Use 0.01 or more.",
       "save": "Save win rates",
       "saving": "Saving…",
       "saved": "Win rates saved.",
@@ -111,15 +128,7 @@
       "draftReadyBanner": "Draft — hidden from the storefront. The prize pool has cards; activate when the win rates look right.",
       "unitsOwed": "{{count}} owed to winners",
       "topHit": "Top hit #",
-      "pendingRow": "new — not in pool until saved",
-      "targetRtp": "Target RTP %",
-      "autoSplit": "Auto-split odds",
-      "autoSplitDone": "Applied — review the rarities and rates, then save.",
-      "autoSplitRtp": "Solved RTP: {{rtp}}% (target {{target}}%) — saving rounds rates to whole basis points. Check the Set 1 EV / RTP tile above for what the pack actually pays.",
-      "autoSplitFloored": "{{count}} card(s) pinned at the 1 in 10,000 minimum — they will drop more often than the target implies:",
-      "autoSplitFlooredRow": "{{name}}: fair 1 in {{fair}}, actual 1 in {{actual}}",
-      "autoSplitCollapse": "These tiers are all at the minimum and are indistinguishable to players: {{tiers}}. Raise the pack price or remove the most valuable cards.",
-      "autoSplitSetWarning": "Sets 2 and 3 already have their own saved rates. Auto-split changes rarities, and that can silently re-pin a Set 2/3 balancer card at its old rate instead of letting it keep balancing — skewing that set's payout with no error on save. Review Sets 2 and 3 after applying, or clear their overrides first."
+      "pendingRow": "new — not in pool until saved"
     }
   },
   "pcAdd": {
@@ -169,6 +178,54 @@
       "queueSkipped": "{{n}} created, {{skipped}} skipped.",
       "queueSkippedCapped": "{{n}} created, {{skipped}} skipped. Errors not shown: {{hidden}}."
     }
+  },
+  "pcCollection": {
+    "title": "Add from PriceCharting collection",
+    "subtitle": "Scan your own PriceCharting collection and onboard many holdings in one pass. It runs to thousands of items, so the scan pages through with live counters and can be stopped as soon as what you want is on screen. Importing re-reads each pick at its live per-grade value (not the collection valuation); you then set units held and link a pixel Pokémon before saving the batch.",
+    "fetch": "Scan my collection",
+    "refetch": "Rescan from the start",
+    "stop": "Stop scan",
+    "continue": "Continue scan",
+    "progress": "{{scanned}} scanned ({{pages}} pages) · {{shown}} shown",
+    "complete": "Whole collection scanned",
+    "partial": "Partial — scan stopped early",
+    "empty": "No holdings came back from PriceCharting.",
+    "filter": "Filter by name, set or grade tag…",
+    "cardsOnly": "Cards only",
+    "gradedOnly": "Graded only",
+    "selectAll": "Select all shown",
+    "deselectAll": "Deselect all shown",
+    "import": "Import selected ({{n}})",
+    "importing": "Pricing {{done}} / {{total}}…",
+    "tierUnmapped": "Pick after import",
+    "pickTier": "Pick a grade tier",
+    "valueHint": "Value shown is PriceCharting's valuation of your holding, for triage only. Import re-reads the live per-grade price so it matches what the nightly sync writes.",
+    "drafts": "Imported ({{n}}) — finish these before saving",
+    "slabLine": "PriceCharting tag {{tag}} · recorded as {{grader}}",
+    "noGrader": "no grader (tier is a price comp)",
+    "remove": "Remove import",
+    "save": "Save {{n}} products",
+    "col": {
+      "item": "Item",
+      "pcTag": "PriceCharting tag",
+      "tier": "Grade tier",
+      "offerValue": "Holding value"
+    },
+    "skip": {
+      "noImage": "{{name}}: PriceCharting has no card photo — add it on the search page.",
+      "noPrices": "{{name}}: PriceCharting lists no prices for this product."
+    },
+    "toast": {
+      "imported": "{{n}} imported — set units and pixel Pokémon, then save.",
+      "skipped": "{{skipped}} skipped.",
+      "skippedCapped": "{{skipped}} skipped. Errors not shown: {{hidden}}."
+    },
+    "stopImport": "Stop import",
+    "rowCap": "Showing the first {{shown}} of {{total}} matches — narrow the filter to reach the rest.",
+    "merged": "{{n}} holdings of this card at this grade — one product, units preset to {{n}}.",
+    "selectRow": "Select {{name}} ({{tag}})",
+    "clearSelection": "Clear selection ({{n}})",
+    "foreignDropped": "{{n}} rows were not yours and were dropped — PRICECHARTING_SELLER_ID does not match the account the API token reads."
   },
   "cards": {
     "title": "Gacha Cards",
