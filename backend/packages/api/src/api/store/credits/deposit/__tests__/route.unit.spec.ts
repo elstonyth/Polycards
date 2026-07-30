@@ -26,10 +26,24 @@ const mkReq = (over: Record<string, unknown> = {}) =>
 
 const sentIp = () => startMock.mock.calls[0][1].ipAddress;
 
+const ORIGINAL_ENV = {
+  GLOBEPAY_NOTIFY_URL: process.env.GLOBEPAY_NOTIFY_URL,
+  GLOBEPAY_RETURN_URL: process.env.GLOBEPAY_RETURN_URL,
+};
+
 beforeEach(() => {
   startMock.mockClear();
   process.env.GLOBEPAY_NOTIFY_URL = 'https://us/notify';
   process.env.GLOBEPAY_RETURN_URL = 'https://us/return';
+});
+
+// These are process-wide: leaving them set leaks into whatever runs next and
+// makes a later suite pass or fail on execution order.
+afterEach(() => {
+  for (const [key, value] of Object.entries(ORIGINAL_ENV)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
 });
 
 describe('POST /store/credits/deposit — customer IP', () => {
@@ -61,11 +75,16 @@ describe('POST /store/credits/deposit — customer IP', () => {
     expect(sentIp()).toBe('0.0.0.0');
   });
 
-  it('fails closed when the callback URLs are unset — money in, no credit', async () => {
-    delete process.env.GLOBEPAY_NOTIFY_URL;
-    await expect(POST(mkReq({ ip: '203.0.113.7' }), res)).rejects.toThrow(
-      /temporarily unavailable/i,
-    );
-    expect(startMock).not.toHaveBeenCalled();
-  });
+  // Either URL missing must fail closed. Covering only NOTIFY would let a
+  // dropped RETURN guard through — money in, no credit, no test.
+  it.each(['GLOBEPAY_NOTIFY_URL', 'GLOBEPAY_RETURN_URL'] as const)(
+    'fails closed when %s is unset — money in, no credit',
+    async (missing) => {
+      delete process.env[missing];
+      await expect(POST(mkReq({ ip: '203.0.113.7' }), res)).rejects.toThrow(
+        /temporarily unavailable/i,
+      );
+      expect(startMock).not.toHaveBeenCalled();
+    },
+  );
 });

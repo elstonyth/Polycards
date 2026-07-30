@@ -311,8 +311,15 @@ Rules to bank now:
   `GLOBEPAY_CALLBACK_IPS` in `globepay.ts` records their egress addresses for
   reference (it is what you give THEM, and what to expect in their logs); it is
   intentionally not wired into any route.
-- Credit **idempotently keyed on their `TransactionId`** — reuse
-  `mutateCreditAtomic` + `topupIdempotencyReference`.
+- Credit **idempotently keyed on the signed `Data.MerchantTransactionId`** —
+  reuse `mutateCreditAtomic` + `topupIdempotencyReference`. NOT the top-level
+  `TransactionId`: only `Data` is covered by the RSA signature, so every other
+  field is attacker-mutable on a captured callback. Anchoring on `TransactionId`
+  would let one genuine callback be replayed with a fresh value each time, each
+  replay minting another credit. `TransactionId` is a human-facing
+  reconciliation handle only. The deposit hook already does this — see the note
+  above `const merchantTransactionId` in
+  `src/api/hooks/globepay/deposit/route.ts`.
 - Deposit status: `6` = success, `7` = fail, `4` = verify-fail (**not final**),
   anything else = processing.
 - Withdrawal status: `4` = success, `5` = fail, else processing.
