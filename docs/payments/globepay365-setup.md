@@ -255,12 +255,14 @@ Version}` (as in §1.9.2) and `{merchantCode, data, …}` (as in §1.1.2) return
 ## Phase 1 checklist (blocks everything else)
 
 - [x] Generate merchant RSA 1024 keypair locally.
-- [ ] Send **merchant public key** to GlobePay365 tech team.
-- [ ] Give them our **server outgoing IP** for their whitelist. **Open problem:**
-      `polycards-backend` runs on DO App Platform with `egress: null` — no static
-      outbound IP. Needs `spec.egress.type: DEDICATED_IP` (paid DO feature) or a
-      proxy with a fixed IP.
-- [ ] Receive `MerchantCode` back.
+- [x] Send **merchant public key** to GlobePay365 tech team. (Production key
+      sent 2026-07-29; the string in their thread is byte-identical to
+      `~/.secrets/globepay/merchant_public_prod.pem`, re-verified 2026-07-30.)
+- [x] Give them our **server outgoing IP** for their whitelist. Solved with
+      `spec.egress.type: DEDICATED_IP` — see "Egress is spec state, and it can be
+      wiped" below before touching it.
+- [x] Receive `MerchantCode` back — `Polycard` (in `.do/backend.app.yaml`).
+      Not yet exercised against the live host; the first `CheckBalance` proves it.
 
 ## Phase 2 — integration
 
@@ -418,11 +420,12 @@ a human into the DigitalOcean app, never into this repo.
    devglan.com or any other web tool, whatever their onboarding mail says: that
    private key signs payout requests, so a key that ever touched a third-party
    site is a drain-the-balance risk. Send them the **public** half only.
-3. **Give them our outgoing IP, and have one to give.** `polycards-backend` runs
-   on DO App Platform with no `egress` block, so it has no static outbound
-   address, while their account has `IP Whitelist Check: Active`. Needs
-   `spec.egress.type: DEDICATED_IP` (paid) or a fixed-IP proxy. Until this is
-   done **every API call from production is rejected** — no env var fixes it.
+3. **Give them our outgoing IP, and have one to give.** DONE — `polycards-backend`
+   now carries `spec.egress.type: DEDICATED_IP`, one address per component.
+   Without it the app has no static outbound address while their account has
+   `IP Whitelist Check: Active`, so **every API call from production is
+   rejected** and no env var fixes it. Read the next section before you touch
+   the spec: this setting has already been lost once.
 4. **Both whitelists — and GlobePay has to do them.** Their `Setting →
    Whitelist Setting` has a BackOffice list (who may log in) and an API list
    (which servers may call). Confirmed 2026-07-29: the production account
@@ -436,6 +439,58 @@ a human into the DigitalOcean app, never into this repo.
    payments work while the sweep that catches a dropped callback fails silently.
    Note the office IP is likely dynamic; ask whether they can allow a range.
 
+   **BackOffice list: DONE**, per GlobePay 2026-07-30 ("都已设置好了") and
+   independently verified — `https://backoffice.globepay365.com/` now answers
+   `200` from the office with no `Access Denied` body, where 2026-07-29 it
+   refused. Office IP `60.48.37.10`.
+
+   **API list: SET, BUT ON THE WRONG ADDRESSES.** They whitelisted
+   `206.189.94.252` / `168.144.35.100` as asked. Those IPs were released hours
+   later (see the next section) and production now egresses from
+   **`188.166.181.61`** and **`188.166.181.204`**. The new pair has to be sent
+   and confirmed before deposits are armed, or every call is rejected. This half
+   cannot be verified from the office at all — only the server addresses may
+   call — so its first proof is `CheckBalance` from production.
+
+### Egress is spec state, and it can be wiped (learned the hard way 2026-07-30)
+
+`doctl apps update` replaces the **entire** app spec. A spec with no `egress`
+block does not leave the dedicated IPs alone — it releases them.
+
+That is what happened on 2026-07-30. Deployment `f7b19e3b` (09:39 UTC) went out
+with `egress: {"type":"DEDICATED_IP"}`; `2779c7a6` (09:46 UTC, "app spec
+updated") went out with `egress: null`, because the spec applied was master's
+and only this branch carried the block. `dedicated_ips` read back `null`
+afterwards. Thirty minutes earlier GlobePay had confirmed the API whitelist for
+exactly those two addresses.
+
+**The failure is silent.** The app stays `ACTIVE`, `/health` passes, the
+storefront is fine. The only thing that breaks is outbound calls to GlobePay —
+so with the gateway armed, it would have surfaced as a customer paying and
+never being credited, not as an alarm.
+
+Fixed by putting the block in master's `.do/backend.app.yaml` (PR #302), so any
+future `do-apply backend` preserves it, then re-applying to restore egress
+(deployment `3de62783`, ACTIVE 2026-07-30).
+
+**The addresses did not come back.** DO allocated a fresh pair rather than
+returning the released ones:
+
+| | Whitelisted by GlobePay | Live after the restore |
+| --- | --- | --- |
+| | `206.189.94.252` | `188.166.181.61` |
+| | `168.144.35.100` | `188.166.181.204` |
+
+So the wipe cost the whitelist, not just the setting. Treat "toggled egress off"
+as "burned those IPs" — they are not reserved and you do not get them back.
+
+Standing rule:
+
+> After **any** change that touches egress, read the addresses back —
+> `doctl apps get 7fd66ea2-0105-420b-87eb-8a4606262561 -o json` →
+> `dedicated_ips` — and compare to what GlobePay has. A reallocation is
+> invisible from our side and un-whitelisted from theirs.
+
 ### Then the spec update — committed IaC, not the DO UI
 
 The variables are **already written** into `.do/backend.app.yaml` and
@@ -448,6 +503,16 @@ What you supply is three secret values in the gitignored `deploy/.env.deploy`:
     GLOBEPAY_AES_KEY=<their AES key>
     GLOBEPAY_PUBLIC_KEY=<their RSA public key, bare base64 body, ONE line>
     GLOBEPAY_MERCHANT_PRIVATE_KEY=<our private key, bare base64 body, ONE line>
+
+Two of the three still have to come **from GlobePay** — the AES key and their
+public key. Only `GLOBEPAY_MERCHANT_PRIVATE_KEY` is ours (in
+`~/.secrets/globepay/merchant_private_prod.pem`), and as of 2026-07-30 none of
+the three are in `deploy/.env.deploy`.
+
+Ask for the AES key **reissued**, per blocker 1: the value handed over came
+alongside a back-office password that was pasted into a chat transcript. Pasting
+the pre-rotation key into production puts a chat-exposed secret on the money
+path.
 
 Bare base64 **body only** for both keys — no `-----BEGIN-----` armor and no
 newlines. `packs/globepay.ts` `toPem()` re-wraps them, a multi-line value would
