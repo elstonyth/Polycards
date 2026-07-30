@@ -131,10 +131,10 @@ export interface PackBase {
 
 /**
  * Resolve a single pack + its category siblings by slug from the SAME backend
- * catalog seam as the /claw list (`getPackCategories`). This keeps the detail
+ * catalog seam as the /slots list (`getPackCategories`). This keeps the detail
  * page in sync with the list: any backend-created pack that shows in the grid
- * also resolves here — fixing the 404 where the detail page used to gate on the
- * static `findPack` 8-pack list while the list rendered live backend packs.
+ * also resolves here — fixing the 404 where the detail page used to gate on a
+ * static pack table (since deleted) while the list rendered live backend packs.
  *
  * Returns null when no category contains the slug — unknown pack, or the
  * backend is down/empty (source of truth) → the page 404s.

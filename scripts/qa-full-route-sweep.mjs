@@ -64,17 +64,13 @@ const PUBLIC = [
   '/',
   '/about',
   '/contact',
-  '/daily',
   '/fairness',
   '/free',
   '/how-it-works',
   '/leaderboard',
   '/reset-password',
-  '/roulette',
   '/slots',
   ...(slug ? [`/slots/${slug}`, `/slots/${slug}/spin`] : []),
-  '/social',
-  '/vouchers',
 ];
 const ACCOUNT = [
   '/me',

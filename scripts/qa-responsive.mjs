@@ -46,14 +46,11 @@ const PUBLIC = [
   '/fairness',
   '/about',
   '/contact',
-  '/social',
   '/free',
   '/download',
-  '/roulette',
   '/reset-password',
   '/auth/google/failed',
   '/profile/ProfessorOak',
-  '/invite/ProfessorOak',
   '/card/pikachu-ex-238-psa-10-7800271',
 ];
 
