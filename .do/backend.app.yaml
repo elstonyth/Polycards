@@ -221,6 +221,21 @@ envs:
     scope: RUN_TIME
     value: unsafe-demo
 
+# Dedicated outbound IPs. DO assigns one per component (the service makes the
+# customer-facing calls, the worker runs the reconciliation sweeps) and
+# GlobePay365 runs an ACTIVE API whitelist keyed on those exact addresses, so
+# BOTH have to be on their list.
+#
+# This block lives here because `doctl apps update` replaces the whole spec:
+# on 2026-07-30 a do-apply from a spec without it silently released the IPs
+# assigned the day before (deployment 2779c7a6, egress null — app stayed
+# ACTIVE and healthy, only outbound calls to them would have been rejected).
+# Never drop it. After any egress toggle, re-read the assigned addresses
+# (`doctl apps get <id> -o json` → dedicated_ips) and re-send them to
+# GlobePay365 if they changed — a reallocation is invisible from our side.
+egress:
+  type: DEDICATED_IP
+
 services:
   - name: backend
     dockerfile_path: backend/Dockerfile
