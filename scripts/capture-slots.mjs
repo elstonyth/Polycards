@@ -13,9 +13,6 @@ const ctx = await browser.newContext({
 });
 const page = await ctx.newPage();
 
-// The /claw -> /slots redirect check is gone: next.config.ts deliberately keeps
-// no redirects for retired sections, so /claw is a plain 404 now.
-
 await page
   .getByRole('button', { name: 'Accept' })
   .click({ timeout: 4000 })

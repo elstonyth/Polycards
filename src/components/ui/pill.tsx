@@ -27,10 +27,10 @@ const PILL_SIZE = {
 } as const;
 
 // ponytail: two lookups and a join — cva earned its keep across a component
-// library, not across one file. Same call shape, so callers don't change.
+// library, not across one file.
 type PillOptions = {
-  variant?: keyof typeof PILL_VARIANT | null;
-  size?: keyof typeof PILL_SIZE | null;
+  variant?: keyof typeof PILL_VARIANT;
+  size?: keyof typeof PILL_SIZE;
 };
 
 function pillVariants({ variant, size }: PillOptions = {}) {

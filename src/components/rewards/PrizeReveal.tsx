@@ -13,9 +13,6 @@ import { useModalA11y } from '@/lib/use-modal-a11y';
  * (docs/superpowers/specs/2026-07-29-suspend-vip-referral-surfaces-design.md).
  * Kept unreferenced, not deleted, so un-suspending is a revert — same
  * treatment as the other kept orphans (daily.ts, referral.ts, voucherLabel).
- * The notification copy in lib/notifications/copy.ts still cites this
- * component as the reason `reward_won` doesn't toast; that suppression is
- * inert until the surface returns.
  *
  * A minimal reveal animation for the daily box prize (adapted from the slab aesthetic).
  */

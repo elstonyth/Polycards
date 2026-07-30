@@ -1,7 +1,6 @@
 // Canonical MOCK card pool for the frontend clone (no backend). Built deterministically
 // from the harvested graded-card images in public/cdn/cards/h-*.webp so grids look full.
-// Only the pool itself is still consumed (mock/users.ts profile fixtures) — the
-// slug resolvers went with /card/<id>'s move to real backend data.
+// Pool only (mock/users.ts fixtures) — /card/<id> reads real backend data now.
 
 import type { Rarity } from '@/lib/packs-data';
 

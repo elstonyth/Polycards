@@ -52,15 +52,8 @@ export const CAT_ICON = {
   pokemon: '/pack-index-icons/pokemon.webp',
 } as const;
 
-/** A category's presentational chrome, with no pack list of its own — every
- *  consumer fills `packs` from the backend catalog. */
-export type CategoryMeta = Omit<PackCategory, 'packs'>;
-
-// Category chrome for the Polycards tier ladder. The static 5-pack table that
-// used to live here was only ever read through `findPack`; getPackCategories
-// overwrites `packs` on both its success and its backend-down path, so the
-// entries were dead weight.
-export const CATEGORIES: CategoryMeta[] = [
+// Category chrome only — getPackCategories fills `packs` from the backend.
+export const CATEGORIES: Omit<PackCategory, 'packs'>[] = [
   {
     id: 'pokemon',
     tab: 'Pokémon',
