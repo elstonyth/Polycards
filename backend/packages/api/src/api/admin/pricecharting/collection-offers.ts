@@ -77,10 +77,18 @@ export function normalizeOffer(raw: Record<string, unknown>): PcOffer | null {
   const productId = raw.id != null ? String(raw.id).trim() : '';
   if (productId === '') return null;
 
-  // String OR number: dropping a numerically-keyed row would empty the page
-  // in a way indistinguishable from a genuinely empty collection.
+  // A string or a finite number, nothing else. A number is accepted because
+  // dropping a numerically-keyed row would empty the page in a way
+  // indistinguishable from a genuinely empty collection; anything else is
+  // refused because String() would coin a key rows can SHARE — `{}` becomes
+  // "[object Object]" for every such row, and the scan dedupe would then treat
+  // two distinct holdings as one and undercount the units held.
+  const rawOfferId = raw['offer-id'];
   const offerId =
-    raw['offer-id'] != null ? String(raw['offer-id']).trim() : '';
+    typeof rawOfferId === 'string' ||
+    (typeof rawOfferId === 'number' && Number.isFinite(rawOfferId))
+      ? String(rawOfferId).trim()
+      : '';
   if (offerId === '') return null;
 
   const include = String(raw['include-string'] ?? '');

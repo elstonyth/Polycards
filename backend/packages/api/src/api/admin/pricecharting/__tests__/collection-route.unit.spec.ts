@@ -97,6 +97,17 @@ describe('GET /admin/pricecharting/collection', () => {
     expect(url.searchParams.get('cursor')).toBe('cur/sor+abc');
   });
 
+  it('rejects a non-string cursor instead of restarting the scan', async () => {
+    // Express turns a repeated ?cursor=a&cursor=b into an array; coercing it to
+    // '' would silently answer page 1.
+    const { captured, url } = await runGet(
+      { cursor: ['a', 'b'] },
+      { status: 'success', offers: [] },
+    );
+    expect(captured.status).toBe(400);
+    expect(url).toBeUndefined();
+  });
+
   it('rejects an absurdly long cursor instead of restarting the scan', async () => {
     // Answering page 1 would be invisible to the client: its dedupe drops every
     // row, so the scan spins to the page cap looking like a hang.

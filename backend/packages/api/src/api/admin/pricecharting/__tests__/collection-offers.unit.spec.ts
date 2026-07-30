@@ -174,6 +174,15 @@ describe('normalizeOffer', () => {
     expect(normalizeOffer({ ...RAW, 'offer-id': '   ' })).toBeNull();
   });
 
+  it('drops an offer id that is neither a string nor a finite number', () => {
+    // String({}) is "[object Object]" — a key EVERY such row would share, so
+    // the scan dedupe would fold distinct holdings into one and undercount.
+    expect(normalizeOffer({ ...RAW, 'offer-id': {} })).toBeNull();
+    expect(normalizeOffer({ ...RAW, 'offer-id': [] })).toBeNull();
+    expect(normalizeOffer({ ...RAW, 'offer-id': true })).toBeNull();
+    expect(normalizeOffer({ ...RAW, 'offer-id': Number.NaN })).toBeNull();
+  });
+
   it('accepts a numeric offer id rather than emptying the page', () => {
     // Dropping numerically-keyed rows would render as "collection is empty",
     // indistinguishable from the operator's real empty-collection state.

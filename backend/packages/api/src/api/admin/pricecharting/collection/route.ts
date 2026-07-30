@@ -42,9 +42,8 @@ export const PC_SELLER_MISSING =
 // and spins to the page cap looking like a hang.
 const MAX_CURSOR_LENGTH = 512;
 
-export const PC_CURSOR_TOO_LONG =
-  'The PriceCharting cursor is not valid (too long). Rescan the collection from ' +
-  'the start.';
+export const PC_CURSOR_INVALID =
+  'The PriceCharting cursor is not valid. Rescan the collection from the start.';
 
 type PcOffersResponse = {
   status: string;
@@ -64,10 +63,17 @@ export async function GET(
   }
 
   // The cursor is the one operator-supplied value that reaches the upstream URL.
-  const cursor =
-    typeof req.query.cursor === 'string' ? req.query.cursor.trim() : '';
-  if (cursor.length > MAX_CURSOR_LENGTH) {
-    res.status(400).json({ message: PC_CURSOR_TOO_LONG });
+  // Reject anything that is not a plain string of plausible length rather than
+  // coercing it away: a repeated ?cursor= arrives as an ARRAY, and coercion
+  // would answer page 1, which is invisible to the scan loop (its dedupe drops
+  // every row it already holds) and spins to the page cap looking like a hang.
+  const rawCursor = req.query.cursor;
+  const cursor = typeof rawCursor === 'string' ? rawCursor.trim() : '';
+  if (
+    (rawCursor !== undefined && typeof rawCursor !== 'string') ||
+    cursor.length > MAX_CURSOR_LENGTH
+  ) {
+    res.status(400).json({ message: PC_CURSOR_INVALID });
     return;
   }
 
