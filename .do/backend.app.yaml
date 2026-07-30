@@ -199,7 +199,9 @@ envs:
     value: __SECRET__PRICECHARTING_API_TOKEN__
   # Required by Inventory > "Add from PC Collection". NOT a secret: it is the
   # public 26-char PriceCharting user id (their docs publish an example one), so
-  # it is a plain value rather than a __SECRET__ placeholder. The token above
+  # it is a plain value rather than a redacted-secret placeholder (do-apply.ps1
+  # scans the WHOLE spec, comments included, so the literal placeholder token
+  # must never appear in prose here). The token above
   # only AUTHENTICATES — it does NOT scope /api/offers to our account, so
   # without this key PriceCharting answers with EVERY user's offers and the
   # route refuses to run rather than import strangers' cards as our stock.
