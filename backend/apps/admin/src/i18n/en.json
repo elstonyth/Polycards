@@ -179,6 +179,54 @@
       "queueSkippedCapped": "{{n}} created, {{skipped}} skipped. Errors not shown: {{hidden}}."
     }
   },
+  "pcCollection": {
+    "title": "Add from PriceCharting collection",
+    "subtitle": "Scan your own PriceCharting collection and onboard many holdings in one pass. It runs to thousands of items, so the scan pages through with live counters and can be stopped as soon as what you want is on screen. Importing re-reads each pick at its live per-grade value (not the collection valuation); you then set units held and link a pixel Pokémon before saving the batch.",
+    "fetch": "Scan my collection",
+    "refetch": "Rescan from the start",
+    "stop": "Stop scan",
+    "continue": "Continue scan",
+    "progress": "{{scanned}} scanned ({{pages}} pages) · {{shown}} shown",
+    "complete": "Whole collection scanned",
+    "partial": "Partial — scan stopped early",
+    "empty": "No holdings came back from PriceCharting.",
+    "filter": "Filter by name, set or grade tag…",
+    "cardsOnly": "Cards only",
+    "gradedOnly": "Graded only",
+    "selectAll": "Select all shown",
+    "deselectAll": "Deselect all shown",
+    "import": "Import selected ({{n}})",
+    "importing": "Pricing {{done}} / {{total}}…",
+    "tierUnmapped": "Pick after import",
+    "pickTier": "Pick a grade tier",
+    "valueHint": "Value shown is PriceCharting's valuation of your holding, for triage only. Import re-reads the live per-grade price so it matches what the nightly sync writes.",
+    "drafts": "Imported ({{n}}) — finish these before saving",
+    "slabLine": "PriceCharting tag {{tag}} · recorded as {{grader}}",
+    "noGrader": "no grader (tier is a price comp)",
+    "remove": "Remove import",
+    "save": "Save {{n}} products",
+    "col": {
+      "item": "Item",
+      "pcTag": "PriceCharting tag",
+      "tier": "Grade tier",
+      "offerValue": "Holding value"
+    },
+    "skip": {
+      "noImage": "{{name}}: PriceCharting has no card photo — add it on the search page.",
+      "noPrices": "{{name}}: PriceCharting lists no prices for this product."
+    },
+    "toast": {
+      "imported": "{{n}} imported — set units and pixel Pokémon, then save.",
+      "skipped": "{{skipped}} skipped.",
+      "skippedCapped": "{{skipped}} skipped. Errors not shown: {{hidden}}."
+    },
+    "stopImport": "Stop import",
+    "rowCap": "Showing the first {{shown}} of {{total}} matches — narrow the filter to reach the rest.",
+    "merged": "{{n}} holdings of this card at this grade — one product, units preset to {{n}}.",
+    "selectRow": "Select {{name}} ({{tag}})",
+    "clearSelection": "Clear selection ({{n}})",
+    "foreignDropped": "{{n}} rows were not yours and were dropped — PRICECHARTING_SELLER_ID does not match the account the API token reads."
+  },
   "cards": {
     "title": "Gacha Cards",
     "subtitle": "Inventory products registered as gacha prizes. Add the item to the product catalog first, then register it here; rarity is chosen per pack in each pack's win-rate editor.",
