@@ -65,7 +65,6 @@ const PUBLIC = [
   '/about',
   '/contact',
   '/fairness',
-  '/free',
   '/how-it-works',
   '/leaderboard',
   '/reset-password',
