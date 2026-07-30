@@ -46,7 +46,6 @@ const PUBLIC = [
   '/fairness',
   '/about',
   '/contact',
-  '/free',
   '/download',
   '/reset-password',
   '/auth/google/failed',
