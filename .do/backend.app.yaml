@@ -197,6 +197,15 @@ envs:
     scope: RUN_TIME
     type: SECRET
     value: __SECRET__PRICECHARTING_API_TOKEN__
+  # Required by Inventory > "Add from PC Collection". NOT a secret: it is the
+  # public 26-char PriceCharting user id (their docs publish an example one), so
+  # it is a plain value rather than a __SECRET__ placeholder. The token above
+  # only AUTHENTICATES — it does NOT scope /api/offers to our account, so
+  # without this key PriceCharting answers with EVERY user's offers and the
+  # route refuses to run rather than import strangers' cards as our stock.
+  - key: PRICECHARTING_SELLER_ID
+    scope: RUN_TIME
+    value: pwoe4lsq4pkxegdsoyyzvfjuza
   # ╔═══════════════════════════════════════════════════════════════════════╗
   # ║ GO-LIVE BLOCKER — DELETE THIS ENV BEFORE REAL LAUNCH.                  ║
   # ║ 'unsafe-demo' runs the always-approving MOCK payment gateway in prod   ║
