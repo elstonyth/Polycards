@@ -2,10 +2,9 @@
 // statically-published odds display. Pack `id` doubles as the route slug
 // (/slots/<id>).
 //
-// NOTE: the LIVE pack list comes entirely from the backend (the source of
-// truth) via src/lib/data/packs.ts — the static pack entries below are never
-// rendered as catalog; they only back `findPack` label lookups (recent-pull
-// pack names/icons) until that feed resolves labels from the backend too.
+// NOTE: there is no static pack list here any more. Every pack the storefront
+// renders comes from the backend via src/lib/data/packs.ts; the only local data
+// left is the category chrome (tab label, heading, icon) that wraps it.
 
 /** Site-wide flat buyback % — what every sell from the vault/inventory pays.
  *  Mirrors FLAT_PERCENT in backend/packages/api/src/modules/packs/buyback-rate.ts. */
@@ -53,58 +52,13 @@ export const CAT_ICON = {
   pokemon: '/pack-index-icons/pokemon.webp',
 } as const;
 
-// The Polycards tier ladder (2026-07 catalog cutover — the old claw-derived
-// 8-pack catalog was retired). These static entries are NEVER rendered as the
-// catalog (the backend is the source of truth); they only back `findPack`
-// label/icon fallbacks until that feed resolves labels from the backend too.
-export const CATEGORIES: PackCategory[] = [
+// Category chrome only — getPackCategories fills `packs` from the backend.
+export const CATEGORIES: Omit<PackCategory, 'packs'>[] = [
   {
     id: 'pokemon',
     tab: 'Pokémon',
     heading: 'Pokémon Packs',
     icon: CAT_ICON.pokemon,
-    packs: [
-      {
-        id: 'bronze-pack',
-        name: 'Bronze Pack',
-        price: 'RM 50',
-        priceValue: 50,
-        image: '/images/polycards/bronze-pack.webp',
-        displayImage: '/images/polycards/bronze-factory.webp',
-      },
-      {
-        id: 'silver-pack',
-        name: 'Silver Pack',
-        price: 'RM 250',
-        priceValue: 250,
-        image: '/images/polycards/silver-pack.webp',
-        displayImage: '/images/polycards/silver-factory.webp',
-      },
-      {
-        id: 'gold-pack',
-        name: 'Gold Pack',
-        price: 'RM 1,000',
-        priceValue: 1000,
-        image: '/images/polycards/gold-pack.webp',
-        displayImage: '/images/polycards/gold-factory.webp',
-      },
-      {
-        id: 'platinum-pack',
-        name: 'Platinum Pack',
-        price: 'RM 2,500',
-        priceValue: 2500,
-        image: '/images/polycards/platinum-pack.webp',
-        displayImage: '/images/polycards/platinum-factory.webp',
-      },
-      {
-        id: 'diamond-pack',
-        name: 'Diamond Pack',
-        price: 'RM 5,000',
-        priceValue: 5000,
-        image: '/images/polycards/diamond-pack.webp',
-        displayImage: '/images/polycards/diamond-factory.webp',
-      },
-    ],
   },
 ];
 
@@ -113,23 +67,6 @@ export type ResolvedPack = Pack & {
   categoryName: string;
   icon: string;
 };
-
-export const ALL_PACKS: ResolvedPack[] = CATEGORIES.flatMap((c) =>
-  c.packs.map((p) => ({
-    ...p,
-    categoryId: c.id,
-    categoryName: c.tab,
-    icon: c.icon,
-  })),
-);
-
-export function findPack(slug: string): ResolvedPack | null {
-  return ALL_PACKS.find((p) => p.id === slug) ?? null;
-}
-
-export function findCategory(slug: string): PackCategory | null {
-  return CATEGORIES.find((c) => c.packs.some((p) => p.id === slug)) ?? null;
-}
 
 /** Numeric price, e.g. "RM 1,000" -> 1000. SORTING/BUCKETING ONLY — the string
  *  it parses is the ROUNDED display, so it can disagree with what the customer

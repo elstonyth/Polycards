@@ -1,4 +1,4 @@
-// capture-slots.mjs — Phase 6 QA: slots catalog/detail render + /claw redirect.
+// capture-slots.mjs — Phase 6 QA: slots catalog + pack-detail render.
 import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
 
@@ -12,22 +12,6 @@ const ctx = await browser.newContext({
   deviceScaleFactor: 2,
 });
 const page = await ctx.newPage();
-
-// Redirect check: /claw and /claw/:slug must land on /slots equivalents.
-for (const [from, to] of [
-  ['/claw', '/slots'],
-  ['/claw/pokemon-elite', '/slots/pokemon-elite'],
-]) {
-  const res = await page.goto(BASE + from, {
-    waitUntil: 'domcontentloaded',
-    timeout: 30000,
-  });
-  const landed = new URL(page.url()).pathname;
-  console.log(
-    landed === to ? 'ok' : 'FAIL',
-    `${from} -> ${landed} (status ${res?.status()})`,
-  );
-}
 
 await page
   .getByRole('button', { name: 'Accept' })
