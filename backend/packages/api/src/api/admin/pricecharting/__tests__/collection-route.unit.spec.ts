@@ -97,12 +97,15 @@ describe('GET /admin/pricecharting/collection', () => {
     expect(url.searchParams.get('cursor')).toBe('cur/sor+abc');
   });
 
-  it('drops an absurdly long cursor rather than forwarding it', async () => {
-    const { url } = await runGet(
+  it('rejects an absurdly long cursor instead of restarting the scan', async () => {
+    // Answering page 1 would be invisible to the client: its dedupe drops every
+    // row, so the scan spins to the page cap looking like a hang.
+    const { captured, url } = await runGet(
       { cursor: 'x'.repeat(600) },
       { status: 'success', offers: [] },
     );
-    expect(url.searchParams.has('cursor')).toBe(false);
+    expect(captured.status).toBe(400);
+    expect(url).toBeUndefined();
   });
 
   it('trims a padded seller id', async () => {

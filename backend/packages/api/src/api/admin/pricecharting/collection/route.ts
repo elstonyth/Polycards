@@ -36,6 +36,16 @@ export const PC_SELLER_MISSING =
   'pricecharting.com/selling-available page). Without it PriceCharting returns ' +
   "every user's offers, not your collection.";
 
+// A real PriceCharting cursor is ~40 characters. Anything past this is not a
+// cursor, and the request is rejected rather than quietly answered with page 1:
+// a silent restart is invisible to the scan loop (its dedupe drops every row)
+// and spins to the page cap looking like a hang.
+const MAX_CURSOR_LENGTH = 512;
+
+export const PC_CURSOR_TOO_LONG =
+  'The PriceCharting cursor is not valid (too long). Rescan the collection from ' +
+  'the start.';
+
 type PcOffersResponse = {
   status: string;
   'error-message'?: string;
@@ -53,11 +63,13 @@ export async function GET(
     return;
   }
 
-  // The cursor is the one operator-supplied value that reaches the upstream
-  // URL. Real ones are ~40 chars; anything longer is not a cursor.
-  const raw =
+  // The cursor is the one operator-supplied value that reaches the upstream URL.
+  const cursor =
     typeof req.query.cursor === 'string' ? req.query.cursor.trim() : '';
-  const cursor = raw.length <= 512 ? raw : '';
+  if (cursor.length > MAX_CURSOR_LENGTH) {
+    res.status(400).json({ message: PC_CURSOR_TOO_LONG });
+    return;
+  }
 
   const params: Record<string, string> = { status: 'collection', seller };
   if (cursor) params.cursor = cursor;
