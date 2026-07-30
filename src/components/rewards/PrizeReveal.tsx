@@ -7,7 +7,15 @@ import { rm } from '@/lib/format';
 import type { DrawPrize } from '@/lib/actions/daily';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 
-/** A minimal reveal animation for the daily box prize (adapted from the slab aesthetic). */
+/**
+ * SUSPENDED 2026-07-29 — its only caller was `/daily` (DailyClient), deleted
+ * with the rest of the VIP reward surfaces
+ * (docs/superpowers/specs/2026-07-29-suspend-vip-referral-surfaces-design.md).
+ * Kept unreferenced, not deleted, so un-suspending is a revert — same
+ * treatment as the other kept orphans (daily.ts, referral.ts, voucherLabel).
+ *
+ * A minimal reveal animation for the daily box prize (adapted from the slab aesthetic).
+ */
 export function PrizeReveal({
   prize,
   onClose,

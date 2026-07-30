@@ -6,7 +6,15 @@ import { withdrawPrize } from '@/lib/actions/daily';
 import type { WithdrawAddressInput } from '@/lib/data/schemas';
 import { INPUT_CLASS } from '@/components/account/ui';
 
-/** Simple inline address form for prize withdrawal. */
+/**
+ * SUSPENDED 2026-07-29 — its only caller was `/daily` (DailyClient), deleted
+ * with the rest of the VIP reward surfaces
+ * (docs/superpowers/specs/2026-07-29-suspend-vip-referral-surfaces-design.md).
+ * Kept unreferenced, not deleted, so un-suspending is a revert; this is also
+ * the last caller of `withdrawPrize` in the kept daily.ts.
+ *
+ * Simple inline address form for prize withdrawal.
+ */
 export function WithdrawForm({
   pullId,
   onDone,
