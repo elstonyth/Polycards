@@ -84,13 +84,80 @@ try {
         path: `docs/research/qa-pool-modal-${label}-3-card-overlay.png`,
       });
 
-      // Escape closes overlay, second Escape closes modal.
+      // Escape must close ONE layer at a time (topmost first) — asserting the
+      // intermediate state catches the both-close-at-once + stranded
+      // body{overflow:hidden} bug the shared modalStack in use-modal-a11y
+      // guards against.
       await page.keyboard.press('Escape');
       await page.waitForTimeout(400);
+      const afterEsc1 = await page.evaluate(() => ({
+        overlays: document.querySelectorAll('.glass-scrim').length,
+        dialogs: document.querySelectorAll(
+          '[role="dialog"][aria-label="Cards in this pack"]',
+        ).length,
+      }));
       await page.keyboard.press('Escape');
       await page.waitForTimeout(400);
-      const modalGone = (await dialog.count()) === 0;
-      console.log(JSON.stringify({ slug, label, modalGone }));
+      const afterEsc2 = await page.evaluate(() => ({
+        dialogs: document.querySelectorAll(
+          '[role="dialog"][aria-label="Cards in this pack"]',
+        ).length,
+        bodyOverflow: document.body.style.overflow,
+      }));
+      const escStack =
+        afterEsc1.overlays === 0 &&
+        afterEsc1.dialogs === 1 &&
+        afterEsc2.dialogs === 0 &&
+        afterEsc2.bodyOverflow !== 'hidden';
+      console.log(
+        JSON.stringify({ slug, label, afterEsc1, afterEsc2, escStack }),
+      );
+
+      // Mouse drag-to-scroll on the rail: drag moves scrollLeft and opens
+      // nothing; a plain click still opens the card overlay. Only meaningful
+      // where the rail overflows (narrow viewports).
+      const rail = page.locator('div.cursor-grab').first();
+      const dims = await rail.evaluate((el) => ({
+        sw: el.scrollWidth,
+        cw: el.clientWidth,
+      }));
+      if (dims.sw > dims.cw) {
+        const box = await rail.boundingBox();
+        const cx = box.x + box.width / 2;
+        const cy = box.y + box.height / 2;
+        await page.mouse.move(cx, cy);
+        await page.mouse.down();
+        for (let i = 1; i <= 8; i++) await page.mouse.move(cx - i * 25, cy);
+        await page.mouse.up();
+        await page.waitForTimeout(300);
+        const scrolled = await rail.evaluate((el) => el.scrollLeft);
+        const overlayAfterDrag = await page.locator('.glass-scrim').count();
+        await rail
+          .locator('button[aria-label^="View details"]')
+          .first()
+          .click();
+        await page.waitForTimeout(600);
+        const overlayAfterClick = await page.locator('.glass-scrim').count();
+        await page.keyboard.press('Escape');
+        console.log(
+          JSON.stringify({
+            slug,
+            label,
+            drag: {
+              scrolled,
+              dragScrolls: scrolled > 0,
+              overlayAfterDrag,
+              overlayAfterClick,
+              clickStillWorks:
+                overlayAfterDrag === 0 && overlayAfterClick === 1,
+            },
+          }),
+        );
+      } else {
+        console.log(
+          JSON.stringify({ slug, label, drag: 'rail does not overflow here' }),
+        );
+      }
       done = true;
       await page.close();
     }

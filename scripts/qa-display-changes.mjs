@@ -183,6 +183,11 @@ try {
   );
   await page.screenshot({ path: 'docs/research/qa-display-bronze-cards.png' });
 
+  // STALE (2026-07-31, feat/pack-pool-modal): the inline aria-controls
+  // disclosure was replaced by an expand-to-dialog (PoolModal), so this
+  // toggle locator matches nothing and the block below permanently skips.
+  // Current coverage lives in scripts/qa-pool-modal.mjs.
+  //
   // Locate the toggle by aria-controls, NOT by its text: the label flips to
   // "Show less" on expand, so a text-filtered locator would resolve to zero
   // elements afterwards and the post-click getAttribute would sit out the full

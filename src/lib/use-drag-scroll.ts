@@ -25,6 +25,9 @@ export function useDragScroll<T extends HTMLElement>() {
   return {
     ref: el,
     onPointerDown: (e: PointerEvent<T>) => {
+      // Reset BEFORE the pointer-type guard: a mouse drag released off-window
+      // fires no click, so a stale `dragged` would swallow the next touch tap.
+      state.current.dragged = false;
       if (e.pointerType !== 'mouse' || e.button !== 0 || !el.current) return;
       state.current = {
         down: true,
