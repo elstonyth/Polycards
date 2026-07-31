@@ -655,32 +655,11 @@ export default function SlotMachineClient({
     setPhase('idle');
   }, []);
 
-  // Deliberate "Spin again" from the concluded reveal — replaces the old silent
-  // auto-conclude (spec #27) that let a stray tap start a spin. Conclude the
-  // stage, then start the next spin. Two steps because handleSpin's guard reads
-  // `phase` synchronously and must see 'idle', which only lands after
-  // handleConclude's state flush; the ref + the phase effect below chain them
-  // across that render.
-  const replayAfterConclude = useRef(false);
-  const handleSpinAgain = useCallback(() => {
-    replayAfterConclude.current = true;
-    handleConclude();
-  }, [handleConclude]);
-  // Call handleSpin through a ref so this effect doesn't depend on it (it's a
-  // per-render function; depending on it would churn the effect and trip
-  // exhaustive-deps). The ref always holds the latest closure.
-  const handleSpinRef = useRef(handleSpin);
-  handleSpinRef.current = handleSpin;
-  useEffect(() => {
-    if (phase !== 'idle' || !replayAfterConclude.current) return;
-    replayAfterConclude.current = false;
-    // Only auto-replay when a spin is actually possible right now; otherwise
-    // land on the idle machine so the player sees why (can't afford / cooling
-    // down) — the same gates as the Spin button's `disabled`.
-    if (!modeUndecided && !cooldown && (customer == null || canAfford)) {
-      void handleSpinRef.current();
-    }
-  }, [phase, modeUndecided, cooldown, customer, canAfford]);
+  // The concluded reveal used to offer "Spin again" (conclude + replay in one
+  // press) and "Done". Both are gone — RevealStage auto-concludes to the idle
+  // machine now — so the conclude→replay chaining that lived here (a ref flag,
+  // a handleSpin ref, and a phase effect to fire the replay one render later)
+  // went with them. A new spin is a press on the Spin button again, nothing else.
 
   // Settle watchdog: the customer is charged the moment openBatch returns ok,
   // but the reveal only lands when the reel engine reports completion. If that
@@ -927,7 +906,6 @@ export default function SlotMachineClient({
                   onSkip={skipToCards}
                   onConclude={handleConclude}
                   onCloseInstant={closeInstantWindow}
-                  onSpinAgain={handleSpinAgain}
                   onSellBack={sellBackPull}
                   onReveal={revealPull}
                   onSold={refreshBalance}

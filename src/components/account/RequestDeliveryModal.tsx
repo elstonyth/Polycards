@@ -9,6 +9,7 @@ import {
   type AddAddressInput,
 } from '@/lib/actions/delivery';
 import type { VaultItem } from '@/lib/actions/vault';
+import { addressViewFromInput } from '@/lib/address-view';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { Pill } from '@/components/ui/pill';
 import { INPUT_CLASS } from '@/components/account/ui';
@@ -66,18 +67,7 @@ export default function RequestDeliveryModal({
       return;
     }
     // Optimistic: append + select. (A full refresh would re-fetch getAddresses.)
-    const view: AddressView = {
-      id: res.addressId,
-      name: `${form.firstName} ${form.lastName}`.trim(),
-      line1: form.address1,
-      line2: form.address2 ?? null,
-      city: form.city,
-      province: form.province ?? null,
-      postalCode: form.postalCode,
-      countryCode: form.countryCode,
-      phone: form.phone ?? null,
-    };
-    setAddrList((p) => [...p, view]);
+    setAddrList((p) => [...p, addressViewFromInput(res.addressId, form)]);
     setSelectedAddr(res.addressId);
     setAdding(false);
   }

@@ -15,6 +15,7 @@ import {
   BuybackResultSchema,
   CardDetailSchema,
   WalletSchema,
+  DeliveryOrderSchema,
   CREDIT_REASONS,
 } from '../schemas';
 
@@ -321,6 +322,60 @@ describe('WalletSchema', () => {
       parseOne(WalletSchema, {
         ...valid,
         playthrough: { deposited: 'nope', used: 40, remaining: 20 },
+      }),
+    ).toBeNull();
+  });
+});
+
+describe('DeliveryOrderSchema — the shipping snapshot', () => {
+  const minimal = {
+    id: 'do_1',
+    status: 'shipped',
+    created_at: '2026-07-31T00:00:00.000Z',
+    address: { name: 'Wei Lim', city: 'Johor Bahru', country_code: 'my' },
+  };
+
+  // The street lines were added to this schema so /orders could show a full
+  // destination. They MUST stay optional: parseList DROPS a row that fails, so a
+  // backend that predates them would make the customer's order vanish from the
+  // page entirely rather than render with a short address.
+  it('still parses an address carrying only name/city/country_code', () => {
+    const out = parseOne(DeliveryOrderSchema, minimal);
+    expect(out).not.toBeNull();
+    expect(out?.address?.city).toBe('Johor Bahru');
+    expect(out?.address?.address_1).toBeUndefined();
+  });
+
+  it('keeps the street lines when the backend does send them', () => {
+    const out = parseOne(DeliveryOrderSchema, {
+      ...minimal,
+      address: {
+        ...minimal.address,
+        address_1: '2 Jalan Ekoflora 2/12',
+        address_2: 'Taman Ekoflora',
+        province: 'Johor',
+        postal_code: '81100',
+        phone: '+60123456789',
+      },
+    });
+    expect(out?.address?.address_1).toBe('2 Jalan Ekoflora 2/12');
+    expect(out?.address?.postal_code).toBe('81100');
+  });
+
+  it('accepts an explicit null on an optional line (a cleared field round-trips)', () => {
+    const out = parseOne(DeliveryOrderSchema, {
+      ...minimal,
+      address: { ...minimal.address, address_2: null, phone: null },
+    });
+    expect(out).not.toBeNull();
+    expect(out?.address?.address_2).toBeNull();
+  });
+
+  it('drops the row when a REQUIRED address field is the wrong type', () => {
+    expect(
+      parseOne(DeliveryOrderSchema, {
+        ...minimal,
+        address: { ...minimal.address, city: 42 },
       }),
     ).toBeNull();
   });

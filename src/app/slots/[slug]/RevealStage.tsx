@@ -33,7 +33,6 @@ export function RevealStage({
   onSkip,
   onConclude,
   onCloseInstant,
-  onSpinAgain,
   onSellBack,
   onReveal,
   onSold,
@@ -54,16 +53,13 @@ export function RevealStage({
   /** Demo-only conversion CTA (openAuth signup). */
   onSignUp?: () => void;
   onSkip: () => void;
-  /** Called once every card is sold/kept/expired — clears the stage (spec #27). */
+  /** Clears the stage back to the idle machine. Fired automatically once every
+   *  card is sold/kept/expired (spec #27), and by the demo's own exit button. */
   onConclude: () => void;
   /** End the instant-buyback window server-side when the reveal ends (approach
    *  A: close-on-leave → the vault quotes the flat rate). Fire-and-forget; the
    *  30s deadline is the hard-tab-kill backstop. */
   onCloseInstant?: (pullIds: string[]) => void;
-  /** Deliberate "Spin again" from the concluded reveal: conclude the stage AND
-   *  start the next spin in one press. Replaces the old silent auto-conclude so
-   *  a stray tap can't trigger a spin. */
-  onSpinAgain?: () => void;
   onSellBack: SellBackFn;
   onReveal?: RevealFn;
   onSold?: (balance: number) => void;
@@ -121,17 +117,57 @@ export function RevealStage({
     vibrate([30, 40, 30]);
   }, [expired, sfx, vibrate]);
 
-  // NO auto-conclude (was spec #27). Once every card is terminal the stage used
-  // to clear itself back to 'idle' after ~1.4s — but that silently returned the
-  // machine to a spin-ready state, so a tap the player meant for the just-
-  // revealed cards started a fresh spin instead. The reveal now STAYS until the
-  // player deliberately presses "Spin again" (the footer CTA below → onSpinAgain,
-  // which concludes and replays in one press). The demo path already ends on its
-  // own explicit buttons, so this only ever affected real pulls.
+  // AUTO-CONCLUDE (spec #27). Once every card is terminal — sold, kept, or
+  // timed out — the stage clears itself back to the idle machine. The explicit
+  // "Spin again" / "Done" pair that lived here is gone: acting on the last card
+  // (or letting the clock run out) IS the player saying they're finished, and a
+  // second press to say so again was the complaint. Returns to the slot only —
+  // never auto-spins, so no charge happens without a press.
+  //
+  // The delay is what makes it read as a conclusion instead of a yank: the last
+  // footer state ("+RM x credited", "Stored in your vault") gets to land first.
+  // ~1.4s, not exactly: if `expired` turns true a render after `allConcluded`
+  // (the expiry effect flips idle states to 'vaulted', which satisfies both) the
+  // deps change and the timer restarts once. Harmless — the ceiling is 2.8s, and
+  // the alternative is latching state to shave a beat off a wait nobody times.
+  // A sell still IN FLIGHT when the clock runs out gets torn down with the rest,
+  // so its "+RM x credited" may never show; the credit still lands (it is
+  // server-authoritative and refreshBalance has already fired).
+  // Demo has its own explicit exit buttons AND reads as concluded instantly
+  // (all-null offers), so it must never enter this path.
+  // `|| expired`, not `allConcluded` alone. Expiry normally flips every unsold
+  // card to 'vaulted' (useSellWindow) and satisfies allConcluded on its own —
+  // but a sell that FAILED sits at phase 'error', which allConcluded never
+  // accepts. That used to mean "the Done button shows up late"; with the button
+  // gone it would mean the player is stranded on the reveal with no exit. Once
+  // the clock is out the window is closed and the card is vaulted server-side
+  // anyway, so leaving is always the right move.
+  //
+  // `onConclude` is depended on directly rather than mirrored through a ref:
+  // SlotMachineClient's handleConclude is a useCallback with no deps, so it is
+  // stable and cannot restart the timer mid-countdown. If that ever stops being
+  // true, the symptom is a reveal that never clears — mirror it then.
+  // `flipped &&` is the invariant, not a patch: NEVER conclude a reveal the
+  // player has not seen. allConcluded treats a NULL offer as already-concluded,
+  // and a real batch produces null offers whenever the backend response carries
+  // no pull id (SlotMachineClient builds `builtOffer` as null then) — so an
+  // all-null batch reads as concluded the instant `states` seeds, and without
+  // this guard the cards would clear themselves 1.4s into 'review', face down.
+  // Under the old buttons that same state was harmless: it just showed "Done"
+  // early. `expired` already implies flipped (useSellWindow's `active` is
+  // `phase === 'review' && flipped`), so this only constrains the other branch.
+  useEffect(() => {
+    if (demo || !flipped || phase !== 'review' || !(allConcluded || expired)) {
+      return;
+    }
+    const id = window.setTimeout(onConclude, 1400);
+    return () => clearTimeout(id);
+  }, [demo, flipped, phase, allConcluded, expired, onConclude]);
 
   // Close the instant-buyback window when the reveal ends. This component
-  // unmounts when the player concludes (Spin again → phase→idle) or navigates
-  // away, so its cleanup is the single "left the reveal" signal (approach A).
+  // unmounts when the reveal auto-concludes (phase→idle, above) or the player
+  // navigates away, so its cleanup is the single "left the reveal" signal
+  // (approach A).
   // The pull ids are captured ONCE at mount: handleConclude clears `offers` just
   // before the unmount, so reading it inside the cleanup would find nothing.
   // Demo reveals carry no real pulls. A hard tab-kill won't run this — the 30s
@@ -392,33 +428,6 @@ export function RevealStage({
             />
           )}
       </div>
-      {/* Explicit end-of-reveal controls — shown once every card is concluded
-          (sold/kept/expired). Replaces the old silent auto-conclude: the reveal
-          now waits for a DELIBERATE press, so a stray tap on the just-revealed
-          cards can't start a fresh spin. "Spin again" concludes AND respins in
-          one press; "Done" just returns to the idle machine (no charge) — the
-          non-spinning exit for a solvent player who is finished, since the
-          machine chrome is hidden behind the reveal. Demo has its own buttons. */}
-      {!demo && allConcluded && (
-        <div className="flex w-full max-w-[300px] flex-col items-center gap-2">
-          {onSpinAgain && (
-            <button
-              type="button"
-              onClick={onSpinAgain}
-              className="inline-flex h-12 w-full items-center justify-center rounded-xl bg-white text-sm font-bold text-neutral-950 transition-colors hover:bg-white/90"
-            >
-              Spin again
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={onConclude}
-            className="inline-flex h-11 w-full items-center justify-center rounded-xl border border-white/12 bg-white/5 text-[13px] font-semibold text-white/70 transition-colors hover:bg-white/10 hover:text-white"
-          >
-            Done
-          </button>
-        </div>
-      )}
       {confirmIndex !== null && offers[confirmIndex] && (
         <SellConfirmModal
           open

@@ -1,3 +1,11 @@
+// NOT DEAD — deliberately unlinked. This route has ZERO inbound links in src/
+// as of 2026-07-31: the operator removed both the /me "About & help" card and
+// the site-footer nav that pointed here (they duplicated each other on one
+// screen), and chose not to add a replacement. It is still public, still in
+// ROUTES (lib/site.ts) and so still in the sitemap, and is reached from search
+// and by URL. See the comment in components/app-shell/SiteFooter.tsx for the
+// full reachability map. Zero inbound links is exactly the signature this
+// repo's dead-route sweeps prune on — check there before deleting this.
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';

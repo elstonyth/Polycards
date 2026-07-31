@@ -29,7 +29,7 @@ describe('balanceOdds — Common absorbs the remainder', () => {
   });
   it('blocks save when Common would go below 0%', () => {
     const r = balanceOdds([e('a', 60), e('b', 50), common('c')]);
-    expect(r.error).toMatch(/Common win rate would go below 0%/i);
+    expect(r.error).toMatch(/over the 100% budget/i);
   });
   it('without an unlocked Common, rates must total exactly 100%', () => {
     expect(balanceOdds([e('a', 40), e('b', 50)]).error).toMatch(/total exactly 100%/i);

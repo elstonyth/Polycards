@@ -192,13 +192,27 @@ describe('previewSets', () => {
     expect(pct[2].size).toBe(0);
   });
 
+  // REGRESSION: computeSetWeights short-circuits `rows: []` on ANY set's error,
+  // so a set-2 overflow used to empty set 1's map too — the whole table read '—'
+  // and the EV/RTP tiles went null, with nothing on screen saying which set was
+  // at fault. Set 1 has no chaining, so it stays resolvable and must stay shown.
+  it('keeps SET 1 resolved when only set 2 overflows', () => {
+    const { error, pct } = previewSets(trio({ pctInput2: '120' }));
+    expect(error).toMatch(/^Set 2: /);
+    expect(pct[1].get('a')).toBe(10);
+    expect(pct[1].get('b')).toBe(5);
+    expect(pct[1].get('c')).toBe(85);
+  });
+
   it('propagates a set-1 failure verbatim (no prefix)', () => {
     const rows = [
       editRow({ card_id: 'a', rarity: 'Rare', pctInput: '60' }),
       editRow({ card_id: 'b', rarity: 'Legendary', pctInput: '60' }),
     ];
+    // The numbers are the point: 60 + 60 = 120%, i.e. 20% over budget.
     expect(previewSets(rows).error).toBe(
-      'Common win rate would go below 0%. Lower the other rates.',
+      'Win rates total 120% — 20% over the 100% budget, so the unlocked ' +
+        'Common balancer would go below 0%. Lower a rate by 20%.',
     );
   });
 });
