@@ -121,9 +121,16 @@ export default function PackDetailClient({
   // the top cards, the expand dialog lists every Rare-and-above card
   // (commons/uncommons are catalogue noise there). Order inherited (pool is
   // value-sorted desc). The FULL pool still feeds the demo spin + odds range.
-  const topPool = pool.filter(
-    (c) => RARITY_ORDER.indexOf(c.rarity) <= RARITY_ORDER.indexOf('Rare'),
-  );
+  // Memoized like `pool` above (stable prop identity for PoolByRarity); the
+  // i >= 0 bound keeps an unknown rarity string (indexOf -1) out rather than
+  // letting it pass the <= check.
+  const topPool = useMemo(() => {
+    const rareIndex = RARITY_ORDER.indexOf('Rare');
+    return pool.filter((c) => {
+      const i = RARITY_ORDER.indexOf(c.rarity);
+      return i >= 0 && i <= rareIndex;
+    });
+  }, [pool]);
 
   // Card-value range over the FULL pool (not topPool) — one derivation feeding
   // both the odds-panel gate and its range row.
