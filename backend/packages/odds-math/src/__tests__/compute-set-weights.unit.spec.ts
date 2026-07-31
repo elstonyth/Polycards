@@ -106,7 +106,7 @@ describe('computeSetWeights — 3-set inheritance + balancer', () => {
     ]);
 
     expect(error).toMatch(/^Set 2: /);
-    expect(error).toMatch(/Common win rate would go below 0%/i);
+    expect(error).toMatch(/over the 100% budget/i);
     expect(rows).toEqual([]);
   });
 
@@ -117,7 +117,7 @@ describe('computeSetWeights — 3-set inheritance + balancer', () => {
       common('c'),
     ]);
 
-    expect(error).toMatch(/Common win rate would go below 0%/i);
+    expect(error).toMatch(/over the 100% budget/i);
     expect(error).not.toMatch(/^Set /);
     expect(rows).toEqual([]);
   });

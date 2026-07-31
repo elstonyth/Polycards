@@ -361,8 +361,10 @@ const PackOddsEditorPage = () => {
   const preview = useMemo(() => previewSets(effective), [effective]);
 
   // Per-set readouts: Σ (100% when valid) and the theoretical EV/RTP that set
-  // pays. All null while the preview is errored — nothing would be saved, so a
-  // number here would be a lie (see previewSets).
+  // pays. Null for any set the preview could NOT resolve — nothing would be
+  // saved, so a number there would be a lie. Set 1 is the exception and stays
+  // readable through a set-2/3 failure (see previewSets): it resolves on its own,
+  // and blanking it told the operator nothing except that everything broke.
   const sets = useMemo(
     () =>
       ([1, 2, 3] as const).map((n) => {
@@ -392,6 +394,72 @@ const PackOddsEditorPage = () => {
         prev?.map((r) => (r.card_id === cardId ? { ...r, ...patch } : r)) ??
         null,
     );
+
+  // ── Bulk retier ───────────────────────────────────────────────────────────
+  // Retiering a 60-card pool one Select at a time is the single most tedious
+  // job in this editor, so the table takes a checkbox column and one bulk
+  // action: set every checked row's rarity at once. Selection is by card_id and
+  // survives a reseed; `checkedIds` intersects it with the rows actually on
+  // screen so a card dropped from the pool can never inflate the count or be
+  // written to.
+  //
+  // This is exactly the per-row rarity Select, N rows at a time — including its
+  // hazard, which bulk makes easier to hit: rarity is ONE column shared by all
+  // three sets, so retiering a card AWAY from Common stops it balancing in sets
+  // 2/3 and pins it at whatever pctInput2/3 already holds (see
+  // hasMaterializedSetOverrides in odds-rows.ts). That only becomes VISIBLE when
+  // the pinned mass crosses 100% and the Alert below fires; under it, sets 2/3
+  // quietly re-tune. No guard here on purpose — the per-row Select has none, and
+  // one path refusing an edit the other allows is worse than the hazard. Check
+  // the Set 2/3 columns after a bulk retier of a pack that uses them.
+  // `checked`, not `selected` — that name already belongs to the prize-pool
+  // picker's membership selection above, a different set entirely.
+  const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
+  // Selection belongs to a PACK — same render-phase reset as `defaults` above.
+  // card_id is the card HANDLE, which the same card carries in EVERY pack it
+  // belongs to, and the router reuses this component across `:slug`. Without
+  // this, navigating pack A → pack B opens B with a bulk bar the operator never
+  // opened, pre-checking whatever cards the two pools share.
+  const [checkedFor, setCheckedFor] = useState(slug);
+  if (checkedFor !== slug) {
+    setCheckedFor(slug);
+    setChecked(new Set());
+  }
+  const checkedIds = effective
+    .map((r) => r.card_id)
+    .filter((id) => checked.has(id));
+  const allChecked =
+    effective.length > 0 && checkedIds.length === effective.length;
+
+  const toggleChecked = (cardId: string) =>
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(cardId)) next.add(cardId);
+      return next;
+    });
+  // Decide add-vs-clear from `prev`, not from the rendered `allChecked`: a
+  // reseed can swap the rows between the click and the update.
+  const toggleCheckAll = () =>
+    setChecked((prev) => {
+      const ids = effective.map((r) => r.card_id);
+      return ids.length > 0 && ids.every((id) => prev.has(id))
+        ? new Set<string>()
+        : new Set(ids);
+    });
+  const bulkSetRarity = (rarity: OddsRarity) => {
+    const ids = new Set(checkedIds);
+    if (ids.size === 0) return;
+    setRows(
+      (prev) =>
+        prev?.map((r) => (ids.has(r.card_id) ? { ...r, rarity } : r)) ?? null,
+    );
+    // Clearing the selection is deliberate: the flow is "check a group, tier it,
+    // check the next group", and a still-armed bulk bar over rows that were just
+    // retiered is one stray pick away from silently re-tiering them. Re-applying
+    // to the same rows costs a select-all; the accident costs a pool audit.
+    setChecked(new Set());
+    toast.success(t('packs.editor.bulk.applied', { count: ids.size, rarity }));
+  };
 
   // Locking hands the operator the wheel, pre-filled with the rate the card has
   // right now — rounded to the 2dp the 1 bps storage floor can actually hold, so
@@ -598,6 +666,66 @@ const PackOddsEditorPage = () => {
               }))}
           />
 
+          {/* ABOVE the table, not below it. This used to be a line of red text
+              after the last row: on a 20-card pool the operator typing a rate
+              at the top never saw it, and an over-budget set reads as the whole
+              table dying for no reason (every column goes '—'). The set-1
+              column now survives that (previewSets), and this says which set
+              refused and why, in the same viewport as the input. */}
+          {preview.error && (
+            // role=alert: this appears mid-typing, so it has to be announced —
+            // @medusajs/ui's Alert renders no live-region role of its own.
+            <div className="px-6 pb-4" role="alert">
+              <Alert variant="error">{preview.error}</Alert>
+            </div>
+          )}
+
+          {/* Bulk bar — only while something is checked, so the editor is
+              unchanged for the common single-row edit. */}
+          {checkedIds.length > 0 && (
+            <div
+              // Sticky: on the 60-card pools this was built for, checking a
+              // row would otherwise push every row down by the bar's height —
+              // layout shift under the operator's finger — and leave the bar
+              // itself scrolled off above.
+              className="bg-ui-bg-subtle sticky top-0 z-10 flex flex-wrap items-center gap-3 px-6 py-3"
+              role="region"
+              aria-label={t('packs.editor.bulk.region')}
+            >
+              <Text size="small" weight="plus">
+                {t('packs.editor.bulk.selected', { count: checkedIds.length })}
+              </Text>
+              {/* Applies on pick (no second "Apply" press) and resets to the
+                  placeholder, matching the per-row rarity Select. `value=""`
+                  keeps it a command, not a field showing a current tier — the
+                  checked rows can be several different tiers. */}
+              <Select value="" onValueChange={bulkSetRarity}>
+                <Select.Trigger
+                  className="w-40"
+                  aria-label={t('packs.editor.bulk.setRarity')}
+                >
+                  <Select.Value
+                    placeholder={t('packs.editor.bulk.setRarity')}
+                  />
+                </Select.Trigger>
+                <Select.Content>
+                  {RARITIES.map((rarity) => (
+                    <Select.Item key={rarity} value={rarity}>
+                      {rarity}
+                    </Select.Item>
+                  ))}
+                </Select.Content>
+              </Select>
+              <Button
+                size="small"
+                variant="transparent"
+                onClick={() => setChecked(new Set())}
+              >
+                {t('packs.editor.bulk.clear')}
+              </Button>
+            </div>
+          )}
+
           <div
             className="overflow-x-auto"
             tabIndex={0}
@@ -607,6 +735,19 @@ const PackOddsEditorPage = () => {
             <Table>
               <Table.Header>
                 <Table.Row>
+                  <Table.HeaderCell className="w-10">
+                    <Checkbox
+                      aria-label={t('packs.editor.bulk.selectAll')}
+                      checked={
+                        allChecked
+                          ? true
+                          : checkedIds.length > 0
+                            ? 'indeterminate'
+                            : false
+                      }
+                      onCheckedChange={toggleCheckAll}
+                    />
+                  </Table.HeaderCell>
                   <Table.HeaderCell>{t('packs.editor.card')}</Table.HeaderCell>
                   <Table.HeaderCell>
                     {t('packs.editor.rarity')}
@@ -638,6 +779,15 @@ const PackOddsEditorPage = () => {
                 {effective.map((r) => {
                   return (
                     <Table.Row key={r.card_id}>
+                      <Table.Cell>
+                        <Checkbox
+                          aria-label={t('packs.editor.bulk.selectOne', {
+                            name: r.name,
+                          })}
+                          checked={checked.has(r.card_id)}
+                          onCheckedChange={() => toggleChecked(r.card_id)}
+                        />
+                      </Table.Cell>
                       <Table.Cell>
                         <div className="flex items-center gap-3">
                           <img
@@ -751,11 +901,6 @@ const PackOddsEditorPage = () => {
           </div>
 
           <div className="flex flex-col gap-3 px-6 py-4">
-            {preview.error && (
-              <Text size="small" className="text-ui-tag-red-text">
-                {preview.error}
-              </Text>
-            )}
             <div className="flex items-center justify-between">
               {/* Every set must total 100% — the balancer guarantees it, so a
                   reading that is not 100 means the preview refused to resolve.

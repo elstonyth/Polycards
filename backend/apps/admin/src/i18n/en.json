@@ -128,7 +128,18 @@
       "draftReadyBanner": "Draft — hidden from the storefront. The prize pool has cards; activate when the win rates look right.",
       "unitsOwed": "{{count}} owed to winners",
       "topHit": "Top hit #",
-      "pendingRow": "new — not in pool until saved"
+      "pendingRow": "new — not in pool until saved",
+      "bulk": {
+        "selected_one": "{{count}} selected",
+        "selected_other": "{{count}} selected",
+        "setRarity": "Set rarity",
+        "clear": "Clear selection",
+        "region": "Bulk actions",
+        "selectAll": "Select every card",
+        "selectOne": "Select {{name}}",
+        "applied_one": "Set 1 card to {{rarity}}",
+        "applied_other": "Set {{count}} cards to {{rarity}}"
+      }
     }
   },
   "pcAdd": {

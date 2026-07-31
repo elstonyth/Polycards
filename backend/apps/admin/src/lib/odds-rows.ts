@@ -1,5 +1,6 @@
 import type { OddsRow } from './packs-api';
 import {
+  balanceOdds,
   computeSetWeights,
   RARITIES,
   type OddsRarity,
@@ -79,7 +80,9 @@ export const rowsToSetEntries = (rows: EditRow[]): SetEntry[] =>
 export type SetsPreview = {
   /** Non-null ⇒ do NOT save. Sets 2/3 come back prefixed 'Set N: '. */
   error: string | null;
-  /** Effective win % per set, per card. EMPTY when `error` is set. */
+  /** Effective win % per set, per card. Empty for any set the preview could NOT
+   *  resolve — but set 1 stays populated through a set-2/3 failure, so `error`
+   *  being set does NOT imply every map is empty (see previewSets). */
   pct: Record<1 | 2 | 3, Map<string, number>>;
 };
 
@@ -90,17 +93,38 @@ export type SetsPreview = {
  * (null weight_N = inherit) back into an effective % per set.
  *
  * On error `computeSetWeights` returns no rows, so the maps come back empty and
- * every readout renders '—'. That is deliberate: a best-effort 0% would read as
- * "this card is unpullable" when nothing is being saved at all.
+ * the ERRORED set's readouts render '—'. That is deliberate: a best-effort 0%
+ * would read as "this card is unpullable" when nothing is being saved at all.
+ *
+ * SET 1 IS THE EXCEPTION. computeSetWeights short-circuits on the FIRST set
+ * that fails, so a single over-budget set-2/3 override used to blank all three
+ * columns plus every EV/RTP tile — the operator saw the whole table die with
+ * only a line of red text below the fold to explain it. Set 1 is computed by a
+ * plain `balanceOdds` with no set chaining, so when it resolves on its own it
+ * stays on screen: the operator keeps their bearings and can see which set is
+ * actually at fault. Saving is still gated on `error` (page.tsx), unchanged.
  */
 export const previewSets = (rows: EditRow[]): SetsPreview => {
-  const { error, rows: computed } = computeSetWeights(rowsToSetEntries(rows));
+  const entries = rowsToSetEntries(rows);
+  const { error, rows: computed } = computeSetWeights(entries);
   const pct: SetsPreview['pct'] = { 1: new Map(), 2: new Map(), 3: new Map() };
   for (const r of computed) {
     const w2 = r.weight_2 ?? r.weight;
     pct[1].set(r.card_id, r.weight / 100);
     pct[2].set(r.card_id, w2 / 100);
     pct[3].set(r.card_id, (r.weight_3 ?? w2) / 100);
+  }
+  if (error && computed.length === 0) {
+    // The SAME call computeSetWeights makes for set 1 (its first line), so this
+    // cannot show a set-1 table that differs from what a save would persist.
+    // Yes, that recomputes it — ERROR PATH ONLY, and the alternative is widening
+    // computeSetWeights's return to hand set 1 back, which puts an editor
+    // concern into the shared save-path contract. Revisit if a big pool ever
+    // makes typing feel heavy while an error is on screen.
+    const set1 = balanceOdds(entries);
+    if (!set1.error) {
+      for (const c of set1.computed) pct[1].set(c.card_id, c.pct);
+    }
   }
   return { error, pct };
 };
