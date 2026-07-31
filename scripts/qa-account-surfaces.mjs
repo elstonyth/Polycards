@@ -119,8 +119,15 @@ if ((await editBtns.count()) > 0) {
 // Exercises updateAddress + deleteAddress for real without touching the
 // customer's actual saved address.
 const STAMP = 'QAthrowaway';
-await page.getByRole('button', { name: /Add a new address/ }).click();
-await page.waitForTimeout(500);
+// The pill is ABSENT on an empty book — AddressesClient starts with `adding`
+// true there, so the form is already open and there is nothing to click. An
+// unconditional click times out and kills the run before the edit and remove
+// coverage below, which is exactly the state the delete step leaves behind.
+const addPill = page.getByRole('button', { name: /Add a new address/ });
+if ((await addPill.count()) > 0) {
+  await addPill.click();
+  await page.waitForTimeout(500);
+}
 const set = async (label, value) =>
   page.getByRole('textbox', { name: label }).fill(value);
 await set('First name', STAMP);
@@ -136,7 +143,18 @@ await page
   .click();
 await page.waitForTimeout(2500);
 const row = page.locator('li', { hasText: STAMP });
-console.log('throwaway added:', await row.count());
+const added = await row.count();
+console.log('throwaway added:', added);
+// Everything below reads that row. Without this gate a failed add (or a
+// failed login) surfaces as a stack trace from row.innerText() instead of
+// one line saying the add never happened.
+if (added === 0) {
+  console.log(
+    'SKIP edit/remove coverage — the throwaway address was not created',
+  );
+  await browser.close();
+  process.exit(1);
+}
 
 // EDIT it — change the street, assert the list reflects it.
 await page

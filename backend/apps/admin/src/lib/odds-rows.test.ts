@@ -209,7 +209,22 @@ describe('previewSets', () => {
       editRow({ card_id: 'a', rarity: 'Rare', pctInput: '60' }),
       editRow({ card_id: 'b', rarity: 'Legendary', pctInput: '60' }),
     ];
-    // The numbers are the point: 60 + 60 = 120%, i.e. 20% over budget.
+    // The numbers are the point: 60 + 60 = 120%, i.e. 20% over budget. This
+    // pool has NO unlocked Common, so the message must not blame a balancer
+    // that does not exist — only the arithmetic and the fix.
+    expect(previewSets(rows).error).toBe(
+      'Win rates total 120% — 20% over the 100% budget. Lower a rate by 20%.',
+    );
+  });
+
+  it('names the balancer only when the pool actually has one', () => {
+    // Same 120% overshoot, but now with an unlocked Common absorbing — the
+    // explanation earns its keep because there IS something to go below 0%.
+    const rows = [
+      editRow({ card_id: 'a', rarity: 'Rare', pctInput: '60' }),
+      editRow({ card_id: 'b', rarity: 'Legendary', pctInput: '60' }),
+      editRow({ card_id: 'c', rarity: 'Common', pctInput: '0' }),
+    ];
     expect(previewSets(rows).error).toBe(
       'Win rates total 120% — 20% over the 100% budget, so the unlocked ' +
         'Common balancer would go below 0%. Lower a rate by 20%.',

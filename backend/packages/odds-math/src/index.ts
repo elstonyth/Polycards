@@ -186,11 +186,21 @@ export function balanceOdds(entries: OddsInput[]): OddsResult {
     // lower the *others* — could only find the ceiling by bisecting it: the
     // "41 works, 42 doesn't" report. The total and the overshoot say where the
     // ceiling is and how far past it they are, in one read, on every set.
+    //
+    // The balancer clause is CONDITIONAL. This branch fires on pinned mass
+    // alone, and it is checked before the no-balancer branch below, so
+    // `error ??=` claims the message first even for a pool with no unlocked
+    // Common at all — where "the unlocked Common balancer would go below 0%"
+    // names an element that does not exist and sends the operator looking for
+    // it. The arithmetic is true either way; only the explanation is gated.
     const total = pinnedBps / 100;
     const over = (pinnedBps - TOTAL_BPS) / 100;
+    const budget = `Win rates total ${total}% — ${over}% over the 100% budget`;
+    const fix = `Lower a rate by ${over}%.`;
     error ??=
-      `Win rates total ${total}% — ${over}% over the 100% budget, so the ` +
-      `unlocked Common balancer would go below 0%. Lower a rate by ${over}%.`;
+      balancers.length > 0
+        ? `${budget}, so the unlocked Common balancer would go below 0%. ${fix}`
+        : `${budget}. ${fix}`;
   }
   if (balancers.length === 0 && pinnedBps !== TOTAL_BPS) {
     error ??=

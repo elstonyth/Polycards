@@ -114,8 +114,9 @@ try {
   await browser.close();
   process.exit(1);
 }
-await page.locator('img[alt*="card back" i], [role="button"]').first();
-// Flip: tapping any card flips them all.
+// Flip: tapping any card flips them all. Readiness is already gated by the
+// tapHint wait above — an `await page.locator(...).first()` here looked like a
+// wait but is a no-op, since a Locator is not a Promise.
 await page.mouse.click(215, 400);
 await page.waitForTimeout(1500);
 await shot('qa-10-reveal-flipped');
