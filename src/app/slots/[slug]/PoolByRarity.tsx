@@ -7,6 +7,7 @@ import type { PackCard, Rarity } from '@/lib/packs-data';
 import { rarityRgb, RARITY_ORDER } from '@/lib/rarity';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
+import { useDragScroll } from '@/lib/use-drag-scroll';
 import { CardTile } from '@/components/cards/CardTile';
 
 const TEASER_COUNT = 6;
@@ -34,6 +35,8 @@ export function PoolByRarity({
   onOpen: (card: PackCard) => void;
 }) {
   const [modalOpen, setModalOpen] = useState(false);
+  // Mouse drag-to-scroll on the rail (touch swipes natively).
+  const drag = useDragScroll<HTMLDivElement>();
 
   return (
     <div className="flex flex-col gap-3">
@@ -69,7 +72,10 @@ export function PoolByRarity({
           partly cancels px-10, leaving a small leading indent — the trade for
           a fully-lit first card without horizontal overflow. Adjacent cards'
           halos overlap across the gap and blend into one smooth glow. */}
-      <div className="-mx-4 -my-12 flex gap-2 overflow-x-auto px-10 py-12 sm:gap-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div
+        {...drag}
+        className="-mx-4 -my-12 flex cursor-grab gap-2 overflow-x-auto px-10 py-12 active:cursor-grabbing sm:gap-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
         {pool.slice(0, TEASER_COUNT).map((c) => (
           <div key={c.id} className="w-[38%] shrink-0 sm:w-40">
             <CardTile
