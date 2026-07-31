@@ -121,8 +121,10 @@ try {
         sw: el.scrollWidth,
         cw: el.clientWidth,
       }));
-      if (dims.sw > dims.cw) {
-        const box = await rail.boundingBox();
+      // boundingBox() is null when the rail isn't visible — bail with a
+      // report line instead of throwing and aborting the whole run.
+      const box = dims.sw > dims.cw ? await rail.boundingBox() : null;
+      if (box) {
         const cx = box.x + box.width / 2;
         const cy = box.y + box.height / 2;
         await page.mouse.move(cx, cy);
@@ -155,7 +157,11 @@ try {
         );
       } else {
         console.log(
-          JSON.stringify({ slug, label, drag: 'rail does not overflow here' }),
+          JSON.stringify({
+            slug,
+            label,
+            drag: 'skipped: rail not overflowing or not visible',
+          }),
         );
       }
       done = true;

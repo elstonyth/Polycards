@@ -7,11 +7,28 @@ const FOCUSABLE =
 // Open-modal stack: the TOPMOST panel owns Escape. Stacked dialogs (e.g.
 // CardDetailOverlay at z-[100] over PoolModal at z-50) each register their own
 // document keydown listener; without this gate one Escape press fires every
-// onClose in the same event — collapsing the whole stack — and the two
-// cleanups then restore body overflow out of order, stranding the page at
-// body{overflow:hidden}. LIFO closing keeps each cleanup's captured
-// prevOverflow correct.
+// onClose in the same event, collapsing the whole stack.
 const modalStack: HTMLElement[] = [];
+
+// Body scroll lock is reference-counted at module level so stacked modals can
+// close in ANY order: the first open captures the pre-modal overflow, the last
+// close restores it. Per-modal prevOverflow capture depended on strict LIFO —
+// a bottom dialog closing under a still-open top overlay restored scrolling
+// early, and the overlay's later cleanup then stranded body{overflow:hidden}.
+let scrollLockCount = 0;
+let preLockOverflow = '';
+
+function lockBodyScroll(): void {
+  if (scrollLockCount++ === 0) {
+    preLockOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+  }
+}
+
+function unlockBodyScroll(): void {
+  scrollLockCount = Math.max(0, scrollLockCount - 1);
+  if (scrollLockCount === 0) document.body.style.overflow = preLockOverflow;
+}
 
 /**
  * Shared modal accessibility contract, extracted from AuthModal/SellConfirmModal
@@ -70,15 +87,14 @@ export function useModalA11y(
     };
 
     document.addEventListener('keydown', onKey);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    lockBodyScroll();
     return () => {
       if (panel) {
         const i = modalStack.lastIndexOf(panel);
         if (i !== -1) modalStack.splice(i, 1);
       }
       document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prevOverflow;
+      unlockBodyScroll();
       trigger?.focus();
     };
   }, [open, panelRef]);
