@@ -1,44 +1,43 @@
-// QA Task C — guest demo spin on the PROD build (:4000).
-// Flow A (anonymous): demo spin plays the full reveal, result is DEMO-labeled,
-//   keep/sell is replaced by the sign-up CTA, and NO POST hits the backend
-//   (asserted from the page's network log). Real-open CTA reads "Log in to open".
-// Flow B (logged-in): demo overlay shows NO sign-up CTA; real-open CTA + the
-//   credits footer render unchanged (the full paid loop is qa-pack-open-charge.mjs).
-// Headless; screenshots to docs/research/. Run: node scripts/qa-demo-spin.mjs
+// Guest demo-spin behavior on the PROD build (:4000) — the demo/real boundary.
+// (Reel physics live in qa-press-spin.mjs; the real paid loop in
+// qa-spin-conclude.mjs. This file owns the MODE assertions.)
+//
+// Flow A (anonymous, /slots/<pack>/spin?demo=1):
+//   - machine renders in demo mode: "Demo" badge, 'Demo spin' CTA, and the
+//     honesty footer ("Free demo — no credits charged, no real cards won")
+//   - the demo spin plays through to the reveal, which offers the sign-up
+//     conversion CTA + "Back to the reel" — and NO sell-back (nothing was won)
+//   - ZERO POSTs during the whole flow: a demo draw is client-side theater and
+//     must never hit the backend (the auth session check is a GET)
+//   - the sign-up CTA opens the auth modal in signup mode
+//   - without ?demo=1 the anonymous machine gates instead: 'Log in to spin'
+// Flow B (logged-in customer on ?demo=1): demo is a pre-signup taste only —
+//   a customer gets the REAL machine (no Demo badge, no demo footer, 'Spin'
+//   CTA with the Bet line). No spin is fired (that's qa-spin-conclude's job).
+//
+// Run (stack up, standalone storefront on :4000):
+//   node scripts/qa-demo-spin.mjs            # QA_PACK overrides the pack slug
 import { chromium } from 'playwright';
+import fs from 'node:fs';
+import path from 'node:path';
 
-const BASE = 'http://localhost:4000';
-const PACK = 'pokemon-rookie';
-const EMAIL = 'stocktest-1@polycards.local';
-const PASSWORD = 'stocktest2026!';
+const BASE = process.env.STORE_BASE ?? 'http://127.0.0.1:4000';
+const API = process.env.MEDUSA_BACKEND_URL ?? 'http://localhost:9000';
+const PACK = process.env.QA_PACK ?? 'bronze-pack';
 
+let failed = false;
+const ok = (m) => console.log(`✓ ${m}`);
 const fail = (m) => {
   console.error(`✗ ${m}`);
-  process.exitCode = 1;
+  failed = true;
 };
-const ok = (m) => console.log(`✓ ${m}`);
 
 const browser = await chromium.launch({ headless: true });
-
-// Demo theater: cylinder → tap pack → slab → tap → metadata → card.
-async function playDemoToCard(page) {
-  await page.getByRole('button', { name: /demo spin/i }).click();
-  await page.waitForTimeout(1200); // cylinder mounts + idles
-  await page.mouse.click(720, 420); // pack → slab
-  await page.waitForTimeout(900);
-  await page.mouse.click(720, 420); // slab → metadata (→ card via timer/tap)
-  await page.waitForTimeout(600);
-  await page.mouse.click(720, 80); // metadata → card (background tap, off the card stack)
-  // Card stage is reached when the demo watermark mounts; give the flip/exit
-  // animations a beat to settle so screenshots show the final frame.
-  await page.getByText('Demo', { exact: true }).waitFor({ timeout: 25000 });
-  await page.waitForTimeout(1500);
-}
-
 try {
   // ── Flow A: anonymous visitor ─────────────────────────────────────────────
   const ctxA = await browser.newContext({
     viewport: { width: 1440, height: 860 },
+    reducedMotion: 'no-preference',
   });
   const page = await ctxA.newPage();
   const posts = [];
@@ -46,97 +45,125 @@ try {
     if (r.method() === 'POST') posts.push(r.url());
   });
 
-  await page.goto(`${BASE}/claw/${PACK}`, { waitUntil: 'domcontentloaded' });
-  // waitFor, not isVisible — the label hydrates client-side from auth state.
-  await page
-    .getByRole('button', { name: /log in to open/i })
-    .waitFor({ timeout: 15000 });
-  ok("anonymous real-open CTA reads 'Log in to open'");
-
-  await playDemoToCard(page);
-  ok('demo spin played through to the card reveal');
-
-  const watermark = await page.getByText('Demo', { exact: true }).isVisible();
-  if (watermark) ok('result watermarked DEMO');
-  else fail('DEMO watermark missing');
-
-  const signup = page.getByRole('button', {
-    name: /sign up to keep what you pull/i,
+  await page.goto(`${BASE}/slots/${PACK}/spin?demo=1`, {
+    waitUntil: 'domcontentloaded',
   });
-  if (await signup.isVisible()) ok('sign-up conversion CTA shown');
-  else fail('sign-up CTA missing');
+  // waitFor, not isVisible — the mode hydrates client-side from auth state.
+  const spinCta = page.getByRole('button', { name: /^demo spin$/i });
+  await spinCta.waitFor({ timeout: 20000 });
+  ok("anonymous ?demo=1 machine shows the 'Demo spin' CTA");
 
+  if (await page.getByText('Demo', { exact: true }).first().isVisible())
+    ok('Demo badge shown on the machine');
+  else fail('Demo badge missing');
+  if (await page.getByText(/free demo — no credits charged/i).count())
+    ok('honesty footer present (no credits charged, no real cards won)');
+  else fail('demo honesty footer missing');
+
+  // Cookie banner overlays the bottom controls — clear it before spinning.
+  await page
+    .getByRole('button', { name: /^(Accept|Reject)$/ })
+    .first()
+    .click({ timeout: 4000 })
+    .catch(() => {});
+  await page.waitForTimeout(1500); // sprites paint, idle drift settles
+  await spinCta.click();
+  // The reveal has landed when a card back is tappable; tapping flips it and
+  // surfaces the per-card footer (sign-up CTA on demo).
+  await page.getByText('Tap the card to reveal').waitFor({ timeout: 60000 });
+  await page.mouse.click(720, 380);
+  const signup = page.getByRole('button', {
+    name: /sign up & pull for real/i,
+  });
+  await signup.waitFor({ timeout: 15000 });
+  ok('demo spin played through to the reveal with the sign-up CTA');
+
+  if (await page.getByRole('button', { name: /back to the reel/i }).count())
+    ok("demo reveal offers 'Back to the reel'");
+  else fail("'Back to the reel' missing on the demo reveal");
   if (await page.getByRole('button', { name: /sell back/i }).count())
-    fail('sell-back offered on a demo spin');
-  else ok('no keep/sell offer on the demo result');
+    fail('sell-back offered on a demo reveal (nothing was won)');
+  else ok('no sell window on the demo reveal');
 
-  await page.screenshot({ path: 'docs/research/qa-demo-spin-anon.png' });
-
-  // openPack is a Next SERVER ACTION: from the browser a real open is a
-  // same-origin POST to the page URL (next-action header) — the backend
-  // /store/packs/*/open call happens server-side, invisible here. So the
-  // honest assertion is ZERO POSTs of any kind during the anonymous flow
-  // (the anon page makes none legitimately; the auth session check is a GET).
+  // openPack is a Next SERVER ACTION: a real open would be a same-origin POST
+  // (next-action header). The anon demo page makes no legitimate POST at all,
+  // so the honest assertion is ZERO POSTs of any kind.
   if (posts.length === 0) ok('zero POSTs during the anonymous demo flow');
   else fail(`demo flow fired POST(s): ${posts.join(', ')}`);
 
-  // Sign-up CTA opens the auth modal in signup mode.
   await signup.click();
   await page
-    .getByRole('button', { name: /create account|sign up/i })
-    .first()
+    .getByRole('dialog', { name: /create account/i })
     .waitFor({ timeout: 10000 });
-  ok('sign-up CTA opens the auth modal');
-  await page.screenshot({ path: 'docs/research/qa-demo-spin-signup.png' });
+  ok('sign-up CTA opens the auth modal in signup mode');
+  await page.screenshot({ path: 'docs/research/qa-demo-spin-anon.png' });
 
-  // Marketplace gating: anonymous Buy now on a card detail → login modal.
-  await page.goto(`${BASE}/marketplace`, { waitUntil: 'domcontentloaded' });
-  const cardHref = await page
-    .locator('a[href^="/card/"]')
-    .first()
-    .getAttribute('href');
-  await page.goto(`${BASE}${cardHref}`, { waitUntil: 'domcontentloaded' });
-  await page.getByRole('button', { name: /buy now/i }).click();
+  // Anonymous WITHOUT ?demo=1: the machine gates on login instead.
+  await page.goto(`${BASE}/slots/${PACK}/spin`, {
+    waitUntil: 'domcontentloaded',
+  });
   await page
-    .locator('input[name="email"]')
-    .waitFor({ state: 'visible', timeout: 10000 });
-  ok('anonymous Buy now routes to the login modal');
-  await page.screenshot({ path: 'docs/research/qa-demo-spin-buygate.png' });
+    .getByRole('button', { name: /log in to spin/i })
+    .waitFor({ timeout: 20000 });
+  ok("anonymous real machine gates with 'Log in to spin'");
   await ctxA.close();
 
-  // ── Flow B: logged-in customer — real flow unchanged, demo loses the CTA ──
-  const ctxB = await browser.newContext({
-    viewport: { width: 1440, height: 860 },
-  });
-  const page2 = await ctxB.newPage();
-  await page2.goto(`${BASE}/claw/${PACK}`, { waitUntil: 'domcontentloaded' });
-  await page2
-    .getByRole('button', { name: /^login$/i })
-    .first()
-    .click();
-  await page2.fill('input[name="email"]', EMAIL);
-  await page2.fill('input[name="password"]', PASSWORD);
-  await page2.press('input[name="password"]', 'Enter');
-  await page2
-    .getByRole('button', { name: /open pack/i })
-    .waitFor({ timeout: 20000 });
-  ok("logged in — real 'Open Pack' CTA unchanged");
-  await page2.getByText(/Each open costs/).waitFor({ timeout: 15000 });
-  ok('credits footer renders for the logged-in customer');
+  // ── Flow B: logged-in customer on ?demo=1 gets the REAL machine ──────────
+  const creds = Object.fromEntries(
+    fs
+      .readFileSync(path.join(process.cwd(), 'scripts/.dev-logins'), 'utf8')
+      .split(/\r?\n/)
+      .filter((l) => l.includes('=') && !l.trim().startsWith('#'))
+      .map((l) => {
+        const i = l.indexOf('=');
+        return [l.slice(0, i).trim(), l.slice(i + 1).trim()];
+      }),
+  );
+  if (!creds.CUST_PW) {
+    console.log('SKIP flow B: no CUST_PW in scripts/.dev-logins');
+  } else {
+    const auth = await fetch(`${API}/auth/customer/emailpass`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: creds.CUST_EMAIL ?? 'test@polycards.app',
+        password: creds.CUST_PW,
+      }),
+    }).then((r) => r.json());
+    if (!auth.token) throw new Error('customer auth failed (flow B)');
 
-  await playDemoToCard(page2);
-  if (await page2.getByRole('button', { name: /sign up to keep/i }).count())
-    fail('sign-up CTA shown to a logged-in customer');
-  else ok('logged-in demo shows no sign-up CTA');
-  const spinAgain = await page2
-    .getByRole('button', { name: /spin again/i })
-    .isVisible();
-  if (spinAgain) ok("demo reveal offers 'Spin again'");
-  else fail("'Spin again' missing on demo reveal");
-  await page2.screenshot({ path: 'docs/research/qa-demo-spin-authed.png' });
-  await ctxB.close();
+    const ctxB = await browser.newContext({
+      viewport: { width: 1440, height: 860 },
+    });
+    await ctxB.addCookies([
+      {
+        name: '_polycards_jwt',
+        value: auth.token,
+        url: BASE,
+        httpOnly: true,
+        sameSite: 'Lax',
+      },
+    ]);
+    const page2 = await ctxB.newPage();
+    await page2.goto(`${BASE}/slots/${PACK}/spin?demo=1`, {
+      waitUntil: 'domcontentloaded',
+    });
+    await page2
+      .getByRole('button', { name: /^spin$/i })
+      .waitFor({ timeout: 20000 });
+    ok("logged-in on ?demo=1 gets the real machine ('Spin' CTA)");
+    if (await page2.getByText(/free demo — no credits charged/i).count())
+      fail('demo honesty footer shown to a logged-in customer');
+    else ok('no demo footer for the logged-in customer');
+    if (await page2.getByText(/^Bet\b/).count())
+      ok('real Bet line renders for the logged-in customer');
+    else fail('Bet line missing for the logged-in customer');
+    await page2.screenshot({ path: 'docs/research/qa-demo-spin-authed.png' });
+    await ctxB.close();
+  }
 } catch (err) {
   fail(err.message);
 } finally {
   await browser.close();
 }
+process.exit(failed ? 1 : 0);

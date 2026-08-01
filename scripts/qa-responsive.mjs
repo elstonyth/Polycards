@@ -54,21 +54,17 @@ const PUBLIC = [
 ];
 
 // Rendered against a freshly registered customer, so these are EMPTY-STATE
-// layouts only — no orders, cards, transactions or vault items. /rewards is
-// omitted: it redirects to /vip (the arrival assertion caught it being counted
-// as checked while actually measuring /vip).
+// layouts only — no orders, cards, transactions or vault items. /referrals,
+// /vip and /vouchers were suspended 2026-07-29 (#294) and now 404.
 const AUTHED = [
   '/me',
   '/vault',
   '/wallet',
   '/orders',
   '/transactions',
-  '/referrals',
   '/settings',
   '/addresses',
   '/notifications',
-  '/vip',
-  '/vouchers',
   '/bank-withdrawal',
 ];
 
