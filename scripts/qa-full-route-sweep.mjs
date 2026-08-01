@@ -63,25 +63,28 @@ console.log(`derived: pack slug=${slug}`);
 const PUBLIC = [
   '/',
   '/about',
+  '/auth/google/failed',
   '/contact',
+  '/download',
   '/fairness',
   '/how-it-works',
   '/leaderboard',
   '/reset-password',
   '/slots',
+  '/task',
+  '/bank-withdrawal',
   ...(slug ? [`/slots/${slug}`, `/slots/${slug}/spin`] : []),
 ];
+// /rewards, /vip, /referrals removed with the 2026-07-29 suspension (#294)
 const ACCOUNT = [
   '/me',
   '/wallet',
   '/vault',
   '/orders',
-  '/rewards',
   '/settings',
   '/transactions',
-  '/vip',
-  '/referrals',
   '/notifications',
+  '/addresses',
 ];
 
 let failures = 0;
