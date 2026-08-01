@@ -17,6 +17,7 @@ import {
   FocusModal,
   Checkbox,
   toast,
+  usePrompt,
   clx,
 } from '@medusajs/ui';
 import { ArrowLeft } from '@medusajs/icons';
@@ -98,6 +99,7 @@ const houseDefaults = (): Record<string, string> =>
 const PackOddsEditorPage = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const prompt = usePrompt();
   const { slug = '' } = useParams();
 
   const { data, isError: loadError, refetch } = usePackOdds(slug);
@@ -461,6 +463,50 @@ const PackOddsEditorPage = () => {
     toast.success(t('packs.editor.bulk.applied', { count: ids.size, rarity }));
   };
 
+  // Bulk remove — drop every checked card from the pack's prize pool. This is
+  // the pool picker's membership save with the checked rows subtracted, so it
+  // shares its semantics exactly: set-pack-members diffs (deletes the checked
+  // rows' PackOdds, reweighs survivors, guards an active pack against losing
+  // its last rollable card), and the reseed below refreshes the table from the
+  // saved pool. That also means any REMAINING pending (staged) rows are
+  // committed as members here, same as saving the pool picker would.
+  const bulkRemove = async () => {
+    const ids = new Set(checkedIds);
+    if (ids.size === 0 || savingMembers || !rows) return;
+    const confirmed = await prompt({
+      title: t('packs.editor.bulk.removeTitle'),
+      description: t('packs.editor.bulk.removeDesc', { count: ids.size }),
+      confirmText: t('packs.editor.bulk.removeConfirm'),
+      cancelText: t('packs.pool.cancel'),
+    });
+    if (!confirmed) return;
+    const checkedRows = rows.filter((r) => ids.has(r.card_id));
+    // All-pending selection: nothing is on the server yet — un-stage locally
+    // instead of a membership save that would commit the other staged rows.
+    if (checkedRows.every((r) => r.pending)) {
+      setRows((prev) => prev?.filter((r) => !ids.has(r.card_id)) ?? null);
+      setChecked(new Set());
+      toast.success(t('packs.editor.bulk.removed', { count: ids.size }));
+      return;
+    }
+    try {
+      await saveMembersMut.mutateAsync({
+        slug,
+        card_ids: rows
+          .filter((r) => !ids.has(r.card_id))
+          .map((r) => r.card_id),
+      });
+      setChecked(new Set());
+      toast.success(t('packs.editor.bulk.removed', { count: ids.size }));
+      // Same as saveMembers: the cache is fresh once mutateAsync resolves —
+      // reset the seed so the render-phase seeding rebuilds the rows from the
+      // new membership.
+      setSeededFrom(undefined);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   // Locking hands the operator the wheel, pre-filled with the rate the card has
   // right now — rounded to the 2dp the 1 bps storage floor can actually hold, so
   // a derived 0.0333 does not land in the input as an out-of-step value.
@@ -716,6 +762,14 @@ const PackOddsEditorPage = () => {
                   ))}
                 </Select.Content>
               </Select>
+              <Button
+                size="small"
+                variant="danger"
+                onClick={bulkRemove}
+                isLoading={savingMembers}
+              >
+                {t('packs.editor.bulk.remove')}
+              </Button>
               <Button
                 size="small"
                 variant="transparent"
