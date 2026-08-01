@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { googleCallback } from '@/lib/actions/auth';
-import { ALLOWED_SELF_HOSTS } from '@/lib/allowed-hosts';
+import { resolveCallbackOrigin } from '@/lib/allowed-hosts';
 
 /**
  * Google OAuth return URL (an Authorised redirect URI on the OAuth client).
@@ -11,22 +11,37 @@ import { ALLOWED_SELF_HOSTS } from '@/lib/allowed-hosts';
  * Component render. On success the customer lands on their account; on failure
  * we bounce to the storefront's Google-error page (route handlers can't render
  * JSX, so the human-readable reason travels as a query param).
+ *
+ * Origin resolution (resolveCallbackOrigin) lives in @/lib/allowed-hosts, not
+ * here: a Route Handler module may only export the recognised HTTP-method/
+ * config names, and an extra export fails the generated route type check.
  */
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const { searchParams } = request.nextUrl;
 
-  // NEVER build redirects from `request.url`: behind the DO proxy the
-  // standalone server sees its own bind origin (http://0.0.0.0:<port>), and a
-  // redirect there lands the phone on Safari's "restricted network port"
-  // error page. Derive the public origin from the forwarded headers instead,
-  // allowlisted (they're client-supplied) — same guard as googleLoginStart.
   const host =
     request.headers.get('x-forwarded-host') ?? request.headers.get('host');
-  const proto =
-    request.headers.get('x-forwarded-proto') ??
-    (process.env.NODE_ENV === 'production' ? 'https' : 'http');
-  const origin =
-    host && ALLOWED_SELF_HOSTS.has(host) ? `${proto}://${host}` : request.url;
+  const origin = resolveCallbackOrigin(
+    host,
+    request.headers.get('x-forwarded-proto'),
+  );
+
+  // Fail closed: an unrecognised/missing host means we can't safely build an
+  // absolute self-URL — and `request.nextUrl` is not a safe fallback here
+  // either. Behind the DO proxy, `request.nextUrl`'s origin is the standalone
+  // server's own BIND origin (http://0.0.0.0:PORT), not the public origin the
+  // browser actually requested (the exact broken redirect PR #311 fixed for
+  // the happy path — recreated here on the failure path if we ever build a
+  // URL from it). A bare relative Location is RFC 7231 §7.1.2-legal and lets
+  // the browser resolve it against the origin IT requested, so skip
+  // NextResponse.redirect's URL construction entirely and write the header
+  // by hand.
+  if (!origin) {
+    return new NextResponse(null, {
+      status: 302,
+      headers: { Location: '/auth/google/failed?reason=origin' },
+    });
+  }
 
   const failed = (reason: string): NextResponse =>
     NextResponse.redirect(

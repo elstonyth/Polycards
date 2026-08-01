@@ -1,3 +1,13 @@
+/**
+ * SUSPENDED 2026-07-29 — the `/vip` route was deleted with the reward
+ * surfaces (docs/superpowers/specs/2026-07-29-suspend-vip-referral-surfaces-design.md).
+ * Kept unreferenced, not deleted, so un-suspending is a revert rather than a
+ * rewrite; the backend routes these call are all still live.
+ *
+ * Note: the perk strings below describe the suspended reward economy (box
+ * tiers, referral rates) — verify they still match current VIP-level rewards
+ * before un-suspending, don't assume they aged perfectly.
+ */
 import type { VipLevel } from '@/lib/actions/vip';
 
 export type Milestone = { level: number; perks: string[] };

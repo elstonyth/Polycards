@@ -285,11 +285,14 @@ export async function getChallenge(): Promise<Challenge | null> {
               // Dedupe by card IDENTITY (id), not image: the same card featured
               // in two unlocked stages shows one thumb, while two distinct cards
               // that happen to share fallback art are NOT collapsed. Dedupe the
-              // ids first, then resolve.
+              // ids first, then resolve. Podium ranks (1-3) only — this feeds
+              // the "Top 3 will receive" tile, matching the `creditsOf(…, 4)`
+              // boundary just below (ranks 4+ go to the credits sheet instead).
               cards: resolveCards([
                 ...new Set(
                   unlocked.flatMap((s) =>
                     s.rankRewards
+                      .filter((r) => r.rank <= 3)
                       .map((r) => r.cardId)
                       .filter((id): id is string => Boolean(id)),
                   ),

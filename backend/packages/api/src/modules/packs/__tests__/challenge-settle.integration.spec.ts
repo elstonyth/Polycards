@@ -66,6 +66,11 @@ const priorWeekDate = () =>
   new Date(currentWeekStartUtc().getTime() - 12 * HOUR);
 const currentWeekDate = () =>
   new Date(currentWeekStartUtc().getTime() + 12 * HOUR);
+// The settled week's OWN start (weeksBack: 1 shifts the whole week left 7
+// days — see CHALLENGE_WEEK_ANCHOR_CTE) — what settleChallengeWinner's WP
+// ref_id (`challenge:<weekStartIso>:<customerId>`) is keyed on.
+const priorWeekStartUtc = () =>
+  new Date(currentWeekStartUtc().getTime() - 7 * 24 * HOUR);
 
 moduleIntegrationTestRunner<PacksModuleService>({
   moduleName: PACKS_MODULE,
@@ -240,6 +245,85 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(await service.creditBalance('cus_a')).toBe(50); // unchanged
         const payoutRows = await service.listChallengePayouts({}, { take: 10 });
         expect(payoutRows).toHaveLength(2); // credits row + card row, once
+      });
+
+      // Plan 060: settleChallengeWinner now writes the WP transaction-ledger
+      // row the admin Transactions filter has offered since POLYCARD-BACK §5
+      // with no writer behind it.
+      describe('WP ledger row', () => {
+        it('writes exactly one WP row with the credited amount and the challenge ref_id', async () => {
+          const { card } = await seedBase();
+          await seedStage(1, 100, [{ rank: 1, card_id: card.id, credits: 50 }]);
+          await seedPriorWeekPull('cus_a', card);
+
+          await service.settleChallengeWeek({
+            getStock: async () =>
+              new Map<string, number | null>([[card.handle, null]]),
+          });
+
+          const wpRows = await service.listLedgerEntries(
+            { type: 'WP', customer_id: 'cus_a' },
+            { take: 10 },
+          );
+          expect(wpRows).toHaveLength(1);
+          expect(wpRows[0]!.ref_id).toBe(
+            `challenge:${priorWeekStartUtc().toISOString()}:cus_a`,
+          );
+          expect(Number(wpRows[0]!.wallet_delta)).toBe(50);
+        });
+
+        it('re-running settlement for the same week does not write a second WP row', async () => {
+          const { card } = await seedBase();
+          await seedStage(1, 100, [{ rank: 1, card_id: card.id, credits: 50 }]);
+          await seedPriorWeekPull('cus_a', card);
+          const deps = {
+            getStock: async () =>
+              new Map<string, number | null>([[card.handle, null]]),
+          };
+
+          await service.settleChallengeWeek(deps);
+          // Clear the payout-row gate (settleChallengeWinner's step 2 check
+          // AND the 2b anchor-overlap guard both query challenge_payout) so
+          // the second pass genuinely re-enters 3a/3b/3c instead of short-
+          // circuiting before reaching recordLedgerEntry — otherwise this
+          // would only re-prove the payout-row no-op the earlier "settles
+          // once" test already covers, not recordLedgerEntry's OWN
+          // (type, ref_id) idempotency.
+          await service.deleteChallengePayouts(
+            (await service.listChallengePayouts({}, { take: 20 })).map(
+              (r) => r.id,
+            ),
+          );
+          await service.settleChallengeWeek(deps);
+
+          const wpRows = await service.listLedgerEntries(
+            { type: 'WP', customer_id: 'cus_a' },
+            { take: 10 },
+          );
+          expect(wpRows).toHaveLength(1); // recordLedgerEntry found the existing row
+        });
+
+        it('a card-only rank (credits = 0) still writes its WP row', async () => {
+          const { card } = await seedBase();
+          await seedStage(1, 100, [{ rank: 1, card_id: card.id, credits: 0 }]);
+          await seedPriorWeekPull('cus_a', card);
+
+          await service.settleChallengeWeek({
+            getStock: async () =>
+              new Map<string, number | null>([[card.handle, null]]),
+          });
+
+          const wpRows = await service.listLedgerEntries(
+            { type: 'WP', customer_id: 'cus_a' },
+            { take: 10 },
+          );
+          expect(wpRows).toHaveLength(1);
+          expect(Number(wpRows[0]!.wallet_delta)).toBe(0);
+          const payload = wpRows[0]!.payload as unknown as {
+            sku: string | null;
+          };
+          expect(payload.sku).toBe(card.handle);
+        });
       });
 
       it('mints qty pulls in one call and records every id when two stages award the same card', async () => {

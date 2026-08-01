@@ -39,6 +39,8 @@ export default async function seedNotificationProbe({
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i]!
+    // Deliberately NOT notifyFeedNonfatal — this QA probe must fail loudly
+    // when the seed is broken (plan 059 exemption).
     await notifyFeed(container, {
       receiverId,
       template: row.template,

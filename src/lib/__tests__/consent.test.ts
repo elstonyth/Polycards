@@ -29,4 +29,22 @@ describe('consent store', () => {
     // Listener ran after the write: it already saw the new value.
     expect(spy).toHaveReturnedWith('rejected');
   });
+
+  // Withdrawal path (plan 063 settings-page control): rejecting after a prior
+  // accept must overwrite the stored choice and still fire CONSENT_EVENT, so
+  // MetaPixel's listener (and the reload the control triggers) both see it.
+  it('overwrites an accepted choice with rejected, firing CONSENT_EVENT again', () => {
+    setConsent('accepted');
+    expect(getConsent()).toBe('accepted');
+
+    const spy = vi.fn(() => getConsent());
+    window.addEventListener(CONSENT_EVENT, spy);
+    setConsent('rejected');
+    window.removeEventListener(CONSENT_EVENT, spy);
+
+    expect(getConsent()).toBe('rejected');
+    expect(localStorage.getItem(CONSENT_KEY)).toBe('rejected');
+    expect(spy).toHaveBeenCalledOnce();
+    expect(spy).toHaveReturnedWith('rejected');
+  });
 });

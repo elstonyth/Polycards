@@ -12,6 +12,7 @@ import {
 import { addressViewFromInput } from '@/lib/address-view';
 import { openAuth } from '@/components/AuthButton';
 import { INPUT_CLASS } from '@/components/account/ui';
+import { PhoneField } from '@/components/PhoneField';
 import { Pill, pillVariants } from '@/components/ui/pill';
 import { cn } from '@/lib/utils';
 import { useModalA11y } from '@/lib/use-modal-a11y';
@@ -188,30 +189,34 @@ export function AddressesClient({
     return false;
   };
 
-  async function save() {
+  // Takes the submitted payload as a param rather than reading `form` state
+  // directly: PhoneField carries its E.164 value in its own hidden input
+  // (see the form's onSubmit), so the phone the customer actually typed only
+  // exists in FormData at submit time, not in `form.phone`.
+  async function save(input: AddAddressInput) {
     if (busy) return;
     setBusy(true);
     setError(null);
     try {
       if (editingId) {
-        const res = await updateAddress(editingId, form);
+        const res = await updateAddress(editingId, input);
         if (!res.ok) {
           if (!handled(res)) setError(res.error);
           return;
         }
-        // Optimistic in-place patch: `form` IS what was persisted.
+        // Optimistic in-place patch: `input` IS what was persisted.
         setAddresses((p) =>
           p.map((a) =>
-            a.id === editingId ? addressViewFromInput(editingId, form) : a,
+            a.id === editingId ? addressViewFromInput(editingId, input) : a,
           ),
         );
       } else {
-        const res = await addAddress(form);
+        const res = await addAddress(input);
         if (!res.ok) {
           if (!handled(res)) setError(res.error);
           return;
         }
-        setAddresses((p) => [...p, addressViewFromInput(res.addressId, form)]);
+        setAddresses((p) => [...p, addressViewFromInput(res.addressId, input)]);
       }
       setForm(EMPTY_FORM);
       closeForm();
@@ -309,7 +314,14 @@ export function AddressesClient({
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            void save();
+            // PhoneField's E.164 value only exists in its own hidden input
+            // (name="phone"), not in `form` state — read it from FormData so
+            // the typed number actually reaches the action and the optimistic
+            // row, instead of silently falling back to the stale seed value.
+            const phone = String(
+              new FormData(e.currentTarget).get('phone') ?? '',
+            ).trim();
+            void save({ ...form, phone: phone || undefined });
           }}
           className="rounded-2xl border border-white/10 bg-neutral-900 p-5"
         >
@@ -347,7 +359,23 @@ export function AddressesClient({
               pattern: '[A-Za-z]{2}',
               title: 'Two-letter country code, for example MY',
             })}
-            {field('Phone (optional)', 'phone', { autoComplete: 'tel' })}
+            <div className="col-span-2">
+              <label className="block">
+                <span className="mb-1.5 block text-[12px] font-medium text-white/55">
+                  Phone (optional)
+                </span>
+                {/* Keyed on the edit target so switching which address is
+                    being edited remounts the field — PhoneField only reads
+                    `defaultValue` on mount, so without this a second `Edit`
+                    click would keep showing the first address's number. */}
+                <PhoneField
+                  key={editingId ?? 'new'}
+                  name="phone"
+                  defaultValue={form.phone ?? ''}
+                  inputClassName={INPUT_CLASS}
+                />
+              </label>
+            </div>
           </div>
           {error && (
             <p

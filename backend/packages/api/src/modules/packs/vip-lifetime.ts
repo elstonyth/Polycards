@@ -3,8 +3,8 @@
 // opens count (2026-07-22 turnover-VIP change). Referral commissions and the
 // withdrawal playthrough gate still use the external-funded basis. Reversals
 // are amount>0 → excluded, so a refund never lowers the counter (spec §3).
-// Mirrors the service raw SQL (lifetimeExternalSenFor).
-export function lifetimeExternalSen(
+// Mirrors the service raw SQL (lifetimeTurnoverSenFor).
+export function lifetimeTurnoverSen(
   rows: { amount: number; reason: string }[],
 ): number {
   let sen = 0;

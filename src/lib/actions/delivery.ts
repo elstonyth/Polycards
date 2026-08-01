@@ -22,6 +22,7 @@ import {
 } from '@/lib/data/schemas';
 import { friendlyError, isAuthError, type ErrorRule } from '@/lib/errors';
 import { DELIVERY_RULES, DELIVERY_FALLBACK } from '@/lib/delivery-errors';
+import { normalizePhone } from '@/lib/profile-validation';
 
 export type DeliveryOrderItemView = {
   pullId: string;
@@ -378,6 +379,28 @@ const missingRequired = (input: AddAddressInput): boolean =>
   !input.postalCode?.trim() ||
   !input.countryCode?.trim();
 
+// The address-book phone is the actual SOURCE of a delivery order's
+// ship_phone — the backend's profile-phone fallback (request-delivery.ts)
+// only fires when it's BLANK, so a garbage address phone here would SUPPRESS
+// that validated fallback. Same rule, same copy, as the profile phone
+// (customer.ts): empty stays optional (→ null via addressBody below), a
+// non-empty value must normalize to E.164 or the action rejects. Shared by
+// both addAddress and updateAddress so the rule can't drift between them.
+function validateAddressPhone(
+  phone: string | undefined,
+): { ok: true; phone: string | undefined } | { ok: false; error: string } {
+  const trimmed = phone?.trim();
+  if (!trimmed) return { ok: true, phone: undefined };
+  const normalized = normalizePhone(trimmed);
+  if (!normalized) {
+    return {
+      ok: false,
+      error: 'Please enter a valid phone number for the selected country.',
+    };
+  }
+  return { ok: true, phone: normalized };
+}
+
 // Create an address in the Medusa customer address book via the built-in SDK.
 // Returns the new address id for immediate selection in the delivery flow.
 export async function addAddress(
@@ -389,9 +412,11 @@ export async function addAddress(
   if (missingRequired(input)) {
     return { ok: false, error: 'Fill in the required address fields.' };
   }
+  const phoneCheck = validateAddressPhone(input.phone);
+  if (!phoneCheck.ok) return phoneCheck;
   try {
     const { customer } = await sdk.store.customer.createAddress(
-      addressBody(input),
+      addressBody({ ...input, phone: phoneCheck.phone }),
       {},
       { Authorization: `Bearer ${token}` },
     );
@@ -428,10 +453,12 @@ export async function updateAddress(
   if (missingRequired(input)) {
     return { ok: false, error: 'Fill in the required address fields.' };
   }
+  const phoneCheck = validateAddressPhone(input.phone);
+  if (!phoneCheck.ok) return phoneCheck;
   try {
     await sdk.store.customer.updateAddress(
       addressId,
-      addressBody(input),
+      addressBody({ ...input, phone: phoneCheck.phone }),
       {},
       { Authorization: `Bearer ${token}` },
     );

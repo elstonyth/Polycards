@@ -21,6 +21,18 @@ updates:
         update-types:
           - minor
           - patch
+    # Root is majors-current on React 19 today; this only blocks an AUTOMATED
+    # solo half-bump of the pair going forward (deliberate manual bumps are
+    # unaffected) — same react/react-dom lockstep reasoning as the /backend
+    # updater below, applied here so the root updater can't recreate the
+    # mismatch on its own.
+    ignore:
+      - dependency-name: 'react'
+        update-types:
+          - version-update:semver-major
+      - dependency-name: 'react-dom'
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: npm
     directory: /backend
@@ -58,6 +70,20 @@ updates:
       - dependency-name: '@mercurjs/*'
         update-types:
           - version-update:semver-minor
+          - version-update:semver-major
+      # PR #279 bumped react-dom to 19.x alone, leaving react pinned at 18 —
+      # @mercurjs/admin peer-depends on React 18, so react-dom must move in
+      # lockstep with react, never ahead of it on its own. A semver-major
+      # react-dom PR is exactly the shape that broke last time; blocking it
+      # here (like the @medusajs/@mercurjs families above) means the pair can
+      # only be bumped to 19 together, deliberately, in one reviewed PR.
+      - dependency-name: 'react-dom'
+        update-types:
+          - version-update:semver-major
+      # Mirror of the react-dom ignore above: the pair moves together
+      # deliberately, so a solo react major bump is blocked too.
+      - dependency-name: 'react'
+        update-types:
           - version-update:semver-major
 
   - package-ecosystem: github-actions

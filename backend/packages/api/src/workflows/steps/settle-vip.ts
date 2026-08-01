@@ -2,7 +2,7 @@ import { createStep, StepResponse } from '@medusajs/framework/workflows-sdk';
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
-import { notifyFeed } from '../../modules/packs/notify-feed';
+import { notifyFeedNonfatal } from '../../modules/packs/notify-feed';
 
 export type SettleVipInput = {
   customer_id: string;
@@ -38,8 +38,9 @@ export const settleVipStep = createStep(
       if (gained.length > 0) {
         // Same consolidated notification (and idempotency key) the
         // vip-spend-settled subscriber sends, so whichever path settles first
-        // notifies exactly once.
-        await notifyFeed(container, {
+        // notifies exactly once. notifyFeedNonfatal never throws, so the
+        // surrounding try/catch here exists to guard the GRANT call, not this.
+        await notifyFeedNonfatal(container, 'settle-vip', {
           receiverId: input.customer_id,
           template: 'vip_level_up',
           data: { levels: gained },
@@ -54,7 +55,7 @@ export const settleVipStep = createStep(
         container
           .resolve(ContainerRegistrationKeys.LOGGER)
           .warn(
-            `settle-vip: level-up grant or notifyFeed('vip_level_up') failed for receiver '${input.customer_id}' (open '${input.open_id}') — open continues, vip.spend_settled event is the retry path. ${
+            `settle-vip: level-up grant failed for receiver '${input.customer_id}' (open '${input.open_id}') — open continues, vip.spend_settled event is the retry path. ${
               error instanceof Error ? error.message : String(error)
             }`,
           );

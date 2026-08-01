@@ -360,6 +360,17 @@ jobs:
             backend/.yarn/install-state.gz
           key: bnm2-${{ runner.os }}-node22-${{ hashFiles('backend/yarn.lock') }}
 
+      # turbo writes its local cache to backend/.turbo; without restoring it every
+      # lint/check-types/build task reruns cold. github.sha key + os restore-key
+      # means each run seeds from the newest prior cache and saves its own.
+      - name: Cache turbo
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: backend/.turbo
+          key: turbo-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ runner.os }}-
+
       - name: Install backend dependencies
         working-directory: backend
         run: corepack yarn install --immutable
