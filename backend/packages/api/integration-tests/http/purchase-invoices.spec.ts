@@ -130,6 +130,55 @@ medusaIntegrationTestRunner({
         expect(res.status).toBe(400);
       });
 
+      // Plan 065: an unresolvable card_handle used to post a fully successful
+      // 201 whose cost basis + audit trail attached to a phantom key. The
+      // route now resolves every distinct handle against PRODUCT before the
+      // workflow runs at all — this must be all-or-nothing, so the VALID
+      // sibling line in the same body must not partially write either.
+      it('rejects a POST with an unknown card_handle among otherwise-valid lines, naming the line + handle, and writes nothing', async () => {
+        const res = await createOriginal([
+          LINE,
+          { ...LINE, card_handle: 'ghost-handle-does-not-exist', qty: 1 },
+        ]);
+        expect(res.status).toBe(400);
+        expect(res.data.message).toMatch(/lines\[1\]/);
+        expect(res.data.message).toMatch(/ghost-handle-does-not-exist/);
+
+        expect(await packs.listPurchaseInvoices({}, { take: 10 })).toHaveLength(
+          0,
+        );
+        expect(
+          await packs.listStockMovements(
+            { card_handle: LINE.card_handle },
+            { take: 10 },
+          ),
+        ).toHaveLength(0);
+      });
+
+      // Reversal carve-out: a reversal may name a handle whose product was
+      // deleted AFTER the original purchase — assertReversalCovered
+      // (service.ts) still independently requires the handle to actually be
+      // on the target invoice, so this can't be used to sneak an unrelated
+      // handle past the gate.
+      it('accepts a reversal whose product has since been deleted', async () => {
+        const HANDLE = 'reversal-deleted-product';
+        await makeProduct(HANDLE, 'Reversal Deleted Product');
+        const original = await createOriginal([{ ...LINE, card_handle: HANDLE }]);
+        expect(original.status).toBe(201);
+
+        const productModule = getContainer().resolve(Modules.PRODUCT);
+        const [product] = await productModule.listProducts(
+          { handle: HANDLE },
+          { take: 1 },
+        );
+        await productModule.deleteProducts([product.id]);
+
+        const res = await reverse(original.data.invoice.id, [
+          { ...LINE, card_handle: HANDLE, qty: -10 },
+        ]);
+        expect(res.status).toBe(201);
+      });
+
       it('rejects a reversal whose line does not match the target invoice on card_handle+unit_cost', async () => {
         const original = await createOriginal();
         const res = await reverse(original.data.invoice.id, [

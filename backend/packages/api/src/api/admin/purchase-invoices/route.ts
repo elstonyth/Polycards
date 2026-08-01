@@ -3,7 +3,7 @@ import type {
   MedusaRequest,
   MedusaResponse,
 } from '@medusajs/framework/http';
-import { Modules } from '@medusajs/framework/utils';
+import { MedusaError, Modules } from '@medusajs/framework/utils';
 import type { IUserModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
@@ -38,6 +38,48 @@ export async function POST(
   // Resolved HERE, before the workflow opens its transaction — resolving it
   // inside would take a second pool connection.
   await resolveFxRateStrict(packs);
+
+  // Existence gate: validate.ts checks card_handle is a non-empty string, not
+  // that it resolves to anything. An unresolvable handle used to post a fully
+  // successful 201 whose cost basis + stock_movement audit row attach to a
+  // phantom key: invisible on the Inventory list (PRODUCT-grained, see
+  // inventory-view.ts:59-64) and on_hand never rises. Resolve against PRODUCT
+  // handles, never Card — a Product with no Card row (the PriceCharting
+  // importer's output) is a legitimate purchase target, and a cards-only
+  // check would 400 it.
+  //
+  // Reversal carve-out: a reversal's lines may ALSO name a handle whose
+  // product was deleted after the original purchase. That is safe to allow
+  // here because assertReversalCovered (service.ts, inside the workflow's own
+  // transaction) independently rejects any handle that isn't actually on the
+  // target invoice — this union can't let an unrelated/bogus handle through.
+  const productModule = req.scope.resolve(Modules.PRODUCT);
+  const requestedHandles = [...new Set(body.lines.map((l) => l.card_handle))];
+  const products = await productModule.listProducts(
+    { handle: requestedHandles },
+    { take: requestedHandles.length, select: ['handle'] },
+  );
+  const validHandles = new Set(products.map((p) => p.handle));
+  if (body.reverses_invoice_id) {
+    const targetLines = await pageAll((opts) =>
+      packs.listPurchaseInvoiceLines(
+        { invoice_id: [body.reverses_invoice_id as string] },
+        opts,
+      ),
+    );
+    for (const l of targetLines) validHandles.add(l.card_handle);
+  }
+  const unknown = body.lines
+    .map((l, i) => ({ i, card_handle: l.card_handle }))
+    .filter(({ card_handle }) => !validHandles.has(card_handle));
+  if (unknown.length) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      `Unknown card_handle — no matching product for ${unknown
+        .map(({ i, card_handle }) => `lines[${i}] ('${card_handle}')`)
+        .join(', ')}.`,
+    );
+  }
 
   const { result } = await createPurchaseInvoiceWorkflow(req.scope).run({
     input: {
