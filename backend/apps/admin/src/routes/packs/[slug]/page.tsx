@@ -472,7 +472,10 @@ const PackOddsEditorPage = () => {
   // committed as members here, same as saving the pool picker would.
   const bulkRemove = async () => {
     const ids = new Set(checkedIds);
-    if (ids.size === 0 || savingMembers || !rows) return;
+    // `saving` too: an in-flight odds save submits the CURRENT membership set,
+    // and a removal landing first would fail its card-set validation after the
+    // pool already changed (mirrors save()'s own savingMembers guard).
+    if (ids.size === 0 || savingMembers || saving || !rows) return;
     const confirmed = await prompt({
       title: t('packs.editor.bulk.removeTitle'),
       description: t('packs.editor.bulk.removeDesc', { count: ids.size }),
@@ -767,6 +770,7 @@ const PackOddsEditorPage = () => {
                 variant="danger"
                 onClick={bulkRemove}
                 isLoading={savingMembers}
+                disabled={savingMembers || saving}
               >
                 {t('packs.editor.bulk.remove')}
               </Button>
