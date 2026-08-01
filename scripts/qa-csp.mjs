@@ -56,6 +56,18 @@ for (const route of ROUTES) {
   if (!resp || !resp.ok()) {
     await fail(`${route} — bad response: ${resp ? resp.status() : 'none'}`);
   }
+  // A missing header would let the scan pass "clean" simply because no policy
+  // was ever served to violate — the same never-ran-≠-clean trap qa-a11y.mjs
+  // guards against for the oklch-abort case.
+  const headers = resp.headers();
+  if (
+    !headers['content-security-policy'] &&
+    !headers['content-security-policy-report-only']
+  ) {
+    await fail(
+      `no CSP header on ${route} — the gate cannot attest a policy it never saw`,
+    );
+  }
   await page.waitForTimeout(2000);
   const loadMs = Date.now() - startedAt;
   const routeId = route === '/' ? 'home' : route.slice(1).replaceAll('/', '_');
