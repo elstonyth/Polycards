@@ -143,6 +143,7 @@ const EXEMPT: { path: string; method: string; reason: string }[] = [
 describe('admin mutation routes are rate-limited (plan 061 coverage guard)', () => {
   const limiterEntries = extractAdminActionRateLimitEntries();
   const limiterRegexes = limiterEntries.map((e) => ({
+    matcher: e.matcher,
     methods: e.methods,
     re: matcherToRegExp(e.matcher),
   }));
@@ -196,6 +197,44 @@ describe('admin mutation routes are rate-limited (plan 061 coverage guard)', () 
           failures.push(
             `${method} ${url} is both covered by a limiter matcher AND listed ` +
               `in EXEMPT — remove the stale EXEMPT entry`,
+          );
+        }
+      }
+    }
+
+    expect(failures).toEqual([]);
+  });
+
+  it('no route is matched by more than one adminActionRateLimit entry', () => {
+    // A trailing "*" matcher (e.g. "/admin/cards/*") spans "/" (path-to-regexp
+    // 0.1.x) and can silently swallow a sibling route that already has its own
+    // matcher — exactly how "/admin/packs/*" and "/admin/delivery-orders/*"
+    // ended up EXEMPT instead of added (see the reasons above). If a future
+    // route or matcher recreates that shape, Medusa's RoutesSorter registers
+    // the wildcard-bucket entry before the static one and BOTH run, double-
+    // charging the shared budget for a single request. This asserts the
+    // invariant directly — any route matched twice fails here, regardless of
+    // which matchers are responsible — rather than relying on the code
+    // comments next to /admin/cards/* and /admin/packs/reorder etc. staying
+    // accurate by hand.
+    const routeFiles = collectRouteFiles(path.join(API_ROOT, 'admin'));
+    const failures: string[] = [];
+
+    for (const relPath of routeFiles) {
+      const text = fs.readFileSync(path.join(API_ROOT, relPath), 'utf8');
+      const methods = mutationMethodsOf(text);
+      if (methods.length === 0) continue;
+
+      const url = routeFileToUrl(relPath);
+      for (const method of methods) {
+        const matches = limiterRegexes.filter(
+          (e) => e.methods.includes(method) && e.re.test(url),
+        );
+        if (matches.length > 1) {
+          failures.push(
+            `${method} ${url} (src/api/${relPath}) matches ${matches.length} ` +
+              `adminActionRateLimit entries: ${matches.map((e) => e.matcher).join(', ')} ` +
+              `— would run the rate limiter more than once per request`,
           );
         }
       }
