@@ -11,7 +11,10 @@ const env = Object.fromEntries(
   readFileSync('scripts/.dev-logins', 'utf8')
     .split(/\r?\n/)
     .filter((l) => l.includes('=') && !l.startsWith('#'))
-    .map((l) => [l.slice(0, l.indexOf('=')).trim(), l.slice(l.indexOf('=') + 1).trim()]),
+    .map((l) => [
+      l.slice(0, l.indexOf('=')).trim(),
+      l.slice(l.indexOf('=') + 1).trim(),
+    ]),
 );
 const EMAIL = env.ADMIN_EMAIL ?? 'admin@pokenic.app';
 const PW = env.ADMIN_PW ?? '';
@@ -45,7 +48,9 @@ await page.waitForTimeout(1500);
 console.log('editor url:', page.url());
 
 // wait for odds table rows, check first 3 row checkboxes (skip header select-all)
-const rowChecks = page.locator('table tbody [role="checkbox"], table tbody input[type="checkbox"]');
+const rowChecks = page.locator(
+  'table tbody [role="checkbox"], table tbody input[type="checkbox"]',
+);
 await rowChecks.first().waitFor({ state: 'visible', timeout: 30000 });
 const n = Math.min(3, await rowChecks.count());
 for (let i = 0; i < n; i++) await rowChecks.nth(i).click();
@@ -59,9 +64,14 @@ console.log('shot 1: bulk bar');
 
 // open confirm dialog, screenshot, cancel (no actual removal)
 await removeBtn.click();
-await page.getByRole('button', { name: 'Remove', exact: true }).waitFor({ state: 'visible', timeout: 10000 });
+await page
+  .getByRole('button', { name: 'Remove', exact: true })
+  .waitFor({ state: 'visible', timeout: 10000 });
 await page.waitForTimeout(300);
-await page.screenshot({ path: `${OUT}/bulk-remove-confirm.png`, fullPage: false });
+await page.screenshot({
+  path: `${OUT}/bulk-remove-confirm.png`,
+  fullPage: false,
+});
 console.log('shot 2: confirm dialog');
 await page.getByRole('button', { name: 'Cancel', exact: true }).click();
 

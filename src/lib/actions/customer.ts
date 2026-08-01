@@ -25,8 +25,7 @@ export type ProfileCustomer = {
 };
 
 export type ProfileResult =
-  | { ok: true; customer: ProfileCustomer }
-  | { ok: false; error: string };
+  { ok: true; customer: ProfileCustomer } | { ok: false; error: string };
 
 const toProfileCustomer = (c: HttpTypes.StoreCustomer): ProfileCustomer => ({
   id: c.id,
