@@ -2,7 +2,7 @@
 
 import { useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronDown, Maximize2, X } from 'lucide-react';
+import { Maximize2, X } from 'lucide-react';
 import type { PackCard, Rarity } from '@/lib/packs-data';
 import { rarityRgb, RARITY_ORDER } from '@/lib/rarity';
 import { useModalA11y } from '@/lib/use-modal-a11y';
@@ -10,18 +10,15 @@ import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
 import { useDragScroll } from '@/lib/use-drag-scroll';
 import { CardTile } from '@/components/cards/CardTile';
 
-const TEASER_COUNT = 6;
-
 /**
- * "Cards in this pack" — the caller pre-filters the pool to Rare+ (commons/
- * uncommons are catalogue noise there). The section itself is ONE horizontally-
- * swipeable teaser rail of the top TEASER_COUNT cards (pool arrives value-
- * sorted desc) — the catalog's rail idiom, per the 90scard reference. The
- * header's expand button and the "Show all N rare cards" button both open a
- * full-screen dialog listing the whole Rare+ pool grouped by canonical tier
- * (rarest first) as a grid. Group headers carry the rarity dot + count and,
- * when the admin published odds, that tier's pull chance (the same data the
- * odds panel shows; nothing invented).
+ * "Top hits" — the caller pre-filters the pool to Rare+ (commons/uncommons are
+ * catalogue noise there). The section itself is ONE horizontally-swipeable
+ * rail of the WHOLE Rare+ pool (pool arrives value-sorted desc, so the top
+ * hits lead) — the catalog's rail idiom, per the 90scard reference. The
+ * header's expand button opens a full-screen dialog listing the same pool
+ * grouped by canonical tier (rarest first) as a grid. Group headers carry the
+ * rarity dot + count and, when the admin published odds, that tier's pull
+ * chance (the same data the odds panel shows; nothing invented).
  */
 export function PoolByRarity({
   pool,
@@ -43,20 +40,20 @@ export function PoolByRarity({
       <div>
         <div className="mb-1 flex items-center justify-between gap-3">
           <h2 className="font-heading text-lg font-bold tracking-tight text-white">
-            Cards in this pack
+            Top hits
           </h2>
           <button
             type="button"
             onClick={() => setModalOpen(true)}
             aria-haspopup="dialog"
-            aria-label={`Show all ${pool.length} rare cards`}
+            aria-label={`Show all ${pool.length} cards grouped by rarity`}
             className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-white/60 transition-colors hover:bg-white/10 hover:text-white"
           >
             <Maximize2 className="h-4 w-4" aria-hidden />
           </button>
         </div>
         <p className="text-[13px] text-white/70">
-          The rarest cards in this pack and their current market price.
+          The top cards available in this pack.
         </p>
       </div>
       {/* Teaser rail — a peeking partial card signals the sideways swipe;
@@ -76,7 +73,7 @@ export function PoolByRarity({
         {...drag}
         className="-mx-4 -my-12 flex cursor-grab gap-2 overflow-x-auto px-10 py-12 active:cursor-grabbing sm:gap-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
-        {pool.slice(0, TEASER_COUNT).map((c) => (
+        {pool.map((c) => (
           <div key={c.id} className="w-[38%] shrink-0 sm:w-40">
             <CardTile
               card={c}
@@ -86,17 +83,6 @@ export function PoolByRarity({
           </div>
         ))}
       </div>
-      {pool.length > TEASER_COUNT && (
-        <button
-          type="button"
-          onClick={() => setModalOpen(true)}
-          aria-haspopup="dialog"
-          className="mx-auto flex min-h-11 items-center gap-1 text-[13px] font-semibold text-white/70 transition-colors hover:text-white"
-        >
-          Show all {pool.length} rare cards
-          <ChevronDown className="h-4 w-4 shrink-0" aria-hidden />
-        </button>
-      )}
       <PoolModal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
@@ -154,14 +140,14 @@ function PoolModal({
         ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Cards in this pack"
+        aria-label="Top hits"
         tabIndex={-1}
         className="glass-panel max-h-[85vh] w-full overflow-y-auto rounded-t-2xl border-t p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] outline-none sm:max-w-2xl sm:rounded-2xl sm:border"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="font-heading text-lg font-bold tracking-tight text-white">
-            Cards in this pack
+            Top hits
             <span className="ml-2 text-[13px] font-normal tabular-nums text-white/50">
               {pool.length} cards
             </span>

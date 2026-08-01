@@ -44,6 +44,11 @@ const mkReq = (orders: any[], customerId = 'cus_1') => ({
           }
         : {
             listCustomerAddresses: jest.fn(async () => [ADDRESS]),
+            // Profile fallback for ship_phone (addresses saved by the
+            // storefront's inline form carry no phone).
+            listCustomers: jest.fn(async () => [
+              { id: customerId, phone: '+60107667787' },
+            ]),
           },
   },
 });
@@ -60,6 +65,8 @@ describe('POST /store/delivery-orders/:id/address', () => {
       await editAddress(mkReq([order({ status })]) as any, res);
       expect(updateDeliveryOrders).toHaveBeenCalledTimes(1);
       expect(out.body.address.ship_name).toBe('Ada Lovelace');
+      // Address has no phone → the profile phone rides into the snapshot.
+      expect(out.body.address.ship_phone).toBe('+60107667787');
     },
   );
 

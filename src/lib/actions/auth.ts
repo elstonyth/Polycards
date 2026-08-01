@@ -18,18 +18,11 @@ import { logger } from '@/lib/logger';
 import { setAuthToken, clearAuthToken } from '@/lib/data/customer';
 import { fetchProfileHandle } from '@/lib/data/profiles';
 import { friendlyError, type ErrorRule } from '@/lib/errors';
+import { NAME_MAX, normalizePhone } from '@/lib/profile-validation';
+import { ALLOWED_SELF_HOSTS } from '@/lib/allowed-hosts';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD_LENGTH = 8;
-
-// Hosts allowed to originate the Google OAuth callback URL. Mirrors the
-// Authorised redirect URIs on the OAuth client — keep the two in sync. Guards
-// against Host/X-Forwarded-Host spoofing when building `callback_url`.
-const ALLOWED_CALLBACK_HOSTS = new Set([
-  'polycards.gg',
-  'www.polycards.gg',
-  'localhost:3000',
-]);
 
 export type AuthCustomer = {
   id: string;
@@ -43,7 +36,8 @@ export type AuthCustomer = {
 };
 
 export type AuthResult =
-  { ok: true; customer: AuthCustomer } | { ok: false; error: string };
+  | { ok: true; customer: AuthCustomer }
+  | { ok: false; error: string };
 
 type TokenResponse = { token: string };
 
@@ -139,6 +133,7 @@ export async function signup(input: {
   email: string;
   password: string;
   first_name?: string;
+  phone?: string;
 }): Promise<AuthResult> {
   const email = input.email.trim().toLowerCase();
   if (!EMAIL_RE.test(email))
@@ -152,6 +147,16 @@ export async function signup(input: {
       ok: false,
       error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`,
     };
+  // Phone is REQUIRED at registration (operator requirement) and stored
+  // normalized to E.164 (+60…, +44…, …) so it flows into delivery orders
+  // reliably.
+  const phone = normalizePhone(input.phone ?? '');
+  if (!phone)
+    return {
+      ok: false,
+      error: 'Please enter a valid phone number for the selected country.',
+    };
+  const first_name = input.first_name?.trim().slice(0, NAME_MAX) || undefined;
 
   try {
     const registerToken = await exchangeToken(
@@ -160,7 +165,7 @@ export async function signup(input: {
       input.password,
     );
     await sdk.store.customer.create(
-      { email, first_name: input.first_name?.trim() || undefined },
+      { email, first_name, phone },
       {},
       { Authorization: `Bearer ${registerToken}` },
     );
@@ -227,7 +232,7 @@ export async function googleLoginStart(): Promise<
     // rejected by Google anyway, but validating here keeps attacker-controlled
     // values out of the backend token exchange. This set mirrors the Authorised
     // redirect URIs on the OAuth client (keep the two in sync).
-    if (!host || !ALLOWED_CALLBACK_HOSTS.has(host))
+    if (!host || !ALLOWED_SELF_HOSTS.has(host))
       return { ok: false, error: 'Could not determine site origin.' };
     const proto =
       h.get('x-forwarded-proto') ??

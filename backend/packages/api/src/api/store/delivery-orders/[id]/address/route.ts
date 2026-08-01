@@ -62,6 +62,16 @@ export async function POST(
       'That address is missing required shipping fields.',
     );
   }
+  // Same fallback as request-delivery: addresses saved by the storefront's
+  // inline form carry no phone, so pull the profile phone rather than wiping
+  // the order's contact number on an address edit.
+  if (!snapshot.ship_phone) {
+    const [customer] = await customerModule.listCustomers(
+      { id: customerId },
+      { take: 1 },
+    );
+    snapshot.ship_phone = customer?.phone ?? null;
+  }
 
   // Atomic write: only update while the order is STILL in the status we read,
   // so an admin shipping the order between our check and this write can't be

@@ -277,7 +277,8 @@ export async function getPackDetail(slug: string): Promise<PackDetail | null> {
 // --- Recent Pulls: the live ledger feed (GET /store/pulls/recent) -----------
 
 // One row from the public recent-pulls feed: won card + when + the source
-// pack's live catalog label + a MASKED puller name ("Els***" / "Anonymous").
+// pack's live catalog label + the puller's display name ("Anonymous" when
+// the account has none).
 interface BackendRecentPull {
   handle: string;
   name: string;
@@ -291,7 +292,7 @@ interface BackendRecentPull {
   /** Pack label from the live catalog; null when the pack was deleted. */
   pack_title?: string | null;
   pack_image?: string | null;
-  /** Masked puller display name; absent on an older backend. */
+  /** Puller display name (first_name, full); absent on an older backend. */
   who?: string;
   rolled_at: string;
 }
@@ -308,7 +309,7 @@ export interface RecentPull {
   /** Source pack name + icon (for the feed's pack label). */
   packName: string;
   packIcon: string;
-  /** Masked puller display name, e.g. "Els***" (never full identity). */
+  /** Puller display name (first_name in full — never email/id). */
   who: string;
   /** Relative timestamp, e.g. "4m ago" (computed at render). */
   agoLabel: string;

@@ -117,8 +117,8 @@ export default function PackDetailClient({
   // that identity churn would make the valueRange memo below recompute always.
   const pool = useMemo(() => liveDetail?.pool ?? [], [liveDetail?.pool]);
 
-  // Rare+ subset for the "Cards in this pack" section: the teaser rail shows
-  // the top cards, the expand dialog lists every Rare-and-above card
+  // Rare+ subset for the "Top hits" section: the rail shows the whole subset,
+  // the expand dialog lists the same Rare-and-above cards grouped by tier
   // (commons/uncommons are catalogue noise there). Order inherited (pool is
   // value-sorted desc). The FULL pool still feeds the demo spin + odds range.
   // Memoized like `pool` above (stable prop identity for PoolByRarity); the
@@ -498,7 +498,7 @@ export default function PackDetailClient({
             </Reveal>
           )}
 
-          {/* Cards in this pack — Rare+ only, as a swipeable teaser rail whose
+          {/* Top hits — Rare+ only, as a swipeable rail whose
               expand button opens the full pool dialog (rarest first, per-tier
               pull chance when published). Header lives inside the component
               (the expand button sits in it). */}

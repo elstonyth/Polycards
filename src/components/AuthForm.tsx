@@ -10,6 +10,13 @@ import {
   googleLoginStart,
 } from '@/lib/actions/auth';
 import { useAuth } from './auth/AuthProvider';
+import { NAME_MAX, normalizePhone } from '@/lib/profile-validation';
+import { PhoneField } from '@/components/PhoneField';
+
+// The Field inputs below carry a pl-9 for their leading icon; PhoneField has
+// no icon, so it gets the same chrome with plain px-3.
+const PHONE_INPUT_CLASS =
+  'h-11 w-full rounded-xl border border-white/10 bg-white/[0.05] px-3 text-sm text-white shadow-[inset_0_1px_2px_rgba(0,0,0,0.25)] placeholder:text-white/50 focus:border-white/25 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-0';
 
 // Inner content of the auth modal. The panel chrome (border/bg/padding) is provided
 // by AuthModal; this component renders the heading, social buttons, and the form.
@@ -17,9 +24,9 @@ import { useAuth } from './auth/AuthProvider';
 // uses a single modal, not separate pages). `onSuccess` closes the modal once the
 // auth server action returns a customer.
 
-// Error notes. `field: 'password'` marks errors caused by the password pair
-// (wires aria-invalid/-describedby).
-type Note = { text: string; field?: 'password' };
+// Error notes. `field` marks which input caused the error (wires
+// aria-invalid/-describedby): the password pair or the signup phone.
+type Note = { text: string; field?: 'password' | 'phone' };
 
 export default function AuthForm({
   mode,
@@ -80,6 +87,17 @@ export default function AuthForm({
       });
       return;
     }
+    // Same normalization the server applies — catch a bad number before the
+    // round-trip (the action re-validates; a server action is a public endpoint).
+    // PhoneField submits E.164 (+<country code><number>) in the hidden input.
+    const phone = String(form.get('phone') ?? '');
+    if (isSignup && !normalizePhone(phone)) {
+      setNote({
+        text: 'Please enter a valid phone number for the selected country.',
+        field: 'phone',
+      });
+      return;
+    }
 
     setBusy(true);
     const result = isSignup
@@ -87,6 +105,7 @@ export default function AuthForm({
           email,
           password,
           first_name: String(form.get('username') ?? ''),
+          phone,
         })
       : await login({ email, password });
     setBusy(false);
@@ -232,6 +251,7 @@ export default function AuthForm({
             placeholder="Username"
             // Submitted as first_name (a display name), not a login identifier.
             autoComplete="nickname"
+            maxLength={NAME_MAX}
           />
         )}
         <Field
@@ -242,6 +262,18 @@ export default function AuthForm({
           autoComplete="email"
           required
         />
+        {isSignup && (
+          <PhoneField
+            name="phone"
+            inputClassName={PHONE_INPUT_CLASS}
+            placeholder="Phone number"
+            required
+            ariaInvalid={note?.field === 'phone'}
+            ariaDescribedby={
+              note?.field === 'phone' ? 'auth-form-error' : undefined
+            }
+          />
+        )}
         <Field
           icon={Lock}
           name="password"

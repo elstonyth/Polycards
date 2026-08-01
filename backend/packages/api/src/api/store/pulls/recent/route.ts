@@ -15,9 +15,10 @@ import {
 
 // GET /store/pulls/recent — the most recent pulls across all packs, for the
 // "Recent Pulls" live feed. A plain publishable-key-scoped store route (no
-// customer auth). PUBLIC-feed PII policy (product decision, 2026-07-04): each
-// row carries a MASKED puller display name ("Els***" — first_name only, first
-// three characters; never email, never customer_id), the won card, the source
+// customer auth). PUBLIC-feed PII policy (operator decision 2026-08-01,
+// reversing the 2026-07-04 masking): each row carries the puller's FULL
+// display name (first_name only — the same field the leaderboard already
+// shows in full; never email, never customer_id), the won card, the source
 // pack's title/image, and when it was rolled. Each pull is joined to its Card
 // by handle; orphaned rows (card removed) are dropped.
 const RECENT_LIMIT = 12;
@@ -37,10 +38,10 @@ export function clearRecentPullsCache(): void {
   recentCache.clear();
 }
 
-// "Elston" → "Els***"; blank/missing first_name → "Anonymous".
-const maskName = (name: string | null | undefined): string => {
+// Full display name; blank/missing first_name → "Anonymous".
+const displayName = (name: string | null | undefined): string => {
   const n = (name ?? '').trim();
-  return n ? `${n.slice(0, 3)}***` : 'Anonymous';
+  return n || 'Anonymous';
 };
 
 export async function GET(
@@ -89,8 +90,8 @@ export async function GET(
     : [];
   const packBySlug = new Map(packRows.map((p) => [p.slug, p]));
 
-  // Masked puller names — first_name ONLY (leaderboard's PII rule), then
-  // masked to 3 chars. Missing customer/first_name reads as "Anonymous".
+  // Puller display names — first_name ONLY (leaderboard's PII rule), shown in
+  // full. Missing customer/first_name reads as "Anonymous".
   // ponytail: resolve() is wrapped nullsafe — if the customer module can't be
   // resolved (or resolves to something without listCustomers, e.g. a test
   // harness that only registers this module) the feed degrades to masking
@@ -134,8 +135,8 @@ export async function GET(
         pack_id: p.pack_id,
         pack_title: pack?.title ?? null,
         pack_image: pack?.image ?? null,
-        // MASKED display name only — never customer_id/email (see header).
-        who: maskName(p.customer_id ? firstNameById.get(p.customer_id) : null),
+        // Full display name — never customer_id/email (see header).
+        who: displayName(p.customer_id ? firstNameById.get(p.customer_id) : null),
         rolled_at: p.rolled_at,
       };
     })

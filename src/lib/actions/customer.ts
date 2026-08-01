@@ -14,8 +14,7 @@ import type { HttpTypes } from '@medusajs/types';
 import { logger } from '@/lib/logger';
 import { updateCustomerProfile } from '@/lib/data/customer';
 import { friendlyError, type ErrorRule } from '@/lib/errors';
-
-const MAX_FIELD_LENGTH = 120;
+import { NAME_MAX, normalizePhone } from '@/lib/profile-validation';
 
 export type ProfileCustomer = {
   id: string;
@@ -26,7 +25,8 @@ export type ProfileCustomer = {
 };
 
 export type ProfileResult =
-  { ok: true; customer: ProfileCustomer } | { ok: false; error: string };
+  | { ok: true; customer: ProfileCustomer }
+  | { ok: false; error: string };
 
 const toProfileCustomer = (c: HttpTypes.StoreCustomer): ProfileCustomer => ({
   id: c.id,
@@ -40,7 +40,7 @@ const toProfileCustomer = (c: HttpTypes.StoreCustomer): ProfileCustomer => ({
 const clean = (v: string | undefined): string | null | undefined => {
   if (v === undefined) return undefined;
   const trimmed = v.trim();
-  return trimmed === '' ? null : trimmed.slice(0, MAX_FIELD_LENGTH);
+  return trimmed === '' ? null : trimmed.slice(0, NAME_MAX);
 };
 
 const PROFILE_RULES: ErrorRule[] = [
@@ -55,10 +55,33 @@ export async function updateProfile(input: {
   last_name?: string;
   phone?: string;
 }): Promise<ProfileResult> {
+  // Reject (don't silently truncate) an over-long name — the form caps input
+  // at NAME_MAX too, so this only fires for API callers bypassing the UI.
+  for (const name of [input.first_name, input.last_name]) {
+    if (name !== undefined && name.trim().length > NAME_MAX) {
+      return {
+        ok: false,
+        error: `Names must be ${NAME_MAX} characters or fewer.`,
+      };
+    }
+  }
+  // Phone stays optional here (existing accounts may not have one yet), but a
+  // non-empty value must be a valid number — stored normalized to E.164.
+  let phone = clean(input.phone);
+  if (typeof phone === 'string') {
+    const normalized = normalizePhone(phone);
+    if (!normalized) {
+      return {
+        ok: false,
+        error: 'Please enter a valid phone number for the selected country.',
+      };
+    }
+    phone = normalized;
+  }
   const body: HttpTypes.StoreUpdateCustomer = {
     first_name: clean(input.first_name),
     last_name: clean(input.last_name),
-    phone: clean(input.phone),
+    phone,
   };
 
   try {

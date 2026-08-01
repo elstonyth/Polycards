@@ -6,6 +6,8 @@ import { Loader2 } from 'lucide-react';
 import { updateProfile, type ProfileCustomer } from '@/lib/actions/customer';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { INPUT_CLASS } from '@/components/account/ui';
+import { NAME_MAX } from '@/lib/profile-validation';
+import { PhoneField } from '@/components/PhoneField';
 
 // Real, wired profile form for the logged-in customer ("me"). Submits via the
 // `updateProfile` server action (httpOnly-cookie Bearer, no client-side token).
@@ -62,6 +64,7 @@ export default function SettingsForm({ customer }: Props) {
         defaultValue={customer.first_name ?? ''}
         autoComplete="given-name"
         placeholder="Your name"
+        maxLength={NAME_MAX}
       />
       <Field
         label="Last name"
@@ -69,15 +72,22 @@ export default function SettingsForm({ customer }: Props) {
         defaultValue={customer.last_name ?? ''}
         autoComplete="family-name"
         placeholder="Optional"
+        maxLength={NAME_MAX}
       />
-      <Field
-        label="Phone"
-        name="phone"
-        type="tel"
-        defaultValue={customer.phone ?? ''}
-        autoComplete="tel"
-        placeholder="Optional"
-      />
+      <label className="block">
+        <span className="mb-1.5 block text-[12px] font-medium text-white/55">
+          Phone
+        </span>
+        <PhoneField
+          name="phone"
+          defaultValue={customer.phone ?? ''}
+          inputClassName={INPUT_CLASS}
+          placeholder="Phone number"
+        />
+        <span className="mt-1 block text-[11px] text-white/55">
+          Used for delivery updates. Pick your country code.
+        </span>
+      </label>
       <label className="block">
         <span className="mb-1.5 block text-[12px] font-medium text-white/55">
           Email
@@ -121,8 +131,12 @@ export default function SettingsForm({ customer }: Props) {
 
 function Field({
   label,
+  hint,
   ...props
-}: { label: string } & React.InputHTMLAttributes<HTMLInputElement>) {
+}: {
+  label: string;
+  hint?: string;
+} & React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <label className="block">
       <span className="mb-1.5 block text-[12px] font-medium text-white/55">
@@ -133,6 +147,9 @@ function Field({
         {...props}
         className={INPUT_CLASS}
       />
+      {hint && (
+        <span className="mt-1 block text-[11px] text-white/55">{hint}</span>
+      )}
     </label>
   );
 }
