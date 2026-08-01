@@ -85,6 +85,59 @@ describe('signup — password presence (#3)', () => {
   });
 });
 
+// Registration requires a phone (operator requirement 2026-08-01), picked via
+// the country selector and normalized to E.164 before the customer is created.
+describe('signup — required phone', () => {
+  it('rejects a missing phone before any backend call', async () => {
+    const r = await signup({
+      email: 'new@polycards.app',
+      password: 'PolycardsTest123!',
+    });
+    expect(r).toEqual({
+      ok: false,
+      error: 'Please enter a valid phone number for the selected country.',
+    });
+    expect(mocks.clientFetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects an invalid number', async () => {
+    const r = await signup({
+      email: 'new@polycards.app',
+      password: 'PolycardsTest123!',
+      phone: '12345',
+    });
+    expect(r.ok).toBe(false);
+    expect(mocks.clientFetch).not.toHaveBeenCalled();
+  });
+
+  it('creates the customer with the normalized +60 phone', async () => {
+    mocks.clientFetch
+      .mockResolvedValueOnce({ token: 'reg-tok' }) // register
+      .mockResolvedValueOnce({ token: 'sess-tok' }); // login exchange
+    mocks.customerCreate.mockResolvedValueOnce({ customer: { id: 'c1' } });
+    mocks.customerRetrieve.mockResolvedValueOnce({
+      customer: {
+        id: 'c1',
+        email: 'new@polycards.app',
+        first_name: 'N',
+        last_name: null,
+      },
+    });
+    mocks.fetchProfileHandle.mockResolvedValueOnce(null);
+
+    const r = await signup({
+      email: 'new@polycards.app',
+      password: 'PolycardsTest123!',
+      first_name: 'N',
+      phone: '010-766 7787',
+    });
+
+    expect(r.ok).toBe(true);
+    const [body] = mocks.customerCreate.mock.calls[0]!;
+    expect(body.phone).toBe('+60107667787');
+  });
+});
+
 describe('resetPassword — password presence (#3)', () => {
   it('returns a friendly error when the password is missing (no throw)', async () => {
     const r = await resetPassword({
