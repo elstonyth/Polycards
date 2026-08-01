@@ -483,7 +483,13 @@ const PackOddsEditorPage = () => {
       cancelText: t('packs.pool.cancel'),
     });
     if (!confirmed) return;
-    const checkedRows = rows.filter((r) => ids.has(r.card_id));
+    // One pass: split into the checked rows and the survivors' ids.
+    const checkedRows: EditRow[] = [];
+    const keepIds: string[] = [];
+    for (const r of rows) {
+      if (ids.has(r.card_id)) checkedRows.push(r);
+      else keepIds.push(r.card_id);
+    }
     // All-pending selection: nothing is on the server yet — un-stage locally
     // instead of a membership save that would commit the other staged rows.
     if (checkedRows.every((r) => r.pending)) {
@@ -493,12 +499,7 @@ const PackOddsEditorPage = () => {
       return;
     }
     try {
-      await saveMembersMut.mutateAsync({
-        slug,
-        card_ids: rows
-          .filter((r) => !ids.has(r.card_id))
-          .map((r) => r.card_id),
-      });
+      await saveMembersMut.mutateAsync({ slug, card_ids: keepIds });
       setChecked(new Set());
       toast.success(t('packs.editor.bulk.removed', { count: ids.size }));
       // Same as saveMembers: the cache is fresh once mutateAsync resolves —
