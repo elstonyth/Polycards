@@ -127,8 +127,9 @@ vocabulary is retained because un-suspending is meant to be a revert, not a rewr
 ADR 0004. VIP Level accrual itself stayed live throughout._
 
 **VIP Level**:
-A customer's rung 1–100, reached by cumulative external-funded spend. Unlocks a
-Reward Box tier, avatar frames, and referral rates.
+A customer's rung 1–100, reached by cumulative pack-open turnover (winnings-funded
+opens count too, #254/ADR 0003 — not external-funded spend). Unlocks a Reward Box
+tier, avatar frames, and referral rates.
 _Avoid_: rank, tier (Tier is the price axis)
 
 **Reward Box**:
