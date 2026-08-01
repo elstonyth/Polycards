@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { AccountHeader, Panel } from '@/components/account/ui';
 import SettingsForm from '@/components/account/SettingsForm';
+import CookieSettings from './CookieSettings';
 import { getCustomer } from '@/lib/data/customer';
 
 export const metadata: Metadata = { title: 'Settings' };
@@ -31,6 +32,12 @@ export default async function SettingsPage() {
               phone: customer.phone ?? null,
             }}
           />
+        </Panel>
+        <Panel>
+          <h2 className="mb-4 font-heading text-lg font-bold text-white">
+            Privacy
+          </h2>
+          <CookieSettings />
         </Panel>
         {/* One quiet line, not a panel of dead "coming soon" rows: none of
             these have a backend representation yet (launch follow-ups in
