@@ -1,16 +1,25 @@
 'use client';
 
 import Script from 'next/script';
+import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { CONSENT_EVENT, getConsent } from '@/lib/consent';
 
 const META_PIXEL_ID = '1867225397993589';
+
+// Routes that carry a single-use credential in the URL (query string or
+// path). The pixel's PageView beacon reports the full URL to Facebook, and
+// that race is independent of how fast the page scrubs the query client-side
+// — so these routes never get a pixel, full stop. Add a route here the
+// moment it puts a token/secret in the URL.
+const TOKENIZED_ROUTES = ['/reset-password'];
 
 // Loads the Meta Pixel only after the visitor accepts the cookie banner
 // (CookieConsent.tsx). Mounting after a mid-session "Accept" fires the
 // deferred init + PageView; the pixel itself auto-tracks App Router
 // client-side navigations via history.pushState.
 export default function MetaPixel() {
+  const pathname = usePathname();
   const [consented, setConsented] = useState(false);
 
   useEffect(() => {
@@ -20,6 +29,9 @@ export default function MetaPixel() {
     return () => window.removeEventListener(CONSENT_EVENT, sync);
   }, []);
 
+  // Checked before consent: a visitor who lands directly on a tokenized route
+  // must get no pixel for that page, even if they'd already consented.
+  if (TOKENIZED_ROUTES.includes(pathname)) return null;
   if (!consented) return null;
 
   return (
