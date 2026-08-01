@@ -6249,6 +6249,35 @@ class PacksModuleService extends MedusaService({
     }
 
     if (rows.length === 0) return null;
+
+    // 3c) WP ledger row (POLYCARD-BACK §5, Plan 060) — one row per settled
+    // winner, not per card. Same ref_id as the 3a credit mutation so a retry
+    // dedupes on recordLedgerEntry's own (type, ref_id) idempotency.
+    // vaultDelta stays null (WP is a straight reward credit like TP, not a
+    // vault-liability move). `stage` has no single source — RankPayout is
+    // already a union of every unlocked stage's rewards (challenge-settle.ts
+    // payoutByRank) — so this reports the highest stage unlocked that week,
+    // the frontier the payout reflects; SettleSnapshot carries no per-card
+    // FMV, so `value` stays 0 rather than threading new data through the job.
+    await this.recordLedgerEntry(
+      {
+        type: 'WP',
+        customerId,
+        refId: `challenge:${weekStartIso}:${customerId}`,
+        walletDelta: payout.credits,
+        vaultDelta: null,
+        payload: {
+          type: 'WP',
+          period: weekStartIso,
+          stage: Math.max(...input.snapshot.unlocked_stages),
+          rank,
+          sku: cardHandles[0] ?? null,
+          value: 0,
+        },
+      },
+      sharedContext,
+    );
+
     // 4) The settled-week record — generated create (writes raw_credits).
     await this.createChallengePayouts(rows, sharedContext);
 

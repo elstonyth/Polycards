@@ -69,11 +69,11 @@ function coerceQ(raw: unknown): string | undefined {
 
 // GET /admin/ledger — the Transactions list (POLYCARD-BACK §5.4).
 //
-// RF and WP are offered as filters but no writer produces them yet (no
-// referral-payout or challenge-settlement job exists, and Epic 6 is
-// cancelled), so those two return zero rows. The whole table is go-forward
-// only (D4, no backfill) — an empty list before this epic deployed is correct,
-// not a bug.
+// WP is written by settleChallengeWinner (Plan 060) when a weekly-challenge
+// winner is settled. RF is still writerless — Epic 6 (referral payouts) is
+// cancelled, so that filter returns zero rows. The whole table is go-forward
+// only (D4, no backfill) — an empty list for rows predating a type's writer
+// is correct, not a bug.
 //
 // ?from/?to are MYT CALENDAR DAYS, half-open [from, to+1day) — see
 // parseMytBound. Task 10 shipped the date pickers this was waiting on, so the
