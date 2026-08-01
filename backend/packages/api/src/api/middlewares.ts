@@ -208,6 +208,10 @@ export default defineMiddlewares({
     {
       // Validated admin image upload (POST /admin/media). /admin/* is already
       // auth-protected; multer parses the multipart body into req.files.
+      // Deliberately NOT on adminActionRateLimit: multi-image upload flows
+      // fire this per-image from a client-side loop, and the shared 30/10s
+      // burst budget would 429 mid-batch (see the EXEMPT note in the
+      // coverage-guard spec).
       matcher: '/admin/media',
       method: 'POST',
       middlewares: [mediaUploadMiddleware],
@@ -659,6 +663,49 @@ export default defineMiddlewares({
       method: 'POST',
       middlewares: [adminActionRateLimit],
     },
+    {
+      // Purchase-invoice writer (POLYCARD-BACK §3.5) — raises real inventory
+      // counters, up to 200 lines x 1,000,000 qty per call; same admin budget.
+      matcher: '/admin/purchase-invoices',
+      method: ['POST'],
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Delivery-orders bulk status transition — up to 100 order transitions +
+      // 100 customer notifications per call; same admin budget.
+      matcher: '/admin/delivery-orders/bulk',
+      method: ['POST'],
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Pack list reorder — batch rank write across the packs list; same admin
+      // budget.
+      matcher: '/admin/packs/reorder',
+      method: ['POST'],
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Pack odds write (POST /admin/packs/:slug/odds) — rewrites the pull
+      // table an economy relies on; same admin money-mutation budget.
+      matcher: '/admin/packs/*/odds',
+      method: ['POST'],
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Pack members write (POST /admin/packs/:slug/members) — rewrites which
+      // cards a pack can pull; same admin money-mutation budget.
+      matcher: '/admin/packs/*/members',
+      method: ['POST'],
+      middlewares: [adminActionRateLimit],
+    },
+    // /admin/cards, /admin/cards/*, /admin/products/from-pricecharting,
+    // /admin/pixel-pokemon, /admin/packs (bare create) and
+    // /admin/packs/*/top-hits are deliberately NOT on adminActionRateLimit —
+    // catalog/display CRUD driven by client-side per-row loops in shipped
+    // bulk operator tooling (#299 PriceCharting collection import, #305 bulk
+    // retier), and from-pricecharting matches the recorded convention that
+    // only money-mutation routes carry this limiter. See the coverage-guard
+    // spec's EXEMPT list for the one-line reason on each.
     // POLYCARD-BACK §4.2 session block — LAST entry on purpose. Blocking login
     // alone would leave every already-minted bearer (including a Google-minted
     // one, whose callback this does not touch) working until it expired, so a
