@@ -1,4 +1,5 @@
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
+import { Modules, ProductStatus } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
 import { mintSuperAdmin, unwrapResponse } from './utils';
@@ -14,6 +15,18 @@ medusaIntegrationTestRunner({
     describe('admin purchase invoices — create', () => {
       let adminToken: string;
       let packs: PacksModuleService;
+
+      // The route's card_handle existence gate resolves against PRODUCT
+      // handles (POLYCARD-BACK, see route.ts) — every handle a fixture buys
+      // needs a backing product, same convention as inventory-detail.spec.ts
+      // (makeProduct) and inventory-list.spec.ts (createProducts).
+      const makeProduct = async (handle: string, title: string) => {
+        const productModule = getContainer().resolve(Modules.PRODUCT);
+        const [product] = await productModule.createProducts([
+          { title, handle, status: ProductStatus.PUBLISHED },
+        ]);
+        return product;
+      };
 
       beforeEach(async () => {
         packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
@@ -32,6 +45,8 @@ medusaIntegrationTestRunner({
             { headers: { authorization: `Bearer ${adminToken}` } },
           ),
         );
+        // LINE's handle below, product-backed for every test in this file.
+        await makeProduct('charizard-psa-10', 'Charizard PSA 10');
       });
 
       const adminHeaders = () => ({
@@ -99,6 +114,7 @@ medusaIntegrationTestRunner({
         // 3 * 0.07 is 0.21000000000000002 in JS but exactly 0.21 in Postgres
         // numeric — the CHECK tolerates that gap; a 2dp-rounded line_total
         // against a rounder qty would be the thing it must still catch.
+        await makeProduct('penny-common', 'Penny Common');
         const res = await createOriginal([
           { ...LINE, card_handle: 'penny-common', qty: 3, unit_cost: 0.07 },
         ]);
