@@ -27,12 +27,20 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   );
 
   // Fail closed: an unrecognised/missing host means we can't safely build an
-  // absolute self-URL. Bounce relative to the current request instead of
-  // ever falling back to `request.url` (see resolveCallbackOrigin).
+  // absolute self-URL — and `request.nextUrl` is not a safe fallback here
+  // either. Behind the DO proxy, `request.nextUrl`'s origin is the standalone
+  // server's own BIND origin (http://0.0.0.0:PORT), not the public origin the
+  // browser actually requested (the exact broken redirect PR #311 fixed for
+  // the happy path — recreated here on the failure path if we ever build a
+  // URL from it). A bare relative Location is RFC 7231 §7.1.2-legal and lets
+  // the browser resolve it against the origin IT requested, so skip
+  // NextResponse.redirect's URL construction entirely and write the header
+  // by hand.
   if (!origin) {
-    return NextResponse.redirect(
-      new URL('/auth/google/failed?reason=origin', request.nextUrl),
-    );
+    return new NextResponse(null, {
+      status: 302,
+      headers: { Location: '/auth/google/failed?reason=origin' },
+    });
   }
 
   const failed = (reason: string): NextResponse =>

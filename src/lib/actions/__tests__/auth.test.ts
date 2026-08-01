@@ -53,6 +53,8 @@ import {
   googleCallback,
 } from '../auth';
 import { resolveCallbackOrigin } from '@/lib/allowed-hosts';
+import { NextRequest } from 'next/server';
+import { GET as googleCallbackGET } from '@/app/auth/google/callback/route';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -457,15 +459,53 @@ describe('googleLoginStart — callback_url host guard', () => {
 });
 
 // Plan 063 — the callback route's own origin guard (route.ts, separate from
-// googleLoginStart above). Tests the extracted helper rather than the Route
-// Handler itself, per the route staying a thin GET around it.
-describe('resolveCallbackOrigin — callback route origin guard (plan 063)', () => {
-  it('unallowlisted forwarded host → null (never falls back to request.url)', () => {
-    expect(resolveCallbackOrigin('evil.example.com', 'https')).toBeNull();
+// googleLoginStart above). The success-path cases below test the extracted
+// resolveCallbackOrigin helper directly, per the route staying a thin GET
+// around it; the two fail-closed cases (CodeRabbit PR-314) instead import and
+// call the real Route Handler GET, because the bug they pin — the redirect's
+// Location built from the wrong origin — lives in route.ts itself, not in
+// the helper (see the note on those two below).
+describe("callback route origin guard — resolveCallbackOrigin + the route's fail-closed redirect (plan 063)", () => {
+  // These two exercise the real Route Handler, not just the helper: the
+  // fail-closed branch used to build its redirect from `request.nextUrl`,
+  // whose origin behind the DO proxy is the standalone server's own BIND
+  // origin (http://0.0.0.0:PORT) — the exact broken redirect PR #311 fixed,
+  // recreated on this failure path. The URL below stands in for that bind
+  // origin; asserting a bare RELATIVE Location (not an absolute URL carrying
+  // it) is what actually pins the fix — resolveCallbackOrigin returning null
+  // in isolation wouldn't catch a regression back to `new URL(path,
+  // request.nextUrl)`.
+  const bindOriginRequest = (headers?: Record<string, string>) =>
+    new NextRequest(
+      'http://0.0.0.0:41234/auth/google/callback?code=c&state=s',
+      headers ? { headers } : undefined,
+    );
+
+  it('unallowlisted forwarded host → 302 with a relative Location, never the bind origin', async () => {
+    const request = bindOriginRequest({
+      'x-forwarded-host': 'evil.example.com',
+      'x-forwarded-proto': 'https',
+    });
+
+    const res = await googleCallbackGET(request);
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe(
+      '/auth/google/failed?reason=origin',
+    );
+    expect(mocks.clientFetch).not.toHaveBeenCalled();
   });
 
-  it('missing host → null', () => {
-    expect(resolveCallbackOrigin(null, 'https')).toBeNull();
+  it('missing host → 302 with a relative Location, never the bind origin', async () => {
+    const request = bindOriginRequest();
+
+    const res = await googleCallbackGET(request);
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe(
+      '/auth/google/failed?reason=origin',
+    );
+    expect(mocks.clientFetch).not.toHaveBeenCalled();
   });
 
   it('x-forwarded-host: localhost:4000 → succeeds with the http local origin', () => {

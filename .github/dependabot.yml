@@ -68,6 +68,11 @@ updates:
       - dependency-name: 'react-dom'
         update-types:
           - version-update:semver-major
+      # Mirror of the react-dom ignore above: the pair moves together
+      # deliberately, so a solo react major bump is blocked too.
+      - dependency-name: 'react'
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: github-actions
     directory: /

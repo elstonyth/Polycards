@@ -1,4 +1,8 @@
-import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
+import {
+  ContainerRegistrationKeys,
+  MedusaError,
+  Modules,
+} from '@medusajs/framework/utils';
 import type { MedusaContainer } from '@medusajs/framework/types';
 import { PACKS_MODULE } from './index';
 import type PacksModuleService from './service';
@@ -69,7 +73,7 @@ async function skuByHandle(
 // on_hand, which comes from the authoritative Medusa counter.
 export async function loadInventoryRows(
   container: MedusaContainer,
-  opts: { q?: string; handle?: string } = {},
+  opts: { q?: string; handle?: string; maxRows?: number } = {},
 ): Promise<InventoryRow[]> {
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
   const productModule = container.resolve(Modules.PRODUCT);
@@ -102,6 +106,19 @@ export async function loadInventoryRows(
   const listed = products.filter(
     (p): p is typeof p & { handle: string } => !!p.handle,
   );
+
+  // Enforced HERE, before the card read and the five aggregates below, not
+  // after: `listed` maps 1:1 to the rows this function returns, so a huge
+  // ?q= that busts the cap fails fast instead of paying for every downstream
+  // read first. Only the export route passes maxRows -- list/detail leave it
+  // unset, so this is a no-op for them (see loadInventoryRows' opts).
+  if (opts.maxRows !== undefined && listed.length > opts.maxRows) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      `Inventory export matched ${listed.length} rows, over the ${opts.maxRows}-row cap. Narrow the ?q= filter and try again.`,
+    );
+  }
+
   const handles = listed.map((p) => p.handle);
   // Scoped to `handles`, same as the five aggregates below — an unfiltered
   // cards read here was the one query in this function that ignored

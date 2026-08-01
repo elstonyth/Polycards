@@ -42,15 +42,22 @@ function routeFileToUrl(relPath: string): string {
   return `/${segments.join('/')}`;
 }
 
+// Matches four export shapes a route.ts handler can use for a mutation
+// method, so the scan can't be dodged by switching styles:
+//   export async function POST(...)   (the original, still group 1)
+//   export function POST(...)         (no async — group 1)
+//   export const POST = ...           (arrow/const handler — group 2)
+//   export { someHandler as POST }    (re-export alias — group 3)
 const MUTATION_METHOD_RE =
-  /export async function (POST|PUT|PATCH|DELETE)\b/g;
+  /export\s+(?:async\s+)?function\s+(POST|PUT|PATCH|DELETE)\b|export\s+const\s+(POST|PUT|PATCH|DELETE)\s*=|export\s*\{[^}]*\bas\s+(POST|PUT|PATCH|DELETE)\b[^}]*\}/g;
 
 function mutationMethodsOf(fileText: string): string[] {
   const methods = new Set<string>();
   let match: RegExpExecArray | null;
   MUTATION_METHOD_RE.lastIndex = 0;
   while ((match = MUTATION_METHOD_RE.exec(fileText))) {
-    methods.add(match[1]);
+    const method = match[1] || match[2] || match[3];
+    if (method) methods.add(method);
   }
   return [...methods];
 }
@@ -248,6 +255,7 @@ describe('admin mutation routes are rate-limited (plan 061 coverage guard)', () 
   it('every admin route.ts mutation export is rate-limited or explicitly exempt', () => {
     const routeFiles = collectRouteFiles(path.join(API_ROOT, 'admin'));
     const failures: string[] = [];
+    let scannedMethodCount = 0;
 
     for (const relPath of routeFiles) {
       const text = fs.readFileSync(path.join(API_ROOT, relPath), 'utf8');
@@ -256,6 +264,7 @@ describe('admin mutation routes are rate-limited (plan 061 coverage guard)', () 
 
       const url = routeFileToUrl(relPath);
       for (const method of methods) {
+        scannedMethodCount++;
         const covered = limiterRegexes.some(
           (e) => e.methods.includes(method) && e.re.test(url),
         );
@@ -278,6 +287,13 @@ describe('admin mutation routes are rate-limited (plan 061 coverage guard)', () 
       }
     }
 
+    // Guards MUTATION_METHOD_RE itself, the same way the extraction test above
+    // guards extractAdminActionRateLimitEntries: without this floor, a regex
+    // change that silently matches nothing would make `failures` vacuously
+    // empty and this whole test green-for-the-wrong-reason (the axe/oklch
+    // trap this file's header comment already warns about). 20 is a safe
+    // floor under the measured 32 mutation-method exports as of plan 061.
+    expect(scannedMethodCount).toBeGreaterThan(20);
     expect(failures).toEqual([]);
   });
 

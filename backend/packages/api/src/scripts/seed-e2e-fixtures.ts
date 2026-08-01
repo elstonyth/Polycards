@@ -279,14 +279,30 @@ export default async function seedE2eFixtures({
     );
   } else {
     // Idempotent by deterministic id: covers first-run (create), a re-run before
-    // the spec claims it (sees 'granted'), and a re-run after (sees 'fulfilled').
+    // the spec claims it (sees 'granted'), and a re-run after a rewards.spec.ts
+    // pass already CLAIMED it (sees 'fulfilled', or 'revoked' from a manual
+    // op). Self-healing on that last case, not just idempotent: a claim
+    // flips status via claimVipRewardGrant's updateVipRewardGrants (service.ts),
+    // so without a reset here the fixture goes dark after the very first
+    // successful nightly run instead of staying claimable on every run.
     const grantId = `vrg_e2e_${rewardCustomer.id}_voucher`;
     const [existingGrant] = await packs.listVipRewardGrants(
       { id: grantId },
       { take: 1 },
     );
-    if (existingGrant) {
+    if (existingGrant && existingGrant.status === 'granted') {
       logger.info('[e2e] E2E voucher grant already present, skipping.');
+    } else if (existingGrant) {
+      // Reset in place (not delete+recreate): the row's id is the fixture's
+      // deterministic key and the unique ladder index is scoped to it, so an
+      // update is the smaller, safer move than a delete racing a re-create.
+      await packs.updateVipRewardGrants([
+        { id: grantId, status: 'granted' },
+      ]);
+      logger.info(
+        `[e2e] E2E voucher grant was '${existingGrant.status}' — reset to ` +
+          `'granted' for '${REWARD_EMAIL}'.`,
+      );
     } else {
       await packs.createVipRewardGrants([
         {

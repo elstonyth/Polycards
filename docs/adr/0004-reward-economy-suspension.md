@@ -1,6 +1,6 @@
 # The reward economy is suspended, not retired
 
-#294 (2026-07-29) pulled VIP reward claiming (`/vip`, its voucher list, the
+PR #294 (2026-07-29) pulled VIP reward claiming (`/vip`, its voucher list, the
 daily reward box) and the two-tier referral programme
 (`/vouchers`, `/daily`, `/rewards`, `/referrals`, `/invite/[handle]`) off the
 storefront. Referrals carried known bugs (2026-07-25 referral investigation)

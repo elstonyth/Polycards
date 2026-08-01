@@ -157,7 +157,7 @@ CA is the only supported path here — do not disable certificate verification a
 
 ---
 
-## 5. Known-good as of 2026-07-19
+## 5. Known-good as of 2026-07-19 (`7495ea4`) — historical; §1 re-verified 2026-08-01 against `a993f34a`
 
 - `master` = `7495ea4`; both DO apps ACTIVE on it.
 - Weekly Challenge tracking/display half: shipped and verified live.

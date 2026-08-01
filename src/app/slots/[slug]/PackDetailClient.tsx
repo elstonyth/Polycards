@@ -504,8 +504,14 @@ export default function PackDetailClient({
               on the page listing the whole pool, matching the value range the
               odds panel quotes below (also computed over the full pool).
               Header lives inside the component (the expand button sits in
-              it). */}
-          {topPool.length > 0 && (
+              it). Gated on `pool`, not `topPool`: a save-only Common/
+              Uncommon pack has an empty Rare+ subset but a non-empty pool,
+              and the odds panel below still quotes full-pool value ranges —
+              PoolByRarity itself drops the rail strip and relabels the
+              header to "All cards" when `rail` is empty (see its own note),
+              so this section still renders instead of vanishing under an
+              odds panel with nothing to point at. */}
+          {pool.length > 0 && (
             <Reveal as="section">
               <PoolByRarity
                 rail={topPool}

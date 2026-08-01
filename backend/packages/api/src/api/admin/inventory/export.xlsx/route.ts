@@ -1,5 +1,4 @@
 import type { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
-import { MedusaError } from '@medusajs/framework/utils';
 // write-excel-file 4 is ESM-ONLY as far as TypeScript is concerned: both its
 // root and its node/ package.json declare `"type": "module"` and it ships no
 // .d.cts, so under this package's Node16 moduleResolution a plain value
@@ -142,15 +141,15 @@ export async function GET(
     typeof rawQ === 'string' && rawQ.trim() !== ''
       ? rawQ.trim().slice(0, 100)
       : undefined;
-  const rows = await loadInventoryRows(req.scope, { q });
-
-  const maxRows = inventoryExportMaxRows();
-  if (rows.length > maxRows) {
-    throw new MedusaError(
-      MedusaError.Types.INVALID_DATA,
-      `Inventory export matched ${rows.length} rows, over the ${maxRows}-row cap. Narrow the ?q= filter and try again.`,
-    );
-  }
+  // maxRows is enforced INSIDE loadInventoryRows now, right after the
+  // products read and before the card read + five aggregates -- a huge ?q=
+  // that busts the cap fails fast instead of paying for every downstream
+  // read first (loadInventoryRows' own note). Throws the same
+  // MedusaError/INVALID_DATA shape this route used to raise itself.
+  const rows = await loadInventoryRows(req.scope, {
+    q,
+    maxRows: inventoryExportMaxRows(),
+  });
 
   // See the import note at the top of this file for why this is dynamic.
   const { default: writeXlsxFile } = await import('write-excel-file/node');
