@@ -208,9 +208,12 @@ export default defineMiddlewares({
     {
       // Validated admin image upload (POST /admin/media). /admin/* is already
       // auth-protected; multer parses the multipart body into req.files.
+      // adminActionRateLimit runs FIRST (keys on auth_context.actor_id / IP,
+      // never reads the body) so an over-budget request is rejected before
+      // the 20 MB multipart body is buffered into memory by multer.
       matcher: '/admin/media',
       method: 'POST',
-      middlewares: [mediaUploadMiddleware],
+      middlewares: [adminActionRateLimit, mediaUploadMiddleware],
     },
     // Brute-force/credential-stuffing protection on the public credential
     // endpoints (login, register, reset/update password) for every actor type
@@ -657,6 +660,87 @@ export default defineMiddlewares({
       // -wide; same admin money-mutation budget as site-settings.
       matcher: '/admin/avatar-frames',
       method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Purchase-invoice writer (POLYCARD-BACK §3.5) — raises real inventory
+      // counters, up to 200 lines x 1,000,000 qty per call; same admin budget.
+      matcher: '/admin/purchase-invoices',
+      method: ['POST'],
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Delivery-orders bulk status transition — up to 100 order transitions +
+      // 100 customer notifications per call; same admin budget.
+      matcher: '/admin/delivery-orders/bulk',
+      method: ['POST'],
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Pack list reorder — batch rank write across the packs list; same admin
+      // budget.
+      matcher: '/admin/packs/reorder',
+      method: ['POST'],
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Pack odds write (POST /admin/packs/:slug/odds) — rewrites the pull
+      // table an economy relies on; same admin money-mutation budget.
+      matcher: '/admin/packs/*/odds',
+      method: ['POST'],
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Pack members write (POST /admin/packs/:slug/members) — rewrites which
+      // cards a pack can pull; same admin money-mutation budget.
+      matcher: '/admin/packs/*/members',
+      method: ['POST'],
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Card catalog write (POST /admin/cards) — creates catalog cards that
+      // feed pack odds/members; same admin money-mutation budget.
+      matcher: '/admin/cards',
+      method: ['POST'],
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Product-from-PriceCharting import write — creates a priced product
+      // from an external catalog lookup; same admin money-mutation budget.
+      matcher: '/admin/products/from-pricecharting',
+      method: ['POST'],
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Pixel-Pokemon catalog write — same admin money-mutation budget.
+      matcher: '/admin/pixel-pokemon',
+      method: ['POST'],
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Pack creation (POST /admin/packs) — distinct tree node from
+      // reorder/odds/members/top-hits below it, so no matcher overlap; same
+      // admin money-mutation budget.
+      matcher: '/admin/packs',
+      method: ['POST'],
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Top Hits display-order write (POST /admin/packs/:slug/top-hits) —
+      // sibling of odds/members at the same wildcard sub-node; same admin
+      // money-mutation budget.
+      matcher: '/admin/packs/*/top-hits',
+      method: ['POST'],
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Card catalog update/delete (POST/DELETE /admin/cards/:handle) — feeds
+      // pack odds/members; same admin money-mutation budget. No sibling route
+      // exists under /admin/cards/* (verified), so the trailing wildcard is
+      // safe here (see the EXEMPT note in the coverage-guard spec for the two
+      // cases where a trailing wildcard is NOT safe to add).
+      matcher: '/admin/cards/*',
+      method: ['POST', 'DELETE'],
       middlewares: [adminActionRateLimit],
     },
     // POLYCARD-BACK §4.2 session block — LAST entry on purpose. Blocking login
