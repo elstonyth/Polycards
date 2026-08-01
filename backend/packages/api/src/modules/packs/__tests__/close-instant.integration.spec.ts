@@ -102,6 +102,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         await service.closeInstantWindow([pull.id], 'cus_a', NOW.getTime());
         const firstClose = await freshPull(pull.id);
         const stamp = firstClose.instant_closed_at;
+        expect(stamp).not.toBeNull(); // guard against a silently-no-op first close
 
         const second = await service.closeInstantWindow(
           [pull.id],
