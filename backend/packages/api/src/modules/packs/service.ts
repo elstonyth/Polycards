@@ -6271,7 +6271,11 @@ class PacksModuleService extends MedusaService({
         payload: {
           type: 'WP',
           period: weekStartIso,
-          stage: Math.max(...input.snapshot.unlocked_stages),
+          // A winner implies >=1 unlocked stage, so the `: 0` branch is
+          // defensive dead code — guards Math.max(...[]) === -Infinity.
+          stage: input.snapshot.unlocked_stages.length
+            ? Math.max(...input.snapshot.unlocked_stages)
+            : 0,
           rank,
           sku: cardHandles[0] ?? null,
           value: 0,

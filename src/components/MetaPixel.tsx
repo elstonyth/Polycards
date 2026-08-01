@@ -12,6 +12,14 @@ const META_PIXEL_ID = '1867225397993589';
 // that race is independent of how fast the page scrubs the query client-side
 // — so these routes never get a pixel, full stop. Add a route here the
 // moment it puts a token/secret in the URL.
+//
+// Recorded acceptance: once fbevents.js has loaded on a prior page, its own
+// pushState auto-tracking can still beacon a CLIENT-SIDE navigation onto a
+// tokenized route — the guard below re-runs on every pathname change and
+// returns null on the tokenized route, unmounting the <Script>, but that
+// cannot unload the already-fetched fbevents.js global or its pushState
+// hook. Accepted — the threat model this guards is the email-link direct
+// load, which this null-return fully covers.
 const TOKENIZED_ROUTES = ['/reset-password'];
 
 // Loads the Meta Pixel only after the visitor accepts the cookie banner

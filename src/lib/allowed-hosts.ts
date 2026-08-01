@@ -44,8 +44,15 @@ export function resolveCallbackOrigin(
   forwardedProto: string | null,
 ): string | null {
   if (!host || !ALLOWED_SELF_HOSTS.has(host)) return null;
+  // forwardedProto is client-supplied — never interpolate it verbatim; clamp
+  // to the only two valid schemes instead.
   const proto =
-    forwardedProto ??
-    (process.env.NODE_ENV === 'production' ? 'https' : 'http');
+    forwardedProto === 'https'
+      ? 'https'
+      : forwardedProto === null
+        ? process.env.NODE_ENV === 'production'
+          ? 'https'
+          : 'http'
+        : 'http';
   return `${proto}://${host}`;
 }

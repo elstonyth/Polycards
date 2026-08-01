@@ -325,17 +325,13 @@ export const updateCardInvoke = async (
       newSlabKey: nextSlabKey,
     } satisfies CardCompensate);
   } catch (error) {
-    // Reclaim the file this run baked — the Card is about to be pointed back at
-    // the OLD key, so the new composite is now referenced by nothing
-    // (deleteSlabFile never throws). If the throw came from the pixel resolve,
-    // the mutation below never ran and this restore is an idempotent re-write
-    // of the snapshot values — harmless and simpler than tracking that.
-    // Skip when the key is unchanged: content-hash filenames mean an unchanged
-    // photo/label re-bake yields nextSlabKey === the OLD key, and deleting it
-    // would destroy the card's only composite (matches the sibling guards).
-    if (nextSlabKey && nextSlabKey !== snapshot.slab_image_key) {
-      await deleteSlabFile(container, nextSlabKey);
-    }
+    // Restore the Card FIRST — if this throws, the error propagates without
+    // having deleted the new slab file, so the card (still pointing at the
+    // new key, since the restore below never landed) doesn't end up
+    // referencing a deleted composite. If the throw came from the pixel
+    // resolve, the mutation below never ran and this restore is an
+    // idempotent re-write of the snapshot values — harmless and simpler
+    // than tracking that.
     await packs.updateCards([
       {
         id: snapshot.id,
@@ -359,6 +355,15 @@ export const updateCardInvoke = async (
         label_note: snapshot.label_note,
       },
     ]);
+    // Reclaim the file this run baked — the Card now points back at the OLD
+    // key, so the new composite is referenced by nothing (deleteSlabFile
+    // never throws). Skip when the key is unchanged: content-hash filenames
+    // mean an unchanged photo/label re-bake yields nextSlabKey === the OLD
+    // key, and deleting it would destroy the card's only composite (matches
+    // the sibling guards).
+    if (nextSlabKey && nextSlabKey !== snapshot.slab_image_key) {
+      await deleteSlabFile(container, nextSlabKey);
+    }
     throw error;
   }
 };

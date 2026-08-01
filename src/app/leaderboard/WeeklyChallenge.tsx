@@ -165,44 +165,49 @@ export function WeeklyChallenge({ challenge }: { challenge: Challenge }) {
               {/* Full-width stacked tiles: the deduped card row gets room to
                   breathe (gap, no overlap) instead of a cramped half column. */}
               <div className="mt-4 space-y-4">
-                <div className="rounded-xl border border-white/5 bg-neutral-900 p-5">
-                  <p className="flex items-center gap-2 text-xs font-semibold tracking-wide text-neutral-300 uppercase">
-                    <Trophy className="text-chase h-4 w-4" aria-hidden />
-                    Top 3 will receive
-                  </p>
-                  <div className="mt-4 flex flex-wrap items-end justify-center gap-4 sm:justify-start">
-                    {summary.cards.map((c, i) =>
-                      // Same rule as the stage tiles: graded prizes wear the
-                      // prism frame, raw card art stays an unframed <img>.
-                      c.slabImage ? (
-                        <SlabImage
-                          key={`${c.name}-${i}`}
-                          src={c.image}
-                          slabSrc={c.slabImage}
-                          alt={c.name}
-                          frameVariant="prism"
-                          glowScale={0.4}
-                          sizes="384px"
-                          className="h-32"
-                        />
-                      ) : (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          key={`${c.name}-${i}`}
-                          src={c.image}
-                          alt={c.name}
-                          loading="lazy"
-                          decoding="async"
-                          className="h-32 object-contain drop-shadow-[0_10px_20px_rgba(0,0,0,0.6)]"
-                        />
-                      ),
-                    )}
+                {/* Podium ranks can be configured credits-only — skip the
+                    whole tile rather than show the heading over zero
+                    thumbnails. */}
+                {summary.cards.length > 0 && (
+                  <div className="rounded-xl border border-white/5 bg-neutral-900 p-5">
+                    <p className="flex items-center gap-2 text-xs font-semibold tracking-wide text-neutral-300 uppercase">
+                      <Trophy className="text-chase h-4 w-4" aria-hidden />
+                      Top 3 will receive
+                    </p>
+                    <div className="mt-4 flex flex-wrap items-end justify-center gap-4 sm:justify-start">
+                      {summary.cards.map((c, i) =>
+                        // Same rule as the stage tiles: graded prizes wear the
+                        // prism frame, raw card art stays an unframed <img>.
+                        c.slabImage ? (
+                          <SlabImage
+                            key={`${c.name}-${i}`}
+                            src={c.image}
+                            slabSrc={c.slabImage}
+                            alt={c.name}
+                            frameVariant="prism"
+                            glowScale={0.4}
+                            sizes="384px"
+                            className="h-32"
+                          />
+                        ) : (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            key={`${c.name}-${i}`}
+                            src={c.image}
+                            alt={c.name}
+                            loading="lazy"
+                            decoding="async"
+                            className="h-32 object-contain drop-shadow-[0_10px_20px_rgba(0,0,0,0.6)]"
+                          />
+                        ),
+                      )}
+                    </div>
+                    <p className="mt-3 text-sm text-neutral-400">
+                      Podium prize cards (ranks 1–3) from stages 1–
+                      {summary.unlockedCount}
+                    </p>
                   </div>
-                  <p className="mt-3 text-sm text-neutral-400">
-                    Podium prize cards (ranks 1–3) from stages 1–
-                    {summary.unlockedCount}
-                  </p>
-                </div>
+                )}
                 <div className="rounded-xl border border-white/5 bg-neutral-900 p-5">
                   <p className="flex items-center gap-2 text-xs font-semibold tracking-wide text-neutral-300 uppercase">
                     <Coins className="text-chase h-4 w-4" aria-hidden />

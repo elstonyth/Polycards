@@ -34,13 +34,17 @@ to size the payout.
   (VIP level, ladder grants) and the external-funded basis (commission size,
   withdrawal gate). A future change that "simplifies" them into one basis
   would silently alter either payout economics or level-up pacing.
-- The admin Players list column and its i18n label should read "Turnover",
-  not "Spend" — "Spend" reads as money the customer paid, which is exactly
-  the external-funded basis this counter does *not* track. (Relabeling is
-  tracked as a follow-up; see plan 068 — one of the two label call sites in
-  `backend/apps/admin/src/i18n/en.json` is shared with a different admin
-  surface, so the actual text edit needs a reviewer decision on the sibling
-  strings rather than a mechanical rename.)
+- The admin Players list column and its i18n label read "Turnover", not
+  "Spend" — "Spend" reads as money the customer paid, which is exactly the
+  external-funded basis this counter does *not* track. **Done** (commit
+  `052ceb8c`): the shared `players.spend` i18n key in
+  `backend/apps/admin/src/i18n/en.json` serves both the Players list column
+  and the per-customer monthly spend-report table, and both are
+  funding-source-agnostic pack-open sums (`spendReportForCustomer` sums
+  `pack_open` rows with no external-funded filter), so the single shared
+  "Turnover" label is correct in both places. The sibling strings
+  (`subtitle`, `lastSpend`, `spendReport`, `spendEmpty`) and the report
+  table's non-i18n `aria-label` were relabeled in the same change.
 - `backfillExternalFundedBasis` (`service.ts:4562-4606`) is a **separate**
   mechanism that stamps `external_funded_cents` on pre-1b grandfathered
   topups — it corrects the external-funded basis (commission/withdrawal
