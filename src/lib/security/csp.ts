@@ -47,10 +47,11 @@ export function cspEnforced(): boolean {
  * env at runtime.
  */
 export function mediaHost(): string {
-  return (
-    process.env.NEXT_PUBLIC_MEDIA_HOST ??
-    'polycards-media.sgp1.cdn.digitaloceanspaces.com'
-  );
+  // Trim + treat blank as unset (same philosophy as cspEnforced above): a
+  // whitespace-only dashboard value must not produce an empty hostname in the
+  // CSP or remotePatterns.
+  const fromEnv = process.env.NEXT_PUBLIC_MEDIA_HOST?.trim();
+  return fromEnv || 'polycards-media.sgp1.cdn.digitaloceanspaces.com';
 }
 
 export function buildCsp(): string {

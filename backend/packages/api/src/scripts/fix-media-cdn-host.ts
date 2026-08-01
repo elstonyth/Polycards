@@ -58,6 +58,7 @@ export default async function fixMediaCdnHost({
 
   const pattern = `%${OLD_HOST}%`;
   let found = 0;
+  let scanFailures = 0;
   let rewritten = 0;
   let auditHits = 0;
   for (const col of columns) {
@@ -101,12 +102,20 @@ export default async function fixMediaCdnHost({
     } catch (e) {
       // Keep scanning, but never silently: a swallowed error here would let a
       // dry run report "clean" while having checked nothing.
+      scanFailures++;
       logger.warn(
         `[fix-media-cdn-host] SKIPPED ${col.table_name}.${col.column_name}: ${(e as Error).message}`,
       );
     }
   }
 
+  // A failed scan means the sweep did NOT cover the schema — surface that as
+  // a hard failure so a partial run can never read as "Clean".
+  if (scanFailures > 0) {
+    throw new Error(
+      `[fix-media-cdn-host] ${scanFailures} column scan(s) failed (see warnings above) — result is incomplete, not clean`,
+    );
+  }
   if (found === 0) {
     logger.info('[fix-media-cdn-host] Clean — no references to the dead host.');
   } else if (apply) {
