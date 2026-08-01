@@ -29,6 +29,7 @@ import {
   HREEL_STRIP_LEN,
   HREEL_VISIBLE_CELLS,
   HREEL_IDLE_BASE_INDEX as IDLE_BASE_INDEX,
+  idleDriftFits,
   type HReelCell,
 } from '@/lib/hreel';
 import { rarityRgb } from '@/lib/rarity';
@@ -175,10 +176,7 @@ export function ReelStrip({
       setView(null);
       stripEl.style.filter = '';
       const wrapPx = poolLen * pitch;
-      if (
-        reduced ||
-        IDLE_BASE_INDEX + HREEL_VISIBLE_CELLS + poolLen > HREEL_STRIP_LEN
-      ) {
+      if (reduced || !idleDriftFits(poolLen)) {
         pxRef.current = basePx;
         stripEl.style.transform = `translate3d(${-basePx}px, 0, 0)`;
         return;

@@ -12,6 +12,7 @@ import {
   buildPressStrip,
   buildDecoyPool,
   buildIdlePool,
+  idleDriftFits,
   shuffleCells,
   type HReelCell,
 } from '@/lib/hreel';
@@ -76,14 +77,14 @@ describe('buildDecoyPool', () => {
 });
 
 describe('HREEL_IDLE_POOL_MAX (frozen-rails regression)', () => {
-  test('a capped pool always fits the idle drift window on the strip', () => {
-    // ReelStrip disables the idle drift (rails freeze) when
-    // base + window + poolLen overruns the strip. Prod diamond-pack shipped a
-    // 78-pair pool and the machine sat dead — any pool capped to this max must
-    // satisfy the drift-fit inequality.
-    expect(
-      HREEL_IDLE_BASE_INDEX + HREEL_VISIBLE_CELLS + HREEL_IDLE_POOL_MAX,
-    ).toBeLessThanOrEqual(HREEL_STRIP_LEN);
+  test('the cap sits EXACTLY on the drift-fit boundary of the shared guard', () => {
+    // ReelStrip disables the idle drift (rails freeze) when idleDriftFits
+    // fails. Prod diamond-pack shipped a 78-pair pool and the machine sat
+    // dead. The cap must be the LARGEST fitting pool: MAX passes the shared
+    // guard, MAX+1 fails it — a smaller (over-conservative) or larger
+    // (drift-killing) cap both fail this test.
+    expect(idleDriftFits(HREEL_IDLE_POOL_MAX)).toBe(true);
+    expect(idleDriftFits(HREEL_IDLE_POOL_MAX + 1)).toBe(false);
   });
   test('buildIdlePool caps an oversized pool to the drift-fit max', () => {
     // The invariant that actually broke prod: a 78-pair pool reaching the

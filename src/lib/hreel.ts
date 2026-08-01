@@ -26,6 +26,16 @@ export const HREEL_IDLE_BASE_INDEX = 5;
  *  reshuffle still rotates the full pool through the reel over time. */
 export const HREEL_IDLE_POOL_MAX =
   HREEL_STRIP_LEN - HREEL_VISIBLE_CELLS - HREEL_IDLE_BASE_INDEX;
+
+/** True when a pool of `poolLen` cells can wrap the idle drift on the strip:
+ *  the drift tiles one full pool period + the visible window from the base
+ *  cell. ReelStrip rests the reel sharp when this fails — the shared guard, so
+ *  the cap above and the component can never disagree. */
+export function idleDriftFits(poolLen: number): boolean {
+  return (
+    HREEL_IDLE_BASE_INDEX + HREEL_VISIBLE_CELLS + poolLen <= HREEL_STRIP_LEN
+  );
+}
 /** Fallback decoy sprites when the caller supplies no pack pool: a curated set
  *  of dexes that reliably have animated showdown sprites (gen 1–4), so decoy
  *  cells never 404 into a broken image. Used only when the pack pool is empty or
