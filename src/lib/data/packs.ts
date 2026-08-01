@@ -197,17 +197,16 @@ export interface PackDetail {
 // the trust boundary so a malformed value can't render NaN or unknown tiers).
 const parsePublishedOdds = (raw: unknown): PublishedOdds | null => {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-  const o = raw as { overall?: unknown; tiers?: unknown };
+  const o = raw as { tiers?: unknown };
   const okPct = (v: unknown): v is number =>
     typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 100;
-  if (!okPct(o.overall)) return null;
   const tiers: PublishedOdds['tiers'] = {};
   if (o.tiers && typeof o.tiers === 'object' && !Array.isArray(o.tiers)) {
     for (const [k, v] of Object.entries(o.tiers as Record<string, unknown>)) {
       if (isRarity(k) && okPct(v)) tiers[k] = v;
     }
   }
-  return { overall: o.overall, tiers };
+  return { tiers };
 };
 
 /**

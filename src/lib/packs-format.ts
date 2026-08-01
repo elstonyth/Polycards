@@ -19,10 +19,9 @@ const RARITY_SET = new Set<string>(RARITIES);
 /** Runtime guard: is an arbitrary string one of the known rarity tiers? */
 export const isRarity = (r: string): r is Rarity => RARITY_SET.has(r);
 
-/** Admin-PUBLISHED odds ({ overall win %, per-tier % }) — the only odds data
- *  the storefront ever shows; fully decoupled from the secret draw weights. */
+/** Admin-PUBLISHED odds (per-tier %) — the only odds data the storefront ever
+ *  shows; fully decoupled from the secret draw weights. */
 export interface PublishedOdds {
-  overall: number;
   tiers: Partial<Record<Rarity, number>>;
 }
 
