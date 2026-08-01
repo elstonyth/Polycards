@@ -474,6 +474,15 @@ describe('resolveCallbackOrigin — callback route origin guard (plan 063)', () 
     );
   });
 
+  // localhost:3000 (`next dev`) is the origin actually registered on the
+  // Google OAuth client — it must stay allowlisted alongside :4000, not be
+  // replaced by it.
+  it('x-forwarded-host: localhost:3000 → still succeeds (next dev, registered with Google)', () => {
+    expect(resolveCallbackOrigin('localhost:3000', null)).toBe(
+      'http://localhost:3000',
+    );
+  });
+
   it('allowlisted prod host + forwarded proto → https origin', () => {
     expect(resolveCallbackOrigin('polycards.gg', 'https')).toBe(
       'https://polycards.gg',

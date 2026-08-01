@@ -13,8 +13,16 @@
 export const ALLOWED_SELF_HOSTS = new Set([
   'polycards.gg',
   'www.polycards.gg',
-  // The local storefront is served standalone on :4000 (scripts/serve-standalone.ps1),
-  // never :3000 — see CLAUDE.md "Running & verifying".
+  // :3000 is `next dev` — the origin actually registered as an Authorised
+  // redirect URI on the Google OAuth client (see backend/packages/api's
+  // GOOGLE_CALLBACK_URL template default), so it stays even though this
+  // repo's documented *build* verification flow runs on :4000 instead.
+  'localhost:3000',
+  // :4000 is the standalone production-style serve
+  // (scripts/serve-standalone.ps1 — see CLAUDE.md "Running & verifying").
+  // Google login only works there once :4000's callback URI is also
+  // registered on the OAuth client; until then this host resolves locally
+  // but the exchange fails at Google with redirect_uri_mismatch.
   'localhost:4000',
   '127.0.0.1:4000',
 ]);
