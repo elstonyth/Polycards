@@ -97,13 +97,20 @@ export async function loadInventoryRows(
       page,
     ),
   );
-  const cards = await pageAll((page) => packs.listCards({}, page));
   const fx = await resolveFxRate(packs);
 
   const listed = products.filter(
     (p): p is typeof p & { handle: string } => !!p.handle,
   );
   const handles = listed.map((p) => p.handle);
+  // Scoped to `handles`, same as the five aggregates below — an unfiltered
+  // cards read here was the one query in this function that ignored
+  // opts.handle/opts.q (PR review finding). `handles.length` guard first:
+  // MedusaService's `IN ()` on an empty array is the classic footgun, not "no
+  // rows" but a query it should never issue.
+  const cards = handles.length
+    ? await pageAll((page) => packs.listCards({ handle: handles }, page))
+    : [];
   const cardByHandle = new Map(cards.map((c) => [c.handle, c]));
 
   // Sequential, NOT Promise.all: each of these checks out its own pool

@@ -109,6 +109,42 @@ medusaIntegrationTestRunner({
         expect(filtered).not.toContain(`<t>${EXCLUDED}</t>`);
       });
 
+      // Error rather than truncate (route.ts's documented posture): a sheet
+      // silently cut off at N rows would read as "this is the whole
+      // inventory" when it isn't. Cap of 1 is guaranteed under the seeded row
+      // count -- both beforeEach fixtures reach the sheet with no ?q= per the
+      // unfiltered assertion above -- without hardcoding the catalog's total
+      // size. Plain (non-arraybuffer) request: this asserts the JSON error
+      // body, not the workbook.
+      it('caps the export at INVENTORY_EXPORT_MAX_ROWS -- 400s rather than truncating', async () => {
+        const prevCap = process.env.INVENTORY_EXPORT_MAX_ROWS;
+        process.env.INVENTORY_EXPORT_MAX_ROWS = '1';
+        try {
+          const res = await unwrapResponse(
+            api.get('/admin/inventory/export.xlsx', {
+              headers: { authorization: `Bearer ${adminToken}` },
+            }),
+          );
+          expect(res.status).toBe(400);
+          // Specific to the CAP, not just any 400 -- same reasoning as
+          // delivery-orders.spec's `pull_ids` cap case.
+          expect(res.data.message).toMatch(/1-row cap/);
+          expect(res.data.message).toMatch(/\bq=/);
+        } finally {
+          if (prevCap === undefined) {
+            delete process.env.INVENTORY_EXPORT_MAX_ROWS;
+          } else {
+            process.env.INVENTORY_EXPORT_MAX_ROWS = prevCap;
+          }
+        }
+
+        // Restore actually took effect -- the SAME request that 400'd above
+        // now serves the workbook once the env override is undone.
+        const restored = await getXlsx();
+        expect(restored.status).toBe(200);
+        expect(restored.headers['content-type']).toBe(XLSX_MIME);
+      });
+
       // The negative control for the whole route. `export.xlsx` is a STATIC
       // sibling of admin/inventory/[handle]/route.ts, and `:handle` matches the
       // literal string "export.xlsx" perfectly well -- so the two routes are

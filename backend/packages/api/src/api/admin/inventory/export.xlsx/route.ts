@@ -1,4 +1,5 @@
 import type { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
+import { MedusaError } from '@medusajs/framework/utils';
 // write-excel-file 4 is ESM-ONLY as far as TypeScript is concerned: both its
 // root and its node/ package.json declare `"type": "module"` and it ships no
 // .d.cts, so under this package's Node16 moduleResolution a plain value
@@ -64,6 +65,20 @@ import {
 // loadInventoryRows order, so sorting by Cost desc and exporting gives a sheet
 // back in load order. Section 3.3 asks for the current FILTER applied, not the
 // current sort -- do NOT "fix" this by sorting in the route.
+// Error rather than truncate (this repo's documented posture, e.g. pageAll's
+// own docstring): a sheet silently cut off at N rows reads to the operator as
+// "this is the whole inventory" when it isn't. `INVENTORY_EXPORT_MAX_ROWS` is
+// read PER REQUEST rather than frozen at import -- same process.env pattern
+// as rewardsRedemptionEnabled (modules/packs/rewards-gate.ts) and
+// COMMISSION_COOLDOWN_DAYS (modules/packs/service.ts) -- so an operator can
+// tune it live and inventory-export.spec can drive both the default and an
+// overridden cap through the one booted app.
+const DEFAULT_INVENTORY_EXPORT_MAX_ROWS = 10000;
+function inventoryExportMaxRows(): number {
+  const n = Number(process.env.INVENTORY_EXPORT_MAX_ROWS);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_INVENTORY_EXPORT_MAX_ROWS;
+}
+
 export const INVENTORY_COLUMNS: Column<InventoryRow>[] = [
   { header: 'Handle', width: 28, cell: (r) => r.handle },
   { header: 'Name', width: 30, cell: (r) => r.name },
@@ -128,6 +143,14 @@ export async function GET(
       ? rawQ.trim().slice(0, 100)
       : undefined;
   const rows = await loadInventoryRows(req.scope, { q });
+
+  const maxRows = inventoryExportMaxRows();
+  if (rows.length > maxRows) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      `Inventory export matched ${rows.length} rows, over the ${maxRows}-row cap. Narrow the ?q= filter and try again.`,
+    );
+  }
 
   // See the import note at the top of this file for why this is dynamic.
   const { default: writeXlsxFile } = await import('write-excel-file/node');
