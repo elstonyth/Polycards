@@ -2,6 +2,9 @@ import { describe, expect, test } from 'vitest';
 import {
   HREEL_STRIP_LEN,
   HREEL_WIN_INDEX,
+  HREEL_VISIBLE_CELLS,
+  HREEL_IDLE_BASE_INDEX,
+  HREEL_IDLE_POOL_MAX,
   DECOY_DEXES,
   decoyRarity,
   teaseRarity,
@@ -68,6 +71,18 @@ describe('buildDecoyPool', () => {
       { name: 'Trainer Card', pokemonDex: null, rarity: 'Common' as const }, // no dex
     ]);
     expect(pool).toEqual([{ dex: 25, rarity: 'Common' }]);
+  });
+});
+
+describe('HREEL_IDLE_POOL_MAX (frozen-rails regression)', () => {
+  test('a capped pool always fits the idle drift window on the strip', () => {
+    // ReelStrip disables the idle drift (rails freeze) when
+    // base + window + poolLen overruns the strip. Prod diamond-pack shipped a
+    // 78-pair pool and the machine sat dead — any pool capped to this max must
+    // satisfy the drift-fit inequality.
+    expect(
+      HREEL_IDLE_BASE_INDEX + HREEL_VISIBLE_CELLS + HREEL_IDLE_POOL_MAX,
+    ).toBeLessThanOrEqual(HREEL_STRIP_LEN);
   });
 });
 

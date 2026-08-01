@@ -15,6 +15,17 @@ export const HREEL_WIN_INDEX = 48;
 export const HREEL_STRIP_LEN = 64;
 /** Cells visible across a strip window — a long horizontal reel. */
 export const HREEL_VISIBLE_CELLS = 9;
+/** Cell the idle drift starts centered on. Must clear the left half-window
+ *  (HREEL_VISIBLE_CELLS/2), and leaves the rest of the strip as drift runway. */
+export const HREEL_IDLE_BASE_INDEX = 5;
+/** Largest decoy pool the idle drift can wrap over: the drift tiles one full
+ *  pool period plus the visible window onto the strip, so a pool beyond
+ *  STRIP_LEN − VISIBLE − BASE cells overruns it and ReelStrip rests the reel
+ *  sharp — the "rails frozen" bug on big packs (prod diamond-pack: 78 pairs).
+ *  Pool builders slice their shuffled pools to this cap; the per-idle-cycle
+ *  reshuffle still rotates the full pool through the reel over time. */
+export const HREEL_IDLE_POOL_MAX =
+  HREEL_STRIP_LEN - HREEL_VISIBLE_CELLS - HREEL_IDLE_BASE_INDEX;
 /** Fallback decoy sprites when the caller supplies no pack pool: a curated set
  *  of dexes that reliably have animated showdown sprites (gen 1–4), so decoy
  *  cells never 404 into a broken image. Used only when the pack pool is empty or
