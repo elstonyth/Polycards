@@ -63,6 +63,7 @@ console.log(`derived: pack slug=${slug}`);
 const PUBLIC = [
   '/',
   '/about',
+  '/auth/google/failed',
   '/contact',
   '/download',
   '/fairness',

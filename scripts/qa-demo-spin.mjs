@@ -68,10 +68,15 @@ try {
     .catch(() => {});
   await page.waitForTimeout(1500); // sprites paint, idle drift settles
   await spinCta.click();
-  // The reveal has landed when a card back is tappable; tapping flips it and
-  // surfaces the per-card footer (sign-up CTA on demo).
+  // The reveal has landed when a card back is tappable; flipping it surfaces
+  // the per-card footer (sign-up CTA on demo). The card is a real button.
   await page.getByText('Tap the card to reveal').waitFor({ timeout: 60000 });
-  await page.mouse.click(720, 380);
+  // force: the card idles on a continuous framer-motion animation, so it
+  // never passes Playwright's "stable" actionability check.
+  await page
+    .getByRole('button', { name: 'Flip to reveal your card' })
+    .first()
+    .click({ force: true });
   const signup = page.getByRole('button', {
     name: /sign up & pull for real/i,
   });
@@ -81,15 +86,14 @@ try {
   if (await page.getByRole('button', { name: /back to the reel/i }).count())
     ok("demo reveal offers 'Back to the reel'");
   else fail("'Back to the reel' missing on the demo reveal");
-  if (await page.getByRole('button', { name: /sell back/i }).count())
-    fail('sell-back offered on a demo reveal (nothing was won)');
+  // Real-pull footers read "Sell for RM… (…%)" + "Keep in vault" — neither may
+  // appear on a demo reveal (nothing was won).
+  const sellCount =
+    (await page.getByRole('button', { name: /^sell for /i }).count()) +
+    (await page.getByRole('button', { name: /keep in vault/i }).count());
+  if (sellCount)
+    fail('sell/keep window offered on a demo reveal (nothing was won)');
   else ok('no sell window on the demo reveal');
-
-  // openPack is a Next SERVER ACTION: a real open would be a same-origin POST
-  // (next-action header). The anon demo page makes no legitimate POST at all,
-  // so the honest assertion is ZERO POSTs of any kind.
-  if (posts.length === 0) ok('zero POSTs during the anonymous demo flow');
-  else fail(`demo flow fired POST(s): ${posts.join(', ')}`);
 
   await signup.click();
   await page
@@ -106,19 +110,29 @@ try {
     .getByRole('button', { name: /log in to spin/i })
     .waitFor({ timeout: 20000 });
   ok("anonymous real machine gates with 'Log in to spin'");
+
+  // openPack is a Next SERVER ACTION: a real open would be a same-origin POST
+  // (next-action header). The anon pages make no legitimate POST at all (the
+  // auth session check is a GET), so the honest assertion — checked at the
+  // very end of the anonymous context — is ZERO POSTs of any kind.
+  if (posts.length === 0) ok('zero POSTs during the whole anonymous flow');
+  else fail(`anonymous flow fired POST(s): ${posts.join(', ')}`);
   await ctxA.close();
 
   // ── Flow B: logged-in customer on ?demo=1 gets the REAL machine ──────────
-  const creds = Object.fromEntries(
-    fs
-      .readFileSync(path.join(process.cwd(), 'scripts/.dev-logins'), 'utf8')
-      .split(/\r?\n/)
-      .filter((l) => l.includes('=') && !l.trim().startsWith('#'))
-      .map((l) => {
-        const i = l.indexOf('=');
-        return [l.slice(0, i).trim(), l.slice(i + 1).trim()];
-      }),
-  );
+  const credsPath = path.join(process.cwd(), 'scripts/.dev-logins');
+  const creds = fs.existsSync(credsPath)
+    ? Object.fromEntries(
+        fs
+          .readFileSync(credsPath, 'utf8')
+          .split(/\r?\n/)
+          .filter((l) => l.includes('=') && !l.trim().startsWith('#'))
+          .map((l) => {
+            const i = l.indexOf('=');
+            return [l.slice(0, i).trim(), l.slice(i + 1).trim()];
+          }),
+      )
+    : {};
   if (!creds.CUST_PW) {
     console.log('SKIP flow B: no CUST_PW in scripts/.dev-logins');
   } else {
