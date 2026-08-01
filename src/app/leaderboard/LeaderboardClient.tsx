@@ -82,7 +82,7 @@ export default function LeaderboardClient({
       <p className="mt-3 text-[12px] text-neutral-400">
         {period === 'This Week'
           ? 'This week ranks by pulled value — every eligible pack draw counts. It is the Weekly Challenge board.'
-          : 'All Time — lifetime pulled value across every eligible pack draw.'}
+          : 'All Time — ranked by lifetime pack-open spend; showing each player’s lifetime pulled value.'}
       </p>
 
       {/* Standings */}

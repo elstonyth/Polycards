@@ -212,6 +212,40 @@ describe('getChallenge', () => {
     });
   });
 
+  it('excludes a rank-5 (sheet rank) card from the summary', async () => {
+    // Sheet ranks (4+) go to the "Top 4-10" credits tile, not the podium card
+    // row — matching the `creditsOf(…, 4)` boundary the credits total uses.
+    fetchMock.mockResolvedValueOnce({
+      ...active,
+      stages: [
+        {
+          ...active.stages[0],
+          rankRewards: [{ rank: 5, cardId: 'c3', credits: 0 }],
+        },
+        ...active.stages.slice(1),
+      ],
+    });
+    const c = await getChallenge();
+    expect(c!.summary!.cards).toEqual([]);
+  });
+
+  it('includes a rank-2 (podium) card in the summary', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ...active,
+      stages: [
+        {
+          ...active.stages[0],
+          rankRewards: [{ rank: 2, cardId: 'c2', credits: 0 }],
+        },
+        ...active.stages.slice(1),
+      ],
+    });
+    const c = await getChallenge();
+    expect(c!.summary!.cards).toEqual([
+      { name: 'Pikachu', image: 'http://x/pikachu.webp', slabImage: null },
+    ]);
+  });
+
   it('marks every stage complete and sums all credits when cleared', async () => {
     fetchMock.mockResolvedValueOnce({
       ...active,

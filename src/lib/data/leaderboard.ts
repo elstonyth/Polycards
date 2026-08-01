@@ -4,7 +4,7 @@
  * Reads the live leaderboard from the custom Medusa route
  * `GET /store/leaderboard?period=` — weekly ranks by pulled value over the
  * challenge-anchored week (the Weekly Pull Value board the challenge settles on);
- * alltime ranks by REAL pack-open spend ("points") — and maps it to the
+ * alltime ranks by REAL pack-open spend — and maps it to the
  * presentational shape the standings render. Returns [] when the backend is unreachable or
  * the board is empty — the page shows an honest empty state instead of fake
  * rows (the old mock board actively misled operators).
@@ -31,7 +31,6 @@ export interface LeaderboardEntry {
   /** Formatted MYR winnings, e.g. "RM 8,173.26". */
   volume: string;
   pulls: string;
-  points: string;
   avatar: string;
   frame: string | null;
 }
@@ -43,7 +42,6 @@ interface BackendEntry {
   handle: string | null;
   volume: number;
   pulls: number;
-  points: number;
   seed: number;
   avatar_url?: string | null;
   equipped_frame_level?: number | null;
@@ -79,7 +77,6 @@ export async function getLeaderboard(
       handle: typeof e.handle === 'string' ? e.handle : null,
       volume: rm(e.volume),
       pulls: String(e.pulls),
-      points: Math.round(e.points).toLocaleString('en-US'),
       avatar: e.avatar_url ?? avatarForSeed(e.seed),
       frame: e.equipped_frame_level
         ? (frames[String(e.equipped_frame_level)] ?? null)

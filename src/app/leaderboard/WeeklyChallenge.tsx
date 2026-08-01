@@ -199,7 +199,8 @@ export function WeeklyChallenge({ challenge }: { challenge: Challenge }) {
                     )}
                   </div>
                   <p className="mt-3 text-sm text-neutral-400">
-                    Every featured card from stages 1–{summary.unlockedCount}
+                    Podium prize cards (ranks 1–3) from stages 1–
+                    {summary.unlockedCount}
                   </p>
                 </div>
                 <div className="rounded-xl border border-white/5 bg-neutral-900 p-5">

@@ -498,14 +498,18 @@ export default function PackDetailClient({
             </Reveal>
           )}
 
-          {/* Top hits — Rare+ only, as a swipeable rail whose
-              expand button opens the full pool dialog (rarest first, per-tier
-              pull chance when published). Header lives inside the component
-              (the expand button sits in it). */}
+          {/* Rare & above — Rare+ only, as a swipeable rail whose
+              expand button opens the FULL pool dialog (every tier, rarest
+              first, per-tier pull chance when published) — the only surface
+              on the page listing the whole pool, matching the value range the
+              odds panel quotes below (also computed over the full pool).
+              Header lives inside the component (the expand button sits in
+              it). */}
           {topPool.length > 0 && (
             <Reveal as="section">
               <PoolByRarity
-                pool={topPool}
+                rail={topPool}
+                full={pool}
                 tierChances={liveDetail?.publishedOdds?.tiers ?? null}
                 onOpen={(card) => setOpenCard(toSeed(card))}
               />
