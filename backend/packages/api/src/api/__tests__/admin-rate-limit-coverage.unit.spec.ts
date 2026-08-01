@@ -42,23 +42,45 @@ function routeFileToUrl(relPath: string): string {
   return `/${segments.join('/')}`;
 }
 
-// Matches four export shapes a route.ts handler can use for a mutation
+// Matches two export shapes a route.ts handler can use for a mutation
 // method, so the scan can't be dodged by switching styles:
 //   export async function POST(...)   (the original, still group 1)
 //   export function POST(...)         (no async — group 1)
 //   export const POST = ...           (arrow/const handler — group 2)
-//   export { someHandler as POST }    (re-export alias — group 3)
+// `export { x as METHOD, y as METHOD2 }` re-exports are handled SEPARATELY
+// below (RE_EXPORT_BLOCK_RE + RE_EXPORT_SPECIFIER_RE), not folded into this
+// alternation: a single regex match can only capture one group per match, so
+// a block aliasing more than one method at once (e.g.
+// `export { create as POST, remove as DELETE }`) would silently lose every
+// specifier after the first if it stayed a third alternative here.
 const MUTATION_METHOD_RE =
-  /export\s+(?:async\s+)?function\s+(POST|PUT|PATCH|DELETE)\b|export\s+const\s+(POST|PUT|PATCH|DELETE)\s*=|export\s*\{[^}]*\bas\s+(POST|PUT|PATCH|DELETE)\b[^}]*\}/g;
+  /export\s+(?:async\s+)?function\s+(POST|PUT|PATCH|DELETE)\b|export\s+const\s+(POST|PUT|PATCH|DELETE)\s*=/g;
+
+// Every `export { ... }` block, so its contents can be scanned on their own
+// for however many `as METHOD` specifiers it contains.
+const RE_EXPORT_BLOCK_RE = /export\s*\{([^}]*)\}/g;
+const RE_EXPORT_SPECIFIER_RE = /\bas\s+(POST|PUT|PATCH|DELETE)\b/g;
 
 function mutationMethodsOf(fileText: string): string[] {
   const methods = new Set<string>();
+
   let match: RegExpExecArray | null;
   MUTATION_METHOD_RE.lastIndex = 0;
   while ((match = MUTATION_METHOD_RE.exec(fileText))) {
-    const method = match[1] || match[2] || match[3];
+    const method = match[1] || match[2];
     if (method) methods.add(method);
   }
+
+  let blockMatch: RegExpExecArray | null;
+  RE_EXPORT_BLOCK_RE.lastIndex = 0;
+  while ((blockMatch = RE_EXPORT_BLOCK_RE.exec(fileText))) {
+    let specMatch: RegExpExecArray | null;
+    RE_EXPORT_SPECIFIER_RE.lastIndex = 0;
+    while ((specMatch = RE_EXPORT_SPECIFIER_RE.exec(blockMatch[1]))) {
+      methods.add(specMatch[1]);
+    }
+  }
+
   return [...methods];
 }
 
@@ -222,6 +244,17 @@ describe('admin mutation routes are rate-limited (plan 061 coverage guard)', () 
     methods: e.methods,
     re: matcherToRegExp(e.matcher),
   }));
+
+  it('a single `export { }` block re-exporting MULTIPLE methods detects all of them', () => {
+    // Regression for the re-export alternation registering only the FIRST
+    // aliased method per brace block — a synthetic source string, not a real
+    // route file, keeps this text-level like the rest of the spec (no fixture
+    // route.ts needed just to pin the regex).
+    const synthetic = `
+      export { createDeliveryOrder as POST, removeDeliveryOrder as DELETE } from './handlers';
+    `;
+    expect(mutationMethodsOf(synthetic).sort()).toEqual(['DELETE', 'POST']);
+  });
 
   it('extraction is not vacuous (finds real entries, not just /store noise)', () => {
     // Guards against a regex change silently matching nothing (green-for-the-

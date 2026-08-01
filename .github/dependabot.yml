@@ -21,6 +21,18 @@ updates:
         update-types:
           - minor
           - patch
+    # Root is majors-current on React 19 today; this only blocks an AUTOMATED
+    # solo half-bump of the pair going forward (deliberate manual bumps are
+    # unaffected) — same react/react-dom lockstep reasoning as the /backend
+    # updater below, applied here so the root updater can't recreate the
+    # mismatch on its own.
+    ignore:
+      - dependency-name: 'react'
+        update-types:
+          - version-update:semver-major
+      - dependency-name: 'react-dom'
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: npm
     directory: /backend
