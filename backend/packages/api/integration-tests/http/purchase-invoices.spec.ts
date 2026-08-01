@@ -1,4 +1,5 @@
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
+import { Modules, ProductStatus } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
 import { mintSuperAdmin, unwrapResponse } from './utils';
@@ -14,6 +15,18 @@ medusaIntegrationTestRunner({
     describe('admin purchase invoices — create', () => {
       let adminToken: string;
       let packs: PacksModuleService;
+
+      // The route's card_handle existence gate resolves against PRODUCT
+      // handles (POLYCARD-BACK, see route.ts) — every handle a fixture buys
+      // needs a backing product, same convention as inventory-detail.spec.ts
+      // (makeProduct) and inventory-list.spec.ts (createProducts).
+      const makeProduct = async (handle: string, title: string) => {
+        const productModule = getContainer().resolve(Modules.PRODUCT);
+        const [product] = await productModule.createProducts([
+          { title, handle, status: ProductStatus.PUBLISHED },
+        ]);
+        return product;
+      };
 
       beforeEach(async () => {
         packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
@@ -32,6 +45,8 @@ medusaIntegrationTestRunner({
             { headers: { authorization: `Bearer ${adminToken}` } },
           ),
         );
+        // LINE's handle below, product-backed for every test in this file.
+        await makeProduct('charizard-psa-10', 'Charizard PSA 10');
       });
 
       const adminHeaders = () => ({
@@ -99,6 +114,7 @@ medusaIntegrationTestRunner({
         // 3 * 0.07 is 0.21000000000000002 in JS but exactly 0.21 in Postgres
         // numeric — the CHECK tolerates that gap; a 2dp-rounded line_total
         // against a rounder qty would be the thing it must still catch.
+        await makeProduct('penny-common', 'Penny Common');
         const res = await createOriginal([
           { ...LINE, card_handle: 'penny-common', qty: 3, unit_cost: 0.07 },
         ]);
@@ -112,6 +128,55 @@ medusaIntegrationTestRunner({
       it('rejects a sub-sen unit_cost', async () => {
         const res = await createOriginal([{ ...LINE, unit_cost: 1.005 }]);
         expect(res.status).toBe(400);
+      });
+
+      // Plan 065: an unresolvable card_handle used to post a fully successful
+      // 201 whose cost basis + audit trail attached to a phantom key. The
+      // route now resolves every distinct handle against PRODUCT before the
+      // workflow runs at all — this must be all-or-nothing, so the VALID
+      // sibling line in the same body must not partially write either.
+      it('rejects a POST with an unknown card_handle among otherwise-valid lines, naming the line + handle, and writes nothing', async () => {
+        const res = await createOriginal([
+          LINE,
+          { ...LINE, card_handle: 'ghost-handle-does-not-exist', qty: 1 },
+        ]);
+        expect(res.status).toBe(400);
+        expect(res.data.message).toMatch(/lines\[1\]/);
+        expect(res.data.message).toMatch(/ghost-handle-does-not-exist/);
+
+        expect(await packs.listPurchaseInvoices({}, { take: 10 })).toHaveLength(
+          0,
+        );
+        expect(
+          await packs.listStockMovements(
+            { card_handle: LINE.card_handle },
+            { take: 10 },
+          ),
+        ).toHaveLength(0);
+      });
+
+      // Reversal carve-out: a reversal may name a handle whose product was
+      // deleted AFTER the original purchase — assertReversalCovered
+      // (service.ts) still independently requires the handle to actually be
+      // on the target invoice, so this can't be used to sneak an unrelated
+      // handle past the gate.
+      it('accepts a reversal whose product has since been deleted', async () => {
+        const HANDLE = 'reversal-deleted-product';
+        await makeProduct(HANDLE, 'Reversal Deleted Product');
+        const original = await createOriginal([{ ...LINE, card_handle: HANDLE }]);
+        expect(original.status).toBe(201);
+
+        const productModule = getContainer().resolve(Modules.PRODUCT);
+        const [product] = await productModule.listProducts(
+          { handle: HANDLE },
+          { take: 1 },
+        );
+        await productModule.deleteProducts([product.id]);
+
+        const res = await reverse(original.data.invoice.id, [
+          { ...LINE, card_handle: HANDLE, qty: -10 },
+        ]);
+        expect(res.status).toBe(201);
       });
 
       it('rejects a reversal whose line does not match the target invoice on card_handle+unit_cost', async () => {
