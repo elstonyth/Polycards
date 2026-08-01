@@ -47,12 +47,15 @@ test.beforeAll(async () => {
 test('card lifecycle: register from inventory → adjust FMV → reflects on storefront', async ({
   page,
 }) => {
-  // Guard: skip clearly if the eligible product was never minted.
+  // Hard-fail rather than skip: seed:e2e provisions this product in the same
+  // CI job, so its absence means the seed regressed, not that the fixture is
+  // legitimately missing — a skip here is exactly what kept this spec dark
+  // for six weeks.
   const elig = await eligibleProducts(admin);
-  test.skip(
-    !elig.products.some((p) => p.handle === CARD_HANDLE),
-    `No eligible product '${CARD_HANDLE}' — run seed:e2e (seed-e2e-fixtures.ts) first.`,
-  );
+  expect(
+    elig.products.some((p) => p.handle === CARD_HANDLE),
+    `Eligible product '${CARD_HANDLE}' missing — seed:e2e (seed-e2e-fixtures.ts) regressed or was not run`,
+  ).toBeTruthy();
   lifecycleRan = true;
 
   const originalPool = (await getOdds(admin, POOL_PACK)).odds.map(
