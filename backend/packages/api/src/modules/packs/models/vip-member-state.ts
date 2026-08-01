@@ -5,6 +5,9 @@ import { model } from '@medusajs/framework/utils';
 export const VipMemberState = model.define('vip_member_state', {
   id: model.id().primaryKey(),
   customer_id: model.text().unique(),
+  // column name predates the 2026-07-22 turnover change (#254); holds full
+  // turnover (winnings-funded opens included), not external-funded spend —
+  // see ADR 0003. Kept to avoid a live-table rename.
   lifetime_external_spend_sen: model.bigNumber().default(0), // SEN, monotonic
   highest_level_ever: model.number().default(1), // L1 entry-tier floor
   current_level: model.number().default(1),
