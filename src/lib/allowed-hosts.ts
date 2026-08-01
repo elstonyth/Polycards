@@ -4,7 +4,8 @@
  * client-supplied headers, so anything derived from them must pass this list
  * before landing in a redirect or an OAuth exchange. Mirrors the Authorised
  * redirect URIs on the Google OAuth client (Cloud project `polycards`) — keep
- * the two in sync.
+ * the two in sync, and keep this set tracking the domains in
+ * `.do/storefront.app.yaml`.
  *
  * Lives outside the 'use server' action modules because those may only export
  * async functions.
@@ -12,5 +13,31 @@
 export const ALLOWED_SELF_HOSTS = new Set([
   'polycards.gg',
   'www.polycards.gg',
-  'localhost:3000',
+  // The local storefront is served standalone on :4000 (scripts/serve-standalone.ps1),
+  // never :3000 — see CLAUDE.md "Running & verifying".
+  'localhost:4000',
+  '127.0.0.1:4000',
 ]);
+
+/**
+ * Resolve the public origin to build an absolute self-URL from, given the
+ * (client-supplied, so allowlisted) forwarded host/proto. Returns null when
+ * the host is missing or not on ALLOWED_SELF_HOSTS — callers must fail
+ * closed rather than falling back to `request.url`: behind the DO proxy
+ * that's the standalone server's own bind origin (http://0.0.0.0:<port>),
+ * the exact broken redirect PR #311 fixed.
+ *
+ * Lives here (not in the route file) because a Next.js Route Handler module
+ * may only export the recognised HTTP-method/config names — an extra named
+ * export fails the generated route type check at build time.
+ */
+export function resolveCallbackOrigin(
+  host: string | null,
+  forwardedProto: string | null,
+): string | null {
+  if (!host || !ALLOWED_SELF_HOSTS.has(host)) return null;
+  const proto =
+    forwardedProto ??
+    (process.env.NODE_ENV === 'production' ? 'https' : 'http');
+  return `${proto}://${host}`;
+}

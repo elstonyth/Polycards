@@ -52,6 +52,7 @@ import {
   googleLoginStart,
   googleCallback,
 } from '../auth';
+import { resolveCallbackOrigin } from '@/lib/allowed-hosts';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -452,5 +453,30 @@ describe('googleLoginStart — callback_url host guard', () => {
       ok: false,
       error: 'Google sign-in is currently unavailable.',
     });
+  });
+});
+
+// Plan 063 — the callback route's own origin guard (route.ts, separate from
+// googleLoginStart above). Tests the extracted helper rather than the Route
+// Handler itself, per the route staying a thin GET around it.
+describe('resolveCallbackOrigin — callback route origin guard (plan 063)', () => {
+  it('unallowlisted forwarded host → null (never falls back to request.url)', () => {
+    expect(resolveCallbackOrigin('evil.example.com', 'https')).toBeNull();
+  });
+
+  it('missing host → null', () => {
+    expect(resolveCallbackOrigin(null, 'https')).toBeNull();
+  });
+
+  it('x-forwarded-host: localhost:4000 → succeeds with the http local origin', () => {
+    expect(resolveCallbackOrigin('localhost:4000', null)).toBe(
+      'http://localhost:4000',
+    );
+  });
+
+  it('allowlisted prod host + forwarded proto → https origin', () => {
+    expect(resolveCallbackOrigin('polycards.gg', 'https')).toBe(
+      'https://polycards.gg',
+    );
   });
 });
