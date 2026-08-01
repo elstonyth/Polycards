@@ -138,7 +138,14 @@
         "selectAll": "Select every card",
         "selectOne": "Select {{name}}",
         "applied_one": "Set 1 card to {{rarity}}",
-        "applied_other": "Set {{count}} cards to {{rarity}}"
+        "applied_other": "Set {{count}} cards to {{rarity}}",
+        "remove": "Remove from pack",
+        "removeTitle": "Remove cards from this pack",
+        "removeDesc_one": "Remove {{count}} card from this pack's prize pool? Its saved win rate is deleted, but the card stays in the catalog and in other packs.",
+        "removeDesc_other": "Remove {{count}} cards from this pack's prize pool? Their saved win rates are deleted, but the cards stay in the catalog and in other packs.",
+        "removeConfirm": "Remove",
+        "removed_one": "Removed 1 card from the pack",
+        "removed_other": "Removed {{count}} cards from the pack"
       }
     }
   },
