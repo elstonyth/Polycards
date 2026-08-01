@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Bell } from 'lucide-react';
 import { relativeTime } from '@/lib/format';
@@ -11,17 +11,36 @@ import {
 } from '@/lib/actions/notifications';
 import type { Notification } from '@/lib/actions/notifications';
 import { copyFor } from '@/lib/notifications/copy';
+import { displayUnreadTotal } from '@/lib/notifications/unread-total';
 
 export default function NotificationsClient({
   initial,
   page = 1,
+  unreadCount,
 }: {
   initial: Notification[];
   page?: number;
+  unreadCount: number;
 }) {
   const [items, setItems] = useState<Notification[]>(initial);
   const [clearing, setClearing] = useState(false);
+  // The cross-page total lives in state so Mark-all-read can zero it: the
+  // `unreadCount` prop is frozen and can't observe the clear this button does
+  // itself, which would otherwise leave a non-zero label after a full clear.
+  const [serverTotal, setServerTotal] = useState(unreadCount);
   const unread = items.filter((n) => !n.readAt).length;
+  // Unread on THIS page at first render — frozen (the component remounts per
+  // page via key={res.page}), so it anchors how far local reads have drifted
+  // the server total below.
+  const initialUnreadOnPage = useMemo(
+    () => initial.filter((n) => !n.readAt).length,
+    [initial],
+  );
+  const totalUnread = displayUnreadTotal(
+    serverTotal,
+    initialUnreadOnPage,
+    unread,
+  );
 
   // The feed rows are LINKS: acting on one navigates away and unmounts this
   // page, so the optimistic state dies with the component. Coming back — via
@@ -67,12 +86,21 @@ export default function NotificationsClient({
   async function onClearAll() {
     // Snapshot for rollback: only the rows this action actually flips.
     const wasUnread = items.filter((n) => !n.readAt).map((n) => n.id);
-    if (wasUnread.length === 0) return;
+    // No early-return on an empty snapshot: the button only renders when the
+    // cross-page total > 0, so reaching here with zero unread rows on THIS page
+    // means unread lives on other pages — markAllRead() must still fire (it
+    // clears every page server-side and is idempotent). With wasUnread empty,
+    // the optimistic map and rollback are both no-ops, which is correct.
     setClearing(true);
     const now = new Date().toISOString();
     setItems((xs) => xs.map((n) => (n.readAt ? n : { ...n, readAt: now })));
     const r = await markAllRead();
-    if (!r.ok) {
+    if (r.ok) {
+      // Clears every page server-side → the true total is now 0. Test:
+      // displayUnreadTotal(0, 20, 20) === 0. On failure, leave serverTotal
+      // alone; the row rollback below restores the old (still-correct) total.
+      setServerTotal(0);
+    } else {
       const revert = new Set(wasUnread);
       setItems((xs) =>
         xs.map((n) => (revert.has(n.id) ? { ...n, readAt: null } : n)),
@@ -117,10 +145,9 @@ export default function NotificationsClient({
 
   return (
     <>
-      {/* Derived from the rows we already hold — the server's unread_count is
-          page-scoped over the same 50 rows, so passing it in would be a second
-          source of truth for the same number. */}
-      {unread > 0 && (
+      {/* unreadCount is the server's true cross-page total (route.ts contract);
+          decremented locally as rows on this page get optimistically marked. */}
+      {totalUnread > 0 && (
         <div className="mt-4 flex justify-end">
           <button
             type="button"
@@ -128,7 +155,7 @@ export default function NotificationsClient({
             disabled={clearing}
             className="rounded-full border border-white/15 px-3 py-1.5 text-[12px] font-semibold text-white/70 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-50"
           >
-            {clearing ? 'Clearing…' : `Mark all read (${unread})`}
+            {clearing ? 'Clearing…' : `Mark all read (${totalUnread})`}
           </button>
         </div>
       )}

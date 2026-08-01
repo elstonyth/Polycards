@@ -14,13 +14,16 @@
 // 'logger', resolves to the packs service. Against that shape a resolve-only
 // guard is NOT enough: the resolve succeeds and `.warn` is undefined, so the
 // emit throws. Those cases fail on a resolve-only guard and pass on the
-// resolve-AND-emit guard the producers now use.
+// resolve-AND-emit guard that now lives once in `notifyFeedNonfatal` (the
+// producers delegate to it instead of hand-rolling the try/catch).
 //
 // settle-vip is deliberately not covered here: invoking a Medusa workflow step
-// outside a workflow run is not worth the harness, and it uses the identical
-// guard shape.
+// outside a workflow run is not worth the harness. It now calls
+// notifyFeedNonfatal for the notification, but keeps its OWN outer try/catch
+// to guard the grant call — so the wrapper's contract is what matters there.
 import { Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../modules/packs';
+import { notifyFeedNonfatal } from '../../modules/packs/notify-feed';
 import vipSpendSettledHandler from '../vip-spend-settled';
 import matureCommissionsJob from '../../jobs/mature-commissions';
 import { POST as claimPOST } from '../../api/store/rewards/claim/[grantId]/route';
@@ -44,6 +47,61 @@ const containerWith = (registrations: Record<string, unknown>) => ({
     if (key in registrations) return registrations[key];
     throw new Error(`Could not resolve '${key}'`);
   },
+});
+
+describe('notifyFeedNonfatal wrapper', () => {
+  const args = {
+    receiverId: 'cus_x',
+    template: 'reward_won' as const,
+    data: { k: 1 },
+    idempotencyKey: 'idem_1',
+  };
+
+  it('swallows a notification failure and warns with context + template + receiver + cause', async () => {
+    const { warns, logger } = loggerSpy();
+    const container = containerWith({
+      [Modules.NOTIFICATION]: failingNotif,
+      logger,
+    });
+    await expect(
+      notifyFeedNonfatal(container, 'unit-ctx', args),
+    ).resolves.toBeUndefined();
+    expect(warns).toHaveLength(1);
+    expect(warns[0]).toContain('unit-ctx');
+    expect(warns[0]).toContain('reward_won');
+    expect(warns[0]).toContain('cus_x');
+    expect(warns[0]).toContain('provider exploded');
+  });
+
+  it('still resolves when notify throws AND the logger cannot be resolved', async () => {
+    // Container with a failing notif and NO logger key — resolve('logger') throws.
+    const container = containerWith({ [Modules.NOTIFICATION]: failingNotif });
+    await expect(
+      notifyFeedNonfatal(container, 'unit-ctx', args),
+    ).resolves.toBeUndefined();
+  });
+
+  it('cannot throw when the container resolves a non-logger for every key', async () => {
+    // Hostile shape: resolve() ignores the key, so 'logger' resolves to a
+    // value with no .warn — the resolve-AND-emit guard must still not throw.
+    const container = { resolve: () => failingNotif };
+    await expect(
+      notifyFeedNonfatal(container, 'unit-ctx', args),
+    ).resolves.toBeUndefined();
+  });
+
+  it('does not warn on the happy path', async () => {
+    const { warns, logger } = loggerSpy();
+    const okNotif = { createNotifications: async () => undefined };
+    const container = containerWith({
+      [Modules.NOTIFICATION]: okNotif,
+      logger,
+    });
+    await expect(
+      notifyFeedNonfatal(container, 'unit-ctx', args),
+    ).resolves.toBeUndefined();
+    expect(warns).toHaveLength(0);
+  });
 });
 
 describe('vip-spend-settled subscriber', () => {
