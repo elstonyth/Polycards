@@ -127,9 +127,9 @@ const EXEMPT: { path: string; method: string; reason: string }[] = [
     reason:
       'Pack update (packs/[slug]/route.ts). A trailing-wildcard matcher ' +
       '"/admin/packs/*" also matches the already-covered "/admin/packs/reorder", ' +
-      '"/admin/packs/*/odds", "/admin/packs/*/members" and "/admin/packs/*/top-hits" ' +
-      'siblings (verified empirically), multi-charging the shared admin budget ' +
-      'on those calls. Needs a scoped fix before it can be added safely.',
+      '"/admin/packs/*/odds" and "/admin/packs/*/members" siblings (verified ' +
+      'empirically), multi-charging the shared admin budget on those calls. ' +
+      'Needs a scoped fix before it can be added safely.',
   },
   {
     path: '/admin/packs/*',
@@ -137,6 +137,74 @@ const EXEMPT: { path: string; method: string; reason: string }[] = [
     reason:
       'Pack delete (packs/[slug]/route.ts) — same trailing-wildcard overlap as ' +
       'the POST entry above.',
+  },
+  // The seven below are catalog/display CRUD, not money mutations. Several
+  // are driven by client-side per-row loops in shipped bulk operator tooling
+  // (#299 PriceCharting collection import — a collection "can run to five
+  // figures of offers"; #305 bulk retier; multi-image upload), so putting
+  // them on the shared 30-request/10s burst budget would 429 mid-batch. A
+  // prior audit round recorded the convention that only money-mutation
+  // routes carry adminActionRateLimit; from-pricecharting is consistent with
+  // its sibling CRUD routes in carrying none. Revisit only by giving them
+  // their own, higher-budget limiter — never the shared admin-action one.
+  {
+    path: '/admin/media',
+    method: 'POST',
+    reason:
+      'Admin image upload — multi-image upload flows fire this per-image ' +
+      'from a client-side loop; the shared burst budget would 429 mid-batch.',
+  },
+  {
+    path: '/admin/cards',
+    method: 'POST',
+    reason:
+      'Card catalog create — catalog CRUD, not a money mutation; sibling of ' +
+      'the #305 bulk-retier /admin/cards/* route below.',
+  },
+  {
+    path: '/admin/cards/*',
+    method: 'POST',
+    reason:
+      'Card catalog update — PR #305\'s bulk retier fires this per-row from a ' +
+      'client-side loop; the shared burst budget would 429 mid-batch.',
+  },
+  {
+    path: '/admin/cards/*',
+    method: 'DELETE',
+    reason:
+      'Card catalog delete — same per-row bulk-retier driver as the POST ' +
+      'entry above.',
+  },
+  {
+    path: '/admin/products/from-pricecharting',
+    method: 'POST',
+    reason:
+      "PR #299's bulk PriceCharting collection import loops this per row " +
+      '(a collection "can run to five figures of offers"); consistent with ' +
+      'the recorded "only money-mutation routes carry this limiter" convention.',
+  },
+  {
+    path: '/admin/pixel-pokemon',
+    method: 'POST',
+    reason:
+      'Pixel-Pokemon catalog write — catalog CRUD, not a money mutation; ' +
+      'unlimited per the recorded convention.',
+  },
+  {
+    path: '/admin/packs',
+    method: 'POST',
+    reason:
+      'Pack creation — catalog CRUD, not a money mutation (pricing/rank ' +
+      'writes stay limited via reorder/odds/members); unlimited per the ' +
+      'recorded convention.',
+  },
+  {
+    path: '/admin/packs/*/top-hits',
+    method: 'POST',
+    reason:
+      'Top Hits display-order write — display-only (never touches ' +
+      'weights/locks/pricing), edited row-by-row from the admin UI; ' +
+      'unlimited per the recorded convention.',
   },
 ];
 
@@ -163,9 +231,17 @@ describe('admin mutation routes are rate-limited (plan 061 coverage guard)', () 
   it('the EXEMPT list is exactly the routes plan 061 intended — no silent growth', () => {
     const keys = EXEMPT.map((e) => `${e.method} ${e.path}`).sort();
     expect(keys).toEqual([
+      'DELETE /admin/cards/*',
       'DELETE /admin/packs/*',
+      'POST /admin/cards',
+      'POST /admin/cards/*',
       'POST /admin/delivery-orders/*',
+      'POST /admin/media',
+      'POST /admin/packs',
       'POST /admin/packs/*',
+      'POST /admin/packs/*/top-hits',
+      'POST /admin/pixel-pokemon',
+      'POST /admin/products/from-pricecharting',
     ]);
   });
 
@@ -206,17 +282,20 @@ describe('admin mutation routes are rate-limited (plan 061 coverage guard)', () 
   });
 
   it('no route is matched by more than one adminActionRateLimit entry', () => {
-    // A trailing "*" matcher (e.g. "/admin/cards/*") spans "/" (path-to-regexp
-    // 0.1.x) and can silently swallow a sibling route that already has its own
-    // matcher — exactly how "/admin/packs/*" and "/admin/delivery-orders/*"
-    // ended up EXEMPT instead of added (see the reasons above). If a future
-    // route or matcher recreates that shape, Medusa's RoutesSorter registers
-    // the wildcard-bucket entry before the static one and BOTH run, double-
+    // A trailing "*" matcher (e.g. a hypothetical "/admin/packs/*" for the
+    // pack-by-slug route) spans "/" (path-to-regexp 0.1.x) and can silently
+    // swallow a sibling route that already has its own matcher — exactly how
+    // "/admin/packs/*" and "/admin/delivery-orders/*" ended up EXEMPT instead
+    // of added (see the reasons above). None of the CURRENT
+    // adminActionRateLimit entries is a trailing wildcard (all are exact
+    // paths or a middle "*" with a static suffix, e.g. "/admin/packs/*/odds"),
+    // so nothing collides today. If a future route or matcher recreates the
+    // trailing-wildcard shape, Medusa's RoutesSorter registers the
+    // wildcard-bucket entry before the static one and BOTH run, double-
     // charging the shared budget for a single request. This asserts the
     // invariant directly — any route matched twice fails here, regardless of
-    // which matchers are responsible — rather than relying on the code
-    // comments next to /admin/cards/* and /admin/packs/reorder etc. staying
-    // accurate by hand.
+    // which matchers are responsible — rather than relying on hand-maintained
+    // code comments staying accurate.
     const routeFiles = collectRouteFiles(path.join(API_ROOT, 'admin'));
     const failures: string[] = [];
 

@@ -208,12 +208,13 @@ export default defineMiddlewares({
     {
       // Validated admin image upload (POST /admin/media). /admin/* is already
       // auth-protected; multer parses the multipart body into req.files.
-      // adminActionRateLimit runs FIRST (keys on auth_context.actor_id / IP,
-      // never reads the body) so an over-budget request is rejected before
-      // the 20 MB multipart body is buffered into memory by multer.
+      // Deliberately NOT on adminActionRateLimit: multi-image upload flows
+      // fire this per-image from a client-side loop, and the shared 30/10s
+      // burst budget would 429 mid-batch (see the EXEMPT note in the
+      // coverage-guard spec).
       matcher: '/admin/media',
       method: 'POST',
-      middlewares: [adminActionRateLimit, mediaUploadMiddleware],
+      middlewares: [mediaUploadMiddleware],
     },
     // Brute-force/credential-stuffing protection on the public credential
     // endpoints (login, register, reset/update password) for every actor type
@@ -697,52 +698,14 @@ export default defineMiddlewares({
       method: ['POST'],
       middlewares: [adminActionRateLimit],
     },
-    {
-      // Card catalog write (POST /admin/cards) — creates catalog cards that
-      // feed pack odds/members; same admin money-mutation budget.
-      matcher: '/admin/cards',
-      method: ['POST'],
-      middlewares: [adminActionRateLimit],
-    },
-    {
-      // Product-from-PriceCharting import write — creates a priced product
-      // from an external catalog lookup; same admin money-mutation budget.
-      matcher: '/admin/products/from-pricecharting',
-      method: ['POST'],
-      middlewares: [adminActionRateLimit],
-    },
-    {
-      // Pixel-Pokemon catalog write — same admin money-mutation budget.
-      matcher: '/admin/pixel-pokemon',
-      method: ['POST'],
-      middlewares: [adminActionRateLimit],
-    },
-    {
-      // Pack creation (POST /admin/packs) — distinct tree node from
-      // reorder/odds/members/top-hits below it, so no matcher overlap; same
-      // admin money-mutation budget.
-      matcher: '/admin/packs',
-      method: ['POST'],
-      middlewares: [adminActionRateLimit],
-    },
-    {
-      // Top Hits display-order write (POST /admin/packs/:slug/top-hits) —
-      // sibling of odds/members at the same wildcard sub-node; same admin
-      // money-mutation budget.
-      matcher: '/admin/packs/*/top-hits',
-      method: ['POST'],
-      middlewares: [adminActionRateLimit],
-    },
-    {
-      // Card catalog update/delete (POST/DELETE /admin/cards/:handle) — feeds
-      // pack odds/members; same admin money-mutation budget. No sibling route
-      // exists under /admin/cards/* (verified), so the trailing wildcard is
-      // safe here (see the EXEMPT note in the coverage-guard spec for the two
-      // cases where a trailing wildcard is NOT safe to add).
-      matcher: '/admin/cards/*',
-      method: ['POST', 'DELETE'],
-      middlewares: [adminActionRateLimit],
-    },
+    // /admin/cards, /admin/cards/*, /admin/products/from-pricecharting,
+    // /admin/pixel-pokemon, /admin/packs (bare create) and
+    // /admin/packs/*/top-hits are deliberately NOT on adminActionRateLimit —
+    // catalog/display CRUD driven by client-side per-row loops in shipped
+    // bulk operator tooling (#299 PriceCharting collection import, #305 bulk
+    // retier), and from-pricecharting matches the recorded convention that
+    // only money-mutation routes carry this limiter. See the coverage-guard
+    // spec's EXEMPT list for the one-line reason on each.
     // POLYCARD-BACK §4.2 session block — LAST entry on purpose. Blocking login
     // alone would leave every already-minted bearer (including a Google-minted
     // one, whose callback this does not touch) working until it expired, so a
