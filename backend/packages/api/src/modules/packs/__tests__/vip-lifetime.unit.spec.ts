@@ -1,4 +1,4 @@
-import { lifetimeExternalSen } from '../vip-lifetime';
+import { lifetimeTurnoverSen } from '../vip-lifetime';
 
 it('sums full open spend over debits only (turnover — funding source irrelevant); excludes reversals', () => {
   const rows = [
@@ -8,9 +8,9 @@ it('sums full open spend over debits only (turnover — funding source irrelevan
     { amount: 100, reason: 'topup' }, // not a spend — excluded
     { amount: 7, reason: 'direct_referral' }, // commission — excluded
   ];
-  expect(lifetimeExternalSen(rows)).toBe(8000); // 5000 + 3000, monotonic
+  expect(lifetimeTurnoverSen(rows)).toBe(8000); // 5000 + 3000, monotonic
 });
 
 it('is empty-safe', () => {
-  expect(lifetimeExternalSen([])).toBe(0);
+  expect(lifetimeTurnoverSen([])).toBe(0);
 });

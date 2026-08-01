@@ -2454,16 +2454,18 @@ class PacksModuleService extends MedusaService({
         );
         if (rel?.sponsor_id) {
           const sponsorId = rel.sponsor_id;
-          // Sponsor's effective level ranks on their MONOTONIC lifetime external-
-          // funded spend (refund-immune; spec §6 — a refund never lowers VIP level
-          // or the commission tier it sets), NOT the refund-reducible creditSummary
+          // Sponsor's effective level ranks on their MONOTONIC lifetime TURNOVER
+          // (refund-immune; spec §6 — a refund never lowers VIP level or the
+          // commission tier it sets), NOT the refund-reducible creditSummary
           // basis (which nets reversed opens to zero). The lifetime counter already
-          // backs VIP display/grants; this aligns the commission tier with it.
-          // lifetimeExternalSenFor is @InjectManager like creditSummary, so the
+          // backs VIP display/grants; this aligns the commission tier with it. The
+          // commission BASIS itself (basisSen above) stays external-funded — only
+          // the sponsor's TIER lookup uses turnover.
+          // lifetimeTurnoverSenFor is @InjectManager like creditSummary, so the
           // level read stays off the locked path. (F5)
           const sponsorLifetimeSen =
-            await this.lifetimeExternalSenFor(sponsorId);
-          // UNIT TRAP: lifetimeExternalSenFor returns integer SEN, but
+            await this.lifetimeTurnoverSenFor(sponsorId);
+          // UNIT TRAP: lifetimeTurnoverSenFor returns integer SEN, but
           // levelForSpend expects MYR (it calls toSen internally) — same
           // conversion the VIP grant path does (rebuildVipMemberState /
           // grantLevelUpRewards). Passing raw SEN would inflate the tier 100×.
@@ -4398,11 +4400,11 @@ class PacksModuleService extends MedusaService({
   // external-funded basis). Sums ORIGINAL pack_open debits (amount<0) only —
   // reversals are amount>0 and thus excluded, so the counter never drops on a
   // clawback (spec §3).
-  // This mirrors the `lifetimeExternalSen` pure fold but runs in raw SQL for
+  // This mirrors the `lifetimeTurnoverSen` pure fold but runs in raw SQL for
   // efficiency (one scan vs. N ORM fetches). Uses @InjectManager so a caller
   // outside a transaction gets a fresh connection.
   @InjectManager()
-  async lifetimeExternalSenFor(
+  async lifetimeTurnoverSenFor(
     customerId: string,
     @MedusaContext() sharedContext: Context = {},
   ): Promise<number> {
@@ -4474,14 +4476,14 @@ class PacksModuleService extends MedusaService({
   // lifetime turnover counter (SEN), the net turnover spend (MYR, the display axis),
   // and the full ladder (threshold + reward columns). Both rebuildVipMemberState
   // and grantLevelUpRewards need exactly these, so they live in one place and can
-  // never drift in what they read. Reads stay SEQUENTIAL: lifetimeExternalSenFor
+  // never drift in what they read. Reads stay SEQUENTIAL: lifetimeTurnoverSenFor
   // and listVipLevels run on the same injected EntityManager, which is not safe to
   // query concurrently — so this is a DRY extraction, not a parallelization.
   private async loadVipStateInputs(
     customerId: string,
     sharedContext: Context = {},
   ) {
-    const lifetimeSen = await this.lifetimeExternalSenFor(
+    const lifetimeSen = await this.lifetimeTurnoverSenFor(
       customerId,
       sharedContext,
     );
@@ -4658,7 +4660,7 @@ class PacksModuleService extends MedusaService({
   // Grant ladder rewards for every newly-crossed VIP level (Phase 3b §E).
   //
   // Monotonic-grant invariant: derives the trigger level from the MONOTONIC
-  // lifetime counter (lifetimeExternalSenFor → fromSen → levelForSpend) so
+  // lifetime counter (lifetimeTurnoverSenFor → fromSen → levelForSpend) so
   // a clawback+respend can never re-grant rewards already earned. The high-water
   // mark (highest_level_ever) is read from the existing state row (default L1)
   // and drives levelsToGrant — L1 is never granted (levelsToGrant enforces L2 floor).

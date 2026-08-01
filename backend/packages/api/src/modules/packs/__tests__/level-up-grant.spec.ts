@@ -231,7 +231,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
 
         // Verify: lifetime still counts the original open (monotonic; reversal excluded)
         const lifetimeSenAfterClawback =
-          await service.lifetimeExternalSenFor(customerId);
+          await service.lifetimeTurnoverSenFor(customerId);
         // Original open was 200 MYR = 20000 sen. Reversal rows are excluded.
         expect(lifetimeSenAfterClawback).toBe(20000);
 
