@@ -2,12 +2,17 @@ import { describe, expect, test } from 'vitest';
 import {
   HREEL_STRIP_LEN,
   HREEL_WIN_INDEX,
+  HREEL_VISIBLE_CELLS,
+  HREEL_IDLE_BASE_INDEX,
+  HREEL_IDLE_POOL_MAX,
   DECOY_DEXES,
   decoyRarity,
   teaseRarity,
   buildHReelStrip,
   buildPressStrip,
   buildDecoyPool,
+  buildIdlePool,
+  idleDriftFits,
   shuffleCells,
   type HReelCell,
 } from '@/lib/hreel';
@@ -68,6 +73,43 @@ describe('buildDecoyPool', () => {
       { name: 'Trainer Card', pokemonDex: null, rarity: 'Common' as const }, // no dex
     ]);
     expect(pool).toEqual([{ dex: 25, rarity: 'Common' }]);
+  });
+});
+
+describe('HREEL_IDLE_POOL_MAX (frozen-rails regression)', () => {
+  test('the cap sits EXACTLY on the drift-fit boundary of the shared guard', () => {
+    // ReelStrip disables the idle drift (rails freeze) when idleDriftFits
+    // fails. Prod diamond-pack shipped a 78-pair pool and the machine sat
+    // dead. The cap must be the LARGEST fitting pool: MAX passes the shared
+    // guard, MAX+1 fails it — a smaller (over-conservative) or larger
+    // (drift-killing) cap both fail this test.
+    expect(idleDriftFits(HREEL_IDLE_POOL_MAX)).toBe(true);
+    expect(idleDriftFits(HREEL_IDLE_POOL_MAX + 1)).toBe(false);
+  });
+  test('buildIdlePool caps an oversized pool to the drift-fit max', () => {
+    // The invariant that actually broke prod: a 78-pair pool reaching the
+    // reel uncapped. Every idle-cycle pool must come back drift-fittable.
+    const big: HReelCell[] = Array.from({ length: 78 }, (_, i) => ({
+      dex: i + 1,
+      rarity: 'Common',
+    }));
+    const pool = buildIdlePool(big, () => 0.5);
+    expect(pool.length).toBeLessThanOrEqual(HREEL_IDLE_POOL_MAX);
+    expect(
+      HREEL_IDLE_BASE_INDEX + HREEL_VISIBLE_CELLS + pool.length,
+    ).toBeLessThanOrEqual(HREEL_STRIP_LEN);
+  });
+  test('buildIdlePool is a no-op cap for small pools (bronze stays intact)', () => {
+    const small: HReelCell[] = Array.from({ length: 6 }, (_, i) => ({
+      dex: i + 1,
+      rarity: 'Rare',
+    }));
+    const pool = buildIdlePool(small, () => 0.5);
+    expect(pool).toHaveLength(6);
+    // Same cells, reshuffled — nothing dropped.
+    expect(new Set(pool.map((c) => c.dex))).toEqual(
+      new Set(small.map((c) => c.dex)),
+    );
   });
 });
 
