@@ -11,22 +11,28 @@ import { useDragScroll } from '@/lib/use-drag-scroll';
 import { CardTile } from '@/components/cards/CardTile';
 
 /**
- * "Top hits" — the caller pre-filters the pool to Rare+ (commons/uncommons are
- * catalogue noise there). The section itself is ONE horizontally-swipeable
- * rail of the WHOLE Rare+ pool (pool arrives value-sorted desc, so the top
- * hits lead) — the catalog's rail idiom, per the 90scard reference. The
- * header's expand button opens a full-screen dialog listing the same pool
- * grouped by canonical tier (rarest first) as a grid. Group headers carry the
- * rarity dot + count and, when the admin published odds, that tier's pull
- * chance (the same data the odds panel shows; nothing invented).
+ * "Rare & above" — the caller pre-filters the RAIL to Rare+ (commons/uncommons
+ * are catalogue noise there). The rail is ONE horizontally-swipeable strip of
+ * the Rare+ subset (value-sorted desc, so the top hits lead) — the catalog's
+ * rail idiom, per the 90scard reference. The header's expand button opens a
+ * full-screen dialog listing the FULL pack pool (every tier, including
+ * Common/Uncommon) grouped by canonical tier (rarest first) as a grid — this
+ * is the only surface on the page that lists the whole pool, so its "show all
+ * N" count and value range must match the full pool, not the Rare+ rail.
+ * Group headers carry the rarity dot + count and, when the admin published
+ * odds, that tier's pull chance (the same data the odds panel shows; nothing
+ * invented).
  */
 export function PoolByRarity({
-  pool,
+  rail,
+  full,
   tierChances,
   onOpen,
 }: {
-  /** Pre-filtered (Rare+) public prize pool, value-sorted. */
-  pool: PackCard[];
+  /** Rare+ subset for the teaser rail, value-sorted. */
+  rail: PackCard[];
+  /** FULL pack pool (every tier) for the expand dialog. */
+  full: PackCard[];
   /** Admin-published per-tier chances; null = this pack has no published odds. */
   tierChances: Partial<Record<Rarity, number>> | null;
   onOpen: (card: PackCard) => void;
@@ -40,20 +46,20 @@ export function PoolByRarity({
       <div>
         <div className="mb-1 flex items-center justify-between gap-3">
           <h2 className="font-heading text-lg font-bold tracking-tight text-white">
-            Top hits
+            Rare & above
           </h2>
           <button
             type="button"
             onClick={() => setModalOpen(true)}
             aria-haspopup="dialog"
-            aria-label={`Show all ${pool.length} cards grouped by rarity`}
+            aria-label={`Show all ${full.length} cards grouped by rarity`}
             className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-white/60 transition-colors hover:bg-white/10 hover:text-white"
           >
             <Maximize2 className="h-4 w-4" aria-hidden />
           </button>
         </div>
         <p className="text-[13px] text-white/70">
-          The top cards available in this pack.
+          The Rare-and-up cards available in this pack.
         </p>
       </div>
       {/* Teaser rail — a peeking partial card signals the sideways swipe;
@@ -73,7 +79,7 @@ export function PoolByRarity({
         {...drag}
         className="-mx-4 -my-12 flex cursor-grab gap-2 overflow-x-auto px-10 py-12 active:cursor-grabbing sm:gap-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
-        {pool.map((c) => (
+        {rail.map((c) => (
           <div key={c.id} className="w-[38%] shrink-0 sm:w-40">
             <CardTile
               card={c}
@@ -86,7 +92,7 @@ export function PoolByRarity({
       <PoolModal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
-        pool={pool}
+        pool={full}
         tierChances={tierChances}
         onOpen={onOpen}
       />
@@ -140,14 +146,14 @@ function PoolModal({
         ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Top hits"
+        aria-label="All cards"
         tabIndex={-1}
         className="glass-panel max-h-[85vh] w-full overflow-y-auto rounded-t-2xl border-t p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] outline-none sm:max-w-2xl sm:rounded-2xl sm:border"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="font-heading text-lg font-bold tracking-tight text-white">
-            Top hits
+            All cards
             <span className="ml-2 text-[13px] font-normal tabular-nums text-white/50">
               {pool.length} cards
             </span>
