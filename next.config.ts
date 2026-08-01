@@ -89,7 +89,7 @@ const dangerouslyAllowLocalIP = isLocalHostname(backend.hostname);
 // NEXT_PUBLIC_MEDIA_HOST still overrides per environment.
 const mediaHost =
   process.env.NEXT_PUBLIC_MEDIA_HOST ??
-  'pokenic-media.sgp1.cdn.digitaloceanspaces.com';
+  'polycards-media.sgp1.cdn.digitaloceanspaces.com';
 if (mediaHost) {
   remotePatterns.push({
     protocol: 'https',
