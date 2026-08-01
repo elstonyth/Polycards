@@ -16,7 +16,12 @@ The home page's trust-engine section comes out.
 - `src/app/page.tsx` — drop `<HowItRips />` (line ~69) and its import.
 - Delete `src/components/home/HowItRips.tsx`.
 - Leave `src/components/HowItWorksSteps.tsx` and the `/how-it-works` route
-  alone — different component, still linked from `/me` and the footer.
+  alone — different component. (Stale note: the footer's trust-link nav row
+  and `/me`'s "About & help" card — both of which linked here — were removed
+  2026-07-31 as duplicates of each other; the route is still reachable via
+  the home page, `/about`, and `/contact`, just not from `/me` or the footer
+  any more — see `src/components/app-shell/SiteFooter.tsx:1-24` for the
+  current inbound-link map.)
 
 Section numbering in `page.tsx`'s comments shifts (`04 → 03` etc.); update the
 comments so they stay honest.

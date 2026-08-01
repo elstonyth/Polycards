@@ -2,7 +2,9 @@
 
 **Date:** 2026-07-27
 **Builds on:** POLYCARD-BACK Epic 3 (`feat/epic3-odds`) — 3 odds sets, Common-as-balancer, EV/RTP columns
-**Status:** Approved, ready for planning
+**Status:** Superseded in part by #298 (2026-07-30) — default tier preset,
+derive-unless-locked editing, per-tier EV/value ranges; the auto-split solver
+itself still matches.
 
 ## Problem
 

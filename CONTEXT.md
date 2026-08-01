@@ -121,6 +121,11 @@ Order and `rewards/withdraw`), payout
 
 ## Rewards, VIP, and referrals
 
+_The reward-granting surfaces below (Reward Box, Reward Draw, Voucher, referral Commission
+pages) are SUSPENDED 2026-07-29 (#294) — storefront routes 404, backend stays live. The
+vocabulary is retained because un-suspending is meant to be a revert, not a rewrite; see
+ADR 0004. VIP Level accrual itself stayed live throughout._
+
 **VIP Level**:
 A customer's rung 1–100, reached by cumulative external-funded spend. Unlocks a
 Reward Box tier, avatar frames, and referral rates.
