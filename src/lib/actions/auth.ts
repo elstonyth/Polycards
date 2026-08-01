@@ -155,7 +155,14 @@ export async function signup(input: {
       ok: false,
       error: 'Please enter a valid phone number for the selected country.',
     };
-  const first_name = input.first_name?.trim().slice(0, NAME_MAX) || undefined;
+  // Reject (not truncate) an over-long name — same rule as updateProfile, so a
+  // name accepted at signup can never be refused later on the settings page.
+  const first_name = input.first_name?.trim() || undefined;
+  if (first_name && first_name.length > NAME_MAX)
+    return {
+      ok: false,
+      error: `Names must be ${NAME_MAX} characters or fewer.`,
+    };
 
   try {
     const registerToken = await exchangeToken(

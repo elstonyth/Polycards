@@ -40,9 +40,19 @@ const check = (label, ok, detail = '') => {
     headers: { 'x-forwarded-host': 'evil.example.com' },
   });
   const loc = res.headers.get('location') ?? '';
+  // Parse and compare the HOST (not a substring scan — CodeQL js/incomplete-url-substring-sanitization).
+  const locUrl = (() => {
+    try {
+      return new URL(loc);
+    } catch {
+      return null;
+    }
+  })();
   check(
     'google callback rejects foreign host (falls back to request origin)',
-    !loc.includes('evil.example.com') && loc.includes('/auth/google/failed'),
+    locUrl !== null &&
+      locUrl.hostname !== 'evil.example.com' &&
+      locUrl.pathname === '/auth/google/failed',
     loc,
   );
 }
