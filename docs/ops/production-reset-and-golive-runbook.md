@@ -6,7 +6,9 @@ start. This runbook covers what must be true before that reset, the reset itself
 verify the result.
 
 **Written:** 2026-07-19, after PRs #212/#213/#214 (Weekly Pulled Value Challenge + recorded
-pull value) shipped to `master` (commit `7495ea4`).
+pull value) shipped to `master` (commit `7495ea4`). **Re-verified 2026-08-01** against
+`master` `a993f34a` (plan 068) — §1.1 and the vendor self-registration bullet below were
+struck as resolved; see each for the PR that closed it.
 
 ---
 
@@ -28,29 +30,14 @@ site looks dead while the backend is perfectly healthy.
 
 These are not reset steps; they are gaps that make "officially started" untrue if skipped.
 
-### 1.1 Weekly Challenge has no settlement engine (BLOCKING)
+### 1.1 Weekly Challenge settlement — RESOLVED (#296)
 
-Verified in code 2026-07-19: `src/jobs/` contains only `mature-commissions.ts` and
-`sync-market-prices.ts`, and **nothing** in `jobs/`, `workflows/`, or `subscribers/` references
-the challenge. `service.ts` still comments "the reward settlement engine is inert."
-
-What exists: draw-time value recording, the community pool aggregate, the pulled-value weekly
-ranking (both on `/leaderboard`), admin config, and the storefront page.
-
-What does **not** exist: at week end, nothing grants featured cards to ranks 1–3 or credits to
-ranks 4–10, and nothing snapshots the closing standings. When the anchor moves, the board
-recomputes for the new week and last week's top 10 disappears from every surface.
-
-The underlying data survives (each `pull` row carries `rolled_at` and a pinned
-`recorded_value_usd`), so standings stay *recomputable by hand* — but there is no automatic
-payout and no history table.
-
-Minimum to launch honestly, pick one:
-- **Build it** — a job at reset that ranks the closing week, writes an immutable standings
-  snapshot, and grants the cumulative unlocked rewards, with an admin review surface before it
-  pays. Touches money → own PR, own tests.
-- **Or** operate it manually week 1 and keep the page's reward copy future-tense (it already
-  is), with a documented manual settlement procedure.
+Settled by PR #296: `backend/packages/api/src/jobs/settle-challenge-week.ts` is an hourly,
+self-gating job that settles the most-recently-ended week — pays the top-10 the union of
+every community-pool-unlocked stage's rank rewards and writes an immutable
+`challenge_payout` row (its own header comment is the spec). Covered by
+`backend/packages/api/src/modules/packs/__tests__/challenge-settle.integration.spec.ts` and
+`challenge-settle.unit.spec.ts`. No action needed before launch.
 
 ### 1.2 Challenge stage thresholds are demo-sized
 
@@ -61,17 +48,28 @@ finale week". The top stage threshold is RM 100. Set real thresholds in
 Do **not** use `seed-challenge.ts` for this — it is an explicitly labelled demo seed
 (RM 100k–1M ladder, featured cards picked arbitrarily from the catalog).
 
+### 1.2b Vendor self-registration — RESOLVED (#173)
+
+Was: `seller_registration:false` is UI-only; an anonymous `POST /vendor/sellers` created a
+real seller (flagged MEDIUM in a prior audit). Closed by #173:
+`backend/packages/api/src/api/middlewares.ts:120-139` hard-404s both registration
+entrypoints (`/auth/member/emailpass/register` and `/vendor/sellers`), guarded by
+`backend/packages/api/integration-tests/http/vendor-selfreg-block.spec.ts`. No action
+needed before launch.
+
 ### 1.3 Carried over from earlier sessions — VERIFY, do not assume
 
 These were true when last checked but predate this runbook. Re-verify each before launch:
 
 - **Google OAuth app still in Testing mode** — only whitelisted test users can sign in.
-  Publishing the app is the last step for real customer Google login.
-- **Password-reset email is env-gated OFF** — code complete, no API key set. Envs must be
-  app-level (subscribers run on the worker). Without it, customers cannot recover accounts.
-- **Vendor self-registration is open** — `seller_registration:false` is UI-only; an anonymous
-  `POST /vendor/sellers` creates a real seller. Flagged MEDIUM in a prior audit. Close before
-  a public launch.
+  Publishing the app is the last step for real customer Google login. (Not verifiable from
+  code — this is a Google Cloud Console setting.)
+- **Password-reset email is code-gated on both `RESEND_API_KEY` and `RESEND_FROM_EMAIL`**
+  (`backend/packages/api/src/modules/resend/options.ts:19`, unchanged as of this
+  re-verification) — without both set, the subscriber warns instead of sending, and
+  customers cannot recover accounts. Both envs must be **app-level**, not job-level
+  (subscribers run on the worker). Confirm the actual DO app spec before launch — this
+  runbook cannot see prod env state.
 
 ---
 
