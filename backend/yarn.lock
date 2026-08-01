@@ -16,7 +16,7 @@ __metadata:
     "@mercurjs/admin": "npm:2.1.6"
     "@types/node": "npm:^24.10.1"
     autoprefixer: "npm:^10.5.4"
-    postcss: "npm:^8.5.23"
+    postcss: "npm:^8.5.25"
     tailwindcss: "npm:^3.4.17"
     vitest: "npm:^4.1.10"
   languageName: unknown
@@ -40,7 +40,7 @@ __metadata:
     "@mercurjs/cli": "npm:2.1.6"
     "@mercurjs/core": "npm:2.1.6"
     "@mercurjs/types": "npm:2.1.6"
-    "@swc/core": "npm:^1.15.46"
+    "@swc/core": "npm:^1.15.47"
     "@swc/jest": "npm:^0.2.36"
     "@types/jest": "npm:^29.5.13"
     "@types/multer": "npm:^2.2.0"
@@ -51,7 +51,7 @@ __metadata:
     jest: "npm:^29.7.0"
     multer: "npm:^2.2.0"
     prop-types: "npm:^15.8.1"
-    resend: "npm:^6.18.0"
+    resend: "npm:^6.18.1"
     sharp: "npm:^0.35.3"
     write-excel-file: "npm:^4.1.1"
     yalc: "npm:^1.0.0-pre.53"
@@ -62,7 +62,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@acme/odds-math@workspace:packages/odds-math"
   dependencies:
-    "@swc/core": "npm:^1.15.46"
+    "@swc/core": "npm:^1.15.47"
     "@swc/jest": "npm:^0.2.36"
     "@types/jest": "npm:^29.5.13"
     jest: "npm:^29.7.0"
@@ -74,7 +74,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@acme/pokemon@workspace:packages/pokemon"
   dependencies:
-    "@swc/core": "npm:^1.15.46"
+    "@swc/core": "npm:^1.15.47"
     "@swc/jest": "npm:^0.2.36"
     "@types/jest": "npm:^29.5.13"
     jest: "npm:^29.7.0"
@@ -6847,106 +6847,106 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@swc/core-darwin-arm64@npm:1.15.46":
-  version: 1.15.46
-  resolution: "@swc/core-darwin-arm64@npm:1.15.46"
+"@swc/core-darwin-arm64@npm:1.15.47":
+  version: 1.15.47
+  resolution: "@swc/core-darwin-arm64@npm:1.15.47"
   conditions: os=darwin & cpu=arm64
   languageName: node
   linkType: hard
 
-"@swc/core-darwin-x64@npm:1.15.46":
-  version: 1.15.46
-  resolution: "@swc/core-darwin-x64@npm:1.15.46"
+"@swc/core-darwin-x64@npm:1.15.47":
+  version: 1.15.47
+  resolution: "@swc/core-darwin-x64@npm:1.15.47"
   conditions: os=darwin & cpu=x64
   languageName: node
   linkType: hard
 
-"@swc/core-linux-arm-gnueabihf@npm:1.15.46":
-  version: 1.15.46
-  resolution: "@swc/core-linux-arm-gnueabihf@npm:1.15.46"
+"@swc/core-linux-arm-gnueabihf@npm:1.15.47":
+  version: 1.15.47
+  resolution: "@swc/core-linux-arm-gnueabihf@npm:1.15.47"
   conditions: os=linux & cpu=arm
   languageName: node
   linkType: hard
 
-"@swc/core-linux-arm64-gnu@npm:1.15.46":
-  version: 1.15.46
-  resolution: "@swc/core-linux-arm64-gnu@npm:1.15.46"
+"@swc/core-linux-arm64-gnu@npm:1.15.47":
+  version: 1.15.47
+  resolution: "@swc/core-linux-arm64-gnu@npm:1.15.47"
   conditions: os=linux & cpu=arm64 & libc=glibc
   languageName: node
   linkType: hard
 
-"@swc/core-linux-arm64-musl@npm:1.15.46":
-  version: 1.15.46
-  resolution: "@swc/core-linux-arm64-musl@npm:1.15.46"
+"@swc/core-linux-arm64-musl@npm:1.15.47":
+  version: 1.15.47
+  resolution: "@swc/core-linux-arm64-musl@npm:1.15.47"
   conditions: os=linux & cpu=arm64 & libc=musl
   languageName: node
   linkType: hard
 
-"@swc/core-linux-ppc64-gnu@npm:1.15.46":
-  version: 1.15.46
-  resolution: "@swc/core-linux-ppc64-gnu@npm:1.15.46"
+"@swc/core-linux-ppc64-gnu@npm:1.15.47":
+  version: 1.15.47
+  resolution: "@swc/core-linux-ppc64-gnu@npm:1.15.47"
   conditions: os=linux & cpu=ppc64 & libc=glibc
   languageName: node
   linkType: hard
 
-"@swc/core-linux-s390x-gnu@npm:1.15.46":
-  version: 1.15.46
-  resolution: "@swc/core-linux-s390x-gnu@npm:1.15.46"
+"@swc/core-linux-s390x-gnu@npm:1.15.47":
+  version: 1.15.47
+  resolution: "@swc/core-linux-s390x-gnu@npm:1.15.47"
   conditions: os=linux & cpu=s390x & libc=glibc
   languageName: node
   linkType: hard
 
-"@swc/core-linux-x64-gnu@npm:1.15.46":
-  version: 1.15.46
-  resolution: "@swc/core-linux-x64-gnu@npm:1.15.46"
+"@swc/core-linux-x64-gnu@npm:1.15.47":
+  version: 1.15.47
+  resolution: "@swc/core-linux-x64-gnu@npm:1.15.47"
   conditions: os=linux & cpu=x64 & libc=glibc
   languageName: node
   linkType: hard
 
-"@swc/core-linux-x64-musl@npm:1.15.46":
-  version: 1.15.46
-  resolution: "@swc/core-linux-x64-musl@npm:1.15.46"
+"@swc/core-linux-x64-musl@npm:1.15.47":
+  version: 1.15.47
+  resolution: "@swc/core-linux-x64-musl@npm:1.15.47"
   conditions: os=linux & cpu=x64 & libc=musl
   languageName: node
   linkType: hard
 
-"@swc/core-win32-arm64-msvc@npm:1.15.46":
-  version: 1.15.46
-  resolution: "@swc/core-win32-arm64-msvc@npm:1.15.46"
+"@swc/core-win32-arm64-msvc@npm:1.15.47":
+  version: 1.15.47
+  resolution: "@swc/core-win32-arm64-msvc@npm:1.15.47"
   conditions: os=win32 & cpu=arm64
   languageName: node
   linkType: hard
 
-"@swc/core-win32-ia32-msvc@npm:1.15.46":
-  version: 1.15.46
-  resolution: "@swc/core-win32-ia32-msvc@npm:1.15.46"
+"@swc/core-win32-ia32-msvc@npm:1.15.47":
+  version: 1.15.47
+  resolution: "@swc/core-win32-ia32-msvc@npm:1.15.47"
   conditions: os=win32 & cpu=ia32
   languageName: node
   linkType: hard
 
-"@swc/core-win32-x64-msvc@npm:1.15.46":
-  version: 1.15.46
-  resolution: "@swc/core-win32-x64-msvc@npm:1.15.46"
+"@swc/core-win32-x64-msvc@npm:1.15.47":
+  version: 1.15.47
+  resolution: "@swc/core-win32-x64-msvc@npm:1.15.47"
   conditions: os=win32 & cpu=x64
   languageName: node
   linkType: hard
 
-"@swc/core@npm:^1.15.46":
-  version: 1.15.46
-  resolution: "@swc/core@npm:1.15.46"
+"@swc/core@npm:^1.15.47":
+  version: 1.15.47
+  resolution: "@swc/core@npm:1.15.47"
   dependencies:
-    "@swc/core-darwin-arm64": "npm:1.15.46"
-    "@swc/core-darwin-x64": "npm:1.15.46"
-    "@swc/core-linux-arm-gnueabihf": "npm:1.15.46"
-    "@swc/core-linux-arm64-gnu": "npm:1.15.46"
-    "@swc/core-linux-arm64-musl": "npm:1.15.46"
-    "@swc/core-linux-ppc64-gnu": "npm:1.15.46"
-    "@swc/core-linux-s390x-gnu": "npm:1.15.46"
-    "@swc/core-linux-x64-gnu": "npm:1.15.46"
-    "@swc/core-linux-x64-musl": "npm:1.15.46"
-    "@swc/core-win32-arm64-msvc": "npm:1.15.46"
-    "@swc/core-win32-ia32-msvc": "npm:1.15.46"
-    "@swc/core-win32-x64-msvc": "npm:1.15.46"
+    "@swc/core-darwin-arm64": "npm:1.15.47"
+    "@swc/core-darwin-x64": "npm:1.15.47"
+    "@swc/core-linux-arm-gnueabihf": "npm:1.15.47"
+    "@swc/core-linux-arm64-gnu": "npm:1.15.47"
+    "@swc/core-linux-arm64-musl": "npm:1.15.47"
+    "@swc/core-linux-ppc64-gnu": "npm:1.15.47"
+    "@swc/core-linux-s390x-gnu": "npm:1.15.47"
+    "@swc/core-linux-x64-gnu": "npm:1.15.47"
+    "@swc/core-linux-x64-musl": "npm:1.15.47"
+    "@swc/core-win32-arm64-msvc": "npm:1.15.47"
+    "@swc/core-win32-ia32-msvc": "npm:1.15.47"
+    "@swc/core-win32-x64-msvc": "npm:1.15.47"
     "@swc/counter": "npm:^0.1.3"
     "@swc/types": "npm:^0.1.27"
   peerDependencies:
@@ -6979,7 +6979,7 @@ __metadata:
   peerDependenciesMeta:
     "@swc/helpers":
       optional: true
-  checksum: 10c0/70cab177b55c69ba6fea493267a4f31fd28c5a078893810d26ed3a84238dc8e23b875697b9f6494efc34c76b8280f6935345a3d89ed2b4848a9efcc17e1f802f
+  checksum: 10c0/34ccbb3ae5db0af520934abfdf2505b8490128b48863d9a2e6db2d8787e2d7415318000c92fd32ebe351b24d93f36f52c58f35b9a98e60a4010b34a1af2c3d5e
   languageName: node
   linkType: hard
 
@@ -14198,7 +14198,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"postcss@npm:^8.4.38, postcss@npm:^8.4.47, postcss@npm:^8.5.16, postcss@npm:^8.5.23, postcss@npm:^8.5.3":
+"postcss@npm:^8.4.38, postcss@npm:^8.4.47, postcss@npm:^8.5.16, postcss@npm:^8.5.3":
   version: 8.5.23
   resolution: "postcss@npm:8.5.23"
   dependencies:
@@ -14206,6 +14206,17 @@ __metadata:
     picocolors: "npm:^1.1.1"
     source-map-js: "npm:^1.2.1"
   checksum: 10c0/ed714e635b330bb42666ecdd0c0b4f30224ded15b0b0052d6bc2b92832f2cf17d1c1141359453f96f0a84f8fbf4c405a74df187f559163b8f31131b2535455aa
+  languageName: node
+  linkType: hard
+
+"postcss@npm:^8.5.25":
+  version: 8.5.25
+  resolution: "postcss@npm:8.5.25"
+  dependencies:
+    nanoid: "npm:^3.3.16"
+    picocolors: "npm:^1.1.1"
+    source-map-js: "npm:^1.2.1"
+  checksum: 10c0/0a12c1e74b456c57122e81f684e02fd98ff4d57526f794d10c996df1147158808f5ae373ac82b988c8de6cbbaa82dbd7b13803b14f5dd3cf7cc6a42ccad5c9f2
   languageName: node
   linkType: hard
 
@@ -14934,9 +14945,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"resend@npm:^6.18.0":
-  version: 6.18.0
-  resolution: "resend@npm:6.18.0"
+"resend@npm:^6.18.1":
+  version: 6.18.1
+  resolution: "resend@npm:6.18.1"
   dependencies:
     postal-mime: "npm:2.7.5"
     standardwebhooks: "npm:1.0.0"
@@ -14945,7 +14956,7 @@ __metadata:
   peerDependenciesMeta:
     "@react-email/render":
       optional: true
-  checksum: 10c0/40a6147221efe0ac45cc80629b974c25c9c7740d04dfebba52329fb8a6f434b8e7cde356cd5de5d4aea4b1cc640ac19345ad79646ff8c27ac829c895d8448b16
+  checksum: 10c0/6450a9166c12ad5db56fc6f77d01125b8e622ec93fe86ccb9295a498a134c4a446663f23fcacf713bd95b8aa0407fb9d015b8c51aa7d17a2deebbd308e28353d
   languageName: node
   linkType: hard
 
