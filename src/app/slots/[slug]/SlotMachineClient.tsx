@@ -46,7 +46,7 @@ import { spriteGif } from '@/lib/mock/pokedex';
 import { SlotReelStack, type ColumnWinner } from './SlotReelStack';
 import {
   buildDecoyPool,
-  shuffleCells,
+  buildIdlePool,
   HREEL_IDLE_POOL_MAX,
   type HReelCell,
 } from '@/lib/hreel';
@@ -230,11 +230,7 @@ export default function SlotMachineClient({
   // reel via the DECOY_DEXES fallback.
   useEffect(() => {
     if (phase !== 'idle') return;
-    setDecoyPools(
-      Array.from({ length: reels }, () =>
-        shuffleCells(basePool).slice(0, HREEL_IDLE_POOL_MAX),
-      ),
-    );
+    setDecoyPools(Array.from({ length: reels }, () => buildIdlePool(basePool)));
   }, [phase, reels, basePool]);
   // A just-added reel must show pack cards in the SAME render (the reshuffle
   // effect only lands next tick) — pad with cappedBase instead of letting

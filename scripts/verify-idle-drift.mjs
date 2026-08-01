@@ -2,16 +2,20 @@
 import { chromium } from 'playwright';
 
 const BASE = process.env.PW_BASE ?? 'http://localhost:4000';
+// Pack under test — diamond-pack is the prod repro (78-pair pool); a fresh
+// local/e2e DB only has the QA packs, so point QA_PACK at one seeded big.
+const PACK = process.env.QA_PACK ?? 'diamond-pack';
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
 
-await page.goto(`${BASE}/slots/diamond-pack/spin?demo=1`, {
+await page.goto(`${BASE}/slots/${PACK}/spin?demo=1`, {
   waitUntil: 'networkidle',
 });
 const strip = page.locator('div.will-change-transform').first();
 await strip.waitFor({ state: 'visible', timeout: 15000 });
 
-// Pool size actually rendered (cells in the strip)
+// Strip cell count — always HREEL_STRIP_LEN (64); a sanity check that the
+// reel actually mounted, NOT the pool size.
 const cellCount = await strip.locator(':scope > div').count();
 
 const t1 = await strip.evaluate((el) => el.style.transform);

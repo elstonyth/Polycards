@@ -88,6 +88,20 @@ export function shuffleCells(
 }
 
 /**
+ * One idle-cycle pool for a reel: a fresh shuffle of the base pool, capped to
+ * HREEL_IDLE_POOL_MAX so the idle drift always fits the strip (the frozen-rails
+ * bug: an uncapped 78-pair pool made ReelStrip rest the reel sharp). Shuffling
+ * BEFORE the slice is what rotates the full pool through the reel across
+ * cycles. `rand` is injectable for deterministic tests.
+ */
+export function buildIdlePool(
+  cells: readonly HReelCell[],
+  rand: () => number = Math.random,
+): HReelCell[] {
+  return shuffleCells(cells, rand).slice(0, HREEL_IDLE_POOL_MAX);
+}
+
+/**
  * Deterministic decoy tier for cell `i`: a prime-step walk over the 6-tier
  * palette so the strip flickers varied colors with zero render-time randomness.
  * `(i*5+2) % 6` visits all six tiers with period 6.
