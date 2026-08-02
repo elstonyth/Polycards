@@ -24,8 +24,15 @@ const PK =
 const EMAIL = `qa-phone-forgot-${Date.now()}@test.dev`;
 const OLD_PASSWORD = 'PhoneForgotOld123!';
 const NEW_PASSWORD = 'PhoneForgotNew456!';
-const NATIONAL_PHONE = '010-766 7789'; // default country MY -> +60107667789
-const E164_PHONE = '+60107667789';
+// A fixed number here collides with whatever the last run's seed customer
+// left in the (persistent, shared) local DB — the phone-verification/
+// password-reset route then sees 2 matches and (correctly) refuses with
+// "More than one account uses this phone number." Vary the last 4 digits
+// per run so this script stays re-runnable. Prefix matches the previously
+// human-verified '010-766 7787'/'010-766 7789' numbers (default country MY).
+const PHONE_SUFFIX = String(Date.now()).slice(-4);
+const NATIONAL_PHONE = `010-766 ${PHONE_SUFFIX}`;
+const E164_PHONE = `+6010766${PHONE_SUFFIX}`;
 const DEV_CODE = '000000';
 
 const b = await chromium.launch();

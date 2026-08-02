@@ -242,11 +242,12 @@ export default function AuthForm({
               {PHONE_VERIFICATION_REQUIRED && (
                 <button
                   type="button"
+                  disabled={busy}
                   onClick={() => {
                     setForgot('phone');
                     setNote(null);
                   }}
-                  className="self-center py-2 text-[12px] text-white/70 hover:text-white"
+                  className="self-center py-2 text-[12px] text-white/70 hover:text-white disabled:opacity-70"
                 >
                   Use phone number instead
                 </button>

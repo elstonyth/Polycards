@@ -11,6 +11,7 @@ import { logger } from '@/lib/logger';
 import { getAuthToken } from '@/lib/data/customer';
 import { normalizePhone } from '@/lib/profile-validation';
 import type { PhoneOtpPurpose } from '@/lib/phone-verification';
+import { friendlyError, type ErrorRule } from '@/lib/errors';
 
 type Fail = { ok: false; error: string };
 const fail = (error: string): Fail => ({ ok: false, error });
@@ -20,6 +21,23 @@ const messageOf = (error: unknown, fallback: string): string => {
   const msg = error instanceof Error ? error.message : '';
   return /try again in \d+s/i.test(msg) ? msg : fallback;
 };
+
+// The three post-OTP outcomes password-reset/route.ts is DESIGNED to
+// disclose to a proven phone-holder (Task 5 comment) — a raw FetchError's
+// `.message` is the backend MedusaError's literal text, unwrapped (verified
+// against node_modules/@medusajs/js-sdk's FetchError: `super(jsonError.message
+// ?? resp.statusText)`; same mechanism AUTH_RULES already relies on in
+// src/lib/actions/auth.ts). Collapsing these into the generic fallback would
+// tell a Google-only account "Reset by email instead." — a dead end, since
+// that account has no emailpass identity to reset.
+const PHONE_RESET_RULES: ErrorRule[] = [
+  [/no account uses this phone number/i, 'No account uses this phone number.'],
+  [
+    /more than one account uses this phone number/i,
+    'More than one account uses this phone number. Reset by email instead.',
+  ],
+  [/this account signs in with google/i, 'This account signs in with Google.'],
+];
 
 export async function startPhoneOtp(input: {
   phone: string;
@@ -103,8 +121,17 @@ export async function resetPasswordByPhone(input: {
     return { ok: true, ...data };
   } catch (error) {
     logger.error('[phone-otp] reset exchange failed:', error);
+    // Designed-disclosure messages win; a 429's retry text is the next
+    // fallback (messageOf), the generic copy is the last resort.
     return fail(
-      messageOf(error, 'Could not verify this phone. Reset by email instead.'),
+      friendlyError(
+        error,
+        PHONE_RESET_RULES,
+        messageOf(
+          error,
+          'Could not verify this phone. Reset by email instead.',
+        ),
+      ),
     );
   }
 }
