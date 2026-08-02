@@ -1,11 +1,14 @@
 // Mobile verification (390x844 phone viewport):
-//  1. vault grid = 3-up, tiles compact
-//  2. pack "Cards in this pack" = 3-up
+//  1. vault grid = 3-up, tiles compact (needs scripts/.dev-logins + backend)
+//  2. pack "Rare & above" rail — distinct tile x positions = cards visible
+//     across the viewport (it's a horizontal rail now, not the old 3-up grid)
 //  3. card-detail overlay fits the viewport WITHOUT scrolling
+// Usage: node scripts/qa-mobile-cards.mjs [baseUrl]
 import { chromium } from 'playwright';
 import { readFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 
+const BASE = process.argv[2] ?? 'http://127.0.0.1:4000';
 const OUT = process.env.OUT_DIR ?? '.';
 mkdirSync(OUT, { recursive: true });
 const kv = Object.fromEntries(
@@ -26,7 +29,7 @@ const page = await browser.newPage({
 });
 
 // login (needed for vault)
-await page.goto('http://127.0.0.1:4000/', { waitUntil: 'domcontentloaded' });
+await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' });
 const loginBtn = page
   .locator('header')
   .getByRole('button', { name: /^login$/i });
@@ -41,7 +44,7 @@ await loginBtn.waitFor({ state: 'detached', timeout: 20000 });
 console.log('login: ok');
 
 // 1. vault
-await page.goto('http://127.0.0.1:4000/vault', { waitUntil: 'networkidle' });
+await page.goto(`${BASE}/vault`, { waitUntil: 'networkidle' });
 await page.waitForTimeout(1500);
 const firstTile = page
   .locator('button[aria-label^="View details for"]')
@@ -67,12 +70,14 @@ console.log(
 );
 await page.screenshot({ path: `${OUT}/vault-mobile.png`, fullPage: false });
 
-// 2. pack pool grid
-await page.goto('http://127.0.0.1:4000/slots/pokemon-black', {
+// 2. pack pool rail ("Rare & above" normally, "All cards" for zero-Rare packs)
+await page.goto(`${BASE}/slots/bronze-pack`, {
   waitUntil: 'networkidle',
 });
 await page.waitForTimeout(1000);
-const heading = page.getByRole('heading', { name: /cards in this pack/i });
+const heading = page.getByRole('heading', {
+  name: /^(Rare & above|All cards)$/,
+});
 await heading.scrollIntoViewIfNeeded();
 await page.waitForTimeout(600);
 const poolTiles = await page
@@ -81,7 +86,7 @@ const poolTiles = await page
     const xs = els.map((e) => Math.round(e.getBoundingClientRect().x));
     return [...new Set(xs)].filter((x) => x >= 0);
   });
-console.log(`pack pool: distinct tile x positions=${poolTiles.length}`);
+console.log(`pack rail: distinct tile x positions=${poolTiles.length}`);
 await page.screenshot({ path: `${OUT}/pack-pool-mobile.png` });
 
 // 3. overlay fits without scroll
