@@ -498,19 +498,19 @@ export default function PackDetailClient({
             </Reveal>
           )}
 
-          {/* Rare & above — Rare+ only, as a swipeable rail whose
-              expand button opens the FULL pool dialog (every tier, rarest
-              first, per-tier pull chance when published) — the only surface
-              on the page listing the whole pool, matching the value range the
-              odds panel quotes below (also computed over the full pool).
-              Header lives inside the component (the expand button sits in
-              it). Gated on `pool`, not `topPool`: a save-only Common/
-              Uncommon pack has an empty Rare+ subset but a non-empty pool,
-              and the odds panel below still quotes full-pool value ranges —
-              PoolByRarity itself drops the rail strip and relabels the
-              header to "All cards" when `rail` is empty (see its own note),
-              so this section still renders instead of vanishing under an
-              odds panel with nothing to point at. */}
+          {/* Rare & above — Rare+ only, as a swipeable rail whose expand
+              button opens a dialog of the SAME Rare+ subset (rarest first,
+              per-tier pull chance when published) — operator decision
+              2026-08-02; commons are catalogue noise in the expanded view
+              too. The odds panel below still quotes value ranges over the
+              FULL pool — a deliberate, operator-accepted mismatch (see
+              PoolByRarity's header note before "fixing" it). Header lives
+              inside the component (the expand button sits in it). Gated on
+              `pool`, not `topPool`: a save-only Common/Uncommon pack has an
+              empty Rare+ subset but a non-empty pool — PoolByRarity drops
+              the rail strip and falls back to the full pool under an
+              "All cards" header, so the pool keeps an entry point instead of
+              vanishing under an odds panel with nothing to point at. */}
           {pool.length > 0 && (
             <Reveal as="section">
               <PoolByRarity
