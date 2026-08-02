@@ -64,11 +64,25 @@ export default function AuthForm({
     phone: string;
     pending: { email: string; password: string; first_name: string };
   } | null>(null);
+  // Snapshot of the signup form's values, taken the moment the OTP step is
+  // entered. Unlike `otp`, this SURVIVES `setOtp(null)` (Back, or a
+  // signup() failure after a real SMS was already sent) — the remounted
+  // signup form below reads it to re-seed its uncontrolled inputs via
+  // `defaultValue` instead of rendering empty. Only ever set from the
+  // PHONE_VERIFICATION_REQUIRED branch of onSubmit, so it stays null (no
+  // behavior change) on the flag-off path.
+  const [signupDraft, setSignupDraft] = useState<{
+    email: string;
+    password: string;
+    first_name: string;
+    phone: string;
+  } | null>(null);
 
   function switchMode(m: 'login' | 'signup') {
     setForgot('none');
     setNote(null);
     setOtp(null);
+    setSignupDraft(null);
     onSwitchMode(m);
   }
 
@@ -177,8 +191,10 @@ export default function AuthForm({
         return;
       }
       // Defer the real signup() call until the code is verified — pending
-      // fields ride along in state for onVerified to use.
+      // fields ride along in state for onVerified to use. signupDraft is the
+      // same values, but kept around after setOtp(null) (see its comment).
       setOtp({ phone, pending: { email, password, first_name } });
+      setSignupDraft({ email, password, first_name, phone });
       return;
     }
 
@@ -276,6 +292,7 @@ export default function AuthForm({
             >
               <PhoneField
                 name="phone"
+                defaultValue={forgotPhone}
                 inputClassName={PHONE_INPUT_CLASS}
                 placeholder="Phone number"
                 required
@@ -368,14 +385,12 @@ export default function AuthForm({
               phone: otp.phone,
               phone_verification_token: token,
             });
-            if (result.ok) {
-              setCustomer(result.customer);
-              onSuccess?.();
-              router.refresh();
-              return;
-            }
-            setOtp(null);
-            setNote({ text: result.error });
+            // On failure, fall back to the signup form — signupDraft (still
+            // set) re-seeds it instead of it rendering empty. finishAuth
+            // handles both branches: setCustomer/onSuccess/refresh on ok,
+            // setNote on failure.
+            if (!result.ok) setOtp(null);
+            finishAuth(result);
           }}
         />
       </div>
@@ -422,6 +437,7 @@ export default function AuthForm({
             // Submitted as first_name (a display name), not a login identifier.
             autoComplete="nickname"
             maxLength={NAME_MAX}
+            defaultValue={signupDraft?.first_name}
           />
         )}
         <Field
@@ -431,10 +447,12 @@ export default function AuthForm({
           placeholder="Email"
           autoComplete="email"
           required
+          defaultValue={signupDraft?.email}
         />
         {isSignup && (
           <PhoneField
             name="phone"
+            defaultValue={signupDraft?.phone ?? ''}
             inputClassName={PHONE_INPUT_CLASS}
             placeholder="Phone number"
             required
@@ -452,6 +470,7 @@ export default function AuthForm({
           autoComplete={isSignup ? 'new-password' : 'current-password'}
           required
           minLength={isSignup ? 8 : undefined}
+          defaultValue={signupDraft?.password}
           aria-invalid={note?.field === 'password' || undefined}
           aria-describedby={
             note?.field === 'password' ? 'auth-form-error' : undefined
@@ -465,6 +484,7 @@ export default function AuthForm({
             placeholder="Confirm password"
             autoComplete="new-password"
             required
+            defaultValue={signupDraft?.password}
             aria-invalid={note?.field === 'password' || undefined}
             aria-describedby={
               note?.field === 'password' ? 'auth-form-error' : undefined

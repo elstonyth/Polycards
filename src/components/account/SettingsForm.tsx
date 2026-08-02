@@ -230,23 +230,23 @@ export default function SettingsForm({ customer }: Props) {
         {phoneChange === 'entry' && (
           // Not a <form> (nor form-associated) — its value is read straight
           // off the DOM via newPhoneWrapRef, not FormData, and Enter-to-send
-          // is reimplemented via onKeyDown below (associating this PhoneField
-          // with settings-profile would make Enter trigger a profile SAVE
-          // instead of Send code, via native implicit form submission).
-          <div
-            className="flex flex-col gap-2"
-            onKeyDown={(e) => {
-              if (e.key !== 'Enter') return;
-              e.preventDefault();
-              void onSendCode();
-            }}
-          >
+          // is reimplemented via the PhoneField's onKeyDown below (associating
+          // this PhoneField with settings-profile would make Enter trigger a
+          // profile SAVE instead of Send code, via native implicit form
+          // submission). Scoped to the tel input itself, not a wrapping div —
+          // a div-level handler would also eat Enter on the country <select>.
+          <div className="flex flex-col gap-2">
             <div ref={newPhoneWrapRef}>
               <PhoneField
                 name="new_phone"
                 defaultValue={pendingPhone}
                 inputClassName={INPUT_CLASS}
                 placeholder="New phone number"
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter') return;
+                  e.preventDefault();
+                  void onSendCode();
+                }}
               />
             </div>
             <div className="flex items-center gap-3">
