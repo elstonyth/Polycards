@@ -167,6 +167,40 @@ Above 100 means the operator loses money on that pack.
 **EV** (Expected Value):
 The odds-weighted expected FMV of one Open of a pack.
 
+## Phone Verification
+
+Phone number confirmation via SMS-delivered OTP (one-time password). When enabled, gates three flows: account signup (requires proof token in header), phone change on existing accounts, and password reset via on-file phone number.
+
+**OTP** (One-Time Password):
+Six-digit code valid for 10 minutes, sent to the phone via SMS. In dev/test, code is `000000` (overridable via `PHONE_OTP_DEV_CODE` env var). In production, sent via Twilio Verify; production fails closed if Twilio is unconfigured.
+_Avoid_: token (that's the proof token below), password (this is a numeric code)
+
+**Proof Token**:
+Stateless HMAC-signed JWT (10-minute TTL) issued after successful OTP check. Single-purpose: proves one phone number for one flow (`signup` | `phone-change` | `password-reset`). Replay within TTL on the same phone is accepted (OTP resend cost is negligible). Different phones produce cryptographically distinct tokens.
+
+**Feature Flag** (`PHONE_VERIFICATION_REQUIRED`):
+Backend-only flag (env var). Enables phone-verification gates on signup and phone-change routes. When off, all gates open (rollback mechanism). Build-time storefront flag `NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED` displays OTP UI; flag drift is UX-only, backend gate is authoritative.
+
+**Flows**:
+
+- **Signup**: POST /store/customers with `x-phone-verification` header (proof token) when a phone is provided and feature flag is on.
+- **Phone change**: POST /store/customers/me with proof token when changing the phone number.
+- **Password reset**: POST /store/auth/customer/password-reset exchanges a proof token for a single-use reset token; proof obtained via POST /store/phone-verification/password-reset, which sends OTP to the on-file phone.
+
+**Rate Limits** (`phone-otp`):
+IP-based, two-tier per operation:
+
+- Start (POST /store/phone-verification/start): 3 per 60s / 10 per 1h
+- Check (POST /store/phone-verification/check): 5 per 60s / 20 per 1h
+
+Tunable via env vars: `PHONE_OTP_START_RATE_PER_SECOND`, `PHONE_OTP_START_RATE_PER_HOUR`, `PHONE_OTP_CHECK_RATE_PER_SECOND`, `PHONE_OTP_CHECK_RATE_PER_HOUR`.
+
+**Accepted Ceilings** (scope boundaries):
+
+- Proof-token replay within 10m TTL on the same phone number (acceptable).
+- Legacy non-E.164 phones cannot initiate password reset (only E.164-normalized phones from signup flow work).
+- Phoneless direct-API signup unaffected (unchanged pre-existing behavior).
+
 ## UI only — deliberately not domain
 
 These are presentation words. They must not stand in for the domain terms above.
