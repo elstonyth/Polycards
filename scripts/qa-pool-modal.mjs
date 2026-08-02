@@ -1,4 +1,4 @@
-// QA: "Cards in this pack" rail + expand modal (feat/pack-pool-modal).
+// QA: pool rail ("Rare & above" / "All cards") + expand modal on /slots/[slug].
 // Usage: node scripts/qa-pool-modal.mjs [baseUrl]
 // Screenshots to docs/research/qa-pool-modal-*.png, JSON to stdout.
 import { mkdirSync } from 'node:fs';
@@ -7,17 +7,28 @@ import { chromium } from 'playwright';
 const BASE = process.argv[2] ?? 'http://127.0.0.1:4000';
 mkdirSync('docs/research', { recursive: true });
 
+// The dialog's aria-label mirrors its heading — "Rare & above" normally,
+// "All cards" for a zero-Rare pack. One selector for both, and specific
+// enough to never match the cookie-consent dialog.
+const DIALOG_SEL =
+  '[role="dialog"][aria-label="Rare & above"], [role="dialog"][aria-label="All cards"]';
+
 const browser = await chromium.launch();
 try {
-  // Find pack slugs that actually render the section (needs a Rare+ pool).
+  // Find pack slugs that actually render the section (any non-empty pool —
+  // "Rare & above" normally, the "All cards" fallback for zero-Rare packs).
   const scout = await browser.newPage();
   await scout.goto(`${BASE}/slots`, { waitUntil: 'domcontentloaded' });
   await scout.waitForTimeout(2000);
-  const slugs = await scout.evaluate(() =>
-    [...document.querySelectorAll('a[href^="/slots/"]')]
-      .map((a) => a.getAttribute('href').replace('/slots/', ''))
-      .filter((s) => s && !s.includes('/')),
-  );
+  // Hrefs may carry a query (?count=1 since the qty presets) — strip it, or
+  // every derived slug 404s the later checks. Dedupe at the source.
+  const slugs = await scout.evaluate(() => [
+    ...new Set(
+      [...document.querySelectorAll('a[href^="/slots/"]')]
+        .map((a) => a.getAttribute('href').replace('/slots/', '').split('?')[0])
+        .filter((s) => s && !s.includes('/')),
+    ),
+  ]);
   await scout.close();
   console.log(JSON.stringify({ slugs }));
 
@@ -26,14 +37,16 @@ try {
     ['desktop', { width: 1440, height: 900 }],
   ]) {
     let done = false;
-    for (const slug of [...new Set(slugs)]) {
+    for (const slug of slugs) {
       if (done) break;
       const page = await browser.newPage({ viewport });
       await page.goto(`${BASE}/slots/${slug}`, {
         waitUntil: 'domcontentloaded',
         timeout: 30000,
       });
-      const h2 = page.locator('h2', { hasText: 'Cards in this pack' }).first();
+      const h2 = page
+        .locator('h2', { hasText: /^(Rare & above|All cards)$/ })
+        .first();
       try {
         await h2.waitFor({ timeout: 8000 });
       } catch {
@@ -46,18 +59,17 @@ try {
         path: `docs/research/qa-pool-modal-${label}-1-rail.png`,
       });
 
-      // Expand via the header icon button.
-      const expand = page.locator('button[aria-label^="Show all"]').first();
+      // Expand via the header icon button (aria: "Show the N Rare & above
+      // cards grouped by rarity" / "Show all N cards grouped by rarity").
+      const expand = page
+        .locator('button[aria-label*="grouped by rarity"]')
+        .first();
       await expand.click();
-      const dialog = page.locator(
-        '[role="dialog"][aria-label="Cards in this pack"]',
-      );
+      const dialog = page.locator(DIALOG_SEL);
       await dialog.waitFor({ timeout: 5000 });
       await page.waitForTimeout(1200);
-      const m = await page.evaluate(() => {
-        const d = document.querySelector(
-          '[role="dialog"][aria-label="Cards in this pack"]',
-        );
+      const m = await page.evaluate((sel) => {
+        const d = document.querySelector(sel);
         const headers = [...d.querySelectorAll('h3')].map((h) => {
           const row = h.closest('div');
           return row ? row.textContent.trim() : h.textContent;
@@ -68,7 +80,7 @@ try {
             .length,
           scrollable: d.scrollHeight > d.clientHeight,
         };
-      });
+      }, DIALOG_SEL);
       console.log(JSON.stringify({ slug, label, ...m }));
       await page.screenshot({
         path: `docs/research/qa-pool-modal-${label}-2-modal.png`,
@@ -90,20 +102,22 @@ try {
       // guards against.
       await page.keyboard.press('Escape');
       await page.waitForTimeout(400);
-      const afterEsc1 = await page.evaluate(() => ({
-        overlays: document.querySelectorAll('.glass-scrim').length,
-        dialogs: document.querySelectorAll(
-          '[role="dialog"][aria-label="Cards in this pack"]',
-        ).length,
-      }));
+      const afterEsc1 = await page.evaluate(
+        (sel) => ({
+          overlays: document.querySelectorAll('.glass-scrim').length,
+          dialogs: document.querySelectorAll(sel).length,
+        }),
+        DIALOG_SEL,
+      );
       await page.keyboard.press('Escape');
       await page.waitForTimeout(400);
-      const afterEsc2 = await page.evaluate(() => ({
-        dialogs: document.querySelectorAll(
-          '[role="dialog"][aria-label="Cards in this pack"]',
-        ).length,
-        bodyOverflow: document.body.style.overflow,
-      }));
+      const afterEsc2 = await page.evaluate(
+        (sel) => ({
+          dialogs: document.querySelectorAll(sel).length,
+          bodyOverflow: document.body.style.overflow,
+        }),
+        DIALOG_SEL,
+      );
       const escStack =
         afterEsc1.overlays === 0 &&
         afterEsc1.dialogs === 1 &&
@@ -115,8 +129,22 @@ try {
 
       // Mouse drag-to-scroll on the rail: drag moves scrollLeft and opens
       // nothing; a plain click still opens the card overlay. Only meaningful
-      // where the rail overflows (narrow viewports).
+      // where the rail overflows (narrow viewports). A zero-Rare pack (the
+      // "All cards" fallback) renders NO rail at all — count() first, or
+      // rail.evaluate() would wait 30s and throw, aborting the whole run.
       const rail = page.locator('div.cursor-grab').first();
+      if ((await page.locator('div.cursor-grab').count()) === 0) {
+        console.log(
+          JSON.stringify({
+            slug,
+            label,
+            drag: 'skipped: no rail (zero-Rare "All cards" fallback)',
+          }),
+        );
+        done = true;
+        await page.close();
+        continue;
+      }
       const dims = await rail.evaluate((el) => ({
         sw: el.scrollWidth,
         cw: el.clientWidth,
