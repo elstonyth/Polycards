@@ -27,6 +27,10 @@ import {
 } from './utils/rate-limit';
 import { createResetTokenSingleUseGuard } from './utils/reset-token-guard';
 import { rejectCustomerMetadata } from './utils/customer-metadata-guard';
+import {
+  requireSignupPhoneProof,
+  blockUnverifiedPhoneWrite,
+} from './utils/phone-verification-guard';
 import { validateDeliverableAddress } from './utils/address-guard';
 import {
   blockDisabledCustomerSession,
@@ -274,17 +278,29 @@ export default defineMiddlewares({
       // guard as /me. Matcher is an anchored exact match (path-to-regexp; only
       // a trailing /* matches deeper segments), so it does NOT shadow
       // /store/customers/me or /store/customers/me/addresses.
+      //
+      // requireSignupPhoneProof (see utils/phone-verification-guard.ts):
+      // when PHONE_VERIFICATION_REQUIRED is on and the body carries a phone,
+      // the request must also carry a verified 'signup'-purpose proof for
+      // that exact number — the enforcement gate that makes Task 2's OTP
+      // routes mandatory instead of opt-in.
       matcher: '/store/customers',
       method: 'POST',
-      middlewares: [rejectCustomerMetadata],
+      middlewares: [rejectCustomerMetadata, requireSignupPhoneProof],
     },
     {
       // /store/customers/me is framework-authenticated; this guard rejects
       // client-supplied `metadata` (reserved for server-validated keys — see
       // utils/customer-metadata-guard.ts).
+      //
+      // blockUnverifiedPhoneWrite (see utils/phone-verification-guard.ts):
+      // when PHONE_VERIFICATION_REQUIRED is on, a direct string `phone` write
+      // here is rejected — phone CHANGES must go through the verified
+      // store/phone-verification/change route (Task 4); clearing to null
+      // stays allowed.
       matcher: '/store/customers/me',
       method: 'POST',
-      middlewares: [rejectCustomerMetadata],
+      middlewares: [rejectCustomerMetadata, blockUnverifiedPhoneWrite],
     },
     // Medusa's stock address routes silently accept null country_code +
     // postal_code (sim finding P3-8) — reject undeliverable addresses before

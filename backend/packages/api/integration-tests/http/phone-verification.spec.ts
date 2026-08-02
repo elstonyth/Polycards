@@ -143,6 +143,105 @@ medusaIntegrationTestRunner({
           });
         });
       });
+
+      // Enforcement gates (Task 3, src/api/utils/phone-verification-guard.ts).
+      // The guards read PHONE_VERIFICATION_REQUIRED per request, so flipping
+      // the env var here (rather than a runner `env:` override) reaches the
+      // already-booted app without a restart - scoped to this describe block
+      // only via beforeAll/afterAll so the tests above stay opt-in.
+      describe("gated signup", () => {
+        beforeAll(() => {
+          process.env.PHONE_VERIFICATION_REQUIRED = "true";
+        });
+        afterAll(() => {
+          delete process.env.PHONE_VERIFICATION_REQUIRED;
+        });
+
+        // Register-only helper (no /store/customers call yet) so each test
+        // controls its own create-attempt body/headers.
+        const register = async (email: string): Promise<string> => {
+          const reg = await api.post("/auth/customer/emailpass/register", {
+            email,
+            password: PASSWORD,
+          });
+          return reg.data.token as string;
+        };
+
+        it("refuses registration with a phone but no proof", async () => {
+          const email = "gated-no-proof@test.dev";
+          const phone = "+60199999996";
+          const token = await register(email);
+
+          const res = await unwrapResponse(
+            api.post(
+              "/store/customers",
+              { email, phone },
+              { headers: { ...headers, authorization: `Bearer ${token}` } },
+            ),
+          );
+          expect(res.status).toBe(400);
+        });
+
+        it("accepts registration with a fresh signup proof header", async () => {
+          const email = "gated-with-proof@test.dev";
+          const phone = "+60199999995";
+          const token = await register(email);
+
+          await start({ phone, purpose: "signup" });
+          const checked = await check({
+            phone,
+            purpose: "signup",
+            code: "000000",
+          });
+          expect(checked.status).toBe(200);
+          const proof = checked.data.token as string;
+
+          const res = await unwrapResponse(
+            api.post(
+              "/store/customers",
+              { email, phone },
+              {
+                headers: {
+                  ...headers,
+                  authorization: `Bearer ${token}`,
+                  "x-phone-verification": proof,
+                },
+              },
+            ),
+          );
+          expect(res.status).toBe(200);
+          expect(res.data.customer.phone).toBe(phone);
+        });
+
+        it("refuses a direct phone change on /store/customers/me", async () => {
+          const email = "gated-me-change@test.dev";
+          const token = await register(email);
+          await unwrapResponse(
+            api.post(
+              "/store/customers",
+              { email },
+              { headers: { ...headers, authorization: `Bearer ${token}` } },
+            ),
+          );
+          const login = await api.post("/auth/customer/emailpass", {
+            email,
+            password: PASSWORD,
+          });
+          const loginHeaders = {
+            ...headers,
+            authorization: `Bearer ${login.data.token}`,
+          };
+
+          const res = await unwrapResponse(
+            api.post(
+              "/store/customers/me",
+              { phone: "+60199999994" },
+              { headers: loginHeaders },
+            ),
+          );
+          expect(res.status).toBe(400);
+        });
+      });
     });
   },
 });
