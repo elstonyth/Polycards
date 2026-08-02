@@ -15,9 +15,11 @@ export async function GET(
     { defaultLimit: 25, maxLimit: 100 },
   );
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+  // `id` tiebreaker: offset pagination needs a unique secondary sort key or
+  // rows sharing a `created_at` can appear on two pages or on neither.
   const [rows, total] = await packs.listAndCountCreditTransactions(
     { customer_id: id },
-    { order: { created_at: 'DESC' }, skip: offset, take: limit },
+    { order: { created_at: 'DESC', id: 'DESC' }, skip: offset, take: limit },
   );
   // Ledger display id where present (POLYCARD-BACK §4.3 Wallet tab). SP rows
   // key on source_transaction_id (the open_id); TP/SE/AD key on the

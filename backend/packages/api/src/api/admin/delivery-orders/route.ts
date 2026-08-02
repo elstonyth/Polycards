@@ -34,8 +34,10 @@ export async function GET(
     { defaultLimit: 50, maxLimit: 100 },
   );
 
+  // `id` tiebreaker: offset pagination needs a unique secondary sort key or
+  // rows sharing a `created_at` can appear on two pages or on neither.
   const [orders, total] = await packs.listAndCountDeliveryOrders(filter, {
-    order: { created_at: 'DESC' },
+    order: { created_at: 'DESC', id: 'DESC' },
     skip: offset,
     take: limit,
   });
