@@ -110,14 +110,15 @@ export default function PackDetailClient({
     ? publishedOddsRows(liveDetail.publishedOdds)
     : null;
 
-  // The full public prize pool (value-sorted) — feeds the "Cards in this
-  // pack" grid AND gates the guest demo-spin CTA (pure theater on the reel,
-  // /spin?demo=1 — no charge, nothing won).
+  // The full public prize pool (value-sorted) — feeds the odds panel's
+  // valueRange/tierRanges, gates the guest demo-spin CTA (pure theater on the
+  // reel, /spin?demo=1 — no charge, nothing won), and backs the pool dialog
+  // only in the zero-Rare fallback (PoolByRarity's `full` prop).
   // Memoized so the `?? []` fallback doesn't mint a fresh array every render —
   // that identity churn would make the valueRange memo below recompute always.
   const pool = useMemo(() => liveDetail?.pool ?? [], [liveDetail?.pool]);
 
-  // Rare+ subset for the "Top hits" section: the rail shows the whole subset,
+  // Rare+ subset for the "Rare & above" section: the rail shows the whole subset,
   // the expand dialog lists the same Rare-and-above cards grouped by tier
   // (commons/uncommons are catalogue noise there). Order inherited (pool is
   // value-sorted desc). The FULL pool still feeds the demo spin + odds range.
@@ -498,19 +499,19 @@ export default function PackDetailClient({
             </Reveal>
           )}
 
-          {/* Rare & above — Rare+ only, as a swipeable rail whose
-              expand button opens the FULL pool dialog (every tier, rarest
-              first, per-tier pull chance when published) — the only surface
-              on the page listing the whole pool, matching the value range the
-              odds panel quotes below (also computed over the full pool).
-              Header lives inside the component (the expand button sits in
-              it). Gated on `pool`, not `topPool`: a save-only Common/
-              Uncommon pack has an empty Rare+ subset but a non-empty pool,
-              and the odds panel below still quotes full-pool value ranges —
-              PoolByRarity itself drops the rail strip and relabels the
-              header to "All cards" when `rail` is empty (see its own note),
-              so this section still renders instead of vanishing under an
-              odds panel with nothing to point at. */}
+          {/* Rare & above — Rare+ only, as a swipeable rail whose expand
+              button opens a dialog of the SAME Rare+ subset (rarest first,
+              per-tier pull chance when published) — operator decision
+              2026-08-02; commons are catalogue noise in the expanded view
+              too. The odds panel below still quotes value ranges over the
+              FULL pool — a deliberate, operator-accepted mismatch (see
+              PoolByRarity's header note before "fixing" it). Header lives
+              inside the component (the expand button sits in it). Gated on
+              `pool`, not `topPool`: a save-only Common/Uncommon pack has an
+              empty Rare+ subset but a non-empty pool — PoolByRarity drops
+              the rail strip and falls back to the full pool under an
+              "All cards" header, so the pool keeps an entry point instead of
+              vanishing under an odds panel with nothing to point at. */}
           {pool.length > 0 && (
             <Reveal as="section">
               <PoolByRarity
