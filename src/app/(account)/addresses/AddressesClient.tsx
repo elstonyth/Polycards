@@ -62,16 +62,21 @@ function RemoveAddressModal({
   async function confirm() {
     setBusy(true);
     setError(null);
-    const res = await deleteAddress(address.id);
-    setBusy(false);
-    if (!res.ok) {
-      // Expired session: reopen the login modal rather than stranding the
-      // customer on "Please log in first." inside a dialog with no way there.
-      if (res.needsAuth) openAuth('login');
-      else setError(res.error);
-      return;
+    try {
+      const res = await deleteAddress(address.id);
+      if (!res.ok) {
+        // Expired session: reopen the login modal rather than stranding the
+        // customer on "Please log in first." inside a dialog with no way there.
+        if (res.needsAuth) openAuth('login');
+        else setError(res.error);
+        return;
+      }
+      onRemoved();
+    } catch {
+      setError('Couldn’t remove the address. Please try again.');
+    } finally {
+      setBusy(false);
     }
-    onRemoved();
   }
 
   return (
