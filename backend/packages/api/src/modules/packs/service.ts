@@ -6503,8 +6503,10 @@ class PacksModuleService extends MedusaService({
   // Audited singleton replace (same pattern as editChallengeSettings). The
   // ORM MERGES json columns on update (see avatar_frames above), so the
   // write carries EVERY rarity key explicitly — null overwrites a cleared
-  // tier, otherwise removing a range could never persist.
-  @InjectManager()
+  // tier, otherwise removing a range could never persist. Transactional like
+  // every audited write here: the settings row and its audit row commit or
+  // roll back together.
+  @InjectTransactionManager()
   async editTierSettings(
     input: { ranges: TierRangeMap; adminId: string; reason: string },
     @MedusaContext() sharedContext: Context = {},

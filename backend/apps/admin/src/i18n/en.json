@@ -111,7 +111,7 @@
       "hint": "Blank = open on that side; both blank = tier unconfigured. Overlaps resolve to the rarest match.",
       "save": "Save ranges",
       "saved": "Tier ranges saved.",
-      "badNumber": "{{tier}}: bounds must be numbers ≥ 0.",
+      "badNumber": "{{tier}}: bounds must be numbers between 0 and 100,000,000.",
       "badOrder": "{{tier}}: min must not exceed max."
     },
     "editor": {
@@ -186,7 +186,7 @@
     "save": "Save tier defaults",
     "loadError": "Could not load tier defaults.",
     "errors": {
-      "number": "{{tier}}: {{side}} must be a number ≥ 0.",
+      "number": "{{tier}}: {{side}} must be a number between 0 and 100,000,000.",
       "order": "{{tier}}: min must not exceed max."
     }
   },

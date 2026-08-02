@@ -1351,7 +1351,8 @@ const seedRangeRows = (
 const rangeBoundOk = (s: string): boolean => {
   if (s.trim() === '') return true;
   const n = Number(s);
-  return Number.isFinite(n) && n >= 0;
+  // 100M cap mirrors the server's MAX_TIER_BOUND_MYR (tier-settings-validate).
+  return Number.isFinite(n) && n >= 0 && n <= 100_000_000;
 };
 
 const TierRangesSection = ({

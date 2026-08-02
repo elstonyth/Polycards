@@ -36,14 +36,19 @@ const fromDTO = (dto: TierSettingsDTO): FormState =>
 
 const snapshot = (form: FormState): string => JSON.stringify(form);
 
-// '' stays null (open bound); anything else must be a finite number ≥ 0.
+// Mirrors the server's MAX_TIER_BOUND_MYR (tier-settings-validate.ts) so an
+// absurd bound blocks Save inline instead of dying as a 400 toast.
+const MAX_BOUND_MYR = 100_000_000;
+
+// '' stays null (open bound); anything else must be a finite number in
+// [0, MAX_BOUND_MYR].
 const parseBound = (s: string): number | null =>
   s.trim() === '' ? null : Number(s);
 
 const boundOk = (s: string): boolean => {
   if (s.trim() === '') return true;
   const n = Number(s);
-  return Number.isFinite(n) && n >= 0;
+  return Number.isFinite(n) && n >= 0 && n <= MAX_BOUND_MYR;
 };
 
 /**

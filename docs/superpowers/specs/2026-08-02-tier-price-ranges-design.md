@@ -103,8 +103,9 @@ challenge-settings ones.
   `rarityForValue(displayPrice) ?? 'Common'` instead of always `'Common'`.
 - **Editor pool modal (`saveMembers`):** same confirm for the newly added handles
   (selected minus current pool) before the mutation. After the post-save reseed, the
-  newly added rows get their proposed rarity staged as an unsaved edit (a ref carries the
-  added ids across the reseed); the operator persists it with the normal odds save.
+  newly added rows get their proposed rarity staged as an unsaved edit (a state
+  latch — not a ref, the seed runs during render — carries the added ids across
+  the reseed); the operator persists it with the normal odds save.
   The tier is a **staged default**, never a silent server write.
 
 ### 5. Admin — drift signal (no auto-switch)

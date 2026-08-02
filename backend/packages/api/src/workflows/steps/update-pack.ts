@@ -3,12 +3,14 @@ import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
 import { hasRollablePool } from '../../modules/packs/rollable-pool';
-import type { TierRangeMap } from '@acme/odds-math';
-import { fillTierRanges } from '../../modules/packs/tier-settings-validate';
+import {
+  fillTierRanges,
+  normalizeTierRanges,
+} from '../../modules/packs/tier-settings-validate';
 import {
   fillPublishedTiers,
+  normalizePublishedOdds,
   type PackWriteInput,
-  type PublishedOdds,
 } from './create-pack';
 
 // slug is immutable (it keys PackOdds / the /claw route); it selects the row.
@@ -25,8 +27,11 @@ type PackSnapshot = {
   boost: boolean;
   rank: number;
   status: 'active' | 'draft';
-  published_odds: PublishedOdds | null;
-  tier_ranges: TierRangeMap | null;
+  // STORAGE shapes (full-key, null = unset), not the public sparse shapes:
+  // compensation writes these back through the same json-merging update, so a
+  // sparse snapshot could fail to revert keys the failed write had set.
+  published_odds: Record<string, unknown> | null;
+  tier_ranges: Record<string, unknown> | null;
 };
 
 // update-pack — patch a pack's listing fields (everything but slug).
@@ -69,8 +74,24 @@ export const updatePackStep = createStep(
       boost: pack.boost,
       rank: pack.rank,
       status: pack.status,
-      published_odds: (pack.published_odds as PublishedOdds | null) ?? null,
-      tier_ranges: (pack.tier_ranges as TierRangeMap | null) ?? null,
+      // Normalize → fill: pre-fix rows may hold SPARSE maps, and replaying a
+      // sparse snapshot through the merging update could leave keys from the
+      // write being rolled back. Null (inherit / not set) passes through.
+      published_odds: (() => {
+        const stored = normalizePublishedOdds(pack.published_odds);
+        return stored === null
+          ? null
+          : ({
+              overall: stored.overall,
+              tiers: fillPublishedTiers(stored.tiers),
+            } as unknown as Record<string, unknown>);
+      })(),
+      tier_ranges:
+        pack.tier_ranges == null
+          ? null
+          : (fillTierRanges(
+              normalizeTierRanges(pack.tier_ranges),
+            ) as unknown as Record<string, unknown>),
     };
 
     await packs.updatePacks([

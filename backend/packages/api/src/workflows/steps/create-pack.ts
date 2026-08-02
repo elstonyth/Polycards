@@ -1,6 +1,7 @@
 import { createStep, StepResponse } from '@medusajs/framework/workflows-sdk';
 import { MedusaError } from '@medusajs/framework/utils';
 import { RARITIES, type OddsRarity, type TierRangeMap } from '@acme/odds-math';
+import { fillTierRanges } from '../../modules/packs/tier-settings-validate';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
 
@@ -112,8 +113,19 @@ export const createPackStep = createStep(
         boost: input.boost,
         rank: input.rank,
         status: input.status,
-        published_odds: input.published_odds ?? null,
-        tier_ranges: (input.tier_ranges ?? null) as Record<
+        // Full-key shapes from birth (see fillPublishedTiers/fillTierRanges):
+        // an insert has no merge hazard itself, but a sparse stored map makes
+        // every LATER update/rollback merge-prone — store only null or the
+        // full-key form so the invariant holds everywhere.
+        published_odds: (input.published_odds == null
+          ? null
+          : {
+              overall: input.published_odds.overall,
+              tiers: fillPublishedTiers(input.published_odds.tiers),
+            }) as unknown as Record<string, unknown> | null,
+        tier_ranges: (input.tier_ranges == null
+          ? null
+          : fillTierRanges(input.tier_ranges)) as unknown as Record<
           string,
           unknown
         > | null,
