@@ -13,6 +13,11 @@ mkdirSync('docs/research', { recursive: true });
 const DIALOG_SEL =
   '[role="dialog"][aria-label="Rare & above"], [role="dialog"][aria-label="All cards"]';
 
+// Every probe boolean below (scrollable, dragScrolls, clickStillWorks,
+// escStack, the heading/rail consistency check) feeds this -- a failed
+// probe must fail the process, not just print a log line nobody reads.
+let anyFailure = false;
+
 const browser = await chromium.launch();
 try {
   // Find pack slugs that actually render the section (any non-empty pool —
@@ -53,6 +58,7 @@ try {
         await page.close();
         continue;
       }
+      const headingText = (await h2.textContent())?.trim();
       await h2.scrollIntoViewIfNeeded();
       await page.waitForTimeout(1200); // Reveal animation + images
       await page.screenshot({
@@ -81,6 +87,7 @@ try {
           scrollable: d.scrollHeight > d.clientHeight,
         };
       }, DIALOG_SEL);
+      if (!m.scrollable) anyFailure = true;
       console.log(JSON.stringify({ slug, label, ...m }));
       await page.screenshot({
         path: `docs/research/qa-pool-modal-${label}-2-modal.png`,
@@ -123,6 +130,7 @@ try {
         afterEsc1.dialogs === 1 &&
         afterEsc2.dialogs === 0 &&
         afterEsc2.bodyOverflow !== 'hidden';
+      if (!escStack) anyFailure = true;
       console.log(
         JSON.stringify({ slug, label, afterEsc1, afterEsc2, escStack }),
       );
@@ -134,14 +142,30 @@ try {
       // rail.evaluate() would wait 30s and throw, aborting the whole run.
       const rail = page.locator('div.cursor-grab').first();
       if ((await page.locator('div.cursor-grab').count()) === 0) {
-        console.log(
-          JSON.stringify({
-            slug,
-            label,
-            drag: 'skipped: no rail (zero-Rare "All cards" fallback)',
-          }),
-        );
-        done = true;
+        if (headingText === 'All cards') {
+          // Genuine zero-Rare fallback -- no rail is correct here. Don't
+          // mark done: keep looking for a Rare+ pack so the drag probe
+          // actually runs at least once per viewport.
+          console.log(
+            JSON.stringify({
+              slug,
+              label,
+              drag: 'skipped: no rail (zero-Rare "All cards" fallback)',
+            }),
+          );
+        } else {
+          // The heading says "Rare & above" (or is unrecognized) but no
+          // rail rendered -- that's a real regression, not the documented
+          // zero-Rare edge case.
+          anyFailure = true;
+          console.log(
+            JSON.stringify({
+              slug,
+              label,
+              drag: `FAIL: no rail but heading is "${headingText}", not "All cards"`,
+            }),
+          );
+        }
         await page.close();
         continue;
       }
@@ -169,17 +193,20 @@ try {
         await page.waitForTimeout(600);
         const overlayAfterClick = await page.locator('.glass-scrim').count();
         await page.keyboard.press('Escape');
+        const dragScrolls = scrolled > 0;
+        const clickStillWorks =
+          overlayAfterDrag === 0 && overlayAfterClick === 1;
+        if (!dragScrolls || !clickStillWorks) anyFailure = true;
         console.log(
           JSON.stringify({
             slug,
             label,
             drag: {
               scrolled,
-              dragScrolls: scrolled > 0,
+              dragScrolls,
               overlayAfterDrag,
               overlayAfterClick,
-              clickStillWorks:
-                overlayAfterDrag === 0 && overlayAfterClick === 1,
+              clickStillWorks,
             },
           }),
         );
@@ -200,6 +227,7 @@ try {
         JSON.stringify({ label, error: 'no pack with pool section' }),
       );
   }
+  if (anyFailure) process.exitCode = 1;
 } finally {
   await browser.close();
 }
