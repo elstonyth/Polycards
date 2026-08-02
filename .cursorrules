@@ -1,3 +1,7 @@
+<!-- AUTO-GENERATED from the CODE_REVIEW_GRAPH_DOC block in
+     scripts/sync-agent-rules.sh — do not edit directly. Run
+     `bash scripts/sync-agent-rules.sh` to regenerate. -->
+
 <!-- code-review-graph MCP tools -->
 ## MCP Tools: code-review-graph
 
