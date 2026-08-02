@@ -74,8 +74,11 @@ export async function GET(
   const filter: Record<string, unknown> = { customer_id: id };
   if (status) filter.status = status;
   if (source) filter.source = source;
+  // `id` tiebreaker: a batch open stamps every pull in the batch with the
+  // same `rolled_at` millisecond, so offset pagination needs a unique
+  // secondary sort key. Same rule as inventory/[handle]/route.ts:82.
   const [rows, total] = await packs.listAndCountPulls(filter, {
-    order: { rolled_at: 'DESC' },
+    order: { rolled_at: 'DESC', id: 'DESC' },
     skip: offset,
     take: limit,
   });

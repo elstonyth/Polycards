@@ -180,6 +180,19 @@ medusaIntegrationTestRunner({
         expect(cleared.status).toBe(200);
       });
 
+      it('escapes LIKE metacharacters in `q` — a literal `%` does not widen the search to every row', async () => {
+        await seedAdjustment('admin-ledger-route-escape@test.dev');
+        const unfiltered = await listLedger('');
+        expect(unfiltered.length).toBeGreaterThan(0);
+
+        // Unescaped, `?q=%` builds ILIKE '%%%' and matches EVERY row — the
+        // operator would believe they filtered while seeing the whole table.
+        // Escaped, it matches only rows whose display_id literally contains
+        // '%', which none of the seeded display ids do.
+        const percentOnly = await listLedger(`?q=${encodeURIComponent('%')}`);
+        expect(percentOnly).toEqual([]);
+      });
+
       it('401s an unauthenticated caller (the list carries every player email)', async () => {
         const res = await unwrapResponse(api.get('/admin/ledger'));
         expect(res.status).toBe(401);

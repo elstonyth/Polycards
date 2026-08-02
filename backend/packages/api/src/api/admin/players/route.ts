@@ -1,5 +1,5 @@
 import type { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
-import { Modules } from '@medusajs/framework/utils';
+import { MedusaError, Modules } from '@medusajs/framework/utils';
 import type { ICustomerModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
@@ -19,6 +19,17 @@ export async function GET(
     { defaultLimit: 50, maxLimit: 200 },
   );
   const rawQ = req.query.q;
+  // `?q=a&q=b` arrives as an ARRAY. The old inline `typeof rawQ === 'string'`
+  // check below silently dropped it (treated as absent), widening the result
+  // set to every player — same rule as ledger/route.ts's coerceQ. (Only the
+  // array handling is fixed here — this `q` feeds Medusa's own customer
+  // search, not this repo's ILIKE builder, so no escaping is added.)
+  if (rawQ !== undefined && typeof rawQ !== 'string') {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      `Invalid \`q\` filter '${String(rawQ)}'.`,
+    );
+  }
   const q =
     typeof rawQ === 'string' && rawQ.trim() !== ''
       ? rawQ.trim().slice(0, 100)

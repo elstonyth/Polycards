@@ -165,6 +165,72 @@ medusaIntegrationTestRunner({
         expect(empty.status).toBe(400);
       });
 
+      // Regression guard for the missing `id` tiebreaker: a batch open
+      // (open-batch) stamps every pull in the batch with the same `rolled_at`
+      // millisecond (record-pulls-batch.ts calls `new Date()` once per card
+      // inside one `.map()`), so ties on the sort key are the norm for this
+      // route — not an edge case. Without a unique secondary sort key,
+      // Postgres gives no guarantee that OFFSET pagination returns the same
+      // tie order across different offsets, so a row can be shown on two
+      // pages or on neither.
+      it('pages /admin/pulls with limit=1 through a same-`rolled_at` batch without duplicates or gaps', async () => {
+        const token = await registerCustomer('admin-pulls-batch@test.dev');
+        await api.post(
+          '/store/credits/topup',
+          { amount: PACK_PRICE * 3 },
+          {
+            headers: {
+              ...authed(token),
+              'idempotency-key': 'admin-pulls-batch-topup',
+            },
+          },
+        );
+        const open = await unwrapResponse(
+          api.post(
+            `/store/packs/${PACK_SLUG}/open-batch`,
+            { count: 3 },
+            { headers: authed(token) },
+          ),
+        );
+        expect(open.status).toBe(200);
+        expect(open.data.rolls.length).toBe(3);
+
+        const adminToken = await mintSuperAdmin(
+          getContainer(),
+          api,
+          ADMIN_EMAIL,
+          PASSWORD,
+        );
+        const adminHeaders = { authorization: `Bearer ${adminToken}` };
+
+        const unpaged = await unwrapResponse(
+          api.get('/admin/pulls', { headers: adminHeaders }),
+        );
+        expect(unpaged.status).toBe(200);
+        expect(unpaged.data.total).toBe(3);
+        const expectedIds = new Set(
+          unpaged.data.pulls.map((p: { id: string }) => p.id),
+        );
+        expect(expectedIds.size).toBe(3);
+
+        // Page through one row at a time. With a stable total order (the `id`
+        // tiebreaker), the union of every page is exactly the 3 pull ids —
+        // no row repeated, none skipped.
+        const seenIds: string[] = [];
+        for (let offset = 0; offset < 3; offset++) {
+          const page = await unwrapResponse(
+            api.get(`/admin/pulls?limit=1&offset=${offset}`, {
+              headers: adminHeaders,
+            }),
+          );
+          expect(page.status).toBe(200);
+          expect(page.data.pulls.length).toBe(1);
+          seenIds.push(page.data.pulls[0].id);
+        }
+        expect(new Set(seenIds)).toEqual(expectedIds);
+        expect(seenIds.length).toBe(new Set(seenIds).size);
+      });
+
       it('ledger row for an opened pack carries the pack title (not null)', async () => {
         const token = await registerCustomer('admin-pulls-customer@test.dev');
         await api.post(
