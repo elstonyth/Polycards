@@ -118,8 +118,24 @@ export async function editCard(
 }
 
 // Drive the per-pack odds editor so exactly one card (by name) holds 100% of the
-// win rate: lock the target at 100, unlock everyone else (their share -> 0). This
-// is the same mutation POST /admin/packs/{slug}/odds performs, but through the UI.
+// win rate: lock the target at 100, lock everyone else at 0. This is the same
+// mutation POST /admin/packs/{slug}/odds performs, but through the UI.
+//
+// Locking (not merely unlocking) every other row is load-bearing. The editor's
+// preview (odds-rows.ts previewSets -> @acme/odds-math balanceOdds) treats an
+// UNLOCKED non-Common row as PINNED to its *tier's own default budget share*
+// (routes/packs/[slug]/page.tsx `effective`/`applyTierSplit`), not to 0 — a
+// tier's budget is spent independently of what's locked in a DIFFERENT tier.
+// So "lock target at 100, unlock the rest" leaves every other tier still
+// handing out its full default share on top of the target's 100%, which
+// overflows the 100% budget and makes `preview.error` non-null — the Save
+// button then stays disabled forever (page.tsx:989 `disabled={... ||
+// preview.error !== null}`; there is no separate "dirty" tracking to drive).
+// Locking every non-target row at an explicit 0% instead makes every row
+// PINNED at a literal value: Σ = 100 (target) + 0×(n-1) = 100 exactly, so
+// `balanceOdds` reports no error regardless of the pool's rarity mix — the
+// same shape the sibling API-driven test (odds-reflection.spec.ts pack B)
+// already sends via `setOdds` (`pct: 0` for every non-target entry).
 export async function forceCardTo100ViaUI(
   page: Page,
   slug: string,
@@ -142,16 +158,17 @@ export async function forceCardTo100ViaUI(
     const checked = await sw.isChecked();
     const isTarget =
       name !== '' && (name.includes(targetName) || targetName.includes(name));
+    if (!checked) await sw.click();
+    // Scope to SET 1: locking the row turns Set 2 and Set 3 into number
+    // inputs too, so a bare getByRole('spinbutton') is a strict-mode
+    // violation. Label is `Set N Win rate (%): <card name>` (i18n
+    // packs.editor.set + .winRate) — match the prefix, not the whole string.
+    const rateInput = row.getByRole('spinbutton', { name: /^Set 1 / });
     if (isTarget) {
       matched += 1;
-      if (!checked) await sw.click();
-      // Scope to SET 1: locking the row turns Set 2 and Set 3 into number
-      // inputs too, so a bare getByRole('spinbutton') is a strict-mode
-      // violation. Label is `Set N Win rate (%): <card name>` (i18n
-      // packs.editor.set + .winRate) — match the prefix, not the whole string.
-      await row.getByRole('spinbutton', { name: /^Set 1 / }).fill('100');
-    } else if (checked) {
-      await sw.click();
+      await rateInput.fill('100');
+    } else {
+      await rateInput.fill('0');
     }
   }
   if (matched !== 1) {
