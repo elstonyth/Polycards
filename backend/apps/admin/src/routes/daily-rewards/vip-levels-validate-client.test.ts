@@ -51,6 +51,16 @@ describe('validateVipLevelsClient', () => {
     expect(errs.some((e) => /referral/.test(e))).toBe(true);
   });
 
+  test('flags a voucher amount above the 10,000 ceiling, accepts the ceiling itself', () => {
+    const errs = validateVipLevelsClient([row({ voucherInput: '10001' })]);
+    expect(
+      errs.some((e) => /voucher amount must be between 0 and 10,000/.test(e)),
+    ).toBe(true);
+    expect(validateVipLevelsClient([row({ voucherInput: '10000' })])).toEqual(
+      [],
+    );
+  });
+
   test('flags a referral % above 100', () => {
     const errs = validateVipLevelsClient([row({ referralInput: '101' })]);
     expect(errs.some((e) => /referral % must be between 0 and 100/.test(e))).toBe(true);

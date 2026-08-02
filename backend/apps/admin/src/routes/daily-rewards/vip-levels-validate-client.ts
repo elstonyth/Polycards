@@ -1,8 +1,14 @@
 // Client-side pre-validation for the Levels tab — mirrors the server
-// validateVipLevels invariants so the operator sees problems inline before
-// POSTing (parity with the Vouchers tab's foldRangesLocal). Returns every
-// problem (never stops at the first). `level` is index+1, not an input.
+// validateVipLevels invariants (modules/packs/vip-levels-validate.ts) so the
+// operator sees problems inline before POSTing, surfaced directly on the
+// Levels tab. Returns every problem (never stops at the first). `level` is
+// index+1, not an input.
 export const FRAME_LEVELS = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
+
+// COUPLED MIRROR of modules/packs/voucher-ranges.ts. Kept as a literal —
+// separate builds, no shared package (same convention as
+// lib/purchase-invoice-form.ts).
+const MAX_VOUCHER_MYR = 10_000;
 
 export interface VipLevelRow {
   thresholdInput: string;
@@ -35,8 +41,10 @@ export function validateVipLevelsClient(rows: VipLevelRow[]): string[] {
       prev = t;
     }
     const v = num(r.voucherInput);
-    if (!Number.isFinite(v) || v < 0)
-      errors.push(`Level ${level}: voucher amount must be ≥ 0.`);
+    if (!Number.isFinite(v) || v < 0 || v > MAX_VOUCHER_MYR)
+      errors.push(
+        `Level ${level}: voucher amount must be between 0 and ${MAX_VOUCHER_MYR.toLocaleString()}.`,
+      );
     const p = num(r.referralInput);
     if (!Number.isFinite(p) || p < 0 || p > 100)
       errors.push(`Level ${level}: referral % must be between 0 and 100.`);
