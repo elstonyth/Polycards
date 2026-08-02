@@ -1191,6 +1191,20 @@ on deploy). Executor worktrees under `.claude/worktrees/` + the
 `.worktrees/round8-rollup` husk remain for manual cleanup (locked-file
 Windows chore, see worktree-removal memory).
 
+> **2026-08-02 post-merge cleanup + merge-state verification:** the executor
+> worktrees, the rollup husk, and all nine `advisor/*` branches are now
+> DELETED. Before deletion, every branch tip was verified an ancestor of PR
+> #314's head (`git log <pr-314-head>..<branch>` empty for each, and
+> `git diff <pr-314-head> 0157f257` empty — the squash preserved the head
+> tree), so the per-row "NOT MERGED" annotations below are settled: all ten
+> plans ARE merged via `0157f257`. The branch names and commit ranges in the
+> rows are historical; those commits are reachable only via GitHub's
+> `refs/pull/314/head`. Audit caveat for future rounds: a
+> `git merge-tree`-containment check against master reports phantom
+> "unmerged" deltas for these branches, because the rollup evolved past the
+> branch tips during review (renames, added guards, prettier). Ancestry
+> against the merged PR head is the decisive test, not content containment.
+
 Original pre-merge record follows:
 
 All ten plans were executed by dispatched subagents in isolated worktrees and
