@@ -180,6 +180,12 @@ medusaIntegrationTestRunner({
             ),
           );
           expect(res.status).toBe(400);
+          // Pin the rejection source to requireSignupPhoneProof, not
+          // rejectCustomerMetadata or core body validation (both also 400 on
+          // this route, which would let an unwired guard pass silently).
+          expect(res.data).toMatchObject({
+            message: "Phone verification required.",
+          });
         });
 
         it("accepts registration with a fresh signup proof header", async () => {
@@ -240,6 +246,12 @@ medusaIntegrationTestRunner({
             ),
           );
           expect(res.status).toBe(400);
+          // Pin the rejection source to blockUnverifiedPhoneWrite, not
+          // rejectCustomerMetadata or core validation (same reasoning as the
+          // signup-gate assertion above).
+          expect(res.data).toMatchObject({
+            message: "Phone changes require verification.",
+          });
         });
       });
     });
