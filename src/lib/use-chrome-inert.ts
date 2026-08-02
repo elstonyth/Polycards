@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import { lockBodyScroll, unlockBodyScroll } from './use-modal-a11y';
 
 /**
  * Immersive-surface helper: while `active`, lock body scroll and mark the root
@@ -15,14 +16,13 @@ export function useChromeInert(active: boolean): void {
     const nodes = Array.from(
       document.querySelectorAll<HTMLElement>('[data-site-chrome]'),
     );
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    lockBodyScroll();
     for (const n of nodes) {
       n.setAttribute('inert', '');
       n.setAttribute('aria-hidden', 'true');
     }
     return () => {
-      document.body.style.overflow = prevOverflow;
+      unlockBodyScroll();
       for (const n of nodes) {
         n.removeAttribute('inert');
         n.removeAttribute('aria-hidden');
