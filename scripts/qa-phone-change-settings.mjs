@@ -232,6 +232,15 @@ await page.screenshot({
   path: 'docs/research/qa-phone-settings-1-readonly.png',
 });
 
+// Type an UNSAVED name edit before touching the phone panel at all — the
+// name inputs are form-associated (form="settings-profile") rather than
+// nested inside the phone panel's view, specifically so they survive every
+// phoneChange transition, including 'otp' (which used to unmount the whole
+// profile form via an early return and silently discard exactly this kind
+// of in-progress edit). Asserted again after the full change flow below.
+const UNSAVED_NAME = 'Unsaved Name Should Survive';
+await page.getByLabel('Display name').fill(UNSAVED_NAME);
+
 // ── 3. Change → entry step ──────────────────────────────────────────────────
 await changeButton.click();
 const newPhoneBox = page.getByPlaceholder('New phone number');
@@ -289,6 +298,10 @@ check(
 await page.screenshot({
   path: 'docs/research/qa-phone-settings-4-updated.png',
 });
+check(
+  (await page.getByLabel('Display name').inputValue()) === UNSAVED_NAME,
+  'unsaved name typed before Change survived the whole entry->otp->closed transition (form= association, not a view-swap unmount)',
+);
 
 // ── 7. Backend truth check ───────────────────────────────────────────────────
 const me = await authedGetMe();

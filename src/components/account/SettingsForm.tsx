@@ -123,142 +123,25 @@ export default function SettingsForm({ customer }: Props) {
     setPhoneChange('otp');
   }
 
-  // Verified phone-change OTP step: rendered as its OWN top-level view, not
-  // nested inside the profile <form> below — PhoneOtpStep renders its own
-  // <form> (code input + Verify), and forms can't validly nest. Same
-  // early-return shape AuthForm.tsx uses for its signup/forgot-by-phone OTP
-  // steps. Names/email are simply not shown while this is up; they render
-  // again (unaffected) once phoneChange returns to 'closed' or 'entry'.
-  if (phoneChange === 'otp') {
+  if (!PHONE_VERIFICATION_REQUIRED) {
     return (
-      <div className="flex flex-col gap-4">
-        <p className="mb-1.5 text-[12px] font-medium text-white/55">Phone</p>
-        <PhoneOtpStep
-          phone={pendingPhone}
-          purpose="phone-change"
-          onBack={() => setPhoneChange('entry')}
-          onVerified={async (token) => {
-            const result = await changePhone({ phone: pendingPhone, token });
-            if (result.ok) {
-              setPhone(result.phone);
-              setPhoneChange('closed');
-              setNote({ ok: true, text: 'Phone updated.' });
-              router.refresh();
-              return;
-            }
-            // Back to phone-entry (not 'closed') — the entry PhoneField's
-            // defaultValue={pendingPhone} re-seeds the number so it isn't
-            // lost.
-            setPhoneChange('entry');
-            setNote({ ok: false, text: result.error });
-          }}
+      <form onSubmit={onSubmit} className="flex flex-col gap-4">
+        <Field
+          label="Display name"
+          name="first_name"
+          defaultValue={customer.first_name ?? ''}
+          autoComplete="given-name"
+          placeholder="Your name"
+          maxLength={NAME_MAX}
         />
-      </div>
-    );
-  }
-
-  return (
-    <form onSubmit={onSubmit} className="flex flex-col gap-4">
-      <Field
-        label="Display name"
-        name="first_name"
-        defaultValue={customer.first_name ?? ''}
-        autoComplete="given-name"
-        placeholder="Your name"
-        maxLength={NAME_MAX}
-      />
-      <Field
-        label="Last name"
-        name="last_name"
-        defaultValue={customer.last_name ?? ''}
-        autoComplete="family-name"
-        placeholder="Optional"
-        maxLength={NAME_MAX}
-      />
-      {PHONE_VERIFICATION_REQUIRED ? (
-        // Not a <label> — under enforcement this block holds several
-        // interactive controls (Change button, or the OTP step's own inputs),
-        // and a <label> forwards clicks/announces to only the first one. The
-        // read-only input below carries its own aria-label instead.
-        <div className="block">
-          <span className="mb-1.5 block text-[12px] font-medium text-white/55">
-            Phone
-          </span>
-          {phoneChange === 'closed' && (
-            <div className="flex items-center gap-3">
-              <input
-                type="tel"
-                value={displayPhone}
-                readOnly
-                aria-label="Phone (read-only)"
-                className={READONLY_CLASS}
-              />
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => {
-                  setNote(null);
-                  setPhoneChange('entry');
-                }}
-                className="h-11 shrink-0 rounded-xl border border-white/10 bg-white/[0.05] px-4 text-sm font-medium text-white transition-colors hover:bg-white/[0.1] disabled:opacity-70"
-              >
-                Change
-              </button>
-            </div>
-          )}
-          {phoneChange === 'entry' && (
-            // Not a nested <form> — this whole block already lives inside
-            // the profile <form>, and forms can't nest. Enter-to-send is
-            // preserved via the onKeyDown below instead.
-            <div
-              className="flex flex-col gap-2"
-              onKeyDown={(e) => {
-                if (e.key !== 'Enter') return;
-                e.preventDefault();
-                void onSendCode();
-              }}
-            >
-              <div ref={newPhoneWrapRef}>
-                <PhoneField
-                  name="new_phone"
-                  defaultValue={pendingPhone}
-                  inputClassName={INPUT_CLASS}
-                  placeholder="New phone number"
-                />
-              </div>
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={onSendCode}
-                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-neutral-200 px-4 text-sm font-semibold text-neutral-950 transition-colors hover:bg-white disabled:opacity-70"
-                >
-                  {busy && (
-                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                  )}
-                  Send code
-                </button>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => {
-                    setNote(null);
-                    setPhoneChange('closed');
-                  }}
-                  className="text-[12px] text-white/55 hover:text-white disabled:opacity-70"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
-          {phoneChange === 'closed' && (
-            <span className="mt-1 block text-[11px] text-white/55">
-              Changing your phone requires a verification code.
-            </span>
-          )}
-        </div>
-      ) : (
+        <Field
+          label="Last name"
+          name="last_name"
+          defaultValue={customer.last_name ?? ''}
+          autoComplete="family-name"
+          placeholder="Optional"
+          maxLength={NAME_MAX}
+        />
         <label className="block">
           <span className="mb-1.5 block text-[12px] font-medium text-white/55">
             Phone
@@ -273,45 +156,212 @@ export default function SettingsForm({ customer }: Props) {
             Used for delivery updates. Pick your country code.
           </span>
         </label>
-      )}
-      <label className="block">
-        <span className="mb-1.5 block text-[12px] font-medium text-white/55">
-          Email
-        </span>
-        <input
-          type="email"
-          value={customer.email}
-          readOnly
-          aria-label="Email (read-only)"
-          // A long address overflows the field on a 320px screen. It's
-          // read-only, so there's no caret to scroll it into view — ellipsis at
-          // least reads as truncation rather than a cut-off word.
-          className={READONLY_CLASS}
-        />
-        <span className="mt-1 block text-[11px] text-white/55">
-          Email can&apos;t be changed here.
-        </span>
-      </label>
+        <EmailField email={customer.email} />
+        <SaveRow busy={busy} note={note} />
+      </form>
+    );
+  }
 
-      <div className="flex items-center gap-3">
-        <button
-          type="submit"
-          disabled={busy}
-          className="inline-flex h-11 items-center justify-center gap-2 self-start rounded-xl bg-neutral-200 px-5 text-sm font-semibold text-neutral-950 transition-colors hover:bg-white disabled:opacity-70"
-        >
-          {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
-          Save changes
-        </button>
-        {note && (
-          <span
-            role="status"
-            className={`text-[12px] ${note.ok ? 'text-buyback-fg' : 'text-red-400'}`}
+  // PHONE_VERIFICATION_REQUIRED: the name inputs + Save button must stay
+  // mounted across every phoneChange sub-state, including 'otp' (which
+  // renders PhoneOtpStep's own <form> — code input + Verify — and forms
+  // can't validly nest). An earlier version of this file solved the nesting
+  // problem by early-returning a DIFFERENT tree for the 'otp' state, which
+  // unmounted the whole profile <form> — silently discarding an in-progress,
+  // unsaved name edit the moment "Send code" was clicked. Fix: give the
+  // profile form an id and associate the name inputs + Save button to it via
+  // the `form` attribute (a real HTML input/button doesn't need to be a DOM
+  // descendant of its form owner — `FormData(form)` follows that
+  // association, not DOM nesting). The <form> element itself stays empty and
+  // hidden; nothing is ever nested inside it, so nothing here can violate
+  // the no-nested-forms rule regardless of phoneChange's value, and nothing
+  // ever unmounts.
+  return (
+    <div className="flex flex-col gap-4">
+      <form id="settings-profile" onSubmit={onSubmit} hidden />
+      <Field
+        label="Display name"
+        name="first_name"
+        form="settings-profile"
+        defaultValue={customer.first_name ?? ''}
+        autoComplete="given-name"
+        placeholder="Your name"
+        maxLength={NAME_MAX}
+      />
+      <Field
+        label="Last name"
+        name="last_name"
+        form="settings-profile"
+        defaultValue={customer.last_name ?? ''}
+        autoComplete="family-name"
+        placeholder="Optional"
+        maxLength={NAME_MAX}
+      />
+      {/* Not a <label> — this block holds several interactive controls
+          (Change button, or the entry/OTP step's own inputs), and a <label>
+          forwards clicks/announces to only the first one. The read-only
+          input below carries its own aria-label instead. */}
+      <div className="block">
+        <span className="mb-1.5 block text-[12px] font-medium text-white/55">
+          Phone
+        </span>
+        {phoneChange === 'closed' && (
+          <div className="flex items-center gap-3">
+            <input
+              type="tel"
+              value={displayPhone}
+              readOnly
+              aria-label="Phone (read-only)"
+              className={READONLY_CLASS}
+            />
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setNote(null);
+                setPhoneChange('entry');
+              }}
+              className="h-11 shrink-0 rounded-xl border border-white/10 bg-white/[0.05] px-4 text-sm font-medium text-white transition-colors hover:bg-white/[0.1] disabled:opacity-70"
+            >
+              Change
+            </button>
+          </div>
+        )}
+        {phoneChange === 'entry' && (
+          // Not a <form> (nor form-associated) — its value is read straight
+          // off the DOM via newPhoneWrapRef, not FormData, and Enter-to-send
+          // is reimplemented via onKeyDown below (associating this PhoneField
+          // with settings-profile would make Enter trigger a profile SAVE
+          // instead of Send code, via native implicit form submission).
+          <div
+            className="flex flex-col gap-2"
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter') return;
+              e.preventDefault();
+              void onSendCode();
+            }}
           >
-            {note.text}
+            <div ref={newPhoneWrapRef}>
+              <PhoneField
+                name="new_phone"
+                defaultValue={pendingPhone}
+                inputClassName={INPUT_CLASS}
+                placeholder="New phone number"
+              />
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={onSendCode}
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-neutral-200 px-4 text-sm font-semibold text-neutral-950 transition-colors hover:bg-white disabled:opacity-70"
+              >
+                {busy && (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                )}
+                Send code
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  setNote(null);
+                  setPendingPhone('');
+                  setPhoneChange('closed');
+                }}
+                className="text-[12px] text-white/55 hover:text-white disabled:opacity-70"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+        {phoneChange === 'otp' && (
+          <PhoneOtpStep
+            phone={pendingPhone}
+            purpose="phone-change"
+            onBack={() => setPhoneChange('entry')}
+            onVerified={async (token) => {
+              const result = await changePhone({ phone: pendingPhone, token });
+              if (result.ok) {
+                setPhone(result.phone);
+                setPhoneChange('closed');
+                setNote({ ok: true, text: 'Phone updated.' });
+                router.refresh();
+                return;
+              }
+              // Back to phone-entry (not 'closed') — the entry PhoneField's
+              // defaultValue={pendingPhone} re-seeds the number so it isn't
+              // lost.
+              setPhoneChange('entry');
+              setNote({ ok: false, text: result.error });
+            }}
+          />
+        )}
+        {phoneChange === 'closed' && (
+          <span className="mt-1 block text-[11px] text-white/55">
+            Changing your phone requires a verification code.
           </span>
         )}
       </div>
-    </form>
+      <EmailField email={customer.email} />
+      <SaveRow busy={busy} note={note} formAttr="settings-profile" />
+    </div>
+  );
+}
+
+function EmailField({ email }: { email: string }) {
+  return (
+    <label className="block">
+      <span className="mb-1.5 block text-[12px] font-medium text-white/55">
+        Email
+      </span>
+      <input
+        type="email"
+        value={email}
+        readOnly
+        aria-label="Email (read-only)"
+        // A long address overflows the field on a 320px screen. It's
+        // read-only, so there's no caret to scroll it into view — ellipsis at
+        // least reads as truncation rather than a cut-off word.
+        className={READONLY_CLASS}
+      />
+      <span className="mt-1 block text-[11px] text-white/55">
+        Email can&apos;t be changed here.
+      </span>
+    </label>
+  );
+}
+
+function SaveRow({
+  busy,
+  note,
+  formAttr,
+}: {
+  busy: boolean;
+  note: { ok: boolean; text: string } | null;
+  formAttr?: string;
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <button
+        type="submit"
+        form={formAttr}
+        disabled={busy}
+        className="inline-flex h-11 items-center justify-center gap-2 self-start rounded-xl bg-neutral-200 px-5 text-sm font-semibold text-neutral-950 transition-colors hover:bg-white disabled:opacity-70"
+      >
+        {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
+        Save changes
+      </button>
+      {note && (
+        <span
+          role="status"
+          className={`text-[12px] ${note.ok ? 'text-buyback-fg' : 'text-red-400'}`}
+        >
+          {note.text}
+        </span>
+      )}
+    </div>
   );
 }
 
