@@ -14,20 +14,18 @@ const bad = (m: string): never => {
   throw new MedusaError(MedusaError.Types.INVALID_DATA, m);
 };
 
-// { ranges: { <rarity>: { min, max } } } → TierRangeMap. Keys must be known
+// Bare { <rarity>: { min, max } } map → TierRangeMap. Keys must be known
 // rarities; each bound null or a finite number in [0, cap]; min ≤ max when
 // both set. A tier may be omitted or fully null (= unconfigured). Overlaps
 // and gaps between tiers are DELIBERATELY allowed: assignment picks the
 // rarest match, and a value in a gap is simply "outside every range" (that is
-// what the add-confirm prompt is for).
-export function validateTierRanges(raw: unknown): TierRangeMap {
-  const ranges = (raw as { ranges?: unknown } | null)?.ranges;
-  if (!ranges || typeof ranges !== 'object' || Array.isArray(ranges))
+// what the add-confirm prompt is for). Shared by the global tier_settings
+// singleton and the per-pack pack.tier_ranges override.
+export function validateTierRangeMap(raw: unknown): TierRangeMap {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw))
     bad('ranges must be an object keyed by rarity.');
   const out: TierRangeMap = {};
-  for (const [key, value] of Object.entries(
-    ranges as Record<string, unknown>,
-  )) {
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
     if (!(RARITIES as readonly string[]).includes(key))
       bad(`Unknown rarity '${key}' (one of: ${RARITIES.join(', ')}).`);
     if (!value || typeof value !== 'object' || Array.isArray(value))
@@ -53,4 +51,30 @@ export function validateTierRanges(raw: unknown): TierRangeMap {
     out[key as (typeof RARITIES)[number]] = range;
   }
   return out;
+}
+
+// { ranges: {...} } request body → TierRangeMap (the tier_settings POST shape).
+export function validateTierRanges(raw: unknown): TierRangeMap {
+  return validateTierRangeMap((raw as { ranges?: unknown } | null)?.ranges);
+}
+
+// Stored jsonb → the usable TierRangeMap: EVERY rarity key may be present
+// (null = unconfigured — see editTierSettings); reads drop nulls and
+// non-numeric noise so consumers only ever see ranges they can act on.
+export function normalizeTierRanges(stored: unknown): TierRangeMap {
+  const map = (stored ?? {}) as Record<string, unknown>;
+  const num = (v: unknown): number | null =>
+    typeof v === 'number' && Number.isFinite(v) ? v : null;
+  const ranges: TierRangeMap = {};
+  for (const rarity of RARITIES) {
+    const r = map[rarity];
+    if (!r || typeof r !== 'object' || Array.isArray(r)) continue;
+    const range: TierRange = {
+      min: num((r as Record<string, unknown>).min),
+      max: num((r as Record<string, unknown>).max),
+    };
+    if (range.min === null && range.max === null) continue;
+    ranges[rarity] = range;
+  }
+  return ranges;
 }

@@ -110,11 +110,16 @@ const PackOddsEditorPage = () => {
   const { slug = '' } = useParams();
 
   const { data, isError: loadError, refetch } = usePackOdds(slug);
-  // Admin-configured RM price range per tier (/tier-defaults). {} (never
-  // configured, or the fetch failed) leaves every tier behavior inert: staged
-  // rows default to Common, no add-confirm, no drift badges — exactly the
-  // pre-feature editor.
-  const tierRanges = (useTierSettings().data?.ranges ?? {}) as TierRangeMap;
+  // Tier price ranges. The GLOBAL ladder (/tier-defaults) is the fallback;
+  // a pack may carry its own override (pack.tier_ranges — null = inherit,
+  // any stored map replaces the global wholesale). {} (nothing configured, or
+  // the fetch failed) leaves every tier behavior inert: staged rows default
+  // to Common, no add-confirm, no drift badges — exactly the pre-feature
+  // editor.
+  const globalTierRanges = (useTierSettings().data?.ranges ??
+    {}) as TierRangeMap;
+  const packTierRanges = (data?.pack.tier_ranges ?? null) as TierRangeMap | null;
+  const tierRanges = packTierRanges ?? globalTierRanges;
   const tiersConfigured = Object.keys(tierRanges).length > 0;
   const saveOdds = useSaveOdds();
   const saveMembersMut = useSaveMembers();
@@ -737,6 +742,28 @@ const PackOddsEditorPage = () => {
         split={split}
       />
 
+      {/* Tier price ranges for THIS pack: inherit the global /tier-defaults
+          ladder, or override it wholesale. Feeds the auto-assign default, the
+          add-confirm and the drift badges below. Keyed on the SERVER value so
+          a successful save (or a pack switch) reseeds the buffer, while a
+          mid-edit refetch of unrelated pack data does not. */}
+      {fullPack && (
+        <TierRangesSection
+          key={`tier-ranges-${fullPack.slug}-${JSON.stringify(packTierRanges)}`}
+          override={packTierRanges}
+          globalRanges={globalTierRanges}
+          saving={updatePack.isPending}
+          onSave={async (ranges) => {
+            try {
+              await updatePack.mutateAsync({ ...fullPack, tier_ranges: ranges });
+              toast.success(t('packs.tierRanges.saved'));
+            } catch (err) {
+              toast.error(err instanceof Error ? err.message : String(err));
+            }
+          }}
+        />
+      )}
+
       {/* The PUBLIC percentages players see. Display-only: saving here never
           touches the per-card win rates in the table below. */}
       {fullPack && (
@@ -1295,6 +1322,175 @@ const TierEvBreakdown = ({
 // ── Default odds (the recipe) ────────────────────────────────────────────────
 // Each tier owns a fixed share of the 100%; the cards in a tier split it evenly
 // (2 Immortals → 0.05% each). There is no apply step — every unlocked row in the
+// ── Tier price ranges (per-pack override) ───────────────────────────────────
+// Inherit the global /tier-defaults ladder or replace it wholesale for THIS
+// pack — each pack can value its tiers differently. Advisory, like the global
+// ladder: it feeds the auto-assign default, the add-confirm and the drift
+// badges; it never re-tiers a row on its own. The buffer needs no reseed
+// effects: the parent keys this component on the SERVER value, so a save or a
+// pack switch remounts it fresh.
+const rangeText = (v: number | null | undefined): string =>
+  v == null ? '' : String(v);
+const seedRangeRows = (
+  map: TierRangeMap,
+): Record<string, { min: string; max: string }> =>
+  Object.fromEntries(
+    RARITIES.map((r) => [
+      r,
+      { min: rangeText(map[r]?.min), max: rangeText(map[r]?.max) },
+    ]),
+  );
+const rangeBoundOk = (s: string): boolean => {
+  if (s.trim() === '') return true;
+  const n = Number(s);
+  return Number.isFinite(n) && n >= 0;
+};
+
+const TierRangesSection = ({
+  override,
+  globalRanges,
+  saving,
+  onSave,
+}: {
+  /** The pack's stored override; null = inheriting the global ladder. */
+  override: TierRangeMap | null;
+  globalRanges: TierRangeMap;
+  saving: boolean;
+  onSave: (ranges: TierRangeMap | null) => void;
+}) => {
+  const { t } = useTranslation();
+  const [enabled, setEnabled] = useState(override !== null);
+  // Turning the override on starts from the ladder currently in effect —
+  // tweak a copy of the global defaults rather than retyping them.
+  const [rows, setRows] = useState(() =>
+    seedRangeRows(override ?? globalRanges),
+  );
+
+  const errors: string[] = [];
+  for (const r of RARITIES) {
+    const row = rows[r];
+    if (!rangeBoundOk(row.min) || !rangeBoundOk(row.max)) {
+      errors.push(t('packs.tierRanges.badNumber', { tier: r }));
+    } else if (
+      row.min.trim() !== '' &&
+      row.max.trim() !== '' &&
+      Number(row.min) > Number(row.max)
+    ) {
+      errors.push(t('packs.tierRanges.badOrder', { tier: r }));
+    }
+  }
+
+  const baselineEnabled = override !== null;
+  const dirty = enabled
+    ? !baselineEnabled ||
+      JSON.stringify(rows) !== JSON.stringify(seedRangeRows(override ?? {}))
+    : baselineEnabled;
+
+  const save = () => {
+    if (!enabled) {
+      onSave(null);
+      return;
+    }
+    const map: TierRangeMap = {};
+    for (const r of RARITIES) {
+      const row = rows[r];
+      if (row.min.trim() === '' && row.max.trim() === '') continue;
+      map[r] = {
+        min: row.min.trim() === '' ? null : Number(row.min),
+        max: row.max.trim() === '' ? null : Number(row.max),
+      };
+    }
+    onSave(map);
+  };
+
+  return (
+    <div className="px-6 py-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <Heading level="h3">{t('packs.tierRanges.title')}</Heading>
+          <Text size="xsmall" className="text-ui-fg-subtle mt-0.5">
+            {enabled
+              ? t('packs.tierRanges.overrideNote')
+              : t('packs.tierRanges.inheritNote')}
+          </Text>
+        </div>
+        <div className="flex items-center gap-x-4">
+          <div className="flex items-center gap-x-2">
+            <Switch
+              checked={enabled}
+              aria-label={t('packs.tierRanges.toggle')}
+              onCheckedChange={(on) => {
+                setEnabled(on);
+                if (on) setRows(seedRangeRows(override ?? globalRanges));
+              }}
+            />
+            <Text size="small">{t('packs.tierRanges.toggle')}</Text>
+          </div>
+          <Button
+            size="small"
+            variant="secondary"
+            onClick={save}
+            isLoading={saving}
+            disabled={!dirty || errors.length > 0 || saving}
+          >
+            {t('packs.tierRanges.save')}
+          </Button>
+        </div>
+      </div>
+
+      {enabled && (
+        <>
+          <div className="mt-3 grid grid-cols-3 gap-x-3 gap-y-2 lg:grid-cols-6">
+            {RARITIES.map((r) => (
+              <div key={r} className="flex flex-col gap-y-1">
+                <Label size="xsmall" htmlFor={`tier-range-${r}-min`}>
+                  {r}
+                </Label>
+                <Input
+                  id={`tier-range-${r}-min`}
+                  size="small"
+                  inputMode="decimal"
+                  placeholder={t('packs.tierRanges.min')}
+                  aria-label={`${r} ${t('packs.tierRanges.min')}`}
+                  value={rows[r].min}
+                  onChange={(e) =>
+                    setRows((m) => ({
+                      ...m,
+                      [r]: { ...m[r], min: e.target.value },
+                    }))
+                  }
+                  className="tabular-nums"
+                />
+                <Input
+                  size="small"
+                  inputMode="decimal"
+                  placeholder={t('packs.tierRanges.max')}
+                  aria-label={`${r} ${t('packs.tierRanges.max')}`}
+                  value={rows[r].max}
+                  onChange={(e) =>
+                    setRows((m) => ({
+                      ...m,
+                      [r]: { ...m[r], max: e.target.value },
+                    }))
+                  }
+                  className="tabular-nums"
+                />
+              </div>
+            ))}
+          </div>
+          <Text size="xsmall" className="text-ui-fg-muted mt-2">
+            {errors.length > 0 ? (
+              <span className="text-ui-tag-orange-text">{errors[0]}</span>
+            ) : (
+              t('packs.tierRanges.hint')
+            )}
+          </Text>
+        </>
+      )}
+    </div>
+  );
+};
+
 // table below follows these numbers live. The same numbers seed the published
 // odds, so the secret rates and the public ones start in sync.
 const DefaultOddsSection = ({

@@ -54,12 +54,18 @@ export type TierRangeMap = Partial<Record<OddsRarity, TierRange>>;
 /** Rarest matching tier (RARITIES order), or null when no configured range contains
  *  `value`. A tier with no range (or both bounds null) never matches. Bounds are
  *  inclusive-min, exclusive-max; a null bound is open on that side. */
-export function rarityForValue(value: number, ranges: TierRangeMap): OddsRarity | null;
+export function rarityForValue(
+  value: number,
+  ranges: TierRangeMap,
+): OddsRarity | null;
 
 /** 'in' | 'below' | 'above' for a configured tier; 'unset' when the tier has no usable
  *  range (feature inert for that tier). Non-finite values are 'unset'. */
-export function tierRangeStatus(value: number, rarity: string, ranges: TierRangeMap):
-  'in' | 'below' | 'above' | 'unset';
+export function tierRangeStatus(
+  value: number,
+  rarity: string,
+  ranges: TierRangeMap,
+): 'in' | 'below' | 'above' | 'unset';
 ```
 
 Empty config ⇒ everything `'unset'` / `null` ⇒ current behavior everywhere (feature off).
@@ -126,6 +132,20 @@ current display price on every load.
   `/admin/tier-settings` (defaults, save, reject bad ranges, audit row).
 - Admin: type-check + build; editor behaviors are covered by the pure helpers plus the
   existing visual-QA loop (repo testing policy: no brittle markup assertions).
+
+## Per-pack override (added 2026-08-02, second user request)
+
+Each pack may value its tiers differently. `pack.tier_ranges` (jsonb, nullable)
+holds a per-pack `TierRangeMap`; **null = inherit the global singleton**, a
+stored map (even `{}`) replaces the global ladder wholesale for that pack.
+Tri-state write plumbing mirrors `published_odds` (undefined = keep, null =
+clear, map = validated by the same `validateTierRangeMap`). Surfaced on the
+odds editor as a "Tier price ranges" section (inherit toggle + min/max grid,
+saved through the normal pack update), returned on both the odds GET payload
+and the packs list so the editor and the cards-list picker resolve the
+EFFECTIVE ladder as `pack.tier_ranges ?? global`. All four behaviors
+(auto-assign, add-confirm, drift badge, pool-modal staging) run on the
+effective ladder of the pack in question.
 
 ## Out of scope
 

@@ -3,6 +3,7 @@ import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
 import { hasRollablePool } from '../../modules/packs/rollable-pool';
+import type { TierRangeMap } from '@acme/odds-math';
 import type { PackWriteInput, PublishedOdds } from './create-pack';
 
 // slug is immutable (it keys PackOdds / the /claw route); it selects the row.
@@ -20,6 +21,7 @@ type PackSnapshot = {
   rank: number;
   status: 'active' | 'draft';
   published_odds: PublishedOdds | null;
+  tier_ranges: TierRangeMap | null;
 };
 
 // update-pack — patch a pack's listing fields (everything but slug).
@@ -63,6 +65,7 @@ export const updatePackStep = createStep(
       rank: pack.rank,
       status: pack.status,
       published_odds: (pack.published_odds as PublishedOdds | null) ?? null,
+      tier_ranges: (pack.tier_ranges as TierRangeMap | null) ?? null,
     };
 
     await packs.updatePacks([
@@ -84,6 +87,14 @@ export const updatePackStep = createStep(
           : {}),
         ...(input.published_odds !== undefined
           ? { published_odds: input.published_odds }
+          : {}),
+        ...(input.tier_ranges !== undefined
+          ? {
+              tier_ranges: input.tier_ranges as Record<
+                string,
+                unknown
+              > | null,
+            }
           : {}),
       },
     ]);

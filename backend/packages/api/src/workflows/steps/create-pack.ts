@@ -1,6 +1,6 @@
 import { createStep, StepResponse } from '@medusajs/framework/workflows-sdk';
 import { MedusaError } from '@medusajs/framework/utils';
-import type { OddsRarity } from '@acme/odds-math';
+import type { OddsRarity, TierRangeMap } from '@acme/odds-math';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
 
@@ -31,6 +31,10 @@ export type PackWriteInput = {
   // undefined = leave as-is (writers that don't send the field, e.g. the
   // list-page edit modal, must not clear it); null = explicit clear.
   published_odds?: PublishedOdds | null;
+  // Per-pack tier price-range override. Tri-state like published_odds:
+  // undefined = leave as-is; null = clear (inherit the global tier_settings);
+  // map = pack-specific ranges.
+  tier_ranges?: TierRangeMap | null;
 };
 
 type CompensateData = { packId: string } | undefined;
@@ -75,6 +79,10 @@ export const createPackStep = createStep(
         rank: input.rank,
         status: input.status,
         published_odds: input.published_odds ?? null,
+        tier_ranges: (input.tier_ranges ?? null) as Record<
+          string,
+          unknown
+        > | null,
       },
     ]);
 

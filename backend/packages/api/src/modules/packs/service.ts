@@ -110,7 +110,10 @@ import type {
   ChallengeSettingsPatch,
   ChallengeSettingsView,
 } from './challenge-validate';
-import type { TierSettingsView } from './tier-settings-validate';
+import {
+  normalizeTierRanges,
+  type TierSettingsView,
+} from './tier-settings-validate';
 import { getCardStockByHandle } from './card-stock';
 import {
   unlockedStages,
@@ -6451,28 +6454,6 @@ class PacksModuleService extends MedusaService({
     return after;
   }
 
-  // Stored tier_settings.ranges json → the usable TierRangeMap. The column
-  // keeps EVERY rarity key (null = unconfigured — see editTierSettings for
-  // why); reads drop nulls and non-numeric noise so consumers only ever see
-  // ranges they can act on.
-  private normalizeTierRanges(stored: unknown): TierRangeMap {
-    const map = (stored ?? {}) as Record<string, unknown>;
-    const num = (v: unknown): number | null =>
-      typeof v === 'number' && Number.isFinite(v) ? v : null;
-    const ranges: TierRangeMap = {};
-    for (const rarity of RARITIES) {
-      const r = map[rarity];
-      if (!r || typeof r !== 'object' || Array.isArray(r)) continue;
-      const range: TierRange = {
-        min: num((r as Record<string, unknown>).min),
-        max: num((r as Record<string, unknown>).max),
-      };
-      if (range.min === null && range.max === null) continue;
-      ranges[rarity] = range;
-    }
-    return ranges;
-  }
-
   // Tier-defaults singleton read — the admin-configured RM display-price
   // range per rarity tier, {} when never edited (the admin app treats an
   // empty map as "feature off"). Never 404s.
@@ -6481,7 +6462,7 @@ class PacksModuleService extends MedusaService({
     @MedusaContext() sharedContext: Context = {},
   ): Promise<TierSettingsView> {
     const [row] = await this.listTierSettings({}, { take: 1 }, sharedContext);
-    return { ranges: this.normalizeTierRanges(row?.ranges) };
+    return { ranges: normalizeTierRanges(row?.ranges) };
   }
 
   // Audited singleton replace (same pattern as editChallengeSettings). The
@@ -6495,7 +6476,7 @@ class PacksModuleService extends MedusaService({
   ): Promise<TierSettingsView> {
     const [row] = await this.listTierSettings({}, { take: 1 }, sharedContext);
     const before: TierSettingsView = {
-      ranges: this.normalizeTierRanges(row?.ranges),
+      ranges: normalizeTierRanges(row?.ranges),
     };
     const full: Record<string, TierRange | null> = {};
     for (const rarity of RARITIES) full[rarity] = input.ranges[rarity] ?? null;
@@ -6509,7 +6490,7 @@ class PacksModuleService extends MedusaService({
       await this.createTierSettings([{ id: 'global', ...data }], sharedContext);
     }
     const after: TierSettingsView = {
-      ranges: this.normalizeTierRanges(full),
+      ranges: normalizeTierRanges(full),
     };
     await this.createAdminActionAudits(
       [

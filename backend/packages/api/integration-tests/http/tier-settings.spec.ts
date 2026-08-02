@@ -153,5 +153,107 @@ medusaIntegrationTestRunner({
         expect(read.data).toEqual({ ranges: {} });
       });
     });
+
+    // Per-pack override: pack.tier_ranges (null = inherit the global
+    // singleton above; a stored map replaces it wholesale for that pack).
+    describe('/admin/packs/:slug tier_ranges override', () => {
+      let adminToken: string;
+      const SLUG = 'tier-range-pack';
+      const PACK_BODY = {
+        title: 'Tier Range Pack',
+        category: 'pokemon',
+        price: 50,
+        image: '/cdn/test-pack.webp',
+        buyback_percent: 90,
+        boost: false,
+        rank: 0,
+        status: 'draft',
+      };
+      const adminHeaders = (): Record<string, string> => ({
+        authorization: `Bearer ${adminToken}`,
+      });
+      const listedPack = async () => {
+        const res = await unwrapResponse(
+          api.get('/admin/packs', { headers: adminHeaders() }),
+        );
+        expect(res.status).toBe(200);
+        return res.data.packs.find(
+          (p: { slug: string }) => p.slug === SLUG,
+        ) as { tier_ranges: unknown };
+      };
+
+      beforeEach(async () => {
+        adminToken = await mintSuperAdmin(
+          getContainer(),
+          api,
+          ADMIN_EMAIL,
+          PASSWORD,
+        );
+        const created = await unwrapResponse(
+          api.post(
+            '/admin/packs',
+            { ...PACK_BODY, slug: SLUG },
+            { headers: adminHeaders() },
+          ),
+        );
+        expect(created.status).toBe(201);
+      });
+
+      it('defaults to null (inherit), round-trips a map, keeps it when the key is absent, and null clears it', async () => {
+        expect((await listedPack()).tier_ranges).toBeNull();
+
+        const override = {
+          Common: { min: 10, max: 50 },
+          Rare: { min: 200, max: null },
+        };
+        const saved = await unwrapResponse(
+          api.post(
+            `/admin/packs/${SLUG}`,
+            { ...PACK_BODY, tier_ranges: override },
+            { headers: adminHeaders() },
+          ),
+        );
+        expect(saved.status).toBe(200);
+        expect((await listedPack()).tier_ranges).toEqual(override);
+
+        // Absent key = keep the stored value (deploy-skew safety, same
+        // tri-state as published_odds).
+        const untouched = await unwrapResponse(
+          api.post(`/admin/packs/${SLUG}`, PACK_BODY, {
+            headers: adminHeaders(),
+          }),
+        );
+        expect(untouched.status).toBe(200);
+        expect((await listedPack()).tier_ranges).toEqual(override);
+
+        const cleared = await unwrapResponse(
+          api.post(
+            `/admin/packs/${SLUG}`,
+            { ...PACK_BODY, tier_ranges: null },
+            { headers: adminHeaders() },
+          ),
+        );
+        expect(cleared.status).toBe(200);
+        expect((await listedPack()).tier_ranges).toBeNull();
+      });
+
+      it('rejects bad override maps', async () => {
+        for (const tier_ranges of [
+          { Shiny: { min: 0, max: 1 } },
+          { Common: { min: 500, max: 100 } },
+          { Common: { min: '5', max: null } },
+        ]) {
+          const res = await unwrapResponse(
+            api.post(
+              `/admin/packs/${SLUG}`,
+              { ...PACK_BODY, tier_ranges },
+              { headers: adminHeaders() },
+            ),
+          );
+          expect(res.status).toBe(400);
+        }
+        expect((await listedPack()).tier_ranges).toBeNull();
+      });
+    });
   },
 });

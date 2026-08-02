@@ -101,6 +101,19 @@
       "outsideDesc_other": "{{count}} of the cards you are adding fall outside every configured tier price range (see Tier Defaults). They will join as Common. Add them anyway?",
       "outsideConfirm": "Add anyway"
     },
+    "tierRanges": {
+      "title": "Tier price ranges",
+      "inheritNote": "Inheriting the global Tier Defaults ladder.",
+      "overrideNote": "Pack-specific ranges — this pack ignores the global Tier Defaults.",
+      "toggle": "Pack-specific ranges",
+      "min": "Min (RM)",
+      "max": "Max (RM)",
+      "hint": "Blank = open on that side; both blank = tier unconfigured. Overlaps resolve to the rarest match.",
+      "save": "Save ranges",
+      "saved": "Tier ranges saved.",
+      "badNumber": "{{tier}}: bounds must be numbers ≥ 0.",
+      "badOrder": "{{tier}}: min must not exceed max."
+    },
     "editor": {
       "title": "Win rates",
       "subtitle": "Set each card's rarity for this pack. Unlocked cards follow the default odds above; lock one to type its own rate. Secret — customers never see these.",

@@ -123,9 +123,12 @@ const GachaCardsPage = () => {
   const navigate = useNavigate();
   const prompt = usePrompt();
   const { data: cards = null, isError, refetch } = useCards();
-  // Tier price ranges (/tier-defaults) — only the bulk "add to pack" confirm
-  // reads them; {} (unconfigured or fetch failed) skips the prompt entirely.
-  const tierRanges = (useTierSettings().data?.ranges ?? {}) as TierRangeMap;
+  // Tier price ranges — only the bulk "add to pack" confirm reads them. The
+  // chosen pack's own override (pack.tier_ranges) wins; the global
+  // /tier-defaults ladder is the fallback. {} (nothing configured, or the
+  // fetch failed) skips the prompt entirely.
+  const globalTierRanges = (useTierSettings().data?.ranges ??
+    {}) as TierRangeMap;
   const updateCard = useUpdateCard();
   const removeCard = useDeleteCard();
   const uploadImg = useUploadImage();
@@ -359,6 +362,9 @@ const GachaCardsPage = () => {
       setSelected(new Set());
       return;
     }
+    const pack = (packs ?? []).find((p) => p.slug === slug);
+    const tierRanges = ((pack?.tier_ranges ?? null) ??
+      globalTierRanges) as TierRangeMap;
     if (Object.keys(tierRanges).length > 0) {
       const byHandle = new Map((cards ?? []).map((c) => [c.handle, c]));
       const outside = addCards.filter((h) => {

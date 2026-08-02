@@ -12,6 +12,7 @@ import {
   publishedEv,
 } from "../../../modules/packs/economy";
 import { isGraded } from "../../../modules/packs/card-view";
+import { normalizeTierRanges } from "../../../modules/packs/tier-settings-validate";
 import { weightForSet, type OddsSet } from "../../../modules/packs/odds-sets";
 import {
   resolveFxRate,
@@ -141,6 +142,10 @@ export async function GET(
         buyback_percent: p.buyback_percent,
         boost: p.boost,
         published_odds: p.published_odds ?? null,
+        // Per-pack tier price-range override; null = inherit the global
+        // tier_settings singleton (null vs {} matters — see the odds route).
+        tier_ranges:
+          p.tier_ranges == null ? null : normalizeTierRanges(p.tier_ranges),
         // §2.4.8 composition — AUTO-DETECTED from the pool, never operator-set.
         // Null = empty pool: nothing to infer from, not "raw".
         group: !pool.length
