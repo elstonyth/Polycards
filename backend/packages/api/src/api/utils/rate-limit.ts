@@ -702,3 +702,34 @@ export function createAdminActionRateLimit(): MiddlewareHandler {
     },
   });
 }
+
+/**
+ * The phone-OTP send limiter (POST /store/phone-verification/start). PUBLIC
+ * route — keys on the request IP. Each allowed request can cost real money
+ * (one SMS), so this is the tightest budget in the file: SMS-pumping
+ * protection, layered under Twilio Verify's own per-number caps. Env-tunable:
+ * PHONE_OTP_START_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 3/60s)
+ * PHONE_OTP_START_RATE_LIMIT / _WINDOW_MS (default 10/1h)
+ */
+export function createPhoneOtpStartRateLimit(): MiddlewareHandler {
+  return createEnvRateLimit({
+    name: 'phone-otp-start',
+    message: 'Too many code requests.',
+    defaults: { burstLimit: 3, burstWindowMs: 60_000, limit: 10, windowMs: 3_600_000 },
+  });
+}
+
+/**
+ * The phone-OTP check limiter (POST /store/phone-verification/check). PUBLIC —
+ * keys on IP. Bounds code guessing from one address; Twilio additionally caps
+ * 5 checks per verification. Env-tunable:
+ * PHONE_OTP_CHECK_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 5/60s)
+ * PHONE_OTP_CHECK_RATE_LIMIT / _WINDOW_MS (default 20/1h)
+ */
+export function createPhoneOtpCheckRateLimit(): MiddlewareHandler {
+  return createEnvRateLimit({
+    name: 'phone-otp-check',
+    message: 'Too many verification attempts.',
+    defaults: { burstLimit: 5, burstWindowMs: 60_000, limit: 20, windowMs: 3_600_000 },
+  });
+}

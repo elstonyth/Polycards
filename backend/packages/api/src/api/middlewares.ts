@@ -16,6 +16,8 @@ import {
   createNotificationReadRateLimit,
   createPackOpenBatchRateLimit,
   createPackOpenRateLimit,
+  createPhoneOtpCheckRateLimit,
+  createPhoneOtpStartRateLimit,
   createProfileAppearanceRateLimit,
   createProfileReadRateLimit,
   createPullRevealRateLimit,
@@ -230,6 +232,20 @@ export default defineMiddlewares({
       matcher: '/auth/*/emailpass/*',
       method: 'POST',
       middlewares: [authRateLimit],
+    },
+    {
+      // OTP send — public, IP-keyed, tightest budget in the file (each allowed
+      // request can cost one SMS). See createPhoneOtpStartRateLimit.
+      matcher: '/store/phone-verification/start',
+      method: 'POST',
+      middlewares: [createPhoneOtpStartRateLimit()],
+    },
+    {
+      // OTP check — public, IP-keyed; bounds code guessing (Twilio also caps 5
+      // checks per verification server-side).
+      matcher: '/store/phone-verification/check',
+      method: 'POST',
+      middlewares: [createPhoneOtpCheckRateLimit()],
     },
     {
       // POLYCARD-BACK §4.2 login block: a disabled player is refused BEFORE the
