@@ -48,13 +48,13 @@
     "http-proxy-middleware": "^3.0.7",
     "ioredis": "^5.4.1",
     "multer": "^2.2.0",
-    "resend": "^6.18.0",
+    "resend": "^6.18.1",
     "sharp": "^0.35.3",
     "write-excel-file": "^4.1.1"
   },
   "devDependencies": {
     "@medusajs/test-utils": "2.13.4",
-    "@swc/core": "^1.15.46",
+    "@swc/core": "^1.15.47",
     "@swc/jest": "^0.2.36",
     "@types/jest": "^29.5.13",
     "@types/multer": "^2.2.0",
