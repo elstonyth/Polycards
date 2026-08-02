@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
+import { lockBodyScroll, unlockBodyScroll } from '@/lib/use-modal-a11y';
 import AuthForm from './AuthForm';
 
 // Tabbable-element selector used by the focus trap.
@@ -88,11 +89,10 @@ export default function AuthModal() {
     };
 
     document.addEventListener('keydown', onKey);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    lockBodyScroll();
     return () => {
       document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prevOverflow;
+      unlockBodyScroll();
       // Restore focus to the element that opened the modal (WCAG 2.4.3).
       triggerRef.current?.focus();
     };
