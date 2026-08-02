@@ -61,14 +61,18 @@ export default function AuthForm({
 
     const email = String(new FormData(e.currentTarget).get('email') ?? '');
     setBusy(true);
-    const result = await requestPasswordReset({ email });
-    setBusy(false);
-
-    if (result.ok) {
-      setForgot('sent');
-      return;
+    try {
+      const result = await requestPasswordReset({ email });
+      if (result.ok) {
+        setForgot('sent');
+        return;
+      }
+      setNote({ text: result.error });
+    } catch {
+      setNote({ text: 'Something went wrong. Please try again.' });
+    } finally {
+      setBusy(false);
     }
-    setNote({ text: result.error });
   }
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
@@ -100,40 +104,53 @@ export default function AuthForm({
     }
 
     setBusy(true);
-    const result = isSignup
-      ? await signup({
-          email,
-          password,
-          first_name: String(form.get('username') ?? ''),
-          phone,
-        })
-      : await login({ email, password });
-    setBusy(false);
+    try {
+      const result = isSignup
+        ? await signup({
+            email,
+            password,
+            first_name: String(form.get('username') ?? ''),
+            phone,
+          })
+        : await login({ email, password });
 
-    if (result.ok) {
-      // The action returns the customer — update context directly (no refetch flash).
-      setCustomer(result.customer);
-      onSuccess?.();
-      router.refresh();
-      return;
+      if (result.ok) {
+        // The action returns the customer — update context directly (no refetch flash).
+        setCustomer(result.customer);
+        onSuccess?.();
+        router.refresh();
+        return;
+      }
+      setNote({ text: result.error });
+    } catch {
+      setNote({ text: 'Something went wrong. Please try again.' });
+    } finally {
+      setBusy(false);
     }
-    setNote({ text: result.error });
   }
 
   async function onGoogle() {
     if (busy) return;
     setNote(null);
     setBusy(true);
-    const result = await googleLoginStart();
-    if (result.ok) {
-      // Full-page redirect to Google's consent screen; the /auth/google/callback
-      // route finishes the exchange on return. We're navigating away, so leave
-      // `busy` true (no reset) to keep the button disabled until unload.
-      window.location.assign(result.location);
-      return;
+    // No `finally` here, deliberately: on success we navigate away and must
+    // leave `busy` true (see comment below) — a finally would re-enable the
+    // button mid-redirect. Both the !ok branch and the catch reset it.
+    try {
+      const result = await googleLoginStart();
+      if (result.ok) {
+        // Full-page redirect to Google's consent screen; the /auth/google/callback
+        // route finishes the exchange on return. We're navigating away, so leave
+        // `busy` true (no reset) to keep the button disabled until unload.
+        window.location.assign(result.location);
+        return;
+      }
+      setBusy(false);
+      setNote({ text: result.error });
+    } catch {
+      setBusy(false);
+      setNote({ text: 'Something went wrong. Please try again.' });
     }
-    setBusy(false);
-    setNote({ text: result.error });
   }
 
   // Only the login mode owns the forgot sub-view — if something external
