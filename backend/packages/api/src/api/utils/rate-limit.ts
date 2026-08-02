@@ -231,6 +231,15 @@ export interface RateLimitMiddlewareOptions {
   prefix: string;
   /** Default "Too many pack opens.". */
   message?: RateLimitMessage;
+  /**
+   * Overrides the key derivation below (e.g. keying on a request-body field
+   * instead of the actor/IP) — used when a route is fronted by a shared
+   * egress point (a server-side proxy) that makes IP/actor keying collapse
+   * into one sitewide bucket. Returning undefined falls through to the
+   * existing actor_id → IP logic, so a route with no meaningful alternate key
+   * (e.g. a malformed body) still gets a working budget.
+   */
+  keyOf?: (req: MedusaRequest) => string | undefined;
   onError?: (err: unknown) => void;
 }
 
@@ -249,7 +258,7 @@ type MiddlewareHandler = (
 export function createRateLimitMiddleware(
   opts: RateLimitMiddlewareOptions,
 ): MiddlewareHandler {
-  const { store, rules, prefix, onError } = opts;
+  const { store, rules, prefix, onError, keyOf } = opts;
   // Misconfigured rules must fail at boot, loudly — limit 0 would 429 every
   // request and windowMs 0 would never deny one (see evaluateSlidingWindow's
   // strict window bound). Env parsing guarantees this for the pack-open
@@ -272,7 +281,8 @@ export function createRateLimitMiddleware(
       const auth = (req as AuthenticatedMedusaRequest).auth_context as
         | AuthenticatedMedusaRequest['auth_context']
         | undefined;
-      const key = auth?.actor_id || `ip:${req.ip ?? 'unknown'}`;
+      const key =
+        keyOf?.(req) || auth?.actor_id || `ip:${req.ip ?? 'unknown'}`;
       decision = await store.consume(prefix + key, rules, Date.now());
     } catch (err) {
       // A limiter bug must not take the endpoint down. The Redis store
@@ -375,6 +385,20 @@ function buildFailoverStore(
 
 type EnvLimiterDefaults = typeof DEFAULTS;
 
+// Shared by the two per-phone OTP limiters (see the "Phone-OTP limiters"
+// comment below). App middlewares (this file's consumers, wired in
+// middlewares.ts) run AFTER Medusa's own body-parser middleware — confirmed
+// against @medusajs/framework's router.js, which registers
+// applyBodyParserMiddleware before any route/middleware from this app — so
+// req.body is already populated here (the existing rejectCustomerMetadata
+// guard relies on the same ordering). Falls back to undefined (→ IP) rather
+// than throwing when the body has no string phone; the route handler 400s
+// that shape independently.
+const phoneBodyKeyOf = (req: MedusaRequest): string | undefined => {
+  const phone = (req.body as { phone?: unknown } | undefined)?.phone;
+  return typeof phone === 'string' ? `phone:${phone}` : undefined;
+};
+
 /**
  * Builds a burst + sustained limiter for one endpoint family. Everything
  * derives from `name` (kebab-case, e.g. "pack-open") so the three identities
@@ -386,6 +410,7 @@ function createEnvRateLimit(opts: {
   name: string;
   message?: RateLimitMessage;
   defaults: EnvLimiterDefaults;
+  keyOf?: (req: MedusaRequest) => string | undefined;
 }): MiddlewareHandler {
   const { name, defaults } = opts;
   const envPrefix = `${name.toUpperCase().replace(/-/g, '_')}_RATE`;
@@ -412,6 +437,7 @@ function createEnvRateLimit(opts: {
     rules,
     prefix: `rl:${name}:`,
     message: opts.message,
+    keyOf: opts.keyOf,
     onError: (err) => warn('limiter error; request allowed through', err),
   });
 }
@@ -703,33 +729,112 @@ export function createAdminActionRateLimit(): MiddlewareHandler {
   });
 }
 
+// Phone-OTP limiters are keyed in TWO independent dimensions, both applied
+// (see middlewares.ts): a per-phone tier (below) and this IP tier. Why both —
+// the storefront's phone-verification server actions proxy every OTP request
+// through the Next.js server (src/lib/actions/phone-verification.ts), so in
+// production the backend sees exactly ONE egress IP for every visitor. An
+// IP-only limiter is therefore a SITEWIDE bucket, not per-client fairness:
+// one user's retries can 429 every other user's signup/change/reset OTPs,
+// and it's trivially DoS-able by anyone who knows that. The per-phone tier
+// (createPhoneOtpStartPhoneRateLimit / createPhoneOtpCheckPhoneRateLimit)
+// keys on the phone number in the request body instead, so it survives the
+// shared-IP topology and is the real per-client / SMS-cost cap. This IP tier
+// is kept as a second, deliberately generous circuit breaker against
+// whole-site SMS-spend abuse — sized above legitimate sitewide traffic, with
+// Twilio's own Fraud Guard + geo-lock as the upstream defense. Both factories
+// below build their own env-driven limiter (own Redis connection) rather than
+// sharing one instance — they are genuinely distinct budgets (per-phone vs.
+// sitewide), so collapsing them into one shared limiter would silently merge
+// the two buckets back into the single-bucket bug this split fixes.
+
 /**
- * The phone-OTP send limiter (POST /store/phone-verification/start). PUBLIC
- * route — keys on the request IP. Each allowed request can cost real money
- * (one SMS), so this is the tightest budget in the file: SMS-pumping
- * protection, layered under Twilio Verify's own per-number caps. Env-tunable:
- * PHONE_OTP_START_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 3/60s)
- * PHONE_OTP_START_RATE_LIMIT / _WINDOW_MS (default 10/1h)
+ * The phone-OTP send limiter, PER-PHONE (POST /store/phone-verification/start).
+ * PUBLIC route — keys on the `phone` field in the request body (falls back to
+ * IP if the body has no string phone; the route itself 400s that shape
+ * anyway). This is the primary fairness/SMS-cost cap: each allowed request
+ * can cost real money (one SMS), layered under Twilio Verify's own
+ * per-number caps. Runs BEFORE the IP tier below (middlewares.ts) so a
+ * hammered number 429s before spending the sitewide budget. Env-tunable:
+ * PHONE_OTP_START_PHONE_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 3/10min)
+ * PHONE_OTP_START_PHONE_RATE_LIMIT / _WINDOW_MS (default 6/24h)
+ */
+export function createPhoneOtpStartPhoneRateLimit(): MiddlewareHandler {
+  return createEnvRateLimit({
+    name: 'phone-otp-start-phone',
+    message: 'Too many code requests for this number.',
+    keyOf: phoneBodyKeyOf,
+    defaults: {
+      burstLimit: 3,
+      burstWindowMs: 600_000,
+      limit: 6,
+      windowMs: 86_400_000,
+    },
+  });
+}
+
+/**
+ * The phone-OTP send limiter, SITEWIDE (POST /store/phone-verification/start).
+ * PUBLIC route — keys on the request IP (its designed fallback), which in
+ * production is the storefront's one egress IP (see the module comment
+ * above) — so this is a whole-storefront SMS-spend circuit breaker, NOT
+ * per-client fairness (createPhoneOtpStartPhoneRateLimit is that tier).
+ * Env-tunable:
+ * PHONE_OTP_START_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 30/60s)
+ * PHONE_OTP_START_RATE_LIMIT / _WINDOW_MS (default 300/1h)
  */
 export function createPhoneOtpStartRateLimit(): MiddlewareHandler {
   return createEnvRateLimit({
     name: 'phone-otp-start',
     message: 'Too many code requests.',
-    defaults: { burstLimit: 3, burstWindowMs: 60_000, limit: 10, windowMs: 3_600_000 },
+    defaults: {
+      burstLimit: 30,
+      burstWindowMs: 60_000,
+      limit: 300,
+      windowMs: 3_600_000,
+    },
   });
 }
 
 /**
- * The phone-OTP check limiter (POST /store/phone-verification/check). PUBLIC —
- * keys on IP. Bounds code guessing from one address; Twilio additionally caps
- * 5 checks per verification. Env-tunable:
- * PHONE_OTP_CHECK_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 5/60s)
- * PHONE_OTP_CHECK_RATE_LIMIT / _WINDOW_MS (default 20/1h)
+ * The phone-OTP check limiter, PER-PHONE (POST /store/phone-verification/check).
+ * PUBLIC — same keyOf as the start-phone limiter above. Bounds code guessing
+ * against one specific number; Twilio additionally caps 5 checks per
+ * verification. Runs BEFORE the IP tier below (middlewares.ts). Env-tunable:
+ * PHONE_OTP_CHECK_PHONE_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 10/10min)
+ * PHONE_OTP_CHECK_PHONE_RATE_LIMIT / _WINDOW_MS (default 30/24h)
+ */
+export function createPhoneOtpCheckPhoneRateLimit(): MiddlewareHandler {
+  return createEnvRateLimit({
+    name: 'phone-otp-check-phone',
+    message: 'Too many verification attempts for this number.',
+    keyOf: phoneBodyKeyOf,
+    defaults: {
+      burstLimit: 10,
+      burstWindowMs: 600_000,
+      limit: 30,
+      windowMs: 86_400_000,
+    },
+  });
+}
+
+/**
+ * The phone-OTP check limiter, SITEWIDE (POST /store/phone-verification/check).
+ * PUBLIC — keys on IP, which in production is the storefront's one egress IP
+ * (see the module comment above): a sitewide circuit breaker, not per-client
+ * fairness (createPhoneOtpCheckPhoneRateLimit is that tier). Env-tunable:
+ * PHONE_OTP_CHECK_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 60/60s)
+ * PHONE_OTP_CHECK_RATE_LIMIT / _WINDOW_MS (default 600/1h)
  */
 export function createPhoneOtpCheckRateLimit(): MiddlewareHandler {
   return createEnvRateLimit({
     name: 'phone-otp-check',
     message: 'Too many verification attempts.',
-    defaults: { burstLimit: 5, burstWindowMs: 60_000, limit: 20, windowMs: 3_600_000 },
+    defaults: {
+      burstLimit: 60,
+      burstWindowMs: 60_000,
+      limit: 600,
+      windowMs: 3_600_000,
+    },
   });
 }

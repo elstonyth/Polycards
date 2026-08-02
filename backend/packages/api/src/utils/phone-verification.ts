@@ -43,6 +43,13 @@ export const isPhoneOtpPurpose = (v: unknown): v is PhoneOtpPurpose =>
 /** ponytail: 10m fixed TTL, no config knob — add one only if support tickets ask. */
 const PROOF_TTL_MS = 10 * 60_000;
 
+// Domain-separates this HMAC from anything else ever signed with the same
+// jwtSecret — notably the app's own HS256 JWTs (login/register/reset tokens
+// all share this secret). Prepending a fixed, format-specific string to the
+// HMAC input means a signature computed for one format can never verify
+// against the other, even though the underlying key is identical.
+const PROOF_HMAC_DOMAIN = 'phone-proof.v1';
+
 type ProofPayload = { phone: string; purpose: PhoneOtpPurpose; exp: number };
 
 export function signPhoneProof(
@@ -54,7 +61,9 @@ export function signPhoneProof(
   const payload = Buffer.from(
     JSON.stringify({ phone, purpose, exp: nowMs + PROOF_TTL_MS } satisfies ProofPayload),
   ).toString('base64url');
-  const sig = createHmac('sha256', secret).update(payload).digest('base64url');
+  const sig = createHmac('sha256', secret)
+    .update(`${PROOF_HMAC_DOMAIN}.${payload}`)
+    .digest('base64url');
   return `${payload}.${sig}`;
 }
 
@@ -68,7 +77,9 @@ export function verifyPhoneProof(
   if (dot <= 0) return null;
   const payload = token.slice(0, dot);
   const sig = token.slice(dot + 1);
-  const expected = createHmac('sha256', secret).update(payload).digest('base64url');
+  const expected = createHmac('sha256', secret)
+    .update(`${PROOF_HMAC_DOMAIN}.${payload}`)
+    .digest('base64url');
   const a = Buffer.from(sig);
   const b = Buffer.from(expected);
   if (a.length !== b.length || !timingSafeEqual(a, b)) return null;

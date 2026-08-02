@@ -10,12 +10,19 @@ jest.setTimeout(240 * 1000);
 // PUBLIC (no bearer auth) but live under /store/*, so they need the same
 // publishable-key header as every other /store/* route.
 //
-// The phone-otp-start/check limiters default to a tight 3/60s and 5/60s
-// burst (rate-limit.ts) - this suite's call count exceeds that, so the whole
-// file raises the budget via the runner's `env:` override, same precedent as
-// auth-rate-limit.spec.ts's RATE_ENV (there the override tightens the auth
-// limiter to make it observable; here it loosens the phone-otp limiter so
-// this functional suite doesn't 429 itself).
+// The phone-otp limiters are now TWO tiers each (Finding 1, pre-merge
+// review): a per-phone tier (the real per-client/SMS-cost budget — the
+// storefront proxies every OTP request server-side, so an IP-only limiter
+// would be one shared bucket for every visitor) and an IP-keyed sitewide
+// circuit breaker (rate-limit.ts's "Phone-OTP limiters" comment has the full
+// rationale). Both default tight — this suite's call count (many phones,
+// many purposes) exceeds both, so the whole file raises every knob via the
+// runner's `env:` override, same precedent as auth-rate-limit.spec.ts's
+// RATE_ENV (there the override tightens the auth limiter to make it
+// observable; here it loosens every phone-otp tier so this functional suite
+// doesn't 429 itself). The "per-phone limiter actually keys on phone" test
+// below deliberately uses its OWN tighter override on just the start-phone
+// burst so the mechanism is independently observable.
 const RATE_ENV = {
   PHONE_OTP_START_RATE_BURST_LIMIT: "50",
   PHONE_OTP_START_RATE_BURST_WINDOW_MS: "60000",
@@ -25,6 +32,14 @@ const RATE_ENV = {
   PHONE_OTP_CHECK_RATE_BURST_WINDOW_MS: "60000",
   PHONE_OTP_CHECK_RATE_LIMIT: "200",
   PHONE_OTP_CHECK_RATE_WINDOW_MS: "3600000",
+  PHONE_OTP_START_PHONE_RATE_BURST_LIMIT: "50",
+  PHONE_OTP_START_PHONE_RATE_BURST_WINDOW_MS: "60000",
+  PHONE_OTP_START_PHONE_RATE_LIMIT: "200",
+  PHONE_OTP_START_PHONE_RATE_WINDOW_MS: "3600000",
+  PHONE_OTP_CHECK_PHONE_RATE_BURST_LIMIT: "50",
+  PHONE_OTP_CHECK_PHONE_RATE_BURST_WINDOW_MS: "60000",
+  PHONE_OTP_CHECK_PHONE_RATE_LIMIT: "200",
+  PHONE_OTP_CHECK_PHONE_RATE_WINDOW_MS: "3600000",
 };
 
 const PHONE = "+60107667787";
@@ -270,6 +285,33 @@ medusaIntegrationTestRunner({
               { phone: "+60107667794", token: "bogus" },
               { headers },
             ),
+          );
+          expect(res.status).toBe(401);
+        });
+
+        // Minor fix (pre-merge review): a register token's actor_id is empty
+        // until POST /store/customers links it (see the describe block's
+        // header comment) — hitting this route with one BEFORE that link
+        // used to 500 (customerService.updateCustomers('', …)) instead of
+        // cleanly rejecting an unlinked caller.
+        it("401s a register-token bearer whose actor_id is still empty (pre-link)", async () => {
+          const reg = await api.post("/auth/customer/emailpass/register", {
+            email: "change-unlinked@test.dev",
+            password: PASSWORD,
+          });
+          const phone = "+60107667797";
+
+          await start({ phone, purpose: "phone-change" });
+          const checked = await check({
+            phone,
+            purpose: "phone-change",
+            code: "000000",
+          });
+          expect(checked.status).toBe(200);
+
+          const res = await change(
+            { phone, token: checked.data.token },
+            { ...headers, authorization: `Bearer ${reg.data.token}` },
           );
           expect(res.status).toBe(401);
         });

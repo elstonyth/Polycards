@@ -12,6 +12,15 @@ export async function POST(
   req: AuthenticatedMedusaRequest<Body>,
   res: MedusaResponse,
 ): Promise<void> {
+  // Register-token bearers carry actor_id '' until POST /store/customers
+  // links the identity (same guard as store/vip/route.ts) — without this,
+  // updateCustomers('', …) below reaches core with an empty id and 500s
+  // instead of cleanly rejecting the caller.
+  const customerId = req.auth_context.actor_id;
+  if (!customerId) {
+    throw new MedusaError(MedusaError.Types.UNAUTHORIZED, 'Unauthorized');
+  }
+
   const { phone, token } = req.body ?? {};
   if (typeof phone !== 'string' || !E164_RE.test(phone))
     throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Invalid phone number.');
@@ -31,7 +40,6 @@ export async function POST(
     throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Phone verification required.');
 
   const customerService: ICustomerModuleService = req.scope.resolve(Modules.CUSTOMER);
-  const customerId = req.auth_context.actor_id;
   await customerService.updateCustomers(customerId, { phone });
   res.json({ customer: { id: customerId, phone } });
 }

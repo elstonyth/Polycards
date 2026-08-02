@@ -16,7 +16,9 @@ import {
   createNotificationReadRateLimit,
   createPackOpenBatchRateLimit,
   createPackOpenRateLimit,
+  createPhoneOtpCheckPhoneRateLimit,
   createPhoneOtpCheckRateLimit,
+  createPhoneOtpStartPhoneRateLimit,
   createPhoneOtpStartRateLimit,
   createProfileAppearanceRateLimit,
   createProfileReadRateLimit,
@@ -240,18 +242,28 @@ export default defineMiddlewares({
       middlewares: [authRateLimit],
     },
     {
-      // OTP send — public, IP-keyed, tightest budget in the file (each allowed
-      // request can cost one SMS). See createPhoneOtpStartRateLimit.
+      // OTP send — TWO independent limiter tiers, per-phone FIRST so a
+      // hammered number 429s before spending the sitewide budget. The
+      // storefront proxies every OTP request server-side (one egress IP in
+      // prod), so an IP-only limiter here would be one shared bucket for
+      // every visitor — see the "Phone-OTP limiters" comment in
+      // utils/rate-limit.ts for the full rationale.
       matcher: '/store/phone-verification/start',
       method: 'POST',
-      middlewares: [createPhoneOtpStartRateLimit()],
+      middlewares: [
+        createPhoneOtpStartPhoneRateLimit(),
+        createPhoneOtpStartRateLimit(),
+      ],
     },
     {
-      // OTP check — public, IP-keyed; bounds code guessing (Twilio also caps 5
-      // checks per verification server-side).
+      // OTP check — same two-tier order as start above (bounds code guessing
+      // per number; Twilio also caps 5 checks per verification server-side).
       matcher: '/store/phone-verification/check',
       method: 'POST',
-      middlewares: [createPhoneOtpCheckRateLimit()],
+      middlewares: [
+        createPhoneOtpCheckPhoneRateLimit(),
+        createPhoneOtpCheckRateLimit(),
+      ],
     },
     {
       // Verified phone change (Task 4) — unlike start/check above, this one is

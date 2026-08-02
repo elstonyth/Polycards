@@ -11,6 +11,8 @@ import {
   createAdminActionRateLimit,
   createStoreReadRateLimit,
   createProfileAppearanceRateLimit,
+  createPhoneOtpStartPhoneRateLimit,
+  createPhoneOtpCheckPhoneRateLimit,
   STORE_READ_DEFAULTS,
   PROFILE_APPEARANCE_DEFAULTS,
   positiveIntFromEnv,
@@ -238,6 +240,58 @@ describe("createRateLimitMiddleware", () => {
     );
   });
 
+  // Finding 1 (phone-verification pre-merge review): a route fronted by a
+  // shared egress point (the storefront proxies OTP requests server-side)
+  // needs a key derived from something other than actor/IP, or every caller
+  // collapses into one bucket. `keyOf` is that escape hatch.
+  it("uses keyOf's key over actor_id/IP when it returns one", async () => {
+    const store: RateLimitStore = {
+      consume: jest.fn().mockResolvedValue({ allowed: true, retryAfterMs: 0 }),
+    };
+    const mw = createRateLimitMiddleware({
+      store,
+      rules,
+      prefix: "rl:t:",
+      keyOf: (req) => {
+        const phone = (req as unknown as { body?: { phone?: unknown } }).body
+          ?.phone;
+        return typeof phone === "string" ? `phone:${phone}` : undefined;
+      },
+    });
+    await mw(
+      makeReq({ body: { phone: "+60107667787" } }),
+      makeRes().res,
+      jest.fn() as unknown as MedusaNextFunction,
+    );
+    expect(store.consume).toHaveBeenCalledWith(
+      "rl:t:phone:+60107667787",
+      rules,
+      expect.any(Number),
+    );
+  });
+
+  it("falls back to actor_id/IP when keyOf returns undefined", async () => {
+    const store: RateLimitStore = {
+      consume: jest.fn().mockResolvedValue({ allowed: true, retryAfterMs: 0 }),
+    };
+    const mw = createRateLimitMiddleware({
+      store,
+      rules,
+      prefix: "rl:t:",
+      keyOf: () => undefined,
+    });
+    await mw(
+      authedReq("cus_1"),
+      makeRes().res,
+      jest.fn() as unknown as MedusaNextFunction,
+    );
+    expect(store.consume).toHaveBeenCalledWith(
+      "rl:t:cus_1",
+      rules,
+      expect.any(Number),
+    );
+  });
+
   it("responds 429 with a ceiled Retry-After and does not call next() when denied", async () => {
     const store: RateLimitStore = {
       consume: jest
@@ -422,6 +476,19 @@ describe("createAdminActionRateLimit", () => {
     // Smoke-check the factory resolves without throwing — the exact budget is
     // an integration concern, but we assert it is callable and the rules are valid.
     expect(() => createAdminActionRateLimit()).not.toThrow();
+  });
+});
+
+describe("phone-otp per-phone limiter factories (Finding 1)", () => {
+  // Redis-backed key derivation is exercised end-to-end by the http spec
+  // (needs a real body-parsed request); this just smoke-checks the factories
+  // resolve without throwing, same as the STORE_READ/PROFILE_APPEARANCE
+  // smoke tests above.
+  it("createPhoneOtpStartPhoneRateLimit resolves", () => {
+    expect(() => createPhoneOtpStartPhoneRateLimit()).not.toThrow();
+  });
+  it("createPhoneOtpCheckPhoneRateLimit resolves", () => {
+    expect(() => createPhoneOtpCheckPhoneRateLimit()).not.toThrow();
   });
 });
 
