@@ -15,7 +15,8 @@ const DIALOG_SEL =
 
 const browser = await chromium.launch();
 try {
-  // Find pack slugs that actually render the section (needs a Rare+ pool).
+  // Find pack slugs that actually render the section (any non-empty pool —
+  // "Rare & above" normally, the "All cards" fallback for zero-Rare packs).
   const scout = await browser.newPage();
   await scout.goto(`${BASE}/slots`, { waitUntil: 'domcontentloaded' });
   await scout.waitForTimeout(2000);
@@ -36,7 +37,7 @@ try {
     ['desktop', { width: 1440, height: 900 }],
   ]) {
     let done = false;
-    for (const slug of [...new Set(slugs)]) {
+    for (const slug of slugs) {
       if (done) break;
       const page = await browser.newPage({ viewport });
       await page.goto(`${BASE}/slots/${slug}`, {
@@ -128,8 +129,22 @@ try {
 
       // Mouse drag-to-scroll on the rail: drag moves scrollLeft and opens
       // nothing; a plain click still opens the card overlay. Only meaningful
-      // where the rail overflows (narrow viewports).
+      // where the rail overflows (narrow viewports). A zero-Rare pack (the
+      // "All cards" fallback) renders NO rail at all — count() first, or
+      // rail.evaluate() would wait 30s and throw, aborting the whole run.
       const rail = page.locator('div.cursor-grab').first();
+      if ((await page.locator('div.cursor-grab').count()) === 0) {
+        console.log(
+          JSON.stringify({
+            slug,
+            label,
+            drag: 'skipped: no rail (zero-Rare "All cards" fallback)',
+          }),
+        );
+        done = true;
+        await page.close();
+        continue;
+      }
       const dims = await rail.evaluate((el) => ({
         sw: el.scrollWidth,
         cw: el.clientWidth,

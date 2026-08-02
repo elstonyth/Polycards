@@ -110,14 +110,15 @@ export default function PackDetailClient({
     ? publishedOddsRows(liveDetail.publishedOdds)
     : null;
 
-  // The full public prize pool (value-sorted) — feeds the "Cards in this
-  // pack" grid AND gates the guest demo-spin CTA (pure theater on the reel,
-  // /spin?demo=1 — no charge, nothing won).
+  // The full public prize pool (value-sorted) — feeds the odds panel's
+  // valueRange/tierRanges, gates the guest demo-spin CTA (pure theater on the
+  // reel, /spin?demo=1 — no charge, nothing won), and backs the pool dialog
+  // only in the zero-Rare fallback (PoolByRarity's `full` prop).
   // Memoized so the `?? []` fallback doesn't mint a fresh array every render —
   // that identity churn would make the valueRange memo below recompute always.
   const pool = useMemo(() => liveDetail?.pool ?? [], [liveDetail?.pool]);
 
-  // Rare+ subset for the "Top hits" section: the rail shows the whole subset,
+  // Rare+ subset for the "Rare & above" section: the rail shows the whole subset,
   // the expand dialog lists the same Rare-and-above cards grouped by tier
   // (commons/uncommons are catalogue noise there). Order inherited (pool is
   // value-sorted desc). The FULL pool still feeds the demo spin + odds range.

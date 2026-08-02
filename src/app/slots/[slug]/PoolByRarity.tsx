@@ -41,7 +41,8 @@ export function PoolByRarity({
 }: {
   /** Rare+ subset for the teaser rail, value-sorted. */
   rail: PackCard[];
-  /** FULL pack pool (every tier) for the expand dialog. */
+  /** FULL pack pool (every tier) — the dialog's zero-Rare fallback only; with
+   *  a non-empty `rail` the dialog shows `rail` (operator decision, header note). */
   full: PackCard[];
   /** Admin-published per-tier chances; null = this pack has no published odds. */
   tierChances: Partial<Record<Rarity, number>> | null;
