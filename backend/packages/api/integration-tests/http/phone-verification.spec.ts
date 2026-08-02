@@ -144,6 +144,182 @@ medusaIntegrationTestRunner({
         });
       });
 
+      // Verified phone-change route (Task 4). Unlike the OTP routes above,
+      // this one is authed - it's the only way to set a new phone once
+      // enforcement is on (the /me gate in phone-verification-guard.ts closes
+      // the core route). A register token's actor_id is empty until POST
+      // /store/customers links it (see the "gated signup" register() helper
+      // below), so every case here logs in fresh via /auth/customer/emailpass
+      // to get an actor-bound bearer token, same as the direct-phone-write
+      // test above.
+      describe("POST /store/phone-verification/change", () => {
+        const createLoggedInCustomer = async (
+          email: string,
+        ): Promise<Record<string, string>> => {
+          const reg = await api.post("/auth/customer/emailpass/register", {
+            email,
+            password: PASSWORD,
+          });
+          await api.post(
+            "/store/customers",
+            { email },
+            {
+              headers: {
+                ...headers,
+                authorization: `Bearer ${reg.data.token}`,
+              },
+            },
+          );
+          const login = await api.post("/auth/customer/emailpass", {
+            email,
+            password: PASSWORD,
+          });
+          return { ...headers, authorization: `Bearer ${login.data.token}` };
+        };
+
+        const change = (
+          body: Record<string, unknown>,
+          authHeaders: Record<string, string>,
+        ) =>
+          unwrapResponse(
+            api.post("/store/phone-verification/change", body, {
+              headers: authHeaders,
+            }),
+          );
+
+        it("200s a valid phone-change proof, reflected on GET /store/customers/me", async () => {
+          const authHeaders = await createLoggedInCustomer(
+            "change-valid@test.dev",
+          );
+          const phone = "+60107667790";
+
+          await start({ phone, purpose: "phone-change" });
+          const checked = await check({
+            phone,
+            purpose: "phone-change",
+            code: "000000",
+          });
+          expect(checked.status).toBe(200);
+
+          const res = await change(
+            { phone, token: checked.data.token },
+            authHeaders,
+          );
+          expect(res.status).toBe(200);
+          expect(res.data).toMatchObject({ customer: { phone } });
+
+          const me = await unwrapResponse(
+            api.get("/store/customers/me", { headers: authHeaders }),
+          );
+          expect(me.data.customer.phone).toBe(phone);
+        });
+
+        it("400s a signup-purpose proof", async () => {
+          const authHeaders = await createLoggedInCustomer(
+            "change-wrong-purpose@test.dev",
+          );
+          const phone = "+60107667791";
+
+          await start({ phone, purpose: "signup" });
+          const checked = await check({
+            phone,
+            purpose: "signup",
+            code: "000000",
+          });
+          expect(checked.status).toBe(200);
+
+          const res = await change(
+            { phone, token: checked.data.token },
+            authHeaders,
+          );
+          expect(res.status).toBe(400);
+          expect(res.data).toMatchObject({
+            message: "Phone verification required.",
+          });
+        });
+
+        it("400s a proof minted for a different phone", async () => {
+          const authHeaders = await createLoggedInCustomer(
+            "change-mismatch@test.dev",
+          );
+          const proofPhone = "+60107667792";
+          const requestedPhone = "+60107667793";
+
+          await start({ phone: proofPhone, purpose: "phone-change" });
+          const checked = await check({
+            phone: proofPhone,
+            purpose: "phone-change",
+            code: "000000",
+          });
+          expect(checked.status).toBe(200);
+
+          const res = await change(
+            { phone: requestedPhone, token: checked.data.token },
+            authHeaders,
+          );
+          expect(res.status).toBe(400);
+          expect(res.data).toMatchObject({
+            message: "Phone verification required.",
+          });
+        });
+
+        it("401s an unauthenticated request", async () => {
+          const res = await unwrapResponse(
+            api.post(
+              "/store/phone-verification/change",
+              { phone: "+60107667794", token: "bogus" },
+              { headers },
+            ),
+          );
+          expect(res.status).toBe(401);
+        });
+
+        // This route's whole reason to exist is being the escape hatch
+        // blockUnverifiedPhoneWrite's doc comment points at once
+        // PHONE_VERIFICATION_REQUIRED is on (the direct /me write is closed
+        // in that mode - see the "gated signup" describe below). Prove it
+        // actually still works under enforcement, not just with it off.
+        describe("with enforcement on", () => {
+          beforeAll(() => {
+            process.env.PHONE_VERIFICATION_REQUIRED = "true";
+          });
+          afterAll(() => {
+            delete process.env.PHONE_VERIFICATION_REQUIRED;
+          });
+
+          it("still sets the new phone via a verified proof", async () => {
+            // createLoggedInCustomer posts { email } with no phone, so
+            // requireSignupPhoneProof next()s it untouched even with
+            // enforcement on (that guard only fires when the body carries a
+            // phone).
+            const authHeaders = await createLoggedInCustomer(
+              "change-enforced@test.dev",
+            );
+            const phone = "+60107667795";
+
+            await start({ phone, purpose: "phone-change" });
+            const checked = await check({
+              phone,
+              purpose: "phone-change",
+              code: "000000",
+            });
+            expect(checked.status).toBe(200);
+
+            const res = await change(
+              { phone, token: checked.data.token },
+              authHeaders,
+            );
+            expect(res.status).toBe(200);
+            expect(res.data).toMatchObject({ customer: { phone } });
+
+            const me = await unwrapResponse(
+              api.get("/store/customers/me", { headers: authHeaders }),
+            );
+            expect(me.data.customer.phone).toBe(phone);
+          });
+        });
+      });
+
       // Enforcement gates (Task 3, src/api/utils/phone-verification-guard.ts).
       // The guards read PHONE_VERIFICATION_REQUIRED per request, so flipping
       // the env var here (rather than a runner `env:` override) reaches the

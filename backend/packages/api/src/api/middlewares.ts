@@ -62,15 +62,17 @@ import {
 const storeReadRateLimit = createStoreReadRateLimit();
 const authRateLimit = createAuthRateLimit();
 // Shared by ALL write-tier matchers below (delivery-order writes, rewards
-// claim/withdraw, daily draw, avatar upload): one budget + one Redis
-// connection, distinct from the read budget. The 429 label resolves per
-// request so a rewards claim is never told "Too many delivery requests."
-// (sim finding P3-10).
+// claim/withdraw, daily draw, avatar upload, verified phone change): one
+// budget + one Redis connection, distinct from the read budget. The 429
+// label resolves per request so a rewards claim is never told "Too many
+// delivery requests." (sim finding P3-10).
 const deliveryWriteRateLimit = createDeliveryWriteRateLimit((req) => {
   if (req.path.startsWith('/store/rewards/'))
     return 'Too many reward requests.';
   if (req.path.startsWith('/store/daily/')) return 'Too many draw attempts.';
   if (req.path.startsWith('/store/profile/')) return 'Too many uploads.';
+  if (req.path.startsWith('/store/phone-verification/'))
+    return 'Too many verification requests.';
   return 'Too many delivery requests.';
 });
 // Frame equip/unequip — cosmetic metadata write with its own generous budget
@@ -250,6 +252,16 @@ export default defineMiddlewares({
       matcher: '/store/phone-verification/check',
       method: 'POST',
       middlewares: [createPhoneOtpCheckRateLimit()],
+    },
+    {
+      // Verified phone change (Task 4) — unlike start/check above, this one is
+      // AUTHED: it consumes a 'phone-change'-purpose proof from the OTP flow
+      // and is the only way to set a new phone once PHONE_VERIFICATION_REQUIRED
+      // is on (blockUnverifiedPhoneWrite closes the direct /me write). Shares
+      // the write-tier budget with the rest of the authed mutation matchers.
+      matcher: '/store/phone-verification/change',
+      method: 'POST',
+      middlewares: [authenticate('customer', ['bearer']), deliveryWriteRateLimit],
     },
     {
       // POLYCARD-BACK §4.2 login block: a disabled player is refused BEFORE the
