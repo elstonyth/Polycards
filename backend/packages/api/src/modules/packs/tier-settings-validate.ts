@@ -58,6 +58,19 @@ export function validateTierRanges(raw: unknown): TierRangeMap {
   return validateTierRangeMap((raw as { ranges?: unknown } | null)?.ranges);
 }
 
+// Sparse map → a full-key write shape: EVERY rarity present, null for the
+// unconfigured ones. The ORM MERGES json POJOs on update (an omitted key
+// survives a "replace"), so any UPDATE of a ranges column must write all six
+// keys or a removed tier silently resurrects. Reads normalize the nulls back
+// out. Shared by editTierSettings and the pack tier_ranges update step.
+export function fillTierRanges(
+  map: TierRangeMap,
+): Record<string, TierRange | null> {
+  const full: Record<string, TierRange | null> = {};
+  for (const rarity of RARITIES) full[rarity] = map[rarity] ?? null;
+  return full;
+}
+
 // Stored jsonb → the usable TierRangeMap: EVERY rarity key may be present
 // (null = unconfigured — see editTierSettings); reads drop nulls and
 // non-numeric noise so consumers only ever see ranges they can act on.

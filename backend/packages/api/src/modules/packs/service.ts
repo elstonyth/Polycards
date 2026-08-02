@@ -8,12 +8,7 @@ import {
   Modules,
 } from '@medusajs/framework/utils';
 import type { Context, HttpTypes } from '@medusajs/framework/types';
-import {
-  RARITIES,
-  type OddsRarity,
-  type TierRange,
-  type TierRangeMap,
-} from '@acme/odds-math';
+import type { OddsRarity, TierRangeMap } from '@acme/odds-math';
 import {
   validateDeliveryRequest,
   validateDeliveryStatusTransition,
@@ -111,6 +106,7 @@ import type {
   ChallengeSettingsView,
 } from './challenge-validate';
 import {
+  fillTierRanges,
   normalizeTierRanges,
   type TierSettingsView,
 } from './tier-settings-validate';
@@ -1770,15 +1766,29 @@ class PacksModuleService extends MedusaService({
   // the SP writer (service.ts recordPullsWithLedger).
   @InjectTransactionManager()
   async createDeliveryOrderWithLedger(
-    input: { customerId: string; snapshot: AddressSnapshot; pullIds: string[]; fx: number },
+    input: {
+      customerId: string;
+      snapshot: AddressSnapshot;
+      pullIds: string[];
+      fx: number;
+    },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ orderId: string; itemIds: string[] }> {
     const [order] = await this.createDeliveryOrders(
-      [{ customer_id: input.customerId, status: 'requested' as const, ...input.snapshot }],
+      [
+        {
+          customer_id: input.customerId,
+          status: 'requested' as const,
+          ...input.snapshot,
+        },
+      ],
       sharedContext,
     );
     const items = await this.createDeliveryOrderItems(
-      input.pullIds.map((pull_id) => ({ delivery_order_id: order.id, pull_id })),
+      input.pullIds.map((pull_id) => ({
+        delivery_order_id: order.id,
+        pull_id,
+      })),
       sharedContext,
     );
     await this.transitionPullStatus(
@@ -1788,8 +1798,16 @@ class PacksModuleService extends MedusaService({
 
     // ONE listPulls call feeds both the value sum and the payload tally —
     // vaultValueForPulls takes the rows, not the ids, so this isn't fetched twice.
-    const pulls = await this.listPulls({ id: input.pullIds }, { take: input.pullIds.length }, sharedContext);
-    const vaultDelta = await this.vaultValueForPulls(pulls, input.fx, sharedContext);
+    const pulls = await this.listPulls(
+      { id: input.pullIds },
+      { take: input.pullIds.length },
+      sharedContext,
+    );
+    const vaultDelta = await this.vaultValueForPulls(
+      pulls,
+      input.fx,
+      sharedContext,
+    );
     await this.recordLedgerEntry(
       {
         type: 'OD',
@@ -1825,13 +1843,22 @@ class PacksModuleService extends MedusaService({
   ): Promise<number> {
     const handles = [...new Set(pulls.map((p) => p.card_id))];
     if (handles.length === 0) return 0;
-    const cards = await this.listCards({ handle: handles }, { take: handles.length }, sharedContext);
+    const cards = await this.listCards(
+      { handle: handles },
+      { take: handles.length },
+      sharedContext,
+    );
     const byHandle = new Map(cards.map((c) => [c.handle, c]));
     const sum = pulls.reduce((total, p) => {
       const card = byHandle.get(p.card_id);
       if (!card) return total;
-      return total + displayMarketPrice(
-        Number(card.market_value), fx, Number(card.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER),
+      return (
+        total +
+        displayMarketPrice(
+          Number(card.market_value),
+          fx,
+          Number(card.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER),
+        )
       );
     }, 0);
     return Math.round(sum * 100) / 100;
@@ -2725,7 +2752,8 @@ class PacksModuleService extends MedusaService({
 
     const vaultDelta = input.pulls.reduce(
       (sum, p) =>
-        sum + displayMarketPrice(Number(p.recorded_value_usd), input.ledger.fx, 1),
+        sum +
+        displayMarketPrice(Number(p.recorded_value_usd), input.ledger.fx, 1),
       0,
     );
 
@@ -3633,8 +3661,7 @@ class PacksModuleService extends MedusaService({
     const pullCount = new Map<string, number>();
     const vipLevel = new Map<string, number>();
     const state = new Map<string, { frozen: boolean; disabled: boolean }>();
-    if (ids.length === 0)
-      return { wallet, vault, pullCount, vipLevel, state };
+    if (ids.length === 0) return { wallet, vault, pullCount, vipLevel, state };
 
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
@@ -4120,9 +4147,18 @@ class PacksModuleService extends MedusaService({
       openId: string | null;
     },
     @MedusaContext() sharedContext: Context = {},
-  ): Promise<Awaited<ReturnType<PacksModuleService['createCreditTransactions']>>> {
+  ): Promise<
+    Awaited<ReturnType<PacksModuleService['createCreditTransactions']>>
+  > {
     const rows = await this.createCreditTransactions(
-      [{ customer_id: input.customerId, amount: input.amount, reason: 'buyback' as const, pull_id: input.pullId }],
+      [
+        {
+          customer_id: input.customerId,
+          amount: input.amount,
+          reason: 'buyback' as const,
+          pull_id: input.pullId,
+        },
+      ],
       sharedContext,
     );
     await this.recordLedgerEntry(
@@ -4201,14 +4237,16 @@ class PacksModuleService extends MedusaService({
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
     const occurredAt = input.occurredAt ?? new Date();
 
-    const [existing] = await em.execute<
-      { id: string; display_id: string }[]
-    >(
+    const [existing] = await em.execute<{ id: string; display_id: string }[]>(
       'SELECT id, display_id FROM ledger_entry WHERE type = ? AND ref_id = ? AND deleted_at IS NULL LIMIT 1',
       [input.type, input.refId],
     );
     if (existing) {
-      return { id: existing.id, display_id: existing.display_id, replayed: true };
+      return {
+        id: existing.id,
+        display_id: existing.display_id,
+        replayed: true,
+      };
     }
 
     const scope = sequenceScope(input.type, occurredAt);
@@ -4219,10 +4257,12 @@ class PacksModuleService extends MedusaService({
     // row won.
     await em.execute(
       'INSERT INTO ledger_sequence (id, scope, last_serial, created_at, updated_at) ' +
-        "VALUES (?, ?, NULL, now(), now()) ON CONFLICT (scope) WHERE deleted_at IS NULL DO NOTHING",
+        'VALUES (?, ?, NULL, now(), now()) ON CONFLICT (scope) WHERE deleted_at IS NULL DO NOTHING',
       [randomUUID(), scope],
     );
-    const [seqRow] = await em.execute<{ id: string; last_serial: string | null }[]>(
+    const [seqRow] = await em.execute<
+      { id: string; last_serial: string | null }[]
+    >(
       'SELECT id, last_serial FROM ledger_sequence WHERE scope = ? AND deleted_at IS NULL FOR UPDATE',
       [scope],
     );
@@ -6146,12 +6186,7 @@ class PacksModuleService extends MedusaService({
            AND COALESCE((snapshot->>'week_end')::timestamptz,
                         week_start + interval '7 days') > ?::timestamptz
          LIMIT 1`,
-      [
-        customerId,
-        weekStartIso,
-        input.weekEnd.toISOString(),
-        weekStartIso,
-      ],
+      [customerId, weekStartIso, input.weekEnd.toISOString(), weekStartIso],
     );
     if (overlap) return null;
 
@@ -6478,8 +6513,7 @@ class PacksModuleService extends MedusaService({
     const before: TierSettingsView = {
       ranges: normalizeTierRanges(row?.ranges),
     };
-    const full: Record<string, TierRange | null> = {};
-    for (const rarity of RARITIES) full[rarity] = input.ranges[rarity] ?? null;
+    const full = fillTierRanges(input.ranges);
     const data = { ranges: full as unknown as Record<string, unknown> };
     if (row) {
       await this.updateTierSettings(
@@ -6782,7 +6816,11 @@ class PacksModuleService extends MedusaService({
     // compensation code that HARD-DELETES money records, so a truncated list
     // fails open and strands orphan lines/movements behind a deleted invoice.
     const lines = await pageAll((opts) =>
-      this.listPurchaseInvoiceLines({ invoice_id: invoiceId }, opts, sharedContext),
+      this.listPurchaseInvoiceLines(
+        { invoice_id: invoiceId },
+        opts,
+        sharedContext,
+      ),
     );
     const lineIds = lines.map((l) => l.id);
     if (lineIds.length) {

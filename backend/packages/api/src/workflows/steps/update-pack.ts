@@ -4,6 +4,7 @@ import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
 import { hasRollablePool } from '../../modules/packs/rollable-pool';
 import type { TierRangeMap } from '@acme/odds-math';
+import { fillTierRanges } from '../../modules/packs/tier-settings-validate';
 import type { PackWriteInput, PublishedOdds } from './create-pack';
 
 // slug is immutable (it keys PackOdds / the /claw route); it selects the row.
@@ -88,12 +89,20 @@ export const updatePackStep = createStep(
         ...(input.published_odds !== undefined
           ? { published_odds: input.published_odds }
           : {}),
+        // A map is written with EVERY rarity key (null = unconfigured):
+        // the ORM merges json POJOs on update, so a sparse map over a stored
+        // one would resurrect removed tiers — shrinking or emptying an
+        // override could never persist. Null (= inherit global) replaces
+        // wholesale and needs no fill. Reads normalize the nulls back out.
         ...(input.tier_ranges !== undefined
           ? {
-              tier_ranges: input.tier_ranges as Record<
-                string,
-                unknown
-              > | null,
+              tier_ranges:
+                input.tier_ranges === null
+                  ? null
+                  : (fillTierRanges(input.tier_ranges) as unknown as Record<
+                      string,
+                      unknown
+                    >),
             }
           : {}),
       },

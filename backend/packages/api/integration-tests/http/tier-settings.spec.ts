@@ -237,6 +237,42 @@ medusaIntegrationTestRunner({
         expect((await listedPack()).tier_ranges).toBeNull();
       });
 
+      // The ORM merges json POJOs on update, so these two transitions are the
+      // ones a sparse write silently breaks: a removed tier resurrecting, and
+      // an emptied override no-opping. Guards the fillTierRanges null-fill in
+      // the update step.
+      it('a shrunk override drops the removed tier, and {} empties it (map replaces, never merges)', async () => {
+        const save = (
+          tier_ranges: Record<
+            string,
+            { min: number | null; max: number | null }
+          >,
+        ) =>
+          unwrapResponse(
+            api.post(
+              `/admin/packs/${SLUG}`,
+              { ...PACK_BODY, tier_ranges },
+              { headers: adminHeaders() },
+            ),
+          );
+
+        await save({
+          Common: { min: 10, max: 50 },
+          Uncommon: { min: 50, max: 200 },
+        });
+        const shrunk = await save({ Common: { min: 5, max: 40 } });
+        expect(shrunk.status).toBe(200);
+        expect((await listedPack()).tier_ranges).toEqual({
+          Common: { min: 5, max: 40 },
+        });
+
+        // {} = explicit "pack-specific, nothing configured" — distinct from
+        // null (inherit global), and it must actually clear the stored tiers.
+        const emptied = await save({});
+        expect(emptied.status).toBe(200);
+        expect((await listedPack()).tier_ranges).toEqual({});
+      });
+
       it('rejects bad override maps', async () => {
         for (const tier_ranges of [
           { Shiny: { min: 0, max: 1 } },

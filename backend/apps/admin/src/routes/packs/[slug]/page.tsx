@@ -391,8 +391,16 @@ const PackOddsEditorPage = () => {
       });
       // Stage tier defaults for the rows this save admitted — set ONLY after
       // the save succeeds, so a failed mutation can never leave a latch that
-      // re-tiers rows on some later, unrelated reseed.
-      setAutoTierAdd(added);
+      // re-tiers rows on some later, unrelated reseed. Latched against the
+      // SERVER pool, not `rows`: a PENDING row (staged from the cards list)
+      // is in `rows` but not the server pool, and the post-save reseed wipes
+      // its staged tier back to Common — the latch restages it. The prompt
+      // above deliberately keeps the `rows` basis so already-prompted staged
+      // cards aren't confirmed twice.
+      const inServerPool = new Set((data?.odds ?? []).map((o) => o.card_id));
+      setAutoTierAdd(
+        Array.from(selected).filter((h) => !inServerPool.has(h)),
+      );
       toast.success(
         t('packs.pool.saved', { added: res.added, removed: res.removed }),
       );
