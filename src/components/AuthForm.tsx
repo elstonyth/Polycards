@@ -14,7 +14,10 @@ import { useAuth } from './auth/AuthProvider';
 import { NAME_MAX, normalizePhone } from '@/lib/profile-validation';
 import { PhoneField } from '@/components/PhoneField';
 import { PhoneOtpStep } from '@/components/auth/PhoneOtpStep';
-import { startPhoneOtp } from '@/lib/actions/phone-verification';
+import {
+  startPhoneOtp,
+  resetPasswordByPhone,
+} from '@/lib/actions/phone-verification';
 import { PHONE_VERIFICATION_REQUIRED } from '@/lib/phone-verification';
 
 // The Field inputs below carry a pl-9 for their leading icon; PhoneField has
@@ -50,7 +53,11 @@ export default function AuthForm({
   // keeps everything in the one modal): "form" collects the email, "sent" is
   // the always-the-same confirmation (no account enumeration — the backend
   // 201s for unknown emails too).
-  const [forgot, setForgot] = useState<'none' | 'form' | 'sent'>('none');
+  const [forgot, setForgot] = useState<
+    'none' | 'form' | 'sent' | 'phone' | 'phone-otp'
+  >('none');
+  // Phone entered on the 'phone' sub-view, carried into 'phone-otp'.
+  const [forgotPhone, setForgotPhone] = useState('');
   // Signup-only sub-view: once the phone OTP is sent, hold the rest of the
   // form's values here so `onVerified` can finish the real signup() call.
   const [otp, setOtp] = useState<{
@@ -80,6 +87,35 @@ export default function AuthForm({
       return;
     }
     setNote({ text: result.error });
+  }
+
+  async function onForgotPhoneSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (busy) return;
+    setNote(null);
+
+    // Same normalization the server applies — catch a bad number before the
+    // round-trip (see onSubmit's signup-phone comment).
+    const phone = normalizePhone(
+      String(new FormData(e.currentTarget).get('phone') ?? ''),
+    );
+    if (!phone) {
+      setNote({
+        text: 'Please enter a valid phone number for the selected country.',
+      });
+      return;
+    }
+
+    setBusy(true);
+    const result = await startPhoneOtp({ phone, purpose: 'password-reset' });
+    setBusy(false);
+
+    if (!result.ok) {
+      setNote({ text: result.error });
+      return;
+    }
+    setForgotPhone(phone);
+    setForgot('phone-otp');
   }
 
   // Shared tail for both login and signup — the action returns the customer,
@@ -176,7 +212,7 @@ export default function AuthForm({
         <h2 className="font-heading text-2xl font-bold tracking-tight text-white sm:text-3xl">
           Reset your password
         </h2>
-        {forgot === 'form' ? (
+        {forgot === 'form' && (
           <>
             <p className="mt-1.5 text-sm text-white/50">
               Enter your email and we&apos;ll send you a reset link.
@@ -203,15 +239,82 @@ export default function AuthForm({
                 )}
                 Send reset link
               </button>
+              {PHONE_VERIFICATION_REQUIRED && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setForgot('phone');
+                    setNote(null);
+                  }}
+                  className="self-center py-2 text-[12px] text-white/70 hover:text-white"
+                >
+                  Use phone number instead
+                </button>
+              )}
             </form>
           </>
-        ) : (
+        )}
+
+        {forgot === 'sent' && (
           // Same copy whether or not the account exists — the backend
           // responds identically, and so does this view.
           <p className="mt-1.5 text-sm text-white/50">
             If an account exists for that email, a reset link is on its way.
             Check your inbox.
           </p>
+        )}
+
+        {forgot === 'phone' && (
+          <>
+            <p className="mt-1.5 text-sm text-white/50">
+              Enter the phone number on your account.
+            </p>
+            <form
+              onSubmit={onForgotPhoneSubmit}
+              className="mt-6 flex flex-col gap-3"
+            >
+              <PhoneField
+                name="phone"
+                inputClassName={PHONE_INPUT_CLASS}
+                placeholder="Phone number"
+                required
+              />
+              <p className="text-[12px] text-white/50">
+                If an account uses this number, we&apos;ll text a code.
+              </p>
+              <button
+                type="submit"
+                disabled={busy}
+                className="mt-1 inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-gradient-to-b from-white to-neutral-300 text-sm font-semibold text-neutral-950 shadow-[0_8px_20px_-8px_rgba(255,255,255,0.35)] transition-colors hover:to-neutral-100 disabled:opacity-70"
+              >
+                {busy && (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                )}
+                Send code
+              </button>
+            </form>
+          </>
+        )}
+
+        {forgot === 'phone-otp' && (
+          <PhoneOtpStep
+            phone={forgotPhone}
+            purpose="password-reset"
+            onBack={() => setForgot('phone')}
+            onVerified={async (proofToken) => {
+              const result = await resetPasswordByPhone({
+                token: proofToken,
+              });
+              if (result.ok) {
+                window.location.assign(
+                  `/reset-password?token=${encodeURIComponent(result.token)}&email=${encodeURIComponent(result.maskedEmail)}`,
+                );
+                return;
+              }
+              setForgot('phone');
+              setNote({ text: result.error });
+            }}
+          />
         )}
 
         {/* Persistent live region: an alert node inserted already-populated may
