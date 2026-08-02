@@ -201,6 +201,23 @@ Tunable via env vars: `PHONE_OTP_START_RATE_PER_SECOND`, `PHONE_OTP_START_RATE_P
 - Legacy non-E.164 phones cannot initiate password reset (only E.164-normalized phones from signup flow work).
 - Phoneless direct-API signup unaffected (unchanged pre-existing behavior).
 
+**Environment Variables**:
+Backend (app-level, like Resend vars): `PHONE_VERIFICATION_REQUIRED` (feature gate, unset/false in dev), `PHONE_OTP_DEV_CODE` (default `000000` for dev/test SMS transport), `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID` (production Twilio credentials — add AT DEPLOY TIME with real values, never pre-populate `**SECRET**` placeholders in DO spec). Storefront (build-time inlined): `NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED` (when set to `true`, compiles OTP UI; default false/unset).
+
+**Twilio Operator Checklist**:
+
+1. Create a Twilio Verify Service (Console → Verify → Services): friendly name "Polycards", SMS channel on.
+2. Enable Fraud Guard (Verify → Settings, Fraud Guard toggle on) and lock Geo Permissions to expected customer countries only (Malaysia first — SMS-pumping exploits open geo; verify current pricing: per-verification fee + per-SMS rate varies by country, Malaysia cheap).
+3. Collect `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID` for deployment.
+
+**Deploy Order** (flag-off first, then flip):
+
+1. Merge all code changes (Tasks 1–8) and deploy to production with **both flags unset** — zero behavior change, OTP routes and proof logic live but gates are off.
+2. At deploy time: add three Twilio secrets + `PHONE_VERIFICATION_REQUIRED=true` to backend DO app spec (app-level, alongside Resend vars). **Never pre-add `**SECRET**` placeholders — do-apply.ps1 aborts on unresolved tokens.** Set with real values only.
+3. Set `NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED=true` in storefront **build environment** and rebuild — build-time-inlined, rebuilds ship the feature.
+4. Smoke test production: signup with a real phone number (operator's), phone change, forgot-by-phone flow. Watch backend logs for `[phone-otp]` warnings; monitor Twilio console for delivery success.
+5. Rollback lever: flip backend `PHONE_VERIFICATION_REQUIRED` off — every gate opens instantly. Then flip storefront flag + rebuild (OTP UI would otherwise call routes that refuse dev code in prod).
+
 ## UI only — deliberately not domain
 
 These are presentation words. They must not stand in for the domain terms above.
