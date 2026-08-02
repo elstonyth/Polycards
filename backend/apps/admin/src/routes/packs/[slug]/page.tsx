@@ -31,7 +31,10 @@ import {
   DEFAULT_TIER_PCT,
   MIN_PCT,
   RARITIES,
+  rarityForValue,
+  tierRangeStatus,
   type OddsRarity,
+  type TierRangeMap,
   type TierSplitResult,
   type TierSplitTier,
 } from '@acme/odds-math';
@@ -42,6 +45,7 @@ import {
   useSaveMembers,
   useSaveOdds,
   useSaveTopHits,
+  useTierSettings,
   useUpdatePack,
 } from '../../../lib/queries';
 import { fmtPct, rm } from '../../../lib/format';
@@ -63,16 +67,19 @@ import { shouldSeedBuffer } from '../../../lib/seed-buffer';
 import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
 
 // A card staged by the cards list's bulk "Add to gacha pack" — NOT a pool
-// member yet. It enters as an UNLOCKED COMMON, which is exactly how
-// set-pack-members admits a new member (it becomes a balancer and absorbs a
-// share of the remainder), so the live preview here matches what the save
-// persists. `currentPct` 0 = "no saved rate yet".
-const pendingRow = (c: AdminCard): EditRow => ({
+// member yet. Its rarity DEFAULTS from the admin-configured tier price ranges
+// (/tier-defaults); with no configured tier for its value it enters as an
+// UNLOCKED COMMON, exactly how set-pack-members admits a new member. Either
+// way the preview matches what the save persists: save() lands the membership
+// first (as Common, server-side) and then the odds save in the same
+// operator-reviewed step writes this staged rarity. `currentPct` 0 = "no
+// saved rate yet".
+const pendingRow = (c: AdminCard, tierRanges: TierRangeMap): EditRow => ({
   card_id: c.handle,
   name: c.name,
   image: c.image,
   slab_image: c.slab_image,
-  rarity: 'Common',
+  rarity: rarityForValue(c.priceBreakdown.displayPrice, tierRanges) ?? 'Common',
   // DISPLAY price (FMV × fx × the card's markup) — the same number the odds
   // route puts on a saved row, so the EV/RTP chips stay honest while pending.
   market_value: c.priceBreakdown.displayPrice,
@@ -103,6 +110,12 @@ const PackOddsEditorPage = () => {
   const { slug = '' } = useParams();
 
   const { data, isError: loadError, refetch } = usePackOdds(slug);
+  // Admin-configured RM price range per tier (/tier-defaults). {} (never
+  // configured, or the fetch failed) leaves every tier behavior inert: staged
+  // rows default to Common, no add-confirm, no drift badges — exactly the
+  // pre-feature editor.
+  const tierRanges = (useTierSettings().data?.ranges ?? {}) as TierRangeMap;
+  const tiersConfigured = Object.keys(tierRanges).length > 0;
   const saveOdds = useSaveOdds();
   const saveMembersMut = useSaveMembers();
   const saveTopHits = useSaveTopHits();
@@ -193,6 +206,11 @@ const PackOddsEditorPage = () => {
   const [pendingAdd, setPendingAdd] = useState<string[]>(
     () => navAddCards ?? [],
   );
+  // Handles the pool modal's last successful save ADDED — consumed (and
+  // cleared) by the seed below to stage their tier-default rarity. State, not
+  // a ref: the seed runs during render, where reading a ref is off-limits
+  // (react-hooks/refs) — same lifecycle as `pendingAdd` above.
+  const [autoTierAdd, setAutoTierAdd] = useState<string[]>([]);
   // Keyed off the ROUTER STATE, not the latch: the seed below empties
   // pendingAdd DURING render, and React commits only the re-render — so when
   // usePackOdds is a cache hit (the primary flow: editor → cards list → back to
@@ -237,7 +255,25 @@ const PackOddsEditorPage = () => {
     // very first load (`shouldSeedBuffer` also re-gates false by then).
     // NOTE: the tier recipe is deliberately NOT reset here — this block also
     // runs after a pool save on the same pack. See `defaultsFor` above.
-    const seeded = mapOddsToRows(data.odds);
+    const raw = mapOddsToRows(data.odds);
+    // Cards the pool modal just admitted (they land server-side as Common):
+    // stage their tier-default rarity as an UNSAVED edit, mirroring how a
+    // pending row from the cards list defaults. The operator persists it with
+    // the normal odds save — the tier is a staged default, never a silent
+    // server write. One-shot: the latch clears below so a later reseed (pack
+    // switch, bulk remove) can never re-tier settled rows.
+    const autoTier = new Set(autoTierAdd);
+    const seeded =
+      autoTier.size > 0 && tiersConfigured
+        ? raw.map((r) => {
+            if (!autoTier.has(r.card_id) || r.rarity !== 'Common') return r;
+            const proposed = rarityForValue(r.market_value, tierRanges);
+            return proposed !== null && proposed !== r.rarity
+              ? { ...r, rarity: proposed }
+              : r;
+          })
+        : raw;
+    if (autoTierAdd.length > 0) setAutoTierAdd([]);
     if (pendingAdd.length === 0) {
       setRows(seeded);
     } else {
@@ -249,7 +285,7 @@ const PackOddsEditorPage = () => {
         .filter((h) => !inPool.has(h))
         .map((h) => byHandle.get(h))
         .filter((c): c is AdminCard => c !== undefined)
-        .map(pendingRow);
+        .map((c) => pendingRow(c, tierRanges));
       setRows([...seeded, ...staged]);
       setPendingAdd([]);
     }
@@ -319,11 +355,39 @@ const PackOddsEditorPage = () => {
   };
 
   const saveMembers = async () => {
+    // Cards about to JOIN the pool (removals never prompt). When any of them
+    // sits outside every configured tier range — below the cheapest tier's
+    // minimum, or in a gap — the operator confirms first: the ask behind the
+    // tier-defaults feature ("$50 card when Common starts at $100").
+    const current = new Set((rows ?? []).map((r) => r.card_id));
+    const added = Array.from(selected).filter((h) => !current.has(h));
+    if (added.length > 0 && tiersConfigured) {
+      const byHandle = new Map((allCards ?? []).map((c) => [c.handle, c]));
+      const outside = added.filter((h) => {
+        const card = byHandle.get(h);
+        return (
+          card !== undefined &&
+          rarityForValue(card.priceBreakdown.displayPrice, tierRanges) === null
+        );
+      });
+      if (outside.length > 0) {
+        const confirmed = await prompt({
+          title: t('packs.pool.outsideTitle'),
+          description: t('packs.pool.outsideDesc', { count: outside.length }),
+          confirmText: t('packs.pool.outsideConfirm'),
+        });
+        if (!confirmed) return;
+      }
+    }
     try {
       const res = await saveMembersMut.mutateAsync({
         slug,
         card_ids: Array.from(selected),
       });
+      // Stage tier defaults for the rows this save admitted — set ONLY after
+      // the save succeeds, so a failed mutation can never leave a latch that
+      // re-tiers rows on some later, unrelated reseed.
+      setAutoTierAdd(added);
       toast.success(
         t('packs.pool.saved', { added: res.added, removed: res.removed }),
       );
@@ -730,6 +794,24 @@ const PackOddsEditorPage = () => {
             </div>
           )}
 
+          {/* Price-drift summary: how many rows sit outside their assigned
+              tier's configured range (/tier-defaults). The per-row badge says
+              which; nothing is re-tiered automatically — deliberate, per the
+              feature spec ("it will not auto switch the tiers"). */}
+          {(() => {
+            const driftCount = effective.filter((r) => {
+              const s = tierRangeStatus(r.market_value, r.rarity, tierRanges);
+              return s === 'below' || s === 'above';
+            }).length;
+            return driftCount > 0 ? (
+              <div className="px-6 pb-4">
+                <Alert variant="warning">
+                  {t('packs.editor.driftAlert', { count: driftCount })}
+                </Alert>
+              </div>
+            ) : null;
+          })()}
+
           {/* Bulk bar — only while something is checked, so the editor is
               unchanged for the common single-row edit. */}
           {checkedIds.length > 0 && (
@@ -836,6 +918,14 @@ const PackOddsEditorPage = () => {
                     derivation behind them. Same card_ids either way; edits
                     still write through `setRow` to `rows`. */}
                 {effective.map((r) => {
+                  // Price drift vs the assigned tier's configured range
+                  // (/tier-defaults). Signal only — the tier NEVER switches on
+                  // its own; 'unset' (tier not configured) shows nothing.
+                  const drift = tierRangeStatus(
+                    r.market_value,
+                    r.rarity,
+                    tierRanges,
+                  );
                   return (
                     <Table.Row key={r.card_id}>
                       <Table.Cell>
@@ -903,6 +993,23 @@ const PackOddsEditorPage = () => {
                             ))}
                           </Select.Content>
                         </Select>
+                        {(drift === 'below' || drift === 'above') && (
+                          <Badge
+                            size="2xsmall"
+                            color="orange"
+                            className="mt-1"
+                            title={t('packs.editor.outOfRangeHint', {
+                              value: rm(r.market_value),
+                              tier: r.rarity,
+                            })}
+                          >
+                            {t(
+                              drift === 'below'
+                                ? 'packs.editor.outOfRangeBelow'
+                                : 'packs.editor.outOfRangeAbove',
+                            )}
+                          </Badge>
+                        )}
                       </Table.Cell>
                       <Table.Cell className="text-center">
                         <Input

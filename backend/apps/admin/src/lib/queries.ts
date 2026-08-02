@@ -47,6 +47,7 @@ import {
   getReferralTree,
   getRewardsSettings,
   getSiteSettings,
+  getTierSettings,
   getVipLevels,
   listDeliveryOrders,
   listEligibleProducts,
@@ -57,6 +58,7 @@ import {
   saveDailyBox,
   saveRewardsSettings,
   saveSiteSettings,
+  saveTierSettings,
   saveVipLevels,
   saveVoucherRanges,
   setFxRate,
@@ -86,6 +88,8 @@ import {
   type ReferralTree,
   type RewardsSettingsView,
   type SiteSettingsView,
+  type TierRangeDTO,
+  type TierSettingsDTO,
   type VipLevelDTO,
   type VoucherLadderDTO,
   type VoucherRangeDTO,
@@ -765,6 +769,32 @@ export const useSaveChallengeSettings = () => {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.challengeSettings });
       toast.success('Week & payout saved');
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+// ── Tier defaults (price range per rarity tier) ──────────────────────────────
+
+export const useTierSettings = (
+  options: { enabled?: boolean } = {},
+): UseQueryResult<TierSettingsDTO> =>
+  useQuery({
+    queryKey: qk.tierSettings,
+    queryFn: getTierSettings,
+    enabled: options.enabled ?? true,
+  });
+
+export const useSaveTierSettings = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: {
+      ranges: Record<string, TierRangeDTO>;
+      reason: string;
+    }) => saveTierSettings(vars),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.tierSettings });
+      toast.success('Tier defaults saved');
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });

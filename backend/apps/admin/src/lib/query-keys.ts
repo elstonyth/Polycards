@@ -75,6 +75,7 @@ export const qk = {
   vipLevels: ['admin', 'vip-levels'] as const,
   challengeStages: ['admin', 'challenge', 'stages'] as const,
   challengeSettings: ['admin', 'challenge', 'settings'] as const,
+  tierSettings: ['admin', 'tier-settings'] as const,
 
   // ── Epic 2 (Players) ───────────────────────────────────────────────────────
   players: (page: number, q?: string) =>

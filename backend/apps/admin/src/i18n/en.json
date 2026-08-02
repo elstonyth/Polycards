@@ -90,12 +90,16 @@
     "pool": {
       "manage": "Manage cards",
       "title": "Prize pool",
-      "subtitle": "Pick the cards in this pack. {{count}} selected. New cards join as Common — set their rarity and win rates below after saving.",
+      "subtitle": "Pick the cards in this pack. {{count}} selected. New cards join as Common; with Tier Defaults configured, their tier is pre-staged below — review the rarity and win rates, then save.",
       "save": "Save pool",
       "cancel": "Cancel",
       "saved": "Pool updated ({{added}} added, {{removed}} removed).",
       "loadError": "Could not load the card catalog.",
-      "noCards": "No cards registered yet. Register inventory products as gacha cards first."
+      "noCards": "No cards registered yet. Register inventory products as gacha cards first.",
+      "outsideTitle": "Card value outside every tier range",
+      "outsideDesc_one": "{{count}} of the cards you are adding falls outside every configured tier price range (see Tier Defaults). It will join as Common. Add it anyway?",
+      "outsideDesc_other": "{{count}} of the cards you are adding fall outside every configured tier price range (see Tier Defaults). They will join as Common. Add them anyway?",
+      "outsideConfirm": "Add anyway"
     },
     "editor": {
       "title": "Win rates",
@@ -129,6 +133,11 @@
       "unitsOwed": "{{count}} owed to winners",
       "topHit": "Top hit #",
       "pendingRow": "new — not in pool until saved",
+      "outOfRangeBelow": "below tier range",
+      "outOfRangeAbove": "above tier range",
+      "outOfRangeHint": "Value {{value}} is outside the configured {{tier}} price range (Tier Defaults). The tier never switches on its own — retier manually if needed.",
+      "driftAlert_one": "{{count}} card's market value is outside its tier's configured price range (see the orange badges). Tiers never switch automatically — review and retier manually if needed.",
+      "driftAlert_other": "{{count}} cards' market values are outside their tiers' configured price ranges (see the orange badges). Tiers never switch automatically — review and retier manually if needed.",
       "bulk": {
         "selected_one": "{{count}} selected",
         "selected_other": "{{count}} selected",
@@ -147,6 +156,25 @@
         "removed_one": "Removed 1 card from the pack",
         "removed_other": "Removed {{count}} cards from the pack"
       }
+    }
+  },
+  "tierDefaults": {
+    "title": "Tier Defaults",
+    "subtitle": "Value range per rarity tier (RM display price — FMV × FX × markup). When a card joins a pack's prize pool its rarity defaults to the tier whose range holds its value; a card outside every range asks for confirmation before it is added. The odds editor flags cards whose price has drifted out of their tier, but never re-tiers them automatically.",
+    "tier": "Tier",
+    "min": "Min value (RM)",
+    "max": "Max value (RM)",
+    "openBound": "No bound",
+    "boundLabel": "{{tier}} {{side}} value",
+    "hint": "Blank = open on that side. Leave both blank to leave a tier out of auto-assignment. Overlapping tiers resolve to the rarest match; a value covered by no tier prompts \"add anyway?\".",
+    "reasonLabel": "Reason (audit trail)",
+    "reasonPlaceholder": "e.g. Reprice the tier ladder",
+    "reasonRequired": "Add a reason to save",
+    "save": "Save tier defaults",
+    "loadError": "Could not load tier defaults.",
+    "errors": {
+      "number": "{{tier}}: {{side}} must be a number ≥ 0.",
+      "order": "{{tier}}: min must not exceed max."
     }
   },
   "pcAdd": {
@@ -270,7 +298,11 @@
       "addToPack": "Add to gacha pack",
       "pickSubtitle": "Pick the pack to add {{count}} card(s) to. They are staged in that pack's win-rate editor — nothing is saved until you save there.",
       "noPacks": "No packs yet — create a pack first.",
-      "packsError": "Could not load the packs list."
+      "packsError": "Could not load the packs list.",
+      "outsideTitle": "Card value outside every tier range",
+      "outsideDesc_one": "{{count}} of the selected cards falls outside every configured tier price range (see Tier Defaults). It will be staged as Common. Add it anyway?",
+      "outsideDesc_other": "{{count}} of the selected cards fall outside every configured tier price range (see Tier Defaults). They will be staged as Common. Add them anyway?",
+      "outsideConfirm": "Add anyway"
     },
     "register": {
       "title": "Add card from inventory",

@@ -867,6 +867,29 @@ export const saveChallengeSettings = (body: {
   reason: string;
 }) => postJson<ChallengeSettingsDTO>('/admin/challenge/settings', body);
 
+// ── Tier defaults (price range per rarity tier) ──────────────────────────────
+
+/** RM display-price range; a null bound is open on that side. */
+export interface TierRangeDTO {
+  min: number | null;
+  max: number | null;
+}
+
+/** Keyed by rarity. A missing tier is unconfigured; {} = feature off. */
+export interface TierSettingsDTO {
+  ranges: Record<string, TierRangeDTO>;
+}
+
+export const getTierSettings = () =>
+  getJson<TierSettingsDTO>('/admin/tier-settings');
+
+// Singleton REPLACE: the whole map is written each save (an omitted tier is
+// cleared server-side, deliberately — not a merge).
+export const saveTierSettings = (body: {
+  ranges: Record<string, TierRangeDTO>;
+  reason: string;
+}) => postJson<TierSettingsDTO>('/admin/tier-settings', body);
+
 // ── Pixel-Pokémon library (Pokédex) ──────────────────────────────────────────
 
 export interface PixelPokemonRow {

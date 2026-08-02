@@ -24,9 +24,11 @@ import {
   useCards,
   useDeleteCard,
   usePacks,
+  useTierSettings,
   useUpdateCard,
   useUploadImage,
 } from '../../lib/queries';
+import { rarityForValue, type TierRangeMap } from '@acme/odds-math';
 import { resolveImageUrl } from '../../lib/image-url';
 import { validateImageFile } from '../../lib/image-validation';
 import { rm, timeAgo, myrToUsd } from '../../lib/format';
@@ -121,6 +123,9 @@ const GachaCardsPage = () => {
   const navigate = useNavigate();
   const prompt = usePrompt();
   const { data: cards = null, isError, refetch } = useCards();
+  // Tier price ranges (/tier-defaults) — only the bulk "add to pack" confirm
+  // reads them; {} (unconfigured or fetch failed) skips the prompt entirely.
+  const tierRanges = (useTierSettings().data?.ranges ?? {}) as TierRangeMap;
   const updateCard = useUpdateCard();
   const removeCard = useDeleteCard();
   const uploadImg = useUploadImage();
@@ -342,13 +347,38 @@ const GachaCardsPage = () => {
     });
 
   // Stage the selected cards in a pack's win-rate editor. Nothing is written
-  // here: the editor appends them as PENDING rows and its save persists the
-  // membership + the odds in one operator-reviewed step.
-  const addToPack = (slug: string) => {
+  // here: the editor appends them as PENDING rows (rarity defaulted from the
+  // /tier-defaults price ranges) and its save persists the membership + the
+  // odds in one operator-reviewed step. A card whose value sits outside EVERY
+  // configured tier range asks for confirmation first; cancel keeps the
+  // selection so the operator can rethink it.
+  const addToPack = async (slug: string) => {
     const addCards = [...selected].filter((id) => pageIds.includes(id));
+    if (addCards.length === 0) {
+      setPickerOpen(false);
+      setSelected(new Set());
+      return;
+    }
+    if (Object.keys(tierRanges).length > 0) {
+      const byHandle = new Map((cards ?? []).map((c) => [c.handle, c]));
+      const outside = addCards.filter((h) => {
+        const card = byHandle.get(h);
+        return (
+          card !== undefined &&
+          rarityForValue(card.priceBreakdown.displayPrice, tierRanges) === null
+        );
+      });
+      if (outside.length > 0) {
+        const confirmed = await prompt({
+          title: t('cards.bulk.outsideTitle'),
+          description: t('cards.bulk.outsideDesc', { count: outside.length }),
+          confirmText: t('cards.bulk.outsideConfirm'),
+        });
+        if (!confirmed) return;
+      }
+    }
     setPickerOpen(false);
     setSelected(new Set());
-    if (addCards.length === 0) return;
     navigate(`/packs/${slug}`, { state: { addCards } });
   };
 
