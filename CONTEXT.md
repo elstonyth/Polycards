@@ -184,8 +184,8 @@ Backend-only flag (env var). Enables phone-verification gates on signup and phon
 **Flows**:
 
 - **Signup**: POST /store/customers with `x-phone-verification` header (proof token) when a phone is provided and feature flag is on.
-- **Phone change**: POST /store/customers/me with proof token when changing the phone number.
-- **Password reset**: POST /store/auth/customer/password-reset exchanges a proof token for a single-use reset token; proof obtained via POST /store/phone-verification/password-reset, which sends OTP to the on-file phone.
+- **Phone change**: POST /store/phone-verification/change (authed; body {phone, token}) exchanges proof token for verified phone write. POST /store/customers/me rejects string phone writes under enforcement.
+- **Password reset**: OTP is sent to on-file phone via POST /store/phone-verification/start (purpose 'password-reset'), exchanged for proof token at POST /store/phone-verification/check, then exchanged for single-use reset token at POST /store/phone-verification/password-reset.
 
 **Rate Limits** (`phone-otp`):
 IP-based, two-tier per operation:
@@ -193,7 +193,7 @@ IP-based, two-tier per operation:
 - Start (POST /store/phone-verification/start): 3 per 60s / 10 per 1h
 - Check (POST /store/phone-verification/check): 5 per 60s / 20 per 1h
 
-Tunable via env vars: `PHONE_OTP_START_RATE_PER_SECOND`, `PHONE_OTP_START_RATE_PER_HOUR`, `PHONE_OTP_CHECK_RATE_PER_SECOND`, `PHONE_OTP_CHECK_RATE_PER_HOUR`.
+Tunable via env vars: `PHONE_OTP_START_RATE_BURST_LIMIT`, `PHONE_OTP_START_RATE_BURST_WINDOW_MS`, `PHONE_OTP_START_RATE_LIMIT`, `PHONE_OTP_START_RATE_WINDOW_MS`, `PHONE_OTP_CHECK_RATE_BURST_LIMIT`, `PHONE_OTP_CHECK_RATE_BURST_WINDOW_MS`, `PHONE_OTP_CHECK_RATE_LIMIT`, `PHONE_OTP_CHECK_RATE_WINDOW_MS`. Defaults: start 3/60s burst + 10/1h sustained; check 5/60s + 20/1h.
 
 **Accepted Ceilings** (scope boundaries):
 
