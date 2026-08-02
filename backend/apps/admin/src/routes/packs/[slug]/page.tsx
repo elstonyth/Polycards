@@ -63,6 +63,11 @@ import {
   type TierEv,
 } from '../../../lib/odds-rows';
 import { resolveImageUrl } from '../../../lib/image-url';
+import {
+  boundOk,
+  outsideEveryRange,
+  seedRangeRows,
+} from '../../../lib/tier-ranges';
 import { shouldSeedBuffer } from '../../../lib/seed-buffer';
 import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
 
@@ -116,11 +121,17 @@ const PackOddsEditorPage = () => {
   // the fetch failed) leaves every tier behavior inert: staged rows default
   // to Common, no add-confirm, no drift badges — exactly the pre-feature
   // editor.
-  const globalTierRanges = (useTierSettings().data?.ranges ??
+  const tierSettingsQuery = useTierSettings();
+  const globalTierRanges = (tierSettingsQuery.data?.ranges ??
     {}) as TierRangeMap;
   const packTierRanges = (data?.pack.tier_ranges ?? null) as TierRangeMap | null;
   const tierRanges = packTierRanges ?? globalTierRanges;
   const tiersConfigured = Object.keys(tierRanges).length > 0;
+  // Settled (not "loaded") for the same reason as catalogSettled below: staged
+  // rows must not seed before the ladder ARRIVES (they'd all default Common on
+  // a slow fetch), but a failed fetch must not skeleton the editor forever.
+  const tierRangesSettled =
+    tierSettingsQuery.isSuccess || tierSettingsQuery.isError;
   const saveOdds = useSaveOdds();
   const saveMembersMut = useSaveMembers();
   const saveTopHits = useSaveTopHits();
@@ -251,7 +262,7 @@ const PackOddsEditorPage = () => {
 
   if (
     shouldSeedBuffer(data, seededFrom, (s) => s.pack.slug !== slug) &&
-    (pendingAdd.length === 0 || catalogSettled)
+    (pendingAdd.length === 0 || (catalogSettled && tierRangesSettled))
   ) {
     setSeededFrom(data);
     // Read off `data` (the type guard above narrows it), not `seededFrom` —
@@ -366,23 +377,14 @@ const PackOddsEditorPage = () => {
     // tier-defaults feature ("$50 card when Common starts at $100").
     const current = new Set((rows ?? []).map((r) => r.card_id));
     const added = Array.from(selected).filter((h) => !current.has(h));
-    if (added.length > 0 && tiersConfigured) {
-      const byHandle = new Map((allCards ?? []).map((c) => [c.handle, c]));
-      const outside = added.filter((h) => {
-        const card = byHandle.get(h);
-        return (
-          card !== undefined &&
-          rarityForValue(card.priceBreakdown.displayPrice, tierRanges) === null
-        );
+    const outside = outsideEveryRange(allCards, added, tierRanges);
+    if (outside.length > 0) {
+      const confirmed = await prompt({
+        title: t('packs.pool.outsideTitle'),
+        description: t('packs.pool.outsideDesc', { count: outside.length }),
+        confirmText: t('packs.pool.outsideConfirm'),
       });
-      if (outside.length > 0) {
-        const confirmed = await prompt({
-          title: t('packs.pool.outsideTitle'),
-          description: t('packs.pool.outsideDesc', { count: outside.length }),
-          confirmText: t('packs.pool.outsideConfirm'),
-        });
-        if (!confirmed) return;
-      }
+      if (!confirmed) return;
     }
     try {
       const res = await saveMembersMut.mutateAsync({
@@ -1337,24 +1339,6 @@ const TierEvBreakdown = ({
 // badges; it never re-tiers a row on its own. The buffer needs no reseed
 // effects: the parent keys this component on the SERVER value, so a save or a
 // pack switch remounts it fresh.
-const rangeText = (v: number | null | undefined): string =>
-  v == null ? '' : String(v);
-const seedRangeRows = (
-  map: TierRangeMap,
-): Record<string, { min: string; max: string }> =>
-  Object.fromEntries(
-    RARITIES.map((r) => [
-      r,
-      { min: rangeText(map[r]?.min), max: rangeText(map[r]?.max) },
-    ]),
-  );
-const rangeBoundOk = (s: string): boolean => {
-  if (s.trim() === '') return true;
-  const n = Number(s);
-  // 100M cap mirrors the server's MAX_TIER_BOUND_MYR (tier-settings-validate).
-  return Number.isFinite(n) && n >= 0 && n <= 100_000_000;
-};
-
 const TierRangesSection = ({
   override,
   globalRanges,
@@ -1378,7 +1362,7 @@ const TierRangesSection = ({
   const errors: string[] = [];
   for (const r of RARITIES) {
     const row = rows[r];
-    if (!rangeBoundOk(row.min) || !rangeBoundOk(row.max)) {
+    if (!boundOk(row.min) || !boundOk(row.max)) {
       errors.push(t('packs.tierRanges.badNumber', { tier: r }));
     } else if (
       row.min.trim() !== '' &&

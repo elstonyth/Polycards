@@ -3,9 +3,15 @@ import { useTranslation } from 'react-i18next';
 import { Container, Heading, Input, Table, Text } from '@medusajs/ui';
 import { Sparkles } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
-import { RARITIES } from '@acme/odds-math';
+import { RARITIES, type TierRangeMap } from '@acme/odds-math';
 import { useSaveTierSettings, useTierSettings } from '../../lib/queries';
 import type { TierRangeDTO, TierSettingsDTO } from '../../lib/admin-rest';
+import {
+  boundOk,
+  parseBound,
+  seedRangeRows,
+  type RangeRowState,
+} from '../../lib/tier-ranges';
 import { StickySaveBar } from '../../components/StickySaveBar';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
@@ -17,39 +23,14 @@ export const config: RouteConfig = {
 };
 
 // One editable row per rarity: bounds as free-typed strings ('' = open side).
-type RowState = { min: string; max: string };
-type FormState = Record<string, RowState>;
-
-const boundText = (v: number | null | undefined): string =>
-  v == null ? '' : String(v);
+// String-bound helpers are shared with the pack editor's override section —
+// see lib/tier-ranges (boundOk mirrors the server's 100M cap).
+type FormState = Record<string, RangeRowState>;
 
 const fromDTO = (dto: TierSettingsDTO): FormState =>
-  Object.fromEntries(
-    RARITIES.map((r) => [
-      r,
-      {
-        min: boundText(dto.ranges[r]?.min),
-        max: boundText(dto.ranges[r]?.max),
-      },
-    ]),
-  );
+  seedRangeRows(dto.ranges as TierRangeMap);
 
 const snapshot = (form: FormState): string => JSON.stringify(form);
-
-// Mirrors the server's MAX_TIER_BOUND_MYR (tier-settings-validate.ts) so an
-// absurd bound blocks Save inline instead of dying as a 400 toast.
-const MAX_BOUND_MYR = 100_000_000;
-
-// '' stays null (open bound); anything else must be a finite number in
-// [0, MAX_BOUND_MYR].
-const parseBound = (s: string): number | null =>
-  s.trim() === '' ? null : Number(s);
-
-const boundOk = (s: string): boolean => {
-  if (s.trim() === '') return true;
-  const n = Number(s);
-  return Number.isFinite(n) && n >= 0 && n <= MAX_BOUND_MYR;
-};
 
 /**
  * Tier Defaults (`/tier-defaults`): the RM display-price range per rarity

@@ -28,7 +28,8 @@ import {
   useUpdateCard,
   useUploadImage,
 } from '../../lib/queries';
-import { rarityForValue, type TierRangeMap } from '@acme/odds-math';
+import type { TierRangeMap } from '@acme/odds-math';
+import { outsideEveryRange } from '../../lib/tier-ranges';
 import { resolveImageUrl } from '../../lib/image-url';
 import { validateImageFile } from '../../lib/image-validation';
 import { rm, timeAgo, myrToUsd } from '../../lib/format';
@@ -365,23 +366,14 @@ const GachaCardsPage = () => {
     const pack = (packs ?? []).find((p) => p.slug === slug);
     const tierRanges = ((pack?.tier_ranges ?? null) ??
       globalTierRanges) as TierRangeMap;
-    if (Object.keys(tierRanges).length > 0) {
-      const byHandle = new Map((cards ?? []).map((c) => [c.handle, c]));
-      const outside = addCards.filter((h) => {
-        const card = byHandle.get(h);
-        return (
-          card !== undefined &&
-          rarityForValue(card.priceBreakdown.displayPrice, tierRanges) === null
-        );
+    const outside = outsideEveryRange(cards, addCards, tierRanges);
+    if (outside.length > 0) {
+      const confirmed = await prompt({
+        title: t('cards.bulk.outsideTitle'),
+        description: t('cards.bulk.outsideDesc', { count: outside.length }),
+        confirmText: t('cards.bulk.outsideConfirm'),
       });
-      if (outside.length > 0) {
-        const confirmed = await prompt({
-          title: t('cards.bulk.outsideTitle'),
-          description: t('cards.bulk.outsideDesc', { count: outside.length }),
-          confirmText: t('cards.bulk.outsideConfirm'),
-        });
-        if (!confirmed) return;
-      }
+      if (!confirmed) return;
     }
     setPickerOpen(false);
     setSelected(new Set());

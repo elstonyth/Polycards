@@ -1,4 +1,7 @@
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
+import { Modules } from '@medusajs/framework/utils';
+import { PACKS_MODULE } from '../../src/modules/packs';
+import type PacksModuleService from '../../src/modules/packs/service';
 import { mintSuperAdmin, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
@@ -6,7 +9,11 @@ jest.setTimeout(240 * 1000);
 const ADMIN_EMAIL = 'published-odds-admin@test.dev';
 const PASSWORD = 'published-odds-test-pw-1'; // gitleaks:allow
 const SLUG = 'published-odds-pack';
+const CARD_HANDLE = 'published-odds-card';
 
+// `active` so the STORE detail route serves the pack (it 404s drafts) and its
+// assertion below is never vacuous. Activation requires a rollable pool, which
+// the beforeEach builds (card + membership + a saved odds table).
 const PACK_BODY = {
   title: 'Published Odds Pack',
   category: 'pokemon',
@@ -15,7 +22,7 @@ const PACK_BODY = {
   buyback_percent: 90,
   boost: false,
   rank: 0,
-  status: 'draft',
+  status: 'active',
 };
 
 // The ORM merges json POJOs on update, so a published_odds.tiers map written
@@ -27,6 +34,7 @@ medusaIntegrationTestRunner({
   testSuite: ({ api, getContainer }) => {
     describe('/admin/packs/:slug published_odds', () => {
       let adminToken: string;
+      let storeHeaders: Record<string, string>;
       const adminHeaders = (): Record<string, string> => ({
         authorization: `Bearer ${adminToken}`,
       });
@@ -55,20 +63,65 @@ medusaIntegrationTestRunner({
       };
 
       beforeEach(async () => {
-        adminToken = await mintSuperAdmin(
-          getContainer(),
-          api,
-          ADMIN_EMAIL,
-          PASSWORD,
-        );
+        const container = getContainer();
+        adminToken = await mintSuperAdmin(container, api, ADMIN_EMAIL, PASSWORD);
+        // Store routes are publishable-key scoped (same fixture as
+        // store-packs-price-contract.spec).
+        const apiKeyModule = container.resolve(Modules.API_KEY);
+        const key = await apiKeyModule.createApiKeys({
+          title: 'published-odds-test',
+          type: 'publishable',
+          created_by: 'published-odds-test',
+        });
+        storeHeaders = { 'x-publishable-api-key': key.token };
+        // A rollable pool so the pack can go active (activation guard) and the
+        // store route serves it — mirrors pack-target-rtp.spec's fixture.
+        const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
+        await packs.createCards([
+          {
+            handle: CARD_HANDLE,
+            name: 'Published Odds Card PSA 10',
+            set: 'Test Set',
+            grader: 'PSA',
+            grade: '10',
+            market_value: 100,
+            image: '/cdn/test-card.webp',
+          },
+        ]);
         const created = await unwrapResponse(
           api.post(
             '/admin/packs',
-            { ...PACK_BODY, slug: SLUG },
+            { ...PACK_BODY, slug: SLUG, status: 'draft' },
             { headers: adminHeaders() },
           ),
         );
         expect(created.status).toBe(201);
+        const setMembers = await unwrapResponse(
+          api.post(
+            `/admin/packs/${SLUG}/members`,
+            { card_ids: [CARD_HANDLE] },
+            { headers: adminHeaders() },
+          ),
+        );
+        expect(setMembers.status).toBe(200);
+        const odds = await unwrapResponse(
+          api.post(
+            `/admin/packs/${SLUG}/odds`,
+            {
+              entries: [
+                { card_id: CARD_HANDLE, locked: false, pct: 100, rarity: 'Common' },
+              ],
+            },
+            { headers: adminHeaders() },
+          ),
+        );
+        expect(odds.status).toBe(200);
+        const activated = await unwrapResponse(
+          api.post(`/admin/packs/${SLUG}`, PACK_BODY, {
+            headers: adminHeaders(),
+          }),
+        );
+        expect(activated.status).toBe(200);
       });
 
       it('a shrunk tiers map drops the removed tier on every serving route (replace, never merge)', async () => {
@@ -89,12 +142,14 @@ medusaIntegrationTestRunner({
         expect(await detailOdds()).toEqual(expected);
         expect(await listedOdds()).toEqual(expected);
 
-        // Store detail route (public payload) must agree. Draft packs are
-        // hidden from the store list but the detail route serves by slug.
-        const store = await unwrapResponse(api.get(`/store/packs/${SLUG}`));
-        if (store.status === 200) {
-          expect(store.data.published_odds).toEqual(expected);
-        }
+        // Store detail route (public payload) must agree — the fixture keeps
+        // the pack ACTIVE precisely so this assertion can never go vacuous
+        // (the route 404s drafts).
+        const store = await unwrapResponse(
+          api.get(`/store/packs/${SLUG}`, { headers: storeHeaders }),
+        );
+        expect(store.status).toBe(200);
+        expect(store.data.published_odds).toEqual(expected);
       });
 
       it('null still clears and an emptied tiers map persists', async () => {
