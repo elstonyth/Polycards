@@ -43,7 +43,7 @@ export function validateVipLevelsClient(rows: VipLevelRow[]): string[] {
     const v = num(r.voucherInput);
     if (!Number.isFinite(v) || v < 0 || v > MAX_VOUCHER_MYR)
       errors.push(
-        `Level ${level}: voucher amount must be between 0 and ${MAX_VOUCHER_MYR.toLocaleString()}.`,
+        `Level ${level}: voucher amount must be between 0 and ${MAX_VOUCHER_MYR.toLocaleString('en-US')}.`,
       );
     const p = num(r.referralInput);
     if (!Number.isFinite(p) || p < 0 || p > 100)

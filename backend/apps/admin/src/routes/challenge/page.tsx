@@ -215,7 +215,7 @@ const StagesTab = () => {
       // spurious "must exceed" error onto every row that follows.
       if (t > MAX_THRESHOLD_MYR)
         errors.push(
-          `Stage ${i + 1}: threshold must be ≤ ${MAX_THRESHOLD_MYR.toLocaleString()}.`,
+          `Stage ${i + 1}: threshold must be ≤ ${MAX_THRESHOLD_MYR.toLocaleString('en-US')}.`,
         );
       if (i > 0 && !(t > prev)) errors.push(`Stage ${i + 1}: threshold must exceed stage ${i}'s.`);
       prev = t;
@@ -223,7 +223,7 @@ const StagesTab = () => {
     r.ranks.forEach((rk, ri) => {
       if (!creditsValid(rk.creditsInput))
         errors.push(
-          `Stage ${i + 1}, rank ${ri + 1}: credits must be a number between 0 and ${MAX_CREDITS_MYR.toLocaleString()}.`,
+          `Stage ${i + 1}, rank ${ri + 1}: credits must be a number between 0 and ${MAX_CREDITS_MYR.toLocaleString('en-US')}.`,
         );
     });
   });
