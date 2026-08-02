@@ -52,6 +52,7 @@ export default function PackDetailClient({
   siblings,
   detail,
   recentPulls,
+  initialQty = 1,
 }: {
   pack: ResolvedPack;
   siblings: Pack[];
@@ -59,12 +60,14 @@ export default function PackDetailClient({
   detail: PackDetail | null;
   /** Live pull ledger feed; empty array when there are no pulls / backend down. */
   recentPulls: RecentPull[];
+  /** Clamped 1–3 from the URL's `?count=` (the catalog stepper's choice). */
+  initialQty?: number;
 }) {
   const { customer } = useAuth();
   const { balance, openTopUp } = useTopUp();
   const router = useRouter();
   const [active, setActive] = useState<Pack>(pack);
-  const [qty, setQty] = useState(1);
+  const [qty, setQty] = useState(initialQty);
   // `openError` surfaces a friendly failure inline (`needsTopUp` adds the
   // top-up entry for credit shortfalls). Real opens happen on the reel, so
   // there is no in-place async open state here.
