@@ -31,11 +31,10 @@ const POOL_PACK = 'pokemon-rookie';
 const BIG_FMV = 99_999;
 
 let admin: string;
-// The eligibility re-check below only means something after the lifecycle test
-// actually ran (it verifies that test's cleanup). The product comes from
-// seed:e2e; if it's absent both tests skip — in CI that skip means the seed
-// didn't run and is a failure signal, not the expected state.
-let lifecycleRan = false;
+// The eligibility re-check below verifies the lifecycle test's cleanup. The
+// lifecycle test hard-fails (not skips) when its fixture is missing, and its
+// `finally` block restores the pool + deletes the card even on failure, so
+// this check is valid to run unconditionally.
 
 test.beforeAll(async () => {
   admin = await adminToken();
@@ -56,7 +55,6 @@ test('card lifecycle: register from inventory → adjust FMV → reflects on sto
     elig.products.some((p) => p.handle === CARD_HANDLE),
     `Eligible product '${CARD_HANDLE}' missing — seed:e2e (seed-e2e-fixtures.ts) regressed or was not run`,
   ).toBeTruthy();
-  lifecycleRan = true;
 
   const originalPool = (await getOdds(admin, POOL_PACK)).odds.map(
     (o) => o.card_id,
@@ -137,7 +135,6 @@ test('card lifecycle: register from inventory → adjust FMV → reflects on sto
 });
 
 test('deleting the card frees the product to be eligible again', async () => {
-  test.skip(!lifecycleRan, 'lifecycle test skipped — no cleanup to verify');
   // After the lifecycle test's cleanup, the product is un-registered once more.
   const elig = await eligibleProducts(admin);
   expect(elig.products.some((p) => p.handle === CARD_HANDLE)).toBe(true);
