@@ -44,7 +44,12 @@ import {
 import { resolveCardPokemon } from '@/lib/resolve-card-pokemon';
 import { spriteGif } from '@/lib/mock/pokedex';
 import { SlotReelStack, type ColumnWinner } from './SlotReelStack';
-import { buildDecoyPool, shuffleCells, type HReelCell } from '@/lib/hreel';
+import {
+  buildDecoyPool,
+  buildIdlePool,
+  HREEL_IDLE_POOL_MAX,
+  type HReelCell,
+} from '@/lib/hreel';
 import { SlotStatusBar } from './SlotStatusBar';
 import { SlotControls } from './SlotControls';
 import { OddsSheet } from './OddsSheet';
@@ -162,6 +167,17 @@ export default function SlotMachineClient({
   // via name-derive — threading the custom sprite_image into decoy cells is the
   // upgrade path if that ever matters.
   const basePool = useMemo<HReelCell[]>(() => buildDecoyPool(pool), [pool]);
+  // Per-reel pools are sliced to HREEL_IDLE_POOL_MAX: the idle drift tiles one
+  // full pool period + the visible window onto the strip, so a pool past the
+  // cap can't wrap and ReelStrip rests the reel sharp — the "rails frozen" bug
+  // on big packs (prod diamond-pack: 78 pairs). Reshuffles slice AFTER the
+  // per-idle-cycle shuffle, so the whole pool still rotates through the reel
+  // across cycles; this deterministic slice only seeds SSR + pads a just-added
+  // reel, where unshuffled-but-capped is exactly what hydration needs.
+  const cappedBase = useMemo(
+    () => basePool.slice(0, HREEL_IDLE_POOL_MAX),
+    [basePool],
+  );
   // Card-value range for the odds sheet — same pool, same memo convention.
   const valueRange = useMemo(() => poolValueRange(pool), [pool]);
   // Per-tier ranges, so the sheet matches the pack page's odds panel row for row.
@@ -172,7 +188,7 @@ export default function SlotMachineClient({
   // the initial value is the unshuffled pool, so server HTML matches the first
   // client paint; the shuffle lands one effect-tick after hydration.
   const [decoyPools, setDecoyPools] = useState<HReelCell[][]>(() =>
-    Array.from({ length: reels }, () => basePool),
+    Array.from({ length: reels }, () => cappedBase),
   );
 
   // Balance comes from the app-shell provider (identity-tagged: values from
@@ -209,15 +225,15 @@ export default function SlotMachineClient({
   // reel via the DECOY_DEXES fallback.
   useEffect(() => {
     if (phase !== 'idle') return;
-    setDecoyPools(Array.from({ length: reels }, () => shuffleCells(basePool)));
+    setDecoyPools(Array.from({ length: reels }, () => buildIdlePool(basePool)));
   }, [phase, reels, basePool]);
   // A just-added reel must show pack cards in the SAME render (the reshuffle
-  // effect only lands next tick) — pad with basePool instead of letting
+  // effect only lands next tick) — pad with cappedBase instead of letting
   // ReelStrip fall back to the non-pack DECOY_DEXES for a frame.
   const renderPools =
     decoyPools.length >= reels
       ? decoyPools
-      : Array.from({ length: reels }, (_, i) => decoyPools[i] ?? basePool);
+      : Array.from({ length: reels }, (_, i) => decoyPools[i] ?? cappedBase);
   // True once the player has spun at least once this session — drives the
   // "Spin again" button label, which must persist after the reveal concludes
   // back to 'idle' (spec decision #27), not only during 'review'.
@@ -655,32 +671,11 @@ export default function SlotMachineClient({
     setPhase('idle');
   }, []);
 
-  // Deliberate "Spin again" from the concluded reveal — replaces the old silent
-  // auto-conclude (spec #27) that let a stray tap start a spin. Conclude the
-  // stage, then start the next spin. Two steps because handleSpin's guard reads
-  // `phase` synchronously and must see 'idle', which only lands after
-  // handleConclude's state flush; the ref + the phase effect below chain them
-  // across that render.
-  const replayAfterConclude = useRef(false);
-  const handleSpinAgain = useCallback(() => {
-    replayAfterConclude.current = true;
-    handleConclude();
-  }, [handleConclude]);
-  // Call handleSpin through a ref so this effect doesn't depend on it (it's a
-  // per-render function; depending on it would churn the effect and trip
-  // exhaustive-deps). The ref always holds the latest closure.
-  const handleSpinRef = useRef(handleSpin);
-  handleSpinRef.current = handleSpin;
-  useEffect(() => {
-    if (phase !== 'idle' || !replayAfterConclude.current) return;
-    replayAfterConclude.current = false;
-    // Only auto-replay when a spin is actually possible right now; otherwise
-    // land on the idle machine so the player sees why (can't afford / cooling
-    // down) — the same gates as the Spin button's `disabled`.
-    if (!modeUndecided && !cooldown && (customer == null || canAfford)) {
-      void handleSpinRef.current();
-    }
-  }, [phase, modeUndecided, cooldown, customer, canAfford]);
+  // The concluded reveal used to offer "Spin again" (conclude + replay in one
+  // press) and "Done". Both are gone — RevealStage auto-concludes to the idle
+  // machine now — so the conclude→replay chaining that lived here (a ref flag,
+  // a handleSpin ref, and a phase effect to fire the replay one render later)
+  // went with them. A new spin is a press on the Spin button again, nothing else.
 
   // Settle watchdog: the customer is charged the moment openBatch returns ok,
   // but the reveal only lands when the reel engine reports completion. If that
@@ -927,7 +922,6 @@ export default function SlotMachineClient({
                   onSkip={skipToCards}
                   onConclude={handleConclude}
                   onCloseInstant={closeInstantWindow}
-                  onSpinAgain={handleSpinAgain}
                   onSellBack={sellBackPull}
                   onReveal={revealPull}
                   onSold={refreshBalance}

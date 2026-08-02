@@ -72,6 +72,13 @@ jobs:
       #
       # Mock gateway: customer flows fund themselves via /store/credits/topup.
       ALLOW_MOCK_TOPUP: 'true'
+      # Reward-redemption UI specs (rewards.spec.ts voucher claim) would need the
+      # gate open — the seed mints a claimable grant — but /vip is suspended
+      # (#294) and rewards.spec.ts is test.describe.skip, so this flag and the
+      # seeded grant are pre-provisioning only: dormant until the /vip surface
+      # is un-suspended (ADR 0004, review-by 2026-10-01). They exercise nothing
+      # today. Prod default stays OFF (dormant economy) regardless.
+      REWARDS_REDEMPTION_ENABLED: 'true'
       # CORS: locally these live in the gitignored backend .env; in CI they're
       # unset, so the browser's auth preflight comes back without
       # allow-origin and the login POST never fires (observed: only OPTIONS
@@ -199,6 +206,17 @@ jobs:
       - name: Run a11y gate
         if: always()
         run: npm run test:a11y
+
+      # CSP gate: loads the same key routes against the running storefront
+      # (:4000, already up) and fails on any reported policy violation OR a
+      # missing content-security-policy(-report-only) header — production
+      # ENFORCES CSP (.do/storefront.app.yaml CSP_ENFORCE: 'true'), but this
+      # build ships report-only by default, so `[Report Only]` console
+      # violations here are still catchable regressions, not noise.
+      # `always()` for the same reason as the a11y gate above.
+      - name: Run CSP gate
+        if: always()
+        run: npm run qa:csp
 
       - name: Upload report + service logs
         if: always()

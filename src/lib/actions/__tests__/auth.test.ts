@@ -52,6 +52,9 @@ import {
   googleLoginStart,
   googleCallback,
 } from '../auth';
+import { resolveCallbackOrigin } from '@/lib/allowed-hosts';
+import { NextRequest } from 'next/server';
+import { GET as googleCallbackGET } from '@/app/auth/google/callback/route';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -82,6 +85,59 @@ describe('signup — password presence (#3)', () => {
       ok: false,
       error: 'Password must be at least 8 characters.',
     });
+  });
+});
+
+// Registration requires a phone (operator requirement 2026-08-01), picked via
+// the country selector and normalized to E.164 before the customer is created.
+describe('signup — required phone', () => {
+  it('rejects a missing phone before any backend call', async () => {
+    const r = await signup({
+      email: 'new@polycards.app',
+      password: 'PolycardsTest123!',
+    });
+    expect(r).toEqual({
+      ok: false,
+      error: 'Please enter a valid phone number for the selected country.',
+    });
+    expect(mocks.clientFetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects an invalid number', async () => {
+    const r = await signup({
+      email: 'new@polycards.app',
+      password: 'PolycardsTest123!',
+      phone: '12345',
+    });
+    expect(r.ok).toBe(false);
+    expect(mocks.clientFetch).not.toHaveBeenCalled();
+  });
+
+  it('creates the customer with the normalized +60 phone', async () => {
+    mocks.clientFetch
+      .mockResolvedValueOnce({ token: 'reg-tok' }) // register
+      .mockResolvedValueOnce({ token: 'sess-tok' }); // login exchange
+    mocks.customerCreate.mockResolvedValueOnce({ customer: { id: 'c1' } });
+    mocks.customerRetrieve.mockResolvedValueOnce({
+      customer: {
+        id: 'c1',
+        email: 'new@polycards.app',
+        first_name: 'N',
+        last_name: null,
+      },
+    });
+    mocks.fetchProfileHandle.mockResolvedValueOnce(null);
+
+    const r = await signup({
+      email: 'new@polycards.app',
+      password: 'PolycardsTest123!',
+      first_name: 'N',
+      phone: '010-766 7787',
+    });
+
+    expect(r.ok).toBe(true);
+    const [body] = mocks.customerCreate.mock.calls[0]!;
+    expect(body.phone).toBe('+60107667787');
   });
 });
 
@@ -399,5 +455,77 @@ describe('googleLoginStart — callback_url host guard', () => {
       ok: false,
       error: 'Google sign-in is currently unavailable.',
     });
+  });
+});
+
+// Plan 063 — the callback route's own origin guard (route.ts, separate from
+// googleLoginStart above). The success-path cases below test the extracted
+// resolveCallbackOrigin helper directly, per the route staying a thin GET
+// around it; the two fail-closed cases (CodeRabbit PR-314) instead import and
+// call the real Route Handler GET, because the bug they pin — the redirect's
+// Location built from the wrong origin — lives in route.ts itself, not in
+// the helper (see the note on those two below).
+describe("callback route origin guard — resolveCallbackOrigin + the route's fail-closed redirect (plan 063)", () => {
+  // These two exercise the real Route Handler, not just the helper: the
+  // fail-closed branch used to build its redirect from `request.nextUrl`,
+  // whose origin behind the DO proxy is the standalone server's own BIND
+  // origin (http://0.0.0.0:PORT) — the exact broken redirect PR #311 fixed,
+  // recreated on this failure path. The URL below stands in for that bind
+  // origin; asserting a bare RELATIVE Location (not an absolute URL carrying
+  // it) is what actually pins the fix — resolveCallbackOrigin returning null
+  // in isolation wouldn't catch a regression back to `new URL(path,
+  // request.nextUrl)`.
+  const bindOriginRequest = (headers?: Record<string, string>) =>
+    new NextRequest(
+      'http://0.0.0.0:41234/auth/google/callback?code=c&state=s',
+      headers ? { headers } : undefined,
+    );
+
+  it('unallowlisted forwarded host → 302 with a relative Location, never the bind origin', async () => {
+    const request = bindOriginRequest({
+      'x-forwarded-host': 'evil.example.com',
+      'x-forwarded-proto': 'https',
+    });
+
+    const res = await googleCallbackGET(request);
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe(
+      '/auth/google/failed?reason=origin',
+    );
+    expect(mocks.clientFetch).not.toHaveBeenCalled();
+  });
+
+  it('missing host → 302 with a relative Location, never the bind origin', async () => {
+    const request = bindOriginRequest();
+
+    const res = await googleCallbackGET(request);
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe(
+      '/auth/google/failed?reason=origin',
+    );
+    expect(mocks.clientFetch).not.toHaveBeenCalled();
+  });
+
+  it('x-forwarded-host: localhost:4000 → succeeds with the http local origin', () => {
+    expect(resolveCallbackOrigin('localhost:4000', null)).toBe(
+      'http://localhost:4000',
+    );
+  });
+
+  // localhost:3000 (`next dev`) is the origin actually registered on the
+  // Google OAuth client — it must stay allowlisted alongside :4000, not be
+  // replaced by it.
+  it('x-forwarded-host: localhost:3000 → still succeeds (next dev, registered with Google)', () => {
+    expect(resolveCallbackOrigin('localhost:3000', null)).toBe(
+      'http://localhost:3000',
+    );
+  });
+
+  it('allowlisted prod host + forwarded proto → https origin', () => {
+    expect(resolveCallbackOrigin('polycards.gg', 'https')).toBe(
+      'https://polycards.gg',
+    );
   });
 });

@@ -398,7 +398,7 @@ const LvlTab = ({ customerId }: { customerId: string | null }) => {
             className="overflow-x-auto border-t"
             tabIndex={0}
             role="region"
-            aria-label="Spend report table"
+            aria-label="Turnover report table"
           >
             <Table>
               <Table.Header>

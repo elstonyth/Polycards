@@ -36,7 +36,7 @@ import {
   poolValueRange,
   tierValueRanges,
 } from '@/lib/packs-format';
-import { isTopRarity } from '@/lib/rarity';
+import { RARITY_ORDER } from '@/lib/rarity';
 import { useLiveRecentPulls } from '@/lib/use-recent-pulls';
 import { useTopUp } from '@/components/app-shell/TopUpProvider';
 import { CardTile } from '@/components/cards/CardTile';
@@ -110,17 +110,28 @@ export default function PackDetailClient({
     ? publishedOddsRows(liveDetail.publishedOdds)
     : null;
 
-  // The full public prize pool (value-sorted) — feeds the "Cards in this
-  // pack" grid AND gates the guest demo-spin CTA (pure theater on the reel,
-  // /spin?demo=1 — no charge, nothing won).
+  // The full public prize pool (value-sorted) — feeds the odds panel's
+  // valueRange/tierRanges, gates the guest demo-spin CTA (pure theater on the
+  // reel, /spin?demo=1 — no charge, nothing won), and backs the pool dialog
+  // only in the zero-Rare fallback (PoolByRarity's `full` prop).
   // Memoized so the `?? []` fallback doesn't mint a fresh array every render —
   // that identity churn would make the valueRange memo below recompute always.
   const pool = useMemo(() => liveDetail?.pool ?? [], [liveDetail?.pool]);
 
-  // Mythical+ subset for the "Cards in this pack" section (spec 2026-07-29):
-  // commons/rares are catalogue noise there. Order inherited (pool is
+  // Rare+ subset for the "Rare & above" section: the rail shows the whole subset,
+  // the expand dialog lists the same Rare-and-above cards grouped by tier
+  // (commons/uncommons are catalogue noise there). Order inherited (pool is
   // value-sorted desc). The FULL pool still feeds the demo spin + odds range.
-  const topPool = pool.filter((c) => isTopRarity(c.rarity));
+  // Memoized like `pool` above (stable prop identity for PoolByRarity); the
+  // i >= 0 bound keeps an unknown rarity string (indexOf -1) out rather than
+  // letting it pass the <= check.
+  const topPool = useMemo(() => {
+    const rareIndex = RARITY_ORDER.indexOf('Rare');
+    return pool.filter((c) => {
+      const i = RARITY_ORDER.indexOf(c.rarity);
+      return i >= 0 && i <= rareIndex;
+    });
+  }, [pool]);
 
   // Card-value range over the FULL pool (not topPool) — one derivation feeding
   // both the odds-panel gate and its range row.
@@ -488,19 +499,24 @@ export default function PackDetailClient({
             </Reveal>
           )}
 
-          {/* Cards in this pack — Mythical+ only, as a collapsed teaser rail
-              that expands to rarity shelves (rarest first, per-tier pull
-              chance when published). */}
-          {topPool.length > 0 && (
+          {/* Rare & above — Rare+ only, as a swipeable rail whose expand
+              button opens a dialog of the SAME Rare+ subset (rarest first,
+              per-tier pull chance when published) — operator decision
+              2026-08-02; commons are catalogue noise in the expanded view
+              too. The odds panel below still quotes value ranges over the
+              FULL pool — a deliberate, operator-accepted mismatch (see
+              PoolByRarity's header note before "fixing" it). Header lives
+              inside the component (the expand button sits in it). Gated on
+              `pool`, not `topPool`: a save-only Common/Uncommon pack has an
+              empty Rare+ subset but a non-empty pool — PoolByRarity drops
+              the rail strip and falls back to the full pool under an
+              "All cards" header, so the pool keeps an entry point instead of
+              vanishing under an odds panel with nothing to point at. */}
+          {pool.length > 0 && (
             <Reveal as="section">
-              <h2 className="mb-1 font-heading text-lg font-bold tracking-tight text-white">
-                Cards in this pack
-              </h2>
-              <p className="mb-3 text-[13px] text-white/70">
-                The rarest cards in this pack and their current market price.
-              </p>
               <PoolByRarity
-                pool={topPool}
+                rail={topPool}
+                full={pool}
                 tierChances={liveDetail?.publishedOdds?.tiers ?? null}
                 onOpen={(card) => setOpenCard(toSeed(card))}
               />

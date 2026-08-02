@@ -3,6 +3,8 @@
 **Date:** 2026-07-29
 **Status:** Approved (design)
 **Scope:** Storefront only. No backend change.
+**Review-by:** 2026-10-01 — if not restored (or replaced by the daily tasks/missions
+system) by then, decide retire-vs-restore explicitly. See ADR 0004.
 
 ## Problem
 

@@ -16,6 +16,14 @@ const NotificationRead = model
       unique: true,
       where: 'deleted_at IS NULL',
     },
+    {
+      // Unread-count path: GET /store/notifications counts this table by
+      // customer_id alone (no notification_id predicate), so the composite
+      // unique above can't serve it.
+      name: 'IDX_notification_read_customer_id',
+      on: ['customer_id'],
+      where: 'deleted_at IS NULL',
+    },
   ]);
 
 export default NotificationRead;

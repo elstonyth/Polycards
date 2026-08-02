@@ -1,8 +1,17 @@
 import { ExecArgs } from '@medusajs/framework/types';
-import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
+import {
+  ContainerRegistrationKeys,
+  Modules,
+  ProductStatus,
+} from '@medusajs/framework/utils';
+import { createProductsWorkflow } from '@medusajs/medusa/core-flows';
 import { RARITY_WEIGHT, type OddsRarity } from '@acme/odds-math';
 import { PACKS_MODULE } from '../modules/packs';
 import type PacksModuleService from '../modules/packs/service';
+import {
+  buildCardProductInput,
+  resolveCardProductContext,
+} from '../modules/packs/card-product';
 
 // seed-e2e-fixtures — E2E-ONLY fixture. The prod catalog seed (seed.ts, run by
 // deploy:init) ships packs as EMPTY DRAFTS by design (operators register cards
@@ -195,6 +204,119 @@ export default async function seedE2eFixtures({
     logger.info('[e2e] Seeded firm USD_MYR FX rate.');
   } else {
     logger.info('[e2e] FX rate already present, skipping.');
+  }
+
+  // --- Eligible inventory product (card-management.spec.ts) ----------------
+  // The admin lifecycle spec (register from inventory → FMV edit → storefront
+  // reflection) only runs when GET /admin/gacha/eligible-products lists an
+  // un-registered product with this handle. Eligibility = "a product whose
+  // handle is not yet a Card". The prod seed registers all its products, so the
+  // list is empty on a fresh DB — mint ONE un-registered product here (ported
+  // from the hand-run create-test-product.ts). We create only the PRODUCT, never
+  // a Card, so it stays eligible; the spec's beforeAll deletes any leftover card.
+  const productModule = container.resolve(Modules.PRODUCT);
+  const CARD_PRODUCT_HANDLE = 'pw-test-card';
+  const [existingProduct] = await productModule.listProducts(
+    { handle: CARD_PRODUCT_HANDLE },
+    { take: 1 },
+  );
+  if (existingProduct) {
+    logger.info('[e2e] Eligible test product already present, skipping.');
+  } else {
+    const ctx = await resolveCardProductContext(container);
+    const input = buildCardProductInput(
+      {
+        handle: CARD_PRODUCT_HANDLE,
+        title: 'PW Test Eligible Card',
+        image: '/cdn/cards/celebi.webp', // reuse a seeded image
+        price: 12.5,
+        metadata: {
+          fmv: 12.5,
+          points: 90,
+          grade: '9',
+          grader: 'PSA',
+          set: 'PW Test Set',
+          year: 2026,
+        },
+      },
+      {
+        shippingProfileId: ctx.shippingProfileId,
+        salesChannelId: ctx.salesChannelId,
+        status: ProductStatus.PUBLISHED,
+        manageInventory: false, // untracked => ∞ stock, drawable when pooled
+      },
+    );
+    await createProductsWorkflow(container).run({
+      input: {
+        products: [input],
+        additional_data: { seller_id: ctx.sellerId },
+      },
+    });
+    logger.info(`[e2e] Seeded eligible test product '${CARD_PRODUCT_HANDLE}'.`);
+  }
+
+  // --- Claimable voucher grant (rewards.spec.ts) ---------------------------
+  // rewards.spec.ts logs in as the shared dev customer and claims a 'granted'
+  // voucher on /vip. That customer IS seeded (seed.ts's SEED_DEMO path, run by
+  // deploy:init BEFORE this fixture in the nightly), but NO seed path mints the
+  // grant — the spec header's "already holds granted vouchers" is aspirational.
+  // Mint one here so the UI claim leg is exercisable (also needs the gate open:
+  // REWARDS_REDEMPTION_ENABLED, set by e2e.yml). Ladder level-2 voucher — the
+  // shape a real level-up mints.
+  const customerModule = container.resolve(Modules.CUSTOMER);
+  const REWARD_EMAIL = process.env.TEST_CUSTOMER_EMAIL ?? 'test@polycards.app';
+  const [rewardCustomer] = await customerModule.listCustomers(
+    { email: REWARD_EMAIL },
+    { take: 1 },
+  );
+  if (!rewardCustomer) {
+    // Not fatal: in the nightly deploy:init seeds this customer first. A local
+    // seed:e2e without seed.ts's demo path lands here — warn loudly (a silent
+    // skip is exactly the dark-spec problem this fixture fixes) and move on.
+    logger.warn(
+      `[e2e] Reward customer '${REWARD_EMAIL}' not found — skipping voucher ` +
+        'grant. Run deploy:init (seed.ts, SEED_DEMO on) first; the nightly does.',
+    );
+  } else {
+    // Idempotent by deterministic id: covers first-run (create), a re-run before
+    // the spec claims it (sees 'granted'), and a re-run after a rewards.spec.ts
+    // pass already CLAIMED it (sees 'fulfilled', or 'revoked' from a manual
+    // op). Self-healing on that last case, not just idempotent: a claim
+    // flips status via claimVipRewardGrant's updateVipRewardGrants (service.ts),
+    // so without a reset here the fixture goes dark after the very first
+    // successful nightly run instead of staying claimable on every run.
+    const grantId = `vrg_e2e_${rewardCustomer.id}_voucher`;
+    const [existingGrant] = await packs.listVipRewardGrants(
+      { id: grantId },
+      { take: 1 },
+    );
+    if (existingGrant && existingGrant.status === 'granted') {
+      logger.info('[e2e] E2E voucher grant already present, skipping.');
+    } else if (existingGrant) {
+      // Reset in place (not delete+recreate): the row's id is the fixture's
+      // deterministic key and the unique ladder index is scoped to it, so an
+      // update is the smaller, safer move than a delete racing a re-create.
+      await packs.updateVipRewardGrants([
+        { id: grantId, status: 'granted' },
+      ]);
+      logger.info(
+        `[e2e] E2E voucher grant was '${existingGrant.status}' — reset to ` +
+          `'granted' for '${REWARD_EMAIL}'.`,
+      );
+    } else {
+      await packs.createVipRewardGrants([
+        {
+          id: grantId,
+          customer_id: rewardCustomer.id,
+          level: 2,
+          kind: 'voucher',
+          payload: { amount_myr: 5 },
+          status: 'granted',
+          source_open_id: 'seed-e2e-fixtures',
+        },
+      ]);
+      logger.info(`[e2e] Seeded claimable voucher grant for '${REWARD_EMAIL}'.`);
+    }
   }
 
   logger.info('[e2e] Fixture seed complete.');

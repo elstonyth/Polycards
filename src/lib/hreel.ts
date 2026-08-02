@@ -15,6 +15,27 @@ export const HREEL_WIN_INDEX = 48;
 export const HREEL_STRIP_LEN = 64;
 /** Cells visible across a strip window — a long horizontal reel. */
 export const HREEL_VISIBLE_CELLS = 9;
+/** Cell the idle drift starts centered on. Must clear the left half-window
+ *  (HREEL_VISIBLE_CELLS/2), and leaves the rest of the strip as drift runway. */
+export const HREEL_IDLE_BASE_INDEX = 5;
+/** Largest decoy pool the idle drift can wrap over: the drift tiles one full
+ *  pool period plus the visible window onto the strip, so a pool beyond
+ *  STRIP_LEN − VISIBLE − BASE cells overruns it and ReelStrip rests the reel
+ *  sharp — the "rails frozen" bug on big packs (prod diamond-pack: 78 pairs).
+ *  Pool builders slice their shuffled pools to this cap; the per-idle-cycle
+ *  reshuffle still rotates the full pool through the reel over time. */
+export const HREEL_IDLE_POOL_MAX =
+  HREEL_STRIP_LEN - HREEL_VISIBLE_CELLS - HREEL_IDLE_BASE_INDEX;
+
+/** True when a pool of `poolLen` cells can wrap the idle drift on the strip:
+ *  the drift tiles one full pool period + the visible window from the base
+ *  cell. ReelStrip rests the reel sharp when this fails — the shared guard, so
+ *  the cap above and the component can never disagree. */
+export function idleDriftFits(poolLen: number): boolean {
+  return (
+    HREEL_IDLE_BASE_INDEX + HREEL_VISIBLE_CELLS + poolLen <= HREEL_STRIP_LEN
+  );
+}
 /** Fallback decoy sprites when the caller supplies no pack pool: a curated set
  *  of dexes that reliably have animated showdown sprites (gen 1–4), so decoy
  *  cells never 404 into a broken image. Used only when the pack pool is empty or
@@ -74,6 +95,20 @@ export function shuffleCells(
     [out[i], out[j]] = [out[j]!, out[i]!];
   }
   return out;
+}
+
+/**
+ * One idle-cycle pool for a reel: a fresh shuffle of the base pool, capped to
+ * HREEL_IDLE_POOL_MAX so the idle drift always fits the strip (the frozen-rails
+ * bug: an uncapped 78-pair pool made ReelStrip rest the reel sharp). Shuffling
+ * BEFORE the slice is what rotates the full pool through the reel across
+ * cycles. `rand` is injectable for deterministic tests.
+ */
+export function buildIdlePool(
+  cells: readonly HReelCell[],
+  rand: () => number = Math.random,
+): HReelCell[] {
+  return shuffleCells(cells, rand).slice(0, HREEL_IDLE_POOL_MAX);
 }
 
 /**

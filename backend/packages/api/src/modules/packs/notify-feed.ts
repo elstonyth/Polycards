@@ -1,4 +1,4 @@
-import { Modules } from '@medusajs/framework/utils';
+import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
 
 export type FeedTemplate =
   | 'commission_matured'
@@ -41,4 +41,30 @@ export async function notifyFeed(
     data: args.data,
     idempotency_key: args.idempotencyKey,
   });
+}
+
+/** Fire a feed notification AFTER the money/state write has committed.
+ * Never throws: failure is logged (best-effort) and swallowed — a committed
+ * top-up/grant/flip must never fail over a notification. `context` names the
+ * producer for the log line, e.g. 'vip-spend-settled'. */
+export async function notifyFeedNonfatal(
+  container: { resolve: (k: string) => any },
+  context: string,
+  args: Parameters<typeof notifyFeed>[1],
+): Promise<void> {
+  try {
+    await notifyFeed(container, args);
+  } catch (err) {
+    try {
+      container
+        .resolve(ContainerRegistrationKeys.LOGGER)
+        .warn(
+          `[${context}] notifyFeed('${args.template}') failed for receiver ${args.receiverId} (${args.idempotencyKey}) — state committed, notification dropped: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+    } catch {
+      // logger not available (unit-test container) — stay silent, never throw.
+    }
+  }
 }

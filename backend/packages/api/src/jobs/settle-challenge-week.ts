@@ -2,7 +2,7 @@ import { MedusaContainer } from '@medusajs/framework/types';
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../modules/packs';
 import { getCardStockByHandle } from '../modules/packs/card-stock';
-import { notifyFeed } from '../modules/packs/notify-feed';
+import { notifyFeedNonfatal } from '../modules/packs/notify-feed';
 import type PacksModuleService from '../modules/packs/service';
 
 /**
@@ -44,27 +44,22 @@ export default async function settleChallengeWeekJob(
           `[settle-challenge-week] out of stock, NOT granted (manual fulfilment queue): customer ${w.customerId} rank ${w.rank} week ${weekStartIso} card ids ${w.skippedCardIds.join(', ')}`,
         );
       }
-      try {
-        await notifyFeed(container, {
-          receiverId: w.customerId,
-          template: 'challenge_payout',
-          data: {
-            week_start: weekStartIso,
-            rank: w.rank,
-            credits: w.credits,
-            // Pulls MINTED, not distinct handles — two unlocked stages can
-            // award the same card to one rank.
-            card_count: w.cardCount,
-          },
-          idempotencyKey: `challenge:${weekStartIso}:${w.customerId}`,
-        });
-      } catch (err) {
-        warn(
-          `[settle-challenge-week] notifyFeed failed for ${w.customerId} (week ${weekStartIso}) — settlement committed, notification dropped: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-        );
-      }
+      // Non-fatal — never fail a committed payout over a notification. The
+      // wrapper logs a producer failure instead of swallowing it silently
+      // (matches every other post-commit producer, plan 059/052).
+      await notifyFeedNonfatal(container, 'settle-challenge-week', {
+        receiverId: w.customerId,
+        template: 'challenge_payout',
+        data: {
+          week_start: weekStartIso,
+          rank: w.rank,
+          credits: w.credits,
+          // Pulls MINTED, not distinct handles — two unlocked stages can
+          // award the same card to one rank.
+          card_count: w.cardCount,
+        },
+        idempotencyKey: `challenge:${weekStartIso}:${w.customerId}`,
+      });
     },
   });
 }

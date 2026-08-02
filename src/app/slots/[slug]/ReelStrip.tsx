@@ -28,6 +28,8 @@ import {
   HREEL_WIN_INDEX,
   HREEL_STRIP_LEN,
   HREEL_VISIBLE_CELLS,
+  HREEL_IDLE_BASE_INDEX as IDLE_BASE_INDEX,
+  idleDriftFits,
   type HReelCell,
 } from '@/lib/hreel';
 import { rarityRgb } from '@/lib/rarity';
@@ -39,9 +41,6 @@ const CELL_GAP = 10;
  *  read every Pokémon, fast enough that the machine never looks dead. Below
  *  blurStretch's 0.05px threshold, so the idle strip stays sharp. */
 const IDLE_DRIFT_PX_PER_MS = 0.02;
-/** Cell the idle drift starts centered on. Must clear the left half-window
- *  (HREEL_VISIBLE_CELLS/2), and leaves the rest of the strip as drift runway. */
-const IDLE_BASE_INDEX = 5;
 
 export function ReelStrip({
   winnerDex,
@@ -177,10 +176,7 @@ export function ReelStrip({
       setView(null);
       stripEl.style.filter = '';
       const wrapPx = poolLen * pitch;
-      if (
-        reduced ||
-        IDLE_BASE_INDEX + HREEL_VISIBLE_CELLS + poolLen > HREEL_STRIP_LEN
-      ) {
+      if (reduced || !idleDriftFits(poolLen)) {
         pxRef.current = basePx;
         stripEl.style.transform = `translate3d(${-basePx}px, 0, 0)`;
         return;

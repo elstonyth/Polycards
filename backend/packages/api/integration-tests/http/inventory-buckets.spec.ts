@@ -1,4 +1,5 @@
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
+import { Modules, ProductStatus } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
 import { mintSuperAdmin, unwrapResponse } from './utils';
@@ -50,6 +51,17 @@ medusaIntegrationTestRunner({
         headers: { authorization: `Bearer ${adminToken}` },
       });
 
+      // The route's card_handle existence gate resolves against PRODUCT
+      // handles (POLYCARD-BACK, see route.ts) — every handle bought below
+      // needs a backing product, same convention as inventory-detail.spec.ts.
+      const makeProduct = async (handle: string, title: string) => {
+        const productModule = getContainer().resolve(Modules.PRODUCT);
+        const [product] = await productModule.createProducts([
+          { title, handle, status: ProductStatus.PUBLISHED },
+        ]);
+        return product;
+      };
+
       const buy = (
         lines: unknown[],
         reversesInvoiceId: string | null = null,
@@ -76,6 +88,7 @@ medusaIntegrationTestRunner({
 
       it('purchase -> pull -> delivery request -> shipped moves the card between buckets, one at a time', async () => {
         const HANDLE = 'lifecycle-card';
+        await makeProduct(HANDLE, 'Lifecycle Card');
 
         // 1. PURCHASE — through the real Task-3 route, not a hand-seeded row.
         const purchase = await buy([
@@ -186,6 +199,7 @@ medusaIntegrationTestRunner({
 
       it('a reversed purchase (net qty 0) reports null cost, not 0', async () => {
         const HANDLE = 'reversed-card';
+        await makeProduct(HANDLE, 'Reversed Card');
         const line = (qty: number) => ({
           card_handle: HANDLE,
           card_name: 'Reversed Card',

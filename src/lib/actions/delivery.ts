@@ -22,6 +22,7 @@ import {
 } from '@/lib/data/schemas';
 import { friendlyError, isAuthError, type ErrorRule } from '@/lib/errors';
 import { DELIVERY_RULES, DELIVERY_FALLBACK } from '@/lib/delivery-errors';
+import { normalizePhone } from '@/lib/profile-validation';
 
 export type DeliveryOrderItemView = {
   pullId: string;
@@ -41,7 +42,18 @@ export type DeliveryOrderView = {
   trackingNumber: string | null;
   createdAt: string;
   items: DeliveryOrderItemView[];
-  address: { name: string; city: string; countryCode: string };
+  /** The shipping snapshot taken when the order was placed — NOT a live read of
+   *  the address book, so editing or removing the book entry never rewrites it. */
+  address: {
+    name: string;
+    line1: string;
+    line2: string | null;
+    city: string;
+    province: string | null;
+    postalCode: string;
+    countryCode: string;
+    phone: string | null;
+  };
   // Operator-uploaded proof-of-delivery photo URLs (empty when none). Backend
   // key is `proof_images`; renamed here to match the camelCase view convention.
   proofImages: string[];
@@ -60,7 +72,12 @@ export type EditAddressResult =
 
 export type AddressView = {
   id: string;
+  /** `firstName lastName`, for display. */
   name: string;
+  // Kept SPLIT as well as joined: the edit form has to seed the two inputs back,
+  // and re-splitting `name` on whitespace mangles every two-word given name.
+  firstName: string;
+  lastName: string;
   line1: string;
   line2: string | null;
   city: string;
@@ -76,7 +93,16 @@ interface BackendDeliveryOrder {
   tracking_number: string | null;
   proof_images?: string[] | null;
   created_at: string;
-  address: { name: string; city: string; country_code: string };
+  address: {
+    name: string;
+    address_1?: string | null;
+    address_2?: string | null;
+    city: string;
+    province?: string | null;
+    postal_code?: string | null;
+    country_code: string;
+    phone?: string | null;
+  };
   items: {
     pull_id: string;
     card: {
@@ -113,8 +139,13 @@ export async function getDeliveryOrders(): Promise<DeliveryOrdersResult> {
       createdAt: o.created_at,
       address: {
         name: o.address?.name ?? '',
+        line1: o.address?.address_1 ?? '',
+        line2: o.address?.address_2 ?? null,
         city: o.address?.city ?? '',
+        province: o.address?.province ?? null,
+        postalCode: o.address?.postal_code ?? '',
         countryCode: o.address?.country_code ?? '',
+        phone: o.address?.phone ?? null,
       },
       proofImages: o.proof_images ?? [],
       items: (o.items ?? []).map((it) => ({
@@ -287,6 +318,8 @@ export async function getAddresses(): Promise<AddressView[]> {
     (a: HttpTypes.StoreCustomerAddress) => ({
       id: a.id,
       name: [a.first_name, a.last_name].filter(Boolean).join(' '),
+      firstName: a.first_name ?? '',
+      lastName: a.last_name ?? '',
       line1: a.address_1 ?? '',
       line2: a.address_2 ?? null,
       city: a.city ?? '',
@@ -313,6 +346,61 @@ export type AddAddressResult =
   | { ok: true; addressId: string }
   | { ok: false; error: string; needsAuth?: boolean };
 
+export type EditAddressBookResult =
+  { ok: true } | { ok: false; error: string; needsAuth?: boolean };
+
+// ONE snake_case mapping for both create and update.
+//
+// The optional fields send an explicit `null`, NOT `undefined` — this is the
+// load-bearing bit, not a style choice. `JSON.stringify` drops an `undefined`
+// value entirely, and the update route is a PARTIAL write: a key that never
+// reaches the wire leaves the stored value untouched. So `|| undefined` meant
+// an operator clearing their phone number got a 200, an optimistic row showing
+// it blank, and the old number still on the server after a reload. `null` is
+// what "no value" has to look like on the update path, and Medusa's Create and
+// Update schemas both type these `string | null`, so create is unaffected.
+const addressBody = (input: AddAddressInput) => ({
+  first_name: input.firstName,
+  last_name: input.lastName,
+  address_1: input.address1,
+  address_2: input.address2 || null,
+  city: input.city,
+  province: input.province || null,
+  postal_code: input.postalCode,
+  country_code: input.countryCode,
+  phone: input.phone || null,
+});
+
+// The four fields a parcel cannot ship without. Same gate on add and edit —
+// an edit that blanks the street is as unshippable as an add that omits it.
+const missingRequired = (input: AddAddressInput): boolean =>
+  !input.address1?.trim() ||
+  !input.city?.trim() ||
+  !input.postalCode?.trim() ||
+  !input.countryCode?.trim();
+
+// The address-book phone is the actual SOURCE of a delivery order's
+// ship_phone — the backend's profile-phone fallback (request-delivery.ts)
+// only fires when it's BLANK, so a garbage address phone here would SUPPRESS
+// that validated fallback. Same rule, same copy, as the profile phone
+// (customer.ts): empty stays optional (→ null via addressBody below), a
+// non-empty value must normalize to E.164 or the action rejects. Shared by
+// both addAddress and updateAddress so the rule can't drift between them.
+function validateAddressPhone(
+  phone: string | undefined,
+): { ok: true; phone: string | undefined } | { ok: false; error: string } {
+  const trimmed = phone?.trim();
+  if (!trimmed) return { ok: true, phone: undefined };
+  const normalized = normalizePhone(trimmed);
+  if (!normalized) {
+    return {
+      ok: false,
+      error: 'Please enter a valid phone number for the selected country.',
+    };
+  }
+  return { ok: true, phone: normalized };
+}
+
 // Create an address in the Medusa customer address book via the built-in SDK.
 // Returns the new address id for immediate selection in the delivery flow.
 export async function addAddress(
@@ -321,27 +409,14 @@ export async function addAddress(
   const token = await getAuthToken();
   if (!token)
     return { ok: false, error: 'Please log in first.', needsAuth: true };
-  if (
-    !input.address1?.trim() ||
-    !input.city?.trim() ||
-    !input.postalCode?.trim() ||
-    !input.countryCode?.trim()
-  ) {
+  if (missingRequired(input)) {
     return { ok: false, error: 'Fill in the required address fields.' };
   }
+  const phoneCheck = validateAddressPhone(input.phone);
+  if (!phoneCheck.ok) return phoneCheck;
   try {
     const { customer } = await sdk.store.customer.createAddress(
-      {
-        first_name: input.firstName,
-        last_name: input.lastName,
-        address_1: input.address1,
-        address_2: input.address2 || undefined,
-        city: input.city,
-        province: input.province || undefined,
-        postal_code: input.postalCode,
-        country_code: input.countryCode,
-        phone: input.phone || undefined,
-      },
+      addressBody({ ...input, phone: phoneCheck.phone }),
       {},
       { Authorization: `Bearer ${token}` },
     );
@@ -353,6 +428,69 @@ export async function addAddress(
     return { ok: true, addressId: created.id };
   } catch (error) {
     logger.error('[delivery] add address failed:', error);
+    return {
+      ok: false,
+      error: friendlyError(error, DELIVERY_RULES, DELIVERY_FALLBACK),
+      needsAuth: isAuthError(error),
+    };
+  }
+}
+
+// Edit a saved address in place. NOTE: a delivery order snapshots the address
+// at request time (ship_* columns on delivery_order), so this never re-routes a
+// parcel that is already on its way — changing where an existing order ships is
+// `editDeliveryAddress` above, which re-points it at a book entry.
+export async function updateAddress(
+  addressId: string,
+  input: AddAddressInput,
+): Promise<EditAddressBookResult> {
+  if (typeof addressId !== 'string' || addressId.trim() === '') {
+    return { ok: false, error: 'Missing address.' };
+  }
+  const token = await getAuthToken();
+  if (!token)
+    return { ok: false, error: 'Please log in first.', needsAuth: true };
+  if (missingRequired(input)) {
+    return { ok: false, error: 'Fill in the required address fields.' };
+  }
+  const phoneCheck = validateAddressPhone(input.phone);
+  if (!phoneCheck.ok) return phoneCheck;
+  try {
+    await sdk.store.customer.updateAddress(
+      addressId,
+      addressBody({ ...input, phone: phoneCheck.phone }),
+      {},
+      { Authorization: `Bearer ${token}` },
+    );
+    return { ok: true };
+  } catch (error) {
+    logger.error(`[delivery] update address '${addressId}' failed:`, error);
+    return {
+      ok: false,
+      error: friendlyError(error, DELIVERY_RULES, DELIVERY_FALLBACK),
+      needsAuth: isAuthError(error),
+    };
+  }
+}
+
+// Remove an address from the book. Safe against in-flight orders for the same
+// reason as `updateAddress`: the order carries its own snapshot.
+export async function deleteAddress(
+  addressId: string,
+): Promise<EditAddressBookResult> {
+  if (typeof addressId !== 'string' || addressId.trim() === '') {
+    return { ok: false, error: 'Missing address.' };
+  }
+  const token = await getAuthToken();
+  if (!token)
+    return { ok: false, error: 'Please log in first.', needsAuth: true };
+  try {
+    await sdk.store.customer.deleteAddress(addressId, {
+      Authorization: `Bearer ${token}`,
+    });
+    return { ok: true };
+  } catch (error) {
+    logger.error(`[delivery] delete address '${addressId}' failed:`, error);
     return {
       ok: false,
       error: friendlyError(error, DELIVERY_RULES, DELIVERY_FALLBACK),

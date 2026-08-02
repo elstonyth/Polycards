@@ -13,6 +13,7 @@ import {
   type AddressView,
   type AddAddressInput,
 } from '@/lib/actions/delivery';
+import { addressViewFromInput } from '@/lib/address-view';
 import { cn } from '@/lib/utils';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 
@@ -151,18 +152,7 @@ function EditAddressModal({
       setError(res.error);
       return;
     }
-    const view: AddressView = {
-      id: res.addressId,
-      name: `${form.firstName} ${form.lastName}`.trim(),
-      line1: form.address1,
-      line2: form.address2 ?? null,
-      city: form.city,
-      province: form.province ?? null,
-      postalCode: form.postalCode,
-      countryCode: form.countryCode,
-      phone: form.phone ?? null,
-    };
-    onAddAddress(view);
+    onAddAddress(addressViewFromInput(res.addressId, form));
     setSelectedAddr(res.addressId);
     setAdding(false);
   }
@@ -180,13 +170,25 @@ function EditAddressModal({
       setError(res.error);
       return;
     }
-    // Reflect the new destination in the row from the selected address book entry.
+    // Reflect the new destination in the row from the selected address book
+    // entry. The book entry and the order's snapshot carry the same fields, so
+    // this is a straight swap — falling back to the old snapshot only if the
+    // list somehow no longer holds the id the backend just accepted.
     const chosen = addresses.find((a) => a.id === selectedAddr);
-    onSaved({
-      name: chosen?.name ?? order.address.name,
-      city: chosen?.city ?? order.address.city,
-      countryCode: chosen?.countryCode ?? order.address.countryCode,
-    });
+    onSaved(
+      chosen
+        ? {
+            name: chosen.name,
+            line1: chosen.line1,
+            line2: chosen.line2,
+            city: chosen.city,
+            province: chosen.province,
+            postalCode: chosen.postalCode,
+            countryCode: chosen.countryCode,
+            phone: chosen.phone,
+          }
+        : order.address,
+    );
   }
 
   return (
@@ -465,6 +467,157 @@ function CancelOrderModal({
   );
 }
 
+// Full contents of one order. The table row can only ever show the first card
+// and a "+N more" — an 81-card delivery is unreadable there — so tapping the
+// cards cell opens this: every card, and the shipping snapshot the parcel is
+// actually going out with (NOT a live read of the address book, which is why
+// editing that book entry later doesn't change what this shows).
+function OrderDetailModal({
+  order,
+  onClose,
+}: {
+  order: DeliveryOrderView;
+  onClose: () => void;
+}) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  useModalA11y(panelRef, true, onClose);
+  const shortId = order.id.slice(-6);
+  const photos = order.proofImages.filter(isSafeMediaUrl);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Order #${shortId} details`}
+        tabIndex={-1}
+        className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-white/10 bg-neutral-900 p-5 outline-none"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="font-heading text-lg font-bold text-white">
+              Order #{shortId}
+            </h2>
+            <p className="mt-1 text-[13px] text-white/55">
+              Requested {orderDate(order.createdAt)}
+            </p>
+          </div>
+          <Badge tone={STATUS_TONE[order.status] ?? 'neutral'}>
+            {STATUS_LABEL[order.status] ?? order.status}
+          </Badge>
+        </div>
+
+        <p className="mt-5 text-[11px] uppercase tracking-wide text-white/40">
+          {order.items.length === 1 ? '1 card' : `${order.items.length} cards`}
+        </p>
+        <ul className="mt-2 flex flex-col gap-1.5">
+          {order.items.map((it) => (
+            <li
+              key={it.pullId}
+              className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-[13px] text-white/80"
+            >
+              {it.card?.image && (
+                <SlabImage
+                  src={it.card.image}
+                  slabSrc={it.card.slabImage}
+                  alt=""
+                  sizes="32px"
+                  className="w-8 shrink-0"
+                />
+              )}
+              {/* Deep-link to the card page when the card still resolves; a
+                  null card (deleted from the catalog) still lists its row so
+                  the count on screen matches the count being shipped. */}
+              {it.card ? (
+                <Link
+                  href={`/card/${it.card.handle}`}
+                  className="min-w-0 flex-1 truncate hover:text-white"
+                >
+                  {it.card.name}
+                </Link>
+              ) : (
+                <span className="min-w-0 flex-1 truncate text-white/50">
+                  Card unavailable
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+
+        <p className="mt-5 text-[11px] uppercase tracking-wide text-white/40">
+          Shipping to
+        </p>
+        <div className="mt-2 rounded-xl border border-white/10 bg-white/[0.03] p-3 text-[13px] text-white/80">
+          <p className="font-semibold text-white">
+            {order.address.name || '—'}
+          </p>
+          {order.address.line1 && (
+            <p className="mt-0.5">
+              {order.address.line1}
+              {order.address.line2 ? `, ${order.address.line2}` : ''}
+            </p>
+          )}
+          <p>
+            {order.address.city}
+            {order.address.province ? `, ${order.address.province}` : ''}{' '}
+            {order.address.postalCode} {order.address.countryCode.toUpperCase()}
+          </p>
+          {order.address.phone && (
+            <p className="text-white/50">{order.address.phone}</p>
+          )}
+        </div>
+
+        <p className="mt-5 text-[11px] uppercase tracking-wide text-white/40">
+          Tracking
+        </p>
+        <p className="mt-2 text-[13px] text-white/80">
+          {order.trackingNumber ? (
+            <span className="font-mono">{order.trackingNumber}</span>
+          ) : (
+            <span className="text-white/55">
+              Not shipped yet — a tracking number appears here once it leaves
+              the vault.
+            </span>
+          )}
+        </p>
+
+        {photos.length > 0 && (
+          <>
+            <p className="mt-5 text-[11px] uppercase tracking-wide text-white/40">
+              Delivery photos
+            </p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {photos.map((url) => (
+                <a
+                  key={url}
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element -- arbitrary operator-uploaded proof URL (backend static / CDN), not an allowlisted next/image domain */}
+                  <img
+                    src={url}
+                    alt="Delivery proof"
+                    className="h-16 w-16 rounded-lg border border-white/10 object-cover transition-opacity hover:opacity-80"
+                  />
+                </a>
+              ))}
+            </div>
+          </>
+        )}
+
+        <div className="mt-6 flex justify-end">
+          <Pill variant="secondary" onClick={onClose} className="px-5">
+            Close
+          </Pill>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function OrdersClient({
   orders: initialOrders,
   addresses,
@@ -478,6 +631,12 @@ export default function OrdersClient({
   const [addrList, setAddrList] = useState<AddressView[]>(addresses);
   const [editing, setEditing] = useState<DeliveryOrderView | null>(null);
   const [canceling, setCanceling] = useState<DeliveryOrderView | null>(null);
+  const [viewingId, setViewingId] = useState<string | null>(null);
+  // Resolve by id, not by holding the object: an address edit or a cancel
+  // replaces the row in `orders`, and a held snapshot would keep showing the
+  // pre-edit destination behind the modal that just changed it.
+  const viewing = orders.find((o) => o.id === viewingId) ?? null;
+  const setViewing = (o: DeliveryOrderView) => setViewingId(o.id);
   // Orders canceled this session — their rows show a "back in your vault" note.
   const [canceledIds, setCanceledIds] = useState<ReadonlySet<string>>(
     new Set(),
@@ -510,7 +669,18 @@ export default function OrdersClient({
                   </span>
                 </td>
                 <td className="whitespace-nowrap px-4 py-3 text-white/80">
-                  <DeliveryItems items={o.items} />
+                  {/* The cards cell IS the affordance — it already shows the
+                      first card and "+N more", so tapping it to see the rest is
+                      what a customer reaches for. A real <button> so it's
+                      keyboard-reachable, not a click handler on the <td>. */}
+                  <button
+                    type="button"
+                    onClick={() => setViewing(o)}
+                    aria-label={`View order #${o.id.slice(-6)} details`}
+                    className="-mx-2 rounded-lg px-2 py-1 text-left transition-colors hover:bg-white/[0.04] hover:text-white"
+                  >
+                    <DeliveryItems items={o.items} />
+                  </button>
                 </td>
                 <td className="whitespace-nowrap px-4 py-3 text-white/80">
                   {orderDate(o.createdAt)}
@@ -611,6 +781,10 @@ export default function OrdersClient({
             setEditing(null);
           }}
         />
+      )}
+
+      {viewing && (
+        <OrderDetailModal order={viewing} onClose={() => setViewingId(null)} />
       )}
 
       {canceling && (

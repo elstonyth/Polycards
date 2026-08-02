@@ -44,12 +44,13 @@ const QUICK_ACCESS: { label: string; href: string; icon: LucideIcon }[] = [
   { label: 'Settings', href: '/settings', icon: Settings },
 ];
 
-const ABOUT_LINKS: { label: string; href: string }[] = [
-  { label: 'How it works', href: '/how-it-works' },
-  { label: 'Fairness', href: '/fairness' },
-  { label: 'About', href: '/about' },
-  { label: 'Contact', href: '/contact' },
-];
+// The "About & help" card (How it works / Fairness / About / Contact) was
+// removed 2026-07-31: the site footer sits ~150px below it on this same page
+// and carried the identical four links, so /me showed them twice in one scroll.
+// The footer's copy of them went in the same change — the trust routes are now
+// reached by URL and from search (they stay in ROUTES/sitemap in lib/site.ts),
+// plus the in-content links on the home page, /about and /contact. `Support` in
+// QUICK_ACCESS above still covers /contact.
 
 export default async function MePage() {
   // Layout guard guarantees a customer here.
@@ -330,22 +331,6 @@ export default async function MePage() {
 
         {/* Frames live in the Edit Profile modal (tap the avatar or name) —
             Show's Me has no frames row. */}
-
-        {/* About & help */}
-        <section className="rounded-2xl border border-white/10 bg-neutral-900">
-          {ABOUT_LINKS.map((link, i) => (
-            <Link
-              key={link.href}
-              href={link.href}
-              className={`flex h-12 items-center justify-between px-5 text-sm font-medium text-neutral-300 transition-colors hover:text-white ${
-                i > 0 ? 'border-t border-white/5' : ''
-              }`}
-            >
-              {link.label}
-              <ChevronRight className="h-4 w-4 text-neutral-600" aria-hidden />
-            </Link>
-          ))}
-        </section>
 
         <LogoutButton />
       </div>

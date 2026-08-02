@@ -24,29 +24,24 @@ export function SlotStatusBar({
     // min-content width and pushes the plate past the viewport edge on phones
     // (spec decision #28). The marquee then clips inside via overflow-hidden.
     <div className="flex min-w-0 flex-col gap-1.5 rounded-xl border border-white/10 bg-gradient-to-b from-white/[0.06] to-white/[0.02] px-3 py-1.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-4 sm:py-2">
-      <div className="flex items-center gap-4 sm:gap-5">
-        {balance !== null && (
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-white/60">
-              Credit
-            </p>
-            <Meter
-              value={balance}
-              direction={null}
-              reduced={reduced}
-              className="font-heading text-base font-bold sm:text-lg"
-            />
-          </div>
-        )}
+      {/* Credit only. The "Wins" tally next to it counted `recent.length` — the
+          length of the recent-pulls marquee, i.e. a display window, not a
+          lifetime or session win count. It read as a score and meant nothing;
+          removed rather than redefined (operator call). The marquee below still
+          shows what was actually pulled. */}
+      {balance !== null && (
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-widest text-white/60">
-            Wins
+            Credit
           </p>
-          <p className="font-heading text-base font-bold tabular-nums text-white sm:text-lg">
-            {recent.length}
-          </p>
+          <Meter
+            value={balance}
+            direction={null}
+            reduced={reduced}
+            className="font-heading text-base font-bold sm:text-lg"
+          />
         </div>
-      </div>
+      )}
       {/* RECENT WINS marquee — keyframe `sp-scroll-x` lives in globals.css;
           frozen under reduced motion. */}
       {/* Edge fade (style mask): the track is clipped by overflow-hidden, so

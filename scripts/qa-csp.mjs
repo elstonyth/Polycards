@@ -56,6 +56,46 @@ for (const route of ROUTES) {
   if (!resp || !resp.ok()) {
     await fail(`${route} — bad response: ${resp ? resp.status() : 'none'}`);
   }
+  // A missing header would let the scan pass "clean" simply because no policy
+  // was ever served to violate — the same never-ran-≠-clean trap qa-a11y.mjs
+  // guards against for the oklch-abort case.
+  const headers = resp.headers();
+  const cspHeaderName = headers['content-security-policy']
+    ? 'content-security-policy'
+    : headers['content-security-policy-report-only']
+      ? 'content-security-policy-report-only'
+      : null;
+  if (!cspHeaderName) {
+    await fail(
+      `no CSP header on ${route} — the gate cannot attest a policy it never saw`,
+    );
+  }
+  // Presence alone would let a policy as loose as "script-src *" pass. A full
+  // diff against buildCsp() is deliberately out of scope (the policy is
+  // env-shaped — backend/media origins vary per deploy — and the
+  // securitypolicyviolation listener above is the primary signal for actual
+  // breakage); this only guards the header having SOME real restriction on it.
+  const cspValue = headers[cspHeaderName];
+  if (!/(?:^|;)\s*(default-src|script-src)\b/i.test(cspValue ?? '')) {
+    await fail(
+      `CSP on ${route} has neither default-src nor script-src — looks ` +
+        `unrestricted: ${cspHeaderName}: ${cspValue}`,
+    );
+  }
+  // Mirrors csp.ts's cspEnforced(): if THIS gate's own environment says CSP
+  // should be enforcing, the served header must be the enforcing name, not
+  // report-only — otherwise a silent downgrade to report-only would still
+  // scan green.
+  const enforceFlag = process.env.CSP_ENFORCE?.trim().toLowerCase();
+  if (
+    (enforceFlag === 'true' || enforceFlag === '1') &&
+    cspHeaderName !== 'content-security-policy'
+  ) {
+    await fail(
+      `CSP_ENFORCE is set in this gate's environment but ${route} served ` +
+        `${cspHeaderName} (report-only), not the enforcing header`,
+    );
+  }
   await page.waitForTimeout(2000);
   const loadMs = Date.now() - startedAt;
   const routeId = route === '/' ? 'home' : route.slice(1).replaceAll('/', '_');

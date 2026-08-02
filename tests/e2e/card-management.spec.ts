@@ -4,8 +4,10 @@
 // "Top Hits" is driven by the card's market_value via GET /store/packs/{slug} —
 // so a card FMV edit must surface there.
 //
-// Requires one eligible (un-registered) inventory product. Mint it once with:
-//   cd backend/packages/api && npx medusa exec ./src/scripts/create-test-product.ts
+// Requires one eligible (un-registered) inventory product with handle
+// 'pw-test-card'. The nightly's seed:e2e (seed-e2e-fixtures.ts) mints it; run it
+// locally the same way:
+//   cd backend/packages/api && corepack yarn seed:e2e
 import { test, expect } from '@playwright/test';
 import { BASE } from './helpers/constants';
 import {
@@ -30,8 +32,9 @@ const BIG_FMV = 99_999;
 
 let admin: string;
 // The eligibility re-check below only means something after the lifecycle test
-// actually ran (it verifies that test's cleanup). On a fresh DB — CI — the
-// test product was never minted, the lifecycle test skips, and so must it.
+// actually ran (it verifies that test's cleanup). The product comes from
+// seed:e2e; if it's absent both tests skip — in CI that skip means the seed
+// didn't run and is a failure signal, not the expected state.
 let lifecycleRan = false;
 
 test.beforeAll(async () => {
@@ -44,12 +47,15 @@ test.beforeAll(async () => {
 test('card lifecycle: register from inventory → adjust FMV → reflects on storefront', async ({
   page,
 }) => {
-  // Guard: skip clearly if the eligible product was never minted.
+  // Hard-fail rather than skip: seed:e2e provisions this product in the same
+  // CI job, so its absence means the seed regressed, not that the fixture is
+  // legitimately missing — a skip here is exactly what kept this spec dark
+  // for six weeks.
   const elig = await eligibleProducts(admin);
-  test.skip(
-    !elig.products.some((p) => p.handle === CARD_HANDLE),
-    `No eligible product '${CARD_HANDLE}' — run create-test-product.ts first.`,
-  );
+  expect(
+    elig.products.some((p) => p.handle === CARD_HANDLE),
+    `Eligible product '${CARD_HANDLE}' missing — seed:e2e (seed-e2e-fixtures.ts) regressed or was not run`,
+  ).toBeTruthy();
   lifecycleRan = true;
 
   const originalPool = (await getOdds(admin, POOL_PACK)).odds.map(

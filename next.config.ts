@@ -1,6 +1,6 @@
 import type { NextConfig } from 'next';
 import { withSentryConfig } from '@sentry/nextjs';
-import { buildCsp, cspEnforced } from './src/lib/security/csp';
+import { buildCsp, cspEnforced, mediaHost } from './src/lib/security/csp';
 
 // next/image refuses remote hosts unless allowlisted. Card/product art is
 // served by the Medusa backend (POST /admin/media stores it; see
@@ -84,19 +84,14 @@ const isLocalHostname = (h: string): boolean => {
 const dangerouslyAllowLocalIP = isLocalHostname(backend.hostname);
 
 // Dedicated S3/R2/CDN media host. It is the bucket's own public host, so the
-// whole host is media — scope to its served prefix if you use one. Defaults to
-// the project's DO Spaces CDN so a prod-cloned local DB renders out of the box;
-// NEXT_PUBLIC_MEDIA_HOST still overrides per environment.
-const mediaHost =
-  process.env.NEXT_PUBLIC_MEDIA_HOST ??
-  'pokenic-media.sgp1.cdn.digitaloceanspaces.com';
-if (mediaHost) {
-  remotePatterns.push({
-    protocol: 'https',
-    hostname: mediaHost,
-    pathname: '/**',
-  });
-}
+// whole host is media — scope to its served prefix if you use one. Resolved in
+// csp.ts (single source, shared with img-src/connect-src) so the optimizer
+// allowlist and the CSP can never disagree about it.
+remotePatterns.push({
+  protocol: 'https',
+  hostname: mediaHost(),
+  pathname: '/**',
+});
 
 const securityHeaders = [
   // HSTS: 2 years, include subdomains, preload-eligible.

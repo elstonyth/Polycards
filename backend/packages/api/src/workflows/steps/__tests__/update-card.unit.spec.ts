@@ -196,3 +196,116 @@ describe('updateCardInvoke slab bake', () => {
     expect(deleteSlabFile).toHaveBeenCalledWith(expect.anything(), 'old-key');
   });
 });
+
+describe('updateCardInvoke rollback when the product mirror fails', () => {
+  beforeEach(() => {
+    jest.mocked(bakeSlabImage).mockReset().mockResolvedValue(null);
+    jest.mocked(deleteSlabFile).mockReset().mockResolvedValue(undefined);
+  });
+
+  // Input that GENUINELY differs from CARD (25 / 'Test Card') so "restored the
+  // old value" is distinguishable from "forward wrote the same value".
+  const CHANGED = { ...INPUT, name: 'Changed Name', market_value: 999 };
+
+  it('mirror throws → rethrows and restores the card to the snapshot values', async () => {
+    jest.mocked(updateProductsWorkflow).mockReturnValueOnce({
+      run: jest.fn().mockRejectedValue(new Error('mirror boom')),
+    } as unknown as ReturnType<typeof updateProductsWorkflow>);
+    const packs = packsStub();
+
+    await expect(
+      updateCardInvoke(CHANGED, { container: buildContainer(packs) }),
+    ).rejects.toThrow('mirror boom');
+
+    // Called twice: forward (999 / 'Changed Name'), then restore (25 / 'Test Card').
+    expect(packs.updateCards).toHaveBeenCalledTimes(2);
+    expect(packs.updateCards).toHaveBeenLastCalledWith([
+      expect.objectContaining({
+        id: 'card_1',
+        name: 'Test Card',
+        market_value: 25,
+        slab_image_key: 'old-key',
+      }),
+    ]);
+  });
+
+  it('mirror throws → reclaims the new slab file, never the old one', async () => {
+    jest
+      .mocked(bakeSlabImage)
+      .mockResolvedValue({ url: '/static/slab-new.webp', key: 'new-key' });
+    jest.mocked(updateProductsWorkflow).mockReturnValueOnce({
+      run: jest.fn().mockRejectedValue(new Error('mirror boom')),
+    } as unknown as ReturnType<typeof updateProductsWorkflow>);
+    const packs = packsStub();
+
+    await expect(
+      updateCardInvoke(CHANGED, { container: buildContainer(packs) }),
+    ).rejects.toThrow('mirror boom');
+
+    expect(deleteSlabFile).toHaveBeenCalledWith(expect.anything(), 'new-key');
+    expect(deleteSlabFile).not.toHaveBeenCalledWith(
+      expect.anything(),
+      'old-key',
+    );
+  });
+
+  it('mirror succeeds → no restore (updateCards once, only the old slab deleted)', async () => {
+    jest
+      .mocked(bakeSlabImage)
+      .mockResolvedValue({ url: '/static/slab-new.webp', key: 'new-key' });
+    const packs = packsStub();
+
+    await updateCardInvoke(CHANGED, { container: buildContainer(packs) });
+
+    expect(packs.updateCards).toHaveBeenCalledTimes(1);
+    expect(deleteSlabFile).toHaveBeenCalledWith(expect.anything(), 'old-key');
+    expect(deleteSlabFile).not.toHaveBeenCalledWith(
+      expect.anything(),
+      'new-key',
+    );
+  });
+
+  it('upsert branch throws (no product) → rethrows and restores the card', async () => {
+    jest.mocked(createProductsWorkflow).mockReturnValueOnce({
+      run: jest.fn().mockRejectedValue(new Error('upsert boom')),
+    } as unknown as ReturnType<typeof createProductsWorkflow>);
+    const packs = packsStub();
+
+    await expect(
+      updateCardInvoke(CHANGED, { container: buildContainer(packs, []) }),
+    ).rejects.toThrow('upsert boom');
+
+    expect(packs.updateCards).toHaveBeenCalledTimes(2);
+    expect(packs.updateCards).toHaveBeenLastCalledWith([
+      expect.objectContaining({
+        id: 'card_1',
+        name: 'Test Card',
+        market_value: 25,
+      }),
+    ]);
+  });
+
+  it('mirror throws on an unchanged re-bake → does NOT delete the reused key, still restores', async () => {
+    // Content-hash filenames: an unchanged photo/label re-bake yields the SAME
+    // key as the card already has. Reclaiming it would destroy the card's only
+    // composite, then restore the card pointing at a deleted file.
+    jest
+      .mocked(bakeSlabImage)
+      .mockResolvedValue({ url: 'u', key: CARD.slab_image_key });
+    jest.mocked(updateProductsWorkflow).mockReturnValueOnce({
+      run: jest.fn().mockRejectedValue(new Error('mirror boom')),
+    } as unknown as ReturnType<typeof updateProductsWorkflow>);
+    const packs = packsStub();
+
+    await expect(
+      updateCardInvoke(CHANGED, { container: buildContainer(packs) }),
+    ).rejects.toThrow('mirror boom');
+
+    expect(deleteSlabFile).not.toHaveBeenCalledWith(
+      expect.anything(),
+      CARD.slab_image_key,
+    );
+    // The card restore still ran (forward + restore = 2 calls).
+    expect(packs.updateCards).toHaveBeenCalledTimes(2);
+  });
+});

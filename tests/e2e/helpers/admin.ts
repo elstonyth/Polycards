@@ -129,18 +129,37 @@ export async function forceCardTo100ViaUI(
   const rows = page.locator('tbody tr');
   await rows.first().waitFor({ timeout: 20_000 });
   const count = await rows.count();
+  let matched = 0;
   for (let i = 0; i < count; i++) {
     const row = rows.nth(i);
-    const name = ((await row.locator('td').first().innerText()) ?? '').trim();
+    // Cell 1, not cell 0 — cell 0 is the bulk-select checkbox. This read used to
+    // be `.first()`, which after that column landed returned '' for every row;
+    // `targetName.includes('')` is true, so EVERY row became the target and the
+    // helper locked the whole pool at 100% each. Hence the empty-name guard
+    // below: an unreadable name must fail loudly, never match everything.
+    const name = ((await row.locator('td').nth(1).innerText()) ?? '').trim();
     const sw = row.getByRole('switch');
     const checked = await sw.isChecked();
-    const isTarget = name.includes(targetName) || targetName.includes(name);
+    const isTarget =
+      name !== '' && (name.includes(targetName) || targetName.includes(name));
     if (isTarget) {
+      matched += 1;
       if (!checked) await sw.click();
-      await row.getByRole('spinbutton').fill('100');
+      // Scope to SET 1: locking the row turns Set 2 and Set 3 into number
+      // inputs too, so a bare getByRole('spinbutton') is a strict-mode
+      // violation. Label is `Set N Win rate (%): <card name>` (i18n
+      // packs.editor.set + .winRate) — match the prefix, not the whole string.
+      await row.getByRole('spinbutton', { name: /^Set 1 / }).fill('100');
     } else if (checked) {
       await sw.click();
     }
+  }
+  if (matched !== 1) {
+    throw new Error(
+      `forceCardTo100ViaUI: expected exactly 1 row matching '${targetName}' in ` +
+        `pack '${slug}', matched ${matched} of ${count}. The odds table's column ` +
+        `order or aria-labels probably changed.`,
+    );
   }
   await page.getByRole('button', { name: 'Save win rates' }).click();
   await expect(page.getByText('Win rates saved.')).toBeVisible({

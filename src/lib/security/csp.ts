@@ -37,14 +37,30 @@ export function cspEnforced(): boolean {
   return flag === 'true' || flag === '1';
 }
 
+/**
+ * Dedicated media host (S3/R2/CDN), resolved in ONE place for the CSP AND the
+ * image optimizer (next.config.ts imports this) so the two can never disagree
+ * — an allowlisted-but-CSP-blocked host would break every media image under
+ * an enforced policy. Defaults to the project's DO Spaces CDN so a
+ * prod-cloned local DB renders out of the box; NEXT_PUBLIC_MEDIA_HOST
+ * overrides per environment. A function (not a const) so tests can vary the
+ * env at runtime.
+ */
+export function mediaHost(): string {
+  // Trim + treat blank as unset (same philosophy as cspEnforced above): a
+  // whitespace-only dashboard value must not produce an empty hostname in the
+  // CSP or remotePatterns.
+  const fromEnv = process.env.NEXT_PUBLIC_MEDIA_HOST?.trim();
+  return fromEnv || 'polycards-media.sgp1.cdn.digitaloceanspaces.com';
+}
+
 export function buildCsp(): string {
   // Default matches lib/medusa.ts (SDK) and next.config.ts (image optimizer): an
   // unset env var means local dev on :9000, so the policy must allow it too.
   const backend = originOf(
     process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000',
   );
-  const mediaHost = process.env.NEXT_PUBLIC_MEDIA_HOST;
-  const media = mediaHost ? `https://${mediaHost}` : null;
+  const media = `https://${mediaHost()}`;
   // Sentry ingest (browser → SDK transport). Covers *.ingest.sentry.io / *.sentry.io.
   const sentry = 'https://*.sentry.io https://*.ingest.sentry.io';
 

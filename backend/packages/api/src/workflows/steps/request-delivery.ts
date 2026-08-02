@@ -117,6 +117,18 @@ export const requestDeliveryStep = createStep(
         "That address is missing required shipping fields.",
       );
     }
+    // The storefront's inline address form carries no phone field, so most
+    // addresses snapshot with ship_phone null and the admin delivery view
+    // showed "—" even when the customer's profile had a phone. Fall back to
+    // the profile phone (required at registration since 2026-08-01) so the
+    // order always carries a reachable number.
+    if (!snapshot.ship_phone) {
+      const [customer] = await customerModule.listCustomers(
+        { id: input.customer_id },
+        { take: 1 },
+      );
+      snapshot.ship_phone = customer?.phone ?? null;
+    }
 
     // 3. Create the order + items + pull flip, plus the paired OD ledger row,
     //    all in ONE atomic transaction (see createDeliveryOrderWithLedger).

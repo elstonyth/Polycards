@@ -591,11 +591,21 @@ export const DeliveryOrderSchema = z.looseObject({
   ]),
   created_at: z.string(),
   tracking_number: z.string().nullable().optional(),
+  // The backend has always sent the full shipping snapshot (delivery-view.ts);
+  // only name/city/country_code were declared, so the rest was silently dropped
+  // by the view mapping. The street lines are OPTIONAL here on purpose: an old
+  // backend that omits them must still parse, or parseList drops the whole row
+  // and the customer's order vanishes from /orders.
   address: z
     .looseObject({
       name: z.string(),
+      address_1: z.string().nullable().optional(),
+      address_2: z.string().nullable().optional(),
       city: z.string(),
+      province: z.string().nullable().optional(),
+      postal_code: z.string().nullable().optional(),
       country_code: z.string(),
+      phone: z.string().nullable().optional(),
     })
     .optional(),
   items: z

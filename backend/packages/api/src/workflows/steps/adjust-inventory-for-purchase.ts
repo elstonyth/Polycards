@@ -25,7 +25,16 @@ export const adjustInventoryForPurchaseStep = createStep(
     for (const line of input.lines) {
       try {
         const target = await findCardInventoryTarget(container, line.card_handle);
-        if (!target) continue; // untracked — nothing to raise
+        if (!target) {
+          // Non-fatal: the product exists (the route's existence gate already
+          // rejected anything that doesn't) but carries no tracked inventory
+          // item, so there is nothing to raise — the stock_movement audit row
+          // still recorded the receipt.
+          logger.warn(
+            `adjust-inventory-for-purchase: no inventory target for '${line.card_handle}' — counter not raised (untracked product).`,
+          );
+          continue;
+        }
         await inventoryModule.adjustInventory(
           target.inventoryItemId,
           target.locationId,
