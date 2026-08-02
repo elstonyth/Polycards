@@ -264,6 +264,16 @@ export default defineMiddlewares({
       middlewares: [authenticate('customer', ['bearer']), deliveryWriteRateLimit],
     },
     {
+      // Phone-proof → reset-token exchange (Task 5). Public (pre-auth by
+      // nature — the caller has no session yet), so it shares the auth
+      // brute-force budget rather than deliveryWriteRateLimit (that one's for
+      // authed writes; this is a credential-issuing endpoint, same family as
+      // login/register below).
+      matcher: '/store/phone-verification/password-reset',
+      method: 'POST',
+      middlewares: [authRateLimit],
+    },
+    {
       // POLYCARD-BACK §4.2 login block: a disabled player is refused BEFORE the
       // core route mints a token (401). Customer login only — an admin/member
       // disable is a different lever. Unknown emails fall through untouched, so

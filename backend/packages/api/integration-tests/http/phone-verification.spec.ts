@@ -320,6 +320,154 @@ medusaIntegrationTestRunner({
         });
       });
 
+      // Forgot-password-by-phone (Task 5): proof exchanges for the SAME
+      // single-use 15m reset token the email flow issues
+      // (generateResetPasswordTokenWorkflow — see route.ts's header comment
+      // for the full workflow-contract verification). The returned token is
+      // a genuine core reset token, so it already goes through the existing
+      // '/auth/*/emailpass/update' single-use guard (reset-token-guard.ts) —
+      // the happy-path test's single successful update is that guard working
+      // WITH this route, not a gap in coverage.
+      describe("POST /store/phone-verification/password-reset", () => {
+        const passwordReset = (body: Record<string, unknown>) =>
+          unwrapResponse(
+            api.post("/store/phone-verification/password-reset", body, {
+              headers,
+            }),
+          );
+
+        it("runs the full loop: proof -> reset token -> emailpass update -> login with the new password", async () => {
+          const email = "pw-reset-happy@test.dev";
+          const phone = "+60107667800";
+          const newPassword = "phone-verify-new-pw-2";
+          await registerCustomerWithPhone(email, phone);
+
+          await start({ phone, purpose: "password-reset" });
+          const checked = await check({
+            phone,
+            purpose: "password-reset",
+            code: "000000",
+          });
+          expect(checked.status).toBe(200);
+
+          const res = await passwordReset({ token: checked.data.token });
+          expect(res.status).toBe(200);
+          expect(typeof res.data.token).toBe("string");
+          expect(res.data.maskedEmail).toMatch(/^.\*+@/);
+
+          const updated = await unwrapResponse(
+            api.post(
+              "/auth/customer/emailpass/update",
+              { password: newPassword },
+              { headers: { Authorization: `Bearer ${res.data.token}` } },
+            ),
+          );
+          expect(updated.status).toBe(200);
+          expect(updated.data).toMatchObject({ success: true });
+
+          const login = await api.post("/auth/customer/emailpass", {
+            email,
+            password: newPassword,
+          });
+          expect(login.status).toBe(200);
+          expect(login.data.token).toEqual(expect.any(String));
+        });
+
+        it("400s a signup-purpose proof", async () => {
+          const phone = "+60107667801";
+          await start({ phone, purpose: "signup" });
+          const checked = await check({
+            phone,
+            purpose: "signup",
+            code: "000000",
+          });
+          expect(checked.status).toBe(200);
+
+          const res = await passwordReset({ token: checked.data.token });
+          expect(res.status).toBe(400);
+          expect(res.data).toMatchObject({
+            message: "Phone verification required.",
+          });
+        });
+
+        it("404s a phone matching zero customers", async () => {
+          const phone = "+60107667802";
+          await start({ phone, purpose: "password-reset" });
+          const checked = await check({
+            phone,
+            purpose: "password-reset",
+            code: "000000",
+          });
+          expect(checked.status).toBe(200);
+
+          const res = await passwordReset({ token: checked.data.token });
+          expect(res.status).toBe(404);
+          expect(res.data).toMatchObject({
+            message: "No account uses this phone number.",
+          });
+        });
+
+        it("400s when two accounts share the phone, with the reset-by-email message", async () => {
+          const phone = "+60107667803";
+          await registerCustomerWithPhone("pw-reset-dup-a@test.dev", phone);
+          await registerCustomerWithPhone("pw-reset-dup-b@test.dev", phone);
+
+          await start({ phone, purpose: "password-reset" });
+          const checked = await check({
+            phone,
+            purpose: "password-reset",
+            code: "000000",
+          });
+          expect(checked.status).toBe(200);
+
+          const res = await passwordReset({ token: checked.data.token });
+          expect(res.status).toBe(400);
+          expect(res.data).toMatchObject({
+            message:
+              "More than one account uses this phone number. Reset by email instead.",
+          });
+        });
+
+        // Google-only account: has_account:true + a phone, but no `emailpass`
+        // provider identity — seeded directly via the AUTH module (rather
+        // than POST /auth/customer/emailpass/register, which would create
+        // one) so the row shape matches a real Google-only signup. A genuine
+        // `google` auth-provider strategy isn't registered in this test env
+        // (medusa-config.ts only adds it when GOOGLE_CLIENT_ID/SECRET/
+        // CALLBACK_URL are set, and .env.test sets none of them), so this
+        // seeds the provider_identity row directly instead of going through
+        // a live Google OAuth callback.
+        it("400s (NOT_ALLOWED) for an account with no emailpass identity", async () => {
+          const email = "pw-reset-google-only@test.dev";
+          const phone = "+60107667804";
+          const container = getContainer();
+          const customerService = container.resolve(Modules.CUSTOMER);
+          const authService = container.resolve(Modules.AUTH);
+          await customerService.createCustomers({
+            email,
+            phone,
+            has_account: true,
+          });
+          await authService.createAuthIdentities({
+            provider_identities: [{ provider: "google", entity_id: email }],
+          });
+
+          await start({ phone, purpose: "password-reset" });
+          const checked = await check({
+            phone,
+            purpose: "password-reset",
+            code: "000000",
+          });
+          expect(checked.status).toBe(200);
+
+          const res = await passwordReset({ token: checked.data.token });
+          expect(res.status).toBe(400);
+          expect(res.data).toMatchObject({
+            message: "This account signs in with Google.",
+          });
+        });
+      });
+
       // Enforcement gates (Task 3, src/api/utils/phone-verification-guard.ts).
       // The guards read PHONE_VERIFICATION_REQUIRED per request, so flipping
       // the env var here (rather than a runner `env:` override) reaches the
