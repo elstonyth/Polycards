@@ -4,7 +4,7 @@ import { mintSuperAdmin, unwrapResponse } from './utils';
 jest.setTimeout(240 * 1000);
 
 const ADMIN_EMAIL = 'published-odds-admin@test.dev';
-const PASSWORD = 'published-odds-test-pw-1';
+const PASSWORD = 'published-odds-test-pw-1'; // gitleaks:allow
 const SLUG = 'published-odds-pack';
 
 const PACK_BODY = {
