@@ -15,21 +15,23 @@ import { CardTile } from '@/components/cards/CardTile';
  * are catalogue noise there). The rail is ONE horizontally-swipeable strip of
  * the Rare+ subset (value-sorted desc, so the top hits lead) — the catalog's
  * rail idiom, per the 90scard reference. The header's expand button opens a
- * full-screen dialog listing the FULL pack pool (every tier, including
- * Common/Uncommon) grouped by canonical tier (rarest first) as a grid — this
- * is the only surface on the page that lists the whole pool, so its "show all
- * N" count and value range must match the full pool, not the Rare+ rail.
+ * full-screen dialog listing the SAME Rare+ subset grouped by canonical tier
+ * (rarest first) as a grid — operator decision 2026-08-02: the expanded view
+ * is the rail's "see everything in this tier band" companion, and commons are
+ * catalogue noise there too. (This deliberately re-opens the gap the round-8
+ * display-truth pass closed: the odds panel below still quotes value ranges
+ * over the FULL pool, including tiers the dialog doesn't list. Operator
+ * preference wins; don't "fix" one side without asking.)
  * Group headers carry the rarity dot + count and, when the admin published
  * odds, that tier's pull chance (the same data the odds panel shows; nothing
  * invented).
  *
  * A save-only Common/Uncommon pack has an EMPTY Rare+ rail but a non-empty
  * `full` pool — the caller still renders this component (gated on `pool`,
- * not `topPool`; see PackDetailClient's note) so the odds panel's full-pool
- * value ranges have something to point at. When `rail` is empty there is
- * nothing to tease, so the rail strip is skipped entirely and the header
- * relabels to "All cards" / "Every card in this pack." — the expand button
- * (and everything it opens) stays exactly as-is either way.
+ * not `topPool`; see PackDetailClient's note). With no Rare+ subset to show,
+ * the rail strip is skipped and BOTH the header and the dialog fall back to
+ * the full pool ("All cards" / "Every card in this pack.") so the pool keeps
+ * an entry point on the page.
  */
 export function PoolByRarity({
   rail,
@@ -39,7 +41,8 @@ export function PoolByRarity({
 }: {
   /** Rare+ subset for the teaser rail, value-sorted. */
   rail: PackCard[];
-  /** FULL pack pool (every tier) for the expand dialog. */
+  /** FULL pack pool (every tier) — the dialog's zero-Rare fallback only; with
+   *  a non-empty `rail` the dialog shows `rail` (operator decision, header note). */
   full: PackCard[];
   /** Admin-published per-tier chances; null = this pack has no published odds. */
   tierChances: Partial<Record<Rarity, number>> | null;
@@ -49,6 +52,10 @@ export function PoolByRarity({
   // Mouse drag-to-scroll on the rail (touch swipes natively).
   const drag = useDragScroll<HTMLDivElement>();
   const hasRail = rail.length > 0;
+  // Dialog shows the Rare+ subset whenever one exists (operator decision,
+  // see the header comment); the full pool only backs the zero-Rare edge.
+  const shown = hasRail ? rail : full;
+  const shownTitle = hasRail ? 'Rare & above' : 'All cards';
 
   return (
     <div className="flex flex-col gap-3">
@@ -61,7 +68,11 @@ export function PoolByRarity({
             type="button"
             onClick={() => setModalOpen(true)}
             aria-haspopup="dialog"
-            aria-label={`Show all ${full.length} cards grouped by rarity`}
+            aria-label={
+              hasRail
+                ? `Show the ${shown.length} Rare & above cards grouped by rarity`
+                : `Show all ${shown.length} cards grouped by rarity`
+            }
             className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-white/60 transition-colors hover:bg-white/10 hover:text-white"
           >
             <Maximize2 className="h-4 w-4" aria-hidden />
@@ -107,7 +118,8 @@ export function PoolByRarity({
       <PoolModal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
-        pool={full}
+        pool={shown}
+        title={shownTitle}
         tierChances={tierChances}
         onOpen={onOpen}
       />
@@ -122,12 +134,15 @@ function PoolModal({
   open,
   onClose,
   pool,
+  title,
   tierChances,
   onOpen,
 }: {
   open: boolean;
   onClose: () => void;
   pool: PackCard[];
+  /** Dialog heading + aria-label — names what `pool` holds ("Rare & above" or "All cards"). */
+  title: string;
   tierChances: Partial<Record<Rarity, number>> | null;
   onOpen: (card: PackCard) => void;
 }) {
@@ -161,14 +176,14 @@ function PoolModal({
         ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-label="All cards"
+        aria-label={title}
         tabIndex={-1}
-        className="glass-panel max-h-[85vh] w-full overflow-y-auto rounded-t-2xl border-t p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] outline-none sm:max-w-2xl sm:rounded-2xl sm:border"
+        className="glass-panel max-h-[85vh] w-full overflow-y-auto rounded-t-2xl border-t p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] outline-none sm:max-w-2xl sm:rounded-2xl sm:border [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="font-heading text-lg font-bold tracking-tight text-white">
-            All cards
+            {title}
             <span className="ml-2 text-[13px] font-normal tabular-nums text-white/50">
               {pool.length} cards
             </span>
