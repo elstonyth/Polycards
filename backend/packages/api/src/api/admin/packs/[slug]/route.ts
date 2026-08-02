@@ -2,6 +2,7 @@ import { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import PacksModuleService from "../../../../modules/packs/service";
 import { PACKS_MODULE } from "../../../../modules/packs";
 import { updatePackWorkflow } from "../../../../workflows/update-pack";
+import { normalizePublishedOdds } from "../../../../workflows/steps/create-pack";
 import { deletePackWorkflow } from "../../../../workflows/delete-pack";
 import { coercePackBody } from "../validate";
 import { clearPackListCache } from "../../../store/packs/route";
@@ -41,7 +42,9 @@ export async function GET(
       boost: pack.boost,
       rank: pack.rank,
       status: pack.status,
-      published_odds: pack.published_odds ?? null,
+      // Normalized — see the packs list route; the edit form seeds its
+      // inputs from these values.
+      published_odds: normalizePublishedOdds(pack.published_odds),
     },
   });
 }

@@ -1,6 +1,6 @@
 import { createStep, StepResponse } from '@medusajs/framework/workflows-sdk';
 import { MedusaError } from '@medusajs/framework/utils';
-import type { OddsRarity, TierRangeMap } from '@acme/odds-math';
+import { RARITIES, type OddsRarity, type TierRangeMap } from '@acme/odds-math';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
 
@@ -9,6 +9,40 @@ import type PacksModuleService from '../../modules/packs/service';
 export type PublishedOdds = {
   overall: number;
   tiers: Partial<Record<OddsRarity, number>>;
+};
+
+// Sparse tiers → the full-key WRITE shape (null = tier not published). The
+// ORM MERGES json POJOs on update, so an UPDATE writing published_odds must
+// carry every rarity key or a removed tier resurrects from the stored value —
+// the same bug class as pack.tier_ranges (fillTierRanges). Reads strip the
+// nulls back out via normalizePublishedOdds below.
+export const fillPublishedTiers = (
+  tiers: PublishedOdds['tiers'],
+): Record<string, number | null> => {
+  const full: Record<string, number | null> = {};
+  for (const r of RARITIES) full[r] = tiers[r] ?? null;
+  return full;
+};
+
+// Stored jsonb → the public { overall, tiers } shape: storage nulls and
+// non-numeric noise dropped, unknown keys ignored. Every route that serves
+// published_odds runs this, so no consumer ever sees the null-filled storage
+// shape (the admin editor seeds inputs with String(tiers[r]), and "null" in a
+// win-rate field is exactly the garbage this prevents).
+export const normalizePublishedOdds = (raw: unknown): PublishedOdds | null => {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const o = raw as { overall?: unknown; tiers?: unknown };
+  const overall =
+    typeof o.overall === 'number' && Number.isFinite(o.overall)
+      ? o.overall
+      : 100;
+  const tiers: PublishedOdds['tiers'] = {};
+  const stored = (o.tiers ?? {}) as Record<string, unknown>;
+  for (const r of RARITIES) {
+    const v = stored[r];
+    if (typeof v === 'number' && Number.isFinite(v)) tiers[r] = v;
+  }
+  return { overall, tiers };
 };
 
 export type PackWriteInput = {

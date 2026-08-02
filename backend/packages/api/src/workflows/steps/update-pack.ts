@@ -5,7 +5,11 @@ import type PacksModuleService from '../../modules/packs/service';
 import { hasRollablePool } from '../../modules/packs/rollable-pool';
 import type { TierRangeMap } from '@acme/odds-math';
 import { fillTierRanges } from '../../modules/packs/tier-settings-validate';
-import type { PackWriteInput, PublishedOdds } from './create-pack';
+import {
+  fillPublishedTiers,
+  type PackWriteInput,
+  type PublishedOdds,
+} from './create-pack';
 
 // slug is immutable (it keys PackOdds / the /claw route); it selects the row.
 export type UpdatePackInput = PackWriteInput;
@@ -86,8 +90,19 @@ export const updatePackStep = createStep(
         ...(input.display_image !== undefined
           ? { display_image: input.display_image }
           : {}),
+        // Same merge hazard as tier_ranges below: the tiers POJO must carry
+        // EVERY rarity key (null = not published) or a removed tier survives
+        // the update. Serving routes normalize the nulls back out.
         ...(input.published_odds !== undefined
-          ? { published_odds: input.published_odds }
+          ? {
+              published_odds:
+                input.published_odds === null
+                  ? null
+                  : ({
+                      overall: input.published_odds.overall,
+                      tiers: fillPublishedTiers(input.published_odds.tiers),
+                    } as unknown as Record<string, unknown>),
+            }
           : {}),
         // A map is written with EVERY rarity key (null = unconfigured):
         // the ORM merges json POJOs on update, so a sparse map over a stored

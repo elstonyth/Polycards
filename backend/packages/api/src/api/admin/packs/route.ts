@@ -4,7 +4,10 @@ import { PACKS_MODULE } from "../../../modules/packs";
 import { createPackWorkflow } from "../../../workflows/create-pack";
 import { coercePackBody } from "./validate";
 import { clearPackListCache } from "../../store/packs/route";
-import type { PublishedOdds } from "../../../workflows/steps/create-pack";
+import {
+  normalizePublishedOdds,
+  type PublishedOdds,
+} from "../../../workflows/steps/create-pack";
 import { pageAll } from "../../utils/page-all";
 import { toMoney } from "../../../modules/packs/money";
 import {
@@ -141,7 +144,10 @@ export async function GET(
         display_image: p.display_image ?? null,
         buyback_percent: p.buyback_percent,
         boost: p.boost,
-        published_odds: p.published_odds ?? null,
+        // Normalized: storage null-fills the tiers (json-merge guard) and
+        // the editor seeds inputs with String(tiers[r]) — a raw storage null
+        // would render as the literal string "null".
+        published_odds: normalizePublishedOdds(p.published_odds),
         // Per-pack tier price-range override; null = inherit the global
         // tier_settings singleton (null vs {} matters — see the odds route).
         tier_ranges:
