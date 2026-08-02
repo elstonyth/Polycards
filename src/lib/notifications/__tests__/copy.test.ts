@@ -1,15 +1,41 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { NOTIFICATION_COPY, copyFor } from '../copy';
 
-const TEMPLATES = [
-  'vip_level_up',
-  'commission_matured',
-  'delivery_status',
-  'reward_won',
-  'voucher_claimed',
-  'topup_credited',
-  'challenge_payout',
-] as const;
+// The seven-template list used to be hand-copied here as a `TEMPLATES` const.
+// That mirror could drift from the backend's `FeedTemplate` union silently: a
+// template added on the backend shipped green while the storefront feed fell
+// through to unknown-key handling for a template announcing money events.
+// Parse the union straight from backend source instead, so this file's
+// "covers every template" assertion IS the parity check, not a copy of one.
+const BACKEND_SRC = join(
+  process.cwd(),
+  'backend/packages/api/src/modules/packs/notify-feed.ts',
+);
+
+function backendFeedTemplates(): string[] {
+  const src = readFileSync(BACKEND_SRC, 'utf8');
+  const union = src.match(/export type FeedTemplate\s*=([\s\S]*?);/)?.[1];
+  if (!union) {
+    throw new Error(
+      `FeedTemplate union not found in ${BACKEND_SRC}. If it was renamed or ` +
+        `moved, update this guard -- do not delete it.`,
+    );
+  }
+  const members = [...union.matchAll(/'([^']+)'/g)]
+    .map((x) => x[1])
+    .filter((x): x is string => x !== undefined);
+  if (members.length === 0) {
+    throw new Error(
+      `FeedTemplate union parsed but yielded no members from ${BACKEND_SRC}. ` +
+        `If the union shape changed, update this guard -- do not delete it.`,
+    );
+  }
+  return members;
+}
+
+const TEMPLATES = backendFeedTemplates();
 
 // /vip, /vouchers, /daily, /referrals, /invite and /rewards all 404 while the
 // reward economy is suspended (spec 2026-07-29) — a feed row must not deep-link

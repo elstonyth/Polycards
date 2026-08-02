@@ -82,16 +82,6 @@ export async function GET(
           cardId: x.card_id ?? null,
           credits: Number(x.credits),
         })),
-        // Legacy projection — the shipped storefront reads these until the
-        // per-rank UI lands (plan 057 phase 2): podium = ranks 1-3 cards,
-        // rewardCredits = the largest credits configured for ranks 4-10.
-        rewardCardIds: table
-          .filter((x) => x.rank <= 3 && x.card_id)
-          .map((x) => x.card_id as string),
-        rewardCredits: Math.max(
-          0,
-          ...table.filter((x) => x.rank >= 4).map((x) => Number(x.credits)),
-        ),
       };
     })
     .sort((a, b) => a.stageNumber - b.stageNumber);
