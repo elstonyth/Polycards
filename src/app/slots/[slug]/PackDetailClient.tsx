@@ -73,8 +73,16 @@ export default function PackDetailClient({
   // there is no in-place async open state here.
   const [openError, setOpenError] = useState<string | null>(null);
   const [needsTopUp, setNeedsTopUp] = useState(false);
-  // One request refreshes every grid price (60s, visibility-gated).
-  const liveDetail = usePackDetailPoll(active.id, detail) ?? detail;
+  // One request refreshes every grid price (60s, visibility-gated). `detail`
+  // is the URL pack's (`pack`) server snapshot -- only pass it as the seed
+  // when the selected sibling IS the URL pack; otherwise seed null so a
+  // sibling switch never renders pack A's pool/Top Hits/odds under pack B's
+  // name (the gated-empty sections below render instead until the poll's
+  // immediate tick lands).
+  const liveDetail = usePackDetailPoll(
+    active.id,
+    active.id === pack.id ? detail : null,
+  );
   const [openCard, setOpenCard] = useState<CardSeed | null>(null);
   const toSeed = (c: PackCard): CardSeed => ({
     handle: c.id,
