@@ -8,10 +8,14 @@ import {
   signup,
   requestPasswordReset,
   googleLoginStart,
+  type AuthResult,
 } from '@/lib/actions/auth';
 import { useAuth } from './auth/AuthProvider';
 import { NAME_MAX, normalizePhone } from '@/lib/profile-validation';
 import { PhoneField } from '@/components/PhoneField';
+import { PhoneOtpStep } from '@/components/auth/PhoneOtpStep';
+import { startPhoneOtp } from '@/lib/actions/phone-verification';
+import { PHONE_VERIFICATION_REQUIRED } from '@/lib/phone-verification';
 
 // The Field inputs below carry a pl-9 for their leading icon; PhoneField has
 // no icon, so it gets the same chrome with plain px-3.
@@ -47,10 +51,17 @@ export default function AuthForm({
   // the always-the-same confirmation (no account enumeration — the backend
   // 201s for unknown emails too).
   const [forgot, setForgot] = useState<'none' | 'form' | 'sent'>('none');
+  // Signup-only sub-view: once the phone OTP is sent, hold the rest of the
+  // form's values here so `onVerified` can finish the real signup() call.
+  const [otp, setOtp] = useState<{
+    phone: string;
+    pending: { email: string; password: string; first_name: string };
+  } | null>(null);
 
   function switchMode(m: 'login' | 'signup') {
     setForgot('none');
     setNote(null);
+    setOtp(null);
     onSwitchMode(m);
   }
 
@@ -66,6 +77,18 @@ export default function AuthForm({
 
     if (result.ok) {
       setForgot('sent');
+      return;
+    }
+    setNote({ text: result.error });
+  }
+
+  // Shared tail for both login and signup — the action returns the customer,
+  // so update context directly (no refetch flash) on success.
+  function finishAuth(result: AuthResult) {
+    if (result.ok) {
+      setCustomer(result.customer);
+      onSuccess?.();
+      router.refresh();
       return;
     }
     setNote({ text: result.error });
@@ -87,37 +110,46 @@ export default function AuthForm({
       });
       return;
     }
+
+    if (!isSignup) {
+      setBusy(true);
+      const result = await login({ email, password });
+      setBusy(false);
+      finishAuth(result);
+      return;
+    }
+
     // Same normalization the server applies — catch a bad number before the
     // round-trip (the action re-validates; a server action is a public endpoint).
     // PhoneField submits E.164 (+<country code><number>) in the hidden input.
-    const phone = String(form.get('phone') ?? '');
-    if (isSignup && !normalizePhone(phone)) {
+    const phone = normalizePhone(String(form.get('phone') ?? ''));
+    if (!phone) {
       setNote({
         text: 'Please enter a valid phone number for the selected country.',
         field: 'phone',
       });
       return;
     }
+    const first_name = String(form.get('username') ?? '');
 
-    setBusy(true);
-    const result = isSignup
-      ? await signup({
-          email,
-          password,
-          first_name: String(form.get('username') ?? ''),
-          phone,
-        })
-      : await login({ email, password });
-    setBusy(false);
-
-    if (result.ok) {
-      // The action returns the customer — update context directly (no refetch flash).
-      setCustomer(result.customer);
-      onSuccess?.();
-      router.refresh();
+    if (PHONE_VERIFICATION_REQUIRED) {
+      setBusy(true);
+      const otpResult = await startPhoneOtp({ phone, purpose: 'signup' });
+      setBusy(false);
+      if (!otpResult.ok) {
+        setNote({ text: otpResult.error });
+        return;
+      }
+      // Defer the real signup() call until the code is verified — pending
+      // fields ride along in state for onVerified to use.
+      setOtp({ phone, pending: { email, password, first_name } });
       return;
     }
-    setNote({ text: result.error });
+
+    setBusy(true);
+    const result = await signup({ email, password, first_name, phone });
+    setBusy(false);
+    finishAuth(result);
   }
 
   async function onGoogle() {
@@ -208,6 +240,40 @@ export default function AuthForm({
             Back to log in
           </button>
         </p>
+      </div>
+    );
+  }
+
+  // Signup phone-OTP sub-view (only reachable when PHONE_VERIFICATION_REQUIRED
+  // sent us here from onSubmit). Not wrapped in `isSignup` alone — `otp` only
+  // ever gets set on the signup branch, but the guard makes the invariant
+  // explicit and mirrors the forgot-password guard above.
+  if (isSignup && otp) {
+    return (
+      <div className="w-full">
+        <h2 className="font-heading text-2xl font-bold tracking-tight text-white sm:text-3xl">
+          Verify your phone
+        </h2>
+        <PhoneOtpStep
+          phone={otp.phone}
+          purpose="signup"
+          onBack={() => setOtp(null)}
+          onVerified={async (token) => {
+            const result = await signup({
+              ...otp.pending,
+              phone: otp.phone,
+              phone_verification_token: token,
+            });
+            if (result.ok) {
+              setCustomer(result.customer);
+              onSuccess?.();
+              router.refresh();
+              return;
+            }
+            setOtp(null);
+            setNote({ text: result.error });
+          }}
+        />
       </div>
     );
   }
