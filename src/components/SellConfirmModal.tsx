@@ -6,6 +6,7 @@ import { X } from 'lucide-react';
 import { SlabImage } from '@/components/SlabImage';
 import { rm } from '@/lib/format';
 import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
+import { lockBodyScroll, unlockBodyScroll } from '@/lib/use-modal-a11y';
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -82,11 +83,10 @@ export default function SellConfirmModal({
     };
 
     document.addEventListener('keydown', onKey);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    lockBodyScroll();
     return () => {
       document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prevOverflow;
+      unlockBodyScroll();
       triggerRef.current?.focus();
     };
   }, [open, busy, onCancel]);

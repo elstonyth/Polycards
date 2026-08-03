@@ -106,11 +106,16 @@ export const buybackPullStep = createStep(
     // close-instant POST could have landed in that gap, and pricing the instant
     // premium off the stale pre-close read would let a quick vault sell beat the
     // close and claim 99% (CodeRabbit). The fresh read collapses that window to
-    // the sub-ms between here and the conditional status flip below.
+    // the sub-ms between here and the conditional status flip below. Both
+    // pricing inputs below come from the same fresh read — `revealed_at` too,
+    // since a reveal ping landing in that same gap must not collapse the
+    // instant deadline back to the stale `rolled_at + 30s` default and
+    // under-credit a sell the reveal UI already quoted at the instant rate.
+    // `rolled_at` stays from the first read: it's immutable after insert.
     const [fresh] = await packs.listPulls({ id: pull.id }, { take: 1 });
     const { percent, rate_type } = resolveBuybackRate(pack, {
       rolled_at: pull.rolled_at,
-      revealed_at: pull.revealed_at,
+      revealed_at: fresh?.revealed_at ?? pull.revealed_at,
       // Once the reveal has closed the window (left it / concluded), the credit
       // is the flat vault rate even inside the 30s — the credit must match what
       // the vault quoted.

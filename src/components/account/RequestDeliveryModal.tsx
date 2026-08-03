@@ -60,16 +60,21 @@ export default function RequestDeliveryModal({
   async function saveAddress() {
     setBusy(true);
     setError(null);
-    const res = await addAddress(form);
-    setBusy(false);
-    if (!res.ok) {
-      setError(res.error);
-      return;
+    try {
+      const res = await addAddress(form);
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      // Optimistic: append + select. (A full refresh would re-fetch getAddresses.)
+      setAddrList((p) => [...p, addressViewFromInput(res.addressId, form)]);
+      setSelectedAddr(res.addressId);
+      setAdding(false);
+    } catch {
+      setError('Couldn’t save the address. Please try again.');
+    } finally {
+      setBusy(false);
     }
-    // Optimistic: append + select. (A full refresh would re-fetch getAddresses.)
-    setAddrList((p) => [...p, addressViewFromInput(res.addressId, form)]);
-    setSelectedAddr(res.addressId);
-    setAdding(false);
   }
 
   async function submit() {
@@ -79,14 +84,19 @@ export default function RequestDeliveryModal({
     }
     setBusy(true);
     setError(null);
-    const pullIds = items.map((i) => i.pullId);
-    const res = await requestDelivery(pullIds, selectedAddr);
-    setBusy(false);
-    if (!res.ok) {
-      setError(res.error);
-      return;
+    try {
+      const pullIds = items.map((i) => i.pullId);
+      const res = await requestDelivery(pullIds, selectedAddr);
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      onSubmitted(pullIds);
+    } catch {
+      setError('Couldn’t request delivery. Please try again.');
+    } finally {
+      setBusy(false);
     }
-    onSubmitted(pullIds);
   }
 
   return (

@@ -60,15 +60,19 @@ export default function ResetPasswordClient() {
     }
 
     setBusy(true);
-    const result = await resetPassword({ token, password });
-    setBusy(false);
-
-    if (result.ok) {
-      setDone(true);
-      redirectRef.current = setTimeout(goToLogin, 1500);
-      return;
+    try {
+      const result = await resetPassword({ token, password });
+      if (result.ok) {
+        setDone(true);
+        redirectRef.current = setTimeout(goToLogin, 1500);
+        return;
+      }
+      setNote(result.error);
+    } catch {
+      setNote('Something went wrong. Please try again.');
+    } finally {
+      setBusy(false);
     }
-    setNote(result.error);
   }
 
   return (

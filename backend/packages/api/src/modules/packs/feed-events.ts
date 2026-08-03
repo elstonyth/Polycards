@@ -41,6 +41,15 @@ export function topupFeedKey(reference: string): string {
   return `topup:${reference}`;
 }
 
+/** One notification per payout outcome (paid or refunded), keyed on our
+ * signed reference so a retried callback can't produce a second receipt. */
+export function withdrawalFeedKey(
+  reference: string,
+  outcome: 'paid' | 'refunded',
+): string {
+  return `withdrawal:${reference}:${outcome}`;
+}
+
 /**
  * True when a top-up result represents money that actually arrived.
  *

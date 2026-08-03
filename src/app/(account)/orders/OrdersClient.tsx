@@ -146,15 +146,20 @@ function EditAddressModal({
   async function saveAddress() {
     setBusy(true);
     setError(null);
-    const res = await addAddress(form);
-    setBusy(false);
-    if (!res.ok) {
-      setError(res.error);
-      return;
+    try {
+      const res = await addAddress(form);
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      onAddAddress(addressViewFromInput(res.addressId, form));
+      setSelectedAddr(res.addressId);
+      setAdding(false);
+    } catch {
+      setError('Couldn’t save the address. Please try again.');
+    } finally {
+      setBusy(false);
     }
-    onAddAddress(addressViewFromInput(res.addressId, form));
-    setSelectedAddr(res.addressId);
-    setAdding(false);
   }
 
   async function submit() {
@@ -164,31 +169,36 @@ function EditAddressModal({
     }
     setBusy(true);
     setError(null);
-    const res = await editDeliveryAddress(order.id, selectedAddr);
-    setBusy(false);
-    if (!res.ok) {
-      setError(res.error);
-      return;
+    try {
+      const res = await editDeliveryAddress(order.id, selectedAddr);
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      // Reflect the new destination in the row from the selected address book
+      // entry. The book entry and the order's snapshot carry the same fields, so
+      // this is a straight swap — falling back to the old snapshot only if the
+      // list somehow no longer holds the id the backend just accepted.
+      const chosen = addresses.find((a) => a.id === selectedAddr);
+      onSaved(
+        chosen
+          ? {
+              name: chosen.name,
+              line1: chosen.line1,
+              line2: chosen.line2,
+              city: chosen.city,
+              province: chosen.province,
+              postalCode: chosen.postalCode,
+              countryCode: chosen.countryCode,
+              phone: chosen.phone,
+            }
+          : order.address,
+      );
+    } catch {
+      setError('Couldn’t save the address. Please try again.');
+    } finally {
+      setBusy(false);
     }
-    // Reflect the new destination in the row from the selected address book
-    // entry. The book entry and the order's snapshot carry the same fields, so
-    // this is a straight swap — falling back to the old snapshot only if the
-    // list somehow no longer holds the id the backend just accepted.
-    const chosen = addresses.find((a) => a.id === selectedAddr);
-    onSaved(
-      chosen
-        ? {
-            name: chosen.name,
-            line1: chosen.line1,
-            line2: chosen.line2,
-            city: chosen.city,
-            province: chosen.province,
-            postalCode: chosen.postalCode,
-            countryCode: chosen.countryCode,
-            phone: chosen.phone,
-          }
-        : order.address,
-    );
   }
 
   return (
@@ -396,13 +406,18 @@ function CancelOrderModal({
   async function confirm() {
     setBusy(true);
     setError(null);
-    const res = await cancelDeliveryOrder(order.id);
-    setBusy(false);
-    if (!res.ok) {
-      setError(res.error);
-      return;
+    try {
+      const res = await cancelDeliveryOrder(order.id);
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      onCanceled(res.status);
+    } catch {
+      setError('Couldn’t cancel the order. Please try again.');
+    } finally {
+      setBusy(false);
     }
-    onCanceled(res.status);
   }
 
   return (

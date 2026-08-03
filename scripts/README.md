@@ -15,6 +15,17 @@ npm run build
 pwsh scripts/serve-standalone.ps1 -Port 4000
 ```
 
+## Adding a script here
+
+One-off debug/capture scripts are born in the gitignored scratchpad
+(`docs/research/`) or a PR branch — not committed straight to master's
+`scripts/`. A script belongs here only once something references it —
+`package.json`, `.github/workflows/*`, `docs/**`, `tests/**`, or
+`README.md` — **or** this README states its trigger/purpose (as the
+art-pipeline family below does). That KEEP rule wins over any other signal
+at triage time: a referenced script stays even once its target route has
+gone stale (fixing that is a separate task).
+
 ## The art-pipeline family needs its input tree restored
 
 59 scripts here reference `public/images/claw/*` — the claw-machine renders and

@@ -10,7 +10,7 @@ import {
   type LedgerType,
 } from '../../../modules/packs/ledger';
 
-const LEDGER_TYPES: LedgerType[] = ['TP', 'SP', 'SE', 'OD', 'RF', 'AD', 'WP'];
+const LEDGER_TYPES: LedgerType[] = ['TP', 'SP', 'SE', 'OD', 'RF', 'AD', 'WP', 'WD'];
 
 export type AdminLedgerRow = {
   id: string;
@@ -64,7 +64,13 @@ function coerceQ(raw: unknown): string | undefined {
   if (raw === undefined || raw === '') return undefined;
   if (typeof raw !== 'string') bad(`Invalid \`q\` filter '${String(raw)}'.`);
   const trimmed = (raw as string).trim();
-  return trimmed === '' ? undefined : trimmed.slice(0, 100);
+  if (trimmed === '') return undefined;
+  // Truncated FIRST, escaped SECOND (per purchase-invoices/route.ts:128-136):
+  // escaping before the cut could sever an escape pair. Unescaped, `?q=%`
+  // widens the ILIKE below to `%%%` and returns the WHOLE table while the
+  // operator believes they filtered — not an injection fix (the value is
+  // bound), just an honesty fix for what the filter actually matches.
+  return trimmed.slice(0, 100).replace(/[\\%_]/g, (c) => `\\${c}`);
 }
 
 // GET /admin/ledger — the Transactions list (POLYCARD-BACK §5.4).
