@@ -29,6 +29,18 @@ alerts:
   - rule: DEPLOYMENT_FAILED
   - rule: DOMAIN_FAILED
 
+# Routing. Present because `doctl apps update` replaces the FULL spec and the
+# live app carries this block — with one service DO would regenerate an
+# equivalent default, but matching live exactly keeps the apply a no-op for
+# everything except the values we meant to change.
+ingress:
+  rules:
+    - match:
+        path:
+          prefix: /
+      component:
+        name: storefront
+
 services:
   - name: storefront
     dockerfile_path: Dockerfile
@@ -37,7 +49,11 @@ services:
       branch: master
       deploy_on_push: true
     http_port: 3000
-    instance_size_slug: basic-xxs
+    # basic-xs, NOT basic-xxs: the 512 MB box ran the storefront out of memory
+    # in production (mem pinned ~99%, CPU idle, /healthz UNHEALTHY, 503s). The
+    # live app was bumped by hand; this spec lagged behind, so applying the old
+    # value would re-create the outage. Keep it in step with NODE_OPTIONS below.
+    instance_size_slug: basic-xs
     instance_count: 1
     health_check:
       http_path: /healthz
@@ -104,3 +120,20 @@ services:
       - key: NEXT_PUBLIC_MEDIA_HOST
         scope: RUN_AND_BUILD_TIME
         value: polycards-media.sgp1.cdn.digitaloceanspaces.com
+      # Node heap ceiling, set alongside the basic-xs bump above. Without it the
+      # container OOMs before V8 ever collects. RUN_TIME only — the build box is
+      # a different, larger machine.
+      - key: NODE_OPTIONS
+        scope: RUN_TIME
+        value: --max-old-space-size=896
+      - key: NEXT_TELEMETRY_DISABLED
+        scope: RUN_AND_BUILD_TIME
+        value: '1'
+      # Phone-OTP UI gate. Build-time inlined, so flipping this needs a REBUILD,
+      # not a restart — and it must not go true until the backend is already
+      # serving /store/phone-verification/* with the Twilio secrets set, or the
+      # signup sheet renders an OTP step that 404s. CONTEXT.md → Deploy Order:
+      # this is step 3, the backend PHONE_VERIFICATION_REQUIRED flag is step 4.
+      # - key: NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED
+      #   scope: RUN_AND_BUILD_TIME
+      #   value: 'true'
