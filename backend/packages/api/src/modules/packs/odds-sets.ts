@@ -33,7 +33,9 @@ export const isDefaultPlayerGroup = (g: {
   g.metadata?.[DEFAULT_PLAYER_GROUP_FLAG] === true ||
   g.name === DEFAULT_PLAYER_GROUP_NAME;
 
-// D2 fallback chain: set 2 empty → set 1; set 3 empty → set 2. Per card.
+/** One card's draw weight under a given odds set.
+ *
+ *  D2 fallback chain, per card: set 2 empty → set 1; set 3 empty → set 2. */
 export const weightForSet = (o: SetWeights, set: OddsSet): number =>
   set === 1
     ? o.weight
@@ -41,32 +43,38 @@ export const weightForSet = (o: SetWeights, set: OddsSet): number =>
       ? (o.weight_2 ?? o.weight)
       : (o.weight_3 ?? o.weight_2 ?? o.weight);
 
-// Defensive: anything that is not exactly set 2 or 3 rolls to set 1 (the
-// default group's set). Group metadata is admin-written but untyped JSON.
+/** Narrow an untyped `metadata.odds_set` to a real odds set.
+ *
+ *  Defensive: anything that is not exactly set 2 or 3 rolls to set 1 (the
+ *  default group's set). Group metadata is admin-written but untyped JSON. */
 export const coerceOddsSet = (v: unknown): OddsSet =>
   v === 2 || v === '2' ? 2 : v === 3 || v === '3' ? 3 : 1;
 
-// Customer → group → odds_set, resolved SERVER-SIDE at spin time (§2.5).
-// No group (or anonymous/demo roll) → set 1. A customer in several groups
-// gets the OLDEST group's set (created_at ASC — deterministic, documented),
-// EXCEPT the default group, which is skipped whenever the player also belongs
-// to a real one.
-//
-// That exception is the whole reason this reads every group instead of taking
-// one: the default group is created on the first sign-up, so on any fresh
-// install it is OLDER than every group an operator makes afterwards. Under
-// plain oldest-wins, its set 1 would then shadow "pro" forever and moving a
-// player into a group would silently change nothing — a money bug with no
-// visible symptom. Admin moves are exclusive (POST /admin/customers/:id/group
-// clears the others), so multi-group only happens via the prebuilt
-// /customer-groups screen; this keeps that harmless.
-//
-// The default group ALWAYS resolves to set 1, never to whatever odds_set its
-// row happens to carry: a member of it and a customer with no group at all
-// must roll identically, or two players the admin shows the same way would
-// silently play different odds (the subscriber is fail-soft, and seeded
-// customers bypass it entirely, so ungrouped players do exist). The admin
-// enforces the same rule by locking that row's odds-set control.
+/**
+ * The odds set a customer's spin rolls on. Customer → group → `odds_set`,
+ * resolved SERVER-SIDE at spin time (§2.5).
+ *
+ * No group (or an anonymous/demo roll) → set 1. A customer in several groups
+ * gets the OLDEST group's set (created_at ASC — deterministic, documented),
+ * EXCEPT the default group, which is skipped whenever the player also belongs
+ * to a real one.
+ *
+ * That exception is the whole reason this reads every group instead of taking
+ * one: the default group is created on the first sign-up, so on any fresh
+ * install it is OLDER than every group an operator makes afterwards. Under
+ * plain oldest-wins, its set 1 would then shadow "pro" forever and moving a
+ * player into a group would silently change nothing — a money bug with no
+ * visible symptom. Admin moves are exclusive (POST /admin/customers/:id/group
+ * clears the others), so multi-group only happens via the prebuilt
+ * /customer-groups screen; this keeps that harmless.
+ *
+ * The default group ALWAYS resolves to set 1, never to whatever `odds_set` its
+ * row happens to carry: a member of it and a customer with no group at all
+ * must roll identically, or two players the admin shows the same way would
+ * silently play different odds (the subscriber is fail-soft, and seeded
+ * customers bypass it entirely, so ungrouped players do exist). The admin
+ * enforces the same rule by locking that row's odds-set control.
+ */
 export async function resolveOddsSetForCustomer(
   container: MedusaContainer,
   customerId?: string,

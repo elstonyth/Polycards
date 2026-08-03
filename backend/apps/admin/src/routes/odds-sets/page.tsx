@@ -47,6 +47,8 @@ const PlayerCount = ({ groupId }: { groupId: string }) => {
   return <span className="tabular-nums">{data}</span>;
 };
 
+/** One group row: its odds set (locked for the default group) and its member
+ *  count. */
 const GroupRow = ({ group }: { group: AdminCustomerGroup }) => {
   const { t } = useTranslation();
   const save = useSetGroupOddsSet();
@@ -116,11 +118,13 @@ const GroupRow = ({ group }: { group: AdminCustomerGroup }) => {
   );
 };
 
-// Player groups ARE Medusa customer groups — the SAME rows the prebuilt
-// /customer-groups screen lists and populates, so there is no separate "player
-// groups" page. This one owns the two things that screen has no field for: a
-// group's odds set, and creating a group with its odds set already chosen. A
-// PLAYER's group is changed from their own profile (routes/customers/[id]).
+/**
+ * Player groups ARE Medusa customer groups — the SAME rows the prebuilt
+ * /customer-groups screen lists and populates, so there is no separate "player
+ * groups" page. This one owns the two things that screen has no field for: a
+ * group's odds set, and creating a group with its odds set already chosen. A
+ * PLAYER's group is changed from their own profile (routes/customers/[id]).
+ */
 const OddsSetsPage = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();

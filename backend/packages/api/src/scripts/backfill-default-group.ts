@@ -24,6 +24,8 @@ import { ensureDefaultPlayerGroup } from '../modules/packs/player-groups';
 
 const PAGE = 500;
 
+/** Assigns every group-less customer to the default player group. See the file
+ *  header for why this is needed and how to run it. */
 export default async function backfillDefaultGroup({
   container,
 }: ExecArgs): Promise<void> {

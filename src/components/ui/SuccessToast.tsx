@@ -7,16 +7,18 @@ import { useLiquidGlass, GLASS_ACCENT } from '@/lib/use-liquid-glass';
 // animation-duration (the inline style below overrides the class fallback).
 const TOAST_MS = 4000;
 
-// Transient top-of-screen confirmation (e.g. "Shipping order created
-// successfully!"). Slides in under the header, auto-dismisses after
-// TOAST_MS, and the shrinking green bar shows the time remaining.
-// Distinct from the vault's inline `notice`, which persists in the page flow.
-//
-// Render it UNCONDITIONALLY with message=null when idle: the role="status"
-// live region must already be in the DOM before the message lands (sr-only
-// while idle), or screen readers may not announce it — a region inserted
-// together with its content is skipped by some SR/browser combos. Same
-// pattern as SlotMachineClient's persistent announcer.
+/**
+ * Transient top-of-screen confirmation (e.g. "Shipping order created
+ * successfully!"). Slides in under the header, auto-dismisses after
+ * TOAST_MS, and the shrinking green bar shows the time remaining.
+ * Distinct from the vault's inline `notice`, which persists in the page flow.
+ *
+ * Render it UNCONDITIONALLY with message=null when idle: the role="status"
+ * live region must already be in the DOM before the message lands (sr-only
+ * while idle), or screen readers may not announce it — a region inserted
+ * together with its content is skipped by some SR/browser combos. Same
+ * pattern as SlotMachineClient's persistent announcer.
+ */
 export function SuccessToast({
   message,
   nonce,

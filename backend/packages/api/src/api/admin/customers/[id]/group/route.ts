@@ -7,16 +7,18 @@ import { setPlayerGroup } from '../../../../../modules/packs/player-groups';
 
 type Body = { group_id?: unknown };
 
-// POST /admin/customers/:id/group — move a player into ONE player group.
-//
-// A single call on purpose. Medusa's native route is group-scoped
-// (POST /admin/customer-groups/:id/customers), so a move from A to B is two
-// requests from the dashboard, and a failure between them leaves the player in
-// both — where the older group's odds silently win. Doing it server-side keeps
-// "a player has one group" true after every operator click.
-//
-// Body: { group_id: string | null }. null (or omitted) means the DEFAULT group,
-// never "no group". Admin routes are framework-auto-protected.
+/**
+ * POST /admin/customers/:id/group — move a player into ONE player group.
+ *
+ * A single call on purpose. Medusa's native route is group-scoped
+ * (POST /admin/customer-groups/:id/customers), so a move from A to B is two
+ * requests from the dashboard, and a failure between them leaves the player in
+ * both — where the older group's odds silently win. Doing it server-side keeps
+ * "a player has one group" true after every operator click.
+ *
+ * Body: `{ group_id: string | null }`. null (or omitted) means the default
+ * group, never "no group". Admin routes are framework-auto-protected.
+ */
 export async function POST(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,

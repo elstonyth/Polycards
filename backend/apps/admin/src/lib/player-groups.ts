@@ -14,6 +14,8 @@ export const DEFAULT_PLAYER_GROUP_NAME = 'DEFAULT';
  *  rename the group. */
 export const DEFAULT_PLAYER_GROUP_FLAG = 'is_default';
 
+/** Is this the default (ungrouped-equivalent) player group? Marker first, then
+ *  the legacy name, so a row that predates the marker is still recognised. */
 export const isDefaultPlayerGroup = (g: {
   name?: string | null;
   metadata?: Record<string, unknown> | null;
