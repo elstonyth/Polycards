@@ -16,6 +16,7 @@ import {
   type OddsSet,
 } from '../../../../../modules/packs/odds-sets';
 import { cardByHandle, isGraded } from '../../../../../modules/packs/card-view';
+import { normalizeTierRanges } from '../../../../../modules/packs/tier-settings-validate';
 import { clearPackDetailCache } from '../../../../store/packs/[slug]/route';
 import { pageAll } from '../../../../utils/page-all';
 
@@ -161,6 +162,13 @@ export async function GET(
       price: toMoney(pack.price),
       target_rtp_bps: pack.target_rtp_bps ?? 7000,
       group,
+      // Per-pack tier price-range override; null = inherit the global
+      // tier_settings singleton. Null vs {} matters: a stored (even empty)
+      // map replaces the global ladder wholesale for this pack.
+      tier_ranges:
+        pack.tier_ranges == null
+          ? null
+          : normalizeTierRanges(pack.tier_ranges),
     },
     odds: rows,
   });

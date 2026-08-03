@@ -2,6 +2,7 @@ import { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
 import PacksModuleService from '../../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import { cardByHandle, toCardView } from '../../../../modules/packs/card-view';
+import { normalizePublishedOdds } from '../../../../workflows/steps/create-pack';
 import { toMoney } from '../../../../modules/packs/money';
 import { pageAll } from '../../../utils/page-all';
 import {
@@ -138,7 +139,9 @@ export async function GET(
     // The PUBLIC odds display ({ overall, tiers } percentages, admin-authored).
     // This is the ONLY odds data customers ever see — deliberately decoupled
     // from the secret per-card weights above. Null = not set (panel hidden).
-    published_odds: pack.published_odds ?? null,
+    // Normalized: storage null-fills the tiers (json-merge guard) and the
+    // public payload must not carry those nulls.
+    published_odds: normalizePublishedOdds(pack.published_odds),
   };
   packCache.set(slug, { expires: Date.now() + CACHE_TTL_MS, body });
   res.json(body);

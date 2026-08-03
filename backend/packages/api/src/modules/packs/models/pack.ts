@@ -52,6 +52,12 @@ export const Pack = model.define("pack", {
   // reward_box pool controls — A1
   pool_enabled: model.boolean().default(false),
   draws_per_day: model.number().default(0),
+  // Per-pack tier price ranges (TierRangeMap-shaped: rarity → { min, max } in
+  // RM display price). NULL = inherit the global tier_settings singleton; a
+  // stored map (even {}) replaces it wholesale for this pack. Advisory config
+  // for the odds editor (auto-assign / add-confirm / drift badge) — the server
+  // never enforces it.
+  tier_ranges: model.json().nullable(),
 });
 
 export default Pack;
