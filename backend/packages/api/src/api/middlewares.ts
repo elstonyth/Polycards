@@ -678,6 +678,15 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      // Tier-defaults singleton write (POST /admin/tier-settings) — the price
+      // ranges that default a card's tier in the odds editor. Advisory config,
+      // not a money mutation, but it steers every future odds save — same
+      // admin budget.
+      matcher: '/admin/tier-settings',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
       // Global USD->MYR FX-rate write. Sets the multiplier behind every
       // displayed price, so it shares the admin money-mutation budget. Auth is
       // the framework default /admin guard (handler is AuthenticatedMedusaRequest);
