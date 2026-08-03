@@ -167,6 +167,66 @@ Above 100 means the operator loses money on that pack.
 **EV** (Expected Value):
 The odds-weighted expected FMV of one Open of a pack.
 
+## Phone Verification
+
+Phone number confirmation via SMS-delivered OTP (one-time password). When enabled, gates three flows: account signup (requires proof token in header), phone change on existing accounts, and password reset via on-file phone number.
+
+**OTP** (One-Time Password):
+4–10 digit code (Twilio's own default is six digits; the check route accepts any length in that range) valid for 10 minutes, sent to the phone via SMS. In dev/test, code is `000000` (overridable via `PHONE_OTP_DEV_CODE` env var). In production, sent via Twilio Verify; production fails closed if Twilio is unconfigured.
+_Avoid_: token (that's the proof token below), password (this is a numeric code)
+
+**Proof Token**:
+Stateless HMAC-signed token — NOT a JWT: a custom 2-segment `base64url(payload).base64url(hmac)` format, domain-separated from the app's own HS256 JWTs (which share the same `jwtSecret`) via a fixed prefix in the HMAC input. 10-minute TTL, issued after successful OTP check. Single-purpose: proves one phone number for one flow (`signup` | `phone-change` | `password-reset`). Replay within TTL on the same phone is accepted (OTP resend cost is negligible). Different phones produce cryptographically distinct tokens.
+
+**Feature Flag** (`PHONE_VERIFICATION_REQUIRED`):
+Backend-only flag (env var). Enables phone-verification gates on signup and phone-change routes. When off, all gates open (rollback mechanism). Build-time storefront flag `NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED` displays OTP UI; flag drift is UX-only, backend gate is authoritative.
+
+**Flows**:
+
+- **Signup**: POST /store/customers with `x-phone-verification` header (proof token) when a phone is provided and feature flag is on.
+- **Phone change**: POST /store/phone-verification/change (authed; body {phone, token}) exchanges proof token for verified phone write. POST /store/customers/me rejects string phone writes under enforcement.
+- **Password reset**: OTP is sent to on-file phone via POST /store/phone-verification/start (purpose 'password-reset'), exchanged for proof token at POST /store/phone-verification/check, then exchanged for single-use reset token at POST /store/phone-verification/password-reset.
+
+**Rate Limits** (`phone-otp`):
+TWO independent tiers per operation, both applied (per-phone runs first):
+
+- **Per-phone** (keyed on the request body's `phone`): the primary per-client fairness / SMS-cost cap. This is the tier that actually protects one caller from another — the storefront's phone-verification server actions proxy every OTP request, so in production every browser's request arrives from the ONE Next.js egress IP.
+- **IP** (keyed on the request IP, its designed fallback): a sitewide SMS-spend circuit breaker, sized above legitimate whole-storefront traffic — because of the shared-egress-IP fact above, this tier is a whole-site budget, not per-visitor fairness. Twilio's own Fraud Guard + geo-lock are the upstream defense this tier backstops.
+
+Defaults:
+
+- Start (POST /store/phone-verification/start): per-phone 3 per 10min / 6 per 24h; IP (sitewide) 30 per 60s / 300 per 1h.
+- Check (POST /store/phone-verification/check): per-phone 10 per 10min / 30 per 24h; IP (sitewide) 60 per 60s / 600 per 1h.
+
+Tunable via env vars — per-phone: `PHONE_OTP_START_PHONE_RATE_BURST_LIMIT`, `PHONE_OTP_START_PHONE_RATE_BURST_WINDOW_MS`, `PHONE_OTP_START_PHONE_RATE_LIMIT`, `PHONE_OTP_START_PHONE_RATE_WINDOW_MS`, `PHONE_OTP_CHECK_PHONE_RATE_BURST_LIMIT`, `PHONE_OTP_CHECK_PHONE_RATE_BURST_WINDOW_MS`, `PHONE_OTP_CHECK_PHONE_RATE_LIMIT`, `PHONE_OTP_CHECK_PHONE_RATE_WINDOW_MS`; IP: `PHONE_OTP_START_RATE_BURST_LIMIT`, `PHONE_OTP_START_RATE_BURST_WINDOW_MS`, `PHONE_OTP_START_RATE_LIMIT`, `PHONE_OTP_START_RATE_WINDOW_MS`, `PHONE_OTP_CHECK_RATE_BURST_LIMIT`, `PHONE_OTP_CHECK_RATE_BURST_WINDOW_MS`, `PHONE_OTP_CHECK_RATE_LIMIT`, `PHONE_OTP_CHECK_RATE_WINDOW_MS`.
+
+**Accepted Ceilings** (scope boundaries):
+
+- Proof-token replay within 10m TTL on the same phone number (acceptable).
+- Legacy non-E.164 phones cannot initiate password reset (only E.164-normalized phones from signup flow work).
+- Phoneless direct-API signup unaffected (unchanged pre-existing behavior).
+- OTP codes are per-phone, not per-purpose: Twilio re-triggers the SAME code for a number within the 10-minute window regardless of which flow requested it, and POST /store/phone-verification/start is public — so a code phished from a user for one purpose could be checked and exchanged for a proof token under a different purpose. The proof TOKEN itself remains purpose-bound (verifyPhoneProof rejects a mismatched purpose), and every password-reset proof mint still emails the account owner before anything usable comes back. True separation would need one Twilio Verify Service per purpose (three SIDs instead of one) — noted as a hardening option, deliberately not shipped.
+
+**Environment Variables**:
+Backend (app-level, like Resend vars): `PHONE_VERIFICATION_REQUIRED` (feature gate, unset/false in dev), `PHONE_OTP_DEV_CODE` (default `000000` for dev/test SMS transport), `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID` (production Twilio credentials — add AT DEPLOY TIME with real values, never pre-populate `**SECRET**` placeholders in DO spec). Storefront (build-time inlined): `NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED` (when set to `true`, compiles OTP UI; default false/unset).
+
+**Twilio Operator Checklist**:
+
+1. Create a Twilio Verify Service (Console → Verify → Services): friendly name "Polycards", SMS channel on.
+2. Enable Fraud Guard (Verify → Settings, Fraud Guard toggle on) and lock Geo Permissions to expected customer countries only (Malaysia first — SMS-pumping exploits open geo; verify current pricing: per-verification fee + per-SMS rate varies by country, Malaysia cheap).
+3. Collect `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID` for deployment.
+
+**Deploy Order** (flag-off first, then flip):
+
+Reordered from the original plan (Finding 3, pre-merge review): the original order set the backend enforcement flag in the SAME step as the Twilio secrets — BEFORE the storefront rebuild that ships the OTP UI. Between those two steps every signup that includes a phone number would 400 (`requireSignupPhoneProof` demands a proof-token header the not-yet-rebuilt storefront never sends) — a live signup outage window for however long the two deploys are apart. The fix is to flip the backend enforcement flag LAST, once the storefront is already sending proof tokens.
+
+1. Merge all code changes (Tasks 1–8) and deploy to production with **both flags unset** — zero behavior change, OTP routes and proof logic live but gates are off.
+2. At deploy time: add the three Twilio secrets ONLY (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID`) to backend DO app spec (app-level, alongside Resend vars) — **do not set `PHONE_VERIFICATION_REQUIRED` yet**. **Never pre-add `**SECRET**` placeholders — do-apply.ps1 aborts on unresolved tokens.** Set with real values only. Note: this alone makes POST /store/phone-verification/start a live SMS sender even with the backend flag off (that route isn't flag-gated) — acceptable (it's already rate-limited, see above), but keep this step immediately adjacent to step 3 rather than leaving it live unattended.
+3. Set `NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED=true` in storefront **build environment** and rebuild — build-time-inlined, rebuilds ship the OTP UI. Signup/change/reset now work end-to-end WITHOUT enforcement: the OTP routes and the `x-phone-verification` header plumbing (`src/lib/actions/auth.ts`) aren't flag-gated, only `requireSignupPhoneProof`/`blockUnverifiedPhoneWrite` are — so there is no window where the storefront sends a proof token the backend doesn't yet require, or the reverse.
+4. Set backend `PHONE_VERIFICATION_REQUIRED=true` — enforcement turns on. The storefront has been sending proof tokens since step 3, so this step alone flips the gate closed with no outage: unlike the original order, nothing here waits on a storefront rebuild.
+5. Smoke test production: signup with a real phone number (operator's), phone change, forgot-by-phone flow. Watch backend logs for `[phone-otp]` warnings; monitor Twilio console for delivery success.
+6. Rollback lever (unchanged): flip backend `PHONE_VERIFICATION_REQUIRED` off first — every gate opens instantly, storefront unaffected (the OTP UI still works, just no longer required). Flip the storefront flag off + rebuild whenever convenient after that.
+
 ## UI only — deliberately not domain
 
 These are presentation words. They must not stand in for the domain terms above.

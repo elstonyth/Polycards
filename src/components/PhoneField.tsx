@@ -46,6 +46,7 @@ export function PhoneField({
   required,
   ariaInvalid,
   ariaDescribedby,
+  onKeyDown,
 }: {
   name?: string;
   /** Stored E.164 value (settings) — seeds both the country and the number. */
@@ -56,6 +57,10 @@ export function PhoneField({
   required?: boolean;
   ariaInvalid?: boolean;
   ariaDescribedby?: string;
+  /** Scoped to the visible tel input only (not the country <select>) — a
+   *  caller that needs an Enter-key shortcut must not also intercept Enter
+   *  while the picker is focused. */
+  onKeyDown?: React.KeyboardEventHandler<HTMLInputElement>;
 }) {
   const seeded = defaultValue
     ? parsePhoneNumberFromString(defaultValue)
@@ -112,6 +117,7 @@ export function PhoneField({
         required={required}
         value={national}
         onChange={(e) => setNational(e.target.value)}
+        onKeyDown={onKeyDown}
         aria-invalid={ariaInvalid || undefined}
         aria-describedby={ariaDescribedby}
         className={`${inputClassName} min-w-0 flex-1`}

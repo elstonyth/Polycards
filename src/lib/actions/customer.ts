@@ -15,6 +15,7 @@ import { logger } from '@/lib/logger';
 import { updateCustomerProfile } from '@/lib/data/customer';
 import { friendlyError, type ErrorRule } from '@/lib/errors';
 import { NAME_MAX, normalizePhone } from '@/lib/profile-validation';
+import { PHONE_VERIFICATION_REQUIRED } from '@/lib/phone-verification';
 
 export type ProfileCustomer = {
   id: string;
@@ -64,24 +65,31 @@ export async function updateProfile(input: {
       };
     }
   }
-  // Phone stays optional here (existing accounts may not have one yet), but a
-  // non-empty value must be a valid number — stored normalized to E.164.
-  let phone = clean(input.phone);
-  if (typeof phone === 'string') {
-    const normalized = normalizePhone(phone);
-    if (!normalized) {
-      return {
-        ok: false,
-        error: 'Please enter a valid phone number for the selected country.',
-      };
-    }
-    phone = normalized;
-  }
   const body: HttpTypes.StoreUpdateCustomer = {
     first_name: clean(input.first_name),
     last_name: clean(input.last_name),
-    phone,
   };
+
+  // Under phone-verification enforcement, phone writes go through
+  // `changePhone` (proven via OTP) instead — the backend gate (Task 3) 400s
+  // the WHOLE save if a string `phone` rides along here, so omit the key
+  // entirely rather than validate/send it. Names still save normally.
+  if (!PHONE_VERIFICATION_REQUIRED) {
+    // Phone stays optional here (existing accounts may not have one yet), but
+    // a non-empty value must be a valid number — stored normalized to E.164.
+    let phone = clean(input.phone);
+    if (typeof phone === 'string') {
+      const normalized = normalizePhone(phone);
+      if (!normalized) {
+        return {
+          ok: false,
+          error: 'Please enter a valid phone number for the selected country.',
+        };
+      }
+      phone = normalized;
+    }
+    body.phone = phone;
+  }
 
   try {
     const customer = await updateCustomerProfile(body);
