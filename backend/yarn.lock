@@ -17,7 +17,7 @@ __metadata:
     "@medusajs/ui-preset": "npm:2.15.5"
     "@mercurjs/admin": "npm:2.1.6"
     "@tanstack/react-query": "npm:5.101.4"
-    "@types/node": "npm:^24.10.1"
+    "@types/node": "npm:^24.13.3"
     autoprefixer: "npm:^10.5.4"
     postcss: "npm:^8.5.25"
     react: "npm:^18.3.1"
@@ -51,7 +51,7 @@ __metadata:
     "@swc/jest": "npm:^0.2.36"
     "@types/jest": "npm:^30.0.0"
     "@types/multer": "npm:^2.2.0"
-    "@types/node": "npm:^20.12.11"
+    "@types/node": "npm:^24.13.3"
     fflate: "npm:^0.8.2"
     http-proxy-middleware: "npm:^3.0.7"
     ioredis: "npm:^5.4.1"
@@ -95,7 +95,7 @@ __metadata:
   dependencies:
     "@acme/api": "workspace:*"
     "@mercurjs/vendor": "npm:2.1.6"
-    "@types/node": "npm:^24.10.1"
+    "@types/node": "npm:^24.13.3"
   languageName: unknown
   linkType: soft
 
@@ -7661,15 +7661,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/node@npm:^20.12.11":
-  version: 20.19.42
-  resolution: "@types/node@npm:20.19.42"
-  dependencies:
-    undici-types: "npm:~6.21.0"
-  checksum: 10c0/e21d8ee6e45480688b933fd6d61c1e538efff5cbd88e3bd737fba4d41511ab0904ad5b5a86d3fe5977984496f51d25f7304c8652f5a0efdb6a44ec9458dd6b74
-  languageName: node
-  linkType: hard
-
 "@types/node@npm:^22.5.5":
   version: 22.19.20
   resolution: "@types/node@npm:22.19.20"
@@ -7679,12 +7670,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/node@npm:^24.10.1":
-  version: 24.13.1
-  resolution: "@types/node@npm:24.13.1"
+"@types/node@npm:^24.13.3":
+  version: 24.13.3
+  resolution: "@types/node@npm:24.13.3"
   dependencies:
     undici-types: "npm:~7.18.0"
-  checksum: 10c0/ef58425ed71c7fefa95f30d370eeb0390f24c9337d66fa6617b5a14b53e2e831aa6a13e95d978d9057237bf257062b8fa60f773380abed1607183fe7065bc26b
+  checksum: 10c0/a5bc08f49b9581dcdca90e02cd77197a3c799840807664942e5cd5161a553d4d2ae8064f7e3294410d748d7d098b5c1848be7fa50c06f29c4193ab16be4e59eb
   languageName: node
   linkType: hard
 
