@@ -295,6 +295,34 @@ export const AmountBalanceSchema = z.looseObject({
   replayed: z.boolean().optional(),
 });
 
+/** POST /store/credits/deposit response — the real payment gateway. Unlike the
+ *  mock top-up this credits NOTHING yet: it returns the gateway's cashier URL,
+ *  and credit only lands when their signed callback settles the deposit. `url`
+ *  is the only field the redirect flow needs; the bank/QR extras ride along on
+ *  the loose object for a future in-page renderer. */
+export const DepositStartSchema = z.looseObject({
+  url: z.string(),
+  transactionId: z.string(),
+  merchantTransactionId: z.string(),
+  amount: finite,
+});
+
+/** POST /store/credits/withdraw response. The debit already happened —
+ *  `balance` is the post-debit balance, and the payout completes (or refunds)
+ *  asynchronously via the gateway callback. `transactionId` is null when the
+ *  submit outcome was ambiguous (still resolves asynchronously). */
+export const WithdrawStartSchema = z.looseObject({
+  merchantTransactionId: z.string(),
+  transactionId: z.string().nullable(),
+  amount: finite,
+  balance: finite,
+});
+
+/** GET /store/credits/withdraw/banks response — the payout bank picker. */
+export const WithdrawBanksSchema = z.looseObject({
+  banks: z.array(z.looseObject({ bankCode: z.string(), bankName: z.string() })),
+});
+
 /** POST /store/vault/:id/buyback response — finite amount + balance. `percent`
  *  rides along but is NOT rendered on the sell path (consumers read amount/
  *  balance), so it stays OPTIONAL: requiring it would false-fail an idempotent

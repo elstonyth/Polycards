@@ -45,6 +45,26 @@ async function submitSignup(
   await page.fill('input[name="email"]', email);
   await page.fill('input[name="password"]', password);
   await page.fill('input[name="confirmPassword"]', password);
+  // PR #311 made the phone field required; PhoneField's E.164 value lives in a
+  // hidden input, so fill the visible national-number control instead.
+  await page.getByRole('textbox', { name: 'Phone number' }).fill('0123456789');
+  // If the form gains another required field, fail HERE with a clear message
+  // instead of timing out 180s later.
+  const missing = await page
+    .locator('form input[required]')
+    .evaluateAll((els) =>
+      els
+        .filter((el) => !(el as HTMLInputElement).value)
+        .map(
+          (el) =>
+            (el as HTMLInputElement).name || (el as HTMLInputElement).ariaLabel,
+        ),
+    );
+  if (missing.length) {
+    throw new Error(
+      `signup form has unfilled required fields: ${missing.join(', ')}`,
+    );
+  }
   await page.getByRole('button', { name: /create account/i }).click();
 }
 
@@ -76,7 +96,9 @@ export async function signup(
   email: string,
   password: string,
 ): Promise<void> {
-  for (let attempt = 0; attempt < 5; attempt++) {
+  // 3 attempts × ~40s worst case = 120s, safely under the 180s test timeout so
+  // the diagnostic below can actually fire (5 × 40s = 200s could not).
+  for (let attempt = 0; attempt < 3; attempt++) {
     await submitSignup(page, slug, username, email, password);
     if (await flippedToOpen(page, 12_000)) return;
     await page.waitForTimeout(8_000); // clear the short sign-in window

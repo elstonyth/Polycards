@@ -85,6 +85,50 @@ updates:
       - dependency-name: 'react'
         update-types:
           - version-update:semver-major
+      # #317 bumped plugin-react to 6.x against our vite 6.4.3 — plugin-react
+      # 5+ imports vite 7's './internal' export, so every COLD admin/vendor
+      # vite build (CI backend-quality, the DO deploy image) dies with
+      # ERR_PACKAGE_PATH_NOT_EXPORTED. Turbo cache hid it until the first
+      # cache miss. plugin-react majors move only in lockstep with a vite
+      # major, deliberately, in one reviewed PR (reverted in the commit
+      # adding this entry).
+      - dependency-name: '@vitejs/plugin-react'
+        update-types:
+          - version-update:semver-major
+
+  - package-ecosystem: npm
+    directory: /backend/apps/admin
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        exclude-patterns:
+          - '@medusajs/*'
+          - '@mercurjs/*'
+        update-types:
+          - minor
+          - patch
+    # Same lockstep rationale as the /backend updater above (@medusajs/* +
+    # @mercurjs/* pinned as a family; react/react-dom must move together) —
+    # this manifest re-declares those same packages for its own workspace, so
+    # it needs the identical ignores or the two updaters could open
+    # conflicting PRs for the same underlying resolution.
+    ignore:
+      - dependency-name: '@medusajs/*'
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-major
+      - dependency-name: '@mercurjs/*'
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-major
+      - dependency-name: 'react-dom'
+        update-types:
+          - version-update:semver-major
+      - dependency-name: 'react'
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: github-actions
     directory: /

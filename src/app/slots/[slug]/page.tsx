@@ -26,10 +26,15 @@ export async function generateMetadata({
 
 export default async function SlotsPackDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<{ count?: string }>;
 }) {
   const { slug } = await params;
+  const { count: countRaw } = await searchParams;
+  const parsed = Number(countRaw);
+  const count = Number.isInteger(parsed) ? Math.min(3, Math.max(1, parsed)) : 1;
   const [base, detail, recentPulls] = await Promise.all([
     getPackBySlug(slug),
     getPackDetail(slug),
@@ -43,6 +48,7 @@ export default async function SlotsPackDetailPage({
       siblings={base.siblings}
       detail={detail}
       recentPulls={recentPulls}
+      initialQty={count}
     />
   );
 }

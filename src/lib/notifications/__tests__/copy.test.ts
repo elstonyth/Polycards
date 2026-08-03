@@ -1,15 +1,41 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { NOTIFICATION_COPY, copyFor } from '../copy';
 
-const TEMPLATES = [
-  'vip_level_up',
-  'commission_matured',
-  'delivery_status',
-  'reward_won',
-  'voucher_claimed',
-  'topup_credited',
-  'challenge_payout',
-] as const;
+// The template list used to be hand-copied here as a `TEMPLATES` const.
+// That mirror could drift from the backend's `FeedTemplate` union silently: a
+// template added on the backend shipped green while the storefront feed fell
+// through to unknown-key handling for a template announcing money events.
+// Parse the union straight from backend source instead, so this file's
+// "covers every template" assertion IS the parity check, not a copy of one.
+const BACKEND_SRC = join(
+  process.cwd(),
+  'backend/packages/api/src/modules/packs/notify-feed.ts',
+);
+
+function backendFeedTemplates(): string[] {
+  const src = readFileSync(BACKEND_SRC, 'utf8');
+  const union = src.match(/export type FeedTemplate\s*=([\s\S]*?);/)?.[1];
+  if (!union) {
+    throw new Error(
+      `FeedTemplate union not found in ${BACKEND_SRC}. If it was renamed or ` +
+        `moved, update this guard -- do not delete it.`,
+    );
+  }
+  const members = [...union.matchAll(/'([^']+)'/g)]
+    .map((x) => x[1])
+    .filter((x): x is string => x !== undefined);
+  if (members.length === 0) {
+    throw new Error(
+      `FeedTemplate union parsed but yielded no members from ${BACKEND_SRC}. ` +
+        `If the union shape changed, update this guard -- do not delete it.`,
+    );
+  }
+  return members;
+}
+
+const TEMPLATES = backendFeedTemplates();
 
 // /vip, /vouchers, /daily, /referrals, /invite and /rewards all 404 while the
 // reward economy is suspended (spec 2026-07-29) — a feed row must not deep-link
@@ -48,15 +74,18 @@ describe('NOTIFICATION_COPY', () => {
   it('toasts exactly the templates nothing else announces', () => {
     const always = TEMPLATES.filter((t) => copyFor(t).policy === 'always');
     // voucher_claimed / topup_credited have their own client toast;
-    // reward_won has PrizeReveal. Toasting them would double up.
+    // reward_won has PrizeReveal. Toasting them would double up. The two
+    // withdrawal outcomes land asynchronously with no owning tab, and
     // challenge_payout settles server-side between sessions — nothing else
-    // announces it.
+    // announces any of them, so all three DO toast.
     expect(always.sort()).toEqual(
       [
         'challenge_payout',
         'commission_matured',
         'delivery_status',
         'vip_level_up',
+        'withdrawal_paid',
+        'withdrawal_refunded',
       ].sort(),
     );
   });
@@ -158,6 +187,12 @@ describe('body rendering', () => {
     );
     expect(copyFor('voucher_claimed').body({ amount_myr: 5, level: 3 })).toBe(
       'RM 5.00 credited from your Level 3 voucher.',
+    );
+    expect(copyFor('withdrawal_paid').body({ amount_myr: 50 })).toBe(
+      'RM 50.00 has been sent to your bank.',
+    );
+    expect(copyFor('withdrawal_refunded').body({ amount_myr: 50 })).toBe(
+      'The transfer could not be completed — RM 50.00 is back in your balance.',
     );
   });
 

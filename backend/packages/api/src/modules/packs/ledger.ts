@@ -12,7 +12,7 @@
 // year) — ponytail: if this ever needs to serve a DST-observing zone, this
 // function needs Intl.DateTimeFormat/date-fns-tz instead of the fixed shift.
 
-export type LedgerType = 'TP' | 'SP' | 'SE' | 'OD' | 'RF' | 'AD' | 'WP';
+export type LedgerType = 'TP' | 'SP' | 'SE' | 'OD' | 'RF' | 'AD' | 'WP' | 'WD';
 
 export type LedgerPayload =
   | { type: 'TP'; payment_method: string; gateway_ref: string | null }
@@ -21,7 +21,14 @@ export type LedgerPayload =
   | { type: 'OD'; handles: { card_handle: string; qty: number }[]; status: string }
   | { type: 'RF'; period: string; spend_total: number; pct: number }
   | { type: 'AD'; admin_id: string; reason: string; detail: string | null; card_handle: string | null }
-  | { type: 'WP'; period: string; stage: number; rank: number; sku: string | null; value: number };
+  | { type: 'WP'; period: string; stage: number; rank: number; sku: string | null; value: number }
+  // WD: a GlobePay365 payout. One row when the debit is taken (negative
+  // wallet_delta) and, if the payout later fails, one when it is refunded
+  // (positive) — the pair nets to zero, which is how a bounced withdrawal
+  // reads in the ledger. The account number is stored as last-4 ONLY: the
+  // full number lives on globepay_withdrawal, and the ledger is an operator-
+  // and customer-visible surface.
+  | { type: 'WD'; outcome: 'requested' | 'refunded'; bank_code: string | null; account_last4: string | null; gateway_ref: string | null };
 
 const SERIAL_RE = /^([a-z]+)(\d{4})$/;
 

@@ -71,9 +71,13 @@ export async function GET(
         {},
         { order: { rolled_at: "DESC" }, take: ROLLUP_WINDOW }
       );
+  // `id` tiebreaker: a batch open (open-batch) stamps every pull in the
+  // batch with the same `rolled_at` millisecond, so without a unique
+  // secondary sort key, offset pagination can show a row on two pages or on
+  // neither. Same rule as inventory/[handle]/route.ts:82.
   const [ledger, total] = await packs.listAndCountPulls(
     ledgerFilter,
-    { order: { rolled_at: "DESC" }, skip: offset, take: limit }
+    { order: { rolled_at: "DESC", id: "DESC" }, skip: offset, take: limit }
   );
 
   const handles = [...new Set([...allPulls, ...ledger].map((p) => p.card_id))];

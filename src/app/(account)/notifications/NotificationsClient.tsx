@@ -12,6 +12,7 @@ import {
 import type { Notification } from '@/lib/actions/notifications';
 import { copyFor } from '@/lib/notifications/copy';
 import { displayUnreadTotal } from '@/lib/notifications/unread-total';
+import { rollbackRead } from '@/lib/notifications/rollback-read';
 
 export default function NotificationsClient({
   initial,
@@ -60,9 +61,14 @@ export default function NotificationsClient({
   // row (a plain link firing no action). A mount-time re-sync races nothing.
   useEffect(() => {
     let live = true;
-    void getNotifications(page).then((r) => {
-      if (live && r.ok) setItems(r.notifications);
-    });
+    void getNotifications(page)
+      .then((r) => {
+        if (live && r.ok) setItems(r.notifications);
+      })
+      // A transport failure (offline, a mid-deploy action-id mismatch) just
+      // keeps the server-rendered `initial` list — same posture as the header
+      // bell badge (NotificationBell.tsx).
+      .catch(() => {});
     return () => {
       live = false;
     };
@@ -75,11 +81,11 @@ export default function NotificationsClient({
         n.id === id ? { ...n, readAt: new Date().toISOString() } : n,
       ),
     );
-    const r = await markRead(id);
-    if (!r.ok) {
-      setItems((xs) =>
-        xs.map((n) => (n.id === id ? { ...n, readAt: null } : n)),
-      );
+    try {
+      const r = await markRead(id);
+      if (!r.ok) setItems((xs) => rollbackRead(xs, [id]));
+    } catch {
+      setItems((xs) => rollbackRead(xs, [id]));
     }
   }
 
@@ -94,19 +100,21 @@ export default function NotificationsClient({
     setClearing(true);
     const now = new Date().toISOString();
     setItems((xs) => xs.map((n) => (n.readAt ? n : { ...n, readAt: now })));
-    const r = await markAllRead();
-    if (r.ok) {
-      // Clears every page server-side → the true total is now 0. Test:
-      // displayUnreadTotal(0, 20, 20) === 0. On failure, leave serverTotal
-      // alone; the row rollback below restores the old (still-correct) total.
-      setServerTotal(0);
-    } else {
-      const revert = new Set(wasUnread);
-      setItems((xs) =>
-        xs.map((n) => (revert.has(n.id) ? { ...n, readAt: null } : n)),
-      );
+    try {
+      const r = await markAllRead();
+      if (r.ok) {
+        // Clears every page server-side → the true total is now 0. Test:
+        // displayUnreadTotal(0, 20, 20) === 0. On failure, leave serverTotal
+        // alone; the row rollback below restores the old (still-correct) total.
+        setServerTotal(0);
+      } else {
+        setItems((xs) => rollbackRead(xs, wasUnread));
+      }
+    } catch {
+      setItems((xs) => rollbackRead(xs, wasUnread));
+    } finally {
+      setClearing(false);
     }
-    setClearing(false);
   }
 
   if (items.length === 0) {

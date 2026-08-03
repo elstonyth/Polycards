@@ -24,10 +24,11 @@ export const config: RouteConfig = {
   rank: 31,
 };
 
-// undefined is the "All" tab. RF (referral payout) and WP (challenge
-// settlement) stay listed even though no writer produces them yet — the ledger
-// stores both and a later epic may wire them. They are empty, not broken, so
-// they get no special-case copy.
+// undefined is the "All" tab. WP (challenge settlement) is written by
+// settleChallengeWinner (plan 060). RF (referral payout) stays listed but is
+// still writerless — Epic 6 (referral payouts) is cancelled, so that filter
+// always returns zero rows. It is empty, not broken, so it gets no
+// special-case copy.
 const TYPES: (LedgerType | undefined)[] = [
   undefined,
   'TP',
@@ -37,6 +38,7 @@ const TYPES: (LedgerType | undefined)[] = [
   'RF',
   'AD',
   'WP',
+  'WD',
 ];
 
 // Header cells above; the payload expander spans all of them.

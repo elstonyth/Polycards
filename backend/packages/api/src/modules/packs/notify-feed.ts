@@ -7,6 +7,8 @@ export type FeedTemplate =
   | 'voucher_claimed'
   | 'delivery_status'
   | 'topup_credited'
+  | 'withdrawal_paid'
+  | 'withdrawal_refunded'
   | 'challenge_payout';
 
 // The channel our CUSTOMER in-app feed lives on. Deliberately NOT 'feed':

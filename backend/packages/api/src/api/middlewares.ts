@@ -558,6 +558,43 @@ export default defineMiddlewares({
       ],
     },
     {
+      // Real GlobePay365 deposit (POST /store/credits/deposit). Same tier as
+      // the mock top-up above: authenticated write, own limiter. Each call
+      // creates a deposit at the gateway, so an unlimited caller could flood
+      // their back office even without ever paying.
+      //
+      // NOTE: the gateway's own callback is POST /hooks/globepay/deposit, which
+      // is deliberately OUTSIDE /store/* — a webhook carries no customer token,
+      // so it must not hit authenticate(). Its auth is the RSA signature.
+      matcher: '/store/credits/deposit',
+      method: 'POST',
+      middlewares: [
+        authenticate('customer', ['bearer']),
+        createCreditTopupRateLimit(),
+      ],
+    },
+    {
+      // Real GlobePay365 payout (POST /store/credits/withdraw). Money OUT, so
+      // it shares the top-up write tier: authenticated, own limiter. The
+      // gateway's callback (POST /hooks/globepay/withdrawal) and Payout
+      // Verification (POST /hooks/globepay/payout-verify) are deliberately
+      // OUTSIDE /store/* — webhook auth is the RSA signature.
+      matcher: '/store/credits/withdraw',
+      method: 'POST',
+      middlewares: [
+        authenticate('customer', ['bearer']),
+        createCreditTopupRateLimit(),
+      ],
+    },
+    {
+      // Bank picker for the withdrawal form. Read-only proxy, but
+      // authenticated so the bank list (with our merchant context) is not a
+      // public unauthenticated endpoint.
+      matcher: '/store/credits/withdraw/banks',
+      method: 'GET',
+      middlewares: [authenticate('customer', ['bearer'])],
+    },
+    {
       // Reward redemption writes — claim a grant, withdraw a
       // vaulted prize. All state/money mutations, so they share the delivery
       // write-tier budget (the same family as topup/buyback/delivery). The

@@ -93,14 +93,18 @@ export default function AuthForm({
 
     const email = String(new FormData(e.currentTarget).get('email') ?? '');
     setBusy(true);
-    const result = await requestPasswordReset({ email });
-    setBusy(false);
-
-    if (result.ok) {
-      setForgot('sent');
-      return;
+    try {
+      const result = await requestPasswordReset({ email });
+      if (result.ok) {
+        setForgot('sent');
+        return;
+      }
+      setNote({ text: result.error });
+    } catch {
+      setNote({ text: 'Something went wrong. Please try again.' });
+    } finally {
+      setBusy(false);
     }
-    setNote({ text: result.error });
   }
 
   async function onForgotPhoneSubmit(e: FormEvent<HTMLFormElement>) {
@@ -163,9 +167,14 @@ export default function AuthForm({
 
     if (!isSignup) {
       setBusy(true);
-      const result = await login({ email, password });
-      setBusy(false);
-      finishAuth(result);
+      try {
+        const result = await login({ email, password });
+        finishAuth(result);
+      } catch {
+        setNote({ text: 'Something went wrong. Please try again.' });
+      } finally {
+        setBusy(false);
+      }
       return;
     }
 
@@ -184,40 +193,59 @@ export default function AuthForm({
 
     if (PHONE_VERIFICATION_REQUIRED) {
       setBusy(true);
-      const otpResult = await startPhoneOtp({ phone, purpose: 'signup' });
-      setBusy(false);
-      if (!otpResult.ok) {
-        setNote({ text: otpResult.error });
-        return;
+      try {
+        const otpResult = await startPhoneOtp({ phone, purpose: 'signup' });
+        if (!otpResult.ok) {
+          setNote({ text: otpResult.error });
+          return;
+        }
+        // Defer the real signup() call until the code is verified — pending
+        // fields ride along in state for onVerified to use. signupDraft is
+        // the same values, but kept around after setOtp(null) (see its
+        // comment).
+        setOtp({ phone, pending: { email, password, first_name } });
+        setSignupDraft({ email, password, first_name, phone });
+      } catch {
+        setNote({ text: 'Something went wrong. Please try again.' });
+      } finally {
+        setBusy(false);
       }
-      // Defer the real signup() call until the code is verified — pending
-      // fields ride along in state for onVerified to use. signupDraft is the
-      // same values, but kept around after setOtp(null) (see its comment).
-      setOtp({ phone, pending: { email, password, first_name } });
-      setSignupDraft({ email, password, first_name, phone });
       return;
     }
 
     setBusy(true);
-    const result = await signup({ email, password, first_name, phone });
-    setBusy(false);
-    finishAuth(result);
+    try {
+      const result = await signup({ email, password, first_name, phone });
+      finishAuth(result);
+    } catch {
+      setNote({ text: 'Something went wrong. Please try again.' });
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function onGoogle() {
     if (busy) return;
     setNote(null);
     setBusy(true);
-    const result = await googleLoginStart();
-    if (result.ok) {
-      // Full-page redirect to Google's consent screen; the /auth/google/callback
-      // route finishes the exchange on return. We're navigating away, so leave
-      // `busy` true (no reset) to keep the button disabled until unload.
-      window.location.assign(result.location);
-      return;
+    // No `finally` here, deliberately: on success we navigate away and must
+    // leave `busy` true (see comment below) — a finally would re-enable the
+    // button mid-redirect. Both the !ok branch and the catch reset it.
+    try {
+      const result = await googleLoginStart();
+      if (result.ok) {
+        // Full-page redirect to Google's consent screen; the /auth/google/callback
+        // route finishes the exchange on return. We're navigating away, so leave
+        // `busy` true (no reset) to keep the button disabled until unload.
+        window.location.assign(result.location);
+        return;
+      }
+      setBusy(false);
+      setNote({ text: result.error });
+    } catch {
+      setBusy(false);
+      setNote({ text: 'Something went wrong. Please try again.' });
     }
-    setBusy(false);
-    setNote({ text: result.error });
   }
 
   // Only the login mode owns the forgot sub-view — if something external

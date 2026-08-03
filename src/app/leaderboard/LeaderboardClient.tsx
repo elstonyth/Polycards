@@ -100,7 +100,10 @@ export default function LeaderboardClient({
                 notes): weekly = "# Player · reward" (pulled value moved under
                 the name), All Time = "# Player · pulled value". Spacer mirrors
                 the 36px avatar so "Player" starts over the names. */}
-            <div className="mt-3 flex items-center gap-3 px-4 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+            {/* text-neutral-400, not -500: -500 on bg-neutral-900 measures
+                ~3.8:1 (axe flagged it at 4.17:1 in CI), under the 4.5:1 AA
+                floor — -400 measures ~6.9:1 (plan 070 step 4). */}
+            <div className="mt-3 flex items-center gap-3 px-4 text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
               <span className="w-8 shrink-0 text-center">#</span>
               <span aria-hidden className="w-9 shrink-0" />
               <span className="min-w-0 flex-1">Player</span>

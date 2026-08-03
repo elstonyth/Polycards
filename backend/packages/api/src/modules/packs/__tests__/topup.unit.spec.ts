@@ -126,14 +126,9 @@ describe('mockTopupAllowed', () => {
     ).toBe(false);
   });
 
-  it("allows the mock via the deliberate demo value ('unsafe-demo')", () => {
-    expect(
-      mockTopupAllowed({
-        NODE_ENV: 'production',
-        ALLOW_MOCK_TOPUP: 'unsafe-demo',
-      }),
-    ).toBe(true);
-    expect(mockTopupAllowed({ ALLOW_MOCK_TOPUP: 'unsafe-demo' })).toBe(true);
+  // The prod-as-demo escape hatch was removed once the real gateway shipped.
+  it("no longer honours the retired 'unsafe-demo' value", () => {
+    expect(mockTopupAllowed({ ALLOW_MOCK_TOPUP: 'unsafe-demo' })).toBe(false);
   });
 });
 
@@ -151,32 +146,27 @@ describe('assertMockTopupSafe', () => {
     ).toThrow(/production/i);
   });
 
-  it('permits production WITHOUT the flag (mockTopupAllowed already fails closed there)', () => {
+  it('permits production only when the flag is ABSENT (fails closed there anyway)', () => {
     expect(() => assertMockTopupSafe({ NODE_ENV: 'production' })).not.toThrow();
-    expect(() =>
-      assertMockTopupSafe({
-        NODE_ENV: 'production',
-        ALLOW_MOCK_TOPUP: 'false',
-      }),
-    ).not.toThrow();
+    expect(mockTopupAllowed({ NODE_ENV: 'production' })).toBe(false);
   });
 
-  it("permits the deliberate demo opt-in ('unsafe-demo') in production", () => {
-    // Prod-as-demo (2026-07-02): 'true' (every local .env) still refuses boot,
-    // but the weird-looking explicit value boots and enables the mock gateway.
-    expect(() =>
-      assertMockTopupSafe({
-        NODE_ENV: 'production',
-        ALLOW_MOCK_TOPUP: 'unsafe-demo',
-      }),
-    ).not.toThrow();
-    expect(
-      mockTopupAllowed({
-        NODE_ENV: 'production',
-        ALLOW_MOCK_TOPUP: 'unsafe-demo',
-      }),
-    ).toBe(true);
-  });
+  // 2026-07-29: production may not run the mock gateway at all now that
+  // GlobePay365 exists. ANY value refuses boot — including the retired
+  // 'unsafe-demo' and values the guard has never seen, because an operator who
+  // set the variable meant something by it and a silently-disabled top-up path
+  // is worse than a loud refusal.
+  it.each(['unsafe-demo', 'false', '1', 'yes', ''])(
+    'refuses to boot production with ALLOW_MOCK_TOPUP=%p',
+    (value) => {
+      expect(() =>
+        assertMockTopupSafe({
+          NODE_ENV: 'production',
+          ALLOW_MOCK_TOPUP: value,
+        }),
+      ).toThrow(/not permitted in production/i);
+    },
+  );
 
   it('permits the opt-in OFF production (staging/custom/dev/test still allow the mock)', () => {
     expect(() =>

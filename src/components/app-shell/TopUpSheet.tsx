@@ -4,12 +4,34 @@ import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { rm, rm0 } from '@/lib/format';
-import { topUpCredits } from '@/lib/actions/vault';
+import { startDeposit, topUpCredits } from '@/lib/actions/vault';
+import { leaveFor } from '@/lib/navigation';
 import { Pill } from '@/components/ui/pill';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
 
-const PRESETS = [10, 25, 50, 100];
+// Which gateway backs the sheet. 'globepay' sends the customer to the
+// provider's cashier page and credits nothing here — the balance updates later,
+// when their signed callback settles the deposit. Anything else keeps the mock
+// gateway, which credits synchronously and stays the local/dev path.
+const USE_GATEWAY = process.env.NEXT_PUBLIC_PAYMENTS_PROVIDER === 'globepay';
+
+// The gateway's band is narrower than the mock's on both ends, and it rejects
+// anything outside it with a generic "Invalid Transaction Amount" that names no
+// numbers. Catch it in the sheet so the customer gets a message they can act on.
+// Production band, confirmed by the provider 2026-07-29: RM 30 – RM 10,000 for
+// both Online Banking and QR (docs/payments/globepay365-setup.md). Mirrors the
+// backend's GLOBEPAY_MIN_RM/GLOBEPAY_MAX_RM.
+const GATEWAY_MIN_RM = 30;
+const GATEWAY_MAX_RM = 10000;
+
+// The mock's 10/25 rungs are below the gateway's floor, so offering them would
+// guarantee a rejection on the real path. The gateway rungs span the production
+// band (RM 30 – 10,000) rather than hugging its floor — 5,000 is a real ticket
+// size now that the ceiling is 10,000, and it was impossible under the test
+// account's RM 1,000 cap.
+const PRESETS = USE_GATEWAY ? [50, 250, 500, 5000] : [10, 25, 50, 100];
+const DEFAULT_AMOUNT = USE_GATEWAY ? '50' : '25';
 
 /**
  * Global top-up bottom sheet (90scard's profile top-up flow, dark skin).
@@ -28,7 +50,7 @@ export default function TopUpSheet({
   onClose: () => void;
   onToppedUp: (balance: number, amount: number) => void;
 }) {
-  const [amountText, setAmountText] = useState('25');
+  const [amountText, setAmountText] = useState(DEFAULT_AMOUNT);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<{
@@ -71,6 +93,26 @@ export default function TopUpSheet({
     setError(null);
     setSubmitting(true);
     try {
+      if (USE_GATEWAY) {
+        if (amount < GATEWAY_MIN_RM || amount > GATEWAY_MAX_RM) {
+          setError(
+            `Top-ups must be between ${rm0(GATEWAY_MIN_RM)} and ${rm0(GATEWAY_MAX_RM)}.`,
+          );
+          return;
+        }
+        const res = await startDeposit(amount);
+        if (!res.ok) {
+          setError(res.error);
+          return;
+        }
+        // Leave for the cashier page. Deliberately a full navigation, not a new
+        // tab: popup blockers eat a window.open() that follows an await, and
+        // the customer must land back on our return URL afterwards. Nothing was
+        // credited — the balance updates when their callback settles.
+        leaveFor(res.url);
+        return;
+      }
+
       attemptKey.current ??= crypto.randomUUID();
       const res = await topUpCredits(amount, attemptKey.current);
       if (!res.ok) {
@@ -120,9 +162,14 @@ export default function TopUpSheet({
         <div className="flex items-center justify-between">
           <h2 className="font-heading text-xl text-white">TOP UP</h2>
           <div className="flex items-center gap-2">
-            <span className="rounded-md border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider text-amber-300">
-              Demo
-            </span>
+            {/* Never in gateway mode: this sheet redirects to a real cashier
+                and takes real money, so a "Demo" badge would be a lie on the
+                one screen where it matters most. */}
+            {!USE_GATEWAY && (
+              <span className="rounded-md border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider text-amber-300">
+                Demo
+              </span>
+            )}
             <button
               type="button"
               onClick={onClose}
@@ -208,7 +255,12 @@ export default function TopUpSheet({
                 </span>
               </div>
               <div className="mt-3 flex items-center justify-between border-t border-white/10 pt-3">
-                <span className="text-neutral-300">New balance</span>
+                {/* On the gateway path the credit is NOT immediate — it lands
+                    when the provider confirms the payment. Calling this "New
+                    balance" would promise something the button cannot deliver. */}
+                <span className="text-neutral-300">
+                  {USE_GATEWAY ? 'Balance once paid' : 'New balance'}
+                </span>
                 <span className="font-heading text-lg text-white">
                   {balance != null && amountValid ? rm(balance + amount) : '—'}
                 </span>
@@ -231,15 +283,21 @@ export default function TopUpSheet({
               className="mt-4 w-full"
             >
               {submitting
-                ? 'Processing…'
+                ? USE_GATEWAY
+                  ? 'Taking you to payment…'
+                  : 'Processing…'
                 : amountValid
-                  ? `Proceed — add ${rm(amount)}`
+                  ? USE_GATEWAY
+                    ? // Nothing is added here — the button leaves the site.
+                      `Pay ${rm(amount)}`
+                    : `Proceed — add ${rm(amount)}`
                   : 'Enter an amount'}
             </Pill>
 
             <p className="mt-3 text-[12px] leading-relaxed text-neutral-400">
-              Demo checkout: only the amount leaves your browser. Amounts ending
-              in .13 are declined on purpose so you can see the error path.
+              {USE_GATEWAY
+                ? 'You’ll finish paying on GlobePay365, then come back here. Credits appear once your payment is confirmed — usually within a minute.'
+                : 'Demo checkout: only the amount leaves your browser. Amounts ending in .13 are declined on purpose so you can see the error path.'}
             </p>
           </>
         )}

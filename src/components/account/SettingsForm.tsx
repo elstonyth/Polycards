@@ -60,34 +60,39 @@ export default function SettingsForm({ customer }: Props) {
 
     const form = new FormData(e.currentTarget);
     setBusy(true);
-    const result = await updateProfile({
-      first_name: String(form.get('first_name') ?? ''),
-      last_name: String(form.get('last_name') ?? ''),
-      // Under enforcement there's no editable phone field in this form (see
-      // below) — phone writes go through changePhone instead.
-      ...(PHONE_VERIFICATION_REQUIRED
-        ? {}
-        : { phone: String(form.get('phone') ?? '') }),
-    });
-    setBusy(false);
-
-    if (result.ok) {
-      // Sync the header's user menu (AuthCustomer has no phone — drop it).
-      // The profile handle and avatar are name-independent — carry the
-      // current ones over.
-      setCustomer({
-        id: result.customer.id,
-        email: result.customer.email,
-        first_name: result.customer.first_name,
-        last_name: result.customer.last_name,
-        handle: authCustomer?.handle ?? null,
-        avatar_url: authCustomer?.avatar_url ?? null,
+    try {
+      const result = await updateProfile({
+        first_name: String(form.get('first_name') ?? ''),
+        last_name: String(form.get('last_name') ?? ''),
+        // Under enforcement there's no editable phone field in this form
+        // (see below) — phone writes go through changePhone instead.
+        ...(PHONE_VERIFICATION_REQUIRED
+          ? {}
+          : { phone: String(form.get('phone') ?? '') }),
       });
-      setNote({ ok: true, text: 'Changes saved.' });
-      router.refresh();
-      return;
+
+      if (result.ok) {
+        // Sync the header's user menu (AuthCustomer has no phone — drop it).
+        // The profile handle and avatar are name-independent — carry the
+        // current ones over.
+        setCustomer({
+          id: result.customer.id,
+          email: result.customer.email,
+          first_name: result.customer.first_name,
+          last_name: result.customer.last_name,
+          handle: authCustomer?.handle ?? null,
+          avatar_url: authCustomer?.avatar_url ?? null,
+        });
+        setNote({ ok: true, text: 'Changes saved.' });
+        router.refresh();
+        return;
+      }
+      setNote({ ok: false, text: result.error });
+    } catch {
+      setNote({ ok: false, text: 'Couldn’t save changes. Please try again.' });
+    } finally {
+      setBusy(false);
     }
-    setNote({ ok: false, text: result.error });
   }
 
   // 'entry' step: validate + send the OTP, then move to 'otp'.
