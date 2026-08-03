@@ -44,6 +44,13 @@ type CompensateData =
         buyback_percent: number;
         in_stock: boolean;
         published_odds: Record<string, unknown> | null;
+        // Compensation is an INSERT (no json-merge hazard), so the raw stored
+        // shapes round-trip as-is — but they must be CARRIED or a rolled-back
+        // delete silently reverts the pack to inherit-global tiers, no hero
+        // art, and the default RTP target.
+        display_image: string | null;
+        target_rtp_bps: number;
+        tier_ranges: Record<string, unknown> | null;
       };
       odds: OddsSnapshot[];
     }
@@ -86,6 +93,10 @@ export const deletePackStep = createStep(
         in_stock: pack.in_stock,
         published_odds:
           (pack.published_odds as Record<string, unknown> | null) ?? null,
+        display_image: pack.display_image ?? null,
+        target_rtp_bps: pack.target_rtp_bps ?? 7000,
+        tier_ranges:
+          (pack.tier_ranges as Record<string, unknown> | null) ?? null,
       },
       odds: oddsRows.map((o) => ({
         pack_id: o.pack_id,

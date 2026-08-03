@@ -35,6 +35,10 @@ export interface AdminPack {
   buyback_percent: number;
   boost: boolean;
   published_odds: PublishedOdds | null;
+  /** Per-pack tier price-range override (rarity → { min, max }, RM display
+   *  price). Null = inherit the global Tier Defaults; a stored map (even {})
+   *  replaces the global ladder wholesale for this pack. */
+  tier_ranges: Record<string, { min: number | null; max: number | null }> | null;
   /** RAW / GRADED / MIX composition of the prize pool — AUTO-DETECTED from the
    *  members' graders, never operator-set. Null = empty pool (nothing to infer
    *  from, which is not the same as "raw"). */
@@ -68,6 +72,9 @@ export interface AdminPackWrite {
   rank: number;
   status: 'active' | 'draft';
   published_odds?: PublishedOdds | null;
+  /** OMITTED = keep the stored value; null = clear (inherit the global Tier
+   *  Defaults); map = pack-specific ranges. */
+  tier_ranges?: Record<string, { min: number | null; max: number | null }> | null;
 }
 
 // No rarity here — rarity is a per-pack property (PackOdds), edited in each
@@ -207,6 +214,12 @@ export interface PackOddsResponse {
     /** Target RTP in basis points (7000 = 70%) — the auto-split's default
      *  input and the value a save persists back onto the pack. */
     target_rtp_bps: number;
+    /** Per-pack tier price-range override; null = inherit the global Tier
+     *  Defaults. */
+    tier_ranges: Record<
+      string,
+      { min: number | null; max: number | null }
+    > | null;
   };
   odds: OddsRow[];
 }

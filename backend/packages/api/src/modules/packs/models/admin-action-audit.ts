@@ -24,6 +24,7 @@ export const AdminActionAudit = model
       'challenge_settings',
       'delivery_order',
       'purchase_invoice',
+      'tier_settings',
     ]),
     entity_id: model.text(),
     action: model.enum([

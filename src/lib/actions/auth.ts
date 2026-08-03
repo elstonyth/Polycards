@@ -20,6 +20,7 @@ import { fetchProfileHandle } from '@/lib/data/profiles';
 import { friendlyError, type ErrorRule } from '@/lib/errors';
 import { NAME_MAX, normalizePhone } from '@/lib/profile-validation';
 import { ALLOWED_SELF_HOSTS } from '@/lib/allowed-hosts';
+import { PHONE_VERIFICATION_REQUIRED } from '@/lib/phone-verification';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD_LENGTH = 8;
@@ -133,6 +134,7 @@ export async function signup(input: {
   password: string;
   first_name?: string;
   phone?: string;
+  phone_verification_token?: string;
 }): Promise<AuthResult> {
   const email = input.email.trim().toLowerCase();
   if (!EMAIL_RE.test(email))
@@ -163,6 +165,11 @@ export async function signup(input: {
       ok: false,
       error: `Names must be ${NAME_MAX} characters or fewer.`,
     };
+  // Enforcement is mirrored client-side for UX only — the backend gate
+  // (requireSignupPhoneProof) is authoritative; this just avoids a round trip
+  // for the common case where the storefront flag matches the backend's.
+  if (PHONE_VERIFICATION_REQUIRED && !input.phone_verification_token)
+    return { ok: false, error: 'Please verify your phone number first.' };
 
   try {
     const registerToken = await exchangeToken(
@@ -173,7 +180,12 @@ export async function signup(input: {
     await sdk.store.customer.create(
       { email, first_name, phone },
       {},
-      { Authorization: `Bearer ${registerToken}` },
+      {
+        Authorization: `Bearer ${registerToken}`,
+        ...(input.phone_verification_token
+          ? { 'x-phone-verification': input.phone_verification_token }
+          : {}),
+      },
     );
     // The register token isn't a session token — log in to get the real one.
     return await login({ email, password: input.password });

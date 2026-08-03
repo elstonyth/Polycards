@@ -11,3 +11,9 @@
 # what waives it going forward (sha-independent); the entry stays because the
 # branch commit itself is still scanned in history.
 8dccef9feb8a4f95484fef1f63f42db364e6fe26:backend/packages/api/integration-tests/http/delivery-orders-bulk.spec.ts:generic-api-key:9
+
+# Synthetic integration-test admin password ('published-odds-test-pw-1') —
+# same fixture pattern and same waiver shape as the entry above: inline
+# `// gitleaks:allow` carries forward across squash re-authoring, this
+# fingerprint waives the already-pushed branch commit in history.
+4f23518f2396708bb97a1f4b011722092c683214:backend/packages/api/integration-tests/http/pack-published-odds.spec.ts:generic-api-key:7

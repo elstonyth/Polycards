@@ -50,6 +50,7 @@ import {
   getReferralTree,
   getRewardsSettings,
   getSiteSettings,
+  getTierSettings,
   getVipLevels,
   listDeliveryOrders,
   listEligibleProducts,
@@ -60,6 +61,7 @@ import {
   saveDailyBox,
   saveRewardsSettings,
   saveSiteSettings,
+  saveTierSettings,
   saveVipLevels,
   saveVoucherRanges,
   setFxRate,
@@ -89,6 +91,8 @@ import {
   type ReferralTree,
   type RewardsSettingsView,
   type SiteSettingsView,
+  type TierRangeDTO,
+  type TierSettingsDTO,
   type VipLevelDTO,
   type VoucherLadderDTO,
   type VoucherRangeDTO,
@@ -782,6 +786,32 @@ export const useSaveChallengeSettings = () => {
   });
 };
 
+// ── Tier defaults (price range per rarity tier) ──────────────────────────────
+
+export const useTierSettings = (
+  options: { enabled?: boolean } = {},
+): UseQueryResult<TierSettingsDTO> =>
+  useQuery({
+    queryKey: qk.tierSettings,
+    queryFn: getTierSettings,
+    enabled: options.enabled ?? true,
+  });
+
+export const useSaveTierSettings = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: {
+      ranges: Record<string, TierRangeDTO>;
+      reason: string;
+    }) => saveTierSettings(vars),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.tierSettings });
+      toast.success('Tier defaults saved');
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
 // GlobePay deposits. Polls once a minute: this is the money-in watch list, and a
 // stranded payment should surface without an operator remembering to reload.
 export const useGlobePayDeposits = (
@@ -794,6 +824,7 @@ export const useGlobePayDeposits = (
     placeholderData: keepPreviousData,
     refetchInterval: 60_000,
   });
+
 // ── Epic 2 (Players) ─────────────────────────────────────────────────────────
 // Own import block (not merged into the one at the top) so this whole section
 // stays append-only while a parallel epic edits the same file.

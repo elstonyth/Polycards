@@ -12,8 +12,8 @@ __metadata:
     "@acme/api": "workspace:*"
     "@acme/odds-math": "workspace:*"
     "@acme/pokemon": "workspace:*"
-    "@medusajs/icons": "npm:2.13.4"
-    "@medusajs/ui": "npm:4.1.1"
+    "@medusajs/icons": "npm:2.13.6"
+    "@medusajs/ui": "npm:4.1.19"
     "@medusajs/ui-preset": "npm:2.15.5"
     "@mercurjs/admin": "npm:2.1.6"
     "@tanstack/react-query": "npm:5.101.4"
@@ -3288,12 +3288,30 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@medusajs/icons@npm:2.13.6":
+  version: 2.13.6
+  resolution: "@medusajs/icons@npm:2.13.6"
+  peerDependencies:
+    react: ^18.3.1
+  checksum: 10c0/fa960fec03d75a1c8788d46bf3205661158b117049ce7bb03dbc8172307a2de3bac72456a3a20d24a99a57038b942c3670d9da9af15311997be499fa0a034530
+  languageName: node
+  linkType: hard
+
 "@medusajs/icons@npm:2.15.5":
   version: 2.15.5
   resolution: "@medusajs/icons@npm:2.15.5"
   peerDependencies:
     react: ^18.3.1 || ^19.0.0
   checksum: 10c0/3600d64019f6f0c6cc682953563c76f24e33db9ed786a1dbc99ea5075cdc3505e52f00c9427119a0524343f885432fe1226af2596468bac9256a01283bfabe8d
+  languageName: node
+  linkType: hard
+
+"@medusajs/icons@npm:2.17.2":
+  version: 2.17.2
+  resolution: "@medusajs/icons@npm:2.17.2"
+  peerDependencies:
+    react: ^18.3.1 || ^19.0.0
+  checksum: 10c0/0977ac59f0a4ed7def01594d99187c278ab9a4f9b1b35fa3b035028f2f12bd9908885f7c436f45be154b38c70860220710d9b0881ca32737680181f8c7cc5c85
   languageName: node
   linkType: hard
 
@@ -3768,6 +3786,36 @@ __metadata:
     react: ^18.3.1
     react-dom: ^18.3.1
   checksum: 10c0/45ecc71719e5117566b35ddc09ac382e2279ec8206ab9075153c516b4bfd2df53023b2e8dca1731aacbd40484548e852d22394d92b3c3591e613dfbf2767bbbf
+  languageName: node
+  linkType: hard
+
+"@medusajs/ui@npm:4.1.19":
+  version: 4.1.19
+  resolution: "@medusajs/ui@npm:4.1.19"
+  dependencies:
+    "@dnd-kit/core": "npm:^6.1.0"
+    "@dnd-kit/sortable": "npm:^8.0.0"
+    "@dnd-kit/utilities": "npm:^3.2.2"
+    "@medusajs/icons": "npm:2.17.2"
+    "@radix-ui/react-dialog": "npm:1.1.4"
+    "@radix-ui/react-dismissable-layer": "npm:1.1.4"
+    "@tanstack/react-table": "npm:8.20.5"
+    clsx: "npm:^1.2.1"
+    copy-to-clipboard: "npm:^3.3.3"
+    cva: "npm:1.0.0-beta.1"
+    lodash.isequal: "npm:^4.5.0"
+    prism-react-renderer: "npm:^2.0.6"
+    prismjs: "npm:^1.30.0"
+    radix-ui: "npm:1.1.2"
+    react-aria: "npm:^3.33.1"
+    react-currency-input-field: "npm:^3.6.11"
+    react-stately: "npm:^3.31.1"
+    sonner: "npm:^1.5.0"
+    tailwind-merge: "npm:^2.2.1"
+  peerDependencies:
+    react: ^18.3.1
+    react-dom: ^18.3.1
+  checksum: 10c0/4187b5f833769e52c330e5400cef86a8797403b5d667a3d094391609ae4de624b5aecfbdb4a0d864e5a277fc0f3c36c40f3addc4eaf63556de3e3a0fde359a78
   languageName: node
   linkType: hard
 
@@ -9671,8 +9719,8 @@ __metadata:
   dependencies:
     "@eslint/js": "npm:^10.0.1"
     "@hookform/resolvers": "npm:5.5.7"
-    "@medusajs/icons": "npm:2.13.4"
-    "@medusajs/ui": "npm:4.1.1"
+    "@medusajs/icons": "npm:2.13.6"
+    "@medusajs/ui": "npm:4.1.19"
     "@mercurjs/client": "npm:2.1.6"
     "@mercurjs/dashboard-sdk": "npm:2.1.6"
     "@mercurjs/dashboard-shared": "npm:2.1.6"
