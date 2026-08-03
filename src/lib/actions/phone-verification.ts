@@ -106,7 +106,12 @@ export async function changePhone(input: {
     return { ok: true, phone: customer.phone };
   } catch (error) {
     logger.error('[phone-otp] change failed:', error);
-    return fail('Could not update your phone number. Please try again.');
+    // Same 429 retry-hint passthrough as startPhoneOtp/checkPhoneOtp — a
+    // rate-limited change should say how long to wait, not invite an
+    // immediate retry.
+    return fail(
+      messageOf(error, 'Could not update your phone number. Please try again.'),
+    );
   }
 }
 

@@ -76,6 +76,11 @@ export default function AuthForm({
     password: string;
     first_name: string;
     phone: string;
+    // A still-valid proof token from a signup() that failed AFTER the OTP
+    // passed (e.g. duplicate email). Reused on the next submit for the SAME
+    // phone so the user isn't texted (and billed) twice; cleared when the
+    // backend rejects it or the phone changes.
+    proofToken: string | null;
   } | null>(null);
 
   function switchMode(m: 'login' | 'signup') {
@@ -198,6 +203,35 @@ export default function AuthForm({
     if (PHONE_VERIFICATION_REQUIRED) {
       setBusy(true);
       try {
+        // A proof token from a failed post-OTP signup() stays valid for ~10
+        // minutes for the SAME phone — reuse it instead of sending (and
+        // paying for) another SMS. Only when the backend rejects the token
+        // (expired) does the flow fall through to a fresh OTP send.
+        if (signupDraft?.proofToken && signupDraft.phone === phone) {
+          const retry = await signup({
+            email,
+            password,
+            first_name,
+            phone,
+            phone_verification_token: signupDraft.proofToken,
+          });
+          if (retry.ok || !/verif/i.test(retry.error)) {
+            // Keep the token for another retry (e.g. a second duplicate
+            // email) and refresh the draft to what was just typed.
+            setSignupDraft({
+              email,
+              password,
+              first_name,
+              phone,
+              proofToken: signupDraft.proofToken,
+            });
+            finishAuth(retry);
+            return;
+          }
+          // Verification-shaped rejection — token expired/consumed. Clear it
+          // and fall through to a fresh OTP.
+          setSignupDraft({ ...signupDraft, proofToken: null });
+        }
         const otpResult = await startPhoneOtp({ phone, purpose: 'signup' });
         if (!otpResult.ok) {
           setNote({ text: otpResult.error });
@@ -208,7 +242,13 @@ export default function AuthForm({
         // the same values, but kept around after setOtp(null) (see its
         // comment).
         setOtp({ phone, pending: { email, password, first_name } });
-        setSignupDraft({ email, password, first_name, phone });
+        setSignupDraft({
+          email,
+          password,
+          first_name,
+          phone,
+          proofToken: null,
+        });
       } catch {
         setNote({ text: 'Something went wrong. Please try again.' });
       } finally {
@@ -418,10 +458,15 @@ export default function AuthForm({
               phone_verification_token: token,
             });
             // On failure, fall back to the signup form — signupDraft (still
-            // set) re-seeds it instead of it rendering empty. finishAuth
-            // handles both branches: setCustomer/onSuccess/refresh on ok,
-            // setNote on failure.
-            if (!result.ok) setOtp(null);
+            // set) re-seeds it instead of it rendering empty, and it KEEPS
+            // this proof token so the next submit for the same phone skips a
+            // second paid SMS (see onSubmit). finishAuth handles both
+            // branches: setCustomer/onSuccess/refresh on ok, setNote on
+            // failure.
+            if (!result.ok) {
+              setSignupDraft((d) => (d ? { ...d, proofToken: token } : d));
+              setOtp(null);
+            }
             finishAuth(result);
           }}
         />
