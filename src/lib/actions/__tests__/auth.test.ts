@@ -13,12 +13,21 @@ const mocks = vi.hoisted(() => ({
   // can inspect the logged args; googleLoginStart also needs next/headers.
   logError: vi.fn(),
   headers: vi.fn(),
+  // PHONE_VERIFICATION_REQUIRED is a module-level const read at import time —
+  // mock it as a live getter so individual tests can flip it (a plain
+  // vi.stubEnv wouldn't work: the real module already resolved the env var).
+  phoneVerificationRequired: false,
 }));
 
 vi.mock('@/lib/data/customer', () => ({
   setAuthToken: mocks.setAuthToken,
   clearAuthToken: mocks.clearAuthToken,
   getAuthToken: vi.fn(),
+}));
+vi.mock('@/lib/phone-verification', () => ({
+  get PHONE_VERIFICATION_REQUIRED() {
+    return mocks.phoneVerificationRequired;
+  },
 }));
 vi.mock('@/lib/data/profiles', () => ({
   fetchProfileHandle: mocks.fetchProfileHandle,
@@ -58,6 +67,7 @@ import { GET as googleCallbackGET } from '@/app/auth/google/callback/route';
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.phoneVerificationRequired = false;
 });
 
 // #3 — a missing/undefined password must return a friendly error, never throw.
@@ -138,6 +148,58 @@ describe('signup — required phone', () => {
     expect(r.ok).toBe(true);
     const [body] = mocks.customerCreate.mock.calls[0]!;
     expect(body.phone).toBe('+60107667787');
+  });
+});
+
+// Task 6 — the storefront mirror of PHONE_VERIFICATION_REQUIRED. The backend
+// gate (requireSignupPhoneProof) is authoritative; this only avoids a round
+// trip for the common case where the flags match.
+describe('signup — phone verification enforcement (PHONE_VERIFICATION_REQUIRED mirror)', () => {
+  beforeEach(() => {
+    mocks.phoneVerificationRequired = true;
+  });
+
+  it('flag on + no proof token → fails fast, never touches the backend', async () => {
+    const r = await signup({
+      email: 'new@polycards.app',
+      password: 'PolycardsTest123!',
+      phone: '010-766 7787',
+    });
+    expect(r).toEqual({
+      ok: false,
+      error: 'Please verify your phone number first.',
+    });
+    expect(mocks.clientFetch).not.toHaveBeenCalled();
+    expect(mocks.customerCreate).not.toHaveBeenCalled();
+  });
+
+  it('flag on + proof token → forwards it as the x-phone-verification header', async () => {
+    mocks.clientFetch
+      .mockResolvedValueOnce({ token: 'reg-tok' }) // register
+      .mockResolvedValueOnce({ token: 'sess-tok' }); // login exchange
+    mocks.customerCreate.mockResolvedValueOnce({ customer: { id: 'c1' } });
+    mocks.customerRetrieve.mockResolvedValueOnce({
+      customer: {
+        id: 'c1',
+        email: 'new@polycards.app',
+        first_name: 'N',
+        last_name: null,
+      },
+    });
+    mocks.fetchProfileHandle.mockResolvedValueOnce(null);
+
+    const r = await signup({
+      email: 'new@polycards.app',
+      password: 'PolycardsTest123!',
+      first_name: 'N',
+      phone: '010-766 7787',
+      phone_verification_token: 'proof-tok',
+    });
+
+    expect(r.ok).toBe(true);
+    const [, , headers] = mocks.customerCreate.mock.calls[0]!;
+    expect(headers.Authorization).toBe('Bearer reg-tok');
+    expect(headers['x-phone-verification']).toBe('proof-tok');
   });
 });
 

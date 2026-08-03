@@ -546,6 +546,65 @@ export function proposeRarities(
   });
 }
 
+// ── Tier price ranges (admin "Tier defaults" config) ────────────────────────
+// Absolute RM display-price range per tier, admin-configured (tier_settings
+// singleton). Unlike RARITY_BANDS above these are not pack-relative: the same
+// card proposes the same tier in every pack. Pure: the caller supplies the
+// ranges and the display price; odds-math never reads the DB.
+
+export type TierRange = {
+  /** Inclusive lower bound (RM display price); null = open downward. */
+  min: number | null;
+  /** EXCLUSIVE upper bound; null = open upward. */
+  max: number | null;
+};
+
+export type TierRangeMap = Partial<Record<OddsRarity, TierRange>>;
+
+// A tier with no entry or both bounds null is unconfigured and never matches —
+// an empty map turns the whole feature off.
+const usableRange = (range: TierRange | undefined): range is TierRange =>
+  range !== undefined && (range.min !== null || range.max !== null);
+
+const inRange = (value: number, range: TierRange): boolean =>
+  (range.min === null || value >= range.min) &&
+  (range.max === null || value < range.max);
+
+/**
+ * The tier whose configured range contains `value` — the RAREST match when
+ * ranges overlap (RARITIES is ordered rarest first). Null when no range
+ * matches (below the lowest minimum, inside a gap, empty config) or the value
+ * is unusable — the caller decides the fallback and whether to confirm.
+ */
+export function rarityForValue(
+  value: number,
+  ranges: TierRangeMap,
+): OddsRarity | null {
+  if (!Number.isFinite(value) || value < 0) return null;
+  for (const rarity of RARITIES) {
+    const range = ranges[rarity];
+    if (usableRange(range) && inRange(value, range)) return rarity;
+  }
+  return null;
+}
+
+/**
+ * Where `value` sits relative to its ASSIGNED tier's configured range — the
+ * drift signal. 'unset' (no judgement) for an unconfigured tier, an unknown
+ * rarity string, or an unusable value, so an empty config shows no badges.
+ */
+export function tierRangeStatus(
+  value: number,
+  rarity: string,
+  ranges: TierRangeMap,
+): 'in' | 'below' | 'above' | 'unset' {
+  const range = ranges[rarity as OddsRarity];
+  if (!usableRange(range) || !Number.isFinite(value)) return 'unset';
+  if (range.min !== null && value < range.min) return 'below';
+  if (range.max !== null && value >= range.max) return 'above';
+  return 'in';
+}
+
 // ── Target-RTP auto-split (POLYCARD-BACK auto-split spec) ───────────────────
 // Solve a single CHASE BUDGET `c` — the total probability mass across unlocked
 // non-Common rows. Inside the budget the rarity ladder's relative proportions

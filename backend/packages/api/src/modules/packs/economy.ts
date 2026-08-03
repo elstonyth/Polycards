@@ -61,9 +61,10 @@ export function packTheoreticalRtp(
 // list can't disagree by a float epsilon.
 export function publishedEv(
   tierAvgPrice: Record<string, number>,
-  // The stored `published_odds.tiers` is a PARTIAL record (only the tiers the
-  // operator filled in), so a present key can still be undefined.
-  publishedTiers: Record<string, number | undefined> | null | undefined,
+  // Storage carries EVERY rarity key with null = not published (the json-merge
+  // guard — see fillPublishedTiers); pre-fix rows are sparse, so a key can be
+  // absent, undefined, or null. All three mean "skip this tier".
+  publishedTiers: Record<string, number | null | undefined> | null | undefined,
 ): number | null {
   if (!publishedTiers) return null;
   let cents = 0;

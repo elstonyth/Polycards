@@ -95,40 +95,29 @@ updates:
       - dependency-name: '@vitejs/plugin-react'
         update-types:
           - version-update:semver-major
+      # Majors the Medusa admin/vendor apps can't take yet — all four PRs from
+      # the 2026-08-03 batch were red across the board (#330/#336/#337/#338):
+      # react-router-dom 7 (dashboard stack peer-pins router 6), react-i18next
+      # 17 (4-major jump vs the pinned i18next), tailwindcss 4 (new engine vs
+      # the admin Tailwind 3 preset pipeline). Each moves deliberately, in its
+      # own reviewed PR, when the stack supports it — then remove its entry.
+      - dependency-name: 'react-router-dom'
+        update-types:
+          - version-update:semver-major
+      - dependency-name: 'react-i18next'
+        update-types:
+          - version-update:semver-major
+      - dependency-name: 'tailwindcss'
+        update-types:
+          - version-update:semver-major
 
-  - package-ecosystem: npm
-    directory: /backend/apps/admin
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
-    groups:
-      minor-and-patch:
-        exclude-patterns:
-          - '@medusajs/*'
-          - '@mercurjs/*'
-        update-types:
-          - minor
-          - patch
-    # Same lockstep rationale as the /backend updater above (@medusajs/* +
-    # @mercurjs/* pinned as a family; react/react-dom must move together) —
-    # this manifest re-declares those same packages for its own workspace, so
-    # it needs the identical ignores or the two updaters could open
-    # conflicting PRs for the same underlying resolution.
-    ignore:
-      - dependency-name: '@medusajs/*'
-        update-types:
-          - version-update:semver-minor
-          - version-update:semver-major
-      - dependency-name: '@mercurjs/*'
-        update-types:
-          - version-update:semver-minor
-          - version-update:semver-major
-      - dependency-name: 'react-dom'
-        update-types:
-          - version-update:semver-major
-      - dependency-name: 'react'
-        update-types:
-          - version-update:semver-major
+  # NOTE: there is deliberately NO updater for /backend/apps/admin. The yarn
+  # workspace lockfile lives at /backend, so an updater rooted at the admin app
+  # can only edit backend/apps/admin/package.json without touching the lock —
+  # every PR it opens fails CI with YN0028 ("lockfile would have been modified",
+  # --immutable install). The /backend updater is workspace-aware and already
+  # bumps the admin manifest together with the lock (#333/#334 both did), so it
+  # is the single source of npm updates for the whole backend workspace.
 
   - package-ecosystem: github-actions
     directory: /

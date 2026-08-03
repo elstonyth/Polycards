@@ -1,6 +1,7 @@
 import { createStep, StepResponse } from '@medusajs/framework/workflows-sdk';
 import { MedusaError } from '@medusajs/framework/utils';
-import type { OddsRarity } from '@acme/odds-math';
+import { RARITIES, type OddsRarity, type TierRangeMap } from '@acme/odds-math';
+import { fillTierRanges } from '../../modules/packs/tier-settings-validate';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
 
@@ -9,6 +10,40 @@ import type PacksModuleService from '../../modules/packs/service';
 export type PublishedOdds = {
   overall: number;
   tiers: Partial<Record<OddsRarity, number>>;
+};
+
+// Sparse tiers → the full-key WRITE shape (null = tier not published). The
+// ORM MERGES json POJOs on update, so an UPDATE writing published_odds must
+// carry every rarity key or a removed tier resurrects from the stored value —
+// the same bug class as pack.tier_ranges (fillTierRanges). Reads strip the
+// nulls back out via normalizePublishedOdds below.
+export const fillPublishedTiers = (
+  tiers: PublishedOdds['tiers'],
+): Record<string, number | null> => {
+  const full: Record<string, number | null> = {};
+  for (const r of RARITIES) full[r] = tiers[r] ?? null;
+  return full;
+};
+
+// Stored jsonb → the public { overall, tiers } shape: storage nulls and
+// non-numeric noise dropped, unknown keys ignored. Every route that serves
+// published_odds runs this, so no consumer ever sees the null-filled storage
+// shape (the admin editor seeds inputs with String(tiers[r]), and "null" in a
+// win-rate field is exactly the garbage this prevents).
+export const normalizePublishedOdds = (raw: unknown): PublishedOdds | null => {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const o = raw as { overall?: unknown; tiers?: unknown };
+  const overall =
+    typeof o.overall === 'number' && Number.isFinite(o.overall)
+      ? o.overall
+      : 100;
+  const tiers: PublishedOdds['tiers'] = {};
+  const stored = (o.tiers ?? {}) as Record<string, unknown>;
+  for (const r of RARITIES) {
+    const v = stored[r];
+    if (typeof v === 'number' && Number.isFinite(v)) tiers[r] = v;
+  }
+  return { overall, tiers };
 };
 
 export type PackWriteInput = {
@@ -31,6 +66,10 @@ export type PackWriteInput = {
   // undefined = leave as-is (writers that don't send the field, e.g. the
   // list-page edit modal, must not clear it); null = explicit clear.
   published_odds?: PublishedOdds | null;
+  // Per-pack tier price-range override. Tri-state like published_odds:
+  // undefined = leave as-is; null = clear (inherit the global tier_settings);
+  // map = pack-specific ranges.
+  tier_ranges?: TierRangeMap | null;
 };
 
 type CompensateData = { packId: string } | undefined;
@@ -74,7 +113,22 @@ export const createPackStep = createStep(
         boost: input.boost,
         rank: input.rank,
         status: input.status,
-        published_odds: input.published_odds ?? null,
+        // Full-key shapes from birth (see fillPublishedTiers/fillTierRanges):
+        // an insert has no merge hazard itself, but a sparse stored map makes
+        // every LATER update/rollback merge-prone — store only null or the
+        // full-key form so the invariant holds everywhere.
+        published_odds: (input.published_odds == null
+          ? null
+          : {
+              overall: input.published_odds.overall,
+              tiers: fillPublishedTiers(input.published_odds.tiers),
+            }) as unknown as Record<string, unknown> | null,
+        tier_ranges: (input.tier_ranges == null
+          ? null
+          : fillTierRanges(input.tier_ranges)) as unknown as Record<
+          string,
+          unknown
+        > | null,
       },
     ]);
 

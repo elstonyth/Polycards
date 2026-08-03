@@ -16,6 +16,10 @@ import {
   createNotificationReadRateLimit,
   createPackOpenBatchRateLimit,
   createPackOpenRateLimit,
+  createPhoneOtpCheckPhoneRateLimit,
+  createPhoneOtpCheckRateLimit,
+  createPhoneOtpStartPhoneRateLimit,
+  createPhoneOtpStartRateLimit,
   createProfileAppearanceRateLimit,
   createProfileReadRateLimit,
   createPullRevealRateLimit,
@@ -25,6 +29,10 @@ import {
 } from './utils/rate-limit';
 import { createResetTokenSingleUseGuard } from './utils/reset-token-guard';
 import { rejectCustomerMetadata } from './utils/customer-metadata-guard';
+import {
+  requireSignupPhoneProof,
+  blockUnverifiedPhoneWrite,
+} from './utils/phone-verification-guard';
 import { validateDeliverableAddress } from './utils/address-guard';
 import {
   blockDisabledCustomerSession,
@@ -56,15 +64,17 @@ import {
 const storeReadRateLimit = createStoreReadRateLimit();
 const authRateLimit = createAuthRateLimit();
 // Shared by ALL write-tier matchers below (delivery-order writes, rewards
-// claim/withdraw, daily draw, avatar upload): one budget + one Redis
-// connection, distinct from the read budget. The 429 label resolves per
-// request so a rewards claim is never told "Too many delivery requests."
-// (sim finding P3-10).
+// claim/withdraw, daily draw, avatar upload, verified phone change): one
+// budget + one Redis connection, distinct from the read budget. The 429
+// label resolves per request so a rewards claim is never told "Too many
+// delivery requests." (sim finding P3-10).
 const deliveryWriteRateLimit = createDeliveryWriteRateLimit((req) => {
   if (req.path.startsWith('/store/rewards/'))
     return 'Too many reward requests.';
   if (req.path.startsWith('/store/daily/')) return 'Too many draw attempts.';
   if (req.path.startsWith('/store/profile/')) return 'Too many uploads.';
+  if (req.path.startsWith('/store/phone-verification/'))
+    return 'Too many verification requests.';
   return 'Too many delivery requests.';
 });
 // Frame equip/unequip — cosmetic metadata write with its own generous budget
@@ -232,6 +242,50 @@ export default defineMiddlewares({
       middlewares: [authRateLimit],
     },
     {
+      // OTP send — TWO independent limiter tiers, per-phone FIRST so a
+      // hammered number 429s before spending the sitewide budget. The
+      // storefront proxies every OTP request server-side (one egress IP in
+      // prod), so an IP-only limiter here would be one shared bucket for
+      // every visitor — see the "Phone-OTP limiters" comment in
+      // utils/rate-limit.ts for the full rationale.
+      matcher: '/store/phone-verification/start',
+      method: 'POST',
+      middlewares: [
+        createPhoneOtpStartPhoneRateLimit(),
+        createPhoneOtpStartRateLimit(),
+      ],
+    },
+    {
+      // OTP check — same two-tier order as start above (bounds code guessing
+      // per number; Twilio also caps 5 checks per verification server-side).
+      matcher: '/store/phone-verification/check',
+      method: 'POST',
+      middlewares: [
+        createPhoneOtpCheckPhoneRateLimit(),
+        createPhoneOtpCheckRateLimit(),
+      ],
+    },
+    {
+      // Verified phone change (Task 4) — unlike start/check above, this one is
+      // AUTHED: it consumes a 'phone-change'-purpose proof from the OTP flow
+      // and is the only way to set a new phone once PHONE_VERIFICATION_REQUIRED
+      // is on (blockUnverifiedPhoneWrite closes the direct /me write). Shares
+      // the write-tier budget with the rest of the authed mutation matchers.
+      matcher: '/store/phone-verification/change',
+      method: 'POST',
+      middlewares: [authenticate('customer', ['bearer']), deliveryWriteRateLimit],
+    },
+    {
+      // Phone-proof → reset-token exchange (Task 5). Public (pre-auth by
+      // nature — the caller has no session yet), so it shares the auth
+      // brute-force budget rather than deliveryWriteRateLimit (that one's for
+      // authed writes; this is a credential-issuing endpoint, same family as
+      // login/register below).
+      matcher: '/store/phone-verification/password-reset',
+      method: 'POST',
+      middlewares: [authRateLimit],
+    },
+    {
       // POLYCARD-BACK §4.2 login block: a disabled player is refused BEFORE the
       // core route mints a token (401). Customer login only — an admin/member
       // disable is a different lever. Unknown emails fall through untouched, so
@@ -258,17 +312,29 @@ export default defineMiddlewares({
       // guard as /me. Matcher is an anchored exact match (path-to-regexp; only
       // a trailing /* matches deeper segments), so it does NOT shadow
       // /store/customers/me or /store/customers/me/addresses.
+      //
+      // requireSignupPhoneProof (see utils/phone-verification-guard.ts):
+      // when PHONE_VERIFICATION_REQUIRED is on and the body carries a phone,
+      // the request must also carry a verified 'signup'-purpose proof for
+      // that exact number — the enforcement gate that makes Task 2's OTP
+      // routes mandatory instead of opt-in.
       matcher: '/store/customers',
       method: 'POST',
-      middlewares: [rejectCustomerMetadata],
+      middlewares: [rejectCustomerMetadata, requireSignupPhoneProof],
     },
     {
       // /store/customers/me is framework-authenticated; this guard rejects
       // client-supplied `metadata` (reserved for server-validated keys — see
       // utils/customer-metadata-guard.ts).
+      //
+      // blockUnverifiedPhoneWrite (see utils/phone-verification-guard.ts):
+      // when PHONE_VERIFICATION_REQUIRED is on, a direct string `phone` write
+      // here is rejected — phone CHANGES must go through the verified
+      // store/phone-verification/change route (Task 4); clearing to null
+      // stays allowed.
       matcher: '/store/customers/me',
       method: 'POST',
-      middlewares: [rejectCustomerMetadata],
+      middlewares: [rejectCustomerMetadata, blockUnverifiedPhoneWrite],
     },
     // Medusa's stock address routes silently accept null country_code +
     // postal_code (sim finding P3-8) — reject undeliverable addresses before
@@ -616,6 +682,11 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      matcher: '/admin/customers/*/group',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
       matcher: '/admin/commissions/*/reverse',
       method: 'POST',
       middlewares: [adminActionRateLimit],
@@ -674,6 +745,15 @@ export default defineMiddlewares({
       // retimes the reward cycle (cadence/reset), so it shares the admin
       // money-mutation budget.
       matcher: '/admin/challenge/settings',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Tier-defaults singleton write (POST /admin/tier-settings) — the price
+      // ranges that default a card's tier in the odds editor. Advisory config,
+      // not a money mutation, but it steers every future odds save — same
+      // admin budget.
+      matcher: '/admin/tier-settings',
       method: 'POST',
       middlewares: [adminActionRateLimit],
     },
