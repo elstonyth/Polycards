@@ -316,6 +316,49 @@ medusaIntegrationTestRunner({
           expect(res.status).toBe(401);
         });
 
+        // Review fix: the proof only establishes the CALLER can receive SMS
+        // at this number — it doesn't establish the number is free. Customer
+        // B must not be able to steal a phone customer A already verified
+        // and holds.
+        it("400s when the proof phone already belongs to another account", async () => {
+          const phone = "+60107667796";
+          const authHeadersA = await createLoggedInCustomer(
+            "change-taken-a@test.dev",
+          );
+          await start({ phone, purpose: "phone-change" });
+          const checkedA = await check({
+            phone,
+            purpose: "phone-change",
+            code: "000000",
+          });
+          expect(checkedA.status).toBe(200);
+          const claimed = await change(
+            { phone, token: checkedA.data.token },
+            authHeadersA,
+          );
+          expect(claimed.status).toBe(200);
+
+          const authHeadersB = await createLoggedInCustomer(
+            "change-taken-b@test.dev",
+          );
+          await start({ phone, purpose: "phone-change" });
+          const checkedB = await check({
+            phone,
+            purpose: "phone-change",
+            code: "000000",
+          });
+          expect(checkedB.status).toBe(200);
+
+          const res = await change(
+            { phone, token: checkedB.data.token },
+            authHeadersB,
+          );
+          expect(res.status).toBe(400);
+          expect(res.data).toMatchObject({
+            message: "This phone number is already in use.",
+          });
+        });
+
         // This route's whole reason to exist is being the escape hatch
         // blockUnverifiedPhoneWrite's doc comment points at once
         // PHONE_VERIFICATION_REQUIRED is on (the direct /me write is closed

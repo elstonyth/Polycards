@@ -118,4 +118,20 @@ describe('twilio transport', () => {
       /not configured/i,
     );
   });
+
+  // An abort (timeout, or any other fetch-level failure) must map to the
+  // same retryable message as a bad Twilio response — never escape as a raw
+  // AbortError / unhandled rejection.
+  it('send maps an aborted fetch to the friendly retryable error', async () => {
+    jest.spyOn(globalThis, 'fetch').mockRejectedValue(new DOMException('The operation was aborted.', 'AbortError'));
+    await expect(sendPhoneOtp(env, noopLogger, PHONE)).rejects.toThrow(
+      /could not send the verification code/i,
+    );
+  });
+  it('check maps an aborted fetch to the friendly retryable error', async () => {
+    jest.spyOn(globalThis, 'fetch').mockRejectedValue(new DOMException('The operation was aborted.', 'AbortError'));
+    await expect(checkPhoneOtpCode(env, noopLogger, PHONE, '123456')).rejects.toThrow(
+      /could not verify the code/i,
+    );
+  });
 });

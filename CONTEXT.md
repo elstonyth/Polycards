@@ -205,6 +205,7 @@ Tunable via env vars — per-phone: `PHONE_OTP_START_PHONE_RATE_BURST_LIMIT`, `P
 - Proof-token replay within 10m TTL on the same phone number (acceptable).
 - Legacy non-E.164 phones cannot initiate password reset (only E.164-normalized phones from signup flow work).
 - Phoneless direct-API signup unaffected (unchanged pre-existing behavior).
+- OTP codes are per-phone, not per-purpose: Twilio re-triggers the SAME code for a number within the 10-minute window regardless of which flow requested it, and POST /store/phone-verification/start is public — so a code phished from a user for one purpose could be checked and exchanged for a proof token under a different purpose. The proof TOKEN itself remains purpose-bound (verifyPhoneProof rejects a mismatched purpose), and every password-reset proof mint still emails the account owner before anything usable comes back. True separation would need one Twilio Verify Service per purpose (three SIDs instead of one) — noted as a hardening option, deliberately not shipped.
 
 **Environment Variables**:
 Backend (app-level, like Resend vars): `PHONE_VERIFICATION_REQUIRED` (feature gate, unset/false in dev), `PHONE_OTP_DEV_CODE` (default `000000` for dev/test SMS transport), `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID` (production Twilio credentials — add AT DEPLOY TIME with real values, never pre-populate `**SECRET**` placeholders in DO spec). Storefront (build-time inlined): `NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED` (when set to `true`, compiles OTP UI; default false/unset).

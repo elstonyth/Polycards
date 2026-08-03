@@ -8,6 +8,10 @@ import { E164_RE, verifyPhoneProof } from '../../../../utils/phone-verification'
 // from the verified bearer token, never the body.
 type Body = { phone?: unknown; token?: unknown };
 
+// `phone` isn't declared on FilterableCustomerProps (only has_account is) —
+// same cast idiom as start/route.ts.
+type CustomerFilters = Parameters<ICustomerModuleService['listCustomers']>[0];
+
 export async function POST(
   req: AuthenticatedMedusaRequest<Body>,
   res: MedusaResponse,
@@ -40,6 +44,21 @@ export async function POST(
     throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Phone verification required.');
 
   const customerService: ICustomerModuleService = req.scope.resolve(Modules.CUSTOMER);
+
+  // The OTP proof only establishes the CALLER can receive SMS at this number
+  // — it says nothing about whether another account already owns it (ported
+  // number, two people typing the same digits). Same CustomerFilters cast
+  // idiom as start/route.ts.
+  const matches = await customerService.listCustomers(
+    { phone, has_account: true } as unknown as CustomerFilters,
+    { select: ['id'], take: 2 },
+  );
+  if (matches.some((c) => c.id !== customerId))
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'This phone number is already in use.',
+    );
+
   await customerService.updateCustomers(customerId, { phone });
   res.json({ customer: { id: customerId, phone } });
 }

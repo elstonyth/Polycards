@@ -13,6 +13,7 @@ import {
   createProfileAppearanceRateLimit,
   createPhoneOtpStartPhoneRateLimit,
   createPhoneOtpCheckPhoneRateLimit,
+  phoneBodyKeyOf,
   STORE_READ_DEFAULTS,
   PROFILE_APPEARANCE_DEFAULTS,
   positiveIntFromEnv,
@@ -244,7 +245,7 @@ describe("createRateLimitMiddleware", () => {
   // shared egress point (the storefront proxies OTP requests server-side)
   // needs a key derived from something other than actor/IP, or every caller
   // collapses into one bucket. `keyOf` is that escape hatch.
-  it("uses keyOf's key over actor_id/IP when it returns one", async () => {
+  it("uses phoneBodyKeyOf's key over actor_id/IP for a valid E.164 body phone", async () => {
     const store: RateLimitStore = {
       consume: jest.fn().mockResolvedValue({ allowed: true, retryAfterMs: 0 }),
     };
@@ -252,11 +253,7 @@ describe("createRateLimitMiddleware", () => {
       store,
       rules,
       prefix: "rl:t:",
-      keyOf: (req) => {
-        const phone = (req as unknown as { body?: { phone?: unknown } }).body
-          ?.phone;
-        return typeof phone === "string" ? `phone:${phone}` : undefined;
-      },
+      keyOf: phoneBodyKeyOf,
     });
     await mw(
       makeReq({ body: { phone: "+60107667787" } }),
@@ -265,6 +262,28 @@ describe("createRateLimitMiddleware", () => {
     );
     expect(store.consume).toHaveBeenCalledWith(
       "rl:t:phone:+60107667787",
+      rules,
+      expect.any(Number),
+    );
+  });
+
+  it("phoneBodyKeyOf falls back to actor_id/IP for a non-E.164 body phone", async () => {
+    const store: RateLimitStore = {
+      consume: jest.fn().mockResolvedValue({ allowed: true, retryAfterMs: 0 }),
+    };
+    const mw = createRateLimitMiddleware({
+      store,
+      rules,
+      prefix: "rl:t:",
+      keyOf: phoneBodyKeyOf,
+    });
+    await mw(
+      makeReq({ body: { phone: "0107667787" } }), // missing +country
+      makeRes().res,
+      jest.fn() as unknown as MedusaNextFunction,
+    );
+    expect(store.consume).toHaveBeenCalledWith(
+      "rl:t:ip:10.0.0.1",
       rules,
       expect.any(Number),
     );

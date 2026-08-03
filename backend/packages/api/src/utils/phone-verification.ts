@@ -43,6 +43,10 @@ export const isPhoneOtpPurpose = (v: unknown): v is PhoneOtpPurpose =>
 /** ponytail: 10m fixed TTL, no config knob — add one only if support tickets ask. */
 const PROOF_TTL_MS = 10 * 60_000;
 
+// Twilio call budget — a hung request must fail into the existing retryable
+// error, not hold the request (and this worker) open indefinitely.
+const TWILIO_TIMEOUT_MS = 10_000;
+
 // Domain-separates this HMAC from anything else ever signed with the same
 // jwtSecret — notably the app's own HS256 JWTs (login/register/reset tokens
 // all share this secret). Prepending a fixed, format-specific string to the
@@ -130,11 +134,25 @@ export async function sendPhoneOtp(
       'Phone verification is not configured.',
     );
   }
-  const res = await fetch(`${twilioBase(env)}/Verifications`, {
-    method: 'POST',
-    headers: twilioHeaders(env),
-    body: new URLSearchParams({ To: phone, Channel: 'sms' }).toString(),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${twilioBase(env)}/Verifications`, {
+      method: 'POST',
+      headers: twilioHeaders(env),
+      body: new URLSearchParams({ To: phone, Channel: 'sms' }).toString(),
+      signal: AbortSignal.timeout(TWILIO_TIMEOUT_MS),
+    });
+  } catch {
+    // Timeout (AbortError) or any other network failure — same retryable
+    // message as a bad Twilio response below; never let this escape as an
+    // unhandled rejection / raw 500. Status-free warn (no status to report,
+    // and never the phone or a Twilio error body).
+    logger.warn('[phone-otp] twilio send request failed (network/timeout)');
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'Could not send the verification code. Try again shortly.',
+    );
+  }
   if (!res.ok) {
     // Twilio 429s (per-number caps, Fraud Guard) land here too — surface a
     // retryable message, log the status only (never the body: it echoes To=).
@@ -161,11 +179,23 @@ export async function checkPhoneOtpCode(
       'Phone verification is not configured.',
     );
   }
-  const res = await fetch(`${twilioBase(env)}/VerificationCheck`, {
-    method: 'POST',
-    headers: twilioHeaders(env),
-    body: new URLSearchParams({ To: phone, Code: code }).toString(),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${twilioBase(env)}/VerificationCheck`, {
+      method: 'POST',
+      headers: twilioHeaders(env),
+      body: new URLSearchParams({ To: phone, Code: code }).toString(),
+      signal: AbortSignal.timeout(TWILIO_TIMEOUT_MS),
+    });
+  } catch {
+    // Same reasoning as sendPhoneOtp's catch above: a timeout must map to
+    // the existing friendly error, never escape raw.
+    logger.warn('[phone-otp] twilio check request failed (network/timeout)');
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'Could not verify the code. Try again shortly.',
+    );
+  }
   // Twilio 404s a check whose verification already expired/was consumed —
   // that's a plain "wrong/expired code" to us, not a transport failure.
   if (res.status === 404) return false;

@@ -19,6 +19,19 @@ const makeReq = (body: unknown, headers: Record<string, string> = {}) => ({
 }) as never;
 
 describe('requireSignupPhoneProof', () => {
+  // Capture whatever this key was before the suite (a stray-set env, e.g. a
+  // gitignored local .env, must not leak a permanent delete into other spec
+  // files sharing this jest worker process) and restore it once, at the end.
+  const ORIGINAL_PHONE_VERIFICATION_REQUIRED =
+    process.env.PHONE_VERIFICATION_REQUIRED;
+  afterAll(() => {
+    if (ORIGINAL_PHONE_VERIFICATION_REQUIRED === undefined) {
+      delete process.env.PHONE_VERIFICATION_REQUIRED;
+    } else {
+      process.env.PHONE_VERIFICATION_REQUIRED = ORIGINAL_PHONE_VERIFICATION_REQUIRED;
+    }
+  });
+
   const run = (req: never) =>
     new Promise<unknown>((resolve) => requireSignupPhoneProof(req, {} as never, resolve));
 
@@ -63,6 +76,17 @@ describe('requireSignupPhoneProof', () => {
 });
 
 describe('blockUnverifiedPhoneWrite', () => {
+  // Same capture/restore as requireSignupPhoneProof above — see its comment.
+  const ORIGINAL_PHONE_VERIFICATION_REQUIRED =
+    process.env.PHONE_VERIFICATION_REQUIRED;
+  afterAll(() => {
+    if (ORIGINAL_PHONE_VERIFICATION_REQUIRED === undefined) {
+      delete process.env.PHONE_VERIFICATION_REQUIRED;
+    } else {
+      process.env.PHONE_VERIFICATION_REQUIRED = ORIGINAL_PHONE_VERIFICATION_REQUIRED;
+    }
+  });
+
   const run = (req: never) =>
     new Promise<unknown>((resolve) => blockUnverifiedPhoneWrite(req, {} as never, resolve));
 

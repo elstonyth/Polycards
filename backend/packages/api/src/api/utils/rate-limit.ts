@@ -5,6 +5,7 @@ import type {
   MedusaResponse,
 } from '@medusajs/framework/http';
 import Redis from 'ioredis';
+import { E164_RE } from '../../utils/phone-verification';
 
 // Sliding-window rate limiting for the pack-open endpoint (and reusable for
 // any future endpoint — the factory at the bottom is the only pack-specific
@@ -394,9 +395,14 @@ type EnvLimiterDefaults = typeof DEFAULTS;
 // guard relies on the same ordering). Falls back to undefined (→ IP) rather
 // than throwing when the body has no string phone; the route handler 400s
 // that shape independently.
-const phoneBodyKeyOf = (req: MedusaRequest): string | undefined => {
+export const phoneBodyKeyOf = (req: MedusaRequest): string | undefined => {
   const phone = (req.body as { phone?: unknown } | undefined)?.phone;
-  return typeof phone === 'string' ? `phone:${phone}` : undefined;
+  // Bounded: only a shape that actually passes the route's own E.164 check
+  // becomes a key — an arbitrary/oversized body string would otherwise key
+  // (and grow) the limiter's keyspace directly off unvalidated input.
+  return typeof phone === 'string' && E164_RE.test(phone)
+    ? `phone:${phone}`
+    : undefined;
 };
 
 /**
