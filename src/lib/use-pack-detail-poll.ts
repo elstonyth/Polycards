@@ -6,10 +6,13 @@ import type { PackDetail } from '@/lib/data/packs';
 const POLL_MS = 60_000;
 
 /** Live pack detail: fetches immediately on mount AND on every pack switch,
- *  then refreshes every 60s while the tab is visible. The immediate tick
- *  matters on sibling-pack switches: `initial` is always the URL pack's
- *  server snapshot, so without it the grid would show the WRONG pack's pool
- *  for up to a full poll interval. */
+ *  then refreshes every 60s while the tab is visible. The caller only ever
+ *  passes `initial` for the matching pack (null on a sibling switch, per
+ *  PackDetailClient) -- so a switch renders null (the caller's gated-empty
+ *  sections) until the immediate tick lands, never the PREVIOUS pack's pool/
+ *  Top Hits/odds under the new pack's name. The immediate tick still matters:
+ *  without it, a sibling switch would sit empty for up to a full poll
+ *  interval instead of resolving within one request. */
 export function usePackDetailPoll(
   slug: string,
   initial: PackDetail | null,

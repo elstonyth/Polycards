@@ -18,14 +18,16 @@ const modalStack: HTMLElement[] = [];
 let scrollLockCount = 0;
 let preLockOverflow = '';
 
-function lockBodyScroll(): void {
+// Exported for useChromeInert — every body-scroll lock in the app must go
+// through this refcount.
+export function lockBodyScroll(): void {
   if (scrollLockCount++ === 0) {
     preLockOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
   }
 }
 
-function unlockBodyScroll(): void {
+export function unlockBodyScroll(): void {
   scrollLockCount = Math.max(0, scrollLockCount - 1);
   if (scrollLockCount === 0) document.body.style.overflow = preLockOverflow;
 }

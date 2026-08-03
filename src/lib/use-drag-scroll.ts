@@ -49,6 +49,16 @@ export function useDragScroll<T extends HTMLElement>() {
     onPointerUp: () => {
       state.current.down = false;
     },
+    // An OS-cancelled drag (e.g. a browser gesture taking over) fires
+    // pointercancel instead of pointerup; losing capture without either
+    // firing (rare, but possible) also needs the same reset. Without these,
+    // `down` stays true and the rail keeps scrolling on plain mouse moves.
+    onPointerCancel: () => {
+      state.current.down = false;
+    },
+    onLostPointerCapture: () => {
+      state.current.down = false;
+    },
     onClickCapture: (e: MouseEvent<T>) => {
       // `dragged` resets on the next pointerdown, so a drag that ends without
       // a click (released off-element) can't swallow a later real click.

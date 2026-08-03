@@ -117,6 +117,28 @@ describe("resolveBuybackRate", () => {
       resolveBuybackRate(pack, { rolled_at: "not-a-date" }, NOW),
     ).toEqual({ percent: FLAT_PERCENT, rate_type: "vault" });
   });
+
+  it("regression: a stale null revealed_at under-credits what a fresh revealed_at correctly prices as instant (plan 072)", () => {
+    // rolled 40s ago: the pre-reveal fallback deadline (rolled_at + 30s window)
+    // already passed, so pricing off a stale `revealed_at: null` — what the
+    // buyback step used before it re-read `revealed_at` alongside
+    // `instant_closed_at` — collapses to the flat vault rate.
+    const rolledAt = ago(40_000);
+    expect(
+      resolveBuybackRate(pack, { rolled_at: rolledAt, revealed_at: null }, NOW),
+    ).toEqual({ percent: FLAT_PERCENT, rate_type: "vault" });
+
+    // Same rolled_at, same nowMs — but the reveal ping landed 5s ago, so the
+    // fresh revealed_at anchors a still-open instant window. This is the
+    // credit the reveal UI actually quoted.
+    expect(
+      resolveBuybackRate(
+        pack,
+        { rolled_at: rolledAt, revealed_at: ago(5_000) },
+        NOW,
+      ),
+    ).toEqual({ percent: 95, rate_type: "instant" });
+  });
 });
 
 describe("buybackAmount", () => {

@@ -20,7 +20,15 @@ const browser = await chromium.launch();
 // @axe-core/playwright requires a page from an explicit BrowserContext — calling
 // browser.newPage() directly makes AxeBuilder.analyze() throw "Please use
 // browser.newContext()", which was silently breaking the whole gate.
-const context = await browser.newContext();
+//
+// reducedMotion: 'reduce' — set at the CONTEXT level (applies to every route
+// this shared page navigates to, before any load happens) so `Reveal`
+// (src/components/Reveal.tsx) renders content at its FINAL opacity/transform
+// immediately instead of mid fade-up. Without this, axe can catch a route's
+// text at opacity < 1 mid-animation and report a real color as failing
+// contrast — plausibly why /about's 1.02–1.63:1 hits all carried
+// `transition-delay`/`transition-[opacity,...]` in their failure nodes.
+const context = await browser.newContext({ reducedMotion: 'reduce' });
 const page = await context.newPage();
 let failed = false;
 

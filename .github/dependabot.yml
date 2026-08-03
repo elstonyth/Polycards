@@ -96,6 +96,40 @@ updates:
         update-types:
           - version-update:semver-major
 
+  - package-ecosystem: npm
+    directory: /backend/apps/admin
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        exclude-patterns:
+          - '@medusajs/*'
+          - '@mercurjs/*'
+        update-types:
+          - minor
+          - patch
+    # Same lockstep rationale as the /backend updater above (@medusajs/* +
+    # @mercurjs/* pinned as a family; react/react-dom must move together) —
+    # this manifest re-declares those same packages for its own workspace, so
+    # it needs the identical ignores or the two updaters could open
+    # conflicting PRs for the same underlying resolution.
+    ignore:
+      - dependency-name: '@medusajs/*'
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-major
+      - dependency-name: '@mercurjs/*'
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-major
+      - dependency-name: 'react-dom'
+        update-types:
+          - version-update:semver-major
+      - dependency-name: 'react'
+        update-types:
+          - version-update:semver-major
+
   - package-ecosystem: github-actions
     directory: /
     schedule:

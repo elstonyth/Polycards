@@ -427,11 +427,7 @@ medusaIntegrationTestRunner({
             { rank: 1, cardId: cxId, credits: 0 },
             { rank: 4, cardId: null, credits: 1000 },
           ],
-          // legacy projection (plan 057 phase 2 removes it)
-          rewardCredits: 1000,
-          rewardCardIds: [cxId],
         });
-        expect(body.stages[1].rewardCardIds).toEqual([cxId, cyId]);
         // slab_image is emitted per card (null when the card has no graded
         // slab, as here) so the storefront can pick the prism-framed path.
         expect(body.cards[cxId]).toEqual({

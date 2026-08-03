@@ -99,7 +99,22 @@ test.describe('admin workflow', () => {
     const cust = await createCustomer(100);
     await openPack(cust.token, 'pokemon-rookie');
 
-    await page.goto(`${ADMIN}/pulls`, { waitUntil: 'domcontentloaded' });
+    // The standalone "/pulls" page was retired ATOMICALLY in #271 (POLYCARD-BACK
+    // epic 2, spec D6, commit 87c7e148): the ledger relocated into the Customer
+    // 360 detail's "Pulls" tab (routes/customers/[id]/page.tsx → PullsTable) —
+    // there is no cross-customer ledger view left to navigate to directly.
+    // Reach it the way an operator does: find the customer via Support, open
+    // their 360, then the Pulls tab (same search flow the "adjust a customer
+    // credit balance" test below already exercises).
+    await page.goto(`${ADMIN}/support`, { waitUntil: 'domcontentloaded' });
+    await page.locator('#support-q').fill(cust.email);
+    await page.getByRole('button', { name: /^search$/i }).click();
+    const result = page.getByText(cust.email).first();
+    await result.waitFor({ timeout: 15_000 });
+    await result.click();
+    await page.getByRole('button', { name: 'View 360' }).click();
+    await page.getByRole('tab', { name: 'Pulls' }).click();
+
     await expect(page.locator('table tbody tr').first()).toBeVisible({
       timeout: 20_000,
     });

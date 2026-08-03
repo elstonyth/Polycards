@@ -23,6 +23,7 @@ import {
   type ChallengeSettingsDTO,
 } from '../../lib/queries';
 import { resolveImageUrl } from '../../lib/image-url';
+import { rm } from '../../lib/format';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 import { RowActions } from '../../components/RowActions';
 import { StickySaveBar } from '../../components/StickySaveBar';
@@ -107,13 +108,20 @@ interface StageRow {
   ranks: RankRow[];
 }
 
+// COUPLED MIRROR of modules/packs/challenge-validate.ts (MAX_VOUCHER_MYR /
+// MAX_THRESHOLD_MYR). Kept as literals — separate builds, no shared package
+// (same convention as lib/purchase-invoice-form.ts).
+const MAX_CREDITS_MYR = 10_000;
+const MAX_THRESHOLD_MYR = 100_000_000;
+
 // ONE parser drives validation, the pays-anything filter and serialization so
-// they can never disagree. Blank reads as 0; anything else non-finite or
-// negative is caught by `creditsValid` and blocks the save.
+// they can never disagree. Blank reads as 0; anything else non-finite,
+// negative, or over the voucher ceiling is caught by `creditsValid` and
+// blocks the save.
 const parseCredits = (v: string): number => (v.trim() === '' ? 0 : Number(v));
 const creditsValid = (v: string): boolean => {
   const n = parseCredits(v);
-  return Number.isFinite(n) && n >= 0;
+  return Number.isFinite(n) && n >= 0 && n <= MAX_CREDITS_MYR;
 };
 // A rank pays only if it carries a card and/or a positive credit amount.
 const rankPays = (r: RankRow): boolean =>
@@ -191,7 +199,8 @@ const StagesTab = () => {
   // (index-derived) and rank uniqueness/range are structural here, so only
   // thresholds and per-rank credits can actually be wrong. Empty list is valid
   // (challenge off); an all-empty rank table is valid (stage pays nothing).
-  // A per-rank reward cap (plan 044) would slot in beside the credits check.
+  // The per-rank credits cap and the stage threshold cap (plan 044) mirror the
+  // server via MAX_CREDITS_MYR / MAX_THRESHOLD_MYR above.
   const errors: string[] = [];
   let prev = -1;
   rows.forEach((r, i) => {
@@ -200,12 +209,22 @@ const StagesTab = () => {
     const t = r.thresholdInput.trim() === '' ? NaN : Number(r.thresholdInput);
     if (!Number.isFinite(t) || t < 0) errors.push(`Stage ${i + 1}: threshold must be ≥ 0.`);
     else {
+      // A separate check (not folded into the line above) so an over-cap
+      // threshold still updates `prev` — otherwise the NEXT stage's
+      // contiguity check would compare against a stale value and cascade a
+      // spurious "must exceed" error onto every row that follows.
+      if (t > MAX_THRESHOLD_MYR)
+        errors.push(
+          `Stage ${i + 1}: threshold must be ≤ ${MAX_THRESHOLD_MYR.toLocaleString('en-US')}.`,
+        );
       if (i > 0 && !(t > prev)) errors.push(`Stage ${i + 1}: threshold must exceed stage ${i}'s.`);
       prev = t;
     }
     r.ranks.forEach((rk, ri) => {
       if (!creditsValid(rk.creditsInput))
-        errors.push(`Stage ${i + 1}, rank ${ri + 1}: credits must be a number ≥ 0.`);
+        errors.push(
+          `Stage ${i + 1}, rank ${ri + 1}: credits must be a number between 0 and ${MAX_CREDITS_MYR.toLocaleString('en-US')}.`,
+        );
     });
   });
   const reasonValid = reason.trim().length > 0;
@@ -330,7 +349,7 @@ const StagesTab = () => {
                 : [
                     `${paying} of ${MAX_REWARD_RANK} ranks pay`,
                     cardCount > 0 ? `${cardCount} card${cardCount > 1 ? 's' : ''}` : null,
-                    creditTotal > 0 ? `RM ${creditTotal} credits` : null,
+                    creditTotal > 0 ? `${rm(creditTotal)} credits` : null,
                   ]
                     .filter(Boolean)
                     .join(' · ')}

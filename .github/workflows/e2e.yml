@@ -231,3 +231,7 @@ jobs:
             storefront.log
           retention-days: 7
           if-no-files-found: ignore
+          # .report/.artifacts are dot-prefixed; upload-artifact@v7 skips
+          # hidden files by default, which shipped 3 straight nightlies with
+          # only the plain-text logs and none of the traces/screenshots.
+          include-hidden-files: true

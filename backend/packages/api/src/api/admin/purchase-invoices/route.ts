@@ -125,6 +125,15 @@ export async function GET(
     { defaultLimit: 50, maxLimit: 100 },
   );
   const rawQ = req.query.q;
+  // `?q=a&q=b` arrives as an ARRAY. The old inline `typeof rawQ === 'string'`
+  // check below silently dropped it (treated as absent), widening the result
+  // set to every invoice — same rule as ledger/route.ts's coerceQ.
+  if (rawQ !== undefined && typeof rawQ !== 'string') {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      `Invalid \`q\` filter '${String(rawQ)}'.`,
+    );
+  }
   // Truncated FIRST, escaped SECOND: escaping before the cut could sever an
   // escape pair and hand Postgres a dangling escape character.
   const q =

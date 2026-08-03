@@ -11,9 +11,10 @@ import { useDragScroll } from '@/lib/use-drag-scroll';
 import { CardTile } from '@/components/cards/CardTile';
 
 /**
- * "Rare & above" — the caller pre-filters the RAIL to Rare+ (commons/uncommons
- * are catalogue noise there). The rail is ONE horizontally-swipeable strip of
- * the Rare+ subset (value-sorted desc, so the top hits lead) — the catalog's
+ * The default header (`view.title` below) — the caller pre-filters the RAIL
+ * to Rare+ (commons/uncommons are catalogue noise there). The rail is ONE
+ * horizontally-swipeable strip of the Rare+ subset (value-sorted desc, so
+ * the top hits lead) — the catalog's
  * rail idiom, per the 90scard reference. The header's expand button opens a
  * full-screen dialog listing the SAME Rare+ subset grouped by canonical tier
  * (rarest first) as a grid — operator decision 2026-08-02: the expanded view
@@ -52,17 +53,29 @@ export function PoolByRarity({
   // Mouse drag-to-scroll on the rail (touch swipes natively).
   const drag = useDragScroll<HTMLDivElement>();
   const hasRail = rail.length > 0;
+  // One derivation for every rendered string keyed on hasRail (h2, aria-label,
+  // blurb, and the dialog's cards/title) -- the QA script and any snapshots
+  // key on these exact strings, so they must stay byte-identical to before.
   // Dialog shows the Rare+ subset whenever one exists (operator decision,
   // see the header comment); the full pool only backs the zero-Rare edge.
-  const shown = hasRail ? rail : full;
-  const shownTitle = hasRail ? 'Rare & above' : 'All cards';
+  const view = hasRail
+    ? {
+        title: 'Rare & above',
+        blurb: 'The Rare-and-up cards available in this pack.',
+        cards: rail,
+      }
+    : {
+        title: 'All cards',
+        blurb: 'Every card in this pack.',
+        cards: full,
+      };
 
   return (
     <div className="flex flex-col gap-3">
       <div>
         <div className="mb-1 flex items-center justify-between gap-3">
           <h2 className="font-heading text-lg font-bold tracking-tight text-white">
-            {hasRail ? 'Rare & above' : 'All cards'}
+            {view.title}
           </h2>
           <button
             type="button"
@@ -70,19 +83,15 @@ export function PoolByRarity({
             aria-haspopup="dialog"
             aria-label={
               hasRail
-                ? `Show the ${shown.length} Rare & above cards grouped by rarity`
-                : `Show all ${shown.length} cards grouped by rarity`
+                ? `Show the ${view.cards.length} ${view.title} cards grouped by rarity`
+                : `Show all ${view.cards.length} cards grouped by rarity`
             }
             className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-white/60 transition-colors hover:bg-white/10 hover:text-white"
           >
             <Maximize2 className="h-4 w-4" aria-hidden />
           </button>
         </div>
-        <p className="text-[13px] text-white/70">
-          {hasRail
-            ? 'The Rare-and-up cards available in this pack.'
-            : 'Every card in this pack.'}
-        </p>
+        <p className="text-[13px] text-white/70">{view.blurb}</p>
       </div>
       {/* Teaser rail — a peeking partial card signals the sideways swipe;
           hidden scrollbar matches the catalog rails. overflow-x-auto forces
@@ -118,8 +127,8 @@ export function PoolByRarity({
       <PoolModal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
-        pool={shown}
-        title={shownTitle}
+        pool={view.cards}
+        title={view.title}
         tierChances={tierChances}
         onOpen={onOpen}
       />
@@ -141,7 +150,7 @@ function PoolModal({
   open: boolean;
   onClose: () => void;
   pool: PackCard[];
-  /** Dialog heading + aria-label — names what `pool` holds ("Rare & above" or "All cards"). */
+  /** Dialog heading + aria-label — names what `pool` holds (the caller's `view.title`). */
   title: string;
   tierChances: Partial<Record<Rarity, number>> | null;
   onOpen: (card: PackCard) => void;
