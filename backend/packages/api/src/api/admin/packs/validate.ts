@@ -1,10 +1,11 @@
 import { MedusaError } from '@medusajs/framework/utils';
-import { RARITIES } from '@acme/odds-math';
+import { RARITIES, type TierRangeMap } from '@acme/odds-math';
 import type {
   PackWriteInput,
   PublishedOdds,
 } from '../../../workflows/steps/create-pack';
 import { FLAT_PERCENT } from '../../../modules/packs/buyback-rate';
+import { validateTierRangeMap } from '../../../modules/packs/tier-settings-validate';
 
 const HANDLE_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const MAX_TEXT = 512;
@@ -110,6 +111,15 @@ const coercePublishedOdds = (v: unknown): PublishedOdds | null | undefined => {
   return { overall: pct(o.overall ?? 100, 'published_odds.overall'), tiers };
 };
 
+// Per-pack tier price-range override. Tri-state like published_odds:
+// undefined → keep the stored value; null → clear (inherit the global
+// tier_settings); object → validated map (same rules as the singleton).
+const coerceTierRanges = (v: unknown): TierRangeMap | null | undefined => {
+  if (v === undefined) return undefined;
+  if (v === null) return null;
+  return validateTierRangeMap(v);
+};
+
 // Batch rank writes from the packs-list reorder arrows. Rank-only by design:
 // reordering must not travel through the full-payload update (whose activation
 // guard correctly rejects an active empty-pool pack and used to half-apply the
@@ -192,5 +202,6 @@ export function coercePackBody(raw: unknown, slug: string): PackWriteInput {
     rank: Math.trunc(num(b, 'rank', 0)),
     status,
     published_odds: coercePublishedOdds(b.published_odds),
+    tier_ranges: coerceTierRanges(b.tier_ranges),
   };
 }

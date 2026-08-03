@@ -50,6 +50,7 @@ import {
   getReferralTree,
   getRewardsSettings,
   getSiteSettings,
+  getTierSettings,
   getVipLevels,
   listDeliveryOrders,
   listEligibleProducts,
@@ -60,6 +61,7 @@ import {
   saveDailyBox,
   saveRewardsSettings,
   saveSiteSettings,
+  saveTierSettings,
   saveVipLevels,
   saveVoucherRanges,
   setFxRate,
@@ -89,12 +91,17 @@ import {
   type ReferralTree,
   type RewardsSettingsView,
   type SiteSettingsView,
+  type TierRangeDTO,
+  type TierSettingsDTO,
   type VipLevelDTO,
   type VoucherLadderDTO,
   type VoucherRangeDTO,
   // ── Epic 3 (Odds) ──
   listCustomerGroupsAdmin,
   setGroupOddsSet,
+  createCustomerGroupAdmin,
+  countCustomersInGroup,
+  setCustomerGroup,
   type AdminCustomerGroup,
 } from './admin-rest';
 import type { SetEntry } from '@acme/odds-math';
@@ -582,7 +589,14 @@ export const useUploadImage = () =>
   useMutation({
     mutationFn: (vars: {
       file: File;
-      kind: 'pack' | 'display' | 'card' | 'sprite' | 'frame' | 'avatar-frame' | 'delivery';
+      kind:
+        | 'pack'
+        | 'display'
+        | 'card'
+        | 'sprite'
+        | 'frame'
+        | 'avatar-frame'
+        | 'delivery';
     }) => uploadImage(vars.file, vars.kind),
   });
 
@@ -739,8 +753,7 @@ export const useSaveVipLevels = () => {
 
 export const useChallengeStages = (): UseQueryResult<{
   stages: ChallengeStageDTO[];
-}> =>
-  useQuery({ queryKey: qk.challengeStages, queryFn: getChallengeStages });
+}> => useQuery({ queryKey: qk.challengeStages, queryFn: getChallengeStages });
 
 export const useSaveChallengeStages = () => {
   const qc = useQueryClient();
@@ -773,6 +786,32 @@ export const useSaveChallengeSettings = () => {
   });
 };
 
+// ── Tier defaults (price range per rarity tier) ──────────────────────────────
+
+export const useTierSettings = (
+  options: { enabled?: boolean } = {},
+): UseQueryResult<TierSettingsDTO> =>
+  useQuery({
+    queryKey: qk.tierSettings,
+    queryFn: getTierSettings,
+    enabled: options.enabled ?? true,
+  });
+
+export const useSaveTierSettings = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: {
+      ranges: Record<string, TierRangeDTO>;
+      reason: string;
+    }) => saveTierSettings(vars),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.tierSettings });
+      toast.success('Tier defaults saved');
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
 // GlobePay deposits. Polls once a minute: this is the money-in watch list, and a
 // stranded payment should surface without an operator remembering to reload.
 export const useGlobePayDeposits = (
@@ -785,6 +824,7 @@ export const useGlobePayDeposits = (
     placeholderData: keepPreviousData,
     refetchInterval: 60_000,
   });
+
 // ── Epic 2 (Players) ─────────────────────────────────────────────────────────
 // Own import block (not merged into the one at the top) so this whole section
 // stays append-only while a parallel epic edits the same file.
@@ -805,10 +845,7 @@ export type { PlayerRow, PlayersPage, PayoutDetails } from './admin-rest';
 
 // Paged + searchable, but NOT id-scoped, so plain keepPreviousData is right
 // here (no stale-row-click hazard — the whole page swaps together).
-export const usePlayers = (
-  page = 0,
-  q?: string,
-): UseQueryResult<PlayersPage> =>
+export const usePlayers = (page = 0, q?: string): UseQueryResult<PlayersPage> =>
   useQuery({
     queryKey: qk.players(page, q),
     queryFn: () => listPlayers(page, q),
@@ -866,13 +903,13 @@ export const useSpendReport = (
     enabled: !!id,
   });
 
-// Keyed inline (qk carries no customerDetail entry) so the per-customer prefix
-// still reaches it — same pattern as useEconomy's inline period segments.
+// Shares the per-customer prefix with every other tab's key, so one customer
+// invalidation reaches all of them (qk.customerDetail).
 export const useCustomerDetail = (
   id: string | null,
 ): UseQueryResult<{ customer: AdminCustomerDetail }> =>
   useQuery({
-    queryKey: ['admin', 'customer', id ?? '', 'detail'],
+    queryKey: qk.customerDetail(id ?? ''),
     queryFn: () => getCustomerDetail(id!),
     enabled: !!id,
   });
@@ -900,6 +937,63 @@ export const useSetGroupOddsSet = () => {
       // Odds Sets page drops its local override in ITS onSuccess, and doing so
       // against a stale cache would flash the previous set.
       return qc.invalidateQueries({ queryKey: qk.customerGroups });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+// Odds set is chosen IN the create form, so a new group never spends a moment
+// silently on set 1 (the create route takes metadata alongside the name).
+export const useCreateCustomerGroup = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { name: string; set: 1 | 2 | 3 }) =>
+      createCustomerGroupAdmin(vars.name, vars.set),
+    onSuccess: () => {
+      toast.success('Player group created');
+      return qc.invalidateQueries({ queryKey: qk.customerGroups });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+// One query per group rather than one fat list query: the native
+// customer-groups route has no member-count field, and asking it to embed
+// `customers` would pull every member row of every group to count them.
+// `enabled` keeps it from firing before the group list resolves.
+export const useGroupPlayerCount = (
+  groupId: string | undefined,
+): UseQueryResult<number> =>
+  useQuery({
+    queryKey: qk.customerGroupCount(groupId ?? ''),
+    queryFn: () => countCustomersInGroup(groupId!),
+    enabled: !!groupId,
+    // The QueryClient belongs to the prebuilt dashboard, so the defaults apply:
+    // staleTime 0 + refetchOnWindowFocus. One row = one request, so every
+    // alt-tab back would re-fire the whole column (up to the 100-group ceiling
+    // this page assumes). A member count that is 30s old is never wrong enough
+    // to matter; a move still updates it immediately via qk.customerGroupCounts.
+    staleTime: 30_000,
+  });
+
+// Exclusive move (one repo-side request). Invalidates the group list — its
+// member counts just shifted — plus the player's own detail row and the
+// Players list, whose Group column is read straight off the customer.
+export const useSetPlayerGroup = (customerId: string | null) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (groupId: string | null) =>
+      setCustomerGroup(customerId!, groupId),
+    onSuccess: (res) => {
+      toast.success(`Moved to ${res.group.name}`);
+      return Promise.all([
+        qc.invalidateQueries({
+          queryKey: qk.customerDetail(customerId ?? ''),
+        }),
+        qc.invalidateQueries({ queryKey: qk.customerGroups }),
+        qc.invalidateQueries({ queryKey: qk.customerGroupCounts }),
+        qc.invalidateQueries({ queryKey: qk.playersKey }),
+      ]);
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });

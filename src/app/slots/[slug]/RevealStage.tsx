@@ -62,7 +62,9 @@ export function RevealStage({
   onCloseInstant?: (pullIds: string[]) => void;
   onSellBack: SellBackFn;
   onReveal?: RevealFn;
-  onSold?: (balance: number) => void;
+  /** Fired after a confirmed sell-back: the new balance, and what this card
+   *  credited (so the parent can raise a toast that outlives this stage). */
+  onSold?: (balance: number, amount: number) => void;
   sfx: (name: SfxName) => void;
   vibrate: (p: number | number[]) => void;
   play: (name: SoundName, volume?: number) => void;

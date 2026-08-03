@@ -141,6 +141,16 @@ describe('qk', () => {
       'cus_1',
       'spend-report',
     ]);
+    // Literal, not just the prefix loop: the Profile tab's group card only
+    // re-reads the server value because useSetPlayerGroup invalidates THIS
+    // key, and renaming the segment in the builder alone would satisfy the
+    // loop while orphaning the cache entry the page already holds.
+    expect(qk.customerDetail('cus_1')).toEqual([
+      'admin',
+      'customer',
+      'cus_1',
+      'detail',
+    ]);
     // Same 3-segment prefix as the other per-customer keys, so one customer
     // invalidation reaches all of their tabs.
     const prefix = ['admin', 'customer', 'cus_1'];
@@ -148,6 +158,7 @@ describe('qk', () => {
       qk.payoutDetails('cus_1'),
       qk.spendReport('cus_1'),
       qk.customerGacha('cus_1'),
+      qk.customerDetail('cus_1'),
     ]) {
       expect(key.slice(0, 3)).toEqual(prefix);
     }
@@ -156,6 +167,25 @@ describe('qk', () => {
   // Epic 3 (Odds): flat list key for the customer-group -> odds_set page.
   it('exposes the customer-groups key', () => {
     expect(qk.customerGroups).toEqual(['admin', 'customer-groups']);
+  });
+
+  it('keys group member counts as a sibling of the group list', () => {
+    expect(qk.customerGroupCounts).toEqual(['admin', 'customer-group-counts']);
+    expect(qk.customerGroupCount('cusgroup_1')).toEqual([
+      'admin',
+      'customer-group-counts',
+      'cusgroup_1',
+    ]);
+    // The counts prefix reaches every group's count (one player move changes
+    // two of them) ...
+    expect(qk.customerGroupCount('cusgroup_1').slice(0, 2)).toEqual([
+      ...qk.customerGroupCounts,
+    ]);
+    // ... and the group LIST key must not reach the counts, or every odds-set
+    // save would refetch a count that cannot have changed.
+    expect(qk.customerGroupCount('cusgroup_1').slice(0, 2)).not.toEqual([
+      ...qk.customerGroups,
+    ]);
   });
 
   // ── Epic 4 (Ledger) ───────────────────────────────────────────────────────

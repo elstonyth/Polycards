@@ -60,7 +60,7 @@ export function useSellWindow({
   active: boolean;
   onReveal?: RevealFn;
   onSellBack: SellBackFn;
-  onSold?: (balance: number) => void;
+  onSold?: (balance: number, amount: number) => void;
 }) {
   const [states, setStates] = useState<SellState[]>(() =>
     offers.map(() => ({ phase: 'idle' })),
@@ -187,7 +187,11 @@ export function useSellWindow({
             : { phase: 'error', message: res.error };
           return next;
         });
-        if (res.ok) onSold?.(res.balance);
+        // `amount` is passed alongside the balance so the caller can confirm
+        // the sale OUTSIDE this stage. The in-card "+RM x credited" footer is
+        // torn down with the reveal (auto-conclude, or expiry mid-flight), and
+        // a player who never saw it has no on-screen proof the money landed.
+        if (res.ok) onSold?.(res.balance, res.amount);
         return res.ok;
       } catch {
         setStates((prev) => {
