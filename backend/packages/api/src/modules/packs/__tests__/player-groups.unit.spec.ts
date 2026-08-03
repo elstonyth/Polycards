@@ -15,6 +15,8 @@ function buildContainer(opts: {
   memberships?: Group[];
   customerMissing?: boolean;
   createThrows?: boolean;
+  /** Cap the unfiltered group read, to stand in for the real 100-row ceiling. */
+  windowLimit?: number;
 }) {
   const calls = {
     added: [] as { customer_id: string; customer_group_id: string }[],
@@ -34,12 +36,23 @@ function buildContainer(opts: {
       if (!g) throw new Error('Customer group not found');
       return g;
     }),
-    // Two shapes in one stub, keyed on the filter the caller passes:
-    // `{ customers }` asks for one player's memberships, `{}` asks for the
-    // whole group list (ensureDefaultPlayerGroup's marker scan).
-    listCustomerGroups: jest.fn(async (filters: Record<string, unknown>) =>
-      'customers' in filters ? (opts.memberships ?? []) : groups,
-    ),
+    // Three shapes in one stub, keyed on the filter the caller passes:
+    // `{ customers }` = one player's memberships, `{ name }` = the DB-side
+    // default-group lookup (window-independent by design — see findByName),
+    // `{}` = the whole group list (ensureDefaultPlayerGroup's marker scan).
+    // The name branch filters `groups` rather than returning it wholesale, or
+    // the "renamed default group" case would match the wrong row.
+    listCustomerGroups: jest.fn(async (filters: Record<string, unknown>) => {
+      if ('customers' in filters) return opts.memberships ?? [];
+      if ('name' in filters)
+        return groups.filter((g) => g.name === filters.name);
+      // `windowLimit` simulates the real 100-row ceiling on the marker scan:
+      // metadata is not a server-side filter, so that read is paged and the
+      // default row can genuinely fall outside it on a big shop.
+      return opts.windowLimit === undefined
+        ? groups
+        : groups.slice(0, opts.windowLimit);
+    }),
     createCustomerGroups: jest.fn(
       async (data: { name: string; metadata?: Record<string, unknown> }) => {
         if (opts.createThrows) {
@@ -134,6 +147,28 @@ describe('ensureDefaultPlayerGroup', () => {
       odds_set: 1,
       is_default: true,
     });
+  });
+
+  // The marker scan is capped (metadata cannot be filtered server-side), so on
+  // a shop with more groups than that cap the default row can sit outside the
+  // page. A page-only name check would then miss it, the create would hit the
+  // unique-name constraint, and every player move would 500.
+  it('finds the default group by name when it falls outside the scanned page', async () => {
+    const { container, calls } = buildContainer({
+      groups: [
+        { id: 'cg_a', name: 'pro', metadata: { odds_set: 2 } },
+        { id: 'cg_b', name: 'whale', metadata: { odds_set: 3 } },
+        {
+          id: 'cg_def',
+          name: DEFAULT_PLAYER_GROUP_NAME,
+          metadata: { odds_set: 1 },
+        },
+      ],
+      windowLimit: 2, // the default row is the 3rd — outside the scan
+    });
+    const g = await ensureDefaultPlayerGroup(container);
+    expect(g.id).toBe('cg_def');
+    expect(calls.created).toHaveLength(0);
   });
 
   it('re-reads the winner when a concurrent sign-up wins the create race', async () => {

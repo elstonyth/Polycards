@@ -88,8 +88,15 @@ await toast.first().waitFor({ state: 'visible', timeout: 20000 });
 console.log('toast:', (await toast.first().innerText()).replace(/\s+/g, ' '));
 await p.screenshot({ path: `${OUT}/spin-sell-toast.png` });
 
-// ~2s later the reveal has cleared; the toast must still be on screen.
-await p.waitForTimeout(2200);
+// The whole point of mounting the toast outside RevealStage: it must OUTLIVE
+// the reveal. So wait for the reveal to actually conclude — "Spin again" is
+// only reachable on the idle machine — and only then assert the toast is still
+// there. A bare timeout would pass even if the toast died with the stage.
+await p
+  .getByRole('button', { name: /^spin again$/i })
+  .first()
+  .waitFor({ state: 'visible', timeout: 15000 });
+await toast.first().waitFor({ state: 'visible', timeout: 10000 });
 await p.screenshot({ path: `${OUT}/spin-sell-toast-after-conclude.png` });
-console.log('done');
+console.log('toast survived the reveal auto-conclude');
 await b.close();

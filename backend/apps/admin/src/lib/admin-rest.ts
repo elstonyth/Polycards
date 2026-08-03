@@ -1077,8 +1077,18 @@ export interface AdminCustomerDetail {
   metadata: Record<string, unknown> | null;
   /** Player group membership. Exclusive in practice (see setPlayerGroup on the
    *  backend), so the Profile tab reads groups[0] — but it stays an ARRAY
-   *  because the prebuilt /customer-groups screen can still add a second. */
-  groups?: { id: string; name: string }[];
+   *  because the prebuilt /customer-groups screen can still add a second.
+   *
+   *  `metadata` is carried because isDefaultPlayerGroup identifies the default
+   *  group by its MARKER first and only falls back to the name. Without it,
+   *  a renamed default group stops being recognised here — exactly the case
+   *  the marker exists for — and the duplicate-membership repair would pick
+   *  the wrong membership as current. */
+  groups?: {
+    id: string;
+    name: string;
+    metadata?: Record<string, unknown> | null;
+  }[];
 }
 
 // `+groups.*` APPENDS to Medusa's default field set rather than replacing it —
@@ -1087,7 +1097,7 @@ export interface AdminCustomerDetail {
 // supported relation, not a query smuggled past the validator.
 export const getCustomerDetail = (id: string) =>
   getJson<{ customer: AdminCustomerDetail }>(
-    `/admin/customers/${encodeURIComponent(id)}?fields=%2Bgroups.id,%2Bgroups.name`,
+    `/admin/customers/${encodeURIComponent(id)}?fields=%2Bgroups.id,%2Bgroups.name,%2Bgroups.metadata`,
   );
 
 // ── Epic 3 (Odds) ────────────────────────────────────────────────────────────

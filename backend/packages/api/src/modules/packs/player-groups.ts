@@ -37,6 +37,16 @@ const listGroups = (container: MedusaContainer) =>
     { take: 100, order: { created_at: 'ASC' } },
   );
 
+/** The default group by NAME, straight from the DB — the one lookup that does
+ *  not depend on the 100-row window above. */
+const findByName = async (container: MedusaContainer) => {
+  const [row] = await customerService(container).listCustomerGroups(
+    { name: DEFAULT_PLAYER_GROUP_NAME },
+    { take: 1 },
+  );
+  return row;
+};
+
 /**
  * The default player group, created on first use.
  *
@@ -64,11 +74,16 @@ export async function ensureDefaultPlayerGroup(
   );
   if (marked) return marked;
 
-  // Pre-marker row (or a fresh clone of production): adopt it. Medusa merges
-  // metadata per key on update, so `odds_set` and anything else on the row
-  // survives this stamp.
-  const byName = groups.find((g) => g.name === DEFAULT_PLAYER_GROUP_NAME);
+  // Name lookup goes to the DB, not to the page above. The marker scan is
+  // window-bounded (metadata is not a server-side filter), so on a shop with
+  // more than 100 groups the default row can fall outside it — and then a
+  // page-only name check would miss it, the create below would hit the unique
+  // name constraint, and every move would 500.
+  const byName = await findByName(container);
   if (byName) {
+    // Pre-marker row (or a fresh clone of production): adopt it. Medusa merges
+    // metadata per key on update, so `odds_set` and anything else on the row
+    // survives this stamp.
     return await customers.updateCustomerGroups(byName.id, {
       metadata: { [DEFAULT_PLAYER_GROUP_FLAG]: true },
     });
@@ -80,7 +95,11 @@ export async function ensureDefaultPlayerGroup(
       metadata: { odds_set: 1, [DEFAULT_PLAYER_GROUP_FLAG]: true },
     });
   } catch (e) {
-    const raced = (await listGroups(container)).find(isDefaultPlayerGroup);
+    // Same reason the lookup above is name-filtered: the winner of a create
+    // race must be findable regardless of where it sits in the group list.
+    const raced =
+      (await findByName(container)) ??
+      (await listGroups(container)).find(isDefaultPlayerGroup);
     if (raced) return raced;
     throw e;
   }

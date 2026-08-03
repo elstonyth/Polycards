@@ -212,8 +212,13 @@ const BankForm = ({
  *  sets disagree. */
 const GroupCard = ({ customerId }: { customerId: string }) => {
   const { t } = useTranslation();
-  const { data: detail } = useCustomerDetail(customerId);
-  const { data: groupList, isError } = useCustomerGroupsAdmin();
+  const { data: detail, isError: detailError } = useCustomerDetail(customerId);
+  const { data: groupList, isError: groupsError } = useCustomerGroupsAdmin();
+  // BOTH error flags: the render below falls back to a skeleton on
+  // `!groupList || !detail`, so a failed customer-detail request with a healthy
+  // group list would sit on that skeleton forever instead of ever reaching the
+  // error message.
+  const isError = detailError || groupsError;
   const move = useSetPlayerGroup(customerId);
   // Unsaved pick only — undefined re-reads the server value every render, so
   // the post-save refetch is what the Select shows (same rule as the Player
