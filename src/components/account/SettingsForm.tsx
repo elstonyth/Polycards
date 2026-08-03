@@ -114,18 +114,22 @@ export default function SettingsForm({ customer }: Props) {
     }
 
     setBusy(true);
-    const result = await startPhoneOtp({
-      phone: normalized,
-      purpose: 'phone-change',
-    });
-    setBusy(false);
-
-    if (!result.ok) {
-      setNote({ ok: false, text: result.error });
-      return;
+    try {
+      const result = await startPhoneOtp({
+        phone: normalized,
+        purpose: 'phone-change',
+      });
+      if (!result.ok) {
+        setNote({ ok: false, text: result.error });
+        return;
+      }
+      setPendingPhone(normalized);
+      setPhoneChange('otp');
+    } catch {
+      setNote({ ok: false, text: 'Something went wrong. Please try again.' });
+    } finally {
+      setBusy(false);
     }
-    setPendingPhone(normalized);
-    setPhoneChange('otp');
   }
 
   if (!PHONE_VERIFICATION_REQUIRED) {

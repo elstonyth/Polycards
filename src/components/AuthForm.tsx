@@ -125,15 +125,19 @@ export default function AuthForm({
     }
 
     setBusy(true);
-    const result = await startPhoneOtp({ phone, purpose: 'password-reset' });
-    setBusy(false);
-
-    if (!result.ok) {
-      setNote({ text: result.error });
-      return;
+    try {
+      const result = await startPhoneOtp({ phone, purpose: 'password-reset' });
+      if (!result.ok) {
+        setNote({ text: result.error });
+        return;
+      }
+      setForgotPhone(phone);
+      setForgot('phone-otp');
+    } catch {
+      setNote({ text: 'Something went wrong. Please try again.' });
+    } finally {
+      setBusy(false);
     }
-    setForgotPhone(phone);
-    setForgot('phone-otp');
   }
 
   // Shared tail for both login and signup — the action returns the customer,
