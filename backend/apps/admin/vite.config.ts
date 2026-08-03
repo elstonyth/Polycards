@@ -62,7 +62,19 @@ export default defineConfig(() => ({
   // Source, not the CJS dist — see ODDS_MATH_SRC above. This also retires the
   // old `optimizeDeps.include` / `commonjsOptions` pair that existed only to
   // drag that CJS build through Rollup's node_modules-scoped CJS plugin.
-  resolve: { alias: { '@acme/odds-math': ODDS_MATH_SRC } },
+  //
+  // dedupe react-query: @mercurjs/admin (the prebuilt dashboard that renders
+  // OUR routes and owns the QueryClientProvider) pins 5.64.2 and gets its own
+  // nested copy, while this app's package.json pins 5.101.4. Two module
+  // instances = two React contexts, so every custom page threw "No QueryClient
+  // set, use QueryClientProvider to set one" and rendered the dashboard's
+  // "An error occurred" card — every page in src/routes at once, including
+  // ones nobody had touched. dedupe collapses both imports onto this app's
+  // copy so the provider the dashboard mounts is the one our useQuery reads.
+  resolve: {
+    alias: { '@acme/odds-math': ODDS_MATH_SRC },
+    dedupe: ['@tanstack/react-query'],
+  },
   server: { port: 7000 },
   plugins: [
     react(),

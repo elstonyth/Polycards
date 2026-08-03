@@ -1052,11 +1052,19 @@ export interface AdminCustomerDetail {
   phone: string | null;
   created_at: string;
   metadata: Record<string, unknown> | null;
+  /** Player group membership. Exclusive in practice (see setPlayerGroup on the
+   *  backend), so the Profile tab reads groups[0] — but it stays an ARRAY
+   *  because the prebuilt /customer-groups screen can still add a second. */
+  groups?: { id: string; name: string }[];
 }
 
+// `+groups.*` APPENDS to Medusa's default field set rather than replacing it —
+// a bare `fields=groups.id` would drop email/phone/created_at and blank the
+// Profile tab. `groups` is on the route's `allowed` list, so this is a
+// supported relation, not a query smuggled past the validator.
 export const getCustomerDetail = (id: string) =>
   getJson<{ customer: AdminCustomerDetail }>(
-    `/admin/customers/${encodeURIComponent(id)}`,
+    `/admin/customers/${encodeURIComponent(id)}?fields=%2Bgroups.id,%2Bgroups.name`,
   );
 
 // ── Epic 3 (Odds) ────────────────────────────────────────────────────────────
@@ -1087,6 +1095,31 @@ export const setGroupOddsSet = (id: string, set: 1 | 2 | 3) =>
   postJson<{ customer_group: AdminCustomerGroup }>(
     `/admin/customer-groups/${encodeURIComponent(id)}`,
     { metadata: { odds_set: set } },
+  );
+
+// The native create route takes `metadata` in the same body as `name`, so the
+// group is born with its odds set — no create-then-patch window in which a new
+// group silently plays set 1.
+export const createCustomerGroupAdmin = (name: string, set: 1 | 2 | 3) =>
+  postJson<{ customer_group: AdminCustomerGroup }>('/admin/customer-groups', {
+    name,
+    metadata: { odds_set: set },
+  });
+
+/** How many players are in one group. Only `count` is used — limit=1 keeps the
+ *  payload one row wide on a group with 50k members (limit=0 is not a
+ *  documented "count only" in Medusa, so it isn't relied on here). */
+export const countCustomersInGroup = (groupId: string) =>
+  getJson<{ count: number }>(
+    `/admin/customers?limit=1&fields=id&groups=${encodeURIComponent(groupId)}`,
+  ).then((r) => r.count);
+
+/** Move a player into ONE group (repo-side route — exclusive, single request).
+ *  `groupId: null` returns them to the default group. */
+export const setCustomerGroup = (customerId: string, groupId: string | null) =>
+  postJson<{ group: { id: string; name: string } }>(
+    `/admin/customers/${encodeURIComponent(customerId)}/group`,
+    { group_id: groupId },
   );
 
 // ── Epic 4 (Ledger) ──────────────────────────────────────────────────────────

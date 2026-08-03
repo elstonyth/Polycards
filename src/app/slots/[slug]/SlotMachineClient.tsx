@@ -56,6 +56,7 @@ import { OddsSheet } from './OddsSheet';
 import { VaultRoom } from './VaultRoom';
 import { Meter } from './Meter';
 import { RevealStage } from './RevealStage';
+import { SuccessToast } from '@/components/ui/SuccessToast';
 import { CARD_BACK_SRC } from './SlabCard';
 import type { SellBackOffer } from './useSellWindow';
 
@@ -194,8 +195,8 @@ export default function SlotMachineClient({
   // Balance comes from the app-shell provider (identity-tagged: values from
   // another account never render — push security review). Server-returned
   // balances from spins/sell-backs are pushed back up via applyBalance.
-  // Aliased: a local `refreshBalance` further down is just `applyBalance`
-  // (it sets a known number). This one refetches from the server.
+  // Aliased: `applyBalance` sets a known number (the balance a spin or
+  // sell-back returned). `refetchBalance` re-reads it from the server.
   const { balance, applyBalance, refreshBalance: refetchBalance } = useTopUp();
   const [recent, setRecent] = useState<RecentPull[]>(recentPulls);
   const [phase, setPhase] = useState<Phase>('idle');
@@ -761,7 +762,49 @@ export default function SlotMachineClient({
     };
   }, [phase, spin?.nonce, reels, reduced, sfx]);
 
-  const refreshBalance = applyBalance;
+  // Sell-back confirmation, mounted OUTSIDE the reveal stage on purpose.
+  // The in-card "+RM x credited" footer dies with the stage — auto-conclude
+  // clears the reveal ~1.4s after the last card, and a sell still in flight at
+  // expiry never renders it at all — so the player could be left with a card
+  // gone from the vault and nothing on screen saying the money arrived. This is
+  // the same confirmation the vault gives after a delivery request.
+  //
+  // A multi-reel batch is sold card by card, so the toast RUNS A TOTAL rather
+  // than being overwritten by each sale: after selling five, "credited RM 12"
+  // (the last card) understates what actually landed, and the player has no
+  // other running figure on screen. Same shape as the vault's bulk-sell notice.
+  // `seq` bumps per sale so an identical string still restarts the countdown
+  // (see SuccessToast's nonce) — without it the 2nd sale of two equal-priced
+  // cards would inherit the 1st toast's remaining time.
+  const [sellToast, setSellToast] = useState<{
+    text: string;
+    seq: number;
+  } | null>(null);
+  const sellRun = useRef({ count: 0, total: 0, seq: 0 });
+  const handleSold = useCallback(
+    (newBalance: number, amount: number) => {
+      applyBalance(newBalance);
+      const run = sellRun.current;
+      run.count += 1;
+      run.total += amount;
+      run.seq += 1;
+      setSellToast({
+        text:
+          run.count === 1
+            ? `Sold — ${rm(amount)} credited to your balance.`
+            : `Sold ${run.count} cards — ${rm(run.total)} credited to your balance.`,
+        seq: run.seq,
+      });
+    },
+    [applyBalance],
+  );
+  // Dismissal ends the run: the next sale starts counting from one again. `seq`
+  // is NOT reset — it only has to keep changing, and reusing a value could
+  // collide with the key React is still holding.
+  const closeSellToast = useCallback(() => {
+    sellRun.current = { count: 0, total: 0, seq: sellRun.current.seq };
+    setSellToast(null);
+  }, []);
 
   const inReveal =
     phase === 'flood' || phase === 'transform' || phase === 'review';
@@ -924,7 +967,7 @@ export default function SlotMachineClient({
                   onCloseInstant={closeInstantWindow}
                   onSellBack={sellBackPull}
                   onReveal={revealPull}
-                  onSold={refreshBalance}
+                  onSold={handleSold}
                   sfx={sfx}
                   vibrate={vibrate}
                   play={play}
@@ -1017,6 +1060,14 @@ export default function SlotMachineClient({
           )}
         </div>
       </VaultRoom>
+
+      {/* Always mounted, message=null when idle: the live region must pre-exist
+          its message for screen readers to announce it (see SuccessToast). */}
+      <SuccessToast
+        message={sellToast?.text ?? null}
+        nonce={sellToast?.seq}
+        onClose={closeSellToast}
+      />
 
       {/* Single consolidated announcement (settle-only). */}
       <p role="status" aria-live="polite" className="sr-only">

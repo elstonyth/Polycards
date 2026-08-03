@@ -19,9 +19,16 @@ const TOAST_MS = 4000;
 // pattern as SlotMachineClient's persistent announcer.
 export function SuccessToast({
   message,
+  nonce,
   onClose,
 }: {
   message: string | null;
+  /** Bump this to restart the countdown when the SAME message is raised again.
+   *  Without it the timer effect (keyed on `message`) never re-runs for an
+   *  identical string, so a repeat event inherits whatever time was left on the
+   *  previous one and the progress bar doesn't reset. Optional: callers that
+   *  never repeat a message can omit it and behave exactly as before. */
+  nonce?: number;
   onClose: () => void;
 }) {
   // Latest-ref so an unstable onClose (an inline arrow in the parent) can't
@@ -35,7 +42,7 @@ export function SuccessToast({
     if (!message) return;
     const t = setTimeout(() => onCloseRef.current(), TOAST_MS);
     return () => clearTimeout(t);
-  }, [message]);
+  }, [message, nonce]);
 
   // Liquid-glass rim while visible (the sr-only idle element has no box to
   // map); frosted fallback on Safari/Firefox. Truthiness gate matches the
@@ -85,7 +92,13 @@ export function SuccessToast({
               <path d="M6.3 5 10 8.6 13.7 5 15 6.3 11.4 10l3.6 3.7-1.3 1.3-3.7-3.6L6.3 15 5 13.7 8.6 10 5 6.3 6.3 5z" />
             </svg>
           </button>
+          {/* Keyed on `nonce` so a repeat message REMOUNTS this element and
+              the CSS animation starts over — restarting the JS timer alone
+              would leave the bar mid-flight and the two would disagree about
+              how long is left. Undefined nonce = one stable key = old
+              behaviour. */}
           <span
+            key={nonce}
             aria-hidden="true"
             className="absolute inset-x-0 bottom-0 h-0.5 origin-left bg-buyback-fg motion-safe:animate-[toastBar_4s_linear_forwards]"
             style={{ animationDuration: `${TOAST_MS}ms` }}
