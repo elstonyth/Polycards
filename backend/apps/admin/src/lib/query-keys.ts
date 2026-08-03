@@ -13,6 +13,10 @@ export const qk = {
     ['admin', 'pulls', page, source ?? 'all', customerId ?? 'all'] as const,
   // 2-segment prefix — invalidates ALL pages of the pull ledger in one call
   pullsKey: ['admin', 'pulls'] as const,
+  // Keyed on (view, page): each deposit view caches independently, so
+  // switching filters never shows another view's rows.
+  globepayDeposits: (page: number, status: string) =>
+    ['admin', 'globepay-deposits', status, page] as const,
   economy: ['admin', 'economy'] as const,
   eligibleProducts: ['admin', 'eligible-products'] as const,
   customerGacha: (id: string) => ['admin', 'customer', id, 'gacha'] as const,

@@ -2229,7 +2229,8 @@
             "OD",
             "RF",
             "AD",
-            "WP"
+            "WP",
+            "WD"
           ],
           "mappedType": "enum"
         },

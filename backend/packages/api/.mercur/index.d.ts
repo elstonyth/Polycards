@@ -472,6 +472,9 @@ export type Routes = {
         gacha: {
             eligibleProducts: typeof import("../../src/api/admin/gacha/eligible-products/route");
         };
+        globepay: {
+            deposits: typeof import("../../src/api/admin/globepay/deposits/route");
+        };
         media: typeof import("../../src/api/admin/media/route");
         packs: typeof import("../../src/api/admin/packs/route") & {
             $slug: typeof import("../../src/api/admin/packs/[slug]/route") & {
@@ -597,7 +600,11 @@ export type Routes = {
         challenge: typeof import("../../src/api/store/challenge/route");
         credits: typeof import("../../src/api/store/credits/route") & {
             balance: typeof import("../../src/api/store/credits/balance/route");
+            deposit: typeof import("../../src/api/store/credits/deposit/route");
             topup: typeof import("../../src/api/store/credits/topup/route");
+            withdraw: typeof import("../../src/api/store/credits/withdraw/route") & {
+                banks: typeof import("../../src/api/store/credits/withdraw/banks/route");
+            };
         };
         daily: typeof import("../../src/api/store/daily/route") & {
             draw: typeof import("../../src/api/store/daily/draw/route");
@@ -831,6 +838,13 @@ export type Routes = {
     cdn: {
         cards: {
             $file: typeof import("../../src/api/cdn/cards/[file]/route");
+        };
+    };
+    hooks: {
+        globepay: {
+            deposit: typeof import("../../src/api/hooks/globepay/deposit/route");
+            payoutVerify: typeof import("../../src/api/hooks/globepay/payout-verify/route");
+            withdrawal: typeof import("../../src/api/hooks/globepay/withdrawal/route");
         };
     };
 };
