@@ -209,17 +209,62 @@ envs:
     scope: RUN_TIME
     value: pwoe4lsq4pkxegdsoyyzvfjuza
   # ╔═══════════════════════════════════════════════════════════════════════╗
-  # ║ GO-LIVE BLOCKER — DELETE THIS ENV BEFORE REAL LAUNCH.                  ║
-  # ║ 'unsafe-demo' runs the always-approving MOCK payment gateway in prod   ║
-  # ║ (mints free spendable credit). Prod is deliberately a DEMO box today.  ║
-  # ║ The boot guard (packs/topup.ts assertMockTopupSafe) refuses 'true' in  ║
-  # ║ production; only this weird-on-purpose value boots. Remove when the    ║
-  # ║ real PSP (security roadmap Batch B) ships. Living here (not the DO UI) ║
-  # ║ keeps the spec = live reality and makes the blocker grep-able.         ║
+  # ║ DO NOT APPLY THIS SPEC UNTIL PR #252 IS MERGED.                        ║
+  # ║ ALLOW_MOCK_TOPUP is GONE (the go-live blocker is cleared) and the      ║
+  # ║ GlobePay365 vars below arm the real gateway. Applied against the       ║
+  # ║ pre-merge code, that combination gives customers a storefront whose    ║
+  # ║ deposit route does not exist yet. Applied AFTER the merge it is        ║
+  # ║ correct — and it must be, because the boot guard now refuses to start  ║
+  # ║ production with ALLOW_MOCK_TOPUP set to ANY value.                     ║
   # ╚═══════════════════════════════════════════════════════════════════════╝
-  - key: ALLOW_MOCK_TOPUP
+  #
+  # GlobePay365 — the real payment gateway. Fails closed: without ENABLED the
+  # deposit route refuses, and globepayConfigFromEnv throws on any missing
+  # value rather than half-configuring itself.
+  - key: GLOBEPAY_ENABLED
     scope: RUN_TIME
-    value: unsafe-demo
+    value: "true"
+  - key: GLOBEPAY_MERCHANT_CODE
+    scope: RUN_TIME
+    value: Polycard
+  # Production host. There is deliberately NO default in code — a missing value
+  # used to fall back to the STAGING host, which would point live credentials at
+  # the wrong environment and "work" until someone noticed the money missing.
+  - key: GLOBEPAY_API_BASE
+    scope: RUN_TIME
+    value: https://mapi.GlobePay365.com
+  # Their server-to-server targets. Explicit, not derived: production names its
+  # storefront var MERCUR_STOREFRONT_URL, so deriving would silently produce a
+  # localhost default and the gateway would call an address that does not exist.
+  - key: GLOBEPAY_NOTIFY_URL
+    scope: RUN_TIME
+    value: https://admin.polycards.gg/hooks/globepay/deposit
+  - key: GLOBEPAY_RETURN_URL
+    scope: RUN_TIME
+    value: https://polycards.gg/transactions
+  # The three secrets. Values live in the gitignored deploy/.env.deploy and are
+  # injected by scripts/do-apply.ps1. Both KEY values are the bare base64 body
+  # on ONE line — no PEM armor, no newlines: packs/globepay.ts toPem() re-wraps
+  # them, and a multi-line value would break both this YAML and the placeholder
+  # substitution. (Verified 2026-07-29: the bare body signs and verifies.)
+  - key: GLOBEPAY_AES_KEY
+    scope: RUN_TIME
+    type: SECRET
+    value: __SECRET__GLOBEPAY_AES_KEY__
+  - key: GLOBEPAY_PUBLIC_KEY
+    scope: RUN_TIME
+    type: SECRET
+    value: __SECRET__GLOBEPAY_PUBLIC_KEY__
+  - key: GLOBEPAY_MERCHANT_PRIVATE_KEY
+    scope: RUN_TIME
+    type: SECRET
+    value: __SECRET__GLOBEPAY_MERCHANT_PRIVATE_KEY__
+  # Withdrawals stay OFF for the first cutover: deposits are the launch path and
+  # nothing has ever been paid out through this account. To arm them, add
+  # GLOBEPAY_WITHDRAWALS_ENABLED=true plus GLOBEPAY_WITHDRAW_NOTIFY_URL
+  # (…/hooks/globepay/withdrawal) and GLOBEPAY_PAYOUT_VERIFY_URL
+  # (…/hooks/globepay/payout-verify), and set NEXT_PUBLIC_WITHDRAWALS_ENABLED on
+  # the storefront in the same window.
 
 # Dedicated outbound IPs. DO assigns one per component (the service makes the
 # customer-facing calls, the worker runs the reconciliation sweeps) and

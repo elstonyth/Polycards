@@ -45,6 +45,8 @@ import RewardBoxPrize from './models/reward-box-prize';
 import PixelPokemon from './models/pixel-pokemon';
 import ChallengeStage from './models/challenge-stage';
 import ChallengeSettings from './models/challenge-settings';
+import GlobePayDeposit from './models/globepay-deposit';
+import GlobePayWithdrawal from './models/globepay-withdrawal';
 import ChallengePayout from './models/challenge-payout';
 import LedgerEntry from './models/ledger-entry';
 import LedgerSequence from './models/ledger-sequence';
@@ -470,6 +472,8 @@ class PacksModuleService extends MedusaService({
   PixelPokemon,
   ChallengeStage,
   ChallengeSettings,
+  GlobePayDeposit,
+  GlobePayWithdrawal,
   ChallengePayout,
   LedgerEntry,
   LedgerSequence,
@@ -1015,9 +1019,19 @@ class PacksModuleService extends MedusaService({
   // Wraps mutateCreditAtomic with the paired TP ledger row, same transaction
   // (POLYCARD-BACK §5.3). ref_id = the credit_transaction's own id, so the
   // Wallet-tab join (Task 9) is a plain equality on credit_transaction.id.
+  //
+  // ledgerPaymentMethod/ledgerGatewayRef default to the mock gateway so the
+  // original caller is untouched; the GlobePay365 callback and its
+  // reconciliation sweep pass the real method (BQR/OB) and their transaction
+  // id. Those two share ONE idempotency anchor, so a callback racing the sweep
+  // collapses to a single credit — and since refId is that credit's id, to a
+  // single ledger row.
   @InjectTransactionManager()
   async topUpCreditsWithLedger(
-    input: CreditMutationInput,
+    input: CreditMutationInput & {
+      ledgerPaymentMethod?: string;
+      ledgerGatewayRef?: string | null;
+    },
     @MedusaContext() sharedContext: Context = {},
   ): ReturnType<PacksModuleService['mutateCreditAtomic']> {
     const result = await this.mutateCreditAtomic(input, sharedContext);
@@ -1031,8 +1045,59 @@ class PacksModuleService extends MedusaService({
           vaultDelta: null,
           payload: {
             type: 'TP',
-            payment_method: 'mock',
-            gateway_ref: result.reference,
+            payment_method: input.ledgerPaymentMethod ?? 'mock',
+            gateway_ref:
+              input.ledgerGatewayRef === undefined
+                ? result.reference
+                : input.ledgerGatewayRef,
+          },
+        },
+        sharedContext,
+      );
+    }
+    return result;
+  }
+
+  // The withdrawal counterpart: every balance move on the payout path writes a
+  // WD row in the SAME transaction. Debit is negative, refund positive, so
+  // Σ(ledger) follows the balance through the whole payout lifecycle — without
+  // this, arming payouts breaks the conservation invariant asserted by
+  // integration-tests/http/ledger-conservation.spec.ts.
+  //
+  // A replayed credit writes nothing: the refund anchors are idempotent, so a
+  // callback and the sweep both refunding one failed payout produce one credit
+  // and one ledger row.
+  @InjectTransactionManager()
+  async withdrawCreditsWithLedger(
+    input: CreditMutationInput & {
+      ledger: {
+        outcome: 'requested' | 'refunded';
+        bankCode: string | null;
+        accountNumber: string | null;
+        gatewayRef: string | null;
+      };
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): ReturnType<PacksModuleService['mutateCreditAtomic']> {
+    const result = await this.mutateCreditAtomic(input, sharedContext);
+    if (!result.replayed) {
+      await this.recordLedgerEntry(
+        {
+          type: 'WD',
+          customerId: input.customerId,
+          refId: result.id,
+          walletDelta: result.amount,
+          vaultDelta: null,
+          payload: {
+            type: 'WD',
+            outcome: input.ledger.outcome,
+            bank_code: input.ledger.bankCode,
+            // Last 4 only — the ledger is a customer- and operator-visible
+            // surface; the full number stays on globepay_withdrawal.
+            account_last4: input.ledger.accountNumber
+              ? input.ledger.accountNumber.slice(-4)
+              : null,
+            gateway_ref: input.ledger.gatewayRef,
           },
         },
         sharedContext,

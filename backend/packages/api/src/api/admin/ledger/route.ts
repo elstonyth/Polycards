@@ -10,7 +10,7 @@ import {
   type LedgerType,
 } from '../../../modules/packs/ledger';
 
-const LEDGER_TYPES: LedgerType[] = ['TP', 'SP', 'SE', 'OD', 'RF', 'AD', 'WP'];
+const LEDGER_TYPES: LedgerType[] = ['TP', 'SP', 'SE', 'OD', 'RF', 'AD', 'WP', 'WD'];
 
 export type AdminLedgerRow = {
   id: string;

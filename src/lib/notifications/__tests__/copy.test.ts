@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { NOTIFICATION_COPY, copyFor } from '../copy';
 
-// The seven-template list used to be hand-copied here as a `TEMPLATES` const.
+// The template list used to be hand-copied here as a `TEMPLATES` const.
 // That mirror could drift from the backend's `FeedTemplate` union silently: a
 // template added on the backend shipped green while the storefront feed fell
 // through to unknown-key handling for a template announcing money events.
@@ -74,15 +74,18 @@ describe('NOTIFICATION_COPY', () => {
   it('toasts exactly the templates nothing else announces', () => {
     const always = TEMPLATES.filter((t) => copyFor(t).policy === 'always');
     // voucher_claimed / topup_credited have their own client toast;
-    // reward_won has PrizeReveal. Toasting them would double up.
+    // reward_won has PrizeReveal. Toasting them would double up. The two
+    // withdrawal outcomes land asynchronously with no owning tab, and
     // challenge_payout settles server-side between sessions — nothing else
-    // announces it.
+    // announces any of them, so all three DO toast.
     expect(always.sort()).toEqual(
       [
         'challenge_payout',
         'commission_matured',
         'delivery_status',
         'vip_level_up',
+        'withdrawal_paid',
+        'withdrawal_refunded',
       ].sort(),
     );
   });
@@ -184,6 +187,12 @@ describe('body rendering', () => {
     );
     expect(copyFor('voucher_claimed').body({ amount_myr: 5, level: 3 })).toBe(
       'RM 5.00 credited from your Level 3 voucher.',
+    );
+    expect(copyFor('withdrawal_paid').body({ amount_myr: 50 })).toBe(
+      'RM 50.00 has been sent to your bank.',
+    );
+    expect(copyFor('withdrawal_refunded').body({ amount_myr: 50 })).toBe(
+      'The transfer could not be completed — RM 50.00 is back in your balance.',
     );
   });
 

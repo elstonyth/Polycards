@@ -25,6 +25,9 @@ import {
   BalanceSchema,
   AmountBalanceSchema,
   BuybackResultSchema,
+  DepositStartSchema,
+  WithdrawStartSchema,
+  WithdrawBanksSchema,
   CreditsSchema,
   CreditTransactionSchema,
 } from '@/lib/data/schemas';
@@ -53,6 +56,18 @@ const VAULT_RULES: ErrorRule[] = [
     /declined/i,
     'Payment declined by the demo gateway — amounts ending in .13 always decline.',
   ],
+  // Withdrawal messages are already customer-facing on the backend — pass
+  // them through instead of flattening a gateway refusal into the fallback.
+  [
+    /could not start your withdrawal/i,
+    'We could not start your withdrawal. Please check the bank details and try again.',
+  ],
+  [
+    /withdrawals must be between/i,
+    'Withdrawals must be between RM 30 and RM 1,000.',
+  ],
+  [/withdrawals are not open/i, 'Withdrawals are not open yet.'],
+  [/insufficient/i, 'Not enough balance for that.'],
   [/amount/i, 'Enter a valid amount (up to RM 10,000, whole cents).'],
   [/already sold/i, 'This card was already sold back.'],
   [/not found|404/i, 'This card is no longer in your vault.'],
@@ -132,6 +147,171 @@ export type TopUpActionResult =
       replayed?: boolean;
     }
   | { ok: false; error: string; needsAuth?: boolean };
+
+export type StartDepositResult =
+  | { ok: true; url: string; amount: number }
+  | { ok: false; error: string; needsAuth?: boolean };
+
+/**
+ * Start a REAL top-up through the GlobePay365 gateway.
+ *
+ * Unlike `topUpCredits` this credits nothing and returns no balance: it hands
+ * back the gateway's cashier URL, the customer pays there, and credit only
+ * lands when their signed callback settles the deposit. So there is no
+ * Idempotency-Key here — the backend mints a fresh reference per attempt and a
+ * re-clicked button costs nothing but an abandoned deposit row.
+ *
+ * Which gateway the UI uses is decided by NEXT_PUBLIC_PAYMENTS_PROVIDER; this
+ * action is only called when it is 'globepay'.
+ */
+export async function startDeposit(
+  amount: number,
+): Promise<StartDepositResult> {
+  // Validate at the boundary — a server action is a public endpoint.
+  if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
+    return { ok: false, error: 'Enter a valid amount.' };
+  }
+
+  const token = await getAuthToken();
+  if (!token) {
+    return { ok: false, error: 'Please log in first.', needsAuth: true };
+  }
+
+  try {
+    const parsed = parseOne(
+      DepositStartSchema,
+      await sdk.client.fetch('/store/credits/deposit', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: { amount },
+      }),
+    );
+    if (!parsed) {
+      return {
+        ok: false,
+        error: 'Got an unexpected response. Please try again.',
+      };
+    }
+    return { ok: true, url: parsed.url, amount: parsed.amount };
+  } catch (error) {
+    logger.error('[vault] deposit start failed:', error);
+    return {
+      ok: false,
+      error: friendlyError(error, VAULT_RULES, VAULT_FALLBACK),
+      needsAuth: isAuthError(error),
+    };
+  }
+}
+
+export type WithdrawBank = { bankCode: string; bankName: string };
+
+export type WithdrawBanksResult =
+  | { ok: true; banks: WithdrawBank[] }
+  | { ok: false; error: string; needsAuth?: boolean };
+
+/** Payout bank picker source — proxied through the backend (the gateway's
+ *  bank-list endpoint carries our merchant code, so it never runs browser-side). */
+export async function fetchWithdrawBanks(): Promise<WithdrawBanksResult> {
+  const token = await getAuthToken();
+  if (!token) {
+    return { ok: false, error: 'Please log in first.', needsAuth: true };
+  }
+  try {
+    const parsed = parseOne(
+      WithdrawBanksSchema,
+      await sdk.client.fetch('/store/credits/withdraw/banks', {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+    );
+    if (!parsed) {
+      return { ok: false, error: 'Could not load the bank list.' };
+    }
+    return { ok: true, banks: parsed.banks };
+  } catch (error) {
+    logger.error('[vault] withdraw banks failed:', error);
+    return {
+      ok: false,
+      error: friendlyError(error, VAULT_RULES, VAULT_FALLBACK),
+      needsAuth: isAuthError(error),
+    };
+  }
+}
+
+export type StartWithdrawalResult =
+  | { ok: true; amount: number; balance: number; reference: string }
+  | { ok: false; error: string; needsAuth?: boolean };
+
+/**
+ * Start a REAL payout through the GlobePay365 gateway. The balance is debited
+ * immediately (the returned `balance` reflects it); the bank transfer then
+ * completes asynchronously, and a failed payout refunds the debit — so the
+ * money is never both spendable and in flight. No Idempotency-Key: the backend
+ * mints a fresh reference per attempt, and each attempt debits atomically.
+ */
+export async function startWithdrawal(input: {
+  amount: number;
+  bankCode: string;
+  accountNumber: string;
+  accountHolderName: string;
+}): Promise<StartWithdrawalResult> {
+  // Validate at the boundary — a server action is a public endpoint.
+  if (
+    typeof input.amount !== 'number' ||
+    !Number.isFinite(input.amount) ||
+    input.amount <= 0
+  ) {
+    return { ok: false, error: 'Enter a valid amount.' };
+  }
+  if (
+    typeof input.bankCode !== 'string' ||
+    typeof input.accountNumber !== 'string' ||
+    typeof input.accountHolderName !== 'string'
+  ) {
+    return { ok: false, error: 'Fill in every bank field.' };
+  }
+
+  const token = await getAuthToken();
+  if (!token) {
+    return { ok: false, error: 'Please log in first.', needsAuth: true };
+  }
+
+  try {
+    const parsed = parseOne(
+      WithdrawStartSchema,
+      await sdk.client.fetch('/store/credits/withdraw', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: {
+          amount: input.amount,
+          bank_code: input.bankCode,
+          account_number: input.accountNumber,
+          account_holder_name: input.accountHolderName,
+        },
+      }),
+    );
+    if (!parsed) {
+      return {
+        ok: false,
+        error: 'Got an unexpected response. Please try again.',
+      };
+    }
+    return {
+      ok: true,
+      amount: parsed.amount,
+      balance: parsed.balance,
+      // Their W… id when the submit confirmed; our reference when the
+      // outcome is still resolving asynchronously.
+      reference: parsed.transactionId ?? parsed.merchantTransactionId,
+    };
+  } catch (error) {
+    logger.error('[vault] withdrawal start failed:', error);
+    return {
+      ok: false,
+      error: friendlyError(error, VAULT_RULES, VAULT_FALLBACK),
+      needsAuth: isAuthError(error),
+    };
+  }
+}
 
 // Buy site credit through the mock gateway (demo — no real payment). The fake
 // card fields never leave the browser; only the amount is posted, and the

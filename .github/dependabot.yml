@@ -85,6 +85,16 @@ updates:
       - dependency-name: 'react'
         update-types:
           - version-update:semver-major
+      # #317 bumped plugin-react to 6.x against our vite 6.4.3 — plugin-react
+      # 5+ imports vite 7's './internal' export, so every COLD admin/vendor
+      # vite build (CI backend-quality, the DO deploy image) dies with
+      # ERR_PACKAGE_PATH_NOT_EXPORTED. Turbo cache hid it until the first
+      # cache miss. plugin-react majors move only in lockstep with a vite
+      # major, deliberately, in one reviewed PR (reverted in the commit
+      # adding this entry).
+      - dependency-name: '@vitejs/plugin-react'
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: npm
     directory: /backend/apps/admin

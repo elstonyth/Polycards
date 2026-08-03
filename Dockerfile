@@ -62,10 +62,16 @@ ARG NEXT_PUBLIC_MEDIA_HOST=polycards-media.sgp1.cdn.digitaloceanspaces.com
 # Set to the live DO host; on a custom-domain move update this ARG + the .do
 # spec + the backend's MERCUR_STOREFRONT_URL together.
 ARG NEXT_PUBLIC_SITE_URL=https://polycards.gg
+# Payment provider for the top-up sheet. 'mock' keeps the demo gateway; set to
+# 'globepay' at cutover, together with the .do/storefront.app.yaml value. This
+# ARG default is the one that reaches the bundle (App Platform build-time env is
+# unreliable here), so flipping the spec alone does nothing.
+ARG NEXT_PUBLIC_PAYMENTS_PROVIDER=mock
 ENV NEXT_PUBLIC_MEDUSA_BACKEND_URL=$NEXT_PUBLIC_MEDUSA_BACKEND_URL
 ENV NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY=$NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY
 ENV NEXT_PUBLIC_MEDIA_HOST=$NEXT_PUBLIC_MEDIA_HOST
 ENV NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL
+ENV NEXT_PUBLIC_PAYMENTS_PROVIDER=$NEXT_PUBLIC_PAYMENTS_PROVIDER
 
 # Next.js collects completely anonymous telemetry data about general usage.
 # Learn more here: https://nextjs.org/telemetry
