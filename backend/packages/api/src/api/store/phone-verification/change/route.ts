@@ -49,6 +49,15 @@ export async function POST(
   // — it says nothing about whether another account already owns it (ported
   // number, two people typing the same digits). Same CustomerFilters cast
   // idiom as start/route.ts.
+  //
+  // DELIBERATELY non-atomic (check-then-update, no lock/constraint): racing
+  // it requires two accounts holding fresh OTP proofs for the SAME phone —
+  // i.e. one phone-holder racing their own accounts — and the duplicate
+  // state it could create is already handled fail-closed downstream
+  // (password-reset refuses a multi-match, start sends no SMS). A unique
+  // index can't back this: customer is a core-Medusa table (no migrations
+  // in this feature) and legacy rows predating verification may share
+  // phones. Revisit only if support ever sees a real duplicate.
   const matches = await customerService.listCustomers(
     { phone, has_account: true } as unknown as CustomerFilters,
     { select: ['id'], take: 2 },
