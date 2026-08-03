@@ -12,7 +12,7 @@ __metadata:
     "@acme/api": "workspace:*"
     "@acme/odds-math": "workspace:*"
     "@acme/pokemon": "workspace:*"
-    "@medusajs/icons": "npm:2.13.4"
+    "@medusajs/icons": "npm:2.13.6"
     "@medusajs/ui": "npm:4.1.1"
     "@medusajs/ui-preset": "npm:2.15.5"
     "@mercurjs/admin": "npm:2.1.6"
@@ -3285,6 +3285,15 @@ __metadata:
   peerDependencies:
     react: ^18.3.1
   checksum: 10c0/ceff98f018a88aa9b78324d7ba9b0c58073c950d68cad715070068d06a220e670120eee3655e6d392fa5b7e49a16a9f08816a4e088fe4446a4e274e0b5e5d597
+  languageName: node
+  linkType: hard
+
+"@medusajs/icons@npm:2.13.6":
+  version: 2.13.6
+  resolution: "@medusajs/icons@npm:2.13.6"
+  peerDependencies:
+    react: ^18.3.1
+  checksum: 10c0/fa960fec03d75a1c8788d46bf3205661158b117049ce7bb03dbc8172307a2de3bac72456a3a20d24a99a57038b942c3670d9da9af15311997be499fa0a034530
   languageName: node
   linkType: hard
 
@@ -9662,7 +9671,7 @@ __metadata:
   dependencies:
     "@eslint/js": "npm:^10.0.1"
     "@hookform/resolvers": "npm:5.5.7"
-    "@medusajs/icons": "npm:2.13.4"
+    "@medusajs/icons": "npm:2.13.6"
     "@medusajs/ui": "npm:4.1.1"
     "@mercurjs/client": "npm:2.1.6"
     "@mercurjs/dashboard-sdk": "npm:2.1.6"
