@@ -15,7 +15,7 @@
     "@acme/odds-math": "workspace:*",
     "@acme/pokemon": "workspace:*",
     "@medusajs/icons": "2.13.6",
-    "@medusajs/ui": "4.1.1",
+    "@medusajs/ui": "4.1.19",
     "@mercurjs/admin": "2.1.6",
     "@tanstack/react-query": "5.101.4",
     "react": "^18.3.1",
