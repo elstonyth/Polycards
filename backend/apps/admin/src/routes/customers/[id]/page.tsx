@@ -10,6 +10,7 @@ import {
   Input,
   Label,
   Prompt,
+  Select,
   StatusBadge,
   Table,
   Tabs,
@@ -22,6 +23,7 @@ import {
   useCustomerAudit,
   useCustomerDetail,
   useCustomerGacha,
+  useCustomerGroupsAdmin,
   useCustomerPulls,
   useCustomerTransactions,
   useDeliveryOrders,
@@ -32,6 +34,7 @@ import {
   useCustomerCommissions,
   useReverseCommission,
   useSavePayoutDetails,
+  useSetPlayerGroup,
   useSpendReport,
   useSuspendCommission,
   useUnfreezeCustomer,
@@ -47,6 +50,10 @@ import type {
   ReferralTreeNode,
 } from '../../../lib/admin-rest';
 import { resolveImageUrl } from '../../../lib/image-url';
+import {
+  effectiveOddsSet,
+  isDefaultPlayerGroup,
+} from '../../../lib/player-groups';
 import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
 import { Pager } from '../../../components/Pager';
 import { PullsTable } from '../../../components/PullsTable';
@@ -199,6 +206,115 @@ const BankForm = ({
   );
 };
 
+/** Move a player between player groups. Exclusive by construction: the Select
+ *  holds ONE group and the save posts to the repo-side route that clears the
+ *  others, so the operator can never leave a player in two groups whose odds
+ *  sets disagree. */
+const GroupCard = ({ customerId }: { customerId: string }) => {
+  const { t } = useTranslation();
+  const { data: detail, isError: detailError } = useCustomerDetail(customerId);
+  const { data: groupList, isError: groupsError } = useCustomerGroupsAdmin();
+  // BOTH error flags: the render below falls back to a skeleton on
+  // `!groupList || !detail`, so a failed customer-detail request with a healthy
+  // group list would sit on that skeleton forever instead of ever reaching the
+  // error message.
+  const isError = detailError || groupsError;
+  const move = useSetPlayerGroup(customerId);
+  // Unsaved pick only — undefined re-reads the server value every render, so
+  // the post-save refetch is what the Select shows (same rule as the Player
+  // Groups page's odds-set column).
+  const [picked, setPicked] = useState<string | undefined>();
+
+  const groups = groupList?.customer_groups ?? [];
+  // Membership is exclusive on every surface we own, so this is normally the
+  // player's only group. The non-DEFAULT preference matches
+  // resolveOddsSetForCustomer EXACTLY: a player put in two groups by the
+  // prebuilt /customer-groups screen rolls their real group's odds, and this
+  // card must name the same one — showing "DEFAULT — Odds set 1" while the spin
+  // rolls set 2 would be a lie the operator acts on. Saving collapses the
+  // duplicates back to one.
+  const memberships = detail?.customer.groups ?? [];
+  const current =
+    (memberships.find((g) => !isDefaultPlayerGroup(g)) ?? memberships[0])?.id ??
+    '';
+  const value = picked ?? current;
+  // `duplicated` keeps Save live when the player holds MORE than one
+  // membership, even with nothing picked. That state is the one this card
+  // exists to repair — the prebuilt /customer-groups screen is what creates it
+  // — and gating purely on `dirty` disabled the button precisely then, so the
+  // only way out was to move the player somewhere else and back. Pressing Save
+  // as-is collapses them onto the group already shown, which is the group the
+  // draw path is already using.
+  const duplicated = memberships.length > 1;
+  const dirty = value !== current;
+
+  return (
+    <Container className="p-0">
+      <div className="px-6 py-4">
+        <Heading level="h2">{t('players.groupTitle')}</Heading>
+        <Text className="text-ui-fg-subtle mt-1" size="small">
+          {t('players.groupSubtitle')}
+        </Text>
+      </div>
+      {isError ? (
+        <div className="border-t px-6 py-6">
+          <Text size="small" className="text-ui-fg-error">
+            {t('players.groupLoadError')}
+          </Text>
+        </div>
+      ) : !groupList || !detail ? (
+        <div className="border-t px-6 py-6">
+          <LoadingSkeleton />
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-end gap-3 border-t px-6 py-4">
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="player-group" size="small">
+              {t('players.groupLabel')}
+            </Label>
+            <Select value={value} onValueChange={setPicked}>
+              <Select.Trigger id="player-group" className="w-64">
+                {/* Placeholder, because `value` is '' for a player in NO group
+                    — possible before the backfill runs, after a fail-soft
+                    subscriber miss, or for a seeded customer. A blank trigger
+                    reads as a loading bug rather than a real state. */}
+                <Select.Value placeholder={t('players.groupNone')} />
+              </Select.Trigger>
+              <Select.Content>
+                {groups.map((g) => (
+                  <Select.Item key={g.id} value={g.id}>
+                    {/* effectiveOddsSet, not the raw metadata: the default
+                        group always rolls set 1, whatever its row stores. */}
+                    {g.name} —{' '}
+                    {t('players.groupOddsSet', { n: effectiveOddsSet(g) })}
+                  </Select.Item>
+                ))}
+              </Select.Content>
+            </Select>
+          </div>
+          <Button
+            size="small"
+            onClick={() =>
+              move.mutate(value || null, {
+                onSuccess: () => setPicked(undefined),
+              })
+            }
+            isLoading={move.isPending}
+            disabled={!dirty && !duplicated}
+          >
+            {t('players.groupSave')}
+          </Button>
+          {duplicated && (
+            <Text size="small" className="text-ui-fg-subtle pb-2">
+              {t('players.groupDuplicated', { count: memberships.length })}
+            </Text>
+          )}
+        </div>
+      )}
+    </Container>
+  );
+};
+
 const ProfileTab = ({ customerId }: { customerId: string | null }) => {
   const { t } = useTranslation();
   const { data, isError } = useCustomerDetail(customerId);
@@ -209,7 +325,8 @@ const ProfileTab = ({ customerId }: { customerId: string | null }) => {
   const handle = customer?.metadata?.handle;
   const referralCode = typeof handle === 'string' && handle ? handle : '—';
   const name =
-    [customer?.first_name, customer?.last_name].filter(Boolean).join(' ') || '—';
+    [customer?.first_name, customer?.last_name].filter(Boolean).join(' ') ||
+    '—';
 
   return (
     <>
@@ -240,10 +357,14 @@ const ProfileTab = ({ customerId }: { customerId: string | null }) => {
             <dt className="text-ui-fg-subtle">{t('players.referralCode')}</dt>
             <dd>{referralCode}</dd>
             <dt className="text-ui-fg-subtle">{t('players.registered')}</dt>
-            <dd className="tabular-nums">{orderDateTime(customer.created_at)}</dd>
+            <dd className="tabular-nums">
+              {orderDateTime(customer.created_at)}
+            </dd>
           </dl>
         )}
       </Container>
+
+      {customerId && <GroupCard customerId={customerId} />}
 
       <Container className="p-0">
         <div className="px-6 py-4">
@@ -412,9 +533,7 @@ const LvlTab = ({ customerId }: { customerId: string | null }) => {
               <Table.Body>
                 {periods.map((p) => (
                   <Table.Row key={p.period}>
-                    <Table.Cell className="tabular-nums">
-                      {p.period}
-                    </Table.Cell>
+                    <Table.Cell className="tabular-nums">{p.period}</Table.Cell>
                     <Table.Cell className="text-right tabular-nums">
                       {rm(p.spend)}
                     </Table.Cell>
@@ -617,7 +736,9 @@ const VaultTab = ({ customerId }: { customerId: string | null }) => {
                       </div>
                     </Table.Cell>
                     {/* One pack open yields one card. */}
-                    <Table.Cell className="text-right tabular-nums">1</Table.Cell>
+                    <Table.Cell className="text-right tabular-nums">
+                      1
+                    </Table.Cell>
                     <Table.Cell className="text-ui-fg-subtle text-right tabular-nums">
                       {rm(p.card?.market_value ?? null)}
                     </Table.Cell>
@@ -713,9 +834,7 @@ const ShippingOrders = ({ customerId }: { customerId: string }) => {
                 <Table.Cell>
                   <span className="flex min-w-0 items-center gap-2">
                     <span className="truncate">
-                      {o.items[0]?.card?.name ??
-                        o.items[0]?.pull_id ??
-                        '—'}
+                      {o.items[0]?.card?.name ?? o.items[0]?.pull_id ?? '—'}
                     </span>
                     {o.items.length > 1 && (
                       <span className="text-ui-fg-subtle whitespace-nowrap text-xs">
@@ -873,7 +992,10 @@ const HistoryTab = ({
   const auditActions = (auditData?.actions ?? [])
     // ponytail: belt-and-suspenders — backend already orders DESC; sort client-side to guarantee newest-first regardless of fetch order
     .slice()
-    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    .sort(
+      (a, b) =>
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+    );
   const accountState = auditData?.account_state ?? null;
 
   return (
@@ -906,67 +1028,95 @@ const HistoryTab = ({
             <LoadingSkeleton />
           </div>
         ) : (
-          <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Referral tree table">
-          <Table>
-            <Table.Header>
-              <Table.Row>
-                <Table.HeaderCell>{t('customer360.treeHandle')}</Table.HeaderCell>
-                <Table.HeaderCell>{t('customer360.treeDepth')}</Table.HeaderCell>
-                <Table.HeaderCell>{t('customer360.treeRecruits')}</Table.HeaderCell>
-                <Table.HeaderCell>{t('customer360.treeVip')}</Table.HeaderCell>
-                <Table.HeaderCell>{t('customer360.treeFrozen')}</Table.HeaderCell>
-                <Table.HeaderCell />
-              </Table.Row>
-            </Table.Header>
-            <Table.Body>
-              {nodes.map((node) => (
-                <Table.Row key={node.customer_id}>
-                  <Table.Cell>
-                    {/* indent by depth using padding */}
-                    <span style={{ paddingLeft: `${node.depth * 20}px` }} className="flex flex-col">
-                      <span className="font-medium">
-                        {node.handle ?? node.email ?? node.customer_id}
-                      </span>
-                      {node.handle && node.email && (
-                        <span className="text-ui-fg-subtle text-xs">{node.email}</span>
-                      )}
-                    </span>
-                  </Table.Cell>
-                  <Table.Cell className="tabular-nums">{node.depth}</Table.Cell>
-                  <Table.Cell className="tabular-nums">{node.direct_recruit_count}</Table.Cell>
-                  <Table.Cell>
-                    {node.vip_level !== null ? (
-                      <Badge size="2xsmall" color="purple">
-                        {t('customer360.vipLevelShort', { level: node.vip_level })}
-                      </Badge>
-                    ) : (
-                      <span className="text-ui-fg-subtle">—</span>
-                    )}
-                  </Table.Cell>
-                  <Table.Cell>
-                    {node.frozen ? (
-                      <Badge size="2xsmall" color="red">
-                        {t('customer360.frozen')}
-                      </Badge>
-                    ) : (
-                      <span className="text-ui-fg-subtle">—</span>
-                    )}
-                  </Table.Cell>
-                  <Table.Cell>
-                    {node.has_more_depth && (
-                      <button
-                        type="button"
-                        onClick={() => navigate(`/customers/${node.customer_id}`)}
-                        className="text-ui-fg-interactive hover:text-ui-fg-interactive-hover text-xs underline"
-                      >
-                        {t('customer360.treeOpenSubtree')}
-                      </button>
-                    )}
-                  </Table.Cell>
+          <div
+            className="overflow-x-auto"
+            tabIndex={0}
+            role="region"
+            aria-label="Referral tree table"
+          >
+            <Table>
+              <Table.Header>
+                <Table.Row>
+                  <Table.HeaderCell>
+                    {t('customer360.treeHandle')}
+                  </Table.HeaderCell>
+                  <Table.HeaderCell>
+                    {t('customer360.treeDepth')}
+                  </Table.HeaderCell>
+                  <Table.HeaderCell>
+                    {t('customer360.treeRecruits')}
+                  </Table.HeaderCell>
+                  <Table.HeaderCell>
+                    {t('customer360.treeVip')}
+                  </Table.HeaderCell>
+                  <Table.HeaderCell>
+                    {t('customer360.treeFrozen')}
+                  </Table.HeaderCell>
+                  <Table.HeaderCell />
                 </Table.Row>
-              ))}
-            </Table.Body>
-          </Table>
+              </Table.Header>
+              <Table.Body>
+                {nodes.map((node) => (
+                  <Table.Row key={node.customer_id}>
+                    <Table.Cell>
+                      {/* indent by depth using padding */}
+                      <span
+                        style={{ paddingLeft: `${node.depth * 20}px` }}
+                        className="flex flex-col"
+                      >
+                        <span className="font-medium">
+                          {node.handle ?? node.email ?? node.customer_id}
+                        </span>
+                        {node.handle && node.email && (
+                          <span className="text-ui-fg-subtle text-xs">
+                            {node.email}
+                          </span>
+                        )}
+                      </span>
+                    </Table.Cell>
+                    <Table.Cell className="tabular-nums">
+                      {node.depth}
+                    </Table.Cell>
+                    <Table.Cell className="tabular-nums">
+                      {node.direct_recruit_count}
+                    </Table.Cell>
+                    <Table.Cell>
+                      {node.vip_level !== null ? (
+                        <Badge size="2xsmall" color="purple">
+                          {t('customer360.vipLevelShort', {
+                            level: node.vip_level,
+                          })}
+                        </Badge>
+                      ) : (
+                        <span className="text-ui-fg-subtle">—</span>
+                      )}
+                    </Table.Cell>
+                    <Table.Cell>
+                      {node.frozen ? (
+                        <Badge size="2xsmall" color="red">
+                          {t('customer360.frozen')}
+                        </Badge>
+                      ) : (
+                        <span className="text-ui-fg-subtle">—</span>
+                      )}
+                    </Table.Cell>
+                    <Table.Cell>
+                      {node.has_more_depth && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            navigate(`/customers/${node.customer_id}`)
+                          }
+                          className="text-ui-fg-interactive hover:text-ui-fg-interactive-hover text-xs underline"
+                        >
+                          {t('customer360.treeOpenSubtree')}
+                        </button>
+                      )}
+                    </Table.Cell>
+                  </Table.Row>
+                ))}
+              </Table.Body>
+            </Table>
           </div>
         )}
       </Container>
@@ -992,91 +1142,114 @@ const HistoryTab = ({
           </div>
         ) : commissions.length === 0 ? (
           <div className="border-t px-6 py-6">
-            <Text className="text-ui-fg-subtle">{t('customer360.commissionsEmpty')}</Text>
+            <Text className="text-ui-fg-subtle">
+              {t('customer360.commissionsEmpty')}
+            </Text>
           </div>
         ) : (
           <>
-          <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Commissions table">
-          <Table>
-            <Table.Header>
-              <Table.Row>
-                <Table.HeaderCell>{t('customer360.commGen')}</Table.HeaderCell>
-                <Table.HeaderCell>{t('customer360.commKind')}</Table.HeaderCell>
-                <Table.HeaderCell>{t('customer360.commStatus')}</Table.HeaderCell>
-                <Table.HeaderCell className="text-right">{t('customer360.commAmount')}</Table.HeaderCell>
-                <Table.HeaderCell>{t('customer360.commOpener')}</Table.HeaderCell>
-                <Table.HeaderCell>{t('customer360.commMatures')}</Table.HeaderCell>
-                <Table.HeaderCell>{t('customer360.commActions')}</Table.HeaderCell>
-              </Table.Row>
-            </Table.Header>
-            <Table.Body>
-              {commissions.map((c) => (
-                <Table.Row key={c.id}>
-                  <Table.Cell className="tabular-nums">{c.generation}</Table.Cell>
-                  <Table.Cell>
-                    <Badge size="2xsmall">{c.kind}</Badge>
-                  </Table.Cell>
-                  <Table.Cell>
-                    <StatusBadge
-                      color={COMMISSION_STATUS_COLOR[c.status] ?? 'grey'}
-                    >
-                      {c.status}
-                    </StatusBadge>
-                  </Table.Cell>
-                  <Table.Cell className="text-right tabular-nums">
-                    {rm(parseFloat(c.amount))}
-                  </Table.Cell>
-                  <Table.Cell className="text-ui-fg-subtle">
-                    {c.opener.handle ?? c.opener.customer_id ?? '—'}
-                  </Table.Cell>
-                  <Table.Cell className="text-ui-fg-subtle">
-                    {c.matures_at
-                      ? new Date(c.matures_at).toLocaleDateString('en-US')
-                      : '—'}
-                  </Table.Cell>
-                  <Table.Cell>
-                    <div className="flex items-center gap-1">
-                      {c.status !== 'reversed' && (
-                        <Button
-                          size="small"
-                          variant="secondary"
-                          onClick={() => openModal('reverse', c.id)}
+            <div
+              className="overflow-x-auto"
+              tabIndex={0}
+              role="region"
+              aria-label="Commissions table"
+            >
+              <Table>
+                <Table.Header>
+                  <Table.Row>
+                    <Table.HeaderCell>
+                      {t('customer360.commGen')}
+                    </Table.HeaderCell>
+                    <Table.HeaderCell>
+                      {t('customer360.commKind')}
+                    </Table.HeaderCell>
+                    <Table.HeaderCell>
+                      {t('customer360.commStatus')}
+                    </Table.HeaderCell>
+                    <Table.HeaderCell className="text-right">
+                      {t('customer360.commAmount')}
+                    </Table.HeaderCell>
+                    <Table.HeaderCell>
+                      {t('customer360.commOpener')}
+                    </Table.HeaderCell>
+                    <Table.HeaderCell>
+                      {t('customer360.commMatures')}
+                    </Table.HeaderCell>
+                    <Table.HeaderCell>
+                      {t('customer360.commActions')}
+                    </Table.HeaderCell>
+                  </Table.Row>
+                </Table.Header>
+                <Table.Body>
+                  {commissions.map((c) => (
+                    <Table.Row key={c.id}>
+                      <Table.Cell className="tabular-nums">
+                        {c.generation}
+                      </Table.Cell>
+                      <Table.Cell>
+                        <Badge size="2xsmall">{c.kind}</Badge>
+                      </Table.Cell>
+                      <Table.Cell>
+                        <StatusBadge
+                          color={COMMISSION_STATUS_COLOR[c.status] ?? 'grey'}
                         >
-                          {t('customer360.commReverse')}
-                        </Button>
-                      )}
-                      {c.status === 'available' && (
-                        <Button
-                          size="small"
-                          variant="secondary"
-                          onClick={() => openModal('suspend', c.id)}
-                        >
-                          {t('customer360.commSuspend')}
-                        </Button>
-                      )}
-                      {c.status === 'suspended' && (
-                        <Button
-                          size="small"
-                          variant="secondary"
-                          onClick={() => openModal('unsuspend', c.id)}
-                        >
-                          {t('customer360.commUnsuspend')}
-                        </Button>
-                      )}
-                    </div>
-                  </Table.Cell>
-                </Table.Row>
-              ))}
-            </Table.Body>
-          </Table>
-          </div>
-          <Pager
-            page={commPage}
-            onPage={setCommPage}
-            pageSize={50}
-            count={commissions.length}
-            total={null}
-          />
+                          {c.status}
+                        </StatusBadge>
+                      </Table.Cell>
+                      <Table.Cell className="text-right tabular-nums">
+                        {rm(parseFloat(c.amount))}
+                      </Table.Cell>
+                      <Table.Cell className="text-ui-fg-subtle">
+                        {c.opener.handle ?? c.opener.customer_id ?? '—'}
+                      </Table.Cell>
+                      <Table.Cell className="text-ui-fg-subtle">
+                        {c.matures_at
+                          ? new Date(c.matures_at).toLocaleDateString('en-US')
+                          : '—'}
+                      </Table.Cell>
+                      <Table.Cell>
+                        <div className="flex items-center gap-1">
+                          {c.status !== 'reversed' && (
+                            <Button
+                              size="small"
+                              variant="secondary"
+                              onClick={() => openModal('reverse', c.id)}
+                            >
+                              {t('customer360.commReverse')}
+                            </Button>
+                          )}
+                          {c.status === 'available' && (
+                            <Button
+                              size="small"
+                              variant="secondary"
+                              onClick={() => openModal('suspend', c.id)}
+                            >
+                              {t('customer360.commSuspend')}
+                            </Button>
+                          )}
+                          {c.status === 'suspended' && (
+                            <Button
+                              size="small"
+                              variant="secondary"
+                              onClick={() => openModal('unsuspend', c.id)}
+                            >
+                              {t('customer360.commUnsuspend')}
+                            </Button>
+                          )}
+                        </div>
+                      </Table.Cell>
+                    </Table.Row>
+                  ))}
+                </Table.Body>
+              </Table>
+            </div>
+            <Pager
+              page={commPage}
+              onPage={setCommPage}
+              pageSize={50}
+              count={commissions.length}
+              total={null}
+            />
           </>
         )}
       </Container>
@@ -1114,13 +1287,16 @@ const HistoryTab = ({
               )}
               {accountState.freeze_cause && (
                 <Text size="small" className="text-ui-fg-subtle">
-                  {t('customer360.accountStateCause')}: {accountState.freeze_cause}
+                  {t('customer360.accountStateCause')}:{' '}
+                  {accountState.freeze_cause}
                 </Text>
               )}
               {accountState.frozen_at && (
                 <Text size="small" className="text-ui-fg-subtle">
                   {t('customer360.accountStateSince', {
-                    date: new Date(accountState.frozen_at).toLocaleDateString('en-US'),
+                    date: new Date(accountState.frozen_at).toLocaleDateString(
+                      'en-US',
+                    ),
                   })}
                 </Text>
               )}
@@ -1133,7 +1309,9 @@ const HistoryTab = ({
             {accountState.disabled && accountState.disabled_at && (
               <Text size="small" className="text-ui-fg-subtle mt-1">
                 {t('customer360.accountStateSince', {
-                  date: new Date(accountState.disabled_at).toLocaleDateString('en-US'),
+                  date: new Date(accountState.disabled_at).toLocaleDateString(
+                    'en-US',
+                  ),
                 })}
                 {accountState.disabled_by &&
                   ` · ${t('customer360.accountStateBy', { admin: accountState.disabled_by })}`}
@@ -1159,42 +1337,50 @@ const HistoryTab = ({
           </div>
         ) : auditActions.length === 0 ? (
           <div className="border-t px-6 py-6">
-            <Text className="text-ui-fg-subtle">{t('customer360.auditEmpty')}</Text>
+            <Text className="text-ui-fg-subtle">
+              {t('customer360.auditEmpty')}
+            </Text>
           </div>
         ) : (
           <>
-          <Table>
-            <Table.Header>
-              <Table.Row>
-                <Table.HeaderCell>{t('customer360.auditWhen')}</Table.HeaderCell>
-                <Table.HeaderCell>{t('customer360.auditAction')}</Table.HeaderCell>
-                <Table.HeaderCell>{t('customer360.auditReason')}</Table.HeaderCell>
-              </Table.Row>
-            </Table.Header>
-            <Table.Body>
-              {auditActions.map((row) => (
-                <Table.Row key={row.id}>
-                  <Table.Cell className="text-ui-fg-subtle tabular-nums whitespace-nowrap">
-                    {new Date(row.created_at).toLocaleString('en-US')}
-                  </Table.Cell>
-                  <Table.Cell>
-                    {/* ponytail: t() falls back to raw action key if label missing */}
-                    {t(`customer360.action.${row.action}`, row.action)}
-                  </Table.Cell>
-                  <Table.Cell className="text-ui-fg-subtle">
-                    {row.reason ?? '—'}
-                  </Table.Cell>
+            <Table>
+              <Table.Header>
+                <Table.Row>
+                  <Table.HeaderCell>
+                    {t('customer360.auditWhen')}
+                  </Table.HeaderCell>
+                  <Table.HeaderCell>
+                    {t('customer360.auditAction')}
+                  </Table.HeaderCell>
+                  <Table.HeaderCell>
+                    {t('customer360.auditReason')}
+                  </Table.HeaderCell>
                 </Table.Row>
-              ))}
-            </Table.Body>
-          </Table>
-          <Pager
-            page={auditPage}
-            onPage={setAuditPage}
-            pageSize={50}
-            count={auditActions.length}
-            total={null}
-          />
+              </Table.Header>
+              <Table.Body>
+                {auditActions.map((row) => (
+                  <Table.Row key={row.id}>
+                    <Table.Cell className="text-ui-fg-subtle tabular-nums whitespace-nowrap">
+                      {new Date(row.created_at).toLocaleString('en-US')}
+                    </Table.Cell>
+                    <Table.Cell>
+                      {/* ponytail: t() falls back to raw action key if label missing */}
+                      {t(`customer360.action.${row.action}`, row.action)}
+                    </Table.Cell>
+                    <Table.Cell className="text-ui-fg-subtle">
+                      {row.reason ?? '—'}
+                    </Table.Cell>
+                  </Table.Row>
+                ))}
+              </Table.Body>
+            </Table>
+            <Pager
+              page={auditPage}
+              onPage={setAuditPage}
+              pageSize={50}
+              count={auditActions.length}
+              total={null}
+            />
           </>
         )}
       </Container>
@@ -1262,7 +1448,9 @@ const Customer360Page = () => {
     setTargetCommId(commId);
     setModal(kind);
   }
-  function closeModal() { setModal(null); }
+  function closeModal() {
+    setModal(null);
+  }
 
   // ── Action handlers (called from Prompt.Action) ──────────────────────────
   function applyFreeze() {
@@ -1306,27 +1494,27 @@ const Customer360Page = () => {
 
   // ── Prompt titles / descriptions per modal kind ──────────────────────────
   const MODAL_TITLE: Record<ModalKind, string> = {
-    freeze:    t('customer360.modalFreezeTitle'),
-    unfreeze:  t('customer360.modalUnfreezeTitle'),
-    credits:   t('customer360.modalCreditsTitle'),
-    reverse:   t('customer360.modalReverseTitle'),
-    suspend:   t('customer360.modalSuspendTitle'),
+    freeze: t('customer360.modalFreezeTitle'),
+    unfreeze: t('customer360.modalUnfreezeTitle'),
+    credits: t('customer360.modalCreditsTitle'),
+    reverse: t('customer360.modalReverseTitle'),
+    suspend: t('customer360.modalSuspendTitle'),
     unsuspend: t('customer360.modalUnsuspendTitle'),
   };
 
   const MODAL_DESC: Record<ModalKind, string> = {
-    freeze:    t('customer360.modalFreezeDesc'),
-    unfreeze:  t('customer360.modalUnfreezeDesc'),
-    credits:   t('customer360.modalCreditsDesc'),
-    reverse:   t('customer360.modalReverseDesc'),
-    suspend:   t('customer360.modalSuspendDesc'),
+    freeze: t('customer360.modalFreezeDesc'),
+    unfreeze: t('customer360.modalUnfreezeDesc'),
+    credits: t('customer360.modalCreditsDesc'),
+    reverse: t('customer360.modalReverseDesc'),
+    suspend: t('customer360.modalSuspendDesc'),
     unsuspend: t('customer360.modalUnsuspendDesc'),
   };
 
   function handleConfirm() {
-    if (modal === 'freeze')     applyFreeze();
-    else if (modal === 'unfreeze')   applyUnfreeze();
-    else if (modal === 'credits')    applyAdjustCredits();
+    if (modal === 'freeze') applyFreeze();
+    else if (modal === 'unfreeze') applyUnfreeze();
+    else if (modal === 'credits') applyAdjustCredits();
     else applyCommAction();
   }
 
@@ -1357,9 +1545,7 @@ const Customer360Page = () => {
               {t('customer360.back')}
             </button>
             <div className="flex items-center gap-2">
-              <Heading level="h2">
-                {view?.customer.email ?? id}
-              </Heading>
+              <Heading level="h2">{view?.customer.email ?? id}</Heading>
               {view?.vip && (
                 <Badge size="small" color="purple">
                   {t('customer360.vipLevel', { level: view.vip.level })}
@@ -1379,7 +1565,9 @@ const Customer360Page = () => {
             {view?.customer.created_at && (
               <Text className="text-ui-fg-subtle mt-1" size="small">
                 {t('customer360.memberSince', {
-                  date: new Date(view.customer.created_at).toLocaleDateString('en-US'),
+                  date: new Date(view.customer.created_at).toLocaleDateString(
+                    'en-US',
+                  ),
                 })}
               </Text>
             )}
@@ -1452,7 +1640,9 @@ const Customer360Page = () => {
                   {rm(view.vip.spend)}
                 </Heading>
                 <Text size="small" className="text-ui-fg-subtle">
-                  {t('customer360.vipPeakLevel', { level: view.vip.highest_level_ever })}
+                  {t('customer360.vipPeakLevel', {
+                    level: view.vip.highest_level_ever,
+                  })}
                 </Text>
               </div>
             )}
@@ -1461,11 +1651,18 @@ const Customer360Page = () => {
       </Container>
 
       {/* ── Prompt modal — single instance, content varies by modal kind ─── */}
-      <Prompt open={modal !== null} onOpenChange={(open) => { if (!open) closeModal(); }}>
+      <Prompt
+        open={modal !== null}
+        onOpenChange={(open) => {
+          if (!open) closeModal();
+        }}
+      >
         <Prompt.Content>
           <Prompt.Header>
             <Prompt.Title>{modal ? MODAL_TITLE[modal] : ''}</Prompt.Title>
-            <Prompt.Description>{modal ? MODAL_DESC[modal] : ''}</Prompt.Description>
+            <Prompt.Description>
+              {modal ? MODAL_DESC[modal] : ''}
+            </Prompt.Description>
           </Prompt.Header>
 
           <div className="flex flex-col gap-3 px-6 pb-2">
@@ -1525,13 +1722,21 @@ const Customer360Page = () => {
         <div className="px-6 py-3">
           <Tabs value={tab} onValueChange={(v) => setTab(v as TabKey)}>
             <Tabs.List aria-label="Player detail sections">
-              <Tabs.Trigger value="profile">{t('players.tabProfile')}</Tabs.Trigger>
+              <Tabs.Trigger value="profile">
+                {t('players.tabProfile')}
+              </Tabs.Trigger>
               <Tabs.Trigger value="lvl">{t('players.tabLvl')}</Tabs.Trigger>
-              <Tabs.Trigger value="wallet">{t('players.tabWallet')}</Tabs.Trigger>
+              <Tabs.Trigger value="wallet">
+                {t('players.tabWallet')}
+              </Tabs.Trigger>
               <Tabs.Trigger value="vault">{t('players.tabVault')}</Tabs.Trigger>
-              <Tabs.Trigger value="orders">{t('players.tabOrders')}</Tabs.Trigger>
+              <Tabs.Trigger value="orders">
+                {t('players.tabOrders')}
+              </Tabs.Trigger>
               <Tabs.Trigger value="pulls">{t('players.tabPulls')}</Tabs.Trigger>
-              <Tabs.Trigger value="history">{t('players.tabHistory')}</Tabs.Trigger>
+              <Tabs.Trigger value="history">
+                {t('players.tabHistory')}
+              </Tabs.Trigger>
             </Tabs.List>
           </Tabs>
         </div>

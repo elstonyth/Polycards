@@ -86,12 +86,25 @@ export const qk = {
     ['admin', 'players', page, q ?? ''] as const,
   // 2-segment prefix — invalidates ALL pages/searches of the players list
   playersKey: ['admin', 'players'] as const,
+  // The core Medusa customer record behind the Profile tab. Named rather than
+  // hand-built at both ends: the group card only re-reads the server value
+  // because useSetPlayerGroup invalidates this exact key, and two inline array
+  // literals agreeing was a coupling nothing checked.
+  customerDetail: (id: string) => ['admin', 'customer', id, 'detail'] as const,
   payoutDetails: (id: string) =>
     ['admin', 'customer', id, 'payout-details'] as const,
   spendReport: (id: string) =>
     ['admin', 'customer', id, 'spend-report'] as const,
   // ── Epic 3 (Odds) ──
   customerGroups: ['admin', 'customer-groups'] as const,
+  // SIBLING namespace, not a child of customerGroups: the member count comes
+  // from a different endpoint (/admin/customers?groups=), and nesting it would
+  // make every odds-set save refetch every group's count for nothing.
+  customerGroupCount: (id: string) =>
+    ['admin', 'customer-group-counts', id] as const,
+  // 2-segment prefix — invalidates EVERY group's member count in one call
+  // (moving one player changes the count of two groups, not one).
+  customerGroupCounts: ['admin', 'customer-group-counts'] as const,
 
   // ── Epic 4 (Ledger) ──
   // Every filter segment always renders (defaulting to 'all'/'') — same rule as
