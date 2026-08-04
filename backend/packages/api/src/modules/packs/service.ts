@@ -44,6 +44,7 @@ import RewardBox from './models/reward-box';
 import RewardBoxPrize from './models/reward-box-prize';
 import PixelPokemon from './models/pixel-pokemon';
 import ChallengeStage from './models/challenge-stage';
+import ChallengeSchedule from './models/challenge-schedule';
 import ChallengeSettings from './models/challenge-settings';
 import TierSettings from './models/tier-settings';
 import GlobePayDeposit from './models/globepay-deposit';
@@ -477,6 +478,7 @@ class PacksModuleService extends MedusaService({
   RewardBoxPrize,
   PixelPokemon,
   ChallengeStage,
+  ChallengeSchedule,
   ChallengeSettings,
   TierSettings,
   GlobePayDeposit,
@@ -5970,6 +5972,61 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     return after;
+  }
+
+  // Promote every challenge_schedule row whose start has passed into the LIVE
+  // stage table, oldest first, and stamp it applied.
+  //
+  // Oldest-first matters: if the job missed a tick and two editions came due,
+  // replaying them in order leaves the newest one live, which is what the
+  // operator queued. Each promotion is its own transaction (@InjectManager
+  // here, saveChallengeStages opens its own) so one bad edition — a prize card
+  // deleted since it was queued — cannot roll back the ones that already
+  // landed. That row simply stays unapplied and is retried next hour, which is
+  // the loud-but-recoverable state: the operator sees it stuck in the Scheduled
+  // tab rather than silently losing a week's prizes.
+  //
+  // `applied_at` is the idempotency gate — the filter below excludes stamped
+  // rows, so re-running this is a no-op.
+  @InjectManager()
+  async promoteDueChallengeSchedules(
+    now: Date = new Date(),
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ promoted: number; failed: number }> {
+    const due = await this.listChallengeSchedules(
+      { applied_at: null, starts_at: { $lte: now } },
+      {
+        select: ['id', 'starts_at', 'label', 'stages'],
+        order: { starts_at: 'ASC' },
+        take: 100,
+      },
+      sharedContext,
+    );
+    let promoted = 0;
+    let failed = 0;
+    for (const row of due) {
+      try {
+        // Through the normal save path, NOT a raw write: it is what validates
+        // the prize cards still exist and what writes the audit row, so a
+        // promoted edition is indistinguishable from a hand-saved one.
+        await this.saveChallengeStages({
+          stages: (row.stages as unknown as ChallengeStageInput[]) ?? [],
+          adminId: 'system',
+          reason: `Scheduled challenge promoted (${row.label ?? new Date(row.starts_at).toISOString()})`,
+        });
+        await this.updateChallengeSchedules({
+          selector: { id: row.id },
+          data: { applied_at: new Date() },
+        });
+        promoted += 1;
+      } catch {
+        // Swallowed on purpose: a later edition must still get its chance, and
+        // the unstamped row IS the error report (visible in the admin, retried
+        // hourly). The caller logs the count.
+        failed += 1;
+      }
+    }
+    return { promoted, failed };
   }
 
   // Community pool for the CURRENT challenge week: Σ pulled value across all

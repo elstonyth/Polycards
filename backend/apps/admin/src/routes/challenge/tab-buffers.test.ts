@@ -13,9 +13,9 @@ import { describe, it, expect } from 'vitest';
 // hits the explanatory comments above the panels, which would stay green after
 // a real panel lost the prop.
 const contentTag = (src: string, value: string): string | null =>
-  new RegExp(String.raw`<Tabs\.Content\b(?=[^>]*\bvalue="${value}")[^>]*>`).exec(
-    src,
-  )?.[0] ?? null;
+  new RegExp(
+    String.raw`<Tabs\.Content\b(?=[^>]*\bvalue="${value}")[^>]*>`,
+  ).exec(src)?.[0] ?? null;
 
 const forceMounts = (src: string, value: string) => {
   const tag = contentTag(src, value);
@@ -34,12 +34,15 @@ const hidesWhenInactive = (src: string, value: string) => {
   );
 };
 
-const read = (...seg: string[]) => readFileSync(join(__dirname, ...seg), 'utf8');
+const read = (...seg: string[]) =>
+  readFileSync(join(__dirname, ...seg), 'utf8');
 
 describe('challenge/VIP tab buffers survive tab switches', () => {
-  it('challenge page forceMounts both tab contents and hides the inactive one', () => {
+  it('challenge page forceMounts every tab content and hides the inactive ones', () => {
     const src = read('page.tsx');
-    for (const value of ['stages', 'payout']) {
+    // 'schedule' holds a buffer too: the Add-weekly-challenge draft lives in
+    // ScheduleTab's subtree, so unmounting it on a tab switch would wipe it.
+    for (const value of ['stages', 'schedule', 'payout']) {
       expect(forceMounts(src, value)).toBe(true);
       expect(hidesWhenInactive(src, value)).toBe(true);
     }

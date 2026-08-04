@@ -753,6 +753,20 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      // Queue a challenge to go live later (POST /admin/challenge/schedule) —
+      // it becomes the credit-minting stage table on promotion, so it shares
+      // the same admin budget as writing those stages directly.
+      matcher: '/admin/challenge/schedule',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Drop a queued challenge (DELETE /admin/challenge/schedule/:id).
+      matcher: '/admin/challenge/schedule/*',
+      method: 'DELETE',
+      middlewares: [adminActionRateLimit],
+    },
+    {
       // Challenge settings singleton patch (POST /admin/challenge/settings) —
       // retimes the reward cycle (cadence/reset), so it shares the admin
       // money-mutation budget.

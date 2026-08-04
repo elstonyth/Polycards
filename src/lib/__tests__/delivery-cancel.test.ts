@@ -72,21 +72,29 @@ describe('cancelDeliveryOrder', () => {
     expect(res).toEqual({ ok: true, status: 'canceled' });
   });
 
-  it('maps the already-shipped refusal to the contact-support copy', async () => {
-    fetchMock.mockRejectedValue(
-      new Error(
-        'This delivery is already shipped and can no longer be canceled — please contact support.',
-      ),
-    );
-    const res = await cancelDeliveryOrder('do_1');
-    expect(res.ok).toBe(false);
-    if (!res.ok) {
-      expect(res.error).toBe(
-        'This order has already shipped and can no longer be canceled — please contact support.',
-      );
-      expect(res.needsAuth).toBe(false);
-    }
-  });
+  // The customer window closes at `processed`, so the backend refuses from
+  // `ready_to_ship` on — BEFORE the parcel physically ships. The copy has to be
+  // true for every status it covers, hence "being prepared" rather than
+  // "shipped": telling a customer their order shipped when it is still on the
+  // packing bench is the kind of wrong that generates the support ticket it was
+  // meant to pre-empt.
+  it.each([
+    'This delivery is already ready to ship and can no longer be canceled — please contact support.',
+    'This delivery is already shipped and can no longer be canceled — please contact support.',
+  ])(
+    'maps the post-window refusal (%s) to the contact-support copy',
+    async (message) => {
+      fetchMock.mockRejectedValue(new Error(message));
+      const res = await cancelDeliveryOrder('do_1');
+      expect(res.ok).toBe(false);
+      if (!res.ok) {
+        expect(res.error).toBe(
+          'This order is already being prepared for shipping and can no longer be canceled — please contact support.',
+        );
+        expect(res.needsAuth).toBe(false);
+      }
+    },
+  );
 
   it('maps an already-canceled order to its own copy', async () => {
     fetchMock.mockRejectedValue(

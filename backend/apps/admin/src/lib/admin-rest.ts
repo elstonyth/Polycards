@@ -37,7 +37,14 @@ export const httpStatus = (err: unknown): number | undefined => {
 // profile (pack ≈ square, card ≈ 5:7).
 export async function uploadImage(
   file: File,
-  kind: 'pack' | 'display' | 'card' | 'sprite' | 'frame' | 'avatar-frame' | 'delivery',
+  kind:
+    | 'pack'
+    | 'display'
+    | 'card'
+    | 'sprite'
+    | 'frame'
+    | 'avatar-frame'
+    | 'delivery',
 ): Promise<string> {
   const body = new FormData();
   body.append('files', file);
@@ -822,8 +829,10 @@ export const getVipLevels = () =>
 
 // Replace-all the ladder. Audited edit; `reason` mandatory. Throws
 // Error(message) on a 400 (httpError surfaces the backend MedusaError).
-export const saveVipLevels = (body: { levels: VipLevelDTO[]; reason: string }) =>
-  postJson<{ levels: VipLevelDTO[] }>('/admin/vip-levels', body);
+export const saveVipLevels = (body: {
+  levels: VipLevelDTO[];
+  reason: string;
+}) => postJson<{ levels: VipLevelDTO[] }>('/admin/vip-levels', body);
 
 // ── Weekly Challenge (milestone stages + week/payout settings) ───────────────
 
@@ -849,7 +858,43 @@ export const getChallengeStages = () =>
 export const saveChallengeStages = (body: {
   stages: ChallengeStageDTO[];
   reason: string;
-}) => postJson<{ stages: ChallengeStageDTO[] }>('/admin/challenge/stages', body);
+}) =>
+  postJson<{ stages: ChallengeStageDTO[] }>('/admin/challenge/stages', body);
+
+/** One Weekly Challenge queued to take over later. `applied_at` non-null means
+ *  it already went live (the hourly settle job promoted it); a due row that is
+ *  still null failed to promote and is being retried. */
+export interface ChallengeScheduleDTO {
+  id: string;
+  starts_at: string;
+  label: string | null;
+  applied_at: string | null;
+  stages: ChallengeStageDTO[];
+}
+
+export const getChallengeSchedules = () =>
+  getJson<{ schedules: ChallengeScheduleDTO[] }>('/admin/challenge/schedule');
+
+export const createChallengeSchedule = (body: {
+  starts_at: string;
+  label: string | null;
+  stages: ChallengeStageDTO[];
+  reason: string;
+}) =>
+  postJson<{ schedule: ChallengeScheduleDTO }>(
+    '/admin/challenge/schedule',
+    body,
+  );
+
+export async function deleteChallengeSchedule(id: string): Promise<void> {
+  const res = await fetch(
+    `${__BACKEND_URL__}/admin/challenge/schedule/${encodeURIComponent(id)}`,
+    { method: 'DELETE', credentials: 'include' },
+  );
+  if (!res.ok) {
+    throw await httpError(res);
+  }
+}
 
 export interface ChallengeSettingsDTO {
   cadence: string;
@@ -988,7 +1033,9 @@ export function getGlobePayDeposits(
     limit: String(pageSize),
     offset: String(page * pageSize),
   });
-  return getJson<GlobePayDepositsResponse>(`/admin/globepay/deposits?${params}`);
+  return getJson<GlobePayDepositsResponse>(
+    `/admin/globepay/deposits?${params}`,
+  );
 }
 
 // ── Epic 2 (Players) ─────────────────────────────────────────────────────────
@@ -1252,8 +1299,10 @@ export interface AdminPurchaseInvoice {
 
 // agent_email is NOT omitted: GET /:id joins the user module the same way the
 // list route does, so both pages name the same person for one invoice.
-export interface AdminPurchaseInvoiceDetail
-  extends Omit<AdminPurchaseInvoice, 'total_qty' | 'subtotal' | 'total_fmv'> {
+export interface AdminPurchaseInvoiceDetail extends Omit<
+  AdminPurchaseInvoice,
+  'total_qty' | 'subtotal' | 'total_fmv'
+> {
   lines: AdminPurchaseInvoiceLine[];
 }
 

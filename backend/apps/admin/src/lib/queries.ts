@@ -26,6 +26,9 @@ import {
   getAvatarFrames,
   getChallengeSettings,
   getChallengeStages,
+  getChallengeSchedules,
+  createChallengeSchedule,
+  deleteChallengeSchedule,
   getCustomerAudit,
   getCustomerGacha,
   getCustomerCommissions,
@@ -75,6 +78,7 @@ import {
   type AvatarFramesView,
   type ChallengeSettingsDTO,
   type ChallengeStageDTO,
+  type ChallengeScheduleDTO,
   type CustomerAudit,
   type CustomerGacha,
   type SupportTransaction,
@@ -732,6 +736,7 @@ export const useSaveAvatarFrames = () => {
 export type {
   VipLevelDTO,
   ChallengeStageDTO,
+  ChallengeScheduleDTO,
   ChallengeSettingsDTO,
 } from './admin-rest';
 
@@ -763,6 +768,47 @@ export const useSaveChallengeStages = () => {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.challengeStages });
       toast.success('Milestone stages saved');
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+export const useChallengeSchedules = (): UseQueryResult<{
+  schedules: ChallengeScheduleDTO[];
+}> =>
+  useQuery({
+    queryKey: qk.challengeSchedules,
+    queryFn: getChallengeSchedules,
+  });
+
+// Both mutations invalidate the LIVE stages too: promotion rewrites them, so a
+// queue change the operator makes right after a promotion must not leave a
+// stale ladder on the Milestone Stages tab.
+export const useCreateChallengeSchedule = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: {
+      starts_at: string;
+      label: string | null;
+      stages: ChallengeStageDTO[];
+      reason: string;
+    }) => createChallengeSchedule(vars),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.challengeSchedules });
+      qc.invalidateQueries({ queryKey: qk.challengeStages });
+      toast.success('Weekly challenge scheduled');
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+export const useDeleteChallengeSchedule = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => deleteChallengeSchedule(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.challengeSchedules });
+      toast.success('Scheduled challenge removed');
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });
