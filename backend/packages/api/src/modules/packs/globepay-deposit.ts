@@ -175,23 +175,28 @@ export async function startGlobePayDeposit(
       // no, so no deposit exists on their side and no callback will ever
       // arrive. Close the row out rather than leaving it pending and polluting
       // the reconciliation sweep forever.
+      await packs.updateGlobePayDeposits({ id: row.id, status: 'failed' });
+      // Log their reason before it is flattened into the customer-facing
+      // message below — this is the ONLY point we ever observe it, since the
+      // row records status 'failed' with no code. Without it the 2026-08-04
+      // cutover had a live deposit failing with no way to tell a bad key from
+      // an unprovisioned payment method from an IP the gateway refuses.
       //
-      // Log their codes BEFORE flattening them into the customer-facing message
-      // below. Without this the refusal reason is destroyed at the only point
-      // we ever see it: the row records status 'failed' with no code, and the
-      // storefront shows a generic line — which during the 2026-08-04 cutover
-      // left a live deposit failure with no way to tell a bad key from an
-      // unprovisioned payment method. Safe to log: their codes, the HTTP
+      // AFTER the status update on purpose: the row write is money-path state
+      // and must not depend on the logger resolving. `error.message` carries
+      // the diagnosis when `codes` is empty — a non-JSON/WAF response (an
+      // un-allowlisted IP lands here) is built from the response text alone,
+      // see globepay-client.ts. Safe to log: their codes and message, the HTTP
       // status, our own opaque reference, the method and the amount. NEVER the
-      // request or response body — those carry the signed/encrypted payload.
+      // request or response envelope — those carry the signed/encrypted body.
       scope
         .resolve<{ warn: (message: string) => void }>('logger')
         .warn(
           `[globepay] deposit refused: codes=${error.codes.join(',') || 'none'} ` +
             `httpStatus=${error.httpStatus} definite=${error.definite} ` +
-            `method=${paymentMethodCode} amount=${amount} ref=${merchantTransactionId}`,
+            `method=${paymentMethodCode} amount=${amount} ref=${merchantTransactionId} ` +
+            `msg=${error.message}`,
         );
-      await packs.updateGlobePayDeposits({ id: row.id, status: 'failed' });
       // Their validation errors are the customer's problem to fix (amount out
       // of range, method unavailable), not a 500.
       throw new MedusaError(

@@ -16,7 +16,8 @@ import { sdk } from '@/lib/medusa';
 import { logger } from '@/lib/logger';
 import { sanePage } from '@/lib/page-param';
 import { getAuthToken } from '@/lib/data/customer';
-import { friendlyError, isAuthError, type ErrorRule } from '@/lib/errors';
+import { friendlyError, isAuthError } from '@/lib/errors';
+import { VAULT_RULES, VAULT_FALLBACK } from '@/lib/vault-errors';
 import {
   parseList,
   parseOne,
@@ -44,44 +45,9 @@ export type SellBackResult =
   | { ok: true; amount: number; percent: number; balance: number }
   | { ok: false; error: string; needsAuth?: boolean };
 
-// Patterns local to the vault/credit actions (rate-limit, auth, the demo
-// gateway decline, amount/already-sold/not-found). Order matters — first match.
-const VAULT_RULES: ErrorRule[] = [
-  [
-    /too many|rate.?limit|429/i,
-    'Too many requests — give it a moment and try again.',
-  ],
-  [/unauthorized|not authenticated|401/i, 'Please log in to view your vault.'],
-  [
-    /declined/i,
-    'Payment declined by the demo gateway — amounts ending in .13 always decline.',
-  ],
-  // Withdrawal messages are already customer-facing on the backend — pass
-  // them through instead of flattening a gateway refusal into the fallback.
-  [
-    /could not start your withdrawal/i,
-    'We could not start your withdrawal. Please check the bank details and try again.',
-  ],
-  [
-    /withdrawals must be between/i,
-    'Withdrawals must be between RM 30 and RM 1,000.',
-  ],
-  [/withdrawals are not open/i, 'Withdrawals are not open yet.'],
-  [/insufficient/i, 'Not enough balance for that.'],
-  // BEFORE the /amount/i catch-all on purpose. The gateway's own refusal
-  // ("…try a different amount or payment method.") contains the word "amount",
-  // so the broad rule below rewrote it into a validation error — during the
-  // 2026-08-04 cutover the sheet told a customer their perfectly valid RM 50
-  // was malformed when the real cause was GlobePay refusing the submit.
-  [
-    /could not start your top-up/i,
-    'The payment gateway could not start this top-up. Try again shortly, or pick a different payment method.',
-  ],
-  [/amount/i, 'Enter a valid amount (up to RM 10,000, whole cents).'],
-  [/already sold/i, 'This card was already sold back.'],
-  [/not found|404/i, 'This card is no longer in your vault.'],
-];
-const VAULT_FALLBACK = 'Something went wrong. Please try again.';
+// Patterns live in lib/vault-errors.ts — a 'use server' file may only export
+// async functions, so keeping them here made the ordering contract untestable
+// (see the header there, and __tests__/vault-errors.test.ts).
 
 // The vault list + the credit balance in one call (the page shows both).
 export async function getVault(): Promise<VaultResult> {
