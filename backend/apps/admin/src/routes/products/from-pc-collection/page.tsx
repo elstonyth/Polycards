@@ -238,8 +238,7 @@ const AddFromPcCollectionPage = () => {
         // set but is not the account the token reads. Importing them would put
         // other people's cards in our catalog, so the API already dropped them;
         // say so instead of quietly serving a short page.
-        if (data.foreign_dropped > 0)
-          foreignRef.current += data.foreign_dropped;
+        if (data.foreign_dropped > 0) foreignRef.current += data.foreign_dropped;
         setOffers((prev) => {
           const rows = prev ?? [];
           const seen = new Set(rows.map(offerKey));
@@ -571,14 +570,11 @@ const AddFromPcCollectionPage = () => {
           </Text>
         )}
 
-        {offers !== null &&
-          scanned === 0 &&
-          !scanning &&
-          scanError === null && (
-            <Text className="text-ui-fg-subtle" size="small">
-              {t('pcCollection.empty')}
-            </Text>
-          )}
+        {offers !== null && scanned === 0 && !scanning && scanError === null && (
+          <Text className="text-ui-fg-subtle" size="small">
+            {t('pcCollection.empty')}
+          </Text>
+        )}
 
         {/* Step 2 — narrow + pick */}
         {offers !== null && scanned > 0 && (

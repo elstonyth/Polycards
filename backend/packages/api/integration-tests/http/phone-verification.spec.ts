@@ -1,6 +1,6 @@
-import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
-import { Modules } from '@medusajs/framework/utils';
-import { unwrapResponse } from './utils';
+import { medusaIntegrationTestRunner } from "@medusajs/test-utils";
+import { Modules } from "@medusajs/framework/utils";
+import { unwrapResponse } from "./utils";
 
 jest.setTimeout(240 * 1000);
 
@@ -24,51 +24,51 @@ jest.setTimeout(240 * 1000);
 // below deliberately uses its OWN tighter override on just the start-phone
 // burst so the mechanism is independently observable.
 const RATE_ENV = {
-  PHONE_OTP_START_RATE_BURST_LIMIT: '50',
-  PHONE_OTP_START_RATE_BURST_WINDOW_MS: '60000',
-  PHONE_OTP_START_RATE_LIMIT: '200',
-  PHONE_OTP_START_RATE_WINDOW_MS: '3600000',
-  PHONE_OTP_CHECK_RATE_BURST_LIMIT: '50',
-  PHONE_OTP_CHECK_RATE_BURST_WINDOW_MS: '60000',
-  PHONE_OTP_CHECK_RATE_LIMIT: '200',
-  PHONE_OTP_CHECK_RATE_WINDOW_MS: '3600000',
-  PHONE_OTP_START_PHONE_RATE_BURST_LIMIT: '50',
-  PHONE_OTP_START_PHONE_RATE_BURST_WINDOW_MS: '60000',
-  PHONE_OTP_START_PHONE_RATE_LIMIT: '200',
-  PHONE_OTP_START_PHONE_RATE_WINDOW_MS: '3600000',
-  PHONE_OTP_CHECK_PHONE_RATE_BURST_LIMIT: '50',
-  PHONE_OTP_CHECK_PHONE_RATE_BURST_WINDOW_MS: '60000',
-  PHONE_OTP_CHECK_PHONE_RATE_LIMIT: '200',
-  PHONE_OTP_CHECK_PHONE_RATE_WINDOW_MS: '3600000',
+  PHONE_OTP_START_RATE_BURST_LIMIT: "50",
+  PHONE_OTP_START_RATE_BURST_WINDOW_MS: "60000",
+  PHONE_OTP_START_RATE_LIMIT: "200",
+  PHONE_OTP_START_RATE_WINDOW_MS: "3600000",
+  PHONE_OTP_CHECK_RATE_BURST_LIMIT: "50",
+  PHONE_OTP_CHECK_RATE_BURST_WINDOW_MS: "60000",
+  PHONE_OTP_CHECK_RATE_LIMIT: "200",
+  PHONE_OTP_CHECK_RATE_WINDOW_MS: "3600000",
+  PHONE_OTP_START_PHONE_RATE_BURST_LIMIT: "50",
+  PHONE_OTP_START_PHONE_RATE_BURST_WINDOW_MS: "60000",
+  PHONE_OTP_START_PHONE_RATE_LIMIT: "200",
+  PHONE_OTP_START_PHONE_RATE_WINDOW_MS: "3600000",
+  PHONE_OTP_CHECK_PHONE_RATE_BURST_LIMIT: "50",
+  PHONE_OTP_CHECK_PHONE_RATE_BURST_WINDOW_MS: "60000",
+  PHONE_OTP_CHECK_PHONE_RATE_LIMIT: "200",
+  PHONE_OTP_CHECK_PHONE_RATE_WINDOW_MS: "3600000",
 };
 
-const PHONE = '+60107667787';
-const PASSWORD = 'phone-verify-test-pw-1'; // gitleaks:allow
+const PHONE = "+60107667787";
+const PASSWORD = "phone-verify-test-pw-1"; // gitleaks:allow
 
 medusaIntegrationTestRunner({
   inApp: true,
   env: RATE_ENV,
   testSuite: ({ api, getContainer }) => {
-    describe('phone-verification OTP routes', () => {
+    describe("phone-verification OTP routes", () => {
       let headers: Record<string, string>;
 
       beforeEach(async () => {
         const apiKeyModule = getContainer().resolve(Modules.API_KEY);
         const key = await apiKeyModule.createApiKeys({
-          title: 'phone-verification-test',
-          type: 'publishable',
-          created_by: 'phone-verification-test',
+          title: "phone-verification-test",
+          type: "publishable",
+          created_by: "phone-verification-test",
         });
-        headers = { 'x-publishable-api-key': key.token };
+        headers = { "x-publishable-api-key": key.token };
       });
 
       const start = (body: Record<string, unknown>) =>
         unwrapResponse(
-          api.post('/store/phone-verification/start', body, { headers }),
+          api.post("/store/phone-verification/start", body, { headers }),
         );
       const check = (body: Record<string, unknown>) =>
         unwrapResponse(
-          api.post('/store/phone-verification/check', body, { headers }),
+          api.post("/store/phone-verification/check", body, { headers }),
         );
 
       // Register + link (POST /auth/.../register -> POST /store/customers)
@@ -80,34 +80,32 @@ medusaIntegrationTestRunner({
         email: string,
         phone: string,
       ): Promise<void> => {
-        const reg = await api.post('/auth/customer/emailpass/register', {
+        const reg = await api.post("/auth/customer/emailpass/register", {
           email,
           password: PASSWORD,
         });
         await api.post(
-          '/store/customers',
+          "/store/customers",
           { email, phone },
-          {
-            headers: { ...headers, authorization: `Bearer ${reg.data.token}` },
-          },
+          { headers: { ...headers, authorization: `Bearer ${reg.data.token}` } },
         );
       };
 
-      describe('POST /store/phone-verification/start', () => {
-        it('200-oks a valid E.164 + purpose', async () => {
-          const res = await start({ phone: PHONE, purpose: 'signup' });
+      describe("POST /store/phone-verification/start", () => {
+        it("200-oks a valid E.164 + purpose", async () => {
+          const res = await start({ phone: PHONE, purpose: "signup" });
           expect(res.status).toBe(200);
           expect(res.data).toEqual({ ok: true });
         });
 
-        it('400s a non-E.164 phone and an unknown purpose', async () => {
+        it("400s a non-E.164 phone and an unknown purpose", async () => {
           const badPhone = await start({
-            phone: '0107667787',
-            purpose: 'signup',
+            phone: "0107667787",
+            purpose: "signup",
           });
           expect(badPhone.status).toBe(400);
 
-          const badPurpose = await start({ phone: PHONE, purpose: 'admin' });
+          const badPurpose = await start({ phone: PHONE, purpose: "admin" });
           expect(badPurpose.status).toBe(400);
         });
 
@@ -115,48 +113,48 @@ medusaIntegrationTestRunner({
         // never disclose whether a phone belongs to an account - zero
         // matches and exactly-one-match both answer identically, and
         // neither actually blocks on the (mocked-away) SMS send.
-        describe('password-reset (no-oracle)', () => {
-          it('200-oks {ok:true} for a phone matching zero customers', async () => {
+        describe("password-reset (no-oracle)", () => {
+          it("200-oks {ok:true} for a phone matching zero customers", async () => {
             const res = await start({
-              phone: '+60199999998',
-              purpose: 'password-reset',
+              phone: "+60199999998",
+              purpose: "password-reset",
             });
             expect(res.status).toBe(200);
             expect(res.data).toEqual({ ok: true });
           });
 
-          it('200-oks the identical {ok:true} for a phone matching a real registered customer', async () => {
-            const phone = '+60199999997';
-            await registerCustomerWithPhone('pr-seeded@test.dev', phone);
+          it("200-oks the identical {ok:true} for a phone matching a real registered customer", async () => {
+            const phone = "+60199999997";
+            await registerCustomerWithPhone("pr-seeded@test.dev", phone);
 
-            const res = await start({ phone, purpose: 'password-reset' });
+            const res = await start({ phone, purpose: "password-reset" });
             expect(res.status).toBe(200);
             expect(res.data).toEqual({ ok: true });
           });
         });
       });
 
-      describe('POST /store/phone-verification/check', () => {
-        it('mints a proof token for the dev code', async () => {
+      describe("POST /store/phone-verification/check", () => {
+        it("mints a proof token for the dev code", async () => {
           const res = await check({
             phone: PHONE,
-            purpose: 'signup',
-            code: '000000',
+            purpose: "signup",
+            code: "000000",
           });
           expect(res.status).toBe(200);
-          expect(typeof res.data.token).toBe('string');
-          expect(res.data.token).toContain('.');
+          expect(typeof res.data.token).toBe("string");
+          expect(res.data.token).toContain(".");
         });
 
-        it('400s a wrong code with a generic message', async () => {
+        it("400s a wrong code with a generic message", async () => {
           const res = await check({
             phone: PHONE,
-            purpose: 'signup',
-            code: '111111',
+            purpose: "signup",
+            code: "111111",
           });
           expect(res.status).toBe(400);
           expect(res.data).toMatchObject({
-            message: 'Invalid or expired code.',
+            message: "Invalid or expired code.",
           });
         });
       });
@@ -169,16 +167,16 @@ medusaIntegrationTestRunner({
       // below), so every case here logs in fresh via /auth/customer/emailpass
       // to get an actor-bound bearer token, same as the direct-phone-write
       // test above.
-      describe('POST /store/phone-verification/change', () => {
+      describe("POST /store/phone-verification/change", () => {
         const createLoggedInCustomer = async (
           email: string,
         ): Promise<Record<string, string>> => {
-          const reg = await api.post('/auth/customer/emailpass/register', {
+          const reg = await api.post("/auth/customer/emailpass/register", {
             email,
             password: PASSWORD,
           });
           await api.post(
-            '/store/customers',
+            "/store/customers",
             { email },
             {
               headers: {
@@ -187,7 +185,7 @@ medusaIntegrationTestRunner({
               },
             },
           );
-          const login = await api.post('/auth/customer/emailpass', {
+          const login = await api.post("/auth/customer/emailpass", {
             email,
             password: PASSWORD,
           });
@@ -199,22 +197,22 @@ medusaIntegrationTestRunner({
           authHeaders: Record<string, string>,
         ) =>
           unwrapResponse(
-            api.post('/store/phone-verification/change', body, {
+            api.post("/store/phone-verification/change", body, {
               headers: authHeaders,
             }),
           );
 
-        it('200s a valid phone-change proof, reflected on GET /store/customers/me', async () => {
+        it("200s a valid phone-change proof, reflected on GET /store/customers/me", async () => {
           const authHeaders = await createLoggedInCustomer(
-            'change-valid@test.dev',
+            "change-valid@test.dev",
           );
-          const phone = '+60107667790';
+          const phone = "+60107667790";
 
-          await start({ phone, purpose: 'phone-change' });
+          await start({ phone, purpose: "phone-change" });
           const checked = await check({
             phone,
-            purpose: 'phone-change',
-            code: '000000',
+            purpose: "phone-change",
+            code: "000000",
           });
           expect(checked.status).toBe(200);
 
@@ -226,22 +224,22 @@ medusaIntegrationTestRunner({
           expect(res.data).toMatchObject({ customer: { phone } });
 
           const me = await unwrapResponse(
-            api.get('/store/customers/me', { headers: authHeaders }),
+            api.get("/store/customers/me", { headers: authHeaders }),
           );
           expect(me.data.customer.phone).toBe(phone);
         });
 
-        it('400s a signup-purpose proof', async () => {
+        it("400s a signup-purpose proof", async () => {
           const authHeaders = await createLoggedInCustomer(
-            'change-wrong-purpose@test.dev',
+            "change-wrong-purpose@test.dev",
           );
-          const phone = '+60107667791';
+          const phone = "+60107667791";
 
-          await start({ phone, purpose: 'signup' });
+          await start({ phone, purpose: "signup" });
           const checked = await check({
             phone,
-            purpose: 'signup',
-            code: '000000',
+            purpose: "signup",
+            code: "000000",
           });
           expect(checked.status).toBe(200);
 
@@ -251,22 +249,22 @@ medusaIntegrationTestRunner({
           );
           expect(res.status).toBe(400);
           expect(res.data).toMatchObject({
-            message: 'Phone verification required.',
+            message: "Phone verification required.",
           });
         });
 
-        it('400s a proof minted for a different phone', async () => {
+        it("400s a proof minted for a different phone", async () => {
           const authHeaders = await createLoggedInCustomer(
-            'change-mismatch@test.dev',
+            "change-mismatch@test.dev",
           );
-          const proofPhone = '+60107667792';
-          const requestedPhone = '+60107667793';
+          const proofPhone = "+60107667792";
+          const requestedPhone = "+60107667793";
 
-          await start({ phone: proofPhone, purpose: 'phone-change' });
+          await start({ phone: proofPhone, purpose: "phone-change" });
           const checked = await check({
             phone: proofPhone,
-            purpose: 'phone-change',
-            code: '000000',
+            purpose: "phone-change",
+            code: "000000",
           });
           expect(checked.status).toBe(200);
 
@@ -276,15 +274,15 @@ medusaIntegrationTestRunner({
           );
           expect(res.status).toBe(400);
           expect(res.data).toMatchObject({
-            message: 'Phone verification required.',
+            message: "Phone verification required.",
           });
         });
 
-        it('401s an unauthenticated request', async () => {
+        it("401s an unauthenticated request", async () => {
           const res = await unwrapResponse(
             api.post(
-              '/store/phone-verification/change',
-              { phone: '+60107667794', token: 'bogus' },
+              "/store/phone-verification/change",
+              { phone: "+60107667794", token: "bogus" },
               { headers },
             ),
           );
@@ -296,18 +294,18 @@ medusaIntegrationTestRunner({
         // header comment) — hitting this route with one BEFORE that link
         // used to 500 (customerService.updateCustomers('', …)) instead of
         // cleanly rejecting an unlinked caller.
-        it('401s a register-token bearer whose actor_id is still empty (pre-link)', async () => {
-          const reg = await api.post('/auth/customer/emailpass/register', {
-            email: 'change-unlinked@test.dev',
+        it("401s a register-token bearer whose actor_id is still empty (pre-link)", async () => {
+          const reg = await api.post("/auth/customer/emailpass/register", {
+            email: "change-unlinked@test.dev",
             password: PASSWORD,
           });
-          const phone = '+60107667797';
+          const phone = "+60107667797";
 
-          await start({ phone, purpose: 'phone-change' });
+          await start({ phone, purpose: "phone-change" });
           const checked = await check({
             phone,
-            purpose: 'phone-change',
-            code: '000000',
+            purpose: "phone-change",
+            code: "000000",
           });
           expect(checked.status).toBe(200);
 
@@ -322,16 +320,16 @@ medusaIntegrationTestRunner({
         // at this number — it doesn't establish the number is free. Customer
         // B must not be able to steal a phone customer A already verified
         // and holds.
-        it('400s when the proof phone already belongs to another account', async () => {
-          const phone = '+60107667796';
+        it("400s when the proof phone already belongs to another account", async () => {
+          const phone = "+60107667796";
           const authHeadersA = await createLoggedInCustomer(
-            'change-taken-a@test.dev',
+            "change-taken-a@test.dev",
           );
-          await start({ phone, purpose: 'phone-change' });
+          await start({ phone, purpose: "phone-change" });
           const checkedA = await check({
             phone,
-            purpose: 'phone-change',
-            code: '000000',
+            purpose: "phone-change",
+            code: "000000",
           });
           expect(checkedA.status).toBe(200);
           const claimed = await change(
@@ -341,13 +339,13 @@ medusaIntegrationTestRunner({
           expect(claimed.status).toBe(200);
 
           const authHeadersB = await createLoggedInCustomer(
-            'change-taken-b@test.dev',
+            "change-taken-b@test.dev",
           );
-          await start({ phone, purpose: 'phone-change' });
+          await start({ phone, purpose: "phone-change" });
           const checkedB = await check({
             phone,
-            purpose: 'phone-change',
-            code: '000000',
+            purpose: "phone-change",
+            code: "000000",
           });
           expect(checkedB.status).toBe(200);
 
@@ -357,7 +355,7 @@ medusaIntegrationTestRunner({
           );
           expect(res.status).toBe(400);
           expect(res.data).toMatchObject({
-            message: 'This phone number is already in use.',
+            message: "This phone number is already in use.",
           });
         });
 
@@ -366,29 +364,29 @@ medusaIntegrationTestRunner({
         // PHONE_VERIFICATION_REQUIRED is on (the direct /me write is closed
         // in that mode - see the "gated signup" describe below). Prove it
         // actually still works under enforcement, not just with it off.
-        describe('with enforcement on', () => {
+        describe("with enforcement on", () => {
           beforeAll(() => {
-            process.env.PHONE_VERIFICATION_REQUIRED = 'true';
+            process.env.PHONE_VERIFICATION_REQUIRED = "true";
           });
           afterAll(() => {
             delete process.env.PHONE_VERIFICATION_REQUIRED;
           });
 
-          it('still sets the new phone via a verified proof', async () => {
+          it("still sets the new phone via a verified proof", async () => {
             // createLoggedInCustomer posts { email } with no phone, so
             // requireSignupPhoneProof next()s it untouched even with
             // enforcement on (that guard only fires when the body carries a
             // phone).
             const authHeaders = await createLoggedInCustomer(
-              'change-enforced@test.dev',
+              "change-enforced@test.dev",
             );
-            const phone = '+60107667795';
+            const phone = "+60107667795";
 
-            await start({ phone, purpose: 'phone-change' });
+            await start({ phone, purpose: "phone-change" });
             const checked = await check({
               phone,
-              purpose: 'phone-change',
-              code: '000000',
+              purpose: "phone-change",
+              code: "000000",
             });
             expect(checked.status).toBe(200);
 
@@ -400,7 +398,7 @@ medusaIntegrationTestRunner({
             expect(res.data).toMatchObject({ customer: { phone } });
 
             const me = await unwrapResponse(
-              api.get('/store/customers/me', { headers: authHeaders }),
+              api.get("/store/customers/me", { headers: authHeaders }),
             );
             expect(me.data.customer.phone).toBe(phone);
           });
@@ -415,36 +413,36 @@ medusaIntegrationTestRunner({
       // '/auth/*/emailpass/update' single-use guard (reset-token-guard.ts) —
       // the happy-path test's single successful update is that guard working
       // WITH this route, not a gap in coverage.
-      describe('POST /store/phone-verification/password-reset', () => {
+      describe("POST /store/phone-verification/password-reset", () => {
         const passwordReset = (body: Record<string, unknown>) =>
           unwrapResponse(
-            api.post('/store/phone-verification/password-reset', body, {
+            api.post("/store/phone-verification/password-reset", body, {
               headers,
             }),
           );
 
-        it('runs the full loop: proof -> reset token -> emailpass update -> login with the new password', async () => {
-          const email = 'pw-reset-happy@test.dev';
-          const phone = '+60107667800';
-          const newPassword = 'phone-verify-new-pw-2';
+        it("runs the full loop: proof -> reset token -> emailpass update -> login with the new password", async () => {
+          const email = "pw-reset-happy@test.dev";
+          const phone = "+60107667800";
+          const newPassword = "phone-verify-new-pw-2";
           await registerCustomerWithPhone(email, phone);
 
-          await start({ phone, purpose: 'password-reset' });
+          await start({ phone, purpose: "password-reset" });
           const checked = await check({
             phone,
-            purpose: 'password-reset',
-            code: '000000',
+            purpose: "password-reset",
+            code: "000000",
           });
           expect(checked.status).toBe(200);
 
           const res = await passwordReset({ token: checked.data.token });
           expect(res.status).toBe(200);
-          expect(typeof res.data.token).toBe('string');
+          expect(typeof res.data.token).toBe("string");
           expect(res.data.maskedEmail).toMatch(/^.\*+@/);
 
           const updated = await unwrapResponse(
             api.post(
-              '/auth/customer/emailpass/update',
+              "/auth/customer/emailpass/update",
               { password: newPassword },
               { headers: { Authorization: `Bearer ${res.data.token}` } },
             ),
@@ -452,7 +450,7 @@ medusaIntegrationTestRunner({
           expect(updated.status).toBe(200);
           expect(updated.data).toMatchObject({ success: true });
 
-          const login = await api.post('/auth/customer/emailpass', {
+          const login = await api.post("/auth/customer/emailpass", {
             email,
             password: newPassword,
           });
@@ -460,50 +458,50 @@ medusaIntegrationTestRunner({
           expect(login.data.token).toEqual(expect.any(String));
         });
 
-        it('400s a signup-purpose proof', async () => {
-          const phone = '+60107667801';
-          await start({ phone, purpose: 'signup' });
+        it("400s a signup-purpose proof", async () => {
+          const phone = "+60107667801";
+          await start({ phone, purpose: "signup" });
           const checked = await check({
             phone,
-            purpose: 'signup',
-            code: '000000',
+            purpose: "signup",
+            code: "000000",
           });
           expect(checked.status).toBe(200);
 
           const res = await passwordReset({ token: checked.data.token });
           expect(res.status).toBe(400);
           expect(res.data).toMatchObject({
-            message: 'Phone verification required.',
+            message: "Phone verification required.",
           });
         });
 
-        it('404s a phone matching zero customers', async () => {
-          const phone = '+60107667802';
-          await start({ phone, purpose: 'password-reset' });
+        it("404s a phone matching zero customers", async () => {
+          const phone = "+60107667802";
+          await start({ phone, purpose: "password-reset" });
           const checked = await check({
             phone,
-            purpose: 'password-reset',
-            code: '000000',
+            purpose: "password-reset",
+            code: "000000",
           });
           expect(checked.status).toBe(200);
 
           const res = await passwordReset({ token: checked.data.token });
           expect(res.status).toBe(404);
           expect(res.data).toMatchObject({
-            message: 'No account uses this phone number.',
+            message: "No account uses this phone number.",
           });
         });
 
-        it('400s when two accounts share the phone, with the reset-by-email message', async () => {
-          const phone = '+60107667803';
-          await registerCustomerWithPhone('pw-reset-dup-a@test.dev', phone);
-          await registerCustomerWithPhone('pw-reset-dup-b@test.dev', phone);
+        it("400s when two accounts share the phone, with the reset-by-email message", async () => {
+          const phone = "+60107667803";
+          await registerCustomerWithPhone("pw-reset-dup-a@test.dev", phone);
+          await registerCustomerWithPhone("pw-reset-dup-b@test.dev", phone);
 
-          await start({ phone, purpose: 'password-reset' });
+          await start({ phone, purpose: "password-reset" });
           const checked = await check({
             phone,
-            purpose: 'password-reset',
-            code: '000000',
+            purpose: "password-reset",
+            code: "000000",
           });
           expect(checked.status).toBe(200);
 
@@ -511,7 +509,7 @@ medusaIntegrationTestRunner({
           expect(res.status).toBe(400);
           expect(res.data).toMatchObject({
             message:
-              'More than one account uses this phone number. Reset by email instead.',
+              "More than one account uses this phone number. Reset by email instead.",
           });
         });
 
@@ -524,9 +522,9 @@ medusaIntegrationTestRunner({
         // CALLBACK_URL are set, and .env.test sets none of them), so this
         // seeds the provider_identity row directly instead of going through
         // a live Google OAuth callback.
-        it('400s (NOT_ALLOWED) for an account with no emailpass identity', async () => {
-          const email = 'pw-reset-google-only@test.dev';
-          const phone = '+60107667804';
+        it("400s (NOT_ALLOWED) for an account with no emailpass identity", async () => {
+          const email = "pw-reset-google-only@test.dev";
+          const phone = "+60107667804";
           const container = getContainer();
           const customerService = container.resolve(Modules.CUSTOMER);
           const authService = container.resolve(Modules.AUTH);
@@ -536,21 +534,21 @@ medusaIntegrationTestRunner({
             has_account: true,
           });
           await authService.createAuthIdentities({
-            provider_identities: [{ provider: 'google', entity_id: email }],
+            provider_identities: [{ provider: "google", entity_id: email }],
           });
 
-          await start({ phone, purpose: 'password-reset' });
+          await start({ phone, purpose: "password-reset" });
           const checked = await check({
             phone,
-            purpose: 'password-reset',
-            code: '000000',
+            purpose: "password-reset",
+            code: "000000",
           });
           expect(checked.status).toBe(200);
 
           const res = await passwordReset({ token: checked.data.token });
           expect(res.status).toBe(400);
           expect(res.data).toMatchObject({
-            message: 'This account signs in with Google.',
+            message: "This account signs in with Google.",
           });
         });
       });
@@ -560,9 +558,9 @@ medusaIntegrationTestRunner({
       // the env var here (rather than a runner `env:` override) reaches the
       // already-booted app without a restart - scoped to this describe block
       // only via beforeAll/afterAll so the tests above stay opt-in.
-      describe('gated signup', () => {
+      describe("gated signup", () => {
         beforeAll(() => {
-          process.env.PHONE_VERIFICATION_REQUIRED = 'true';
+          process.env.PHONE_VERIFICATION_REQUIRED = "true";
         });
         afterAll(() => {
           delete process.env.PHONE_VERIFICATION_REQUIRED;
@@ -571,21 +569,21 @@ medusaIntegrationTestRunner({
         // Register-only helper (no /store/customers call yet) so each test
         // controls its own create-attempt body/headers.
         const register = async (email: string): Promise<string> => {
-          const reg = await api.post('/auth/customer/emailpass/register', {
+          const reg = await api.post("/auth/customer/emailpass/register", {
             email,
             password: PASSWORD,
           });
           return reg.data.token as string;
         };
 
-        it('refuses registration with a phone but no proof', async () => {
-          const email = 'gated-no-proof@test.dev';
-          const phone = '+60199999996';
+        it("refuses registration with a phone but no proof", async () => {
+          const email = "gated-no-proof@test.dev";
+          const phone = "+60199999996";
           const token = await register(email);
 
           const res = await unwrapResponse(
             api.post(
-              '/store/customers',
+              "/store/customers",
               { email, phone },
               { headers: { ...headers, authorization: `Bearer ${token}` } },
             ),
@@ -595,33 +593,33 @@ medusaIntegrationTestRunner({
           // rejectCustomerMetadata or core body validation (both also 400 on
           // this route, which would let an unwired guard pass silently).
           expect(res.data).toMatchObject({
-            message: 'Phone verification required.',
+            message: "Phone verification required.",
           });
         });
 
-        it('accepts registration with a fresh signup proof header', async () => {
-          const email = 'gated-with-proof@test.dev';
-          const phone = '+60199999995';
+        it("accepts registration with a fresh signup proof header", async () => {
+          const email = "gated-with-proof@test.dev";
+          const phone = "+60199999995";
           const token = await register(email);
 
-          await start({ phone, purpose: 'signup' });
+          await start({ phone, purpose: "signup" });
           const checked = await check({
             phone,
-            purpose: 'signup',
-            code: '000000',
+            purpose: "signup",
+            code: "000000",
           });
           expect(checked.status).toBe(200);
           const proof = checked.data.token as string;
 
           const res = await unwrapResponse(
             api.post(
-              '/store/customers',
+              "/store/customers",
               { email, phone },
               {
                 headers: {
                   ...headers,
                   authorization: `Bearer ${token}`,
-                  'x-phone-verification': proof,
+                  "x-phone-verification": proof,
                 },
               },
             ),
@@ -630,17 +628,17 @@ medusaIntegrationTestRunner({
           expect(res.data.customer.phone).toBe(phone);
         });
 
-        it('refuses a direct phone change on /store/customers/me', async () => {
-          const email = 'gated-me-change@test.dev';
+        it("refuses a direct phone change on /store/customers/me", async () => {
+          const email = "gated-me-change@test.dev";
           const token = await register(email);
           await unwrapResponse(
             api.post(
-              '/store/customers',
+              "/store/customers",
               { email },
               { headers: { ...headers, authorization: `Bearer ${token}` } },
             ),
           );
-          const login = await api.post('/auth/customer/emailpass', {
+          const login = await api.post("/auth/customer/emailpass", {
             email,
             password: PASSWORD,
           });
@@ -651,8 +649,8 @@ medusaIntegrationTestRunner({
 
           const res = await unwrapResponse(
             api.post(
-              '/store/customers/me',
-              { phone: '+60199999994' },
+              "/store/customers/me",
+              { phone: "+60199999994" },
               { headers: loginHeaders },
             ),
           );
@@ -661,18 +659,19 @@ medusaIntegrationTestRunner({
           // rejectCustomerMetadata or core validation (same reasoning as the
           // signup-gate assertion above).
           expect(res.data).toMatchObject({
-            message: 'Phone changes require verification.',
+            message: "Phone changes require verification.",
           });
         });
+
 
         // requirePhoneVerified on the money/goods paths. Only an HTTP test can
         // catch the failure modes that matter here: a matcher that misses the
         // route (gate silently absent), a matcher that is too broad (cancel
         // locked out too), or middleware ordering that runs the gate before
         // authenticate() so actor_id is empty for everyone.
-        describe('topup + delivery gates', () => {
+        describe("topup + delivery gates", () => {
           const loginHeaders = async (email: string) => {
-            const login = await api.post('/auth/customer/emailpass', {
+            const login = await api.post("/auth/customer/emailpass", {
               email,
               password: PASSWORD,
             });
@@ -682,15 +681,15 @@ medusaIntegrationTestRunner({
             };
           };
 
-          // Register + link WITHOUT a phone — the shape 204 of 222 live
-          // accounts are in, and the one the gate has to refuse.
+          // Register + link WITHOUT a phone — the shape the large majority of
+          // live accounts are in, and the one the gate has to refuse.
           const registerUnverified = async (email: string) => {
-            const reg = await api.post('/auth/customer/emailpass/register', {
+            const reg = await api.post("/auth/customer/emailpass/register", {
               email,
               password: PASSWORD,
             });
             await api.post(
-              '/store/customers',
+              "/store/customers",
               { email },
               {
                 headers: {
@@ -702,15 +701,15 @@ medusaIntegrationTestRunner({
             return loginHeaders(email);
           };
 
-          it('refuses a topup and a delivery request from an unverified account', async () => {
-            const h = await registerUnverified('gate-unverified@test.dev');
+          it("refuses a topup and a delivery request from an unverified account", async () => {
+            const h = await registerUnverified("gate-unverified@test.dev");
 
             const topup = await unwrapResponse(
-              api.post('/store/credits/topup', { amount: 10 }, { headers: h }),
+              api.post("/store/credits/topup", { amount: 10 }, { headers: h }),
             );
             expect(topup.status).toBe(400);
             expect(topup.data).toMatchObject({
-              message: 'Verify your phone number before continuing.',
+              message: "Verify your phone number before continuing.",
             });
 
             // Body is deliberately valid-shaped: a 400 from the route's own
@@ -718,32 +717,32 @@ medusaIntegrationTestRunner({
             // while proving nothing about the gate, so assert the MESSAGE.
             const delivery = await unwrapResponse(
               api.post(
-                '/store/delivery-orders',
-                { pull_ids: ['pull_nope'], address_id: 'addr_nope' },
+                "/store/delivery-orders",
+                { pull_ids: ["pull_nope"], address_id: "addr_nope" },
                 { headers: h },
               ),
             );
             expect(delivery.data).toMatchObject({
-              message: 'Verify your phone number before continuing.',
+              message: "Verify your phone number before continuing.",
             });
           });
 
-          it('lets the account through once it verifies its phone', async () => {
-            const email = 'gate-verifies@test.dev';
-            const phone = '+60199999991';
+          it("lets the account through once it verifies its phone", async () => {
+            const email = "gate-verifies@test.dev";
+            const phone = "+60199999991";
             const h = await registerUnverified(email);
 
-            await start({ phone, purpose: 'phone-change' });
+            await start({ phone, purpose: "phone-change" });
             const checked = await check({
               phone,
-              purpose: 'phone-change',
-              code: '000000',
+              purpose: "phone-change",
+              code: "000000",
             });
             expect(checked.status).toBe(200);
 
             const changed = await unwrapResponse(
               api.post(
-                '/store/phone-verification/change',
+                "/store/phone-verification/change",
                 { phone, token: checked.data.token },
                 { headers: h },
               ),
@@ -755,12 +754,12 @@ medusaIntegrationTestRunner({
             // so the gated call needed no key but this one does.
             const topup = await unwrapResponse(
               api.post(
-                '/store/credits/topup',
+                "/store/credits/topup",
                 { amount: 10 },
                 {
                   headers: {
                     ...h,
-                    'idempotency-key': 'phone-gate-verified-topup',
+                    "idempotency-key": "phone-gate-verified-topup",
                   },
                 },
               ),
@@ -769,21 +768,21 @@ medusaIntegrationTestRunner({
             expect(topup.status).toBe(200);
           });
 
-          it('still lets an unverified account cancel a delivery', async () => {
+          it("still lets an unverified account cancel a delivery", async () => {
             // The gate is on the EXACT /store/delivery-orders matcher, not the
             // wildcard: locking cancel would strand an unverified player with
             // an order they cannot unwind. A 404 (unknown order) proves the
             // request reached the route instead of being refused by the gate.
-            const h = await registerUnverified('gate-can-cancel@test.dev');
+            const h = await registerUnverified("gate-can-cancel@test.dev");
             const res = await unwrapResponse(
               api.post(
-                '/store/delivery-orders/do_nope/cancel',
+                "/store/delivery-orders/do_nope/cancel",
                 {},
                 { headers: h },
               ),
             );
             expect(res.status).toBe(404);
-            expect(res.data).toMatchObject({ message: 'Order not found.' });
+            expect(res.data).toMatchObject({ message: "Order not found." });
           });
         });
       });
