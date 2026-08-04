@@ -164,7 +164,10 @@ export const VipLevelsTab = () => {
   const insertAt = (index: number) =>
     setRows((prev) => {
       const next = prev.slice();
-      next.splice(index, 0, blankRow(prev[index - 1], fallbackTier));
+      // Inherit from the rung above; at index 0 there is none, so inherit from
+      // the rung being displaced down — it is the ladder's current base and its
+      // tier is the right one for the new base.
+      next.splice(index, 0, blankRow(prev[index - 1] ?? prev[index], fallbackTier));
       return next;
     });
   const removeAt = (index: number) =>
