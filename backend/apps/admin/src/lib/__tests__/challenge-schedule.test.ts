@@ -30,13 +30,24 @@ describe('nextWeeklyReset', () => {
     expect(iso(next)).toBe('2026-08-16T16:00:00.000Z');
   });
 
-  it('never returns a past instant, whatever day/hour it is called on', () => {
-    // 24 hourly probes across a full week — the off-by-one in the day maths
-    // only bites on the reset day itself, which a single fixed date misses.
+  it('skips a boundary that is too close to schedule for', () => {
+    // 90 seconds before the KL Monday reset. Offering it would lose a race the
+    // operator cannot see: they accept the default, type a reason, click Save
+    // after the boundary, and the route refuses a past start.
+    const at = new Date('2026-08-09T15:58:30Z');
+    expect(iso(nextWeeklyReset(KL, at))).toBe('2026-08-16T16:00:00.000Z');
+  });
+
+  it('never returns an instant less than an hour out, whatever minute it is called on', () => {
+    // Minute-resolution probes across a full week: the reset-day off-by-one and
+    // the too-close window both only bite in a narrow band that hourly probes
+    // step straight over.
     const start = Date.parse('2026-08-05T00:00:00Z');
-    for (let h = 0; h < 7 * 24; h++) {
-      const at = new Date(start + h * 3_600_000);
-      expect(nextWeeklyReset(KL, at).getTime()).toBeGreaterThan(at.getTime());
+    for (let m = 0; m < 7 * 24 * 60; m++) {
+      const at = new Date(start + m * 60_000);
+      expect(nextWeeklyReset(KL, at).getTime() - at.getTime()).toBeGreaterThanOrEqual(
+        60 * 60_000,
+      );
     }
   });
 
