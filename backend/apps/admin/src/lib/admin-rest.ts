@@ -851,6 +851,79 @@ export const saveChallengeStages = (body: {
   reason: string;
 }) => postJson<{ stages: ChallengeStageDTO[] }>('/admin/challenge/stages', body);
 
+/** One Weekly Challenge queued to take over later. `applied_at` non-null means
+ *  it already went live (the hourly settle job promoted it); a due row that is
+ *  still null failed to promote and is being retried. */
+export interface ChallengeScheduleDTO {
+  id: string;
+  starts_at: string;
+  label: string | null;
+  applied_at: string | null;
+  /** Start has passed, decided on the SERVER's clock — the one the promotion
+   *  job runs on. `due && !applied_at` is a promotion that hasn't landed. */
+  due: boolean;
+  stages: ChallengeStageDTO[];
+}
+
+export const getChallengeSchedules = () =>
+  getJson<{ schedules: ChallengeScheduleDTO[] }>('/admin/challenge/schedule');
+
+export const createChallengeSchedule = (body: {
+  starts_at: string;
+  label: string | null;
+  stages: ChallengeStageDTO[];
+  reason: string;
+}) =>
+  postJson<{ schedule: ChallengeScheduleDTO }>(
+    '/admin/challenge/schedule',
+    body,
+  );
+
+export async function deleteChallengeSchedule(id: string): Promise<void> {
+  const res = await fetch(
+    `${__BACKEND_URL__}/admin/challenge/schedule/${encodeURIComponent(id)}`,
+    { method: 'DELETE', credentials: 'include' },
+  );
+  if (!res.ok) {
+    throw await httpError(res);
+  }
+}
+
+/** One settled week, for the Winners selector. `skipped` counts prize cards the
+ *  settlement could NOT grant for stock — the manual-fulfilment queue. */
+export interface ChallengeWeekSummaryDTO {
+  weekStart: string;
+  winners: number;
+  credits: number;
+  cards: number;
+  skipped: number;
+}
+
+export interface ChallengeWinnerDTO {
+  rank: number;
+  customer_id: string;
+  customer_email: string | null;
+  credits: number;
+  cards: {
+    card_id: string;
+    name: string | null;
+    image: string | null;
+    qty: number;
+    status: string;
+  }[];
+  pool_myr: number | null;
+  unlocked_stages: number[];
+}
+
+export const getChallengeWinners = (week?: string) =>
+  getJson<{
+    weeks: ChallengeWeekSummaryDTO[];
+    week: string | null;
+    winners: ChallengeWinnerDTO[];
+  }>(
+    `/admin/challenge/winners${week ? `?week=${encodeURIComponent(week)}` : ''}`,
+  );
+
 export interface ChallengeSettingsDTO {
   cadence: string;
   timezone: string;
@@ -1013,6 +1086,10 @@ export interface PlayerRow {
   /** Funds hold. Orthogonal to `disabled` (login block). */
   frozen: boolean;
   disabled: boolean;
+  /** Has this account ever completed SMS verification? Orthogonal to both flags
+   *  above: an unverified account can log in and browse, it just cannot top up
+   *  or request delivery while the phone gate is on. */
+  phone_verified: boolean;
 }
 
 export interface PlayersPage {

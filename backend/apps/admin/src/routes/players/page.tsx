@@ -16,9 +16,17 @@ import {
 } from '@medusajs/ui';
 import { Users } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
-import { usePlayers, useSetPlayerDisabled } from '../../lib/queries';
+import {
+  useCustomerGroupsAdmin,
+  usePlayers,
+  useSetPlayerDisabled,
+} from '../../lib/queries';
 import type { PlayerRow } from '../../lib/admin-rest';
 import { orderDateTime, rm } from '../../lib/format';
+import {
+  DEFAULT_PLAYER_GROUP_NAME,
+  isDefaultPlayerGroup,
+} from '../../lib/player-groups';
 import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
@@ -43,6 +51,13 @@ const PlayersPage = () => {
   const [q, setQ] = useState('');
   const [target, setTarget] = useState<Target | null>(null);
   const [reason, setReason] = useState('');
+  // Only to name the default group for players with no stored membership. The
+  // constant is the fallback for the window before the list resolves (and for a
+  // shop that has no default row yet).
+  const { data: groupList } = useCustomerGroupsAdmin();
+  const defaultGroupName =
+    (groupList?.customer_groups ?? []).find(isDefaultPlayerGroup)?.name ??
+    DEFAULT_PLAYER_GROUP_NAME;
 
   // 300 ms debounce — the list refetches on the settled value, not per keystroke.
   useEffect(() => {
@@ -135,6 +150,7 @@ const PlayersPage = () => {
                   <Table.HeaderCell>{t('players.name')}</Table.HeaderCell>
                   <Table.HeaderCell>{t('players.email')}</Table.HeaderCell>
                   <Table.HeaderCell>{t('players.phone')}</Table.HeaderCell>
+                  <Table.HeaderCell>{t('players.verified')}</Table.HeaderCell>
                   <Table.HeaderCell>{t('players.group')}</Table.HeaderCell>
                   <Table.HeaderCell>{t('players.lvl')}</Table.HeaderCell>
                   <Table.HeaderCell className="text-right">
@@ -186,8 +202,27 @@ const PlayersPage = () => {
                     <Table.Cell className="text-ui-fg-subtle whitespace-nowrap">
                       {p.phone ?? '—'}
                     </Table.Cell>
+                    {/* With the phone gate live, "why can't this player top up
+                        or request delivery?" is a question this list has to be
+                        able to answer — otherwise the only way to tell is to
+                        reproduce the refusal as the player. */}
+                    <Table.Cell className="whitespace-nowrap">
+                      <StatusBadge color={p.phone_verified ? 'green' : 'grey'}>
+                        {p.phone_verified
+                          ? t('players.verifiedYes')
+                          : t('players.verifiedNo')}
+                      </StatusBadge>
+                    </Table.Cell>
                     <Table.Cell className="text-ui-fg-subtle">
-                      {p.groups[0] ?? '—'}
+                      {/* No stored membership is not "no odds" — it rolls set 1,
+                          exactly what DEFAULT's members roll. Naming the group
+                          keeps this column agreeing with the Profile tab's
+                          group card, which shows DEFAULT for the same player.
+                          Resolved from the group LIST, not the constant: the
+                          prebuilt /customer-groups screen can rename the default
+                          group, and the card resolves the real name — a
+                          hardcoded fallback would make the two disagree. */}
+                      {p.groups[0] ?? defaultGroupName}
                     </Table.Cell>
                     <Table.Cell className="whitespace-nowrap">
                       <Badge size="2xsmall">LV {p.vip_level}</Badge>
@@ -229,7 +264,9 @@ const PlayersPage = () => {
                           aria-label={`${p.disabled ? t('players.disabled') : t('players.active')} — ${p.email}`}
                         />
                         <StatusBadge color={p.disabled ? 'red' : 'green'}>
-                          {p.disabled ? t('players.disabled') : t('players.active')}
+                          {p.disabled
+                            ? t('players.disabled')
+                            : t('players.active')}
                         </StatusBadge>
                       </div>
                     </Table.Cell>
@@ -264,10 +301,16 @@ const PlayersPage = () => {
         <Prompt.Content>
           <Prompt.Header>
             <Prompt.Title>
-              {t(target?.disabled ? 'players.enableTitle' : 'players.disableTitle')}
+              {t(
+                target?.disabled
+                  ? 'players.enableTitle'
+                  : 'players.disableTitle',
+              )}
             </Prompt.Title>
             <Prompt.Description>
-              {t(target?.disabled ? 'players.enableDesc' : 'players.disableDesc')}
+              {t(
+                target?.disabled ? 'players.enableDesc' : 'players.disableDesc',
+              )}
             </Prompt.Description>
           </Prompt.Header>
 

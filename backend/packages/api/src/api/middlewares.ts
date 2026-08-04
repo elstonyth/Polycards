@@ -32,6 +32,7 @@ import { rejectCustomerMetadata } from './utils/customer-metadata-guard';
 import {
   requireSignupPhoneProof,
   blockUnverifiedPhoneWrite,
+  requirePhoneVerified,
 } from './utils/phone-verification-guard';
 import { validateDeliverableAddress } from './utils/address-guard';
 import {
@@ -273,7 +274,10 @@ export default defineMiddlewares({
       // the write-tier budget with the rest of the authed mutation matchers.
       matcher: '/store/phone-verification/change',
       method: 'POST',
-      middlewares: [authenticate('customer', ['bearer']), deliveryWriteRateLimit],
+      middlewares: [
+        authenticate('customer', ['bearer']),
+        deliveryWriteRateLimit,
+      ],
     },
     {
       // Phone-proof → reset-token exchange (Task 5). Public (pre-auth by
@@ -433,11 +437,17 @@ export default defineMiddlewares({
     },
     {
       // POST /store/delivery-orders (create — state-changing write)
+      //
+      // requirePhoneVerified is on the EXACT matcher, not the wildcard below:
+      // shipping cards out needs a verified player, but cancelling an order
+      // (POST /store/delivery-orders/:id/cancel) must stay open to everyone,
+      // or an unverified player is stuck with a delivery they cannot unwind.
       matcher: '/store/delivery-orders',
       method: 'POST',
       middlewares: [
         authenticate('customer', ['bearer']),
         deliveryWriteRateLimit,
+        requirePhoneVerified,
       ],
     },
     {
@@ -555,6 +565,7 @@ export default defineMiddlewares({
       middlewares: [
         authenticate('customer', ['bearer']),
         createCreditTopupRateLimit(),
+        requirePhoneVerified,
       ],
     },
     {
@@ -571,6 +582,7 @@ export default defineMiddlewares({
       middlewares: [
         authenticate('customer', ['bearer']),
         createCreditTopupRateLimit(),
+        requirePhoneVerified,
       ],
     },
     {
@@ -738,6 +750,20 @@ export default defineMiddlewares({
       // the credit-minting per-rank reward stages; same admin budget.
       matcher: '/admin/challenge/stages',
       method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Queue a challenge to go live later (POST /admin/challenge/schedule) —
+      // it becomes the credit-minting stage table on promotion, so it shares
+      // the same admin budget as writing those stages directly.
+      matcher: '/admin/challenge/schedule',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Drop a queued challenge (DELETE /admin/challenge/schedule/:id).
+      matcher: '/admin/challenge/schedule/*',
+      method: 'DELETE',
       middlewares: [adminActionRateLimit],
     },
     {

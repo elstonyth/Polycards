@@ -41,10 +41,12 @@ export async function GET(
   // ponytail: to-many `groups` join under skip/take — Medusa paginates on the
   // customer, and players-list.spec.ts pages limit=1 with a grouped customer in
   // the set, so this holds; revisit only if a page ever short-counts.
-  const [page, total] = await customers.listAndCountCustomers(
-    q ? { q } : {},
-    { skip: offset, take: limit, order: { created_at: 'DESC', id: 'DESC' }, relations: ['groups'] },
-  );
+  const [page, total] = await customers.listAndCountCustomers(q ? { q } : {}, {
+    skip: offset,
+    take: limit,
+    order: { created_at: 'DESC', id: 'DESC' },
+    relations: ['groups'],
+  });
   const ids = page.map((c) => c.id);
   const fx = await resolveFxRate(packs);
   const agg = await packs.playersOverview(ids, fx);
@@ -57,7 +59,8 @@ export async function GET(
       const w = agg.wallet.get(c.id);
       const v = agg.vault.get(c.id);
       const s = agg.state.get(c.id);
-      const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || null;
+      const name =
+        [c.first_name, c.last_name].filter(Boolean).join(' ') || null;
       return {
         id: c.id,
         email: c.email,
@@ -74,6 +77,9 @@ export async function GET(
         last_spend_at: w?.lastSpendAt ?? null,
         frozen: s?.frozen ?? false,
         disabled: s?.disabled ?? false,
+        // No state row at all = never verified, which is the default for every
+        // account that predates the gate.
+        phone_verified: s?.phoneVerified ?? false,
       };
     }),
   });

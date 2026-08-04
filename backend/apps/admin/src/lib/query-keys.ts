@@ -78,6 +78,9 @@ export const qk = {
   avatarFrames: ['admin', 'avatar-frames'] as const,
   vipLevels: ['admin', 'vip-levels'] as const,
   challengeStages: ['admin', 'challenge', 'stages'] as const,
+  challengeSchedules: ['admin', 'challenge', 'schedule'] as const,
+  challengeWinners: (week: string) =>
+    ['admin', 'challenge', 'winners', week] as const,
   challengeSettings: ['admin', 'challenge', 'settings'] as const,
   tierSettings: ['admin', 'tier-settings'] as const,
 

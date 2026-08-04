@@ -23,6 +23,14 @@ export const VAULT_RULES: ErrorRule[] = [
     'Too many requests — give it a moment and try again.',
   ],
   [/unauthorized|not authenticated|401/i, 'Please log in to view your vault.'],
+  // requirePhoneVerified (backend api/utils/phone-verification-guard.ts) —
+  // above every broad rule below, per the ORDER note in the file header. Names
+  // the screen that fixes it: the gate clears the moment Settings completes the
+  // SMS flow, and without the pointer this reads as a dead end.
+  [
+    /verify your phone/i,
+    'Verify your phone number in Account settings before topping up.',
+  ],
   [
     /declined/i,
     'Payment declined by the demo gateway — amounts ending in .13 always decline.',

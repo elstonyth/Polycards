@@ -662,6 +662,129 @@ medusaIntegrationTestRunner({
             message: "Phone changes require verification.",
           });
         });
+
+
+        // requirePhoneVerified on the money/goods paths. Only an HTTP test can
+        // catch the failure modes that matter here: a matcher that misses the
+        // route (gate silently absent), a matcher that is too broad (cancel
+        // locked out too), or middleware ordering that runs the gate before
+        // authenticate() so actor_id is empty for everyone.
+        describe("topup + delivery gates", () => {
+          const loginHeaders = async (email: string) => {
+            const login = await api.post("/auth/customer/emailpass", {
+              email,
+              password: PASSWORD,
+            });
+            return {
+              ...headers,
+              authorization: `Bearer ${login.data.token}`,
+            };
+          };
+
+          // Register + link WITHOUT a phone — the shape the large majority of
+          // live accounts are in, and the one the gate has to refuse.
+          const registerUnverified = async (email: string) => {
+            const reg = await api.post("/auth/customer/emailpass/register", {
+              email,
+              password: PASSWORD,
+            });
+            await api.post(
+              "/store/customers",
+              { email },
+              {
+                headers: {
+                  ...headers,
+                  authorization: `Bearer ${reg.data.token}`,
+                },
+              },
+            );
+            return loginHeaders(email);
+          };
+
+          it("refuses a topup and a delivery request from an unverified account", async () => {
+            const h = await registerUnverified("gate-unverified@test.dev");
+
+            const topup = await unwrapResponse(
+              api.post("/store/credits/topup", { amount: 10 }, { headers: h }),
+            );
+            expect(topup.status).toBe(400);
+            expect(topup.data).toMatchObject({
+              message: "Verify your phone number before continuing.",
+            });
+
+            // Body is deliberately valid-shaped: a 400 from the route's own
+            // pull_ids/address_id validation would pass a bare status check
+            // while proving nothing about the gate, so assert the MESSAGE.
+            const delivery = await unwrapResponse(
+              api.post(
+                "/store/delivery-orders",
+                { pull_ids: ["pull_nope"], address_id: "addr_nope" },
+                { headers: h },
+              ),
+            );
+            expect(delivery.data).toMatchObject({
+              message: "Verify your phone number before continuing.",
+            });
+          });
+
+          it("lets the account through once it verifies its phone", async () => {
+            const email = "gate-verifies@test.dev";
+            const phone = "+60199999991";
+            const h = await registerUnverified(email);
+
+            await start({ phone, purpose: "phone-change" });
+            const checked = await check({
+              phone,
+              purpose: "phone-change",
+              code: "000000",
+            });
+            expect(checked.status).toBe(200);
+
+            const changed = await unwrapResponse(
+              api.post(
+                "/store/phone-verification/change",
+                { phone, token: checked.data.token },
+                { headers: h },
+              ),
+            );
+            expect(changed.status).toBe(200);
+
+            // The topup route requires a client Idempotency-Key of its own —
+            // the refusal above happens in the middleware, BEFORE that check,
+            // so the gated call needed no key but this one does.
+            const topup = await unwrapResponse(
+              api.post(
+                "/store/credits/topup",
+                { amount: 10 },
+                {
+                  headers: {
+                    ...h,
+                    "idempotency-key": "phone-gate-verified-topup",
+                  },
+                },
+              ),
+            );
+            // The stamp written by the change route is what the gate reads.
+            expect(topup.status).toBe(200);
+          });
+
+          it("still lets an unverified account cancel a delivery", async () => {
+            // The gate is on the EXACT /store/delivery-orders matcher, not the
+            // wildcard: locking cancel would strand an unverified player with
+            // an order they cannot unwind. A 404 (unknown order) proves the
+            // request reached the route instead of being refused by the gate.
+            const h = await registerUnverified("gate-can-cancel@test.dev");
+            const res = await unwrapResponse(
+              api.post(
+                "/store/delivery-orders/do_nope/cancel",
+                {},
+                { headers: h },
+              ),
+            );
+            expect(res.status).toBe(404);
+            expect(res.data).toMatchObject({ message: "Order not found." });
+          });
+        });
       });
     });
   },

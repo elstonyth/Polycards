@@ -17,6 +17,7 @@ import { MedusaError } from '@medusajs/framework/utils';
 export type PhoneVerificationEnv = {
   NODE_ENV?: string;
   PHONE_VERIFICATION_REQUIRED?: string;
+  PHONE_GATE_REQUIRED?: string;
   TWILIO_ACCOUNT_SID?: string;
   TWILIO_AUTH_TOKEN?: string;
   TWILIO_VERIFY_SERVICE_SID?: string;
@@ -27,6 +28,28 @@ type Logger = { warn: (msg: string) => void };
 
 export const isPhoneVerificationRequired = (env: PhoneVerificationEnv): boolean =>
   env.PHONE_VERIFICATION_REQUIRED === 'true';
+
+/**
+ * The MONEY/GOODS gate (requirePhoneVerified) — separate from the signup and
+ * phone-change gates above, because they are different risks with different
+ * blast radii and must be rollback-able independently.
+ *
+ * PHONE_VERIFICATION_REQUIRED closes a door on WRITING a phone: a handful of
+ * signups per day, and turning it off costs nothing already banked. This one
+ * blocks topping up and shipping for every account that has not verified —
+ * currently the large majority. If the two shared a switch, the documented
+ * rollback lever ("flip PHONE_VERIFICATION_REQUIRED off", CONTEXT.md) could not
+ * reopen the money path without also reopening unproven phone writes.
+ *
+ * Unset (or empty) means "follow PHONE_VERIFICATION_REQUIRED", so the deploy
+ * needs no new configuration to behave as intended — the extra variable exists
+ * to be set to 'false' in a hurry.
+ */
+export const isPhoneGateRequired = (env: PhoneVerificationEnv): boolean => {
+  const own = env.PHONE_GATE_REQUIRED;
+  if (own === undefined || own === '') return isPhoneVerificationRequired(env);
+  return own === 'true';
+};
 
 export const isTwilioVerifyConfigured = (env: PhoneVerificationEnv): boolean =>
   Boolean(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_VERIFY_SERVICE_SID);

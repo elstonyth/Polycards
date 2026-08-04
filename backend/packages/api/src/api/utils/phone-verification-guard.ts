@@ -1,10 +1,14 @@
 import type {
+  AuthenticatedMedusaRequest,
   MedusaNextFunction,
   MedusaRequest,
   MedusaResponse,
 } from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
+import { PACKS_MODULE } from '../../modules/packs';
+import type PacksModuleService from '../../modules/packs/service';
 import {
+  isPhoneGateRequired,
   isPhoneVerificationRequired,
   verifyPhoneProof,
 } from '../../utils/phone-verification';
@@ -26,7 +30,10 @@ const secretOf = (req: MedusaRequest): string => {
   // verifyPhoneProof's HMAC needs a plain string, so a non-string secret is
   // treated the same as unconfigured.
   if (typeof secret !== 'string' || !secret)
-    throw new MedusaError(MedusaError.Types.UNEXPECTED_STATE, 'Server misconfigured.');
+    throw new MedusaError(
+      MedusaError.Types.UNEXPECTED_STATE,
+      'Server misconfigured.',
+    );
   return secret;
 };
 
@@ -46,10 +53,63 @@ export const requireSignupPhoneProof = (
     // next(err) — repo convention for surfacing middleware errors (see
     // blockUnusedVendorSelfRegistration in middlewares.ts).
     return next(
-      new MedusaError(MedusaError.Types.INVALID_DATA, 'Phone verification required.'),
+      new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'Phone verification required.',
+      ),
     );
   }
   next();
+};
+
+/**
+ * Money in / goods out: the caller must have COMPLETED phone verification at
+ * some point, not merely be holding a fresh OTP proof. That is a persisted
+ * fact (`customer_account_state.phone_verified_at`), stamped by the
+ * phone-change route and the signup subscriber.
+ *
+ * Deliberately NOT applied to cancel/read routes: a player who has not
+ * verified must still be able to unwind an order and see their own data —
+ * the gate exists to stop unverified value MOVING, not to lock the account.
+ *
+ * Gated on its OWN flag (isPhoneGateRequired), which falls back to
+ * PHONE_VERIFICATION_REQUIRED when unset: blocking every unverified account
+ * from topping up is a far larger blast radius than refusing an unproven phone
+ * WRITE, and the two have to be rollback-able separately.
+ *
+ * Reads the env flag per request for the same reason the two gates above do:
+ * the http specs flip it without rebooting the app.
+ */
+export const requirePhoneVerified = async (
+  req: AuthenticatedMedusaRequest,
+  _res: MedusaResponse,
+  next: MedusaNextFunction,
+): Promise<void> => {
+  if (!isPhoneGateRequired(process.env)) return next();
+  const customerId = req.auth_context?.actor_id;
+  // Register-token bearers carry actor_id '' until POST /store/customers links
+  // the identity (same guard as store/phone-verification/change). No actor =
+  // nothing to check the state row against, so refuse rather than pass.
+  if (!customerId) {
+    return next(
+      new MedusaError(MedusaError.Types.UNAUTHORIZED, 'Unauthorized'),
+    );
+  }
+  try {
+    const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+    if (await packs.isPhoneVerified(customerId)) return next();
+  } catch (e) {
+    // Fail CLOSED. A read failure here must not become a free pass on a money
+    // path; the caller retries, and the storefront copy already tells them
+    // what to do next.
+    return next(e as Error);
+  }
+  next(
+    new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'Verify your phone number before continuing.',
+    ),
+  );
 };
 
 /** POST /store/customers/me — phone CHANGES go through the verified route

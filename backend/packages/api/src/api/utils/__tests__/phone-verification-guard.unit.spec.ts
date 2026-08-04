@@ -1,4 +1,8 @@
-import { requireSignupPhoneProof, blockUnverifiedPhoneWrite } from '../phone-verification-guard';
+import {
+  requireSignupPhoneProof,
+  blockUnverifiedPhoneWrite,
+  requirePhoneVerified,
+} from '../phone-verification-guard';
 import { signPhoneProof } from '../../../utils/phone-verification';
 
 const SECRET = 'test-secret';
@@ -109,5 +113,105 @@ describe('blockUnverifiedPhoneWrite', () => {
       expect(await run(makeReq({ phone: null }))).toBeUndefined();
       expect(await run(makeReq({ first_name: 'A' }))).toBeUndefined();
     });
+  });
+});
+
+describe('requirePhoneVerified', () => {
+  // Same capture/restore as the two suites above — see their comment. Both keys
+  // are captured: this gate reads its own switch first.
+  const ORIGINAL_PHONE_VERIFICATION_REQUIRED =
+    process.env.PHONE_VERIFICATION_REQUIRED;
+  const ORIGINAL_PHONE_GATE_REQUIRED = process.env.PHONE_GATE_REQUIRED;
+  afterAll(() => {
+    if (ORIGINAL_PHONE_VERIFICATION_REQUIRED === undefined) {
+      delete process.env.PHONE_VERIFICATION_REQUIRED;
+    } else {
+      process.env.PHONE_VERIFICATION_REQUIRED = ORIGINAL_PHONE_VERIFICATION_REQUIRED;
+    }
+    if (ORIGINAL_PHONE_GATE_REQUIRED === undefined) {
+      delete process.env.PHONE_GATE_REQUIRED;
+    } else {
+      process.env.PHONE_GATE_REQUIRED = ORIGINAL_PHONE_GATE_REQUIRED;
+    }
+  });
+
+  // actorId '' models a register-token bearer (see the guard); `verified`
+  // throwing models a DB read failure, which must NOT become a free pass.
+  const gateReq = (
+    actorId: string | undefined,
+    verified: boolean | (() => never),
+  ) =>
+    ({
+      auth_context: actorId === undefined ? undefined : { actor_id: actorId },
+      scope: {
+        resolve: () => ({
+          isPhoneVerified: async () =>
+            typeof verified === 'function' ? verified() : verified,
+        }),
+      },
+    }) as never;
+
+  const run = (req: never) =>
+    new Promise<unknown>((resolve) => {
+      void requirePhoneVerified(req, {} as never, resolve);
+    });
+
+  it('passes untouched when enforcement is off, verified or not', async () => {
+    delete process.env.PHONE_VERIFICATION_REQUIRED;
+    expect(await run(gateReq('cus_1', false))).toBeUndefined();
+  });
+
+  // Both keys cleared before EVERY case, not just restored at the end: a
+  // machine that already exports PHONE_GATE_REQUIRED would otherwise silently
+  // decide these tests — 'false' makes every enforcement case pass vacuously,
+  // 'true' breaks the enforcement-off case. Each test sets only what it needs.
+  beforeEach(() => {
+    delete process.env.PHONE_VERIFICATION_REQUIRED;
+    delete process.env.PHONE_GATE_REQUIRED;
+  });
+
+  describe('enforcement on', () => {
+    beforeEach(() => {
+      process.env.PHONE_VERIFICATION_REQUIRED = 'true';
+    });
+    afterEach(() => {
+      delete process.env.PHONE_VERIFICATION_REQUIRED;
+    });
+
+    it('passes a verified customer', async () => {
+      expect(await run(gateReq('cus_1', true))).toBeUndefined();
+    });
+    it('refuses an unverified customer with actionable copy', async () => {
+      const err = (await run(gateReq('cus_1', false))) as Error;
+      expect(err).toBeInstanceOf(Error);
+      // The storefront error tables key on this text (vault-errors.ts,
+      // delivery-errors.ts) — a reword must break a test on both sides.
+      expect(err.message).toMatch(/verify your phone/i);
+    });
+    it('refuses a register-token bearer (actor_id is empty until linked)', async () => {
+      expect(await run(gateReq('', true))).toBeInstanceOf(Error);
+      expect(await run(gateReq(undefined, true))).toBeInstanceOf(Error);
+    });
+    it('fails CLOSED when the state read throws', async () => {
+      const boom = () => {
+        throw new Error('db down');
+      };
+      expect(await run(gateReq('cus_1', boom))).toBeInstanceOf(Error);
+    });
+
+    // The point of the separate switch: kill the money gate WITHOUT reopening
+    // the signup / phone-change gates, which stay on PHONE_VERIFICATION_REQUIRED.
+    it('opens when PHONE_GATE_REQUIRED overrides to false', async () => {
+      process.env.PHONE_GATE_REQUIRED = 'false';
+      expect(await run(gateReq('cus_1', false))).toBeUndefined();
+      delete process.env.PHONE_GATE_REQUIRED;
+    });
+  });
+
+  it('closes on its OWN flag even with phone verification off', async () => {
+    delete process.env.PHONE_VERIFICATION_REQUIRED;
+    process.env.PHONE_GATE_REQUIRED = 'true';
+    expect(await run(gateReq('cus_1', false))).toBeInstanceOf(Error);
+    delete process.env.PHONE_GATE_REQUIRED;
   });
 });

@@ -178,8 +178,12 @@ _Avoid_: token (that's the proof token below), password (this is a numeric code)
 **Proof Token**:
 Stateless HMAC-signed token — NOT a JWT: a custom 2-segment `base64url(payload).base64url(hmac)` format, domain-separated from the app's own HS256 JWTs (which share the same `jwtSecret`) via a fixed prefix in the HMAC input. 10-minute TTL, issued after successful OTP check. Single-purpose: proves one phone number for one flow (`signup` | `phone-change` | `password-reset`). Replay within TTL on the same phone is accepted (OTP resend cost is negligible). Different phones produce cryptographically distinct tokens.
 
-**Feature Flag** (`PHONE_VERIFICATION_REQUIRED`):
-Backend-only flag (env var). Enables phone-verification gates on signup and phone-change routes. When off, all gates open (rollback mechanism). Build-time storefront flag `NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED` displays OTP UI; flag drift is UX-only, backend gate is authoritative.
+**Feature Flags** — two backend env vars, deliberately separate because they have very different blast radii:
+
+- `PHONE_VERIFICATION_REQUIRED` — gates WRITING a phone: signup (`requireSignupPhoneProof`) and phone-change (`blockUnverifiedPhoneWrite`). Affects new signups only; turning it off costs nothing already banked. Also decides whether the `customer.created` subscriber stamps `phone_verified_at` (a phone written while it was off was never proven).
+- `PHONE_GATE_REQUIRED` — gates SPENDING and SHIPPING: `requirePhoneVerified` on `POST /store/credits/topup`, `/store/credits/deposit`, `/store/delivery-orders`. Blocks every account without a `customer_account_state.phone_verified_at` stamp — the large majority at cutover. **Unset means "follow `PHONE_VERIFICATION_REQUIRED`"**, so nothing has to be configured for the intended behaviour; it exists so the money path can be reopened in a hurry without also reopening unproven phone writes. Deliberately NOT applied to cancel or any read: an unverified player must still be able to unwind an order and see their own data.
+
+Build-time storefront flag `NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED` displays OTP UI; flag drift is UX-only, backend gates are authoritative. Verification state is visible per player in the admin Players list ("Phone verified" column).
 
 **Flows**:
 
@@ -225,7 +229,10 @@ Reordered from the original plan (Finding 3, pre-merge review): the original ord
 3. Set `NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED=true` in storefront **build environment** and rebuild — build-time-inlined, rebuilds ship the OTP UI. DONE 2026-08-04: root Dockerfile ARG default (the value that actually reaches the bundle — App Platform build-time env is unreliable) + the matching `.do/storefront.app.yaml` env; ships on merge (deploy_on_push). Signup/change/reset now work end-to-end WITHOUT enforcement: the OTP routes and the `x-phone-verification` header plumbing (`src/lib/actions/auth.ts`) aren't flag-gated, only `requireSignupPhoneProof`/`blockUnverifiedPhoneWrite` are — so there is no window where the storefront sends a proof token the backend doesn't yet require, or the reverse.
 4. Set backend `PHONE_VERIFICATION_REQUIRED=true` — enforcement turns on. The storefront has been sending proof tokens since step 3, so this step alone flips the gate closed with no outage: unlike the original order, nothing here waits on a storefront rebuild. DONE 2026-08-04: the flag is in `.do/backend.app.yaml`; it goes LIVE on the next `do-apply.ps1 backend`, run only after the step-3 storefront build is ACTIVE.
 5. Smoke test production: signup with a real phone number (operator's), phone change, forgot-by-phone flow. Watch backend logs for `[phone-otp]` warnings; monitor Twilio console for delivery success.
-6. Rollback lever (unchanged): flip backend `PHONE_VERIFICATION_REQUIRED` off first — every gate opens instantly, storefront unaffected (the OTP UI still works, just no longer required). Flip the storefront flag off + rebuild whenever convenient after that.
+6. Rollback levers — pick by what is actually hurting:
+   - **Money path only** (topup/deposit/delivery refusing verified-less accounts): set `PHONE_GATE_REQUIRED=false`. Reopens spending and shipping instantly; signup and phone-change stay gated, so nothing unproven gets written while you decide.
+   - **Everything**: flip `PHONE_VERIFICATION_REQUIRED` off. With `PHONE_GATE_REQUIRED` unset the money gate follows it, so this still opens every gate in one move — but if `PHONE_GATE_REQUIRED` has been set explicitly, it wins and must be cleared too.
+   - Storefront unaffected either way (the OTP UI still works, just no longer required). Flip the storefront flag off + rebuild whenever convenient after that.
 
 ## UI only — deliberately not domain
 

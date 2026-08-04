@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
-import { useHref } from 'react-router-dom';
+import { useHref, useNavigate } from 'react-router-dom';
 import {
   Checkbox,
   Container,
@@ -20,6 +20,7 @@ import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
   useBulkUpdateDeliveryOrders,
   useDeliveryOrders,
+  useGlobePayDeposits,
   usePulls,
   useUpdateDeliveryOrder,
   useUploadImage,
@@ -28,11 +29,13 @@ import type {
   AdminDeliveryItem,
   AdminDeliveryOrder,
   DeliveryStatus,
+  GlobePayDeposit,
 } from '../../lib/admin-rest';
 import {
   DELIVERY_STATUS_LABEL,
   deliveryStatusLabel,
   orderDateTime,
+  rm,
 } from '../../lib/format';
 import { resolveImageUrl } from '../../lib/image-url';
 import { Pager } from '../../components/Pager';
@@ -60,6 +63,22 @@ const TONE: Record<DeliveryStatus, 'orange' | 'blue' | 'green' | 'grey'> = {
   shipped: 'blue',
   completed: 'green',
   canceled: 'grey',
+};
+
+// Exhaustive over GlobePayDeposit['status'], so a new gateway status is a type
+// error here rather than a raw token in the badge.
+const DEPOSIT_TONE: Record<
+  GlobePayDeposit['status'],
+  'orange' | 'green' | 'red'
+> = {
+  pending: 'orange',
+  settled: 'green',
+  failed: 'red',
+};
+const DEPOSIT_STATUS_LABEL: Record<GlobePayDeposit['status'], string> = {
+  pending: 'Pending',
+  settled: 'Settled',
+  failed: 'Failed',
 };
 
 // First item's thumbnail + name/handle with a "+N more" tail — the operator
@@ -211,10 +230,116 @@ const PackPurchases = () => {
   );
 };
 
+// Money IN. Same rows as the standalone /deposits screen (which keeps its
+// reconciliation tooling — the stale-pending warning, the status filter); this
+// tab exists so "All Orders" actually means all of them, and reuses that
+// screen's query rather than growing a second deposits endpoint.
+// Read-only: a deposit is settled by the gateway callback or the sweep, never
+// by hand here.
+const Topups = () => {
+  const navigate = useNavigate();
+  const [page, setPage] = useState(0);
+  const { data, isError } = useGlobePayDeposits(page, 'all');
+  const deposits = data?.deposits ?? null;
+
+  return (
+    <>
+      {isError ? (
+        <div className="px-6 py-8">
+          <Text className="text-ui-fg-subtle">Failed to load topups.</Text>
+        </div>
+      ) : deposits === null ? (
+        <div className="px-6 py-8">
+          <LoadingSkeleton />
+        </div>
+      ) : deposits.length === 0 ? (
+        <div className="px-6 py-8">
+          <Text className="text-ui-fg-subtle">No topups yet.</Text>
+        </div>
+      ) : (
+        <div
+          className="overflow-x-auto"
+          tabIndex={0}
+          role="region"
+          aria-label="Topups table"
+        >
+          <Table>
+            <Table.Header>
+              <Table.Row>
+                <Table.HeaderCell>Reference</Table.HeaderCell>
+                <Table.HeaderCell>Date</Table.HeaderCell>
+                <Table.HeaderCell>Method</Table.HeaderCell>
+                <Table.HeaderCell className="text-right">
+                  Requested
+                </Table.HeaderCell>
+                <Table.HeaderCell className="text-right">
+                  Settled
+                </Table.HeaderCell>
+                <Table.HeaderCell>Player</Table.HeaderCell>
+                <Table.HeaderCell>Status</Table.HeaderCell>
+              </Table.Row>
+            </Table.Header>
+            <Table.Body>
+              {deposits.map((d) => (
+                <Table.Row key={d.id}>
+                  <Table.Cell className="font-mono text-xs break-all">
+                    {d.merchant_transaction_id}
+                  </Table.Cell>
+                  <Table.Cell className="text-ui-fg-subtle whitespace-nowrap text-xs">
+                    {orderDateTime(d.created_at)}
+                  </Table.Cell>
+                  <Table.Cell>{d.payment_method_code}</Table.Cell>
+                  <Table.Cell className="text-right tabular-nums whitespace-nowrap">
+                    {rm(d.amount_requested)}
+                  </Table.Cell>
+                  <Table.Cell className="text-ui-fg-subtle text-right tabular-nums whitespace-nowrap">
+                    {d.amount_settled === null ? '—' : rm(d.amount_settled)}
+                  </Table.Cell>
+                  <Table.Cell className="text-ui-fg-subtle">
+                    <button
+                      type="button"
+                      className="text-ui-fg-interactive hover:underline"
+                      onClick={() => navigate(`/customers/${d.customer_id}`)}
+                    >
+                      {d.customer_email ?? d.customer_id.slice(0, 8)}
+                    </button>
+                  </Table.Cell>
+                  {/* A pending row past the sweep's stale window is the one
+                      case that needs an operator — same signal the /deposits
+                      screen leads with. */}
+                  <Table.Cell>
+                    <StatusBadge color={DEPOSIT_TONE[d.status]}>
+                      {d.status === 'pending' && d.stale
+                        ? 'Stale'
+                        : DEPOSIT_STATUS_LABEL[d.status]}
+                    </StatusBadge>
+                  </Table.Cell>
+                </Table.Row>
+              ))}
+            </Table.Body>
+          </Table>
+        </div>
+      )}
+
+      {data && (
+        <Pager
+          page={page}
+          onPage={setPage}
+          pageSize={data.limit}
+          count={data.deposits.length}
+          total={data.total}
+        />
+      )}
+    </>
+  );
+};
+
+type OrderKind = 'shipping' | 'purchases' | 'topups';
+
 const DeliveriesPage = () => {
   // Which kind of record the page is showing. 'shipping' is everything the page
   // did before: status tabs, id search, bulk tool, Manage modal.
-  const [kind, setKind] = useState<'shipping' | 'purchases'>('shipping');
+  const [kind, setKind] = useState<OrderKind>('shipping');
   const [filter, setFilter] = useState<DeliveryStatus | undefined>(undefined);
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState('');
@@ -300,7 +425,9 @@ const DeliveriesPage = () => {
       const refused = skipped.filter((s) => s.reason !== benign);
       const noop = skipped.length - refused.length;
       const tail = [
-        noop > 0 ? `${noop} already ${DELIVERY_STATUS_LABEL[bulkStatus]}` : null,
+        noop > 0
+          ? `${noop} already ${DELIVERY_STATUS_LABEL[bulkStatus]}`
+          : null,
         refused.length > 0 ? `${refused.length} skipped` : null,
       ]
         .filter(Boolean)
@@ -382,7 +509,7 @@ const DeliveriesPage = () => {
           <div>
             <Heading level="h2">All Orders</Heading>
             <Text className="text-ui-fg-subtle mt-1" size="small">
-              Orders and physical shipment requests.
+              Physical shipment requests, pack purchases and credit topups.
             </Text>
           </div>
           {kind === 'shipping' && (
@@ -403,13 +530,11 @@ const DeliveriesPage = () => {
         {/* Two tablists now, so each needs its own name to tell them apart.
             Switching kind deliberately leaves the shipping state (filter,
             search, page, selection) alone — toggling back restores the view. */}
-        <Tabs
-          value={kind}
-          onValueChange={(v) => setKind(v as 'shipping' | 'purchases')}
-        >
+        <Tabs value={kind} onValueChange={(v) => setKind(v as OrderKind)}>
           <Tabs.List aria-label="Record kind">
             <Tabs.Trigger value="shipping">Shipping</Tabs.Trigger>
             <Tabs.Trigger value="purchases">Pack purchases</Tabs.Trigger>
+            <Tabs.Trigger value="topups">Topups</Tabs.Trigger>
           </Tabs.List>
         </Tabs>
         {kind === 'shipping' && (
@@ -434,6 +559,7 @@ const DeliveriesPage = () => {
       </div>
 
       {kind === 'purchases' && <PackPurchases />}
+      {kind === 'topups' && <Topups />}
 
       {kind === 'shipping' && selected.size > 0 && (
         <div

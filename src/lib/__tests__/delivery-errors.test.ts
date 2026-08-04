@@ -48,6 +48,14 @@ describe('DELIVERY_RULES backend-message contract', () => {
     );
   });
 
+  // The phone gate is a NOT_ALLOWED, same class as "no longer available" —
+  // so its rule has to win, or the customer is told to fix the wrong thing.
+  it('keeps the phone-verification rule ahead of the broad not-allowed rule', () => {
+    expect(map('Verify your phone number before continuing.')).toBe(
+      'Verify your phone number in Account settings before requesting delivery.',
+    );
+  });
+
   it('falls back on unknown text without leaking it', () => {
     expect(map('ECONNRESET raw socket detail')).toBe(DELIVERY_FALLBACK);
   });

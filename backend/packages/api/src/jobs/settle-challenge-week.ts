@@ -62,6 +62,36 @@ export default async function settleChallengeWeekJob(
       });
     },
   });
+
+  // Promotion runs AFTER settlement, and that order is the whole design: the
+  // week that just ended must be paid with the stages it actually ran on. Swap
+  // these two and a scheduled edition that came due overnight would pay out
+  // last week's winners on next week's prize table.
+  //
+  // Same hourly tick as settlement for the same reason — cron cannot read the
+  // admin-configured cadence (schedule is static at boot), so the gate does the
+  // honoring: `applied_at` makes extra runs no-ops.
+  try {
+    const { promoted, failed } = await packs.promoteDueChallengeSchedules();
+    if (promoted > 0) {
+      warn(
+        `[settle-challenge-week] promoted ${promoted} scheduled challenge(s)`,
+      );
+    }
+    if (failed > 0) {
+      // Left unstamped on purpose — it retries next hour and stays visible in
+      // the admin's Scheduled tab. Usually a prize card deleted since queueing.
+      warn(
+        `[settle-challenge-week] ${failed} scheduled challenge(s) FAILED to promote and will be retried — check their prize cards still exist`,
+      );
+    }
+  } catch (e) {
+    // Never let promotion take the settlement job down: the winners above are
+    // already paid, and a thrown job hides that in the crash.
+    warn(
+      `[settle-challenge-week] schedule promotion failed: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
 }
 
 export const config = {

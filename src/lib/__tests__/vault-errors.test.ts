@@ -58,6 +58,12 @@ describe('VAULT_RULES backend-message contract', () => {
     );
   });
 
+  it('points an unverified customer at the screen that clears the gate', () => {
+    expect(map('Verify your phone number before continuing.')).toBe(
+      'Verify your phone number in Account settings before topping up.',
+    );
+  });
+
   it('falls back for an unrecognised message', () => {
     expect(map('kaboom')).toBe(VAULT_FALLBACK);
   });

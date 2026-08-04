@@ -49,24 +49,26 @@ const STATUS_LABEL: Record<DeliveryOrderView['status'], string> = {
   canceled: 'Canceled',
 };
 
-// The two pre-ship windows mirror the backend's guards, and they differ:
-// the address locks from `ready_to_ship` on (a printed label must not diverge
-// from it), while cancel stays open until the parcel actually ships. `packing`
-// is the legacy expand-window token (~`processed`): the backend's own EDITABLE
-// and CANCELABLE lists accept it, so offering the affordance here is a call it
-// honors, not one it refuses. These sets must keep agreeing with those two
-// backend lists — all three drop `packing` in the same release as the CONTRACT
-// migration named in Migration20260727000000.
+// Both pre-ship windows close at `processed`: from `ready_to_ship` on the
+// parcel is picked and its label printed, so neither the address nor the order
+// itself is the customer's to change any more — cancelling then is a support
+// (or operator) action. `packing` is the legacy expand-window token
+// (~`processed`): the backend's own EDITABLE and CANCELABLE lists accept it, so
+// offering the affordance here is a call it honors, not one it refuses. These
+// sets must keep agreeing with those two backend lists — both drop `packing` in
+// the same release as the CONTRACT migration named in Migration20260727000000.
 const ADDRESS_EDITABLE: ReadonlySet<DeliveryOrderView['status']> = new Set([
   'requested',
   'packing',
   'processed',
 ]);
+// Same members as ADDRESS_EDITABLE today, spelled out rather than aliased: they
+// are two independent backend lists that happen to agree, and aliasing would
+// make a future change to one silently move the other.
 const CANCELABLE: ReadonlySet<DeliveryOrderView['status']> = new Set([
   'requested',
   'packing',
   'processed',
-  'ready_to_ship',
 ]);
 
 // Only render http(s) or same-origin root-relative proof URLs — never a

@@ -44,6 +44,7 @@ import RewardBox from './models/reward-box';
 import RewardBoxPrize from './models/reward-box-prize';
 import PixelPokemon from './models/pixel-pokemon';
 import ChallengeStage from './models/challenge-stage';
+import ChallengeSchedule from './models/challenge-schedule';
 import ChallengeSettings from './models/challenge-settings';
 import TierSettings from './models/tier-settings';
 import GlobePayDeposit from './models/globepay-deposit';
@@ -477,6 +478,7 @@ class PacksModuleService extends MedusaService({
   RewardBoxPrize,
   PixelPokemon,
   ChallengeStage,
+  ChallengeSchedule,
   ChallengeSettings,
   TierSettings,
   GlobePayDeposit,
@@ -2205,6 +2207,62 @@ class PacksModuleService extends MedusaService({
     return { disabled: input.disabled };
   }
 
+  // Has this account ever completed SMS verification? One read, mirroring
+  // isAccountDisabled. The stateless OTP proof cannot answer this (10m TTL),
+  // and `customer.phone` is not a proxy for it — see the model's comment.
+  @InjectManager()
+  async isPhoneVerified(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<boolean> {
+    const [state] = await this.listCustomerAccountStates(
+      { customer_id: customerId },
+      { select: ['phone_verified_at'], take: 1 },
+      sharedContext,
+    );
+    return Boolean(state?.phone_verified_at);
+  }
+
+  // Stamp the account as phone-verified. Called from the two paths that can
+  // only be reached WITH a valid OTP proof: the phone-change route, and the
+  // customer.created subscriber (requireSignupPhoneProof middleware has already
+  // rejected an unproven signup phone by the time the customer row exists).
+  //
+  // Idempotent and first-write-wins: re-verifying a number later must not move
+  // the timestamp, because it records when the account was first trusted.
+  // Same advisory key as the other account-state upserts, so two concurrent
+  // first-writes can't race the unique customer_id to a 23505.
+  @InjectTransactionManager()
+  async markPhoneVerified(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `credit:${customerId}`,
+    ]);
+    const [existing] = await this.listCustomerAccountStates(
+      { customer_id: customerId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (existing?.phone_verified_at) return;
+    if (existing) {
+      await this.updateCustomerAccountStates(
+        {
+          selector: { id: existing.id },
+          data: { phone_verified_at: new Date() },
+        },
+        sharedContext,
+      );
+    } else {
+      await this.createCustomerAccountStates(
+        [{ customer_id: customerId, phone_verified_at: new Date() }],
+        sharedContext,
+      );
+    }
+  }
+
   // True if the customer's login is administratively disabled. One indexed read
   // on the auth path — mirrors isFrozen.
   @InjectManager()
@@ -3725,7 +3783,13 @@ class PacksModuleService extends MedusaService({
     const vault = new Map<string, { count: number; cents: number }>();
     const pullCount = new Map<string, number>();
     const vipLevel = new Map<string, number>();
-    const state = new Map<string, { frozen: boolean; disabled: boolean }>();
+    // phoneVerified rides along on a query that already reads this row: with
+    // the topup/delivery gate live, "why can't this player top up?" is the
+    // question the Players list has to be able to answer.
+    const state = new Map<
+      string,
+      { frozen: boolean; disabled: boolean; phoneVerified: boolean }
+    >();
     if (ids.length === 0) return { wallet, vault, pullCount, vipLevel, state };
 
     const em = (sharedContext.transactionManager ??
@@ -3767,9 +3831,14 @@ class PacksModuleService extends MedusaService({
       ids,
     );
     const states = await em.execute<
-      { customer_id: string; frozen: boolean; disabled: boolean }[]
+      {
+        customer_id: string;
+        frozen: boolean;
+        disabled: boolean;
+        phone_verified_at: string | null;
+      }[]
     >(
-      `SELECT customer_id, frozen, disabled FROM customer_account_state WHERE customer_id IN (${ph}) AND deleted_at IS NULL`,
+      `SELECT customer_id, frozen, disabled, phone_verified_at FROM customer_account_state WHERE customer_id IN (${ph}) AND deleted_at IS NULL`,
       ids,
     );
 
@@ -3787,6 +3856,7 @@ class PacksModuleService extends MedusaService({
       state.set(r.customer_id, {
         frozen: Boolean(r.frozen),
         disabled: Boolean(r.disabled),
+        phoneVerified: r.phone_verified_at !== null,
       });
     return { wallet, vault, pullCount, vipLevel, state };
   }
@@ -5914,6 +5984,166 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     return after;
+  }
+
+  // Promote every challenge_schedule row whose start has passed into the LIVE
+  // stage table, oldest first, and stamp it applied.
+  //
+  // Oldest-first matters: if the job missed a tick and two editions came due,
+  // replaying them in order leaves the newest one live, which is what the
+  // operator queued. Each promotion is its own transaction (@InjectManager
+  // here, saveChallengeStages opens its own) so one bad edition — a prize card
+  // deleted since it was queued — cannot roll back the ones that already
+  // landed. That row simply stays unapplied and is retried next hour, which is
+  // the loud-but-recoverable state: the operator sees it stuck in the Scheduled
+  // tab rather than silently losing a week's prizes.
+  //
+  // `applied_at` is the idempotency gate — the filter below excludes stamped
+  // rows, so re-running this is a no-op.
+  //
+  // No advisory lock, unlike the sibling writes in this service: the promotion
+  // runs from ONE place, the settle-challenge-week cron, and the worker that
+  // runs it is `instance_count: 1` under a split MEDUSA_WORKER_MODE (see
+  // .do/backend.app.yaml). Scaling that worker past one would let two runs both
+  // read `applied_at: null` and double-write the live stage table — take a lock
+  // here before doing that.
+  //
+  // The save and its `applied_at` stamp share ONE transaction per row
+  // (promoteOneChallengeSchedule). Separately, a stamp failure would leave the
+  // ladder replaced but the row still due — and the next hour's retry would
+  // then overwrite whatever an operator edited in between. Per-row rather than
+  // per-batch, so the failure isolation below is unaffected: one bad edition
+  // rolls back alone.
+  @InjectManager()
+  async promoteDueChallengeSchedules(
+    now: Date = new Date(),
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ promoted: number; failed: number }> {
+    const due = await this.listChallengeSchedules(
+      { applied_at: null, starts_at: { $lte: now } },
+      {
+        select: ['id', 'starts_at', 'label', 'stages'],
+        order: { starts_at: 'ASC' },
+        take: 100,
+      },
+      sharedContext,
+    );
+    let promoted = 0;
+    let failed = 0;
+    for (const row of due) {
+      try {
+        // Context MUST be threaded: without it the callee's
+        // @InjectTransactionManager has no manager to inherit and no repository
+        // to open one from. In production this carries a plain read context, so
+        // each row opens its OWN transaction — which is exactly the per-row
+        // atomicity wanted.
+        await this.promoteOneChallengeSchedule(row, sharedContext);
+        promoted += 1;
+      } catch {
+        // Swallowed on purpose: a later edition must still get its chance, and
+        // the unstamped row IS the error report (visible in the admin, retried
+        // hourly). The caller logs the count.
+        failed += 1;
+      }
+    }
+    return { promoted, failed };
+  }
+
+  /**
+   * One edition: replace the live stages and stamp the row applied, in a single
+   * transaction.
+   *
+   * Both writes or neither. If the stamp failed on its own, the ladder would
+   * already be replaced while the row stayed due — and the next hourly retry
+   * would re-run saveChallengeStages, silently reverting any edit an operator
+   * made to the live ladder in the meantime.
+   *
+   * The stage write goes through the normal save path, NOT a raw write: that is
+   * what validates the prize cards still exist and what writes the audit row,
+   * so a promoted edition is indistinguishable from a hand-saved one. Both
+   * callees are @InjectTransactionManager and receive this method's context, so
+   * they join this transaction rather than opening their own.
+   */
+  @InjectTransactionManager()
+  async promoteOneChallengeSchedule(
+    row: { id: string; label: string | null; starts_at: Date; stages: unknown },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    await this.saveChallengeStages(
+      {
+        stages: (row.stages as ChallengeStageInput[]) ?? [],
+        adminId: 'system',
+        reason: `Scheduled challenge promoted (${row.label ?? new Date(row.starts_at).toISOString()})`,
+      },
+      sharedContext,
+    );
+    await this.updateChallengeSchedules(
+      { selector: { id: row.id }, data: { applied_at: new Date() } },
+      sharedContext,
+    );
+  }
+
+  // The settled weeks, newest first, with enough per-week summary to drive a
+  // selector without loading every payout row.
+  //
+  // Raw SQL because this is a GROUP BY: the generated list methods return rows,
+  // and deriving the week list from them client-side means paging every payout
+  // ever written just to learn which weeks exist — the same unbounded-window
+  // trap the schedule list had.
+  //
+  // `skipped` is the reason this read exists at all. A card the settlement
+  // could not grant for stock is recorded and then only ever mentioned in a job
+  // log line; counting it per week is what turns it into a queue someone can
+  // actually work.
+  @InjectManager()
+  async challengeWinnerWeeks(
+    limit = 26,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<
+    {
+      weekStart: string;
+      winners: number;
+      credits: number;
+      cards: number;
+      skipped: number;
+    }[]
+  > {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<
+      {
+        week_start: Date;
+        winners: string;
+        credits: string | null;
+        cards: string;
+        skipped: string;
+      }[]
+    >(
+      `SELECT week_start,
+              COUNT(DISTINCT customer_id) AS winners,
+              COALESCE(SUM(credits), 0) AS credits,
+              -- GRANTED cards only. A skipped_no_stock row is still kind
+              -- 'card', so counting the kind alone reports a card handed over
+              -- when none was — on the very week the operator is being told
+              -- one is owed.
+              COUNT(*) FILTER (
+                WHERE kind = 'card' AND status <> 'skipped_no_stock'
+              ) AS cards,
+              COUNT(*) FILTER (WHERE status = 'skipped_no_stock') AS skipped
+         FROM challenge_payout
+        WHERE deleted_at IS NULL
+        GROUP BY week_start
+        ORDER BY week_start DESC
+        LIMIT ?`,
+      [limit],
+    );
+    return rows.map((r) => ({
+      weekStart: new Date(r.week_start).toISOString(),
+      winners: Number(r.winners),
+      credits: Number(r.credits ?? 0),
+      cards: Number(r.cards),
+      skipped: Number(r.skipped),
+    }));
   }
 
   // Community pool for the CURRENT challenge week: Σ pulled value across all
