@@ -122,6 +122,18 @@ updates:
       - dependency-name: 'typescript'
         update-types:
           - version-update:semver-major
+      # #364 bumped ioredis 5.11.1 -> 6.0.0. Every Medusa Redis module pins
+      # ioredis ^5.4.1 (event-bus-redis, cache-redis, workflow-engine-redis,
+      # locking-redis), so a solo major either splits the tree — our
+      # api/utils/rate-limit.ts on v6, the framework's queues, cache and
+      # distributed locks on v5 — or forces a resolution the framework was
+      # never tested against. Redis carries the event bus, the workflow engine
+      # and the locks, so a mismatch there fails at BOOT while unit tests stay
+      # green (exactly how the mikro-orm 6.6 bump behaved). Moves with the
+      # @medusajs/* family, gated on the integration suites.
+      - dependency-name: 'ioredis'
+        update-types:
+          - version-update:semver-major
 
   # NOTE: there is deliberately NO updater for /backend/apps/admin. The yarn
   # workspace lockfile lives at /backend, so an updater rooted at the admin app
