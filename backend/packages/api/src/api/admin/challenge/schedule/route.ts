@@ -42,24 +42,43 @@ const view = (r: {
   stages: (r.stages as ScheduleView['stages']) ?? [],
 });
 
-// GET /admin/challenge/schedule — the queue, soonest first. Already-promoted
-// rows come back too (with applied_at set): the operator needs to see that last
-// week's edition went live, and a row that FAILED to promote is exactly a due
-// row that is still unstamped.
+// How much promoted history to show beside the queue. Enough to answer "why did
+// the ladder change?" without letting old rows crowd out pending ones.
+const HISTORY_LIMIT = 20;
+const QUEUE_LIMIT = 100;
+
+// GET /admin/challenge/schedule — the queue, soonest first, plus a little
+// already-promoted history: the operator needs to see that last week's edition
+// went live, and a row that FAILED to promote is exactly a due row still
+// unstamped.
+//
+// TWO queries, not one ordered window. A single `order: starts_at ASC, take:
+// 100` puts the OLDEST rows first — so once ~100 editions have accumulated
+// (two years of weekly use) every newly queued row falls outside the window and
+// the Scheduled tab silently stops showing it. An operator whose entry does not
+// appear queues it again, which is the worst possible failure for a table that
+// replaces the live prize ladder.
 export async function GET(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
-  const rows = await packs.listChallengeSchedules(
-    {},
-    {
-      select: ['id', 'starts_at', 'label', 'applied_at', 'stages'],
-      order: { starts_at: 'ASC' },
-      take: 100,
-    },
+  const select = ['id', 'starts_at', 'label', 'applied_at', 'stages'];
+  // Sequential, not Promise.all: both resolve the same injected manager, and
+  // overlapping them is two concurrent queries on one connection — this repo's
+  // "pool is probably full" shape (same rule as settleChallengeWeek's reads).
+  const pending = await packs.listChallengeSchedules(
+    { applied_at: null },
+    { select, order: { starts_at: 'ASC' }, take: QUEUE_LIMIT },
   );
-  res.json({ schedules: rows.map(view) });
+  const history = await packs.listChallengeSchedules(
+    { applied_at: { $ne: null } },
+    { select, order: { starts_at: 'DESC' }, take: HISTORY_LIMIT },
+  );
+  // Queue first, in the order it will fire — a due-but-unstamped row (a
+  // promotion that threw) sorts to the very top, which is where the one row
+  // needing a person belongs. Promoted history follows as the record.
+  res.json({ schedules: [...pending.map(view), ...history.map(view)] });
 }
 
 // POST /admin/challenge/schedule — queue one. Same stage validation as the

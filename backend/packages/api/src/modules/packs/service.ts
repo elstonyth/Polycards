@@ -3783,7 +3783,13 @@ class PacksModuleService extends MedusaService({
     const vault = new Map<string, { count: number; cents: number }>();
     const pullCount = new Map<string, number>();
     const vipLevel = new Map<string, number>();
-    const state = new Map<string, { frozen: boolean; disabled: boolean }>();
+    // phoneVerified rides along on a query that already reads this row: with
+    // the topup/delivery gate live, "why can't this player top up?" is the
+    // question the Players list has to be able to answer.
+    const state = new Map<
+      string,
+      { frozen: boolean; disabled: boolean; phoneVerified: boolean }
+    >();
     if (ids.length === 0) return { wallet, vault, pullCount, vipLevel, state };
 
     const em = (sharedContext.transactionManager ??
@@ -3825,9 +3831,14 @@ class PacksModuleService extends MedusaService({
       ids,
     );
     const states = await em.execute<
-      { customer_id: string; frozen: boolean; disabled: boolean }[]
+      {
+        customer_id: string;
+        frozen: boolean;
+        disabled: boolean;
+        phone_verified_at: string | null;
+      }[]
     >(
-      `SELECT customer_id, frozen, disabled FROM customer_account_state WHERE customer_id IN (${ph}) AND deleted_at IS NULL`,
+      `SELECT customer_id, frozen, disabled, phone_verified_at FROM customer_account_state WHERE customer_id IN (${ph}) AND deleted_at IS NULL`,
       ids,
     );
 
@@ -3845,6 +3856,7 @@ class PacksModuleService extends MedusaService({
       state.set(r.customer_id, {
         frozen: Boolean(r.frozen),
         disabled: Boolean(r.disabled),
+        phoneVerified: r.phone_verified_at !== null,
       });
     return { wallet, vault, pullCount, vipLevel, state };
   }
@@ -5988,6 +6000,19 @@ class PacksModuleService extends MedusaService({
   //
   // `applied_at` is the idempotency gate — the filter below excludes stamped
   // rows, so re-running this is a no-op.
+  //
+  // No advisory lock, unlike the sibling writes in this service: the promotion
+  // runs from ONE place, the settle-challenge-week cron, and the worker that
+  // runs it is `instance_count: 1` under a split MEDUSA_WORKER_MODE (see
+  // .do/backend.app.yaml). Scaling that worker past one would let two runs both
+  // read `applied_at: null` and double-write the live stage table — take a lock
+  // here before doing that.
+  //
+  // The save and its `applied_at` stamp are also separate transactions. A stamp
+  // failure re-promotes next hour, which is harmless (same stages) except that
+  // it would revert a manual live-ladder edit made in the intervening hour and
+  // leave a second audit row. Accepted: the alternative couples every promotion
+  // to one transaction and loses the per-row failure isolation below.
   @InjectManager()
   async promoteDueChallengeSchedules(
     now: Date = new Date(),

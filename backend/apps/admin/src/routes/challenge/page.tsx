@@ -29,6 +29,7 @@ import { resolveImageUrl } from '../../lib/image-url';
 import { orderDateTime, rm } from '../../lib/format';
 import {
   describeInShopZone,
+  isWeeklyResetInstant,
   nextWeeklyReset,
   toLocalInput,
 } from '../../lib/challenge-schedule';
@@ -751,6 +752,19 @@ const AddChallengeModal = ({
                     {settings.timezone}
                   </Text>
                 )}
+                {/* Not an error — a mid-week start is legal and occasionally
+                    deliberate. But it promotes under players who are already
+                    competing on the current thresholds, and the settlement that
+                    follows pays that finished week on the NEW table, so the
+                    operator should be choosing it rather than inheriting it. */}
+                {startValid &&
+                  settings &&
+                  !isWeeklyResetInstant(settings, start) && (
+                    <Text className="text-ui-fg-subtle" size="small">
+                      ⚠ Not a weekly reset — this replaces the ladder mid-week,
+                      and the finished week settles on the new prizes.
+                    </Text>
+                  )}
               </div>
               <div className="flex min-w-64 flex-1 flex-col gap-y-1">
                 <Label htmlFor="schedule-label" size="small">
@@ -791,6 +805,9 @@ const AddChallengeModal = ({
 const ScheduleTab = () => {
   const { data, isError } = useChallengeSchedules();
   const { data: live } = useChallengeStages();
+  // Already cached by the modal and the Week & Reset tab — this only needs the
+  // timezone, to render the queue in the shop's clock rather than the browser's.
+  const { data: settings } = useChallengeSettings();
   const remove = useDeleteChallengeSchedule();
   const [adding, setAdding] = useState(false);
 
@@ -833,18 +850,30 @@ const ScheduleTab = () => {
           <Table.Body>
             {schedules.map((s) => {
               const due = new Date(s.starts_at).getTime() <= now;
-              // Due but unstamped = the promotion threw (usually a prize card
-              // deleted since queueing) and is being retried hourly. Saying so
-              // is the only place the operator can learn it.
+              // Due but unstamped. Usually a prize card deleted since queueing
+              // — but it is ALSO what a failing weekly settlement looks like,
+              // because promotion runs after settlement and never gets its
+              // turn. Naming only the first cause would send the operator to
+              // the wrong screen, so the copy names both and the job log is
+              // where the answer actually is.
               const status = s.applied_at
                 ? 'Live'
                 : due
-                  ? 'Retrying — check its prize cards still exist'
+                  ? 'Overdue — check its prize cards, then the settle job log'
                   : 'Queued';
               return (
                 <Table.Row key={s.id}>
+                  {/* Shop timezone, not browser: orderDateTime renders local
+                      wall-clock unlabelled, so an operator abroad would read
+                      the queue in a different zone than the one the modal
+                      warns them about. */}
                   <Table.Cell className="whitespace-nowrap tabular-nums">
-                    {orderDateTime(s.starts_at)}
+                    {settings
+                      ? describeInShopZone(
+                          new Date(s.starts_at),
+                          settings.timezone,
+                        )
+                      : orderDateTime(s.starts_at)}
                   </Table.Cell>
                   <Table.Cell>{s.label ?? '—'}</Table.Cell>
                   <Table.Cell className="text-ui-fg-subtle">

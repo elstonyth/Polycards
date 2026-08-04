@@ -117,14 +117,21 @@ describe('blockUnverifiedPhoneWrite', () => {
 });
 
 describe('requirePhoneVerified', () => {
-  // Same capture/restore as the two suites above — see their comment.
+  // Same capture/restore as the two suites above — see their comment. Both keys
+  // are captured: this gate reads its own switch first.
   const ORIGINAL_PHONE_VERIFICATION_REQUIRED =
     process.env.PHONE_VERIFICATION_REQUIRED;
+  const ORIGINAL_PHONE_GATE_REQUIRED = process.env.PHONE_GATE_REQUIRED;
   afterAll(() => {
     if (ORIGINAL_PHONE_VERIFICATION_REQUIRED === undefined) {
       delete process.env.PHONE_VERIFICATION_REQUIRED;
     } else {
       process.env.PHONE_VERIFICATION_REQUIRED = ORIGINAL_PHONE_VERIFICATION_REQUIRED;
+    }
+    if (ORIGINAL_PHONE_GATE_REQUIRED === undefined) {
+      delete process.env.PHONE_GATE_REQUIRED;
+    } else {
+      process.env.PHONE_GATE_REQUIRED = ORIGINAL_PHONE_GATE_REQUIRED;
     }
   });
 
@@ -182,5 +189,20 @@ describe('requirePhoneVerified', () => {
       };
       expect(await run(gateReq('cus_1', boom))).toBeInstanceOf(Error);
     });
+
+    // The point of the separate switch: kill the money gate WITHOUT reopening
+    // the signup / phone-change gates, which stay on PHONE_VERIFICATION_REQUIRED.
+    it('opens when PHONE_GATE_REQUIRED overrides to false', async () => {
+      process.env.PHONE_GATE_REQUIRED = 'false';
+      expect(await run(gateReq('cus_1', false))).toBeUndefined();
+      delete process.env.PHONE_GATE_REQUIRED;
+    });
+  });
+
+  it('closes on its OWN flag even with phone verification off', async () => {
+    delete process.env.PHONE_VERIFICATION_REQUIRED;
+    process.env.PHONE_GATE_REQUIRED = 'true';
+    expect(await run(gateReq('cus_1', false))).toBeInstanceOf(Error);
+    delete process.env.PHONE_GATE_REQUIRED;
   });
 });

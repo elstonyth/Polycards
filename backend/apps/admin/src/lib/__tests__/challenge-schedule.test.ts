@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   nextWeeklyReset,
   describeInShopZone,
+  isWeeklyResetInstant,
+  toLocalInput,
   zoneOffsetMs,
 } from '../challenge-schedule';
 
@@ -65,6 +67,51 @@ describe('nextWeeklyReset', () => {
       new Date('2026-08-05T10:00:00Z'),
     );
     expect(iso(next)).toBe('2026-08-10T01:00:00.000Z'); // 09:00 +08
+  });
+});
+
+describe('isWeeklyResetInstant', () => {
+  it('accepts the boundary nextWeeklyReset produces', () => {
+    // The two have to agree or the form warns about its own default.
+    const next = nextWeeklyReset(KL, new Date('2026-08-05T10:00:00Z'));
+    expect(isWeeklyResetInstant(KL, next)).toBe(true);
+  });
+
+  it('accepts a boundary that is already in the past', () => {
+    // The predicate answers "is this a boundary?", not "is it schedulable" —
+    // the margin belongs to nextWeeklyReset alone.
+    expect(isWeeklyResetInstant(KL, new Date('2026-07-26T16:00:00Z'))).toBe(
+      true,
+    );
+  });
+
+  it('rejects a mid-week instant', () => {
+    // Wednesday 12:00 KL — the case the modal warns about.
+    expect(isWeeklyResetInstant(KL, new Date('2026-08-12T04:00:00Z'))).toBe(
+      false,
+    );
+  });
+
+  it('rejects the right hour on the wrong day and the wrong hour on the right day', () => {
+    // Sunday 00:00 KL (a day early) and Monday 01:00 KL (an hour late).
+    expect(isWeeklyResetInstant(KL, new Date('2026-08-08T16:00:00Z'))).toBe(
+      false,
+    );
+    expect(isWeeklyResetInstant(KL, new Date('2026-08-09T17:00:00Z'))).toBe(
+      false,
+    );
+  });
+
+  it('rejects an invalid date instead of throwing', () => {
+    expect(isWeeklyResetInstant(KL, new Date('nope'))).toBe(false);
+  });
+});
+
+describe('toLocalInput', () => {
+  it('returns empty string for an invalid date rather than throwing', () => {
+    // toISOString throws RangeError on Invalid Date, and this runs during
+    // render — a white-screened modal is worse than an empty field.
+    expect(toLocalInput(new Date('nope'))).toBe('');
   });
 });
 

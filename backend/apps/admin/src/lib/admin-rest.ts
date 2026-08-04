@@ -1060,6 +1060,10 @@ export interface PlayerRow {
   /** Funds hold. Orthogonal to `disabled` (login block). */
   frozen: boolean;
   disabled: boolean;
+  /** Has this account ever completed SMS verification? Orthogonal to both flags
+   *  above: an unverified account can log in and browse, it just cannot top up
+   *  or request delivery while the phone gate is on. */
+  phone_verified: boolean;
 }
 
 export interface PlayersPage {

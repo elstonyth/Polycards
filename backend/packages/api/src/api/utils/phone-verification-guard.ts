@@ -8,6 +8,7 @@ import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
 import {
+  isPhoneGateRequired,
   isPhoneVerificationRequired,
   verifyPhoneProof,
 } from '../../utils/phone-verification';
@@ -71,6 +72,11 @@ export const requireSignupPhoneProof = (
  * verified must still be able to unwind an order and see their own data —
  * the gate exists to stop unverified value MOVING, not to lock the account.
  *
+ * Gated on its OWN flag (isPhoneGateRequired), which falls back to
+ * PHONE_VERIFICATION_REQUIRED when unset: blocking every unverified account
+ * from topping up is a far larger blast radius than refusing an unproven phone
+ * WRITE, and the two have to be rollback-able separately.
+ *
  * Reads the env flag per request for the same reason the two gates above do:
  * the http specs flip it without rebooting the app.
  */
@@ -79,7 +85,7 @@ export const requirePhoneVerified = async (
   _res: MedusaResponse,
   next: MedusaNextFunction,
 ): Promise<void> => {
-  if (!isPhoneVerificationRequired(process.env)) return next();
+  if (!isPhoneGateRequired(process.env)) return next();
   const customerId = req.auth_context?.actor_id;
   // Register-token bearers carry actor_id '' until POST /store/customers links
   // the identity (same guard as store/phone-verification/change). No actor =

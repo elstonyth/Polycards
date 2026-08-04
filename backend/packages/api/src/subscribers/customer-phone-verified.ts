@@ -11,10 +11,19 @@ import { isPhoneVerificationRequired } from '../utils/phone-verification';
  * Why a subscriber and not the signup middleware: requireSignupPhoneProof
  * (api/utils/phone-verification-guard.ts) runs BEFORE the customer row exists,
  * so it has a proof but no id to stamp. By the time this event fires the row
- * exists, and — critically — that middleware has already rejected any signup
- * whose body carried an UNPROVEN phone. So "the new customer has a phone"
- * implies "it was proven", but only for signups that happened while
- * PHONE_VERIFICATION_REQUIRED was on; hence the flag check below.
+ * exists, and that middleware has already rejected any STOREFRONT signup whose
+ * body carried an unproven phone.
+ *
+ * SCOPE, stated plainly because the event cannot tell us where it came from
+ * (the payload is an id and nothing else): createCustomersWorkflow also backs
+ * POST /admin/customers, so an operator who creates a customer WITH a phone
+ * stamps them verified without an OTP. That is admin-authenticated and reads as
+ * a deliberate vouch — an operator who types a number has usually just spoken to
+ * the person — but it is a real way past the topup/delivery gate, and the next
+ * reader should know it rather than infer an invariant that does not hold.
+ *
+ * The flag check below is what keeps this honest across the cutover: a phone
+ * written while PHONE_VERIFICATION_REQUIRED was off was never proven by anyone.
  *
  * That flag check is the whole reason this cannot be inferred at read time
  * instead: a phone written before the flag flipped is indistinguishable in the
