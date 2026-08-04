@@ -2205,6 +2205,62 @@ class PacksModuleService extends MedusaService({
     return { disabled: input.disabled };
   }
 
+  // Has this account ever completed SMS verification? One read, mirroring
+  // isAccountDisabled. The stateless OTP proof cannot answer this (10m TTL),
+  // and `customer.phone` is not a proxy for it — see the model's comment.
+  @InjectManager()
+  async isPhoneVerified(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<boolean> {
+    const [state] = await this.listCustomerAccountStates(
+      { customer_id: customerId },
+      { select: ['phone_verified_at'], take: 1 },
+      sharedContext,
+    );
+    return Boolean(state?.phone_verified_at);
+  }
+
+  // Stamp the account as phone-verified. Called from the two paths that can
+  // only be reached WITH a valid OTP proof: the phone-change route, and the
+  // customer.created subscriber (requireSignupPhoneProof middleware has already
+  // rejected an unproven signup phone by the time the customer row exists).
+  //
+  // Idempotent and first-write-wins: re-verifying a number later must not move
+  // the timestamp, because it records when the account was first trusted.
+  // Same advisory key as the other account-state upserts, so two concurrent
+  // first-writes can't race the unique customer_id to a 23505.
+  @InjectTransactionManager()
+  async markPhoneVerified(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `credit:${customerId}`,
+    ]);
+    const [existing] = await this.listCustomerAccountStates(
+      { customer_id: customerId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (existing?.phone_verified_at) return;
+    if (existing) {
+      await this.updateCustomerAccountStates(
+        {
+          selector: { id: existing.id },
+          data: { phone_verified_at: new Date() },
+        },
+        sharedContext,
+      );
+    } else {
+      await this.createCustomerAccountStates(
+        [{ customer_id: customerId, phone_verified_at: new Date() }],
+        sharedContext,
+      );
+    }
+  }
+
   // True if the customer's login is administratively disabled. One indexed read
   // on the auth path — mirrors isFrozen.
   @InjectManager()

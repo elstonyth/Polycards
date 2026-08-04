@@ -22,6 +22,14 @@ export const DELIVERY_RULES: ErrorRule[] = [
     /unauthorized|not authenticated|401/i,
     'Please log in to manage deliveries.',
   ],
+  // requirePhoneVerified (backend api/utils/phone-verification-guard.ts). MUST
+  // stay above the broad /not allowed|409/ rule below, which would otherwise
+  // flatten it into "cards are no longer available to deliver" — a wrong
+  // diagnosis the customer cannot act on.
+  [
+    /verify your phone/i,
+    'Verify your phone number in Account settings before requesting delivery.',
+  ],
   // Specific per-status reasons (sim P3 #9) — must precede the generic rule.
   [
     /already in a pending delivery/i,

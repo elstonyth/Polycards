@@ -7,6 +7,14 @@ import { model } from '@medusajs/framework/utils';
 // `disabled` (§4.2) is a LOGIN block, orthogonal to `frozen`: an admin can
 // disable an account without touching its funds, and vice versa. Always
 // manual — there is no auto-disable path.
+//
+// `phone_verified_at` is the PERSISTED half of phone verification. The OTP
+// proof tokens (utils/phone-verification.ts) are stateless and expire in 10
+// minutes, so they can answer "did this caller just prove a number?" but never
+// "has this account ever verified?" — which is what the topup/delivery gates
+// need. Deliberately NOT inferred from `customer.phone`: a phone written before
+// PHONE_VERIFICATION_REQUIRED was flipped on was never proven, and Google
+// signups carry no phone at all.
 export const CustomerAccountState = model
   .define('customer_account_state', {
     id: model.id().primaryKey(),
@@ -22,12 +30,13 @@ export const CustomerAccountState = model
     disabled_reason: model.text().nullable(),
     disabled_by: model.text().nullable(), // admin_id
     disabled_at: model.dateTime().nullable(),
+    phone_verified_at: model.dateTime().nullable(),
   })
   .indexes([
     {
       name: 'IDX_customer_account_state_frozen',
       on: ['customer_id'],
-      where: "frozen = true AND deleted_at IS NULL",
+      where: 'frozen = true AND deleted_at IS NULL',
     },
     {
       name: 'IDX_customer_account_state_disabled',
