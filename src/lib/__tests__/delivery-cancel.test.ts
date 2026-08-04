@@ -72,7 +72,9 @@ describe('cancelDeliveryOrder', () => {
     expect(res).toEqual({ ok: true, status: 'canceled' });
   });
 
-  it('maps the already-shipped refusal to the contact-support copy', async () => {
+  it('maps the out-of-window refusal to the contact-support copy', async () => {
+    // Copy says "being prepared", not "shipped": the backend refusal fires
+    // from `ready_to_ship` on (see CANCEL_ERROR_COPY in actions/delivery.ts).
     fetchMock.mockRejectedValue(
       new Error(
         'This delivery is already shipped and can no longer be canceled — please contact support.',
@@ -82,7 +84,7 @@ describe('cancelDeliveryOrder', () => {
     expect(res.ok).toBe(false);
     if (!res.ok) {
       expect(res.error).toBe(
-        'This order has already shipped and can no longer be canceled — please contact support.',
+        'This order is already being prepared for shipping and can no longer be canceled — please contact support.',
       );
       expect(res.needsAuth).toBe(false);
     }
