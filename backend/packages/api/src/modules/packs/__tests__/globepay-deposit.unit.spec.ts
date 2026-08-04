@@ -34,9 +34,17 @@ function harness() {
     createGlobePayDeposits: jest.fn().mockResolvedValue([{ id: 'gpd_1' }]),
     updateGlobePayDeposits: jest.fn().mockResolvedValue(undefined),
   };
+  // Resolve BY KEY. The old stub returned `packs` for every key, which passed
+  // only because the subject resolved one dependency; the first call to
+  // resolve('logger') then blew up with "warn is not a function" inside the
+  // refusal path. Same shape as api/hooks/globepay/deposit's spec.
+  const logger = { warn: jest.fn(), error: jest.fn(), info: jest.fn() };
   return {
     packs,
-    scope: { resolve: () => packs } as never,
+    logger,
+    scope: {
+      resolve: (key: string) => (key === 'logger' ? logger : packs),
+    } as never,
   };
 }
 
@@ -138,10 +146,62 @@ describe('startGlobePayDeposit', () => {
     );
   });
 
+  // GLOBEPAY_DEPOSIT_METHOD exists so an operator can name the channel their
+  // merchant account actually carries without a rebuild — production refused
+  // the compiled-in BQR with PMT10006 on 2026-08-04. It must still go through
+  // the allow-list, or a typo in the spec reaches the gateway instead of
+  // failing here.
+  describe('GLOBEPAY_DEPOSIT_METHOD override', () => {
+    const saved = process.env.GLOBEPAY_DEPOSIT_METHOD;
+    afterEach(() => {
+      if (saved === undefined) delete process.env.GLOBEPAY_DEPOSIT_METHOD;
+      else process.env.GLOBEPAY_DEPOSIT_METHOD = saved;
+    });
+
+    it('sends the env-named method instead of the compiled-in default', async () => {
+      process.env.GLOBEPAY_DEPOSIT_METHOD = 'FPX';
+      const h = harness();
+      await start(h);
+      expect(submitMock).toHaveBeenCalledWith(
+        expect.objectContaining({ paymentMethodCode: 'FPX' }),
+        expect.anything(),
+      );
+    });
+
+    it('refuses an unknown env value instead of forwarding it', async () => {
+      process.env.GLOBEPAY_DEPOSIT_METHOD = 'NOPE';
+      const h = harness();
+      await expect(start(h)).rejects.toThrow(/unsupported payment method/i);
+      expect(submitMock).not.toHaveBeenCalled();
+    });
+  });
+
   it('closes the row out when the gateway refuses, so it never lingers pending', async () => {
     const h = harness();
     submitMock.mockRejectedValue(new GlobePayError('nope', ['PMT10005'], 200));
     await expect(start(h)).rejects.toThrow(/could not start your top-up/i);
+    expect(h.packs.updateGlobePayDeposits).toHaveBeenCalledWith({
+      id: 'gpd_1',
+      status: 'failed',
+    });
+  });
+
+  // The refusal reason exists ONLY in this log line: the row keeps no code and
+  // the customer-facing message is deliberately generic. A refusal with an
+  // empty `codes` (a WAF/non-JSON response — where an un-allowlisted IP lands)
+  // carries its whole diagnosis in the message, so both must survive.
+  it('logs the gateway codes AND message before flattening the refusal', async () => {
+    const h = harness();
+    submitMock.mockRejectedValue(
+      new GlobePayError('Access denied for this IP', [], 403),
+    );
+    await expect(start(h)).rejects.toThrow(/could not start your top-up/i);
+    const line = h.logger.warn.mock.calls[0][0] as string;
+    expect(line).toContain('codes=none');
+    expect(line).toContain('httpStatus=403');
+    expect(line).toContain('msg=Access denied for this IP');
+    // Money-path state is written even if logging is broken, so the row update
+    // must not sit behind the logger call.
     expect(h.packs.updateGlobePayDeposits).toHaveBeenCalledWith({
       id: 'gpd_1',
       status: 'failed',
