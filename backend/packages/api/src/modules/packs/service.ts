@@ -6008,11 +6008,12 @@ class PacksModuleService extends MedusaService({
   // read `applied_at: null` and double-write the live stage table — take a lock
   // here before doing that.
   //
-  // The save and its `applied_at` stamp are also separate transactions. A stamp
-  // failure re-promotes next hour, which is harmless (same stages) except that
-  // it would revert a manual live-ladder edit made in the intervening hour and
-  // leave a second audit row. Accepted: the alternative couples every promotion
-  // to one transaction and loses the per-row failure isolation below.
+  // The save and its `applied_at` stamp share ONE transaction per row
+  // (promoteOneChallengeSchedule). Separately, a stamp failure would leave the
+  // ladder replaced but the row still due — and the next hour's retry would
+  // then overwrite whatever an operator edited in between. Per-row rather than
+  // per-batch, so the failure isolation below is unaffected: one bad edition
+  // rolls back alone.
   @InjectManager()
   async promoteDueChallengeSchedules(
     now: Date = new Date(),
@@ -6031,18 +6032,12 @@ class PacksModuleService extends MedusaService({
     let failed = 0;
     for (const row of due) {
       try {
-        // Through the normal save path, NOT a raw write: it is what validates
-        // the prize cards still exist and what writes the audit row, so a
-        // promoted edition is indistinguishable from a hand-saved one.
-        await this.saveChallengeStages({
-          stages: (row.stages as unknown as ChallengeStageInput[]) ?? [],
-          adminId: 'system',
-          reason: `Scheduled challenge promoted (${row.label ?? new Date(row.starts_at).toISOString()})`,
-        });
-        await this.updateChallengeSchedules({
-          selector: { id: row.id },
-          data: { applied_at: new Date() },
-        });
+        // Context MUST be threaded: without it the callee's
+        // @InjectTransactionManager has no manager to inherit and no repository
+        // to open one from. In production this carries a plain read context, so
+        // each row opens its OWN transaction — which is exactly the per-row
+        // atomicity wanted.
+        await this.promoteOneChallengeSchedule(row, sharedContext);
         promoted += 1;
       } catch {
         // Swallowed on purpose: a later edition must still get its chance, and
@@ -6052,6 +6047,40 @@ class PacksModuleService extends MedusaService({
       }
     }
     return { promoted, failed };
+  }
+
+  /**
+   * One edition: replace the live stages and stamp the row applied, in a single
+   * transaction.
+   *
+   * Both writes or neither. If the stamp failed on its own, the ladder would
+   * already be replaced while the row stayed due — and the next hourly retry
+   * would re-run saveChallengeStages, silently reverting any edit an operator
+   * made to the live ladder in the meantime.
+   *
+   * The stage write goes through the normal save path, NOT a raw write: that is
+   * what validates the prize cards still exist and what writes the audit row,
+   * so a promoted edition is indistinguishable from a hand-saved one. Both
+   * callees are @InjectTransactionManager and receive this method's context, so
+   * they join this transaction rather than opening their own.
+   */
+  @InjectTransactionManager()
+  async promoteOneChallengeSchedule(
+    row: { id: string; label: string | null; starts_at: Date; stages: unknown },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    await this.saveChallengeStages(
+      {
+        stages: (row.stages as ChallengeStageInput[]) ?? [],
+        adminId: 'system',
+        reason: `Scheduled challenge promoted (${row.label ?? new Date(row.starts_at).toISOString()})`,
+      },
+      sharedContext,
+    );
+    await this.updateChallengeSchedules(
+      { selector: { id: row.id }, data: { applied_at: new Date() } },
+      sharedContext,
+    );
   }
 
   // The settled weeks, newest first, with enough per-week summary to drive a
@@ -6093,7 +6122,13 @@ class PacksModuleService extends MedusaService({
       `SELECT week_start,
               COUNT(DISTINCT customer_id) AS winners,
               COALESCE(SUM(credits), 0) AS credits,
-              COUNT(*) FILTER (WHERE kind = 'card') AS cards,
+              -- GRANTED cards only. A skipped_no_stock row is still kind
+              -- 'card', so counting the kind alone reports a card handed over
+              -- when none was — on the very week the operator is being told
+              -- one is owed.
+              COUNT(*) FILTER (
+                WHERE kind = 'card' AND status <> 'skipped_no_stock'
+              ) AS cards,
               COUNT(*) FILTER (WHERE status = 'skipped_no_stock') AS skipped
          FROM challenge_payout
         WHERE deleted_at IS NULL

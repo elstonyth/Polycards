@@ -640,6 +640,7 @@ const AddChallengeModal = ({
   open,
   onClose,
   seedFrom,
+  openedAt,
 }: {
   open: boolean;
   onClose: () => void;
@@ -647,6 +648,9 @@ const AddChallengeModal = ({
    *  the last one, and an empty ladder means "no challenge", which is almost
    *  never what the operator wanted to schedule. */
   seedFrom: ChallengeStageDTO[];
+  /** Clock reading from the click that opened this modal. Passed in rather than
+   *  read here so render stays pure — see startValid below. */
+  openedAt: number;
 }) => {
   // The configured week boundary (Week & Reset tab) — the default start snaps
   // to it. "+7 days from now" would flip the milestone ladder mid-week, under
@@ -676,10 +680,16 @@ const AddChallengeModal = ({
   const start = startsAt === '' ? null : new Date(startsAt);
   // Mirrors the route's guard: a past start would be promoted by the very next
   // tick, which is a surprising way to replace the live challenge.
+  //
+  // `openedAt` is stamped by the button that opened this modal — an event
+  // handler, where reading the clock is allowed. Render must stay pure, and a
+  // value that changes every render would make "is this in the future?" flip
+  // under its own feet. A clock frozen at open is enough: the window is a
+  // minute or two, and the route re-checks against the real time on submit.
   const startValid =
     start !== null &&
     !Number.isNaN(start.getTime()) &&
-    start.getTime() > Date.now();
+    start.getTime() > openedAt;
   const canSave =
     !create.isPending &&
     startValid &&
@@ -812,9 +822,9 @@ const ScheduleTab = () => {
   const { data: settings } = useChallengeSettings();
   const remove = useDeleteChallengeSchedule();
   const [adding, setAdding] = useState(false);
+  const [openedAt, setOpenedAt] = useState(0);
 
   const schedules = data?.schedules ?? [];
-  const now = Date.now();
 
   return (
     <div className="pc-admin flex flex-col gap-y-4 px-6 py-4">
@@ -824,7 +834,15 @@ const ScheduleTab = () => {
           milestone ladder when its start passes; the current one keeps running
           until then.
         </Text>
-        <Button variant="secondary" onClick={() => setAdding(true)}>
+        {/* The clock is read HERE, in the handler — render must stay pure, and
+            the modal only needs "now" as of the moment it opened. */}
+        <Button
+          variant="secondary"
+          onClick={() => {
+            setOpenedAt(Date.now());
+            setAdding(true);
+          }}
+        >
           Add weekly challenge
         </Button>
       </div>
@@ -851,7 +869,10 @@ const ScheduleTab = () => {
           </Table.Header>
           <Table.Body>
             {schedules.map((s) => {
-              const due = new Date(s.starts_at).getTime() <= now;
+              // From the server, not the browser: "overdue" is a claim about
+              // the promotion job, which runs on the server's clock. A skewed
+              // laptop clock should not decide whether a row looks stuck.
+              const due = s.due;
               // Due but unstamped. Usually a prize card deleted since queueing
               // — but it is ALSO what a failing weekly settlement looks like,
               // because promotion runs after settlement and never gets its
@@ -916,6 +937,7 @@ const ScheduleTab = () => {
         open={adding}
         onClose={() => setAdding(false)}
         seedFrom={live?.stages ?? []}
+        openedAt={openedAt}
       />
     </div>
   );

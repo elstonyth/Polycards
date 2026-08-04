@@ -127,4 +127,36 @@ describe('zoneOffsetMs', () => {
     expect(winter).toBe(0);
     expect(summer).toBe(3_600_000);
   });
+
+  // Regression: the previous implementation rendered the instant in `tz` and
+  // again in UTC and subtracted, which looks like it cancels the BROWSER's
+  // offset and does not — both strings get re-parsed as browser-local wall
+  // times. An operator in a DST zone, on the morning that zone shifts, had the
+  // two halves parsed under different offsets. 2026-11-01T00:30:00Z is
+  // 00:30 EDT and 08:30 EST on the same New York morning, so KL came back as
+  // UTC+9 and the scheduled default landed an hour off.
+  it('is unaffected by a DST transition in the BROWSER zone', () => {
+    const originalTz = process.env.TZ;
+    try {
+      process.env.TZ = 'America/New_York';
+      // The new implementation never touches the browser zone, so this case
+      // passes trivially if the runner ignored TZ — assert the switch took
+      // effect first, or the regression guards nothing. (July: NY is UTC-4.)
+      expect(new Date('2026-07-01T12:00:00Z').getHours()).toBe(8);
+      expect(
+        zoneOffsetMs(new Date('2026-11-01T00:30:00Z'), KL.timezone),
+      ).toBe(8 * 3_600_000);
+    } finally {
+      if (originalTz === undefined) delete process.env.TZ;
+      else process.env.TZ = originalTz;
+    }
+  });
+
+  it('ignores sub-second precision rather than reporting a fractional offset', () => {
+    // formatToParts carries whole seconds; without flooring the instant, the
+    // millisecond remainder leaks into the offset.
+    expect(zoneOffsetMs(new Date('2026-08-05T10:00:00.777Z'), KL.timezone)).toBe(
+      8 * 3_600_000,
+    );
+  });
 });

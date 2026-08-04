@@ -14,6 +14,9 @@ import PacksModuleService from '../service';
  *     NEWEST edition live rather than an older one.
  *  3. A row that fails to promote (e.g. a prize card deleted since it was
  *     queued) is NOT stamped, and does NOT stop the editions after it.
+ *  4. A row whose STAMP fails counts as failed, not promoted — the stage save
+ *     and the stamp share one transaction, so in production the save rolls
+ *     back with it and the ladder is left untouched.
  */
 
 type Row = {
@@ -29,7 +32,11 @@ const stage = (n: number) => ({
   rank_rewards: [],
 });
 
-const fakeService = (rows: Row[], failOn: string[] = []) => {
+const fakeService = (
+  rows: Row[],
+  failOn: string[] = [],
+  failStampOn: string[] = [],
+) => {
   const svc = Object.create(PacksModuleService.prototype) as PacksModuleService;
   const saved: string[] = [];
   const stamped: string[] = [];
@@ -44,6 +51,8 @@ const fakeService = (rows: Row[], failOn: string[] = []) => {
   });
   const updateChallengeSchedules = jest.fn(
     async (args: { selector: { id: string } }) => {
+      if (failStampOn.includes(args.selector.id))
+        throw new Error('stamp write failed');
       stamped.push(args.selector.id);
       return [];
     },
@@ -65,7 +74,15 @@ const NOW = new Date('2026-08-10T00:00:00.000Z');
 // NON-EMPTY: the decorator's isPresent() check treats `{}` as absent and then
 // throws looking for baseRepository_. Nothing here issues raw SQL, so `execute`
 // is never actually called.
-const ctx = { manager: { execute: async () => [] } } as never;
+//
+// `transactionManager` is set for the same reason on the other half:
+// promoteOneChallengeSchedule is @InjectTransactionManager, and without a
+// transaction already in context it would try to open a real one.
+const stubManager = { execute: async () => [] };
+const ctx = {
+  manager: stubManager,
+  transactionManager: stubManager,
+} as never;
 
 describe('promoteDueChallengeSchedules', () => {
   it('reads only due, unapplied rows, oldest first', async () => {
@@ -133,6 +150,33 @@ describe('promoteDueChallengeSchedules', () => {
     expect(saved).toEqual(['sch_ok']);
     // Unstamped => retried next hour and still visible in the admin, which is
     // the whole recovery path.
+    expect(stamped).toEqual(['sch_ok']);
+  });
+
+  it('counts a STAMP failure as failed, and still promotes later editions', async () => {
+    // The dangerous half: without a shared transaction the ladder would already
+    // be replaced while the row stayed due, and next hour's retry would
+    // overwrite whatever an operator edited in between. Here the row must not
+    // be reported promoted; in production the save rolls back with the stamp.
+    const rows: Row[] = [
+      {
+        id: 'sch_stampfail',
+        starts_at: new Date('2026-08-03T00:00:00.000Z'),
+        label: 'week-a',
+        stages: [stage(1)],
+      },
+      {
+        id: 'sch_ok',
+        starts_at: new Date('2026-08-10T00:00:00.000Z'),
+        label: 'week-b',
+        stages: [stage(1)],
+      },
+    ];
+    const { svc, stamped } = fakeService(rows, [], ['sch_stampfail']);
+
+    const out = await svc.promoteDueChallengeSchedules(NOW, ctx);
+
+    expect(out).toEqual({ promoted: 1, failed: 1 });
     expect(stamped).toEqual(['sch_ok']);
   });
 });

@@ -859,6 +859,9 @@ export interface ChallengeScheduleDTO {
   starts_at: string;
   label: string | null;
   applied_at: string | null;
+  /** Start has passed, decided on the SERVER's clock — the one the promotion
+   *  job runs on. `due && !applied_at` is a promotion that hasn't landed. */
+  due: boolean;
   stages: ChallengeStageDTO[];
 }
 

@@ -18,12 +18,59 @@
  * the standard way to do zoned arithmetic with plain Intl.
  */
 
-/** The zone's UTC offset (ms) at a given instant. Both sides are re-parsed in
- *  browser-local time, so the BROWSER's own offset cancels and what is left is
- *  the target zone's. */
-export const zoneOffsetMs = (instant: Date, tz: string): number =>
-  new Date(instant.toLocaleString('en-US', { timeZone: tz })).getTime() -
-  new Date(instant.toLocaleString('en-US', { timeZone: 'UTC' })).getTime();
+// One formatter per zone. Constructing an Intl.DateTimeFormat is the expensive
+// part; the offset lookups below are called several times per render path.
+const partsCache = new Map<string, Intl.DateTimeFormat>();
+const zoneParts = (tz: string): Intl.DateTimeFormat => {
+  let f = partsCache.get(tz);
+  if (!f) {
+    f = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      hourCycle: 'h23',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+    partsCache.set(tz, f);
+  }
+  return f;
+};
+
+/**
+ * The zone's UTC offset (ms) at a given instant.
+ *
+ * Reads the zoned wall-clock FIELDS via formatToParts and rebuilds them as a
+ * UTC instant. The obvious alternative — rendering the time in `tz` and again
+ * in UTC and subtracting — looks like it cancels the browser's own offset, and
+ * silently does not: both strings are re-parsed as BROWSER-local wall times, so
+ * if the browser's zone has a DST transition between the two rendered times
+ * they parse under different offsets. Concretely, with the browser in
+ * America/New_York, 2026-11-01T00:30:00Z reports Asia/Kuala_Lumpur as UTC+9,
+ * because 00:30 parses as EDT and 08:30 parses as EST across that morning's
+ * fall-back. formatToParts never round-trips through the local parser at all.
+ */
+export const zoneOffsetMs = (instant: Date, tz: string): number => {
+  const p: Record<string, string> = {};
+  for (const { type, value } of zoneParts(tz).formatToParts(instant)) {
+    p[type] = value;
+  }
+  const asUtc = Date.UTC(
+    Number(p.year),
+    Number(p.month) - 1,
+    Number(p.day),
+    // hourCycle h23 pins midnight to 00, but some ICU builds still emit 24 —
+    // and Date.UTC would roll that into the next day.
+    Number(p.hour) % 24,
+    Number(p.minute),
+    Number(p.second),
+  );
+  // formatToParts carries whole seconds only, so compare against a
+  // second-floored instant or every offset is off by the millisecond remainder.
+  return asUtc - Math.floor(instant.getTime() / 1000) * 1000;
+};
 
 /**
  * How close to a reset is "too close to schedule for". Promotion runs on the

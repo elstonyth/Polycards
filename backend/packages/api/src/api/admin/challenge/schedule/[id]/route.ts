@@ -32,6 +32,25 @@ export async function DELETE(
       'This challenge already went live — edit the live stages instead.',
     );
 
-  await packs.deleteChallengeSchedules([id]);
+  // Delete on a FILTER that repeats the unapplied condition, not on the id
+  // alone. The check above and the delete are separate statements, and the
+  // hourly promotion runs between them often enough to matter: it stamps the
+  // row and replaces the live ladder, and an id-only delete would then erase
+  // the record of an edition that had just gone live. Losing the race here
+  // deletes nothing.
+  await packs.deleteChallengeSchedules({ id, applied_at: null });
+
+  // Re-read to find out who won. A no-op delete is not an error the operator
+  // caused, but it must not be reported as a success either — the row they
+  // tried to drop is now the live challenge.
+  const [after] = await packs.listChallengeSchedules(
+    { id },
+    { select: ['id', 'applied_at'], take: 1 },
+  );
+  if (after)
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'This challenge went live while you were removing it — edit the live stages instead.',
+    );
   res.json({ id, deleted: true });
 }

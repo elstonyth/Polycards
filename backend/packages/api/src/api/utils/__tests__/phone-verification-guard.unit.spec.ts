@@ -161,6 +161,15 @@ describe('requirePhoneVerified', () => {
     expect(await run(gateReq('cus_1', false))).toBeUndefined();
   });
 
+  // Both keys cleared before EVERY case, not just restored at the end: a
+  // machine that already exports PHONE_GATE_REQUIRED would otherwise silently
+  // decide these tests — 'false' makes every enforcement case pass vacuously,
+  // 'true' breaks the enforcement-off case. Each test sets only what it needs.
+  beforeEach(() => {
+    delete process.env.PHONE_VERIFICATION_REQUIRED;
+    delete process.env.PHONE_GATE_REQUIRED;
+  });
+
   describe('enforcement on', () => {
     beforeEach(() => {
       process.env.PHONE_VERIFICATION_REQUIRED = 'true';
