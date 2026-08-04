@@ -178,7 +178,11 @@ describe('startGlobePayDeposit', () => {
 
   it('closes the row out when the gateway refuses, so it never lingers pending', async () => {
     const h = harness();
-    submitMock.mockRejectedValue(new GlobePayError('nope', ['PMT10005'], 200));
+    // definite=true — a parsed refusal. Only those close the row; see the
+    // definite=false case below.
+    submitMock.mockRejectedValue(
+      new GlobePayError('nope', ['PMT10005'], 200, true),
+    );
     await expect(start(h)).rejects.toThrow(/could not start your top-up/i);
     expect(h.packs.updateGlobePayDeposits).toHaveBeenCalledWith({
       id: 'gpd_1',
@@ -187,19 +191,19 @@ describe('startGlobePayDeposit', () => {
   });
 
   // The refusal reason exists ONLY in this log line: the row keeps no code and
-  // the customer-facing message is deliberately generic. A refusal with an
-  // empty `codes` (a WAF/non-JSON response — where an un-allowlisted IP lands)
-  // carries its whole diagnosis in the message, so both must survive.
+  // the customer-facing message is deliberately generic. Both the codes and the
+  // message must survive — a refusal carrying no code puts its whole diagnosis
+  // in the message.
   it('logs the gateway codes AND message before flattening the refusal', async () => {
     const h = harness();
     submitMock.mockRejectedValue(
-      new GlobePayError('Access denied for this IP', [], 403),
+      new GlobePayError('Invalid Payment Method.', ['PMT10006'], 400, true),
     );
     await expect(start(h)).rejects.toThrow(/could not start your top-up/i);
     const line = h.logger.warn.mock.calls[0][0] as string;
-    expect(line).toContain('codes=none');
-    expect(line).toContain('httpStatus=403');
-    expect(line).toContain('msg=Access denied for this IP');
+    expect(line).toContain('codes=PMT10006');
+    expect(line).toContain('httpStatus=400');
+    expect(line).toContain('msg=Invalid Payment Method.');
     // Money-path state is written even if logging is broken, so the row update
     // must not sit behind the logger call.
     expect(h.packs.updateGlobePayDeposits).toHaveBeenCalledWith({
@@ -209,22 +213,30 @@ describe('startGlobePayDeposit', () => {
   });
 
   // The other half of that rule, and the one that costs real money if it is
-  // wrong. A timeout/socket reset does NOT mean the gateway refused — the
-  // submit may have landed. The reconciliation sweep only scans
+  // wrong. A timeout/socket reset/WAF page does NOT mean the gateway refused —
+  // the submit may have landed. The reconciliation sweep only scans
   // status='pending', so marking this row 'failed' would take a live deposit
   // out of requery forever and strand whatever the customer paid.
+  //
+  // The GlobePayError case is the one that matters and the one that used to be
+  // missing: the client wraps a non-JSON/WAF response in GlobePayError with
+  // definite=false, so a test that only mocked a raw SyntaxError (a shape the
+  // client never throws) passed while production closed those rows anyway.
   it.each([
     ['a timeout', new Error('ETIMEDOUT')],
-    ['an unparseable response', new SyntaxError('Unexpected token < in JSON')],
-  ])('leaves the row pending on %s, so the sweep can still requery it', async (
-    _label,
-    error,
-  ) => {
-    const h = harness();
-    submitMock.mockRejectedValue(error);
-    await expect(start(h)).rejects.toThrow(error);
-    expect(h.packs.updateGlobePayDeposits).not.toHaveBeenCalled();
-  });
+    [
+      'a WAF page the client could not parse',
+      new GlobePayError('<html>Access denied for this IP</html>', [], 403),
+    ],
+  ])(
+    'leaves the row pending on %s, so the sweep can still requery it',
+    async (_label, error) => {
+      const h = harness();
+      submitMock.mockRejectedValue(error);
+      await expect(start(h)).rejects.toThrow(error);
+      expect(h.packs.updateGlobePayDeposits).not.toHaveBeenCalled();
+    },
+  );
 
   it('rejects an invalid amount before touching the gateway', async () => {
     const h = harness();

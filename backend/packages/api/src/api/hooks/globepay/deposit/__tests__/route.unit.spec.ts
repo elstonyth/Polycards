@@ -256,6 +256,43 @@ describe('deposit callback — already-resolved rows', () => {
     expect(res.body).toBe('success');
     expect(h.packs.topUpCreditsWithLedger).not.toHaveBeenCalled();
   });
+
+  // THE money-losing case, and the one this suite used to have no test for.
+  // The sweep can write a paid deposit off as 'failed' (a requery 400 read as
+  // "never existed", or a non-final status older than GLOBEPAY_STALE_AFTER_MS)
+  // and it only rescans status='pending', so the row never comes back. If the
+  // customer's settlement callback is then swallowed here, the payment is gone
+  // with no credit and no log — recoverable only by hand-diffing GlobePay's
+  // back office against globepay_deposit.
+  it('credits a status 6 that lands on a written-off (failed) row', async () => {
+    const h = harness({ ...pendingRow, status: 'failed' });
+    const res = await run(h, callback(settled));
+    expect(res.statusCode).toBe(200);
+    expect(h.packs.topUpCreditsWithLedger).toHaveBeenCalledTimes(1);
+    // …and the row must follow the money. A selector hardcoded to 'pending'
+    // would match nothing here, leaving the ledger credited and the row failed.
+    expect(h.packs.updateGlobePayDeposits).toHaveBeenCalledWith(
+      expect.objectContaining({
+        selector: { id: pendingRow.id, status: 'failed' },
+        data: expect.objectContaining({ status: 'settled' }),
+      }),
+    );
+    // Silent recovery is nearly as bad as silent loss — an operator has to know
+    // the sweep wrote off a deposit the customer actually paid.
+    expect(h.logger.error).toHaveBeenCalledWith(
+      expect.stringMatching(/already failed/i),
+    );
+  });
+
+  // The inverse must NOT resurrect anything: a failure callback on a failed row
+  // agrees with us, so it stays a plain ack with no ledger movement.
+  it('acks a status 7 on a failed row without touching the ledger', async () => {
+    const h = harness({ ...pendingRow, status: 'failed' });
+    const res = await run(h, callback({ ...settled, Status: 7 }));
+    expect(res.statusCode).toBe(200);
+    expect(h.packs.topUpCreditsWithLedger).not.toHaveBeenCalled();
+    expect(h.packs.updateGlobePayDeposits).not.toHaveBeenCalled();
+  });
 });
 
 describe('deposit callback — idempotency', () => {
