@@ -110,6 +110,18 @@ updates:
       - dependency-name: 'tailwindcss'
         update-types:
           - version-update:semver-major
+      # #349 (TS 5.9.3 -> 6.0.3) failed every backend job with TS5107:
+      # `moduleResolution=node10` is deprecated. That is "moduleResolution":
+      # "Node" at line 5 of backend/packages/{odds-math,pokemon}/tsconfig.json —
+      # what the CommonJS Medusa toolchain expects — so TS 6 is a coordinated
+      # migration gated on the integration suites, not a bump. Config-level
+      # because #159's per-PR ignore only stored [>= 7.a, < 8] and the 6.x PR
+      # walked through the gap, same shape as #158 -> #234/#235 above.
+      # Remove once those tsconfigs move off "Node" (or set ignoreDeprecations)
+      # and the suites are green. Patch/minor are unaffected.
+      - dependency-name: 'typescript'
+        update-types:
+          - version-update:semver-major
 
   # NOTE: there is deliberately NO updater for /backend/apps/admin. The yarn
   # workspace lockfile lives at /backend, so an updater rooted at the admin app
