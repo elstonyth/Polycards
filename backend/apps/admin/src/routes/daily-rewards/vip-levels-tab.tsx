@@ -4,7 +4,6 @@ import {
   Button,
   Input,
   Label,
-  Select,
   StatusBadge,
   Switch,
   Table,
@@ -46,13 +45,19 @@ const rowFromDTO = (l: VipLevelDTO): Row => ({
   frameUnlock: l.frame_unlock,
   referralInput: String(l.direct_referral_pct),
 });
-const blankRow = (boxTier: string): Row => ({
+// Box tier and referral % are no longer edited on this tab (both surfaces are
+// suspended), but they are still LIVE server-side — box_tier picks the daily
+// box and must name a real reward box tier, direct_referral_pct pays sponsor
+// commission. So they stay in the buffer and round-trip untouched on save, and
+// a new rung INHERITS them from the rung above rather than resetting to the
+// first tier / 1% — with no editor, a silent reset would be unfixable here.
+const blankRow = (inheritFrom: Row | undefined, fallbackTier: string): Row => ({
   localId: `vl-${nextId++}`,
   thresholdInput: "0",
   voucherInput: "0",
-  boxTier,
+  boxTier: inheritFrom?.boxTier ?? fallbackTier,
   frameUnlock: false,
-  referralInput: "1",
+  referralInput: inheritFrom?.referralInput ?? "1",
 });
 
 const snapshotOf = (rows: Row[]): string =>
@@ -123,8 +128,9 @@ export const VipLevelsTab = () => {
     );
   if (!data) return <LoadingSkeleton />;
 
-  const tiers = (boxesData?.boxes ?? []).map((b) => b.tier);
-  const fallbackTier = tiers[0] ?? "a";
+  // Only needed to seed the very first rung of an empty ladder — every other
+  // rung inherits its tier from the one above.
+  const fallbackTier = boxesData?.boxes?.[0]?.tier ?? "a";
   const dirty = snapshotOf(rows) !== savedSnapshot;
   const errors = validateVipLevelsClient(rows);
   const reasonValid = reason.trim().length > 0;
@@ -158,7 +164,7 @@ export const VipLevelsTab = () => {
   const insertAt = (index: number) =>
     setRows((prev) => {
       const next = prev.slice();
-      next.splice(index, 0, blankRow(fallbackTier));
+      next.splice(index, 0, blankRow(prev[index - 1], fallbackTier));
       return next;
     });
   const removeAt = (index: number) =>
@@ -175,7 +181,7 @@ export const VipLevelsTab = () => {
     // Open the decade the new rung lands in, otherwise "Append level" looks
     // like it did nothing.
     setOpen(Math.floor(rows.length / DECADE), true);
-    setRows((prev) => [...prev, blankRow(fallbackTier)]);
+    setRows((prev) => [...prev, blankRow(prev[prev.length - 1], fallbackTier)]);
   };
 
   async function onSave() {
@@ -229,19 +235,6 @@ export const VipLevelsTab = () => {
           <Text weight="plus">
             {shape.frameLevels.length} of {shape.frameSlots.length} decade slots
           </Text>
-        </div>
-        <div className="md:col-span-3">
-          <Text size="small" className="text-ui-fg-subtle mb-1">
-            Box tier runs
-          </Text>
-          <div className="flex flex-wrap gap-1">
-            {shape.tierSegments.map((s) => (
-              <Badge key={`${s.tier}-${s.from}`} size="2xsmall">
-                {s.tier} · L{s.from}
-                {s.to !== s.from ? `-${s.to}` : ""}
-              </Badge>
-            ))}
-          </div>
         </div>
         <div className="md:col-span-3">
           <Text size="small" className="text-ui-fg-subtle mb-1">
@@ -312,13 +305,6 @@ export const VipLevelsTab = () => {
               <Text size="small" className="text-ui-fg-subtle">
                 RM {money(g.thresholdFrom)} → RM {money(g.thresholdTo)}
               </Text>
-              <div className="flex flex-wrap gap-1">
-                {g.tiers.map((t) => (
-                  <Badge key={t} size="2xsmall">
-                    tier {t}
-                  </Badge>
-                ))}
-              </div>
               {g.frameLevels.length > 0 && (
                 <Badge size="2xsmall" color="purple">
                   frame @ L{g.frameLevels.join(", L")}
@@ -337,9 +323,7 @@ export const VipLevelsTab = () => {
                   <Table.HeaderCell>Level</Table.HeaderCell>
                   <Table.HeaderCell>Threshold (RM)</Table.HeaderCell>
                   <Table.HeaderCell>Voucher (RM)</Table.HeaderCell>
-                  <Table.HeaderCell>Box tier</Table.HeaderCell>
                   <Table.HeaderCell>Frame</Table.HeaderCell>
-                  <Table.HeaderCell>Referral %</Table.HeaderCell>
                   <Table.HeaderCell>Actions</Table.HeaderCell>
                 </Table.Row>
               </Table.Header>
@@ -395,33 +379,6 @@ export const VipLevelsTab = () => {
                         </div>
                       </Table.Cell>
                       <Table.Cell>
-                        <div
-                          className={changeMark(
-                            !!prev && prev.boxTier !== r.boxTier,
-                          )}
-                        >
-                          <Select
-                            value={r.boxTier}
-                            onValueChange={(v) =>
-                              setRow(r.localId, { boxTier: v })
-                            }
-                          >
-                            <Select.Trigger
-                              aria-label={`Level ${level} box tier`}
-                            >
-                              <Select.Value />
-                            </Select.Trigger>
-                            <Select.Content>
-                              {tiers.map((t) => (
-                                <Select.Item key={t} value={t}>
-                                  {t}
-                                </Select.Item>
-                              ))}
-                            </Select.Content>
-                          </Select>
-                        </div>
-                      </Table.Cell>
-                      <Table.Cell>
                         {/* Off-decade frames are illegal, but legacy data may
                             already carry one - never trap it as unclearable. */}
                         <Switch
@@ -432,23 +389,6 @@ export const VipLevelsTab = () => {
                             setRow(r.localId, { frameUnlock: v })
                           }
                         />
-                      </Table.Cell>
-                      <Table.Cell>
-                        <div
-                          className={changeMark(
-                            !!prev && prev.referralInput !== r.referralInput,
-                          )}
-                        >
-                          <Input
-                            aria-label={`Level ${level} referral percent`}
-                            value={r.referralInput}
-                            onChange={(e) =>
-                              setRow(r.localId, {
-                                referralInput: e.target.value,
-                              })
-                            }
-                          />
-                        </div>
                       </Table.Cell>
                       <Table.Cell>
                         <div className="pc-row-actions">

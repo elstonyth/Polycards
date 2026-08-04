@@ -43,12 +43,9 @@ describe('validateVipLevelsClient', () => {
     );
   });
 
-  test('flags a negative voucher / referral', () => {
-    const errs = validateVipLevelsClient([
-      row({ voucherInput: '-1', referralInput: '-2' }),
-    ]);
+  test('flags a negative voucher', () => {
+    const errs = validateVipLevelsClient([row({ voucherInput: '-1' })]);
     expect(errs.some((e) => /voucher/.test(e))).toBe(true);
-    expect(errs.some((e) => /referral/.test(e))).toBe(true);
   });
 
   test('flags a voucher amount above the 10,000 ceiling, accepts the ceiling itself', () => {
@@ -61,19 +58,24 @@ describe('validateVipLevelsClient', () => {
     );
   });
 
-  test('flags a referral % above 100', () => {
-    const errs = validateVipLevelsClient([row({ referralInput: '101' })]);
-    expect(errs.some((e) => /referral % must be between 0 and 100/.test(e))).toBe(true);
-    expect(validateVipLevelsClient([row({ referralInput: '100' })])).toEqual([]);
+  // Neither field has an editor on the tab any more, so a client error on one
+  // would be an uncorrectable block on saving the whole ladder. Both are still
+  // enforced server-side; this pins that the CLIENT stays quiet about them.
+  test('does not block the ladder on referral % or box tier', () => {
+    expect(
+      validateVipLevelsClient([row({ referralInput: '101', boxTier: '' })]),
+    ).toEqual([]);
+    expect(
+      validateVipLevelsClient([row({ referralInput: '', boxTier: '   ' })]),
+    ).toEqual([]);
   });
 
   test('flags blank inputs instead of coercing them to 0', () => {
     const errs = validateVipLevelsClient([
       row(),
-      row({ thresholdInput: '', voucherInput: ' ', referralInput: '' }),
+      row({ thresholdInput: '', voucherInput: ' ' }),
     ]);
     expect(errs.some((e) => /Level 2: threshold must be a number/.test(e))).toBe(true);
     expect(errs.some((e) => /Level 2: voucher amount/.test(e))).toBe(true);
-    expect(errs.some((e) => /Level 2: referral %/.test(e))).toBe(true);
   });
 });

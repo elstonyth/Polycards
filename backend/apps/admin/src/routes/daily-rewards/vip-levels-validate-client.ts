@@ -45,11 +45,11 @@ export function validateVipLevelsClient(rows: VipLevelRow[]): string[] {
       errors.push(
         `Level ${level}: voucher amount must be between 0 and ${MAX_VOUCHER_MYR.toLocaleString('en-US')}.`,
       );
-    const p = num(r.referralInput);
-    if (!Number.isFinite(p) || p < 0 || p > 100)
-      errors.push(`Level ${level}: referral % must be between 0 and 100.`);
-    if (!r.boxTier || r.boxTier.trim().length === 0)
-      errors.push(`Level ${level}: a box tier is required.`);
+    // referralInput / boxTier are deliberately NOT checked here. Neither is
+    // editable on the tab any more, so a failure would be a permanent,
+    // uncorrectable block on saving the whole ladder. Both bounds are still
+    // enforced server-side (vip-levels-validate.ts + the box_tier-exists
+    // lookup in the service), which surfaces as a toast instead.
     if (r.frameUnlock && !FRAME_LEVELS.includes(level))
       errors.push(
         `Level ${level}: a frame can only unlock on a decade level (10, 20, … 100).`,
