@@ -14,7 +14,13 @@ import { topUpAmountError } from './topup';
 // here — that happens only when a verified callback reports status 6
 // (src/api/hooks/globepay/deposit/route.ts).
 
-/** Default MYR deposit method. BQR is the only channel provisioned on staging. */
+/**
+ * Fallback MYR deposit method when neither the request nor the environment
+ * names one. BQR is the only channel provisioned on STAGING — production
+ * refused it on 2026-08-04 with `PMT10006 Invalid Payment Method`, which is
+ * why the value is now overridable per environment (see below) instead of
+ * being a constant that costs a code deploy to change.
+ */
 export const GLOBEPAY_DEFAULT_METHOD = 'BQR';
 
 /**
@@ -129,7 +135,17 @@ export async function startGlobePayDeposit(
     );
   }
 
-  const paymentMethodCode = input.paymentMethodCode ?? GLOBEPAY_DEFAULT_METHOD;
+  // GLOBEPAY_DEPOSIT_METHOD lets an operator name the channel their merchant
+  // account actually has, without a code deploy: which of FPX/DN/BQR/OB is
+  // provisioned is GlobePay's decision, differs between staging and production,
+  // and is not discoverable from our side except by being refused. Finding the
+  // right one otherwise costs a ~10 minute build per guess; as an env var it is
+  // a ~4 minute spec apply. Still validated against the allow-list below, so a
+  // typo fails closed on OUR side rather than reaching the gateway.
+  const paymentMethodCode =
+    input.paymentMethodCode ??
+    process.env.GLOBEPAY_DEPOSIT_METHOD ??
+    GLOBEPAY_DEFAULT_METHOD;
   if (
     !(GLOBEPAY_MYR_METHODS as readonly string[]).includes(paymentMethodCode)
   ) {
