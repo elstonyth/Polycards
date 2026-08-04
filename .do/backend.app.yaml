@@ -270,6 +270,16 @@ envs:
   - key: GLOBEPAY_RETURN_URL
     scope: RUN_TIME
     value: https://polycards.gg/transactions
+  # Which deposit channel to ask for. One of FPX / DN / BQR / OB — the code
+  # allow-list, so a typo is refused on our side rather than at the gateway.
+  # NOT cosmetic: production refused BQR on 2026-08-04 with
+  # `PMT10006 Invalid Payment Method` (BQR is provisioned on staging only), and
+  # which channels a merchant account carries is GlobePay's decision, invisible
+  # to us until they refuse. Kept as an env var so changing it is a spec apply,
+  # not a rebuild. Confirm against the provisioned list before editing.
+  - key: GLOBEPAY_DEPOSIT_METHOD
+    scope: RUN_TIME
+    value: FPX
   # The three secrets. Values live in the gitignored deploy/.env.deploy and are
   # injected by scripts/do-apply.ps1. Both KEY values are the bare base64 body
   # on ONE line — no PEM armor, no newlines: packs/globepay.ts toPem() re-wraps
