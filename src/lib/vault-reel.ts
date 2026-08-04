@@ -129,8 +129,11 @@ export function spinOffset(
   const overshootPx = itemH * OVERSHOOT_CELLS;
   // Blur travel sized so the blur's EXIT velocity equals friction's ENTRY
   // velocity (easeOutCubic'(0) = 3·frictionPx/FRICTION_MS), keeping the handoff
-  // velocity-continuous for ANY FRICTION_MS. Derived, not a magic divisor.
-  const blurPx = (3 * frictionPx * blur) / (2 * FRICTION_MS);
+  // velocity-continuous for ANY FRICTION_MS. The accel phase actually starts
+  // from the wound-UP position, so its distance is blurPx + windupPx; subtract
+  // windupPx here so exit velocity 2·(blurPx+windupPx)/blur lands exactly on
+  // friction's entry — the windup used to leak in as a ~2% velocity step.
+  const blurPx = (3 * frictionPx * blur) / (2 * FRICTION_MS) - windupPx;
   // The winner starts this far ABOVE its landed (centered) position and descends.
   const startPx = targetPx + frictionPx + crawlPx + blurPx;
 

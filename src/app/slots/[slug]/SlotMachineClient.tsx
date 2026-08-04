@@ -712,8 +712,12 @@ export default function SlotMachineClient({
   useEffect(() => {
     if (phase !== 'spinning' || reduced) return;
     if (!ambientOn.current && !muted) {
-      loop('ambient');
+      // Latch optimistically (a re-fire mustn't double-start), un-latch on
+      // failure so the NEXT spin retries instead of staying silent forever.
       ambientOn.current = true;
+      void loop('ambient').then((ok) => {
+        if (!ok) ambientOn.current = false;
+      });
     }
     play('start');
   }, [phase, spin?.nonce, reduced, muted, play, loop]);

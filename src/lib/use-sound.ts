@@ -92,20 +92,26 @@ export function useSound() {
     [muted],
   );
 
-  // Looping playback (reel-loop under the spin, ambient bed). Stop via halt().
+  // Looping playback (ambient bed). Stop via halt(). Resolves to whether
+  // playback actually started, so callers latching "already playing" state
+  // (ambientOn) can reset on failure and retry on a later gesture instead of
+  // going permanently silent.
   const loop = useCallback(
-    (name: SoundName, volume = 1) => {
-      if (muted) return;
+    (name: SoundName, volume = 1): Promise<boolean> => {
+      if (muted) return Promise.resolve(false);
       const audio = pool.current[name];
-      if (!audio) return;
+      if (!audio) return Promise.resolve(false);
       try {
         audio.loop = true;
         audio.volume = Math.min(1, Math.max(0, volume));
         audio.playbackRate = 1;
         audio.currentTime = 0;
-        void audio.play().catch(() => {});
+        return audio.play().then(
+          () => true,
+          () => false,
+        );
       } catch {
-        /* no-op */
+        return Promise.resolve(false);
       }
     },
     [muted],

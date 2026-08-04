@@ -31,6 +31,21 @@ const run = async () => {
   await page.waitForTimeout(9000); // reels + flood + reveal
 
   await page.screenshot({ path: 'docs/research/qa-sfx-wiring.png' });
+  // Assert every wired sound is actually requested — a removed or misnamed
+  // asset must fail the probe, not just shorten the log line.
+  const REQUIRED = [
+    'slot-tap.mp3',
+    'slot-start.mp3',
+    'slot-stop.mp3',
+    'slot-riser.mp3',
+    'slot-win.mp3',
+    'slot-bigwin.mp3',
+    'slot-count.mp3',
+    'slot-ambient.mp3',
+  ];
+  for (const f of REQUIRED) {
+    if (!audioReqs.has(f)) errors.push(`missing sound request: ${f}`);
+  }
   console.log(
     'audio files requested:',
     [...audioReqs].sort().join(', ') || 'NONE',
