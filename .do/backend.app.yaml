@@ -218,10 +218,16 @@ envs:
   #
   # Registering these does NOT enforce anything: sendPhoneOtp starts working,
   # but requireSignupPhoneProof / blockUnverifiedPhoneWrite stay open until
-  # PHONE_VERIFICATION_REQUIRED is set. That flag is deliberately NOT here —
-  # it is flipped LAST, after the storefront rebuild ships the OTP UI
-  # (CONTEXT.md → Deploy Order, steps 3 then 4). Adding it in this same edit
-  # would 400 every phone signup until the storefront caught up.
+  # PHONE_VERIFICATION_REQUIRED is set below.
+  #
+  # PHONE_VERIFICATION_REQUIRED added 2026-08-04 (Deploy Order step 4) — the
+  # storefront OTP UI shipped first (step 3, Dockerfile ARG + storefront spec),
+  # and this spec must only be APPLIED after that storefront build is ACTIVE,
+  # or phone signups 400 until it catches up. Rollback lever: set this to
+  # "false" and re-apply — every gate opens instantly, storefront unaffected.
+  - key: PHONE_VERIFICATION_REQUIRED
+    scope: RUN_TIME
+    value: "true"
   - key: TWILIO_ACCOUNT_SID
     scope: RUN_TIME
     type: SECRET
