@@ -146,6 +146,36 @@ describe('startGlobePayDeposit', () => {
     );
   });
 
+  // GLOBEPAY_DEPOSIT_METHOD exists so an operator can name the channel their
+  // merchant account actually carries without a rebuild — production refused
+  // the compiled-in BQR with PMT10006 on 2026-08-04. It must still go through
+  // the allow-list, or a typo in the spec reaches the gateway instead of
+  // failing here.
+  describe('GLOBEPAY_DEPOSIT_METHOD override', () => {
+    const saved = process.env.GLOBEPAY_DEPOSIT_METHOD;
+    afterEach(() => {
+      if (saved === undefined) delete process.env.GLOBEPAY_DEPOSIT_METHOD;
+      else process.env.GLOBEPAY_DEPOSIT_METHOD = saved;
+    });
+
+    it('sends the env-named method instead of the compiled-in default', async () => {
+      process.env.GLOBEPAY_DEPOSIT_METHOD = 'FPX';
+      const h = harness();
+      await start(h);
+      expect(submitMock).toHaveBeenCalledWith(
+        expect.objectContaining({ paymentMethodCode: 'FPX' }),
+        expect.anything(),
+      );
+    });
+
+    it('refuses an unknown env value instead of forwarding it', async () => {
+      process.env.GLOBEPAY_DEPOSIT_METHOD = 'NOPE';
+      const h = harness();
+      await expect(start(h)).rejects.toThrow(/unsupported payment method/i);
+      expect(submitMock).not.toHaveBeenCalled();
+    });
+  });
+
   it('closes the row out when the gateway refuses, so it never lingers pending', async () => {
     const h = harness();
     submitMock.mockRejectedValue(new GlobePayError('nope', ['PMT10005'], 200));
