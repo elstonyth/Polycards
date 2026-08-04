@@ -43,7 +43,7 @@ __metadata:
     "@medusajs/draft-order": "npm:2.13.4"
     "@medusajs/framework": "npm:2.13.4"
     "@medusajs/medusa": "npm:2.13.4"
-    "@medusajs/test-utils": "npm:2.13.4"
+    "@medusajs/test-utils": "npm:2.13.6"
     "@mercurjs/cli": "npm:2.1.6"
     "@mercurjs/core": "npm:2.1.6"
     "@mercurjs/types": "npm:2.1.6"
@@ -3677,9 +3677,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@medusajs/test-utils@npm:2.13.4":
-  version: 2.13.4
-  resolution: "@medusajs/test-utils@npm:2.13.4"
+"@medusajs/test-utils@npm:2.13.6":
+  version: 2.13.6
+  resolution: "@medusajs/test-utils@npm:2.13.6"
   dependencies:
     "@types/express": "npm:^4.17.21"
     axios: "npm:^1.13.1"
@@ -3687,15 +3687,15 @@ __metadata:
     get-port: "npm:^5.1.1"
     ulid: "npm:^2.3.0"
   peerDependencies:
-    "@medusajs/core-flows": 2.13.4
-    "@medusajs/framework": 2.13.4
-    "@medusajs/medusa": 2.13.4
+    "@medusajs/core-flows": 2.13.6
+    "@medusajs/framework": 2.13.6
+    "@medusajs/medusa": 2.13.6
   peerDependenciesMeta:
     "@medusajs/core-flows":
       optional: true
     "@medusajs/medusa":
       optional: true
-  checksum: 10c0/9fe6aaef9a76d5ab82f2d30513dd5f77255921ae4971645349d6663e79a15b0ed9f70c86e7bbda71229d558eda93bb3f60cf26baa9df0ad7c59a57729d401dee
+  checksum: 10c0/a4d200d4765471c96ac4cb861dfa20b8fb218db54d1d2cb64d36698ec59dcd3c5988dcb280de315d56ec6682e7b1dcd298f49cb0ee81f9f1bb51d215073e2ba6
   languageName: node
   linkType: hard
 
@@ -7340,44 +7340,44 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@turbo/darwin-64@npm:2.10.7":
-  version: 2.10.7
-  resolution: "@turbo/darwin-64@npm:2.10.7"
+"@turbo/darwin-64@npm:2.10.8":
+  version: 2.10.8
+  resolution: "@turbo/darwin-64@npm:2.10.8"
   conditions: os=darwin & cpu=x64
   languageName: node
   linkType: hard
 
-"@turbo/darwin-arm64@npm:2.10.7":
-  version: 2.10.7
-  resolution: "@turbo/darwin-arm64@npm:2.10.7"
+"@turbo/darwin-arm64@npm:2.10.8":
+  version: 2.10.8
+  resolution: "@turbo/darwin-arm64@npm:2.10.8"
   conditions: os=darwin & cpu=arm64
   languageName: node
   linkType: hard
 
-"@turbo/linux-64@npm:2.10.7":
-  version: 2.10.7
-  resolution: "@turbo/linux-64@npm:2.10.7"
-  conditions: os=linux & cpu=x64
+"@turbo/linux-64@npm:2.10.8":
+  version: 2.10.8
+  resolution: "@turbo/linux-64@npm:2.10.8"
+  conditions: (os=android | os=linux) & cpu=x64
   languageName: node
   linkType: hard
 
-"@turbo/linux-arm64@npm:2.10.7":
-  version: 2.10.7
-  resolution: "@turbo/linux-arm64@npm:2.10.7"
-  conditions: os=linux & cpu=arm64
+"@turbo/linux-arm64@npm:2.10.8":
+  version: 2.10.8
+  resolution: "@turbo/linux-arm64@npm:2.10.8"
+  conditions: (os=android | os=linux) & cpu=arm64
   languageName: node
   linkType: hard
 
-"@turbo/windows-64@npm:2.10.7":
-  version: 2.10.7
-  resolution: "@turbo/windows-64@npm:2.10.7"
+"@turbo/windows-64@npm:2.10.8":
+  version: 2.10.8
+  resolution: "@turbo/windows-64@npm:2.10.8"
   conditions: os=win32 & cpu=x64
   languageName: node
   linkType: hard
 
-"@turbo/windows-arm64@npm:2.10.7":
-  version: 2.10.7
-  resolution: "@turbo/windows-arm64@npm:2.10.7"
+"@turbo/windows-arm64@npm:2.10.8":
+  version: 2.10.8
+  resolution: "@turbo/windows-arm64@npm:2.10.8"
   conditions: os=win32 & cpu=arm64
   languageName: node
   linkType: hard
@@ -7613,10 +7613,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/lodash@npm:^4.17.24":
-  version: 4.17.24
-  resolution: "@types/lodash@npm:4.17.24"
-  checksum: 10c0/b72f60d4daacdad1fa643edb3faba204c02a01eb1ac00a83ff73496a6d236fc55e459c06106e8ced42277dba932d087d8fc090f8de4ef590d3f91e6d6f7ce85a
+"@types/lodash@npm:^4.17.25":
+  version: 4.17.25
+  resolution: "@types/lodash@npm:4.17.25"
+  checksum: 10c0/ca2049f16bf527e04d6e27702e3912a484faaff587de77a5c58e0d243b9292a655e1d7f7e5bdf2ffdf49a76da10673097f8dd4901990679058d47ccd99051877
   languageName: node
   linkType: hard
 
@@ -9725,7 +9725,7 @@ __metadata:
     "@tanstack/react-query": "npm:5.101.4"
     "@tanstack/react-table": "npm:8.21.3"
     "@types/jsonwebtoken": "npm:^9.0.9"
-    "@types/lodash": "npm:^4.17.24"
+    "@types/lodash": "npm:^4.17.25"
     "@types/react": "npm:^18.3.2"
     "@types/react-dom": "npm:^18.3.1"
     "@vitejs/plugin-react": "npm:^4.2.1"
@@ -9738,12 +9738,12 @@ __metadata:
     prettier: "npm:^3.9.6"
     react: "npm:^18.3.1"
     react-dom: "npm:^18.3.1"
-    react-hook-form: "npm:7.83.0"
+    react-hook-form: "npm:7.84.0"
     react-i18next: "npm:13.5.0"
     react-jwt: "npm:^2.0.0"
     react-router-dom: "npm:6.30.4"
     ts-node: "npm:^10.9.2"
-    turbo: "npm:^2.10.7"
+    turbo: "npm:^2.10.8"
     typescript: "npm:5.9.3"
     typescript-eslint: "npm:^8.65.0"
     vite: "npm:^6.4.3"
@@ -10767,9 +10767,9 @@ __metadata:
   linkType: hard
 
 "fast-uri@npm:^3.0.1":
-  version: 3.1.4
-  resolution: "fast-uri@npm:3.1.4"
-  checksum: 10c0/f90948821ceb49980f64f89b8216ba498f5957f26035be813526a55b6145d26cbd63ef5618d5205a3292b31edc9c08589749350cd72bd86c7095eb434dceb757
+  version: 3.1.5
+  resolution: "fast-uri@npm:3.1.5"
+  checksum: 10c0/2bf60eb800dd610c65e17be436425dcb21c92aff3a87d442a8bccab0b7b071e88cf1a5d7d1ea946370b937e6fc0375c405c0296c10587e57de4f78be4646d1d0
   languageName: node
   linkType: hard
 
@@ -14963,12 +14963,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"react-hook-form@npm:7.83.0":
-  version: 7.83.0
-  resolution: "react-hook-form@npm:7.83.0"
+"react-hook-form@npm:7.84.0":
+  version: 7.84.0
+  resolution: "react-hook-form@npm:7.84.0"
   peerDependencies:
     react: ^16.8.0 || ^17 || ^18 || ^19
-  checksum: 10c0/3a1cfbb6bd614833675e1db1c079e05dc51c4f26c5259424023846a380de22d51748a755032a9983af492d25cbe98c524eecadce3c75e6997ff136e7538be06e
+  checksum: 10c0/9af7e9850ac3c41e6a03fe2fc5a236525603dd8ab983194ffb8e893dba1d26b518ae02989192786d8c1f109793adb93d6de46385bee2b04ff06267f7431bdf8e
   languageName: node
   linkType: hard
 
@@ -16640,16 +16640,16 @@ __metadata:
   languageName: node
   linkType: hard
 
-"turbo@npm:^2.10.7":
-  version: 2.10.7
-  resolution: "turbo@npm:2.10.7"
+"turbo@npm:^2.10.8":
+  version: 2.10.8
+  resolution: "turbo@npm:2.10.8"
   dependencies:
-    "@turbo/darwin-64": "npm:2.10.7"
-    "@turbo/darwin-arm64": "npm:2.10.7"
-    "@turbo/linux-64": "npm:2.10.7"
-    "@turbo/linux-arm64": "npm:2.10.7"
-    "@turbo/windows-64": "npm:2.10.7"
-    "@turbo/windows-arm64": "npm:2.10.7"
+    "@turbo/darwin-64": "npm:2.10.8"
+    "@turbo/darwin-arm64": "npm:2.10.8"
+    "@turbo/linux-64": "npm:2.10.8"
+    "@turbo/linux-arm64": "npm:2.10.8"
+    "@turbo/windows-64": "npm:2.10.8"
+    "@turbo/windows-arm64": "npm:2.10.8"
   dependenciesMeta:
     "@turbo/darwin-64":
       optional: true
@@ -16665,7 +16665,7 @@ __metadata:
       optional: true
   bin:
     turbo: bin/turbo
-  checksum: 10c0/06230af220cf6f9516286602003aa243840a684b381bffb5240c284d8eaa57d7ea0011af4253f3e8f2a19787c77bfd2e9788275dcf43a120f1aa556bc9ca14e5
+  checksum: 10c0/892459ca52bdcc0ecd50d0bd5e092bc97052ff726fd727af7df997e6b8ff20b1aea6040caac14c2ceb661f18b08e7abd2027d188f8a67bc74dcab0c043060026
   languageName: node
   linkType: hard
 
@@ -16827,9 +16827,9 @@ __metadata:
   linkType: hard
 
 "undici@npm:^6.25.0":
-  version: 6.27.0
-  resolution: "undici@npm:6.27.0"
-  checksum: 10c0/f88c3dae3957dbf9d93cb481440aced317bd3c4941b5914fea5efba516d51138988cdb5c76006f0bb1337e41d56c3443351055d492e73af2428521c37ba2a76f
+  version: 6.28.0
+  resolution: "undici@npm:6.28.0"
+  checksum: 10c0/3029a70df06b38b5b2f30732932a1e92544c753cd82c8abdf0d35afad48e0ba91612e79fe3a442dbbb9434d6a9eba2b714d5ea28984c903dda2b5d5444f38354
   languageName: node
   linkType: hard
 
