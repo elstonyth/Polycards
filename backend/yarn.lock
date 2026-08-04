@@ -43,7 +43,7 @@ __metadata:
     "@medusajs/draft-order": "npm:2.13.4"
     "@medusajs/framework": "npm:2.13.4"
     "@medusajs/medusa": "npm:2.13.4"
-    "@medusajs/test-utils": "npm:2.13.4"
+    "@medusajs/test-utils": "npm:2.13.6"
     "@mercurjs/cli": "npm:2.1.6"
     "@mercurjs/core": "npm:2.1.6"
     "@mercurjs/types": "npm:2.1.6"
@@ -3677,9 +3677,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@medusajs/test-utils@npm:2.13.4":
-  version: 2.13.4
-  resolution: "@medusajs/test-utils@npm:2.13.4"
+"@medusajs/test-utils@npm:2.13.6":
+  version: 2.13.6
+  resolution: "@medusajs/test-utils@npm:2.13.6"
   dependencies:
     "@types/express": "npm:^4.17.21"
     axios: "npm:^1.13.1"
@@ -3687,15 +3687,15 @@ __metadata:
     get-port: "npm:^5.1.1"
     ulid: "npm:^2.3.0"
   peerDependencies:
-    "@medusajs/core-flows": 2.13.4
-    "@medusajs/framework": 2.13.4
-    "@medusajs/medusa": 2.13.4
+    "@medusajs/core-flows": 2.13.6
+    "@medusajs/framework": 2.13.6
+    "@medusajs/medusa": 2.13.6
   peerDependenciesMeta:
     "@medusajs/core-flows":
       optional: true
     "@medusajs/medusa":
       optional: true
-  checksum: 10c0/9fe6aaef9a76d5ab82f2d30513dd5f77255921ae4971645349d6663e79a15b0ed9f70c86e7bbda71229d558eda93bb3f60cf26baa9df0ad7c59a57729d401dee
+  checksum: 10c0/a4d200d4765471c96ac4cb861dfa20b8fb218db54d1d2cb64d36698ec59dcd3c5988dcb280de315d56ec6682e7b1dcd298f49cb0ee81f9f1bb51d215073e2ba6
   languageName: node
   linkType: hard
 
