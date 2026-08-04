@@ -94,18 +94,20 @@ services:
         scope: RUN_AND_BUILD_TIME
         value: https://polycards.gg
       # Which top-up sheet the storefront renders: 'globepay' redirects to the
-      # real cashier, anything else keeps the mock. Left at 'mock' on purpose so
-      # merging PR #252 changes nothing for customers until the cutover.
+      # real cashier, anything else keeps the mock. Cut over 2026-08-04, once
+      # the backend spec carried GLOBEPAY_ENABLED=true + the three secrets and
+      # ALLOW_MOCK_TOPUP was gone from production — at that point the mock sheet
+      # posted to a route that refuses (topup-credits.ts), so leaving it was a
+      # dead-end button, not a safe default.
       #
-      # READ THIS BEFORE FLIPPING IT: Next inlines NEXT_PUBLIC_* at BUILD time,
+      # READ THIS BEFORE CHANGING IT: Next inlines NEXT_PUBLIC_* at BUILD time,
       # and per the note above App Platform does not reliably pass build-time
       # env — the root Dockerfile's ARG DEFAULT is what actually lands in the
-      # bundle. Changing this value ALONE will not switch the sheet. The cutover
-      # is a one-line commit setting ARG NEXT_PUBLIC_PAYMENTS_PROVIDER=globepay
-      # in the root Dockerfile, and this value moves with it.
+      # bundle. Changing this value ALONE will not switch the sheet; it moves
+      # with ARG NEXT_PUBLIC_PAYMENTS_PROVIDER in the root Dockerfile.
       - key: NEXT_PUBLIC_PAYMENTS_PROVIDER
         scope: RUN_AND_BUILD_TIME
-        value: mock
+        value: globepay
       # Enforce the CSP. Without this, next.config.ts serves
       # Content-Security-Policy-Report-Only — report-only had a clean run
       # (qa:csp + Sentry), flip assessed safe. GO-LIVE checklist: must be true.
