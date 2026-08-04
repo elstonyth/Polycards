@@ -136,6 +136,9 @@ services:
       # serving /store/phone-verification/* with the Twilio secrets set, or the
       # signup sheet renders an OTP step that 404s. CONTEXT.md → Deploy Order:
       # this is step 3, the backend PHONE_VERIFICATION_REQUIRED flag is step 4.
-      # - key: NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED
-      #   scope: RUN_AND_BUILD_TIME
-      #   value: 'true'
+      # Enabled 2026-08-04 (backend routes + Twilio verified live first). Like
+      # every NEXT_PUBLIC_* here, the root Dockerfile ARG default is what the
+      # bundle actually gets — this key moves together with that ARG.
+      - key: NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED
+        scope: RUN_AND_BUILD_TIME
+        value: 'true'
