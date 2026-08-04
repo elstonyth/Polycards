@@ -21,6 +21,6 @@
     "@swc/jest": "^0.2.36",
     "@types/jest": "^30.0.0",
     "jest": "^30.4.2",
-    "typescript": "5.9.3"
+    "typescript": "6.0.3"
   }
 }
