@@ -110,26 +110,15 @@ updates:
       - dependency-name: 'tailwindcss'
         update-types:
           - version-update:semver-major
-      # #349 bumped typescript 5.9.3 -> 6.0.3 and went red on every backend
-      # job:
-      #
-      #   tsconfig.json(5,25): error TS5107: Option 'moduleResolution=node10'
-      #   is deprecated and will stop functioning in TypeScript 7.0. Specify
-      #   compilerOption '"ignoreDeprecations": "6.0"' to silence this error.
-      #
-      # That is backend/packages/odds-math/tsconfig.json:5 and
-      # backend/packages/pokemon/tsconfig.json:5, both `"moduleResolution":
-      # "Node"` (= node10) — what the CommonJS Medusa toolchain expects. So
-      # TS 6 is a coordinated migration gated on the integration suites, not a
-      # dependency bump. Note the per-PR `@dependabot ignore` on the earlier
-      # TS 7 PR (#159) only stored `[>= 7.a, < 8]`, so this 6.x PR walked
-      # straight through it — same one-range-at-a-time hole that let #158 come
-      # back as #234/#235 above. Hence the config-level entry.
-      #
-      # Remove this entry once those two tsconfigs move off
-      # `moduleResolution: "Node"` (to Node16/NodeNext/Bundler) or set
-      # `"ignoreDeprecations": "6.0"`, and the integration suites are green on
-      # the new compiler. 5.9.x patch/minor updates are unaffected.
+      # #349 (TS 5.9.3 -> 6.0.3) failed every backend job with TS5107:
+      # `moduleResolution=node10` is deprecated. That is "moduleResolution":
+      # "Node" at line 5 of backend/packages/{odds-math,pokemon}/tsconfig.json —
+      # what the CommonJS Medusa toolchain expects — so TS 6 is a coordinated
+      # migration gated on the integration suites, not a bump. Config-level
+      # because #159's per-PR ignore only stored [>= 7.a, < 8] and the 6.x PR
+      # walked through the gap, same shape as #158 -> #234/#235 above.
+      # Remove once those tsconfigs move off "Node" (or set ignoreDeprecations)
+      # and the suites are green. Patch/minor are unaffected.
       - dependency-name: 'typescript'
         update-types:
           - version-update:semver-major
