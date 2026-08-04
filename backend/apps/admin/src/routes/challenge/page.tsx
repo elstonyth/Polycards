@@ -27,6 +27,11 @@ import {
 } from '../../lib/queries';
 import { resolveImageUrl } from '../../lib/image-url';
 import { orderDateTime, rm } from '../../lib/format';
+import {
+  describeInShopZone,
+  nextWeeklyReset,
+  toLocalInput,
+} from '../../lib/challenge-schedule';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 import { RowActions } from '../../components/RowActions';
 import { StickySaveBar } from '../../components/StickySaveBar';
@@ -609,24 +614,6 @@ const StagesTab = () => {
 // promoteDueChallengeSchedules) — promotion happens AFTER that week is settled,
 // so the ending week always pays on the stages it actually ran.
 
-/** `datetime-local` speaks WALL-CLOCK time with no zone, so it must be read and
- *  written in the BROWSER's zone. `new Date(value)` already parses it that way;
- *  the reverse needs the offset subtracted, because toISOString is UTC. */
-const toLocalInput = (d: Date): string =>
-  new Date(d.getTime() - d.getTimezoneOffset() * 60_000)
-    .toISOString()
-    .slice(0, 16);
-
-/** Default start: next week, same wall-clock time, rounded to the hour. The
- *  real boundary is the configured reset (Week & Reset tab); this is only a
- *  sane starting point the operator adjusts. */
-const defaultStart = (): string => {
-  const d = new Date();
-  d.setHours(d.getHours() + 1, 0, 0, 0);
-  d.setDate(d.getDate() + 7);
-  return toLocalInput(d);
-};
-
 const stageSummary = (stages: ChallengeStageDTO[]): string => {
   if (stages.length === 0) return 'No stages — challenge off for that week';
   const cards = stages.reduce(
@@ -658,6 +645,10 @@ const AddChallengeModal = ({
    *  never what the operator wanted to schedule. */
   seedFrom: ChallengeStageDTO[];
 }) => {
+  // The configured week boundary (Week & Reset tab) — the default start snaps
+  // to it. "+7 days from now" would flip the milestone ladder mid-week, under
+  // players already competing on those thresholds.
+  const { data: settings } = useChallengeSettings();
   const create = useCreateChallengeSchedule();
   const [rows, setRows] = useState<StageRow[]>([]);
   const [startsAt, setStartsAt] = useState('');
@@ -667,10 +658,12 @@ const AddChallengeModal = ({
   // seeding once would hand the operator their previous draft — including one
   // they already saved.
   const [seededOpen, setSeededOpen] = useState(false);
-  if (open && !seededOpen) {
+  // Waits for settings: seeding a wrong default and silently correcting it
+  // later would be worse than an empty field for the half-second it takes.
+  if (open && !seededOpen && settings) {
     setSeededOpen(true);
     setRows(seedFrom.map(stageFromDTO));
-    setStartsAt(defaultStart());
+    setStartsAt(toLocalInput(nextWeeklyReset(settings)));
     setLabel('');
     setReason('');
   }
@@ -748,6 +741,16 @@ const AddChallengeModal = ({
                     startsAt !== '' && !startValid ? true : undefined
                   }
                 />
+                {/* The input is BROWSER wall-clock. Echoing the same instant in
+                    the shop's zone is the only way an operator sitting in a
+                    different one can see that their "Monday 00:00" is not the
+                    shop's reset. */}
+                {startValid && settings && (
+                  <Text className="text-ui-fg-subtle" size="small">
+                    {describeInShopZone(start, settings.timezone)}{' '}
+                    {settings.timezone}
+                  </Text>
+                )}
               </div>
               <div className="flex min-w-64 flex-1 flex-col gap-y-1">
                 <Label htmlFor="schedule-label" size="small">

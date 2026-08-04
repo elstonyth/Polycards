@@ -232,7 +232,11 @@ export default function SettingsForm({ customer }: Props) {
               }}
               className="h-11 shrink-0 rounded-xl border border-white/10 bg-white/[0.05] px-4 text-sm font-medium text-white transition-colors hover:bg-white/[0.1] disabled:opacity-70"
             >
-              Change
+              {/* "Add" for an account with no number yet — most accounts, and
+                  the ones sent here by the topup/delivery verification gate.
+                  Labelling that button "Change" reads as "change what?" and
+                  makes the screen look like the wrong one. */}
+              {phone ? 'Change' : 'Add'}
             </button>
           </div>
         )}
