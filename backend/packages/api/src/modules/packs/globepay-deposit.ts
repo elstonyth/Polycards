@@ -186,11 +186,20 @@ export async function startGlobePayDeposit(
       config,
     );
   } catch (error) {
-    if (error instanceof GlobePayError) {
-      // A GlobePayError is a DEFINITIVE rejection: their API answered and said
+    if (error instanceof GlobePayError && error.definite) {
+      // Only a DEFINITIVE rejection closes the row: their API answered and said
       // no, so no deposit exists on their side and no callback will ever
-      // arrive. Close the row out rather than leaving it pending and polluting
-      // the reconciliation sweep forever.
+      // arrive. Close it out rather than leaving it pending and polluting the
+      // reconciliation sweep forever.
+      //
+      // `definite` is load-bearing, not decoration. A timeout, socket reset or
+      // WAF page also arrives as a GlobePayError, with definite=false, and
+      // means the submit MAY have been accepted and only the response lost
+      // (see the class doc in globepay-client.ts). Closing those took a live
+      // deposit out of the sweep's status='pending' scan permanently — the
+      // sibling test at globepay-deposit.unit.spec.ts already asserted the
+      // opposite of what this branch did, and passed only because it mocked a
+      // raw SyntaxError, a shape the client never actually throws.
       await packs.updateGlobePayDeposits({ id: row.id, status: 'failed' });
       // Log their reason before it is flattened into the customer-facing
       // message below — this is the ONLY point we ever observe it, since the
