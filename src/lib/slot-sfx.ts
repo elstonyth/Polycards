@@ -53,13 +53,14 @@ function blip(
 
 const CUES: Record<SfxName, () => void> = {
   tick: () => blip(2400, 28, { type: 'square', gain: 0.03 }),
-  // Woody per-cell reel tick — softer than `tick` (triangle, lower, quick decay)
-  // so a rapid run of them reads as a crisp tick track, not a harsh buzz. One
-  // fires per Pokémon crossing the winning line; the rate decelerates with the
-  // reel, so the ticks naturally slow and space out into a countable landing.
+  // Clicky per-cell reel tick (operator ask 2026-08-04: "more clicky"): short
+  // bright transient over a stubby tonal body — reads as a mechanical pawl
+  // click per Pokémon crossing the winning line. Rate follows the reel (fires
+  // per crossing), so ticks speed up through the fast middle and space out
+  // into a countable landing.
   reelTick: () => {
-    blip(1500, 24, { type: 'triangle', gain: 0.14, slideTo: 1300 });
-    blip(3600, 12, { type: 'square', gain: 0.028 }); // click transient
+    blip(2100, 16, { type: 'triangle', gain: 0.12, slideTo: 1700 });
+    blip(5200, 10, { type: 'square', gain: 0.06 }); // sharp click transient
   },
   clack: () => {
     blip(180, 90, { type: 'triangle', gain: 0.16, slideTo: 70 });
