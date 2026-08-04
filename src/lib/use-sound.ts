@@ -10,13 +10,14 @@ import { playSfx, type SfxName } from '@/lib/slot-sfx';
 const MUTED_KEY = 'polycards.slot.muted';
 
 const FILES = {
-  spin: '/sounds/slot-spin.mp3',
+  tap: '/sounds/slot-tap.mp3',
+  start: '/sounds/slot-start.mp3',
   stop: '/sounds/slot-stop.mp3',
   win: '/sounds/slot-win.mp3',
   bigwin: '/sounds/slot-bigwin.mp3',
-  sell: '/sounds/slot-sell.mp3',
   riser: '/sounds/slot-riser.mp3',
-  reveal: '/sounds/slot-reveal.mp3',
+  count: '/sounds/slot-count.mp3',
+  ambient: '/sounds/slot-ambient.mp3',
 } as const;
 
 export type SoundName = keyof typeof FILES;
@@ -51,9 +52,6 @@ export function useSound() {
   // server snapshot.
   const [muted, setMuted] = useState(false);
   const pool = useRef<Partial<Record<SoundName, HTMLAudioElement>>>({});
-  // In-flight volume-fade timer for the looping reveal bed (HTMLAudio has no
-  // native fade). A new fade cancels the previous one.
-  const fadeTimer = useRef<number | null>(null);
 
   // Hydrate mute state + preload the audio pool on the client only.
   useEffect(() => {
@@ -67,12 +65,8 @@ export function useSound() {
     const pool_ = pool.current;
     return () => {
       // One-shots (bigwin fanfare etc.) must not bleed past the machine's
-      // unmount; the reveal-bed stop elsewhere doesn't cover them.
+      // unmount.
       for (const audio of Object.values(pool_)) audio?.pause();
-      if (fadeTimer.current !== null) {
-        window.clearInterval(fadeTimer.current);
-        fadeTimer.current = null;
-      }
     };
   }, []);
 
@@ -84,6 +78,7 @@ export function useSound() {
       const audio = pool.current[name];
       if (!audio) return;
       try {
+        audio.loop = false; // an element last used by loop() must not re-loop
         audio.volume = Math.min(1, Math.max(0, volume));
         // rate ≠ 1 shifts pitch (classic rising reel-stop): pitch correction off.
         audio.preservesPitch = rate === 1;
@@ -97,6 +92,31 @@ export function useSound() {
     [muted],
   );
 
+  // Looping playback (ambient bed). Stop via halt(). Resolves to whether
+  // playback actually started, so callers latching "already playing" state
+  // (ambientOn) can reset on failure and retry on a later gesture instead of
+  // going permanently silent.
+  const loop = useCallback(
+    (name: SoundName, volume = 1): Promise<boolean> => {
+      if (muted) return Promise.resolve(false);
+      const audio = pool.current[name];
+      if (!audio) return Promise.resolve(false);
+      try {
+        audio.loop = true;
+        audio.volume = Math.min(1, Math.max(0, volume));
+        audio.playbackRate = 1;
+        audio.currentTime = 0;
+        return audio.play().then(
+          () => true,
+          () => false,
+        );
+      } catch {
+        return Promise.resolve(false);
+      }
+    },
+    [muted],
+  );
+
   // Halt a playing sound (the 6s spin bed outlives short spins). Not muted-
   // gated: halting must always work, even if mute was toggled mid-spin.
   const halt = useCallback((name: SoundName) => {
@@ -104,6 +124,7 @@ export function useSound() {
     if (!audio) return;
     try {
       audio.pause();
+      audio.loop = false;
       audio.currentTime = 0;
     } catch {
       /* no-op */
@@ -140,58 +161,5 @@ export function useSound() {
     [muted],
   );
 
-  // Start the looping reveal ambience (fills the face-down wait); returns a
-  // stop() the caller MUST call on reveal/unmount. Muted → no-op stop so callers
-  // don't branch. Loops seamlessly (asset is crossfade-constructed).
-  const anticipation = useCallback((): (() => void) => {
-    if (muted) return () => {};
-    const audio = pool.current.reveal;
-    if (!audio) return () => {};
-    // Manual volume ramp (HTMLAudio has no native fade): step every ~30ms so the
-    // bed EMERGES under the reel-stop instead of popping in at full level, and
-    // fades out on the tap instead of cutting. A new ramp cancels any prior one.
-    const ramp = (to: number, ms: number, done?: () => void) => {
-      if (fadeTimer.current !== null) window.clearInterval(fadeTimer.current);
-      const from = audio.volume;
-      const steps = Math.max(1, Math.round(ms / 30));
-      let i = 0;
-      fadeTimer.current = window.setInterval(() => {
-        i += 1;
-        audio.volume = Math.min(
-          1,
-          Math.max(0, from + (to - from) * (i / steps)),
-        );
-        if (i >= steps) {
-          if (fadeTimer.current !== null)
-            window.clearInterval(fadeTimer.current);
-          fadeTimer.current = null;
-          done?.();
-        }
-      }, 30);
-    };
-    try {
-      audio.loop = true;
-      audio.volume = 0;
-      audio.currentTime = 0;
-      void audio.play().catch(() => {});
-      ramp(1, 600); // ease in across the reel-stop → reveal handoff
-    } catch {
-      /* no-op */
-    }
-    return () => {
-      try {
-        // Quick smooth duck on the tap so the bed clears cleanly under the
-        // blooming win fanfare (which now eases in too) — a seamless handoff.
-        ramp(0, 220, () => {
-          audio.pause();
-          audio.loop = false;
-          audio.currentTime = 0;
-        });
-      } catch {
-        /* no-op */
-      }
-    };
-  }, [muted]);
-
-  return { muted, toggleMuted, play, halt, vibrate, sfx, anticipation };
+  return { muted, toggleMuted, play, loop, halt, vibrate, sfx };
 }

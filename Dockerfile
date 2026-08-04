@@ -62,11 +62,14 @@ ARG NEXT_PUBLIC_MEDIA_HOST=polycards-media.sgp1.cdn.digitaloceanspaces.com
 # Set to the live DO host; on a custom-domain move update this ARG + the .do
 # spec + the backend's MERCUR_STOREFRONT_URL together.
 ARG NEXT_PUBLIC_SITE_URL=https://polycards.gg
-# Payment provider for the top-up sheet. 'mock' keeps the demo gateway; set to
-# 'globepay' at cutover, together with the .do/storefront.app.yaml value. This
-# ARG default is the one that reaches the bundle (App Platform build-time env is
+# Payment provider for the top-up sheet. Flipped to 'globepay' 2026-08-04, the
+# cutover: the backend spec now carries GLOBEPAY_ENABLED=true plus the three
+# secrets, and ALLOW_MOCK_TOPUP is gone from production — so the mock sheet had
+# nothing left to call (topup-credits.ts refuses when mockTopupAllowed() is
+# false). Moves together with the .do/storefront.app.yaml value. This ARG
+# default is the one that reaches the bundle (App Platform build-time env is
 # unreliable here), so flipping the spec alone does nothing.
-ARG NEXT_PUBLIC_PAYMENTS_PROVIDER=mock
+ARG NEXT_PUBLIC_PAYMENTS_PROVIDER=globepay
 ENV NEXT_PUBLIC_MEDUSA_BACKEND_URL=$NEXT_PUBLIC_MEDUSA_BACKEND_URL
 ENV NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY=$NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY
 ENV NEXT_PUBLIC_MEDIA_HOST=$NEXT_PUBLIC_MEDIA_HOST
