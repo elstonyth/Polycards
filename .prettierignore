@@ -7,6 +7,11 @@ coverage/
 # Separate package with its own toolchain
 backend/
 
+# DigitalOcean app specs: hand-maintained, comment-heavy, and round-tripped
+# through `doctl`. Prettier re-quotes scalars ("true" -> 'true') on every edit,
+# burying real changes in churn on a spec where the diff IS the deploy review.
+.do/
+
 # Generated / vendored / research artifacts
 graphify-out/
 public/

@@ -208,6 +208,34 @@ envs:
   - key: PRICECHARTING_SELLER_ID
     scope: RUN_TIME
     value: pwoe4lsq4pkxegdsoyyzvfjuza
+  # ── Twilio Verify (SMS OTP) ────────────────────────────────────────────────
+  # App level, like Resend: the OTP routes run on the SERVICE, but keeping the
+  # scope uniform avoids the PriceCharting failure mode above (a component-
+  # scoped key that the other component silently lacks). Values are injected
+  # from gitignored deploy/.env.deploy by do-apply.ps1, same as every secret
+  # here — all three names are in its required-key list, so a half-filled env
+  # file fails the apply instead of shipping a broken half-configured gateway.
+  #
+  # Registering these does NOT enforce anything: sendPhoneOtp starts working,
+  # but requireSignupPhoneProof / blockUnverifiedPhoneWrite stay open until
+  # PHONE_VERIFICATION_REQUIRED is set. That flag is deliberately NOT here —
+  # it is flipped LAST, after the storefront rebuild ships the OTP UI
+  # (CONTEXT.md → Deploy Order, steps 3 then 4). Adding it in this same edit
+  # would 400 every phone signup until the storefront caught up.
+  - key: TWILIO_ACCOUNT_SID
+    scope: RUN_TIME
+    type: SECRET
+    value: __SECRET__TWILIO_ACCOUNT_SID__
+  - key: TWILIO_AUTH_TOKEN
+    scope: RUN_TIME
+    type: SECRET
+    value: __SECRET__TWILIO_AUTH_TOKEN__
+  # Not strictly a credential (it is an identifier), but it pairs with the two
+  # above and there is no value in leaking which Verify service is live.
+  - key: TWILIO_VERIFY_SERVICE_SID
+    scope: RUN_TIME
+    type: SECRET
+    value: __SECRET__TWILIO_VERIFY_SERVICE_SID__
   # ╔═══════════════════════════════════════════════════════════════════════╗
   # ║ DO NOT APPLY THIS SPEC UNTIL PR #252 IS MERGED.                        ║
   # ║ ALLOW_MOCK_TOPUP is GONE (the go-live blocker is cleared) and the      ║
