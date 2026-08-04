@@ -123,7 +123,8 @@ type Draft = {
   image: string;
   stock: string;
   /** How many collection holdings collapsed into this draft (see productKey).
-   *  Shown so a preset stock of 3 reads as deliberate, not as a bug. */
+   *  Shown beside the row so the operator knows what to type into Units — the
+   *  field itself imports as 0 (nothing is listed for sale until they say so). */
   merged: number;
   /** Slab-label text (§8), prefilled from pokemontcg.io like the search page. */
   labelYear: string;
@@ -237,7 +238,8 @@ const AddFromPcCollectionPage = () => {
         // set but is not the account the token reads. Importing them would put
         // other people's cards in our catalog, so the API already dropped them;
         // say so instead of quietly serving a short page.
-        if (data.foreign_dropped > 0) foreignRef.current += data.foreign_dropped;
+        if (data.foreign_dropped > 0)
+          foreignRef.current += data.foreign_dropped;
         setOffers((prev) => {
           const rows = prev ?? [];
           const seen = new Set(rows.map(offerKey));
@@ -364,9 +366,13 @@ const AddFromPcCollectionPage = () => {
             grader: seeded.grader,
             grade: seeded.grader === '' ? '' : seeded.grade,
             image,
-            // These holdings are physically in hand — that is what makes them a
-            // collection — so units default to how many were picked.
-            stock: String(group.length),
+            // Units default to 0, same as the from-pricecharting search page.
+            // A PriceCharting collection records what the operator OWNS, not
+            // what is sellable here, so importing the holding count straight
+            // into sellable stock published inventory nobody had decided to
+            // list. The merged count is still shown beside the row, so the
+            // operator can type it in deliberately.
+            stock: '0',
             merged: group.length,
             labelYear: '',
             labelNote: '',
@@ -565,11 +571,14 @@ const AddFromPcCollectionPage = () => {
           </Text>
         )}
 
-        {offers !== null && scanned === 0 && !scanning && scanError === null && (
-          <Text className="text-ui-fg-subtle" size="small">
-            {t('pcCollection.empty')}
-          </Text>
-        )}
+        {offers !== null &&
+          scanned === 0 &&
+          !scanning &&
+          scanError === null && (
+            <Text className="text-ui-fg-subtle" size="small">
+              {t('pcCollection.empty')}
+            </Text>
+          )}
 
         {/* Step 2 — narrow + pick */}
         {offers !== null && scanned > 0 && (

@@ -34,11 +34,13 @@ export async function POST(
     throw new MedusaError(MedusaError.Types.NOT_FOUND, 'Order not found.');
   }
 
-  // Only a pre-ship order is customer-cancelable. Give an actionable message
-  // rather than a bare transition error.
-  // 'packing' = legacy expand-window token; ALLOWED routes packing -> canceled,
-  // so the customer window must agree until the contract migration.
-  const CANCELABLE = ['requested', 'processed', 'ready_to_ship', 'packing'];
+  // The customer window closes at `processed` — once the order is picked for
+  // packing (`ready_to_ship` on) only the operator may cancel it, so
+  // CANCELABLE is deliberately NARROWER than delivery.ts's ALLOWED, which
+  // still routes ready_to_ship -> canceled for the admin surface.
+  // 'packing' = legacy expand-window token (~`processed`); it stays until the
+  // contract migration named in Migration20260727000000.
+  const CANCELABLE = ['requested', 'processed', 'packing'];
   if (!CANCELABLE.includes(order.status)) {
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,

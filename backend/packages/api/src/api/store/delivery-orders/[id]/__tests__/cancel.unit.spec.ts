@@ -63,15 +63,6 @@ describe('POST /store/delivery-orders/:id/cancel', () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 
-  it('also allows cancel while ready_to_ship', async () => {
-    const { res } = mkRes();
-    await cancelOrder(
-      mkReq([order({ status: 'ready_to_ship' })]) as any,
-      res,
-    );
-    expect(run).toHaveBeenCalledTimes(1);
-  });
-
   it('404s an unknown order id without invoking the workflow', async () => {
     await expect(
       cancelOrder(mkReq([]) as any, mkRes().res),
@@ -103,6 +94,9 @@ describe('POST /store/delivery-orders/:id/cancel', () => {
   });
 
   it.each([
+    // The customer window closes at `processed`: from ready_to_ship on only the
+    // operator may cancel (the admin's ALLOWED map still permits it).
+    ['ready_to_ship', /already ready to ship .*contact support/i],
     ['shipped', /already shipped .*contact support/i],
     // CUSTOMER_STATUS_WORD.completed === 'delivered' — the customer is told
     // their order was delivered, not "completed" (operator vocabulary).

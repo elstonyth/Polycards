@@ -68,7 +68,8 @@ export type RequestDeliveryResult =
   | { ok: false; error: string; needsAuth?: boolean };
 
 export type EditAddressResult =
-  { ok: true } | { ok: false; error: string; needsAuth?: boolean };
+  | { ok: true }
+  | { ok: false; error: string; needsAuth?: boolean };
 
 export type AddressView = {
   id: string;
@@ -264,17 +265,20 @@ const CANCEL_RULES: ErrorRule[] = [
     'Please log in to manage deliveries.',
   ],
   [/already canceled/i, 'This delivery is already canceled.'],
-  // Backend NOT_ALLOWED for shipped/delivered orders — mirror its copy.
+  // Backend NOT_ALLOWED once the order is out of the customer window. It fires
+  // from `ready_to_ship` on — not only after the parcel physically ships — so
+  // the copy says "being prepared", which is true for every status it covers.
   [
-    /no longer be canceled|not allowed|shipped|delivered/i,
-    'This order has already shipped and can no longer be canceled — please contact support.',
+    /no longer be canceled|not allowed|ready to ship|shipped|delivered/i,
+    'This order is already being prepared for shipping and can no longer be canceled — please contact support.',
   ],
   [/not found|404/i, 'That order was not found.'],
 ];
 
-// Cancel a still-pre-ship order (`requested`/`processed`/`ready_to_ship`) —
-// the cards return to the customer's vault. The backend enforces ownership and
-// status transition; the UI additionally hides the affordance post-ship.
+// Cancel an order the customer still owns the decision on (`requested`/
+// `processed`) — the cards return to their vault. From `ready_to_ship` on the
+// backend refuses: the parcel is picked and labelled, so cancelling is an
+// operator/support action. The UI hides the affordance for the same statuses.
 export async function cancelDeliveryOrder(
   orderId: string,
 ): Promise<CancelDeliveryResult> {
@@ -347,7 +351,8 @@ export type AddAddressResult =
   | { ok: false; error: string; needsAuth?: boolean };
 
 export type EditAddressBookResult =
-  { ok: true } | { ok: false; error: string; needsAuth?: boolean };
+  | { ok: true }
+  | { ok: false; error: string; needsAuth?: boolean };
 
 // ONE snake_case mapping for both create and update.
 //

@@ -237,7 +237,15 @@ const GroupCard = ({ customerId }: { customerId: string }) => {
   const current =
     (memberships.find((g) => !isDefaultPlayerGroup(g)) ?? memberships[0])?.id ??
     '';
-  const value = picked ?? current;
+  // A player in NO group rolls set 1 — bit-for-bit what the DEFAULT group's
+  // members roll (resolveOddsSetForCustomer returns 1 for both) — so the card
+  // names DEFAULT instead of reading as an unset field the operator has to
+  // interpret. Not cosmetic-only: `current` stays the real membership, so this
+  // shows as an unsaved change and Save persists it in one click. That is the
+  // whole repair path when the fail-soft subscriber missed someone or the row
+  // predates it (see scripts/backfill-default-group.ts).
+  const defaultGroupId = groups.find(isDefaultPlayerGroup)?.id ?? '';
+  const value = (picked ?? current) || defaultGroupId;
   // `duplicated` keeps Save live when the player holds MORE than one
   // membership, even with nothing picked. That state is the one this card
   // exists to repair — the prebuilt /customer-groups screen is what creates it
@@ -274,10 +282,10 @@ const GroupCard = ({ customerId }: { customerId: string }) => {
             </Label>
             <Select value={value} onValueChange={setPicked}>
               <Select.Trigger id="player-group" className="w-64">
-                {/* Placeholder, because `value` is '' for a player in NO group
-                    — possible before the backfill runs, after a fail-soft
-                    subscriber miss, or for a seeded customer. A blank trigger
-                    reads as a loading bug rather than a real state. */}
+                {/* Only reachable when the shop has no DEFAULT row at all —
+                    a group-less player otherwise shows DEFAULT (see
+                    `defaultGroupId` above). A blank trigger reads as a loading
+                    bug rather than a real state. */}
                 <Select.Value placeholder={t('players.groupNone')} />
               </Select.Trigger>
               <Select.Content>
@@ -304,10 +312,19 @@ const GroupCard = ({ customerId }: { customerId: string }) => {
           >
             {t('players.groupSave')}
           </Button>
-          {duplicated && (
+          {duplicated ? (
             <Text size="small" className="text-ui-fg-subtle pb-2">
               {t('players.groupDuplicated', { count: memberships.length })}
             </Text>
+          ) : (
+            // Says out loud that the DEFAULT on screen is the odds this player
+            // already rolls but is not yet a stored membership — otherwise a
+            // live Save button next to an apparently-correct value looks broken.
+            memberships.length === 0 && (
+              <Text size="small" className="text-ui-fg-subtle pb-2">
+                {t('players.groupUnassigned')}
+              </Text>
+            )
           )}
         </div>
       )}

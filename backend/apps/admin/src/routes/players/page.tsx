@@ -19,6 +19,7 @@ import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import { usePlayers, useSetPlayerDisabled } from '../../lib/queries';
 import type { PlayerRow } from '../../lib/admin-rest';
 import { orderDateTime, rm } from '../../lib/format';
+import { DEFAULT_PLAYER_GROUP_NAME } from '../../lib/player-groups';
 import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
@@ -187,7 +188,11 @@ const PlayersPage = () => {
                       {p.phone ?? '—'}
                     </Table.Cell>
                     <Table.Cell className="text-ui-fg-subtle">
-                      {p.groups[0] ?? '—'}
+                      {/* No stored membership is not "no odds" — it rolls set 1,
+                          exactly what DEFAULT's members roll. Naming the group
+                          keeps this column agreeing with the Profile tab's
+                          group card, which shows DEFAULT for the same player. */}
+                      {p.groups[0] ?? DEFAULT_PLAYER_GROUP_NAME}
                     </Table.Cell>
                     <Table.Cell className="whitespace-nowrap">
                       <Badge size="2xsmall">LV {p.vip_level}</Badge>
@@ -229,7 +234,9 @@ const PlayersPage = () => {
                           aria-label={`${p.disabled ? t('players.disabled') : t('players.active')} — ${p.email}`}
                         />
                         <StatusBadge color={p.disabled ? 'red' : 'green'}>
-                          {p.disabled ? t('players.disabled') : t('players.active')}
+                          {p.disabled
+                            ? t('players.disabled')
+                            : t('players.active')}
                         </StatusBadge>
                       </div>
                     </Table.Cell>
@@ -264,10 +271,16 @@ const PlayersPage = () => {
         <Prompt.Content>
           <Prompt.Header>
             <Prompt.Title>
-              {t(target?.disabled ? 'players.enableTitle' : 'players.disableTitle')}
+              {t(
+                target?.disabled
+                  ? 'players.enableTitle'
+                  : 'players.disableTitle',
+              )}
             </Prompt.Title>
             <Prompt.Description>
-              {t(target?.disabled ? 'players.enableDesc' : 'players.disableDesc')}
+              {t(
+                target?.disabled ? 'players.enableDesc' : 'players.disableDesc',
+              )}
             </Prompt.Description>
           </Prompt.Header>
 
