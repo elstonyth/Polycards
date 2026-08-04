@@ -14,7 +14,13 @@ import { topUpAmountError } from './topup';
 // here — that happens only when a verified callback reports status 6
 // (src/api/hooks/globepay/deposit/route.ts).
 
-/** Default MYR deposit method. BQR is the only channel provisioned on staging. */
+/**
+ * Fallback MYR deposit method when neither the request nor the environment
+ * names one. BQR is the only channel provisioned on STAGING — production
+ * refused it on 2026-08-04 with `PMT10006 Invalid Payment Method`, which is
+ * why the value is now overridable per environment (see below) instead of
+ * being a constant that costs a code deploy to change.
+ */
 export const GLOBEPAY_DEFAULT_METHOD = 'BQR';
 
 /**
@@ -129,7 +135,17 @@ export async function startGlobePayDeposit(
     );
   }
 
-  const paymentMethodCode = input.paymentMethodCode ?? GLOBEPAY_DEFAULT_METHOD;
+  // GLOBEPAY_DEPOSIT_METHOD lets an operator name the channel their merchant
+  // account actually has, without a code deploy: which of FPX/DN/BQR/OB is
+  // provisioned is GlobePay's decision, differs between staging and production,
+  // and is not discoverable from our side except by being refused. Finding the
+  // right one otherwise costs a ~10 minute build per guess; as an env var it is
+  // a ~4 minute spec apply. Still validated against the allow-list below, so a
+  // typo fails closed on OUR side rather than reaching the gateway.
+  const paymentMethodCode =
+    input.paymentMethodCode ??
+    process.env.GLOBEPAY_DEPOSIT_METHOD ??
+    GLOBEPAY_DEFAULT_METHOD;
   if (
     !(GLOBEPAY_MYR_METHODS as readonly string[]).includes(paymentMethodCode)
   ) {
@@ -176,6 +192,27 @@ export async function startGlobePayDeposit(
       // arrive. Close the row out rather than leaving it pending and polluting
       // the reconciliation sweep forever.
       await packs.updateGlobePayDeposits({ id: row.id, status: 'failed' });
+      // Log their reason before it is flattened into the customer-facing
+      // message below — this is the ONLY point we ever observe it, since the
+      // row records status 'failed' with no code. Without it the 2026-08-04
+      // cutover had a live deposit failing with no way to tell a bad key from
+      // an unprovisioned payment method from an IP the gateway refuses.
+      //
+      // AFTER the status update on purpose: the row write is money-path state
+      // and must not depend on the logger resolving. `error.message` carries
+      // the diagnosis when `codes` is empty — a non-JSON/WAF response (an
+      // un-allowlisted IP lands here) is built from the response text alone,
+      // see globepay-client.ts. Safe to log: their codes and message, the HTTP
+      // status, our own opaque reference, the method and the amount. NEVER the
+      // request or response envelope — those carry the signed/encrypted body.
+      scope
+        .resolve<{ warn: (message: string) => void }>('logger')
+        .warn(
+          `[globepay] deposit refused: codes=${error.codes.join(',') || 'none'} ` +
+            `httpStatus=${error.httpStatus} definite=${error.definite} ` +
+            `method=${paymentMethodCode} amount=${amount} ref=${merchantTransactionId} ` +
+            `msg=${error.message}`,
+        );
       // Their validation errors are the customer's problem to fix (amount out
       // of range, method unavailable), not a 500.
       throw new MedusaError(
