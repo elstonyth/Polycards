@@ -896,6 +896,41 @@ export async function deleteChallengeSchedule(id: string): Promise<void> {
   }
 }
 
+/** One settled week, for the Winners selector. `skipped` counts prize cards the
+ *  settlement could NOT grant for stock — the manual-fulfilment queue. */
+export interface ChallengeWeekSummaryDTO {
+  weekStart: string;
+  winners: number;
+  credits: number;
+  cards: number;
+  skipped: number;
+}
+
+export interface ChallengeWinnerDTO {
+  rank: number;
+  customer_id: string;
+  customer_email: string | null;
+  credits: number;
+  cards: {
+    card_id: string;
+    name: string | null;
+    image: string | null;
+    qty: number;
+    status: string;
+  }[];
+  pool_myr: number | null;
+  unlocked_stages: number[];
+}
+
+export const getChallengeWinners = (week?: string) =>
+  getJson<{
+    weeks: ChallengeWeekSummaryDTO[];
+    week: string | null;
+    winners: ChallengeWinnerDTO[];
+  }>(
+    `/admin/challenge/winners${week ? `?week=${encodeURIComponent(week)}` : ''}`,
+  );
+
 export interface ChallengeSettingsDTO {
   cadence: string;
   timezone: string;

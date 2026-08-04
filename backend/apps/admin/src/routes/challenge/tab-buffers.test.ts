@@ -46,6 +46,12 @@ describe('challenge/VIP tab buffers survive tab switches', () => {
       expect(forceMounts(src, value)).toBe(true);
       expect(hidesWhenInactive(src, value)).toBe(true);
     }
+    // 'winners' is deliberately excluded — read-only history with no edit
+    // buffer, so forceMounting it would only fire its query on every visit to
+    // the page. Asserted as a NEGATIVE (same precedent as daily-rewards'
+    // 'boxes') so adding it back to the loop above fails here first.
+    expect(forceMounts(src, 'winners')).toBe(false);
+    expect(hidesWhenInactive(src, 'winners')).toBe(false);
   });
 
   it('daily-rewards page forceMounts its buffer-holding tabs and hides them when inactive', () => {

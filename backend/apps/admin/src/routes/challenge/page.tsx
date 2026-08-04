@@ -7,6 +7,7 @@ import {
   Input,
   Label,
   Select,
+  StatusBadge,
   Table,
   Tabs,
   FocusModal,
@@ -18,6 +19,7 @@ import {
   useChallengeStages,
   useSaveChallengeStages,
   useChallengeSchedules,
+  useChallengeWinners,
   useCreateChallengeSchedule,
   useDeleteChallengeSchedule,
   useChallengeSettings,
@@ -919,6 +921,157 @@ const ScheduleTab = () => {
   );
 };
 
+// ── Winners tab ──────────────────────────────────────────────────────────────
+// What the weekly settlement actually paid, and what it could not. Read-only:
+// settlement owns these rows, and nothing here marks, resends or exports.
+//
+// The out-of-stock half is why this exists. A prize card the settlement could
+// not grant is recorded `skipped_no_stock` and then mentioned once, in a job
+// log, which nobody reads — so the spec's "manual fulfilment queue" had no
+// queue. This is it.
+const WinnersTab = () => {
+  const [week, setWeek] = useState('');
+  const { data, isError } = useChallengeWinners(week);
+  const { data: settings } = useChallengeSettings();
+
+  if (isError)
+    return (
+      <Text className="text-ui-fg-subtle p-6">Failed to load winners.</Text>
+    );
+  if (!data) return <LoadingSkeleton />;
+
+  const weeks = data.weeks;
+  const summary = weeks.find((w) => w.weekStart === data.week);
+  const tz = settings?.timezone;
+  const weekLabel = (iso: string) =>
+    tz ? describeInShopZone(new Date(iso), tz) : orderDateTime(iso);
+
+  return (
+    <div className="pc-admin flex flex-col gap-y-4 px-6 py-4">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <Text className="text-ui-fg-subtle" size="small">
+          Every settled week, paid by the hourly job. Ranks are the pulled-value
+          leaderboard as it stood when the week closed.
+        </Text>
+        {weeks.length > 0 && (
+          <div className="flex flex-col gap-y-1">
+            <Label htmlFor="winners-week" size="small">
+              Week
+            </Label>
+            {/* Value is data.week, not `week`: '' means "latest" and the server
+                resolves which week that is, so echoing the raw state would
+                leave the trigger blank on first paint. */}
+            <Select value={data.week ?? ''} onValueChange={setWeek}>
+              <Select.Trigger id="winners-week" className="w-72">
+                <Select.Value />
+              </Select.Trigger>
+              <Select.Content>
+                {weeks.map((w) => (
+                  <Select.Item key={w.weekStart} value={w.weekStart}>
+                    {weekLabel(w.weekStart)} — {w.winners} paid
+                  </Select.Item>
+                ))}
+              </Select.Content>
+            </Select>
+          </div>
+        )}
+      </div>
+
+      {summary && summary.skipped > 0 && (
+        // The one line on this page that needs an operator: these cards were
+        // won and never granted, so somebody has to ship them by hand.
+        <div className="border-ui-border-error rounded-lg border p-3">
+          <Text className="text-ui-fg-error" size="small">
+            {summary.skipped} prize card
+            {summary.skipped > 1 ? 's were' : ' was'} out of stock at settlement
+            and never granted — fulfil by hand. Marked below.
+          </Text>
+        </div>
+      )}
+
+      {weeks.length === 0 || data.winners.length === 0 ? (
+        <Text className="text-ui-fg-subtle">
+          No week has settled yet. The hourly job writes these rows when a
+          challenge week closes.
+        </Text>
+      ) : (
+        <>
+          <Table>
+            <Table.Header>
+              <Table.Row>
+                <Table.HeaderCell className="w-16">Rank</Table.HeaderCell>
+                <Table.HeaderCell>Player</Table.HeaderCell>
+                <Table.HeaderCell className="text-right">
+                  Credits
+                </Table.HeaderCell>
+                <Table.HeaderCell>Cards</Table.HeaderCell>
+              </Table.Row>
+            </Table.Header>
+            <Table.Body>
+              {data.winners.map((w) => (
+                <Table.Row key={w.customer_id}>
+                  <Table.Cell className="tabular-nums">#{w.rank}</Table.Cell>
+                  <Table.Cell className="text-ui-fg-subtle break-words">
+                    {w.customer_email ?? w.customer_id}
+                  </Table.Cell>
+                  <Table.Cell className="text-right tabular-nums whitespace-nowrap">
+                    {w.credits > 0 ? rm(w.credits) : '—'}
+                  </Table.Cell>
+                  <Table.Cell>
+                    {w.cards.length === 0 ? (
+                      <Text className="text-ui-fg-muted" size="small">
+                        —
+                      </Text>
+                    ) : (
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                        {w.cards.map((c) => (
+                          <div
+                            key={c.card_id}
+                            className="flex items-center gap-x-2"
+                          >
+                            {c.image && (
+                              <img
+                                src={resolveImageUrl(c.image)}
+                                alt=""
+                                loading="lazy"
+                                decoding="async"
+                                className="h-9 w-7 shrink-0 rounded object-contain"
+                              />
+                            )}
+                            <Text size="small">{c.name ?? c.card_id}</Text>
+                            {c.qty > 1 && (
+                              <Text className="text-ui-fg-muted" size="small">
+                                ×{c.qty}
+                              </Text>
+                            )}
+                            {c.status === 'skipped_no_stock' && (
+                              <StatusBadge color="red">
+                                Out of stock
+                              </StatusBadge>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </Table.Cell>
+                </Table.Row>
+              ))}
+            </Table.Body>
+          </Table>
+          {summary && (
+            <Text className="text-ui-fg-subtle" size="small">
+              Pool {rm(data.winners[0]?.pool_myr ?? 0)} · stages{' '}
+              {data.winners[0]?.unlocked_stages.join(', ') || 'none'} unlocked ·{' '}
+              {rm(summary.credits)} credits paid across {summary.winners}{' '}
+              players
+            </Text>
+          )}
+        </>
+      )}
+    </div>
+  );
+};
+
 // ── Week & Reset tab ─────────────────────────────────────────────────────────
 const zones = (
   Intl as typeof Intl & { supportedValuesOf(k: string): string[] }
@@ -1077,7 +1230,7 @@ const PayoutTab = () => {
   );
 };
 
-type ChallengeTab = 'stages' | 'schedule' | 'payout';
+type ChallengeTab = 'stages' | 'schedule' | 'winners' | 'payout';
 
 const ChallengePage = () => {
   const [tab, setTab] = useState<ChallengeTab>('stages');
@@ -1093,11 +1246,13 @@ const ChallengePage = () => {
               still settled by hand.
             </Text>
           </div>
-          {/* Three tabs, in the order the operator thinks about them: what is
-              running now, what runs next, and when the week turns over. */}
+          {/* In the order the operator thinks about them: what is running now,
+              what runs next, what already paid out, and when the week turns
+              over. */}
           <Tabs.List>
             <Tabs.Trigger value="stages">This week</Tabs.Trigger>
             <Tabs.Trigger value="schedule">Scheduled</Tabs.Trigger>
+            <Tabs.Trigger value="winners">Winners</Tabs.Trigger>
             <Tabs.Trigger value="payout">Week & Reset</Tabs.Trigger>
           </Tabs.List>
         </div>
@@ -1117,6 +1272,14 @@ const ChallengePage = () => {
           className={tab === 'schedule' ? undefined : 'hidden'}
         >
           <ScheduleTab />
+        </Tabs.Content>
+        {/* Winners is deliberately NOT forceMounted, unlike its siblings: it
+            holds no edit buffer to protect, and mounting it always would fire
+            its query on every visit to this page whether or not anyone opens
+            the tab. Pinned as a negative in tab-buffers.test.ts so the next
+            reader does not "fix the inconsistency". */}
+        <Tabs.Content value="winners">
+          <WinnersTab />
         </Tabs.Content>
         <Tabs.Content
           value="payout"

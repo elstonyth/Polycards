@@ -129,6 +129,13 @@ if (await toggle.count()) {
 await page.keyboard.press('Escape');
 await page.waitForTimeout(500);
 
+// Winners: settled history, including the out-of-stock cards that are the only
+// reason the manual-fulfilment queue is visible anywhere.
+await page.getByRole('tab', { name: 'Winners' }).click();
+await page.getByText('Every settled week').waitFor({ timeout: 20000 });
+await page.waitForTimeout(1200);
+await shot(page, 'challenge-winners-tab', card(page));
+
 // ── 2. All Orders: the new Topups tab ────────────────────────────────────────
 await page.goto(`${ADMIN}/deliveries`, { waitUntil: 'networkidle' });
 await page.waitForTimeout(900);

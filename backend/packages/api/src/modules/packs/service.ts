@@ -6054,6 +6054,63 @@ class PacksModuleService extends MedusaService({
     return { promoted, failed };
   }
 
+  // The settled weeks, newest first, with enough per-week summary to drive a
+  // selector without loading every payout row.
+  //
+  // Raw SQL because this is a GROUP BY: the generated list methods return rows,
+  // and deriving the week list from them client-side means paging every payout
+  // ever written just to learn which weeks exist — the same unbounded-window
+  // trap the schedule list had.
+  //
+  // `skipped` is the reason this read exists at all. A card the settlement
+  // could not grant for stock is recorded and then only ever mentioned in a job
+  // log line; counting it per week is what turns it into a queue someone can
+  // actually work.
+  @InjectManager()
+  async challengeWinnerWeeks(
+    limit = 26,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<
+    {
+      weekStart: string;
+      winners: number;
+      credits: number;
+      cards: number;
+      skipped: number;
+    }[]
+  > {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<
+      {
+        week_start: Date;
+        winners: string;
+        credits: string | null;
+        cards: string;
+        skipped: string;
+      }[]
+    >(
+      `SELECT week_start,
+              COUNT(DISTINCT customer_id) AS winners,
+              COALESCE(SUM(credits), 0) AS credits,
+              COUNT(*) FILTER (WHERE kind = 'card') AS cards,
+              COUNT(*) FILTER (WHERE status = 'skipped_no_stock') AS skipped
+         FROM challenge_payout
+        WHERE deleted_at IS NULL
+        GROUP BY week_start
+        ORDER BY week_start DESC
+        LIMIT ?`,
+      [limit],
+    );
+    return rows.map((r) => ({
+      weekStart: new Date(r.week_start).toISOString(),
+      winners: Number(r.winners),
+      credits: Number(r.credits ?? 0),
+      cards: Number(r.cards),
+      skipped: Number(r.skipped),
+    }));
+  }
+
   // Community pool for the CURRENT challenge week: Σ pulled value across all
   // customers (recorded draw-time USD value, live FMV × multiplier fallback
   // for pre-backfill rows, × FX → MYR) since the week anchor (shared

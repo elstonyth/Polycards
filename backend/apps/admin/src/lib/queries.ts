@@ -27,6 +27,7 @@ import {
   getChallengeSettings,
   getChallengeStages,
   getChallengeSchedules,
+  getChallengeWinners,
   createChallengeSchedule,
   deleteChallengeSchedule,
   getCustomerAudit,
@@ -79,6 +80,8 @@ import {
   type ChallengeSettingsDTO,
   type ChallengeStageDTO,
   type ChallengeScheduleDTO,
+  type ChallengeWeekSummaryDTO,
+  type ChallengeWinnerDTO,
   type CustomerAudit,
   type CustomerGacha,
   type SupportTransaction,
@@ -737,6 +740,8 @@ export type {
   VipLevelDTO,
   ChallengeStageDTO,
   ChallengeScheduleDTO,
+  ChallengeWeekSummaryDTO,
+  ChallengeWinnerDTO,
   ChallengeSettingsDTO,
 } from './admin-rest';
 
@@ -813,6 +818,20 @@ export const useDeleteChallengeSchedule = () => {
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });
 };
+
+// Keyed on the selected week so switching weeks does not blow the cache away,
+// and '' (latest) is its own entry. Read-only history — no mutation hooks.
+export const useChallengeWinners = (
+  week: string,
+): UseQueryResult<{
+  weeks: ChallengeWeekSummaryDTO[];
+  week: string | null;
+  winners: ChallengeWinnerDTO[];
+}> =>
+  useQuery({
+    queryKey: qk.challengeWinners(week),
+    queryFn: () => getChallengeWinners(week || undefined),
+  });
 
 export const useChallengeSettings = (): UseQueryResult<ChallengeSettingsDTO> =>
   useQuery({ queryKey: qk.challengeSettings, queryFn: getChallengeSettings });
