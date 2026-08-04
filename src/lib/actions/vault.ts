@@ -68,6 +68,15 @@ const VAULT_RULES: ErrorRule[] = [
   ],
   [/withdrawals are not open/i, 'Withdrawals are not open yet.'],
   [/insufficient/i, 'Not enough balance for that.'],
+  // BEFORE the /amount/i catch-all on purpose. The gateway's own refusal
+  // ("…try a different amount or payment method.") contains the word "amount",
+  // so the broad rule below rewrote it into a validation error — during the
+  // 2026-08-04 cutover the sheet told a customer their perfectly valid RM 50
+  // was malformed when the real cause was GlobePay refusing the submit.
+  [
+    /could not start your top-up/i,
+    'The payment gateway could not start this top-up. Try again shortly, or pick a different payment method.',
+  ],
   [/amount/i, 'Enter a valid amount (up to RM 10,000, whole cents).'],
   [/already sold/i, 'This card was already sold back.'],
   [/not found|404/i, 'This card is no longer in your vault.'],
