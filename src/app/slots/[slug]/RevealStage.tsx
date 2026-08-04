@@ -39,7 +39,6 @@ export function RevealStage({
   sfx,
   vibrate,
   play,
-  anticipation,
 }: {
   phase: RevealPhase;
   cards: WonCard[];
@@ -68,8 +67,6 @@ export function RevealStage({
   sfx: (name: SfxName) => void;
   vibrate: (p: number | number[]) => void;
   play: (name: SoundName, volume?: number) => void;
-  /** Starts the sustained anticipation pad; returns a stop() to call on reveal. */
-  anticipation: () => () => void;
 }) {
   const [flipped, setFlipped] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -94,23 +91,6 @@ export function RevealStage({
   useEffect(() => {
     if (phase === 'transform') sfx('chime');
   }, [phase, sfx]);
-
-  // Hold the reveal ambience from the moment the reels stop (`flood`) through
-  // the whole face-down wait, so the reel-stop → reveal handoff is continuous:
-  // the bed fades IN under the riser (in useSound) and PERSISTS across every
-  // reveal phase — the condition stays true from flood→transform→review, so the
-  // effect never re-runs and the loop never restarts. The flip (or unmount)
-  // fades it out, handing off to the win fanfare in flipAll. Reduced motion
-  // skips the theater, so the bed would just be noise there — skip it.
-  const holdAnticipation =
-    !flipped &&
-    !reduced &&
-    (phase === 'flood' || phase === 'transform' || phase === 'review');
-  useEffect(() => {
-    if (!holdAnticipation) return;
-    const stop = anticipation();
-    return stop;
-  }, [holdAnticipation, anticipation]);
 
   useEffect(() => {
     if (!expired || thunked.current) return;
@@ -446,7 +426,7 @@ export function RevealStage({
             const i = confirmIndex;
             setConfirmIndex(null);
             void sell(i).then((ok) => {
-              if (ok) sfx('credit');
+              if (ok) play('count'); // credit tally tick roll
             });
           }}
           onCancel={() => setConfirmIndex(null)}

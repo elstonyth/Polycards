@@ -61,16 +61,17 @@ describe('spinTotalMs', () => {
     expect(spinTotalMs(1)).toBe(columnDurationMs(0, 1));
   });
 
-  // Spec decision #33 (a) + audio-sync retune: lengthened so the reel's cell
-  // crossings form a full accelerate→decelerate tick arc (the spin's sole audio)
-  // landing on the winner. A range, not exact constants, so retunes don't churn.
-  test('a single-reel spin runs ~4.9s (long readable decelerating tick arc)', () => {
-    expect(columnDurationMs(0, 1)).toBeGreaterThan(4200);
-    expect(columnDurationMs(0, 1)).toBeLessThan(5400);
+  // Spec decision #33 (a) + audio-sync retune (2026-08-04: BLUR_MS 2800 /
+  // FRICTION_CELLS 8 — longer spin, faster middle): the reel's cell crossings
+  // form a full accelerate→decelerate tick arc (the spin's sole audio) landing
+  // on the winner. A range, not exact constants, so retunes don't churn.
+  test('a single-reel spin runs ~5.5s (long readable decelerating tick arc)', () => {
+    expect(columnDurationMs(0, 1)).toBeGreaterThan(4800);
+    expect(columnDurationMs(0, 1)).toBeLessThan(6000);
   });
-  test('a 3-reel spin lands ~5.7s (ticks decelerate onto the winner lock)', () => {
-    expect(spinTotalMs(3)).toBeGreaterThan(5000);
-    expect(spinTotalMs(3)).toBeLessThan(6200);
+  test('a 3-reel spin lands ~6.3s (ticks decelerate onto the winner lock)', () => {
+    expect(spinTotalMs(3)).toBeGreaterThan(5600);
+    expect(spinTotalMs(3)).toBeLessThan(6800);
   });
 });
 

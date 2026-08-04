@@ -6,8 +6,11 @@ import type { Rarity } from '@/lib/packs-data';
 
 /** Reel cell width in CSS px (matches RouletteClient ITEM_W). */
 export const ITEM_W = 124;
-/** Fixed strip length — long enough to read as a real spin without wrap-looping. */
-export const STRIP_LEN = 48;
+/** Fixed strip length — long enough to read as a real spin without wrap-looping.
+ *  48 → 64 with the 2026-08-04 retune (BLUR_MS 2800 / FRICTION_CELLS 8): the
+ *  reference spinOffset trajectory's travel outgrew a 48-cell strip. No
+ *  production component renders this strip — it sizes the test-encoded fit. */
+export const STRIP_LEN = 64;
 /** The winner's index on the strip (high, so there's pre-roll travel). */
 export const WIN_INDEX = 36;
 /** Default per-row spin duration (ms). */

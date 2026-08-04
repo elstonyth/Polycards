@@ -34,7 +34,7 @@ describe('reelTarget', () => {
   it('uses the shipped constants by default geometry', () => {
     expect(ITEM_W).toBe(124);
     expect(WIN_INDEX).toBe(36);
-    expect(STRIP_LEN).toBe(48);
+    expect(STRIP_LEN).toBe(64);
   });
 });
 

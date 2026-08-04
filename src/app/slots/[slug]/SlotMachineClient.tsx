@@ -131,7 +131,10 @@ export default function SlotMachineClient({
   // mirrored every render always holds the current id, closing that bypass.
   const customerIdRef = useRef<string | null>(customer?.id ?? null);
   customerIdRef.current = customer?.id ?? null;
-  const { muted, toggleMuted, play, vibrate, sfx, anticipation } = useSound();
+  const { muted, toggleMuted, play, loop, halt, vibrate, sfx } = useSound();
+  // Ambient bed starts on the first real spin gesture (autoplay-safe) and
+  // persists across spins; mute kills it and the next spin restarts it.
+  const ambientOn = useRef(false);
 
   // Guest-only demo: a logged-in customer on ?demo=1 gets the real machine —
   // the demo exists purely as a pre-signup taste, never a mode for players.
@@ -322,6 +325,7 @@ export default function SlotMachineClient({
 
   async function handleSpin() {
     if (spinGuarded || modeUndecided) return;
+    play('tap');
     // Clear any in-flight reveal-theater timers (same as skipToCards) so a
     // stale flood→transform→review handoff can't fire over the new spin.
     if (floodTimer.current !== null) clearTimeout(floodTimer.current);
@@ -625,10 +629,11 @@ export default function SlotMachineClient({
     // Reduced motion collapses the theater to an immediate cut to review.
     const heldCardsCount = held.cards.length;
     setPhase('flood');
-    // One rising gesture, not two: the `riser` sweep carries the flood beat and
-    // the warm reveal bed fades in under it (RevealStage). The old synth `swell`
-    // was a second, redundant rise stacked on top — dropped so the lead-up reads
-    // as one seamless swell instead of two overlapping ones.
+    // One rising gesture, not two: the `riser` sweep alone carries the flood
+    // beat. The old synth `swell` was a second, redundant rise stacked on top —
+    // dropped so the lead-up reads as one swell. (The looping reveal bed that
+    // used to fade in under it was removed 2026-08-04 — operator call: the
+    // face-down wait plays dry.)
     play('riser');
     if (floodTimer.current !== null) clearTimeout(floodTimer.current);
     if (transformTimer.current !== null) clearTimeout(transformTimer.current);
@@ -697,13 +702,31 @@ export default function SlotMachineClient({
     return () => clearTimeout(id);
   }, [phase, spin?.nonce, reels, handleSettled]);
 
+  // Reel audio: launch whoosh at reel takeoff. The spinning sound itself is the
+  // per-cell reelTick below (one click per Pokémon crossing — tracks the real
+  // reel speed, which a fixed-tempo loop file cannot; the slot-spin.mp3 loop was
+  // tried and replaced 2026-08-04). Reduced motion has no reel travel — same
+  // guard as the clacks below. The ambient bed piggybacks on the same moment:
+  // first spin is a safe gesture-unlocked point to start it, and it persists
+  // across spins until muted.
+  useEffect(() => {
+    if (phase !== 'spinning' || reduced) return;
+    if (!ambientOn.current && !muted) {
+      // Latch optimistically (a re-fire mustn't double-start), un-latch on
+      // failure so the NEXT spin retries instead of staying silent forever.
+      ambientOn.current = true;
+      void loop('ambient').then((ok) => {
+        if (!ok) ambientOn.current = false;
+      });
+    }
+    play('start');
+  }, [phase, spin?.nonce, reduced, muted, play, loop]);
+
   // Per-cell tick: EVERY reel calls this as one of its Pokémon centers on the
-  // winning line, so multi-reel spins sound multi-reel. A single reel never
-  // crosses cells faster than ~74ms apart, so this ~18ms floor never drops a
-  // reel's own ticks — it only collapses the rare case where two reels cross
-  // within a blink (heard as one tick anyway), so overlapping reels can't stack
-  // into a harsh coincident peak. Keeps the multi-reel cascade and the loud
-  // single-reel tick, just tames the density.
+  // winning line, so multi-reel spins sound multi-reel. The ~18ms floor only
+  // collapses the rare case where two reels cross within a blink (heard as one
+  // tick anyway) — at the new peak speed a single reel's crossings are ~54ms
+  // apart, so no reel ever drops its own ticks.
   const lastTickAt = useRef(0);
   const handleCellCross = useCallback(() => {
     const now = performance.now();
@@ -711,6 +734,14 @@ export default function SlotMachineClient({
     lastTickAt.current = now;
     sfx('reelTick');
   }, [sfx]);
+
+  // Mute must silence the already-running ambient loop, not just future plays.
+  useEffect(() => {
+    if (muted) {
+      halt('ambient');
+      ambientOn.current = false;
+    }
+  }, [muted, halt]);
 
   // Reel-stop clacks: the stack owns its per-column settle internally, so fire a
   // mechanical clack at each column's stop time from here (cleared on teardown).
@@ -971,7 +1002,6 @@ export default function SlotMachineClient({
                   sfx={sfx}
                   vibrate={vibrate}
                   play={play}
-                  anticipation={anticipation}
                 />
               </div>
             )}

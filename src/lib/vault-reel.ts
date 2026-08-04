@@ -5,10 +5,11 @@
 /** Ratchet wind-up: the strip pulls back half a cell before release. */
 export const WINDUP_MS = 180;
 /** Full-speed blur phase (columns start together; stagger extends this phase).
- *  Lengthened (was 1500) to give the reel a longer readable spin whose cell
- *  crossings form a full accelerate→decelerate tick arc (the spin's sole audio;
- *  min crossing gap measured ~74ms, so every tick stays discrete/countable). */
-export const BLUR_MS = 2200;
+ *  Lengthened again (1500 → 2200 → 2800, operator ask 2026-08-04: "longer
+ *  spin") — cell crossings form a full accelerate→decelerate tick arc (the
+ *  spin's sole audio; crossing gap at peak ≈54ms, still above the 18ms
+ *  coincidence floor in SlotMachineClient, so ticks stay discrete). */
+export const BLUR_MS = 2800;
 /** Friction phase: cells tick past slower and slower (longer = spec #33 landing).
  *  Lengthened (was 850) to stretch the decelerating per-cell ticks — each
  *  Pokémon crossing the winning line reads as its own audible tick. Raising this
@@ -59,8 +60,11 @@ const settleShape = (p: number) =>
 // Tuned landing distances, in cells — the SINGLE source shared by BOTH
 // trajectories (spinOffset and the press-launched pressSpinOffset), so a
 // retune can never silently desync their landing feel.
-/** Friction travel of the landing. */
-const FRICTION_CELLS = 6;
+/** Friction travel of the landing. Raised 6 → 8 (operator ask 2026-08-04:
+ *  "middle part faster") — peak/mid velocity scales with FRICTION_CELLS via the
+ *  velocity-continuous handoff (3·frictionPx/FRICTION_MS), so this is the one
+ *  knob that speeds the blur phase without touching the landing durations. */
+const FRICTION_CELLS = 8;
 /** Suspense-crawl travel (LAST column only). */
 const CRAWL_CELLS = 2;
 /** Settle overshoot depth past the payline; kept < 0.6 cells (test-bounded). */
@@ -125,8 +129,11 @@ export function spinOffset(
   const overshootPx = itemH * OVERSHOOT_CELLS;
   // Blur travel sized so the blur's EXIT velocity equals friction's ENTRY
   // velocity (easeOutCubic'(0) = 3·frictionPx/FRICTION_MS), keeping the handoff
-  // velocity-continuous for ANY FRICTION_MS. Derived, not a magic divisor.
-  const blurPx = (3 * frictionPx * blur) / (2 * FRICTION_MS);
+  // velocity-continuous for ANY FRICTION_MS. The accel phase actually starts
+  // from the wound-UP position, so its distance is blurPx + windupPx; subtract
+  // windupPx here so exit velocity 2·(blurPx+windupPx)/blur lands exactly on
+  // friction's entry — the windup used to leak in as a ~2% velocity step.
+  const blurPx = (3 * frictionPx * blur) / (2 * FRICTION_MS) - windupPx;
   // The winner starts this far ABOVE its landed (centered) position and descends.
   const startPx = targetPx + frictionPx + crawlPx + blurPx;
 
