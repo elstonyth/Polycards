@@ -135,9 +135,39 @@ export async function POST(
   // contradicting the ledger. Row-level idempotency, and safe against retries:
   // the transient-error path below leaves the row 'pending', so a callback we
   // genuinely failed to process still gets reprocessed.
+  //
+  // EXCEPT success-on-failed, which is money in with no credit. The sweep can
+  // write a row off (globepay-reconcile.ts: a requery 400 read as "never
+  // existed", or a non-final status older than GLOBEPAY_STALE_AFTER_MS), and
+  // it only ever scans status='pending' — so once written off, the row is
+  // never requeried again. Before this branch existed, the customer's own
+  // settlement callback then arrived here, was acked 200, credited nothing and
+  // logged nothing: the payment vanished with the only trace sitting in
+  // GlobePay's back office. Recover it instead. Crediting late is safe — the
+  // signed-anchor dedupe in mutateCreditAtomic collapses this with any other
+  // delivery of the same deposit — whereas swallowing it is not.
   if (deposit.status !== 'pending') {
-    res.status(200).send('success');
-    return;
+    const recoverable = state === 'success' && deposit.status === 'failed';
+    // Mirrors the withdrawal route's guard: any callback disagreeing with the
+    // row we already wrote is worth an operator's attention, recoverable or not.
+    const contradicts =
+      (state === 'success' && deposit.status !== 'settled') ||
+      (state === 'failed' && deposit.status !== 'failed');
+    if (contradicts) {
+      req.scope
+        .resolve('logger')
+        .error(
+          `[globepay] deposit ${merchantTransactionId} callback says status ${data.Status} (${state}) but the row is already ${deposit.status} (gateway ${gatewayTransactionId})` +
+            (recoverable
+              ? ' — crediting a written-off deposit that the customer did pay'
+              : ' — investigate'),
+        );
+    }
+    if (!recoverable) {
+      res.status(200).send('success');
+      return;
+    }
+    // falls through to the credit path below
   }
 
   // 4) Non-final states (their status 4 "VerifyFail" among them) are explicitly
@@ -220,12 +250,15 @@ export async function POST(
       ),
     });
 
-    // Conditional flip: only claim a row that is STILL pending. Combined with
-    // the anchor above this is belt-and-braces, but it keeps the row honest if
-    // two callbacks land at once — the loser no-ops instead of overwriting
-    // settled_at and amount_settled with its own copy.
+    // Conditional flip on the status we READ, not a literal 'pending': the
+    // recovery branch above reaches here with a 'failed' row, and a hardcoded
+    // 'pending' selector would match nothing — the credit would land while the
+    // row stayed 'failed', leaving the ledger and the record disagreeing about
+    // the same deposit. Matching deposit.status keeps the concurrency guard
+    // intact (a row another worker moved since we read it still no-ops) while
+    // letting a written-off deposit be put right.
     await packs.updateGlobePayDeposits({
-      selector: { id: deposit.id, status: 'pending' },
+      selector: { id: deposit.id, status: deposit.status },
       data: {
         status: 'settled',
         gateway_status: data.Status,
