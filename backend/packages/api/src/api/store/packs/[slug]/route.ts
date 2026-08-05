@@ -5,6 +5,7 @@ import { cardByHandle, toCardView } from '../../../../modules/packs/card-view';
 import { normalizePublishedOdds } from '../../../../workflows/steps/create-pack';
 import { toMoney } from '../../../../modules/packs/money';
 import { pageAll } from '../../../utils/page-all';
+import { demoTierSplit } from '../../../../modules/packs/odds-sets';
 import {
   DEFAULT_MARKET_MULTIPLIER,
   displayMarketPrice,
@@ -120,6 +121,29 @@ export async function GET(
     })
     .filter((e): e is NonNullable<typeof e> => e !== null);
 
+  // GUEST DEMO ODDS — odds SET 3, aggregated per rarity tier.
+  //
+  // The logged-out demo spin (/slots/:slug/spin?demo=1) samples client-side and
+  // used to roll the PUBLISHED display odds, which are marketing copy, not a
+  // real distribution. The operator wants the demo to feel like the real thing,
+  // so it rolls set 3's actual weights (weight_3 → weight_2 → weight, the same
+  // fallback a set-3 player's spin resolves).
+  //
+  // 🔒 Aggregated on purpose: only the TIER split leaves the backend, the same
+  // GRAIN as published_odds — true numbers instead of authored ones. The exact
+  // bound (single-card tiers, and why a pack with no set-3 overrides publishes
+  // NOTHING rather than set 1) is documented on demoTierSplit; docs/adr/
+  // 0001-demo-spin-set-3-odds.md records the decision. Normalized over the CARD
+  // rows this response already exposes, so it describes the demo's pool exactly
+  // (reward rows can't be drawn in a demo).
+  const demoTiers = demoTierSplit(
+    odds.filter((o) => byHandle.has(o.card_id)), // same rows as `entries` above
+  );
+  // Same { tiers } shape as published_odds so the storefront reuses one parser.
+  // null when nothing is pullable, or when set 3 is indistinguishable from what
+  // default players roll — the demo then falls back to the published odds.
+  const demoOdds = demoTiers ? { tiers: demoTiers } : null;
+
   // Explicit public shape — `price` is bigNumber now, so a raw `pack` spread
   // would leak the internal `raw_price` jsonb sidecar into a public payload.
   const body = {
@@ -142,6 +166,8 @@ export async function GET(
     // Normalized: storage null-fills the tiers (json-merge guard) and the
     // public payload must not carry those nulls.
     published_odds: normalizePublishedOdds(pack.published_odds),
+    // Set-3 tier split for the guest demo spin only (see above).
+    demo_odds: demoOdds,
   };
   packCache.set(slug, { expires: Date.now() + CACHE_TTL_MS, body });
   res.json(body);

@@ -3,12 +3,58 @@ import {
   rm,
   timeAgo,
   fmtPct,
+  slugKeystroke,
+  toSlug,
   usdToMyr,
   gradeToGrader,
   graderFromInclude,
   orderDateTime,
   deliveryStatusLabel,
 } from './format';
+
+// The backend gate the output has to clear (packs/validate.ts HANDLE_RE).
+const HANDLE_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+describe('toSlug', () => {
+  it('kebab-cases a title-style slug', () => {
+    expect(toSlug('ascended heroes')).toBe('ascended-heroes');
+    expect(toSlug('ASCENDED HEROES')).toBe('ascended-heroes');
+  });
+  it('collapses runs and trims the edges', () => {
+    expect(toSlug('  Ascended -- Heroes!  ')).toBe('ascended-heroes');
+  });
+  it('leaves an already-valid slug alone', () => {
+    expect(toSlug('legend-pack')).toBe('legend-pack');
+  });
+  // Anything this returns non-empty is submitted as-is, so it must satisfy the
+  // backend regex — otherwise Save enables and the create 400s instead.
+  it('produces a handle the backend accepts, or nothing at all', () => {
+    for (const raw of ['ascended heroes', '!!!', '---', 'Ünïcødé 2026', 'a']) {
+      const out = toSlug(raw);
+      if (out !== '') expect(out).toMatch(HANDLE_RE);
+    }
+  });
+});
+
+describe('slugKeystroke', () => {
+  // The whole reason this exists instead of calling toSlug per keystroke: the
+  // hyphen a space just produced has to survive, or the operator typing
+  // "ascended heroes" would watch the space vanish and get "ascendedheroes".
+  it('keeps the trailing hyphen a just-typed space produced', () => {
+    expect(slugKeystroke('ascended ')).toBe('ascended-');
+    expect(slugKeystroke('ascended heroes')).toBe('ascended-heroes');
+  });
+
+  // Whatever it leaves behind mid-typing, toSlug still has to land on something
+  // the backend accepts — the pair is only correct together.
+  it('always feeds toSlug a value that normalizes to a valid handle', () => {
+    for (const raw of ['Ascended Heroes!', 'a  b', 'x--', '2026 SET']) {
+      const out = toSlug(slugKeystroke(raw));
+      if (out !== '') expect(out).toMatch(HANDLE_RE);
+    }
+    expect(toSlug(slugKeystroke('Ascended Heroes!'))).toBe('ascended-heroes');
+  });
+});
 
 describe('deliveryStatusLabel', () => {
   it('titles a canonical status', () => {

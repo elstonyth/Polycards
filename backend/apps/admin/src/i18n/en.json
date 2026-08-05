@@ -75,6 +75,7 @@
       "poolHint": "After creating, open the pack to add cards to its prize pool.",
       "save": "Save",
       "cancel": "Cancel",
+      "missing": "Still needed: {{fields}}",
       "statusCreateHint": "New packs start as drafts. Add cards to the prize pool on the pack page, then activate."
     },
     "delete": {

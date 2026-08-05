@@ -191,6 +191,11 @@ export interface PackDetail {
   pool: PackCard[];
   /** Admin-published PUBLIC odds; null = not set (the odds panel is hidden). */
   publishedOdds: PublishedOdds | null;
+  /** Odds SET 3's real tier split, backend-aggregated — what the guest demo
+   *  spin samples on (never shown as the odds panel, never used by a real
+   *  spin). Null on an older backend / an unpullable pool → the demo falls
+   *  back to the published odds. */
+  demoOdds: PublishedOdds | null;
 }
 
 // Sanitize the backend's published_odds json (jsonb passthrough — validate at
@@ -221,9 +226,10 @@ const parsePublishedOdds = (raw: unknown): PublishedOdds | null => {
  */
 export async function getPackDetail(slug: string): Promise<PackDetail | null> {
   try {
-    const { odds, published_odds } = await sdk.client.fetch<{
+    const { odds, published_odds, demo_odds } = await sdk.client.fetch<{
       odds: BackendOddsEntry[];
       published_odds?: unknown;
+      demo_odds?: unknown;
     }>(`/store/packs/${encodeURIComponent(slug)}`);
     if (!Array.isArray(odds) || odds.length === 0) return null;
 
@@ -266,6 +272,8 @@ export async function getPackDetail(slug: string): Promise<PackDetail | null> {
       topHits,
       pool,
       publishedOdds: parsePublishedOdds(published_odds),
+      // Same { tiers } shape from the backend, so the same sanitizer applies.
+      demoOdds: parsePublishedOdds(demo_odds),
     };
   } catch (error) {
     logger.error(`[packs] failed to load pack detail for '${slug}':`, error);
