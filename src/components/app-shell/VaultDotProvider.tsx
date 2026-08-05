@@ -70,10 +70,20 @@ export function VaultDotProvider({ children }: { children: ReactNode }) {
     seenAt: string | null;
   } | null>(null);
   const lastFetchRef = useRef(0);
+  // Monotonic request id. Every fetch claims one and only writes if it is still
+  // the newest — so a slow response that lands after an account switch, or
+  // after a later refresh already answered, is dropped instead of clobbering
+  // fresher state. One mechanism serves BOTH callers below.
+  const genRef = useRef(0);
 
   const refresh = useCallback(async (forId: string) => {
+    const gen = ++genRef.current;
+    // Stamped BEFORE the await, not after: an event landing while this fetch is
+    // still in flight would otherwise read a stale timestamp, pass the TTL
+    // check, and fire a duplicate request.
     lastFetchRef.current = Date.now();
     const latestAt = await getVaultLatest();
+    if (gen !== genRef.current) return;
     setState((prev) => ({
       forId,
       latestAt,
@@ -83,34 +93,31 @@ export function VaultDotProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
-  // Fetch on login / account switch. setState only ever runs in a promise
-  // callback, never synchronously in the effect body — React Compiler's
-  // react-hooks/set-state-in-effect rejects the latter, and TopUpProvider
-  // carries the same discipline for the same reason.
+  // Fetch on login / account switch.
   //
-  // Logging out therefore writes no state at all: `live` below derives to null
-  // whenever `customer` is null, so a signed-out shell can never render the
-  // previous account's dot even though the stale value is still in memory.
+  // This inlines the fetch rather than calling refresh(), and that is forced,
+  // not stylistic: react-hooks/set-state-in-effect traces through a called
+  // function, so `void refresh(customer.id)` here is rejected exactly like a
+  // bare setState would be, even though refresh only writes after an await. The
+  // setState has to sit lexically inside a callback in the effect body. Both
+  // paths still share genRef, so the drop-if-superseded rule lives in one place.
+  //
+  // Logging out writes no state at all: `live` below derives to null whenever
+  // `customer` is null, so a signed-out shell can never render the previous
+  // account's dot even though the stale value is still in memory.
   useEffect(() => {
     if (!customer) return;
-    // Stamped BEFORE the await, not after: a focus event landing while this
-    // first fetch is still in flight would otherwise see a zero timestamp, pass
-    // the TTL check, and fire a duplicate request.
+    const forId = customer.id;
+    const gen = ++genRef.current;
     lastFetchRef.current = Date.now();
-    let cancelled = false;
     void getVaultLatest().then((latestAt) => {
-      if (cancelled) return;
-      setState({
-        forId: customer.id,
+      if (gen !== genRef.current) return;
+      setState((prev) => ({
+        forId,
         latestAt,
-        seenAt: readStamp(customer.id),
-      });
+        seenAt: prev?.forId === forId ? prev.seenAt : readStamp(forId),
+      }));
     });
-    // The cancel flag is why this effect does not just call refresh(): a late
-    // resolution after an account switch must be dropped, not merely tagged.
-    return () => {
-      cancelled = true;
-    };
   }, [customer]);
 
   // Refresh when the tab regains focus, throttled — mirrors NotificationBell's
