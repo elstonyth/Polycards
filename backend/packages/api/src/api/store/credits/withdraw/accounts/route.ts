@@ -82,6 +82,14 @@ async function loadAccounts(
   req: AuthenticatedMedusaRequest,
   customerId: string,
 ): Promise<{ accounts: SavedBankAccount[]; metadata: Record<string, unknown> }> {
+  // Register-phase JWTs pass authenticate('customer') with actor_id '' (the
+  // documented repo trap — see profile/frame/route.ts). Without this guard,
+  // retrieveCustomer('') surfaces as a confusing NOT_FOUND instead of a 401,
+  // and the client's isAuthError never offers the login prompt. Single choke
+  // point: every handler loads through here before touching anything.
+  if (!customerId) {
+    throw new MedusaError(MedusaError.Types.UNAUTHORIZED, 'Unauthorized');
+  }
   const customers = req.scope.resolve(Modules.CUSTOMER);
   const customer = await customers.retrieveCustomer(customerId);
   const metadata = (customer.metadata ?? {}) as Record<string, unknown>;

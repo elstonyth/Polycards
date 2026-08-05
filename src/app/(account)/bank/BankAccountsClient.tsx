@@ -79,6 +79,10 @@ export function BankAccountsClient() {
       setBankCode('');
       setAccountNumber('');
       setHolderName('');
+    } catch {
+      // The action catches its own failures — this is for the action CALL
+      // itself failing (network), which would otherwise leave silence.
+      setError('Something went wrong. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -95,6 +99,8 @@ export function BankAccountsClient() {
         return;
       }
       setAccounts(res.accounts);
+    } catch {
+      setError('Something went wrong. Please try again.');
     } finally {
       setRemovingId(null);
     }

@@ -119,7 +119,10 @@ export default function WithdrawForm({
       }
       // The withdrawal is already accepted — saving the account is a
       // convenience side effect and must never surface as a payout error.
-      // Fire-and-forget: the action returns a result object, never throws.
+      // Fire-and-forget. The action catches its own failures, but the ACTION
+      // CALL itself (a network round-trip) can still reject — swallow that
+      // too, or a flaky connection turns a successful payout into an
+      // unhandled-rejection overlay.
       if (saveAccount && !matchesSaved) {
         const bankName =
           (banks ?? []).find((b) => b.bankCode === bankCode)?.bankName ?? '';
@@ -128,7 +131,7 @@ export default function WithdrawForm({
           bankName,
           accountNumber,
           accountHolderName: holderName.trim(),
-        });
+        }).catch(() => undefined);
       }
       setDone({
         amount: res.amount,

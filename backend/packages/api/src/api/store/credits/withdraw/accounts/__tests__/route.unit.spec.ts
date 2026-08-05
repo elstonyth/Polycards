@@ -99,6 +99,24 @@ describe('POST /store/credits/withdraw/accounts', () => {
     expect(updateCustomers).not.toHaveBeenCalled();
   });
 
+  it('refuses a missing or blank bank name (its own gate, not the shared one)', async () => {
+    await expect(
+      POST(mkReq({ ...VALID_BODY, bank_name: ' ' }), mkRes()),
+    ).rejects.toThrow(/choose a bank/i);
+    expect(updateCustomers).not.toHaveBeenCalled();
+  });
+
+  it('401s a register-phase token (empty actor_id) before touching the DB', async () => {
+    const req = {
+      auth_context: { actor_id: '' },
+      body: VALID_BODY,
+      scope,
+    } as never;
+    await expect(POST(req, mkRes())).rejects.toThrow(/unauthorized/i);
+    expect(retrieveCustomer).not.toHaveBeenCalled();
+    expect(updateCustomers).not.toHaveBeenCalled();
+  });
+
   it('re-adding the same bank+number updates in place, no duplicate', async () => {
     retrieveCustomer.mockResolvedValue({
       metadata: { bank_accounts: [savedShape()] },
