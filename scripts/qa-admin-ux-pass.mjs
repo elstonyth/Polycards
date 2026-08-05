@@ -50,9 +50,13 @@ await page.goto(`${BASE}/dashboard/login`, { waitUntil: 'domcontentloaded' });
 await page.fill('input[name="email"]', creds.ADMIN_EMAIL ?? '');
 await page.fill('input[name="password"]', creds.ADMIN_PW ?? '');
 await page.click('button[type="submit"]');
+// Throw rather than warn: a swallowed failure screenshots every route logged
+// OUT and still exits 0, which reads as a clean sweep of broken pages.
 await page
   .waitForURL((u) => !/login/.test(u.pathname), { timeout: 30000 })
-  .catch(() => console.log('WARN: still on /login after submit'));
+  .catch(() => {
+    throw new Error('login did not complete — still on /login after submit');
+  });
 await page.waitForTimeout(2500);
 await page.screenshot({ path: path.join(OUT, 'home.png'), fullPage: true });
 
