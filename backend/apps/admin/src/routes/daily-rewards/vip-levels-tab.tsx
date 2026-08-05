@@ -4,7 +4,6 @@ import {
   Button,
   Input,
   Label,
-  Select,
   StatusBadge,
   Switch,
   Table,
@@ -22,6 +21,7 @@ import { StickySaveBar } from "../../components/StickySaveBar";
 import {
   FRAME_LEVELS,
   validateVipLevelsClient,
+  voucherOutOfRange,
   type VipLevelRow,
 } from "./vip-levels-validate-client";
 import {
@@ -46,13 +46,25 @@ const rowFromDTO = (l: VipLevelDTO): Row => ({
   frameUnlock: l.frame_unlock,
   referralInput: String(l.direct_referral_pct),
 });
-const blankRow = (boxTier: string): Row => ({
+// Voucher, box tier and referral % are no longer edited on this tab (all three
+// surfaces are suspended), but all three are still LIVE server-side —
+// voucher_amount mints a voucher on level-up when > 0 (rewardsForLevel),
+// box_tier picks the daily box and must name a real reward box tier,
+// direct_referral_pct pays sponsor commission. So they stay in the buffer and
+// round-trip untouched on save.
+//
+// A new rung INHERITS box tier and referral % from the rung above rather than
+// resetting to the first tier / 1% — with no editor, a silent reset would be
+// unfixable here. Voucher deliberately does NOT inherit: 0 means "grants
+// nothing", the safe default for a credit-minting lever. Inheriting would
+// silently mint a payout on a rung nobody priced.
+const blankRow = (inheritFrom: Row | undefined, fallbackTier: string): Row => ({
   localId: `vl-${nextId++}`,
   thresholdInput: "0",
   voucherInput: "0",
-  boxTier,
+  boxTier: inheritFrom?.boxTier ?? fallbackTier,
   frameUnlock: false,
-  referralInput: "1",
+  referralInput: inheritFrom?.referralInput ?? "1",
 });
 
 const snapshotOf = (rows: Row[]): string =>
@@ -73,14 +85,6 @@ const money = (s: string): string => {
   const n = Number(s);
   return s.trim() !== "" && Number.isFinite(n) ? n.toLocaleString() : s;
 };
-
-// Consecutive rows mostly repeat; only the rows where something *changes* carry
-// information. Marked with a leading accent rather than by dimming the repeats:
-// these are editable fields and must stay full-contrast.
-const changeMark = (changed: boolean): string =>
-  changed
-    ? "border-l-2 border-ui-tag-orange-icon pl-2"
-    : "border-l-2 border-transparent pl-2";
 
 const levelInMessage = (message: string): number | null => {
   const m = /Level (\d+)/.exec(message);
@@ -123,8 +127,9 @@ export const VipLevelsTab = () => {
     );
   if (!data) return <LoadingSkeleton />;
 
-  const tiers = (boxesData?.boxes ?? []).map((b) => b.tier);
-  const fallbackTier = tiers[0] ?? "a";
+  // Only needed to seed the very first rung of an empty ladder — every other
+  // rung inherits its tier from the one above.
+  const fallbackTier = boxesData?.boxes?.[0]?.tier ?? "a";
   const dirty = snapshotOf(rows) !== savedSnapshot;
   const errors = validateVipLevelsClient(rows);
   const reasonValid = reason.trim().length > 0;
@@ -158,7 +163,10 @@ export const VipLevelsTab = () => {
   const insertAt = (index: number) =>
     setRows((prev) => {
       const next = prev.slice();
-      next.splice(index, 0, blankRow(fallbackTier));
+      // Inherit from the rung above; at index 0 there is none, so inherit from
+      // the rung being displaced down — it is the ladder's current base and its
+      // tier is the right one for the new base.
+      next.splice(index, 0, blankRow(prev[index - 1] ?? prev[index], fallbackTier));
       return next;
     });
   const removeAt = (index: number) =>
@@ -175,7 +183,7 @@ export const VipLevelsTab = () => {
     // Open the decade the new rung lands in, otherwise "Append level" looks
     // like it did nothing.
     setOpen(Math.floor(rows.length / DECADE), true);
-    setRows((prev) => [...prev, blankRow(fallbackTier)]);
+    setRows((prev) => [...prev, blankRow(prev[prev.length - 1], fallbackTier)]);
   };
 
   async function onSave() {
@@ -232,19 +240,6 @@ export const VipLevelsTab = () => {
         </div>
         <div className="md:col-span-3">
           <Text size="small" className="text-ui-fg-subtle mb-1">
-            Box tier runs
-          </Text>
-          <div className="flex flex-wrap gap-1">
-            {shape.tierSegments.map((s) => (
-              <Badge key={`${s.tier}-${s.from}`} size="2xsmall">
-                {s.tier} · L{s.from}
-                {s.to !== s.from ? `-${s.to}` : ""}
-              </Badge>
-            ))}
-          </div>
-        </div>
-        <div className="md:col-span-3">
-          <Text size="small" className="text-ui-fg-subtle mb-1">
             Frame slots (decade levels only)
           </Text>
           <div className="flex flex-wrap gap-1">
@@ -292,6 +287,16 @@ export const VipLevelsTab = () => {
       </div>
 
       {groups.map((g) => {
+        // The Voucher column is gone, but the shipped ladder violates the
+        // voucher cap (L90, L100) and a save rejects the WHOLE ladder on it.
+        // Rather than leave the tab a dead end — no input to fix a field that
+        // blocks everything else — the column comes back for the decades that
+        // actually contain an out-of-range rung, and only there. Same shape as
+        // the frame_unlock escape hatch below: never trap legacy data as
+        // unclearable. A clean ladder shows this column nowhere.
+        const repairVouchers = g.rows.some((r) =>
+          voucherOutOfRange(r.voucherInput),
+        );
         const issues = errors.filter((e) => {
           const level = levelInMessage(e);
           return (
@@ -312,13 +317,6 @@ export const VipLevelsTab = () => {
               <Text size="small" className="text-ui-fg-subtle">
                 RM {money(g.thresholdFrom)} → RM {money(g.thresholdTo)}
               </Text>
-              <div className="flex flex-wrap gap-1">
-                {g.tiers.map((t) => (
-                  <Badge key={t} size="2xsmall">
-                    tier {t}
-                  </Badge>
-                ))}
-              </div>
               {g.frameLevels.length > 0 && (
                 <Badge size="2xsmall" color="purple">
                   frame @ L{g.frameLevels.join(", L")}
@@ -336,10 +334,10 @@ export const VipLevelsTab = () => {
                 <Table.Row>
                   <Table.HeaderCell>Level</Table.HeaderCell>
                   <Table.HeaderCell>Threshold (RM)</Table.HeaderCell>
-                  <Table.HeaderCell>Voucher (RM)</Table.HeaderCell>
-                  <Table.HeaderCell>Box tier</Table.HeaderCell>
+                  {repairVouchers && (
+                    <Table.HeaderCell>Voucher (RM)</Table.HeaderCell>
+                  )}
                   <Table.HeaderCell>Frame</Table.HeaderCell>
-                  <Table.HeaderCell>Referral %</Table.HeaderCell>
                   <Table.HeaderCell>Actions</Table.HeaderCell>
                 </Table.Row>
               </Table.Header>
@@ -347,7 +345,6 @@ export const VipLevelsTab = () => {
                 {g.rows.map((r, j) => {
                   const i = g.startIndex + j;
                   const level = i + 1;
-                  const prev = i > 0 ? rows[i - 1] : undefined;
                   // FRAME_LEVELS is the authority, not level % 10: it caps at 100, so an
                   // appended level 110 must not advertise a slot the validator rejects.
                   const frameSlot = FRAME_LEVELS.includes(level);
@@ -377,50 +374,25 @@ export const VipLevelsTab = () => {
                           }
                         />
                       </Table.Cell>
-                      <Table.Cell>
-                        <div
-                          className={changeMark(
-                            !!prev && prev.voucherInput !== r.voucherInput,
+                      {repairVouchers && (
+                        <Table.Cell>
+                          {voucherOutOfRange(r.voucherInput) ? (
+                            <Input
+                              aria-label={`Level ${level} voucher`}
+                              value={r.voucherInput}
+                              onChange={(e) =>
+                                setRow(r.localId, {
+                                  voucherInput: e.target.value,
+                                })
+                              }
+                            />
+                          ) : (
+                            <Text size="small" className="text-ui-fg-subtle">
+                              {money(r.voucherInput)}
+                            </Text>
                           )}
-                        >
-                          <Input
-                            aria-label={`Level ${level} voucher`}
-                            value={r.voucherInput}
-                            onChange={(e) =>
-                              setRow(r.localId, {
-                                voucherInput: e.target.value,
-                              })
-                            }
-                          />
-                        </div>
-                      </Table.Cell>
-                      <Table.Cell>
-                        <div
-                          className={changeMark(
-                            !!prev && prev.boxTier !== r.boxTier,
-                          )}
-                        >
-                          <Select
-                            value={r.boxTier}
-                            onValueChange={(v) =>
-                              setRow(r.localId, { boxTier: v })
-                            }
-                          >
-                            <Select.Trigger
-                              aria-label={`Level ${level} box tier`}
-                            >
-                              <Select.Value />
-                            </Select.Trigger>
-                            <Select.Content>
-                              {tiers.map((t) => (
-                                <Select.Item key={t} value={t}>
-                                  {t}
-                                </Select.Item>
-                              ))}
-                            </Select.Content>
-                          </Select>
-                        </div>
-                      </Table.Cell>
+                        </Table.Cell>
+                      )}
                       <Table.Cell>
                         {/* Off-decade frames are illegal, but legacy data may
                             already carry one - never trap it as unclearable. */}
@@ -432,23 +404,6 @@ export const VipLevelsTab = () => {
                             setRow(r.localId, { frameUnlock: v })
                           }
                         />
-                      </Table.Cell>
-                      <Table.Cell>
-                        <div
-                          className={changeMark(
-                            !!prev && prev.referralInput !== r.referralInput,
-                          )}
-                        >
-                          <Input
-                            aria-label={`Level ${level} referral percent`}
-                            value={r.referralInput}
-                            onChange={(e) =>
-                              setRow(r.localId, {
-                                referralInput: e.target.value,
-                              })
-                            }
-                          />
-                        </div>
                       </Table.Cell>
                       <Table.Cell>
                         <div className="pc-row-actions">

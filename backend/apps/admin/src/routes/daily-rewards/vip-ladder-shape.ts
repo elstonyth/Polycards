@@ -15,7 +15,13 @@ export interface DecadeGroup<T> {
   rows: T[];
   thresholdFrom: string;
   thresholdTo: string;
-  /** Distinct box tiers in this decade, in first-seen order. */
+  /**
+   * SUSPENDED — kept deliberately. Distinct box tiers in this decade, in
+   * first-seen order. No longer rendered: the Box tier column and its summary
+   * badges left the Levels tab when the VIP surface was suspended. `box_tier`
+   * is still live server-side (resolveBoxTier picks the daily box), so this
+   * read-model comes back for free if the column returns. Do not prune.
+   */
   tiers: string[];
   /** Levels inside this decade that unlock a frame. */
   frameLevels: number[];
@@ -57,7 +63,11 @@ export interface TierSegment {
 export interface LadderShape {
   count: number;
   topThreshold: string;
-  /** Consecutive runs of the same box tier — the ladder's real structure. */
+  /**
+   * SUSPENDED — kept deliberately, same reason as `DecadeGroup.tiers` above.
+   * Consecutive runs of the same box tier — the ladder's real structure.
+   * Unrendered since the "Box tier runs" overview block was removed.
+   */
   tierSegments: TierSegment[];
   /** Decade levels that exist in this ladder (candidate frame slots). */
   frameSlots: number[];
