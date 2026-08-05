@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
   validateVipLevelsClient,
-  voucherOutOfRange,
   type VipLevelRow,
 } from './vip-levels-validate-client';
 import { decadesWithErrors } from './vip-ladder-shape';
@@ -60,49 +59,28 @@ describe('validateVipLevelsClient', () => {
     ).toEqual([]);
   });
 
-  // Voucher is the exception, and the reason is live data: the shipped ladder
-  // carries L90=12000 and L100=15000 against a 10,000 cap the server enforces
-  // on every save. Staying quiet here would let the tab look saveable and then
-  // fail server-side naming a column the admin no longer renders — bricking
-  // Threshold and Frame too. The tab keys its repair input off the SAME
-  // predicate, so anything flagged here is reachable and fixable.
-  test('flags an over-cap voucher so the tab can offer a repair input', () => {
-    const errs = validateVipLevelsClient([row({ voucherInput: '12000' })]);
+  // Voucher used to be the exception here, and it cost the tab a whole repair
+  // column: the client checked a 10,000 cap that the shipped ladder broke
+  // (L90 = 12,000, L100 = 15,000), so two rungs were flagged on every load and
+  // the tab had to grow an input to clear them. Vouchers are now 0 on every
+  // level (Migration20260805000000). With no editor and nothing left to breach
+  // the bound, the client stays quiet; validateVipLevels still enforces it on
+  // save, as a toast. Legacy amounts are still asserted below — a ladder loaded
+  // before the migration must not re-block the tab.
+  test('does not block the ladder on voucher amounts', () => {
+    // The two real rungs that used to brick every save on this tab.
     expect(
-      errs.some((e) => /Level 1: voucher must be between 0 and 10,000/.test(e)),
-    ).toBe(true);
-    expect(voucherOutOfRange('12000')).toBe(true);
-    // The real L90/L100 values, and the boundary itself.
-    expect(voucherOutOfRange('15000')).toBe(true);
-    expect(voucherOutOfRange('10000')).toBe(false);
-    expect(voucherOutOfRange('-1')).toBe(true);
-    // Blank is not a silent 0 — same rule as every other money field here.
-    expect(voucherOutOfRange('')).toBe(true);
-  });
-
-  // decadesWithErrors regexes `Level (\d+)` out of these strings to force the
-  // owning decade open. A voucher message that lost that prefix would leave the
-  // only fixable row collapsed — the exact dead end this check exists to avoid.
-  test('over-cap voucher message carries a parseable level prefix', () => {
-    const ladder = Array.from({ length: 10 }, (_, i) =>
-      row({
-        thresholdInput: String(i * 100),
-        voucherInput: i === 9 ? '12000' : '0',
-      }),
-    );
-    const errs = validateVipLevelsClient(ladder);
-    const voucherErr = errs.find((e) => /voucher/.test(e));
-    expect(voucherErr).toBeDefined();
-    expect(/Level (\d+)/.exec(voucherErr as string)?.[1]).toBe('10');
-    // And the consumer actually resolves it to a decade to force open. L10 is
-    // decade 0; the real offenders (L90, L100) land in decades 8 and 9.
-    expect(decadesWithErrors([voucherErr as string])).toEqual(new Set([0]));
+      validateVipLevelsClient([row({ voucherInput: '12000' })]),
+    ).toEqual([]);
     expect(
-      decadesWithErrors([
-        'Level 90: voucher must be between 0 and 10,000 — lower it below, or have the cap raised if this rung is correct.',
-        'Level 100: voucher must be between 0 and 10,000 — lower it below, or have the cap raised if this rung is correct.',
-      ]),
-    ).toEqual(new Set([8, 9]));
+      validateVipLevelsClient([row({ voucherInput: '15000' })]),
+    ).toEqual([]);
+    // Values no editor can produce are equally not the client's problem —
+    // they round-trip untouched and the server has the last word.
+    expect(
+      validateVipLevelsClient([row({ voucherInput: '-1' })]),
+    ).toEqual([]);
+    expect(validateVipLevelsClient([row({ voucherInput: '' })])).toEqual([]);
   });
 
   // Threshold is the one money-shaped field still edited here, so its
@@ -112,5 +90,24 @@ describe('validateVipLevelsClient', () => {
     expect(
       errs.some((e) => /Level 2: threshold must be a number/.test(e)),
     ).toBe(true);
+  });
+
+  // decadesWithErrors regexes `Level (\d+)` out of these strings to force the
+  // owning decade open. An error whose message lost that prefix would leave the
+  // offending row collapsed — a flagged ladder the operator cannot see to fix.
+  test('errors carry a level prefix the decade opener can parse', () => {
+    const ladder = Array.from({ length: 10 }, (_, i) =>
+      row({ thresholdInput: i === 9 ? '' : String(i * 100) }),
+    );
+    const errs = validateVipLevelsClient(ladder);
+    expect(errs).not.toEqual([]);
+    expect(decadesWithErrors(errs)).toEqual(new Set([0]));
+    // L90 and L100 land in decades 8 and 9 — the shape the real ladder uses.
+    expect(
+      decadesWithErrors([
+        'Level 90: threshold must be a number ≥ 0.',
+        'Level 100: threshold must be a number ≥ 0.',
+      ]),
+    ).toEqual(new Set([8, 9]));
   });
 });

@@ -2,7 +2,7 @@ import { ExecArgs } from '@medusajs/framework/types';
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import type PacksModuleService from '../modules/packs/service';
 import { PACKS_MODULE } from '../modules/packs';
-import { VIP_LEVELS } from './vip-levels.data';
+import { VIP_LEVELS_SEED } from './vip-levels.data';
 
 // Targeted reference-data seed: the VIP ladder ONLY. Prod deploys run
 // migrations but never the full seed, so vip_level ends up empty there — the
@@ -15,11 +15,13 @@ export default async function seedVipLevels({ container }: ExecArgs) {
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
 
   const existingVipLevels = await packs.listVipLevels(
-    { level: VIP_LEVELS.map((r) => r.level) },
-    { select: ['level'], take: VIP_LEVELS.length },
+    { level: VIP_LEVELS_SEED.map((r) => r.level) },
+    { select: ['level'], take: VIP_LEVELS_SEED.length },
   );
   const haveLevels = new Set(existingVipLevels.map((r) => r.level));
-  const vipLevelsToCreate = VIP_LEVELS.filter((r) => !haveLevels.has(r.level));
+  const vipLevelsToCreate = VIP_LEVELS_SEED.filter(
+    (r) => !haveLevels.has(r.level),
+  );
   if (vipLevelsToCreate.length === 0) {
     logger.info('VIP levels already exist, skipping.');
   } else {

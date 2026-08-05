@@ -1,7 +1,12 @@
 // Canonical VIP ladder — parsed from Workbook1.xlsx (boss's authoritative sheet),
-// thresholds rounded to whole MYR. Single source of truth for the seed. Resolved
-// 2026-06-20: L40 direct_referral_pct = 4 (no blank); L50 voucher = 300 (confirmed);
-// thresholds whole-MYR. Do NOT edit values without re-confirming against the workbook.
+// thresholds rounded to whole MYR. Resolved 2026-06-20: L40 direct_referral_pct
+// = 4 (no blank); L50 voucher = 300 (confirmed); thresholds whole-MYR. Do NOT
+// edit values without re-confirming against the workbook.
+//
+// VIP_LEVELS is the record of the SHEET, not what gets inserted — seeding goes
+// through VIP_LEVELS_SEED at the bottom of this file, which zeroes voucher_amount
+// (vouchers are off across the ladder; see Migration20260805000000). Passing
+// VIP_LEVELS to createVipLevels re-introduces the payouts that migration removed.
 export type VipLevelSeed = {
   level: number;
   spend_threshold: number;
@@ -918,3 +923,20 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
 if (new Set(VIP_LEVELS.map((r) => r.level)).size !== VIP_LEVELS.length) {
   throw new Error('VIP_LEVELS contains duplicate levels');
 }
+
+// What actually gets INSERTED. Vouchers are off across the ladder (operator
+// decision 2026-08-05: the redeeming surface is suspended, so a level-up was
+// minting grants nobody could spend — Migration20260805000000 zeroed the live
+// rows). Seeding straight from VIP_LEVELS would hand a fresh environment the
+// payouts the migration exists to remove.
+//
+// VIP_LEVELS itself keeps the workbook figures: it is the record of Workbook1
+// (see the header), the parity tests assert against it, and turning a payout
+// back on should be reading the sheet, not archaeology on a seed script.
+export const VIP_LEVELS_SEED: readonly VipLevelSeed[] = Object.freeze(
+  // Shallow freeze only, matching VIP_LEVELS above: consumers spread each row
+  // before handing it to the ORM, and a deep freeze here would be an asymmetry
+  // the type checker cannot see — a future consumer that skips the spread would
+  // get a strict-mode TypeError instead of a compile error.
+  VIP_LEVELS.map((r) => ({ ...r, voucher_amount: 0 })),
+);
