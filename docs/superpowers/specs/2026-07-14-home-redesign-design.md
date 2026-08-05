@@ -38,8 +38,16 @@ data marquees, one white pill per zone.
 ## The routing rule
 
 Every **product** tap on home lands on plain `/slots`:
-hero CTA pill, marquee band, every ladder row, JUST PULLED
-cards, final CTA pill. Sold-out rows stay inert (non-links). Non-product links
+hero CTA pill, marquee band, JUST PULLED
+cards, final CTA pill. Sold-out rows stay inert (non-links).
+
+> **Exception (operator, 2026-08-06):** RIP A PACK ladder rows are the one
+> deep-link on home — a row goes to `/slots/<slug>?count=1`, the pack it
+> actually shows. A row names one pack and prices it, so bouncing to the index
+> made the tap feel like it did nothing. `qa-home-redesign.mjs` exempts that
+> section from the audit; every other product surface still obeys the rule.
+
+Non-product links
 keep their targets: `All packs →` (`/slots`), `How it works →`
 (`/how-it-works`), `See ranks →` (`/leaderboard`).
 

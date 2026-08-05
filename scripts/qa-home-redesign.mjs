@@ -50,8 +50,13 @@ try {
     // product must point at exactly "/slots".
     // (page.$$eval is Playwright's typed DOM-query helper running a static
     // function in page context — not string eval; no arbitrary code here.)
+    // Operator exception (2026-08-06): RIP A PACK ladder rows deep-link to the
+    // pack they show (`/slots/<slug>?count=1`). Every other product surface
+    // still lands on plain "/slots", so the audit skips that section only.
     const offenders = await page.$$eval('main a[href^="/slots/"]', (as) =>
-      as.map((a) => a.getAttribute('href')),
+      as
+        .filter((a) => !a.closest('section[aria-labelledby="shelf-heading"]'))
+        .map((a) => a.getAttribute('href')),
     );
     if (offenders.length === 0) {
       console.log(`[${name}] routing rule OK — no /slots/<pack> links on home`);

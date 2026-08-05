@@ -37,7 +37,8 @@ export type AuthCustomer = {
 };
 
 export type AuthResult =
-  { ok: true; customer: AuthCustomer } | { ok: false; error: string };
+  | { ok: true; customer: AuthCustomer }
+  | { ok: false; error: string };
 
 type TokenResponse = { token: string };
 
@@ -263,7 +264,16 @@ export async function googleLoginStart(): Promise<
     );
     if (!location)
       return { ok: false, error: 'Google sign-in is currently unavailable.' };
-    return { ok: true, location };
+    // auth-google's getRedirect() sets redirect_uri/client_id/response_type/
+    // scope/state and nothing else, so Google silently reuses whichever session
+    // is already signed in and never shows the account chooser — a user with
+    // two Google accounts can't pick the other one after registering with the
+    // first. `prompt=select_account` forces the chooser every time. Added here
+    // rather than in the provider: it ships in node_modules and a patch there
+    // wouldn't survive a reinstall.
+    const url = new URL(location);
+    url.searchParams.set('prompt', 'select_account');
+    return { ok: true, location: url.toString() };
   } catch (error) {
     logger.error('[auth] google login start failed:', error);
     return {

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { X } from 'lucide-react';
+import { X, Loader2 } from 'lucide-react';
 import { SlabImage } from '@/components/SlabImage';
 import { rm } from '@/lib/format';
 import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
@@ -182,8 +182,9 @@ export default function SellConfirmModal({
             type="button"
             onClick={onConfirm}
             disabled={busy}
-            className="inline-flex h-11 flex-1 items-center justify-center rounded-xl bg-buyback text-sm font-bold text-white transition-colors hover:bg-buyback/90 disabled:opacity-60"
+            className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-buyback text-sm font-bold text-white transition-colors hover:bg-buyback/90 disabled:opacity-60"
           >
+            {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
             {busy ? 'Selling…' : `Sell for ${rm(netCredit)}`}
           </button>
         </div>

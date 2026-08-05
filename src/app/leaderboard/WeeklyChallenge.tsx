@@ -1,5 +1,5 @@
 import Image from 'next/image';
-import { Trophy, Coins } from 'lucide-react';
+import { Trophy, Coins, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { SlabImage } from '@/components/SlabImage';
 import type { Challenge } from '@/lib/data/challenge';
@@ -74,52 +74,75 @@ export function WeeklyChallenge({ challenge }: { challenge: Challenge }) {
             </span>
           </p>
 
-          <div
-            className="relative mt-4 h-10 overflow-hidden rounded-full bg-white/5"
-            role="meter"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={Math.round(pool.overallPct)}
-            aria-label={`Community pool at ${pool.pooled} of ${pool.topThreshold}`}
-          >
+          {/* Checkpoint bar — uiverse "moody-squid-55" reworked to run on real
+              data instead of a 6s demo loop: the fill width IS the pool
+              percentage, and the stage milestones ride ON the track as
+              checkpoints that flip gold the moment the pool clears them (the
+              original's grey→green ticks). That folds in the separate marker
+              row this replaced, so one element carries progress AND thresholds.
+              No overflow-hidden here on purpose — the checkpoints stand proud
+              of the track and a clipping parent would shave them. */}
+          <div className="relative mt-6 mb-2 h-6">
             <div
-              className="challenge-fill absolute inset-y-0 left-0 rounded-full"
-              style={{ width: `${pool.overallPct}%` }}
-            />
-            <div className="challenge-particles absolute inset-0" aria-hidden />
+              className="absolute inset-x-0 top-1/2 h-3 -translate-y-1/2 rounded-full bg-white/5"
+              role="meter"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(pool.overallPct)}
+              aria-label={`Community pool at ${pool.pooled} of ${pool.topThreshold}`}
+            >
+              <div
+                className="challenge-fill absolute inset-y-0 left-0 rounded-full"
+                style={{ width: `${pool.overallPct}%` }}
+              />
+              {/* rounded-full clips the dot pattern to the track on its own */}
+              <div
+                className="challenge-particles absolute inset-0 rounded-full"
+                aria-hidden
+              />
+            </div>
+
+            {challenge.stages.map((s) => {
+              const done = s.state === 'complete';
+              return (
+                <span
+                  key={s.stageNumber}
+                  className={cn(
+                    // No transition/animation here on purpose: this is
+                    // server-rendered, the state never flips client-side, and a
+                    // new animated class would need a reduced-motion opt-out.
+                    'absolute top-1/2 flex -translate-y-1/2 items-center justify-center rounded-full ring-2',
+                    // The ring is the panel colour, so each checkpoint reads as
+                    // punched THROUGH the track rather than floating over it.
+                    'ring-neutral-900',
+                    done
+                      ? 'bg-chase text-neutral-950 shadow-[0_0_10px_rgb(255_176_32_/_0.55)]'
+                      : 'scale-75 bg-neutral-600 text-transparent',
+                    // Sizes stay under the 10%↔20% gap on a 330px phone bar.
+                    'h-5 w-5 sm:h-6 sm:w-6',
+                    s.pct > 90 ? 'right-0' : '-translate-x-1/2',
+                  )}
+                  style={s.pct > 90 ? undefined : { left: `${s.pct}%` }}
+                >
+                  <Check className="h-3 w-3" strokeWidth={3.5} aria-hidden />
+                  {/* Thresholds hang off each checkpoint. Hidden below sm —
+                      they collide on a narrow bar; the stage list right below
+                      carries them on mobile. */}
+                  <span
+                    className={cn(
+                      'absolute top-full mt-1.5 hidden text-[10px] font-semibold whitespace-nowrap sm:block',
+                      done ? 'text-chase' : 'text-neutral-400',
+                    )}
+                  >
+                    {s.thresholdCompact}
+                  </span>
+                </span>
+              );
+            })}
           </div>
 
-          {/* Milestone markers along the bar (positions = threshold / top) */}
-          <div className="relative mt-1.5 h-2 sm:h-9">
-            {challenge.stages.map((s) => (
-              <span
-                key={s.stageNumber}
-                className={cn(
-                  'absolute top-0 flex flex-col items-center',
-                  s.pct > 90 ? 'right-0' : '-translate-x-1/2',
-                )}
-                style={s.pct > 90 ? undefined : { left: `${s.pct}%` }}
-              >
-                <span
-                  className={cn(
-                    'h-2 w-px',
-                    s.state === 'complete' ? 'bg-chase/70' : 'bg-white/30',
-                  )}
-                  aria-hidden
-                />
-                {/* Labels collide on narrow bars — ticks only below sm; the
-                    stage list right below carries the thresholds on mobile. */}
-                <span
-                  className={cn(
-                    'mt-1 hidden text-[10px] font-semibold whitespace-nowrap sm:block',
-                    s.state === 'complete' ? 'text-chase' : 'text-neutral-400',
-                  )}
-                >
-                  {s.thresholdCompact}
-                </span>
-              </span>
-            ))}
-          </div>
+          {/* Reserves the row the sm-and-up threshold labels overhang into. */}
+          <div className="hidden h-4 sm:block" aria-hidden />
 
           {pool.next ? (
             <p className="mt-3 text-center text-xs text-neutral-400">

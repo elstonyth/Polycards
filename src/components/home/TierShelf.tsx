@@ -8,7 +8,8 @@ import { priceNumber, type Pack, type PackCard } from '@/lib/packs-data';
  * Board 02 — RIP A PACK: one full-width row per pack, most expensive first, so
  * the catalog reads as a price ladder. Packs carry no rarity/tier label — just
  * art, name, top chase, and price. The top row leads full-width on desktop; the
- * rest sit two-up. Every row → /slots (routing rule); sold out is inert.
+ * rest sit two-up. Every row → that pack's own detail page (the "All packs"
+ * link is what goes to the /slots index); sold out is inert.
  */
 export default function TierShelf({
   packs,
@@ -157,7 +158,10 @@ function LadderRow({
     // Tailwind v4 emits `translate`/`scale`, not `transform` — naming
     // `transform` here would transition the border and snap the lift.
     <Link
-      href="/slots"
+      // Straight to the pack the row shows, ready to rip one. `Pack.id` doubles
+      // as the route slug (packs-data.ts); ?count=1 is the qty the detail page
+      // opens on — /slots/[slug] clamps it to 1..3.
+      href={`/slots/${pack.id}?count=1`}
       className={`${rowClass} transition-[translate,scale,border-color] hover:-translate-y-0.5 hover:border-white/30 active:scale-[0.99] motion-reduce:transition-colors motion-reduce:hover:translate-y-0 motion-reduce:active:scale-100`}
     >
       {body}

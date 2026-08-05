@@ -487,7 +487,12 @@ describe('googleLoginStart — callback_url host guard', () => {
 
     const r = await googleLoginStart();
 
-    expect(r).toEqual({ ok: true, location: 'https://accounts.google/x' });
+    // prompt=select_account is appended to whatever the backend returns, so a
+    // user with several Google accounts always gets the chooser.
+    expect(r).toEqual({
+      ok: true,
+      location: 'https://accounts.google/x?prompt=select_account',
+    });
     const [path, opts] = mocks.clientFetch.mock.calls[0]!;
     expect(path).toBe('/auth/customer/google');
     expect(opts.body.callback_url).toBe(

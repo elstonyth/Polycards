@@ -6,6 +6,7 @@
 // glide-out. Mounted by SlotMachineClient once the reel has settled.
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { motion } from 'motion/react';
+import { Loader2 } from 'lucide-react';
 import { SLAB_ASPECT } from '@/components/SlabImage';
 import type { WonCard } from '@/lib/actions/packs';
 import type { SellBackOffer, SellBackFn, RevealFn } from './useSellWindow';
@@ -278,8 +279,11 @@ export function RevealStage({
           type="button"
           onClick={() => setConfirmIndex(i)}
           disabled={!flipped || state.phase === 'selling'}
-          className="inline-flex h-12 w-full items-center justify-center rounded-xl border border-chase/50 bg-chase/10 text-sm font-bold text-chase transition-colors hover:bg-chase/20 disabled:opacity-50"
+          className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-chase/50 bg-chase/10 text-sm font-bold text-chase transition-colors hover:bg-chase/20 disabled:opacity-50"
         >
+          {state.phase === 'selling' && (
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+          )}
           {state.phase === 'selling'
             ? 'Selling…'
             : `Sell for ${rm(offer.amount)} (${offer.percent}%)`}
@@ -424,8 +428,13 @@ export function RevealStage({
           busy={states[confirmIndex]?.phase === 'selling'}
           onConfirm={() => {
             const i = confirmIndex;
-            setConfirmIndex(null);
+            // Hold the modal open for the round-trip so its busy spinner is the
+            // thing the user watches — their eyes are already on the button they
+            // just pressed. Closing first left them staring at a static stage
+            // with nothing moving. A failed sell still closes; the error copy
+            // renders under the card's own Sell button (state.phase 'error').
             void sell(i).then((ok) => {
+              setConfirmIndex(null);
               if (ok) play('count'); // credit tally tick roll
             });
           }}

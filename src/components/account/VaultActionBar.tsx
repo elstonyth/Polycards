@@ -1,5 +1,6 @@
 'use client';
 
+import { Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { rm } from '@/lib/format';
 import { Pill } from '@/components/ui/pill';
@@ -86,6 +87,7 @@ export function VaultActionBar({
             disabled={none || busy || !quotesFirm}
             className="bg-buyback text-white hover:bg-buyback/90 disabled:opacity-50"
           >
+            {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
             {busy ? 'Selling…' : withCount('Sell')}
           </Pill>
         </div>
