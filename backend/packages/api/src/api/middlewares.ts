@@ -39,6 +39,7 @@ import {
   blockDisabledCustomerSession,
   blockDisabledEmailpassLogin,
 } from './utils/disabled-guard';
+import { noStoreForAuthenticatedStore } from './utils/cache-headers';
 
 // Custom-route middleware. /store/* is NOT a default customer-protected prefix
 // (only /store/customers/me/* is), so every customer-owned route here must opt
@@ -876,7 +877,10 @@ export default defineMiddlewares({
     // have missed.
     {
       matcher: '/store/*',
-      middlewares: [blockDisabledCustomerSession],
+      middlewares: [
+        noStoreForAuthenticatedStore,
+        blockDisabledCustomerSession,
+      ],
     },
   ],
 });

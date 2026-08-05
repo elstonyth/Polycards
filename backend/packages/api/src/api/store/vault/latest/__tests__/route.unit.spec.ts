@@ -44,14 +44,6 @@ describe('GET /store/vault/latest', () => {
     expect(out.body).toEqual({ latest_event_at: null });
   });
 
-  it('forbids caching the response (per-customer data, CWE-525)', async () => {
-    const { res, out } = mkRes();
-
-    await latest(mkReq() as never, res);
-
-    expect(out.headers['Cache-Control']).toBe('no-store');
-  });
-
   it('returns the newest row updated_at when the vault is not empty', async () => {
     const when = new Date('2026-08-05T10:00:00.000Z');
     listPulls.mockResolvedValue([{ id: 'pull_1', updated_at: when }]);
