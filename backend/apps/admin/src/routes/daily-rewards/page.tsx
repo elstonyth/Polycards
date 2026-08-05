@@ -54,6 +54,18 @@ const KIND_LABEL: Record<DailyBoxPrizeDTO['kind'], string> = {
   nothing: 'Nothing',
 };
 
+// What a box prize can be SET to. 'voucher' is deliberately absent: vouchers
+// are off (the redeeming surface is suspended, and Migration20260805000000
+// zeroed the whole VIP ladder), and a box was the last place an operator could
+// still mint one. The kind stays in the model, the label above, and the amount
+// input below, so a row that already carries it stays editable and clearable
+// rather than trapped — same rule as the off-decade frame_unlock toggle.
+const SETTABLE_KINDS = ['credit', 'product', 'nothing'] as const;
+
+// Credit and voucher rows both carry an RM amount; only credit can be authored.
+const hasAmount = (kind: DailyBoxPrizeDTO['kind']): boolean =>
+  kind === 'credit' || kind === 'voucher';
+
 // One prize row in the editable buffer. `payload` fields are flattened here
 // (rather than kept nested) so every cell binds to a single controlled input;
 // save re-nests them into DailyBoxSaveBody.prizes.
@@ -293,7 +305,7 @@ const BoxesTab = ({ dirtyRef }: { dirtyRef: MutableRefObject<boolean> }) => {
       : null;
   const rowErrors = rows.map((r) => {
     if (r.kind === 'product' && !r.productHandle) return 'Pick a product.';
-    if (r.kind === 'credit' || r.kind === 'voucher') {
+    if (hasAmount(r.kind)) {
       const amt = Number(r.amountInput);
       if (!(amt > 0) || amt > maxCredit)
         return `RM amount must be between 0 and ${maxCredit}.`;
@@ -317,7 +329,7 @@ const BoxesTab = ({ dirtyRef }: { dirtyRef: MutableRefObject<boolean> }) => {
   const lockedCount = rows.filter((r) => r.locked).length;
   const totalPct = odds.computed.reduce((s, c) => s + c.pct, 0);
   const maxPayout = rows.reduce((max, r) => {
-    if (r.kind !== 'credit' && r.kind !== 'voucher') return max;
+    if (!hasAmount(r.kind)) return max;
     const amt = Number(r.amountInput) || 0;
     return Math.max(max, amt);
   }, 0);
@@ -355,7 +367,7 @@ const BoxesTab = ({ dirtyRef }: { dirtyRef: MutableRefObject<boolean> }) => {
             kind: r.kind,
             locked: r.locked,
             pct: Number(r.pctInput) || 0,
-            ...(r.kind === 'credit' || r.kind === 'voucher'
+            ...(hasAmount(r.kind)
               ? { amount_myr: Number(r.amountInput) || 0 }
               : {}),
             ...(r.kind === 'product'
@@ -513,18 +525,22 @@ const BoxesTab = ({ dirtyRef }: { dirtyRef: MutableRefObject<boolean> }) => {
                     <Select.Value />
                   </Select.Trigger>
                   <Select.Content>
-                    {(['credit', 'product', 'voucher', 'nothing'] as const).map(
-                      (k) => (
-                        <Select.Item key={k} value={k}>
-                          {KIND_LABEL[k]}
-                        </Select.Item>
-                      ),
-                    )}
+                    {/* A legacy 'voucher' row keeps its own option so the
+                        Select has a value to render and the row can be
+                        switched off it. New rows cannot become one. */}
+                    {(r.kind === 'voucher'
+                      ? ([...SETTABLE_KINDS, 'voucher'] as const)
+                      : SETTABLE_KINDS
+                    ).map((k) => (
+                      <Select.Item key={k} value={k}>
+                        {KIND_LABEL[k]}
+                      </Select.Item>
+                    ))}
                   </Select.Content>
                 </Select>
               </Table.Cell>
               <Table.Cell>
-                {r.kind === 'credit' || r.kind === 'voucher' ? (
+                {hasAmount(r.kind) ? (
                   <div className="flex items-center gap-1">
                     <Text size="small" className="text-ui-fg-subtle">
                       RM
