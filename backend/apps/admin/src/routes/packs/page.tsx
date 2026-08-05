@@ -211,20 +211,27 @@ const PacksListPage = () => {
   // this only trims the edge hyphen a trailing space leaves behind.
   const slugValue = toSlug(form.slug);
 
+  // Parsed once and reused by the blocking-field list AND the save payload, so
+  // the value that passes validation is the value that gets written. The
+  // emptiness checks stay on the raw strings: Number('') is 0, which would let
+  // a cleared money field satisfy `>= 0`.
+  const priceValue = Number(form.price);
+  const buybackValue = Number(form.buybackPercent);
+  const rankValue = Number(form.rank);
+
   // Which fields still block Save. Rendered beside the button: a bare disabled
   // Save reads as "creating a pack is broken" — the operator can't see that
   // e.g. a slug typed with a space ("ascended heroes") is the one thing wrong.
   const missing = [
     form.title.trim() === '' && t('packs.form.titleField'),
     form.image.trim() === '' && t('packs.form.image'),
-    (form.price.trim() === '' || !(Number(form.price) >= 0)) &&
-      t('packs.form.price'),
+    (form.price.trim() === '' || !(priceValue >= 0)) && t('packs.form.price'),
     (form.buybackPercent.trim() === '' ||
-      !(Number(form.buybackPercent) >= 90) ||
-      !(Number(form.buybackPercent) <= 100)) &&
+      !(buybackValue >= 90) ||
+      !(buybackValue <= 100)) &&
       t('packs.form.buybackPercent'),
     form.rank.trim() !== '' &&
-      Number.isNaN(Number(form.rank)) &&
+      Number.isNaN(rankValue) &&
       t('packs.form.rank'),
     mode === 'create' && !SLUG_RE.test(slugValue) && t('packs.form.slug'),
   ].filter((f): f is string => typeof f === 'string');
@@ -235,12 +242,12 @@ const PacksListPage = () => {
     const payload: AdminPackWrite = {
       title: form.title.trim(),
       category: form.category,
-      price: Number(form.price),
+      price: priceValue,
       image: form.image.trim(),
       display_image: form.displayImage.trim() || null,
-      buyback_percent: Math.trunc(Number(form.buybackPercent)),
+      buyback_percent: Math.trunc(buybackValue),
       boost: form.boost,
-      rank: form.rank.trim() === '' ? 0 : Math.trunc(Number(form.rank)),
+      rank: form.rank.trim() === '' ? 0 : Math.trunc(rankValue),
       status: form.status,
     };
     try {
