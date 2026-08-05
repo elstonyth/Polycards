@@ -37,7 +37,7 @@ import {
 } from '../../lib/queries';
 import { resolveImageUrl } from '../../lib/image-url';
 import { validateImageFile } from '../../lib/image-validation';
-import { fmtPct, rm } from '../../lib/format';
+import { fmtPct, rm, toSlug } from '../../lib/format';
 import { GachaPipelineHint } from '../../components/GachaPipelineHint';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
@@ -207,17 +207,28 @@ const PacksListPage = () => {
     }
   };
 
-  const handleOk =
-    form.title.trim() !== '' &&
-    form.image.trim() !== '' &&
-    form.price.trim() !== '' &&
-    Number(form.price) >= 0 &&
-    form.buybackPercent.trim() !== '' &&
-    Number(form.buybackPercent) >= 90 &&
-    Number(form.buybackPercent) <= 100 &&
-    (form.rank.trim() === '' || !Number.isNaN(Number(form.rank))) &&
-    (mode === 'edit' || SLUG_RE.test(form.slug.trim()));
-  const canSave = handleOk && !saving && !uploading;
+  // The slug actually written on create. The field kebab-cases as you type, so
+  // this only trims the edge hyphen a trailing space leaves behind.
+  const slugValue = toSlug(form.slug);
+
+  // Which fields still block Save. Rendered beside the button: a bare disabled
+  // Save reads as "creating a pack is broken" — the operator can't see that
+  // e.g. a slug typed with a space ("ascended heroes") is the one thing wrong.
+  const missing = [
+    form.title.trim() === '' && t('packs.form.titleField'),
+    form.image.trim() === '' && t('packs.form.image'),
+    (form.price.trim() === '' || !(Number(form.price) >= 0)) &&
+      t('packs.form.price'),
+    (form.buybackPercent.trim() === '' ||
+      !(Number(form.buybackPercent) >= 90) ||
+      !(Number(form.buybackPercent) <= 100)) &&
+      t('packs.form.buybackPercent'),
+    form.rank.trim() !== '' &&
+      Number.isNaN(Number(form.rank)) &&
+      t('packs.form.rank'),
+    mode === 'create' && !SLUG_RE.test(slugValue) && t('packs.form.slug'),
+  ].filter((f): f is string => typeof f === 'string');
+  const canSave = missing.length === 0 && !saving && !uploading;
 
   const save = async () => {
     if (!canSave) return;
@@ -234,7 +245,7 @@ const PacksListPage = () => {
     };
     try {
       if (mode === 'create') {
-        await createPack.mutateAsync({ ...payload, slug: form.slug.trim() });
+        await createPack.mutateAsync({ ...payload, slug: slugValue });
         toast.success(t('packs.toast.created'));
       } else {
         await updatePack.mutateAsync({ slug: form.slug, ...payload });
@@ -569,6 +580,11 @@ const PacksListPage = () => {
         <FocusModal.Content>
           <FocusModal.Header>
             <div className="flex items-center justify-end gap-x-2">
+              {missing.length > 0 && (
+                <Text size="small" className="text-ui-fg-error">
+                  {t('packs.form.missing', { fields: missing.join(', ') })}
+                </Text>
+              )}
               <Button
                 size="small"
                 variant="secondary"
@@ -718,8 +734,15 @@ const PacksListPage = () => {
                       id="pack-slug"
                       placeholder="legend-pack"
                       value={form.slug}
+                      // Kebab-case as you type (spaces and punctuation become
+                      // hyphens) — a trailing hyphen survives so the next word
+                      // can be typed; toSlug trims it before the write.
                       onChange={(e) =>
-                        patch({ slug: e.target.value.toLowerCase() })
+                        patch({
+                          slug: e.target.value
+                            .toLowerCase()
+                            .replace(/[^a-z0-9-]+/g, '-'),
+                        })
                       }
                     />
                     <Text className="text-ui-fg-subtle text-xs">

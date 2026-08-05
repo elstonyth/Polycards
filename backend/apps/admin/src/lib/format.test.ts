@@ -3,12 +3,37 @@ import {
   rm,
   timeAgo,
   fmtPct,
+  toSlug,
   usdToMyr,
   gradeToGrader,
   graderFromInclude,
   orderDateTime,
   deliveryStatusLabel,
 } from './format';
+
+// The backend gate the output has to clear (packs/validate.ts HANDLE_RE).
+const HANDLE_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+describe('toSlug', () => {
+  it('kebab-cases a title-style slug', () => {
+    expect(toSlug('ascended heroes')).toBe('ascended-heroes');
+    expect(toSlug('ASCENDED HEROES')).toBe('ascended-heroes');
+  });
+  it('collapses runs and trims the edges', () => {
+    expect(toSlug('  Ascended -- Heroes!  ')).toBe('ascended-heroes');
+  });
+  it('leaves an already-valid slug alone', () => {
+    expect(toSlug('legend-pack')).toBe('legend-pack');
+  });
+  // Anything this returns non-empty is submitted as-is, so it must satisfy the
+  // backend regex — otherwise Save enables and the create 400s instead.
+  it('produces a handle the backend accepts, or nothing at all', () => {
+    for (const raw of ['ascended heroes', '!!!', '---', 'Ünïcødé 2026', 'a']) {
+      const out = toSlug(raw);
+      if (out !== '') expect(out).toMatch(HANDLE_RE);
+    }
+  });
+});
 
 describe('deliveryStatusLabel', () => {
   it('titles a canonical status', () => {
