@@ -20,31 +20,19 @@ import { RankRewardSheet } from './RankRewardSheet';
 
 // Medal-gradient rank numerals (#1ST gold / #2ND silver / #3RD bronze) — the
 // prize-grid treatment from the operator's reference design.
+// Solid medal colors, not bg-clip-text gradients: the metal is what carries
+// the rank, and at 24px a three-stop vertical gradient only cost contrast on
+// the top and bottom thirds of each numeral.
 const RANKS = [
-  {
-    label: '1',
-    suffix: 'ST',
-    grad: 'from-yellow-200 via-chase to-amber-600',
-  },
-  {
-    label: '2',
-    suffix: 'ND',
-    grad: 'from-white via-neutral-300 to-neutral-500',
-  },
-  {
-    label: '3',
-    suffix: 'RD',
-    grad: 'from-orange-300 via-amber-600 to-amber-800',
-  },
+  { label: '1', suffix: 'ST', tone: 'text-chase' },
+  { label: '2', suffix: 'ND', tone: 'text-neutral-300' },
+  { label: '3', suffix: 'RD', tone: 'text-amber-600' },
 ] as const;
 
 function RankNumeral({ rank }: { rank: (typeof RANKS)[number] }) {
   return (
     <span
-      className={cn(
-        'font-heading bg-gradient-to-b bg-clip-text text-2xl leading-none text-transparent italic',
-        rank.grad,
-      )}
+      className={cn('font-heading text-2xl italic leading-none', rank.tone)}
     >
       #{rank.label}
       <span className="text-xs">{rank.suffix}</span>
@@ -167,7 +155,8 @@ function StageCard({
           aria-label={`View rewards for ranks 4 to 10 of stage ${stage.stageNumber}`}
           className="flex flex-col rounded-xl border border-white/5 bg-white/[0.04] p-2.5 text-left transition-colors hover:border-white/15 hover:bg-white/[0.07] focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:outline-none"
         >
-          <span className="font-heading bg-gradient-to-b from-yellow-200 via-chase to-amber-600 bg-clip-text text-2xl leading-none text-transparent italic">
+          {/* Solid chase gold, matching RankNumeral. */}
+          <span className="font-heading text-2xl italic leading-none text-chase">
             #4<span className="text-xs">–10TH</span>
           </span>
           {/* eslint-disable-next-line @next/next/no-img-element */}

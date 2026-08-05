@@ -3,6 +3,7 @@
 import { Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { rm } from '@/lib/format';
+import { useCountedValue } from '@/lib/use-counted-value';
 import { Pill } from '@/components/ui/pill';
 
 // Persistent vault action bar (boss doc / Show Go layout): "Select All" +
@@ -36,6 +37,10 @@ export function VaultActionBar({
   const none = selectedCount === 0;
   const withCount = (label: string) =>
     none ? label : `${label} ${selectedCount}`;
+  // The payout counts up as cards are picked instead of snapping — this is the
+  // number the customer is deciding on, and watching it move is the feedback
+  // that the tap registered. Snaps under reduced motion.
+  const { value: countedSellTotal } = useCountedValue(sellTotal);
   return (
     <div className="fixed inset-x-4 bottom-24 z-40 mx-auto max-w-md rounded-2xl border border-white/10 bg-neutral-900 p-4 shadow-[0_8px_32px_rgba(0,0,0,0.6)] lg:bottom-8">
       <button
@@ -68,8 +73,11 @@ export function VaultActionBar({
                 the dash is reserved for a selection whose MYR price is unknown. */}
             FMV {none ? rm(0) : fmv > 0 ? rm(fmv) : '—'}
           </p>
-          <p className="text-[15px] font-bold text-buyback-fg">
-            Sell for {rm(sellTotal)}
+          <p className="text-[15px] font-bold tabular-nums text-buyback-fg">
+            {/* Deselecting to zero snaps rather than counting down: a payout
+                still reading RM 412.30 while the Sell pill is already disabled
+                is a state contradiction on a money action. */}
+            Sell for {rm(none ? 0 : (countedSellTotal ?? sellTotal))}
           </p>
         </div>
         <div className="flex shrink-0 gap-2">
