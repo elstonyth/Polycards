@@ -288,13 +288,16 @@ envs:
   #   BQR - QR code & Bank transfer       RM 30 – 10,000, 1.70%
   #
   # (Withdrawal is WD/Payout, RM 50 – 5,000. FPX is NOT provisioned — it was a
-  # guess on 2026-08-04 and could never have worked.) BQR was refused with
-  # PMT10006 at 07:38 UTC that day despite appearing here, so OB is the value
-  # that has not been contradicted by production. Re-read that page before
-  # changing this; a channel list is theirs to change without telling us.
+  # guess on 2026-08-04 and could never have worked.) OB is now contradicted
+  # too: PMT10006 six times 2026-08-04 10:00Z – 2026-08-05 04:04Z, including
+  # twice AFTER GlobePay (Sean) said 2026-08-05 that OB and BQR are usable. BQR
+  # is the other channel he named (its own PMT10006 was 2026-08-04 07:38Z,
+  # before his claim), so it is the one remaining untested-since-activation
+  # value. If BQR also returns PMT10006, BOTH back-office channels are dead
+  # API-side and only their support can fix it — do not rotate methods again.
   - key: GLOBEPAY_DEPOSIT_METHOD
     scope: RUN_TIME
-    value: OB
+    value: BQR
   # The three secrets. Values live in the gitignored deploy/.env.deploy and are
   # injected by scripts/do-apply.ps1. Both KEY values are the bare base64 body
   # on ONE line — no PEM armor, no newlines: packs/globepay.ts toPem() re-wraps
