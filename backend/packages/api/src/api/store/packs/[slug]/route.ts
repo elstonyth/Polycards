@@ -5,6 +5,7 @@ import { cardByHandle, toCardView } from '../../../../modules/packs/card-view';
 import { normalizePublishedOdds } from '../../../../workflows/steps/create-pack';
 import { toMoney } from '../../../../modules/packs/money';
 import { pageAll } from '../../../utils/page-all';
+import { tierSplitForSet } from '../../../../modules/packs/odds-sets';
 import {
   DEFAULT_MARKET_MULTIPLIER,
   displayMarketPrice,
@@ -120,6 +121,27 @@ export async function GET(
     })
     .filter((e): e is NonNullable<typeof e> => e !== null);
 
+  // GUEST DEMO ODDS — odds SET 3, aggregated per rarity tier.
+  //
+  // The logged-out demo spin (/slots/:slug/spin?demo=1) samples client-side and
+  // used to roll the PUBLISHED display odds, which are marketing copy, not a
+  // real distribution. The operator wants the demo to feel like the real thing,
+  // so it rolls set 3's actual weights (weight_3 → weight_2 → weight, the same
+  // fallback a set-3 player's spin resolves).
+  //
+  // 🔒 Aggregated on purpose: per-card weights stay secret (the rule at the top
+  // of this file still holds) — only the tier split leaves the backend, which is
+  // the same GRAIN as published_odds, just true numbers instead of authored
+  // ones. Normalized over the CARD rows this response already exposes, so it
+  // describes the demo's pool exactly (reward rows can't be drawn in a demo).
+  const demoTiers = tierSplitForSet(
+    odds.filter((o) => byHandle.has(o.card_id)), // same rows as `entries` above
+    3,
+  );
+  // Same { tiers } shape as published_odds so the storefront reuses one parser.
+  // null when nothing is pullable — the demo then falls back to published odds.
+  const demoOdds = demoTiers ? { tiers: demoTiers } : null;
+
   // Explicit public shape — `price` is bigNumber now, so a raw `pack` spread
   // would leak the internal `raw_price` jsonb sidecar into a public payload.
   const body = {
@@ -142,6 +164,8 @@ export async function GET(
     // Normalized: storage null-fills the tiers (json-merge guard) and the
     // public payload must not carry those nulls.
     published_odds: normalizePublishedOdds(pack.published_odds),
+    // Set-3 tier split for the guest demo spin only (see above).
+    demo_odds: demoOdds,
   };
   packCache.set(slug, { expires: Date.now() + CACHE_TTL_MS, body });
   res.json(body);

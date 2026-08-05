@@ -43,6 +43,38 @@ export const weightForSet = (o: SetWeights, set: OddsSet): number =>
       ? (o.weight_2 ?? o.weight)
       : (o.weight_3 ?? o.weight_2 ?? o.weight);
 
+/**
+ * A pack's per-card weights aggregated into a per-rarity % split for one set.
+ *
+ * The ONLY odds grain that may leave the backend (per-card weights are secret):
+ * the store pack-detail route publishes this for set 3, which the guest demo
+ * spin samples on. Percentages are 2dp and sum to ~100 over the rows given —
+ * pass exactly the rows the caller considers drawable (a 0-weight card is
+ * unpullable, so it is skipped rather than counted into its tier). Null when
+ * nothing is pullable.
+ */
+export function tierSplitForSet(
+  rows: readonly (SetWeights & { rarity?: string | null })[],
+  set: OddsSet,
+): Record<string, number> | null {
+  const tally = new Map<string, number>();
+  let total = 0;
+  for (const row of rows) {
+    const w = weightForSet(row, set);
+    if (!(w > 0)) continue;
+    const rarity = row.rarity ?? 'Common';
+    tally.set(rarity, (tally.get(rarity) ?? 0) + w);
+    total += w;
+  }
+  if (total === 0) return null;
+  return Object.fromEntries(
+    [...tally].map(([rarity, w]) => [
+      rarity,
+      Math.round((w / total) * 10_000) / 100,
+    ]),
+  );
+}
+
 /** Narrow an untyped `metadata.odds_set` to a real odds set.
  *
  *  Defensive: anything that is not exactly set 2 or 3 rolls to set 1 (the

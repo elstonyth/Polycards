@@ -54,7 +54,12 @@ Object.defineProperty(document, 'visibilityState', {
   get: () => 'visible',
 });
 
-const detailA: PackDetail = { topHits: [], pool: [], publishedOdds: null };
+const detailA: PackDetail = {
+  topHits: [],
+  pool: [],
+  publishedOdds: null,
+  demoOdds: null,
+};
 
 describe('usePackDetailPoll', () => {
   beforeEach(() => {

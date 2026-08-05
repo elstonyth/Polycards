@@ -55,6 +55,9 @@ export default async function SlotSpinPage({
       // pool (no backend open, no charge, nothing won). Logged-in visitors are
       // ignored by the client (they always get the real, auth-gated machine).
       demoPool={demo === '1' ? (detail?.pool ?? []) : null}
+      // The demo draw rolls odds SET 3's real tier split (aggregated backend-
+      // side), not the marketing published odds — display is unaffected.
+      demoOdds={detail?.demoOdds ?? null}
     />
   );
 }
