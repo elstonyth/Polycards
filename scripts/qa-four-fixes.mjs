@@ -95,11 +95,20 @@ try {
     let overlap = false;
     for (let i = 1; i < boxes.length; i++)
       if (boxes[i][0] < boxes[i - 1][1]) overlap = true;
+    // Labels are `hidden` below sm, so every height is 0 on the phone passes —
+    // uniform, but vacuously so. Only the 1440 pass really tests the label size.
     const labelHeights = [...new Set(probe.map((p) => p.labelH))];
     console.log(
       `[${name}] checkpoints=${boxes.length} overlap=${overlap} labelHeights=${JSON.stringify(labelHeights)} boxes=${JSON.stringify(boxes)}`,
     );
-    if (overlap || labelHeights.length > 1) process.exitCode = 1;
+    // An empty match means the selector drifted, not that the bar is clean —
+    // fail loudly rather than report a green pass that asserted nothing.
+    if (boxes.length === 0) {
+      console.log(`[${name}] FAIL — no checkpoints matched; selector drifted?`);
+      process.exitCode = 1;
+    } else if (overlap || labelHeights.length > 1) {
+      process.exitCode = 1;
+    }
     await ctx.close();
   }
 } finally {

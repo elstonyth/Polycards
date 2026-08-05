@@ -30,7 +30,7 @@ try {
 
     const panel = page.locator('section[aria-label="Community progress"]');
     await panel.scrollIntoViewIfNeeded();
-    await panel.evaluate(
+    const flipped = await panel.evaluate(
       (root, { pct, completeCount }) => {
         const fill = root.querySelector('.challenge-fill');
         if (fill) fill.style.width = `${pct}%`;
@@ -38,15 +38,19 @@ try {
         meter?.setAttribute('aria-valuenow', String(pct));
         // Anchor span per stage; the pill and the label are its children.
         const checks = [...root.querySelectorAll('[role="meter"] ~ span')];
+        let flipped = 0;
         checks.forEach((anchor, i) => {
           if (i >= completeCount) return;
           const pill = anchor.firstElementChild;
-          pill?.classList.remove(
+          // Only count a flip when the LOCKED classes were actually there to
+          // remove — otherwise the markup changed and the swap means nothing.
+          if (!pill?.classList.contains('bg-neutral-600')) return;
+          pill.classList.remove(
             'scale-75',
             'bg-neutral-600',
             'text-transparent',
           );
-          pill?.classList.add(
+          pill.classList.add(
             'bg-chase',
             'text-neutral-950',
             'shadow-[0_0_10px_rgb(255_176_32_/_0.55)]',
@@ -55,15 +59,26 @@ try {
             'text-neutral-400',
             'text-chase',
           );
+          flipped++;
         });
+        return flipped;
       },
       { pct: PCT, completeCount: COMPLETE_COUNT },
     );
     await page.waitForTimeout(300);
     await panel.screenshot({ path: `${OUT}/${name}.png` });
-    console.log(
-      `[${name}] written (simulated ${PCT}%, ${COMPLETE_COUNT} cleared)`,
-    );
+    // Without this the script prints "written (simulated …)" over an unchanged
+    // screenshot whenever the selectors drift — a green-looking lie.
+    if (flipped !== COMPLETE_COUNT) {
+      console.log(
+        `[${name}] FAIL — flipped ${flipped}/${COMPLETE_COUNT} checkpoints; selectors drifted?`,
+      );
+      process.exitCode = 1;
+    } else {
+      console.log(
+        `[${name}] written (simulated ${PCT}%, ${COMPLETE_COUNT} cleared)`,
+      );
+    }
     await ctx.close();
   }
 } finally {

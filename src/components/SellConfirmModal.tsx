@@ -107,14 +107,20 @@ export default function SellConfirmModal({
         role="dialog"
         aria-modal="true"
         aria-label="Confirm sell-back"
+        // The modal now stays mounted for the whole sell round-trip, so say so
+        // — a screen-reader user otherwise gets silence after confirming.
+        aria-busy={busy}
         tabIndex={-1}
         className="glass-panel relative z-10 max-h-[85vh] w-full overflow-y-auto rounded-t-3xl border-t p-6 pb-[calc(env(safe-area-inset-bottom)+1.5rem)] outline-none sm:inset-x-auto sm:bottom-auto sm:max-w-sm sm:rounded-2xl sm:border sm:pb-6"
       >
         <button
           type="button"
           onClick={() => !busy && onCancel()}
+          // Match Cancel/Confirm: the handler was already guarded, but leaving
+          // it focusable and lit made a mid-sell click look like a dead button.
+          disabled={busy}
           aria-label="Close"
-          className="absolute right-2.5 top-2.5 flex h-11 w-11 items-center justify-center rounded-lg text-white/50 transition-colors hover:bg-white/5 hover:text-white"
+          className="absolute right-2.5 top-2.5 flex h-11 w-11 items-center justify-center rounded-lg text-white/50 transition-colors hover:bg-white/5 hover:text-white disabled:opacity-40"
         >
           <X className="h-4 w-4" aria-hidden />
         </button>
