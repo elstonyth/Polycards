@@ -459,6 +459,23 @@ a human into the DigitalOcean app, never into this repo.
    cannot be verified from the office at all — only the server addresses may
    call — so its first proof is `CheckBalance` from production.
 
+   **STILL NOT DONE as of 2026-08-05 — and deposits were armed anyway.** Read
+   back live today: `doctl apps get 7fd66ea2… -o json` → `dedicated_ips` is
+   still `188.166.181.61` / `188.166.181.204`, and nothing in the git history or
+   this doc records the new pair ever being sent to GlobePay. So every
+   production deposit since the 2026-08-04 cutover has called their API from an
+   address that is not on the API list, which is the precondition this very
+   checklist item says makes "every call rejected".
+
+   This is almost certainly the whole of the `PMT10006` story, and it reframes
+   the 2026-08-04/05 method rotation (OB → BQR, six refusals) as chasing the
+   wrong variable: the rejection lands before the payment method is consulted,
+   which is exactly why EVERY method failed identically and why GlobePay (Sean)
+   could truthfully say OB and BQR are both usable. The channels were never the
+   problem. Do NOT rotate methods again — send the two addresses above, get
+   written confirmation, then prove it with `medusa exec ./src/scripts/check-globepay.ts`
+   from production (read-only, no transaction) BEFORE trusting a customer top-up.
+
 ### Egress is spec state, and it can be wiped (learned the hard way 2026-07-30)
 
 `doctl apps update` replaces the **entire** app spec. A spec with no `egress`
