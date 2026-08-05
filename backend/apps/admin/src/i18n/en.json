@@ -428,6 +428,11 @@
     "statusStale": "Overdue",
     "staleWarning": "{{n}} row(s) on this page are past the reconcile window — the customer is debited with no payout confirmed. Check the withdrawal in the GlobePay back office before touching anything by hand.",
     "empty": "No withdrawals in this view.",
+    "emptyView": "No {{view}} withdrawals right now. Other statuses may still have rows.",
+    "emptyAll": "No withdrawals have been requested yet.",
+    "emptyPage": "Nothing on this page. This view has {{total}} withdrawal(s).",
+    "firstPage": "Back to the first page",
+    "showAll": "Show all statuses",
     "loadError": "Could not load withdrawals.",
     "tableLabel": "Withdrawals table"
   },
