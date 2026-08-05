@@ -42,34 +42,34 @@ export type CountedValue = {
  */
 export function useCountedValue(target: number | null): CountedValue {
   const reduced = usePrefersReducedMotion();
-  const [value, setValue] = useState<number | null>(target);
+  // Non-null ONLY while a count is in flight; settled renders derive `target`
+  // directly, so there is no state to keep in sync with the prop.
+  const [frame, setFrame] = useState<number | null>(null);
   const [direction, setDirection] = useState<'up' | 'down' | null>(null);
-  // The figure currently ON SCREEN — read inside the effect without making
-  // `value` a dependency (that would restart the tween every frame). It tracks
-  // each frame, not just the settled end: a second change arriving mid-count
-  // (three taps in the vault, two packs opened back to back) has to continue
-  // from what the customer can see, or the number jumps.
+  // The figure currently ON SCREEN, tracked every frame rather than only at
+  // the settled end: a second change arriving mid-count (three taps in the
+  // vault, two packs opened back to back) has to continue from what the
+  // customer can see, or the number jumps.
   const shown = useRef<number | null>(target);
 
   useEffect(() => {
     const from = shown.current;
-    if (target == null || from == null || from === target) {
-      shown.current = target;
-      setValue(target);
-      setDirection(null);
-      return;
-    }
+    shown.current = target;
+    if (target == null || from == null || from === target) return;
 
-    setDirection(target > from ? 'up' : 'down');
-
+    const dir = target > from ? 'up' : 'down';
+    // Every state write below happens from a timer or a frame callback, never
+    // synchronously in the effect body — a synchronous setState here is the
+    // cascading-render pattern the React Compiler lint rejects.
+    const tint = setTimeout(() => setDirection(dir), 0);
     // The tint always outlives the count by a beat, on both motion paths.
     const holdMs = reduced ? 600 : DURATION_MS + 600;
     const done = setTimeout(() => setDirection(null), holdMs);
-
     if (reduced) {
-      shown.current = target;
-      setValue(target);
-      return () => clearTimeout(done);
+      return () => {
+        clearTimeout(tint);
+        clearTimeout(done);
+      };
     }
 
     let raf = 0;
@@ -78,15 +78,22 @@ export function useCountedValue(target: number | null): CountedValue {
       const elapsed = now - start;
       const next = countedFrame(from, target, elapsed);
       shown.current = next;
-      setValue(next);
-      if (elapsed < DURATION_MS) raf = requestAnimationFrame(tick);
+      if (elapsed < DURATION_MS) {
+        setFrame(next);
+        raf = requestAnimationFrame(tick);
+      } else {
+        // Settled: drop back to rendering `target` so the displayed figure is
+        // the real one, not a float that happens to equal it.
+        setFrame(null);
+      }
     };
     raf = requestAnimationFrame(tick);
     return () => {
-      cancelAnimationFrame(raf);
+      clearTimeout(tint);
       clearTimeout(done);
+      cancelAnimationFrame(raf);
     };
   }, [target, reduced]);
 
-  return { value, direction };
+  return { value: frame ?? target, direction };
 }
