@@ -1,18 +1,24 @@
 import { describe, expect, test } from 'vitest';
-import { seenKey, shouldShowDot } from '@/lib/vault-dot';
+import { seenKey, shouldShowDot } from '@/lib/unread-dot';
 
 const OLD = '2026-08-01T00:00:00.000Z';
 const NEW = '2026-08-04T00:00:00.000Z';
 
 describe('seenKey', () => {
   test('namespaces the key by customer id', () => {
-    expect(seenKey('cus_a')).toBe('polycards.vault_seen_at:cus_a');
+    expect(seenKey('vault', 'cus_a')).toBe('polycards.vault_seen_at:cus_a');
+  });
+
+  test('keeps the two dots in separate namespaces', () => {
+    // Clearing the Vault dot must not clear the money dot, and vice versa.
+    expect(seenKey('vault', 'cus_a')).not.toBe(seenKey('credits', 'cus_a'));
+    expect(seenKey('credits', 'cus_a')).toBe('polycards.credits_seen_at:cus_a');
   });
 
   test('gives two customers different keys', () => {
     // TopUpProvider's balance leak was exactly this failure: an untagged value
     // handed account B whatever account A had left behind.
-    expect(seenKey('cus_a')).not.toBe(seenKey('cus_b'));
+    expect(seenKey('vault', 'cus_a')).not.toBe(seenKey('vault', 'cus_b'));
   });
 });
 

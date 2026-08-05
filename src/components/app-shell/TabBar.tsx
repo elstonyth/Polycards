@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { openAuth } from '@/components/AuthButton';
 import { useAuth } from '@/components/auth/AuthProvider';
+import { useCreditDot } from './CreditDotProvider';
 import { useVaultDot } from './VaultDotProvider';
 import { TABS, isTabActive } from './tabs';
 
@@ -17,6 +18,7 @@ export default function TabBar() {
   const pathname = usePathname();
   const { customer, isLoading } = useAuth();
   const { show: vaultDot } = useVaultDot();
+  const { show: creditDot } = useCreditDot();
 
   return (
     <nav
@@ -28,7 +30,11 @@ export default function TabBar() {
         {TABS.map((tab) => {
           const active = isTabActive(tab, pathname);
           const Icon = tab.icon;
-          const dot = vaultDot && tab.href === '/vault';
+          // One dot per destination: the vault's arrivals, and the Me tab's
+          // balance movements (its /transactions child is where they are read).
+          const dot =
+            (tab.href === '/vault' && vaultDot) ||
+            (tab.href === '/me' && creditDot);
           return (
             <Link
               key={tab.href}

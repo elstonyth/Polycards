@@ -5,6 +5,7 @@ import './globals.css';
 import AppHeader from '@/components/app-shell/AppHeader';
 import SiteFooter from '@/components/app-shell/SiteFooter';
 import TabBar from '@/components/app-shell/TabBar';
+import { CreditDotProvider } from '@/components/app-shell/CreditDotProvider';
 import { TopUpProvider } from '@/components/app-shell/TopUpProvider';
 import { VaultDotProvider } from '@/components/app-shell/VaultDotProvider';
 import { AuthProvider } from '@/components/auth/AuthProvider';
@@ -89,19 +90,21 @@ export default async function RootLayout({
             would contradict the consent gate in MetaPixel.tsx. */}
         <MetaPixel />
         <AuthProvider>
-          <TopUpProvider>
-            <VaultDotProvider>
-              <SkipLink />
-              <AppHeader />
-              <main id="main" className="flex-1 pb-12 lg:pb-8">
-                {children}
-              </main>
-              {/* Footer carries the TabBar clearance (pb-28) on phones. */}
-              <SiteFooter />
-              <TabBar />
-              <CookieConsent />
-            </VaultDotProvider>
-          </TopUpProvider>
+          <CreditDotProvider>
+            <TopUpProvider>
+              <VaultDotProvider>
+                <SkipLink />
+                <AppHeader />
+                <main id="main" className="flex-1 pb-12 lg:pb-8">
+                  {children}
+                </main>
+                {/* Footer carries the TabBar clearance (pb-28) on phones. */}
+                <SiteFooter />
+                <TabBar />
+                <CookieConsent />
+              </VaultDotProvider>
+            </TopUpProvider>
+          </CreditDotProvider>
         </AuthProvider>
       </body>
     </html>

@@ -12,6 +12,7 @@ import { useRouter } from 'next/navigation';
 import { getCreditBalance } from '@/lib/actions/vault';
 import { openAuth } from '@/components/AuthButton';
 import { useAuth } from '@/components/auth/AuthProvider';
+import { useCreditDot } from './CreditDotProvider';
 import TopUpSheet from './TopUpSheet';
 
 type TopUpContextValue = {
@@ -41,6 +42,12 @@ export function useTopUp(): TopUpContextValue {
 export function TopUpProvider({ children }: { children: ReactNode }) {
   const { customer } = useAuth();
   const router = useRouter();
+  // Every balance movement writes a credit_transaction, and that row is exactly
+  // what the money dot watches. Refreshing HERE rather than at each call site
+  // means a sell, a top-up, a spin charge and a payout all light the dot
+  // without anyone remembering to wire it. CreditDotProvider sits outside this
+  // one in the layout for this reason.
+  const { refresh: refreshCreditDot } = useCreditDot();
   // Balance is stored WITH the customer id it was fetched for. A value tagged
   // for another identity never renders (security review: on logout→login as a
   // different account, an untagged balance briefly leaked the previous user's
@@ -89,8 +96,9 @@ export function TopUpProvider({ children }: { children: ReactNode }) {
     (value: number) => {
       if (!customer) return;
       setBalance({ forId: customer.id, value });
+      refreshCreditDot();
     },
-    [customer],
+    [customer, refreshCreditDot],
   );
 
   const openTopUp = useCallback(() => {
