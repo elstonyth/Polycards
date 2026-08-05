@@ -11,6 +11,7 @@ import { useAuth } from '@/components/auth/AuthProvider';
 import NotificationBell from '@/components/NotificationBell';
 import { Pill } from '@/components/ui/pill';
 import { useTopUp } from './TopUpProvider';
+import { useCreditDot } from './CreditDotProvider';
 import { useVaultDot } from './VaultDotProvider';
 import { TABS, isTabActive } from './tabs';
 
@@ -26,6 +27,7 @@ export default function AppHeader() {
   const { customer, isLoading } = useAuth();
   const { balance, openTopUp } = useTopUp();
   const { show: vaultDot } = useVaultDot();
+  const { show: creditDot } = useCreditDot();
 
   return (
     <header
@@ -57,7 +59,11 @@ export default function AppHeader() {
             {TABS.map((tab) => {
               const active = isTabActive(tab, pathname);
               const Icon = tab.icon;
-              const dot = vaultDot && tab.href === '/vault';
+              // One dot per destination: the vault's arrivals, and the Me tab's
+              // balance movements (its /transactions child is where they are read).
+              const dot =
+                (tab.href === '/vault' && vaultDot) ||
+                (tab.href === '/me' && creditDot);
               return (
                 <Link
                   key={tab.href}
