@@ -440,11 +440,20 @@ a human into the DigitalOcean app, never into this repo.
    answers `Access Denied: Your IP address is not authorized to perform this
    action`. So we cannot reach the portal to add the API entries ourselves;
    both lists have to be set by them. Send: our office IP for the BackOffice
-   list, and BOTH server IPs (**206.189.94.252** and **168.144.35.100**) for the
-   API list. One IP per component — the service takes customer traffic, the
-   worker runs the reconciliation sweeps, and whitelisting only one means live
-   payments work while the sweep that catches a dropped callback fails silently.
-   Note the office IP is likely dynamic; ask whether they can allow a range.
+   list, and BOTH server IPs — **`188.166.181.61`** and **`188.166.181.204`** —
+   for the API list. One IP per component: the service takes customer traffic,
+   the worker runs the reconciliation sweeps, and whitelisting only one means
+   live payments work while the sweep that catches a dropped callback fails
+   silently. Note the office IP is likely dynamic; ask whether they can allow a
+   range.
+
+   These are the **only** addresses to send. `206.189.94.252` /
+   `168.144.35.100` were the original pair and are DEAD — DigitalOcean released
+   them on 2026-07-30 (see below). They are named here only so you recognise
+   them as stale if GlobePay quotes them back; sending them again re-creates the
+   outage. Before sending, re-read the live values rather than trusting this
+   file: `doctl apps get 7fd66ea2-0105-420b-87eb-8a4606262561 -o json` →
+   `dedicated_ips`.
 
    **BackOffice list: DONE**, per GlobePay 2026-07-30 ("都已设置好了") and
    independently verified — `https://backoffice.globepay365.com/` now answers
@@ -458,6 +467,23 @@ a human into the DigitalOcean app, never into this repo.
    and confirmed before deposits are armed, or every call is rejected. This half
    cannot be verified from the office at all — only the server addresses may
    call — so its first proof is `CheckBalance` from production.
+
+   **STILL NOT DONE as of 2026-08-05 — and deposits were armed anyway.** Read
+   back live today: `doctl apps get 7fd66ea2… -o json` → `dedicated_ips` is
+   still `188.166.181.61` / `188.166.181.204`, and nothing in the git history or
+   this doc records the new pair ever being sent to GlobePay. So every
+   production deposit since the 2026-08-04 cutover has called their API from an
+   address that is not on the API list, which is the precondition this very
+   checklist item says makes "every call rejected".
+
+   This is almost certainly the whole of the `PMT10006` story, and it reframes
+   the 2026-08-04/05 method rotation (OB → BQR, six refusals) as chasing the
+   wrong variable: the rejection lands before the payment method is consulted,
+   which is exactly why EVERY method failed identically and why GlobePay (Sean)
+   could truthfully say OB and BQR are both usable. The channels were never the
+   problem. Do NOT rotate methods again — send the two addresses above, get
+   written confirmation, then prove it with `medusa exec ./src/scripts/check-globepay.ts`
+   from production (read-only, no transaction) BEFORE trusting a customer top-up.
 
 ### Egress is spec state, and it can be wiped (learned the hard way 2026-07-30)
 

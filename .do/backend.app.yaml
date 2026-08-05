@@ -295,6 +295,18 @@ envs:
   # before his claim), so it is the one remaining untested-since-activation
   # value. If BQR also returns PMT10006, BOTH back-office channels are dead
   # API-side and only their support can fix it — do not rotate methods again.
+  #
+  # CORRECTION 2026-08-05: BQR did return PMT10006, but "both channels are dead"
+  # was the wrong read. The API whitelist is the actual blocker. GlobePay
+  # whitelisted 206.189.94.252 / 168.144.35.100; DigitalOcean released that pair
+  # on 2026-07-30 and production has egressed from 188.166.181.61 /
+  # 188.166.181.204 ever since (read back live 2026-08-05). The new pair was
+  # never sent, so every deposit since the 2026-08-04 cutover has called from an
+  # un-allowlisted address — which rejects before the payment method is even
+  # consulted. That is why every method failed identically and why Sean could
+  # truthfully say OB and BQR are usable. The channel value below is very likely
+  # fine; the fix is the whitelist, not this var. See the "Both whitelists"
+  # checklist item in docs/payments/globepay365-setup.md.
   - key: GLOBEPAY_DEPOSIT_METHOD
     scope: RUN_TIME
     value: BQR
