@@ -606,6 +606,12 @@ export default defineMiddlewares({
       middlewares: [
         authenticate('customer', ['bearer']),
         createCreditTopupRateLimit(),
+        // Same phone gate as topup/deposit/delivery (2026-08-05): money OUT
+        // was the one money path without it, which made an unverified account
+        // able to cash out what it could never have topped up. Flag-gated by
+        // PHONE_VERIFICATION_REQUIRED like every other requirePhoneVerified
+        // site, so dev/CI (flag unset) are unaffected.
+        requirePhoneVerified,
       ],
     },
     {

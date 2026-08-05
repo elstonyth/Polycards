@@ -404,6 +404,31 @@
     "empty": "No deposits in this view.",
     "loadError": "Could not load deposits."
   },
+  "withdrawals": {
+    "title": "Withdrawals",
+    "subtitle": "GlobePay365 payouts — money already debited from a customer, and whether the bank transfer settled or refunded.",
+    "view": {
+      "pending": "Pending",
+      "settled": "Settled",
+      "failed": "Refunded",
+      "all": "All"
+    },
+    "when": "Started",
+    "customer": "Customer",
+    "destination": "Destination",
+    "amount": "Amount",
+    "status": "Status",
+    "reference": "References",
+    "statusLabel": {
+      "pending": "Pending",
+      "settled": "Paid out",
+      "failed": "Refunded"
+    },
+    "statusStale": "Overdue",
+    "staleWarning": "{{n}} row(s) on this page are past the reconcile window — the customer is debited with no payout confirmed. Check the withdrawal in the GlobePay back office before touching anything by hand.",
+    "empty": "No withdrawals in this view.",
+    "loadError": "Could not load withdrawals."
+  },
   "pulls": {
     "title": "Pull Ledger",
     "subtitle": "Every pack opened, the card won, and who pulled it.",

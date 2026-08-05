@@ -17,6 +17,8 @@ export const qk = {
   // switching filters never shows another view's rows.
   globepayDeposits: (page: number, status: string) =>
     ['admin', 'globepay-deposits', status, page] as const,
+  globepayWithdrawals: (page: number, status: string) =>
+    ['admin', 'globepay-withdrawals', status, page] as const,
   economy: ['admin', 'economy'] as const,
   eligibleProducts: ['admin', 'eligible-products'] as const,
   customerGacha: (id: string) => ['admin', 'customer', id, 'gacha'] as const,

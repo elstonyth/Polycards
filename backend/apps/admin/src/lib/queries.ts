@@ -43,6 +43,9 @@ import {
   getGlobePayDeposits,
   type GlobePayDepositView,
   type GlobePayDepositsResponse,
+  getGlobePayWithdrawals,
+  type GlobePayWithdrawalView,
+  type GlobePayWithdrawalsResponse,
   getPixelPokemon,
   createPixelPokemon,
   type PixelPokemonPage,
@@ -886,6 +889,20 @@ export const useGlobePayDeposits = (
   useQuery({
     queryKey: qk.globepayDeposits(page, status),
     queryFn: () => getGlobePayDeposits(page, status),
+    placeholderData: keepPreviousData,
+    refetchInterval: 60_000,
+  });
+
+// GlobePay withdrawals — same one-minute poll as deposits: this is the
+// money-out watch list, and a debited-but-unpaid customer should surface
+// without an operator remembering to reload.
+export const useGlobePayWithdrawals = (
+  page = 0,
+  status: GlobePayWithdrawalView = 'pending',
+): UseQueryResult<GlobePayWithdrawalsResponse> =>
+  useQuery({
+    queryKey: qk.globepayWithdrawals(page, status),
+    queryFn: () => getGlobePayWithdrawals(page, status),
     placeholderData: keepPreviousData,
     refetchInterval: 60_000,
   });

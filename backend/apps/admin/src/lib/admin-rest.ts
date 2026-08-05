@@ -1064,6 +1064,52 @@ export function getGlobePayDeposits(
   return getJson<GlobePayDepositsResponse>(`/admin/globepay/deposits?${params}`);
 }
 
+// GlobePay365 withdrawals (GET /admin/globepay/withdrawals) — the money-OUT
+// mirror of the deposits window. 'stale' = still pending past the sweep's
+// window; for a withdrawal that means a customer already debited with no
+// payout confirmed and no refund, i.e. the row to chase first.
+export type GlobePayWithdrawalView = 'pending' | 'settled' | 'failed' | 'all';
+
+export interface GlobePayWithdrawal {
+  id: string;
+  merchant_transaction_id: string;
+  gateway_transaction_id: string | null;
+  customer_id: string;
+  customer_email: string | null;
+  amount: number;
+  bank_code: string;
+  account_number: string;
+  account_holder_name: string;
+  status: 'pending' | 'settled' | 'failed';
+  gateway_status: number | null;
+  created_at: string;
+  settled_at: string | null;
+  stale: boolean;
+}
+
+export interface GlobePayWithdrawalsResponse {
+  total: number;
+  offset: number;
+  limit: number;
+  status: GlobePayWithdrawalView;
+  withdrawals: GlobePayWithdrawal[];
+}
+
+export function getGlobePayWithdrawals(
+  page: number,
+  status: GlobePayWithdrawalView,
+  pageSize = 50,
+): Promise<GlobePayWithdrawalsResponse> {
+  const params = new URLSearchParams({
+    status,
+    limit: String(pageSize),
+    offset: String(page * pageSize),
+  });
+  return getJson<GlobePayWithdrawalsResponse>(
+    `/admin/globepay/withdrawals?${params}`,
+  );
+}
+
 // ── Epic 2 (Players) ─────────────────────────────────────────────────────────
 
 /** One row of GET /admin/players. All money fields are MYR (the route divides
