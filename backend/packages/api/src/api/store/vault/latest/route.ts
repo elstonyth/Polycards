@@ -35,15 +35,7 @@ export async function GET(
     { order: { updated_at: 'DESC' }, take: 1 },
   );
 
-  // Per-customer data behind a bearer token: never let it be stored or replayed
-  // across identities (CWE-525). RFC 9111 §3.5 already forbids a SHARED cache
-  // from storing an Authorization-bearing response without an explicit opt-in,
-  // so this is belt-and-braces — it also covers the private browser cache.
-  //
-  // NOTE: no other /store route in this backend sets a cache directive, and the
-  // siblings return far more (GET /store/vault is the whole collection with
-  // values, GET /store/credits the balance). This line is the local fix, not
-  // the codebase-wide one; the gap is worth a separate sweep.
-  res.setHeader('Cache-Control', 'no-store');
+  // Cache-Control: no-store is applied to every authenticated /store response
+  // by noStoreForAuthenticatedStore (src/api/middlewares.ts, blanket matcher).
   res.json({ latest_event_at: newest?.updated_at ?? null });
 }

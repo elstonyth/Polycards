@@ -89,6 +89,27 @@ medusaIntegrationTestRunner({
         expect(res.headers['cache-control']).toBe('no-store');
       });
 
+      // noStoreForAuthenticatedStore is a BLANKET /store/* matcher, so proving
+      // it on this route alone would not distinguish "blanket" from "one route
+      // happens to set it". A second, unrelated authenticated route pins the
+      // claim; the anonymous case pins the gate, without which the public
+      // catalog would silently become uncacheable.
+      it('marks every authenticated store read no-store, and only those', async () => {
+        const { token } = await registerCustomer('vl-blanket@test.dev');
+
+        const credits = await api.get('/store/credits/balance', {
+          headers: authed(token),
+        });
+        expect(credits.status).toBe(200);
+        expect(credits.headers['cache-control']).toBe('no-store');
+
+        const anon = await unwrapResponse(
+          api.get('/store/vault/latest', { headers: storeHeaders }),
+        );
+        expect(anon.status).toBe(401);
+        expect(anon.headers['cache-control']).toBeUndefined();
+      });
+
       // NOTE: freshly created rows all carry ~the same updated_at, so this case
       // deliberately does NOT assert which row won — ordering is pinned by the
       // route unit spec instead. What it proves here is owner-scoping and the
