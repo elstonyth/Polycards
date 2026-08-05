@@ -6,8 +6,16 @@ import { GET as latest } from '../route';
 // (it is what keeps sell-backs and ship-outs from lighting the dot), and an
 // empty vault answers null rather than omitting the key.
 const mkRes = () => {
-  const out: { body?: unknown } = {};
-  return { res: { json: (b: unknown) => (out.body = b) } as never, out };
+  const out: { body?: unknown; headers: Record<string, string> } = {
+    headers: {},
+  };
+  return {
+    res: {
+      json: (b: unknown) => (out.body = b),
+      setHeader: (k: string, v: string) => (out.headers[k] = v),
+    } as never,
+    out,
+  };
 };
 
 const listPulls = jest.fn();
@@ -24,7 +32,7 @@ beforeEach(() => {
 });
 
 describe('GET /store/vault/latest', () => {
-  it('reads only the caller own vaulted pulls, newest first, one row', async () => {
+  it("reads only the caller's own vaulted pulls, newest first, one row", async () => {
     const { res, out } = mkRes();
 
     await latest(mkReq('cus_me') as never, res);
@@ -34,6 +42,14 @@ describe('GET /store/vault/latest', () => {
       { order: { updated_at: 'DESC' }, take: 1 },
     );
     expect(out.body).toEqual({ latest_event_at: null });
+  });
+
+  it('forbids caching the response (per-customer data, CWE-525)', async () => {
+    const { res, out } = mkRes();
+
+    await latest(mkReq() as never, res);
+
+    expect(out.headers['Cache-Control']).toBe('no-store');
   });
 
   it('returns the newest row updated_at when the vault is not empty', async () => {

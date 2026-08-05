@@ -28,20 +28,49 @@ const check = (cond, label) => {
   if (!cond) failures++;
 };
 
-// Read at run time so the key never reaches a transcript or a log line.
+// Environment first, so a runner with no local env file can still work; the
+// dev-machine file is the fallback. Resolved at run time either way, so the key
+// never reaches a transcript or a log line.
 const PUB = (() => {
-  const line = readFileSync('.env.local', 'utf8')
+  const fromEnv = process.env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY;
+  if (fromEnv) return fromEnv.trim();
+  let file;
+  try {
+    file = readFileSync('.env.local', 'utf8');
+  } catch {
+    throw new Error(
+      'NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY is unset and the local env file is unreadable',
+    );
+  }
+  const line = file
     .split(/\r?\n/)
     .find((l) => l.startsWith('NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY='));
   if (!line) throw new Error('NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY missing');
   return line.slice(line.indexOf('=') + 1).trim();
 })();
 
-// Auth + store routes are rate-limited — retry 429s with a pause.
+const MAX_ATTEMPTS = 6;
+
+// Auth + store routes are rate-limited — retry 429s with a pause. A REJECTED
+// fetch is retried too and then reported as a plain sentence: the backend being
+// down on :9000 is the most common way to run this script wrong, and a bare
+// `TypeError: fetch failed` stack does not say so.
 async function call(url, init) {
   for (let attempt = 0; ; attempt++) {
-    const res = await fetch(url, init);
-    if (res.status === 429 && attempt < 6) {
+    let res;
+    try {
+      res = await fetch(url, init);
+    } catch (cause) {
+      if (attempt >= MAX_ATTEMPTS) {
+        throw new Error(
+          `cannot reach ${url} after ${attempt + 1} tries — is the backend up on ${API}?`,
+          { cause },
+        );
+      }
+      await new Promise((r) => setTimeout(r, 2000));
+      continue;
+    }
+    if (res.status === 429 && attempt < MAX_ATTEMPTS) {
       await new Promise((r) => setTimeout(r, 5000));
       continue;
     }

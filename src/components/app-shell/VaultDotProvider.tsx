@@ -93,16 +93,21 @@ export function VaultDotProvider({ children }: { children: ReactNode }) {
   // previous account's dot even though the stale value is still in memory.
   useEffect(() => {
     if (!customer) return;
+    // Stamped BEFORE the await, not after: a focus event landing while this
+    // first fetch is still in flight would otherwise see a zero timestamp, pass
+    // the TTL check, and fire a duplicate request.
+    lastFetchRef.current = Date.now();
     let cancelled = false;
     void getVaultLatest().then((latestAt) => {
       if (cancelled) return;
-      lastFetchRef.current = Date.now();
       setState({
         forId: customer.id,
         latestAt,
         seenAt: readStamp(customer.id),
       });
     });
+    // The cancel flag is why this effect does not just call refresh(): a late
+    // resolution after an account switch must be dropped, not merely tagged.
     return () => {
       cancelled = true;
     };

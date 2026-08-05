@@ -90,7 +90,7 @@ beforeEach(() => {
 });
 
 describe('GET /store/vault/latest', () => {
-  it('reads only the caller own vaulted pulls, newest first, one row', async () => {
+  it("reads only the caller's own vaulted pulls, newest first, one row", async () => {
     const { res, out } = mkRes();
 
     await latest(mkReq('cus_me') as never, res);
@@ -356,7 +356,7 @@ medusaIntegrationTestRunner({
       // deliberately does NOT assert which row won — ordering is pinned by the
       // route unit spec instead. What it proves here is owner-scoping and the
       // status filter, which are the things only a real HTTP round trip can show.
-      it('never exposes another customer rows, and ignores bought_back', async () => {
+      it("never exposes another customer's rows, and ignores bought_back", async () => {
         const a = await registerCustomer('vl-a@test.dev');
         const b = await registerCustomer('vl-b@test.dev');
 
@@ -1148,6 +1148,27 @@ No gaps.
 **Placeholder scan.** No TBD/TODO, no "add appropriate error handling", no "similar to Task N". Every code step carries real code; every test step carries a real command and an expected result.
 
 **Type consistency.** `latest_event_at` is the wire name in Tasks 1, 2, 4. `latestAt` is the client name in Tasks 4, 5, 6, 7. `seenKey`/`shouldShowDot` are spelled identically in Tasks 3 and 5. `useVaultDot` returns `{ latestAt, show, markSeen }` in Task 5 and is destructured consistently in Tasks 6 (`{ show: vaultDot }`) and 7 (`{ latestAt, markSeen }`).
+
+## Post-review amendments (PR #375)
+
+All seven tasks landed exactly as written. These changes came out of CI and the
+automated reviewers afterwards, and are recorded here so the plan does not drift
+from what shipped:
+
+- **`VaultDotProvider` drops the `setState(null)` logout branch.** React
+  Compiler's `react-hooks/set-state-in-effect` rejects a synchronous setState in
+  an effect body and CI's `quality` job failed on it. The write was redundant
+  anyway — `live` already derives to null when `customer` is null. The QA
+  harness gained a logout case, since that derivation is now load-bearing.
+- **The mount effect stamps `lastFetchRef` before the await, not after.** A
+  focus event landing during a slow first fetch would otherwise see a zero
+  timestamp, pass the TTL check, and fire a duplicate request.
+- **The route sets `Cache-Control: no-store`,** asserted in both the unit and
+  integration specs. Note that no other `/store` route in this backend sets a
+  cache directive — this is the local fix, not the codebase-wide one.
+- **The QA harness reads the publishable key from the environment first,** with
+  the local env file as fallback, and reports an unreachable backend as a
+  sentence instead of a bare `TypeError: fetch failed`.
 
 ## Known deviations from the spec's file list
 

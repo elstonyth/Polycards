@@ -47,7 +47,7 @@ change.
 
 ### The signal — one query, no new columns
 
-```
+```text
 latest_event_at = max(pull.updated_at)
                   WHERE customer_id = <from token> AND status = 'vaulted'
 ```
@@ -126,7 +126,7 @@ pull that lands mid-visit is not swallowed by the clear.
 
 ### Data flow
 
-```
+```text
 AuthProvider
   └─ TopUpProvider
        └─ VaultDotProvider              ← new, sibling concern

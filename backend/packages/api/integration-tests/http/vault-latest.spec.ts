@@ -83,13 +83,17 @@ medusaIntegrationTestRunner({
 
         expect(res.status).toBe(200);
         expect(res.data.latest_event_at).toBeNull();
+        // Per-customer data behind a bearer token must not be storable or
+        // replayable across identities (CWE-525). Asserted over real HTTP so a
+        // middleware or serializer that strips the header would be caught.
+        expect(res.headers['cache-control']).toBe('no-store');
       });
 
       // NOTE: freshly created rows all carry ~the same updated_at, so this case
       // deliberately does NOT assert which row won — ordering is pinned by the
       // route unit spec instead. What it proves here is owner-scoping and the
       // status filter, which are the things only a real HTTP round trip can show.
-      it('never exposes another customer rows, and ignores bought_back', async () => {
+      it("never exposes another customer's rows, and ignores bought_back", async () => {
         const a = await registerCustomer('vl-a@test.dev');
         const b = await registerCustomer('vl-b@test.dev');
 
