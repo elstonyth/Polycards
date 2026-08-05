@@ -178,6 +178,35 @@ try {
   });
   await mobile.close();
 
+  // --- 1b. logout: a lit dot must go dark when the session ends -------------
+  // The provider writes NO state on logout (a synchronous setState in an effect
+  // body is rejected by react-hooks/set-state-in-effect). The stale value stays
+  // in memory and only the `live` derivation hides it — so that derivation is
+  // load-bearing and gets its own check rather than being taken on faith.
+  console.log('\n--- logout (420x900) ---');
+  const session = await browser.newContext({
+    viewport: { width: 420, height: 900 },
+  });
+  await session.addCookies([cookie]);
+  const sessionPage = await session.newPage();
+  await sessionPage.goto(FRONT, {
+    waitUntil: 'domcontentloaded',
+    timeout: 20000,
+  });
+  check((await waitForDot(sessionPage)) === 1, 'dot is lit while signed in');
+
+  await session.clearCookies();
+  await sessionPage.goto(FRONT, {
+    waitUntil: 'domcontentloaded',
+    timeout: 20000,
+  });
+  await sessionPage.waitForTimeout(4000);
+  check(
+    (await visibleDots(sessionPage)) === 0,
+    'dot goes dark after the session ends',
+  );
+  await session.close();
+
   // --- 2. desktop AppHeader: fresh context, so the dot is lit again ----------
   console.log('\n--- desktop AppHeader (1440x900) ---');
   const desktop = await browser.newContext({
