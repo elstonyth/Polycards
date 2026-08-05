@@ -286,11 +286,14 @@ export default function VaultClient({
           { label: 'Cards', value: String(items.length) },
           { label: 'Balance', value: rm0(providerBalance ?? balance) },
         ].map((stat) => (
-          <div key={stat.label} className="px-4 text-center">
+          <div key={stat.label} className="px-2 text-center sm:px-4">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
               {stat.label}
             </p>
-            <p className="font-heading mt-0.5 truncate text-base tabular-nums text-white lg:text-lg">
+            {/* nowrap + a smaller phone step, NOT truncate: a seven-figure
+                balance clipped to "RM 6,66…" is worse than a smaller number,
+                and money is the one value this strip exists to state. */}
+            <p className="font-heading mt-0.5 whitespace-nowrap text-[13px] tabular-nums text-white sm:text-base lg:text-lg">
               {stat.value}
             </p>
           </div>
@@ -524,14 +527,17 @@ export default function VaultClient({
                 >
                   {item.card.name}
                 </p>
-                <div className="mt-1 flex items-center justify-between gap-1 text-[10px] sm:text-[11px]">
+                {/* Stacked on phone: side by side, a 3-up tile left the rarity
+                    ~40px and it rendered as "IM…" / "COM…". Rarity is a signal
+                    word — it either reads or it shouldn't be there. */}
+                <div className="mt-1 flex flex-col gap-0.5 text-[10px] sm:flex-row sm:items-center sm:justify-between sm:gap-1 sm:text-[11px]">
                   <span
                     className="truncate font-bold uppercase tracking-wider"
                     style={{ color: `rgb(${glow})` }}
                   >
                     {item.card.rarity}
                   </span>
-                  <span className="font-heading shrink-0 text-[12px] text-white sm:text-[13px]">
+                  <span className="font-heading shrink-0 whitespace-nowrap text-[12px] tabular-nums text-white sm:text-[13px]">
                     {rm(item.card.marketPriceMyr ?? 0)}
                   </span>
                 </div>

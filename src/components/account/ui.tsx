@@ -55,19 +55,27 @@ export function StatCards({
   items: { label: string; value: string; sub?: string }[];
 }) {
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+    // Phone: one full-width row per stat (label left, value right). A 2-col
+    // grid of cards only fits ~140px of value, so a real balance wrapped after
+    // the "RM" — money must never break across lines. Cards resume at sm,
+    // where the column is wide enough to hold the longest figure.
+    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-3 lg:grid-cols-4">
       {items.map((s) => (
         <div
           key={s.label}
-          className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
+          className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 sm:block sm:p-4"
         >
           <p className="text-[11px] uppercase tracking-wide text-white/60">
             {s.label}
           </p>
-          <p className="mt-1 font-heading text-2xl font-bold text-white">
-            {s.value}
-          </p>
-          {s.sub && <p className="mt-0.5 text-[12px] text-white/50">{s.sub}</p>}
+          <div className="text-right sm:text-left">
+            <p className="font-heading whitespace-nowrap text-xl font-bold tabular-nums text-white sm:mt-1 sm:text-2xl">
+              {s.value}
+            </p>
+            {s.sub && (
+              <p className="mt-0.5 text-[12px] text-white/50">{s.sub}</p>
+            )}
+          </div>
         </div>
       ))}
     </div>

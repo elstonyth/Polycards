@@ -74,14 +74,18 @@ function PackCard({ pack, icon }: { pack: Pack; icon: string }) {
         />
       </div>
 
-      {/* Name + price */}
-      <div className="mb-3 flex items-baseline justify-between gap-2">
-        <span className="truncate text-[13px] font-semibold text-white sm:text-sm">
+      {/* Name + price. Stacked, not a justify-between row: at card width a
+          13px "Platinum Pack" plus "RM 2,500" doesn't fit one line, and the
+          row truncated the pack's own name ("Platinum Pa…") on a 1440 screen
+          with room to spare. The name gets the full column; price sits under
+          it in the ledger voice. */}
+      <div className="mb-3 min-w-0">
+        <p className="truncate text-[13px] font-semibold text-white sm:text-sm">
           {pack.name}
-        </span>
-        <span className="shrink-0 text-[13px] font-semibold text-white/90 sm:text-sm">
+        </p>
+        <p className="font-heading mt-0.5 whitespace-nowrap text-[15px] tabular-nums text-white sm:text-base">
           {pack.price}
-        </span>
+        </p>
       </div>
 
       {oos ? (
