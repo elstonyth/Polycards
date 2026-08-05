@@ -77,12 +77,18 @@ ARG NEXT_PUBLIC_PAYMENTS_PROVIDER=globepay
 # value. The backend PHONE_VERIFICATION_REQUIRED flag (step 4) flips only
 # after a build with this ARG is live, or phone signups 400.
 ARG NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED=true
+# Withdrawal UI gate. Armed 2026-08-05 alongside the backend's
+# GLOBEPAY_WITHDRAWALS_ENABLED (the actual money gate — this only renders the
+# form). Same rule as the ARGs above: this default is what reaches the bundle;
+# moves together with the .do/storefront.app.yaml value.
+ARG NEXT_PUBLIC_WITHDRAWALS_ENABLED=true
 ENV NEXT_PUBLIC_MEDUSA_BACKEND_URL=$NEXT_PUBLIC_MEDUSA_BACKEND_URL
 ENV NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY=$NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY
 ENV NEXT_PUBLIC_MEDIA_HOST=$NEXT_PUBLIC_MEDIA_HOST
 ENV NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL
 ENV NEXT_PUBLIC_PAYMENTS_PROVIDER=$NEXT_PUBLIC_PAYMENTS_PROVIDER
 ENV NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED=$NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED
+ENV NEXT_PUBLIC_WITHDRAWALS_ENABLED=$NEXT_PUBLIC_WITHDRAWALS_ENABLED
 
 # Next.js collects completely anonymous telemetry data about general usage.
 # Learn more here: https://nextjs.org/telemetry
