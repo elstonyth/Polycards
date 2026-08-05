@@ -5,6 +5,7 @@ const mkRes = () => {
   const out: { body?: any; status?: number } = {};
   return {
     res: {
+      setHeader: () => {},
       json: (b: any) => {
         out.body = b;
       },

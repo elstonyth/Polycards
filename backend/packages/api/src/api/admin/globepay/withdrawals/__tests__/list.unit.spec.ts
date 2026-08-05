@@ -5,9 +5,12 @@ import { GLOBEPAY_STALE_AFTER_MS } from '../../../../../modules/packs/globepay-r
 // pending row here is a customer ALREADY debited with no payout and no refund.
 
 const mkRes = () => {
-  const out: { body?: any } = {};
+  const out: { body?: any; headers: Record<string, string> } = { headers: {} };
   return {
     res: {
+      setHeader: (k: string, v: string) => {
+        out.headers[k] = v;
+      },
       json: (b: any) => {
         out.body = b;
       },
@@ -80,6 +83,8 @@ describe('GET /admin/globepay/withdrawals', () => {
     expect(row.bank_code).toBe('MBB');
     expect(row.account_number).toBe('1234567890');
     expect(row.account_holder_name).toBe('Tan Ah Kow');
+    // Emails + full bank accounts must never be cacheable (CWE-524).
+    expect(out.headers['Cache-Control']).toBe('no-store');
   });
 
   it('flags a pending row past the sweep window as stale, fresh ones not', async () => {

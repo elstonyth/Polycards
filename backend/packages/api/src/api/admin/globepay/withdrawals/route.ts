@@ -98,5 +98,9 @@ export async function GET(
       now - new Date(r.created_at).getTime() > GLOBEPAY_STALE_AFTER_MS,
   }));
 
+  // Identity-varying response carrying emails and full bank accounts
+  // (CWE-524): a cached copy could outlive the admin session in a shared
+  // browser profile. Same rule as the store saved-accounts route.
+  res.setHeader('Cache-Control', 'no-store');
   res.json({ total, offset, limit, status, withdrawals });
 }

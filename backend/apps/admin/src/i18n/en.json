@@ -402,7 +402,8 @@
     "statusStale": "Overdue",
     "staleWarning": "{{n}} row(s) on this page are past the reconcile window. Check the deposit in the GlobePay back office before crediting anyone by hand.",
     "empty": "No deposits in this view.",
-    "loadError": "Could not load deposits."
+    "loadError": "Could not load deposits.",
+    "tableLabel": "Deposits table"
   },
   "withdrawals": {
     "title": "Withdrawals",
@@ -427,7 +428,8 @@
     "statusStale": "Overdue",
     "staleWarning": "{{n}} row(s) on this page are past the reconcile window — the customer is debited with no payout confirmed. Check the withdrawal in the GlobePay back office before touching anything by hand.",
     "empty": "No withdrawals in this view.",
-    "loadError": "Could not load withdrawals."
+    "loadError": "Could not load withdrawals.",
+    "tableLabel": "Withdrawals table"
   },
   "pulls": {
     "title": "Pull Ledger",

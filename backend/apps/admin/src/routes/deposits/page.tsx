@@ -107,7 +107,7 @@ const DepositsPage = () => {
             className="overflow-x-auto"
             tabIndex={0}
             role="region"
-            aria-label="Deposits table"
+            aria-label={t('deposits.tableLabel')}
           >
             <Table>
               <Table.Header>

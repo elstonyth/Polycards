@@ -111,7 +111,7 @@ const WithdrawalsPage = () => {
             className="overflow-x-auto"
             tabIndex={0}
             role="region"
-            aria-label="Withdrawals table"
+            aria-label={t('withdrawals.tableLabel')}
           >
             <Table>
               <Table.Header>
