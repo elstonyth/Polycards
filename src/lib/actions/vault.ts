@@ -30,6 +30,7 @@ import {
   DepositStartSchema,
   WithdrawStartSchema,
   WithdrawBanksSchema,
+  SavedBankAccountsSchema,
   CreditsSchema,
   CreditTransactionSchema,
 } from '@/lib/data/schemas';
@@ -227,6 +228,134 @@ export async function fetchWithdrawBanks(): Promise<WithdrawBanksResult> {
     return { ok: true, banks: parsed.banks };
   } catch (error) {
     logger.error('[vault] withdraw banks failed:', error);
+    return {
+      ok: false,
+      error: friendlyError(error, VAULT_RULES, VAULT_FALLBACK),
+      needsAuth: isAuthError(error),
+    };
+  }
+}
+
+export type SavedBankAccount = {
+  id: string;
+  bankCode: string;
+  bankName: string;
+  accountNumber: string;
+  accountHolderName: string;
+};
+
+export type SavedBankAccountsResult =
+  | { ok: true; accounts: SavedBankAccount[] }
+  | { ok: false; error: string; needsAuth?: boolean };
+
+/** The customer's saved payout accounts — the withdraw form's picker source. */
+export async function fetchSavedBankAccounts(): Promise<SavedBankAccountsResult> {
+  const token = await getAuthToken();
+  if (!token) {
+    return { ok: false, error: 'Please log in first.', needsAuth: true };
+  }
+  try {
+    const parsed = parseOne(
+      SavedBankAccountsSchema,
+      await sdk.client.fetch('/store/credits/withdraw/accounts', {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+    );
+    if (!parsed) {
+      return { ok: false, error: 'Could not load your saved accounts.' };
+    }
+    return { ok: true, accounts: parsed.accounts };
+  } catch (error) {
+    logger.error('[vault] saved bank accounts failed:', error);
+    return {
+      ok: false,
+      error: friendlyError(error, VAULT_RULES, VAULT_FALLBACK),
+      needsAuth: isAuthError(error),
+    };
+  }
+}
+
+/** Save a payout account for reuse. The backend applies the same validation
+ *  as the payout submit, so a saved account is always a submittable one. */
+export async function addSavedBankAccount(input: {
+  bankCode: string;
+  bankName: string;
+  accountNumber: string;
+  accountHolderName: string;
+}): Promise<SavedBankAccountsResult> {
+  // Validate at the boundary — a server action is a public endpoint.
+  if (
+    typeof input.bankCode !== 'string' ||
+    typeof input.bankName !== 'string' ||
+    typeof input.accountNumber !== 'string' ||
+    typeof input.accountHolderName !== 'string'
+  ) {
+    return { ok: false, error: 'Fill in every bank field.' };
+  }
+  const token = await getAuthToken();
+  if (!token) {
+    return { ok: false, error: 'Please log in first.', needsAuth: true };
+  }
+  try {
+    const parsed = parseOne(
+      SavedBankAccountsSchema,
+      await sdk.client.fetch('/store/credits/withdraw/accounts', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: {
+          bank_code: input.bankCode,
+          bank_name: input.bankName,
+          account_number: input.accountNumber,
+          account_holder_name: input.accountHolderName,
+        },
+      }),
+    );
+    if (!parsed) {
+      return {
+        ok: false,
+        error: 'Got an unexpected response. Please try again.',
+      };
+    }
+    return { ok: true, accounts: parsed.accounts };
+  } catch (error) {
+    logger.error('[vault] save bank account failed:', error);
+    return {
+      ok: false,
+      error: friendlyError(error, VAULT_RULES, VAULT_FALLBACK),
+      needsAuth: isAuthError(error),
+    };
+  }
+}
+
+/** Remove a saved payout account. Idempotent server-side. */
+export async function removeSavedBankAccount(
+  id: string,
+): Promise<SavedBankAccountsResult> {
+  if (typeof id !== 'string' || id.length === 0) {
+    return { ok: false, error: 'Say which account to remove.' };
+  }
+  const token = await getAuthToken();
+  if (!token) {
+    return { ok: false, error: 'Please log in first.', needsAuth: true };
+  }
+  try {
+    const parsed = parseOne(
+      SavedBankAccountsSchema,
+      await sdk.client.fetch('/store/credits/withdraw/accounts', {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+        body: { id },
+      }),
+    );
+    if (!parsed) {
+      return {
+        ok: false,
+        error: 'Got an unexpected response. Please try again.',
+      };
+    }
+    return { ok: true, accounts: parsed.accounts };
+  } catch (error) {
+    logger.error('[vault] remove bank account failed:', error);
     return {
       ok: false,
       error: friendlyError(error, VAULT_RULES, VAULT_FALLBACK),

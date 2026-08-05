@@ -329,6 +329,20 @@ export const WithdrawBanksSchema = z.looseObject({
   banks: z.array(z.looseObject({ bankCode: z.string(), bankName: z.string() })),
 });
 
+/** /store/credits/withdraw/accounts responses (GET/POST/DELETE all return the
+ *  full list) — the customer's saved payout accounts. */
+export const SavedBankAccountsSchema = z.looseObject({
+  accounts: z.array(
+    z.looseObject({
+      id: z.string(),
+      bankCode: z.string(),
+      bankName: z.string(),
+      accountNumber: z.string(),
+      accountHolderName: z.string(),
+    }),
+  ),
+});
+
 /** POST /store/vault/:id/buyback response — finite amount + balance. `percent`
  *  rides along but is NOT rendered on the sell path (consumers read amount/
  *  balance), so it stays OPTIONAL: requiring it would false-fail an idempotent
