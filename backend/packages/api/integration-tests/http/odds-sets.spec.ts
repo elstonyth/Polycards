@@ -314,6 +314,54 @@ medusaIntegrationTestRunner({
         expect(JSON.stringify(detail.data)).not.toContain('"weight');
       });
 
+      // Case 5b — the ONE deliberate exception to case 5: `demo_odds`, the
+      // per-rarity split of SET 3, which the logged-out demo spin samples on
+      // (storefront ?demo=1). Aggregated per tier, never per card, so case 5
+      // still holds — but the exposure is intentional and pinned here so it
+      // reads as a decision rather than a leak.
+      //
+      // A third card makes the sets DISTINGUISHABLE: the fixture's alpha/beta
+      // are both Rare, so every set would otherwise flatten to { Rare: 100 }.
+      // gamma is Common and carries a set-3-ONLY weight, so set 1 ⇒ Rare 100,
+      // set 2 ⇒ Rare 100, and only set 3 ⇒ an even Rare/Common split.
+      it('publishes the SET 3 tier split for the guest demo spin', async () => {
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        await packs.createCards([
+          {
+            handle: 'odds-sets-gamma',
+            name: 'Odds Sets Gamma PSA 10',
+            set: 'Test Set',
+            grader: 'PSA',
+            grade: '10',
+            market_value: FMV,
+            market_multiplier: MULTIPLIER,
+            image: '/cdn/test-card-gamma.webp',
+          },
+        ]);
+        await packs.createPackOdds([
+          {
+            pack_id: PACK_SLUG,
+            card_id: 'odds-sets-gamma',
+            rarity: 'Common' as const,
+            locked: false,
+            weight: 0,
+            weight_2: 0,
+            weight_3: TOTAL_BPS,
+          },
+        ]);
+        clearPackDetailCache();
+
+        const detail = await unwrapResponse(
+          api.get(`/store/packs/${PACK_SLUG}`, { headers: storeHeaders }),
+        );
+        expect(detail.status).toBe(200);
+        // beta inherits its set-2 10000 into set 3 (weight_3 NULL, 3→2→1);
+        // alpha inherits 0; gamma contributes its explicit 10000.
+        expect(detail.data.demo_odds).toEqual({
+          tiers: { Rare: 50, Common: 50 },
+        });
+      });
+
       // Case 6 — MULTI-GROUP determinism. A customer can belong to several
       // groups; the resolver takes the OLDEST (created_at ASC, take 1). Nothing
       // else in the repo exercises that filter+order-through-join, so this is

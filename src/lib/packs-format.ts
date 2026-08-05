@@ -25,6 +25,22 @@ export interface PublishedOdds {
   tiers: Partial<Record<Rarity, number>>;
 }
 
+/**
+ * Which odds the GUEST DEMO draw samples on: the backend's odds-set-3 tier
+ * split when it carries tiers, else the admin-published display odds (the
+ * caller falls back to the static ODDS when neither yields rows).
+ *
+ * Not a bare `demo ?? published`: the payload sanitizer returns a TIER-LESS
+ * `{ tiers: {} }` — truthy — when every key in the backend's map was unknown,
+ * and that would shadow perfectly good published odds and drop the demo
+ * straight to the static ODDS.
+ */
+export const pickDemoOdds = (
+  demo: PublishedOdds | null,
+  published: PublishedOdds | null,
+): PublishedOdds | null =>
+  demo && Object.keys(demo.tiers).length > 0 ? demo : published;
+
 /** Published odds → display rows, rarest-first; only tiers given a value. */
 export const publishedOddsRows = (
   po: PublishedOdds,

@@ -29,6 +29,7 @@ import {
 import type { RecentPull } from '@/lib/data/packs';
 import { demoDraw } from '@/lib/demo-spin';
 import {
+  pickDemoOdds,
   publishedOddsRows,
   poolValueRange,
   tierValueRanges,
@@ -106,12 +107,16 @@ export default function SlotMachineClient({
   publishedOdds,
   pool = [],
   demoPool = null,
+  demoOdds = null,
 }: {
   pack: ResolvedPack & Pack;
   recentPulls: RecentPull[];
   count: number;
   /** Admin-published PUBLIC odds for the OddsSheet; null = not published. */
   publishedOdds: PublishedOdds | null;
+  /** Odds SET 3's real tier split (backend-aggregated) — the demo draw's
+   *  weights. Display never uses it; the OddsSheet stays on publishedOdds. */
+  demoOdds?: PublishedOdds | null;
   /** The pack's full public prize pool — the reel flickers ONLY these cards'
    *  Pokémon (decoys tied to a reward), never arbitrary species. */
   pool?: PackCard[];
@@ -331,14 +336,16 @@ export default function SlotMachineClient({
     if (floodTimer.current !== null) clearTimeout(floodTimer.current);
     if (transformTimer.current !== null) clearTimeout(transformTimer.current);
 
-    // Demo spin — sample client-side from the public pool over the published
-    // odds (static ODDS pre-publication). No backend call, no charge, no Pull
-    // row, no sell-back; the reveal shows a sign-up CTA instead.
+    // Demo spin — sample client-side from the public pool over odds SET 3
+    // (backend-aggregated per tier), falling back to the published odds and
+    // then the static ODDS. No backend call, no charge, no Pull row, no
+    // sell-back; the reveal shows a sign-up CTA instead.
     if (isDemo) {
       // Impure read is safe here: user-click event handler, never render (same
       // as the real spin's Date.now below).
       const spinAt = Date.now();
-      const rows = publishedOdds ? publishedOddsRows(publishedOdds) : null;
+      const drawOdds = pickDemoOdds(demoOdds, publishedOdds);
+      const rows = drawOdds ? publishedOddsRows(drawOdds) : null;
       const cards: WonCard[] = [];
       for (let i = 0; i < reels; i++) {
         const drawn = demoDraw(

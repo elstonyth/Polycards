@@ -88,6 +88,24 @@ export function orderDateTime(iso: string): string {
 export const fmtPct = (n: number): string =>
   `${Number.isInteger(n) ? n : n.toFixed(2)}%`;
 
+// Kebab-case a typed handle/slug for the backend's HANDLE_RE
+// (/^[a-z0-9]+(?:-[a-z0-9]+)*$/ — packs/validate.ts, cards/validate.ts):
+// lowercase, every run of other characters becomes one hyphen, edges trimmed.
+// A title-style "Ascended Heroes" is what an operator naturally types, and an
+// unnormalized one only shows up as a Save button that silently never enables.
+export const toSlug = (v: string): string =>
+  v
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+// The same normalization applied per KEYSTROKE, which is why it can't just be
+// toSlug: a trailing hyphen has to survive, or typing the space in "ascended
+// heroes" would be swallowed and the two words would run together. toSlug trims
+// it before the value is written. Kept beside its pair so the two can't drift.
+export const slugKeystroke = (v: string): string =>
+  v.toLowerCase().replace(/[^a-z0-9-]+/g, '-');
+
 // Client mirror of backend/packages/api/src/modules/packs/pricecharting-grades.ts
 // gradeToGrader — the admin app and the Medusa backend are separate builds with
 // no shared package, so this ~5-line pure function is duplicated rather than

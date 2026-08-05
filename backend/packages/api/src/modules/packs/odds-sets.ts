@@ -43,6 +43,79 @@ export const weightForSet = (o: SetWeights, set: OddsSet): number =>
       ? (o.weight_2 ?? o.weight)
       : (o.weight_3 ?? o.weight_2 ?? o.weight);
 
+/**
+ * A pack's per-card weights aggregated into a per-rarity % split for one set.
+ *
+ * Percentages are 2dp and sum to ~100 over the rows given — pass exactly the
+ * rows the caller considers drawable (a 0-weight card is unpullable, so it is
+ * skipped rather than counted into its tier). Null when nothing is pullable.
+ *
+ * Only ever published through demoTierSplit below; read the disclosure bound
+ * there before adding a second caller that sends this to a customer.
+ */
+export function tierSplitForSet(
+  rows: readonly (SetWeights & { rarity?: string | null })[],
+  set: OddsSet,
+): Record<string, number> | null {
+  const tally = new Map<string, number>();
+  let total = 0;
+  for (const row of rows) {
+    const w = weightForSet(row, set);
+    if (!(w > 0)) continue;
+    const rarity = row.rarity ?? 'Common';
+    tally.set(rarity, (tally.get(rarity) ?? 0) + w);
+    total += w;
+  }
+  if (total === 0) return null;
+  return Object.fromEntries(
+    [...tally].map(([rarity, w]) => [
+      rarity,
+      // A pullable tier floors at 0.01 rather than rounding to 0: a consumer
+      // reading these as sampling weights (the demo spin does) can never
+      // target a 0% tier, which would make a huge pool's rarest tier
+      // unreachable in the demo while it is perfectly reachable in a real spin.
+      Math.max(0.01, Math.round((w / total) * 10_000) / 100),
+    ]),
+  );
+}
+
+const sameSplit = (
+  a: Record<string, number>,
+  b: Record<string, number>,
+): boolean => {
+  const keys = Object.keys(a);
+  return (
+    keys.length === Object.keys(b).length && keys.every((k) => a[k] === b[k])
+  );
+};
+
+/**
+ * The ONLY odds grain derived from the secret per-card weights that may leave
+ * the backend: SET 3's tier split, which the logged-out demo spin samples on
+ * (store pack-detail route → storefront ?demo=1).
+ *
+ * DISCLOSURE BOUND — read before widening this:
+ *  - Tier-level only. Per-card weights never ship. The one exception is a tier
+ *    holding exactly ONE card: its share IS that card's draw probability, since
+ *    the same response lists every card with its rarity. Accepted for set 3.
+ *  - Set 3 ONLY. Set 3 inherits per card (3→2→1), and computeSetWeights stores
+ *    nothing for a set the operator never authored — so on such a pack the
+ *    set-3 resolution IS set 1, the set the DEFAULT group and every ungrouped
+ *    player actually roll. Publishing that would disclose the real odds of the
+ *    people who pay, which is not what the demo needs, so an indistinguishable
+ *    split returns null and the demo falls back to the published display odds.
+ *    (A pack that authored set 2 but not set 3 publishes set 2's values —
+ *    that IS this pack's set 3 by the operator's own configuration.)
+ */
+export function demoTierSplit(
+  rows: readonly (SetWeights & { rarity?: string | null })[],
+): Record<string, number> | null {
+  const set3 = tierSplitForSet(rows, 3);
+  if (!set3) return null;
+  const set1 = tierSplitForSet(rows, 1);
+  return set1 && sameSplit(set1, set3) ? null : set3;
+}
+
 /** Narrow an untyped `metadata.odds_set` to a real odds set.
  *
  *  Defensive: anything that is not exactly set 2 or 3 rolls to set 1 (the
