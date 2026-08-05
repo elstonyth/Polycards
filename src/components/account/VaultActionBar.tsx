@@ -74,10 +74,13 @@ export function VaultActionBar({
             FMV {none ? rm(0) : fmv > 0 ? rm(fmv) : '—'}
           </p>
           <p className="text-[15px] font-bold tabular-nums text-buyback-fg">
-            {/* Deselecting to zero snaps rather than counting down: a payout
-                still reading RM 412.30 while the Sell pill is already disabled
-                is a state contradiction on a money action. */}
-            Sell for {rm(none ? 0 : (countedSellTotal ?? sellTotal))}
+            {/* Always the counted figure. An earlier version rendered a hard 0
+                while nothing was selected, which desynced the hook: the count
+                kept running toward zero behind a static 0, so picking a card
+                mid-animation jumped the display to whatever intermediate the
+                hook had reached. Deselecting now counts down to RM 0.00 in the
+                same beat the Sell pill greys out. */}
+            Sell for {rm(countedSellTotal ?? sellTotal)}
           </p>
         </div>
         <div className="flex shrink-0 gap-2">
