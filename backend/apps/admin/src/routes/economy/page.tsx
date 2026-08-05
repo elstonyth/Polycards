@@ -70,11 +70,20 @@ const EconomyPage = () => {
     value: string;
     hint?: string;
     current?: boolean;
+    /** Semantic class for the figure — set only when the sign is the signal. */
+    tone?: string;
   }[] = data
     ? [
         { key: "revenue", value: rm(data.totals.revenue) },
         { key: "payouts", value: rm(data.totals.payouts) },
-        { key: "net", value: rm(data.totals.net) },
+        {
+          key: "net",
+          value: rm(data.totals.net),
+          // The one figure on this page whose sign changes what the operator
+          // has to do. Positive stays default ink — margin is the expected
+          // state, so only the loss shouts.
+          tone: data.totals.net < 0 ? "text-ui-fg-error" : undefined,
+        },
         {
           key: "liability",
           value: rm(data.liability.market_value),
@@ -132,7 +141,10 @@ const EconomyPage = () => {
                     </Badge>
                   )}
                 </div>
-                <Heading level="h1" className="mt-1 tabular-nums">
+                <Heading
+                  level="h1"
+                  className={`mt-1 tabular-nums ${s.tone ?? ""}`}
+                >
                   {s.value}
                 </Heading>
                 {s.hint && (
