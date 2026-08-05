@@ -94,27 +94,51 @@ export function createUnreadDot(
     // after a later refresh already answered, is dropped instead of clobbering
     // fresher state.
     const genRef = useRef(0);
+    // Coalesces a burst. Selling back N cards fires N applyBalance calls, and
+    // each would otherwise be its own round trip. Skipping outright could miss
+    // the last write, so a request arriving mid-flight sets `trailingRef` and
+    // the in-flight one re-runs once when it lands — at most two reads per
+    // burst, and the second always sees the final state.
+    const inFlightRef = useRef(false);
+    const trailingRef = useRef(false);
 
     const refresh = useCallback(async (forId: string) => {
-      const gen = ++genRef.current;
-      // Stamped BEFORE the await: an event landing while this fetch is still in
-      // flight would otherwise read a stale timestamp, pass the TTL check, and
-      // fire a duplicate request.
-      lastFetchRef.current = Date.now();
-      let latestAt: string | null;
-      try {
-        latestAt = await fetchLatest();
-      } catch {
-        return; // keep whatever we last knew rather than blanking the dot
+      if (inFlightRef.current) {
+        trailingRef.current = true;
+        return;
       }
-      if (gen !== genRef.current) return;
-      setState((prev) => ({
-        forId,
-        latestAt,
-        // Keep an in-session markSeen; only consult storage on the first load
-        // for this identity, so a refresh can't resurrect a cleared dot.
-        seenAt: prev?.forId === forId ? prev.seenAt : readStamp(scope, forId),
-      }));
+      inFlightRef.current = true;
+      // finally, not a plain assignment at the end: every exit below is an
+      // early return, and stranding this flag would freeze the dot for the
+      // rest of the session.
+      try {
+        do {
+          trailingRef.current = false;
+          const gen = ++genRef.current;
+          // Stamped BEFORE the await: an event landing while this fetch is
+          // still in flight would otherwise read a stale timestamp, pass the
+          // TTL check, and fire a duplicate request.
+          lastFetchRef.current = Date.now();
+          let latestAt: string | null;
+          try {
+            latestAt = await fetchLatest();
+          } catch {
+            return; // keep what we last knew rather than blanking the dot
+          }
+          if (gen !== genRef.current) return;
+          setState((prev) => ({
+            forId,
+            latestAt,
+            // Keep an in-session markSeen; only consult storage on the first
+            // load for this identity, so a refresh can't resurrect a cleared
+            // dot.
+            seenAt:
+              prev?.forId === forId ? prev.seenAt : readStamp(scope, forId),
+          }));
+        } while (trailingRef.current);
+      } finally {
+        inFlightRef.current = false;
+      }
     }, []);
 
     // Fetch on login / account switch.

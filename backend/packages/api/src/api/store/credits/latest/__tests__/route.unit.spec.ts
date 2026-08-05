@@ -1,3 +1,7 @@
+import type {
+  AuthenticatedMedusaRequest,
+  MedusaResponse,
+} from '@medusajs/framework/http';
 import { GET as latest } from '../route';
 
 // The route's whole job is: read the caller's own newest ledger row. This spec
@@ -7,7 +11,7 @@ import { GET as latest } from '../route';
 // ledger answers null rather than omitting the key.
 const mkRes = () => {
   const out: { body?: unknown } = {};
-  return { res: { json: (b: unknown) => (out.body = b) } as never, out };
+  return { res: { json: (b: unknown) => (out.body = b) } as unknown as MedusaResponse, out };
 };
 
 const listCreditTransactions = jest.fn();
@@ -27,7 +31,7 @@ describe('GET /store/credits/latest', () => {
   it("reads only the caller's own ledger, newest first, one row", async () => {
     const { res, out } = mkRes();
 
-    await latest(mkReq('cus_me') as never, res);
+    await latest(mkReq('cus_me') as unknown as AuthenticatedMedusaRequest, res);
 
     expect(listCreditTransactions).toHaveBeenCalledWith(
       { customer_id: 'cus_me' },
@@ -41,7 +45,7 @@ describe('GET /store/credits/latest', () => {
     listCreditTransactions.mockResolvedValue([{ id: 'ct_1', created_at: when }]);
     const { res, out } = mkRes();
 
-    await latest(mkReq() as never, res);
+    await latest(mkReq() as unknown as AuthenticatedMedusaRequest, res);
 
     expect(out.body).toEqual({ latest_event_at: when });
   });
@@ -51,7 +55,7 @@ describe('GET /store/credits/latest', () => {
     // to credits only would silently drop spends and withdrawals.
     const { res } = mkRes();
 
-    await latest(mkReq('cus_me') as never, res);
+    await latest(mkReq('cus_me') as unknown as AuthenticatedMedusaRequest, res);
 
     const [filters] = listCreditTransactions.mock.calls[0];
     expect(Object.keys(filters)).toEqual(['customer_id']);
@@ -65,7 +69,7 @@ describe('GET /store/credits/latest', () => {
     };
     const { res } = mkRes();
 
-    await latest(req as never, res);
+    await latest(req as unknown as AuthenticatedMedusaRequest, res);
 
     expect(listCreditTransactions).toHaveBeenCalledWith(
       expect.objectContaining({ customer_id: 'cus_me' }),

@@ -98,11 +98,24 @@ medusaIntegrationTestRunner({
           },
         ]);
 
+        // A second, later row. With take: 1 a WRONG order would return the
+        // OLDER one and a non-null assertion would still pass — so pin which.
+        const [newer] = await packs.createCreditTransactions([
+          {
+            customer_id: a.id,
+            amount: 10,
+            reason: 'buyback',
+          },
+        ]);
+
         const resA = await api.get('/store/credits/latest', {
           headers: authed(a.token),
         });
         expect(resA.status).toBe(200);
         expect(resA.data.latest_event_at).not.toBeNull();
+        expect(new Date(resA.data.latest_event_at).getTime()).toBe(
+          new Date(newer.created_at).getTime(),
+        );
 
         // B has no rows: A's ledger must be invisible, not merely deprioritised.
         const resB = await api.get('/store/credits/latest', {

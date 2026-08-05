@@ -68,6 +68,59 @@ describe('createUnreadDot', () => {
     expect(container.textContent).toBe('lit');
   });
 
+  test('the MOUNT path honours a stamp already in storage', async () => {
+    // The file's own stated risk is its two fetch copies drifting; every other
+    // case here exercises the refresh() copy. This one pins the mount copy —
+    // and re-asserts the storage-key back-compat in the same breath, since a
+    // key change would show up here as a spuriously lit dot.
+    window.localStorage.setItem(
+      'polycards.vault_seen_at:cus_1',
+      '2026-08-04T00:00:00.000Z',
+    );
+    const fetchLatest = vi.fn().mockResolvedValue('2026-08-04T00:00:00.000Z');
+
+    const dot = await mount(fetchLatest);
+
+    expect(dot.current?.show).toBe(false);
+    expect(container.textContent).toBe('dark');
+  });
+
+  test('a burst coalesces into at most two reads, the last one final', async () => {
+    // Selling back N cards fires N applyBalance calls. Skipping outright could
+    // miss the final write, so a request arriving mid-flight must trigger
+    // exactly one trailing read once the in-flight one lands.
+    let release: (v: string | null) => void = () => {};
+    const first = new Promise<string | null>((r) => {
+      release = r;
+    });
+    const fetchLatest = vi
+      .fn()
+      .mockResolvedValueOnce(null) // mount
+      .mockReturnValueOnce(first) // the burst's first read, held open
+      .mockResolvedValue('2026-08-04T00:00:00.000Z'); // the trailing read
+
+    const dot = await mount(fetchLatest);
+    expect(fetchLatest).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      dot.current?.refresh(); // starts the held read
+      dot.current?.refresh(); // coalesced
+      dot.current?.refresh(); // coalesced
+      dot.current?.refresh(); // coalesced
+    });
+    // Still just the one in flight — the three others did not each fetch.
+    expect(fetchLatest).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      release(null);
+      await first;
+    });
+
+    // Exactly one trailing read, and its answer is what sticks.
+    expect(fetchLatest).toHaveBeenCalledTimes(3);
+    expect(dot.current?.show).toBe(true);
+  });
+
   test('refresh() re-reads immediately — the spin fix', async () => {
     // The bug: opening a pack put a card in the vault, but the provider only
     // re-read on login and on window focus, so the dot could not light in that
@@ -121,29 +174,33 @@ describe('createUnreadDot', () => {
   });
 
   test('a superseded in-flight read is dropped, not applied', async () => {
-    // Two reads overlap; the OLDER one resolves last. Without the generation
+    // Two reads overlap and the OLDER resolves last; without the generation
     // guard it would win and show a stale answer.
-    let releaseSlow: (v: string | null) => void = () => {};
-    const slow = new Promise<string | null>((r) => {
-      releaseSlow = r;
+    //
+    // The overlap comes from the MOUNT read, not two refreshes: the mount copy
+    // is inlined in the effect and does not take the in-flight lock, so it is
+    // the one path that can still run alongside a refresh. (Two refreshes can
+    // no longer overlap — they coalesce; see the burst case above.)
+    let releaseMount: (v: string | null) => void = () => {};
+    const mountRead = new Promise<string | null>((r) => {
+      releaseMount = r;
     });
     const fetchLatest = vi
       .fn()
-      .mockReturnValueOnce(Promise.resolve(null))
-      .mockReturnValueOnce(slow)
-      .mockResolvedValue('2026-08-04T00:00:00.000Z');
+      .mockReturnValueOnce(mountRead) // gen 1, held open
+      .mockResolvedValue('2026-08-04T00:00:00.000Z'); // gen 2, lands first
 
     const dot = await mount(fetchLatest);
+    expect(dot.current?.show).toBe(false); // mount has not answered yet
 
     await act(async () => {
-      dot.current?.refresh(); // claims gen 2, hangs on `slow`
-      dot.current?.refresh(); // claims gen 3, resolves immediately → lit
+      dot.current?.refresh();
     });
     expect(dot.current?.show).toBe(true);
 
     await act(async () => {
-      releaseSlow('2026-07-01T00:00:00.000Z'); // older answer lands late
-      await slow;
+      releaseMount('2026-07-01T00:00:00.000Z'); // older answer lands late
+      await mountRead;
     });
 
     expect(dot.current?.show).toBe(true);
