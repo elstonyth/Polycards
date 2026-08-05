@@ -440,11 +440,20 @@ a human into the DigitalOcean app, never into this repo.
    answers `Access Denied: Your IP address is not authorized to perform this
    action`. So we cannot reach the portal to add the API entries ourselves;
    both lists have to be set by them. Send: our office IP for the BackOffice
-   list, and BOTH server IPs (**206.189.94.252** and **168.144.35.100**) for the
-   API list. One IP per component — the service takes customer traffic, the
-   worker runs the reconciliation sweeps, and whitelisting only one means live
-   payments work while the sweep that catches a dropped callback fails silently.
-   Note the office IP is likely dynamic; ask whether they can allow a range.
+   list, and BOTH server IPs — **`188.166.181.61`** and **`188.166.181.204`** —
+   for the API list. One IP per component: the service takes customer traffic,
+   the worker runs the reconciliation sweeps, and whitelisting only one means
+   live payments work while the sweep that catches a dropped callback fails
+   silently. Note the office IP is likely dynamic; ask whether they can allow a
+   range.
+
+   These are the **only** addresses to send. `206.189.94.252` /
+   `168.144.35.100` were the original pair and are DEAD — DigitalOcean released
+   them on 2026-07-30 (see below). They are named here only so you recognise
+   them as stale if GlobePay quotes them back; sending them again re-creates the
+   outage. Before sending, re-read the live values rather than trusting this
+   file: `doctl apps get 7fd66ea2-0105-420b-87eb-8a4606262561 -o json` →
+   `dedicated_ips`.
 
    **BackOffice list: DONE**, per GlobePay 2026-07-30 ("都已设置好了") and
    independently verified — `https://backoffice.globepay365.com/` now answers

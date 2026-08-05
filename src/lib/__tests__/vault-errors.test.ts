@@ -83,6 +83,10 @@ describe('VAULT_RULES backend-message contract', () => {
     // The whole point of the switch is to stop the retry loop, so the copy
     // must not invite an immediate retry the way the transient-refusal copy does.
     expect(map(paused)).not.toMatch(/in a moment/i);
+    // The rule is deliberately case-insensitive, unlike a literal compare: this
+    // matches backend TEXT, and a reword that only changes capitalisation must
+    // not silently drop the customer back onto the generic fallback.
+    expect(map('Top-Ups Are Temporarily Unavailable.')).toBe(map(paused));
   });
 
   it('falls back for an unrecognised message', () => {
