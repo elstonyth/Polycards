@@ -48,7 +48,9 @@ export default function NotFound() {
           >
             NO CARD ON FILE
           </p>
-          <p className="font-heading my-4 bg-gradient-to-b from-white via-neutral-300 to-neutral-600 bg-clip-text text-8xl font-black leading-none text-transparent">
+          {/* Solid, not bg-clip-text: gradient text is decorative and the
+              slab's own chrome already carries the metal. */}
+          <p className="font-heading my-4 text-8xl font-black leading-none text-neutral-200">
             404
           </p>
           <p
@@ -78,9 +80,15 @@ export default function NotFound() {
       </p>
 
       <div className="mt-7 flex w-full flex-col items-center gap-3 sm:w-auto sm:flex-row sm:justify-center">
+        {/* Paper White, not bg-buyback: DESIGN.md reserves buyback green for
+            money-in (credits, sell-back, "+RM"). A navigation CTA wearing it
+            spends the one color that has to mean "you got paid". */}
         <Link
           href="/slots"
-          className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-buyback px-6 text-sm font-semibold text-white transition-opacity hover:opacity-90 sm:w-auto"
+          className={cn(
+            pillVariants({ variant: 'primary', size: 'lg' }),
+            'w-full sm:w-auto',
+          )}
         >
           Back to packs
           <ArrowRight className="h-4 w-4" aria-hidden />
@@ -115,7 +123,9 @@ export default function NotFound() {
               />
             </div>
             <div className="mt-2 flex items-center justify-between gap-1 px-1">
-              <span className="truncate text-xs font-medium text-neutral-200">
+              {/* Two lines rather than "Bronze Pa…" — a third of a phone
+                  viewport can't hold "Diamond Pack" plus the chevron on one. */}
+              <span className="line-clamp-2 text-xs font-medium leading-tight text-neutral-200">
                 {s.label}
               </span>
               <ArrowRight
