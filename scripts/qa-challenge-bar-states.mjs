@@ -36,17 +36,25 @@ try {
         if (fill) fill.style.width = `${pct}%`;
         const meter = root.querySelector('[role="meter"]');
         meter?.setAttribute('aria-valuenow', String(pct));
+        // Anchor span per stage; the pill and the label are its children.
         const checks = [...root.querySelectorAll('[role="meter"] ~ span')];
-        checks.forEach((el, i) => {
+        checks.forEach((anchor, i) => {
           if (i >= completeCount) return;
-          el.classList.remove('scale-75', 'bg-neutral-600', 'text-transparent');
-          el.classList.add(
+          const pill = anchor.firstElementChild;
+          pill?.classList.remove(
+            'scale-75',
+            'bg-neutral-600',
+            'text-transparent',
+          );
+          pill?.classList.add(
             'bg-chase',
             'text-neutral-950',
             'shadow-[0_0_10px_rgb(255_176_32_/_0.55)]',
           );
-          const label = el.querySelector('span');
-          label?.classList.replace('text-neutral-400', 'text-chase');
+          anchor.lastElementChild?.classList.replace(
+            'text-neutral-400',
+            'text-chase',
+          );
         });
       },
       { pct: PCT, completeCount: COMPLETE_COUNT },

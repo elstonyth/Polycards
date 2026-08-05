@@ -433,10 +433,16 @@ export function RevealStage({
             // just pressed. Closing first left them staring at a static stage
             // with nothing moving. A failed sell still closes; the error copy
             // renders under the card's own Sell button (state.phase 'error').
-            void sell(i).then((ok) => {
-              setConfirmIndex(null);
-              if (ok) play('count'); // credit tally tick roll
-            });
+            // .finally, not .then: every way out of this modal is gated on
+            // !busy, so a rejected sell that skipped the close would wedge the
+            // page (scroll locked, Escape/backdrop/Cancel all inert) on a money
+            // action. `sell` catches internally today — this keeps that from
+            // being load-bearing.
+            void sell(i)
+              .then((ok) => {
+                if (ok) play('count'); // credit tally tick roll
+              })
+              .finally(() => setConfirmIndex(null));
           }}
           onCancel={() => setConfirmIndex(null)}
         />

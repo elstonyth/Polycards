@@ -105,32 +105,42 @@ export function WeeklyChallenge({ challenge }: { challenge: Challenge }) {
             {challenge.stages.map((s) => {
               const done = s.state === 'complete';
               return (
+                // Unscaled anchor box, sized to the pill. The pill's locked
+                // state shrinks itself; keeping the threshold label a SIBLING
+                // of the pill (not a child) stops that scale from shrinking
+                // the text and dropping it out of line with the gold labels.
                 <span
                   key={s.stageNumber}
                   className={cn(
-                    // No transition/animation here on purpose: this is
-                    // server-rendered, the state never flips client-side, and a
-                    // new animated class would need a reduced-motion opt-out.
-                    'absolute top-1/2 flex -translate-y-1/2 items-center justify-center rounded-full ring-2',
-                    // The ring is the panel colour, so each checkpoint reads as
-                    // punched THROUGH the track rather than floating over it.
-                    'ring-neutral-900',
-                    done
-                      ? 'bg-chase text-neutral-950 shadow-[0_0_10px_rgb(255_176_32_/_0.55)]'
-                      : 'scale-75 bg-neutral-600 text-transparent',
-                    // Sizes stay under the 10%↔20% gap on a 330px phone bar.
-                    'h-5 w-5 sm:h-6 sm:w-6',
+                    'absolute top-1/2 h-5 w-5 -translate-y-1/2 sm:h-6 sm:w-6',
                     s.pct > 90 ? 'right-0' : '-translate-x-1/2',
                   )}
                   style={s.pct > 90 ? undefined : { left: `${s.pct}%` }}
                 >
-                  <Check className="h-3 w-3" strokeWidth={3.5} aria-hidden />
+                  <span
+                    className={cn(
+                      // No transition/animation on purpose: this is
+                      // server-rendered, the state never flips client-side, and
+                      // a new animated class would need a reduced-motion
+                      // opt-out.
+                      'absolute inset-0 flex items-center justify-center rounded-full ring-2',
+                      // The ring is the panel colour, so each checkpoint reads
+                      // as punched THROUGH the track, not floating over it.
+                      'ring-neutral-900',
+                      done
+                        ? 'bg-chase text-neutral-950 shadow-[0_0_10px_rgb(255_176_32_/_0.55)]'
+                        : 'scale-75 bg-neutral-600 text-transparent',
+                    )}
+                    aria-hidden
+                  >
+                    <Check className="h-3 w-3" strokeWidth={3.5} />
+                  </span>
                   {/* Thresholds hang off each checkpoint. Hidden below sm —
                       they collide on a narrow bar; the stage list right below
                       carries them on mobile. */}
                   <span
                     className={cn(
-                      'absolute top-full mt-1.5 hidden text-[10px] font-semibold whitespace-nowrap sm:block',
+                      'absolute top-full left-1/2 mt-1.5 hidden -translate-x-1/2 text-[10px] font-semibold whitespace-nowrap sm:block',
                       done ? 'text-chase' : 'text-neutral-400',
                     )}
                   >
