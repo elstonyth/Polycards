@@ -59,8 +59,10 @@ describe('VAULT_RULES backend-message contract', () => {
   });
 
   it('points an unverified customer at the screen that clears the gate', () => {
+    // Action-neutral copy: the same guard fires on topup AND withdrawal
+    // (2026-08-05), so the message must not name either one.
     expect(map('Verify your phone number before continuing.')).toBe(
-      'Verify your phone number in Account settings before topping up.',
+      'Verify your phone number in Account settings before continuing.',
     );
   });
 

@@ -29,7 +29,9 @@ export const VAULT_RULES: ErrorRule[] = [
   // SMS flow, and without the pointer this reads as a dead end.
   [
     /verify your phone/i,
-    'Verify your phone number in Account settings before topping up.',
+    // "continuing", not "topping up": since 2026-08-05 the same guard sits on
+    // the withdrawal submit too, and naming the wrong action reads as a bug.
+    'Verify your phone number in Account settings before continuing.',
   ],
   [
     /declined/i,

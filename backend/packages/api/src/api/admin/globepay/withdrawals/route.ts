@@ -5,23 +5,30 @@ import type PacksModuleService from '../../../../modules/packs/service';
 import { GLOBEPAY_STALE_AFTER_MS } from '../../../../modules/packs/globepay-reconcile';
 import { parsePaginationParams } from '../../../../utils/pagination';
 
-// GET /admin/globepay/deposits — operator visibility into the GlobePay365
-// deposit table.
+// GET /admin/globepay/withdrawals — operator visibility into the GlobePay365
+// payout table, the money-OUT mirror of ../deposits.
 //
-// WHY this route exists: a deposit row is the ONLY record tying a payment at the
-// gateway to a customer, and until now nothing in the dashboard could read it.
-// The failure this covers is a customer who paid while both the callback and the
-// reconciliation sweep missed: the money is at the gateway, the row sits
-// 'pending' forever, and finding it meant hand-written SQL against production.
+// WHY: a withdrawal row is the only record tying a payout at the gateway to a
+// customer AND to the bank account we instructed them to pay (their callback
+// echoes neither the customer nor the destination). The failure this covers is
+// the inverse of the deposits page's: money already DEBITED from a customer's
+// balance, payout neither confirmed nor refunded — the row sits 'pending', the
+// customer is out the money, and until now finding it meant SQL against prod.
 //
-// Read-only on purpose. There is no settle/requery action here: the 10-minute
-// sweep (jobs/globepay-reconcile.ts) is the authoritative repair path, and a
-// manual "credit this" button would be a second, unaudited way to mint credit.
+// Read-only on purpose, same as deposits: the withdrawal sweep
+// (jobs/globepay-withdrawal-reconcile.ts) is the authoritative repair path —
+// requery decides settled vs refund, and a manual "refund this" button here
+// would be a second, unaudited way to mint credit.
 //
-// Admin-only (auto-protected /admin/* route), so joining the customer email is
-// legitimate operator visibility — the same call the Pull Ledger makes.
+// `stale` reuses the deposits' window (GLOBEPAY_STALE_AFTER_MS): the sweep has
+// had the same number of chances to resolve the payout, so past it means "look
+// at this row by hand" — with the extra weight that for a withdrawal a stuck
+// pending row is a customer ALREADY charged.
+//
+// Admin-only (auto-protected /admin/* route). The destination account is shown
+// in full: it exists on the row precisely so support can quote it in a payout
+// dispute.
 
-// 'all' is a view, not a stored status: it drops the status filter entirely.
 const STATUS_FILTERS = ['pending', 'settled', 'failed', 'all'] as const;
 type StatusFilter = (typeof STATUS_FILTERS)[number];
 
@@ -46,11 +53,9 @@ export async function GET(
   );
   const status = parseStatusFilter(req.query.status);
 
-  // Pending sorts OLDEST first (the ['status','created_at'] index): the row most
-  // likely to be a stranded payment is the one that has been waiting longest, so
-  // it belongs at the top rather than buried on the last page. Every other view
-  // is a history read, where newest-first is what an operator expects.
-  const [rows, total] = await packs.listAndCountGlobePayDeposits(
+  // Pending oldest-first (the ['status','created_at'] index): the longest-
+  // waiting payout is the likeliest stranded debit. History views newest-first.
+  const [rows, total] = await packs.listAndCountGlobePayWithdrawals(
     status === 'all' ? {} : { status },
     {
       skip: offset,
@@ -60,7 +65,9 @@ export async function GET(
   );
 
   const customerIds = [
-    ...new Set(rows.map((r) => r.customer_id).filter((id): id is string => !!id)),
+    ...new Set(
+      rows.map((r) => r.customer_id).filter((id): id is string => !!id),
+    ),
   ];
   const customers = customerIds.length
     ? await customerService.listCustomers(
@@ -70,25 +77,18 @@ export async function GET(
     : [];
   const emailById = new Map(customers.map((c) => [c.id, c.email]));
 
-  // `stale` is computed here, from the SAME window the sweep uses, so the
-  // dashboard and the job can never disagree about what counts as overdue. A
-  // pending row past it means the sweep has had at least six chances to resolve
-  // this deposit and has not — i.e. look at it by hand.
   const now = Date.now();
-  const deposits = rows.map((r) => ({
+  const withdrawals = rows.map((r) => ({
     id: r.id,
     merchant_transaction_id: r.merchant_transaction_id,
     gateway_transaction_id: r.gateway_transaction_id,
     customer_id: r.customer_id,
     customer_email: emailById.get(r.customer_id) ?? null,
-    // bigNumber columns come back as strings/BigNumber — normalize to a number
-    // for display, exactly as the customer transaction routes do.
-    amount_requested: Number(r.amount_requested),
-    amount_settled:
-      r.amount_settled === null || r.amount_settled === undefined
-        ? null
-        : Number(r.amount_settled),
-    payment_method_code: r.payment_method_code,
+    // bigNumber columns come back as strings/BigNumber — normalize for display.
+    amount: Number(r.amount),
+    bank_code: r.bank_code,
+    account_number: r.account_number,
+    account_holder_name: r.account_holder_name,
     status: r.status,
     gateway_status: r.gateway_status,
     created_at: r.created_at,
@@ -98,9 +98,9 @@ export async function GET(
       now - new Date(r.created_at).getTime() > GLOBEPAY_STALE_AFTER_MS,
   }));
 
-  // Identity-varying response carrying emails
+  // Identity-varying response carrying emails and full bank accounts
   // (CWE-524): a cached copy could outlive the admin session in a shared
   // browser profile. Same rule as the store saved-accounts route.
   res.setHeader('Cache-Control', 'no-store');
-  res.json({ total, offset, limit, status, deposits });
+  res.json({ total, offset, limit, status, withdrawals });
 }
