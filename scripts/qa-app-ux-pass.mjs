@@ -14,6 +14,11 @@ const creds = Object.fromEntries(
     .filter((l) => l.trim() && !l.trim().startsWith('#'))
     .map((l) => {
       const i = l.indexOf('=');
+      // A missing "=" makes indexOf return -1, and slice(0, -1) would hand back
+      // a plausible-looking key with a silently wrong value — the login would
+      // then fail 20s later with no clue why. Fail on the malformed line.
+      if (i <= 0)
+        throw new Error(`Malformed line in scripts/.dev-logins: ${l}`);
       return [l.slice(0, i).trim(), l.slice(i + 1).trim()];
     }),
 );
