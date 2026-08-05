@@ -3,6 +3,7 @@ import {
   rm,
   timeAgo,
   fmtPct,
+  slugKeystroke,
   toSlug,
   usdToMyr,
   gradeToGrader,
@@ -32,6 +33,26 @@ describe('toSlug', () => {
       const out = toSlug(raw);
       if (out !== '') expect(out).toMatch(HANDLE_RE);
     }
+  });
+});
+
+describe('slugKeystroke', () => {
+  // The whole reason this exists instead of calling toSlug per keystroke: the
+  // hyphen a space just produced has to survive, or the operator typing
+  // "ascended heroes" would watch the space vanish and get "ascendedheroes".
+  it('keeps the trailing hyphen a just-typed space produced', () => {
+    expect(slugKeystroke('ascended ')).toBe('ascended-');
+    expect(slugKeystroke('ascended heroes')).toBe('ascended-heroes');
+  });
+
+  // Whatever it leaves behind mid-typing, toSlug still has to land on something
+  // the backend accepts — the pair is only correct together.
+  it('always feeds toSlug a value that normalizes to a valid handle', () => {
+    for (const raw of ['Ascended Heroes!', 'a  b', 'x--', '2026 SET']) {
+      const out = toSlug(slugKeystroke(raw));
+      if (out !== '') expect(out).toMatch(HANDLE_RE);
+    }
+    expect(toSlug(slugKeystroke('Ascended Heroes!'))).toBe('ascended-heroes');
   });
 });
 

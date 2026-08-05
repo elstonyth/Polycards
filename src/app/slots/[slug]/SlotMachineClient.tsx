@@ -29,6 +29,7 @@ import {
 import type { RecentPull } from '@/lib/data/packs';
 import { demoDraw } from '@/lib/demo-spin';
 import {
+  pickDemoOdds,
   publishedOddsRows,
   poolValueRange,
   tierValueRanges,
@@ -343,7 +344,7 @@ export default function SlotMachineClient({
       // Impure read is safe here: user-click event handler, never render (same
       // as the real spin's Date.now below).
       const spinAt = Date.now();
-      const drawOdds = demoOdds ?? publishedOdds;
+      const drawOdds = pickDemoOdds(demoOdds, publishedOdds);
       const rows = drawOdds ? publishedOddsRows(drawOdds) : null;
       const cards: WonCard[] = [];
       for (let i = 0; i < reels; i++) {

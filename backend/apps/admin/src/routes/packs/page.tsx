@@ -37,7 +37,7 @@ import {
 } from '../../lib/queries';
 import { resolveImageUrl } from '../../lib/image-url';
 import { validateImageFile } from '../../lib/image-validation';
-import { fmtPct, rm, toSlug } from '../../lib/format';
+import { fmtPct, rm, slugKeystroke, toSlug } from '../../lib/format';
 import { GachaPipelineHint } from '../../components/GachaPipelineHint';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
@@ -580,8 +580,17 @@ const PacksListPage = () => {
         <FocusModal.Content>
           <FocusModal.Header>
             <div className="flex items-center justify-end gap-x-2">
+              {/* Subtle, not error-red: a fresh New pack form is empty by
+                  definition, so this reads as the checklist it is rather than
+                  as a failure before anything was typed. role="status" is what
+                  gets it to a screen reader — the disabled Save it explains
+                  can't be focused. */}
               {missing.length > 0 && (
-                <Text size="small" className="text-ui-fg-error">
+                <Text
+                  role="status"
+                  size="small"
+                  className="text-ui-fg-subtle text-right"
+                >
                   {t('packs.form.missing', { fields: missing.join(', ') })}
                 </Text>
               )}
@@ -738,11 +747,7 @@ const PacksListPage = () => {
                       // hyphens) — a trailing hyphen survives so the next word
                       // can be typed; toSlug trims it before the write.
                       onChange={(e) =>
-                        patch({
-                          slug: e.target.value
-                            .toLowerCase()
-                            .replace(/[^a-z0-9-]+/g, '-'),
-                        })
+                        patch({ slug: slugKeystroke(e.target.value) })
                       }
                     />
                     <Text className="text-ui-fg-subtle text-xs">

@@ -1,11 +1,16 @@
 /**
  * Guest demo-spin draw — pure theater for logged-out visitors.
  *
- * Samples a rarity from the STATIC published odds (the `ODDS` display in
- * packs-data.ts — by design decoupled from the backend's secret per-card
- * weights) and picks a card of that tier from the public pool. Runs entirely
- * client-side: no backend call, no Pull row, no credit/stock effects.
- * `Math.random` quality is fine here — nothing real is at stake.
+ * Samples a rarity from whichever odds the caller picked (see `pickDemoOdds`:
+ * the backend's odds-set-3 tier split, else the published display odds, else
+ * the static `ODDS` in packs-data.ts) and picks a card of that tier from the
+ * public pool. Runs entirely client-side: no backend call, no Pull row, no
+ * credit/stock effects. `Math.random` quality is fine — nothing is at stake.
+ *
+ * FIDELITY CEILING: the tier probability can be exact, but the card WITHIN a
+ * tier is uniform — per-card weights are secret and never reach the client, so
+ * a demo pull is never quite the real distribution. See
+ * docs/adr/0005-demo-spin-publishes-set-3-tier-odds.md.
  *
  * Rolls are injected as arguments so the weighting math stays unit-testable.
  */
