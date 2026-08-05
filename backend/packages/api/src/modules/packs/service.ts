@@ -6843,6 +6843,10 @@ class PacksModuleService extends MedusaService({
   // Fold admin ranges → the 100-entry ladder, update only the CHANGED
   // vip_level rows (no-op writes for untouched levels), and write ONE audit
   // row — same pattern as editDailyRewardSettings/replaceRewardPool.
+  // NOTE (2026-08-05): vouchers are OFF across the ladder — every level was
+  // zeroed by Migration20260805000000 because the surface that redeems them
+  // is suspended. This endpoint is the other writer of voucher_amount, and no
+  // admin route mounts it today; calling it is how a voucher comes back.
   @InjectTransactionManager()
   async saveVoucherRanges(
     ranges: VoucherRange[],

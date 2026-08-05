@@ -27,7 +27,12 @@ test('Migration20260805000000 zeroes voucher_amount AND its raw_ sidecar', async
   // Soft-deleted rows are not live config and stay untouched, and the WHERE
   // makes a re-run a no-op rather than a full-table rewrite.
   expect(joined).toMatch(/"deleted_at" IS NULL/);
-  expect(joined).toMatch(/"voucher_amount" <> 0/);
+  // The two halves must be OR'd. AND is the shape that skips a row whose
+  // numeric column is already 0 while the sidecar still holds 12,000 — exactly
+  // the half-written state this migration exists to repair.
+  expect(joined).toMatch(
+    /"voucher_amount" <> 0\s*OR\s*"raw_voucher_amount"->>'value' IS DISTINCT FROM '0'/,
+  );
 });
 
 test('down() is a no-op — the cleared amounts are not recoverable', async () => {

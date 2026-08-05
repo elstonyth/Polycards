@@ -20,6 +20,12 @@ import { Migration } from '@medusajs/framework/mikro-orm/migrations';
 // voucher_amount is a bigNumber: the numeric column AND its raw_ jsonb sidecar
 // have to move together, or the ORM keeps reading the old amount back out of
 // raw_voucher_amount and nothing changes. Same shape as Migration20260615094216.
+//
+// Grants ALREADY minted are deliberately left alone: /store/rewards/claim is a
+// live route and claimGrant still credits them (a customer who earned one keeps
+// it). This only stops new ones. Note the ladder is not the only voucher source
+// — a reward box can carry a 'voucher' prize (drawDailyBox); every box ships
+// disabled, so that door is shut, but it is a separate one.
 export class Migration20260805000000 extends Migration {
   override async up(): Promise<void> {
     this.addSql(`UPDATE "vip_level"
@@ -27,15 +33,17 @@ export class Migration20260805000000 extends Migration {
           "raw_voucher_amount" = jsonb_build_object('value', '0', 'precision', 20),
           "updated_at" = now()
       WHERE "deleted_at" IS NULL
-        AND ("voucher_amount" <> 0 OR "raw_voucher_amount"->>'value' <> '0');`);
+        AND ("voucher_amount" <> 0
+             OR "raw_voucher_amount"->>'value' IS DISTINCT FROM '0');`);
   }
 
   override async down(): Promise<void> {
     // Deliberately empty. The per-level amounts this cleared were operator
     // config, not derivable from anything left in the database — a down() that
     // wrote the Workbook1.xlsx figures back would invent numbers the operator
-    // may have since changed (prod ran 1,500 through the 90s; the workbook does
-    // not). The workbook and scripts/vip-levels.data.ts keep the originals on
-    // paper; restoring them is a deliberate re-price, not a rollback.
+    // had already changed (the live ladder ran 1,500 through the 90s; the
+    // workbook does not). They are written down instead, in
+    // docs/ops/vip-voucher-amounts-before-2026-08-05.md; restoring one is a
+    // deliberate re-price through saveVoucherRanges, not a rollback.
   }
 }
