@@ -47,6 +47,21 @@ export const VAULT_RULES: ErrorRule[] = [
   ],
   [/withdrawals are not open/i, 'Withdrawals are not open yet.'],
   [/insufficient/i, 'Not enough balance for that.'],
+  // The operator kill switch, thrown by startGlobePayDeposit when
+  // GLOBEPAY_ENABLED is off and by the deposit route when a callback URL is
+  // missing. Without this rule the message matched NOTHING and fell through to
+  // VAULT_FALLBACK ("Something went wrong. Please try again."), which made the
+  // switch self-defeating: the one lever for "stop customers retrying a gateway
+  // that cannot succeed" answered them with an invitation to retry. Found
+  // during the 2026-08-05 outage, when every provisioned channel was returning
+  // PMT10006 and turning top-ups off was the correct response.
+  //
+  // Deliberately promises no timeframe — the switch is flipped by a human and
+  // stays off until another human flips it back.
+  [
+    /top-ups are temporarily unavailable/i,
+    'Top-ups are paused right now — nothing was charged. Please try again later.',
+  ],
   // MUST stay above /amount/i — see the ORDER note in the file header.
   //
   // The copy deliberately does NOT suggest choosing another payment method,

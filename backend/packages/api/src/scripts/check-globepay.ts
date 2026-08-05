@@ -4,6 +4,7 @@ import {
   checkBalance,
   globepayConfigFromEnv,
   GlobePayError,
+  type GlobePayConfig,
 } from '../modules/packs/globepay-client';
 
 // GlobePay365 pre-flight. §1.9 CheckBalance is read-only and side-effect free,
@@ -24,7 +25,13 @@ import {
 export default async function checkGlobePay({ container }: ExecArgs) {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
 
-  let config;
+  // Annotated, not inferred. `let config;` made this implicitly `any` (the
+  // package has `strict` off, so noImplicitAny does not object), which is how
+  // `config.apiBase` — a field GlobePayConfig has never had — shipped and
+  // printed "against undefined" on every run. The annotation is the guard: tsc
+  // now rejects the next typo here instead of the preflight quietly lying about
+  // which host it tested.
+  let config: GlobePayConfig;
   try {
     config = globepayConfigFromEnv();
   } catch (error) {
@@ -38,7 +45,7 @@ export default async function checkGlobePay({ container }: ExecArgs) {
   }
 
   logger.info(
-    `[globepay-preflight] calling CheckBalance as merchant ${config.merchantCode} against ${config.apiBase}`,
+    `[globepay-preflight] calling CheckBalance as merchant ${config.merchantCode} against ${config.baseUrl}`,
   );
 
   try {
