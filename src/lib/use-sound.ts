@@ -44,6 +44,28 @@ export function writeMuted(muted: boolean): void {
   }
 }
 
+/** A looping bed: the decoded audio, its live source, and its reused gain. */
+type Bed = {
+  buffer: AudioBuffer | null;
+  source: AudioBufferSourceNode | null;
+  gain: GainNode | null;
+};
+
+/**
+ * Stop and unwire a bed's current source. Disconnecting matters as much as
+ * stopping: a stopped-but-connected node stays wired to the graph.
+ */
+function stopBedSource(bed: Bed | undefined): void {
+  if (!bed?.source) return;
+  try {
+    bed.source.stop();
+  } catch {
+    /* already stopped */
+  }
+  bed.source.disconnect();
+  bed.source = null;
+}
+
 export function useSound() {
   // SSR-safe: server + client first render both start unmuted, so there's no
   // hydration mismatch on the mute icon; the stored value is applied in an
@@ -56,14 +78,7 @@ export function useSound() {
   // encoder padding at both ends, and HTMLAudioElement.loop plays that padding
   // as a short silence every lap — clearly audible as a "reset" on a sustained
   // bass bed. A decoded AudioBuffer loops sample-accurately instead.
-  const beds = useRef<
-    Partial<
-      Record<
-        SoundName,
-        { buffer: AudioBuffer | null; source: AudioBufferSourceNode | null }
-      >
-    >
-  >({});
+  const beds = useRef<Partial<Record<SoundName, Bed>>>({});
 
   // Hydrate mute state + preload the audio pool on the client only.
   useEffect(() => {
@@ -80,11 +95,11 @@ export function useSound() {
       // unmount — nor must the looping bed, which has no end of its own.
       for (const audio of Object.values(pool_)) audio?.pause();
       for (const bed of Object.values(beds_)) {
-        try {
-          bed?.source?.stop();
-        } catch {
-          /* already stopped */
-        }
+        stopBedSource(bed);
+        // The context outlives this hook, so the bed's gain has to be unwired
+        // here or it stays attached to the destination for the session.
+        bed?.gain?.disconnect();
+        if (bed) bed.gain = null;
       }
     };
   }, []);
@@ -123,17 +138,26 @@ export function useSound() {
       const ac = sharedAudioContext();
       if (ac) {
         try {
-          const bed = (beds.current[name] ??= { buffer: null, source: null });
+          const bed = (beds.current[name] ??= {
+            buffer: null,
+            source: null,
+            gain: null,
+          });
           bed.buffer ??= await fetch(FILES[name])
             .then((r) => r.arrayBuffer())
             .then((b) => ac.decodeAudioData(b));
-          bed.source?.stop();
+          // One gain per bed, reused: a fresh node per call would leave the
+          // old one wired to the destination with nothing feeding it.
+          if (!bed.gain) {
+            bed.gain = ac.createGain();
+            bed.gain.connect(ac.destination);
+          }
+          bed.gain.gain.value = Math.min(1, Math.max(0, volume));
+          stopBedSource(bed);
           const source = ac.createBufferSource();
           source.buffer = bed.buffer;
           source.loop = true;
-          const gain = ac.createGain();
-          gain.gain.value = Math.min(1, Math.max(0, volume));
-          source.connect(gain).connect(ac.destination);
+          source.connect(bed.gain);
           source.start();
           bed.source = source;
           return true;
@@ -149,10 +173,8 @@ export function useSound() {
         audio.volume = Math.min(1, Math.max(0, volume));
         audio.playbackRate = 1;
         audio.currentTime = 0;
-        return await audio.play().then(
-          () => true,
-          () => false,
-        );
+        await audio.play();
+        return true;
       } catch {
         return false;
       }
@@ -163,15 +185,9 @@ export function useSound() {
   // Halt a playing sound (the 6s spin bed outlives short spins). Not muted-
   // gated: halting must always work, even if mute was toggled mid-spin.
   const halt = useCallback((name: SoundName) => {
-    const bed = beds.current[name];
-    if (bed?.source) {
-      try {
-        bed.source.stop();
-      } catch {
-        /* already stopped */
-      }
-      bed.source = null;
-    }
+    // The gain stays connected — it's reused by the next loop() and carries no
+    // signal while the source is gone.
+    stopBedSource(beds.current[name]);
     const audio = pool.current[name];
     if (!audio) return;
     try {
