@@ -20,6 +20,17 @@ type VaultDotContextValue = {
   show: boolean;
   /** Mark everything up to `latestAt` seen. No-op until `latestAt` resolves. */
   markSeen: () => void;
+  /**
+   * Re-read the signal now, bypassing the focus throttle.
+   *
+   * For callers that KNOW a card just entered the vault — opening a pack is the
+   * only one today. Without it the dot cannot light in-session at all: the
+   * provider otherwise only fetches on login and on window focus, and a spin
+   * involves neither (see the effects below). Quitting mid-spin is already
+   * covered, because the pull row is written `vaulted` at roll time and the
+   * next app open remounts this provider.
+   */
+  refresh: () => void;
 };
 
 const VaultDotContext = createContext<VaultDotContextValue | null>(null);
@@ -141,6 +152,14 @@ export function VaultDotProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  // Deliberately NOT throttled: the focus handler guesses that something might
+  // have changed, so it pays the TTL; a caller reaching for this has just
+  // watched a card land and is telling us so.
+  const refreshNow = useCallback(() => {
+    if (!customer) return;
+    void refresh(customer.id);
+  }, [customer, refresh]);
+
   // Cross-identity state derives away rather than rendering. Also covers SSR
   // and the pre-fetch beat: `state` is null there, so `show` is false and no
   // dot is emitted before mount (localStorage does not exist server-side, and
@@ -153,6 +172,7 @@ export function VaultDotProvider({ children }: { children: ReactNode }) {
         latestAt: live?.latestAt ?? null,
         show: live ? shouldShowDot(live.latestAt, live.seenAt) : false,
         markSeen,
+        refresh: refreshNow,
       }}
     >
       {children}
