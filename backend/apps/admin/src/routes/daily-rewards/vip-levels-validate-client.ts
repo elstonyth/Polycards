@@ -5,11 +5,6 @@
 // index+1, not an input.
 export const FRAME_LEVELS = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
 
-// COUPLED MIRROR of modules/packs/voucher-ranges.ts. Kept as a literal —
-// separate builds, no shared package (same convention as
-// lib/purchase-invoice-form.ts).
-export const MAX_VOUCHER_MYR = 10_000;
-
 export interface VipLevelRow {
   thresholdInput: string;
   voucherInput: string;
@@ -21,14 +16,6 @@ export interface VipLevelRow {
 // A blank field is NOT a valid 0 — Number('') coerces to 0, which would let an
 // accidentally cleared money field silently save as zero.
 const num = (s: string): number => (s.trim() === '' ? NaN : Number(s));
-
-// Shared by the validator below and by the tab, which renders a repair input
-// for exactly the rows this flags. One rule, one place — a drift between them
-// is how a row becomes unfixable.
-export const voucherOutOfRange = (s: string): boolean => {
-  const n = num(s);
-  return !Number.isFinite(n) || n < 0 || n > MAX_VOUCHER_MYR;
-};
 
 export function validateVipLevelsClient(rows: VipLevelRow[]): string[] {
   const errors: string[] = [];
@@ -50,21 +37,18 @@ export function validateVipLevelsClient(rows: VipLevelRow[]): string[] {
         );
       prev = t;
     }
-    // Voucher IS checked, even though the column was removed — the shipped
-    // ladder violates this bound today (L90=12000, L100=15000 vs a 10,000 cap
-    // added in #247, whose comment sized it against seed-reward-economy-demo's
-    // 0–888 range rather than this ladder). Staying silent would let canSave go
-    // true and turn a visible block into a server toast naming a field the
-    // admin no longer shows. The tab renders a repair input for these rows only.
-    if (voucherOutOfRange(r.voucherInput))
-      errors.push(
-        `Level ${level}: voucher must be between 0 and ${MAX_VOUCHER_MYR.toLocaleString('en-US')} — lower it below, or have the cap raised if this rung is correct.`,
-      );
-    // referralInput / boxTier are deliberately NOT checked here. Neither is
-    // editable on the tab any more, and neither bound is reachable from shipped
-    // data (referral seeds are 1–5 against 0–100; a dangling box tier needs an
-    // out-of-band DB change — there is no admin route that deletes a box). Both
-    // stay enforced server-side, surfacing as a toast instead.
+    // voucherInput / referralInput / boxTier are deliberately NOT checked here.
+    // None of the three is editable on the tab any more (all three surfaces are
+    // suspended), so a client error on one would be a block the operator has no
+    // field to clear — the same reasoning #371 applied to referral and box tier.
+    //
+    // Voucher was the exception until the data it checked went away: the ladder
+    // paid 12,000 at L90 and 15,000 at L100 against a 10,000 server cap, so two
+    // rungs were flagged on every load and the tab grew a repair column just to
+    // clear them. Vouchers are now 0 on every level (Migration20260805000000 —
+    // the redeeming surface is suspended), nothing can breach the cap, and the
+    // column is gone. All three stay enforced server-side, surfacing as a toast
+    // rather than a permanent block.
     if (r.frameUnlock && !FRAME_LEVELS.includes(level))
       errors.push(
         `Level ${level}: a frame can only unlock on a decade level (10, 20, … 100).`,

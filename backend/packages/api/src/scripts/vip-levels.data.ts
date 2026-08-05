@@ -918,3 +918,16 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
 if (new Set(VIP_LEVELS.map((r) => r.level)).size !== VIP_LEVELS.length) {
   throw new Error('VIP_LEVELS contains duplicate levels');
 }
+
+// What actually gets INSERTED. Vouchers are off across the ladder (operator
+// decision 2026-08-05: the redeeming surface is suspended, so a level-up was
+// minting grants nobody could spend — Migration20260805000000 zeroed the live
+// rows). Seeding straight from VIP_LEVELS would hand a fresh environment the
+// payouts the migration exists to remove.
+//
+// VIP_LEVELS itself keeps the workbook figures: it is the record of Workbook1
+// (see the header), the parity tests assert against it, and turning a payout
+// back on should be reading the sheet, not archaeology on a seed script.
+export const VIP_LEVELS_SEED: readonly VipLevelSeed[] = Object.freeze(
+  VIP_LEVELS.map((r) => Object.freeze({ ...r, voucher_amount: 0 })),
+);

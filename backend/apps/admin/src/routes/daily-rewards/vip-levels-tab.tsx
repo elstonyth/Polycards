@@ -21,7 +21,6 @@ import { StickySaveBar } from "../../components/StickySaveBar";
 import {
   FRAME_LEVELS,
   validateVipLevelsClient,
-  voucherOutOfRange,
   type VipLevelRow,
 } from "./vip-levels-validate-client";
 import {
@@ -287,16 +286,6 @@ export const VipLevelsTab = () => {
       </div>
 
       {groups.map((g) => {
-        // The Voucher column is gone, but the shipped ladder violates the
-        // voucher cap (L90, L100) and a save rejects the WHOLE ladder on it.
-        // Rather than leave the tab a dead end — no input to fix a field that
-        // blocks everything else — the column comes back for the decades that
-        // actually contain an out-of-range rung, and only there. Same shape as
-        // the frame_unlock escape hatch below: never trap legacy data as
-        // unclearable. A clean ladder shows this column nowhere.
-        const repairVouchers = g.rows.some((r) =>
-          voucherOutOfRange(r.voucherInput),
-        );
         const issues = errors.filter((e) => {
           const level = levelInMessage(e);
           return (
@@ -334,9 +323,6 @@ export const VipLevelsTab = () => {
                 <Table.Row>
                   <Table.HeaderCell>Level</Table.HeaderCell>
                   <Table.HeaderCell>Threshold (RM)</Table.HeaderCell>
-                  {repairVouchers && (
-                    <Table.HeaderCell>Voucher (RM)</Table.HeaderCell>
-                  )}
                   <Table.HeaderCell>Frame</Table.HeaderCell>
                   <Table.HeaderCell>Actions</Table.HeaderCell>
                 </Table.Row>
@@ -374,25 +360,6 @@ export const VipLevelsTab = () => {
                           }
                         />
                       </Table.Cell>
-                      {repairVouchers && (
-                        <Table.Cell>
-                          {voucherOutOfRange(r.voucherInput) ? (
-                            <Input
-                              aria-label={`Level ${level} voucher`}
-                              value={r.voucherInput}
-                              onChange={(e) =>
-                                setRow(r.localId, {
-                                  voucherInput: e.target.value,
-                                })
-                              }
-                            />
-                          ) : (
-                            <Text size="small" className="text-ui-fg-subtle">
-                              {money(r.voucherInput)}
-                            </Text>
-                          )}
-                        </Table.Cell>
-                      )}
                       <Table.Cell>
                         {/* Off-decade frames are illegal, but legacy data may
                             already carry one - never trap it as unclearable. */}

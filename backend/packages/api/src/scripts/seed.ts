@@ -25,7 +25,7 @@ import PacksModuleService from '../modules/packs/service';
 import { PACKS_MODULE } from '../modules/packs';
 import type { HouseSellerService } from '../modules/packs/card-product';
 import { HANDLE_RE, deriveHandle } from '../utils/profile-handle';
-import { VIP_LEVELS } from './vip-levels.data';
+import { VIP_LEVELS, VIP_LEVELS_SEED } from './vip-levels.data';
 
 const updateStoreCurrencies = createWorkflow(
   'update-store-currencies',
@@ -631,7 +631,7 @@ export default async function seedDemoData({ container }: ExecArgs) {
     { select: ['level'], take: VIP_LEVELS.length },
   );
   const haveLevels = new Set(existingVipLevels.map((r) => r.level));
-  const vipLevelsToCreate = VIP_LEVELS.filter((r) => !haveLevels.has(r.level));
+  const vipLevelsToCreate = VIP_LEVELS_SEED.filter((r) => !haveLevels.has(r.level));
   if (vipLevelsToCreate.length === 0) {
     logger.info('VIP levels already exist, skipping.');
   } else {
