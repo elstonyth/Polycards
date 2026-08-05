@@ -142,3 +142,13 @@ services:
       - key: NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED
         scope: RUN_AND_BUILD_TIME
         value: 'true'
+      # Withdrawal UI gate (/bank-withdrawal form + saved-accounts flow).
+      # Armed 2026-08-05 together with the backend's
+      # GLOBEPAY_WITHDRAWALS_ENABLED — the backend flag is the real money gate
+      # (fail closed), this one only decides whether the form renders instead
+      # of the "not open yet" notice. Build-time inlined like every
+      # NEXT_PUBLIC_* here: the root Dockerfile ARG default is what the bundle
+      # actually gets — this key moves together with that ARG.
+      - key: NEXT_PUBLIC_WITHDRAWALS_ENABLED
+        scope: RUN_AND_BUILD_TIME
+        value: 'true'

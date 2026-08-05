@@ -4,8 +4,11 @@ import { useEffect, useState } from 'react';
 import { CheckCircle2 } from 'lucide-react';
 import { rm, rm0 } from '@/lib/format';
 import {
+  addSavedBankAccount,
+  fetchSavedBankAccounts,
   fetchWithdrawBanks,
   startWithdrawal,
+  type SavedBankAccount,
   type WithdrawBank,
 } from '@/lib/actions/vault';
 import { Pill } from '@/components/ui/pill';
@@ -30,10 +33,12 @@ export default function WithdrawForm({
   withdrawable: number | null;
 }) {
   const [banks, setBanks] = useState<WithdrawBank[] | null>(null);
+  const [saved, setSaved] = useState<SavedBankAccount[]>([]);
   const [bankCode, setBankCode] = useState('');
   const [accountNumber, setAccountNumber] = useState('');
   const [holderName, setHolderName] = useState('');
   const [amountText, setAmountText] = useState('');
+  const [saveAccount, setSaveAccount] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<{
@@ -44,15 +49,40 @@ export default function WithdrawForm({
 
   useEffect(() => {
     let cancelled = false;
-    fetchWithdrawBanks().then((res) => {
-      if (cancelled) return;
-      if (res.ok) setBanks(res.banks);
-      else setError(res.error);
-    });
+    // Saved accounts load alongside the bank list; a failed saved-accounts
+    // read degrades to the plain form (it's a prefill, never a gate).
+    Promise.all([fetchWithdrawBanks(), fetchSavedBankAccounts()]).then(
+      ([banksRes, savedRes]) => {
+        if (cancelled) return;
+        if (banksRes.ok) setBanks(banksRes.banks);
+        else setError(banksRes.error);
+        if (savedRes.ok) {
+          setSaved(savedRes.accounts);
+          // One saved account and an empty form: prefill it outright — the
+          // common case is withdrawing to the same account every time. Guarded
+          // per field via the functional setters: this resolves asynchronously,
+          // and a customer who already started typing a different destination
+          // must not have it replaced under their cursor.
+          const only =
+            savedRes.accounts.length === 1 ? savedRes.accounts[0] : undefined;
+          if (only) {
+            setBankCode((cur) => cur || only.bankCode);
+            setAccountNumber((cur) => cur || only.accountNumber);
+            setHolderName((cur) => cur || only.accountHolderName);
+          }
+        }
+      },
+    );
     return () => {
       cancelled = true;
     };
   }, []);
+
+  // Does the typed-in account already exist in the saved list? Drives both
+  // the picker highlight and whether "save for next time" is offered.
+  const matchesSaved = saved.some(
+    (a) => a.bankCode === bankCode && a.accountNumber === accountNumber,
+  );
 
   const amount = Number.parseFloat(amountText);
   const amountValid =
@@ -89,6 +119,22 @@ export default function WithdrawForm({
       if (!res.ok) {
         setError(res.error);
         return;
+      }
+      // The withdrawal is already accepted — saving the account is a
+      // convenience side effect and must never surface as a payout error.
+      // Fire-and-forget. The action catches its own failures, but the ACTION
+      // CALL itself (a network round-trip) can still reject — swallow that
+      // too, or a flaky connection turns a successful payout into an
+      // unhandled-rejection overlay.
+      if (saveAccount && !matchesSaved) {
+        const bankName =
+          (banks ?? []).find((b) => b.bankCode === bankCode)?.bankName ?? '';
+        void addSavedBankAccount({
+          bankCode,
+          bankName,
+          accountNumber,
+          accountHolderName: holderName.trim(),
+        }).catch(() => undefined);
       }
       setDone({
         amount: res.amount,
@@ -135,6 +181,41 @@ export default function WithdrawForm({
           </span>
         </div>
       </div>
+
+      {saved.length > 0 && (
+        <label className="mt-4 block text-[13px] font-semibold text-neutral-300">
+          Saved accounts
+          <select
+            // Reflects the current fields when they match a saved account, so
+            // switching between saved accounts and hand-editing stay in sync.
+            value={
+              saved.find(
+                (a) =>
+                  a.bankCode === bankCode && a.accountNumber === accountNumber,
+              )?.id ?? ''
+            }
+            onChange={(e) => {
+              const account = saved.find((a) => a.id === e.target.value);
+              if (!account) return;
+              setBankCode(account.bankCode);
+              setAccountNumber(account.accountNumber);
+              setHolderName(account.accountHolderName);
+            }}
+            aria-label="Saved bank accounts"
+            className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-neutral-900 px-3 text-sm text-white outline-none focus:border-white/25"
+          >
+            <option value="" disabled>
+              Choose a saved account
+            </option>
+            {saved.map((account) => (
+              <option key={account.id} value={account.id}>
+                {account.bankName} ···· {account.accountNumber.slice(-4)} —{' '}
+                {account.accountHolderName}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
 
       <label className="mt-4 block text-[13px] font-semibold text-neutral-300">
         Bank
@@ -197,6 +278,18 @@ export default function WithdrawForm({
           />
         </span>
       </label>
+
+      {!matchesSaved && (
+        <label className="mt-3 flex items-center gap-2 text-[13px] text-neutral-300">
+          <input
+            type="checkbox"
+            checked={saveAccount}
+            onChange={(e) => setSaveAccount(e.target.checked)}
+            className="h-4 w-4 rounded border-white/20 bg-neutral-900 accent-white"
+          />
+          Save this account for future withdrawals
+        </label>
+      )}
 
       {error && (
         <p
