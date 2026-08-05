@@ -21,10 +21,17 @@ const scope = {
 };
 
 const mkRes = () => {
-  const res = { json: jest.fn(), status: jest.fn() };
+  const res = { json: jest.fn(), status: jest.fn(), setHeader: jest.fn() };
   res.status.mockReturnValue(res);
   return res as never;
 };
+
+/** Every handler serves full account numbers — assert none are cacheable. */
+const expectNoStore = (res: never) =>
+  expect((res as { setHeader: jest.Mock }).setHeader).toHaveBeenCalledWith(
+    'Cache-Control',
+    'no-store',
+  );
 
 const mkReq = (body: Record<string, unknown> | null = null) =>
   ({
@@ -90,6 +97,7 @@ describe('POST /store/credits/withdraw/accounts', () => {
     expect((res as { json: jest.Mock }).json).toHaveBeenCalledWith({
       accounts: [savedShape()],
     });
+    expectNoStore(res);
   });
 
   it('refuses what the payout submit would refuse (shared validation gate)', async () => {
@@ -156,6 +164,7 @@ describe('DELETE /store/credits/withdraw/accounts', () => {
     });
     const res = mkRes();
     await DELETE(mkReq({ id: savedShape().id }), res);
+    expectNoStore(res);
     expect(updateCustomers).toHaveBeenCalledWith('cus_1', {
       metadata: { avatar_url: 'a', bank_accounts: [other] },
     });
@@ -179,6 +188,7 @@ describe('GET /store/credits/withdraw/accounts', () => {
     });
     const res = mkRes();
     await GET(mkReq(), res);
+    expectNoStore(res);
     expect((res as { json: jest.Mock }).json).toHaveBeenCalledWith({
       accounts: [savedShape()],
     });

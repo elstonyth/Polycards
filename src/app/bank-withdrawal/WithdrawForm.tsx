@@ -59,13 +59,16 @@ export default function WithdrawForm({
         if (savedRes.ok) {
           setSaved(savedRes.accounts);
           // One saved account and an empty form: prefill it outright — the
-          // common case is withdrawing to the same account every time.
+          // common case is withdrawing to the same account every time. Guarded
+          // per field via the functional setters: this resolves asynchronously,
+          // and a customer who already started typing a different destination
+          // must not have it replaced under their cursor.
           const only =
             savedRes.accounts.length === 1 ? savedRes.accounts[0] : undefined;
           if (only) {
-            setBankCode(only.bankCode);
-            setAccountNumber(only.accountNumber);
-            setHolderName(only.accountHolderName);
+            setBankCode((cur) => cur || only.bankCode);
+            setAccountNumber((cur) => cur || only.accountNumber);
+            setHolderName((cur) => cur || only.accountHolderName);
           }
         }
       },

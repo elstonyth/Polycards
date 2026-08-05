@@ -96,12 +96,22 @@ async function loadAccounts(
   return { accounts: parseSavedBankAccounts(metadata.bank_accounts), metadata };
 }
 
+/**
+ * Every response here carries full account numbers, so none of them may land
+ * in a shared/browser cache (CWE-525). Applied to all three handlers — POST
+ * and DELETE echo the same list GET serves.
+ */
+function noStore(res: MedusaResponse): MedusaResponse {
+  res.setHeader('Cache-Control', 'no-store');
+  return res;
+}
+
 export async function GET(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
   const { accounts } = await loadAccounts(req, req.auth_context.actor_id);
-  res.json({ accounts });
+  noStore(res).json({ accounts });
 }
 
 export async function POST(
@@ -171,7 +181,7 @@ export async function POST(
   await customers.updateCustomers(customerId, {
     metadata: { ...metadata, bank_accounts: next },
   });
-  res.json({ accounts: next });
+  noStore(res).json({ accounts: next });
 }
 
 export async function DELETE(
@@ -197,5 +207,5 @@ export async function DELETE(
       metadata: { ...metadata, bank_accounts: next },
     });
   }
-  res.json({ accounts: next });
+  noStore(res).json({ accounts: next });
 }
