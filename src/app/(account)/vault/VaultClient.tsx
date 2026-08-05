@@ -18,6 +18,7 @@ import { SuccessToast } from '@/components/ui/SuccessToast';
 import { FLAT_BUYBACK_PERCENT } from '@/lib/packs-data';
 import SellConfirmModal from '@/components/SellConfirmModal';
 import { useTopUp } from '@/components/app-shell/TopUpProvider';
+import { useVaultDot } from '@/components/app-shell/VaultDotProvider';
 import { RARITY_ORDER, rarityRgb } from '@/lib/rarity';
 import { cn } from '@/lib/utils';
 import { Pill, pillVariants } from '@/components/ui/pill';
@@ -141,6 +142,16 @@ export default function VaultClient({
     setShownCount(PAGE_STEP);
   }, [query, rarityFilter]);
   const shown = visible.slice(0, shownCount);
+
+  // Opening the vault marks everything seen. Keyed on `latestAt` rather than
+  // bare mount for two reasons: reaching this page before the provider's fetch
+  // resolves would otherwise stamp nothing, and a pull landing DURING the visit
+  // clears itself on the next focus refresh instead of leaving a dot behind for
+  // cards the customer is looking at right now.
+  const { latestAt, markSeen } = useVaultDot();
+  useEffect(() => {
+    if (latestAt) markSeen();
+  }, [latestAt, markSeen]);
 
   const visibleIds = visible.map((i) => i.pullId);
   const allVisibleSelected =
