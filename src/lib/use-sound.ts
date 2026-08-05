@@ -5,7 +5,7 @@
 // default UNMUTED (PRD §3.9). Degrades silently if an asset is missing, so the
 // slice ships before final audio is sourced.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { playSfx, type SfxName } from '@/lib/slot-sfx';
+import { playSfx, sharedAudioContext, type SfxName } from '@/lib/slot-sfx';
 
 const MUTED_KEY = 'polycards.slot.muted';
 
@@ -52,10 +52,21 @@ export function useSound() {
   // server snapshot.
   const [muted, setMuted] = useState(false);
   const pool = useRef<Partial<Record<SoundName, HTMLAudioElement>>>({});
+  // Looping beds run through WebAudio, not the <audio> element: an MP3 carries
+  // encoder padding at both ends, and HTMLAudioElement.loop plays that padding
+  // as a short silence every lap — clearly audible as a "reset" on a sustained
+  // bass bed. A decoded AudioBuffer loops sample-accurately instead.
+  const beds = useRef<
+    Partial<
+      Record<
+        SoundName,
+        { buffer: AudioBuffer | null; source: AudioBufferSourceNode | null }
+      >
+    >
+  >({});
 
   // Hydrate mute state + preload the audio pool on the client only.
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- v7 false positive; deliberate post-mount SSR-safe sync
     setMuted(readMuted());
     for (const [name, src] of Object.entries(FILES)) {
       const audio = new Audio(src);
@@ -63,10 +74,18 @@ export function useSound() {
       pool.current[name as SoundName] = audio;
     }
     const pool_ = pool.current;
+    const beds_ = beds.current;
     return () => {
       // One-shots (bigwin fanfare etc.) must not bleed past the machine's
-      // unmount.
+      // unmount — nor must the looping bed, which has no end of its own.
       for (const audio of Object.values(pool_)) audio?.pause();
+      for (const bed of Object.values(beds_)) {
+        try {
+          bed?.source?.stop();
+        } catch {
+          /* already stopped */
+        }
+      }
     };
   }, []);
 
@@ -97,21 +116,45 @@ export function useSound() {
   // (ambientOn) can reset on failure and retry on a later gesture instead of
   // going permanently silent.
   const loop = useCallback(
-    (name: SoundName, volume = 1): Promise<boolean> => {
-      if (muted) return Promise.resolve(false);
+    async (name: SoundName, volume = 1): Promise<boolean> => {
+      if (muted) return false;
+
+      // Preferred path: decode once, then loop the buffer. Gapless.
+      const ac = sharedAudioContext();
+      if (ac) {
+        try {
+          const bed = (beds.current[name] ??= { buffer: null, source: null });
+          bed.buffer ??= await fetch(FILES[name])
+            .then((r) => r.arrayBuffer())
+            .then((b) => ac.decodeAudioData(b));
+          bed.source?.stop();
+          const source = ac.createBufferSource();
+          source.buffer = bed.buffer;
+          source.loop = true;
+          const gain = ac.createGain();
+          gain.gain.value = Math.min(1, Math.max(0, volume));
+          source.connect(gain).connect(ac.destination);
+          source.start();
+          bed.source = source;
+          return true;
+        } catch {
+          // Decode or autoplay refused — fall through to the element.
+        }
+      }
+
       const audio = pool.current[name];
-      if (!audio) return Promise.resolve(false);
+      if (!audio) return false;
       try {
         audio.loop = true;
         audio.volume = Math.min(1, Math.max(0, volume));
         audio.playbackRate = 1;
         audio.currentTime = 0;
-        return audio.play().then(
+        return await audio.play().then(
           () => true,
           () => false,
         );
       } catch {
-        return Promise.resolve(false);
+        return false;
       }
     },
     [muted],
@@ -120,6 +163,15 @@ export function useSound() {
   // Halt a playing sound (the 6s spin bed outlives short spins). Not muted-
   // gated: halting must always work, even if mute was toggled mid-spin.
   const halt = useCallback((name: SoundName) => {
+    const bed = beds.current[name];
+    if (bed?.source) {
+      try {
+        bed.source.stop();
+      } catch {
+        /* already stopped */
+      }
+      bed.source = null;
+    }
     const audio = pool.current[name];
     if (!audio) return;
     try {
