@@ -70,8 +70,13 @@ const EconomyPage = () => {
     value: string;
     hint?: string;
     current?: boolean;
-    /** Semantic class for the figure — set only when the sign is the signal. */
-    tone?: string;
+    /**
+     * Semantic ink for the figure, set only when the sign is the signal.
+     * A literal union, not string: a typo in a Tailwind class is invisible at
+     * runtime, so let the compiler catch it. Widen when a second tone earns
+     * its place.
+     */
+    tone?: "text-ui-fg-error";
   }[] = data
     ? [
         { key: "revenue", value: rm(data.totals.revenue) },
