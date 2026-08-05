@@ -83,14 +83,16 @@ export function VaultDotProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
-  // Fetch on login / account switch; drop state on logout so a signed-out shell
-  // never renders the previous account's dot. setState only ever runs in a
-  // promise callback, never synchronously in the effect.
+  // Fetch on login / account switch. setState only ever runs in a promise
+  // callback, never synchronously in the effect body — React Compiler's
+  // react-hooks/set-state-in-effect rejects the latter, and TopUpProvider
+  // carries the same discipline for the same reason.
+  //
+  // Logging out therefore writes no state at all: `live` below derives to null
+  // whenever `customer` is null, so a signed-out shell can never render the
+  // previous account's dot even though the stale value is still in memory.
   useEffect(() => {
-    if (!customer) {
-      setState(null);
-      return;
-    }
+    if (!customer) return;
     let cancelled = false;
     void getVaultLatest().then((latestAt) => {
       if (cancelled) return;
