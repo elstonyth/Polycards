@@ -21,6 +21,7 @@ import { StickySaveBar } from "../../components/StickySaveBar";
 import {
   FRAME_LEVELS,
   validateVipLevelsClient,
+  voucherOutOfRange,
   type VipLevelRow,
 } from "./vip-levels-validate-client";
 import {
@@ -129,6 +130,13 @@ export const VipLevelsTab = () => {
   // Only needed to seed the very first rung of an empty ladder — every other
   // rung inherits its tier from the one above.
   const fallbackTier = boxesData?.boxes?.[0]?.tier ?? "a";
+  // The Voucher column is gone, but the shipped ladder violates the voucher
+  // cap (L90, L100), and a save rejects the WHOLE ladder on it. Rather than
+  // leave the tab a dead end — no input to fix a field that blocks everything
+  // else — the column comes back for as long as any rung is out of range, with
+  // an input on the offending rows only. Same shape as the frame_unlock escape
+  // hatch below: never trap legacy data as unclearable.
+  const repairVouchers = rows.some((r) => voucherOutOfRange(r.voucherInput));
   const dirty = snapshotOf(rows) !== savedSnapshot;
   const errors = validateVipLevelsClient(rows);
   const reasonValid = reason.trim().length > 0;
@@ -323,6 +331,9 @@ export const VipLevelsTab = () => {
                 <Table.Row>
                   <Table.HeaderCell>Level</Table.HeaderCell>
                   <Table.HeaderCell>Threshold (RM)</Table.HeaderCell>
+                  {repairVouchers && (
+                    <Table.HeaderCell>Voucher (RM)</Table.HeaderCell>
+                  )}
                   <Table.HeaderCell>Frame</Table.HeaderCell>
                   <Table.HeaderCell>Actions</Table.HeaderCell>
                 </Table.Row>
@@ -360,6 +371,25 @@ export const VipLevelsTab = () => {
                           }
                         />
                       </Table.Cell>
+                      {repairVouchers && (
+                        <Table.Cell>
+                          {voucherOutOfRange(r.voucherInput) ? (
+                            <Input
+                              aria-label={`Level ${level} voucher`}
+                              value={r.voucherInput}
+                              onChange={(e) =>
+                                setRow(r.localId, {
+                                  voucherInput: e.target.value,
+                                })
+                              }
+                            />
+                          ) : (
+                            <Text size="small" className="text-ui-fg-subtle">
+                              {money(r.voucherInput)}
+                            </Text>
+                          )}
+                        </Table.Cell>
+                      )}
                       <Table.Cell>
                         {/* Off-decade frames are illegal, but legacy data may
                             already carry one - never trap it as unclearable. */}
