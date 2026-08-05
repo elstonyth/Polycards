@@ -130,13 +130,6 @@ export const VipLevelsTab = () => {
   // Only needed to seed the very first rung of an empty ladder — every other
   // rung inherits its tier from the one above.
   const fallbackTier = boxesData?.boxes?.[0]?.tier ?? "a";
-  // The Voucher column is gone, but the shipped ladder violates the voucher
-  // cap (L90, L100), and a save rejects the WHOLE ladder on it. Rather than
-  // leave the tab a dead end — no input to fix a field that blocks everything
-  // else — the column comes back for as long as any rung is out of range, with
-  // an input on the offending rows only. Same shape as the frame_unlock escape
-  // hatch below: never trap legacy data as unclearable.
-  const repairVouchers = rows.some((r) => voucherOutOfRange(r.voucherInput));
   const dirty = snapshotOf(rows) !== savedSnapshot;
   const errors = validateVipLevelsClient(rows);
   const reasonValid = reason.trim().length > 0;
@@ -294,6 +287,16 @@ export const VipLevelsTab = () => {
       </div>
 
       {groups.map((g) => {
+        // The Voucher column is gone, but the shipped ladder violates the
+        // voucher cap (L90, L100) and a save rejects the WHOLE ladder on it.
+        // Rather than leave the tab a dead end — no input to fix a field that
+        // blocks everything else — the column comes back for the decades that
+        // actually contain an out-of-range rung, and only there. Same shape as
+        // the frame_unlock escape hatch below: never trap legacy data as
+        // unclearable. A clean ladder shows this column nowhere.
+        const repairVouchers = g.rows.some((r) =>
+          voucherOutOfRange(r.voucherInput),
+        );
         const issues = errors.filter((e) => {
           const level = levelInMessage(e);
           return (
