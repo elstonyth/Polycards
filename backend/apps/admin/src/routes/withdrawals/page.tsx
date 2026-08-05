@@ -106,21 +106,34 @@ const WithdrawalsPage = () => {
         ) : data.withdrawals.length === 0 ? (
           <div className="border-t px-6 py-8">
             <Text className="text-ui-fg-subtle">
-              {view === 'all'
-                ? t('withdrawals.emptyAll')
-                : t('withdrawals.emptyView', {
-                    view: t(`withdrawals.view.${view}`),
-                  })}
+              {data.total > 0
+                ? t('withdrawals.emptyPage', { total: data.total })
+                : view === 'all'
+                  ? t('withdrawals.emptyAll')
+                  : t('withdrawals.emptyView', {
+                      view: t(`withdrawals.view.${view}`),
+                    })}
             </Text>
-            {view !== 'all' && (
+            {data.total > 0 ? (
               <Button
                 size="small"
                 variant="secondary"
                 className="mt-3"
-                onClick={() => changeView('all')}
+                onClick={() => setPage(0)}
               >
-                {t('withdrawals.showAll')}
+                {t('withdrawals.firstPage')}
               </Button>
+            ) : (
+              view !== 'all' && (
+                <Button
+                  size="small"
+                  variant="secondary"
+                  className="mt-3"
+                  onClick={() => changeView('all')}
+                >
+                  {t('withdrawals.showAll')}
+                </Button>
+              )
             )}
           </div>
         ) : (
