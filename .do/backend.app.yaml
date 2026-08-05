@@ -327,12 +327,26 @@ envs:
     scope: RUN_TIME
     type: SECRET
     value: __SECRET__GLOBEPAY_MERCHANT_PRIVATE_KEY__
-  # Withdrawals stay OFF for the first cutover: deposits are the launch path and
-  # nothing has ever been paid out through this account. To arm them, add
-  # GLOBEPAY_WITHDRAWALS_ENABLED=true plus GLOBEPAY_WITHDRAW_NOTIFY_URL
-  # (…/hooks/globepay/withdrawal) and GLOBEPAY_PAYOUT_VERIFY_URL
-  # (…/hooks/globepay/payout-verify), and set NEXT_PUBLIC_WITHDRAWALS_ENABLED on
-  # the storefront in the same window.
+  # Withdrawals ARMED 2026-08-05 (operator decision: test both money directions
+  # on production as soon as the API whitelist is fixed). They stayed OFF for
+  # the first cutover; nothing has ever been paid out through this account, so
+  # the FIRST payout is the live test of the whole loop — including Payout
+  # Verification, which the back office shows ACTIVE on this merchant
+  # (2026-08-05 portal read; the setup doc's "inactive" note was the STAGING
+  # account). Their §1.7 flow POSTs the withdrawal to GLOBEPAY_PAYOUT_VERIFY_URL
+  # and pays only on a literal "success" — hooks/globepay/payout-verify checks
+  # the row exists, is pending, and the amount+currency match what we debited.
+  # NEXT_PUBLIC_WITHDRAWALS_ENABLED flips on the storefront in the same window
+  # (Dockerfile ARG default + .do/storefront.app.yaml, both).
+  - key: GLOBEPAY_WITHDRAWALS_ENABLED
+    scope: RUN_TIME
+    value: "true"
+  - key: GLOBEPAY_WITHDRAW_NOTIFY_URL
+    scope: RUN_TIME
+    value: https://admin.polycards.gg/hooks/globepay/withdrawal
+  - key: GLOBEPAY_PAYOUT_VERIFY_URL
+    scope: RUN_TIME
+    value: https://admin.polycards.gg/hooks/globepay/payout-verify
 
 # Dedicated outbound IPs. DO assigns one per component (the service makes the
 # customer-facing calls, the worker runs the reconciliation sweeps) and

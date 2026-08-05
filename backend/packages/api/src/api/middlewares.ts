@@ -617,6 +617,34 @@ export default defineMiddlewares({
       middlewares: [authenticate('customer', ['bearer'])],
     },
     {
+      // Saved payout accounts (GET /store/credits/withdraw/accounts) — the
+      // withdraw form's picker source. Per-customer metadata read, so it
+      // shares the store read budget.
+      matcher: '/store/credits/withdraw/accounts',
+      method: 'GET',
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+    },
+    {
+      // Add/remove a saved payout account — metadata writes on the delivery
+      // write-tier budget (rare, deliberate mutations; NOT the appearance
+      // budget, which exists for rapid cosmetic swaps). The actual payout
+      // still re-validates on submit; these only shape the picker.
+      matcher: '/store/credits/withdraw/accounts',
+      method: 'POST',
+      middlewares: [
+        authenticate('customer', ['bearer']),
+        deliveryWriteRateLimit,
+      ],
+    },
+    {
+      matcher: '/store/credits/withdraw/accounts',
+      method: 'DELETE',
+      middlewares: [
+        authenticate('customer', ['bearer']),
+        deliveryWriteRateLimit,
+      ],
+    },
+    {
       // Reward redemption writes — claim a grant, withdraw a
       // vaulted prize. All state/money mutations, so they share the delivery
       // write-tier budget (the same family as topup/buyback/delivery). The

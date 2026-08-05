@@ -39,7 +39,7 @@ salt=aesKey, 1000 iters, 32 bytes)`, `AES-256-CBC` + PKCS7, random 16-byte IV
 | `GLOBEPAY_RETURN_URL`           | where the customer lands after paying |
 | `GLOBEPAY_WITHDRAWALS_ENABLED`  | `true` to arm payouts — a SECOND switch on top of `GLOBEPAY_ENABLED`; deposits can ship without it |
 | `GLOBEPAY_WITHDRAW_NOTIFY_URL`  | their POST target for payout outcomes |
-| `GLOBEPAY_PAYOUT_VERIFY_URL`    | their POST target for Payout Verification (inactive on our account) |
+| `GLOBEPAY_PAYOUT_VERIFY_URL`    | their POST target for Payout Verification — **ACTIVE on the production merchant** (portal read 2026-08-05; the "inactive" note below is the STAGING account), so the route must answer or payouts stall |
 | `GLOBEPAY_CURRENCY`             | optional, defaults to `MYR` |
 
 Set the withdrawal three only when payouts are meant to be live: without them

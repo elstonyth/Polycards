@@ -9,9 +9,22 @@ import { createRoot, type Root } from 'react-dom/client';
 
 const fetchWithdrawBanks = vi.fn();
 const startWithdrawal = vi.fn();
+// Both arrived with the saved-accounts prefill. These cases are about the money
+// guards, not the picker, so the read defaults to "no saved accounts" — also the
+// no-prefill path, leaving every assertion below reading the same empty form it
+// always did. The write is on the submit path (the save checkbox defaults on)
+// and is fire-and-forget, so it only has to resolve rather than throw; a missing
+// export here surfaces as the form's generic error and masks the real assertion.
+const fetchSavedBankAccounts = vi.fn(async () => ({ ok: true, accounts: [] }));
+const addSavedBankAccount = vi.fn(async (_input: unknown) => ({
+  ok: true,
+  accounts: [],
+}));
 vi.mock('@/lib/actions/vault', () => ({
   fetchWithdrawBanks: (...args: unknown[]) => fetchWithdrawBanks(...args),
   startWithdrawal: (...args: unknown[]) => startWithdrawal(...args),
+  fetchSavedBankAccounts: () => fetchSavedBankAccounts(),
+  addSavedBankAccount: (input: unknown) => addSavedBankAccount(input),
 }));
 
 import WithdrawForm from '../WithdrawForm';
