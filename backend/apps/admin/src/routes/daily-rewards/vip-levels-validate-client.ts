@@ -5,11 +5,6 @@
 // index+1, not an input.
 export const FRAME_LEVELS = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
 
-// COUPLED MIRROR of modules/packs/voucher-ranges.ts. Kept as a literal —
-// separate builds, no shared package (same convention as
-// lib/purchase-invoice-form.ts).
-const MAX_VOUCHER_MYR = 10_000;
-
 export interface VipLevelRow {
   thresholdInput: string;
   voucherInput: string;
@@ -40,16 +35,11 @@ export function validateVipLevelsClient(rows: VipLevelRow[]): string[] {
         errors.push(`Level ${level}: threshold must exceed level ${level - 1}'s.`);
       prev = t;
     }
-    const v = num(r.voucherInput);
-    if (!Number.isFinite(v) || v < 0 || v > MAX_VOUCHER_MYR)
-      errors.push(
-        `Level ${level}: voucher amount must be between 0 and ${MAX_VOUCHER_MYR.toLocaleString('en-US')}.`,
-      );
-    // referralInput / boxTier are deliberately NOT checked here. Neither is
-    // editable on the tab any more, so a failure would be a permanent,
-    // uncorrectable block on saving the whole ladder. Both bounds are still
-    // enforced server-side (vip-levels-validate.ts + the box_tier-exists
-    // lookup in the service), which surfaces as a toast instead.
+    // voucherInput / referralInput / boxTier are deliberately NOT checked here.
+    // None is editable on the tab any more, so a failure would be a permanent,
+    // uncorrectable block on saving the whole ladder. Every one of those bounds
+    // is still enforced server-side (vip-levels-validate.ts + the box_tier-
+    // exists lookup in the service), which surfaces as a toast instead.
     if (r.frameUnlock && !FRAME_LEVELS.includes(level))
       errors.push(
         `Level ${level}: a frame can only unlock on a decade level (10, 20, … 100).`,

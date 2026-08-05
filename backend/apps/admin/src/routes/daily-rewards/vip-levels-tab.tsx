@@ -45,12 +45,18 @@ const rowFromDTO = (l: VipLevelDTO): Row => ({
   frameUnlock: l.frame_unlock,
   referralInput: String(l.direct_referral_pct),
 });
-// Box tier and referral % are no longer edited on this tab (both surfaces are
-// suspended), but they are still LIVE server-side — box_tier picks the daily
-// box and must name a real reward box tier, direct_referral_pct pays sponsor
-// commission. So they stay in the buffer and round-trip untouched on save, and
-// a new rung INHERITS them from the rung above rather than resetting to the
-// first tier / 1% — with no editor, a silent reset would be unfixable here.
+// Voucher, box tier and referral % are no longer edited on this tab (all three
+// surfaces are suspended), but all three are still LIVE server-side —
+// voucher_amount mints a voucher on level-up when > 0 (rewardsForLevel),
+// box_tier picks the daily box and must name a real reward box tier,
+// direct_referral_pct pays sponsor commission. So they stay in the buffer and
+// round-trip untouched on save.
+//
+// A new rung INHERITS box tier and referral % from the rung above rather than
+// resetting to the first tier / 1% — with no editor, a silent reset would be
+// unfixable here. Voucher deliberately does NOT inherit: 0 means "grants
+// nothing", the safe default for a credit-minting lever. Inheriting would
+// silently mint a payout on a rung nobody priced.
 const blankRow = (inheritFrom: Row | undefined, fallbackTier: string): Row => ({
   localId: `vl-${nextId++}`,
   thresholdInput: "0",
@@ -78,14 +84,6 @@ const money = (s: string): string => {
   const n = Number(s);
   return s.trim() !== "" && Number.isFinite(n) ? n.toLocaleString() : s;
 };
-
-// Consecutive rows mostly repeat; only the rows where something *changes* carry
-// information. Marked with a leading accent rather than by dimming the repeats:
-// these are editable fields and must stay full-contrast.
-const changeMark = (changed: boolean): string =>
-  changed
-    ? "border-l-2 border-ui-tag-orange-icon pl-2"
-    : "border-l-2 border-transparent pl-2";
 
 const levelInMessage = (message: string): number | null => {
   const m = /Level (\d+)/.exec(message);
@@ -325,7 +323,6 @@ export const VipLevelsTab = () => {
                 <Table.Row>
                   <Table.HeaderCell>Level</Table.HeaderCell>
                   <Table.HeaderCell>Threshold (RM)</Table.HeaderCell>
-                  <Table.HeaderCell>Voucher (RM)</Table.HeaderCell>
                   <Table.HeaderCell>Frame</Table.HeaderCell>
                   <Table.HeaderCell>Actions</Table.HeaderCell>
                 </Table.Row>
@@ -334,7 +331,6 @@ export const VipLevelsTab = () => {
                 {g.rows.map((r, j) => {
                   const i = g.startIndex + j;
                   const level = i + 1;
-                  const prev = i > 0 ? rows[i - 1] : undefined;
                   // FRAME_LEVELS is the authority, not level % 10: it caps at 100, so an
                   // appended level 110 must not advertise a slot the validator rejects.
                   const frameSlot = FRAME_LEVELS.includes(level);
@@ -363,23 +359,6 @@ export const VipLevelsTab = () => {
                             })
                           }
                         />
-                      </Table.Cell>
-                      <Table.Cell>
-                        <div
-                          className={changeMark(
-                            !!prev && prev.voucherInput !== r.voucherInput,
-                          )}
-                        >
-                          <Input
-                            aria-label={`Level ${level} voucher`}
-                            value={r.voucherInput}
-                            onChange={(e) =>
-                              setRow(r.localId, {
-                                voucherInput: e.target.value,
-                              })
-                            }
-                          />
-                        </div>
                       </Table.Cell>
                       <Table.Cell>
                         {/* Off-decade frames are illegal, but legacy data may

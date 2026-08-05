@@ -43,39 +43,28 @@ describe('validateVipLevelsClient', () => {
     );
   });
 
-  test('flags a negative voucher', () => {
-    const errs = validateVipLevelsClient([row({ voucherInput: '-1' })]);
-    expect(errs.some((e) => /voucher/.test(e))).toBe(true);
-  });
-
-  test('flags a voucher amount above the 10,000 ceiling, accepts the ceiling itself', () => {
-    const errs = validateVipLevelsClient([row({ voucherInput: '10001' })]);
+  // None of these three has an editor on the tab any more, so a client error on
+  // one would be an uncorrectable block on saving the WHOLE ladder — there is
+  // no field to go and fix. All three bounds are still enforced server-side
+  // (vip-levels-validate.ts + the box_tier-exists lookup); this pins that the
+  // CLIENT stays quiet about them.
+  test('does not block the ladder on voucher, referral % or box tier', () => {
     expect(
-      errs.some((e) => /voucher amount must be between 0 and 10,000/.test(e)),
-    ).toBe(true);
-    expect(validateVipLevelsClient([row({ voucherInput: '10000' })])).toEqual(
-      [],
-    );
-  });
-
-  // Neither field has an editor on the tab any more, so a client error on one
-  // would be an uncorrectable block on saving the whole ladder. Both are still
-  // enforced server-side; this pins that the CLIENT stays quiet about them.
-  test('does not block the ladder on referral % or box tier', () => {
-    expect(
-      validateVipLevelsClient([row({ referralInput: '101', boxTier: '' })]),
+      validateVipLevelsClient([
+        row({ voucherInput: '999999', referralInput: '101', boxTier: '' }),
+      ]),
     ).toEqual([]);
     expect(
-      validateVipLevelsClient([row({ referralInput: '', boxTier: '   ' })]),
+      validateVipLevelsClient([
+        row({ voucherInput: '-1', referralInput: '', boxTier: '   ' }),
+      ]),
     ).toEqual([]);
   });
 
-  test('flags blank inputs instead of coercing them to 0', () => {
-    const errs = validateVipLevelsClient([
-      row(),
-      row({ thresholdInput: '', voucherInput: ' ' }),
-    ]);
+  // Threshold is the one money-shaped field still edited here, so its
+  // blank-is-not-zero guard has to survive the other three losing theirs.
+  test('flags a blank threshold instead of coercing it to 0', () => {
+    const errs = validateVipLevelsClient([row(), row({ thresholdInput: '' })]);
     expect(errs.some((e) => /Level 2: threshold must be a number/.test(e))).toBe(true);
-    expect(errs.some((e) => /Level 2: voucher amount/.test(e))).toBe(true);
   });
 });
