@@ -6,6 +6,7 @@
 // glide-out. Mounted by SlotMachineClient once the reel has settled.
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { motion } from 'motion/react';
+import { Loader2 } from 'lucide-react';
 import { SLAB_ASPECT } from '@/components/SlabImage';
 import type { WonCard } from '@/lib/actions/packs';
 import type { SellBackOffer, SellBackFn, RevealFn } from './useSellWindow';
@@ -83,6 +84,11 @@ export function RevealStage({
       onSold,
     });
 
+  // A sell that is still on the wire. useSellWindow's expiry sweep deliberately
+  // leaves a 'selling' card alone (every other phase flips to 'vaulted'), so
+  // this stays true across the deadline — which is exactly when it's needed.
+  const selling = states.some((s) => s.phase === 'selling');
+
   const anyTop = cards.some((c) => isTopRarity(c.rarity));
   // Firmness is global per batch (one FX rate), but derive per-offer anyway:
   // no firm offer ⇒ nothing is sellable now ⇒ no countdown-pressure clock.
@@ -112,9 +118,14 @@ export function RevealStage({
   // (the expiry effect flips idle states to 'vaulted', which satisfies both) the
   // deps change and the timer restarts once. Harmless — the ceiling is 2.8s, and
   // the alternative is latching state to shave a beat off a wait nobody times.
-  // A sell still IN FLIGHT when the clock runs out gets torn down with the rest,
-  // so its "+RM x credited" may never show; the credit still lands (it is
-  // server-authoritative and refreshBalance has already fired).
+  // `!selling` holds the stage open for a sell still on the wire when the clock
+  // runs out. Without it, expiry starts the 1.4s teardown regardless and the
+  // player watching the confirm modal's spinner gets the whole stage yanked
+  // mid-action. (Before the modal stayed mounted across the request this only
+  // cost the "+RM x credited" footer, which is what the note here used to say.)
+  // The credit was always safe — it's server-authoritative and refreshBalance
+  // has already fired — but the interaction read as a crash. `selling` cannot
+  // stick: useSellWindow.sell sets a terminal phase in both try and catch.
   // Demo has its own explicit exit buttons AND reads as concluded instantly
   // (all-null offers), so it must never enter this path.
   // `|| expired`, not `allConcluded` alone. Expiry normally flips every unsold
@@ -139,12 +150,18 @@ export function RevealStage({
   // early. `expired` already implies flipped (useSellWindow's `active` is
   // `phase === 'review' && flipped`), so this only constrains the other branch.
   useEffect(() => {
-    if (demo || !flipped || phase !== 'review' || !(allConcluded || expired)) {
+    if (
+      demo ||
+      !flipped ||
+      phase !== 'review' ||
+      selling ||
+      !(allConcluded || expired)
+    ) {
       return;
     }
     const id = window.setTimeout(onConclude, 1400);
     return () => clearTimeout(id);
-  }, [demo, flipped, phase, allConcluded, expired, onConclude]);
+  }, [demo, flipped, phase, selling, allConcluded, expired, onConclude]);
 
   // Close the instant-buyback window when the reveal ends. This component
   // unmounts when the reveal auto-concludes (phase→idle, above) or the player
@@ -278,8 +295,11 @@ export function RevealStage({
           type="button"
           onClick={() => setConfirmIndex(i)}
           disabled={!flipped || state.phase === 'selling'}
-          className="inline-flex h-12 w-full items-center justify-center rounded-xl border border-chase/50 bg-chase/10 text-sm font-bold text-chase transition-colors hover:bg-chase/20 disabled:opacity-50"
+          className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-chase/50 bg-chase/10 text-sm font-bold text-chase transition-colors hover:bg-chase/20 disabled:opacity-50"
         >
+          {state.phase === 'selling' && (
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+          )}
           {state.phase === 'selling'
             ? 'Selling…'
             : `Sell for ${rm(offer.amount)} (${offer.percent}%)`}
@@ -424,10 +444,21 @@ export function RevealStage({
           busy={states[confirmIndex]?.phase === 'selling'}
           onConfirm={() => {
             const i = confirmIndex;
-            setConfirmIndex(null);
-            void sell(i).then((ok) => {
-              if (ok) play('count'); // credit tally tick roll
-            });
+            // Hold the modal open for the round-trip so its busy spinner is the
+            // thing the user watches — their eyes are already on the button they
+            // just pressed. Closing first left them staring at a static stage
+            // with nothing moving. A failed sell still closes; the error copy
+            // renders under the card's own Sell button (state.phase 'error').
+            // .finally, not .then: every way out of this modal is gated on
+            // !busy, so a rejected sell that skipped the close would wedge the
+            // page (scroll locked, Escape/backdrop/Cancel all inert) on a money
+            // action. `sell` catches internally today — this keeps that from
+            // being load-bearing.
+            void sell(i)
+              .then((ok) => {
+                if (ok) play('count'); // credit tally tick roll
+              })
+              .finally(() => setConfirmIndex(null));
           }}
           onCancel={() => setConfirmIndex(null)}
         />

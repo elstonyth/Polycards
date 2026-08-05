@@ -68,6 +68,14 @@ export type ResolvedPack = Pack & {
   icon: string;
 };
 
+/** A pack's detail-page URL, opened on `qty`. `Pack.id` IS the backend slug, so
+ *  encode it — an operator-created slug carrying `?`, `#` or a space would
+ *  otherwise build a broken link. Shared by the /slots catalog and the home
+ *  ladder so the two can't drift on shape or encoding. */
+export function packHref(id: string, qty: number): string {
+  return `/slots/${encodeURIComponent(id)}?count=${qty}`;
+}
+
 /** Numeric price, e.g. "RM 1,000" -> 1000. SORTING/BUCKETING ONLY — the string
  *  it parses is the ROUNDED display, so it can disagree with what the customer
  *  is actually charged. Money math reads `Pack.priceValue`. */
