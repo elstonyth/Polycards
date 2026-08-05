@@ -397,6 +397,15 @@ export default defineMiddlewares({
       middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
     },
     {
+      // Vault unread-dot signal (GET /store/vault/latest). A separate entry
+      // because the matcher above is EXACT — the same reason
+      // '/store/vault/buyback-batch' needed its own. Shares the read budget
+      // with vault/credits/vip/notifications: it is a one-row indexed read,
+      // and the client throttles itself to one call per 30s per session.
+      matcher: '/store/vault/latest',
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+    },
+    {
       // Instant sell-back (POST /store/vault/:id/buyback).
       matcher: '/store/vault/*/buyback',
       middlewares: [

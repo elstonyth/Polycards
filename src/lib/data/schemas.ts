@@ -240,6 +240,12 @@ export const VaultShowcaseSchema = z.looseObject({
 /** GET /store/credits — finite balance. */
 export const BalanceSchema = z.looseObject({ balance: finite });
 
+/** GET /store/vault/latest — the newest vault-visible event (unread-dot signal).
+ *  null when the vault is empty; the client renders no dot for null. */
+export const VaultLatestSchema = z.looseObject({
+  latest_event_at: z.string().nullable(),
+});
+
 /** GET /store/credits — lifetime totals (balance is also validated by BalanceSchema).
  *  `has_more` (pagination) is optional so an older backend still parses. */
 export const CreditsSchema = z.looseObject({

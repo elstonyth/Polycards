@@ -11,6 +11,7 @@ import { useAuth } from '@/components/auth/AuthProvider';
 import NotificationBell from '@/components/NotificationBell';
 import { Pill } from '@/components/ui/pill';
 import { useTopUp } from './TopUpProvider';
+import { useVaultDot } from './VaultDotProvider';
 import { TABS, isTabActive } from './tabs';
 
 const LOGO_SRC = '/branding/polycards-logo.png';
@@ -24,6 +25,7 @@ export default function AppHeader() {
   const pathname = usePathname();
   const { customer, isLoading } = useAuth();
   const { balance, openTopUp } = useTopUp();
+  const { show: vaultDot } = useVaultDot();
 
   return (
     <header
@@ -55,6 +57,7 @@ export default function AppHeader() {
             {TABS.map((tab) => {
               const active = isTabActive(tab, pathname);
               const Icon = tab.icon;
+              const dot = vaultDot && tab.href === '/vault';
               return (
                 <Link
                   key={tab.href}
@@ -69,6 +72,7 @@ export default function AppHeader() {
                       : undefined
                   }
                   aria-current={active ? 'page' : undefined}
+                  aria-label={dot ? `${tab.label}, new items` : undefined}
                   className={cn(
                     'flex h-10 items-center gap-2 rounded-full px-3.5 text-[13px] font-semibold transition-colors',
                     active
@@ -76,7 +80,22 @@ export default function AppHeader() {
                       : 'text-neutral-400 hover:bg-white/5 hover:text-white',
                   )}
                 >
-                  <Icon className="h-4 w-4" aria-hidden />
+                  <span className="relative inline-flex">
+                    <Icon className="h-4 w-4" aria-hidden />
+                    {dot && (
+                      // The active pill is bg-neutral-50, so Paper White would
+                      // vanish on it. Normally moot (being on /vault clears the
+                      // dot), but reachable: a pull can land while the customer
+                      // sits on the page and the next focus refresh relights it.
+                      <span
+                        aria-hidden
+                        className={cn(
+                          'absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full',
+                          active ? 'bg-neutral-950' : 'bg-neutral-50',
+                        )}
+                      />
+                    )}
+                  </span>
                   {tab.label}
                 </Link>
               );

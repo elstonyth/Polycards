@@ -6,6 +6,7 @@ import AppHeader from '@/components/app-shell/AppHeader';
 import SiteFooter from '@/components/app-shell/SiteFooter';
 import TabBar from '@/components/app-shell/TabBar';
 import { TopUpProvider } from '@/components/app-shell/TopUpProvider';
+import { VaultDotProvider } from '@/components/app-shell/VaultDotProvider';
 import { AuthProvider } from '@/components/auth/AuthProvider';
 import SkipLink from '@/components/SkipLink';
 import CookieConsent from '@/components/CookieConsent';
@@ -89,15 +90,17 @@ export default async function RootLayout({
         <MetaPixel />
         <AuthProvider>
           <TopUpProvider>
-            <SkipLink />
-            <AppHeader />
-            <main id="main" className="flex-1 pb-12 lg:pb-8">
-              {children}
-            </main>
-            {/* Footer carries the TabBar clearance (pb-28) on phones. */}
-            <SiteFooter />
-            <TabBar />
-            <CookieConsent />
+            <VaultDotProvider>
+              <SkipLink />
+              <AppHeader />
+              <main id="main" className="flex-1 pb-12 lg:pb-8">
+                {children}
+              </main>
+              {/* Footer carries the TabBar clearance (pb-28) on phones. */}
+              <SiteFooter />
+              <TabBar />
+              <CookieConsent />
+            </VaultDotProvider>
           </TopUpProvider>
         </AuthProvider>
       </body>

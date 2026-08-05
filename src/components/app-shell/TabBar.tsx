@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { openAuth } from '@/components/AuthButton';
 import { useAuth } from '@/components/auth/AuthProvider';
+import { useVaultDot } from './VaultDotProvider';
 import { TABS, isTabActive } from './tabs';
 
 /**
@@ -15,6 +16,7 @@ import { TABS, isTabActive } from './tabs';
 export default function TabBar() {
   const pathname = usePathname();
   const { customer, isLoading } = useAuth();
+  const { show: vaultDot } = useVaultDot();
 
   return (
     <nav
@@ -26,6 +28,7 @@ export default function TabBar() {
         {TABS.map((tab) => {
           const active = isTabActive(tab, pathname);
           const Icon = tab.icon;
+          const dot = vaultDot && tab.href === '/vault';
           return (
             <Link
               key={tab.href}
@@ -42,6 +45,7 @@ export default function TabBar() {
                   : undefined
               }
               aria-current={active ? 'page' : undefined}
+              aria-label={dot ? `${tab.label}, new items` : undefined}
               className={cn(
                 'flex flex-1 flex-col items-center justify-center gap-1 transition-colors',
                 active
@@ -49,11 +53,19 @@ export default function TabBar() {
                   : 'text-neutral-400 hover:text-neutral-300',
               )}
             >
-              <Icon
-                className={cn('h-6 w-6', active && 'scale-105')}
-                strokeWidth={active ? 2.25 : 2}
-                aria-hidden
-              />
+              <span className="relative inline-flex">
+                <Icon
+                  className={cn('h-6 w-6', active && 'scale-105')}
+                  strokeWidth={active ? 2.25 : 2}
+                  aria-hidden
+                />
+                {dot && (
+                  <span
+                    aria-hidden
+                    className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-neutral-50"
+                  />
+                )}
+              </span>
               <span className="text-[10px] font-semibold leading-none">
                 {tab.label}
               </span>

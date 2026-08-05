@@ -24,6 +24,7 @@ import {
   VaultItemSchema,
   VaultShowcaseSchema,
   BalanceSchema,
+  VaultLatestSchema,
   AmountBalanceSchema,
   BuybackResultSchema,
   DepositStartSchema,
@@ -108,6 +109,28 @@ export async function getCreditBalance(): Promise<number | null> {
     return credit ? credit.balance : null;
   } catch (error) {
     logger.error('[vault] balance read failed:', error);
+    return null;
+  }
+}
+
+// The newest vault-visible event for the caller — the Vault tab's unread-dot
+// signal. Deliberately not folded into getVault(): the dot is read from every
+// page, and must not pay for a 500-item vault list. Null = logged out, empty
+// vault, or a failed read; callers render no dot rather than a wrong one.
+export async function getVaultLatest(): Promise<string | null> {
+  const token = await getAuthToken();
+  if (!token) return null;
+  try {
+    const parsed = parseOne(
+      VaultLatestSchema,
+      await sdk.client.fetch('/store/vault/latest', {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
+      }),
+    );
+    return parsed?.latest_event_at ?? null;
+  } catch (error) {
+    logger.error('[vault] latest-event read failed:', error);
     return null;
   }
 }
