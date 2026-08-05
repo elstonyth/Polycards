@@ -4,9 +4,10 @@
 
 ## Why
 
-Home's job changes: every product tap now routes to `/slots` (the catalog), never a
-pack detail page. That makes home a **hype funnel** — the movie trailer, not the
-store. This redesign rebuilds the home sections (and lightly the app shell) as a
+Home's job changes: product taps route to `/slots` (the catalog) rather than a
+pack detail page — with one exception added 2026-08-06, the RIP A PACK ladder
+rows, which deep-link to the pack each row names (see "The routing rule" below).
+That makes home a **hype funnel** — the movie trailer, not the store. This redesign rebuilds the home sections (and lightly the app shell) as a
 phone-first editorial scroll story in the shipped Midnight Rip system
 (`DESIGN.md`), with hypebeast-drop energy: huge Nekst lockups, a tier ladder,
 data marquees, one white pill per zone.

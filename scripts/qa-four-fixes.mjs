@@ -66,27 +66,59 @@ try {
     await page.waitForTimeout(400);
     await panel.screenshot({ path: `${OUT}/${name}.png` });
 
-    // The meter must survive the restructure — the sr-only probe QA relies on.
-    const meter = panel.locator('[role="meter"]');
+    // The meter contract must survive any restructure — this repo's own QA
+    // probes the sr-only meter rather than the animated readout. Assert it
+    // rather than log it: `getAttribute` on a vanished element returns null,
+    // which a log-only check reports as a clean pass.
+    const meters = panel.locator('[role="meter"]');
+    const meterCount = await meters.count();
+    const meterAttrs =
+      meterCount === 1
+        ? await meters.evaluate((el) => ({
+            min: el.getAttribute('aria-valuemin'),
+            max: el.getAttribute('aria-valuemax'),
+            now: el.getAttribute('aria-valuenow'),
+            label: el.getAttribute('aria-label'),
+          }))
+        : null;
+    const now = Number(meterAttrs?.now);
+    const meterOk =
+      meterCount === 1 &&
+      meterAttrs?.min === '0' &&
+      meterAttrs?.max === '100' &&
+      Number.isFinite(now) &&
+      now >= 0 &&
+      now <= 100 &&
+      !!meterAttrs?.label;
     console.log(
-      `[${name}] meter aria-valuenow=${await meter.getAttribute('aria-valuenow')}`,
+      `[${name}] meters=${meterCount} attrs=${JSON.stringify(meterAttrs)}`,
     );
+    if (!meterOk) {
+      console.log(`[${name}] FAIL — meter contract missing or out of range`);
+      process.exitCode = 1;
+    }
 
-    // Checkpoint anchors (one per stage, siblings of the track) must not
-    // overlap on a narrow bar, and every threshold label must render at the
-    // same size — a transform on the pill used to shrink its label with it.
+    // Checkpoints must not overlap on a narrow bar; every threshold label must
+    // render at the same size (a transform on the pill used to shrink its label
+    // with it) and stay inside the track (the 100% pill sits on the right edge,
+    // so a centred label there would hang past the bar).
+    // Guarded: boundingBox() on a missing locator waits out the full 30s
+    // timeout and then throws, which turns a clear FAIL into a hung crash and
+    // skips the remaining viewports.
+    const trackBox =
+      meterCount === 1 ? await meters.first().boundingBox() : null;
     const probe = await panel
-      .locator('[role="meter"] ~ span')
+      .locator('[data-challenge-checkpoint]')
       .evaluateAll((els) =>
         els
           .map((e) => {
             const r = e.getBoundingClientRect();
             const label = e.lastElementChild;
+            const lr = label?.getBoundingClientRect();
             return {
               box: [Math.round(r.left), Math.round(r.right)],
-              labelH: label
-                ? Math.round(label.getBoundingClientRect().height * 10) / 10
-                : 0,
+              labelH: lr ? Math.round(lr.height * 10) / 10 : 0,
+              labelBox: lr ? [Math.round(lr.left), Math.round(lr.right)] : null,
             };
           })
           .sort((a, b) => a.box[0] - b.box[0]),
@@ -98,15 +130,24 @@ try {
     // Labels are `hidden` below sm, so every height is 0 on the phone passes —
     // uniform, but vacuously so. Only the 1440 pass really tests the label size.
     const labelHeights = [...new Set(probe.map((p) => p.labelH))];
+    // Same reason: skip the containment check where the labels aren't rendered.
+    const labelOverflow = probe.some(
+      (p) =>
+        p.labelH > 0 &&
+        trackBox &&
+        p.labelBox &&
+        (p.labelBox[0] < Math.round(trackBox.x) - 1 ||
+          p.labelBox[1] > Math.round(trackBox.x + trackBox.width) + 1),
+    );
     console.log(
-      `[${name}] checkpoints=${boxes.length} overlap=${overlap} labelHeights=${JSON.stringify(labelHeights)} boxes=${JSON.stringify(boxes)}`,
+      `[${name}] checkpoints=${boxes.length} overlap=${overlap} labelHeights=${JSON.stringify(labelHeights)} labelOverflow=${labelOverflow} boxes=${JSON.stringify(boxes)}`,
     );
     // An empty match means the selector drifted, not that the bar is clean —
     // fail loudly rather than report a green pass that asserted nothing.
     if (boxes.length === 0) {
       console.log(`[${name}] FAIL — no checkpoints matched; selector drifted?`);
       process.exitCode = 1;
-    } else if (overlap || labelHeights.length > 1) {
+    } else if (overlap || labelHeights.length > 1 || labelOverflow) {
       process.exitCode = 1;
     }
     await ctx.close();

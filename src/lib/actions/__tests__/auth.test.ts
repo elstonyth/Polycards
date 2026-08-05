@@ -509,6 +509,24 @@ describe('googleLoginStart — callback_url host guard', () => {
     );
   });
 
+  it('location already carrying a prompt → overwritten, state preserved', async () => {
+    setHeaders({ host: 'polycards.gg', 'x-forwarded-proto': 'https' });
+    // Guards the `set` (not `append`) semantics: if the provider ever starts
+    // emitting its own `prompt`, we must replace it rather than send two.
+    mocks.clientFetch.mockResolvedValueOnce({
+      location:
+        'https://accounts.google.com/o/oauth2/v2/auth?state=keep-me&prompt=none',
+    });
+
+    const r = await googleLoginStart();
+
+    expect(r).toEqual({
+      ok: true,
+      location:
+        'https://accounts.google.com/o/oauth2/v2/auth?state=keep-me&prompt=select_account',
+    });
+  });
+
   it('malformed location → generic start error, nothing half-built returned', async () => {
     setHeaders({ host: 'polycards.gg', 'x-forwarded-proto': 'https' });
     mocks.clientFetch.mockResolvedValueOnce({ location: '/not-absolute' });

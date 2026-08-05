@@ -37,7 +37,9 @@ try {
         const meter = root.querySelector('[role="meter"]');
         meter?.setAttribute('aria-valuenow', String(pct));
         // Anchor span per stage; the pill and the label are its children.
-        const checks = [...root.querySelectorAll('[role="meter"] ~ span')];
+        const checks = [
+          ...root.querySelectorAll('[data-challenge-checkpoint]'),
+        ];
         let flipped = 0;
         checks.forEach((anchor, i) => {
           if (i >= completeCount) return;

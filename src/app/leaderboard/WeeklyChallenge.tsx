@@ -111,6 +111,10 @@ export function WeeklyChallenge({ challenge }: { challenge: Challenge }) {
                 // the text and dropping it out of line with the gold labels.
                 <span
                   key={s.stageNumber}
+                  // Stable hook for the QA script — it asserts checkpoint
+                  // spacing and label sizing, and structural selectors made
+                  // that silently skippable across a markup tweak.
+                  data-challenge-checkpoint=""
                   className={cn(
                     'absolute top-1/2 h-5 w-5 -translate-y-1/2 sm:h-6 sm:w-6',
                     s.pct > 90 ? 'right-0' : '-translate-x-1/2',
@@ -140,7 +144,11 @@ export function WeeklyChallenge({ challenge }: { challenge: Challenge }) {
                       carries them on mobile. */}
                   <span
                     className={cn(
-                      'absolute top-full left-1/2 mt-1.5 hidden -translate-x-1/2 text-[10px] font-semibold whitespace-nowrap sm:block',
+                      'absolute top-full mt-1.5 hidden text-[10px] font-semibold whitespace-nowrap sm:block',
+                      // Centred under its checkpoint, except the last one: that
+                      // pill sits ON the track's right edge, so a centred label
+                      // would hang half its width past the bar.
+                      s.pct > 90 ? 'right-0' : 'left-1/2 -translate-x-1/2',
                       done ? 'text-chase' : 'text-neutral-400',
                     )}
                   >
