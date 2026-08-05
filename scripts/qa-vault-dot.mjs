@@ -347,8 +347,8 @@ try {
       /^polycards\.credits_seen_at:cus_/.test(creditStamp[0] ?? ''),
     `money stamp is customer-scoped and its own namespace: ${creditStamp[0]}`,
   );
-  // The two dots must not share a stamp: clearing money must leave the vault
-  // dot alone. Both keys should now exist independently.
+  // The two dots must not share a stamp. This context never visited /vault, so
+  // the vault key should be ABSENT — proving clearing money wrote only its own.
   const vaultStamp = await moneyPage.evaluate(() =>
     Object.keys(window.localStorage).filter((k) =>
       k.startsWith('polycards.vault_seen_at'),

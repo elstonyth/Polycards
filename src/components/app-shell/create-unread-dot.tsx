@@ -57,7 +57,12 @@ function writeStamp(scope: DotScope, customerId: string, at: string): void {
  * copies drift apart is the real risk, so it lives here once.
  *
  * `fetchLatest` returns the surface's newest event as an ISO string, or null
- * for "nothing / logged out / the read failed". It must never throw.
+ * for "nothing / logged out / the read failed". Both callers below still guard
+ * against rejection: these are Server Actions, so the action CALL is a network
+ * round-trip that can reject on its own (offline, a 5xx from the action
+ * endpoint, a deployment-id mismatch) no matter how well the action body
+ * catches. A rejected mount read would otherwise leave state null and the dot
+ * dead for the whole session, silently.
  */
 export function createUnreadDot(
   scope: DotScope,
@@ -68,7 +73,7 @@ export function createUnreadDot(
   function useDot(): UnreadDot {
     const ctx = useContext(Ctx);
     if (!ctx) {
-      throw new Error(`use${scope} dot must be used within its provider`);
+      throw new Error(`the ${scope} dot must be used within its provider`);
     }
     return ctx;
   }
@@ -96,7 +101,12 @@ export function createUnreadDot(
       // flight would otherwise read a stale timestamp, pass the TTL check, and
       // fire a duplicate request.
       lastFetchRef.current = Date.now();
-      const latestAt = await fetchLatest();
+      let latestAt: string | null;
+      try {
+        latestAt = await fetchLatest();
+      } catch {
+        return; // keep whatever we last knew rather than blanking the dot
+      }
       if (gen !== genRef.current) return;
       setState((prev) => ({
         forId,
@@ -124,14 +134,17 @@ export function createUnreadDot(
       const forId = customer.id;
       const gen = ++genRef.current;
       lastFetchRef.current = Date.now();
-      void fetchLatest().then((latestAt) => {
-        if (gen !== genRef.current) return;
-        setState((prev) => ({
-          forId,
-          latestAt,
-          seenAt: prev?.forId === forId ? prev.seenAt : readStamp(scope, forId),
-        }));
-      });
+      void fetchLatest()
+        .catch(() => null)
+        .then((latestAt) => {
+          if (gen !== genRef.current) return;
+          setState((prev) => ({
+            forId,
+            latestAt,
+            seenAt:
+              prev?.forId === forId ? prev.seenAt : readStamp(scope, forId),
+          }));
+        });
     }, [customer]);
 
     // Refresh when the tab regains focus, throttled.

@@ -11,6 +11,7 @@ import {
   type SavedBankAccount,
   type WithdrawBank,
 } from '@/lib/actions/vault';
+import { useTopUp } from '@/components/app-shell/TopUpProvider';
 import { Pill } from '@/components/ui/pill';
 
 // The real payout band (mirrors the backend's GLOBEPAY_WD_MIN/MAX): RM 50 –
@@ -32,6 +33,10 @@ export default function WithdrawForm({
   /** The server's freeze/locked/playthrough-gated figure — NOT raw balance. */
   withdrawable: number | null;
 }) {
+  // The payout debits the balance server-side; repaint it here so the header
+  // chip is not stale, and so the money dot lights without waiting for a focus
+  // event (withdrawals are one of the movements it is meant to announce).
+  const { applyBalance } = useTopUp();
   const [banks, setBanks] = useState<WithdrawBank[] | null>(null);
   const [saved, setSaved] = useState<SavedBankAccount[]>([]);
   const [bankCode, setBankCode] = useState('');
@@ -136,6 +141,7 @@ export default function WithdrawForm({
           accountHolderName: holderName.trim(),
         }).catch(() => undefined);
       }
+      applyBalance(res.balance);
       setDone({
         amount: res.amount,
         balance: res.balance,
