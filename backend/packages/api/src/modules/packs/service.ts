@@ -4474,6 +4474,14 @@ class PacksModuleService extends MedusaService({
       to?: Date;
       limit: number;
       offset: number;
+      // Optional explicit ordering. The key is a closed union AND re-mapped
+      // through LEDGER_SORT_COLS below before touching SQL — this method
+      // string-concatenates ORDER BY, so nothing caller-supplied may ever be
+      // interpolated directly.
+      sort?: {
+        key: 'occurred_at' | 'display_id' | 'type';
+        dir: 'ASC' | 'DESC';
+      };
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ entries: LedgerEntryRow[]; total: number }> {
@@ -4505,10 +4513,20 @@ class PacksModuleService extends MedusaService({
       params.push(`%${input.q}%`, ...ids);
     }
     const where = clauses.join(' AND ');
+    // Fixed lookup table, NOT input.sort.key itself: the ORDER BY below is
+    // string-built, so the column name must come from OUR literal, with the
+    // typed key acting only as the lookup. `id` tiebreaker for stable paging.
+    const LEDGER_SORT_COLS = {
+      occurred_at: 'occurred_at',
+      display_id: 'display_id',
+      type: 'type',
+    } as const;
+    const sortCol = LEDGER_SORT_COLS[input.sort?.key ?? 'occurred_at'];
+    const sortDir = input.sort?.dir === 'ASC' ? 'ASC' : 'DESC';
     const entries = await em.execute<LedgerEntryRow[]>(
       'SELECT id, display_id, type, customer_id, occurred_at, wallet_delta, vault_delta, payload ' +
         `  FROM ledger_entry WHERE ${where} ` +
-        '  ORDER BY occurred_at DESC, id DESC LIMIT ? OFFSET ?',
+        `  ORDER BY ${sortCol} ${sortDir}, id ${sortDir} LIMIT ? OFFSET ?`,
       [...params, input.limit, input.offset],
     );
     const countRows = await em.execute<{ n: string }[]>(

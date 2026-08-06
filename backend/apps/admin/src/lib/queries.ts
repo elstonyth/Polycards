@@ -299,10 +299,11 @@ export const useDeliveryOrders = (
   page = 0,
   q?: string,
   customerId?: string,
+  sort?: string,
 ): UseQueryResult<DeliveryOrdersPage> =>
   useQuery({
-    queryKey: qk.deliveryOrders(status, page, q, customerId),
-    queryFn: () => listDeliveryOrders(status, page, q, 50, customerId),
+    queryKey: qk.deliveryOrders(status, page, q, customerId, sort),
+    queryFn: () => listDeliveryOrders(status, page, q, 50, customerId, sort),
     placeholderData: keepPreviousData,
   });
 
@@ -885,10 +886,11 @@ export const useSaveTierSettings = () => {
 export const useGlobePayDeposits = (
   page = 0,
   status: GlobePayDepositView = 'pending',
+  sort?: string,
 ): UseQueryResult<GlobePayDepositsResponse> =>
   useQuery({
-    queryKey: qk.globepayDeposits(page, status),
-    queryFn: () => getGlobePayDeposits(page, status),
+    queryKey: qk.globepayDeposits(page, status, sort),
+    queryFn: () => getGlobePayDeposits(page, status, 50, sort),
     placeholderData: keepPreviousData,
     refetchInterval: 60_000,
   });
@@ -899,10 +901,11 @@ export const useGlobePayDeposits = (
 export const useGlobePayWithdrawals = (
   page = 0,
   status: GlobePayWithdrawalView = 'pending',
+  sort?: string,
 ): UseQueryResult<GlobePayWithdrawalsResponse> =>
   useQuery({
-    queryKey: qk.globepayWithdrawals(page, status),
-    queryFn: () => getGlobePayWithdrawals(page, status),
+    queryKey: qk.globepayWithdrawals(page, status, sort),
+    queryFn: () => getGlobePayWithdrawals(page, status, 50, sort),
     placeholderData: keepPreviousData,
     refetchInterval: 60_000,
   });
@@ -927,10 +930,14 @@ export type { PlayerRow, PlayersPage, PayoutDetails } from './admin-rest';
 
 // Paged + searchable, but NOT id-scoped, so plain keepPreviousData is right
 // here (no stale-row-click hazard — the whole page swaps together).
-export const usePlayers = (page = 0, q?: string): UseQueryResult<PlayersPage> =>
+export const usePlayers = (
+  page = 0,
+  q?: string,
+  sort?: string,
+): UseQueryResult<PlayersPage> =>
   useQuery({
-    queryKey: qk.players(page, q),
-    queryFn: () => listPlayers(page, q),
+    queryKey: qk.players(page, q, sort),
+    queryFn: () => listPlayers(page, q, 50, sort),
     placeholderData: keepPreviousData,
   });
 
@@ -1101,10 +1108,11 @@ export const useLedger = (
   q?: string,
   from?: string,
   to?: string,
+  sort?: string,
 ): UseQueryResult<AdminLedgerPage> =>
   useQuery({
-    queryKey: qk.ledger(page, type, q, from, to),
-    queryFn: () => listLedger(page, { type, q, from, to }),
+    queryKey: qk.ledger(page, type, q, from, to, sort),
+    queryFn: () => listLedger(page, { type, q, from, to, sort }),
     placeholderData: keepPreviousData,
   });
 // ── Epic 5 (Inventory) ───────────────────────────────────────────────────────

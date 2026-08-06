@@ -18,6 +18,7 @@ import type {
   GlobePayWithdrawalView,
 } from '../../lib/admin-rest';
 import { rm, timeAgo } from '../../lib/format';
+import { useTableSort } from '../../lib/use-table-sort';
 import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
@@ -29,6 +30,11 @@ export const config: RouteConfig = {
 };
 
 const VIEWS: GlobePayWithdrawalView[] = ['pending', 'settled', 'failed', 'all'];
+
+// EXACTLY the backend's SORTABLE allow-list (api/admin/globepay/withdrawals/
+// route.ts) — real columns only, and only the ones this table renders a header
+// for. Adding a key here without a header (or vice versa) drifts the two lists.
+type SortKey = 'created_at' | 'amount';
 
 // The money-OUT mirror of the Deposits page. Pending is the default view for
 // the inverse reason: did we debit somebody whose payout never confirmed AND
@@ -49,7 +55,17 @@ const WithdrawalsPage = () => {
   const navigate = useNavigate();
   const [page, setPage] = useState(0);
   const [view, setView] = useState<GlobePayWithdrawalView>('pending');
-  const { data, isError } = useGlobePayWithdrawals(page, view);
+  // Starts NULL, not seeded — same contract as the Deposits page: the route's
+  // status-dependent default order (pending oldest-first) holds until the
+  // operator explicitly picks a column.
+  const { sort, sortHeader } = useTableSort<SortKey>(null, {
+    onChange: () => setPage(0),
+  });
+  const { data, isError } = useGlobePayWithdrawals(
+    page,
+    view,
+    sort ? `${sort.key}:${sort.dir}` : undefined,
+  );
 
   // A view change restarts paging — page 3 of "pending" has nothing to do
   // with page 3 of "all".
@@ -146,16 +162,14 @@ const WithdrawalsPage = () => {
             <Table>
               <Table.Header>
                 <Table.Row>
-                  <Table.HeaderCell>{t('withdrawals.when')}</Table.HeaderCell>
+                  {sortHeader('created_at', t('withdrawals.when'))}
                   <Table.HeaderCell>
                     {t('withdrawals.customer')}
                   </Table.HeaderCell>
                   <Table.HeaderCell>
                     {t('withdrawals.destination')}
                   </Table.HeaderCell>
-                  <Table.HeaderCell className="text-right">
-                    {t('withdrawals.amount')}
-                  </Table.HeaderCell>
+                  {sortHeader('amount', t('withdrawals.amount'), true)}
                   <Table.HeaderCell>{t('withdrawals.status')}</Table.HeaderCell>
                   <Table.HeaderCell>
                     {t('withdrawals.reference')}

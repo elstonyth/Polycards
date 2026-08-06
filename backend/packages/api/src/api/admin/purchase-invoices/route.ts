@@ -11,7 +11,10 @@ import { resolveFxRateStrict } from '../../../modules/packs/pricing';
 import { createPurchaseInvoiceWorkflow } from '../../../workflows/create-purchase-invoice';
 import { fromSen, toSen } from '../../../modules/packs/money';
 import { pageAll } from '../../utils/page-all';
-import { parsePaginationParams } from '../../../utils/pagination';
+import {
+  parsePaginationParams,
+  parseSortParam,
+} from '../../../utils/pagination';
 import { coerceCreatePurchaseInvoiceBody } from './validate';
 
 // POST /admin/purchase-invoices — record a receipt (POLYCARD-BACK §3.5).
@@ -143,11 +146,11 @@ export async function GET(
           .slice(0, 100)
           .replace(/[\\%_]/g, (c) => `\\${c}`)
       : undefined;
-  const rawSort =
-    typeof req.query.sort === 'string' ? req.query.sort : 'created_at:desc';
-  const [sortKey, sortDir] = rawSort.split(':');
-  const orderKey = SORTABLE.has(sortKey) ? sortKey : 'created_at';
-  const orderDir = sortDir === 'asc' ? 'ASC' : 'DESC';
+  const { key: orderKey, dir: orderDir } = parseSortParam(
+    req.query.sort,
+    SORTABLE,
+    'created_at',
+  );
 
   // $ilike (not $like) for the same reason as admin/delivery-orders/route.ts:29
   // — operators paste ?q= off a slip, in whatever case they typed it. `q` is
@@ -225,7 +228,10 @@ export async function GET(
         // where exact is 300005, an RM 5 error. Widen that cap and this line
         // has to change with it.
         total_fmv: fromSen(
-          invLines.reduce((s, l) => s + toSen(l.fmv_snapshot) * Number(l.qty), 0),
+          invLines.reduce(
+            (s, l) => s + toSen(l.fmv_snapshot) * Number(l.qty),
+            0,
+          ),
         ),
       };
     }),
