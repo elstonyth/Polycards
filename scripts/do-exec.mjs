@@ -11,6 +11,8 @@
 // {"op":"stdout"|"stdin","data":"..."}. Sending a bare string closes the
 // socket with 1006. Token is read from the doctl config and never printed.
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 const [appId, component, command] = process.argv.slice(2);
 if (!appId || !component || !command) {
@@ -18,12 +20,35 @@ if (!appId || !component || !command) {
   process.exit(2);
 }
 
-const cfgPath = `${process.env.APPDATA}/doctl/config.yaml`;
-const token = fs
-  .readFileSync(cfgPath, 'utf8')
-  .match(/access-token:\s*(\S+)/)?.[1];
+// Same locations doctl itself uses, so this works wherever doctl is set up.
+const doctlConfig = () => {
+  if (process.platform === 'win32')
+    return path.join(process.env.APPDATA ?? '', 'doctl', 'config.yaml');
+  if (process.platform === 'darwin')
+    return path.join(
+      os.homedir(),
+      'Library',
+      'Application Support',
+      'doctl',
+      'config.yaml',
+    );
+  return path.join(
+    process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config'),
+    'doctl',
+    'config.yaml',
+  );
+};
+
+const cfgPath = doctlConfig();
+const token =
+  process.env.DIGITALOCEAN_ACCESS_TOKEN ||
+  (fs.existsSync(cfgPath)
+    ? fs.readFileSync(cfgPath, 'utf8').match(/access-token:\s*(\S+)/)?.[1]
+    : undefined);
 if (!token) {
-  console.error(`no access-token in ${cfgPath}`);
+  console.error(
+    `no token: set DIGITALOCEAN_ACCESS_TOKEN or run \`doctl auth init\` (${cfgPath})`,
+  );
   process.exit(2);
 }
 
@@ -97,7 +122,10 @@ ws.onmessage = (ev) => {
     exitCode = Number(hit[1]);
     clearTimeout(hard);
     process.stdout.write(`\n[exec] command exit=${exitCode}\n`);
-    finish(0);
+    // Propagate the remote status. Exiting 0 regardless would let a failed
+    // preflight read as a passing one — the exact silent-success this tool
+    // exists to rule out.
+    finish(exitCode);
   }
 };
 
@@ -107,6 +135,8 @@ ws.onerror = (e) => {
 };
 ws.onclose = (e) => {
   clearTimeout(hard);
-  console.error(`[exec] closed ${e.code}`);
-  process.exit(0);
+  console.error(
+    `[exec] closed ${e.code} — no sentinel, command status unknown`,
+  );
+  process.exit(1);
 };
