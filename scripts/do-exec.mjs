@@ -19,7 +19,9 @@ if (!appId || !component || !command) {
 }
 
 const cfgPath = `${process.env.APPDATA}/doctl/config.yaml`;
-const token = fs.readFileSync(cfgPath, 'utf8').match(/access-token:\s*(\S+)/)?.[1];
+const token = fs
+  .readFileSync(cfgPath, 'utf8')
+  .match(/access-token:\s*(\S+)/)?.[1];
 if (!token) {
   console.error(`no access-token in ${cfgPath}`);
   process.exit(2);
@@ -29,13 +31,16 @@ const api = async (path) => {
   const res = await fetch(`https://api.digitalocean.com/v2${path}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!res.ok) throw new Error(`GET ${path} -> ${res.status} ${await res.text()}`);
+  if (!res.ok)
+    throw new Error(`GET ${path} -> ${res.status} ${await res.text()}`);
   return res.json();
 };
 
 const { app } = await api(`/apps/${appId}`);
 const deploymentId = app.active_deployment.id;
-console.error(`[exec] app=${app.spec.name} component=${component} deployment=${deploymentId}`);
+console.error(
+  `[exec] app=${app.spec.name} component=${component} deployment=${deploymentId}`,
+);
 
 const { url } = await api(
   `/apps/${appId}/deployments/${deploymentId}/components/${component}/exec`,
@@ -49,7 +54,9 @@ let seen = '';
 let exitCode = 1;
 
 const finish = (code) => {
-  try { ws.close(); } catch {}
+  try {
+    ws.close();
+  } catch {}
   process.exit(code);
 };
 const hard = setTimeout(() => {
@@ -59,11 +66,16 @@ const hard = setTimeout(() => {
 
 ws.onopen = () => {
   console.error('[exec] connected');
-  ws.send(JSON.stringify({ op: 'stdin', data: `${command}; echo ${SENTINEL}$?\n` }));
+  ws.send(
+    JSON.stringify({ op: 'stdin', data: `${command}; echo ${SENTINEL}$?\n` }),
+  );
 };
 
 ws.onmessage = (ev) => {
-  const raw = typeof ev.data === 'string' ? ev.data : Buffer.from(ev.data).toString('utf8');
+  const raw =
+    typeof ev.data === 'string'
+      ? ev.data
+      : Buffer.from(ev.data).toString('utf8');
   for (const line of raw.split('\n')) {
     if (!line.trim()) continue;
     let text = line;
@@ -74,9 +86,7 @@ ws.onmessage = (ev) => {
       // Partial frame or non-JSON noise: pass it through rather than drop it.
     }
     // Strip ANSI SGR/OSC and bracketed-paste so the log stays greppable.
-    text = text
-      .replace(/\][^]*/g, '')
-      .replace(/\[[0-9;?]*[A-Za-z]/g, '');
+    text = text.replace(/\][^]*/g, '').replace(/\[[0-9;?]*[A-Za-z]/g, '');
     process.stdout.write(text);
     seen += text;
   }
