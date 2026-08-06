@@ -33,7 +33,10 @@ const VIEWS: GlobePayDepositView[] = ['pending', 'settled', 'failed', 'all'];
 // EXACTLY the backend's SORTABLE allow-list (api/admin/globepay/deposits/
 // route.ts) — real columns only. Customer and status are computed/joined
 // server-side after the page is fetched, so those headers stay plain.
-type SortKey = 'created_at' | 'amount_requested' | 'settled_at';
+//
+// `amount_settled`, NOT `settled_at`: the Credited column renders the AMOUNT
+// credited, and a header must sort the value its own cells display.
+type SortKey = 'created_at' | 'amount_requested' | 'amount_settled';
 
 // Pending is the default view because this page exists for ONE question: did
 // somebody pay and not get credit? A stale pending row (older than the sweep's
@@ -136,7 +139,7 @@ const DepositsPage = () => {
                     t('deposits.requested'),
                     true,
                   )}
-                  {sortHeader('settled_at', t('deposits.settled'), true)}
+                  {sortHeader('amount_settled', t('deposits.settled'), true)}
                   <Table.HeaderCell>{t('deposits.status')}</Table.HeaderCell>
                   <Table.HeaderCell>{t('deposits.reference')}</Table.HeaderCell>
                 </Table.Row>

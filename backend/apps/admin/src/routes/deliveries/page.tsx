@@ -340,7 +340,7 @@ type OrderKind = 'shipping' | 'purchases' | 'topups';
 // EXACTLY the backend's SORTABLE allow-list (api/admin/delivery-orders/
 // route.ts) — real columns only. Item/Qty/Player are joined or derived
 // server-side after the page is fetched, so those headers stay plain.
-type DeliverySortKey = 'created_at' | 'status' | 'shipped_at';
+type DeliverySortKey = 'created_at' | 'status';
 
 const DeliveriesPage = () => {
   // Which kind of record the page is showing. 'shipping' is everything the page

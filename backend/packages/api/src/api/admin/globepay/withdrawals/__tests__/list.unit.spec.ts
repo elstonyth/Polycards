@@ -117,11 +117,12 @@ describe('GET /admin/globepay/withdrawals', () => {
     const { res } = mkRes();
     await GET({ scope, query: { status: 'pending' } } as any, res);
     expect(calls.filter).toEqual({ status: 'pending' });
-    expect(calls.opts.order).toEqual({ created_at: 'ASC' });
+    // `id` tiebreaks the default path too — see the deposits spec.
+    expect(calls.opts.order).toEqual({ created_at: 'ASC', id: 'ASC' });
 
     await GET({ scope, query: { status: 'all' } } as any, res);
     expect(calls.filter).toEqual({});
-    expect(calls.opts.order).toEqual({ created_at: 'DESC' });
+    expect(calls.opts.order).toEqual({ created_at: 'DESC', id: 'DESC' });
   });
 
   it('an explicit ?sort= overrides the status-dependent default, with id tiebreaker', async () => {

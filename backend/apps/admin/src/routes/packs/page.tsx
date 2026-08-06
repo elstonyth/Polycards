@@ -27,6 +27,20 @@ import {
 } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import { type AdminPack, type AdminPackWrite } from '../../lib/packs-api';
+import {
+  useCreatePack,
+  useDeletePack,
+  usePacks,
+  useReorderPacks,
+  useUpdatePack,
+  useUploadImage,
+} from '../../lib/queries';
+import { resolveImageUrl } from '../../lib/image-url';
+import { validateImageFile } from '../../lib/image-validation';
+import { fmtPct, rm, slugKeystroke, toSlug } from '../../lib/format';
+import { useTableSort } from '../../lib/use-table-sort';
+import { GachaPipelineHint } from '../../components/GachaPipelineHint';
+import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
 // Client-side sort — this list is unpaged, the whole catalog is in hand.
 // 'rtp' orders the EV / RTP column ("which pack leaks money" reads by RTP).
@@ -50,20 +64,6 @@ const packSortValue = (p: AdminPack, key: PackSortKey): number | string => {
       return p.price;
   }
 };
-import {
-  useCreatePack,
-  useDeletePack,
-  usePacks,
-  useReorderPacks,
-  useUpdatePack,
-  useUploadImage,
-} from '../../lib/queries';
-import { resolveImageUrl } from '../../lib/image-url';
-import { validateImageFile } from '../../lib/image-validation';
-import { fmtPct, rm, slugKeystroke, toSlug } from '../../lib/format';
-import { useTableSort } from '../../lib/use-table-sort';
-import { GachaPipelineHint } from '../../components/GachaPipelineHint';
-import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
 // Sidebar entry. The label is literal (internal single-operator tool); switch to
 // RouteConfig.translationNs if this dashboard is ever localized.

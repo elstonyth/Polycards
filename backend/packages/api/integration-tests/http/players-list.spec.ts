@@ -264,7 +264,7 @@ medusaIntegrationTestRunner({
         expect(emailsDesc).toEqual([...emails].reverse());
 
         // wallet_balance is a JS-side aggregate, NOT a customer column — it
-        // must degrade to created_at desc, not 400 and not leak into the query.
+        // must degrade to created_at asc, not 400 and not leak into the query.
         const unknown = await list('?sort=wallet_balance:asc');
         expect(unknown.status).toBe(200);
         const stamps = unknown.data.players.map(
@@ -274,6 +274,26 @@ medusaIntegrationTestRunner({
         for (let i = 1; i < stamps.length; i++) {
           expect(stamps[i]).toBeGreaterThanOrEqual(stamps[i - 1]);
         }
+      });
+
+      // `name` is the one bespoke key mapping on this route: the response's
+      // `name` is a JS join of first_name + last_name, so the route expands the
+      // key into BOTH underlying columns. A typo in either would be admitted by
+      // the allowlist and only fail against a real database — which is what
+      // this covers. A is 'Alpha Player'; B has no name at all.
+      it('?sort=name= orders on the underlying first/last name columns', async () => {
+        const asc = await list('?sort=name:asc');
+        expect(asc.status).toBe(200);
+        // ASC puts the named customer first (Postgres sorts NULLS LAST on ASC).
+        expect(asc.data.players[0].id).toBe(aId);
+        expect(asc.data.players[0].name).toBe('Alpha Player');
+
+        // DESC is NULLS FIRST, so the nameless customer leads. Pinned rather
+        // than fixed: it is the same trade-off the Deposits Credited column
+        // documents, and a future NULLS LAST should fail here deliberately.
+        const desc = await list('?sort=name:desc');
+        expect(desc.data.players[0].id).toBe(bId);
+        expect(desc.data.players[0].name).toBeNull();
       });
 
       it('disabled (Task 1) flows through to the row', async () => {

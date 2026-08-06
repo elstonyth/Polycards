@@ -15,8 +15,10 @@ import {
 
 // Sortable columns are an allowlist, not a passthrough — `order` goes straight
 // into the query builder. Real columns only: customer_email, items and the
-// nested address are joined/renamed in JS after the page is fetched.
-const SORTABLE = new Set(['created_at', 'status', 'shipped_at']);
+// nested address are joined/renamed in JS after the page is fetched. Kept to
+// exactly the columns the admin table renders a header for — an allowlist wider
+// than the UI is surface for nothing.
+const SORTABLE = new Set(['created_at', 'status']);
 
 export async function GET(
   req: MedusaRequest,

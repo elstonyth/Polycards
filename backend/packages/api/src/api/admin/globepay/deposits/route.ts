@@ -36,6 +36,14 @@ export function parseStatusFilter(raw: unknown): StatusFilter {
     : 'pending';
 }
 
+// Sortable columns are an allowlist, not a passthrough — `order` goes straight
+// into the query builder. Real columns only: customer_email and stale are
+// computed in JS after the page is fetched. The two money columns are
+// `bigNumber` fields, which store a numeric column plus a raw_* jsonb sidecar;
+// ordering targets the numeric column (proved against a real database in
+// integration-tests/http/globepay-reconcile.spec.ts, not just a mock).
+const SORTABLE = new Set(['created_at', 'amount_requested', 'amount_settled']);
+
 export async function GET(
   req: MedusaRequest,
   res: MedusaResponse,
@@ -49,20 +57,22 @@ export async function GET(
   );
   const status = parseStatusFilter(req.query.status);
 
-  // Sortable columns are an allowlist, not a passthrough — `order` goes
-  // straight into the query builder. Real columns only: customer_email and
-  // stale are computed in JS after the page is fetched.
-  const SORTABLE = new Set(['created_at', 'amount_requested', 'settled_at']);
-
   // Pending sorts OLDEST first (the ['status','created_at'] index): the row most
   // likely to be a stranded payment is the one that has been waiting longest, so
   // it belongs at the top rather than buried on the last page. Every other view
   // is a history read, where newest-first is what an operator expects. That
   // status-dependent default only holds while the operator has NOT picked a
-  // sort — an explicit `?sort=` overrides it (with the id tiebreaker so
-  // non-unique amounts can't reorder rows across pages).
+  // sort — an explicit `?sort=` overrides it.
+  //
+  // `id` is the tiebreaker on BOTH paths, not just the sorted one: offset
+  // pagination needs a unique secondary key, and two deposits written in the
+  // same tick share a created_at often enough that a row can otherwise land on
+  // two pages or on neither. It cannot reorder rows with distinct created_at,
+  // so the default view's meaning is unchanged.
+  const defaultDir = status === 'pending' ? 'ASC' : 'DESC';
   let order: Record<string, 'ASC' | 'DESC'> = {
-    created_at: status === 'pending' ? 'ASC' : 'DESC',
+    created_at: defaultDir,
+    id: defaultDir,
   };
   if (typeof req.query.sort === 'string') {
     const { key, dir } = parseSortParam(req.query.sort, SORTABLE, 'created_at');

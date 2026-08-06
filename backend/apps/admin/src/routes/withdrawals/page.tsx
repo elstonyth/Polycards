@@ -32,8 +32,9 @@ export const config: RouteConfig = {
 const VIEWS: GlobePayWithdrawalView[] = ['pending', 'settled', 'failed', 'all'];
 
 // EXACTLY the backend's SORTABLE allow-list (api/admin/globepay/withdrawals/
-// route.ts) — real columns only.
-type SortKey = 'created_at' | 'amount' | 'settled_at';
+// route.ts) — real columns only, and only the ones this table renders a header
+// for. Adding a key here without a header (or vice versa) drifts the two lists.
+type SortKey = 'created_at' | 'amount';
 
 // The money-OUT mirror of the Deposits page. Pending is the default view for
 // the inverse reason: did we debit somebody whose payout never confirmed AND

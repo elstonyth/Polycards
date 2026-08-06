@@ -76,7 +76,10 @@ describe('GET /admin/globepay/deposits', () => {
     await GET({ scope, query: {} } as any, res);
 
     expect(calls.filter).toEqual({ status: 'pending' });
-    expect(calls.opts.order).toEqual({ created_at: 'ASC' });
+    // `id` tiebreaks the DEFAULT path too — two deposits written in the same
+    // tick share a created_at, and offset pagination needs a unique secondary
+    // key or such a row lands on two pages / on neither.
+    expect(calls.opts.order).toEqual({ created_at: 'ASC', id: 'ASC' });
     expect(out.body.status).toBe('pending');
   });
 
@@ -86,7 +89,7 @@ describe('GET /admin/globepay/deposits', () => {
     await GET({ scope, query: { status: 'all' } } as any, res);
 
     expect(calls.filter).toEqual({});
-    expect(calls.opts.order).toEqual({ created_at: 'DESC' });
+    expect(calls.opts.order).toEqual({ created_at: 'DESC', id: 'DESC' });
     expect(out.body.total).toBe(2);
   });
 

@@ -43,6 +43,14 @@ export function parseStatusFilter(raw: unknown): StatusFilter {
     : 'pending';
 }
 
+// Sortable columns are an allowlist, not a passthrough — `order` goes straight
+// into the query builder. Real columns only: customer_email and stale are
+// computed in JS after the page is fetched. Kept to exactly the two columns the
+// table renders a header for — an allowlist wider than the UI is surface for
+// nothing. `amount` is a `bigNumber` field; ordering targets its numeric column
+// (proved against a real database, see globepay-reconcile.spec.ts).
+const SORTABLE = new Set(['created_at', 'amount']);
+
 export async function GET(
   req: MedusaRequest,
   res: MedusaResponse,
@@ -56,18 +64,18 @@ export async function GET(
   );
   const status = parseStatusFilter(req.query.status);
 
-  // Sortable columns are an allowlist, not a passthrough — `order` goes
-  // straight into the query builder. Real columns only: customer_email and
-  // stale are computed in JS after the page is fetched.
-  const SORTABLE = new Set(['created_at', 'amount', 'settled_at']);
-
   // Pending oldest-first (the ['status','created_at'] index): the longest-
   // waiting payout is the likeliest stranded debit. History views newest-first.
   // That status-dependent default only holds while the operator has NOT picked
-  // a sort — an explicit `?sort=` overrides it (with the id tiebreaker so
-  // non-unique amounts can't reorder rows across pages).
+  // a sort — an explicit `?sort=` overrides it.
+  //
+  // `id` tiebreaks BOTH paths (see the deposits route for the full reasoning):
+  // offset pagination needs a unique secondary key, and it cannot reorder rows
+  // whose created_at already differs.
+  const defaultDir = status === 'pending' ? 'ASC' : 'DESC';
   let order: Record<string, 'ASC' | 'DESC'> = {
-    created_at: status === 'pending' ? 'ASC' : 'DESC',
+    created_at: defaultDir,
+    id: defaultDir,
   };
   if (typeof req.query.sort === 'string') {
     const { key, dir } = parseSortParam(req.query.sort, SORTABLE, 'created_at');
