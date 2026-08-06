@@ -17,6 +17,7 @@ import type {
   GlobePayDepositView,
 } from '../../lib/admin-rest';
 import { rm, timeAgo } from '../../lib/format';
+import { useTableSort } from '../../lib/use-table-sort';
 import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
@@ -29,15 +30,20 @@ export const config: RouteConfig = {
 
 const VIEWS: GlobePayDepositView[] = ['pending', 'settled', 'failed', 'all'];
 
+// EXACTLY the backend's SORTABLE allow-list (api/admin/globepay/deposits/
+// route.ts) — real columns only. Customer and status are computed/joined
+// server-side after the page is fetched, so those headers stay plain.
+type SortKey = 'created_at' | 'amount_requested' | 'settled_at';
+
 // Pending is the default view because this page exists for ONE question: did
 // somebody pay and not get credit? A stale pending row (older than the sweep's
 // stale window, flagged server-side) is that case until proven otherwise.
 const statusBadge = (d: GlobePayDeposit, label: string) => {
-  if (d.status === 'settled') return <StatusBadge color="green">{label}</StatusBadge>;
-  if (d.status === 'failed') return <StatusBadge color="red">{label}</StatusBadge>;
-  return (
-    <StatusBadge color={d.stale ? 'orange' : 'grey'}>{label}</StatusBadge>
-  );
+  if (d.status === 'settled')
+    return <StatusBadge color="green">{label}</StatusBadge>;
+  if (d.status === 'failed')
+    return <StatusBadge color="red">{label}</StatusBadge>;
+  return <StatusBadge color={d.stale ? 'orange' : 'grey'}>{label}</StatusBadge>;
 };
 
 const DepositsPage = () => {
@@ -45,7 +51,17 @@ const DepositsPage = () => {
   const navigate = useNavigate();
   const [page, setPage] = useState(0);
   const [view, setView] = useState<GlobePayDepositView>('pending');
-  const { data, isError } = useGlobePayDeposits(page, view);
+  // Starts NULL, not seeded: with no explicit sort the route orders pending
+  // oldest-first (the work queue) and history views newest-first, and a seeded
+  // default would silently flatten that. First header click opts in.
+  const { sort, sortHeader } = useTableSort<SortKey>(null, {
+    onChange: () => setPage(0),
+  });
+  const { data, isError } = useGlobePayDeposits(
+    page,
+    view,
+    sort ? `${sort.key}:${sort.dir}` : undefined,
+  );
 
   // A view change restarts paging: page 3 of "pending" has nothing to do with
   // page 3 of "all", and keeping the offset lands the operator on an empty page.
@@ -112,15 +128,15 @@ const DepositsPage = () => {
             <Table>
               <Table.Header>
                 <Table.Row>
-                  <Table.HeaderCell>{t('deposits.when')}</Table.HeaderCell>
+                  {sortHeader('created_at', t('deposits.when'))}
                   <Table.HeaderCell>{t('deposits.customer')}</Table.HeaderCell>
                   <Table.HeaderCell>{t('deposits.method')}</Table.HeaderCell>
-                  <Table.HeaderCell className="text-right">
-                    {t('deposits.requested')}
-                  </Table.HeaderCell>
-                  <Table.HeaderCell className="text-right">
-                    {t('deposits.settled')}
-                  </Table.HeaderCell>
+                  {sortHeader(
+                    'amount_requested',
+                    t('deposits.requested'),
+                    true,
+                  )}
+                  {sortHeader('settled_at', t('deposits.settled'), true)}
                   <Table.HeaderCell>{t('deposits.status')}</Table.HeaderCell>
                   <Table.HeaderCell>{t('deposits.reference')}</Table.HeaderCell>
                 </Table.Row>

@@ -38,6 +38,7 @@ import {
   rm,
 } from '../../lib/format';
 import { resolveImageUrl } from '../../lib/image-url';
+import { useTableSort } from '../../lib/use-table-sort';
 import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
@@ -336,6 +337,11 @@ const Topups = () => {
 
 type OrderKind = 'shipping' | 'purchases' | 'topups';
 
+// EXACTLY the backend's SORTABLE allow-list (api/admin/delivery-orders/
+// route.ts) — real columns only. Item/Qty/Player are joined or derived
+// server-side after the page is fetched, so those headers stay plain.
+type DeliverySortKey = 'created_at' | 'status' | 'shipped_at';
+
 const DeliveriesPage = () => {
   // Which kind of record the page is showing. 'shipping' is everything the page
   // did before: status tabs, id search, bulk tool, Manage modal.
@@ -346,7 +352,24 @@ const DeliveriesPage = () => {
   const [q, setQ] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkStatus, setBulkStatus] = useState<DeliveryStatus>('processed');
-  const { data, isError } = useDeliveryOrders(filter, page, q || undefined);
+  // Re-sorting changes which rows are on screen, so it follows the same rule
+  // as every other view change here: back to page 0, selection dropped.
+  const { sort, sortHeader } = useTableSort<DeliverySortKey>(
+    { key: 'created_at', dir: 'desc' },
+    {
+      onChange: () => {
+        setPage(0);
+        setSelected(new Set());
+      },
+    },
+  );
+  const { data, isError } = useDeliveryOrders(
+    filter,
+    page,
+    q || undefined,
+    undefined,
+    sort ? `${sort.key}:${sort.dir}` : 'created_at:desc',
+  );
   const orders = data?.orders ?? null;
   const update = useUpdateDeliveryOrder();
   const bulk = useBulkUpdateDeliveryOrders();
@@ -633,11 +656,11 @@ const DeliveriesPage = () => {
                     />
                   </Table.HeaderCell>
                   <Table.HeaderCell>Order</Table.HeaderCell>
-                  <Table.HeaderCell>Date</Table.HeaderCell>
+                  {sortHeader('created_at', 'Date')}
                   <Table.HeaderCell>Item</Table.HeaderCell>
                   <Table.HeaderCell>Qty</Table.HeaderCell>
                   <Table.HeaderCell>Player</Table.HeaderCell>
-                  <Table.HeaderCell>Status</Table.HeaderCell>
+                  {sortHeader('status', 'Status')}
                   <Table.HeaderCell className="text-right">
                     Actions
                   </Table.HeaderCell>

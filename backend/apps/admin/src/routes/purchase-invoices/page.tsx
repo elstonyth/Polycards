@@ -5,6 +5,7 @@ import { Plus, Receipt } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import { usePurchaseInvoices } from '../../lib/queries';
 import { orderDateTime, rm } from '../../lib/format';
+import { useTableSort } from '../../lib/use-table-sort';
 import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
@@ -31,10 +32,12 @@ const PurchaseInvoicesPage = () => {
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState('');
   const [q, setQ] = useState('');
-  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({
-    key: 'created_at',
-    dir: 'desc',
-  });
+  // Sorting resets to page 0: the operator is re-ordering the whole result
+  // set, so staying on page 3 of the old order would show an arbitrary slice.
+  const { sort, sortHeader } = useTableSort<SortKey>(
+    { key: 'created_at', dir: 'desc' },
+    { onChange: () => setPage(0) },
+  );
 
   // 300 ms debounce, same as the Players list — this endpoint pages over EVERY
   // matching invoice's lines to fold the money totals, so a request per
@@ -51,40 +54,8 @@ const PurchaseInvoicesPage = () => {
   const { data, isError } = usePurchaseInvoices(
     page,
     q || undefined,
-    `${sort.key}:${sort.dir}`,
+    sort ? `${sort.key}:${sort.dir}` : 'created_at:desc',
   );
-
-  // A new column starts descending (newest/highest first, which is what an
-  // operator scanning receipts wants); clicking the active column flips it.
-  const toggleSort = (key: SortKey) =>
-    setSort((s) => ({ key, dir: s.key === key && s.dir === 'desc' ? 'asc' : 'desc' }));
-
-  const sortHeader = (key: SortKey, label: string) => {
-    const active = sort.key === key;
-    return (
-      <Table.HeaderCell
-        aria-sort={
-          active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'
-        }
-      >
-        {/* Real button, not an onClick on the cell: a sortable header has to be
-            reachable by keyboard. */}
-        <button
-          type="button"
-          className="hover:text-ui-fg-base flex items-center gap-1 whitespace-nowrap"
-          onClick={() => {
-            toggleSort(key);
-            setPage(0);
-          }}
-        >
-          {label}
-          <span aria-hidden="true">
-            {active ? (sort.dir === 'asc' ? '↑' : '↓') : ''}
-          </span>
-        </button>
-      </Table.HeaderCell>
-    );
-  };
 
   return (
     <div className="flex flex-col gap-y-3">

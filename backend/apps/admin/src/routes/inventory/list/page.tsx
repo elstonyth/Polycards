@@ -25,6 +25,7 @@ import {
 } from '../../../lib/admin-rest';
 import { orderDateTime, rm } from '../../../lib/format';
 import { resolveImageUrl } from '../../../lib/image-url';
+import { useTableSort } from '../../../lib/use-table-sort';
 import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
 
 // NOT `src/routes/inventory/page.tsx`, which is what spec §3.3's task brief
@@ -100,7 +101,7 @@ const InventoryListPage = () => {
   const [q, setQ] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState(false);
-  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({
+  const { sort, sortHeader } = useTableSort<SortKey>({
     key: 'created_at',
     dir: 'desc',
   });
@@ -141,13 +142,15 @@ const InventoryListPage = () => {
 
   const rows = useMemo(() => {
     const list = [...(data?.rows ?? [])];
+    if (!sort) return list;
     const dir = sort.dir === 'asc' ? 1 : -1;
+    const key = sort.key;
     list.sort((a, b) => {
-      if (sort.key === 'name') {
+      if (key === 'name') {
         return dir * a.name.localeCompare(b.name);
       }
-      const av = sortValue(a, sort.key);
-      const bv = sortValue(b, sort.key);
+      const av = sortValue(a, key);
+      const bv = sortValue(b, key);
       return dir * (av < bv ? -1 : av > bv ? 1 : 0);
     });
     return list;
@@ -284,42 +287,6 @@ const InventoryListPage = () => {
       .finally(() => setExporting(false));
   };
 
-  // A new column starts descending (newest/biggest first, what an operator
-  // scanning stock wants); clicking the active column flips it.
-  const toggleSort = (key: SortKey) =>
-    setSort((s) => ({
-      key,
-      dir: s.key === key && s.dir === 'desc' ? 'asc' : 'desc',
-    }));
-
-  const sortHeader = (key: SortKey, label: string, align = true) => {
-    const active = sort.key === key;
-    return (
-      <Table.HeaderCell
-        aria-sort={
-          active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'
-        }
-      >
-        {/* Real button, not an onClick on the cell: a sortable header has to be
-            reachable by keyboard. */}
-        {/* `w-full justify-end`, NOT `ml-auto`: Tailwind's `flex` makes this a
-            block-level flex container with width:auto, and an auto margin on a
-            width:auto block resolves to 0 — so ml-auto would leave every
-            numeric header left-aligned over right-aligned cells. */}
-        <button
-          type="button"
-          className={`hover:text-ui-fg-base flex items-center gap-1 whitespace-nowrap ${align ? 'w-full justify-end' : ''}`}
-          onClick={() => toggleSort(key)}
-        >
-          {label}
-          <span aria-hidden="true">
-            {active ? (sort.dir === 'asc' ? '↑' : '↓') : ''}
-          </span>
-        </button>
-      </Table.HeaderCell>
-    );
-  };
-
   return (
     <Container className="divide-y p-0">
       <div className="flex flex-wrap items-start justify-between gap-4 px-6 py-4">
@@ -419,17 +386,17 @@ const InventoryListPage = () => {
                   />
                 </Table.HeaderCell>
                 <Table.HeaderCell>{t('inventory.photo')}</Table.HeaderCell>
-                {sortHeader('name', t('inventory.name'), false)}
+                {sortHeader('name', t('inventory.name'))}
                 <Table.HeaderCell>{t('inventory.sku')}</Table.HeaderCell>
                 <Table.HeaderCell>{t('inventory.titleCol')}</Table.HeaderCell>
-                {sortHeader('fmv', t('inventory.fmv'))}
-                {sortHeader('price', t('inventory.price'))}
-                {sortHeader('cost', t('inventory.cost'))}
-                {sortHeader('created_at', t('inventory.created'))}
-                {sortHeader('on_hand', t('inventory.onHand'))}
-                {sortHeader('in_vault', t('inventory.inVault'))}
-                {sortHeader('requested', t('inventory.requested'))}
-                {sortHeader('shipped', t('inventory.shipped'))}
+                {sortHeader('fmv', t('inventory.fmv'), true)}
+                {sortHeader('price', t('inventory.price'), true)}
+                {sortHeader('cost', t('inventory.cost'), true)}
+                {sortHeader('created_at', t('inventory.created'), true)}
+                {sortHeader('on_hand', t('inventory.onHand'), true)}
+                {sortHeader('in_vault', t('inventory.inVault'), true)}
+                {sortHeader('requested', t('inventory.requested'), true)}
+                {sortHeader('shipped', t('inventory.shipped'), true)}
                 <Table.HeaderCell className="text-right">
                   {t('inventory.listingShow')}
                 </Table.HeaderCell>

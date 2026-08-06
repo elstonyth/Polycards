@@ -90,6 +90,25 @@ describe('GET /admin/globepay/deposits', () => {
     expect(out.body.total).toBe(2);
   });
 
+  it('an explicit ?sort= overrides the status-dependent default, with id tiebreaker', async () => {
+    const { res } = mkRes();
+    const { scope, calls } = mkScope([deposit(1)]);
+    await GET({ scope, query: { sort: 'amount_requested:asc' } } as any, res);
+
+    expect(calls.opts.order).toEqual({ amount_requested: 'ASC', id: 'ASC' });
+  });
+
+  it('an unknown sort key degrades to created_at, never a passthrough', async () => {
+    const { res } = mkRes();
+    const { scope, calls } = mkScope([deposit(1)]);
+    await GET(
+      { scope, query: { sort: 'customer_email; DROP TABLE x:desc' } } as any,
+      res,
+    );
+
+    expect(calls.opts.order).toEqual({ created_at: 'DESC', id: 'DESC' });
+  });
+
   it('joins the customer email and normalizes bigNumber amounts', async () => {
     const { res, out } = mkRes();
     const { scope } = mkScope([
@@ -135,7 +154,10 @@ describe('GET /admin/globepay/deposits', () => {
     const { res, out } = mkRes();
     const rows = Array.from({ length: 120 }, (_, i) => deposit(i));
     await GET(
-      { scope: mkScope(rows).scope, query: { limit: '50', offset: '50' } } as any,
+      {
+        scope: mkScope(rows).scope,
+        query: { limit: '50', offset: '50' },
+      } as any,
       res,
     );
     expect(out.body.total).toBe(120);

@@ -19,17 +19,24 @@ const order = (i: number) => ({
 
 function mkScope(totalOrders: number) {
   const all = Array.from({ length: totalOrders }, (_, i) => order(i));
+  const calls: { opts?: any } = {};
   const packs = {
-    listAndCountDeliveryOrders: async (_f: any, o: any) => [
-      all.slice(o?.skip ?? 0, (o?.skip ?? 0) + (o?.take ?? 50)),
-      all.length,
-    ],
+    listAndCountDeliveryOrders: async (_f: any, o: any) => {
+      calls.opts = o;
+      return [
+        all.slice(o?.skip ?? 0, (o?.skip ?? 0) + (o?.take ?? 50)),
+        all.length,
+      ];
+    },
   };
   return {
-    resolve: (key: string) =>
-      typeof key === 'string' && key.toLowerCase().includes('customer')
-        ? { listCustomers: async () => [{ id: 'cus_1', email: 'a@b.c' }] }
-        : packs,
+    calls,
+    scope: {
+      resolve: (key: string) =>
+        typeof key === 'string' && key.toLowerCase().includes('customer')
+          ? { listCustomers: async () => [{ id: 'cus_1', email: 'a@b.c' }] }
+          : packs,
+    },
   };
 }
 
@@ -37,11 +44,31 @@ describe('GET /admin/delivery-orders pagination', () => {
   it('returns total/offset/limit and slices', async () => {
     const { res, out } = mkRes();
     await GET(
-      { scope: mkScope(120), query: { limit: '50', offset: '100' } } as any,
+      {
+        scope: mkScope(120).scope,
+        query: { limit: '50', offset: '100' },
+      } as any,
       res,
     );
     expect(out.body.total).toBe(120);
     expect(out.body.orders).toHaveLength(20);
     expect(out.body.offset).toBe(100);
+  });
+
+  it('defaults to created_at desc with the id tiebreaker', async () => {
+    const { res } = mkRes();
+    const { scope, calls } = mkScope(3);
+    await GET({ scope, query: {} } as any, res);
+    expect(calls.opts.order).toEqual({ created_at: 'DESC', id: 'DESC' });
+  });
+
+  it('honors an allowlisted ?sort= and degrades an unknown key silently', async () => {
+    const { res } = mkRes();
+    const { scope, calls } = mkScope(3);
+    await GET({ scope, query: { sort: 'status:asc' } } as any, res);
+    expect(calls.opts.order).toEqual({ status: 'ASC', id: 'ASC' });
+
+    await GET({ scope, query: { sort: 'customer_email:asc' } } as any, res);
+    expect(calls.opts.order).toEqual({ created_at: 'ASC', id: 'ASC' });
   });
 });

@@ -3,12 +3,20 @@ import { Modules } from '@medusajs/framework/utils';
 import PacksModuleService from '../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../modules/packs';
 import { serializeDeliveryOrders } from '../../../modules/packs/delivery-view';
-import { parsePaginationParams } from '../../../utils/pagination';
+import {
+  parsePaginationParams,
+  parseSortParam,
+} from '../../../utils/pagination';
 import {
   coerceCustomerId,
   coerceIdSearch,
   coerceStatusFilter,
 } from './validate';
+
+// Sortable columns are an allowlist, not a passthrough — `order` goes straight
+// into the query builder. Real columns only: customer_email, items and the
+// nested address are joined/renamed in JS after the page is fetched.
+const SORTABLE = new Set(['created_at', 'status', 'shipped_at']);
 
 export async function GET(
   req: MedusaRequest,
@@ -34,10 +42,17 @@ export async function GET(
     { defaultLimit: 50, maxLimit: 100 },
   );
 
+  const { key: sortKey, dir: sortDir } = parseSortParam(
+    req.query.sort,
+    SORTABLE,
+    'created_at',
+  );
+
   // `id` tiebreaker: offset pagination needs a unique secondary sort key or
-  // rows sharing a `created_at` can appear on two pages or on neither.
+  // rows sharing a `created_at` (or `status`) can appear on two pages or on
+  // neither.
   const [orders, total] = await packs.listAndCountDeliveryOrders(filter, {
-    order: { created_at: 'DESC', id: 'DESC' },
+    order: { [sortKey]: sortDir, id: sortDir },
     skip: offset,
     take: limit,
   });

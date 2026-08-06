@@ -29,6 +29,7 @@ import {
   type PcQueueItem,
 } from '../../../lib/queries';
 import { resolveImageUrl } from '../../../lib/image-url';
+import { useTableSort } from '../../../lib/use-table-sort';
 import {
   rm,
   usdToMyr,
@@ -194,6 +195,12 @@ const AddFromPcCollectionPage = () => {
   const [cardsOnly, setCardsOnly] = useState(true);
   const [gradedOnly, setGradedOnly] = useState(true);
   const [filter, setFilter] = useState('');
+  // Client-side sort over the WHOLE match set (see the pre-slice note in
+  // `matches`). Null = scan order. Selection is keyed by offer_id and survives
+  // reordering by design, same as it survives filter changes.
+  const { sort, sortHeader } = useTableSort<
+    'item' | 'pcTag' | 'tier' | 'offerValue'
+  >(null);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
 
   // Step 3 — import (one per-grade price lookup per picked product, sequential:
@@ -273,7 +280,7 @@ const AddFromPcCollectionPage = () => {
 
   const matches = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    return (offers ?? []).filter((o) => {
+    const filtered = (offers ?? []).filter((o) => {
       if (cardsOnly && !o.is_card) return false;
       if (gradedOnly && !isGraded(o)) return false;
       if (q === '') return true;
@@ -286,7 +293,31 @@ const AddFromPcCollectionPage = () => {
         o.condition.toLowerCase().includes(q)
       );
     });
-  }, [offers, filter, cardsOnly, gradedOnly]);
+    // Sorted HERE, before the MAX_VISIBLE_ROWS slice below — sorting only the
+    // visible 300 would reorder an arbitrary prefix of a five-figure list.
+    if (!sort) return filtered;
+    const dir = sort.dir === 'asc' ? 1 : -1;
+    const val = (o: PcOffer): number | string => {
+      switch (sort.key) {
+        case 'item':
+          return o.name;
+        case 'pcTag':
+          return o.include || o.condition;
+        case 'tier':
+          return o.grade ?? '';
+        case 'offerValue':
+          return o.value_usd ?? Number.NEGATIVE_INFINITY;
+      }
+    };
+    return [...filtered].sort((a, b) => {
+      const av = val(a);
+      const bv = val(b);
+      if (typeof av === 'string' && typeof bv === 'string') {
+        return dir * av.localeCompare(bv);
+      }
+      return dir * (av < bv ? -1 : av > bv ? 1 : 0);
+    });
+  }, [offers, filter, cardsOnly, gradedOnly, sort]);
 
   const visible = matches.slice(0, MAX_VISIBLE_ROWS);
 
@@ -672,18 +703,10 @@ const AddFromPcCollectionPage = () => {
                 <Table.Header>
                   <Table.Row>
                     <Table.HeaderCell />
-                    <Table.HeaderCell>
-                      {t('pcCollection.col.item')}
-                    </Table.HeaderCell>
-                    <Table.HeaderCell>
-                      {t('pcCollection.col.pcTag')}
-                    </Table.HeaderCell>
-                    <Table.HeaderCell>
-                      {t('pcCollection.col.tier')}
-                    </Table.HeaderCell>
-                    <Table.HeaderCell>
-                      {t('pcCollection.col.offerValue')}
-                    </Table.HeaderCell>
+                    {sortHeader('item', t('pcCollection.col.item'))}
+                    {sortHeader('pcTag', t('pcCollection.col.pcTag'))}
+                    {sortHeader('tier', t('pcCollection.col.tier'))}
+                    {sortHeader('offerValue', t('pcCollection.col.offerValue'))}
                   </Table.Row>
                 </Table.Header>
                 <Table.Body>

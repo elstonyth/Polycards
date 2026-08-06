@@ -12,6 +12,7 @@ import { CurrencyDollar } from "@medusajs/icons";
 import type { RouteConfig } from "@mercurjs/dashboard-sdk";
 import { useEconomy } from "../../lib/queries";
 import { rm } from "../../lib/format";
+import { useTableSort } from "../../lib/use-table-sort";
 import { LoadingSkeleton } from "../../components/LoadingSkeleton";
 
 export const config: RouteConfig = {
@@ -24,6 +25,10 @@ export const config: RouteConfig = {
 // time (memoized below); `to` is always "now", so we omit it (nothing is
 // future-dated). Only ledger totals are scoped — liability + RTP stay current.
 type Period = "daily" | "weekly" | "monthly" | "yearly" | "overall";
+
+// Client-side sort over the RTP table — the report is unpaged, every pack is
+// in hand. Nullable ev/rtp_pct sort as -Infinity (inventory/list precedent).
+type EconomySortKey = "pack" | "category" | "price" | "ev" | "rtp";
 const DAY_MS = 86_400_000;
 
 const PERIODS: { value: Period; label: string; scope: string }[] = [
@@ -64,6 +69,36 @@ const EconomyPage = () => {
   const from = useMemo(() => periodFrom(period), [period]);
   const { data, isError } = useEconomy(from);
   const scope = PERIODS.find((p) => p.value === period)?.scope ?? "All time";
+  // Starts NULL = keep the server's order until a column is picked.
+  const { sort, sortHeader } = useTableSort<EconomySortKey>(null);
+
+  const packRows = useMemo(() => {
+    const list = data?.packs ?? [];
+    if (!sort) return list;
+    const dir = sort.dir === "asc" ? 1 : -1;
+    const val = (p: (typeof list)[number]): number | string => {
+      switch (sort.key) {
+        case "pack":
+          return p.title;
+        case "category":
+          return p.category;
+        case "price":
+          return p.price;
+        case "ev":
+          return p.ev ?? Number.NEGATIVE_INFINITY;
+        case "rtp":
+          return p.rtp_pct ?? Number.NEGATIVE_INFINITY;
+      }
+    };
+    return [...list].sort((a, b) => {
+      const av = val(a);
+      const bv = val(b);
+      if (typeof av === "string" && typeof bv === "string") {
+        return dir * av.localeCompare(bv);
+      }
+      return dir * (av < bv ? -1 : av > bv ? 1 : 0);
+    });
+  }, [data, sort]);
 
   const stats: {
     key: string;
@@ -181,21 +216,15 @@ const EconomyPage = () => {
           <Table>
             <Table.Header>
               <Table.Row>
-                <Table.HeaderCell>{t("economy.pack")}</Table.HeaderCell>
-                <Table.HeaderCell>{t("economy.category")}</Table.HeaderCell>
-                <Table.HeaderCell className="text-right">
-                  {t("economy.price")}
-                </Table.HeaderCell>
-                <Table.HeaderCell className="text-right">
-                  {t("economy.ev")}
-                </Table.HeaderCell>
-                <Table.HeaderCell className="text-right">
-                  {t("economy.rtp")}
-                </Table.HeaderCell>
+                {sortHeader("pack", t("economy.pack"))}
+                {sortHeader("category", t("economy.category"))}
+                {sortHeader("price", t("economy.price"), true)}
+                {sortHeader("ev", t("economy.ev"), true)}
+                {sortHeader("rtp", t("economy.rtp"), true)}
               </Table.Row>
             </Table.Header>
             <Table.Body>
-              {data.packs.map((p) => (
+              {packRows.map((p) => (
                 <Table.Row key={p.slug}>
                   <Table.Cell>{p.title}</Table.Cell>
                   <Table.Cell className="text-ui-fg-subtle">

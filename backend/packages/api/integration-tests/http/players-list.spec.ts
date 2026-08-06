@@ -54,7 +54,12 @@ medusaIntegrationTestRunner({
         ]);
         fx = await resolveFxRate(packs);
 
-        adminToken = await mintSuperAdmin(container, api, ADMIN_EMAIL, PASSWORD);
+        adminToken = await mintSuperAdmin(
+          container,
+          api,
+          ADMIN_EMAIL,
+          PASSWORD,
+        );
 
         const customers = container.resolve(Modules.CUSTOMER);
         // A first, B second → created_at DESC puts B ahead of A (ties possible).
@@ -117,7 +122,9 @@ medusaIntegrationTestRunner({
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const list = (qs = ''): Promise<any> =>
-        unwrapResponse(api.get(`/admin/players${qs}`, { headers: adminHeaders() }));
+        unwrapResponse(
+          api.get(`/admin/players${qs}`, { headers: adminHeaders() }),
+        );
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const rowFor = (res: any, id: string): any =>
@@ -158,7 +165,10 @@ medusaIntegrationTestRunner({
       it('reconciles against creditSummary + the pricing seam (spec §4)', async () => {
         const packs = packsService();
         const summary = await packs.creditSummary(aId);
-        const [card] = await packs.listCards({ handle: CARD_HANDLE }, { take: 1 });
+        const [card] = await packs.listCards(
+          { handle: CARD_HANDLE },
+          { take: 1 },
+        );
 
         const res = await list();
         const a = rowFor(res, aId);
@@ -239,6 +249,31 @@ medusaIntegrationTestRunner({
 
         const tooBig = await list('?limit=500');
         expect(tooBig.status).toBe(400);
+      });
+
+      it('?sort= orders by an allowlisted column; unknown keys degrade silently', async () => {
+        const asc = await list('?sort=email:asc');
+        expect(asc.status).toBe(200);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const emails = asc.data.players.map((p: any) => p.email);
+        expect(emails).toEqual([...emails].sort());
+
+        const desc = await list('?sort=email:desc');
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const emailsDesc = desc.data.players.map((p: any) => p.email);
+        expect(emailsDesc).toEqual([...emails].reverse());
+
+        // wallet_balance is a JS-side aggregate, NOT a customer column — it
+        // must degrade to created_at desc, not 400 and not leak into the query.
+        const unknown = await list('?sort=wallet_balance:asc');
+        expect(unknown.status).toBe(200);
+        const stamps = unknown.data.players.map(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (p: any) => new Date(p.registered_at).getTime(),
+        );
+        for (let i = 1; i < stamps.length; i++) {
+          expect(stamps[i]).toBeGreaterThanOrEqual(stamps[i - 1]);
+        }
       });
 
       it('disabled (Task 1) flows through to the row', async () => {

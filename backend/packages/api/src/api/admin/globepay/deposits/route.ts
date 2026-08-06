@@ -3,7 +3,10 @@ import { Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
 import { GLOBEPAY_STALE_AFTER_MS } from '../../../../modules/packs/globepay-reconcile';
-import { parsePaginationParams } from '../../../../utils/pagination';
+import {
+  parsePaginationParams,
+  parseSortParam,
+} from '../../../../utils/pagination';
 
 // GET /admin/globepay/deposits — operator visibility into the GlobePay365
 // deposit table.
@@ -46,21 +49,35 @@ export async function GET(
   );
   const status = parseStatusFilter(req.query.status);
 
+  // Sortable columns are an allowlist, not a passthrough — `order` goes
+  // straight into the query builder. Real columns only: customer_email and
+  // stale are computed in JS after the page is fetched.
+  const SORTABLE = new Set(['created_at', 'amount_requested', 'settled_at']);
+
   // Pending sorts OLDEST first (the ['status','created_at'] index): the row most
   // likely to be a stranded payment is the one that has been waiting longest, so
   // it belongs at the top rather than buried on the last page. Every other view
-  // is a history read, where newest-first is what an operator expects.
+  // is a history read, where newest-first is what an operator expects. That
+  // status-dependent default only holds while the operator has NOT picked a
+  // sort — an explicit `?sort=` overrides it (with the id tiebreaker so
+  // non-unique amounts can't reorder rows across pages).
+  let order: Record<string, 'ASC' | 'DESC'> = {
+    created_at: status === 'pending' ? 'ASC' : 'DESC',
+  };
+  if (typeof req.query.sort === 'string') {
+    const { key, dir } = parseSortParam(req.query.sort, SORTABLE, 'created_at');
+    order = { [key]: dir, id: dir };
+  }
+
   const [rows, total] = await packs.listAndCountGlobePayDeposits(
     status === 'all' ? {} : { status },
-    {
-      skip: offset,
-      take: limit,
-      order: { created_at: status === 'pending' ? 'ASC' : 'DESC' },
-    },
+    { skip: offset, take: limit, order },
   );
 
   const customerIds = [
-    ...new Set(rows.map((r) => r.customer_id).filter((id): id is string => !!id)),
+    ...new Set(
+      rows.map((r) => r.customer_id).filter((id): id is string => !!id),
+    ),
   ];
   const customers = customerIds.length
     ? await customerService.listCustomers(

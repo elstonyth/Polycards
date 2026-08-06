@@ -28,3 +28,26 @@ export function parsePaginationParams(
   }
   return { limit, offset };
 }
+
+/**
+ * Parse a `?sort=<column>:<asc|desc>` query param against an allowlist.
+ *
+ * The allowlist is a security boundary, not hygiene: callers feed the returned
+ * key into a query builder's `order` option (or, in the ledger's case, into a
+ * raw ORDER BY), so it must never be a passthrough. Unknown keys degrade
+ * SILENTLY to `fallback` rather than 400-ing — the purchase-invoices precedent:
+ * the value is produced by our own admin UI, and an allowlist drift there
+ * should degrade the sort, not break the page.
+ */
+export function parseSortParam(
+  raw: unknown,
+  sortable: ReadonlySet<string>,
+  fallback: string,
+): { key: string; dir: 'ASC' | 'DESC' } {
+  const s = typeof raw === 'string' ? raw : `${fallback}:desc`;
+  const [key, dir] = s.split(':');
+  return {
+    key: sortable.has(key) ? key : fallback,
+    dir: dir === 'asc' ? 'ASC' : 'DESC',
+  };
+}

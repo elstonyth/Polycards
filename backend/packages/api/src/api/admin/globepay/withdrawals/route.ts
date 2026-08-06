@@ -3,7 +3,10 @@ import { Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
 import { GLOBEPAY_STALE_AFTER_MS } from '../../../../modules/packs/globepay-reconcile';
-import { parsePaginationParams } from '../../../../utils/pagination';
+import {
+  parsePaginationParams,
+  parseSortParam,
+} from '../../../../utils/pagination';
 
 // GET /admin/globepay/withdrawals — operator visibility into the GlobePay365
 // payout table, the money-OUT mirror of ../deposits.
@@ -53,15 +56,27 @@ export async function GET(
   );
   const status = parseStatusFilter(req.query.status);
 
+  // Sortable columns are an allowlist, not a passthrough — `order` goes
+  // straight into the query builder. Real columns only: customer_email and
+  // stale are computed in JS after the page is fetched.
+  const SORTABLE = new Set(['created_at', 'amount', 'settled_at']);
+
   // Pending oldest-first (the ['status','created_at'] index): the longest-
   // waiting payout is the likeliest stranded debit. History views newest-first.
+  // That status-dependent default only holds while the operator has NOT picked
+  // a sort — an explicit `?sort=` overrides it (with the id tiebreaker so
+  // non-unique amounts can't reorder rows across pages).
+  let order: Record<string, 'ASC' | 'DESC'> = {
+    created_at: status === 'pending' ? 'ASC' : 'DESC',
+  };
+  if (typeof req.query.sort === 'string') {
+    const { key, dir } = parseSortParam(req.query.sort, SORTABLE, 'created_at');
+    order = { [key]: dir, id: dir };
+  }
+
   const [rows, total] = await packs.listAndCountGlobePayWithdrawals(
     status === 'all' ? {} : { status },
-    {
-      skip: offset,
-      take: limit,
-      order: { created_at: status === 'pending' ? 'ASC' : 'DESC' },
-    },
+    { skip: offset, take: limit, order },
   );
 
   const customerIds = [
