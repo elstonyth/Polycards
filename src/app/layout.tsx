@@ -6,6 +6,7 @@ import AppHeader from '@/components/app-shell/AppHeader';
 import SiteFooter from '@/components/app-shell/SiteFooter';
 import TabBar from '@/components/app-shell/TabBar';
 import { TopUpProvider } from '@/components/app-shell/TopUpProvider';
+import { enabledDepositMethods } from '@/lib/deposit-methods';
 import { VaultDotProvider } from '@/components/app-shell/VaultDotProvider';
 import { AuthProvider } from '@/components/auth/AuthProvider';
 import SkipLink from '@/components/SkipLink';
@@ -89,7 +90,13 @@ export default async function RootLayout({
             would contradict the consent gate in MetaPixel.tsx. */}
         <MetaPixel />
         <AuthProvider>
-          <TopUpProvider>
+          {/* Resolved here, not in the sheet: DEPOSIT_METHODS_ENABLED is a
+              RUN_TIME var and the sheet is a client component, so reading it
+              server-side is what makes retracting a channel a restart rather
+              than a storefront rebuild. */}
+          <TopUpProvider
+            methods={enabledDepositMethods(process.env.DEPOSIT_METHODS_ENABLED)}
+          >
             <VaultDotProvider>
               <SkipLink />
               <AppHeader />

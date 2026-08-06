@@ -18,7 +18,11 @@ import { sanePage } from '@/lib/page-param';
 import { getAuthToken } from '@/lib/data/customer';
 import { friendlyError, isAuthError } from '@/lib/errors';
 import { VAULT_RULES, VAULT_FALLBACK } from '@/lib/vault-errors';
-import { DEFAULT_DEPOSIT_METHOD, isDepositMethod } from '@/lib/deposit-methods';
+import {
+  DEFAULT_DEPOSIT_METHOD,
+  enabledDepositMethods,
+  isDepositMethod,
+} from '@/lib/deposit-methods';
 import {
   parseList,
   parseOne,
@@ -176,7 +180,16 @@ export async function startDeposit(
   // set (FPX/DN/BQR/OB) — ours is the narrower one this merchant actually has
   // provisioned, so an un-openable channel is refused here with a message
   // instead of surfacing as a gateway rejection.
-  if (!isDepositMethod(paymentMethodCode)) {
+  //
+  // Re-checked against the RUNTIME set, not just the compiled one: a channel an
+  // operator has retracted via DEPOSIT_METHODS_ENABLED must not still be
+  // reachable by a stale client bundle or a hand-rolled POST, or the switch
+  // would only hide the tile.
+  const enabled = enabledDepositMethods(process.env.DEPOSIT_METHODS_ENABLED);
+  if (
+    !isDepositMethod(paymentMethodCode) ||
+    !enabled.some((method) => method.code === paymentMethodCode)
+  ) {
     return { ok: false, error: 'Pick a payment method.' };
   }
 

@@ -570,9 +570,21 @@ swap for online banking.
 - `src/lib/actions/vault.ts` — `startDeposit(amount, method)`.
 
 `GLOBEPAY_DEPOSIT_METHOD` is now only the fallback for a request that names no
-method. Adding a channel means proving it with `GetSupportedBanks` first: the
-backend allow-list is the gateway's whole MYR set, so an un-provisioned code
+method — which storefront traffic never is, so changing it no longer moves what
+customers get. Adding a channel means proving it with `GetSupportedBanks` first:
+the backend allow-list is the gateway's whole MYR set, so an un-provisioned code
 would pass validation and fail at the cashier.
+
+**Retracting a channel: `DEPOSIT_METHODS_ENABLED` on the storefront app.**
+Comma-separated codes; `BQR` pulls online banking back to QR-only. Deliberately
+not a `NEXT_PUBLIC_*`: those are inlined at build time (and in this repo come
+from a Dockerfile `ARG`), so a picker driven by one could only be retracted by
+rebuilding the storefront image. This is a plain `RUN_TIME` var read by the
+server layout and re-checked in the `startDeposit` action — a spec apply and a
+restart, with no rebuild, and a stale client bundle cannot route around it.
+Unset, or naming nothing recognised, means every provisioned channel; a typo
+must not leave customers unable to pay. `GLOBEPAY_ENABLED` on the backend is
+still the switch that stops top-ups entirely.
 
 **`OB` is offered but NOT yet proven.** Only `BQR` has been seen to reach a
 cashier page since support enabled deposits; `OB` rests on their `已完成设定`

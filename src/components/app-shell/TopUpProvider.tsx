@@ -13,6 +13,7 @@ import { getCreditBalance } from '@/lib/actions/vault';
 import { openAuth } from '@/components/AuthButton';
 import { useAuth } from '@/components/auth/AuthProvider';
 import TopUpSheet from './TopUpSheet';
+import type { DepositMethod } from '@/lib/deposit-methods';
 
 type TopUpContextValue = {
   /** RM credit balance; null while loading or logged out. */
@@ -38,7 +39,15 @@ export function useTopUp(): TopUpContextValue {
  * part of AuthProvider (it changes on every purchase/top-up), so it lives here
  * and pages can push fresh values via applyBalance.
  */
-export function TopUpProvider({ children }: { children: ReactNode }) {
+export function TopUpProvider({
+  children,
+  methods,
+}: {
+  children: ReactNode;
+  /** Deposit channels to offer, resolved from RUN_TIME env by the server
+   *  layout — this is a client component and cannot read that env itself. */
+  methods?: readonly DepositMethod[];
+}) {
   const { customer } = useAuth();
   const router = useRouter();
   // Balance is stored WITH the customer id it was fetched for. A value tagged
@@ -117,6 +126,7 @@ export function TopUpProvider({ children }: { children: ReactNode }) {
       {children}
       <TopUpSheet
         open={open}
+        methods={methods}
         balance={shownBalance}
         onClose={() => setOpen(false)}
         onToppedUp={(next) => {

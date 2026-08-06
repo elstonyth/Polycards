@@ -87,6 +87,28 @@ function payButton(): HTMLButtonElement {
   return btn;
 }
 
+function methodRadios(): HTMLInputElement[] {
+  return [
+    ...container.querySelectorAll<HTMLInputElement>(
+      'input[type="radio"][name="deposit-method"]',
+    ),
+  ];
+}
+
+/** React needs the DOM property set before the change event, the same trick
+ *  typeAmount uses for the amount field. */
+async function selectRadio(input: HTMLInputElement) {
+  const setChecked = Object.getOwnPropertyDescriptor(
+    HTMLInputElement.prototype,
+    'checked',
+  )!.set!;
+  await act(async () => {
+    setChecked.call(input, true);
+    input.dispatchEvent(new Event('click', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+}
+
 async function click(el: Element) {
   await act(async () => {
     el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -180,15 +202,15 @@ describe('TopUpSheet gateway branch', () => {
       url: 'https://cashier.example/pay/ob',
       amount: 50,
     });
-    const [qr, onlineBanking] = buttons().filter(
-      (b) => b.getAttribute('role') === 'radio',
-    );
+    const [qr, onlineBanking] = methodRadios();
     if (!qr || !onlineBanking) throw new Error('method picker not found');
     // QR is pre-selected because it mirrors GLOBEPAY_DEPOSIT_METHOD; without a
     // picker every customer got it, which is the bug this closes.
-    expect(qr.getAttribute('aria-checked')).toBe('true');
-    expect(onlineBanking.getAttribute('aria-checked')).toBe('false');
-    await click(onlineBanking);
+    expect(qr.value).toBe('BQR');
+    expect(qr.checked).toBe(true);
+    expect(onlineBanking.value).toBe('OB');
+    expect(onlineBanking.checked).toBe(false);
+    await selectRadio(onlineBanking);
     await click(payButton());
     expect(startDeposit).toHaveBeenCalledExactlyOnceWith(50, 'OB');
   });

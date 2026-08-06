@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { friendlyError } from '@/lib/errors';
 import { VAULT_RULES, VAULT_FALLBACK } from '@/lib/vault-errors';
+import { DEPOSIT_METHODS } from '@/lib/deposit-methods';
 
 // Contract test for the same message-substring coupling as delivery-errors:
 // @medusajs/js-sdk's FetchError keeps only message/status, so there is no code
@@ -41,14 +42,22 @@ describe('VAULT_RULES backend-message contract', () => {
     );
   });
 
-  it('points a refused top-up at the other channel, which the UI now has', () => {
+  it('points a refused top-up at the other channel, while there IS one', () => {
     // Inverted 2026-08-06: this used to assert the copy must NOT mention a
     // payment method, because TopUpSheet sent an amount only and the channel
     // was pinned to GLOBEPAY_DEPOSIT_METHOD — advice the UI could not act on.
-    // The sheet now offers QR and online banking (src/lib/deposit-methods.ts),
-    // so a per-channel refusal has a real next step. If the picker is ever
-    // removed, revert this and the copy together.
-    expect(map('We could not start your top-up.')).toMatch(/payment method/i);
+    // The sheet now offers QR and online banking, so the advice is actionable.
+    //
+    // Conditional on the list rather than on today's copy: "try the OTHER
+    // payment method" is only true at two-or-more channels. Drop back to one
+    // and this fails, instead of silently re-stranding the customer.
+    if (DEPOSIT_METHODS.length > 1) {
+      expect(map('We could not start your top-up.')).toMatch(/payment method/i);
+    } else {
+      expect(map('We could not start your top-up.')).not.toMatch(
+        /payment method/i,
+      );
+    }
   });
 
   it('keeps the withdrawal rules ahead of the broad ones', () => {

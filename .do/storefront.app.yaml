@@ -108,6 +108,25 @@ services:
       - key: NEXT_PUBLIC_PAYMENTS_PROVIDER
         scope: RUN_AND_BUILD_TIME
         value: globepay
+      # Which deposit channels the top-up sheet offers, comma-separated. This is
+      # the per-channel retract lever, and it is here rather than on the backend
+      # because the sheet now sends a method on every request, which makes
+      # GLOBEPAY_DEPOSIT_METHOD a fallback nobody reaches.
+      #
+      # Unlike the flag above this is NOT a NEXT_PUBLIC — a plain RUN_TIME var
+      # read by the server layout and re-checked in the startDeposit action, so
+      # retracting a channel is a spec apply + restart, NOT a storefront
+      # rebuild. That matters because OB (online banking) has never been proven
+      # live: GetSupportedBanks answered 200 for it all through the 2026-08-06
+      # outage while every OB deposit was refused.
+      #
+      # Set to BQR to pull online banking back to QR-only. Unset (the default)
+      # or naming nothing recognised means every provisioned channel — a typo
+      # must not leave customers with no way to pay. To stop top-ups ENTIRELY,
+      # use GLOBEPAY_ENABLED on the backend instead.
+      - key: DEPOSIT_METHODS_ENABLED
+        scope: RUN_TIME
+        value: 'BQR,OB'
       # Enforce the CSP. Without this, next.config.ts serves
       # Content-Security-Policy-Report-Only — report-only had a clean run
       # (qa:csp + Sentry), flip assessed safe. GO-LIVE checklist: must be true.

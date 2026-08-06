@@ -12,6 +12,7 @@ import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
 import {
   DEPOSIT_METHODS,
   DEFAULT_DEPOSIT_METHOD,
+  type DepositMethod,
   type DepositMethodCode,
 } from '@/lib/deposit-methods';
 
@@ -49,18 +50,26 @@ export default function TopUpSheet({
   balance,
   onClose,
   onToppedUp,
+  methods = DEPOSIT_METHODS,
 }: {
   open: boolean;
   balance: number | null;
   onClose: () => void;
   onToppedUp: (balance: number, amount: number) => void;
+  /** Channels to offer. Comes from the server layout, which resolves
+   *  DEPOSIT_METHODS_ENABLED at runtime; defaults to every provisioned one. */
+  methods?: readonly DepositMethod[];
 }) {
   const [amountText, setAmountText] = useState(DEFAULT_AMOUNT);
-  // Gateway path only — the mock has no channels. Pre-set to the backend's own
-  // default so the untouched sheet behaves exactly as it did before the picker.
-  const [method, setMethod] = useState<DepositMethodCode>(
-    DEFAULT_DEPOSIT_METHOD,
-  );
+  // Gateway path only — the mock has no channels. QR (the backend's own
+  // default) when it is on offer, so an untouched sheet behaves exactly as it
+  // did before the picker; otherwise whatever is left, since preselecting a
+  // retracted channel would hand the server action a code it must refuse.
+  const preferred =
+    methods.find((option) => option.code === DEFAULT_DEPOSIT_METHOD)?.code ??
+    methods[0]?.code ??
+    DEFAULT_DEPOSIT_METHOD;
+  const [method, setMethod] = useState<DepositMethodCode>(preferred);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<{
@@ -94,10 +103,12 @@ export default function TopUpSheet({
       setError(null);
       setDone(null);
       setSubmitting(false);
-      setMethod(DEFAULT_DEPOSIT_METHOD);
+      setMethod(preferred);
       attemptKey.current = null;
     }
-  }, [open]);
+    // `preferred` is a plain string derived from a prop that does not change
+    // within a session, so listing it cannot cause a reset mid-sheet.
+  }, [open, preferred]);
 
   async function submit() {
     if (submitting || !amountValid) return;
@@ -254,24 +265,25 @@ export default function TopUpSheet({
 
             {/* Channel picker. Gateway only: the mock has no channels, and
                 without this the customer always landed on whichever one
-                GLOBEPAY_DEPOSIT_METHOD names (QR), with no way to pay by bank. */}
-            {USE_GATEWAY && (
-              <div
-                role="radiogroup"
-                aria-label="Payment method"
-                className="mt-3 grid grid-cols-2 gap-2"
-              >
-                {DEPOSIT_METHODS.map((option) => {
+                GLOBEPAY_DEPOSIT_METHOD names (QR), with no way to pay by bank.
+                Hidden at one channel — a "choice" of one is noise, and the
+                single code still ships on submit.
+
+                Native radios inside labels, not role="radio" buttons: the ARIA
+                role advertises an arrow-key contract that hand-rolled buttons
+                do not honour, and the input gives it for free along with
+                grouped announcement from the fieldset legend. */}
+            {USE_GATEWAY && methods.length > 1 && (
+              <fieldset className="mt-3 grid grid-cols-2 gap-2">
+                <legend className="sr-only">Payment method</legend>
+                {methods.map((option) => {
                   const selected = option.code === method;
                   return (
-                    <button
+                    <label
                       key={option.code}
-                      type="button"
-                      role="radio"
-                      aria-checked={selected}
-                      onClick={() => setMethod(option.code)}
                       className={cn(
-                        'rounded-xl border px-3 py-2.5 text-left transition-colors',
+                        'cursor-pointer rounded-xl border px-3 py-2.5 text-left transition-colors',
+                        'has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-white/60',
                         // Selected inverts to the solid light fill the amount
                         // presets above already use. A brighter border alone
                         // (the first cut) was too quiet to answer "which one am
@@ -282,6 +294,14 @@ export default function TopUpSheet({
                           : 'border-white/10 bg-white/[0.03] hover:border-white/20',
                       )}
                     >
+                      <input
+                        type="radio"
+                        name="deposit-method"
+                        value={option.code}
+                        checked={selected}
+                        onChange={() => setMethod(option.code)}
+                        className="sr-only"
+                      />
                       <span
                         className={cn(
                           'block text-[13px] font-semibold',
@@ -298,10 +318,10 @@ export default function TopUpSheet({
                       >
                         {option.hint}
                       </span>
-                    </button>
+                    </label>
                   );
                 })}
-              </div>
+              </fieldset>
             )}
 
             <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm">
