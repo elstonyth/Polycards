@@ -3,7 +3,10 @@ import { Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
 import { GLOBEPAY_STALE_AFTER_MS } from '../../../../modules/packs/globepay-reconcile';
-import { parsePaginationParams } from '../../../../utils/pagination';
+import {
+  parsePaginationParams,
+  parseSortParam,
+} from '../../../../utils/pagination';
 
 // GET /admin/globepay/withdrawals — operator visibility into the GlobePay365
 // payout table, the money-OUT mirror of ../deposits.
@@ -40,6 +43,14 @@ export function parseStatusFilter(raw: unknown): StatusFilter {
     : 'pending';
 }
 
+// Sortable columns are an allowlist, not a passthrough — `order` goes straight
+// into the query builder. Real columns only: customer_email and stale are
+// computed in JS after the page is fetched. Kept to exactly the two columns the
+// table renders a header for — an allowlist wider than the UI is surface for
+// nothing. `amount` is a `bigNumber` field; ordering targets its numeric column
+// (proved against a real database, see globepay-reconcile.spec.ts).
+const SORTABLE = new Set(['created_at', 'amount']);
+
 export async function GET(
   req: MedusaRequest,
   res: MedusaResponse,
@@ -55,13 +66,25 @@ export async function GET(
 
   // Pending oldest-first (the ['status','created_at'] index): the longest-
   // waiting payout is the likeliest stranded debit. History views newest-first.
+  // That status-dependent default only holds while the operator has NOT picked
+  // a sort — an explicit `?sort=` overrides it.
+  //
+  // `id` tiebreaks BOTH paths and the status-dependent direction is the
+  // parser's fallback, so it survives an absent OR an unhonoured `?sort=`.
+  // See the deposits route for the full reasoning — these two lists stay
+  // structurally identical on purpose.
+  const defaultDir = status === 'pending' ? 'ASC' : 'DESC';
+  const { key, dir } = parseSortParam(
+    req.query.sort,
+    SORTABLE,
+    'created_at',
+    defaultDir,
+  );
+  const order: Record<string, 'ASC' | 'DESC'> = { [key]: dir, id: dir };
+
   const [rows, total] = await packs.listAndCountGlobePayWithdrawals(
     status === 'all' ? {} : { status },
-    {
-      skip: offset,
-      take: limit,
-      order: { created_at: status === 'pending' ? 'ASC' : 'DESC' },
-    },
+    { skip: offset, take: limit, order },
   );
 
   const customerIds = [

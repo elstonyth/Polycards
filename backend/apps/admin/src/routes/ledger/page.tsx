@@ -14,6 +14,7 @@ import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import { useLedger } from '../../lib/queries';
 import type { LedgerType } from '../../lib/admin-rest';
 import { orderDateTime, rm } from '../../lib/format';
+import { useTableSort } from '../../lib/use-table-sort';
 import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
@@ -44,6 +45,11 @@ const TYPES: (LedgerType | undefined)[] = [
 // Header cells above; the payload expander spans all of them.
 const COLUMN_COUNT = 6;
 
+// EXACTLY the backend's sort allow-list (api/admin/ledger/route.ts). Player
+// lives in another module and Affect folds two nullable deltas into one cell,
+// so neither is server-sortable; those headers stay plain.
+type SortKey = 'occurred_at' | 'display_id' | 'type';
+
 // 'TP' -> 'ledger.typeTp'; the All tab -> 'ledger.typeAll'. Shared by the
 // filter tabs AND the Type column, so one code can never carry two names.
 const typeLabelKey = (tp: LedgerType | undefined): string =>
@@ -56,7 +62,8 @@ const typeLabelKey = (tp: LedgerType | undefined): string =>
 // a row that moves neither shows an em-dash rather than an empty cell.
 function affectSummary(wallet: number | null, vault: number | null): string {
   const parts: string[] = [];
-  const signed = (n: number): string => `${n > 0 ? '+' : '-'}${rm(Math.abs(n))}`;
+  const signed = (n: number): string =>
+    `${n > 0 ? '+' : '-'}${rm(Math.abs(n))}`;
   if (wallet !== null && wallet !== 0) parts.push(`wallet ${signed(wallet)}`);
   if (vault !== null && vault !== 0) parts.push(`vault ${signed(vault)}`);
   return parts.length ? parts.join(', ') : '—';
@@ -73,6 +80,12 @@ const LedgerPage = () => {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // Sorting resets to page 0 — page 3 of the old order is an arbitrary slice
+  // of the new one.
+  const { sort, sortHeader } = useTableSort<SortKey>(
+    { key: 'occurred_at', dir: 'desc' },
+    { onChange: () => setPage(0) },
+  );
 
   // 300 ms debounce (same as the players list) — one keystroke here costs the
   // server a customer-table scan plus a ledger scan.
@@ -90,6 +103,7 @@ const LedgerPage = () => {
     q || undefined,
     from || undefined,
     to || undefined,
+    sort ? `${sort.key}:${sort.dir}` : 'occurred_at:desc',
   );
 
   // The date inputs submit plain YYYY-MM-DD and the route reads that as the
@@ -193,10 +207,10 @@ const LedgerPage = () => {
             <Table>
               <Table.Header>
                 <Table.Row>
-                  <Table.HeaderCell>{t('ledger.colId')}</Table.HeaderCell>
-                  <Table.HeaderCell>{t('ledger.colType')}</Table.HeaderCell>
+                  {sortHeader('display_id', t('ledger.colId'))}
+                  {sortHeader('type', t('ledger.colType'))}
                   <Table.HeaderCell>{t('ledger.colPlayer')}</Table.HeaderCell>
-                  <Table.HeaderCell>{t('ledger.colWhen')}</Table.HeaderCell>
+                  {sortHeader('occurred_at', t('ledger.colWhen'))}
                   <Table.HeaderCell>{t('ledger.colAffect')}</Table.HeaderCell>
                   <Table.HeaderCell>{t('ledger.colDetails')}</Table.HeaderCell>
                 </Table.Row>

@@ -115,9 +115,7 @@ medusaIntegrationTestRunner({
         expect(byType.some((e) => e.customer.id === id)).toBe(true);
 
         const emailPrefix = email.split('@')[0];
-        const byQ = await listLedger(
-          `?q=${encodeURIComponent(emailPrefix)}`,
-        );
+        const byQ = await listLedger(`?q=${encodeURIComponent(emailPrefix)}`);
         const matched = byQ.find((e) => e.customer.email === email);
         expect(matched).toBeDefined();
         const knownDisplayId = (matched as AdminLedgerRow).display_id;
@@ -149,6 +147,36 @@ medusaIntegrationTestRunner({
           .slice(0, 10);
         const sameDay = await listLedger(`?from=${mytDay}&to=${mytDay}`);
         expect(sameDay.some((e) => e.customer.id === id)).toBe(true);
+      });
+
+      it('?sort= orders by an allowlisted column; unknown keys degrade to occurred_at', async () => {
+        // Two AD rows so there is something to reorder.
+        await seedAdjustment('admin-ledger-sort-a@test.dev');
+        await seedAdjustment('admin-ledger-sort-b@test.dev');
+
+        const asc = await listLedger('?sort=display_id:asc');
+        const ids = asc.map((e) => e.display_id);
+        expect(ids.length).toBeGreaterThanOrEqual(2);
+        // display_id is fixed-width `TT-YY-QN-NNNNNN` over ASCII, so a JS
+        // code-unit sort and Postgres' collation agree. If that format ever
+        // grows variable-width segments, compare with a collation-aware
+        // comparator instead of widening the fixture and hoping.
+        expect(ids).toEqual([...ids].sort());
+
+        const desc = await listLedger('?sort=display_id:desc');
+        expect(desc.map((e) => e.display_id)).toEqual([...ids].sort().reverse());
+
+        // customer email lives in another module and the deltas render as one
+        // Affect cell — neither is allowlisted, and the raw-SQL ORDER BY must
+        // degrade rather than see the key. Silent degrade (the
+        // purchase-invoices precedent), unlike this route's other params — and
+        // to the WHOLE default, occurred_at DESC, not the `:asc` that came in
+        // attached to a key we refused.
+        const unknown = await listLedger('?sort=customer_email:asc');
+        const stamps = unknown.map((e) => new Date(e.occurred_at).getTime());
+        for (let i = 1; i < stamps.length; i++) {
+          expect(stamps[i - 1]).toBeGreaterThanOrEqual(stamps[i]);
+        }
       });
 
       it('400s an invalid type, date or q filter instead of silently widening it', async () => {

@@ -37,7 +37,14 @@ export const httpStatus = (err: unknown): number | undefined => {
 // profile (pack ≈ square, card ≈ 5:7).
 export async function uploadImage(
   file: File,
-  kind: 'pack' | 'display' | 'card' | 'sprite' | 'frame' | 'avatar-frame' | 'delivery',
+  kind:
+    | 'pack'
+    | 'display'
+    | 'card'
+    | 'sprite'
+    | 'frame'
+    | 'avatar-frame'
+    | 'delivery',
 ): Promise<string> {
   const body = new FormData();
   body.append('files', file);
@@ -612,6 +619,7 @@ export async function listDeliveryOrders(
   q?: string,
   limit = 50,
   customerId?: string,
+  sort?: string,
 ): Promise<DeliveryOrdersPage> {
   const params = new URLSearchParams({
     limit: String(limit),
@@ -623,6 +631,9 @@ export async function listDeliveryOrders(
   if (q) params.set('q', q.slice(0, 64));
   // Scopes the table to one player. Blank is OMITTED, never sent empty.
   if (customerId) params.set('customer_id', customerId);
+  // `<column>:<asc|desc>`; the route allowlists the column and falls back to
+  // created_at:desc. Omitted = server default (newest first).
+  if (sort) params.set('sort', sort);
   return getJson<DeliveryOrdersPage>(`/admin/delivery-orders?${params}`);
 }
 
@@ -822,8 +833,10 @@ export const getVipLevels = () =>
 
 // Replace-all the ladder. Audited edit; `reason` mandatory. Throws
 // Error(message) on a 400 (httpError surfaces the backend MedusaError).
-export const saveVipLevels = (body: { levels: VipLevelDTO[]; reason: string }) =>
-  postJson<{ levels: VipLevelDTO[] }>('/admin/vip-levels', body);
+export const saveVipLevels = (body: {
+  levels: VipLevelDTO[];
+  reason: string;
+}) => postJson<{ levels: VipLevelDTO[] }>('/admin/vip-levels', body);
 
 // ── Weekly Challenge (milestone stages + week/payout settings) ───────────────
 
@@ -849,7 +862,8 @@ export const getChallengeStages = () =>
 export const saveChallengeStages = (body: {
   stages: ChallengeStageDTO[];
   reason: string;
-}) => postJson<{ stages: ChallengeStageDTO[] }>('/admin/challenge/stages', body);
+}) =>
+  postJson<{ stages: ChallengeStageDTO[] }>('/admin/challenge/stages', body);
 
 /** One Weekly Challenge queued to take over later. `applied_at` non-null means
  *  it already went live (the hourly settle job promoted it); a due row that is
@@ -1055,13 +1069,20 @@ export function getGlobePayDeposits(
   page: number,
   status: GlobePayDepositView,
   pageSize = 50,
+  sort?: string,
 ): Promise<GlobePayDepositsResponse> {
   const params = new URLSearchParams({
     status,
     limit: String(pageSize),
     offset: String(page * pageSize),
   });
-  return getJson<GlobePayDepositsResponse>(`/admin/globepay/deposits?${params}`);
+  // `<column>:<asc|desc>`, allowlisted server-side. OMITTED when unset — the
+  // route's default order is status-dependent (pending = oldest-first work
+  // queue) and an always-sent sort would silently flatten that.
+  if (sort) params.set('sort', sort);
+  return getJson<GlobePayDepositsResponse>(
+    `/admin/globepay/deposits?${params}`,
+  );
 }
 
 // GlobePay365 withdrawals (GET /admin/globepay/withdrawals) — the money-OUT
@@ -1099,12 +1120,15 @@ export function getGlobePayWithdrawals(
   page: number,
   status: GlobePayWithdrawalView,
   pageSize = 50,
+  sort?: string,
 ): Promise<GlobePayWithdrawalsResponse> {
   const params = new URLSearchParams({
     status,
     limit: String(pageSize),
     offset: String(page * pageSize),
   });
+  // Same contract as getGlobePayDeposits: omitted = status-dependent default.
+  if (sort) params.set('sort', sort);
   return getJson<GlobePayWithdrawalsResponse>(
     `/admin/globepay/withdrawals?${params}`,
   );
@@ -1145,9 +1169,16 @@ export interface PlayersPage {
   players: PlayerRow[];
 }
 
-export const listPlayers = (page = 0, q?: string, limit = 50) =>
+// `sort` is `<column>:<asc|desc>`; the route allowlists the column
+// (created_at | email | name) and falls back to created_at.
+export const listPlayers = (
+  page = 0,
+  q?: string,
+  limit = 50,
+  sort = 'created_at:desc',
+) =>
   getJson<PlayersPage>(
-    `/admin/players?limit=${limit}&offset=${page * limit}${q ? `&q=${encodeURIComponent(q)}` : ''}`,
+    `/admin/players?limit=${limit}&offset=${page * limit}&sort=${encodeURIComponent(sort)}${q ? `&q=${encodeURIComponent(q)}` : ''}`,
   );
 
 // Login block / unblock. `reason` is mandatory (1–500 chars) and audited; the
@@ -1319,6 +1350,9 @@ export const listLedger = (
     from?: string;
     to?: string;
     limit?: number;
+    /** `<column>:<asc|desc>`; allowlisted server-side (occurred_at |
+     *  display_id | type), falls back to occurred_at:desc. */
+    sort?: string;
   } = {},
 ) => {
   const limit = opts.limit ?? 50;
@@ -1330,6 +1364,7 @@ export const listLedger = (
   if (opts.q) params.set('q', opts.q);
   if (opts.from) params.set('from', opts.from);
   if (opts.to) params.set('to', opts.to);
+  if (opts.sort) params.set('sort', opts.sort);
   return getJson<AdminLedgerPage>(`/admin/ledger?${params.toString()}`);
 };
 // ── Epic 5 (Inventory) ───────────────────────────────────────────────────────
@@ -1375,8 +1410,10 @@ export interface AdminPurchaseInvoice {
 
 // agent_email is NOT omitted: GET /:id joins the user module the same way the
 // list route does, so both pages name the same person for one invoice.
-export interface AdminPurchaseInvoiceDetail
-  extends Omit<AdminPurchaseInvoice, 'total_qty' | 'subtotal' | 'total_fmv'> {
+export interface AdminPurchaseInvoiceDetail extends Omit<
+  AdminPurchaseInvoice,
+  'total_qty' | 'subtotal' | 'total_fmv'
+> {
   lines: AdminPurchaseInvoiceLine[];
 }
 

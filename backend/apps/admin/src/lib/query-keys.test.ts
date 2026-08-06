@@ -43,11 +43,25 @@ describe('qk', () => {
   // ── Epic 2 (Players) ──────────────────────────────────────────────────────
 
   it('keys the players list under a prefix that invalidates every page', () => {
-    expect(qk.players(0)).toEqual(['admin', 'players', 0, '']);
-    expect(qk.players(2, 'ada')).toEqual(['admin', 'players', 2, 'ada']);
+    // The sort segment always renders (defaulting to the server's own default)
+    // so a sorted key can never be prefixed by an unsorted one.
+    expect(qk.players(0)).toEqual([
+      'admin',
+      'players',
+      0,
+      '',
+      'created_at:desc',
+    ]);
+    expect(qk.players(2, 'ada', 'email:asc')).toEqual([
+      'admin',
+      'players',
+      2,
+      'ada',
+      'email:asc',
+    ]);
     // playersKey must be a strict prefix of every page key, or a post-disable
     // invalidation would leave the row's status stale on the current page.
-    for (const key of [qk.players(0), qk.players(2, 'ada')]) {
+    for (const key of [qk.players(0), qk.players(2, 'ada', 'email:asc')]) {
       expect(key.slice(0, qk.playersKey.length)).toEqual([...qk.playersKey]);
     }
   });
@@ -104,14 +118,18 @@ describe('qk', () => {
       0,
       '',
       'all',
+      'created_at:desc',
     ]);
-    expect(qk.deliveryOrders('shipped', 2, 'abc', 'cus_1')).toEqual([
+    expect(
+      qk.deliveryOrders('shipped', 2, 'abc', 'cus_1', 'status:asc'),
+    ).toEqual([
       'admin',
       'delivery-orders',
       'shipped',
       2,
       'abc',
       'cus_1',
+      'status:asc',
     ]);
     // The 2-segment prefixes still reach every page/filter/customer, so the
     // bulk-update invalidations keep working unchanged.
@@ -120,7 +138,7 @@ describe('qk', () => {
     }
     for (const key of [
       qk.deliveryOrders(undefined, 0),
-      qk.deliveryOrders('shipped', 2, 'abc', 'cus_1'),
+      qk.deliveryOrders('shipped', 2, 'abc', 'cus_1', 'status:asc'),
     ]) {
       expect(key.slice(0, qk.deliveryOrdersKey.length)).toEqual([
         ...qk.deliveryOrdersKey,
@@ -191,8 +209,19 @@ describe('qk', () => {
   // ── Epic 4 (Ledger) ───────────────────────────────────────────────────────
 
   it('keys the ledger under a prefix that invalidates every page/filter', () => {
-    expect(qk.ledger(0)).toEqual(['admin', 'ledger', 0, 'all', '', '', '']);
-    expect(qk.ledger(2, 'TP', 'ada', '2026-07-01', '2026-07-31')).toEqual([
+    expect(qk.ledger(0)).toEqual([
+      'admin',
+      'ledger',
+      0,
+      'all',
+      '',
+      '',
+      '',
+      'occurred_at:desc',
+    ]);
+    expect(
+      qk.ledger(2, 'TP', 'ada', '2026-07-01', '2026-07-31', 'display_id:asc'),
+    ).toEqual([
       'admin',
       'ledger',
       2,
@@ -200,12 +229,13 @@ describe('qk', () => {
       'ada',
       '2026-07-01',
       '2026-07-31',
+      'display_id:asc',
     ]);
     // Mirrors the players/playersKey rule: ledgerKey must be a strict prefix of
     // every page key, or one invalidation would miss the visible page.
     for (const key of [
       qk.ledger(0),
-      qk.ledger(2, 'TP', 'ada', '2026-07-01', '2026-07-31'),
+      qk.ledger(2, 'TP', 'ada', '2026-07-01', '2026-07-31', 'display_id:asc'),
     ]) {
       expect(key.slice(0, qk.ledgerKey.length)).toEqual([...qk.ledgerKey]);
     }
@@ -216,7 +246,6 @@ describe('qk', () => {
     expect(unfiltered.length).toBe(filtered.length);
     expect(unfiltered).not.toEqual(filtered);
   });
-
 
   // ── Epic 5 (Inventory) ────────────────────────────────────────────────────
 
