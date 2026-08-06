@@ -166,12 +166,31 @@ describe('TopUpSheet gateway branch', () => {
       amount: 50,
     });
     await click(payButton());
-    expect(startDeposit).toHaveBeenCalledExactlyOnceWith(50);
+    expect(startDeposit).toHaveBeenCalledExactlyOnceWith(50, 'BQR');
     expect(leaveFor).toHaveBeenCalledExactlyOnceWith(
       'https://cashier.example/pay/abc',
     );
     // No success state — nothing has been credited yet.
     expect(container.textContent).not.toContain('ADDED');
+  });
+
+  it('sends the picked channel, not the backend default', async () => {
+    startDeposit.mockResolvedValue({
+      ok: true,
+      url: 'https://cashier.example/pay/ob',
+      amount: 50,
+    });
+    const [qr, onlineBanking] = buttons().filter(
+      (b) => b.getAttribute('role') === 'radio',
+    );
+    if (!qr || !onlineBanking) throw new Error('method picker not found');
+    // QR is pre-selected because it mirrors GLOBEPAY_DEPOSIT_METHOD; without a
+    // picker every customer got it, which is the bug this closes.
+    expect(qr.getAttribute('aria-checked')).toBe('true');
+    expect(onlineBanking.getAttribute('aria-checked')).toBe('false');
+    await click(onlineBanking);
+    await click(payButton());
+    expect(startDeposit).toHaveBeenCalledExactlyOnceWith(50, 'OB');
   });
 
   it('shows the server error and stays put when the deposit fails', async () => {

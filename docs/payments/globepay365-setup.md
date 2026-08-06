@@ -502,10 +502,25 @@ a human into the DigitalOcean app, never into this repo.
      at the edge, so the only valid test is a real signed `CheckBalance` — which
      is the whole reason `check-globepay.ts` exists. Do not substitute a curl.
 
-### Deposits are dead ACCOUNT-side, not config-side (proven 2026-08-06)
+### Deposits were dead ACCOUNT-side — FIXED by GlobePay 2026-08-06
+
+**RESOLVED.** Support ("Mizuki") replied `可以再尝试充值 已完成设定` at 12:57 MYT
+(04:57 UTC) on 2026-08-06, and the very next top-up from the storefront reached a
+real cashier page: DuitNow QR, `MYR 50.00`, their order `304-MY05-218-26-913`,
+5-minute expiry. `PMT10006` is gone. The diagnosis below is kept because it is
+what was sent to them and what got it fixed — read it as history, not as the
+current state.
+
+What is still true from it: `BQR` and `OB` are the only provisioned deposit
+channels (`DN` and `FPX` are known codes with nothing behind them). Re-checked
+against `GetSupportedBanks` after the fix, and the storefront's picker list
+(`src/lib/deposit-methods.ts`) is built from exactly that.
+
+<details>
+<summary>The 2026-08-06 pre-fix diagnosis (what was sent to support)</summary>
 
 With the whitelist green, `SubmitDeposit` was re-run from production across every
-axis. **Every single combination returns `PMT10006 Invalid Payment Method`:**
+axis. **Every single combination returned `PMT10006 Invalid Payment Method`:**
 
 | Axis swept                                      | Result                        |
 | ----------------------------------------------- | ----------------------------- |
@@ -535,6 +550,46 @@ key, not the RSA signature, not the IP, and not `GLOBEPAY_DEPOSIT_METHOD`.
 API. Only GlobePay support can fix it.** Give them the table above — it is the
 whole diagnosis. Do not rotate `GLOBEPAY_DEPOSIT_METHOD` again; four values,
 four bank codes and four amounts have now been eliminated.
+
+(That conclusion was correct: they enabled it, and nothing on our side changed.)
+
+</details>
+
+### The customer picks the channel (2026-08-06)
+
+Both live channels are now offered in the top-up sheet instead of one being
+pinned server-side. `POST /store/credits/deposit` had always accepted
+`payment_method_code`; the storefront simply never sent it, so every customer
+landed on whatever `GLOBEPAY_DEPOSIT_METHOD` named — a DuitNow QR they could not
+swap for online banking.
+
+- `src/lib/deposit-methods.ts` — the two provisioned channels and their labels,
+  with the `GetSupportedBanks` evidence for why `DN`/`FPX` are absent.
+- `src/components/app-shell/TopUpSheet.tsx` — the picker (gateway branch only;
+  the mock gateway has no channels).
+- `src/lib/actions/vault.ts` — `startDeposit(amount, method)`.
+
+`GLOBEPAY_DEPOSIT_METHOD` is now only the fallback for a request that names no
+method. Adding a channel means proving it with `GetSupportedBanks` first: the
+backend allow-list is the gateway's whole MYR set, so an un-provisioned code
+would pass validation and fail at the cashier.
+
+**`OB` is offered but NOT yet proven.** Only `BQR` has been seen to reach a
+cashier page since support enabled deposits; `OB` rests on their `已完成设定`
+plus a `GetSupportedBanks` 200 — and that same 200 was returned all through the
+outage, while every OB deposit was refused. The first live OB top-up settles it:
+
+| What the cashier renders | Meaning |
+| ------------------------ | ------- |
+| Bank / FPX-style selection page | `OB` is live — done |
+| A DuitNow QR page again  | the deployed backend ignored `payment_method_code` and fell back to `GLOBEPAY_DEPOSIT_METHOD` |
+| An error in the sheet    | `OB` is still shut account-side — send support the same table as before, naming `OB` |
+
+No `SourceClientBankCode` is sent for either channel. That is an assumption, not
+a measurement: the field is documented mandatory for `BMR` only, so their cashier
+is expected to collect the bank for `OB`. If the OB page appears with no bank
+list, add a picker fed by `GetSupportedBanks` and thread the code through
+`startGlobePayDeposit` — the client already accepts it.
 
 **Withdrawals are the mirror image: the channel IS live.** `WD` returns 31 payout
 banks and Payout Verification is active on this merchant. But payouts draw on the

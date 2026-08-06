@@ -304,14 +304,19 @@ envs:
   # on .61, service on .204). So the whitelist is no longer a candidate
   # explanation for anything.
   #
-  # THIS VAR IS NOT THE PROBLEM EITHER — stop rotating it. With the whitelist
-  # green, SubmitDeposit was swept from production across BQR/OB/DN/FPX, across
-  # each method's own bank codes, and across RM 30/50/100/500. Every single
-  # combination returns PMT10006. Meanwhile GetSupportedBanks answers 200 for
-  # BQR (1 bank) and OB (7 banks), so their system knows both codes for merchant
-  # Polycard. Deposits are disabled ACCOUNT-side and only GlobePay support can
-  # enable them; see "Deposits are dead ACCOUNT-side" in
-  # docs/payments/globepay365-setup.md for the table to send them.
+  # THIS VAR WAS NEVER THE PROBLEM — do not rotate it. With the whitelist green,
+  # SubmitDeposit was swept from production across BQR/OB/DN/FPX, each method's
+  # own bank codes, and RM 30/50/100/500: every combination returned PMT10006
+  # while GetSupportedBanks answered 200 for BQR and OB. Deposits were disabled
+  # ACCOUNT-side.
+  #
+  # FIXED 2026-08-06 by GlobePay support (12:57 MYT). A top-up now reaches a
+  # real cashier page. Nothing on our side changed.
+  #
+  # This value is now only the FALLBACK for a deposit request that names no
+  # method: the storefront sends payment_method_code per customer choice
+  # (src/lib/deposit-methods.ts). Keep it on a provisioned channel — BQR and OB
+  # are the only two; DN/FPX are known codes with nothing behind them.
   - key: GLOBEPAY_DEPOSIT_METHOD
     scope: RUN_TIME
     value: BQR

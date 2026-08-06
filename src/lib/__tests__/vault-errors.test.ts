@@ -21,7 +21,7 @@ describe('VAULT_RULES backend-message contract', () => {
     const refusal =
       'We could not start your top-up. Please try a different amount or payment method.';
     expect(map(refusal)).toBe(
-      'The payment gateway could not start this top-up. Please try again in a moment.',
+      'The payment gateway could not start this top-up. Try the other payment method, or try again in a moment.',
     );
     // The precise regression: it must NOT fall through to the amount rule,
     // which is what a re-sort of the table would reintroduce.
@@ -41,12 +41,14 @@ describe('VAULT_RULES backend-message contract', () => {
     );
   });
 
-  it('does not tell a customer to pick a payment method the UI lacks', () => {
-    // TopUpSheet sends only an amount; the method is always
-    // GLOBEPAY_DEFAULT_METHOD. Copy that suggests changing it is a dead end.
-    expect(map('We could not start your top-up.')).not.toMatch(
-      /payment method/i,
-    );
+  it('points a refused top-up at the other channel, which the UI now has', () => {
+    // Inverted 2026-08-06: this used to assert the copy must NOT mention a
+    // payment method, because TopUpSheet sent an amount only and the channel
+    // was pinned to GLOBEPAY_DEPOSIT_METHOD — advice the UI could not act on.
+    // The sheet now offers QR and online banking (src/lib/deposit-methods.ts),
+    // so a per-channel refusal has a real next step. If the picker is ever
+    // removed, revert this and the copy together.
+    expect(map('We could not start your top-up.')).toMatch(/payment method/i);
   });
 
   it('keeps the withdrawal rules ahead of the broad ones', () => {

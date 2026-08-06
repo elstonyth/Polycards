@@ -18,6 +18,7 @@ import { sanePage } from '@/lib/page-param';
 import { getAuthToken } from '@/lib/data/customer';
 import { friendlyError, isAuthError } from '@/lib/errors';
 import { VAULT_RULES, VAULT_FALLBACK } from '@/lib/vault-errors';
+import { DEFAULT_DEPOSIT_METHOD, isDepositMethod } from '@/lib/deposit-methods';
 import {
   parseList,
   parseOne,
@@ -165,10 +166,18 @@ export type StartDepositResult =
  */
 export async function startDeposit(
   amount: number,
+  paymentMethodCode: string = DEFAULT_DEPOSIT_METHOD,
 ): Promise<StartDepositResult> {
   // Validate at the boundary — a server action is a public endpoint.
   if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
     return { ok: false, error: 'Enter a valid amount.' };
+  }
+  // The backend allow-lists this too, but its list is the gateway's whole MYR
+  // set (FPX/DN/BQR/OB) — ours is the narrower one this merchant actually has
+  // provisioned, so an un-openable channel is refused here with a message
+  // instead of surfacing as a gateway rejection.
+  if (!isDepositMethod(paymentMethodCode)) {
+    return { ok: false, error: 'Pick a payment method.' };
   }
 
   const token = await getAuthToken();
@@ -182,7 +191,7 @@ export async function startDeposit(
       await sdk.client.fetch('/store/credits/deposit', {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
-        body: { amount },
+        body: { amount, payment_method_code: paymentMethodCode },
       }),
     );
     if (!parsed) {

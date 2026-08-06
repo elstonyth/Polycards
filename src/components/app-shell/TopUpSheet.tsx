@@ -9,6 +9,11 @@ import { leaveFor } from '@/lib/navigation';
 import { Pill } from '@/components/ui/pill';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
+import {
+  DEPOSIT_METHODS,
+  DEFAULT_DEPOSIT_METHOD,
+  type DepositMethodCode,
+} from '@/lib/deposit-methods';
 
 // Which gateway backs the sheet. 'globepay' sends the customer to the
 // provider's cashier page and credits nothing here — the balance updates later,
@@ -51,6 +56,11 @@ export default function TopUpSheet({
   onToppedUp: (balance: number, amount: number) => void;
 }) {
   const [amountText, setAmountText] = useState(DEFAULT_AMOUNT);
+  // Gateway path only — the mock has no channels. Pre-set to the backend's own
+  // default so the untouched sheet behaves exactly as it did before the picker.
+  const [method, setMethod] = useState<DepositMethodCode>(
+    DEFAULT_DEPOSIT_METHOD,
+  );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<{
@@ -84,6 +94,7 @@ export default function TopUpSheet({
       setError(null);
       setDone(null);
       setSubmitting(false);
+      setMethod(DEFAULT_DEPOSIT_METHOD);
       attemptKey.current = null;
     }
   }, [open]);
@@ -100,7 +111,7 @@ export default function TopUpSheet({
           );
           return;
         }
-        const res = await startDeposit(amount);
+        const res = await startDeposit(amount, method);
         if (!res.ok) {
           setError(res.error);
           return;
@@ -240,6 +251,58 @@ export default function TopUpSheet({
                 placeholder="0.00"
               />
             </label>
+
+            {/* Channel picker. Gateway only: the mock has no channels, and
+                without this the customer always landed on whichever one
+                GLOBEPAY_DEPOSIT_METHOD names (QR), with no way to pay by bank. */}
+            {USE_GATEWAY && (
+              <div
+                role="radiogroup"
+                aria-label="Payment method"
+                className="mt-3 grid grid-cols-2 gap-2"
+              >
+                {DEPOSIT_METHODS.map((option) => {
+                  const selected = option.code === method;
+                  return (
+                    <button
+                      key={option.code}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      onClick={() => setMethod(option.code)}
+                      className={cn(
+                        'rounded-xl border px-3 py-2.5 text-left transition-colors',
+                        // Selected inverts to the solid light fill the amount
+                        // presets above already use. A brighter border alone
+                        // (the first cut) was too quiet to answer "which one am
+                        // I paying with" at a glance — and this is the control
+                        // that decides where the customer's money goes.
+                        selected
+                          ? 'border-transparent bg-neutral-50'
+                          : 'border-white/10 bg-white/[0.03] hover:border-white/20',
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          'block text-[13px] font-semibold',
+                          selected ? 'text-neutral-950' : 'text-neutral-300',
+                        )}
+                      >
+                        {option.label}
+                      </span>
+                      <span
+                        className={cn(
+                          'mt-0.5 block text-[11px] leading-snug',
+                          selected ? 'text-neutral-600' : 'text-neutral-500',
+                        )}
+                      >
+                        {option.hint}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
 
             <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm">
               <div className="flex items-center justify-between text-neutral-400">
