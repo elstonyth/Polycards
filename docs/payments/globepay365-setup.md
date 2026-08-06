@@ -468,22 +468,114 @@ a human into the DigitalOcean app, never into this repo.
    cannot be verified from the office at all — only the server addresses may
    call — so its first proof is `CheckBalance` from production.
 
-   **STILL NOT DONE as of 2026-08-05 — and deposits were armed anyway.** Read
-   back live today: `doctl apps get 7fd66ea2… -o json` → `dedicated_ips` is
-   still `188.166.181.61` / `188.166.181.204`, and nothing in the git history or
-   this doc records the new pair ever being sent to GlobePay. So every
-   production deposit since the 2026-08-04 cutover has called their API from an
-   address that is not on the API list, which is the precondition this very
-   checklist item says makes "every call rejected".
+   **DONE and PROVEN 2026-08-06.** GlobePay confirmed the new pair, and
+   `CheckBalance` now succeeds from **both** components — each one from its own
+   dedicated address, verified in the same session by reading `api.ipify.org`
+   from inside the container:
 
-   This is almost certainly the whole of the `PMT10006` story, and it reframes
-   the 2026-08-04/05 method rotation (OB → BQR, six refusals) as chasing the
-   wrong variable: the rejection lands before the payment method is consulted,
-   which is exactly why EVERY method failed identically and why GlobePay (Sean)
-   could truthfully say OB and BQR are both usable. The channels were never the
-   problem. Do NOT rotate methods again — send the two addresses above, get
-   written confirmation, then prove it with `medusa exec ./src/scripts/check-globepay.ts`
-   from production (read-only, no transaction) BEFORE trusting a customer top-up.
+   | Component | Egress IP          | CheckBalance                                                          |
+   | --------- | ------------------ | --------------------------------------------------------------------- |
+   | `backend` | `188.166.181.204`  | OK — `{"merchantCode":"Polycard","currencyCode":"MYR","currentBalance":0,…}` |
+   | `worker`  | `188.166.181.61`   | OK — same payload                                                     |
+
+   Both is the point, not a formality: one IP per component, and a green
+   `backend` with a dead `worker` means live payments work while the reconcile
+   sweep that catches a dropped callback fails silently.
+
+   **The 2026-08-05 diagnosis in the previous revision of this block was wrong,
+   and it is worth knowing why.** It read the `PMT10006` refusals as the API
+   whitelist rejecting us before the payment method was consulted, and concluded
+   "the channels were never the problem, do NOT rotate methods again." The
+   whitelist is now green on both addresses — so if `PMT10006` survives, it is
+   the channel after all and that instruction is actively misleading. Two
+   traps that produced the bad read:
+
+   - **`PMT10006` was never consistent with an IP rejection.** It is a parseable
+     `PMT*` code at HTTP 400, which is exactly the case
+     `check-globepay.ts` itself labels "credentials are fine and the
+     account/config is the problem". The error shape was in the log the whole
+     time and contradicted the theory.
+   - **An unauthenticated probe cannot test the whitelist.** A malformed
+     `POST /api/Merchant/CheckBalance` returns the identical ASP.NET
+     `400 application/problem+json` from an allowlisted server and from a random
+     office machine. Their IP check lives inside the signed merchant call, not
+     at the edge, so the only valid test is a real signed `CheckBalance` — which
+     is the whole reason `check-globepay.ts` exists. Do not substitute a curl.
+
+### Deposits are dead ACCOUNT-side, not config-side (proven 2026-08-06)
+
+With the whitelist green, `SubmitDeposit` was re-run from production across every
+axis. **Every single combination returns `PMT10006 Invalid Payment Method`:**
+
+| Axis swept                                      | Result                        |
+| ----------------------------------------------- | ----------------------------- |
+| Method `BQR`, `OB`, `DN`, `FPX`                  | all `PMT10006`                |
+| `BQR` + its one bank (`MYRHBB`)                  | `PMT10006`                    |
+| `OB` + `MYAFBB` / `MYBMMB` / `MYCIMB`            | `PMT10006`                    |
+| Amount `30` / `50` / `100` / `500`               | `PMT10006`                    |
+
+And it is **not** that the method codes are unknown to them. `GetSupportedBanks`
+(plain GET, no signature) answers for exactly the codes the back office lists,
+and refuses everything else with a *different* message:
+
+| `PaymentMethodCode` | GetSupportedBanks                                    |
+| ------------------- | ---------------------------------------------------- |
+| `BQR`               | `200`, 1 bank (`MYRHBB`)                             |
+| `OB`                | `200`, 7 banks (Affin, Muamalat, CIMB, HLB, Maybank, Public, RHB) |
+| `WD`                | `200`, 31 banks                                      |
+| `DN`, `FPX`         | `400 Not found` — known code, nothing provisioned    |
+| `QR`/`TNG`/`CARD`/… | `400 Invalid Payment Method` — unknown code          |
+
+So their system knows `BQR` and `OB` for merchant `Polycard`, has banks mapped to
+both, and still refuses to open a deposit on either. Signed calls succeed
+(`CheckBalance` returns the balance), so this is not credentials, not the AES
+key, not the RSA signature, not the IP, and not `GLOBEPAY_DEPOSIT_METHOD`.
+
+**Conclusion: the deposit side of the production merchant is not enabled for the
+API. Only GlobePay support can fix it.** Give them the table above — it is the
+whole diagnosis. Do not rotate `GLOBEPAY_DEPOSIT_METHOD` again; four values,
+four bank codes and four amounts have now been eliminated.
+
+**Withdrawals are the mirror image: the channel IS live.** `WD` returns 31 payout
+banks and Payout Verification is active on this merchant. But payouts draw on the
+merchant balance, and `currentBalance` / `availableBalance` / `t1Balance` are all
+`0` — and the only thing that funds them is deposits. So money-out cannot be
+proven until money-in works, no matter what the withdrawal switches say.
+
+### How to actually run the preflight on production
+
+`CheckBalance` only proves anything from a dedicated egress IP, so it has to run
+*inside* the container. Two things block the obvious route:
+
+1. **`doctl apps console` needs a real terminal.** It puts the local TTY into raw
+   mode, so under anything whose stdout is a pipe — an agent harness, the VS Code
+   terminal, CI — it dies with `error getting terminal size: The handle is
+   invalid`, and there is no flag to opt out. Use `scripts/do-exec.mjs`, which
+   talks to the same console WebSocket directly (envelopes are
+   `{"op":"stdin"|"stdout","data":"…"}`; sending a bare string closes it 1006):
+
+   ```sh
+   node scripts/do-exec.mjs 7fd66ea2-0105-420b-87eb-8a4606262561 backend \
+     'node node_modules/@medusajs/cli/cli.js exec ./src/scripts/check-globepay.ts'
+   ```
+
+   `medusa` is not on `PATH` in the image and not in `node_modules/.bin` — the
+   CLI is `node_modules/@medusajs/cli/cli.js`. Container workdir is
+   `/app/packages/api`. There is no `curl`; use `node -e "fetch(…)"`.
+
+2. **`medusa exec` OOMs the worker.** `worker` is `basic-xxs` (512 MB) and
+   already runs a Medusa process; booting a second one gets the pod's sandbox
+   killed mid-run (`containerManager.WaitPID failed: EOF`). A heap cap does not
+   save it. `globepay-client` imports nothing from the framework, so call it
+   bare instead — same network path, no container boot:
+
+   ```sh
+   node scripts/do-exec.mjs 7fd66ea2-0105-420b-87eb-8a4606262561 worker \
+     'node -e "const c=require(\"/app/packages/api/.medusa/server/src/modules/packs/globepay-client.js\");c.checkBalance(c.globepayConfigFromEnv()).then(b=>console.log(\"OK \"+JSON.stringify(b))).catch(e=>console.log(\"FAIL codes=\"+(e.codes||[]).join(\",\")+\" http=\"+e.httpStatus))"'
+   ```
+
+Confirm which address you actually tested — `dedicated_ips` does not say which
+component holds which. From inside: `node -e "fetch('https://api.ipify.org')…"`.
 
 ### Egress is spec state, and it can be wiped (learned the hard way 2026-07-30)
 
