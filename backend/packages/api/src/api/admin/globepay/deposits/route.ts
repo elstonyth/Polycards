@@ -69,15 +69,19 @@ export async function GET(
   // same tick share a created_at often enough that a row can otherwise land on
   // two pages or on neither. It cannot reorder rows with distinct created_at,
   // so the default view's meaning is unchanged.
+  //
+  // The status-dependent direction is passed as the parser's FALLBACK, which is
+  // what makes it survive an unhonoured `?sort=` as well as an absent one:
+  // degrading a bad key to a hardcoded DESC would silently flip the pending
+  // view out of oldest-first, the one ordering this endpoint exists to give.
   const defaultDir = status === 'pending' ? 'ASC' : 'DESC';
-  let order: Record<string, 'ASC' | 'DESC'> = {
-    created_at: defaultDir,
-    id: defaultDir,
-  };
-  if (typeof req.query.sort === 'string') {
-    const { key, dir } = parseSortParam(req.query.sort, SORTABLE, 'created_at');
-    order = { [key]: dir, id: dir };
-  }
+  const { key, dir } = parseSortParam(
+    req.query.sort,
+    SORTABLE,
+    'created_at',
+    defaultDir,
+  );
+  const order: Record<string, 'ASC' | 'DESC'> = { [key]: dir, id: dir };
 
   const [rows, total] = await packs.listAndCountGlobePayDeposits(
     status === 'all' ? {} : { status },

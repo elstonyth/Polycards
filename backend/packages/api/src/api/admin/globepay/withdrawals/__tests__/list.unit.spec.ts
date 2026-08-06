@@ -132,10 +132,19 @@ describe('GET /admin/globepay/withdrawals', () => {
     expect(calls.opts.order).toEqual({ amount: 'ASC', id: 'ASC' });
   });
 
-  it('an unknown sort key degrades to created_at, never a passthrough', async () => {
+  // account_number is deliberately NOT allowlisted — the full destination is on
+  // the row for dispute quoting, not as a sort axis. A refused key falls back
+  // to the VIEW's default (pending = oldest-first here), same as deposits.
+  it('an unknown sort key degrades to the view default, never a passthrough', async () => {
     const { scope, calls } = mkScope([withdrawal(1)]);
     const { res } = mkRes();
     await GET({ scope, query: { sort: 'account_number:desc' } } as any, res);
+    expect(calls.opts.order).toEqual({ created_at: 'ASC', id: 'ASC' });
+
+    await GET(
+      { scope, query: { status: 'all', sort: 'account_number:asc' } } as any,
+      res,
+    );
     expect(calls.opts.order).toEqual({ created_at: 'DESC', id: 'DESC' });
   });
 });

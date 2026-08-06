@@ -18,10 +18,24 @@ describe('parseSortParam', () => {
     });
   });
 
-  it('degrades an unknown key to the fallback, silently', () => {
+  // A miss restores the caller's WHOLE default, direction included. Honouring
+  // `:asc` from a request whose key we refused would flip a route's default
+  // order on the strength of the one half we couldn't honour anyway.
+  it('degrades an unknown key to the fallback key AND direction, silently', () => {
     expect(parseSortParam('secret_column:asc', SORTABLE, 'created_at')).toEqual(
-      { key: 'created_at', dir: 'ASC' },
+      { key: 'created_at', dir: 'DESC' },
     );
+    // The globepay lists pass their status-dependent default direction in, so
+    // a bad key cannot knock the pending work queue out of oldest-first.
+    expect(
+      parseSortParam('secret_column:desc', SORTABLE, 'created_at', 'ASC'),
+    ).toEqual({ key: 'created_at', dir: 'ASC' });
+  });
+
+  it('honours the requested direction only when the key is allowlisted', () => {
+    expect(
+      parseSortParam('amount:asc', SORTABLE, 'created_at', 'DESC'),
+    ).toEqual({ key: 'amount', dir: 'ASC' });
   });
 
   it('never passes injection-shaped input through', () => {
@@ -38,6 +52,12 @@ describe('parseSortParam', () => {
     expect(parseSortParam(['amount:asc'], SORTABLE, 'created_at')).toEqual({
       key: 'created_at',
       dir: 'DESC',
+    });
+    // An absent param is the same case as a refused one — both mean "the
+    // caller expressed nothing we can act on", so both get the full default.
+    expect(parseSortParam(undefined, SORTABLE, 'created_at', 'ASC')).toEqual({
+      key: 'created_at',
+      dir: 'ASC',
     });
   });
 

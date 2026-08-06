@@ -256,15 +256,23 @@ medusaIntegrationTestRunner({
         expect(asc.status).toBe(200);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const emails = asc.data.players.map((p: any) => p.email);
+        // Every fixture address is lowercase ASCII, the one class where a JS
+        // code-unit sort and Postgres' collation cannot disagree. Don't widen
+        // the fixtures to mixed case without replacing this comparison.
         expect(emails).toEqual([...emails].sort());
 
+        // Built from the ASCENDING response (asserted sorted above) and then
+        // reversed — never from the descending response itself, which would
+        // compare a list against a permutation of itself and always pass.
+        const expectedDesc = [...emails].sort().reverse();
         const desc = await list('?sort=email:desc');
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const emailsDesc = desc.data.players.map((p: any) => p.email);
-        expect(emailsDesc).toEqual([...emails].reverse());
+        expect(emailsDesc).toEqual(expectedDesc);
 
-        // wallet_balance is a JS-side aggregate, NOT a customer column — it
-        // must degrade to created_at asc, not 400 and not leak into the query.
+        // wallet_balance is a JS-side aggregate, NOT a customer column. It must
+        // degrade to the route's WHOLE default — created_at DESC — rather than
+        // keeping the `:asc` from a request whose key was refused.
         const unknown = await list('?sort=wallet_balance:asc');
         expect(unknown.status).toBe(200);
         const stamps = unknown.data.players.map(
@@ -272,7 +280,7 @@ medusaIntegrationTestRunner({
           (p: any) => new Date(p.registered_at).getTime(),
         );
         for (let i = 1; i < stamps.length; i++) {
-          expect(stamps[i]).toBeGreaterThanOrEqual(stamps[i - 1]);
+          expect(stamps[i - 1]).toBeGreaterThanOrEqual(stamps[i]);
         }
       });
 

@@ -68,7 +68,9 @@ describe('GET /admin/delivery-orders pagination', () => {
     await GET({ scope, query: { sort: 'status:asc' } } as any, res);
     expect(calls.opts.order).toEqual({ status: 'ASC', id: 'ASC' });
 
+    // A refused key restores the WHOLE default (created_at DESC), not just the
+    // key — the requested `:asc` came from a request we could not honour.
     await GET({ scope, query: { sort: 'customer_email:asc' } } as any, res);
-    expect(calls.opts.order).toEqual({ created_at: 'ASC', id: 'ASC' });
+    expect(calls.opts.order).toEqual({ created_at: 'DESC', id: 'DESC' });
   });
 });

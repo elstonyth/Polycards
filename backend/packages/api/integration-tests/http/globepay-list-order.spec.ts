@@ -119,12 +119,15 @@ medusaIntegrationTestRunner({
         // customer_email is joined in JS after the page is fetched — it is not
         // a column, and the allowlist must swallow it silently (the
         // purchase-invoices precedent) rather than hand it to the query builder.
-        // Degrading keeps the requested DIRECTION, so this is created_at ASC:
-        // oldest first, i.e. seeding order.
+        // Degrading restores the VIEW's whole default, direction included, so
+        // the history view stays newest-first despite the `:asc`.
         expect(await list('?status=all&sort=customer_email:asc')).toEqual([
-          LARGE,
           SMALL,
+          LARGE,
         ]);
+        // ...and the pending work queue stays oldest-first. SMALL is the only
+        // pending row, so this asserts the view survives rather than 400s.
+        expect(await list('?sort=customer_email:desc')).toEqual([SMALL]);
       });
     });
   },

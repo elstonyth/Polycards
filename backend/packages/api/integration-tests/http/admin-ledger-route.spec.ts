@@ -157,19 +157,25 @@ medusaIntegrationTestRunner({
         const asc = await listLedger('?sort=display_id:asc');
         const ids = asc.map((e) => e.display_id);
         expect(ids.length).toBeGreaterThanOrEqual(2);
+        // display_id is fixed-width `TT-YY-QN-NNNNNN` over ASCII, so a JS
+        // code-unit sort and Postgres' collation agree. If that format ever
+        // grows variable-width segments, compare with a collation-aware
+        // comparator instead of widening the fixture and hoping.
         expect(ids).toEqual([...ids].sort());
 
         const desc = await listLedger('?sort=display_id:desc');
-        expect(desc.map((e) => e.display_id)).toEqual([...ids].reverse());
+        expect(desc.map((e) => e.display_id)).toEqual([...ids].sort().reverse());
 
         // customer email lives in another module and the deltas render as one
         // Affect cell — neither is allowlisted, and the raw-SQL ORDER BY must
-        // degrade to occurred_at rather than see the key. Silent degrade (the
-        // purchase-invoices precedent), unlike this route's other params.
+        // degrade rather than see the key. Silent degrade (the
+        // purchase-invoices precedent), unlike this route's other params — and
+        // to the WHOLE default, occurred_at DESC, not the `:asc` that came in
+        // attached to a key we refused.
         const unknown = await listLedger('?sort=customer_email:asc');
         const stamps = unknown.map((e) => new Date(e.occurred_at).getTime());
         for (let i = 1; i < stamps.length; i++) {
-          expect(stamps[i]).toBeGreaterThanOrEqual(stamps[i - 1]);
+          expect(stamps[i - 1]).toBeGreaterThanOrEqual(stamps[i]);
         }
       });
 

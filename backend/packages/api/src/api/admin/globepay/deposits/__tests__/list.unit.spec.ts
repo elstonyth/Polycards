@@ -101,11 +101,26 @@ describe('GET /admin/globepay/deposits', () => {
     expect(calls.opts.order).toEqual({ amount_requested: 'ASC', id: 'ASC' });
   });
 
-  it('an unknown sort key degrades to created_at, never a passthrough', async () => {
+  // No ?status= means the pending view, whose default is oldest-first. A
+  // refused key must land on THAT default, not on a hardcoded newest-first —
+  // otherwise a typo in the dashboard silently empties the top of the
+  // stranded-payment work queue.
+  it('an unknown sort key degrades to the view default, never a passthrough', async () => {
     const { res } = mkRes();
     const { scope, calls } = mkScope([deposit(1)]);
     await GET(
       { scope, query: { sort: 'customer_email; DROP TABLE x:desc' } } as any,
+      res,
+    );
+
+    expect(calls.opts.order).toEqual({ created_at: 'ASC', id: 'ASC' });
+  });
+
+  it('a refused key on a history view keeps that view newest-first', async () => {
+    const { res } = mkRes();
+    const { scope, calls } = mkScope([deposit(1)]);
+    await GET(
+      { scope, query: { status: 'all', sort: 'customer_email:asc' } } as any,
       res,
     );
 

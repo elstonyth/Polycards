@@ -69,18 +69,18 @@ export async function GET(
   // That status-dependent default only holds while the operator has NOT picked
   // a sort — an explicit `?sort=` overrides it.
   //
-  // `id` tiebreaks BOTH paths (see the deposits route for the full reasoning):
-  // offset pagination needs a unique secondary key, and it cannot reorder rows
-  // whose created_at already differs.
+  // `id` tiebreaks BOTH paths and the status-dependent direction is the
+  // parser's fallback, so it survives an absent OR an unhonoured `?sort=`.
+  // See the deposits route for the full reasoning — these two lists stay
+  // structurally identical on purpose.
   const defaultDir = status === 'pending' ? 'ASC' : 'DESC';
-  let order: Record<string, 'ASC' | 'DESC'> = {
-    created_at: defaultDir,
-    id: defaultDir,
-  };
-  if (typeof req.query.sort === 'string') {
-    const { key, dir } = parseSortParam(req.query.sort, SORTABLE, 'created_at');
-    order = { [key]: dir, id: dir };
-  }
+  const { key, dir } = parseSortParam(
+    req.query.sort,
+    SORTABLE,
+    'created_at',
+    defaultDir,
+  );
+  const order: Record<string, 'ASC' | 'DESC'> = { [key]: dir, id: dir };
 
   const [rows, total] = await packs.listAndCountGlobePayWithdrawals(
     status === 'all' ? {} : { status },
