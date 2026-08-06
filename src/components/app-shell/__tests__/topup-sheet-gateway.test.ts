@@ -105,6 +105,12 @@ function methodRadios(): HTMLInputElement[] {
   ];
 }
 
+function methodRadio(code: string): HTMLInputElement {
+  const input = methodRadios().find((radio) => radio.value === code);
+  if (!input) throw new Error(`no deposit-method radio for ${code}`);
+  return input;
+}
+
 /** React needs the DOM property set before the change event, the same trick
  *  typeAmount uses for the amount field. */
 async function selectRadio(input: HTMLInputElement) {
@@ -212,13 +218,13 @@ describe('TopUpSheet gateway branch', () => {
       url: 'https://cashier.example/pay/ob',
       amount: 50,
     });
-    const [qr, onlineBanking] = methodRadios();
-    if (!qr || !onlineBanking) throw new Error('method picker not found');
+    // By value, not by DOM position: adding or reordering channels should not
+    // break a test about which code gets sent.
+    const qr = methodRadio('BQR');
+    const onlineBanking = methodRadio('OB');
     // QR is pre-selected because it mirrors GLOBEPAY_DEPOSIT_METHOD; without a
     // picker every customer got it, which is the bug this closes.
-    expect(qr.value).toBe('BQR');
     expect(qr.checked).toBe(true);
-    expect(onlineBanking.value).toBe('OB');
     expect(onlineBanking.checked).toBe(false);
     await selectRadio(onlineBanking);
     await click(payButton());

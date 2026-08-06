@@ -196,6 +196,14 @@ export async function getDepositMethods(): Promise<DepositMethodCode[]> {
  *
  * Which gateway the UI uses is decided by NEXT_PUBLIC_PAYMENTS_PROVIDER; this
  * action is only called when it is 'globepay'.
+ *
+ * Both parameters are typed as what can actually ARRIVE, not what is allowed.
+ * A server action is a public endpoint: the compiler constrains our own call
+ * sites, but the wire carries whatever the caller sends, so narrowing
+ * `paymentMethodCode` to `DepositMethodCode` would state a guarantee the
+ * runtime does not have and make the guard below look redundant. `amount: number`
+ * has read that way here since the mock-gateway days — hence its own typeof
+ * check on the first line.
  */
 export async function startDeposit(
   amount: number,
