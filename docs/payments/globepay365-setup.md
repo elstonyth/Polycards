@@ -478,7 +478,7 @@ a human into the DigitalOcean app, never into this repo.
    | `backend` | `188.166.181.204`  | OK — `{"merchantCode":"Polycard","currencyCode":"MYR","currentBalance":0,…}` |
    | `worker`  | `188.166.181.61`   | OK — same payload                                                     |
 
-   Both is the point, not a formality: one IP per component, and a green
+   Testing both is the point, not a formality: one IP per component, and a green
    `backend` with a dead `worker` means live payments work while the reconcile
    sweep that catches a dropped callback fails silently.
 
