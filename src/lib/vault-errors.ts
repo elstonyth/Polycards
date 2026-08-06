@@ -66,20 +66,17 @@ export const VAULT_RULES: ErrorRule[] = [
   ],
   // MUST stay above /amount/i — see the ORDER note in the file header.
   //
-  // Now it DOES point at the other channel, which it deliberately did not do
-  // before: TopUpSheet had no method picker, so "choose another payment method"
-  // named an action the UI could not perform. Since 2026-08-06 the sheet offers
-  // QR and online banking, and a per-channel refusal is exactly the failure this
-  // message covers — the other one may well work.
-  //
-  // The mock top-up path reaches this same rule with its own "could not start
-  // your top-up", and has no picker. Accepted: the mock is the local/dev
-  // gateway (NEXT_PUBLIC_PAYMENTS_PROVIDER != 'globepay'), so the stranded
-  // advice can only ever be read by us, while the real path is the one taking
-  // real money.
+  // The copy deliberately does NOT suggest choosing another payment method,
+  // even though the backend message does. That held when TopUpSheet had no
+  // picker, and it still holds now that it has one: how many channels are on
+  // offer is decided per request (DEPOSIT_METHODS_ENABLED), so "try the other
+  // one" is advice this table cannot know is true — and when it IS true the
+  // tiles are sitting directly above this error anyway. Generic wording also
+  // keeps it correct for the mock top-up path, whose own "could not start your
+  // top-up" message reaches the same table with no picker at all.
   [
     /could not start your top-up/i,
-    'The payment gateway could not start this top-up. Try the other payment method, or try again in a moment.',
+    'The payment gateway could not start this top-up. Please try again in a moment.',
   ],
   [/amount/i, 'Enter a valid amount (up to RM 10,000, whole cents).'],
   [/already sold/i, 'This card was already sold back.'],

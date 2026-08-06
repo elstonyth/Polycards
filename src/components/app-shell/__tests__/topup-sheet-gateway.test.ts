@@ -19,9 +19,13 @@ import { createRoot, type Root } from 'react-dom/client';
 
 const startDeposit = vi.fn();
 const topUpCredits = vi.fn();
+// The sheet asks the server which channels are on offer every time it opens
+// (DEPOSIT_METHODS_ENABLED is RUN_TIME and several routes are prerendered).
+const getDepositMethods = vi.fn();
 vi.mock('@/lib/actions/vault', () => ({
   startDeposit: (...args: unknown[]) => startDeposit(...args),
   topUpCredits: (...args: unknown[]) => topUpCredits(...args),
+  getDepositMethods: () => getDepositMethods(),
 }));
 // jsdom's window.location is unforgeable, so navigation is observed through
 // the leaveFor seam instead of a location spy.
@@ -55,12 +59,13 @@ beforeAll(async () => {
 let container: HTMLDivElement;
 let root: Root;
 
-beforeEach(() => {
-  vi.clearAllMocks();
+/** Mount with a given server-side channel list; awaits the open-time fetch. */
+async function mount(codes: string[] = ['BQR', 'OB']) {
+  getDepositMethods.mockResolvedValue(codes);
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
-  act(() => {
+  await act(async () => {
     root.render(
       createElement(TopUpSheet, {
         open: true,
@@ -70,6 +75,11 @@ beforeEach(() => {
       }),
     );
   });
+}
+
+beforeEach(async () => {
+  vi.clearAllMocks();
+  await mount();
 });
 
 afterEach(() => {
@@ -211,6 +221,23 @@ describe('TopUpSheet gateway branch', () => {
     expect(onlineBanking.value).toBe('OB');
     expect(onlineBanking.checked).toBe(false);
     await selectRadio(onlineBanking);
+    await click(payButton());
+    expect(startDeposit).toHaveBeenCalledExactlyOnceWith(50, 'OB');
+  });
+
+  it('hides the picker when the operator has retracted a channel, and still sends it', async () => {
+    // DEPOSIT_METHODS_ENABLED=OB. A "choice" of one is noise, but the code must
+    // still ride on the request — and it must be the surviving channel, not the
+    // compiled default (BQR), which the server action would refuse.
+    act(() => root.unmount());
+    container.remove();
+    await mount(['OB']);
+    startDeposit.mockResolvedValue({
+      ok: true,
+      url: 'https://cashier.example/pay/ob-only',
+      amount: 50,
+    });
+    expect(methodRadios()).toHaveLength(0);
     await click(payButton());
     expect(startDeposit).toHaveBeenCalledExactlyOnceWith(50, 'OB');
   });

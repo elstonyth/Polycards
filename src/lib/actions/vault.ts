@@ -20,8 +20,10 @@ import { friendlyError, isAuthError } from '@/lib/errors';
 import { VAULT_RULES, VAULT_FALLBACK } from '@/lib/vault-errors';
 import {
   DEFAULT_DEPOSIT_METHOD,
+  DEPOSIT_METHODS,
   enabledDepositMethods,
   isDepositMethod,
+  type DepositMethodCode,
 } from '@/lib/deposit-methods';
 import {
   parseList,
@@ -155,6 +157,33 @@ export type TopUpActionResult =
 export type StartDepositResult =
   | { ok: true; url: string; amount: number }
   | { ok: false; error: string; needsAuth?: boolean };
+
+/**
+ * Which deposit channels to offer, read at REQUEST time.
+ *
+ * Called by the sheet when it opens rather than resolved in the root layout,
+ * and that is the whole point: `DEPOSIT_METHODS_ENABLED` is a RUN_TIME var, but
+ * several routes (`/task`, `/about`, `/how-it-works`, …) are fully prerendered,
+ * so a layout-resolved list would be frozen into their flight payload at BUILD
+ * time — the retract switch would work on dynamic pages and silently do nothing
+ * on static ones. An action runs per request everywhere.
+ */
+export async function getDepositMethods(): Promise<DepositMethodCode[]> {
+  const raw = process.env.DEPOSIT_METHODS_ENABLED;
+  const enabled = enabledDepositMethods(raw);
+  // Fail-open is deliberate (a typo must not leave customers unable to pay) but
+  // must not be silent: this is the case where an operator believes a channel is
+  // retracted and it is still being offered.
+  if (raw?.trim() && enabled.length === DEPOSIT_METHODS.length) {
+    const named = enabled.map((method) => method.code).join(',');
+    if (raw.trim().toUpperCase() !== named) {
+      logger.error(
+        `[vault] DEPOSIT_METHODS_ENABLED="${raw}" matched no known channel — offering all of ${named}`,
+      );
+    }
+  }
+  return enabled.map((method) => method.code);
+}
 
 /**
  * Start a REAL top-up through the GlobePay365 gateway.

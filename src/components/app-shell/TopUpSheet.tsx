@@ -4,7 +4,11 @@ import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { rm, rm0 } from '@/lib/format';
-import { startDeposit, topUpCredits } from '@/lib/actions/vault';
+import {
+  getDepositMethods,
+  startDeposit,
+  topUpCredits,
+} from '@/lib/actions/vault';
 import { leaveFor } from '@/lib/navigation';
 import { Pill } from '@/components/ui/pill';
 import { useModalA11y } from '@/lib/use-modal-a11y';
@@ -50,17 +54,18 @@ export default function TopUpSheet({
   balance,
   onClose,
   onToppedUp,
-  methods = DEPOSIT_METHODS,
 }: {
   open: boolean;
   balance: number | null;
   onClose: () => void;
   onToppedUp: (balance: number, amount: number) => void;
-  /** Channels to offer. Comes from the server layout, which resolves
-   *  DEPOSIT_METHODS_ENABLED at runtime; defaults to every provisioned one. */
-  methods?: readonly DepositMethod[];
 }) {
   const [amountText, setAmountText] = useState(DEFAULT_AMOUNT);
+  // Every provisioned channel until the server says otherwise. An operator can
+  // retract one at runtime (DEPOSIT_METHODS_ENABLED), which is asked for when
+  // the sheet opens rather than resolved in the layout — see getDepositMethods.
+  const [methods, setMethods] =
+    useState<readonly DepositMethod[]>(DEPOSIT_METHODS);
   // Gateway path only — the mock has no channels. QR (the backend's own
   // default) when it is on offer, so an untouched sheet behaves exactly as it
   // did before the picker; otherwise whatever is left, since preselecting a
@@ -97,7 +102,9 @@ export default function TopUpSheet({
   // Liquid-glass rim on the sheet panel (frosted fallback on Safari/Firefox).
   useLiquidGlass(panelRef, open, GLASS_SUBTLE);
 
-  // Reset transient state each time the sheet opens.
+  // Reset transient state each time the sheet opens. `preferred` is deliberately
+  // NOT a dependency: it changes when the channel list arrives below, and
+  // re-running then would wipe a selection the customer had already made.
   useEffect(() => {
     if (open) {
       setError(null);
@@ -106,9 +113,34 @@ export default function TopUpSheet({
       setMethod(preferred);
       attemptKey.current = null;
     }
-    // `preferred` is a plain string derived from a prop that does not change
-    // within a session, so listing it cannot cause a reset mid-sheet.
-  }, [open, preferred]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // Ask the server which channels are on offer, per open. Gateway path only —
+  // the mock has no channels — and failure keeps the compiled list, since the
+  // action re-checks the code anyway and a refused channel shows its own error.
+  useEffect(() => {
+    if (!open || !USE_GATEWAY) return;
+    let cancelled = false;
+    getDepositMethods()
+      .then((codes) => {
+        if (cancelled) return;
+        const offered = DEPOSIT_METHODS.filter((option) =>
+          codes.includes(option.code),
+        );
+        if (offered.length > 0) setMethods(offered);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  // A retract that lands while the sheet is open must not leave a now-invalid
+  // code armed on the Pay button.
+  useEffect(() => {
+    if (!methods.some((option) => option.code === method)) setMethod(preferred);
+  }, [methods, method, preferred]);
 
   async function submit() {
     if (submitting || !amountValid) return;

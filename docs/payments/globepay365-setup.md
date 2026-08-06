@@ -576,15 +576,28 @@ the backend allow-list is the gateway's whole MYR set, so an un-provisioned code
 would pass validation and fail at the cashier.
 
 **Retracting a channel: `DEPOSIT_METHODS_ENABLED` on the storefront app.**
-Comma-separated codes; `BQR` pulls online banking back to QR-only. Deliberately
-not a `NEXT_PUBLIC_*`: those are inlined at build time (and in this repo come
-from a Dockerfile `ARG`), so a picker driven by one could only be retracted by
-rebuilding the storefront image. This is a plain `RUN_TIME` var read by the
-server layout and re-checked in the `startDeposit` action — a spec apply and a
-restart, with no rebuild, and a stale client bundle cannot route around it.
-Unset, or naming nothing recognised, means every provisioned channel; a typo
-must not leave customers unable to pay. `GLOBEPAY_ENABLED` on the backend is
-still the switch that stops top-ups entirely.
+Comma-separated codes; `BQR` pulls online banking back to QR-only. Unset (the
+default — the spec deliberately does not carry the key) means every provisioned
+channel, and so does a value naming nothing recognised, which also logs an
+error: a typo must not leave customers unable to pay. `GLOBEPAY_ENABLED` on the
+backend remains the switch that stops top-ups entirely.
+
+Two things about **where** it is read, both load-bearing:
+
+- Not a `NEXT_PUBLIC_*`. Those are inlined at build time (here from a Dockerfile
+  `ARG`), so a picker driven by one could only be retracted by rebuilding the
+  storefront image.
+- Not read in the root layout either, which is the subtler trap: `/task`,
+  `/about`, `/how-it-works` and friends are fully prerendered, so a
+  layout-resolved list is frozen into their flight payload at **build** time —
+  the switch would work on dynamic routes and silently do nothing on static
+  ones. The sheet calls the `getDepositMethods` action when it opens, which runs
+  per request everywhere.
+
+`startDeposit` re-checks the code against the same runtime set, so a stale
+client bundle cannot route around the switch. A customer JWT posting straight to
+`POST /store/credits/deposit` still can — the backend allow-list is the
+gateway's whole MYR set — but that only buys them a cashier that refuses.
 
 **`OB` is offered but NOT yet proven.** Only `BQR` has been seen to reach a
 cashier page since support enabled deposits; `OB` rests on their `已完成设定`

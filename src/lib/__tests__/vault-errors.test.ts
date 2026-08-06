@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { friendlyError } from '@/lib/errors';
 import { VAULT_RULES, VAULT_FALLBACK } from '@/lib/vault-errors';
-import { DEPOSIT_METHODS } from '@/lib/deposit-methods';
 
 // Contract test for the same message-substring coupling as delivery-errors:
 // @medusajs/js-sdk's FetchError keeps only message/status, so there is no code
@@ -22,7 +21,7 @@ describe('VAULT_RULES backend-message contract', () => {
     const refusal =
       'We could not start your top-up. Please try a different amount or payment method.';
     expect(map(refusal)).toBe(
-      'The payment gateway could not start this top-up. Try the other payment method, or try again in a moment.',
+      'The payment gateway could not start this top-up. Please try again in a moment.',
     );
     // The precise regression: it must NOT fall through to the amount rule,
     // which is what a re-sort of the table would reintroduce.
@@ -42,22 +41,14 @@ describe('VAULT_RULES backend-message contract', () => {
     );
   });
 
-  it('points a refused top-up at the other channel, while there IS one', () => {
-    // Inverted 2026-08-06: this used to assert the copy must NOT mention a
-    // payment method, because TopUpSheet sent an amount only and the channel
-    // was pinned to GLOBEPAY_DEPOSIT_METHOD — advice the UI could not act on.
-    // The sheet now offers QR and online banking, so the advice is actionable.
-    //
-    // Conditional on the list rather than on today's copy: "try the OTHER
-    // payment method" is only true at two-or-more channels. Drop back to one
-    // and this fails, instead of silently re-stranding the customer.
-    if (DEPOSIT_METHODS.length > 1) {
-      expect(map('We could not start your top-up.')).toMatch(/payment method/i);
-    } else {
-      expect(map('We could not start your top-up.')).not.toMatch(
-        /payment method/i,
-      );
-    }
+  it('does not tell a customer to pick a payment method this table cannot see', () => {
+    // Held when TopUpSheet had no picker; still holds now that it has one.
+    // How many channels are offered is a per-request decision
+    // (DEPOSIT_METHODS_ENABLED), so a static rule cannot promise there is
+    // another one — and when there is, the tiles are right above this error.
+    expect(map('We could not start your top-up.')).not.toMatch(
+      /payment method/i,
+    );
   });
 
   it('keeps the withdrawal rules ahead of the broad ones', () => {
