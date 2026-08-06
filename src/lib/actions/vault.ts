@@ -19,6 +19,13 @@ import { getAuthToken } from '@/lib/data/customer';
 import { friendlyError, isAuthError } from '@/lib/errors';
 import { VAULT_RULES, VAULT_FALLBACK } from '@/lib/vault-errors';
 import {
+  DEFAULT_DEPOSIT_METHOD,
+  DEPOSIT_METHODS,
+  enabledDepositMethods,
+  isDepositMethod,
+  type DepositMethodCode,
+} from '@/lib/deposit-methods';
+import {
   parseList,
   parseOne,
   VaultItemSchema,
@@ -152,6 +159,33 @@ export type StartDepositResult =
   | { ok: false; error: string; needsAuth?: boolean };
 
 /**
+ * Which deposit channels to offer, read at REQUEST time.
+ *
+ * Called by the sheet when it opens rather than resolved in the root layout,
+ * and that is the whole point: `DEPOSIT_METHODS_ENABLED` is a RUN_TIME var, but
+ * several routes (`/task`, `/about`, `/how-it-works`, …) are fully prerendered,
+ * so a layout-resolved list would be frozen into their flight payload at BUILD
+ * time — the retract switch would work on dynamic pages and silently do nothing
+ * on static ones. An action runs per request everywhere.
+ */
+export async function getDepositMethods(): Promise<DepositMethodCode[]> {
+  const raw = process.env.DEPOSIT_METHODS_ENABLED;
+  const enabled = enabledDepositMethods(raw);
+  // Fail-open is deliberate (a typo must not leave customers unable to pay) but
+  // must not be silent: this is the case where an operator believes a channel is
+  // retracted and it is still being offered.
+  if (raw?.trim() && enabled.length === DEPOSIT_METHODS.length) {
+    const named = enabled.map((method) => method.code).join(',');
+    if (raw.trim().toUpperCase() !== named) {
+      logger.error(
+        `[vault] DEPOSIT_METHODS_ENABLED="${raw}" matched no known channel — offering all of ${named}`,
+      );
+    }
+  }
+  return enabled.map((method) => method.code);
+}
+
+/**
  * Start a REAL top-up through the GlobePay365 gateway.
  *
  * Unlike `topUpCredits` this credits nothing and returns no balance: it hands
@@ -162,13 +196,38 @@ export type StartDepositResult =
  *
  * Which gateway the UI uses is decided by NEXT_PUBLIC_PAYMENTS_PROVIDER; this
  * action is only called when it is 'globepay'.
+ *
+ * Both parameters are typed as what can actually ARRIVE, not what is allowed.
+ * A server action is a public endpoint: the compiler constrains our own call
+ * sites, but the wire carries whatever the caller sends, so narrowing
+ * `paymentMethodCode` to `DepositMethodCode` would state a guarantee the
+ * runtime does not have and make the guard below look redundant. `amount: number`
+ * has read that way here since the mock-gateway days — hence its own typeof
+ * check on the first line.
  */
 export async function startDeposit(
   amount: number,
+  paymentMethodCode: string = DEFAULT_DEPOSIT_METHOD,
 ): Promise<StartDepositResult> {
   // Validate at the boundary — a server action is a public endpoint.
   if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
     return { ok: false, error: 'Enter a valid amount.' };
+  }
+  // The backend allow-lists this too, but its list is the gateway's whole MYR
+  // set (FPX/DN/BQR/OB) — ours is the narrower one this merchant actually has
+  // provisioned, so an un-openable channel is refused here with a message
+  // instead of surfacing as a gateway rejection.
+  //
+  // Re-checked against the RUNTIME set, not just the compiled one: a channel an
+  // operator has retracted via DEPOSIT_METHODS_ENABLED must not still be
+  // reachable by a stale client bundle or a hand-rolled POST, or the switch
+  // would only hide the tile.
+  const enabled = enabledDepositMethods(process.env.DEPOSIT_METHODS_ENABLED);
+  if (
+    !isDepositMethod(paymentMethodCode) ||
+    !enabled.some((method) => method.code === paymentMethodCode)
+  ) {
+    return { ok: false, error: 'Pick a payment method.' };
   }
 
   const token = await getAuthToken();
@@ -182,7 +241,7 @@ export async function startDeposit(
       await sdk.client.fetch('/store/credits/deposit', {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
-        body: { amount },
+        body: { amount, payment_method_code: paymentMethodCode },
       }),
     );
     if (!parsed) {

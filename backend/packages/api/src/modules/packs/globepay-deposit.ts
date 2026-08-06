@@ -135,13 +135,25 @@ export async function startGlobePayDeposit(
     );
   }
 
-  // GLOBEPAY_DEPOSIT_METHOD lets an operator name the channel their merchant
-  // account actually has, without a code deploy: which of FPX/DN/BQR/OB is
-  // provisioned is GlobePay's decision, differs between staging and production,
-  // and is not discoverable from our side except by being refused. Finding the
-  // right one otherwise costs a ~10 minute build per guess; as an env var it is
-  // a ~4 minute spec apply. Still validated against the allow-list below, so a
-  // typo fails closed on OUR side rather than reaching the gateway.
+  // GLOBEPAY_DEPOSIT_METHOD names the channel to use when the caller does not.
+  // It was the operator's channel lever: which of FPX/DN/BQR/OB is provisioned
+  // is GlobePay's decision, differs between staging and production, and is not
+  // discoverable from our side except by being refused, so an env var (~4 minute
+  // spec apply) beat a ~10 minute build per guess.
+  //
+  // Since 2026-08-06 it is a FALLBACK ONLY for customer traffic: the storefront
+  // top-up sheet lets the customer pick, so every request from it names a
+  // method and this default can never fire. The lever moved with it — retracting
+  // a channel is now DEPOSIT_METHODS_ENABLED on the STOREFRONT app
+  // (src/lib/deposit-methods.ts), also RUN_TIME, also no rebuild. This value
+  // still covers any caller that sends no method, so keep it on a provisioned
+  // channel.
+  //
+  // Validated against the allow-list below either way, so a typo fails closed on
+  // OUR side rather than reaching the gateway. Note the allow-list is the
+  // gateway's whole MYR set, which is WIDER than what this merchant has
+  // provisioned — it will happily pass DN or FPX through to a cashier that
+  // refuses them.
   const paymentMethodCode =
     input.paymentMethodCode ??
     process.env.GLOBEPAY_DEPOSIT_METHOD ??

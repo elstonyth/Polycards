@@ -19,9 +19,13 @@ import { createRoot, type Root } from 'react-dom/client';
 
 const startDeposit = vi.fn();
 const topUpCredits = vi.fn();
+// The sheet asks the server which channels are on offer every time it opens
+// (DEPOSIT_METHODS_ENABLED is RUN_TIME and several routes are prerendered).
+const getDepositMethods = vi.fn();
 vi.mock('@/lib/actions/vault', () => ({
   startDeposit: (...args: unknown[]) => startDeposit(...args),
   topUpCredits: (...args: unknown[]) => topUpCredits(...args),
+  getDepositMethods: () => getDepositMethods(),
 }));
 // jsdom's window.location is unforgeable, so navigation is observed through
 // the leaveFor seam instead of a location spy.
@@ -55,12 +59,13 @@ beforeAll(async () => {
 let container: HTMLDivElement;
 let root: Root;
 
-beforeEach(() => {
-  vi.clearAllMocks();
+/** Mount with a given server-side channel list; awaits the open-time fetch. */
+async function mount(codes: string[] = ['BQR', 'OB']) {
+  getDepositMethods.mockResolvedValue(codes);
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
-  act(() => {
+  await act(async () => {
     root.render(
       createElement(TopUpSheet, {
         open: true,
@@ -70,6 +75,11 @@ beforeEach(() => {
       }),
     );
   });
+}
+
+beforeEach(async () => {
+  vi.clearAllMocks();
+  await mount();
 });
 
 afterEach(() => {
@@ -85,6 +95,34 @@ function payButton(): HTMLButtonElement {
   const btn = buttons().find((b) => /^Pay RM/.test(b.textContent ?? ''));
   if (!btn) throw new Error('Pay button not found');
   return btn;
+}
+
+function methodRadios(): HTMLInputElement[] {
+  return [
+    ...container.querySelectorAll<HTMLInputElement>(
+      'input[type="radio"][name="deposit-method"]',
+    ),
+  ];
+}
+
+function methodRadio(code: string): HTMLInputElement {
+  const input = methodRadios().find((radio) => radio.value === code);
+  if (!input) throw new Error(`no deposit-method radio for ${code}`);
+  return input;
+}
+
+/** React needs the DOM property set before the change event, the same trick
+ *  typeAmount uses for the amount field. */
+async function selectRadio(input: HTMLInputElement) {
+  const setChecked = Object.getOwnPropertyDescriptor(
+    HTMLInputElement.prototype,
+    'checked',
+  )!.set!;
+  await act(async () => {
+    setChecked.call(input, true);
+    input.dispatchEvent(new Event('click', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
 }
 
 async function click(el: Element) {
@@ -166,12 +204,48 @@ describe('TopUpSheet gateway branch', () => {
       amount: 50,
     });
     await click(payButton());
-    expect(startDeposit).toHaveBeenCalledExactlyOnceWith(50);
+    expect(startDeposit).toHaveBeenCalledExactlyOnceWith(50, 'BQR');
     expect(leaveFor).toHaveBeenCalledExactlyOnceWith(
       'https://cashier.example/pay/abc',
     );
     // No success state — nothing has been credited yet.
     expect(container.textContent).not.toContain('ADDED');
+  });
+
+  it('sends the picked channel, not the backend default', async () => {
+    startDeposit.mockResolvedValue({
+      ok: true,
+      url: 'https://cashier.example/pay/ob',
+      amount: 50,
+    });
+    // By value, not by DOM position: adding or reordering channels should not
+    // break a test about which code gets sent.
+    const qr = methodRadio('BQR');
+    const onlineBanking = methodRadio('OB');
+    // QR is pre-selected because it mirrors GLOBEPAY_DEPOSIT_METHOD; without a
+    // picker every customer got it, which is the bug this closes.
+    expect(qr.checked).toBe(true);
+    expect(onlineBanking.checked).toBe(false);
+    await selectRadio(onlineBanking);
+    await click(payButton());
+    expect(startDeposit).toHaveBeenCalledExactlyOnceWith(50, 'OB');
+  });
+
+  it('hides the picker when the operator has retracted a channel, and still sends it', async () => {
+    // DEPOSIT_METHODS_ENABLED=OB. A "choice" of one is noise, but the code must
+    // still ride on the request — and it must be the surviving channel, not the
+    // compiled default (BQR), which the server action would refuse.
+    act(() => root.unmount());
+    container.remove();
+    await mount(['OB']);
+    startDeposit.mockResolvedValue({
+      ok: true,
+      url: 'https://cashier.example/pay/ob-only',
+      amount: 50,
+    });
+    expect(methodRadios()).toHaveLength(0);
+    await click(payButton());
+    expect(startDeposit).toHaveBeenCalledExactlyOnceWith(50, 'OB');
   });
 
   it('shows the server error and stays put when the deposit fails', async () => {

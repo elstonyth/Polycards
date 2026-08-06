@@ -41,9 +41,11 @@ describe('VAULT_RULES backend-message contract', () => {
     );
   });
 
-  it('does not tell a customer to pick a payment method the UI lacks', () => {
-    // TopUpSheet sends only an amount; the method is always
-    // GLOBEPAY_DEFAULT_METHOD. Copy that suggests changing it is a dead end.
+  it('does not tell a customer to pick a payment method this table cannot see', () => {
+    // Held when TopUpSheet had no picker; still holds now that it has one.
+    // How many channels are offered is a per-request decision
+    // (DEPOSIT_METHODS_ENABLED), so a static rule cannot promise there is
+    // another one — and when there is, the tiles are right above this error.
     expect(map('We could not start your top-up.')).not.toMatch(
       /payment method/i,
     );
