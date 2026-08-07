@@ -68,8 +68,12 @@ const PAGES = [
  * (`sp-scroll-x`) and friends loop forever, and awaiting their `.finished`
  * hangs the run rather than settling it.
  */
+// Overridable so the give-up path itself can be exercised:
+// QA_SETTLE_MS=1 node scripts/qa-motion-entrances.mjs  →  must FAIL.
+const SETTLE_CEILING_MS = Number(process.env.QA_SETTLE_MS ?? 5000);
+
 const settle = (page) =>
-  page.evaluate(() => {
+  page.evaluate((ms) => {
     const finite = document
       .getAnimations()
       .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
@@ -77,9 +81,14 @@ const settle = (page) =>
     // Hard ceiling: a long-but-finite animation, or one paused by a throttled
     // tab, would otherwise hang the whole run with no output. The longest
     // entrance here is 900ms + 350ms of stagger.
-    const ceiling = new Promise((r) => setTimeout(r, 5000));
-    return Promise.race([Promise.all(finite), ceiling]);
-  });
+    //
+    // The ceiling resolves FALSE so the caller can tell "everything finished"
+    // from "we gave up waiting". Resolving both the same way would let a page
+    // that never settles get screenshotted mid-flight and reported as settled —
+    // the exact silent-pass this whole script exists to prevent.
+    const ceiling = new Promise((r) => setTimeout(() => r(false), ms));
+    return Promise.race([Promise.all(finite).then(() => true), ceiling]);
+  }, SETTLE_CEILING_MS);
 
 /**
  * One full frame. The `load` event can fire before the compositor has run a
@@ -153,8 +162,15 @@ async function run() {
 
       for (const p of PAGES) {
         await page.goto(`${BASE}${p.path}`, { waitUntil: 'load' });
-        if (mode === 'settled') await settle(page);
-        else await nextFrame(page);
+        if (mode === 'settled') {
+          if (!(await settle(page))) {
+            failures.push(
+              `${p.name}/${vp.name}/settled: animations did not finish within ${SETTLE_CEILING_MS}ms — everything measured below was taken mid-flight`,
+            );
+          }
+        } else {
+          await nextFrame(page);
+        }
 
         // Reduced motion must not merely end up visible — it must never spend
         // real time animating. If the globals.css backstop stops applying, this
