@@ -791,6 +791,9 @@ const PackOddsEditorPage = () => {
               toast.success(t('packs.published.saved'));
             } catch (err) {
               toast.error(err instanceof Error ? err.message : String(err));
+              // Rethrow so the section knows the save failed and leaves the
+              // operator's typed values alone (it normalizes on success only).
+              throw err;
             }
           }}
         />
@@ -1679,12 +1682,13 @@ const SetRateCell = ({
 
   const value =
     set === 1 ? row.pctInput : set === 2 ? row.pctInput2 : row.pctInput3;
-  // Weights store as whole basis points, so a typed 7.567 persists as 7.57.
+  // Weights store as integer units of 0.0001%, so a typed 7.56789 persists as
+  // 7.5679.
   // The input keeps what the operator is typing (clobbering it mid-keystroke is
   // worse), and the resolved rate shows beside it ONLY when the two differ —
   // otherwise "what you see is what's saved" quietly stops being true.
   const typed = Number(value);
-  // A rate under half a basis point rounds to weight 0 — the card can never be
+  // A rate under half a unit (0.00005%) rounds to weight 0 — the card can never be
   // pulled, and nothing else in the editor would say so. Called out separately
   // from ordinary rounding because it is a different kind of wrong.
   const unpullable =
@@ -1695,7 +1699,7 @@ const SetRateCell = ({
   const rounds =
     effective !== null &&
     value.trim() !== '' &&
-    Math.abs(effective - typed) >= 0.005;
+    Math.abs(effective - typed) >= 0.00005;
   return (
     <Table.Cell>
       <div className="flex items-center gap-x-1.5">
@@ -1805,17 +1809,38 @@ const PublishedOddsSection = ({
     [rows, tiers],
   );
 
-  const save = () =>
-    onSave({
-      overall: Number(overall),
-      tiers: Object.fromEntries(
-        RARITIES.filter((r) => (tiers[r] ?? '').trim() !== '').map((r) => [
-          r,
-          Number(tiers[r]),
-        ]),
+  const save = async () => {
+    try {
+      await onSave({
+        overall: Number(overall),
+        tiers: Object.fromEntries(
+          RARITIES.filter((r) => (tiers[r] ?? '').trim() !== '').map((r) => [
+            r,
+            Number(tiers[r]),
+          ]),
+        ),
+        decimals,
+      });
+    } catch {
+      // Parent already toasted; keep the operator's typed values untouched.
+      return;
+    }
+    // The server rounds overall + tiers to 'decimals' places on save
+    // (validate.ts
+    // pct()); mirror that exact rounding into the inputs so the editor shows
+    // what was actually published (e.g. decimals 0: a typed 99.5 saved as 100).
+    const scale = 10 ** decimals;
+    const round = (n: number) => Math.round(n * scale) / scale;
+    setOverall((v) => (v.trim() === '' ? v : String(round(Number(v)))));
+    setTiers((m) =>
+      Object.fromEntries(
+        RARITIES.map((r) => {
+          const v = m[r] ?? '';
+          return [r, v.trim() === '' ? v : String(round(Number(v)))];
+        }),
       ),
-      decimals,
-    });
+    );
+  };
 
   return (
     <div className="px-6 py-5">
