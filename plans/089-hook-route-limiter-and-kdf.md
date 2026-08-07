@@ -43,7 +43,7 @@ upside to leaving either.
 
 ### No `/hooks` matcher
 
-```
+```text
 grep -n "'/hooks" backend/packages/api/src/api/middlewares.ts
 ```
 

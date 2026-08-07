@@ -120,7 +120,7 @@ sites, around :71 and :160), `admin/ledger/route.ts` (around :161),
 `admin/players`, `admin/pulls`, `admin/delivery-orders` and
 `admin/delivery-orders/[id]`. Confirm the current state yourself with:
 
-```
+```shell
 grep -rLn "Cache-Control" backend/packages/api/src/api/admin --include=route.ts
 ```
 

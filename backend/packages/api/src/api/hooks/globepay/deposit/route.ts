@@ -285,7 +285,7 @@ export async function POST(
     req.scope
       .resolve('logger')
       .error(
-        `[globepay] settled callback for ${merchantTransactionId} claims Amount ${creditedAmount}, above the RM ${GLOBEPAY_MAX_RM} deposit ceiling — refusing to credit; the row stays pending for manual settlement`,
+        `[globepay] settled callback for ${merchantTransactionId} claims Amount ${creditedAmount}, above the RM ${GLOBEPAY_MAX_RM} deposit ceiling — refusing to credit; the row remains ${deposit.status} for manual settlement`,
       );
     res.status(400).send('rejected');
     return;

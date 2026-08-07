@@ -415,7 +415,13 @@ export const renderTemplate = (
     const siteUrl = data?.site_url;
     // A security alert that cannot name the account is worse than none — it
     // would tell the customer "something changed" with nothing to check.
-    if (typeof last4 !== 'string' || last4.length === 0) return undefined;
+    //
+    // EXACTLY four digits, not merely non-empty. The only producer
+    // (packs/saved-account-notice.ts) slices the last 4 off a digits-only
+    // number, so this can never refuse a well-formed payload — it is the
+    // backstop for a malformed one, where "non-empty" would happily print a
+    // FULL account number into an email and undo plan 087's whole point.
+    if (typeof last4 !== 'string' || !/^\d{4}$/.test(last4)) return undefined;
     if (typeof siteUrl !== 'string' || siteUrl.length === 0) return undefined;
     return bankAccountAdded({
       bankName: typeof bankName === 'string' && bankName ? bankName : 'Bank',

@@ -73,8 +73,13 @@ export default function WithdrawForm({
     fetchSavedBankAccounts().then((res) => {
       if (cancelled) return;
       if (!res.ok) {
+        // `saved` deliberately stays null. Setting it to [] would render the
+        // "No saved bank accounts yet" empty state below, so a network error or
+        // an expired session would tell the customer their saved accounts do
+        // not exist and invite them to re-add one. The error banner is the
+        // honest answer to a failed load; the empty state is reserved for a
+        // list we actually read.
         setError(res.error);
-        setSaved([]);
         return;
       }
       setSaved(res.accounts);

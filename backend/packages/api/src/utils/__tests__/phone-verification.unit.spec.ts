@@ -143,11 +143,34 @@ describe('sms destination allowlist', () => {
     expect(isAllowedSmsDestination({}, '+15550001111')).toBe(false);
   });
 
-  it('widens per call from env, not at module load', () => {
-    expect(isAllowedSmsDestination({ ALLOWED_SMS_COUNTRIES: 'MY,GB' }, GB)).toBe(true);
-    // Same module instance, next call, back to refusing — proves the env read
-    // happens per call.
-    expect(isAllowedSmsDestination({}, GB)).toBe(false);
+  // +44 is SHARED with the Crown Dependencies (Jersey, Guernsey, Isle of Man),
+  // which are not the UK and which Twilio bills and geo-permits separately. So
+  // GB carries no prefix row: naming it widens NOTHING rather than quietly
+  // admitting three extra jurisdictions. Pinned here because the tempting
+  // one-line "fix" — putting `GB: '+44'` back — is what this asserts against.
+  it('refuses +44 even when GB is named, Crown Dependencies included', () => {
+    const JERSEY = '+441534123456';
+    const GUERNSEY = '+441481123456';
+    const IOM = '+441624123456';
+    const UK_MOBILE = '+447700900123';
+    for (const number of [GB, JERSEY, GUERNSEY, IOM, UK_MOBILE]) {
+      expect(
+        isAllowedSmsDestination({ ALLOWED_SMS_COUNTRIES: 'MY,GB' }, number),
+      ).toBe(false);
+    }
+    // …and naming GB is LOUD, not silent: it reports as unresolvable, so the
+    // operator learns the widening never landed.
+    expect(unresolvableSmsCountries({ ALLOWED_SMS_COUNTRIES: 'MY,GB' })).toEqual(
+      ['GB'],
+    );
+  });
+
+  it('reads env per call, not at module load', () => {
+    // Same module instance, three calls, three answers — proves the env read
+    // happens per call rather than being frozen at import.
+    expect(isAllowedSmsDestination({}, PHONE)).toBe(true);
+    expect(isAllowedSmsDestination({ ALLOWED_SMS_COUNTRIES: 'GB' }, PHONE)).toBe(false);
+    expect(isAllowedSmsDestination({}, PHONE)).toBe(true);
   });
 
   it('narrows per call too — MY is not hardcoded as always-on', () => {
@@ -165,8 +188,13 @@ describe('sms destination allowlist', () => {
   });
 
   it('tolerates mixed case and stray whitespace', () => {
-    expect(isAllowedSmsDestination({ ALLOWED_SMS_COUNTRIES: ' my , gb ' }, GB)).toBe(true);
-    expect(isAllowedSmsDestination({ ALLOWED_SMS_COUNTRIES: '\tGb\n' }, GB)).toBe(true);
+    expect(isAllowedSmsDestination({ ALLOWED_SMS_COUNTRIES: ' my , gb ' }, PHONE)).toBe(
+      true,
+    );
+    expect(isAllowedSmsDestination({ ALLOWED_SMS_COUNTRIES: '\tMy\n' }, PHONE)).toBe(true);
+    // Normalization, not just trimming: the odd spelling resolves to the same
+    // row, so it neither widens the set nor bricks the default.
+    expect(isAllowedSmsDestination({ ALLOWED_SMS_COUNTRIES: '\tmy\n' }, GB)).toBe(false);
   });
 
   // The ISO→prefix table is the coarse stand-in for a parser. An unlisted code
@@ -188,7 +216,7 @@ describe('sms destination allowlist', () => {
     );
     // Silence when the configuration is sound — including the fallback path,
     // so a blank env never produces a spurious misconfiguration warning.
-    expect(unresolvableSmsCountries({ ALLOWED_SMS_COUNTRIES: 'MY,GB' })).toEqual([]);
+    expect(unresolvableSmsCountries({ ALLOWED_SMS_COUNTRIES: 'MY' })).toEqual([]);
     expect(unresolvableSmsCountries({ ALLOWED_SMS_COUNTRIES: '   ' })).toEqual([]);
     expect(unresolvableSmsCountries({})).toEqual([]);
   });

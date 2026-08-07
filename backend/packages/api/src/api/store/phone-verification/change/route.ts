@@ -252,12 +252,14 @@ export async function POST(
       // PRIVACY: customer id only. The phone numbers and the email address are
       // PII and prod logs (DO runtime, a SIEM/Sentry sink) are a wider audience
       // than this warn needs — same rule as scripts/reset-customer-password.ts.
+      // The provider's own error text is NOT interpolated: a notification
+      // provider names the failed recipient in it ("... to alice@example.com"),
+      // which would put the email address in the logs through the back door and
+      // undo the rule this comment states.
       req.scope
         .resolve('logger')
         .warn(
-          `[phone-change] could not email the change notice for customer ${customerId} — phone already updated: ${
-            e instanceof Error ? e.message : String(e)
-          }`,
+          `[phone-change] could not email the change notice for customer ${customerId} — phone already updated`,
         );
     }
   }

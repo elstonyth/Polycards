@@ -234,6 +234,9 @@ describe('renderTemplate', () => {
     })!;
     expect(rendered.html).toContain('••••7781');
     expect(rendered.html).toContain('••••7790');
+    // The plaintext part is rendered independently of the HTML — assert BOTH
+    // numbers there, or dropping the old one from the text body goes unnoticed.
+    expect(rendered.text).toContain('••••7781');
     expect(rendered.text).toContain('••••7790');
   });
 

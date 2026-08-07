@@ -395,12 +395,15 @@ describe('deposit callback — bank details never reach the logs', () => {
     // recorded arguments on failure, which here IS the decrypted bank-detail
     // string — so the failure message would leak into a public CI log exactly
     // the value this test exists to keep out of logs.
+    // JSON.stringify, not .flat(): an object argument stringifies to
+    // "[object Object]" under join, so a future route logging the decrypted
+    // details as a structured field would slip past these assertions.
     const logged = [
       ...h.logger.info.mock.calls,
       ...h.logger.warn.mock.calls,
       ...h.logger.error.mock.calls,
     ]
-      .flat()
+      .map((args) => JSON.stringify(args))
       .join('\n');
     expect(logged.includes('5561234509876')).toBe(false);
     expect(logged.includes('Maybank')).toBe(false);

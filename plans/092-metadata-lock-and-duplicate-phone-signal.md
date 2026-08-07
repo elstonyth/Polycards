@@ -194,7 +194,7 @@ stale read.
 
 Then grep for any other writer:
 
-```
+```sh
 grep -rn "metadata: {" backend/packages/api/src/api --include=route.ts
 ```
 
@@ -209,7 +209,7 @@ converted call sites.
 In the `matches.length !== 1` branch, add a `logger.warn` carrying the **match
 count only** — never the phone number. Something like:
 
-```
+```text
 [phone-otp] password-reset start matched ${matches.length} accounts — no SMS sent
 ```
 

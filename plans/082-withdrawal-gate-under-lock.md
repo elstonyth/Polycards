@@ -307,6 +307,14 @@ over a rolling 24 hours across statuses `pending` and `settled` (a `failed` or
 refunded payout did not move money and must not count against the cap), and
 refuse when `sum + amount` exceeds the cap.
 
+**EXCLUDE THIS ATTEMPT'S OWN ROW from that sum** — `AND merchant_transaction_id
+<> ?`. Step 1 keeps row-first creation, so the new withdrawal is already
+`pending` by the time this query runs; an unfiltered sum would count it against
+its own cap and refuse every withdrawal above half the ceiling (a first RM
+30,000 request against a RM 50,000 cap would read RM 30,000 and reject at RM
+60,000). A concurrent attempt's row does still count, which over-counts rather
+than under-counts — the right fail direction for a blast-radius bound.
+
 - Cap constant: `GLOBEPAY_WD_DAILY_MAX_RM`, default **RM 50,000**, read from
   env per the repo's `positiveIntFromEnv` helper (`rate-limit.ts` has it;
   check whether a money-side equivalent already exists and prefer that).

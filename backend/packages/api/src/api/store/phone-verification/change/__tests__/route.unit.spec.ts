@@ -318,7 +318,13 @@ describe('POST /store/phone-verification/change — Google-only accounts', () =>
 
 describe('POST /store/phone-verification/change — notification is best-effort', () => {
   it('still answers 200 when the email send fails', async () => {
-    createNotifications.mockRejectedValueOnce(new Error('resend is down'));
+    // The recipient is IN the provider's error text on purpose — that is what
+    // real ones do ("failed to deliver to <address>"). A message without it
+    // would make the `not.toContain(EMAIL)` assertion below pass vacuously,
+    // which is exactly how the interpolated `e.message` survived review once.
+    createNotifications.mockRejectedValueOnce(
+      new Error(`resend is down: failed to deliver to ${EMAIL}`),
+    );
     const res = mkRes();
 
     await POST(

@@ -122,6 +122,16 @@ export default async function backfillPayoutDestinations({
       (a, b) => a.first_settled_at.getTime() - b.first_settled_at.getTime(),
     );
 
+    // Per-customer tallies, folded into the run totals only AFTER the write
+    // commits. The mutate callback runs before the UPDATE, so incrementing the
+    // run totals inside it would report destinations as added or stamped even
+    // when mutateCustomerMetadata then threw — and the file header tells the
+    // operator to read "0 stamped, 0 added" as "the backfill is complete".
+    let customerStamped = 0;
+    let customerAdded = 0;
+    let customerSkippedAtCap = 0;
+    let customerUntouched = 0;
+
     try {
       await packs.mutateCustomerMetadata({
         customerId,
@@ -143,13 +153,13 @@ export default async function backfillPayoutDestinations({
               // exactly as it is. This is what makes a re-run a no-op.
               if (typeof current.savedAt === 'string') continue;
               accounts[existing] = { ...current, savedAt };
-              stamped += 1;
+              customerStamped += 1;
               changed = true;
               continue;
             }
 
             if (accounts.length >= MAX_SAVED_BANK_ACCOUNTS) {
-              skippedAtCap += 1;
+              customerSkippedAtCap += 1;
               continue;
             }
             accounts.push({
@@ -161,18 +171,22 @@ export default async function backfillPayoutDestinations({
               accountHolderName: destination.account_holder_name,
               savedAt,
             });
-            added += 1;
+            customerAdded += 1;
             changed = true;
           }
 
           // null = nothing changed, so no write is issued.
           if (!changed) {
-            untouched += 1;
+            customerUntouched += 1;
             return null;
           }
           return { ...metadata, bank_accounts: accounts };
         },
       });
+      stamped += customerStamped;
+      added += customerAdded;
+      skippedAtCap += customerSkippedAtCap;
+      untouched += customerUntouched;
     } catch (error) {
       // One unreadable customer (deleted mid-run, say) must not abandon the
       // rest; the summary is the operator's signal to re-run, which is safe.

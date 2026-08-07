@@ -135,19 +135,28 @@ export const DEFAULT_ALLOWED_SMS_COUNTRIES = ['MY'] as const;
 // storefront does) — pulling a parser in for a handful of string comparisons
 // is not worth it.
 //
-// DO NOT add a `+1` or `+7` row on that reasoning. A prefix is only "coarse but
-// safe" where the calling code maps to ONE country. `US: '+1'` would admit the
-// whole NANP — including +1-809, +1-876 and the other classic revenue-share
-// destinations — so a one-line "widening" would reopen precisely the toll fraud
-// this table exists to stop. Those calling codes need a real parser or an
-// area-code deny list, not a prefix.
+// DO NOT add a `+1`, `+7` or `+44` row on that reasoning. A prefix is only
+// "coarse but safe" where the calling code maps to ONE country. `US: '+1'`
+// would admit the whole NANP — including +1-809, +1-876 and the other classic
+// revenue-share destinations — so a one-line "widening" would reopen precisely
+// the toll fraud this table exists to stop. Those calling codes need a real
+// parser or an area-code deny list, not a prefix.
+//
+// `GB: '+44'` was here and was REMOVED for the same reason: +44 is shared with
+// the Crown Dependencies — Jersey, Guernsey and the Isle of Man are not part of
+// the United Kingdom, and Twilio bills and geo-permits them separately. A
+// deny list of their geographic codes (+441534/+441481/+441624) does not fix
+// it either: SMS goes to MOBILE ranges (+447797, +447781, +447624, …), which
+// are numerous and change. Serving the UK needs a real parser or an exact
+// allocated-range policy — not a prefix, and not a partial deny list, which
+// would only convert an honest coarseness into false assurance.
 //
 // An ISO code with NO row here resolves to nothing. See
 // unresolvableSmsCountries below: the route logs those, because otherwise the
-// misconfiguration is invisible.
+// misconfiguration is invisible. `ALLOWED_SMS_COUNTRIES=GB` is now exactly that
+// case — loudly inert rather than quietly over-broad.
 const SMS_DIAL_PREFIX: Record<string, string> = {
   MY: '+60',
-  GB: '+44',
 };
 
 /**

@@ -54,8 +54,10 @@ callback plus a bank settlement after the 1-hour window means the customer's
 money is credited nowhere and nothing will ever look again.
 
 After this plan: a 400 that is not an explicit not-found leaves the row alone
-and pages the operator, and "we stopped waiting" is a distinct, still-
-recoverable state from "the gateway said no".
+and LOGS the condition at error level — escalation is manual, because nothing
+in this repo pages on a log line (see the Deferred note at the end of this
+plan) — and "we stopped waiting" is a distinct, still-recoverable state from
+"the gateway said no".
 
 ## Current state
 

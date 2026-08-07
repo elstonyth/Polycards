@@ -74,17 +74,27 @@ const WithdrawalsPage = () => {
   // server call, so it must not be re-fetched on a refocus, and it must not
   // outlive this page — navigating away drops them.
   const [revealed, setRevealed] = useState<Record<string, string>>({});
-  const [revealing, setRevealing] = useState<string | null>(null);
+  // A SET, not one id: two reveals can be in flight at once. With a single
+  // slot, clicking row A then row B overwrites the id, and A settling clears it
+  // while B is still loading — B's button re-enables and can be clicked again.
+  // Each click is a logged, rate-limited server call, so the disabled state has
+  // to be accurate per row.
+  const [revealing, setRevealing] = useState<ReadonlySet<string>>(new Set());
 
   const reveal = async (id: string) => {
-    setRevealing(id);
+    if (revealing.has(id)) return;
+    setRevealing((prev) => new Set(prev).add(id));
     try {
       const { account_number } = await getGlobePayWithdrawalAccount(id);
       setRevealed((prev) => ({ ...prev, [id]: account_number }));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
     } finally {
-      setRevealing(null);
+      setRevealing((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
     }
   };
 
@@ -225,7 +235,7 @@ const WithdrawalsPage = () => {
                           <button
                             type="button"
                             className="text-ui-fg-interactive text-xs hover:underline disabled:opacity-50"
-                            disabled={revealing === w.id}
+                            disabled={revealing.has(w.id)}
                             onClick={() => reveal(w.id)}
                           >
                             {t('withdrawals.reveal')}
