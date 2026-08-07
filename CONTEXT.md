@@ -189,6 +189,8 @@ Build-time storefront flag `NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED` displays OT
 
 The error was **21608**, whose message mentions only trial accounts — misleading. [Twilio's docs](https://www.twilio.com/docs/api/errors/21608) give it **two** causes, and the second applied: an **upgraded account with no approved primary compliance profile** is restricted exactly like a trial one. The account did start the day as a trial with a negative balance, which masked the real cause — upgrading to paid (`type: Full`, funded) did **not** clear the 403. Fixed by creating a Trust Hub **Individual** primary profile (`BU5c6ce03f…`, `twilio-approved`), after which a live send returned `201 / pending`. An Individual profile needs no business registration and still unlocks international messaging, which is all Verify needs for `+60`; it only limits US A2P 10DLC, toll-free, short codes and alphanumeric senders.
 
+Scope of that proof: the **transport** is confirmed recovered — Twilio accepts a verification and delivers the SMS. The **application** flows (`start` → `check`, then signup / phone-change / password-reset through the storefront) are **PENDING** until the smoke test below is run against the rebuilt storefront with enforcement back on.
+
 Order of diagnosis if OTP breaks again — all three upstream of every flag below:
 
 1. Primary compliance profile approved? (Trust Hub → Compliance profiles)
