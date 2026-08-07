@@ -889,6 +889,22 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      // Per-row bank-account reveal (GET /admin/globepay/withdrawals/:id/account).
+      // The ONE deliberate READ on this limiter — every other matcher sharing
+      // adminActionRateLimit is a POST or a DELETE (checked across the whole
+      // array, not just the neighbours), so do not read this as a mutation.
+      // The generous admin budget (30/10s burst, 200/60s) is what keeps the
+      // reveal usable: an operator working a dispute queue must not be 429'd
+      // back to the database console. It shares that budget
+      // because the withdrawals list masks account_number and this is the only
+      // route that still serves one in full: throttled, it stays a per-dispute
+      // lookup; unthrottled, a compromised admin token walks the table and
+      // re-derives exactly the bulk view the masking removed.
+      matcher: '/admin/globepay/withdrawals/*/account',
+      method: 'GET',
+      middlewares: [adminActionRateLimit],
+    },
+    {
       // Purchase-invoice writer (POLYCARD-BACK §3.5) — raises real inventory
       // counters, up to 200 lines x 1,000,000 qty per call; same admin budget.
       matcher: '/admin/purchase-invoices',

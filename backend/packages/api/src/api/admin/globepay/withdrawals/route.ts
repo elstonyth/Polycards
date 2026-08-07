@@ -28,12 +28,29 @@ import {
 // at this row by hand" — with the extra weight that for a withdrawal a stuck
 // pending row is a customer ALREADY charged.
 //
-// Admin-only (auto-protected /admin/* route). The destination account is shown
-// in full: it exists on the row precisely so support can quote it in a payout
-// dispute.
+// Admin-only (auto-protected /admin/* route). The destination account is
+// MASKED here and revealed one row at a time by ./[id]/account: support does
+// need to quote it in a payout dispute, but a list serves up to 100 rows per
+// request, so serving it in bulk hands out every listed customer's bank
+// details for one row's worth of need. The reveal endpoint is what keeps that
+// workflow off the database console, where nothing is audited.
 
 const STATUS_FILTERS = ['pending', 'settled', 'failed', 'all'] as const;
 type StatusFilter = (typeof STATUS_FILTERS)[number];
+
+// Display mask for the destination account: `••••1234`.
+//
+// The last-4 derivation matches setPayoutDetails' audit-row helper
+// (modules/packs/service.ts) rather than the ledger's bare `.slice(-4)` —
+// digits only (stored numbers carry spaces and hyphens) and only when there
+// are MORE than four of them, because for a <=4-digit account the "last 4"
+// would be the whole number. One deliberate divergence: that helper returns
+// null in the short case, while this one returns a bare `••••`, because this
+// field is a display string and the SPA renders it inline.
+export function maskAccountNumber(raw: string | null | undefined): string {
+  const digits = (raw ?? '').replace(/\D/g, '');
+  return digits.length > 4 ? `••••${digits.slice(-4)}` : '••••';
+}
 
 /** Unknown/absent status falls back to 'pending' — the view that matters. */
 export function parseStatusFilter(raw: unknown): StatusFilter {
@@ -110,7 +127,11 @@ export async function GET(
     // bigNumber columns come back as strings/BigNumber — normalize for display.
     amount: Number(r.amount),
     bank_code: r.bank_code,
-    account_number: r.account_number,
+    // Masked in bulk, full value via ./[id]/account. The field name is kept so
+    // the SPA does not break on a rename.
+    account_number: maskAccountNumber(r.account_number),
+    // NOT masked: operators match a payout to a dispute by holder name, and
+    // masking it would push that lookup somewhere unaudited.
     account_holder_name: r.account_holder_name,
     status: r.status,
     gateway_status: r.gateway_status,
@@ -121,9 +142,11 @@ export async function GET(
       now - new Date(r.created_at).getTime() > GLOBEPAY_STALE_AFTER_MS,
   }));
 
-  // Identity-varying response carrying emails and full bank accounts
-  // (CWE-524): a cached copy could outlive the admin session in a shared
-  // browser profile. Same rule as the store saved-accounts route.
+  // Identity-varying response carrying customer emails (CWE-524): a cached
+  // copy could outlive the admin session in a shared browser profile. Same
+  // rule as the store saved-accounts route. Still set explicitly even though
+  // the blanket '/admin/*' matcher in middlewares.ts now covers it — this
+  // route states its own requirement rather than inheriting one silently.
   res.setHeader('Cache-Control', 'no-store');
   res.json({ total, offset, limit, status, withdrawals });
 }

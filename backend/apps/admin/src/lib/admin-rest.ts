@@ -1108,6 +1108,8 @@ export interface GlobePayWithdrawal {
   customer_email: string | null;
   amount: number;
   bank_code: string;
+  /** MASKED (`••••1234`) — the list never serves a full account number. The
+   *  full value comes one row at a time from getGlobePayWithdrawalAccount. */
   account_number: string;
   account_holder_name: string;
   status: 'pending' | 'settled' | 'failed';
@@ -1140,6 +1142,17 @@ export function getGlobePayWithdrawals(
   if (sort) params.set('sort', sort);
   return getJson<GlobePayWithdrawalsResponse>(
     `/admin/globepay/withdrawals?${params}`,
+  );
+}
+
+/** Reveal ONE withdrawal's full destination account (the list masks it).
+ *  Deliberately not a react-query hook and not prefetched: the backend logs
+ *  and rate-limits every call, so it must fire only when an operator asks. */
+export function getGlobePayWithdrawalAccount(
+  id: string,
+): Promise<{ id: string; account_number: string }> {
+  return getJson<{ id: string; account_number: string }>(
+    `/admin/globepay/withdrawals/${encodeURIComponent(id)}/account`,
   );
 }
 

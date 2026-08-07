@@ -419,6 +419,7 @@
     "when": "Started",
     "customer": "Customer",
     "destination": "Destination",
+    "reveal": "Reveal",
     "amount": "Amount",
     "status": "Status",
     "reference": "References",
