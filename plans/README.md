@@ -14,6 +14,14 @@ gateway (`ALLOW_MOCK_TOPUP` / `unsafe-demo` prod opt-in) and reward payout is
 dormant until a real PSP + AMLA compliance land. Those are decided tradeoffs,
 not bugs. Implementation bugs _inside_ those guards were still in scope.
 
+> **⚠️ THE EXCLUSION ABOVE IS VOID AS OF ROUND 10 (2026-08-07).** It applied to
+> rounds 1–9 only. PR #252 landed the real GlobePay365 gateway, #376 armed
+> production withdrawals, and #328 added SMS phone verification — all of it
+> live, none of it covered by rounds 1–9. Round 10 audited that surface for
+> security; see the Round 10 section at the end of this file. Treat **every**
+> pre-round-10 rejection as scoped to the mock gateway, and re-read it with the
+> real PSP in mind before relying on it.
+
 Each executor: read the plan fully before starting, honor its STOP conditions,
 and update your row when done. **Do not fix anything not covered by a plan
 without checking the "considered and rejected" list first** — several
@@ -1444,19 +1452,19 @@ every round).
 
 ### Round-9 plans
 
-| Plan | Title                                                                 | Priority | Effort | Depends on                                 | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| ---- | --------------------------------------------------------------------- | -------- | ------ | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 069  | Restore the flagship customer money-path E2E (signup phone helper)    | P1       | S      | —                                          | DONE (APPROVE 2026-08-02; branch `advisor/069-e2e-signup-phone`, commit `bd995d7f`, worktree `agent-aaacb5079cddbb8c3`. Reviewer re-ran: `--list` 21 tests/11 files, typecheck, lifecycleRan grep clean, scope exactly 2 files. Executor proofs: `0123456789` validated for MY via libphonenumber; page-wide `form input[required]` guard safe (AuthForm is the only form on the pack page). RUNTIME PROOF PENDING: first nightly must show customer.spec.ts PASSING, not timing out. NOT MERGED)                |
-| 070  | Nightly E2E signal triage (2 chronic specs + a11y gate)               | P1       | M      | — (coord. 069: same suite, disjoint files) | DONE (APPROVE 2026-08-02; branch `advisor/078-admin-manifest`, commit `5c79a94f`, worktree `agent-a49724cf4fb1a1b6b`. Reviewer read all 3 diffs: 7 entries at root-matching ranges, yarn.lock descriptor-only (+7 lines in the @acme/admin __metadata block, zero new resolutions), dependabot /backend/apps/admin entry mirrors all 4 ignores + rationale pointer. Executor proofs: `yarn install --immutable` green post-commit (the real CI gate); `dedupe --check` exit-1 PRE-EXISTING (identical 28-package list on stashed baseline — plan expectation was wrong, correctly not forced); admin 157/157 + pinned tsc green; turbo check-types covers only 3/5 workspaces (admin proven separately). Watch: Dependabot workspace-dir resolution observable only on its next scheduled run; pre-existing unmet i18next peer unchanged. NOT MERGED) |
-| 071  | Admin list-query hardening (pagination tiebreakers + honest `?q=`)    | P2       | S–M    | —                                          | DONE (APPROVE 2026-08-02; commit `8db98e3b` on worktree branch `worktree-agent-a8e53456e221f4c9b` (harness-owned; rename to `advisor/079-docs-truth-6` at merge if desired), worktree `agent-a8e53456e221f4c9b`. Reviewer re-ran: bash -n, triplet md5 = one hash, CHANGELOG grep gone; read README/gitignore/sync-script diffs. Executor proofs: sync run idempotent (2nd run = empty git status) with a TEMPORARY AGENTS.md copied in (gitignored, absent from fresh worktrees — pre-existing gap), removed before commit. OPERATOR FOLLOW-UPS: local GEMINI.md/.windsurfrules still carry the MCP doc instead of @AGENTS.md pointers; latent second-source risk flagged — check whether AGENTS.md ALSO carries the MCP-doc guidance (would now drift against the new heredoc source in sync-agent-rules.sh). NOT MERGED) |
-| 072  | Buyback prices off the fresh `revealed_at`                            | P2       | S      | —                                          | DONE (APPROVE 2026-08-02; branch `advisor/072-buyback-fresh-revealed-at`, commit `d43efc24`, worktree `agent-a914e490e6fe27eb2`. Reviewer re-ran: buyback-rate 19/19, pinned tsc clean, `revealed_at: fresh` grep = 1 (:118), scope 2 files. Full unit tier 1066/1067 (1 pre-existing win32 self-skip). Executor-disclosed caveat on record: the regression case pins the MATH (stale-null vs fresh under same nowMs), not the step's field sourcing — plan-sanctioned, no interception seam exists. NOT MERGED) |
-| 073  | Pack-detail surface fixes (`?count=`, poll reseed, labels, QA script) | P2       | M      | —                                          | DONE (APPROVE 2026-08-02; branch `advisor/073-pack-detail-surface`, 5 commits `4056c4c8..58c45d6b`, worktree `agent-a555f24d0fea1a6c6`. Reviewer re-ran: npm run check (build) + tests green, Rare-&-above grep = 1, node --check + anyFailure/exitCode wiring verified at 5 probe sites; read page/poll/drag/client diffs. Accepted deviations: aria-label interpolates view.title (rendered output byte-identical, qa-mobile-cards regex unaffected — executor grepped); hand-rolled createRoot+act hook harness (no @testing-library in repo, no new dependency); jsdom visibilityState=prerender stub. CAVEAT: live qa-pool-modal.mjs run pending a stack — first manual run is the proof. NOT MERGED) |
-| 074  | Storefront mutation handlers survive transport failures               | P2       | M      | —                                          | DONE (APPROVE 2026-08-02; branch `advisor/074-action-transport-failures`, commit `fa6654bd`, worktree `agent-a82885494bf25462a`. Reviewer re-ran: 402/402 tests, tsc, eslint clean; read NotificationsClient + AuthForm diffs. 14 handlers guarded (12 survey + 2 mandated); rollbackRead helper + 5 tests. Accepted judgment calls: onGoogle try/catch WITHOUT finally (busy must survive the OAuth redirect — both failure branches reset it); WithdrawForm excluded (SUSPENDED kept-orphan); MeActions left unchanged (no error slot; swallowing a logout failure would be worse). On record: the other 13 catch branches are typecheck-covered only, per the plan its own test scope. NOT MERGED) |
-| 075  | Unify the body-scroll lock (`useChromeInert` → refcounted lock)       | P2       | S      | —                                          | DONE (APPROVE 2026-08-02 after 1 revision — scope growth authorized; branch `advisor/075-unify-scroll-lock`, commits `3fb96276`+`8a43a0c6`, worktree `agent-a1a0da2f3ad61c416`. Executor STOPPED correctly at the done-criteria grep: SellConfirmModal + AuthModal were two MORE independent overflow writers (the hook was extracted FROM them, scroll-lock half never migrated) — reviewer verified both citations, authorized the same-pattern swap. Reviewer re-ran: repo grep = only use-modal-a11y.ts + scroll-lock.test.ts, 401/401 tests, read both diffs (6/6 lines each, traps/focus/busy-gating untouched). 4 new lock tests incl. the out-of-order interleaving. Runtime browser check not run (no stack) — optional manual repro in plan. NOT MERGED) |
-| 076  | Admin editor cap mirrors + stale-comment fixes                        | P3       | S      | —                                          | DONE (APPROVE 2026-08-02; branch `advisor/076-admin-cap-mirrors`, commits `9c9dab8b`+`883e4da5` (locale fixup), worktree `agent-ab142fc9685401089`. Reviewer re-ran: vitest 158/158, pinned tsc clean, all 3 stale-comment greps clean; read all 4 diffs. Accepted deviations: threshold cap as separate if so prev still updates (correct, prevents cascade); challenge-page caps have NO behavioral test (module unimportable under vitest — __BACKEND_URL__ define; matches tab-buffers.test.ts precedent) — follow-up candidate: extract to a pure sibling module; creditTotal summary now excludes over-cap ranks (save blocked anyway). Pre-existing bare toLocaleString at vip-levels-tab.tsx:74 noted, untouched. NOT MERGED) |
-| 077  | Drop dead challenge wire fields; notification-template parity test    | P3       | S      | —                                          | DONE (APPROVE 2026-08-02; branch `advisor/077-challenge-wire-and-parity`, commit `f9f180f5`, worktree `agent-ac29cc21dde906566`. Reviewer re-ran: rewardCardIds/rewardCredits grep clean across api src + integration-tests + src/, storefront suite green, challenge HTTP 13/13 on the live DB; read route + copy.test diffs. Parity guard proven RED in BOTH directions by mutation (added x_probe member → named assertion failure; broken regex → loud collection error with the do-not-delete message). Executor judgment on record: deleting the stage-2 rewardCardIds assertion leaves body.cards[cyId] as the transitive stage-2 mapping proof — plan-authorized. NOT MERGED) |
+| Plan | Title                                                                 | Priority | Effort | Depends on                                 | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ---- | --------------------------------------------------------------------- | -------- | ------ | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 069  | Restore the flagship customer money-path E2E (signup phone helper)    | P1       | S      | —                                          | DONE (APPROVE 2026-08-02; branch `advisor/069-e2e-signup-phone`, commit `bd995d7f`, worktree `agent-aaacb5079cddbb8c3`. Reviewer re-ran: `--list` 21 tests/11 files, typecheck, lifecycleRan grep clean, scope exactly 2 files. Executor proofs: `0123456789` validated for MY via libphonenumber; page-wide `form input[required]` guard safe (AuthForm is the only form on the pack page). RUNTIME PROOF PENDING: first nightly must show customer.spec.ts PASSING, not timing out. NOT MERGED)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| 070  | Nightly E2E signal triage (2 chronic specs + a11y gate)               | P1       | M      | — (coord. 069: same suite, disjoint files) | DONE (APPROVE 2026-08-02; branch `advisor/078-admin-manifest`, commit `5c79a94f`, worktree `agent-a49724cf4fb1a1b6b`. Reviewer read all 3 diffs: 7 entries at root-matching ranges, yarn.lock descriptor-only (+7 lines in the @acme/admin \_\_metadata block, zero new resolutions), dependabot /backend/apps/admin entry mirrors all 4 ignores + rationale pointer. Executor proofs: `yarn install --immutable` green post-commit (the real CI gate); `dedupe --check` exit-1 PRE-EXISTING (identical 28-package list on stashed baseline — plan expectation was wrong, correctly not forced); admin 157/157 + pinned tsc green; turbo check-types covers only 3/5 workspaces (admin proven separately). Watch: Dependabot workspace-dir resolution observable only on its next scheduled run; pre-existing unmet i18next peer unchanged. NOT MERGED)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| 071  | Admin list-query hardening (pagination tiebreakers + honest `?q=`)    | P2       | S–M    | —                                          | DONE (APPROVE 2026-08-02; commit `8db98e3b` on worktree branch `worktree-agent-a8e53456e221f4c9b` (harness-owned; rename to `advisor/079-docs-truth-6` at merge if desired), worktree `agent-a8e53456e221f4c9b`. Reviewer re-ran: bash -n, triplet md5 = one hash, CHANGELOG grep gone; read README/gitignore/sync-script diffs. Executor proofs: sync run idempotent (2nd run = empty git status) with a TEMPORARY AGENTS.md copied in (gitignored, absent from fresh worktrees — pre-existing gap), removed before commit. OPERATOR FOLLOW-UPS: local GEMINI.md/.windsurfrules still carry the MCP doc instead of @AGENTS.md pointers; latent second-source risk flagged — check whether AGENTS.md ALSO carries the MCP-doc guidance (would now drift against the new heredoc source in sync-agent-rules.sh). NOT MERGED)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| 072  | Buyback prices off the fresh `revealed_at`                            | P2       | S      | —                                          | DONE (APPROVE 2026-08-02; branch `advisor/072-buyback-fresh-revealed-at`, commit `d43efc24`, worktree `agent-a914e490e6fe27eb2`. Reviewer re-ran: buyback-rate 19/19, pinned tsc clean, `revealed_at: fresh` grep = 1 (:118), scope 2 files. Full unit tier 1066/1067 (1 pre-existing win32 self-skip). Executor-disclosed caveat on record: the regression case pins the MATH (stale-null vs fresh under same nowMs), not the step's field sourcing — plan-sanctioned, no interception seam exists. NOT MERGED)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| 073  | Pack-detail surface fixes (`?count=`, poll reseed, labels, QA script) | P2       | M      | —                                          | DONE (APPROVE 2026-08-02; branch `advisor/073-pack-detail-surface`, 5 commits `4056c4c8..58c45d6b`, worktree `agent-a555f24d0fea1a6c6`. Reviewer re-ran: npm run check (build) + tests green, Rare-&-above grep = 1, node --check + anyFailure/exitCode wiring verified at 5 probe sites; read page/poll/drag/client diffs. Accepted deviations: aria-label interpolates view.title (rendered output byte-identical, qa-mobile-cards regex unaffected — executor grepped); hand-rolled createRoot+act hook harness (no @testing-library in repo, no new dependency); jsdom visibilityState=prerender stub. CAVEAT: live qa-pool-modal.mjs run pending a stack — first manual run is the proof. NOT MERGED)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| 074  | Storefront mutation handlers survive transport failures               | P2       | M      | —                                          | DONE (APPROVE 2026-08-02; branch `advisor/074-action-transport-failures`, commit `fa6654bd`, worktree `agent-a82885494bf25462a`. Reviewer re-ran: 402/402 tests, tsc, eslint clean; read NotificationsClient + AuthForm diffs. 14 handlers guarded (12 survey + 2 mandated); rollbackRead helper + 5 tests. Accepted judgment calls: onGoogle try/catch WITHOUT finally (busy must survive the OAuth redirect — both failure branches reset it); WithdrawForm excluded (SUSPENDED kept-orphan); MeActions left unchanged (no error slot; swallowing a logout failure would be worse). On record: the other 13 catch branches are typecheck-covered only, per the plan its own test scope. NOT MERGED)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| 075  | Unify the body-scroll lock (`useChromeInert` → refcounted lock)       | P2       | S      | —                                          | DONE (APPROVE 2026-08-02 after 1 revision — scope growth authorized; branch `advisor/075-unify-scroll-lock`, commits `3fb96276`+`8a43a0c6`, worktree `agent-a1a0da2f3ad61c416`. Executor STOPPED correctly at the done-criteria grep: SellConfirmModal + AuthModal were two MORE independent overflow writers (the hook was extracted FROM them, scroll-lock half never migrated) — reviewer verified both citations, authorized the same-pattern swap. Reviewer re-ran: repo grep = only use-modal-a11y.ts + scroll-lock.test.ts, 401/401 tests, read both diffs (6/6 lines each, traps/focus/busy-gating untouched). 4 new lock tests incl. the out-of-order interleaving. Runtime browser check not run (no stack) — optional manual repro in plan. NOT MERGED)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| 076  | Admin editor cap mirrors + stale-comment fixes                        | P3       | S      | —                                          | DONE (APPROVE 2026-08-02; branch `advisor/076-admin-cap-mirrors`, commits `9c9dab8b`+`883e4da5` (locale fixup), worktree `agent-ab142fc9685401089`. Reviewer re-ran: vitest 158/158, pinned tsc clean, all 3 stale-comment greps clean; read all 4 diffs. Accepted deviations: threshold cap as separate if so prev still updates (correct, prevents cascade); challenge-page caps have NO behavioral test (module unimportable under vitest — **BACKEND_URL** define; matches tab-buffers.test.ts precedent) — follow-up candidate: extract to a pure sibling module; creditTotal summary now excludes over-cap ranks (save blocked anyway). Pre-existing bare toLocaleString at vip-levels-tab.tsx:74 noted, untouched. NOT MERGED)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| 077  | Drop dead challenge wire fields; notification-template parity test    | P3       | S      | —                                          | DONE (APPROVE 2026-08-02; branch `advisor/077-challenge-wire-and-parity`, commit `f9f180f5`, worktree `agent-ac29cc21dde906566`. Reviewer re-ran: rewardCardIds/rewardCredits grep clean across api src + integration-tests + src/, storefront suite green, challenge HTTP 13/13 on the live DB; read route + copy.test diffs. Parity guard proven RED in BOTH directions by mutation (added x_probe member → named assertion failure; broken regex → loud collection error with the do-not-delete message). Executor judgment on record: deleting the stage-2 rewardCardIds assertion leaves body.cards[cyId] as the transitive stage-2 mapping proof — plan-authorized. NOT MERGED)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | 078  | `apps/admin` declares its real dependencies                           | P3       | S      | —                                          | DONE-with-caveat (APPROVE 2026-08-02; commits `b0ab299a`+`201b3b2a` on worktree branch `worktree-agent-a108cf6e245c85510` (rename to `advisor/070-nightly-triage` at merge if desired), worktree `agent-a108cf6e245c85510`. Steps 1/2/4 complete, Step 3 hit its own STOP correctly. Diagnoses (trace-artifact substitute: gh run view --log-failed — see the artifact gap below): the /pulls spec was testing a route RETIRED in #271 — re-anchored via Support→View 360→Pulls tab, same assertion; odds helper broken by the tier-budget model (unlocked non-Common rows pin to their tier share → preview.error disables Save; no dirty-tracking exists) — now locks every non-target at explicit 0% matching the sibling API test; a11y scan runs reducedMotion at context level; leaderboard header -500→-400 (3.78:1→6.94:1, measured via the script own oklch resolver). Reviewer re-ran --list + read all 4 diffs + verified both /about citations. CAVEATS: (1) a11y gate stays RED — full-coverage scan surfaced 2 REAL previously-invisible /about violations (axe skips opacity-0 nodes; the old gate under-scanned) — design calls, listed under vetted-not-planned; (2) admin-spec fixes + leaderboard fix runtime-proven only by the first nightly (backend cannot boot in a worktree); (3) /leaderboard local OK is vacuous (no rows without a backend) — fix is measurement-grounded. NOT MERGED) |
-| 079  | Docs & agent-config truth round 6                                     | P3       | S–M    | —                                          | DONE (APPROVE 2026-08-03; branch `advisor/071-admin-list-hardening`, commit `93119c3c`, worktree `agent-af795ac4c105b91e6`. Reviewer re-ran: pinned tsc + admin-pulls 3/3 + admin-ledger-route 6/6 (incl. the new batch-paging and ?q=% cases) on the live DB; read all route diffs. Executor took 2 nudges to finish (background-notification idling — lost signals; foreground instruction resolved it). On record: ledger escape also flows into Medusa customer-name search (under-match only on literal %/_/backslash — plan-as-written); grep criterion false-positive on the unpaginated ROLLUP_WINDOW fetch correctly identified; array-q 400 on purchase-invoices/players is HTTP-untested (unit-visible only) — S follow-up if wanted. MERGED into advisor/round9-execution) |
+| 079  | Docs & agent-config truth round 6                                     | P3       | S–M    | —                                          | DONE (APPROVE 2026-08-03; branch `advisor/071-admin-list-hardening`, commit `93119c3c`, worktree `agent-af795ac4c105b91e6`. Reviewer re-ran: pinned tsc + admin-pulls 3/3 + admin-ledger-route 6/6 (incl. the new batch-paging and ?q=% cases) on the live DB; read all route diffs. Executor took 2 nudges to finish (background-notification idling — lost signals; foreground instruction resolved it). On record: ledger escape also flows into Medusa customer-name search (under-match only on literal %/\_/backslash — plan-as-written); grep criterion false-positive on the unpaginated ROLLUP_WINDOW fetch correctly identified; array-q 400 on purchase-invoices/players is HTTP-untested (unit-visible only) — S follow-up if wanted. MERGED into advisor/round9-execution)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 All plans are independent; run **069 + 070 first** (they restore the nightly's
 signal — every later fix wants a trustworthy gate). Per the round-8 lesson:
@@ -1555,3 +1563,294 @@ PRODUCT.md redesign fork.
   `.claude/` hook scripts; script FILE BODIES beyond the pool-modal family;
   admin SPA browser walk.
 - Rounds 1–8 rejected-findings lists were trusted, not re-audited.
+
+---
+
+## Round 10 — security-only audit of the never-audited money and auth surfaces, 2026-08-07
+
+Generated by the `improve` skill (`/improve security`, standard tier) against
+commit `db2767f5` (master). Scope: **security only**, weighted onto the delta
+since round 9's base `0f14da91` — 60 commits / 348 files / +36,063/−3,027
+(PRs #325–#391). Method: four parallel read-only audits — money IN, money OUT,
+account takeover, and everything-else-new — with every table-bound finding
+re-opened and confirmed by the advisor against the live source. Static
+code-read; no runtime exercise.
+
+**The scope note that made this round necessary.** Rounds 1–9 all carried this
+exclusion, verbatim from the top of this file: _"Payment gateway is
+deliberately excluded — top-up runs through the mock gateway … and reward
+payout is dormant until a real PSP + AMLA compliance land."_ That exclusion is
+now **VOID**: PR #252 (`d174fa11`) landed the real GlobePay365 gateway, #376
+armed production withdrawals, #328 added SMS phone verification including
+forgot-password-by-phone, and #376 introduced a saved-bank-account PII store.
+None of that surface had ever been security-audited. Every prior round's
+rejection list should be read as scoped to the mock gateway.
+
+**Headline.** The cryptographic core is sound and the team's instincts show
+throughout — signature verification runs on all three hook routes and **fails
+closed** on a missing or empty key; row selection uses only signed fields;
+replay is absorbed by a per-customer advisory lock plus a shared idempotency
+anchor; `Migration20260721140000.ts` carries the `raw_*` columns and the unique
+index (the recorded model/migration drift did **not** recur); #387's new sort
+keys are allowlisted at two layers; no secret is committed anywhere and CI
+actions are SHA-pinned. What the round found is a consistent pattern one level
+up: **the boundary is authenticated but not bounded.** A verified callback's
+amount has no ceiling; a verified session can move the recovery phone; a
+verified payout has no velocity cap; an ambiguous gateway refusal is read as a
+definite one. Three findings are exploitable today.
+
+### Round-10 findings table (vetted — every citation re-read by the advisor)
+
+| #   | Finding                                                                                                                                                                                     | Impact        | Effort        | Risk | Confidence  | Plan |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- | ------------- | ---- | ----------- | ---- |
+| 1   | Phone-change route requires no re-auth → a stolen session becomes permanent ATO (change phone → phone-reset → new password), and the same call runs `markPhoneVerified`, unlocking cash-out | HIGH          | S–M           | MED  | HIGH        | 080  |
+| 2   | Auth limiter is a whole-site 20/min IP bucket — storefront auth is server-side, one egress IP; no per-account budget, and real users 429 each other's sign-ins                              | HIGH          | S             | LOW  | HIGH        | 081  |
+| 3   | Withdrawal gate is check-then-debit, unlocked; `floor: 0` guards raw balance, not `balance − locked` → concurrent payouts leak locked commission credits                                    | HIGH          | M             | MED  | HIGH        | 082  |
+| 4   | Deposit callback credits `Amount` with no ceiling (submit path caps RM 10k); the reconcile sweep's `settle` path is equally unbounded                                                       | MED-HIGH      | S             | LOW  | HIGH        | 083  |
+| 5   | Signed `MerchantCode` declared on all 3 hook routes, compared on none — while the sibling `CurrencyCode` is                                                                                 | MED           | S             | LOW  | HIGH (miss) | 083  |
+| 6   | Both sweeps read **any** HTTP 400 as "the gateway never heard of it" → a rotated key writes off paid deposits and refunds in-flight payouts                                                 | MED-HIGH      | S             | LOW  | HIGH        | 084  |
+| 7   | Expired deposits are written as terminal `failed` and the sweep scans `pending` only → a dropped callback plus a late settlement is never recovered (the `d6bd9732` fix is half-complete)   | MED           | M             | MED  | HIGH        | 084  |
+| 8   | Payer IP taken from client-settable `x-forwarded-for` on the money-OUT route; the money-IN sibling does the opposite and has a regression test saying why                                   | MED           | S             | LOW  | HIGH        | 085  |
+| 9   | No destination-country allowlist on the unauthenticated OTP send → ~7,200 billable SMS/day to attacker-chosen destinations                                                                  | MED           | S             | LOW  | MED         | 086  |
+| 10  | A phone change sends no notification of any kind                                                                                                                                            | MED           | S             | LOW  | HIGH        | 080  |
+| 11  | No per-window withdrawal value cap — RM 50k/request × 15/min is the only ceiling                                                                                                            | MED           | S–M           | LOW  | HIGH        | 082  |
+| 12  | Full bank numbers plaintext in `globepay_withdrawal` + `customer.metadata`; admin list returns 100 rows/page unmasked                                                                       | MED           | L (S partial) | MED  | HIGH        | 087  |
+| 13  | Decrypted receiving-bank details written verbatim to `logger.info` — from an **unsigned** field                                                                                             | MED (privacy) | S             | LOW  | HIGH        | 087  |
+| 14  | Payout destination comes from the request body every time; the saved-accounts store documents itself as "not the enforcement point"                                                         | MED           | M–L           | MED  | HIGH (code) | 088  |
+| 15  | `/hooks/globepay/*` has no rate limiter at all, and `pbkdf2Sync` re-derives the AES key on every callback, before signature verification                                                    | LOW-MED       | S             | LOW  | HIGH        | 089  |
+| 16  | Phone gate resolves fail-open on any non-`'true'` value, with no boot-time evidence of the resolved state                                                                                   | MED           | S             | LOW  | HIGH        | 090  |
+| 17  | A storefront comment claims the backend sees the real client IP — inviting deletion of the only per-phone SMS budget                                                                        | LOW-MED       | S             | LOW  | HIGH        | 090  |
+| 18  | `/admin/*` has no blanket `no-store`; the two new GlobePay admin routes set it by hand, the sibling PII routes don't — and admin auth is cookie-based, so RFC 9111 §3.5 doesn't cover it    | LOW-MED       | S             | LOW  | MED         | 091  |
+| 19  | `customer.metadata` read-modify-write is unlocked — an avatar upload can silently drop a just-saved bank account                                                                            | LOW           | S             | LOW  | HIGH        | 092  |
+| 20  | `withdraw/route.ts:21` lacks the empty-`actor_id` guard its own sibling documents                                                                                                           | LOW           | S             | LOW  | HIGH        | 082  |
+| 21  | Duplicate-phone rows dead-end phone recovery silently, with no log line for support                                                                                                         | LOW-MED       | S             | LOW  | MED         | 092  |
+
+### Round-10 plans
+
+| Plan | Title                                                                 | Priority | Effort | Depends on | Status                                                                                                                                                             |
+| ---- | --------------------------------------------------------------------- | -------- | ------ | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 080  | Phone-change re-auth + change notification                            | P1       | M      | —          | TODO                                                                                                                                                               |
+| 081  | Per-identifier rate-limit tier on the credential endpoints            | P1       | S      | —          | TODO                                                                                                                                                               |
+| 082  | Withdrawal gate under the credit lock + per-window value cap          | P1       | M      | —          | TODO                                                                                                                                                               |
+| 083  | Bound the credited deposit amount; validate the signed `MerchantCode` | P1       | S      | —          | TODO                                                                                                                                                               |
+| 084  | Narrow the not-found test; give expiry a non-terminal status          | P2       | M      | —          | TODO                                                                                                                                                               |
+| 085  | Derive the payer IP identically on both money routes                  | P2       | S      | —          | TODO                                                                                                                                                               |
+| 086  | SMS destination-country allowlist (backend + picker together)         | P2       | S      | —          | TODO                                                                                                                                                               |
+| 087  | Mask the admin bank list; stop logging decrypted bank details         | P2       | S–M    | —          | TODO                                                                                                                                                               |
+| 088  | Bind payouts to a saved, cooled-off destination                       | P2       | M–L    | **082**    | TODO — policy DECIDED 2026-08-07: 24h cooldown (env-tunable), backfill destinations already used by a settled withdrawal, `player_payout_details` stays admin-only |
+| 089  | Rate-limit the hook routes; memoize the AES key derivation            | P3       | S      | —          | TODO                                                                                                                                                               |
+| 090  | Boot-time phone-gate evidence; correct the false limiter comment      | P3       | S      | —          | TODO                                                                                                                                                               |
+| 091  | Blanket `no-store` on `/admin/*`                                      | P3       | S      | —          | TODO                                                                                                                                                               |
+| 092  | Lock the metadata read-modify-write; log the duplicate-phone dead end | P3       | S      | —          | TODO                                                                                                                                                               |
+| 093  | Operator security checklist for the console-side controls             | P3       | S–M    | —          | TODO                                                                                                                                                               |
+
+Status values: TODO | IN PROGRESS | DONE | BLOCKED (reason) | REJECTED (reason)
+
+### Dependency & sequencing notes
+
+**Only one hard dependency: 088 → 082.** 082 introduces the locked transaction
+that 088's destination resolution must happen inside; running 088 first would
+create a second unlocked window rather than closing one.
+
+**Everything else is independent in intent but NOT in files.** This repo
+dispatches plans into parallel worktrees, and prior rollups advertised "zero
+conflicts" — that will not hold here. Collision map, derived from each plan's
+own Scope section:
+
+| File                                       | Plans that edit it           |
+| ------------------------------------------ | ---------------------------- |
+| `api/middlewares.ts`                       | 081, 087, 089, 091 (080 may) |
+| `api/utils/rate-limit.ts`                  | 081, 089                     |
+| `modules/packs/service.ts`                 | 082, 092                     |
+| `utils/phone-verification.ts`              | 086, 090                     |
+| `api/hooks/globepay/deposit/route.ts`      | 083, 084, 087                |
+| `modules/packs/globepay-reconcile.ts`      | 083, 084                     |
+| `store/credits/withdraw/route.ts`          | 082, 085, 088                |
+| `store/credits/withdraw/accounts/route.ts` | 088, 092                     |
+| `store/phone-verification/start/route.ts`  | 086, 092                     |
+| `store/phone-verification/change/route.ts` | 080                          |
+
+Within a row: execute one, merge, then rebase the next. Do **not** run two
+plans from the same row concurrently in separate worktrees.
+
+**Four plans each add a matcher to `middlewares.ts`, and each verifies its own
+matcher in isolation** — 081 (auth identifier tier), 087 (the reveal route),
+089 (`/hooks/globepay/*`), 091 (`/admin/*`). `RoutesSorter` ordering is
+**global**, and this repo has a recorded history of matchers that silently do
+not match (the dropped zero-segment matcher; `*` spanning `/`). So after the
+rollup branch exists and before the PR: re-run plan 061's admin rate-limit
+coverage-guard spec, and confirm **every** new matcher actually fires. A
+matcher that silently does not match is a limiter that silently does not run —
+which looks identical to a limiter that works.
+
+- Suggested order: **081 → 082 → 080 → 083 → 084** (the three
+  exploitable-today findings plus the gateway trust boundary), then the P2
+  tail, then P3.
+- Per the round-8 lesson, which round 9 repeated: finish the round with a
+  rollup branch and a PR. **DONE means merged.**
+
+### Round-10 verified clean — do NOT re-audit
+
+- **Webhook signature verification**: runs on all three hook routes and fails
+  **closed** on a missing/empty key. `globepay-client.ts:30-36` (`required()`
+  throws on any falsy value, covering empty string), called _outside_ the try
+  block at `hooks/globepay/deposit/route.ts:57`, `withdrawal/route.ts:50`,
+  `payout-verify/route.ts:35`. `globepay.ts:153-162` decrypts then throws
+  unless `verifySignature` passes. No "skip if no key" branch, no `NODE_ENV`
+  bypass.
+- **Raw-body vs re-serialized**: no gap in either direction. The signature
+  covers the AES-decrypted plaintext, and that exact string is what gets
+  `JSON.parse`d (`globepay.ts:157-161`). Outbound signs the same string it
+  encrypts (`globepay.ts:135-146`).
+- **Replay**: check-then-insert serialized by
+  `pg_advisory_xact_lock('credit:'||customerId)` held across both in one
+  transaction (`service.ts:867-871`). Concurrent identical callbacks collapse
+  to one credit. `Migration20260721140000.ts` carries `raw_amount_requested` /
+  `raw_amount_settled` **and** the unique index on `merchant_transaction_id` —
+  the recorded `bigNumber` model/migration drift did not recur.
+- **Callback cannot alter amount or destination on the payout side**:
+  `withdrawal/route.ts:213-219` logs a disagreeing amount without applying it;
+  `payout-verify/route.ts:66-83` re-reads amount, status and currency from the
+  stored row and refuses on mismatch. Row selection uses the **signed**
+  `MerchantTransactionId`, never the unsigned envelope id.
+- **Debit-before-send ordering**: row → debit (committed) → `SubmitWithdrawal`;
+  a definite refusal refunds on the shared anchor, an ambiguous one
+  deliberately does not. Money can never be sent without first being debited.
+- **IDOR on saved accounts**: all three handlers key strictly on
+  `req.auth_context.actor_id` through one `loadAccounts` choke point that
+  rejects the empty-`actor_id` register-phase token (`accounts/route.ts:85-97`).
+  No body- or query-supplied customer id.
+- **OTP brute force**: genuinely per-phone, not IP-only —
+  `createPhoneOtpCheckPhoneRateLimit` allows 10/10min and 30/24h **per number**
+  and runs before the IP tier; a fresh `start` does **not** reset it (sliding
+  window on the phone key, independent of Twilio sessions). No local OTP is
+  generated or stored — Twilio Verify owns the code, single-use and expiry.
+  The proof token is a domain-separated HMAC compared with `timingSafeEqual`.
+- **The `password-reset` route itself**: takes only a `token`, derives the
+  target solely from the proof's phone, refuses zero and multi matches. A
+  caller cannot point it at an account whose phone they did not prove.
+- **#390 → #391 re-arm is complete**: `git diff 3e36a623 db2767f5` touches four
+  config files only (`.do/backend.app.yaml`, `.do/storefront.app.yaml`,
+  `CONTEXT.md`, `Dockerfile`); every value restored; `3e36a623`'s only code
+  change was additive Twilio error-code logging, which survives. No matcher and
+  no guard was touched by either commit.
+- **Google OAuth**: no open redirect (targets are the fixed `/me` and
+  `/auth/google/failed`), host-allowlisted with a fail-closed relative
+  `Location`, client `x-forwarded-proto` clamped, `state` mandatory before any
+  exchange.
+- **Secrets**: nothing committed. `.do/*.app.yaml` carry only
+  `__SECRET__<KEY>__` placeholders for every credential; a pattern scan for
+  secret-shaped tokens across `docs/`, `.do/`, `scripts/`, `.github/`, `src/`
+  returned zero hits. The three that look like secrets are public by design
+  (Medusa publishable key, Google **client ID**, PriceCharting seller id).
+  Nothing sensitive reaches the client bundle; no `type: SECRET` is a build ARG.
+- **CI**: no `pull_request_target`, no fork-triggered secret exposure, no secret
+  echoed in a `run:`; third-party actions SHA-pinned; gitleaks runs on full
+  history with `persist-credentials: false`.
+- **ORDER-BY injection (#387)**: closed at both layers —
+  `utils/pagination.ts:49-59` validates `?sort=` against a `ReadonlySet`, and
+  `service.ts:4519-4529` re-maps through a literal table before the
+  string-built `ORDER BY`. Every route touched by #387 carries its own
+  allowlist.
+- **Admin seed (`47ae0185`)**: changes one line of `.do/backend.app.yaml`
+  (`ADMIN_EMAIL`). `create-admin.ts` and `reset-admin-password.ts` both read the
+  password from env and **skip** when unset — no hardcoded default, no
+  unconditional prod credential reset.
+- **#377 `no-store`**: correct and complete for `/store` — a blanket matcher
+  running before the handler, so error responses are covered too, and anonymous
+  catalog traffic passes through. (The `/admin` half is finding #18.)
+- **Storefront server actions**: every action derives identity from
+  `getAuthToken()` (httpOnly, `sameSite: 'lax'`, `secure` in production), never
+  from a client-supplied id. No URL/path proxying.
+- **Vendor self-registration IS closed** — `blockUnusedVendorSelfRegistration`
+  is wired at both `/vendor/sellers` and `/auth/member/emailpass/register`
+  (`middlewares.ts:207,216`) and regression-tested
+  (`integration-tests/http/vendor-selfreg-block.spec.ts:22,32` asserts 404 on
+  both plus "no seller self-created"). **This supersedes the stale note that
+  anonymous vendor self-registration was open in prod.**
+- **Sentry / Meta Pixel**: unchanged since before `0f14da91`; no session replay,
+  `sendDefaultPii` unset, DSN public by design, Pixel consent-gated with a
+  tokenized-route denylist. Matches round 8's verification.
+- **Dependencies**: no new high advisory in the delta.
+- **No prompt-injection content** found by any of the four lanes. The single
+  instruction-shaped grep hit is `plans/018-backend-hardening-round2.md`, an
+  audit plan _discussing_ the risk.
+
+### Round-10 considered and rejected during vetting
+
+- **`/hooks/globepay/*` being unauthenticated** — correct webhook design; a
+  webhook carries no customer token and its auth is the RSA signature. Only the
+  _absence of a budget_ was filed (#15), not the absence of auth.
+- **`ALLOW_MOCK_TOPUP` / `unsafe-demo`** — documented, deploy-gated opt-in with
+  ADR history. Not a vulnerability. (`assertMockTopupSafe` is wired at
+  `medusa-config.ts:13` and hard-blocks the precondition in production.)
+- **RSA-SHA1** — vendor-mandated by the GlobePay integration spec §1.14. SHA-1
+  is weak; the implementation adds no risk beyond the convention and the
+  algorithm is not ours to choose.
+- **Proof-token replay within its 10-minute TTL** — documented at
+  `utils/phone-verification.ts:8-10` and in `CONTEXT.md`; each consumer
+  tolerates it. Settled tradeoff.
+- **`markPhoneVerified` on admin-created customers** — a stated, deliberate
+  scope decision in `subscribers/customer-phone-verified.ts`'s header. An
+  operator who types a number is vouching; the honest in-code disclosure is
+  exactly right.
+- **Non-atomic phone-uniqueness check in `change/route.ts:73-81`** — racing it
+  requires one phone-holder racing their own two accounts, and the resulting
+  state is refused fail-closed downstream. Documented with a named upgrade path.
+- **Reset token in the `?token=` URL** — scrubbed via `history.replaceState` on
+  mount; cleared in round 3; same shape as the emailed link.
+- **`maskedEmail` in the phone-reset success body** — discloses a partial email
+  to a caller who has already proven the phone. Accepted risk (recycled numbers
+  are inherent to phone recovery); recorded, not filed.
+- **`X-Forwarded-For` spoofing to rotate limiter buckets** — `.env.template`
+  already documents Medusa's hardcoded `trust proxy` 1 and both failure modes as
+  a prod-checklist item. Behind DO's single LB, `req.ip` is not client-settable.
+  Folded into plan 093 §F rather than re-filed.
+- **`listCreditTransactions` omitting `sharedContext` at `service.ts:887-893`** —
+  traced and still correct (Postgres makes a committed row visible before
+  releasing the xact-scoped advisory lock, and no read-after-own-write occurs).
+  Recorded because it is a fragile invariant an unrelated refactor could break,
+  not because it is wrong today.
+- **`GLOBEPAY_CALLBACK_IPS` being unused** — dead, but the comment above it
+  records why an observed source IP is unreliable behind a proxy. Folded into
+  plan 089 as an explicit non-goal: do **not** turn it into a rejecting gate.
+- **Admin route auth in general** — the new GlobePay admin routes carry no
+  explicit `middlewares.ts` entry and rely on the framework's `/admin` guard,
+  identical to every sibling admin list route. Sort keys allowlisted, pagination
+  capped at 100, no write actions. Not filed.
+
+### Round-10 direction
+
+No new product direction from a security-only round. Round 8/9's options stand:
+DIR-A manual cash-out writer, DIR-B playthrough disclosure at deposit time,
+DIR-C inventory outbound ledger spike, DIR-D suspended-economy
+retire-or-restore by ADR 0004's 2026-10-01 review date, DIR-E resolve the
+PRODUCT.md redesign fork.
+
+One security-adjacent direction item **was** raised and the operator elected to
+plan it rather than defer: binding payouts to a saved, cooled-off destination
+(finding #14 → plan 088). Whether `player_payout_details` becomes the single
+destination of record remains an open operator decision, recorded in that
+plan's Step 1.
+
+### Round-10 coverage — what was NOT audited
+
+- **Non-security categories entirely.** This was `/improve security`;
+  correctness, performance, tests, tech debt, deps, DX, docs and direction were
+  out of scope except where a security finding touched them.
+- **Runtime.** No request was made against a running system, local or
+  production. Every finding is a static code-read; the plans' verification
+  commands are the executors' runtime proof.
+- **Third-party console state** — Twilio Verify settings and SMS geo
+  permissions, GlobePay's key scoping and 400 taxonomy, and the live resolved
+  values of the phone-gate flags. These are not knowable from the repo and are
+  the entire subject of plan 093. Several findings' _severity_ (not existence)
+  depends on them.
+- **`backend/apps/vendor`** (dormant), vendored/framework internals, the admin
+  SPA browser walk (surveyed for auth/token handling only, not read page by
+  page), and the bodies of the storefront's own `src/app/api/**/route.ts`
+  handlers (confirmed `force-dynamic`, contents not audited — noted in plan
+  091).
+- **Rounds 1–9 rejected-findings lists** were read before filing but not
+  re-audited — **except** that every one of them predates the real payment
+  gateway and should be re-read with that in mind.
