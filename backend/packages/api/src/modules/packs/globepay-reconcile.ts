@@ -171,11 +171,13 @@ export function classifyRequeryError(error: unknown): RequeryRefusal {
  * Env-tunable because the right value is an operational judgement about the
  * provider, not a code constant — raise it during a known long outage.
  *
- * Note it equals GLOBEPAY_EXPIRED_RETRY_MS, so a row aged out this way lands at
- * the far edge of the second tier's window and the sweep will not requery it
- * again. Deliberate: after a week of nothing but ambiguous refusals another ten
- * requeries buy nothing, and the row's real recovery path is the callback route,
- * which recovers an 'expired' row at any age.
+ * At the DEFAULT it equals GLOBEPAY_EXPIRED_RETRY_MS, so a row aged out this way
+ * lands at the far edge of the second tier's window and the sweep will not
+ * requery it again — deliberate, since after a week of nothing but ambiguous
+ * refusals another ten requeries buy nothing, and the row's real recovery path
+ * is the callback route, which recovers an 'expired' row at any age. A LOWERED
+ * override changes that for the better: the row ages out inside the retry
+ * window and the second tier keeps requerying it.
  */
 export const GLOBEPAY_AMBIGUOUS_GIVEUP_DEFAULT_MS = 7 * 24 * 60 * 60 * 1000;
 

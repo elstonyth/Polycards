@@ -341,6 +341,26 @@ medusaIntegrationTestRunner({
         expect((await rowOf(row.id)).status).toBe('expired');
       });
 
+      // The bound is operator-tunable, and the ONLY thing that reads the env var
+      // is the job's default-parameter path — so a unit test that passes `env`
+      // explicitly proves the arithmetic but not the plumbing. This exercises
+      // the var the way an operator actually sets it.
+      it('honours GLOBEPAY_AMBIGUOUS_GIVEUP_MS through the job', async () => {
+        const row = await seed('PC-reconcile-ambiguous-tuned', 60_000);
+        requery.mockRejectedValue(ambiguous400());
+        process.env.GLOBEPAY_AMBIGUOUS_GIVEUP_MS = '1000';
+        try {
+          await sweep();
+        } finally {
+          delete process.env.GLOBEPAY_AMBIGUOUS_GIVEUP_MS;
+        }
+
+        // A one-minute-old row would wait for a week at the default; the
+        // override ages it out immediately — and still only to 'expired'.
+        expect(await ledger()).toHaveLength(0);
+        expect((await rowOf(row.id)).status).toBe('expired');
+      });
+
       it('keeps sweeping after one deposit errors', async () => {
         const bad = await seed('PC-reconcile-boom');
         const good = await seed('PC-reconcile-after-boom');
