@@ -28,6 +28,13 @@ import { topupFeedKey } from '../../../../modules/packs/feed-events';
 //     so a genuine callback we failed to process gets retried.
 // The distinction that matters: a status-7 (failed) deposit is HANDLED, not an
 // error. Returning non-2xx for it would make them retry a dead deposit forever.
+//
+// ONE DELIBERATE EXCEPTION: the three "this callback is wrong about itself"
+// guards below — wrong merchant, wrong currency, amount over the deposit
+// ceiling — also answer non-2xx, and a retry can never fix any of them. That
+// is the point. Each says a payment exists that we refuse to act on, so the
+// row must stay claimable and the retries must keep the event visible until a
+// human looks. Acking would file it as handled when nothing was handled.
 type DepositCallbackBody = {
   TransactionId?: string;
   MerchantTransactionId?: string;
@@ -122,7 +129,10 @@ export async function POST(
   // as failed. Case-insensitive — a casing difference between the configured
   // value and what they echo is a config nuisance, not an attack, and a
   // case-sensitive compare would reject legitimate traffic.
-  if (data.MerchantCode?.toUpperCase() !== config.merchantCode.toUpperCase()) {
+  if (
+    String(data.MerchantCode ?? '').toUpperCase() !==
+    config.merchantCode.toUpperCase()
+  ) {
     req.scope
       .resolve('logger')
       .error(
@@ -270,10 +280,11 @@ export async function POST(
   // compromise, an account reconfiguration — becomes withdrawable cash 1:1,
   // because mutateCreditAtomic's only top-up guard is deltaCents > 0.
   //
-  // QUARANTINE, never write off: the row stays 'pending' and we answer non-2xx
-  // so they retry and an operator can settle it by hand. The customer may
-  // genuinely have paid; marking the row 'failed' here would convert an
-  // operator alert into silent money loss.
+  // QUARANTINE, never write off: the row is left untouched (whatever status it
+  // had — usually 'pending', but the recovery branch above reaches here with a
+  // 'failed' one) and we answer non-2xx so they retry and an operator can
+  // settle it by hand. The customer may genuinely have paid; writing the row
+  // off here would convert an operator alert into silent money loss.
   if (creditedAmount > GLOBEPAY_MAX_RM) {
     req.scope
       .resolve('logger')
