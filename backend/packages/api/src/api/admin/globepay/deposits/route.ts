@@ -25,7 +25,17 @@ import {
 // legitimate operator visibility — the same call the Pull Ledger makes.
 
 // 'all' is a view, not a stored status: it drops the status filter entirely.
-const STATUS_FILTERS = ['pending', 'settled', 'failed', 'all'] as const;
+// 'expired' IS a stored status — the sweep writes it when it stopped chasing a
+// deposit the gateway never ruled on. It needs its own view precisely because
+// this page exists to answer "did somebody pay and not get credit?", and an
+// expired row is the strongest candidate for a yes.
+const STATUS_FILTERS = [
+  'pending',
+  'settled',
+  'failed',
+  'expired',
+  'all',
+] as const;
 type StatusFilter = (typeof STATUS_FILTERS)[number];
 
 /** Unknown/absent status falls back to 'pending' — the view that matters. */

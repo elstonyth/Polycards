@@ -159,20 +159,32 @@ export async function POST(
   // the transient-error path below leaves the row 'pending', so a callback we
   // genuinely failed to process still gets reprocessed.
   //
-  // EXCEPT success-on-failed, which is money in with no credit. The sweep can
-  // write a row off (globepay-reconcile.ts: a requery 400 read as "never
-  // existed", or a non-final status older than GLOBEPAY_STALE_AFTER_MS), and
-  // it only ever scans status='pending' — so once written off, the row is
-  // never requeried again. Before this branch existed, the customer's own
+  // EXCEPT success-on-a-closed-row, which is money in with no credit. The sweep
+  // can close a row (globepay-reconcile.ts: an explicit not-found requery, or a
+  // non-final status older than GLOBEPAY_STALE_AFTER_MS), and its live queue is
+  // status='pending' — the second scan tier revisits 'expired' rows for a
+  // bounded window, but nothing ever requeries a 'failed' one.
+  // Before this branch existed, the customer's own
   // settlement callback then arrived here, was acked 200, credited nothing and
   // logged nothing: the payment vanished with the only trace sitting in
   // GlobePay's back office. Recover it instead. Crediting late is safe — the
   // signed-anchor dedupe in mutateCreditAtomic collapses this with any other
   // delivery of the same deposit — whereas swallowing it is not.
   if (deposit.status !== 'pending') {
-    const recoverable = state === 'success' && deposit.status === 'failed';
+    // 'expired' as well as 'failed': the sweep now writes 'expired' when it
+    // merely stopped chasing a deposit the gateway never ruled on, which is
+    // precisely the row a late settlement callback belongs to. Recovering only
+    // 'failed' would have re-opened the same hole for the new status.
+    const recoverable =
+      state === 'success' &&
+      (deposit.status === 'failed' || deposit.status === 'expired');
     // Mirrors the withdrawal route's guard: any callback disagreeing with the
     // row we already wrote is worth an operator's attention, recoverable or not.
+    // Left as-is for 'expired': a status-7 callback on a row we expired is not
+    // a contradiction so much as the answer arriving late, but it DOES leave
+    // the row 'expired' (the !recoverable return below skips the flip) until
+    // the sweep's second tier requeries it — so the log line is the only trace
+    // that happened, and silence would be worse than a slightly loud alert.
     const contradicts =
       (state === 'success' && deposit.status !== 'settled') ||
       (state === 'failed' && deposit.status !== 'failed');

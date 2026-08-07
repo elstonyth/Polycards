@@ -1039,7 +1039,12 @@ export const createPixelPokemon = (body: CreatePixelPokemonBody) =>
 // window into money-in. 'stale' means the row is still pending past the
 // reconciliation sweep's window, i.e. a payment that may have landed at the
 // gateway without ever being credited here.
-export type GlobePayDepositView = 'pending' | 'settled' | 'failed' | 'all';
+export type GlobePayDepositView =
+  | 'pending'
+  | 'settled'
+  | 'failed'
+  | 'expired'
+  | 'all';
 
 export interface GlobePayDeposit {
   id: string;
@@ -1050,7 +1055,11 @@ export interface GlobePayDeposit {
   amount_requested: number;
   amount_settled: number | null;
   payment_method_code: string;
-  status: 'pending' | 'settled' | 'failed';
+  // 'expired' = the reconcile sweep stopped chasing it, but the gateway never
+  // ruled on it — NOT a synonym for 'failed', and still creditable by a late
+  // callback or the sweep's second scan tier. The withdrawal type below
+  // deliberately has no such value: expiring a payout would confiscate a debit.
+  status: 'pending' | 'settled' | 'failed' | 'expired';
   gateway_status: number | null;
   created_at: string;
   settled_at: string | null;

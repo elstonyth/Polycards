@@ -7,7 +7,6 @@ import {
   globepayEnabled,
 } from '../modules/packs/globepay-deposit';
 import {
-  GlobePayError,
   getDepositDetail,
   globepayConfigFromEnv,
 } from '../modules/packs/globepay-client';
@@ -16,7 +15,10 @@ import { notifyFeed } from '../modules/packs/notify-feed';
 import { sendTopupReceipt } from '../modules/packs/topup-receipt';
 import { topupFeedKey } from '../modules/packs/feed-events';
 import {
+  GLOBEPAY_EXPIRED_RETRY_BATCH,
+  GLOBEPAY_EXPIRED_RETRY_MS,
   GLOBEPAY_RECONCILE_BATCH,
+  classifyRequeryError,
   reconcileAction,
   unknownDepositAction,
 } from '../modules/packs/globepay-reconcile';
@@ -44,10 +46,26 @@ export default async function globepayReconcileJob(container: MedusaContainer) {
 
   // Oldest first (the status+created_at index): a backlog drains over several
   // runs instead of starving the earliest deposits.
-  const outstanding = await packs.listGlobePayDeposits(
+  const pending = await packs.listGlobePayDeposits(
     { status: 'pending' },
     { take: GLOBEPAY_RECONCILE_BATCH, order: { created_at: 'ASC' } },
   );
+
+  // Second, smaller tier: deposits we gave up chasing. 'expired' means the
+  // gateway never ruled on it, so a bank transfer can still land afterwards —
+  // without this tier that row would never be requeried again and the payment
+  // would be lost silently. Bounded on BOTH axes so it can never grow into a
+  // full-table scan: a 7-day age window (same ['status','created_at'] index)
+  // and a batch a fifth the size of the live queue.
+  const revivable = await packs.listGlobePayDeposits(
+    {
+      status: 'expired',
+      created_at: { $gte: new Date(now.getTime() - GLOBEPAY_EXPIRED_RETRY_MS) },
+    },
+    { take: GLOBEPAY_EXPIRED_RETRY_BATCH, order: { created_at: 'ASC' } },
+  );
+
+  const outstanding = [...pending, ...revivable];
   if (outstanding.length === 0) return;
 
   let settled = 0;
@@ -69,14 +87,39 @@ export default async function globepayReconcileJob(container: MedusaContainer) {
           now,
         });
       } catch (error) {
-        // A deposit they have never heard of requeries as a 400 "Not found"
-        // (observed on staging — NOT the documented PMT10016). That means
-        // SubmitDeposit never took, so nobody can ever pay it.
-        const notFound =
-          error instanceof GlobePayError &&
-          (error.httpStatus === 400 || error.has('PMT10016'));
-        if (!notFound) throw error;
-        action = unknownDepositAction(new Date(deposit.created_at), now);
+        // A refusal we cannot attribute must never write a row off — a rotated
+        // key or a wrong merchant code returns the same bare 400 a genuine
+        // not-found does, so reading every 400 as "never existed" turned one
+        // credential breakage into a write-off of every pending deposit.
+        // classifyRequeryError encodes the taxonomy (and why it is this
+        // conservative); this branch only reacts to it.
+        const refusal = classifyRequeryError(error);
+        if (refusal.kind === 'rethrow') throw error;
+        if (refusal.kind === 'ambiguous') {
+          logger.error(
+            `[globepay-reconcile] requery refused ${deposit.merchant_transaction_id} with an unattributable 400 (${
+              error instanceof Error ? error.message : String(error)
+            }) — NOT writing it off; check merchant credentials`,
+          );
+          // Deliberately reuses 'wait' rather than adding a ReconcileAction
+          // kind: the write-off branch below is an explicit `if`, and a new
+          // kind is exactly what could one day be forgotten there.
+          action = { kind: 'wait' } as const;
+        } else {
+          action = unknownDepositAction(
+            new Date(deposit.created_at),
+            now,
+            Boolean(deposit.gateway_transaction_id),
+          );
+          if (deposit.gateway_transaction_id) {
+            // Mirrors the withdrawal sweep: their D… id is on our row, so the
+            // deposit provably exists on their side and "unknown" is our own
+            // config being broken, never non-existence.
+            logger.error(
+              `[globepay-reconcile] requery says ${deposit.merchant_transaction_id} is unknown, but it HAS gateway id ${deposit.gateway_transaction_id} — refusing to expire it; check merchant credentials`,
+            );
+          }
+        }
       }
 
       if (action.kind === 'wait') continue;
@@ -109,8 +152,16 @@ export default async function globepayReconcileJob(container: MedusaContainer) {
           ),
         });
 
+        // Conditional on the status we READ, not a literal 'pending' — the
+        // same reasoning as the callback route's recovery flip
+        // (api/hooks/globepay/deposit/route.ts:308): the second scan tier
+        // reaches here with an 'expired' row, and a hardcoded 'pending'
+        // selector would match nothing, leaving the credit committed while the
+        // row still said we had given up on it. Matching deposit.status keeps
+        // the concurrency guard intact — a row another worker moved since we
+        // read it still no-ops.
         await packs.updateGlobePayDeposits({
-          selector: { id: deposit.id, status: 'pending' },
+          selector: { id: deposit.id, status: deposit.status },
           data: {
             status: 'settled',
             amount_settled: action.amount,
@@ -156,16 +207,24 @@ export default async function globepayReconcileJob(container: MedusaContainer) {
       }
 
       // 'fail' (the gateway says so) and 'expire' (non-final but too old to keep
-      // chasing) both close the row without touching the ledger. Conditional on
-      // status so a callback that settled it mid-sweep is never overwritten.
+      // chasing) both close the row without touching the ledger — but into
+      // DIFFERENT statuses. 'failed' is terminal; 'expired' is not, and the
+      // second scan tier above keeps requerying it, because the gateway never
+      // actually ruled on it and a late bank transfer must still be creditable.
+      // Conditional on the status we read so a callback that settled it
+      // mid-sweep is never overwritten.
       //
       // Named explicitly rather than left as the fallthrough: writing a row off
       // is the one irreversible thing this loop does, and a fallthrough would
       // silently swallow any ReconcileAction added later (tsc cannot catch it).
       if (action.kind === 'fail' || action.kind === 'expire') {
+        const next = action.kind === 'fail' ? 'failed' : 'expired';
+        // An already-expired row re-expiring is a no-op; skip it so the sweep
+        // does not report the same row as newly expired every ten minutes.
+        if (deposit.status === next) continue;
         await packs.updateGlobePayDeposits({
-          selector: { id: deposit.id, status: 'pending' },
-          data: { status: 'failed' },
+          selector: { id: deposit.id, status: deposit.status },
+          data: { status: next },
         });
         if (action.kind === 'fail') failed += 1;
         else expired += 1;

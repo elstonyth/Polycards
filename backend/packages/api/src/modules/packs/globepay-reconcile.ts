@@ -1,5 +1,6 @@
 import type { SettlementState } from './globepay';
 import { GLOBEPAY_MAX_RM } from './globepay-deposit';
+import { GlobePayError } from './globepay-client';
 
 // Reconciliation policy for outstanding GlobePay365 deposits. Pure decisions,
 // no container and no HTTP, so the rules are unit-testable — the job wires them
@@ -84,20 +85,89 @@ export function reconcileAction(input: ReconcileInput): ReconcileAction {
 }
 
 /**
- * A deposit the gateway has never heard of (requery 400s with "Not found").
+ * A deposit the gateway has never heard of (an explicit not-found requery).
  * That means SubmitDeposit never took, so no customer can ever pay it — but
  * only give up once it is old enough that an in-flight submit is impossible.
+ *
+ * `hasGatewayTransactionId` mirrors unknownWithdrawalAction's third argument,
+ * for the same reason: globepay-deposit.ts records their D… id the moment
+ * SubmitDeposit returns, so a row that carries one PROVABLY exists on their
+ * side. "Never heard of it" about a transaction we can name is our own
+ * configuration being broken, not non-existence — that row waits forever
+ * (the job logs it loudly) instead of being written off.
+ *
+ * Required, not defaulting to false: a default would silently preserve the
+ * unsafe reading for any caller that forgets to pass it.
  */
 export function unknownDepositAction(
   createdAt: Date,
   now: Date,
+  hasGatewayTransactionId: boolean,
 ): ReconcileAction {
+  if (hasGatewayTransactionId) return { kind: 'wait' };
   return now.getTime() - createdAt.getTime() > GLOBEPAY_STALE_AFTER_MS
     ? { kind: 'expire' }
     : { kind: 'wait' };
 }
 
-/** Row shape the sweep needs; keeps the job decoupled from the model type. */
+/**
+ * What a failed requery entitles the sweeps to do. Both sweeps used to read
+ * ANY HTTP 400 as "this transaction never existed", which is the one reading
+ * that loses money in both directions: a rotated key, a wrong merchant code
+ * and an IP de-whitelisting all arrive as a 400 too, so one credential
+ * breakage would write off every pending deposit and refund every in-flight
+ * payout while the banks still executed them.
+ *
+ * The repo contains no signal that separates the two. Their documented
+ * not-found code is PMT10016, but staging's real not-found came back as a
+ * plain-text 400 WITHOUT it (docs/payments/globepay365-setup.md:124), and what
+ * an auth failure returns is unrecorded (docs/ops/security-verification-
+ * checklist.md item D, still open). GlobePayError.definite does not help: it
+ * only says the body parsed, and a WAF page and a not-found share that shape.
+ *
+ * So this is deliberately conservative pending that taxonomy: only an explicit
+ * not-found code authorises an action, and every other refusal we can still
+ * recognise is 'ambiguous' — the caller waits and shouts. The invariant, which
+ * a future "simplification" back to a bare status check would silently undo:
+ * AN AMBIGUOUS REFUSAL NEVER MOVES MONEY AND NEVER CLOSES A ROW.
+ */
+export type RequeryRefusal =
+  /** The gateway named this transaction as unknown. Actionable. */
+  | { kind: 'not-found' }
+  /** A refusal we cannot attribute. Wait, log, requery next sweep. */
+  | { kind: 'ambiguous' }
+  /** Not a gateway refusal at all (timeout, DNS, our own bug) — rethrow. */
+  | { kind: 'rethrow' };
+
+export function classifyRequeryError(error: unknown): RequeryRefusal {
+  if (!(error instanceof GlobePayError)) return { kind: 'rethrow' };
+  if (error.has('PMT10016')) return { kind: 'not-found' };
+  return error.httpStatus === 400 ? { kind: 'ambiguous' } : { kind: 'rethrow' };
+}
+
+/**
+ * How far back the second scan tier requeries 'expired' deposits. Expiry means
+ * "we stopped chasing", never "the gateway said no", so a bank transfer that
+ * lands late must still be recoverable — but not at the cost of a growing
+ * full-table sweep, hence a window rather than "all expired rows".
+ */
+export const GLOBEPAY_EXPIRED_RETRY_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Cap for that second tier, deliberately smaller than the pending batch: the
+ * expired queue is a long tail of mostly-dead intent, and it must never crowd
+ * out (or double) the round-trips spent on deposits a customer is waiting on.
+ */
+export const GLOBEPAY_EXPIRED_RETRY_BATCH = 10;
+
+/**
+ * Row shape the sweep needs; keeps the job decoupled from the model type.
+ *
+ * NOTE: nothing imports this today — the job reads whole model rows straight
+ * from listGlobePayDeposits, so there is no select list that could omit
+ * gateway_transaction_id. Left as-is rather than extended, so it cannot look
+ * like the shape the sweep actually selects.
+ */
 export type OutstandingDeposit = {
   id: string;
   merchant_transaction_id: string;
