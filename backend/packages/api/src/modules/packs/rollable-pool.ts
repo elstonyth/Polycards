@@ -8,7 +8,7 @@ import { pageAll } from '../../api/utils/page-all';
 // can never see a spinnable pack whose every spin would fail.
 //
 // Checks set 1 only — sufficient because every save re-balances all sets to
-// Σ=10000 bps (computeSetWeights), so a pack rollable on set 1 is rollable on
+// Σ=TOTAL_UNITS (computeSetWeights), so a pack rollable on set 1 is rollable on
 // every set.
 //
 // Paged (not take:1000): a pack may hold 2000+ card rows, and a bare cap could

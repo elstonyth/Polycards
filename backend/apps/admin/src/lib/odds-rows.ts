@@ -2,6 +2,7 @@ import type { OddsRow } from './packs-api';
 import {
   balanceOdds,
   computeSetWeights,
+  PCT_SCALE,
   RARITIES,
   type OddsRarity,
   type SetEntry,
@@ -53,8 +54,8 @@ export const mapOddsToRows = (odds: OddsRow[]): EditRow[] =>
     currentPct: o.pct,
     locked: o.locked,
     pctInput: String(o.pct),
-    pctInput2: o.weight_2 == null ? '' : String(o.weight_2 / 100),
-    pctInput3: o.weight_3 == null ? '' : String(o.weight_3 / 100),
+    pctInput2: o.weight_2 == null ? '' : String(o.weight_2 / PCT_SCALE),
+    pctInput3: o.weight_3 == null ? '' : String(o.weight_3 / PCT_SCALE),
     topHitInput: o.top_hit_order == null ? '' : String(o.top_hit_order),
   }));
 
@@ -110,9 +111,9 @@ export const previewSets = (rows: EditRow[]): SetsPreview => {
   const pct: SetsPreview['pct'] = { 1: new Map(), 2: new Map(), 3: new Map() };
   for (const r of computed) {
     const w2 = r.weight_2 ?? r.weight;
-    pct[1].set(r.card_id, r.weight / 100);
-    pct[2].set(r.card_id, w2 / 100);
-    pct[3].set(r.card_id, (r.weight_3 ?? w2) / 100);
+    pct[1].set(r.card_id, r.weight / PCT_SCALE);
+    pct[2].set(r.card_id, w2 / PCT_SCALE);
+    pct[3].set(r.card_id, (r.weight_3 ?? w2) / PCT_SCALE);
   }
   if (error && computed.length === 0) {
     // The SAME call computeSetWeights makes for set 1 (its first line), so this

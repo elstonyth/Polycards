@@ -26,8 +26,9 @@ export const PackOdds = model
     // SET 1 (default) relative pull weight: roll chance = weight / Σ(weights in
     // the pack), so the roll is scale-invariant (the seed ships rarity-relative
     // weights that need not sum to anything in particular). The admin win-rate
-    // editor NORMALIZES a pack to BASIS POINTS on save (Σweight = 10000), so
-    // afterwards weight/100 reads back as the exact win % the operator set.
+    // editor NORMALIZES a pack to integer units on save (Σweight = 1,000,000),
+    // so afterwards weight/PCT_SCALE reads back as the exact 4-decimal win %
+    // the operator set.
     weight: model.number(),
     // COMMON IS THE BALANCER (POLYCARD-BACK §2.4): on save every non-Common row
     // keeps its submitted % verbatim — locked or not — and locked Common rows
@@ -38,7 +39,7 @@ export const PackOdds = model
     // Win-rate sets 2 and 3 (POLYCARD-BACK §2.4 / D2). Basis points like
     // `weight` (set 1). NULL = "inherit the previous set" PER CARD (2→1, 3→2)
     // — resolution lives in odds-sets.ts weightForSet(). After any save, every
-    // set's RESOLVED weights sum to 10000 (save-pack-odds re-balances all
+    // set's RESOLVED weights sum to 1,000,000 (save-pack-odds re-balances all
     // three sets). `locked` is shared across sets; only the pinned % differs.
     weight_2: model.number().nullable(),
     weight_3: model.number().nullable(),

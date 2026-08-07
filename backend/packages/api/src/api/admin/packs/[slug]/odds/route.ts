@@ -20,12 +20,14 @@ import { normalizeTierRanges } from '../../../../../modules/packs/tier-settings-
 import { clearPackDetailCache } from '../../../../store/packs/[slug]/route';
 import { pageAll } from '../../../../utils/page-all';
 
-const round2 = (n: number): number => Math.round(n * 100) / 100;
+// 4-decimal odds: the editor seeds its inputs from these pcts, so anything
+// coarser than the storage grain (0.0001%) would lose precision on load→save.
+const round4 = (n: number): number => Math.round(n * 10_000) / 10_000;
 
 // One per-card row for the editor form: card display fields + the row's CURRENT
 // per-pack rarity, win % and lock state — for ALL THREE odds sets (§2.4).
 // `pct`/`pct_2`/`pct_3` are weight / Σweight × 100 (NOT weight/100): the seed
-// ships rarity-relative weights that are only normalized to basis points on the
+// ships rarity-relative weights that are only normalized to integer units on the
 // first save, so deriving from the running total reads correctly in BOTH states
 // (pre- and post-normalization). Each set divides by its OWN total, and both
 // sides of that ratio go through `weightForSet` — sets 2/3 are stored sparsely
@@ -47,7 +49,7 @@ type OddsRow = {
   // negative value = units owed to winners.
   stock: number | null;
   weight: number;
-  /** Raw set-2/3 basis points; null = inherit the previous set for this card. */
+  /** Raw set-2/3 integer units; null = inherit the previous set for this card. */
   weight_2: number | null;
   weight_3: number | null;
   locked: boolean;
@@ -133,9 +135,9 @@ export async function GET(
       weight_2: o.weight_2 ?? null,
       weight_3: o.weight_3 ?? null,
       locked: o.locked,
-      pct: round2((weightForSet(o, 1) / totals[1]) * 100),
-      pct_2: round2((weightForSet(o, 2) / totals[2]) * 100),
-      pct_3: round2((weightForSet(o, 3) / totals[3]) * 100),
+      pct: round4((weightForSet(o, 1) / totals[1]) * 100),
+      pct_2: round4((weightForSet(o, 2) / totals[2]) * 100),
+      pct_3: round4((weightForSet(o, 3) / totals[3]) * 100),
       top_hit_order: o.top_hit_order ?? null,
     });
   }
@@ -234,7 +236,7 @@ export function coerceOddsEntries(raw: unknown): SetEntry[] {
   const entries: SetEntry[] = [];
   // A card_id may appear at most ONCE. The workflow's pool check compares Set
   // sizes on both sides, so a duplicate slips past it and then collides in
-  // `idByCard`/`rarityByCard` — the pack persists a Σweight ≠ 10000 that the
+  // `idByCard`/`rarityByCard` — the pack persists a Σweight ≠ TOTAL_UNITS that the
   // operator never typed. Cheapest closure is here, at the body boundary.
   const seen = new Set<string>();
   for (const item of raw as unknown[]) {

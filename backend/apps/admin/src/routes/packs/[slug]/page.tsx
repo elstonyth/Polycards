@@ -124,7 +124,8 @@ const PackOddsEditorPage = () => {
   const tierSettingsQuery = useTierSettings();
   const globalTierRanges = (tierSettingsQuery.data?.ranges ??
     {}) as TierRangeMap;
-  const packTierRanges = (data?.pack.tier_ranges ?? null) as TierRangeMap | null;
+  const packTierRanges = (data?.pack.tier_ranges ??
+    null) as TierRangeMap | null;
   const tierRanges = packTierRanges ?? globalTierRanges;
   const tiersConfigured = Object.keys(tierRanges).length > 0;
   // Settled (not "loaded") for the same reason as catalogSettled below: staged
@@ -400,9 +401,7 @@ const PackOddsEditorPage = () => {
       // above deliberately keeps the `rows` basis so already-prompted staged
       // cards aren't confirmed twice.
       const inServerPool = new Set((data?.odds ?? []).map((o) => o.card_id));
-      setAutoTierAdd(
-        Array.from(selected).filter((h) => !inServerPool.has(h)),
-      );
+      setAutoTierAdd(Array.from(selected).filter((h) => !inServerPool.has(h)));
       toast.success(
         t('packs.pool.saved', { added: res.added, removed: res.removed }),
       );
@@ -454,7 +453,7 @@ const PackOddsEditorPage = () => {
         const sum = [...pct.values()].reduce((s, p) => s + p, 0);
         return {
           n,
-          total: pct.size === 0 ? null : Math.round(sum * 100) / 100,
+          total: pct.size === 0 ? null : Math.round(sum * 10_000) / 10_000,
           ev: money?.ev ?? null,
           rtp: money?.rtp ?? null,
           // Whether this set has a table of its OWN, rather than inheriting
@@ -591,8 +590,8 @@ const PackOddsEditorPage = () => {
   };
 
   // Locking hands the operator the wheel, pre-filled with the rate the card has
-  // right now — rounded to the 2dp the 1 bps storage floor can actually hold, so
-  // a derived 0.0333 does not land in the input as an out-of-step value.
+  // right now — rounded to the 4dp the 1-unit storage floor can actually hold,
+  // so a derived 0.00003333 does not land in the input as an out-of-step value.
   const toggleLock = (r: EditRow) => {
     // While the preview is errored `previewSets` returns empty maps, so fall
     // back to the card's last SAVED rate. Without this the newly editable field
@@ -603,7 +602,7 @@ const PackOddsEditorPage = () => {
       locked: !r.locked,
       ...(r.locked
         ? {}
-        : { pctInput: String(Math.round(derived * 100) / 100) }),
+        : { pctInput: String(Math.round(derived * 10_000) / 10_000) }),
     });
   };
 
@@ -765,7 +764,10 @@ const PackOddsEditorPage = () => {
           saving={updatePack.isPending}
           onSave={async (ranges) => {
             try {
-              await updatePack.mutateAsync({ ...fullPack, tier_ranges: ranges });
+              await updatePack.mutateAsync({
+                ...fullPack,
+                tier_ranges: ranges,
+              });
               toast.success(t('packs.tierRanges.saved'));
             } catch (err) {
               toast.error(err instanceof Error ? err.message : String(err));
@@ -1503,8 +1505,8 @@ const DefaultOddsSection = ({
   const { t } = useTranslation();
   const total =
     Math.round(
-      RARITIES.reduce((s, r) => s + (Number(defaults[r]) || 0), 0) * 100,
-    ) / 100;
+      RARITIES.reduce((s, r) => s + (Number(defaults[r]) || 0), 0) * 10_000,
+    ) / 10_000;
   const byRarity = new Map((split?.tiers ?? []).map((x) => [x.rarity, x]));
   const noBalancer =
     split !== null && (byRarity.get('Common')?.balancerCount ?? 0) === 0;
@@ -1530,7 +1532,7 @@ const DefaultOddsSection = ({
     return tier.lockedCount > 0
       ? `${each} · ${t('packs.defaults.plusLocked', {
           n: tier.lockedCount,
-          pct: fmtPct(Math.round(tier.lockedPct * 100) / 100),
+          pct: fmtPct(Math.round(tier.lockedPct * 10_000) / 10_000),
         })}`
       : each;
   };
@@ -1561,7 +1563,7 @@ const DefaultOddsSection = ({
                 type="number"
                 min={0}
                 max={100}
-                step={0.01}
+                step={0.0001}
                 value={defaults[r] ?? ''}
                 onChange={(e) => onChange(r, e.target.value)}
                 className="tabular-nums"
@@ -1582,7 +1584,7 @@ const DefaultOddsSection = ({
         </span>
         {(split?.unusedPct ?? 0) > 0 &&
           ` · ${t('packs.defaults.unused', {
-            pct: fmtPct(Math.round((split?.unusedPct ?? 0) * 100) / 100),
+            pct: fmtPct(Math.round((split?.unusedPct ?? 0) * 10_000) / 10_000),
           })}`}
       </Text>
 
@@ -1701,7 +1703,7 @@ const SetRateCell = ({
           type="number"
           min={0}
           max={100}
-          step={0.01}
+          step={0.0001}
           aria-label={label}
           value={value}
           placeholder={set === 1 || effective === null ? '' : String(effective)}
@@ -1750,6 +1752,11 @@ const PublishedOddsSection = ({
   const [overall, setOverall] = useState<string>(
     pack.published_odds ? String(pack.published_odds.overall) : '100',
   );
+  // Publish precision (0–4 decimal places). The server rounds every tier to
+  // this on save, so the storefront shows exactly what the operator chose.
+  const [decimals, setDecimals] = useState<number>(
+    pack.published_odds?.decimals ?? 2,
+  );
   // Seeded once (the section is mounted with key={slug}); a pack that HAS
   // published odds keeps them verbatim — the preset must never silently
   // overwrite live public numbers.
@@ -1783,8 +1790,8 @@ const PublishedOddsSection = ({
     RARITIES.every((r) => validPct(tiers[r] ?? ''));
   const sum =
     Math.round(
-      RARITIES.reduce((s, r) => s + (Number(tiers[r]) || 0), 0) * 100,
-    ) / 100;
+      RARITIES.reduce((s, r) => s + (Number(tiers[r]) || 0), 0) * 10_000,
+    ) / 10_000;
   // What the PUBLISHED percentages promise the player, priced off the pool the
   // operator is looking at — live against the tier inputs being typed (the
   // packs list carries the saved figure). The gap against the per-set EV chips
@@ -1807,6 +1814,7 @@ const PublishedOddsSection = ({
           Number(tiers[r]),
         ]),
       ),
+      decimals,
     });
 
   return (
@@ -1819,6 +1827,30 @@ const PublishedOddsSection = ({
           </Text>
         </div>
         <div className="flex shrink-0 items-center gap-x-2">
+          <div className="flex items-center gap-x-1.5">
+            <Label size="xsmall" htmlFor="published-decimals">
+              {t('packs.published.decimals')}
+            </Label>
+            <Select
+              size="small"
+              value={String(decimals)}
+              onValueChange={(v) => setDecimals(Number(v))}
+            >
+              <Select.Trigger
+                id="published-decimals"
+                className="w-16 tabular-nums"
+              >
+                <Select.Value />
+              </Select.Trigger>
+              <Select.Content>
+                {[0, 1, 2, 3, 4].map((d) => (
+                  <Select.Item key={d} value={String(d)}>
+                    {String(d)}
+                  </Select.Item>
+                ))}
+              </Select.Content>
+            </Select>
+          </div>
           <Button
             size="small"
             variant="transparent"
@@ -1868,7 +1900,7 @@ const PublishedOddsSection = ({
                 type="number"
                 min={0}
                 max={100}
-                step={0.1}
+                step={10 ** -decimals}
                 placeholder="—"
                 value={tiers[r] ?? ''}
                 onChange={(e) =>

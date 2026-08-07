@@ -46,7 +46,7 @@ const PACK_PRICE = 10;
 const FMV = 50;
 const MULTIPLIER = 1.2;
 const MANUAL_RATE = 4.0;
-const TOTAL_BPS = 10000;
+const TOTAL_BPS = 1_000_000;
 
 medusaIntegrationTestRunner({
   inApp: true,

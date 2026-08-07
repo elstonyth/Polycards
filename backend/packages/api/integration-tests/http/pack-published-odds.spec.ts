@@ -64,7 +64,12 @@ medusaIntegrationTestRunner({
 
       beforeEach(async () => {
         const container = getContainer();
-        adminToken = await mintSuperAdmin(container, api, ADMIN_EMAIL, PASSWORD);
+        adminToken = await mintSuperAdmin(
+          container,
+          api,
+          ADMIN_EMAIL,
+          PASSWORD,
+        );
         // Store routes are publishable-key scoped (same fixture as
         // store-packs-price-contract.spec).
         const apiKeyModule = container.resolve(Modules.API_KEY);
@@ -109,7 +114,12 @@ medusaIntegrationTestRunner({
             `/admin/packs/${SLUG}/odds`,
             {
               entries: [
-                { card_id: CARD_HANDLE, locked: false, pct: 100, rarity: 'Common' },
+                {
+                  card_id: CARD_HANDLE,
+                  locked: false,
+                  pct: 100,
+                  rarity: 'Common',
+                },
               ],
             },
             { headers: adminHeaders() },
@@ -133,12 +143,13 @@ medusaIntegrationTestRunner({
         expect(await detailOdds()).toEqual({
           overall: 95,
           tiers: { Common: 43, Rare: 22 },
+          decimals: 2,
         });
 
         const shrunk = await save({ overall: 95, tiers: { Common: 43 } });
         expect(shrunk.status).toBe(200);
 
-        const expected = { overall: 95, tiers: { Common: 43 } };
+        const expected = { overall: 95, tiers: { Common: 43 }, decimals: 2 };
         expect(await detailOdds()).toEqual(expected);
         expect(await listedOdds()).toEqual(expected);
 
@@ -156,11 +167,50 @@ medusaIntegrationTestRunner({
         await save({ overall: 90, tiers: { Common: 40, Uncommon: 30 } });
         const emptied = await save({ overall: 90, tiers: {} });
         expect(emptied.status).toBe(200);
-        expect(await detailOdds()).toEqual({ overall: 90, tiers: {} });
+        expect(await detailOdds()).toEqual({
+          overall: 90,
+          tiers: {},
+          decimals: 2,
+        });
 
         const cleared = await save(null);
         expect(cleared.status).toBe(200);
         expect(await detailOdds()).toBeNull();
+      });
+
+      it('publishes at the configured decimals: 4dp survives, 2dp (default) rounds', async () => {
+        const fine = await save({
+          overall: 100,
+          tiers: { Legendary: 0.6842, Common: 43.1234 },
+          decimals: 4,
+        });
+        expect(fine.status).toBe(200);
+        expect(await detailOdds()).toEqual({
+          overall: 100,
+          tiers: { Legendary: 0.6842, Common: 43.1234 },
+          decimals: 4,
+        });
+
+        // No decimals field → legacy default 2: the same tiers round on save.
+        const coarse = await save({
+          overall: 100,
+          tiers: { Legendary: 0.6842, Common: 43.1234 },
+        });
+        expect(coarse.status).toBe(200);
+        expect(await detailOdds()).toEqual({
+          overall: 100,
+          tiers: { Legendary: 0.68, Common: 43.12 },
+          decimals: 2,
+        });
+
+        // Out-of-range decimals is a 400, and writes nothing.
+        const bad = await save({ overall: 100, tiers: {}, decimals: 5 });
+        expect(bad.status).toBe(400);
+        expect(await detailOdds()).toEqual({
+          overall: 100,
+          tiers: { Legendary: 0.68, Common: 43.12 },
+          decimals: 2,
+        });
       });
     });
   },

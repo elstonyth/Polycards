@@ -235,7 +235,9 @@ describe('fmtPct', () => {
   it('formats an integer without decimals', () => {
     expect(fmtPct(20)).toBe('20%');
   });
-  it('formats a fractional value with two decimals', () => {
-    expect(fmtPct(12.5)).toBe('12.50%');
+  it('formats a fractional value with up to 4 decimals, zeros trimmed', () => {
+    expect(fmtPct(12.5)).toBe('12.5%');
+    expect(fmtPct(0.6842)).toBe('0.6842%');
+    expect(fmtPct(0.68424999)).toBe('0.6842%');
   });
 });
