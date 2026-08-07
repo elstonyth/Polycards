@@ -7,10 +7,13 @@
 //    card→card switch never pulses the price — the regression price-tick.ts
 //    guards, verified here through the real component rather than in isolation.
 //
-// 2. The price row's `-mx-2 px-2`. The negative margin buys the pulse tint some
-//    breathing room; it must not move the number off the left edge the rest of
-//    the facts column aligns to, and must not visibly close the gap to the 30d
-//    delta badge.
+// 2. The price row costing NO layout. The pulse tint bleeds 8px past the text
+//    via box-shadow spread precisely so it stays free — an earlier version paid
+//    for it with px-2 plus a compensating -mx-2, and that margin was charged
+//    whether or not a pulse was running, halving the gap-x-4 between the value
+//    and the 30d delta badge beside it. Both invariants are asserted here: the
+//    number stays on the left edge the facts column aligns to, AND the badge
+//    gap stays at its full gap-x-4.
 //
 //   BASE_URL=http://localhost:4100 node scripts/qa-card-overlay-motion.mjs
 import { chromium } from 'playwright';
@@ -29,11 +32,20 @@ const failures = [];
 await page.goto(`${BASE}/card/${encodeURIComponent(CARD)}`, {
   waitUntil: 'load',
 });
+// The gap-x-4 the value block sets between the price and the delta badge.
+const EXPECTED_BADGE_GAP = 16;
+
 const align = await page.evaluate(() => {
   const h1 = document.querySelector('h1');
   const price = document.querySelector('p.font-heading.tabular-nums');
-  // Left edge of the rendered TEXT, not the padded box — px-2 is supposed to
-  // put the glyphs back exactly where the negative margin took the box.
+  // Return a sentinel rather than dereferencing null: if either selector
+  // drifts, an exception here rejects the evaluate, skips the failure report
+  // entirely, and leaks the browser process.
+  if (!h1 || !price?.firstChild) {
+    return { missing: !h1 ? 'h1' : 'price' };
+  }
+  // Left edge of the rendered TEXT, not the box — the box may legitimately
+  // extend past it, but the glyphs must sit on the column's edge.
   const range = document.createRange();
   range.selectNodeContents(price.firstChild);
   const badge = price.parentElement.children[1] ?? null;
@@ -47,10 +59,30 @@ const align = await page.evaluate(() => {
   };
 });
 console.log('alignment:', JSON.stringify(align));
-if (Math.abs(align.priceTextLeft - align.h1Left) > 1) {
+if (align.missing) {
   failures.push(
-    `price text is ${(align.priceTextLeft - align.h1Left).toFixed(1)}px off the h1 left edge`,
+    `alignment probe "${align.missing}" not found — selector drifted, nothing was checked`,
   );
+} else {
+  if (Math.abs(align.priceTextLeft - align.h1Left) > 1) {
+    failures.push(
+      `price text is ${(align.priceTextLeft - align.h1Left).toFixed(1)}px off the h1 left edge`,
+    );
+  }
+  // This is the assertion that would have caught the -mx-2 regression.
+  if (
+    align.gapToBadge !== null &&
+    Math.abs(align.gapToBadge - EXPECTED_BADGE_GAP) > 1
+  ) {
+    failures.push(
+      `gap to the 30d delta badge is ${align.gapToBadge}px, expected ${EXPECTED_BADGE_GAP}px (gap-x-4) — the price row is costing layout again`,
+    );
+  }
+  if (align.gapToBadge === null) {
+    console.log(
+      'note: no delta badge on this card (needs >=2 price history points) — badge-gap assertion skipped',
+    );
+  }
 }
 
 // ---- 1. the overlay ----------------------------------------------------------
