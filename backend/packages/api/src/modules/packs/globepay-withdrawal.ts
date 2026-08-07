@@ -1,7 +1,11 @@
 import { createHash } from 'node:crypto';
-import { MedusaError } from '@medusajs/framework/utils';
+import { MedusaError, Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from './index';
 import type PacksModuleService from './service';
+import {
+  loadSavedBankAccounts,
+  resolveWithdrawalDestination,
+} from './saved-accounts';
 import {
   globepayConfigFromEnv,
   submitWithdrawal,
@@ -120,9 +124,13 @@ export type StartWithdrawalInput = {
   /** From the verified token — NEVER the request body. */
   customerId: string;
   amount: unknown;
-  bankCode: unknown;
-  accountNumber: unknown;
-  accountHolderName: unknown;
+  /**
+   * Which of the CUSTOMER's OWN saved destinations to pay. The bank code,
+   * account number and holder name are resolved from that saved record, so a
+   * request body can no longer name where the money goes — a stolen token
+   * cannot cash out to an account the owner never registered and waited out.
+   */
+  accountId: unknown;
   /** The CUSTOMER's IP (they require it), not our server's. */
   ipAddress: string;
 };
@@ -179,18 +187,37 @@ export async function startGlobePayWithdrawal(
     );
   }
 
-  const detailsInvalid = withdrawalDetailsError(input);
+  const config = globepayConfigFromEnv();
+  const packs = scope.resolve<PacksModuleService>(PACKS_MODULE);
+  const customers = scope.resolve<
+    Parameters<PacksModuleService['withdrawForCashout']>[0]['customers']
+  >(Modules.CUSTOMER);
+
+  // 0a) DESTINATION PRECHECK — NOT the gate, exactly like the wallet precheck
+  // below. The authoritative resolution happens inside packs.withdrawForCashout
+  // under the `credit:` advisory lock, and its result is what the gateway is
+  // told to pay. This copy exists so a refusal that is already certain (no such
+  // saved account, still cooling off) does not leave a `failed` row on the
+  // operator-facing Withdrawals page, and so the row we are about to write can
+  // carry the destination at all.
+  //
+  // It cannot approve anything the locked resolution would refuse: both read the
+  // same list, and savedBankAccountId is derived from (bankCode, accountNumber),
+  // so an id resolves to the same destination in both reads or to nothing.
+  const precheckDestination = resolveWithdrawalDestination({
+    accounts: await loadSavedBankAccounts(customers, input.customerId),
+    accountId: input.accountId,
+  });
+
+  // Belt and braces on the STORED values. The saved-accounts route applies this
+  // same check on save, so a stored account that fails here predates that route
+  // or was written around it — either way the gateway must not see it.
+  const detailsInvalid = withdrawalDetailsError(precheckDestination);
   if (detailsInvalid) {
     throw new MedusaError(MedusaError.Types.INVALID_DATA, detailsInvalid);
   }
-  const bankCode = input.bankCode as string;
-  const accountNumber = input.accountNumber as string;
-  const accountHolderName = (input.accountHolderName as string).trim();
 
-  const config = globepayConfigFromEnv();
-  const packs = scope.resolve<PacksModuleService>(PACKS_MODULE);
-
-  // 0) PRECHECK — NOT the gate. This is an unlocked, read-only fast path whose
+  // 0b) PRECHECK — NOT the gate. This is an unlocked, read-only fast path whose
   // only job is to avoid writing a row for a refusal that is already certain.
   // The authoritative gate is inside packs.withdrawForCashout, under the
   // per-customer `credit:` advisory lock, and it re-reads this same wallet
@@ -223,9 +250,9 @@ export async function startGlobePayWithdrawal(
       merchant_transaction_id: merchantTransactionId,
       customer_id: input.customerId,
       amount,
-      bank_code: bankCode,
-      account_number: accountNumber,
-      account_holder_name: accountHolderName,
+      bank_code: precheckDestination.bankCode,
+      account_number: precheckDestination.accountNumber,
+      account_holder_name: precheckDestination.accountHolderName.trim(),
       status: 'pending',
     },
   ]);
@@ -241,6 +268,8 @@ export async function startGlobePayWithdrawal(
   // A gate refusal that the precheck above did not already catch (a race, or a
   // balance that moved between the two reads) arrives as a throw from this call
   // and closes the row, exactly like an insufficient-balance debit always has.
+  // The same is true of the destination: withdrawForCashout re-resolves it under
+  // the lock and a refusal there lands in this catch.
   let debit;
   try {
     debit = await packs.withdrawForCashout({
@@ -251,8 +280,8 @@ export async function startGlobePayWithdrawal(
         input.customerId,
         merchantTransactionId,
       ),
-      bankCode,
-      accountNumber,
+      accountId: input.accountId,
+      customers,
     });
   } catch (error) {
     // Nothing was debited; the row must not sit pending or the sweep would
@@ -261,7 +290,11 @@ export async function startGlobePayWithdrawal(
     throw error;
   }
 
-  // 3) Only now is money allowed to move on their side.
+  // 3) Only now is money allowed to move on their side — and only to the
+  // destination the LOCKED resolution returned, never to the precheck's copy.
+  const bankCode = debit.destination.bankCode;
+  const accountNumber = debit.destination.accountNumber;
+  const accountHolderName = debit.destination.accountHolderName.trim();
   let result;
   try {
     result = await submitWithdrawal(

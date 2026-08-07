@@ -1,4 +1,4 @@
-import { MedusaError } from '@medusajs/framework/utils';
+import { MedusaError, Modules } from '@medusajs/framework/utils';
 import {
   globepayWithdrawalsEnabled,
   startGlobePayWithdrawal,
@@ -36,7 +36,25 @@ import { GlobePayError, submitWithdrawal } from '../globepay-client';
 
 const submitMock = submitWithdrawal as jest.Mock;
 
-function harness() {
+/** The destination the customer saved two days ago — past its cooling-off
+ *  window, so it is the "happy path" account every ordering test pays to. The
+ *  bank code and number live HERE, in the saved list, and nowhere in a request:
+ *  that is the whole point of plan 088. */
+const SAVED_ACCOUNT = {
+  id: 'acc_owned',
+  bankCode: 'MBB',
+  bankName: 'Maybank',
+  accountNumber: '1234567890',
+  accountHolderName: 'AHMAD BIN ALI',
+  savedAt: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
+};
+
+function harness(savedAccounts: unknown[] = [SAVED_ACCOUNT]) {
+  const customers = {
+    retrieveCustomer: jest
+      .fn()
+      .mockResolvedValue({ metadata: { bank_accounts: savedAccounts } }),
+  };
   const packs = {
     createGlobePayWithdrawals: jest.fn().mockResolvedValue([{ id: 'gpw_1' }]),
     updateGlobePayWithdrawals: jest.fn().mockResolvedValue(undefined),
@@ -46,12 +64,15 @@ function harness() {
     // `PacksModuleService.withdrawForCashout` describe below, which exercises
     // the real thing against a fake `this`. Here it is stubbed, because these
     // tests own the MONEY ORDERING (row -> debit -> gateway, refund on refusal).
+    // Returns the destination it RESOLVED under the lock — the only thing the
+    // caller is allowed to submit to the gateway.
     withdrawForCashout: jest.fn().mockResolvedValue({
       id: 'ct_1',
       balance: 50,
       amount: -50,
       replayed: false,
       reference: null,
+      destination: SAVED_ACCOUNT,
     }),
     // Still the REFUND writer on the payout path (positive amount, wd-refund:
     // anchor). The debit no longer goes through it directly.
@@ -80,8 +101,13 @@ function harness() {
   return {
     packs,
     logger,
+    customers,
     scope: {
-      resolve: (k: string) => (k === 'logger' ? logger : packs),
+      resolve: (k: string) => {
+        if (k === 'logger') return logger;
+        if (k === Modules.CUSTOMER) return customers;
+        return packs;
+      },
     } as never,
   };
 }
@@ -89,9 +115,8 @@ function harness() {
 const input = {
   customerId: 'cus_1',
   amount: 50,
-  bankCode: 'MBB',
-  accountNumber: '1234567890',
-  accountHolderName: 'AHMAD BIN ALI',
+  // The ONLY thing a caller may say about the destination.
+  accountId: 'acc_owned',
   ipAddress: '1.2.3.4',
 };
 
@@ -154,14 +179,14 @@ describe('idempotency anchors', () => {
 
 describe('withdrawalDetailsError', () => {
   it('accepts sane bank details', () => {
-    expect(withdrawalDetailsError(input)).toBeNull();
+    expect(withdrawalDetailsError(SAVED_ACCOUNT)).toBeNull();
   });
   it.each([
-    [{ ...input, bankCode: '' }, /bank/i],
-    [{ ...input, bankCode: 'not a code!' }, /bank/i],
-    [{ ...input, accountNumber: '12ab' }, /account number/i],
-    [{ ...input, accountNumber: '12345' }, /account number/i],
-    [{ ...input, accountHolderName: ' ' }, /holder name/i],
+    [{ ...SAVED_ACCOUNT, bankCode: '' }, /bank/i],
+    [{ ...SAVED_ACCOUNT, bankCode: 'not a code!' }, /bank/i],
+    [{ ...SAVED_ACCOUNT, accountNumber: '12ab' }, /account number/i],
+    [{ ...SAVED_ACCOUNT, accountNumber: '12345' }, /account number/i],
+    [{ ...SAVED_ACCOUNT, accountHolderName: ' ' }, /holder name/i],
   ])('rejects bad details (%#)', (bad, message) => {
     expect(withdrawalDetailsError(bad)).toMatch(message);
   });
@@ -177,7 +202,13 @@ describe('startGlobePayWithdrawal — money ordering', () => {
     });
     h.packs.withdrawForCashout.mockImplementation(async () => {
       order.push('debit');
-      return { id: 'ct_1', balance: 0, amount: -50, replayed: false };
+      return {
+        id: 'ct_1',
+        balance: 0,
+        amount: -50,
+        replayed: false,
+        destination: SAVED_ACCOUNT,
+      };
     });
     submitMock.mockImplementation(async () => {
       order.push('gateway');
@@ -190,10 +221,9 @@ describe('startGlobePayWithdrawal — money ordering', () => {
     expect(order).toEqual(['row', 'debit', 'gateway']);
   });
 
-  // The caller hands the service a POSITIVE amount and the payout's own
-  // reference; `reason`, `floor: 0` and the ledger outcome are the service's to
-  // set, so no caller can get them wrong. The full account number goes down
-  // (the service stores last-4 on the ledger row).
+  // The caller hands the service a POSITIVE amount, the payout's own reference
+  // and the ACCOUNT ID — never bank details; `reason`, `floor: 0` and the ledger
+  // outcome are the service's to set, so no caller can get them wrong.
   it('routes the debit through withdrawForCashout with the wd: anchor', async () => {
     const h = harness();
     await start(h);
@@ -202,17 +232,147 @@ describe('startGlobePayWithdrawal — money ordering', () => {
       expect.objectContaining({
         customerId: 'cus_1',
         amount: 50,
-        bankCode: 'MBB',
-        accountNumber: '1234567890',
+        accountId: 'acc_owned',
         idempotencyReference: expect.stringMatching(/^wd:/),
       }),
     );
-    // The reference the row was written under is the one the debit records.
+    // No bank detail is handed down: the service looks them up itself.
     const call = h.packs.withdrawForCashout.mock.calls[0][0];
+    expect(call.bankCode).toBeUndefined();
+    expect(call.accountNumber).toBeUndefined();
+    // The reference the row was written under is the one the debit records.
     expect(call.merchantTransactionId).toBe(
       h.packs.createGlobePayWithdrawals.mock.calls[0][0][0]
         .merchant_transaction_id,
     );
+  });
+
+  // THE binding, end to end: the gateway is told to pay what the LOCKED
+  // resolution returned. The precheck's copy is deliberately made to disagree
+  // here — if a future edit submits the precheck's destination (or anything
+  // from the caller) instead, this fails.
+  it('submits the destination the LOCKED resolution returned', async () => {
+    const h = harness();
+    const lockedDestination = {
+      ...SAVED_ACCOUNT,
+      bankCode: 'CIMB',
+      accountNumber: '9999999999',
+      accountHolderName: '  SITI BINTI OMAR  ',
+    };
+    h.packs.withdrawForCashout.mockResolvedValue({
+      id: 'ct_1',
+      balance: 50,
+      amount: -50,
+      replayed: false,
+      destination: lockedDestination,
+    });
+    await start(h);
+    expect(submitMock).toHaveBeenCalledTimes(1);
+    expect(submitMock.mock.calls[0][0]).toMatchObject({
+      destinationBankCode: 'CIMB',
+      destinationAccountNumber: '9999999999',
+      destinationAccountHolderName: 'SITI BINTI OMAR',
+    });
+  });
+
+  // Test-plan case 1: the gateway receives the STORED details for an account
+  // the session owns, and the customer never said what they were.
+  it('pays a saved, cooled-off account with its STORED details', async () => {
+    const h = harness();
+    const result = await start(h);
+    expect(submitMock.mock.calls[0][0]).toMatchObject({
+      merchantClientId: 'cus_1',
+      destinationBankCode: SAVED_ACCOUNT.bankCode,
+      destinationAccountNumber: SAVED_ACCOUNT.accountNumber,
+      destinationAccountHolderName: SAVED_ACCOUNT.accountHolderName,
+    });
+    expect(result.transactionId).toBe('W2026072200000001');
+  });
+
+  // Test-plan case 4: the OLD contract must be GONE, not merely unused. Bank
+  // details in the body with no id name no saved account, so this is the same
+  // refusal an unknown id gets — and nothing is written or debited.
+  it('refuses a body carrying bank details and no account id', async () => {
+    const h = harness();
+    await expect(
+      startGlobePayWithdrawal(
+        h.scope,
+        {
+          customerId: 'cus_1',
+          amount: 50,
+          accountId: undefined,
+          ipAddress: '1.2.3.4',
+          // The pre-088 body shape, passed through as excess properties.
+          ...{
+            bankCode: 'MBB',
+            accountNumber: '1234567890',
+            accountHolderName: 'AHMAD BIN ALI',
+          },
+        } as never,
+        'https://us/notify-wd',
+        'https://us/payout-verify',
+      ),
+    ).rejects.toThrow(/select a saved bank account/i);
+    expect(h.packs.createGlobePayWithdrawals).not.toHaveBeenCalled();
+    // calls.length, not not.toHaveBeenCalled(): a failure here would
+    // pretty-print the recorded arguments, and those carry a full account
+    // number on this path.
+    expect(h.packs.withdrawForCashout.mock.calls.length).toBe(0);
+    expect(submitMock.mock.calls.length).toBe(0);
+  });
+
+  // Test-plan case 2 at the CALLER level (the authoritative one is under the
+  // lock, in the service describe below): an id that is not in this customer's
+  // own list is refused before a row exists.
+  it('refuses an account id the session does not own — no row, no debit', async () => {
+    const h = harness();
+    await expect(start(h, { accountId: 'acc_someone_else' })).rejects.toThrow(
+      /select a saved bank account/i,
+    );
+    expect(h.packs.createGlobePayWithdrawals).not.toHaveBeenCalled();
+    expect(h.packs.withdrawForCashout.mock.calls.length).toBe(0);
+  });
+
+  // Test-plan case 3.
+  it('refuses an account still inside the cooling-off window', async () => {
+    const h = harness([
+      { ...SAVED_ACCOUNT, savedAt: new Date(Date.now() - 60_000).toISOString() },
+    ]);
+    await expect(start(h)).rejects.toThrow(/not available for withdrawals yet/i);
+    expect(h.packs.createGlobePayWithdrawals).not.toHaveBeenCalled();
+    expect(h.packs.withdrawForCashout.mock.calls.length).toBe(0);
+  });
+
+  // Test-plan case 5: a pre-cooling-off row (no savedAt) is NOT usable, and it
+  // says so in its own words — "wait a while" would be a lie, because waiting
+  // never arms it.
+  it('refuses an account with no savedAt, telling them to re-save it', async () => {
+    const { savedAt: _dropped, ...noTimestamp } = SAVED_ACCOUNT;
+    const h = harness([noTimestamp]);
+    await expect(start(h)).rejects.toThrow(/remove it and save it again/i);
+    expect(h.packs.createGlobePayWithdrawals).not.toHaveBeenCalled();
+    expect(h.packs.withdrawForCashout.mock.calls.length).toBe(0);
+  });
+
+  it('honours PAYOUT_DESTINATION_COOLDOWN_HOURS, read per call', async () => {
+    const twoHoursOld = [
+      {
+        ...SAVED_ACCOUNT,
+        savedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+      },
+    ];
+    // 2h old: refused under the 24h default…
+    await expect(start(harness(twoHoursOld))).rejects.toThrow(
+      /not available for withdrawals yet/i,
+    );
+    // …and allowed once the operator shortens the window. Only a per-call env
+    // read can see this — the module was imported long before this assignment.
+    process.env.PAYOUT_DESTINATION_COOLDOWN_HOURS = '1';
+    try {
+      await expect(start(harness(twoHoursOld))).resolves.toBeDefined();
+    } finally {
+      delete process.env.PAYOUT_DESTINATION_COOLDOWN_HOURS;
+    }
   });
 
   it('REFUNDS the debit and closes the row when the gateway DEFINITELY refuses', async () => {
@@ -370,13 +530,14 @@ describe('startGlobePayWithdrawal — money ordering', () => {
     },
   );
 
-  it('rejects bad bank details before any row or debit', async () => {
-    const h = harness();
-    await expect(start(h, { accountNumber: 'abc' })).rejects.toThrow(
-      /account number/i,
-    );
+  // Belt and braces on the STORED values: the saved-accounts route applies the
+  // same check on save, so a stored account that fails it was written around
+  // that route (or predates it). The gateway must not see it either way.
+  it('rejects a SAVED account whose stored details are malformed', async () => {
+    const h = harness([{ ...SAVED_ACCOUNT, accountNumber: 'abc' }]);
+    await expect(start(h)).rejects.toThrow(/account number/i);
     expect(h.packs.createGlobePayWithdrawals).not.toHaveBeenCalled();
-    expect(h.packs.withdrawForCashout).not.toHaveBeenCalled();
+    expect(h.packs.withdrawForCashout.mock.calls.length).toBe(0);
   });
 
   it('refuses to run when withdrawals are not enabled', async () => {
@@ -472,13 +633,40 @@ const fakeService = (
   return { svc, em, ctx, walletSummary, withdrawCreditsWithLedger };
 };
 
+/**
+ * The customer module handle the method reads the saved list through. Keyed on
+ * the customer ID it is asked for — which is what makes the cross-customer test
+ * below real rather than vacuous: `cus_2` has their OWN account with a
+ * different id, so asking for `cus_2`'s id while authenticated as `cus_1`
+ * genuinely looks it up in `cus_1`'s list and genuinely does not find it.
+ */
+const OTHER_CUSTOMERS_ACCOUNT = {
+  id: 'acc_theirs',
+  bankCode: 'CIMB',
+  bankName: 'CIMB Bank',
+  accountNumber: '5555555555',
+  accountHolderName: 'SITI BINTI OMAR',
+  savedAt: new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString(),
+};
+
+const fakeCustomers = (
+  byCustomer: Record<string, unknown[]> = {
+    cus_1: [SAVED_ACCOUNT],
+    cus_2: [OTHER_CUSTOMERS_ACCOUNT],
+  },
+) => ({
+  retrieveCustomer: jest.fn(async (id: string) => ({
+    metadata: { bank_accounts: byCustomer[id] ?? [] },
+  })),
+});
+
 const cashout = {
   customerId: 'cus_1',
   amount: 50,
   merchantTransactionId: 'PC-abc',
   idempotencyReference: 'wd:deadbeef',
-  bankCode: 'MBB',
-  accountNumber: '1234567890',
+  accountId: 'acc_owned',
+  customers: fakeCustomers(),
 };
 
 describe('PacksModuleService.withdrawForCashout', () => {
@@ -530,13 +718,108 @@ describe('PacksModuleService.withdrawForCashout', () => {
       }),
       expect.anything(),
     );
+    // The ledger records the RESOLVED destination — nothing about it came from
+    // the call.
     expect(f.withdrawCreditsWithLedger.mock.calls[0][0].ledger).toMatchObject({
       outcome: 'requested',
-      bankCode: 'MBB',
-      accountNumber: '1234567890',
+      bankCode: SAVED_ACCOUNT.bankCode,
+      accountNumber: SAVED_ACCOUNT.accountNumber,
       gatewayRef: 'PC-abc',
     });
     expect(result.balance).toBe(950);
+    // And it hands that same destination back for the gateway call.
+    expect(result.destination).toMatchObject({
+      id: 'acc_owned',
+      bankCode: SAVED_ACCOUNT.bankCode,
+      accountNumber: SAVED_ACCOUNT.accountNumber,
+    });
+  });
+
+  // THE IDOR GUARD (test-plan case 2). `cus_2` really does own `acc_theirs` —
+  // fakeCustomers is keyed by customer id — so this is not passing because the
+  // fixture has one customer or an empty list. The lookup happens in the
+  // TOKEN OWNER's list, so someone else's id is simply not there.
+  it("refuses another customer's account id — no debit", async () => {
+    const f = fakeService();
+    await expect(
+      f.svc.withdrawForCashout({ ...cashout, accountId: 'acc_theirs' }, f.ctx),
+    ).rejects.toMatchObject({
+      type: MedusaError.Types.INVALID_DATA,
+      message: 'Select a saved bank account.',
+    });
+    // calls.length rather than not.toHaveBeenCalled(): a failing
+    // not.toHaveBeenCalled() pretty-prints the recorded arguments, which on
+    // this path carry a full bank account number.
+    expect(f.withdrawCreditsWithLedger.mock.calls.length).toBe(0);
+    // Proof the guard is ownership and not "that id does not exist anywhere":
+    // the very same id resolves for the customer who owns it.
+    await expect(
+      f.svc.withdrawForCashout(
+        { ...cashout, customerId: 'cus_2', accountId: 'acc_theirs' },
+        fakeService().ctx,
+      ),
+    ).resolves.toMatchObject({
+      destination: expect.objectContaining({ id: 'acc_theirs' }),
+    });
+  });
+
+  it('refuses an unknown account id — no debit', async () => {
+    const f = fakeService();
+    await expect(
+      f.svc.withdrawForCashout({ ...cashout, accountId: 'acc_nope' }, f.ctx),
+    ).rejects.toThrow('Select a saved bank account.');
+    expect(f.withdrawCreditsWithLedger.mock.calls.length).toBe(0);
+  });
+
+  it('refuses an account still cooling off — no debit', async () => {
+    const f = fakeService();
+    const customers = fakeCustomers({
+      cus_1: [
+        {
+          ...SAVED_ACCOUNT,
+          savedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+        },
+      ],
+    });
+    await expect(
+      f.svc.withdrawForCashout({ ...cashout, customers }, f.ctx),
+    ).rejects.toMatchObject({
+      type: MedusaError.Types.NOT_ALLOWED,
+      message: expect.stringMatching(/not available for withdrawals yet/i),
+    });
+    expect(f.withdrawCreditsWithLedger.mock.calls.length).toBe(0);
+  });
+
+  // Test-plan case 5, asserted at the gate that actually decides: a missing
+  // timestamp resolves to REFUSED, with its own message. `undefined` never
+  // means "usable".
+  it('refuses an account with no savedAt — no debit, and says to re-save it', async () => {
+    const f = fakeService();
+    const { savedAt: _dropped, ...noTimestamp } = SAVED_ACCOUNT;
+    const customers = fakeCustomers({ cus_1: [noTimestamp] });
+    await expect(
+      f.svc.withdrawForCashout({ ...cashout, customers }, f.ctx),
+    ).rejects.toMatchObject({
+      type: MedusaError.Types.NOT_ALLOWED,
+      message: expect.stringMatching(/remove it and save it again/i),
+    });
+    expect(f.withdrawCreditsWithLedger.mock.calls.length).toBe(0);
+  });
+
+  // The destination must be pinned by the SAME serialized unit that debits: if
+  // a future edit hoists the lookup out to the caller, or above the lock, it
+  // can be swapped between check and debit.
+  it('resolves the destination AFTER the lock and BEFORE the debit', async () => {
+    const f = fakeService();
+    const customers = fakeCustomers();
+    await f.svc.withdrawForCashout({ ...cashout, customers }, f.ctx);
+    expect(customers.retrieveCustomer).toHaveBeenCalledWith('cus_1');
+    expect(f.em.execute.mock.invocationCallOrder[0]).toBeLessThan(
+      customers.retrieveCustomer.mock.invocationCallOrder[0],
+    );
+    expect(customers.retrieveCustomer.mock.invocationCallOrder[0]).toBeLessThan(
+      f.withdrawCreditsWithLedger.mock.invocationCallOrder[0],
+    );
   });
 
   it('blocks a frozen account entirely — no debit', async () => {
