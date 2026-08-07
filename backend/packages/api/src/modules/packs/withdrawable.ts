@@ -55,9 +55,15 @@ export interface WithdrawalGateWallet {
  * Defined HERE, and not at either call site, because the messages have exactly
  * two callers that must stay byte-identical: the authoritative gate inside
  * PacksModuleService.withdrawForCashout (under the credit: advisory lock), and
- * the pre-row precheck in globepay-withdrawal.ts. The storefront and its tests
- * match on these strings, so a second copy that drifted would surface as a
- * silently different refusal on one path only.
+ * the pre-row precheck in globepay-withdrawal.ts. A second copy that drifted
+ * would surface as a silently different refusal on one path only.
+ *
+ * Who matches on these strings, if you are considering a reword: the backend
+ * unit tests in __tests__/globepay-withdrawal.unit.spec.ts assert them by
+ * regex (both the caller-level precheck cases and the service-level gate
+ * cases). Nothing under storefront `src/` matches them today — the customer
+ * sees whatever the API returns — so a reword is a backend-test change, not a
+ * frontend one. Update them together.
  *
  * Order matters: freeze outranks playthrough, which outranks the plain
  * "you can withdraw up to X" cap — a frozen account must never be told it is

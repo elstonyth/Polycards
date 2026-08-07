@@ -417,18 +417,33 @@ const fakeWallet = (over: Record<string, unknown> = {}) => ({
 });
 
 /**
- * @param windowCents what the rolling-24h cap SUM returns (prior pending +
- *   settled rows, EXCLUDING the just-created one — the real query filters it
- *   out by merchant_transaction_id).
+ * @param windowCents what the rolling-24h cap SUM returns for PRIOR rows.
+ * @param selfRowCents what the attempt's OWN just-created pending row is worth.
+ *   The fake is params-aware on purpose: it hands back `windowCents` only when
+ *   the query binds the exclusion parameter ($2 = this attempt's
+ *   merchant_transaction_id), and `windowCents + selfRowCents` otherwise. So
+ *   dropping `AND merchant_transaction_id <> ?` from the real SQL makes the
+ *   self-exclusion test below genuinely fail, instead of passing on a mock that
+ *   ignored its arguments.
  */
-const fakeService = (wallet = fakeWallet(), windowCents = 0) => {
+const fakeService = (
+  wallet = fakeWallet(),
+  windowCents = 0,
+  selfRowCents = 0,
+) => {
   const svc = Object.create(PacksModuleService.prototype) as PacksModuleService;
   const em = {
-    execute: jest.fn(async (q: string, _params?: unknown[]) =>
-      q.includes('globepay_withdrawal')
-        ? [{ sum_cents: String(windowCents) }]
-        : [],
-    ),
+    execute: jest.fn(async (q: string, params?: unknown[]) => {
+      if (!q.includes('globepay_withdrawal')) return [];
+      const excludesSelf = params?.[1] === cashout.merchantTransactionId;
+      return [
+        {
+          sum_cents: String(
+            excludesSelf ? windowCents : windowCents + selfRowCents,
+          ),
+        },
+      ];
+    }),
   };
   // Parameters are declared (not inferred away) so the call-argument
   // assertions below — which are the whole point of this harness — can index
@@ -611,12 +626,15 @@ describe('PacksModuleService.withdrawForCashout', () => {
     expect(params).toEqual(['cus_1', 'PC-abc']);
   });
 
-  // Self-exclusion, proven by behaviour rather than by SQL text: the ONLY row
-  // in the window is this attempt's own pending row, so the sum the query sees
-  // is 0 and a full-ceiling withdrawal must succeed. If the exclusion were
-  // dropped, the sum would be 50,000 and this would refuse.
+  // Self-exclusion, proven by BEHAVIOUR: the only row in the window is this
+  // attempt's own pending row, worth the full ceiling. The params-aware fake
+  // returns 0 only because the query binds the exclusion parameter — drop
+  // `AND merchant_transaction_id <> ?` from the SQL and the fake returns
+  // 50,000, which refuses. That is the bug this guards: without the exclusion
+  // every withdrawal is counted against its own cap and anything above half the
+  // ceiling refuses itself.
   it('a withdrawal at the full ceiling succeeds when its own row is the only one', async () => {
-    const f = fakeService(fakeWallet({ withdrawable: 50_000 }), 0);
+    const f = fakeService(fakeWallet({ withdrawable: 50_000 }), 0, 50_000_00);
     await expect(
       f.svc.withdrawForCashout({ ...cashout, amount: 50_000 }, f.ctx),
     ).resolves.toBeDefined();
