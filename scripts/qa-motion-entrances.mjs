@@ -37,13 +37,16 @@ const PAGES = [
   {
     name: 'home',
     path: '/',
-    // Every element the hero choreography touches must end up visible.
+    // Every element the hero choreography touches must end up visible. Each
+    // selector must name the element that ACTUALLY carries the animation —
+    // probing an un-animated child reports opacity 1 unconditionally and
+    // passes no matter how broken the entrance is.
     probes: {
       kicker: '#hero-heading',
       headline:
         'section[aria-labelledby="hero-heading"] .chase-land, section[aria-labelledby="hero-heading"] .rise-in.font-heading',
       window: 'section[aria-labelledby="hero-heading"] .window-in',
-      cta: 'a[href="/slots"]',
+      cta: 'section[aria-labelledby="hero-heading"] a.rise-in[href="/slots"]',
     },
   },
   {
@@ -66,14 +69,17 @@ const PAGES = [
  * hangs the run rather than settling it.
  */
 const settle = (page) =>
-  page.evaluate(() =>
-    Promise.all(
-      document
-        .getAnimations()
-        .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
-        .map((a) => a.finished.catch(() => {})),
-    ),
-  );
+  page.evaluate(() => {
+    const finite = document
+      .getAnimations()
+      .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+      .map((a) => a.finished.catch(() => {}));
+    // Hard ceiling: a long-but-finite animation, or one paused by a throttled
+    // tab, would otherwise hang the whole run with no output. The longest
+    // entrance here is 900ms + 350ms of stagger.
+    const ceiling = new Promise((r) => setTimeout(r, 5000));
+    return Promise.race([Promise.all(finite), ceiling]);
+  });
 
 /**
  * One full frame. The `load` event can fire before the compositor has run a
@@ -119,67 +125,101 @@ mkdirSync(OUT, { recursive: true });
 const browser = await chromium.launch();
 const failures = [];
 
-for (const vp of VIEWPORTS) {
-  for (const mode of ['reduced', 'settled']) {
+// try/finally so an unguarded throw can't skip browser.close() and strand a
+// chromium process — this repo has a documented runaway-node history.
+try {
+  await run();
+} catch (err) {
+  failures.push(`threw before finishing: ${err.message.split('\n')[0]}`);
+} finally {
+  await browser.close();
+}
+
+if (failures.length) {
+  console.error('\nFAIL:');
+  for (const f of failures) console.error('  ' + f);
+  process.exit(1);
+}
+console.log('\nOK — every probed element ends fully visible in both modes.');
+
+async function run() {
+  for (const vp of VIEWPORTS) {
+    for (const mode of ['reduced', 'settled']) {
+      const ctx = await browser.newContext({
+        viewport: { width: vp.width, height: vp.height },
+        reducedMotion: mode === 'reduced' ? 'reduce' : 'no-preference',
+      });
+      const page = await ctx.newPage();
+
+      for (const p of PAGES) {
+        await page.goto(`${BASE}${p.path}`, { waitUntil: 'load' });
+        if (mode === 'settled') await settle(page);
+        else await nextFrame(page);
+
+        // Reduced motion must not merely end up visible — it must never spend
+        // real time animating. If the globals.css backstop stops applying, this
+        // is the assertion that notices. Checked on EVERY probe, not just the
+        // first: a new animation added to any one element would otherwise escape
+        // the backstop unnoticed. Probes carrying no animation at all report
+        // `0s` and pass, which is correct — the check is "no animation runs for
+        // real time", not "an animation exists".
+        if (mode === 'reduced') {
+          for (const [key, sel] of Object.entries(p.probes)) {
+            const d = await durationOf(page, sel);
+            const secs = parseFloat(d ?? 'NaN');
+            if (!(secs <= 0.001)) {
+              failures.push(
+                `${p.name}/${vp.name}/reduced: "${key}" animation-duration ${d} — reduced-motion backstop not applying`,
+              );
+            }
+          }
+        }
+
+        const m = await measure(page, p.probes);
+        for (const [key, v] of Object.entries(m)) {
+          if (!v) {
+            failures.push(
+              `${p.name}/${vp.name}/${mode}: probe "${key}" missing`,
+            );
+          } else if (v.opacity < 0.99) {
+            failures.push(
+              `${p.name}/${vp.name}/${mode}: "${key}" opacity ${v.opacity} (want 1)`,
+            );
+          } else if (v.w === 0 || v.h === 0) {
+            failures.push(
+              `${p.name}/${vp.name}/${mode}: "${key}" has zero size`,
+            );
+          }
+        }
+        console.log(`${p.name} ${vp.name} ${mode}`, JSON.stringify(m));
+        await page.screenshot({
+          path: `${OUT}/motion-${p.name}-${vp.name}-${mode}.png`,
+        });
+      }
+      await ctx.close();
+    }
+
+    // Filmstrip — mid-flight frames of the home hero only (the card page's
+    // entrance is a plain fade and has nothing to read frame by frame).
     const ctx = await browser.newContext({
       viewport: { width: vp.width, height: vp.height },
-      reducedMotion: mode === 'reduced' ? 'reduce' : 'no-preference',
     });
     const page = await ctx.newPage();
-
-    for (const p of PAGES) {
-      await page.goto(`${BASE}${p.path}`, { waitUntil: 'load' });
-      if (mode === 'settled') await settle(page);
-      else await nextFrame(page);
-
-      // Reduced motion must not merely end up visible — it must never spend
-      // real time animating. If the globals.css backstop stops applying, this
-      // is the assertion that notices.
-      if (mode === 'reduced') {
-        const d = await durationOf(page, Object.values(p.probes)[0]);
-        const secs = parseFloat(d ?? 'NaN');
-        if (!(secs <= 0.001)) {
-          failures.push(
-            `${p.name}/${vp.name}/reduced: animation-duration ${d} — reduced-motion backstop not applying`,
-          );
-        }
-      }
-
-      const m = await measure(page, p.probes);
-      for (const [key, v] of Object.entries(m)) {
-        if (!v) {
-          failures.push(`${p.name}/${vp.name}/${mode}: probe "${key}" missing`);
-        } else if (v.opacity < 0.99) {
-          failures.push(
-            `${p.name}/${vp.name}/${mode}: "${key}" opacity ${v.opacity} (want 1)`,
-          );
-        } else if (v.w === 0 || v.h === 0) {
-          failures.push(`${p.name}/${vp.name}/${mode}: "${key}" has zero size`);
-        }
-      }
-      console.log(`${p.name} ${vp.name} ${mode}`, JSON.stringify(m));
+    await page.goto(`${BASE}/`, { waitUntil: 'commit' });
+    // t is an absolute offset from navigation. Measure against a real clock
+    // rather than accumulating the requested waits: a screenshot takes real time,
+    // so summing the gaps makes every later frame land progressively earlier than
+    // its own filename claims.
+    const t0 = Date.now();
+    for (const t of [180, 420, 700, 1100]) {
+      const remaining = t - (Date.now() - t0);
+      if (remaining > 0) await page.waitForTimeout(remaining);
       await page.screenshot({
-        path: `${OUT}/motion-${p.name}-${vp.name}-${mode}.png`,
+        path: `${OUT}/motion-home-${vp.name}-t${t}.png`,
       });
     }
     await ctx.close();
   }
-
-  // Filmstrip — mid-flight frames of the home hero only (the card page's
-  // entrance is a plain fade and has nothing to read frame by frame).
-  const ctx = await browser.newContext({
-    viewport: { width: vp.width, height: vp.height },
-  });
-  const page = await ctx.newPage();
-  await page.goto(`${BASE}/`, { waitUntil: 'commit' });
-  let elapsed = 0;
-  for (const t of [180, 420, 700, 1100]) {
-    // t is an absolute offset from navigation, so shoot the gaps between them.
-    await page.waitForTimeout(t - elapsed);
-    elapsed = t;
-    await page.screenshot({ path: `${OUT}/motion-home-${vp.name}-t${t}.png` });
-  }
-  await ctx.close();
 }
 
 await browser.close();

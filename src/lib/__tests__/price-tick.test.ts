@@ -27,6 +27,25 @@ describe('nextPriceTick', () => {
     expect(nextPriceTick(s, 'charizard', null)).toBe(s);
   });
 
+  it('stays silent on a sub-cent move the UI cannot render', () => {
+    // An FX wobble that leaves "RM 100.00" on screen must not flash the page.
+    const s = initialPriceTick('charizard', 100);
+    expect(nextPriceTick(s, 'charizard', 100.001)).toBe(s);
+    // ...but a real one-cent move still pulses.
+    expect(nextPriceTick(s, 'charizard', 100.01).n).toBe(1);
+  });
+
+  it('is a fixed point once settled, so the render-time adjust terminates', () => {
+    // CardDetail calls this during render and setStates when the result differs.
+    // If it never converged, that would be an infinite render loop.
+    const a = nextPriceTick(
+      initialPriceTick('charizard', 100),
+      'charizard',
+      120,
+    );
+    expect(nextPriceTick(a, 'charizard', 120)).toBe(a);
+  });
+
   it('re-baselines on a card switch instead of flashing', () => {
     // The regression this guards: card A at 100, overlay reused for card B at
     // 900. Comparing B against A's baseline would pulse on every switch.

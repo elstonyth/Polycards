@@ -30,6 +30,13 @@ export function initialPriceTick(
   return { handle, price, n: 0, up: true };
 }
 
+/**
+ * Cents — the smallest unit the UI actually renders. Comparing raw floats
+ * would pulse on a sub-cent FX wobble that leaves the displayed string
+ * identical, which reads as the page flashing for no reason.
+ */
+const cents = (v: number) => Math.round(v * 100);
+
 /** Next state for (handle, price). Returns `prev` unchanged when nothing moved. */
 export function nextPriceTick(
   prev: PriceTick,
@@ -37,8 +44,9 @@ export function nextPriceTick(
   price: number | null,
 ): PriceTick {
   if (prev.handle !== handle) return initialPriceTick(handle, price);
-  if (price === null || price === prev.price) return prev;
+  if (price === null) return prev;
   // First real price for this card — baseline it, never pulse.
   if (prev.price === null) return { ...prev, price };
+  if (cents(price) === cents(prev.price)) return prev;
   return { handle, price, n: prev.n + 1, up: price > prev.price };
 }

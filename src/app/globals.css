@@ -107,14 +107,29 @@
 /* Deliberately a CSS animation, not a JS-gated class transition. `Reveal` needs
    an IntersectionObserver to fire, which is the wrong tool above the fold — it
    never triggers in a headless renderer or a background tab, which is exactly
-   how a hero ships blank. An animation with `both` fill always runs and always
-   settles on its end state, so content can't be stranded invisible.
+   how a hero ships blank. A CSS animation always runs, and when it does not run
+   the element simply keeps its own base style — which here is the fully visible
+   state — so content can't be stranded invisible either way.
    prefers-reduced-motion is handled by the global backstop at the bottom of
    this file: it zeroes duration AND delay, so the whole choreography resolves
    on frame one rather than being skipped.
 
    Stagger with --i on the element: style={{ '--i': 2 }}. 70ms/step, kept under
-   ~6 steps everywhere so the last item lands inside a second. */
+   ~6 steps everywhere so the last item lands inside a second.
+
+   Fill mode is `backwards`, NOT `both`. Backwards is what actually matters —
+   it holds the 0% frame during the stagger delay. The forwards half buys
+   nothing (every end frame equals the element's own base style: opacity 1, no
+   transform, no filter) and costs a permanent pin: `both` leaves an identity
+   `transform: matrix(1,0,0,1,0,0)` on every revealed element and a
+   `filter: brightness(1)` on the box wrapping the autoplaying hero video —
+   each one a containing block, a stacking context, and a compositing hint that
+   outlives the animation by the entire life of the page.
+
+   The class rules live in @layer utilities so a later `motion-reduce:animate-none`
+   (or any Tailwind animation utility) can actually override them. Unlayered CSS
+   beats every layer, so leaving them bare would make that override a silent
+   no-op — the keyframes themselves stay unlayered, which is correct. */
 @keyframes riseIn {
   from {
     opacity: 0;
@@ -125,35 +140,41 @@
     transform: translate3d(0, 0, 0);
   }
 }
-.rise-in {
-  animation: riseIn 620ms var(--ease-out-expo) both;
-  animation-delay: calc(var(--i, 0) * 70ms);
+@layer utilities {
+  .rise-in {
+    animation: riseIn 620ms var(--ease-out-expo) backwards;
+    animation-delay: calc(var(--i, 0) * 70ms);
+  }
 }
 
-/* Home board 01 — the shop window lighting up. The clip's poster is the LCP
-   image, so this settles and brightens something already painted rather than
-   fading in from nothing. */
+/* Home board 01 — the shop window lighting up. Deliberately NO opacity: the
+   clip's poster is this page's LCP image, and starting it transparent would
+   push LCP out by the length of the animation to buy an effect the brightness
+   ramp already delivers. The panel is painted from frame one and lights up in
+   place, which is what "the shop is open" is supposed to read as. */
 @keyframes windowIn {
   from {
-    opacity: 0;
     transform: scale(0.965);
     filter: brightness(0.55);
   }
   to {
-    opacity: 1;
     transform: scale(1);
     filter: brightness(1);
   }
 }
-.window-in {
-  animation: windowIn 900ms var(--ease-out-expo) both;
-  animation-delay: calc(var(--i, 0) * 70ms);
+@layer utilities {
+  .window-in {
+    animation: windowIn 900ms var(--ease-out-expo) backwards;
+    animation-delay: calc(var(--i, 0) * 70ms);
+  }
 }
 
 /* The money beat. The top chase is the one thing on this fold worth shouting,
    so it lands last and carries a single decaying bloom in its own Chase Gold —
    "Glow Is Earned" (DESIGN.md §4): the hue is inherited from the value itself,
-   and it fires once. It does not loop. */
+   and it fires once. It does not loop.
+   rgb(255, 176, 32) is --color-chase (#ffb020) — keyframes can't read the token
+   through a var() inside rgba(), so it is spelled out; keep the two in sync. */
 @keyframes chaseLand {
   from {
     opacity: 0;
@@ -172,9 +193,11 @@
     text-shadow: 0 0 0 rgba(255, 176, 32, 0);
   }
 }
-.chase-land {
-  animation: chaseLand 760ms var(--ease-out-expo) both;
-  animation-delay: calc(var(--i, 0) * 70ms);
+@layer utilities {
+  .chase-land {
+    animation: chaseLand 760ms var(--ease-out-expo) backwards;
+    animation-delay: calc(var(--i, 0) * 70ms);
+  }
 }
 
 /* /card/[handle] — the slab fades up in place. Opacity ONLY: the operator
@@ -190,8 +213,10 @@
     opacity: 1;
   }
 }
-.slab-arrive {
-  animation: slabArrive 520ms var(--ease-out-quart) both;
+@layer utilities {
+  .slab-arrive {
+    animation: slabArrive 520ms var(--ease-out-quart) backwards;
+  }
 }
 
 /* Live price change — the 60s poll landed on a different number. One pulse in
@@ -218,8 +243,10 @@
     box-shadow: 0 0 0 8px rgba(var(--tick-rgb), 0);
   }
 }
-.price-tick {
-  animation: priceTick 900ms var(--ease-out-quart) both;
+@layer utilities {
+  .price-tick {
+    animation: priceTick 900ms var(--ease-out-quart) backwards;
+  }
 }
 
 /* Marquee (RECENT WINS ticker) */

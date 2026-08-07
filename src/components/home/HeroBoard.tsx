@@ -106,29 +106,26 @@ export default function HeroBoard({
             </p>
           </>
         )}
-        {/* The entrance rides a WRAPPER, not the pill: `.rise-in` ends with a
-            `both`-filled transform, which would sit on the pill forever and
-            silently defeat its own active:scale-[0.98] press state. */}
-        <span
+        {/* The entrance sits directly on the pill. Tailwind 4 compiles
+            `active:scale-[0.98]` to the independent `scale` property, not to
+            `transform`, so the two compose and the press state survives the
+            entrance untouched. */}
+        <Link
+          href="/slots"
           style={{ '--i': 5 } as CSSProperties}
-          className="rise-in mt-6 inline-flex"
+          className={cn(
+            pillVariants({ variant: 'primary', size: 'lg' }),
+            'rise-in group mt-6',
+          )}
         >
-          <Link
-            href="/slots"
-            className={cn(
-              pillVariants({ variant: 'primary', size: 'lg' }),
-              'group',
-            )}
-          >
-            RIP A PACK
-            {/* The arrow leans toward the destination on hover — the one hover
-                affordance on this fold. motion-reduce keeps it still. */}
-            <ArrowRight
-              className="h-4 w-4 transition-transform duration-200 ease-out group-hover:translate-x-0.5 motion-reduce:transition-none motion-reduce:group-hover:translate-x-0"
-              aria-hidden
-            />
-          </Link>
-        </span>
+          RIP A PACK
+          {/* The arrow leans toward the destination on hover — the one hover
+              affordance on this fold. motion-reduce keeps it still. */}
+          <ArrowRight
+            className="h-4 w-4 transition-transform duration-200 ease-out group-hover:translate-x-0.5 motion-reduce:transition-none motion-reduce:group-hover:translate-x-0"
+            aria-hidden
+          />
+        </Link>
       </div>
     </section>
   );

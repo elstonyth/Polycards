@@ -138,7 +138,10 @@ export function CardDetail({
         >
           {/* `key` remounts on each tick so the pulse re-arms. The tint's
               bleed comes from box-shadow spread (see globals.css), so nothing
-              here costs layout. Green up / red down are the money signals. */}
+              here costs layout. The triples are --color-buyback-fg (#2fbf6e,
+              money-in) and red-400 (#f87171, alarm) — a CSS var can't be
+              interpolated into rgba() from a keyframe, so they are spelled
+              out; keep them in sync with the tokens. */}
           <p
             key={next.n}
             style={
