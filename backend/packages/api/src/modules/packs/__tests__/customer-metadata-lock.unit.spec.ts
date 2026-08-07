@@ -20,54 +20,67 @@ import PacksModuleService from '../service';
  * and calls the original method.
  */
 
-const fakeService = (metadata: Record<string, unknown> | null = {}) => {
+/**
+ * The lock, the read and the write are all raw SQL on ONE `em`, so the ordered
+ * log below is built by classifying the SQL itself. That is what makes a read
+ * drifting back out in front of the lock visible.
+ */
+const fakeService = (
+  metadata: Record<string, unknown> | null = {},
+  exists = true,
+) => {
   const svc = Object.create(PacksModuleService.prototype) as PacksModuleService;
-  // One shared ordered log across the SQL, the read and the write. An
-  // `ops.indexOf(a) < ops.indexOf(b)` assertion is the only thing that can
-  // catch a read that drifts back out in front of the lock.
   const ops: string[] = [];
   const em = {
-    execute: jest.fn(async (_query: string, _params?: unknown[]) => {
-      ops.push('sql');
+    execute: jest.fn(async (query: string, _params?: unknown[]) => {
+      if (query.includes('pg_advisory_xact_lock')) {
+        ops.push('lock');
+        return [];
+      }
+      if (query.startsWith('SELECT metadata')) {
+        ops.push('read');
+        // pg returns a jsonb column already parsed; a missing (or soft-deleted)
+        // customer is zero rows, which is how the NOT_FOUND arm is reached.
+        return exists ? [{ metadata }] : [];
+      }
+      ops.push('write');
       return [];
     }),
   };
-  const retrieveCustomer = jest.fn(async () => {
-    ops.push('read');
-    return { metadata };
-  });
-  const updateCustomers = jest.fn(async () => {
-    ops.push('write');
-    return {};
-  });
-  return {
-    svc,
-    em,
-    ops,
-    retrieveCustomer,
-    updateCustomers,
-    customers: { retrieveCustomer, updateCustomers },
-    ctx: { transactionManager: em } as never,
-  };
+  return { svc, em, ops, ctx: { transactionManager: em } as never };
 };
+
+/** The `?`-params of the nth em.execute call. */
+const paramsOf = (em: { execute: jest.Mock }, n: number) =>
+  em.execute.mock.calls[n][1] as unknown[];
 
 describe('PacksModuleService.mutateCustomerMetadata', () => {
   it('takes the metadata advisory lock BEFORE reading, and writes after', async () => {
     const f = fakeService({ avatar_url: 'a' });
     await f.svc.mutateCustomerMetadata(
-      {
-        customerId: 'cus_1',
-        customers: f.customers,
-        mutate: (m) => ({ ...m, handle: 'x' }),
-      },
+      { customerId: 'cus_1', mutate: (m) => ({ ...m, handle: 'x' }) },
       f.ctx,
     );
 
     expect(f.em.execute.mock.calls[0][0]).toContain('pg_advisory_xact_lock');
     // A DIFFERENT key namespace from `credit:` on purpose — the ledger's "at
     // most one credit: lock per transaction, ever" invariant must stay intact.
-    expect(f.em.execute.mock.calls[0][1]).toEqual(['metadata:cus_1']);
-    expect(f.ops).toEqual(['sql', 'read', 'write']);
+    expect(paramsOf(f.em, 0)).toEqual(['metadata:cus_1']);
+    expect(f.ops).toEqual(['lock', 'read', 'write']);
+  });
+
+  // The reason all three statements go through the same `em`: a second pooled
+  // connection here would deadlock the 5-slot per-process pool under five
+  // concurrent mutations, and under lesser contention the 30s
+  // idle_in_transaction kill would drop this session — releasing the advisory
+  // lock — while the write landed anyway. See utils/db-driver-options.ts.
+  it('runs the lock, the read and the write on ONE connection', async () => {
+    const f = fakeService({});
+    await f.svc.mutateCustomerMetadata(
+      { customerId: 'cus_1', mutate: (m) => ({ ...m, handle: 'x' }) },
+      f.ctx,
+    );
+    expect(f.em.execute).toHaveBeenCalledTimes(3);
   });
 
   it('hands mutate the blob read inside the lock, not one the caller carried in', async () => {
@@ -76,7 +89,6 @@ describe('PacksModuleService.mutateCustomerMetadata', () => {
     await f.svc.mutateCustomerMetadata(
       {
         customerId: 'cus_1',
-        customers: f.customers,
         mutate: (m) => {
           seen.push(m.bank_accounts);
           return { ...m, avatar_url: 'new' };
@@ -84,11 +96,10 @@ describe('PacksModuleService.mutateCustomerMetadata', () => {
       },
       f.ctx,
     );
+    // Called EXACTLY once, from exactly one read — the contract the avatar
+    // route's captured `previousFileId` relies on.
     expect(seen).toEqual([['from-the-locked-read']]);
-    // Exactly ONE read exists, and it is the locked one. If a caller-side read
-    // ever comes back, this count moves and the "decided from a stale blob"
-    // regression is visible.
-    expect(f.retrieveCustomer).toHaveBeenCalledTimes(1);
+    expect(f.ops.filter((o) => o === 'read')).toHaveLength(1);
   });
 
   it('a mutate that refuses writes NOTHING (this is how a cap is enforced under the lock)', async () => {
@@ -97,7 +108,6 @@ describe('PacksModuleService.mutateCustomerMetadata', () => {
       f.svc.mutateCustomerMetadata(
         {
           customerId: 'cus_1',
-          customers: f.customers,
           mutate: (m) => {
             const accounts = m.bank_accounts as unknown[];
             if (accounts.length >= 5) {
@@ -112,35 +122,41 @@ describe('PacksModuleService.mutateCustomerMetadata', () => {
         f.ctx,
       ),
     ).rejects.toMatchObject({ type: MedusaError.Types.NOT_ALLOWED });
-    expect(f.updateCustomers).not.toHaveBeenCalled();
     // The refusal came from the LOCKED read: the lock was already held when
-    // mutate ran and saw five accounts.
-    expect(f.ops).toEqual(['sql', 'read']);
+    // mutate ran and saw five accounts. No write was issued, and because the
+    // write would have been on this same transaction, the rollback covers it.
+    expect(f.ops).toEqual(['lock', 'read']);
   });
 
   it('null from mutate means "nothing changed" — no write, current blob returned', async () => {
     const f = fakeService({ bank_accounts: ['keep'] });
     const out = await f.svc.mutateCustomerMetadata(
-      { customerId: 'cus_1', customers: f.customers, mutate: () => null },
+      { customerId: 'cus_1', mutate: () => null },
       f.ctx,
     );
-    expect(f.updateCustomers).not.toHaveBeenCalled();
+    expect(f.ops).toEqual(['lock', 'read']);
     expect(out).toEqual({ bank_accounts: ['keep'] });
   });
 
-  it('returns what was actually written, and treats a null blob as {}', async () => {
+  it('writes the blob as JSON text for the ::jsonb cast, and treats NULL metadata as {}', async () => {
     const f = fakeService(null);
     const out = await f.svc.mutateCustomerMetadata(
-      {
-        customerId: 'cus_2',
-        customers: f.customers,
-        mutate: (m) => ({ ...m, handle: 'first' }),
-      },
+      { customerId: 'cus_2', mutate: (m) => ({ ...m, handle: 'first' }) },
       f.ctx,
     );
-    expect(f.updateCustomers).toHaveBeenCalledWith('cus_2', {
-      metadata: { handle: 'first' },
-    });
+    expect(f.em.execute.mock.calls[2][0]).toContain('UPDATE customer SET');
+    expect(paramsOf(f.em, 2)).toEqual(['{"handle":"first"}', 'cus_2']);
     expect(out).toEqual({ handle: 'first' });
+  });
+
+  it('a missing (or soft-deleted) customer is NOT_FOUND, and nothing is written', async () => {
+    const f = fakeService({}, false);
+    await expect(
+      f.svc.mutateCustomerMetadata(
+        { customerId: 'cus_gone', mutate: (m) => m },
+        f.ctx,
+      ),
+    ).rejects.toMatchObject({ type: MedusaError.Types.NOT_FOUND });
+    expect(f.ops).toEqual(['lock', 'read']);
   });
 });
