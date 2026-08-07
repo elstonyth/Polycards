@@ -669,12 +669,23 @@ export function createReferralRecruitRateLimit(): MiddlewareHandler {
  * Its own defaults object, NOT the shared `DEFAULTS`: that one is also read by
  * createPackOpenRateLimit / createPackOpenBatchRateLimit, and widening it in
  * place would silently widen two unrelated gameplay limiters.
+ *
+ * The two rules are deliberately CONSISTENT (50 per 10s = 300 per minute).
+ * Do not "tighten" the burst on its own: the burst is the binding rule, so a
+ * low one silently overrides the sustained ceiling and re-creates the sitewide
+ * bucket this tier was widened to remove — at 5/10s the real ceiling was
+ * 30/min sitewide, a trivial DoS lever that 429'd honest sign-ins. Sized below
+ * the repo's other by-topology-sitewide limiters (createProfileReadRateLimit
+ * 60/10s + 600/60s, STORE_READ_DEFAULTS 120/10s + 480/60s) because auth volume
+ * is far lower, and still orders of magnitude under a credential-stuffing run
+ * — which createAuthIdentifierRateLimit bounds PER ACCOUNT anyway. That tier,
+ * not this one, is what protects a single account.
  * Env-tunable:
- * AUTH_RATE_BURST_LIMIT / AUTH_RATE_BURST_WINDOW_MS (default 5/10s)
+ * AUTH_RATE_BURST_LIMIT / AUTH_RATE_BURST_WINDOW_MS (default 50/10s)
  * AUTH_RATE_LIMIT / AUTH_RATE_WINDOW_MS (default 300/60s)
  */
 export const AUTH_DEFAULTS: EnvLimiterDefaults = {
-  burstLimit: 5,
+  burstLimit: 50,
   burstWindowMs: 10_000,
   limit: 300,
   windowMs: 60_000,

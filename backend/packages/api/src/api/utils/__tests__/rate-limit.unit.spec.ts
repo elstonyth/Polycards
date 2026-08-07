@@ -14,6 +14,7 @@ import {
   createPhoneOtpStartPhoneRateLimit,
   createPhoneOtpCheckPhoneRateLimit,
   createAuthIdentifierRateLimit,
+  createAuthRateLimit,
   phoneBodyKeyOf,
   emailBodyKeyOf,
   AUTH_DEFAULTS,
@@ -662,23 +663,31 @@ describe("emailBodyKeyOf (Plan 081)", () => {
   });
 });
 
-describe("createAuthIdentifierRateLimit (Plan 081)", () => {
+describe("the two auth rate-limit tiers (Plan 081)", () => {
   const BURST_ENV = "AUTH_IDENTIFIER_RATE_BURST_LIMIT";
-  let redisUrl: string | undefined;
+  let saved: Array<[string, string | undefined]> = [];
 
   beforeEach(() => {
-    // The factory reads env AT CONSTRUCTION, so both of these must be set
-    // before the create call below. Dropping REDIS_URL keeps the limiter on
-    // its in-memory store (no socket opened by a unit test).
-    redisUrl = process.env.REDIS_URL;
-    delete process.env.REDIS_URL;
+    // These factories read env AT CONSTRUCTION, so the environment has to be
+    // pinned before the create calls below. Two things must go:
+    //  - REDIS_URL, so the limiter stays on its in-memory store (a unit test
+    //    must not open a socket);
+    //  - every AUTH_*_RATE_* override, because .env.test widens the auth
+    //    limiter for the http suite — leaving those in place would make the
+    //    sitewide test below assert .env.test's numbers instead of
+    //    AUTH_DEFAULTS, i.e. pass no matter what the defaults say.
+    saved = ["REDIS_URL", ...Object.keys(process.env).filter((k) => /^AUTH_.*RATE/.test(k))]
+      .map((k) => [k, process.env[k]] as [string, string | undefined]);
+    for (const [k] of saved) delete process.env[k];
     process.env[BURST_ENV] = "1";
   });
 
   afterEach(() => {
     delete process.env[BURST_ENV];
-    if (redisUrl === undefined) delete process.env.REDIS_URL;
-    else process.env.REDIS_URL = redisUrl;
+    for (const [k, v] of saved) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
   });
 
   const makeRes = (): { res: MedusaResponse; statusOf: () => number | undefined } => {
@@ -762,6 +771,19 @@ describe("createAuthIdentifierRateLimit (Plan 081)", () => {
       expect((await post(mw, { password: "new-password" })).passed).toBe(true);
     }
   });
+
+  // The sitewide tier keys on IP, and in prod that is ONE storefront egress IP
+  // for every visitor — so its budget is whole-site traffic, not one client's.
+  // The BURST is the binding rule: at the old 5/10s the real ceiling was 30
+  // requests per minute for the entire site, which 429'd honest sign-ins and
+  // was a trivial DoS lever. Guards a revert of that number specifically.
+  it("admits far more than 30 sign-ins a minute from the one storefront IP", async () => {
+    const mw = createAuthRateLimit(); // real defaults, no env override
+    for (let i = 0; i < 40; i++) {
+      const r = await post(mw, { email: `user${i}@x.com`, password: "p" });
+      expect({ i, ...r }).toMatchObject({ passed: true });
+    }
+  });
 });
 
 describe("AUTH_DEFAULTS (Plan 081)", () => {
@@ -774,7 +796,17 @@ describe("AUTH_DEFAULTS (Plan 081)", () => {
     expect(AUTH_DEFAULTS.windowMs).toBeLessThanOrEqual(60_000);
   });
 
-  it("factory resolves", () => {
+  // The burst is the BINDING rule — a low one silently overrides the sustained
+  // ceiling. Keep the two consistent, or the sitewide bucket comes back.
+  it("has a burst that does not shadow the sustained ceiling", () => {
+    const burstsPerWindow = AUTH_DEFAULTS.windowMs / AUTH_DEFAULTS.burstWindowMs;
+    expect(AUTH_DEFAULTS.burstLimit * burstsPerWindow).toBeGreaterThanOrEqual(
+      AUTH_DEFAULTS.limit,
+    );
+  });
+
+  it("factories resolve", () => {
+    expect(() => createAuthRateLimit()).not.toThrow();
     expect(() => createAuthIdentifierRateLimit()).not.toThrow();
   });
 });
