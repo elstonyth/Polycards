@@ -33,8 +33,14 @@ type Body = {
 // Last 4 digits only. The masked pair rides an email body and a persisted
 // notification row (GET /admin/notifications exposes `data` to any admin —
 // the same surface subscribers/password-reset.ts documents as accepted risk),
-// so the full number must never appear there. E164_RE guarantees at least 7
-// digits after the '+', so slice(-4) can never expose the whole number.
+// so the full number must never appear there.
+//
+// The NEW number passed E164_RE this request (>= 7 digits after the '+'), so
+// slice(-4) always drops something. The OLD one is whatever the DB holds and
+// was NOT validated here — the duplicate-check comment below notes legacy rows
+// predating verification — so a stored value of 4 characters or fewer masks to
+// itself. That is the pre-existing value being echoed back to its own owner's
+// inbox, not a new disclosure, but do not read this as a length guarantee.
 const mask = (phone: string): string => `••••${phone.slice(-4)}`;
 
 // `phone` isn't declared on FilterableCustomerProps (only has_account is) —
