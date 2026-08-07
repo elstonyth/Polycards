@@ -86,8 +86,20 @@ if (align.missing) {
 }
 
 // ---- 1. the overlay ----------------------------------------------------------
-// Any pack detail page with a visible pool renders the clickable card grid.
+// Reaching the card overlay takes three clicks, and getting any of them wrong
+// is silent: an earlier version of this script grabbed the first button
+// containing an <img> (which is the pack QUANTITY selector) and then matched
+// the first [role="dialog"] (which is the COOKIE CONSENT banner). It reported
+// rise-in=0 and exited OK while never rendering a CardDetail at all. Hence the
+// semantic selectors below and, above all, the positive control: prove the
+// card is really in the dialog BEFORE trusting any "absence" assertion.
 await page.goto(`${BASE}/slots`, { waitUntil: 'load' });
+
+// Dismiss the consent banner first — it owns role="dialog" until answered.
+// Reject, not Accept: decline non-essential cookies.
+const reject = page.getByRole('button', { name: /reject/i }).first();
+if (await reject.isVisible().catch(() => false)) await reject.click();
+
 // Pack links carry a ?count= query, so match on the path only.
 const packHref = await page.evaluate(() => {
   const a = [...document.querySelectorAll('a[href*="/slots/"]')].find((el) =>
@@ -99,36 +111,69 @@ if (!packHref) {
   failures.push('no pack link found on /slots — cannot reach the overlay');
 } else {
   await page.goto(`${BASE}${packHref}`, { waitUntil: 'load' });
-  const cards = page.locator('button:has(img), [role="button"]:has(img)');
-  const opened = await page
-    .evaluate(() => {
-      // The pool grid entries are the only controls that open the overlay.
-      const el = [...document.querySelectorAll('button, [role="button"]')].find(
-        (b) => b.querySelector('img'),
-      );
-      if (!el) return false;
-      el.click();
-      return true;
-    })
-    .catch(() => false);
 
-  if (!opened) {
+  // The pool grid lives inside PoolByRarity's own modal, opened by the
+  // expand control (the only aria-haspopup="dialog" button on the page).
+  const expand = page.locator('button[aria-haspopup="dialog"]').first();
+
+  if (!(await expand.isVisible().catch(() => false))) {
     failures.push(
-      `no clickable pool card on ${packHref} — overlay not reached`,
+      `no pool expand control on ${packHref} — overlay not reached`,
     );
   } else {
-    await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+    await expand.click();
+    // CardTile renders aria-label="View details for <name>" — semantic, and it
+    // cannot collide with the quantity stepper the way `button:has(img)` did.
+    // Scope to the pool MODAL: PoolByRarity also renders a rail of the same
+    // tiles behind it, and a page-wide .first() resolves to one of those, which
+    // the modal's own glass-stage backdrop then intercepts.
+    const poolModal = page
+      .locator('[role="dialog"]')
+      .filter({ has: page.locator('button[aria-label^="View details for"]') })
+      .first();
+    const tile = poolModal
+      .locator('button[aria-label^="View details for"]')
+      .first();
+    await tile.waitFor({ state: 'visible', timeout: 5000 });
+    const cardName = (await tile.getAttribute('aria-label')).replace(
+      /^View details for /,
+      '',
+    );
+    await tile.click();
+
+    // The card overlay is the dialog carrying an <h1> — the pool modal has an
+    // h2 and the consent banner has neither.
+    const dialog = page
+      .locator('[role="dialog"]')
+      .filter({ has: page.locator('h1') })
+      .first();
+    await dialog.waitFor({ state: 'visible', timeout: 5000 });
     await page.waitForTimeout(1500); // let useCardPrice hydrate from the seed
 
-    const overlay = await page.evaluate(() => {
-      const dlg = document.querySelector('[role="dialog"]');
-      return {
-        riseIn: dlg.querySelectorAll('.rise-in').length,
-        slabArrive: dlg.querySelectorAll('.slab-arrive').length,
-        pulsing: dlg.querySelectorAll('.price-tick').length,
-      };
-    });
+    const overlay = await dialog.evaluate((dlg) => ({
+      h1: dlg.querySelector('h1')?.textContent?.trim() ?? null,
+      imgs: dlg.querySelectorAll('img').length,
+      price:
+        dlg.querySelector('p.font-heading.tabular-nums')?.textContent ?? null,
+      riseIn: dlg.querySelectorAll('.rise-in').length,
+      slabArrive: dlg.querySelectorAll('.slab-arrive').length,
+      pulsing: dlg.querySelectorAll('.price-tick').length,
+    }));
     console.log('overlay:', JSON.stringify(overlay));
+
+    // POSITIVE CONTROL. Without this, every assertion below passes trivially
+    // against an empty or wrong dialog — which is exactly how this script lied
+    // the first time.
+    if (!overlay.h1 || !overlay.imgs || !overlay.price) {
+      failures.push(
+        `overlay did not render a CardDetail (h1=${JSON.stringify(overlay.h1)}, imgs=${overlay.imgs}, price=${JSON.stringify(overlay.price)}) — the absence checks below would have been vacuous`,
+      );
+    } else if (!overlay.h1.toLowerCase().includes(cardName.toLowerCase())) {
+      failures.push(
+        `overlay shows "${overlay.h1}" but the tile clicked was "${cardName}"`,
+      );
+    }
+
     if (overlay.riseIn || overlay.slabArrive) {
       failures.push(
         `overlay leaked page entrance classes (rise-in=${overlay.riseIn}, slab-arrive=${overlay.slabArrive}) — it already animates its own panel`,
@@ -141,7 +186,6 @@ if (!packHref) {
     }
     await page.screenshot({ path: 'docs/research/motion-card-overlay.png' });
   }
-  void cards;
 }
 
 await browser.close();
