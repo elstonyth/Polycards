@@ -5,12 +5,18 @@ import type {
 import { createHash } from 'node:crypto';
 import { MedusaError, Modules } from '@medusajs/framework/utils';
 import { withdrawalDetailsError } from '../../../../../modules/packs/globepay-withdrawal';
+import { PACKS_MODULE } from '../../../../../modules/packs';
+import type PacksModuleService from '../../../../../modules/packs/service';
 
 // Saved payout bank accounts — GET (list) / POST (add) / DELETE (remove) on
 // /store/credits/withdraw/accounts. Storage is customer.metadata.bank_accounts,
 // merged read-modify-write like the avatar/frame routes (the stock
 // POST /store/customers/me rejects client metadata, so a validated custom
-// route is the only way a customer can write these).
+// route is the only way a customer can write these). Both writes go through
+// PacksModuleService.mutateCustomerMetadata, which holds a `metadata:<customer>`
+// advisory lock across the read and the write — the blob is shared with the
+// avatar and frame routes, and an unlocked merge drops whichever key the loser
+// had just written.
 //
 // This is a CONVENIENCE store, not the enforcement point: the actual payout
 // (POST /store/credits/withdraw) re-validates every field on submit, and the
@@ -78,22 +84,54 @@ export function parseSavedBankAccounts(value: unknown): SavedBankAccount[] {
   return accounts;
 }
 
-async function loadAccounts(
-  req: AuthenticatedMedusaRequest,
-  customerId: string,
-): Promise<{ accounts: SavedBankAccount[]; metadata: Record<string, unknown> }> {
-  // Register-phase JWTs pass authenticate('customer') with actor_id '' (the
-  // documented repo trap — see profile/frame/route.ts). Without this guard,
-  // retrieveCustomer('') surfaces as a confusing NOT_FOUND instead of a 401,
-  // and the client's isAuthError never offers the login prompt. Single choke
-  // point: every handler loads through here before touching anything.
+/**
+ * Register-phase JWTs pass authenticate('customer') with actor_id '' (the
+ * documented repo trap — see profile/frame/route.ts). Without this guard,
+ * retrieveCustomer('') surfaces as a confusing NOT_FOUND instead of a 401, and
+ * the client's isAuthError never offers the login prompt. Single choke point:
+ * every handler runs this before touching anything.
+ */
+function requireCustomerId(customerId: string): string {
   if (!customerId) {
     throw new MedusaError(MedusaError.Types.UNAUTHORIZED, 'Unauthorized');
   }
+  return customerId;
+}
+
+/** Read-only list for GET. The write paths do their own read INSIDE the lock. */
+async function loadAccounts(
+  req: AuthenticatedMedusaRequest,
+  customerId: string,
+): Promise<SavedBankAccount[]> {
   const customers = req.scope.resolve(Modules.CUSTOMER);
-  const customer = await customers.retrieveCustomer(customerId);
+  const customer = await customers.retrieveCustomer(
+    requireCustomerId(customerId),
+  );
   const metadata = (customer.metadata ?? {}) as Record<string, unknown>;
-  return { accounts: parseSavedBankAccounts(metadata.bank_accounts), metadata };
+  return parseSavedBankAccounts(metadata.bank_accounts);
+}
+
+/**
+ * Run `mutate` against this customer's metadata under the
+ * `metadata:<customer>` advisory lock and return the saved list as it was
+ * actually written — never as the caller hoped to write it.
+ */
+async function mutateAccounts(
+  req: AuthenticatedMedusaRequest,
+  customerId: string,
+  mutate: (accounts: SavedBankAccount[]) => SavedBankAccount[] | null,
+): Promise<SavedBankAccount[]> {
+  const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+  const customers = req.scope.resolve(Modules.CUSTOMER);
+  const metadata = await packs.mutateCustomerMetadata({
+    customerId: requireCustomerId(customerId),
+    customers,
+    mutate: (current) => {
+      const next = mutate(parseSavedBankAccounts(current.bank_accounts));
+      return next === null ? null : { ...current, bank_accounts: next };
+    },
+  });
+  return parseSavedBankAccounts(metadata.bank_accounts);
 }
 
 /**
@@ -110,7 +148,7 @@ export async function GET(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
-  const { accounts } = await loadAccounts(req, req.auth_context.actor_id);
+  const accounts = await loadAccounts(req, req.auth_context.actor_id);
   noStore(res).json({ accounts });
 }
 
@@ -118,7 +156,7 @@ export async function POST(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
-  const customerId = req.auth_context.actor_id;
+  const customerId = requireCustomerId(req.auth_context.actor_id);
   const body = (req.body ?? {}) as {
     bank_code?: unknown;
     bank_name?: unknown;
@@ -160,35 +198,32 @@ export async function POST(
     accountHolderName: (body.account_holder_name as string).trim(),
   };
 
-  const { accounts, metadata } = await loadAccounts(req, customerId);
-  const existing = accounts.findIndex((a) => a.id === account.id);
-  let next: SavedBankAccount[];
-  if (existing >= 0) {
-    // Idempotent re-add: refresh the label/holder in place (a customer fixing
-    // a typo'd holder name must not need a delete + re-add dance).
-    next = accounts.map((a, i) => (i === existing ? account : a));
-  } else {
+  // The cap is checked against the list read INSIDE the lock, not against one
+  // this handler read earlier — otherwise two concurrent saves could both see
+  // MAX-1 accounts and both be allowed through.
+  const saved = await mutateAccounts(req, customerId, (accounts) => {
+    const existing = accounts.findIndex((a) => a.id === account.id);
+    if (existing >= 0) {
+      // Idempotent re-add: refresh the label/holder in place (a customer fixing
+      // a typo'd holder name must not need a delete + re-add dance).
+      return accounts.map((a, i) => (i === existing ? account : a));
+    }
     if (accounts.length >= MAX_SAVED_BANK_ACCOUNTS) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
         `You can save up to ${MAX_SAVED_BANK_ACCOUNTS} bank accounts — remove one first.`,
       );
     }
-    next = [...accounts, account];
-  }
-
-  const customers = req.scope.resolve(Modules.CUSTOMER);
-  await customers.updateCustomers(customerId, {
-    metadata: { ...metadata, bank_accounts: next },
+    return [...accounts, account];
   });
-  noStore(res).json({ accounts: next });
+  noStore(res).json({ accounts: saved });
 }
 
 export async function DELETE(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
-  const customerId = req.auth_context.actor_id;
+  const customerId = requireCustomerId(req.auth_context.actor_id);
   const id = (req.body as { id?: unknown } | null)?.id;
   if (typeof id !== 'string' || id.length === 0) {
     throw new MedusaError(
@@ -197,15 +232,12 @@ export async function DELETE(
     );
   }
 
-  const { accounts, metadata } = await loadAccounts(req, customerId);
-  const next = accounts.filter((a) => a.id !== id);
-  // Removing an already-gone account succeeds: the customer's goal (that
-  // account no longer listed) is met, and a refresh-then-retry must not error.
-  if (next.length !== accounts.length) {
-    const customers = req.scope.resolve(Modules.CUSTOMER);
-    await customers.updateCustomers(customerId, {
-      metadata: { ...metadata, bank_accounts: next },
-    });
-  }
-  noStore(res).json({ accounts: next });
+  const saved = await mutateAccounts(req, customerId, (accounts) => {
+    const next = accounts.filter((a) => a.id !== id);
+    // Removing an already-gone account succeeds: the customer's goal (that
+    // account no longer listed) is met, and a refresh-then-retry must not
+    // error. `null` = nothing changed, so no write is issued at all.
+    return next.length === accounts.length ? null : next;
+  });
+  noStore(res).json({ accounts: saved });
 }

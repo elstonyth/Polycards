@@ -8,16 +8,47 @@ import {
 } from '../route';
 
 // Saved payout accounts live in customer.metadata.bank_accounts and are the
-// picker source for the withdraw form. Two properties matter enough to pin:
+// picker source for the withdraw form. Three properties matter enough to pin:
 // the merge must never clobber sibling metadata keys (avatar_url et al share
-// the blob), and the validation must be the SAME gate as the payout submit so
-// the picker can never offer an account the withdraw path refuses.
+// the blob), the validation must be the SAME gate as the payout submit so the
+// picker can never offer an account the withdraw path refuses, and both writes
+// must go through the locked metadata mutator rather than reading the blob here
+// and writing it back.
 
 const retrieveCustomer = jest.fn();
 const updateCustomers = jest.fn();
 
+// Stand-in for PacksModuleService.mutateCustomerMetadata. It reproduces the
+// real method's ORDER — read, then mutate, then write (or skip the write on
+// null) — against the same customer-module mocks, so the assertions below stay
+// about what the ROUTE does. That the real one wraps this in a
+// `metadata:<customer>` advisory lock, and that the read happens after the lock
+// statement, is pinned separately in
+// modules/packs/__tests__/customer-metadata-lock.unit.spec.ts — a route spec
+// cannot execute two transactions against a Postgres lock.
+const mutateCustomerMetadata = jest.fn(
+  async (input: {
+    customerId: string;
+    customers: { retrieveCustomer: jest.Mock; updateCustomers: jest.Mock };
+    mutate: (
+      m: Record<string, unknown>,
+    ) => Record<string, unknown> | null;
+  }) => {
+    const customer = await input.customers.retrieveCustomer(input.customerId);
+    const current = (customer.metadata ?? {}) as Record<string, unknown>;
+    const next = input.mutate(current);
+    if (next === null) return current;
+    await input.customers.updateCustomers(input.customerId, { metadata: next });
+    return next;
+  },
+);
+
 const scope = {
-  resolve: jest.fn(() => ({ retrieveCustomer, updateCustomers })),
+  resolve: jest.fn((key: string) =>
+    key === 'packs'
+      ? { mutateCustomerMetadata }
+      : { retrieveCustomer, updateCustomers },
+  ),
 };
 
 const mkRes = () => {
@@ -47,6 +78,12 @@ const VALID_BODY = {
   account_holder_name: 'Tan Ah Kow',
 };
 
+/** A saved list already at the cap. */
+const fullList = () =>
+  Array.from({ length: MAX_SAVED_BANK_ACCOUNTS }, (_, i) =>
+    savedShape({ id: `id_${i}`, accountNumber: `900000000${i}` }),
+  );
+
 const savedShape = (over: Partial<Record<string, unknown>> = {}) => ({
   id: savedBankAccountId('MBB', '1234567890'),
   bankCode: 'MBB',
@@ -59,7 +96,9 @@ const savedShape = (over: Partial<Record<string, unknown>> = {}) => ({
 beforeEach(() => {
   retrieveCustomer.mockReset();
   updateCustomers.mockReset();
+  mutateCustomerMetadata.mockClear();
   retrieveCustomer.mockResolvedValue({ metadata: {} });
+  updateCustomers.mockResolvedValue({});
 });
 
 describe('parseSavedBankAccounts', () => {
@@ -140,19 +179,53 @@ describe('POST /store/credits/withdraw/accounts', () => {
 
   it(`refuses account #${MAX_SAVED_BANK_ACCOUNTS + 1}`, async () => {
     retrieveCustomer.mockResolvedValue({
-      metadata: {
-        bank_accounts: Array.from({ length: MAX_SAVED_BANK_ACCOUNTS }, (_, i) =>
-          savedShape({
-            id: `id_${i}`,
-            accountNumber: `900000000${i}`,
-          }),
-        ),
-      },
+      metadata: { bank_accounts: fullList() },
     });
     await expect(POST(mkReq(VALID_BODY), mkRes())).rejects.toThrow(
       /remove one first/i,
     );
     expect(updateCustomers).not.toHaveBeenCalled();
+    // Exactly one read, and it is the mutator's. A second read would mean a
+    // caller-side copy of the blob exists to go stale.
+    expect(retrieveCustomer).toHaveBeenCalledTimes(1);
+  });
+
+  // The discriminating form of the cap test: the two possible sources of truth
+  // are made to DISAGREE. The locked read sees a full list; anything read
+  // outside the mutator sees an empty one. A handler that decided from its own
+  // read would happily save a sixth account here.
+  it('enforces the cap against the blob the MUTATOR supplies, not one read outside it', async () => {
+    retrieveCustomer.mockResolvedValue({ metadata: { bank_accounts: [] } });
+    mutateCustomerMetadata.mockImplementationOnce(async (input) => {
+      const next = input.mutate({ bank_accounts: fullList() });
+      return next ?? {};
+    });
+    await expect(POST(mkReq(VALID_BODY), mkRes())).rejects.toThrow(
+      /remove one first/i,
+    );
+    expect(updateCustomers).not.toHaveBeenCalled();
+  });
+
+  it('goes through the locked mutator rather than writing metadata itself', async () => {
+    await POST(mkReq(VALID_BODY), mkRes());
+    expect(mutateCustomerMetadata).toHaveBeenCalledTimes(1);
+    expect(mutateCustomerMetadata.mock.calls[0][0].customerId).toBe('cus_1');
+  });
+
+  // Contract: the response is the list that LANDED, not the one this handler
+  // proposed. Under the lock those can differ (a concurrent writer wins), and
+  // echoing the proposal would tell the customer something untrue.
+  it('echoes the list as written, not as proposed', async () => {
+    const landed = savedShape({ accountHolderName: 'What Actually Landed' });
+    mutateCustomerMetadata.mockImplementationOnce(async (input) => {
+      input.mutate({});
+      return { bank_accounts: [landed] };
+    });
+    const res = mkRes();
+    await POST(mkReq(VALID_BODY), res);
+    expect((res as { json: jest.Mock }).json).toHaveBeenCalledWith({
+      accounts: [landed],
+    });
   });
 });
 

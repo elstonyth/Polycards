@@ -277,6 +277,19 @@ type LedgerSqlManager = {
   execute<T = unknown>(query: string, params?: unknown[]): Promise<T>;
 };
 
+/** The slice of the customer module `mutateCustomerMetadata` drives. Declared
+ *  structurally so this module never imports another module's service type;
+ *  the real ICustomerModuleService satisfies it. */
+export type CustomerMetadataStore = {
+  retrieveCustomer(
+    id: string,
+  ): Promise<{ metadata?: Record<string, unknown> | null }>;
+  updateCustomers(
+    id: string,
+    data: { metadata: Record<string, unknown> },
+  ): Promise<unknown>;
+};
+
 /** One raw `ledger_entry` row as listLedgerEntriesForAdmin reads it. */
 export type LedgerEntryRow = {
   id: string;
@@ -2520,6 +2533,64 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     return data;
+  }
+
+  // Serialized read-modify-write of `customer.metadata`, the shared JSONB blob
+  // that holds avatar_url / avatar_file_id / equipped_frame_level /
+  // bank_accounts / handle. Every writer of it spread-merges the WHOLE blob, so
+  // an unlocked read-then-write loses data: an avatar upload landing between a
+  // saved bank account's read and its write republishes the pre-save blob and
+  // the account the customer just saved is silently gone (and vice versa). The
+  // same window lets two concurrent saves both pass a "under the cap" check.
+  //
+  // Precedent: setPayoutDetails above, which takes `payout:<customer>` for
+  // exactly this reason — "the list-then-create still needs a lock".
+  //
+  // Key namespace is `metadata:`, NOT `credit:`. The credit ledger's invariant
+  // (at most one `credit:` advisory lock per transaction, ever — see
+  // matureDueCommissions) is untouched by a different namespace, but nothing
+  // here may be composed into a transaction that already holds a `credit:`
+  // lock.
+  //
+  // The customer read and write are driven through the caller's customer-module
+  // handle rather than raw SQL, so they run on the module's own connection —
+  // outside this locked transaction. Mutual exclusion still holds: a second
+  // caller blocks on the advisory lock until THIS transaction commits, which
+  // happens after the customer write has committed, so the loser's read is
+  // fresh. This transaction writes nothing itself, so there is nothing for a
+  // rollback to have to undo.
+  @InjectTransactionManager()
+  async mutateCustomerMetadata(
+    input: {
+      customerId: string;
+      /** The customer module (or any structural stand-in) doing the I/O. */
+      customers: CustomerMetadataStore;
+      /**
+       * Applied to the metadata read INSIDE the lock — never to a blob the
+       * caller read earlier, which is the whole point of this method. Returning
+       * `null` means "nothing changed": no write is issued, so an idempotent
+       * no-op (deleting an already-gone bank account) stays write-free.
+       * Throwing refuses the whole mutation and rolls the lock back — that is
+       * how a cap check gets enforced against the locked read.
+       */
+      mutate: (
+        metadata: Record<string, unknown>,
+      ) => Record<string, unknown> | null;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<Record<string, unknown>> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `metadata:${input.customerId}`,
+    ]);
+    const customer = await input.customers.retrieveCustomer(input.customerId);
+    const current = (customer.metadata ?? {}) as Record<string, unknown>;
+    const next = input.mutate(current);
+    if (next === null) return current;
+    await input.customers.updateCustomers(input.customerId, {
+      metadata: next,
+    });
+    return next;
   }
 
   // FX manual-override edit + audit row in the same transaction. The audit row
