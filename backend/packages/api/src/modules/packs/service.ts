@@ -17,7 +17,7 @@ import {
   type DeliveryStatus,
 } from './delivery';
 import { rewardsRedemptionEnabled } from './rewards-gate';
-import { playthroughState } from './withdrawable';
+import { playthroughState, withdrawalGateError } from './withdrawable';
 import { FRAME_LEVELS } from './avatar-frames';
 import Pack from './models/pack';
 import Card from './models/card';
@@ -1203,24 +1203,12 @@ class PacksModuleService extends MedusaService({
       undefined,
       sharedContext,
     );
-    if (input.amount > wallet.withdrawable) {
-      if (wallet.isFrozen) {
-        throw new MedusaError(
-          MedusaError.Types.NOT_ALLOWED,
-          'Withdrawals are unavailable while your account is under review. Contact support.',
-        );
-      }
-      if (wallet.playthrough.remaining > 0) {
-        throw new MedusaError(
-          MedusaError.Types.NOT_ALLOWED,
-          `RM ${wallet.playthrough.remaining.toFixed(2)} of your deposits must be spent on packs before you can withdraw.`,
-        );
-      }
-      throw new MedusaError(
-        MedusaError.Types.INVALID_DATA,
-        `You can withdraw up to RM ${wallet.withdrawable.toFixed(2)} right now.`,
-      );
-    }
+    //    THIS is the authoritative gate — the decision that makes the payout
+    //    safe. globepay-withdrawal.ts calls the same helper unlocked before
+    //    writing its row, but only to avoid leaving debris on a refusal that is
+    //    already certain; it decides nothing.
+    const gateError = withdrawalGateError(wallet, input.amount);
+    if (gateError) throw gateError;
 
     // 3) Rolling-24h VALUE cap, summed under the same lock so the sum and the
     //    debit cannot interleave either.

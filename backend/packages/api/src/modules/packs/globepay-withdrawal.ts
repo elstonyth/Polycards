@@ -8,6 +8,7 @@ import {
   GlobePayError,
 } from './globepay-client';
 import { newMerchantTransactionId } from './globepay-deposit';
+import { withdrawalGateError } from './withdrawable';
 
 // The submit half of the GlobePay365 payout loop (method WD), the inverse of
 // globepay-deposit.ts with the money ordering flipped:
@@ -189,6 +190,24 @@ export async function startGlobePayWithdrawal(
   const config = globepayConfigFromEnv();
   const packs = scope.resolve<PacksModuleService>(PACKS_MODULE);
 
+  // 0) PRECHECK — NOT the gate. This is an unlocked, read-only fast path whose
+  // only job is to avoid writing a row for a refusal that is already certain.
+  // It decides nothing: the authoritative gate is inside
+  // packs.withdrawForCashout, under the per-customer `credit:` advisory lock,
+  // and it re-reads this same wallet there. Deleting this block would change no
+  // outcome, only leave a `failed` row behind on every rejected attempt —
+  // which is the point: those rows are an operator-facing surface (the admin
+  // Withdrawals page), and filling it with attempts that never moved money is
+  // how an operator learns to stop reading it.
+  //
+  // Do NOT promote this to the decision. Two concurrent requests can both pass
+  // here and only one can pass under the lock.
+  const precheckError = withdrawalGateError(
+    await packs.walletSummary(input.customerId),
+    amount,
+  );
+  if (precheckError) throw precheckError;
+
   const merchantTransactionId = newMerchantTransactionId();
 
   // 1) Row first — the callback echoes MerchantTransactionId but not our
@@ -213,8 +232,9 @@ export async function startGlobePayWithdrawal(
   // concurrent requests all read the same `withdrawable`, all pass, and all
   // debit: floor 0 (the only atomic guard) sees the RAW balance, not `locked`.
   //
-  // A gate refusal therefore now arrives as a throw from this call and closes
-  // the row below, exactly like an insufficient-balance debit always has.
+  // A gate refusal that the precheck above did not already catch (a race, or a
+  // balance that moved between the two reads) arrives as a throw from this call
+  // and closes the row, exactly like an insufficient-balance debit always has.
   let debit;
   try {
     debit = await packs.withdrawForCashout({

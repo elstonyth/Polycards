@@ -62,6 +62,19 @@ function harness() {
       replayed: false,
       reference: null,
     }),
+    // Read by the PRECHECK only (unlocked, pre-row). The gate that decides is
+    // withdrawForCashout's own re-read under the lock — stubbed above.
+    // Defaults to fully open, so the precheck passes and the tests below
+    // exercise the ordering rather than the refusal path.
+    walletSummary: jest.fn().mockResolvedValue({
+      balance: 1000,
+      available: 1000,
+      locked: 0,
+      isFrozen: false,
+      nextUnlock: null,
+      withdrawable: 1000,
+      playthrough: { deposited: 0, used: 0, remaining: 0 },
+    }),
   };
   const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
   return {
@@ -254,13 +267,51 @@ describe('startGlobePayWithdrawal — money ordering', () => {
     },
   );
 
-  // BEHAVIOUR CHANGE, deliberate: the gate now runs inside the service, which
-  // is called AFTER the row is written (the row must exist before the gateway
-  // call — the callback echoes only MerchantTransactionId). So a gate refusal
-  // leaves a `failed` row where it previously left none. That is the same
+  // The precheck's whole reason to exist: a refusal that is already certain
+  // must not leave a `failed` row on the admin Withdrawals page (#384). It is
+  // a fast path, not a control — the locked gate below still decides.
+  it('a frozen account is refused BEFORE any row is written', async () => {
+    const h = harness();
+    h.packs.walletSummary.mockResolvedValue({
+      balance: 1000,
+      available: 0,
+      locked: 0,
+      isFrozen: true,
+      nextUnlock: null,
+      withdrawable: 0,
+      playthrough: { deposited: 0, used: 0, remaining: 0 },
+    });
+    await expect(start(h)).rejects.toThrow(/under review/i);
+    expect(h.packs.createGlobePayWithdrawals).not.toHaveBeenCalled();
+    expect(h.packs.updateGlobePayWithdrawals).not.toHaveBeenCalled();
+    expect(h.packs.withdrawForCashout).not.toHaveBeenCalled();
+    expect(submitMock).not.toHaveBeenCalled();
+  });
+
+  it('a playthrough refusal also leaves no row behind', async () => {
+    const h = harness();
+    h.packs.walletSummary.mockResolvedValue({
+      balance: 1000,
+      available: 1000,
+      locked: 0,
+      isFrozen: false,
+      nextUnlock: null,
+      withdrawable: 0,
+      playthrough: { deposited: 100, used: 40, remaining: 60 },
+    });
+    await expect(start(h)).rejects.toThrow(
+      /RM 60\.00 of your deposits must be spent on packs/,
+    );
+    expect(h.packs.createGlobePayWithdrawals).not.toHaveBeenCalled();
+  });
+
+  // The RACE path, and the reason the precheck is not a control: the wallet was
+  // open when the precheck read it (harness default) and closed by the time the
+  // locked gate re-read it. The row already exists by then — it must be written
+  // before the gateway call — so this refusal closes it as `failed`. Same
   // terminal shape an insufficient-balance debit has always produced, and the
   // sweep only ever chases `pending` rows.
-  it('a gate refusal closes the row and never reaches the gateway', async () => {
+  it('a LOCKED-gate refusal after the precheck passed closes the row', async () => {
     const h = harness();
     h.packs.withdrawForCashout.mockRejectedValue(
       new MedusaError(
