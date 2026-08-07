@@ -68,9 +68,13 @@ export default async function CardPage({
     <div className="mx-auto w-full px-fluid py-6">
       <Link
         href="/slots"
-        className="mb-6 inline-flex items-center gap-1.5 text-[13px] font-medium text-white/55 transition-colors hover:text-white"
+        className="rise-in group mb-6 inline-flex items-center gap-1.5 text-[13px] font-medium text-white/55 transition-colors hover:text-white"
       >
-        <ArrowLeft className="h-4 w-4" aria-hidden /> All packs
+        <ArrowLeft
+          className="h-4 w-4 transition-transform duration-200 ease-out group-hover:-translate-x-0.5 motion-reduce:transition-none motion-reduce:group-hover:translate-x-0"
+          aria-hidden
+        />{' '}
+        All packs
       </Link>
       <CardDetailHydrated initial={result.card} />
     </div>

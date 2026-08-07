@@ -18,5 +18,7 @@ export function CardDetailHydrated({ initial }: { initial: CardDetailData }) {
     value: rm(initial.marketPriceMyr),
     rarity: initial.rarity,
   };
-  return <CardDetail seed={seed} detail={detail} />;
+  // entrance: the page renders cold (often a shared link opened by a stranger),
+  // so it owns the choreography. The overlay animates its own panel instead.
+  return <CardDetail seed={seed} detail={detail} entrance />;
 }
