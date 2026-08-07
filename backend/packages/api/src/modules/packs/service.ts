@@ -1199,6 +1199,13 @@ class PacksModuleService extends MedusaService({
 
     // 1) Serialize this customer's credit mutations across the WHOLE gate +
     //    debit. Same idiom and same key as mutateCreditAtomic.
+    //
+    //    Note what this widened: the lock now spans walletSummary (~4 queries)
+    //    + the cap scan + the debit, where it used to cover the debit alone.
+    //    That is fine at withdrawal volume — payouts are rare, per-customer, and
+    //    human-initiated — but it is a real assumption. A future high-volume
+    //    path must not inherit it without re-measuring; only mutations for THIS
+    //    customer contend, so the blast radius is one account either way.
     await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
       `credit:${input.customerId}`,
     ]);
@@ -1238,6 +1245,13 @@ class PacksModuleService extends MedusaService({
     //    the only way back to the customer), so an unfiltered sum would count
     //    this very attempt against its own cap and refuse every withdrawal
     //    above half the ceiling.
+    //
+    //    A CONCURRENT attempt's row does still count, though: request B writes
+    //    its own `pending` row before it takes this lock, so A's sum includes B
+    //    even if B goes on to fail the gate and flip to `failed`. That
+    //    over-counts, never under-counts, and it self-heals as the 24h window
+    //    slides — the fail-closed direction is the right default for a cap
+    //    whose job is bounding blast radius.
     const capCents =
       positiveIntFromEnv(
         'GLOBEPAY_WD_DAILY_MAX_RM',

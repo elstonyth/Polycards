@@ -192,13 +192,19 @@ export async function startGlobePayWithdrawal(
 
   // 0) PRECHECK — NOT the gate. This is an unlocked, read-only fast path whose
   // only job is to avoid writing a row for a refusal that is already certain.
-  // It decides nothing: the authoritative gate is inside
-  // packs.withdrawForCashout, under the per-customer `credit:` advisory lock,
-  // and it re-reads this same wallet there. Deleting this block would change no
-  // outcome, only leave a `failed` row behind on every rejected attempt —
-  // which is the point: those rows are an operator-facing surface (the admin
-  // Withdrawals page), and filling it with attempts that never moved money is
-  // how an operator learns to stop reading it.
+  // The authoritative gate is inside packs.withdrawForCashout, under the
+  // per-customer `credit:` advisory lock, and it re-reads this same wallet
+  // there. Deleting this block would leave a `failed` row behind on every
+  // rejected attempt — which is the point: those rows are an operator-facing
+  // surface (the admin Withdrawals page, #384), and filling it with attempts
+  // that never moved money is how an operator learns to stop reading it.
+  //
+  // This check can only refuse EARLIER, never approve. Both reads are of the
+  // same wallet, so the only divergence is the balance moving between them: if
+  // it CLOSES, the locked gate still refuses (this just missed it); if it
+  // OPENS, this refuses an attempt the gate would have allowed — a retryable
+  // 400, not a lost payout. It can never let through something the gate would
+  // reject, which is why it is not a control.
   //
   // Do NOT promote this to the decision. Two concurrent requests can both pass
   // here and only one can pass under the lock.
