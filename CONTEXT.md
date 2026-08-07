@@ -185,6 +185,8 @@ Stateless HMAC-signed token — NOT a JWT: a custom 2-segment `base64url(payload
 
 Build-time storefront flag `NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED` displays OTP UI; flag drift is UX-only, backend gates are authoritative. Verification state is visible per player in the admin Players list ("Phone verified" column).
 
+**Current state — enforcement is OFF (2026-08-07).** All three flags (`PHONE_VERIFICATION_REQUIRED`, the storefront ARG, and by inheritance the money gate) were rolled back the same day: the Twilio account is still a **trial** and its credit ran out, so every `POST /Verifications` returned 403 and no code could arrive. Because `PHONE_GATE_REQUIRED` is unset it followed along, which had frozen topup / deposit / delivery for every unverified account with no way to verify out of it. Re-arming is the normal Deploy Order below (storefront step 3, backend step 4) and must wait until the Twilio account is **upgraded** — a funded trial still only delivers to verified caller IDs, so topping up alone does not fix it. Confirm a real send returns 2xx before flipping anything back.
+
 **Flows**:
 
 - **Signup**: POST /store/customers with `x-phone-verification` header (proof token) when a phone is provided and feature flag is on.

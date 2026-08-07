@@ -225,9 +225,18 @@ envs:
   # and this spec must only be APPLIED after that storefront build is ACTIVE,
   # or phone signups 400 until it catches up. Rollback lever: set this to
   # "false" and re-apply — every gate opens instantly, storefront unaffected.
+  #
+  # ROLLED BACK to "false" 2026-08-07 (applied to prod the same day): the Twilio
+  # account is still a TRIAL and its credit ran out, so every
+  # POST /Verifications came back 403 and nobody could receive a code. With the
+  # flag on and PHONE_GATE_REQUIRED unset, that also froze the money path —
+  # unverified accounts could not top up, deposit, or order delivery, and could
+  # not verify their way out. Flip back to "true" once the Twilio account is
+  # UPGRADED (paid, not trial: trial only delivers to verified caller IDs) and a
+  # real send is confirmed 2xx — together with the storefront ARG, step 3 first.
   - key: PHONE_VERIFICATION_REQUIRED
     scope: RUN_TIME
-    value: "true"
+    value: "false"
   - key: TWILIO_ACCOUNT_SID
     scope: RUN_TIME
     type: SECRET

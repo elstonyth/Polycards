@@ -76,7 +76,12 @@ ARG NEXT_PUBLIC_PAYMENTS_PROVIDER=globepay
 # what reaches the bundle — moves together with the .do/storefront.app.yaml
 # value. The backend PHONE_VERIFICATION_REQUIRED flag (step 4) flips only
 # after a build with this ARG is live, or phone signups 400.
-ARG NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED=true
+# Rolled back to false 2026-08-07: the Twilio account is a trial whose credit
+# ran out, so every OTP send 403s. Leaving the UI on would strand signups
+# behind a code that can never arrive. Backend PHONE_VERIFICATION_REQUIRED went
+# false first (the safe order when DISABLING — the reverse of step 3/4 above).
+# Flip both back once Twilio is upgraded and a real send returns 2xx.
+ARG NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED=false
 # Withdrawal UI gate. Armed 2026-08-05 alongside the backend's
 # GLOBEPAY_WITHDRAWALS_ENABLED (the actual money gate — this only renders the
 # form). Same rule as the ARGs above: this default is what reaches the bundle;

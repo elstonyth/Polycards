@@ -139,6 +139,21 @@ const twilioHeaders = (env: PhoneVerificationEnv): Record<string, string> => ({
   'Content-Type': 'application/x-www-form-urlencoded',
 });
 
+// Twilio answers a refused send with a numeric error code, and that code is
+// the only thing that says WHY: an unfunded/trial account, a geo-permission
+// block and a Fraud Guard hit all arrive as the same bare 403. Log the code
+// alongside the status so the next outage is diagnosable from the app logs
+// instead of a console session. Only the code — the rest of the body echoes
+// To=, i.e. the phone number.
+const twilioErrorCode = async (res: Response): Promise<number | null> => {
+  try {
+    const body = (await res.json()) as { code?: unknown };
+    return typeof body.code === 'number' ? body.code : null;
+  } catch {
+    return null;
+  }
+};
+
 /** Sends the OTP. Dev/test: logs the fixed dev code (the log is the SMS
  *  transport). Prod without Twilio: throws — enforcement on + unconfigured
  *  must brick LOUDLY, never silently skip verification. */
@@ -178,8 +193,11 @@ export async function sendPhoneOtp(
   }
   if (!res.ok) {
     // Twilio 429s (per-number caps, Fraud Guard) land here too — surface a
-    // retryable message, log the status only (never the body: it echoes To=).
-    logger.warn(`[phone-otp] twilio send failed with ${res.status}`);
+    // retryable message, log the status and the error code only (never the
+    // rest of the body: it echoes To=).
+    logger.warn(
+      `[phone-otp] twilio send failed with ${res.status} (code ${(await twilioErrorCode(res)) ?? 'none'})`,
+    );
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
       'Could not send the verification code. Try again shortly.',
@@ -223,7 +241,9 @@ export async function checkPhoneOtpCode(
   // that's a plain "wrong/expired code" to us, not a transport failure.
   if (res.status === 404) return false;
   if (!res.ok) {
-    logger.warn(`[phone-otp] twilio check failed with ${res.status}`);
+    logger.warn(
+      `[phone-otp] twilio check failed with ${res.status} (code ${(await twilioErrorCode(res)) ?? 'none'})`,
+    );
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
       'Could not verify the code. Try again shortly.',
