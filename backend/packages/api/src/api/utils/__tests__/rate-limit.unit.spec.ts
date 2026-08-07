@@ -367,6 +367,79 @@ describe("createRateLimitMiddleware", () => {
     expect(out.statusCode).toBeUndefined();
   });
 
+  // A keyOf may return SEVERAL keys, and every one must be charged. This is
+  // what makes emailBodyKeyOf's guarantee independent of express's path
+  // matching: whichever field the route turns out to read, the real
+  // identifier's bucket was charged, so a decoy in the other field buys
+  // nothing. Charging only the first key would restore a steerable control.
+  it("charges EVERY key a multi-key keyOf returns", async () => {
+    const store: RateLimitStore = {
+      consume: jest.fn().mockResolvedValue({ allowed: true, retryAfterMs: 0 }),
+    };
+    const mw = createRateLimitMiddleware({
+      store,
+      rules,
+      prefix: "rl:t:",
+      keyOf: () => ["email:victim@x.com", "email:decoy@x.com"],
+    });
+    const next = jest.fn() as unknown as MedusaNextFunction;
+    await mw(makeReq(), makeRes().res, next);
+    expect(store.consume).toHaveBeenCalledTimes(2);
+    expect(store.consume).toHaveBeenCalledWith(
+      "rl:t:email:victim@x.com",
+      rules,
+      expect.any(Number),
+    );
+    expect(store.consume).toHaveBeenCalledWith(
+      "rl:t:email:decoy@x.com",
+      rules,
+      expect.any(Number),
+    );
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+
+  it("denies on the first exhausted key and stops charging the rest", async () => {
+    const store: RateLimitStore = {
+      consume: jest.fn(async (key: string) =>
+        key.endsWith("victim@x.com")
+          ? { allowed: false, retryAfterMs: 5_000 }
+          : { allowed: true, retryAfterMs: 0 },
+      ),
+    };
+    const mw = createRateLimitMiddleware({
+      store,
+      rules,
+      prefix: "rl:t:",
+      keyOf: () => ["email:victim@x.com", "email:decoy@x.com"],
+    });
+    const next = jest.fn() as unknown as MedusaNextFunction;
+    const { res, out } = makeRes();
+    await mw(makeReq(), res, next);
+    expect(next).not.toHaveBeenCalled();
+    expect(out.statusCode).toBe(429);
+    // The decoy key is never reached, so it cannot absorb the denial.
+    expect(store.consume).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops falsy entries from a multi-key keyOf", async () => {
+    const store: RateLimitStore = {
+      consume: jest.fn().mockResolvedValue({ allowed: true, retryAfterMs: 0 }),
+    };
+    const mw = createRateLimitMiddleware({
+      store,
+      rules,
+      prefix: "rl:t:",
+      keyOf: () => ["", "email:a@x.com"],
+    });
+    await mw(makeReq(), makeRes().res, jest.fn() as unknown as MedusaNextFunction);
+    expect(store.consume).toHaveBeenCalledTimes(1);
+    expect(store.consume).toHaveBeenCalledWith(
+      "rl:t:email:a@x.com",
+      rules,
+      expect.any(Number),
+    );
+  });
+
   it("falls back to actor_id/IP when keyOf returns undefined", async () => {
     const store: RateLimitStore = {
       consume: jest.fn().mockResolvedValue({ allowed: true, retryAfterMs: 0 }),
@@ -597,37 +670,87 @@ describe("emailBodyKeyOf (Plan 081)", () => {
     ({ ip: "10.0.0.1", path, body }) as unknown as MedusaRequest;
 
   it("normalizes case and surrounding whitespace into one bucket", () => {
-    expect(emailBodyKeyOf(req({ email: " A@X.com " }))).toBe("email:a@x.com");
-    expect(emailBodyKeyOf(req({ email: "a@x.com" }))).toBe("email:a@x.com");
+    expect(emailBodyKeyOf(req({ email: " A@X.com " }))).toEqual([
+      "email:a@x.com",
+    ]);
+    expect(emailBodyKeyOf(req({ email: "a@x.com" }))).toEqual([
+      "email:a@x.com",
+    ]);
   });
 
   // Core's reset-password route validates `identifier`, not `email`
   // (@medusajs/medusa/dist/api/auth/validators.js:6), and the storefront sends
   // the address in it — so this is the field the LIVE reset path uses.
   it("reads `identifier` on the reset-password route", () => {
-    expect(emailBodyKeyOf(req({ identifier: "A@X.com" }, RESET))).toBe(
+    expect(emailBodyKeyOf(req({ identifier: "A@X.com" }, RESET))).toEqual([
       "email:a@x.com",
+    ]);
+  });
+
+  // A real client sends exactly one of the two fields, so a real request is
+  // always a single key and a single consume.
+  it("returns one key when the body carries one identifier", () => {
+    expect(emailBodyKeyOf(req({ email: "a@x.com" }, LOGIN))).toHaveLength(1);
+    expect(emailBodyKeyOf(req({ identifier: "a@x.com" }, RESET))).toHaveLength(
+      1,
     );
   });
 
-  // The limiter runs before core's body validator, so req.body still carries
-  // whatever extra keys the caller sent. Reading "whichever field is present"
-  // would let an attacker park a decoy in the field the route ignores and get
-  // a fresh bucket per attempt while still bombing the real account.
-  it("ignores a decoy in the field the route does not read", () => {
+  // THE decoy attack. The limiter runs before core's body validator, so
+  // req.body still carries whatever extra keys the caller sent, and each route
+  // family reads only one of the names. Charging only the expected field let a
+  // caller park a fresh random address in the ignored one and get a brand new
+  // bucket every request while the victim kept receiving reset mail. Charging
+  // BOTH is what makes that impossible — the victim's key is always in the
+  // list, whatever the path says.
+  it("charges BOTH identifiers, so a decoy cannot buy a fresh bucket", () => {
+    const keys = emailBodyKeyOf(
+      req({ email: "decoy@x.com", identifier: "victim@x.com" }, RESET),
+    );
+    expect(keys).toContain("email:victim@x.com");
+    expect(keys).toContain("email:decoy@x.com");
+    // The route's own field is charged first, purely so a 429 names it.
+    expect(keys?.[0]).toBe("email:victim@x.com");
     expect(
-      emailBodyKeyOf(req({ email: "decoy@x.com", identifier: "victim@x.com" }, RESET)),
-    ).toBe("email:victim@x.com");
-    expect(
-      emailBodyKeyOf(req({ email: "victim@x.com", identifier: "decoy@x.com" }, LOGIN)),
+      emailBodyKeyOf(
+        req({ email: "victim@x.com", identifier: "decoy@x.com" }, LOGIN),
+      )?.[0],
     ).toBe("email:victim@x.com");
   });
 
-  it("returns undefined when only the route's UNUSED field is set", () => {
-    expect(emailBodyKeyOf(req({ identifier: "a@x.com" }, LOGIN))).toBe(
-      undefined,
-    );
-    expect(emailBodyKeyOf(req({ email: "a@x.com" }, RESET))).toBe(undefined);
+  // Express 4 defaults here are strict:false / caseSensitive:false, so these
+  // all reach the same reset handler. An exact `endsWith` test missed them and
+  // fell through to `email` — the decoy field on that route.
+  it("treats trailing slashes and casing as insignificant, like express does", () => {
+    for (const path of [
+      "/auth/customer/emailpass/reset-password/",
+      "/auth/customer/emailpass/Reset-Password",
+      "/auth/customer/emailpass/RESET-PASSWORD/",
+      "/auth/customer/emailpass/reset-password//",
+    ]) {
+      expect(
+        emailBodyKeyOf(
+          req({ email: "decoy@x.com", identifier: "victim@x.com" }, path),
+        )?.[0],
+      ).toBe("email:victim@x.com");
+    }
+  });
+
+  it("returns the other field's key when the route's own field is absent", () => {
+    // Not a real client shape, but it must still cost the account a bucket
+    // rather than costing nothing.
+    expect(emailBodyKeyOf(req({ identifier: "a@x.com" }, LOGIN))).toEqual([
+      "email:a@x.com",
+    ]);
+    expect(emailBodyKeyOf(req({ email: "a@x.com" }, RESET))).toEqual([
+      "email:a@x.com",
+    ]);
+  });
+
+  it("de-duplicates when both fields carry the same address", () => {
+    expect(
+      emailBodyKeyOf(req({ email: "a@x.com", identifier: " A@X.com " }, LOGIN)),
+    ).toEqual(["email:a@x.com"]);
   });
 
   // Keyspace bound: a limiter key derived from unvalidated body input is a
@@ -769,6 +892,28 @@ describe("the two auth rate-limit tiers (Plan 081)", () => {
     // well past the burst limit of 1; none of it may bind.
     for (let i = 0; i < 5; i++) {
       expect((await post(mw, { password: "new-password" })).passed).toBe(true);
+    }
+  });
+
+  // The reset-bombing bypass, end to end through the real factory. Burst is 1,
+  // so the victim's second reset request must 429 no matter what the attacker
+  // puts in the field the route ignores, and no matter how they spell the path.
+  it("a decoy identifier cannot buy a fresh bucket on reset-password", async () => {
+    for (const path of [
+      "/auth/customer/emailpass/reset-password",
+      "/auth/customer/emailpass/reset-password/",
+      "/auth/customer/emailpass/RESET-PASSWORD",
+    ]) {
+      const mw = createAuthIdentifierRateLimit(); // fresh bucket per spelling
+      expect(
+        (await post(mw, { identifier: "victim@x.com" }, path)).passed,
+      ).toBe(true);
+      const bombed = await post(
+        mw,
+        { email: `decoy-${Math.random()}@x.com`, identifier: "victim@x.com" },
+        path,
+      );
+      expect({ path, ...bombed }).toMatchObject({ passed: false, status: 429 });
     }
   });
 
