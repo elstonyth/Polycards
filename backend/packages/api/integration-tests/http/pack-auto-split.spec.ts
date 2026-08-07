@@ -9,10 +9,10 @@ jest.setTimeout(240 * 1000);
 
 // What this proves that no @acme/odds-math unit test can: the solver's DECIMAL
 // output survives coerceOddsEntries -> computeSetWeights -> balanceOdds ->
-// integer bps storage and reads back at (approximately) the solved RTP. The
-// smallest storable non-zero rate is 1 bps (MIN_PCT); if a floored row failed
-// to survive that conversion it would round to 0 and the card would be
-// PERMANENTLY UNWINNABLE — that can only be caught on this side of the API
+// integer-unit storage and reads back at (approximately) the solved RTP. The
+// smallest storable non-zero rate is 1 unit = 0.0001% (MIN_PCT); if a floored
+// row failed to survive that conversion it would round to 0 and the card would
+// be PERMANENTLY UNWINNABLE — that can only be caught on this side of the API
 // boundary, never inside odds-math's own pure-function tests.
 
 const ADMIN_EMAIL = 'auto-split-admin@polycards.test';
@@ -49,6 +49,14 @@ const CARDS = [
   { handle: 'as-grey-felt', usd: 989.18 },
   { handle: 'as-pikachu-ex', usd: 990 },
   { handle: 'as-mega-charizard', usd: 2010 },
+  // SYNTHETIC Immortal-band chase card (not from the real pool): at the 4dp
+  // scale MIN_PCT is 100x finer (0.0001%), and the real bronze-pack shape no
+  // longer pushes any fair share under it — nothing floors and the premise
+  // check below would fail vacuously. This value makes the solver floor BOTH
+  // this card (fair ~0.000073%) and the Legendary (~0.000055%) with margin,
+  // exercising the floor-then-re-solve cascade. Feasibility ceiling is
+  // ~700k USD (floor EV alone outruns the 70% target) — don't raise casually.
+  { handle: 'as-holy-grail', usd: 600000 },
 ];
 
 medusaIntegrationTestRunner({
@@ -193,9 +201,9 @@ medusaIntegrationTestRunner({
           { pack_id: 'auto-split-pack' },
           { take: 50 },
         );
-        expect(stored.reduce((s, o) => s + o.weight, 0)).toBe(10000);
-        // The defect this whole test exists to catch: a floored 0.01% rate
-        // that rounds down to 0 bps on the other side of the API boundary,
+        expect(stored.reduce((s, o) => s + o.weight, 0)).toBe(1_000_000);
+        // The defect this whole test exists to catch: a floored 0.0001% rate
+        // that rounds down to 0 units on the other side of the API boundary,
         // making that card permanently unwinnable.
         expect(stored.every((o) => o.weight >= 1)).toBe(true);
 
@@ -234,13 +242,14 @@ medusaIntegrationTestRunner({
         );
         expect(rtp).not.toBeNull();
         // Expected value computed by running this exact fixture (CARDS/PRICE/
-        // FX_USD_MYR above) through the real pipeline once: raw unrounded
-        // 70.267268%, which packTheoreticalRtp rounds to 70.27 — matching
-        // task-6-report.md's independent LIVE verification of this same pool
-        // ("RM 35.13 . 70.27%") to the hundredth. Not forced to any number;
+        // FX_USD_MYR above) through the pure pipeline (displayMarketPrice ->
+        // proposeRarities -> solveOddsForRtp -> computeSetWeights ->
+        // packTheoreticalRtp's fold) once at the 4dp scale: raw unrounded
+        // 70.006177%, rounding to 70.01. The overshoot above the 70% target is
+        // the two floored rows pinned UP to MIN_PCT. Not forced to any number;
         // tolerance (2 decimal digits => +/-0.005) only absorbs float-path
         // noise between this derivation and a real run, not drift.
-        expect(rtp!.rtp_pct).toBeCloseTo(70.27, 2);
+        expect(rtp!.rtp_pct).toBeCloseTo(70.01, 2);
         // The real invariant, independent of the exact numbers above:
         // per-row integer-bps rounding of the (small) chase rates can only
         // ever shift weight AWAY from the Common absorbers — the cheapest

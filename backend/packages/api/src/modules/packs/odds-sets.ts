@@ -3,6 +3,7 @@ import type {
   ICustomerModuleService,
   MedusaContainer,
 } from '@medusajs/framework/types';
+import { MIN_PCT, PCT_SCALE } from '@acme/odds-math';
 
 export type OddsSet = 1 | 2 | 3;
 export type SetWeights = {
@@ -46,7 +47,7 @@ export const weightForSet = (o: SetWeights, set: OddsSet): number =>
 /**
  * A pack's per-card weights aggregated into a per-rarity % split for one set.
  *
- * Percentages are 2dp and sum to ~100 over the rows given — pass exactly the
+ * Percentages are 4dp and sum to ~100 over the rows given — pass exactly the
  * rows the caller considers drawable (a 0-weight card is unpullable, so it is
  * skipped rather than counted into its tier). Null when nothing is pullable.
  *
@@ -70,11 +71,11 @@ export function tierSplitForSet(
   return Object.fromEntries(
     [...tally].map(([rarity, w]) => [
       rarity,
-      // A pullable tier floors at 0.01 rather than rounding to 0: a consumer
+      // A pullable tier floors at MIN_PCT rather than rounding to 0: a consumer
       // reading these as sampling weights (the demo spin does) can never
       // target a 0% tier, which would make a huge pool's rarest tier
       // unreachable in the demo while it is perfectly reachable in a real spin.
-      Math.max(0.01, Math.round((w / total) * 10_000) / 100),
+      Math.max(MIN_PCT, Math.round((w / total) * 100 * PCT_SCALE) / PCT_SCALE),
     ]),
   );
 }

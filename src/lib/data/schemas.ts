@@ -289,6 +289,9 @@ export const CreditTransactionSchema = z.looseObject({
   amount: finite,
   reason: z.string(),
   created_at: z.string(),
+  // Payment-gateway reference (topup/cashout rows; null otherwise). Optional
+  // so an older backend that omits the field still parses.
+  reference: z.string().nullable().optional(),
 });
 
 /** POST /store/credits/topup response — finite amount + balance. `replayed`

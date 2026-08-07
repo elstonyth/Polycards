@@ -63,18 +63,19 @@ describe("tierSplitForSet", () => {
     ).toBeNull();
   });
 
-  // A tier that rounds to 0.00% would be UNREACHABLE for a consumer sampling on
-  // these numbers (the demo spin parses 0 as "never draw"), while a real spin
-  // pulls it fine. Only bites on pools big enough to push a tier under 0.005%.
-  it("floors a pullable tier at 0.01% instead of rounding it away", () => {
+  // A tier that rounds to 0.0000% would be UNREACHABLE for a consumer sampling
+  // on these numbers (the demo spin parses 0 as "never draw"), while a real
+  // spin pulls it fine. Only bites on pools big enough to push a tier under
+  // half of MIN_PCT (0.00005%).
+  it("floors a pullable tier at MIN_PCT instead of rounding it away", () => {
     const split = tierSplitForSet(
       [
-        { rarity: "Common", weight: 1_000_000, weight_2: null, weight_3: null },
+        { rarity: "Common", weight: 100_000_000, weight_2: null, weight_3: null },
         { rarity: "Immortal", weight: 1, weight_2: null, weight_3: null },
       ],
       3,
     );
-    expect(split?.Immortal).toBe(0.01);
+    expect(split?.Immortal).toBe(0.0001);
   });
 });
 

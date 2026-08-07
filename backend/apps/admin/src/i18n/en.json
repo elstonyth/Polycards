@@ -42,6 +42,7 @@
       "title": "Published odds (public)",
       "subtitle": "What players see on the pack page. Display-only — independent of the real win rates below.",
       "overall": "Overall win %",
+      "decimals": "Decimals",
       "fillFromDefaults": "Use defaults",
       "save": "Save",
       "saved": "Published odds saved.",

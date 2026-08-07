@@ -3,15 +3,19 @@
 // Pure + dependency-free. Both consumers import this exact module, so the
 // preview can never drift from what gets persisted.
 //
-// Model: each pack's PackOdds weights are normalized to BASIS POINTS that sum to
-// exactly TOTAL_BPS (= 10000 = 100%), so weight/100 reads back as the win %.
+// Model: each pack's PackOdds weights are normalized to INTEGER UNITS that sum
+// to exactly TOTAL_UNITS (= 1,000,000 = 100%). One unit is 0.0001% (PCT_SCALE
+// units per 1%), so weight/PCT_SCALE reads back as the win % at 4-decimal
+// precision.
 //   - LOCKED cards keep the operator's chosen % verbatim.
-//   - UNLOCKED cards split the leftover (10000 − Σlocked) bps PROPORTIONALLY to
-//     their per-pack rarity weight (see RARITY_WEIGHT), with largest-remainder
-//     rounding (fraction ties broken by lowest card_id) so the total is exactly
-//     10000 regardless of input order.
+//   - UNLOCKED cards split the leftover (TOTAL_UNITS − Σlocked) units
+//     PROPORTIONALLY to their per-pack rarity weight (see RARITY_WEIGHT), with
+//     largest-remainder rounding (fraction ties broken by lowest card_id) so the
+//     total is exactly TOTAL_UNITS regardless of input order.
 
-export const TOTAL_BPS = 10000;
+/** Integer weight units per 1% — 1 unit = 0.0001% (4-decimal odds). */
+export const PCT_SCALE = 10_000;
+export const TOTAL_UNITS = 100 * PCT_SCALE;
 
 // Per-pack rarity tiers, rarest first. Rarity belongs to the pack↔card link
 // (PackOdds), not the card — the same card can be a different tier per pack.
@@ -54,10 +58,10 @@ export interface OddsInput {
 
 export interface ComputedOdd {
   card_id: string;
-  /** Basis points (1% = 100 bps). Σ over a pack == TOTAL_BPS when valid. */
+  /** Integer units (1% = PCT_SCALE). Σ over a pack == TOTAL_UNITS when valid. */
   weight: number;
   locked: boolean;
-  /** weight / 100 — the resulting win %, for display. */
+  /** weight / PCT_SCALE — the resulting win %, for display. */
   pct: number;
 }
 
@@ -76,7 +80,8 @@ export interface OddsResult {
   unlockedCount: number;
 }
 
-const clampBps = (bps: number): number => Math.max(0, Math.min(TOTAL_BPS, bps));
+const clampUnits = (units: number): number =>
+  Math.max(0, Math.min(TOTAL_UNITS, units));
 
 /**
  * Compute the normalized per-card odds for a pack from the editor's entries.
@@ -88,8 +93,8 @@ export function computeOdds(entries: OddsInput[]): OddsResult {
   const unlocked = safe.filter((e) => e.locked === false);
 
   let error: string | null = null;
-  let lockedBpsTotal = 0;
-  const lockedBpsById = new Map<string, number>();
+  let lockedUnitsTotal = 0;
+  const lockedUnitsById = new Map<string, number>();
 
   for (const e of safe) {
     if (!e.locked) continue;
@@ -97,18 +102,20 @@ export function computeOdds(entries: OddsInput[]): OddsResult {
     if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
       error ??= 'Each locked win rate must be between 0% and 100%.';
     }
-    const bps = clampBps(Math.round((Number.isFinite(pct) ? pct : 0) * 100));
-    lockedBpsById.set(e.card_id, bps);
-    lockedBpsTotal += bps;
+    const units = clampUnits(
+      Math.round((Number.isFinite(pct) ? pct : 0) * PCT_SCALE),
+    );
+    lockedUnitsById.set(e.card_id, units);
+    lockedUnitsTotal += units;
   }
 
   if (safe.length === 0) error ??= 'No cards to configure.';
-  if (lockedBpsTotal > TOTAL_BPS) error ??= 'Locked win rates exceed 100%.';
-  if (unlocked.length === 0 && lockedBpsTotal !== TOTAL_BPS) {
+  if (lockedUnitsTotal > TOTAL_UNITS) error ??= 'Locked win rates exceed 100%.';
+  if (unlocked.length === 0 && lockedUnitsTotal !== TOTAL_UNITS) {
     error ??= 'With every card locked, win rates must total exactly 100%.';
   }
 
-  const remainder = Math.max(0, TOTAL_BPS - lockedBpsTotal);
+  const remainder = Math.max(0, TOTAL_UNITS - lockedUnitsTotal);
   const totalRarityWeight = unlocked.reduce(
     (sum, e) => sum + rarityWeight(e.rarity),
     0,
@@ -137,15 +144,20 @@ export function computeOdds(entries: OddsInput[]): OddsResult {
 
   const computed: ComputedOdd[] = safe.map((e) => {
     const weight = e.locked
-      ? (lockedBpsById.get(e.card_id) ?? 0)
+      ? (lockedUnitsById.get(e.card_id) ?? 0)
       : (shareById.get(e.card_id) ?? 0);
-    return { card_id: e.card_id, weight, locked: e.locked, pct: weight / 100 };
+    return {
+      card_id: e.card_id,
+      weight,
+      locked: e.locked,
+      pct: weight / PCT_SCALE,
+    };
   });
 
   return {
     computed,
     error,
-    lockedTotalPct: lockedBpsTotal / 100,
+    lockedTotalPct: lockedUnitsTotal / PCT_SCALE,
     unlockedCount: unlocked.length,
   };
 }
@@ -154,7 +166,7 @@ export function computeOdds(entries: OddsInput[]): OddsResult {
 // Replaces the rarity-weighted remainder split FOR PACK-ODDS SAVES: every
 // non-Common row keeps its submitted pct verbatim (locked or not), locked
 // Common rows are pinned too, and UNLOCKED Common rows absorb the remainder
-// (even split, largest-remainder rounding → Σ === TOTAL_BPS exactly,
+// (even split, largest-remainder rounding → Σ === TOTAL_UNITS exactly,
 // input-order independent). computeOdds above STAYS for the reward/daily-box
 // editors — those pools have no Common-as-balancer concept.
 export function balanceOdds(entries: OddsInput[]): OddsResult {
@@ -166,20 +178,22 @@ export function balanceOdds(entries: OddsInput[]): OddsResult {
   const pinned = safe.filter((entry) => !isBalancer(entry));
   const balancers = safe.filter(isBalancer);
 
-  let pinnedBps = 0;
-  const bpsById = new Map<string, number>();
+  let pinnedUnits = 0;
+  const unitsById = new Map<string, number>();
   for (const entry of pinned) {
     const pct = Number(entry.pct);
     if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
       error ??= 'Each win rate must be between 0% and 100%.';
     }
-    const bps = clampBps(Math.round((Number.isFinite(pct) ? pct : 0) * 100));
-    bpsById.set(entry.card_id, bps);
-    pinnedBps += bps;
+    const units = clampUnits(
+      Math.round((Number.isFinite(pct) ? pct : 0) * PCT_SCALE),
+    );
+    unitsById.set(entry.card_id, units);
+    pinnedUnits += units;
   }
 
   if (safe.length === 0) error ??= 'No cards to configure.';
-  if (pinnedBps > TOTAL_BPS) {
+  if (pinnedUnits > TOTAL_UNITS) {
     // SHOWS THE ARITHMETIC. The predecessor ("Common win rate would go below
     // 0%. Lower the other rates.") named one direction of the failure and no
     // numbers, so an operator raising ONE rate — who had just been told to
@@ -193,8 +207,8 @@ export function balanceOdds(entries: OddsInput[]): OddsResult {
     // Common at all — where "the unlocked Common balancer would go below 0%"
     // names an element that does not exist and sends the operator looking for
     // it. The arithmetic is true either way; only the explanation is gated.
-    const total = pinnedBps / 100;
-    const over = (pinnedBps - TOTAL_BPS) / 100;
+    const total = pinnedUnits / PCT_SCALE;
+    const over = (pinnedUnits - TOTAL_UNITS) / PCT_SCALE;
     const budget = `Win rates total ${total}% — ${over}% over the 100% budget`;
     const fix = `Lower a rate by ${over}%.`;
     error ??=
@@ -202,12 +216,12 @@ export function balanceOdds(entries: OddsInput[]): OddsResult {
         ? `${budget}, so the unlocked Common balancer would go below 0%. ${fix}`
         : `${budget}. ${fix}`;
   }
-  if (balancers.length === 0 && pinnedBps !== TOTAL_BPS) {
+  if (balancers.length === 0 && pinnedUnits !== TOTAL_UNITS) {
     error ??=
       'Without an unlocked Common card, win rates must total exactly 100%.';
   }
 
-  const remainder = Math.max(0, TOTAL_BPS - pinnedBps);
+  const remainder = Math.max(0, TOTAL_UNITS - pinnedUnits);
   if (balancers.length > 0) {
     const base = Math.floor(remainder / balancers.length);
     let leftover = remainder - base * balancers.length;
@@ -215,25 +229,25 @@ export function balanceOdds(entries: OddsInput[]): OddsResult {
       a.card_id < b.card_id ? -1 : a.card_id > b.card_id ? 1 : 0,
     );
     for (const entry of ordered) {
-      bpsById.set(entry.card_id, base + (leftover > 0 ? 1 : 0));
+      unitsById.set(entry.card_id, base + (leftover > 0 ? 1 : 0));
       if (leftover > 0) leftover -= 1;
     }
   }
 
   const computed: ComputedOdd[] = safe.map((entry) => {
-    const weight = bpsById.get(entry.card_id) ?? 0;
+    const weight = unitsById.get(entry.card_id) ?? 0;
     return {
       card_id: entry.card_id,
       weight,
       locked: entry.locked,
-      pct: weight / 100,
+      pct: weight / PCT_SCALE,
     };
   });
 
   return {
     computed,
     error,
-    lockedTotalPct: pinnedBps / 100,
+    lockedTotalPct: pinnedUnits / PCT_SCALE,
     unlockedCount: balancers.length,
   };
 }
@@ -254,7 +268,7 @@ export function balanceOdds(entries: OddsInput[]): OddsResult {
 //     Cards that merely inherited stay NULL.
 //   - Because every save recomputes ALL THREE sets, a later set-1 edit
 //     refreshes the materialized Common of sets 2/3 — so each set's RESOLVED
-//     weights sum to exactly TOTAL_BPS after every save.
+//     weights sum to exactly TOTAL_UNITS after every save.
 //
 // Errors are per-set and short-circuit: set 1's message propagates verbatim,
 // sets 2/3 are prefixed 'Set N: ' so the editor can point at the right tab.
@@ -272,9 +286,9 @@ export type SetWeightsResult = {
   rows: {
     card_id: string;
     locked: boolean;
-    /** Set 1 basis points — always materialized. */
+    /** Set 1 integer units — always materialized. */
     weight: number;
-    /** Basis points for set 2/3; null = inherit the previous set. */
+    /** Integer units for set 2/3; null = inherit the previous set. */
     weight_2: number | null;
     weight_3: number | null;
   }[];
@@ -384,8 +398,8 @@ export interface TierSplitTier {
   /** Σ of the locked cards' pinned rates — spent out of `budgetPct`. */
   lockedPct: number;
   /** Applied % per unlocked card: (budget − lockedPct) / count, raised to
-   *  MIN_PCT when that would round to 0 bps (a 0-weight card is unpullable and
-   *  nothing else would say so). */
+   *  MIN_PCT when that would round to 0 units (a 0-weight card is unpullable
+   *  and nothing else would say so). */
   perCardPct: number;
   /** True when the share fell under MIN_PCT and was raised to it, so the tier
    *  now costs MORE than its budget. */
@@ -615,8 +629,8 @@ export function tierRangeStatus(
 // collapses the tail (bronze-pack needs k ~ 6.15, pushing Legendary to 1 in
 // 4 trillion), which defeats the point of a chase card.
 
-/** Smallest storable non-zero win rate: 1 bps. */
-export const MIN_PCT = 100 / TOTAL_BPS;
+/** Smallest storable non-zero win rate: 1 unit = 0.0001% (1 in 1,000,000). */
+export const MIN_PCT = 100 / TOTAL_UNITS;
 
 export interface RtpSolveRow {
   card_id: string;
@@ -777,7 +791,7 @@ export function solveOddsForRtp(
     const mFree = M - flooredMass;
     if (mFree <= 0) {
       bandError =
-        'Too many cards need the 1 in 10,000 minimum to fit in 100%. Remove cards from the pool.';
+        'Too many cards need the 1 in 1,000,000 minimum to fit in 100%. Remove cards from the pool.';
       break;
     }
 
