@@ -367,6 +367,49 @@ describe('deposit callback — already-resolved rows', () => {
   });
 });
 
+// AdditionalInformationData carries the RECEIVING BANK DETAILS (§1.2.4) and is
+// UNSIGNED — only `Data` is covered by the signature. It used to be decrypted
+// straight into an info log line; logs have a wider access population and a
+// longer retention than the database, so that put customer bank details
+// somewhere they outlive the deposit row.
+describe('deposit callback — bank details never reach the logs', () => {
+  const BANK_DETAILS = JSON.stringify({
+    BankName: 'Maybank',
+    BankAccountNo: '5561234509876',
+    BankAccountName: 'POLYCARDS SDN BHD',
+  });
+
+  it('credits normally but logs nothing from AdditionalInformationData', async () => {
+    const h = harness(pendingRow);
+    const res = await run(h, {
+      ...callback(settled),
+      AdditionalInformationData: aesEncrypt(BANK_DETAILS, AES_KEY),
+    });
+    // The credit path is untouched — this is a logging change, not a behaviour
+    // change, so a green assertion here is what proves the deletion was safe.
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe('success');
+    expect(h.packs.topUpCreditsWithLedger).toHaveBeenCalledTimes(1);
+
+    // Boolean, not .toContain()/.not.toHaveBeenCalled(): both pretty-print the
+    // recorded arguments on failure, which here IS the decrypted bank-detail
+    // string — so the failure message would leak into a public CI log exactly
+    // the value this test exists to keep out of logs.
+    const logged = [
+      ...h.logger.info.mock.calls,
+      ...h.logger.warn.mock.calls,
+      ...h.logger.error.mock.calls,
+    ]
+      .flat()
+      .join('\n');
+    expect(logged.includes('5561234509876')).toBe(false);
+    expect(logged.includes('Maybank')).toBe(false);
+    // The route has no logger.info call left at all on any path — the deleted
+    // block was the only one (verified against the source, not assumed).
+    expect(h.logger.info.mock.calls.length).toBe(0);
+  });
+});
+
 describe('deposit callback — idempotency', () => {
   it('anchors on the signed reference, so a retry dedupes', async () => {
     const h = harness(pendingRow);

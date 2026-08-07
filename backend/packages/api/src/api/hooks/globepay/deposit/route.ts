@@ -1,11 +1,7 @@
 import { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
-import {
-  aesDecrypt,
-  depositState,
-  openCallback,
-} from '../../../../modules/packs/globepay';
+import { depositState, openCallback } from '../../../../modules/packs/globepay';
 import { globepayConfigFromEnv } from '../../../../modules/packs/globepay-client';
 import { GLOBEPAY_MAX_RM } from '../../../../modules/packs/globepay-deposit';
 import { topupIdempotencyReference } from '../../../../modules/packs/topup';
@@ -383,19 +379,20 @@ export async function POST(
     return;
   }
 
-  // AdditionalInformationData is decrypted for logging only — it carries the
-  // receiving bank details (§1.2.4), never anything the credit depends on.
-  if (body.AdditionalInformationData) {
-    try {
-      req.scope
-        .resolve('logger')
-        .info(
-          `[globepay] ${merchantTransactionId} extra: ${aesDecrypt(body.AdditionalInformationData, config.aesKey)}`,
-        );
-    } catch {
-      // Non-fatal: the credit is committed; bad extra data must not undo it.
-    }
-  }
+  // AdditionalInformationData is declared on the body type above and
+  // deliberately NEVER read. Unlike MerchantCode — which was declared-and-
+  // unread as a BUG, because it is the one signed field saying the money is
+  // ours — this one is declared-and-unread as the FIX:
+  //   - it is UNSIGNED (only `Data` is covered by the signature, per the
+  //     SIGNED vs UNSIGNED note above), so its contents are not authenticated;
+  //   - it carries the receiving bank details (§1.2.4), and nothing the credit
+  //     depends on;
+  //   - it used to be decrypted straight into an info log line. Logs have a
+  //     wider access population and a longer retention than the database, so
+  //     that put customer bank details somewhere they outlive the deposit row —
+  //     defeating the minimization the withdrawal ledger applies (it stores
+  //     account_last4 only, see modules/packs/service.ts).
+  // The field stays on the type to document the wire shape. Do not log it.
 
   res.status(200).send('success');
 }

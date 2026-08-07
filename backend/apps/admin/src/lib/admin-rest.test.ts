@@ -5,7 +5,8 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 // it lets the real fetch helpers run in the node test environment.
 (globalThis as Record<string, unknown>).__BACKEND_URL__ = 'http://backend.test';
 
-const { getPurchaseInvoice, httpStatus } = await import('./admin-rest');
+const { getGlobePayWithdrawalAccount, getPurchaseInvoice, httpStatus } =
+  await import('./admin-rest');
 
 const respondWith = (status: number, body: unknown) =>
   vi.stubGlobal(
@@ -60,6 +61,53 @@ describe('failed admin-rest calls carry their HTTP status', () => {
     );
     const err = await getPurchaseInvoice('pinv_x').catch((e: unknown) => e);
     expect(httpStatus(err)).toBeUndefined();
+  });
+});
+
+// The withdrawals list serves account_number MASKED; this is the only client
+// call that fetches a full one, and the backend logs and rate-limits it. So it
+// must address exactly ONE row — a client that could be talked into a list URL
+// would re-derive the bulk view the masking removed.
+describe('the withdrawal account reveal fetches one row', () => {
+  test('hits the per-id reveal path and returns the full number', async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ id: 'gpw_1', account_number: '1234567890' }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const out = await getGlobePayWithdrawalAccount('gpw_1');
+    expect(out.account_number).toBe('1234567890');
+    expect(String(fetchMock.mock.calls[0][0])).toBe(
+      'http://backend.test/admin/globepay/withdrawals/gpw_1/account',
+    );
+  });
+
+  test('encodes the id, so it cannot be steered off the single-row path', async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ id: 'x', account_number: '1' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await getGlobePayWithdrawalAccount('gpw_1/../..?limit=100');
+    const url = String(fetchMock.mock.calls[0][0]);
+    expect(url).toContain('gpw_1%2F..%2F..%3Flimit%3D100');
+    expect(url.endsWith('/account')).toBe(true);
+  });
+
+  test('a 404 surfaces its status, so the row-not-found case is distinguishable', async () => {
+    respondWith(404, { message: "Withdrawal 'gpw_x' not found." });
+    const err = await getGlobePayWithdrawalAccount('gpw_x').catch(
+      (e: unknown) => e,
+    );
+    expect(httpStatus(err)).toBe(404);
   });
 });
 
