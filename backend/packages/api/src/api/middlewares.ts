@@ -965,8 +965,13 @@ export default defineMiddlewares({
     // Matcher '/admin/*', not '/admin': the sorter DROPS a zero-segment
     // matcher (see the '/*' comment above), and a bare '/admin' would match
     // only the namespace root, which has no route.ts here. '*' spans '/' under
-    // the installed path-to-regexp 0.1.x, so '/admin/*' compiles to
-    // ^/admin/(.*)$ and covers every nested admin path.
+    // the installed path-to-regexp 0.1.13, so '/admin/*' covers every nested
+    // admin path. Compiled regex, checked against the installed package rather
+    // than recalled: /^\/admin\/(.*)\/?$/i in route form, and — because this
+    // entry has no `method`, so registerExpressHandler takes the
+    // `app.use(matcher, …)` branch (router.js:200) — /^\/admin\/(.*)\/?(?=\/|$)/i
+    // as actually registered. Both match every /admin/… path and neither
+    // matches bare '/admin', '/cdn/cards/*', '/store/*' or '/adminfoo/bar'.
     //
     // This is additive, never a reorder: no method filter, no early return,
     // just setHeader + next(). The sorter puts a wildcard entry ahead of the
