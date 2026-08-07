@@ -241,7 +241,17 @@ export function verifyPhoneProof(
   if (dot <= 0) return null;
   const payload = token.slice(0, dot);
   const sig = token.slice(dot + 1);
+  // CodeQL models signPhoneProof's return value as a 'password' and then flags
+  // this single-round HMAC as an insufficient password hash. It is neither. The
+  // key is the server's jwtSecret (resolved from configModule at every call
+  // site — store/phone-verification/check/route.ts, .../change/route.ts,
+  // .../password-reset/route.ts and api/utils/phone-verification-guard.ts —
+  // never anything a request supplies), and the MAC'd message is a token this
+  // server minted 10 minutes ago, not a credential a human chose. Real user
+  // passwords never reach this file: the phone-change re-auth hands them to
+  // Medusa's emailpass provider (change/route.ts:152).
   const expected = createHmac('sha256', secret)
+    // codeql[js/insufficient-password-hash]: not a password hash — HMAC-SHA256 authenticating a server-minted 10-minute proof token under the server's own jwtSecret; a KDF would be wrong here because there is no low-entropy user-chosen secret to stretch and nothing is being stored for later comparison.
     .update(`${PROOF_HMAC_DOMAIN}.${payload}`)
     .digest('base64url');
   const a = Buffer.from(sig);

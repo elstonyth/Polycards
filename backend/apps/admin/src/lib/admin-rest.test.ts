@@ -70,7 +70,7 @@ describe('failed admin-rest calls carry their HTTP status', () => {
 // would re-derive the bulk view the masking removed.
 describe('the withdrawal account reveal fetches one row', () => {
   test('hits the per-id reveal path and returns the full number', async () => {
-    const fetchMock = vi.fn(
+    const fetchMock = vi.fn<typeof fetch>(
       async () =>
         new Response(
           JSON.stringify({ id: 'gpw_1', account_number: '1234567890' }),
@@ -87,7 +87,7 @@ describe('the withdrawal account reveal fetches one row', () => {
   });
 
   test('encodes the id, so it cannot be steered off the single-row path', async () => {
-    const fetchMock = vi.fn(
+    const fetchMock = vi.fn<typeof fetch>(
       async () =>
         new Response(JSON.stringify({ id: 'x', account_number: '1' }), {
           status: 200,
