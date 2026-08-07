@@ -68,6 +68,18 @@ describe('startPhoneOtp — served-destination gate', () => {
     expect(mocks.clientFetch).toHaveBeenCalledTimes(1);
   });
 
+  // The stored-number path SettingsForm's 'old-otp' step depends on: it feeds
+  // the customer's own E.164 number back through this action with the
+  // 'phone-change' purpose, which is NOT exempt from the guard above. A served
+  // number must reach the network — this is what backs "the old-number send is
+  // not blocked for a legitimate stored number".
+  it('sends an E.164 stored number for phone-change', async () => {
+    await expect(
+      startPhoneOtp({ phone: MY, purpose: 'phone-change' }),
+    ).resolves.toEqual({ ok: true });
+    expect(mocks.clientFetch).toHaveBeenCalledTimes(1);
+  });
+
   it('still rejects an unparseable number first', async () => {
     const result = await startPhoneOtp({
       phone: 'nonsense',
@@ -147,6 +159,48 @@ describe('changePhone — re-auth fields', () => {
     await expect(changePhone({ phone: MY, token: 'proof' })).resolves.toEqual({
       ok: false,
       error: 'Verify your current phone number before changing it.',
+      // Set here too — see the dedicated describe below for why the flag
+      // exists; this assertion is the exact-object one, so it has to carry it.
+      needsOldPhoneProof: true,
     });
+  });
+});
+
+// SettingsForm branches its whole flow on this: a Google-only account that
+// already has a phone gets a SECOND OTP step, for the number it is moving away
+// from. The backend is the only thing that knows which cohort the caller is in
+// (its rule is "has an emailpass identity", and an account holding both a
+// password and a Google login takes the password branch), so the client
+// attempts the change and reads the answer off the refusal.
+describe('changePhone — needsOldPhoneProof discriminator', () => {
+  it('flags the old-phone refusal', async () => {
+    mocks.clientFetch.mockRejectedValue(
+      new Error('Verify your current phone number to change it.'),
+    );
+    const result = await changePhone({ phone: MY, token: 'proof' });
+    expect(result.ok).toBe(false);
+    expect(result).toHaveProperty('needsOldPhoneProof', true);
+  });
+
+  // Without this the UI would send the user to a second OTP step after a
+  // mistyped password, which they can never satisfy.
+  it.each([
+    [
+      'the password refusal',
+      'Enter your current password to change your phone number.',
+    ],
+    ['a rate limit', 'Too many requests. Try again in 30s.'],
+    ['an unrecognised failure', 'boom'],
+  ])('leaves the flag off for %s', async (_case, message) => {
+    mocks.clientFetch.mockRejectedValue(new Error(message));
+    const result = await changePhone({ phone: MY, token: 'proof' });
+    expect(result.ok).toBe(false);
+    expect(result).not.toHaveProperty('needsOldPhoneProof');
+  });
+
+  it('leaves the flag off on success', async () => {
+    mocks.clientFetch.mockResolvedValue({ customer: { phone: MY } });
+    const result = await changePhone({ phone: MY, token: 'proof' });
+    expect(result).toEqual({ ok: true, phone: MY });
   });
 });

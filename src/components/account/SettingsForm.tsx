@@ -42,12 +42,25 @@ export default function SettingsForm({ customer }: Props) {
     : 'Not set';
   // Verified phone-change panel (PHONE_VERIFICATION_REQUIRED only): 'closed'
   // (read-only value + Change button) -> 'entry' (new-number PhoneField) ->
-  // 'otp' (PhoneOtpStep). `pendingPhone` carries the normalized new number
-  // from 'entry' into 'otp' (and into the changePhone call after verifying).
-  const [phoneChange, setPhoneChange] = useState<'closed' | 'entry' | 'otp'>(
-    'closed',
-  );
+  // 'otp' (PhoneOtpStep) -> optionally 'old-otp'. `pendingPhone` carries the
+  // normalized new number from 'entry' into 'otp' (and into the changePhone
+  // call after verifying).
+  //
+  // 'old-otp' exists for ONE cohort: a Google-only account that already has a
+  // phone. The backend refuses to move that account's number on the new-number
+  // proof alone — with no password to ask for, the equivalent identity proof is
+  // an OTP to the number being moved AWAY from — and it is the only thing that
+  // knows which cohort this is (see changePhone's `needsOldPhoneProof`). So the
+  // flow ATTEMPTS the change and adds this step only when the route asks for it.
+  const [phoneChange, setPhoneChange] = useState<
+    'closed' | 'entry' | 'otp' | 'old-otp'
+  >('closed');
   const [pendingPhone, setPendingPhone] = useState('');
+  // The new number's proof token, held only long enough to survive the round
+  // trip through 'old-otp' and be replayed with the second proof. The OLD
+  // number's token is deliberately never stored — it is consumed in the same
+  // call that mints it.
+  const [newPhoneToken, setNewPhoneToken] = useState('');
   // The backend refuses to MOVE a phone on a session alone (see the re-auth
   // gate in store/phone-verification/change/route.ts): a stolen session could
   // otherwise take the recovery number and turn itself into a permanent
@@ -101,6 +114,73 @@ export default function SettingsForm({ customer }: Props) {
     } finally {
       setBusy(false);
     }
+  }
+
+  // Everything the phone-change flow holds that must not outlive it: the
+  // account password and the new number's proof token. Same posture 080 took
+  // with the password alone — a live credential or proof sitting in state after
+  // the flow it belonged to is a bug waiting for the next edit.
+  function clearPhoneChangeSecrets() {
+    setCurrentPassword('');
+    setNewPhoneToken('');
+  }
+
+  // The change call itself, shared by both proof paths. The first attempt
+  // carries the password (emailpass accounts); the retry additionally carries a
+  // proof for the CURRENT number (Google-only accounts that already have one).
+  async function submitPhoneChange(token: string, oldPhoneToken?: string) {
+    const result = await changePhone({
+      phone: pendingPhone,
+      token,
+      password: currentPassword,
+      oldPhoneToken,
+    });
+    if (result.ok) {
+      setPhone(result.phone);
+      clearPhoneChangeSecrets();
+      setPhoneChange('closed');
+      setNote({ ok: true, text: 'Phone updated.' });
+      router.refresh();
+      return;
+    }
+    // `!oldPhoneToken` bounds the retry to one round: if the second attempt is
+    // refused the same way, fall through to the error instead of looping.
+    if (result.needsOldPhoneProof && !oldPhoneToken) {
+      await startOldPhoneOtp();
+      return;
+    }
+    // Back to phone-entry (not 'closed') — the entry PhoneField's
+    // defaultValue={pendingPhone} re-seeds the number so it isn't lost. The
+    // password stays too, so a rate-limited or mistyped attempt doesn't cost a
+    // retype; only the spent proof is dropped.
+    setNewPhoneToken('');
+    setPhoneChange('entry');
+    setNote({ ok: false, text: result.error });
+  }
+
+  // Second proof, for the number being moved AWAY from. `phone` is the stored
+  // E.164 value — startPhoneOtp's normalizePhone accepts E.164 as-is, and its
+  // served-country guard passes for anything the picker could have written, so
+  // a legitimate stored number is not blocked. A stored number outside the
+  // served set gets a clear message here rather than an SMS that silently never
+  // arrives, which is the same answer the NEW number would get.
+  async function startOldPhoneOtp() {
+    if (!phone) {
+      // The backend only asks for this when a phone is on the row, so a null
+      // here means local state drifted from the server. Say so rather than
+      // send an OTP to nothing.
+      setPhoneChange('entry');
+      setNote({ ok: false, text: 'Please refresh the page and try again.' });
+      return;
+    }
+    const sent = await startPhoneOtp({ phone, purpose: 'phone-change' });
+    if (!sent.ok) {
+      setPhoneChange('entry');
+      setNote({ ok: false, text: sent.error });
+      return;
+    }
+    setNote(null);
+    setPhoneChange('old-otp');
   }
 
   // 'entry' step: validate + send the OTP, then move to 'otp'.
@@ -236,7 +316,7 @@ export default function SettingsForm({ customer }: Props) {
               disabled={busy}
               onClick={() => {
                 setNote(null);
-                setCurrentPassword('');
+                clearPhoneChangeSecrets();
                 setPhoneChange('entry');
               }}
               className="h-11 shrink-0 rounded-xl border border-white/10 bg-white/[0.05] px-4 text-sm font-medium text-white transition-colors hover:bg-white/[0.1] disabled:opacity-70"
@@ -314,9 +394,9 @@ export default function SettingsForm({ customer }: Props) {
                 onClick={() => {
                   setNote(null);
                   setPendingPhone('');
-                  // Don't leave a password sitting in state for a flow the
-                  // user abandoned.
-                  setCurrentPassword('');
+                  // Don't leave a password or a proof token sitting in state
+                  // for a flow the user abandoned.
+                  clearPhoneChangeSecrets();
                   setPhoneChange('closed');
                 }}
                 className="text-[12px] text-white/55 hover:text-white disabled:opacity-70"
@@ -330,28 +410,46 @@ export default function SettingsForm({ customer }: Props) {
           <PhoneOtpStep
             phone={pendingPhone}
             purpose="phone-change"
-            onBack={() => setPhoneChange('entry')}
-            onVerified={async (token) => {
-              const result = await changePhone({
-                phone: pendingPhone,
-                token,
-                password: currentPassword,
-              });
-              if (result.ok) {
-                setPhone(result.phone);
-                setCurrentPassword('');
-                setPhoneChange('closed');
-                setNote({ ok: true, text: 'Phone updated.' });
-                router.refresh();
-                return;
-              }
-              // Back to phone-entry (not 'closed') — the entry PhoneField's
-              // defaultValue={pendingPhone} re-seeds the number so it isn't
-              // lost.
+            onBack={() => {
+              setNewPhoneToken('');
               setPhoneChange('entry');
-              setNote({ ok: false, text: result.error });
+            }}
+            onVerified={async (token) => {
+              // Held in state as well as passed along: if the backend comes
+              // back asking for the old number too, this token has to survive
+              // the re-render into the 'old-otp' step and be replayed there.
+              setNewPhoneToken(token);
+              await submitPhoneChange(token);
             }}
           />
+        )}
+        {phoneChange === 'old-otp' && (
+          // Its OWN conditional slot rather than a branch inside the 'otp'
+          // block above. React reconciles children by position, so two slots
+          // unmount one PhoneOtpStep and mount a fresh one for the second
+          // number; sharing a slot would REUSE the instance, and its `busy`
+          // flag — set true just before it hands the token up and deliberately
+          // never cleared, because the parent is expected to unmount it —
+          // would arrive stuck, leaving Verify permanently disabled.
+          <div className="flex flex-col gap-2">
+            <p className="text-[12px] text-white/55">
+              This account has no password, so we also need to confirm the
+              number you&apos;re moving away from.
+            </p>
+            <PhoneOtpStep
+              // Non-null: startOldPhoneOtp refuses to enter this state without
+              // a stored number.
+              phone={phone ?? ''}
+              purpose="phone-change"
+              onBack={() => {
+                setNewPhoneToken('');
+                setPhoneChange('entry');
+              }}
+              onVerified={async (oldToken) => {
+                await submitPhoneChange(newPhoneToken, oldToken);
+              }}
+            />
+          </div>
         )}
         {phoneChange === 'closed' && (
           <span className="mt-1 block text-[11px] text-white/55">

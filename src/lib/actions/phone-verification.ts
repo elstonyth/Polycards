@@ -60,13 +60,20 @@ const PHONE_RESET_RULES: ErrorRule[] = [
 // password forever. Both strings are the route's own MedusaError text
 // (backend/packages/api/src/api/store/phone-verification/change/route.ts), read
 // off FetchError.message by the same mechanism PHONE_RESET_RULES relies on.
+// The Google-only branch's refusal, kept as a named constant because it is
+// CONTROL FLOW as well as copy: SettingsForm turns it into a second OTP step
+// for the current number. One regex, used both to pick the message below and to
+// set `needsOldPhoneProof`, so a reworded rule can never leave the two
+// disagreeing.
+const NEEDS_OLD_PHONE_PROOF = /verify your current phone number/i;
+
 const PHONE_CHANGE_RULES: ErrorRule[] = [
   [
     /enter your current password/i,
     'That password is incorrect. Enter your current password to change your phone number.',
   ],
   [
-    /verify your current phone number/i,
+    NEEDS_OLD_PHONE_PROOF,
     'Verify your current phone number before changing it.',
   ],
 ];
@@ -135,7 +142,17 @@ export async function changePhone(input: {
   token: string;
   password?: string;
   oldPhoneToken?: string;
-}): Promise<{ ok: true; phone: string } | Fail> {
+}): Promise<
+  | { ok: true; phone: string }
+  // `needsOldPhoneProof` says the account has no emailpass identity and already
+  // has a phone, so the backend wants an OTP proof for the CURRENT number. The
+  // caller cannot work that out for itself: the backend's rule is "has an
+  // emailpass identity", and an account holding BOTH a password and a Google
+  // login takes the password branch — any client-side "is this Google-only?"
+  // guess would have to reproduce that precedence and would drift from it. The
+  // route's own refusal cannot.
+  | (Fail & { needsOldPhoneProof?: true })
+> {
   const phone = normalizePhone(input.phone);
   if (!phone)
     return fail('Please enter a valid phone number for the selected country.');
@@ -167,16 +184,16 @@ export async function changePhone(input: {
     // Re-auth refusals win; then the same 429 retry-hint passthrough as
     // startPhoneOtp/checkPhoneOtp — a rate-limited change should say how long
     // to wait, not invite an immediate retry; then the generic copy.
-    return fail(
-      friendlyError(
-        error,
-        PHONE_CHANGE_RULES,
-        messageOf(
-          error,
-          'Could not update your phone number. Please try again.',
-        ),
-      ),
+    const message = friendlyError(
+      error,
+      PHONE_CHANGE_RULES,
+      messageOf(error, 'Could not update your phone number. Please try again.'),
     );
+    return NEEDS_OLD_PHONE_PROOF.test(
+      error instanceof Error ? error.message : String(error),
+    )
+      ? { ok: false, error: message, needsOldPhoneProof: true }
+      : fail(message);
   }
 }
 
