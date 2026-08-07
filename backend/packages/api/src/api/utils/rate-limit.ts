@@ -968,10 +968,11 @@ export function createAdminActionRateLimit(): MiddlewareHandler {
  * legitimate caller.
  *
  * Sized generously, because a 429 to a genuine callback costs something:
- * - deposit / withdrawal callbacks: recoverable. The gateway retries, and the
- *   two reconcile jobs (src/jobs/globepay-*reconcile.ts, every 10 min) requery
- *   the gateway for anything still pending, so the settlement lands late
- *   rather than never.
+ * - deposit / withdrawal callbacks: recoverable. The gateway retries (per the
+ *   integration guide, not observed here), and — independently of whether it
+ *   does — the two reconcile jobs (src/jobs/globepay-*reconcile.ts, cron every
+ *   10 min) requery the gateway for anything still pending, so the settlement
+ *   lands late rather than never.
  * - payout-verify: fails CLOSED. Anything but a literal "success" makes the
  *   gateway refuse that payout, so a 429 blocks a legitimate withdrawal from
  *   paying out (no money moves wrongly, but a customer waits).

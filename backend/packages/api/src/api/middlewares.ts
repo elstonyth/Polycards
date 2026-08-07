@@ -293,6 +293,16 @@ export default defineMiddlewares({
       // false — and the routes themselves match those too, so coverage is not
       // dodgeable); '/hooks/globepay', '/hooks', '/hooksfoo/bar',
       // '/hooks/globepayfoo/deposit' and '/store/credits/deposit' do not.
+      //
+      // It also runs BEFORE those routes' own handlers, which is what makes it
+      // more than decoration: router.js:107-110 sorts ONE list
+      // (`[].concat(middlewares).concat(routes)`) and registers in that order,
+      // and under the shared /hooks/globepay branch this entry's last segment
+      // '*' lands in the sorter's `wildcard` bucket while each route's
+      // 'deposit'/'withdrawal'/'payout-verify' lands in `static` — wildcard
+      // precedes static in the default orderBy. Replayed through the real
+      // RoutesSorter with the routes listed both after AND before this entry:
+      // the middleware sorts first either way.
       matcher: '/hooks/globepay/*',
       method: 'POST',
       middlewares: [gatewayHookRateLimit],
