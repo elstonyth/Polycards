@@ -7,6 +7,7 @@ import {
   openCallback,
 } from '../../../../modules/packs/globepay';
 import { globepayConfigFromEnv } from '../../../../modules/packs/globepay-client';
+import { GLOBEPAY_MAX_RM } from '../../../../modules/packs/globepay-deposit';
 import { topupIdempotencyReference } from '../../../../modules/packs/topup';
 import { sendTopupReceipt } from '../../../../modules/packs/topup-receipt';
 import { notifyFeed } from '../../../../modules/packs/notify-feed';
@@ -104,6 +105,28 @@ export async function POST(
       .resolve('logger')
       .warn(
         '[globepay] rejected deposit callback: signed payload carried no MerchantTransactionId',
+      );
+    res.status(400).send('rejected');
+    return;
+  }
+
+  // The signature says "GlobePay sent this". It does NOT say "this payment is
+  // yours" — MerchantCode is the one signed field that does, and until now it
+  // was declared and never read. If their callbacks are signed with a
+  // platform-wide key rather than a per-merchant one, a payment into someone
+  // else's merchant account would verify here.
+  //
+  // Checked BEFORE the row lookup, not beside the CurrencyCode guard further
+  // down: that one sits after the status-7 branch, so a foreign callback whose
+  // reference collided with ours would already have written a live deposit off
+  // as failed. Case-insensitive — a casing difference between the configured
+  // value and what they echo is a config nuisance, not an attack, and a
+  // case-sensitive compare would reject legitimate traffic.
+  if (data.MerchantCode?.toUpperCase() !== config.merchantCode.toUpperCase()) {
+    req.scope
+      .resolve('logger')
+      .error(
+        `[globepay] deposit callback for ${merchantTransactionId} names merchant ${data.MerchantCode}, expected ${config.merchantCode} — refusing`,
       );
     res.status(400).send('rejected');
     return;
@@ -220,6 +243,30 @@ export async function POST(
       .resolve('logger')
       .error(
         `[globepay] settled callback for ${merchantTransactionId} carried a non-positive Amount (${data.Amount}) — refusing to credit`,
+      );
+    res.status(400).send('rejected');
+    return;
+  }
+
+  // A CEILING, not an equality check — the decision above stands: a customer
+  // may legitimately pay a sum other than the one we asked for. But no callback
+  // should confirm more than the submit path could ever have created, and that
+  // path refuses anything over GLOBEPAY_MAX_RM (globepay-deposit.ts). The same
+  // constant is imported here on purpose: raise it for product reasons and this
+  // ceiling follows, so the two can never drift apart. Without it a single
+  // validly-signed event with an inflated Amount — a gateway bug, a key
+  // compromise, an account reconfiguration — becomes withdrawable cash 1:1,
+  // because mutateCreditAtomic's only top-up guard is deltaCents > 0.
+  //
+  // QUARANTINE, never write off: the row stays 'pending' and we answer non-2xx
+  // so they retry and an operator can settle it by hand. The customer may
+  // genuinely have paid; marking the row 'failed' here would convert an
+  // operator alert into silent money loss.
+  if (creditedAmount > GLOBEPAY_MAX_RM) {
+    req.scope
+      .resolve('logger')
+      .error(
+        `[globepay] settled callback for ${merchantTransactionId} claims Amount ${creditedAmount}, above the RM ${GLOBEPAY_MAX_RM} deposit ceiling — refusing to credit; the row stays pending for manual settlement`,
       );
     res.status(400).send('rejected');
     return;

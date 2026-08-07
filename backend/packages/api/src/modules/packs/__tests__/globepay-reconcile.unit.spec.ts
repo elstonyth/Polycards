@@ -3,6 +3,7 @@ import {
   reconcileAction,
   unknownDepositAction,
 } from '../globepay-reconcile';
+import { GLOBEPAY_MAX_RM } from '../globepay-deposit';
 
 const now = new Date('2026-07-21T12:00:00Z');
 const minutesAgo = (m: number) => new Date(now.getTime() - m * 60 * 1000);
@@ -29,6 +30,36 @@ describe('reconcileAction', () => {
         now,
       }),
     ).toEqual({ kind: 'settle', amount: 50 });
+  });
+
+  // Same ceiling as the callback route, for the same reason: a requery amount
+  // above what the submit path could ever have created converts 1:1 into
+  // withdrawable balance. Quarantine, never settle and never write off.
+  it('does NOT settle a success above the deposit ceiling', () => {
+    const action = reconcileAction({
+      state: 'success',
+      amount: GLOBEPAY_MAX_RM + 1,
+      createdAt: minutesAgo(5),
+      now,
+    });
+    expect(action).toEqual({
+      kind: 'quarantine',
+      amount: GLOBEPAY_MAX_RM + 1,
+    });
+    // 'fail' and 'expire' are the write-off kinds — quarantine must be neither.
+    expect(action.kind).not.toBe('fail');
+    expect(action.kind).not.toBe('expire');
+  });
+
+  it('settles a success exactly AT the ceiling', () => {
+    expect(
+      reconcileAction({
+        state: 'success',
+        amount: GLOBEPAY_MAX_RM,
+        createdAt: minutesAgo(5),
+        now,
+      }),
+    ).toEqual({ kind: 'settle', amount: GLOBEPAY_MAX_RM });
   });
 
   it('closes a deposit the gateway reports as failed', () => {
