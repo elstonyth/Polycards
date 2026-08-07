@@ -3,6 +3,7 @@ import { MedusaError, Modules } from '@medusajs/framework/utils';
 import type { ICustomerModuleService } from '@medusajs/framework/types';
 import {
   E164_RE,
+  isAllowedSmsDestination,
   isPhoneOtpPurpose,
   sendPhoneOtp,
 } from '../../../../utils/phone-verification';
@@ -31,6 +32,33 @@ export async function POST(
     throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Invalid purpose.');
 
   const logger = req.scope.resolve('logger') as { warn: (msg: string) => void };
+
+  // password-reset is EXEMPT, and deliberately so: the branch below refuses to
+  // send unless exactly ONE registered account carries this phone, so that
+  // purpose can only ever text a number already on file. It is not a pumping
+  // vector — the account match IS its destination bound. Adding a second bound
+  // there would only lock existing customers whose stored number predates this
+  // allowlist out of account recovery, buying no security.
+  //
+  // signup and phone-change have no such bound: they text an ARBITRARY
+  // caller-supplied number with no lookup at all. That is the toll-fraud
+  // vector, and this is its ceiling.
+  if (purpose !== 'password-reset' && !isAllowedSmsDestination(process.env, phone)) {
+    // Deliberately the SAME generic { ok: true } as the password-reset branch
+    // below — a distinct error would make this a "which countries work" probe
+    // and add a second response shape to a route whose whole contract is that
+    // it never discloses what it did. Checked BEFORE the customer lookup so a
+    // pumping run costs no query either.
+    //
+    // Log the calling-code prefix ONLY, never `phone`: at most three digits,
+    // which is nobody's dialable number, and enough to see a pumping attempt
+    // in the logs. Same PII rule as the Twilio error-code logging above.
+    logger.warn(
+      `[phone-otp] refused send to unserved destination ${phone.slice(0, 4)}`,
+    );
+    res.json({ ok: true });
+    return;
+  }
 
   if (purpose === 'password-reset') {
     const customerService: ICustomerModuleService = req.scope.resolve(Modules.CUSTOMER);

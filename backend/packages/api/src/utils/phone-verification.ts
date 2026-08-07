@@ -22,6 +22,7 @@ export type PhoneVerificationEnv = {
   TWILIO_AUTH_TOKEN?: string;
   TWILIO_VERIFY_SERVICE_SID?: string;
   PHONE_OTP_DEV_CODE?: string;
+  ALLOWED_SMS_COUNTRIES?: string;
 };
 
 type Logger = { warn: (msg: string) => void };
@@ -57,6 +58,68 @@ export const isTwilioVerifyConfigured = (env: PhoneVerificationEnv): boolean =>
 /** E.164: +, non-zero lead digit, 7–15 digits total. The storefront normalizes
  *  with libphonenumber before sending; this is the backend's shape re-check. */
 export const E164_RE = /^\+[1-9]\d{6,14}$/;
+
+/**
+ * Destinations this business serves. POST /store/phone-verification/start is
+ * UNAUTHENTICATED and bills a real SMS per call; the per-phone limiter bounds
+ * one number, so a pumping run using fresh numbers is bounded only by the
+ * sitewide IP tier — thousands of attacker-chosen destinations a day. This is
+ * the coarse geo-lock the repo can enforce; Twilio's own geo permissions are
+ * the other half (console state, not code).
+ *
+ * Default is MY alone: CONTEXT.md records Malaysia (+60) as the one country
+ * confirmed enabled in Twilio's SMS geo permissions, and DEFAULT_PHONE_COUNTRY
+ * is 'MY'. Widen via ALLOWED_SMS_COUNTRIES.
+ *
+ * PAIRED with the storefront picker (ALLOWED_PHONE_COUNTRIES in
+ * src/lib/profile-validation.ts, rendered by src/components/PhoneField.tsx).
+ * Widen BOTH or neither: narrowing only here makes the UI offer a country
+ * whose code silently never arrives; narrowing only there reopens the toll
+ * fraud. E164_RE stays permissive — that is a shape check, this is a business
+ * check, and they are deliberately separate.
+ */
+export const DEFAULT_ALLOWED_SMS_COUNTRIES = ['MY'] as const;
+
+// ISO 3166-1 alpha-2 → E.164 calling-code prefix.
+//
+// ponytail: a prefix match, not a phone-number parser. The allowlist is coarse
+// by design and the backend does not depend on libphonenumber-js (only the
+// storefront does) — pulling a parser in for a handful of string comparisons
+// is not worth it.
+//
+// An ISO code with NO row here resolves to nothing, so naming it in
+// ALLOWED_SMS_COUNTRIES widens nothing at all: add the row in the same change
+// that widens the env var (and the storefront picker with it).
+const SMS_DIAL_PREFIX: Record<string, string> = {
+  MY: '+60',
+  GB: '+44',
+};
+
+/**
+ * True iff `phone` (already E.164-shaped) is in a served destination.
+ *
+ * Env is read PER CALL, not at module top, so one booted app can be driven
+ * through both states (plan 066's convention).
+ *
+ * An empty or whitespace-only value falls back to the default set. It must
+ * never be read as "allow everything" (that is the whole exposure), and
+ * equally never as "allow nothing" — a stray blank in the DO spec would then
+ * brick every signup.
+ */
+export const isAllowedSmsDestination = (
+  env: PhoneVerificationEnv,
+  phone: string,
+): boolean => {
+  const configured = (env.ALLOWED_SMS_COUNTRIES ?? '')
+    .split(',')
+    .map((iso) => iso.trim().toUpperCase())
+    .filter(Boolean);
+  const countries = configured.length ? configured : DEFAULT_ALLOWED_SMS_COUNTRIES;
+  return countries.some((iso) => {
+    const prefix = SMS_DIAL_PREFIX[iso];
+    return prefix !== undefined && phone.startsWith(prefix);
+  });
+};
 
 export const PHONE_OTP_PURPOSES = ['signup', 'phone-change', 'password-reset'] as const;
 export type PhoneOtpPurpose = (typeof PHONE_OTP_PURPOSES)[number];

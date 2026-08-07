@@ -1,5 +1,6 @@
 import {
   E164_RE,
+  isAllowedSmsDestination,
   isPhoneOtpPurpose,
   isPhoneVerificationRequired,
   isTwilioVerifyConfigured,
@@ -37,6 +38,58 @@ describe('predicates', () => {
   it('purpose guard', () => {
     expect(isPhoneOtpPurpose('signup')).toBe(true);
     expect(isPhoneOtpPurpose('admin')).toBe(false);
+  });
+});
+
+// The destination allowlist is the only ceiling on SMS-pumping that survives an
+// attacker rotating phone numbers, so its FAIL DIRECTION matters as much as its
+// happy path: misconfiguration must never widen it to "everywhere", and must
+// never narrow it to "nowhere" (that bricks signup).
+describe('sms destination allowlist', () => {
+  const GB = '+442079460958';
+
+  it('allows the default set and refuses everything else', () => {
+    expect(isAllowedSmsDestination({}, PHONE)).toBe(true);
+    expect(isAllowedSmsDestination({}, GB)).toBe(false);
+    expect(isAllowedSmsDestination({}, '+15550001111')).toBe(false);
+  });
+
+  it('widens per call from env, not at module load', () => {
+    expect(isAllowedSmsDestination({ ALLOWED_SMS_COUNTRIES: 'MY,GB' }, GB)).toBe(true);
+    // Same module instance, next call, back to refusing — proves the env read
+    // happens per call.
+    expect(isAllowedSmsDestination({}, GB)).toBe(false);
+  });
+
+  it('narrows per call too — MY is not hardcoded as always-on', () => {
+    expect(isAllowedSmsDestination({ ALLOWED_SMS_COUNTRIES: 'GB' }, PHONE)).toBe(false);
+  });
+
+  it('falls back to the default on an empty or whitespace value, never to allow-all', () => {
+    for (const ALLOWED_SMS_COUNTRIES of ['', '   ', ',', ' , , ']) {
+      // Fails CLOSED for unserved destinations…
+      expect(isAllowedSmsDestination({ ALLOWED_SMS_COUNTRIES }, GB)).toBe(false);
+      // …and, just as importantly, still OPEN for the default set: a blank in
+      // the DO spec must not brick every Malaysian signup.
+      expect(isAllowedSmsDestination({ ALLOWED_SMS_COUNTRIES }, PHONE)).toBe(true);
+    }
+  });
+
+  it('tolerates mixed case and stray whitespace', () => {
+    expect(isAllowedSmsDestination({ ALLOWED_SMS_COUNTRIES: ' my , gb ' }, GB)).toBe(true);
+    expect(isAllowedSmsDestination({ ALLOWED_SMS_COUNTRIES: '\tGb\n' }, GB)).toBe(true);
+  });
+
+  // The ISO→prefix table is the coarse stand-in for a parser. An unlisted code
+  // resolves to no prefix, so naming it widens NOTHING — pinned here so the
+  // half-landed widening is a failing test, not a silent production surprise.
+  it('ignores an ISO code with no dialling-code row', () => {
+    expect(isAllowedSmsDestination({ ALLOWED_SMS_COUNTRIES: 'SG' }, '+6561234567')).toBe(
+      false,
+    );
+    // …and an all-unknown value is still not "allow nothing at all" by accident:
+    // it resolves to a non-empty list that simply matches no number.
+    expect(isAllowedSmsDestination({ ALLOWED_SMS_COUNTRIES: 'SG' }, PHONE)).toBe(false);
   });
 });
 

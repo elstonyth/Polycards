@@ -257,6 +257,18 @@ envs:
     scope: RUN_TIME
     type: SECRET
     value: __SECRET__TWILIO_VERIFY_SERVICE_SID__
+  # Destination geo-lock for the UNAUTHENTICATED send route: every call there
+  # bills a real SMS, and the per-phone limiter bounds one number, not a pumping
+  # run rotating fresh ones. Plain value, NOT a secret — do-apply.ps1 aborts the
+  # whole apply on any unresolved __SECRET__ token anywhere in this file, so
+  # never write one here for a non-secret. Empty/unset falls back to MY in code.
+  # Widening this alone is not enough: the ISO->dialling-code row in
+  # src/utils/phone-verification.ts and the storefront's ALLOWED_PHONE_COUNTRIES
+  # must move in the same change, or the picker offers a country whose code
+  # never arrives. Twilio's own SMS geo permissions are the upstream half.
+  - key: ALLOWED_SMS_COUNTRIES
+    scope: RUN_TIME
+    value: "MY"
   # ╔═══════════════════════════════════════════════════════════════════════╗
   # ║ DO NOT APPLY THIS SPEC UNTIL PR #252 IS MERGED.                        ║
   # ║ ALLOW_MOCK_TOPUP is GONE (the go-live blocker is cleared) and the      ║

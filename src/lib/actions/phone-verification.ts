@@ -9,7 +9,11 @@
 import { sdk } from '@/lib/medusa';
 import { logger } from '@/lib/logger';
 import { getAuthToken } from '@/lib/data/customer';
-import { normalizePhone } from '@/lib/profile-validation';
+import {
+  isServedPhoneCountry,
+  normalizePhone,
+  UNSERVED_PHONE_COUNTRY_ERROR,
+} from '@/lib/profile-validation';
 import type { PhoneOtpPurpose } from '@/lib/phone-verification';
 import { friendlyError, type ErrorRule } from '@/lib/errors';
 
@@ -46,6 +50,14 @@ export async function startPhoneOtp(input: {
   const phone = normalizePhone(input.phone);
   if (!phone)
     return fail('Please enter a valid phone number for the selected country.');
+  // The one choke point every OTP send passes through, so the check lives here
+  // rather than in AuthForm and SettingsForm separately. Mirrors the backend's
+  // isAllowedSmsDestination — including its password-reset exemption, which
+  // can only text a number already on an account and must keep working for
+  // customers whose stored number predates the allowlist. Without this the
+  // backend refuses silently and the user just never gets a code.
+  if (input.purpose !== 'password-reset' && !isServedPhoneCountry(phone))
+    return fail(UNSERVED_PHONE_COUNTRY_ERROR);
   try {
     await sdk.client.fetch('/store/phone-verification/start', {
       method: 'POST',
