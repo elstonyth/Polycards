@@ -55,6 +55,54 @@ export const isPhoneGateRequired = (env: PhoneVerificationEnv): boolean => {
 export const isTwilioVerifyConfigured = (env: PhoneVerificationEnv): boolean =>
   Boolean(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_VERIFY_SERVICE_SID);
 
+export type PhoneGateState = {
+  phoneVerificationRequired: boolean;
+  phoneGateRequired: boolean;
+  twilioConfigured: boolean;
+  /** Variables an operator set to something that resolves to `false`. */
+  warnings: string[];
+};
+
+// Only these two are boolean-parsed, and only they can be silently misread.
+const BOOLEAN_GATE_VARS = [
+  'PHONE_VERIFICATION_REQUIRED',
+  'PHONE_GATE_REQUIRED',
+] as const;
+
+/**
+ * The RESOLVED gate state, for the boot log in medusa-config.ts. Pure (env in,
+ * object out) — it changes no semantics and MUST NOT throw: a fail-open deploy
+ * is a legitimate configuration, so this is observability, not a guard
+ * (contrast assertMockTopupSafe, which refuses to boot by design).
+ *
+ * Why it exists: the parse is strictly `=== 'true'`, so unset, empty, 'True',
+ * '1' or a misspelled key all resolve to false, and PHONE_GATE_REQUIRED
+ * FOLLOWS PHONE_VERIFICATION_REQUIRED when unset — one wrong value opens the
+ * money gates as well as the write gates. That fail-open default is a recorded
+ * decision (CONTEXT.md's rollback lever, exercised on 2026-08-07), but nothing
+ * logged or asserted the resolved state, and the flag lives in two .do specs
+ * plus a Dockerfile ARG. Now the state a deploy actually booted with is in the
+ * log.
+ *
+ * `warnings` fires only when a raw value is neither 'true' nor 'false' — an
+ * operator meant something by it and got `false`. An explicit 'false' is not a
+ * typo (it is the in-a-hurry lever) and never warns. The raw value is
+ * deliberately NOT carried: these two are boolean-shaped, but a reporter that
+ * echoes env values is one copy-paste from printing a credential into a public
+ * deploy log.
+ */
+export const resolvePhoneGateState = (
+  env: PhoneVerificationEnv,
+): PhoneGateState => ({
+  phoneVerificationRequired: isPhoneVerificationRequired(env),
+  phoneGateRequired: isPhoneGateRequired(env),
+  twilioConfigured: isTwilioVerifyConfigured(env),
+  warnings: BOOLEAN_GATE_VARS.filter((name) => {
+    const raw = env[name];
+    return raw !== undefined && raw !== '' && raw !== 'true' && raw !== 'false';
+  }).map((name) => `${name} is neither 'true' nor 'false' — read as false`),
+});
+
 /** E.164: +, non-zero lead digit, 7–15 digits total. The storefront normalizes
  *  with libphonenumber before sending; this is the backend's shape re-check. */
 export const E164_RE = /^\+[1-9]\d{6,14}$/;

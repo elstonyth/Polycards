@@ -3,8 +3,17 @@
 /**
  * Phone-OTP server actions. Thin proxies onto the backend's
  * /store/phone-verification/* routes — running server-side keeps the
- * publishable-key transport consistent with every other action and lets the
- * backend's IP rate limiter see the real client via x-forwarded-for.
+ * publishable-key transport consistent with every other action and keeps the
+ * proof token out of the browser.
+ *
+ * It does NOT let the backend see the visitor: `sdk` (src/lib/medusa.ts) is
+ * built from a base URL and a publishable key and forwards no client headers,
+ * so every OTP request arrives from this server's single egress IP. The
+ * backend's IP-keyed OTP limiters are therefore a whole-STOREFRONT circuit
+ * breaker, and the PER-PHONE tier is the only real per-client / SMS-cost
+ * budget — do not delete it as "redundant with the IP tier". Full topology:
+ * the phone-OTP limiter module comment in
+ * backend/packages/api/src/api/utils/rate-limit.ts.
  */
 import { sdk } from '@/lib/medusa';
 import { logger } from '@/lib/logger';
