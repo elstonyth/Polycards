@@ -136,9 +136,9 @@ export function CardDetail({
           style={at(3)}
           className={cn(rise, 'flex flex-wrap items-end gap-x-4 gap-y-2')}
         >
-          {/* `key` remounts on each tick so the pulse re-arms; the negative
-              margin lets the tint breathe around the number without moving it.
-              Green up / red down are the DESIGN.md money signals. */}
+          {/* `key` remounts on each tick so the pulse re-arms. The tint's
+              bleed comes from box-shadow spread (see globals.css), so nothing
+              here costs layout. Green up / red down are the money signals. */}
           <p
             key={next.n}
             style={
@@ -149,7 +149,7 @@ export function CardDetail({
                 : undefined
             }
             className={cn(
-              '-mx-2 rounded-md px-2 font-heading text-2xl font-bold tabular-nums text-white md:text-4xl',
+              'font-heading rounded-md text-2xl font-bold tabular-nums text-white md:text-4xl',
               next.n > 0 && 'price-tick',
             )}
           >

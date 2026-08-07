@@ -197,16 +197,25 @@
 /* Live price change — the 60s poll landed on a different number. One pulse in
    the direction's own signal colour (buyback green up, alarm red down, set as
    --tick-rgb at the call site) so a moving market reads as a state change
-   instead of a silent text swap. Re-armed by remounting via React key. */
+   instead of a silent text swap. Re-armed by remounting via React key.
+
+   The tint reaches 8px past the text via box-shadow SPREAD rather than
+   padding + negative margin. Padding would have to be paid for with -mx-2,
+   and that margin is charged whether or not a pulse is running: it silently
+   halved the gap-x-4 to the 30d delta badge sitting beside the value. A
+   shadow costs no layout at all. */
 @keyframes priceTick {
   0% {
     background-color: rgba(var(--tick-rgb), 0);
+    box-shadow: 0 0 0 8px rgba(var(--tick-rgb), 0);
   }
   25% {
     background-color: rgba(var(--tick-rgb), 0.22);
+    box-shadow: 0 0 0 8px rgba(var(--tick-rgb), 0.22);
   }
   100% {
     background-color: rgba(var(--tick-rgb), 0);
+    box-shadow: 0 0 0 8px rgba(var(--tick-rgb), 0);
   }
 }
 .price-tick {
