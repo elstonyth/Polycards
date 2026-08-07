@@ -3,8 +3,10 @@
 /**
  * Phone-OTP server actions. Thin proxies onto the backend's
  * /store/phone-verification/* routes — running server-side keeps the
- * publishable-key transport consistent with every other action and keeps the
- * proof token out of the browser.
+ * publishable-key transport consistent with every other action, and lets
+ * changePhone read the httpOnly auth cookie it converts to a Bearer header
+ * (getAuthToken, below). The proof token itself round-trips through the
+ * browser by design: checkPhoneOtp returns it and changePhone takes it back.
  *
  * It does NOT let the backend see the visitor: `sdk` (src/lib/medusa.ts) is
  * built from a base URL and a publishable key and forwards no client headers,
