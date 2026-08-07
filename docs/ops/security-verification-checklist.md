@@ -57,7 +57,8 @@ and carries the date it was observed.
 | 9 | Known error codes: `PMT10005` amount out of range, `PMT10024` payment-method routing gap, `PMT10000` duplicate merchant transaction id. None of these is an authentication failure. | `docs/payments/globepay365-setup.md:222`, `:239-242`, `backend/packages/api/src/modules/packs/models/globepay-deposit.ts:19-21` |
 | 10 | Live deposit band is RM 30 – RM 10,000; payout band RM 50 – RM 50,000. Confirmed by the provider 2026-07-29, but nobody has submitted either ceiling against the live account. | `docs/payments/globepay365-setup.md:391-417` |
 | 11 | The prod spec sets `PHONE_VERIFICATION_REQUIRED` only; `PHONE_GATE_REQUIRED` is deliberately **unset** and therefore follows it. So item **E** is one resolved value plus a confirmation that the second is still absent. | `.do/backend.app.yaml:235`, `:243` |
-| 12 | Alerting on a deposit pending past its window is **not built**. The admin Deposits page shows it; someone has to look. Both of plan 084's loud log lines are still only log lines. | `docs/payments/globepay365-setup.md:388-389` |
+| 12 | `CONTEXT.md:175` records the OTP as valid for **10 minutes**. Treat this as **unconfirmed**: the same sentence attributes the six-digit length to "Twilio's own default", so the TTL is most likely the documented default rather than a reading of our service. Item **A** still asks for it. | `CONTEXT.md:175` |
+| 13 | Alerting on a deposit pending past its window is **not built**. The admin Deposits page shows it; someone has to look. Both of plan 084's loud log lines are still only log lines. | `docs/payments/globepay365-setup.md:388-389` |
 
 ---
 
@@ -67,8 +68,8 @@ and carries the date it was observed.
 **code length**, the **code TTL**, and the **max check attempts per verification**?
 
 **Why it matters.** The per-phone limiter allows 30 checks / 24 h
-(`CONTEXT.md:219`). Against a 6-digit code that is roughly 3×10⁻⁵ per day; against a
-**4-digit** code it is roughly 0.3% — four orders of magnitude apart. Our own check
+(`CONTEXT.md:219`). Against a 6-digit code that is 30/10⁶ ≈ 3×10⁻⁵ per day; against a
+**4-digit** code it is 30/10⁴ = 0.3% — two orders of magnitude apart. Our own check
 route accepts any 4–10 digit code (settled #1), so a short service configuration
 would not be rejected anywhere in our stack.
 
