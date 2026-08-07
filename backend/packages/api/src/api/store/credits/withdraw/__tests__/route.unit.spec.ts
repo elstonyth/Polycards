@@ -4,20 +4,29 @@ import { POST } from '../route';
 // derived, not one the caller typed. Medusa's express-loader sets
 // `trust proxy` 1 unconditionally, so req.ip is that value; a raw
 // X-Forwarded-For header is attacker-controlled and only a fallback.
-jest.mock('../../../../../modules/packs/globepay-deposit', () => ({
-  startGlobePayDeposit: jest.fn(async () => ({ url: 'https://cashier/x' })),
+//
+// This route is the money-OUT direction, so it matters MORE here than on the
+// deposit: whatever geo/velocity/AML checks the PSP runs on a payout would
+// otherwise be evaluated against an address the payee chose.
+jest.mock('../../../../../modules/packs/globepay-withdrawal', () => ({
+  startGlobePayWithdrawal: jest.fn(async () => ({ status: 'pending' })),
 }));
 
-import { startGlobePayDeposit } from '../../../../../modules/packs/globepay-deposit';
+import { startGlobePayWithdrawal } from '../../../../../modules/packs/globepay-withdrawal';
 
-const startMock = startGlobePayDeposit as jest.Mock;
+const startMock = startGlobePayWithdrawal as jest.Mock;
 
 const res = { json: jest.fn() } as never;
 
 const mkReq = (over: Record<string, unknown> = {}) =>
   ({
     auth_context: { actor_id: 'cus_1' },
-    body: { amount: 50 },
+    body: {
+      amount: 50,
+      bank_code: 'MBB',
+      account_number: '1234567890',
+      account_holder_name: 'A Customer',
+    },
     headers: {},
     scope: {},
     socket: {},
@@ -27,14 +36,14 @@ const mkReq = (over: Record<string, unknown> = {}) =>
 const sentIp = () => startMock.mock.calls[0][1].ipAddress;
 
 const ORIGINAL_ENV = {
-  GLOBEPAY_NOTIFY_URL: process.env.GLOBEPAY_NOTIFY_URL,
-  GLOBEPAY_RETURN_URL: process.env.GLOBEPAY_RETURN_URL,
+  GLOBEPAY_WITHDRAW_NOTIFY_URL: process.env.GLOBEPAY_WITHDRAW_NOTIFY_URL,
+  GLOBEPAY_PAYOUT_VERIFY_URL: process.env.GLOBEPAY_PAYOUT_VERIFY_URL,
 };
 
 beforeEach(() => {
   startMock.mockClear();
-  process.env.GLOBEPAY_NOTIFY_URL = 'https://us/notify';
-  process.env.GLOBEPAY_RETURN_URL = 'https://us/return';
+  process.env.GLOBEPAY_WITHDRAW_NOTIFY_URL = 'https://us/withdraw-notify';
+  process.env.GLOBEPAY_PAYOUT_VERIFY_URL = 'https://us/payout-verify';
 });
 
 // These are process-wide: leaving them set leaks into whatever runs next and
@@ -46,7 +55,7 @@ afterEach(() => {
   }
 });
 
-describe('POST /store/credits/deposit — customer IP', () => {
+describe('POST /store/credits/withdraw — customer IP', () => {
   it('prefers req.ip over a spoofable X-Forwarded-For', async () => {
     await POST(
       mkReq({
@@ -88,16 +97,17 @@ describe('POST /store/credits/deposit — customer IP', () => {
     expect(sentIp()).toBe('10.0.0.1');
   });
 
-  // Either URL missing must fail closed. Covering only NOTIFY would let a
-  // dropped RETURN guard through — money in, no credit, no test.
-  it.each(['GLOBEPAY_NOTIFY_URL', 'GLOBEPAY_RETURN_URL'] as const)(
-    'fails closed when %s is unset — money in, no credit',
-    async (missing) => {
-      delete process.env[missing];
-      await expect(POST(mkReq({ ip: '203.0.113.7' }), res)).rejects.toThrow(
-        /temporarily unavailable/i,
-      );
-      expect(startMock).not.toHaveBeenCalled();
-    },
-  );
+  // Either URL missing must fail closed: without a NotifyUrl a failed payout
+  // could never refund, and without a verify URL their Payout Verification
+  // would reject every payout with nothing in our logs explaining why.
+  it.each([
+    'GLOBEPAY_WITHDRAW_NOTIFY_URL',
+    'GLOBEPAY_PAYOUT_VERIFY_URL',
+  ] as const)('fails closed when %s is unset', async (missing) => {
+    delete process.env[missing];
+    await expect(POST(mkReq({ ip: '203.0.113.7' }), res)).rejects.toThrow(
+      /not open yet/i,
+    );
+    expect(startMock).not.toHaveBeenCalled();
+  });
 });

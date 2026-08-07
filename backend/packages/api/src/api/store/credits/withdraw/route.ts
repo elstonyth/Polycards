@@ -4,6 +4,7 @@ import {
 } from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
 import { startGlobePayWithdrawal } from '../../../../modules/packs/globepay-withdrawal';
+import { payerIpOf } from '../../../utils/payer-ip';
 
 // POST /store/credits/withdraw — start a real GlobePay365 payout (method WD).
 // The ledger is debited HERE, before the gateway call; a refused or failed
@@ -48,12 +49,10 @@ export async function POST(
     );
   }
 
-  const forwarded = req.headers['x-forwarded-for'];
-  const ipAddress =
-    (typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : '') ||
-    req.ip ||
-    req.socket?.remoteAddress ||
-    '0.0.0.0';
+  // The paying customer's IP, derived from the proxy chain — NOT from the
+  // client-settable header. See src/api/utils/payer-ip.ts for why the order
+  // matters.
+  const ipAddress = payerIpOf(req);
 
   const result = await startGlobePayWithdrawal(
     req.scope,
