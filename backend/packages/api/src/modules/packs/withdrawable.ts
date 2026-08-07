@@ -1,3 +1,5 @@
+import { MedusaError } from '@medusajs/framework/utils';
+
 // Playthrough withdrawal gate: a balance is withdrawable only once the
 // customer's lifetime DEPOSIT-FUNDED pack spend covers their lifetime deposits
 // (used >= deposited). "Used" counts only the deposit-funded portion of each
@@ -36,4 +38,50 @@ export interface PlaythroughState {
 export function playthroughState(t: PlaythroughInput): PlaythroughState {
   const remainingCents = Math.max(0, t.depositedCents - t.usedCents);
   return { withdrawable: remainingCents === 0, remainingCents };
+}
+
+/** The wallet fields the gate branches on (a structural subset of
+ *  walletSummary's return, so either caller can pass its result straight in). */
+export interface WithdrawalGateWallet {
+  withdrawable: number;
+  isFrozen: boolean;
+  playthrough: { remaining: number };
+}
+
+/**
+ * The three customer-facing refusals of the withdrawal gate, in one place.
+ * Returns the error to throw, or null when the amount is allowed.
+ *
+ * Defined HERE, and not at either call site, because the messages have exactly
+ * two callers that must stay byte-identical: the authoritative gate inside
+ * PacksModuleService.withdrawForCashout (under the credit: advisory lock), and
+ * the pre-row precheck in globepay-withdrawal.ts. The storefront and its tests
+ * match on these strings, so a second copy that drifted would surface as a
+ * silently different refusal on one path only.
+ *
+ * Order matters: freeze outranks playthrough, which outranks the plain
+ * "you can withdraw up to X" cap — a frozen account must never be told it is
+ * merely short of playthrough.
+ */
+export function withdrawalGateError(
+  wallet: WithdrawalGateWallet,
+  amount: number,
+): MedusaError | null {
+  if (amount <= wallet.withdrawable) return null;
+  if (wallet.isFrozen) {
+    return new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'Withdrawals are unavailable while your account is under review. Contact support.',
+    );
+  }
+  if (wallet.playthrough.remaining > 0) {
+    return new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      `RM ${wallet.playthrough.remaining.toFixed(2)} of your deposits must be spent on packs before you can withdraw.`,
+    );
+  }
+  return new MedusaError(
+    MedusaError.Types.INVALID_DATA,
+    `You can withdraw up to RM ${wallet.withdrawable.toFixed(2)} right now.`,
+  );
 }

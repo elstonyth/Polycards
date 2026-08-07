@@ -17,7 +17,7 @@ import {
   type DeliveryStatus,
 } from './delivery';
 import { rewardsRedemptionEnabled } from './rewards-gate';
-import { playthroughState } from './withdrawable';
+import { playthroughState, withdrawalGateError } from './withdrawable';
 import { FRAME_LEVELS } from './avatar-frames';
 import Pack from './models/pack';
 import Card from './models/card';
@@ -64,6 +64,7 @@ import PurchaseInvoice from './models/purchase-invoice';
 import PurchaseInvoiceLine from './models/purchase-invoice-line';
 import StockMovement from './models/stock-movement';
 import { pageAll } from '../../api/utils/page-all';
+import { positiveIntFromEnv } from '../../api/utils/rate-limit';
 import {
   resolveBuybackRate,
   buybackAmount,
@@ -127,6 +128,17 @@ import type { MedusaContainer } from '@medusajs/framework/types';
 // between creditSummary and walletSummary so the two SQL scans can't drift.
 const DEPOSITED_PT_FILTER =
   "reason = 'topup' AND amount > 0 AND external_funded_cents IS NOT NULL";
+
+// Default rolling-24h cashout ceiling, in RM. The per-transaction payout band
+// (RM 50 – RM 50,000, globepay-withdrawal.ts) bounds ONE payout; before this
+// cap nothing summed prior withdrawals over any window, so a compromised
+// account's blast radius was "the whole balance, as fast as the rate limiter
+// allows" with no velocity signal to alert on.
+//
+// The env override is read PER CALL inside withdrawForCashout (never latched at
+// module load) so a spec can drive both cap states through one booted app —
+// the convention plan 066 established.
+const GLOBEPAY_WD_DAILY_MAX_RM_DEFAULT = 50_000;
 
 // Postgres unique-violation detector (SQLSTATE 23505) for the commission
 // idempotency index. See settleOpen's commission catch for the exact semantics
@@ -1113,6 +1125,160 @@ class PacksModuleService extends MedusaService({
       );
     }
     return result;
+  }
+
+  // The ONE writer of a cashout DEBIT: the withdrawal gate and the debit, as a
+  // single serialized unit.
+  //
+  // Why the gate cannot merely PRECEDE the debit (it used to, in
+  // globepay-withdrawal.ts, with no lock held across the two): `floor: 0` in
+  // mutateCreditAtomic guards the RAW balance. It knows nothing about `locked`
+  // — walletSummary's withdrawable is `balance − locked` (minus the freeze flag
+  // and the playthrough gate), and the floor cannot see any of that. So N
+  // concurrent POST /store/credits/withdraw requests all read the SAME
+  // withdrawable, all pass the policy check, and all debit, bounded only by the
+  // raw balance: a customer holding unmatured or suspended commission credits
+  // could move up to `locked` more than they are entitled to, out to a bank,
+  // after which the reversal and auto-freeze machinery has nothing left to claw
+  // back. The rate limiter permits a 5-request burst per 10s, so that
+  // concurrency is reachable. Holding `credit:<customer>` across the read AND
+  // the write is what makes the policy layer atomic; floor 0 stays underneath
+  // as the raw-overdraft backstop.
+  //
+  // Rejected alternative: making `floor` mean `balance − locked` globally.
+  // Packs are deliberately spendable from the raw balance (walletSummary:
+  // "Spending on packs stays unrestricted either way — the gate only limits
+  // cashout"), so that would change what players can spend on packs. `floor`
+  // and `withdrawable` mean different things and always will.
+  //
+  // Re-entrancy: withdrawCreditsWithLedger → mutateCreditAtomic re-acquires
+  // this SAME advisory key below. Postgres advisory locks are re-entrant per
+  // session, so that is a no-op. The invariant it must not break is at most one
+  // DISTINCT `credit:` key per transaction (see matureDueCommissions) — this
+  // method only ever takes its own customer's.
+  @InjectTransactionManager()
+  async withdrawForCashout(
+    input: {
+      customerId: string;
+      /** POSITIVE RM to withdraw; the ledger debit is written as −amount. */
+      amount: number;
+      /** Our payout reference — also the ledger `reference` and gateway ref. */
+      merchantTransactionId: string;
+      idempotencyReference: string;
+      bankCode: string | null;
+      accountNumber: string | null;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): ReturnType<PacksModuleService['mutateCreditAtomic']> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+
+    // Sign guard. This method inverts the caller's convention (positive RM in,
+    // negative delta out), so a caller passing an already-negated amount would
+    // silently CREDIT the customer instead of debiting them. Fail loud — the
+    // same reasoning as mutateCreditAtomic's own topup/pack_open sign
+    // invariants.
+    if (!Number.isFinite(input.amount) || input.amount <= 0) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'Withdrawal amount must be greater than 0.',
+      );
+    }
+
+    // 1) Serialize this customer's credit mutations across the WHOLE gate +
+    //    debit. Same idiom and same key as mutateCreditAtomic.
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `credit:${input.customerId}`,
+    ]);
+
+    // 2) The withdrawal gate, read INSIDE the lock (withdrawable.ts's own
+    //    invariant: "the cashout writer MUST route through this").
+    //    walletSummary folds THREE limits into one number: the freeze flag
+    //    (frozen accounts withdraw nothing — it is the fraud-response tool),
+    //    locked unmatured commissions, and the playthrough gate (deposits must
+    //    be spent on packs before they can leave to a bank — the
+    //    anti-laundering rule). Threading sharedContext is what makes the read
+    //    see this locked transaction rather than a separate connection.
+    const wallet = await this.walletSummary(
+      input.customerId,
+      undefined,
+      sharedContext,
+    );
+    //    THIS is the authoritative gate — the decision that makes the payout
+    //    safe. globepay-withdrawal.ts calls the same helper unlocked before
+    //    writing its row, but only to avoid leaving debris on a refusal that is
+    //    already certain; it decides nothing.
+    const gateError = withdrawalGateError(wallet, input.amount);
+    if (gateError) throw gateError;
+
+    // 3) Rolling-24h VALUE cap, summed under the same lock so the sum and the
+    //    debit cannot interleave either.
+    //
+    //    `pending` and `settled` both moved (or are still moving) money;
+    //    `failed` did not — a refused or refunded payout must never consume the
+    //    customer's cap. Those three are the entire domain of the column's
+    //    CHECK constraint (Migration20260722170000), which also supplies the
+    //    (status, created_at) and (customer_id) partial indexes this scan uses.
+    //
+    //    The just-created row is EXCLUDED by merchant_transaction_id:
+    //    globepay-withdrawal.ts writes it as `pending` BEFORE calling this
+    //    method (the callback echoes only MerchantTransactionId, so that row is
+    //    the only way back to the customer), so an unfiltered sum would count
+    //    this very attempt against its own cap and refuse every withdrawal
+    //    above half the ceiling.
+    const capCents =
+      positiveIntFromEnv(
+        'GLOBEPAY_WD_DAILY_MAX_RM',
+        GLOBEPAY_WD_DAILY_MAX_RM_DEFAULT,
+      ) * 100;
+    const capRows = await em.execute<{ sum_cents: string | null }[]>(
+      'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS sum_cents ' +
+        'FROM globepay_withdrawal ' +
+        'WHERE customer_id = ? AND deleted_at IS NULL ' +
+        "AND status IN ('pending', 'settled') " +
+        "AND created_at > now() - interval '24 hours' " +
+        'AND merchant_transaction_id <> ?',
+      [input.customerId, input.merchantTransactionId],
+    );
+    // Integer cents throughout — the ledger's unit convention; comparing RM
+    // floats here would drift against the amounts actually written.
+    const windowCents = Number(capRows[0]?.sum_cents ?? 0);
+    const amountCents = Math.round(input.amount * 100);
+    if (windowCents + amountCents > capCents) {
+      // Clamped at 0: a customer already over the ceiling (an operator
+      // adjustment, or a lowered env) must not be told they may withdraw a
+      // NEGATIVE amount more today.
+      const remaining = Math.max(0, capCents - windowCents) / 100;
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `Daily withdrawal limit reached. You can withdraw RM ${remaining.toFixed(2)} more today.`,
+      );
+    }
+
+    // 4) Debit on the SAME context, so it joins this locked transaction instead
+    //    of opening its own.
+    //
+    //    The cap above runs BEFORE mutateCreditAtomic's idempotent-replay
+    //    check, so in principle a genuine replay could be cap-rejected. Not
+    //    reachable today: newMerchantTransactionId() mints a fresh reference
+    //    per attempt, so no two calls here ever share an idempotencyReference.
+    return await this.withdrawCreditsWithLedger(
+      {
+        customerId: input.customerId,
+        amount: -input.amount,
+        reason: 'cashout',
+        reference: input.merchantTransactionId,
+        idempotencyReference: input.idempotencyReference,
+        floor: 0,
+        ledger: {
+          outcome: 'requested',
+          bankCode: input.bankCode,
+          accountNumber: input.accountNumber,
+          // Their id does not exist yet — SubmitWithdrawal has not run.
+          gatewayRef: input.merchantTransactionId,
+        },
+      },
+      sharedContext,
+    );
   }
 
   // Append-only reversal of a single ledger row (the open-saga compensation).

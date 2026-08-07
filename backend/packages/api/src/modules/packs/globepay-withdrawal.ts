@@ -8,6 +8,7 @@ import {
   GlobePayError,
 } from './globepay-client';
 import { newMerchantTransactionId } from './globepay-deposit';
+import { withdrawalGateError } from './withdrawable';
 
 // The submit half of the GlobePay365 payout loop (method WD), the inverse of
 // globepay-deposit.ts with the money ordering flipped:
@@ -189,33 +190,23 @@ export async function startGlobePayWithdrawal(
   const config = globepayConfigFromEnv();
   const packs = scope.resolve<PacksModuleService>(PACKS_MODULE);
 
-  // 0) The withdrawal gate (withdrawable.ts's own invariant: "the cashout
-  // writer MUST route through this"). walletSummary folds THREE limits into
-  // one number: the freeze flag (frozen accounts withdraw nothing — it is
-  // the fraud-response tool), locked unmatured commissions, and the
-  // playthrough gate (deposits must be spent on packs before they can leave
-  // to a bank — the anti-laundering rule). floor 0 below still guards raw
-  // overdraft atomically; this check enforces the policy layer, and the
-  // small check-then-debit window can only move in the customer's favor.
-  const wallet = await packs.walletSummary(input.customerId);
-  if (amount > wallet.withdrawable) {
-    if (wallet.isFrozen) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_ALLOWED,
-        'Withdrawals are unavailable while your account is under review. Contact support.',
-      );
-    }
-    if (wallet.playthrough.remaining > 0) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_ALLOWED,
-        `RM ${wallet.playthrough.remaining.toFixed(2)} of your deposits must be spent on packs before you can withdraw.`,
-      );
-    }
-    throw new MedusaError(
-      MedusaError.Types.INVALID_DATA,
-      `You can withdraw up to RM ${wallet.withdrawable.toFixed(2)} right now.`,
-    );
-  }
+  // 0) PRECHECK — NOT the gate. This is an unlocked, read-only fast path whose
+  // only job is to avoid writing a row for a refusal that is already certain.
+  // It decides nothing: the authoritative gate is inside
+  // packs.withdrawForCashout, under the per-customer `credit:` advisory lock,
+  // and it re-reads this same wallet there. Deleting this block would change no
+  // outcome, only leave a `failed` row behind on every rejected attempt —
+  // which is the point: those rows are an operator-facing surface (the admin
+  // Withdrawals page), and filling it with attempts that never moved money is
+  // how an operator learns to stop reading it.
+  //
+  // Do NOT promote this to the decision. Two concurrent requests can both pass
+  // here and only one can pass under the lock.
+  const precheckError = withdrawalGateError(
+    await packs.walletSummary(input.customerId),
+    amount,
+  );
+  if (precheckError) throw precheckError;
 
   const merchantTransactionId = newMerchantTransactionId();
 
@@ -233,27 +224,29 @@ export async function startGlobePayWithdrawal(
     },
   ]);
 
-  // 2) Debit. floor 0 makes "insufficient balance" atomic with the balance
-  // read — no separate check-then-debit race.
+  // 2) GATE + DEBIT, as one serialized transaction inside the service.
+  // The withdrawal gate lives in packs.withdrawForCashout — freeze flag,
+  // locked unmatured commissions, playthrough, and the rolling-24h value cap
+  // — held under the per-customer `credit:` advisory lock TOGETHER with the
+  // debit. It used to be checked here, before and outside any lock, which let
+  // concurrent requests all read the same `withdrawable`, all pass, and all
+  // debit: floor 0 (the only atomic guard) sees the RAW balance, not `locked`.
+  //
+  // A gate refusal that the precheck above did not already catch (a race, or a
+  // balance that moved between the two reads) arrives as a throw from this call
+  // and closes the row, exactly like an insufficient-balance debit always has.
   let debit;
   try {
-    debit = await packs.withdrawCreditsWithLedger({
+    debit = await packs.withdrawForCashout({
       customerId: input.customerId,
-      amount: -amount,
-      reason: 'cashout',
-      reference: merchantTransactionId,
+      amount,
+      merchantTransactionId,
       idempotencyReference: withdrawalIdempotencyReference(
         input.customerId,
         merchantTransactionId,
       ),
-      floor: 0,
-      ledger: {
-        outcome: 'requested',
-        bankCode: bankCode,
-        accountNumber: accountNumber,
-        // Their id does not exist yet — SubmitWithdrawal has not run.
-        gatewayRef: merchantTransactionId,
-      },
+      bankCode,
+      accountNumber,
     });
   } catch (error) {
     // Nothing was debited; the row must not sit pending or the sweep would
