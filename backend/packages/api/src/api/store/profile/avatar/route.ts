@@ -62,9 +62,15 @@ export function mergeAvatarMetadata(
 // magic-byte sniff + dimension gates, 'avatar' profile) with a 5 MB cap.
 // Stores the original via the configured file provider and writes
 // customer.metadata.avatar_url. Metadata is MERGED (read-modify-write) so
-// equipping a frame and changing the photo never clobber each other; the
-// stock POST /store/customers/me rejects client metadata, so these keys are
-// written only here and in /store/profile/frame. The merge runs through
+// equipping a frame and changing the photo never clobber each other. These keys
+// are written only here and in /store/profile/frame — but that is enforced by
+// OUR middleware, not the framework: Medusa's stock POST /store/customers/me
+// accepts client metadata (StoreUpdateCustomer declares it `nullish()` and the
+// route forwards req.validatedBody), and rejectCustomerMetadata
+// (../../../utils/customer-metadata-guard.ts, wired at middlewares.ts:405
+// and :419) is what refuses it. Since plan 088 that guard also gates saved
+// payout destinations, so it is a money control now — see
+// store/credits/withdraw/accounts/route.ts. The merge runs through
 // PacksModuleService.mutateCustomerMetadata so the read and the write are
 // serialized on a `metadata:<customer>` advisory lock — the blob is shared with
 // the saved-bank-account route, and an unlocked merge here silently drops an

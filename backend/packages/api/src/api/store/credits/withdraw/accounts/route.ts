@@ -17,9 +17,26 @@ import { sendSavedAccountAddedNotice } from '../../../../../modules/packs/saved-
 
 // Saved payout bank accounts — GET (list) / POST (add) / DELETE (remove) on
 // /store/credits/withdraw/accounts. Storage is customer.metadata.bank_accounts,
-// merged read-modify-write like the avatar/frame routes (the stock
-// POST /store/customers/me rejects client metadata, so a validated custom
-// route is the only way a customer can write these). Both writes go through
+// merged read-modify-write like the avatar/frame routes.
+//
+// WHAT KEEPS THIS ROUTE THE ONLY WRITER is our own middleware, NOT the
+// framework. Medusa's stock POST /store/customers/me *accepts* client metadata:
+// node_modules/@medusajs/medusa/dist/api/store/customers/validators.js declares
+// StoreUpdateCustomer with `metadata: z.record(z.unknown()).nullish()`, and
+// .../customers/me/route.js passes req.validatedBody straight into
+// updateCustomersWorkflow. The only thing that refuses it is
+// rejectCustomerMetadata (utils/customer-metadata-guard.ts), wired at
+// middlewares.ts:405 (/store/customers) and :419 (/store/customers/me).
+//
+// Since plan 088 that guard is a MONEY CONTROL, not the cosmetic one it was
+// written as. It no longer merely protects an avatar URL or an equipped frame:
+// it is the only thing between a stolen customer bearer token and an arbitrary
+// payout destination. Unwire it and a token holder can POST a whole
+// bank_accounts array — including a backdated `savedAt` that clears the
+// cooling-off window below — then withdraw to it. Do not "simplify" it away on
+// the belief that the framework already rejects metadata.
+//
+// Both writes go through
 // PacksModuleService.mutateCustomerMetadata, which holds a `metadata:<customer>`
 // advisory lock across the read and the write — the blob is shared with the
 // avatar and frame routes, and an unlocked merge drops whichever key the loser

@@ -329,6 +329,72 @@ it says the narrowing cost nothing in practice and this can stay unbuilt.
 
 ---
 
+## I. The phone-change route is a faster password oracle than the login route
+
+**Not a console question.** Unlike A–H, this one is answerable by reading this
+repository, and it is recorded here because the answer is a **design decision nobody
+has made yet**, not a fact nobody has looked up. Do not wait on a third party for it.
+
+**Question.** Should `POST /store/phone-verification/change` — which now verifies a
+password — carry a per-credential brute-force budget, and what should key it?
+
+**Why it matters.** Plan 080 added a re-auth gate to that route: for an account with an
+emailpass identity it calls `authService.authenticate('emailpass', …)` with a password
+from the request body. That makes it a **password-testing endpoint**, but it is still
+wired to the authed write tier, which was sized for delivery orders and avatar
+uploads:
+
+| Route | Limiter | Budget | Keyed on |
+| --- | --- | --- | --- |
+| `/auth/customer/emailpass` | `authIdentifierRateLimit` + `authRateLimit` | 5 / 60 s, 20 / 1 h | the **email** in the body |
+| `/store/phone-verification/change` | `deliveryWriteRateLimit` | 10 / 10 s, 30 / 60 s | `auth_context.actor_id` |
+
+30 guesses/minute versus 20 guesses/hour is **90× more throughput against the same
+credential** on the route that was never meant to test one. The attacker model is
+narrower than it looks — the change route sits behind `authenticate('customer',
+['bearer'])`, so a guesser needs a valid session for the account whose password they
+are guessing — but that is exactly the plan-080 threat: a stolen session that wants
+the password in order to make the takeover permanent. The gate is what stops it, and
+the gate is currently cheap to grind.
+
+**Why the obvious reuse does not work.** Putting `authIdentifierRateLimit` on the
+matcher fails *silently* rather than loudly, which is worse than not wiring it:
+
+- It keys on `emailBodyKeyOf` (`api/utils/rate-limit.ts:522`), which reads an **email
+  from the request body**. The change body is `{ phone, token, password,
+  old_phone_token }` — no email. The account's email is on the customer row, reached
+  by a `retrieveCustomer` the route already does and a middleware would have to
+  duplicate.
+- With no key extracted, `skipWhenNoKey: true` (`:792`) makes the limiter **skip the
+  route entirely**. Wiring it would look like hardening and would add none — the
+  matcher would read as protected to anyone scanning `middlewares.ts`.
+
+Dropping `skipWhenNoKey` is not the fix either: that flag exists because the `/auth/*`
+wildcard also covers the identifier-less emailpass `update` route, where falling back
+to `ip:` turns a per-account budget into a sitewide ceiling.
+
+**Proposed shape (NOT built — this needs its own plan).** A small per-actor
+**credential-attempt** limiter, distinct from the write tier, wired to the change route
+*alongside* `deliveryWriteRateLimit` rather than replacing it. `actor_id` is the right
+key here and needs no body parsing: the session is already authenticated, and one
+session grinding one account is precisely the threat. Budget on the order of the auth
+tier (single digits per minute, low tens per hour) — a human changing their phone
+number enters their password once, maybe twice. Worth checking in the same plan
+whether any other route has quietly become a credential check since it was wired.
+
+**Where to look.** `backend/packages/api/src/api/middlewares.ts:340-345` (the change
+matcher), `:269` and `:274` (the auth matchers), `api/utils/rate-limit.ts:764-800`
+(`createAuthIdentifierRateLimit`) and `:686-692` (`createDeliveryWriteRateLimit`), and
+the gate itself in `api/store/phone-verification/change/route.ts`.
+
+**Record.** The decision — build it, or accept the 90× with the reason why (the
+bearer-token precondition is a legitimate argument for accepting it). If accepted, say
+so in `middlewares.ts` at the matcher, so the next auditor does not re-raise it.
+
+> **Answer:** _(open)_
+
+---
+
 ## Maintenance notes
 
 - **Answered items move up, they do not disappear.** The next auditor needs to know a

@@ -76,6 +76,20 @@ const PHONE_CHANGE_RULES: ErrorRule[] = [
     NEEDS_OLD_PHONE_PROOF,
     'Verify your current phone number before changing it.',
   ],
+  // Expiry, not a mistake the user made. A proof is good for 10 minutes
+  // (PROOF_TTL_MS, backend/packages/api/src/utils/phone-verification.ts —
+  // fixed, no env knob), and the Google-only flow spends that budget twice:
+  // SettingsForm submits the change, is refused for the OLD number, then runs a
+  // whole second SMS round-trip while still replaying the NEW number's original
+  // proof. Carrier delay plus reading a code out of a notification can outlive
+  // the first token, and the generic "Could not update your phone number.
+  // Please try again." sends them back round the same loop with the same dead
+  // token — the retry can never succeed. Name the expiry so "start again"
+  // reads as the fix rather than the thing that just failed.
+  [
+    /phone verification required/i,
+    'That verification expired. Request a new code and enter it within 10 minutes.',
+  ],
 ];
 
 export async function startPhoneOtp(input: {

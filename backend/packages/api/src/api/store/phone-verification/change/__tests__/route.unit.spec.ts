@@ -192,6 +192,42 @@ describe('POST /store/phone-verification/change — emailpass accounts', () => {
     expect(updateCustomers.mock.calls.length).toBe(0);
   });
 
+  // ORDERING, not outcome. The re-auth gate sits AFTER the new-number proof
+  // check on purpose (route.ts documents it): a caller holding no valid proof
+  // is refused before any password is examined, so this route cannot be used as
+  // a password oracle by someone who never passed the OTP step.
+  //
+  // Every OTHER case in this file passes with the gate hoisted above the proof
+  // check — the success paths all carry valid proofs, and the UNAUTHORIZED
+  // cases never exercise a BAD one. This case is the only thing pinning the
+  // order. Mirror of password-reset/__tests__/route.unit.spec.ts, which pins
+  // its own gate the same way. Hoist the gate and this goes red twice: the
+  // error becomes UNAUTHORIZED, and authenticate gets called.
+  it('answers a bad proof with the proof error, without consulting the auth module', async () => {
+    const err = await rejection(
+      POST(
+        mkReq({
+          phone: NEW_PHONE,
+          // Well-formed, correctly signed, correct phone — WRONG purpose, so
+          // verifyPhoneProof rejects it. A real password rides along, which is
+          // what makes this an oracle test rather than a duplicate of the
+          // missing-password case above.
+          token: signPhoneProof(SECRET, NEW_PHONE, 'password-reset'),
+          password: PASSWORD,
+        }),
+        mkRes() as never,
+      ),
+    );
+
+    expect(err.type).toBe(MedusaError.Types.INVALID_DATA);
+    expect(err.message).toBe('Phone verification required.');
+    // THE ordering assertion: a valid password was in the body and the auth
+    // module never saw it. `.mock.calls.length`, not `.not.toHaveBeenCalled()`
+    // — see the secret hygiene note at the top of this file.
+    expect(authenticate.mock.calls.length).toBe(0);
+    expect(updateCustomers.mock.calls.length).toBe(0);
+  });
+
   it('refuses when the customer row has no readable email', async () => {
     customerRow = { id: CUSTOMER_ID, email: null, phone: OLD_PHONE };
     const err = await rejection(

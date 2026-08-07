@@ -179,6 +179,26 @@ export function resolveWithdrawalDestination(args: {
     );
   }
 
+  // The id is not a label, it is sha256(bankCode, accountNumber). That
+  // derivation is the ONLY reason an id cannot be repointed at a different bank
+  // account — it is what lets the withdraw route accept an `account_id` and no
+  // bank fields at all. Today it holds because every writer computes it (the
+  // save route, the backfill script); recomputing it HERE makes it hold by
+  // enforcement instead of by convention, at the single read the money path
+  // depends on. Any future writer that forgets savedBankAccountId, or anything
+  // that reaches customer metadata directly, is refused rather than paid.
+  //
+  // Same message as the unknown-id branch on purpose: a caller learns "not a
+  // valid destination", never "tampering detected".
+  if (
+    savedBankAccountId(account.bankCode, account.accountNumber) !== account.id
+  ) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      'Select a saved bank account.',
+    );
+  }
+
   const usableAt = destinationUsableAt(account, args.cooldownHours);
   if (!usableAt) {
     throw new MedusaError(
