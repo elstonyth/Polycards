@@ -31,8 +31,9 @@ export const CreditTransaction = model
     // whatever races the API layer loses (Postgres ignores NULLs in unique
     // indexes, so top-up rows don't collide).
     pull_id: model.text().unique().nullable(),
-    // Payment-gateway reference (top-up rows only; null for buybacks). Today
-    // the mock gateway's fake reference; the real gateway's charge id later.
+    // Payment-gateway reference (topup AND cashout rows; null for buybacks,
+    // pack opens and other internal rows). Customer-facing: /store/credits
+    // returns it and the receipt emails quote it.
     reference: model.text().nullable(),
     // Phase 1b — external-funded sen this row added (top-up, +) or consumed
     // (pack_open, −). 0 for buyback/adjustment. NULL on pre-1b rows (read as 0,

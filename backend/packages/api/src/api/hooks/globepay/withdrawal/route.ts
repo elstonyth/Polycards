@@ -9,6 +9,7 @@ import { globepayConfigFromEnv } from '../../../../modules/packs/globepay-client
 import { withdrawalRefundReference } from '../../../../modules/packs/globepay-withdrawal';
 import { notifyFeed } from '../../../../modules/packs/notify-feed';
 import { withdrawalFeedKey } from '../../../../modules/packs/feed-events';
+import { sendWithdrawalReceipt } from '../../../../modules/packs/withdrawal-receipt';
 
 // POST /hooks/globepay/withdrawal — GlobePay365 server-to-server payout
 // callback (§1.6). The deposit hook's mirror with the money flow inverted:
@@ -192,6 +193,18 @@ export async function POST(
           // Never fail a committed refund over a notification.
         }
       }
+      // The emailed record. DELIBERATELY outside the !replayed guard: a crash
+      // between the refund commit and this send leaves replayed=true on the
+      // gateway's retry, and gating on it would lose the email forever. The
+      // notification module's unique idempotency_key is what dedupes — a
+      // second insert throws and sendWithdrawalReceipt swallows it.
+      await sendWithdrawalReceipt(req.scope, {
+        customerId: withdrawal.customer_id,
+        amount: Number(withdrawal.amount),
+        reference: gatewayTransactionId || merchantTransactionId,
+        merchantTransactionId,
+        outcome: 'refunded',
+      });
     } catch (error) {
       // Transient: do NOT ack — the customer's refund must land on retry.
       req.scope
@@ -242,6 +255,17 @@ export async function POST(
   } catch {
     // Never fail a committed settle over a notification.
   }
+
+  // The emailed record. Same replay guard family as the feed row, and its own
+  // send is non-throwing — the settle is committed and must not be undone by
+  // an email problem.
+  await sendWithdrawalReceipt(req.scope, {
+    customerId: withdrawal.customer_id,
+    amount: Number(withdrawal.amount),
+    reference: gatewayTransactionId || merchantTransactionId,
+    merchantTransactionId,
+    outcome: 'paid',
+  });
 
   res.status(200).send('success');
 }

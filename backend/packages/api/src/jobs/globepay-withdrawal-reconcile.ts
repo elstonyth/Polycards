@@ -14,6 +14,7 @@ import {
 } from '../modules/packs/globepay-client';
 import { notifyFeed } from '../modules/packs/notify-feed';
 import { withdrawalFeedKey } from '../modules/packs/feed-events';
+import { sendWithdrawalReceipt } from '../modules/packs/withdrawal-receipt';
 import {
   GLOBEPAY_RECONCILE_BATCH,
   GLOBEPAY_WD_SLOW_AFTER_MS,
@@ -123,6 +124,20 @@ export default async function globepayWithdrawalReconcileJob(
         } catch {
           // Never fail a committed settle over a notification.
         }
+        // Same receipt the callback would have sent. The shared idempotency
+        // anchor means a late callback cannot produce a second one.
+        await sendWithdrawalReceipt(container, {
+          customerId: withdrawal.customer_id,
+          amount: Number(withdrawal.amount),
+          // `||`, not `??` — an empty-string gateway id must fall through, or
+          // the template fails closed AFTER the idempotency key is burned and
+          // the email is permanently unsent.
+          reference:
+            withdrawal.gateway_transaction_id ||
+            withdrawal.merchant_transaction_id,
+          merchantTransactionId: withdrawal.merchant_transaction_id,
+          outcome: 'paid',
+        });
         continue;
       }
 
@@ -197,6 +212,19 @@ export default async function globepayWithdrawalReconcileJob(
           // Never fail a committed refund over a notification.
         }
       }
+      // DELIBERATELY outside the !replayed guard — a crash between the refund
+      // commit and this send leaves replayed=true on the next sweep, and
+      // gating on it would lose the email forever. The notification module's
+      // unique idempotency_key dedupes instead.
+      await sendWithdrawalReceipt(container, {
+        customerId: withdrawal.customer_id,
+        amount: Number(withdrawal.amount),
+        reference:
+          withdrawal.gateway_transaction_id ||
+          withdrawal.merchant_transaction_id,
+        merchantTransactionId: withdrawal.merchant_transaction_id,
+        outcome: 'refunded',
+      });
     } catch (error) {
       // One bad payout must not abort the sweep. It stays pending and is
       // retried next run.

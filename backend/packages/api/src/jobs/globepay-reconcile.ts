@@ -126,19 +126,25 @@ export default async function globepayReconcileJob(container: MedusaContainer) {
           } catch {
             // Never fail a committed credit over a notification.
           }
-
-          // Same receipt the callback would have sent. The shared idempotency
-          // anchor means a late callback cannot produce a second one.
-          await sendTopupReceipt(container, {
-            customerId: deposit.customer_id,
-            amount: action.amount,
-            reference:
-              deposit.gateway_transaction_id ??
-              deposit.merchant_transaction_id,
-            merchantTransactionId: deposit.merchant_transaction_id,
-            paymentMethodCode: deposit.payment_method_code,
-          });
         }
+
+        // Same receipt the callback would have sent. DELIBERATELY outside the
+        // !replayed guard — a crash between the credit commit and this send
+        // leaves replayed=true on the next sweep, and gating on it would lose
+        // the email forever. The notification module's unique idempotency_key
+        // dedupes (a late callback cannot produce a second one either).
+        await sendTopupReceipt(container, {
+          customerId: deposit.customer_id,
+          amount: action.amount,
+          // `||`, not `??` — an empty-string gateway id must fall through, or
+          // the template fails closed AFTER the idempotency key is burned and
+          // the email is permanently unsent.
+          reference:
+            deposit.gateway_transaction_id ||
+            deposit.merchant_transaction_id,
+          merchantTransactionId: deposit.merchant_transaction_id,
+          paymentMethodCode: deposit.payment_method_code,
+        });
         continue;
       }
 

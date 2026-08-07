@@ -55,6 +55,15 @@ export async function GET(
       id: t.id,
       amount: Number(t.amount),
       reason: t.reason,
+      // Payment-gateway reference — the id support and the customer quote to
+      // the gateway; same value the admin pages and receipt emails show.
+      // WHITELISTED by reason, not passed through: adjustment rows carry the
+      // admin's free-text note (also the audit reason) in this column, and
+      // reversal rows carry internal txn ids — neither may reach a customer.
+      reference:
+        t.reason === "topup" || t.reason === "cashout"
+          ? (t.reference ?? null)
+          : null,
       pull_id: t.pull_id,
       created_at: t.created_at,
     })),

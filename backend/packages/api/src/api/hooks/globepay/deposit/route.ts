@@ -289,18 +289,22 @@ export async function POST(
       } catch {
         // Never fail a committed credit over a notification.
       }
-
-      // The emailed receipt. Same replay guard as the feed row, and its own
-      // send is already non-throwing — the credit is committed and must not be
-      // undone by an email problem.
-      await sendTopupReceipt(req.scope, {
-        customerId: deposit.customer_id,
-        amount: creditedAmount,
-        reference: gatewayTransactionId || merchantTransactionId,
-        merchantTransactionId,
-        paymentMethodCode: deposit.payment_method_code,
-      });
     }
+
+    // The emailed receipt. DELIBERATELY outside the !replayed guard (unlike
+    // the feed row): a crash between the credit commit and this send leaves
+    // replayed=true on the gateway's retry, and gating on it would lose the
+    // email forever. The notification module's unique idempotency_key is what
+    // dedupes — a second insert throws and sendTopupReceipt swallows it. Its
+    // own send is non-throwing; the committed credit is never undone by an
+    // email problem.
+    await sendTopupReceipt(req.scope, {
+      customerId: deposit.customer_id,
+      amount: creditedAmount,
+      reference: gatewayTransactionId || merchantTransactionId,
+      merchantTransactionId,
+      paymentMethodCode: deposit.payment_method_code,
+    });
   } catch (error) {
     // Transient (DB down, lock timeout): do NOT ack, so they retry and the
     // customer's money still lands.
