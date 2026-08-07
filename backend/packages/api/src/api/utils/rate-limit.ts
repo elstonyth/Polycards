@@ -466,7 +466,16 @@ export const emailBodyKeyOf = (req: MedusaRequest): string | undefined => {
   const body = req.body as
     | { email?: unknown; identifier?: unknown }
     | undefined;
-  const raw = body?.email ?? body?.identifier;
+  // Read the field the ROUTE actually acts on, never "whichever is present":
+  // this middleware runs BEFORE core's body validator (app wildcard matchers
+  // sort ahead of core's param matchers), so req.body still carries any extra
+  // keys the caller sent. Accepting both names unconditionally would let an
+  // attacker put a decoy in the one the route ignores — e.g. POST
+  // .../reset-password { email: 'decoy@x.com', identifier: 'victim@x.com' } —
+  // and buy a fresh bucket per attempt while still bombing the victim.
+  const raw = req.path?.endsWith('/reset-password')
+    ? body?.identifier
+    : body?.email;
   if (typeof raw !== 'string') return undefined;
   const normalized = raw.trim().toLowerCase();
   return normalized.length <= MAX_EMAIL_LEN && EMAIL_RE.test(normalized)

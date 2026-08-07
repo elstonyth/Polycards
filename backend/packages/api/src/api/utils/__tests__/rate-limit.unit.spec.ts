@@ -589,8 +589,11 @@ describe("phone-otp per-phone limiter factories (Finding 1)", () => {
 });
 
 describe("emailBodyKeyOf (Plan 081)", () => {
-  const req = (body: unknown): MedusaRequest =>
-    ({ ip: "10.0.0.1", body }) as unknown as MedusaRequest;
+  const LOGIN = "/auth/customer/emailpass";
+  const RESET = "/auth/customer/emailpass/reset-password";
+
+  const req = (body: unknown, path = LOGIN): MedusaRequest =>
+    ({ ip: "10.0.0.1", path, body }) as unknown as MedusaRequest;
 
   it("normalizes case and surrounding whitespace into one bucket", () => {
     expect(emailBodyKeyOf(req({ email: " A@X.com " }))).toBe("email:a@x.com");
@@ -600,16 +603,30 @@ describe("emailBodyKeyOf (Plan 081)", () => {
   // Core's reset-password route validates `identifier`, not `email`
   // (@medusajs/medusa/dist/api/auth/validators.js:6), and the storefront sends
   // the address in it — so this is the field the LIVE reset path uses.
-  it("reads `identifier` too (the reset-password field name)", () => {
-    expect(emailBodyKeyOf(req({ identifier: "A@X.com" }))).toBe(
+  it("reads `identifier` on the reset-password route", () => {
+    expect(emailBodyKeyOf(req({ identifier: "A@X.com" }, RESET))).toBe(
       "email:a@x.com",
     );
   });
 
-  it("prefers `email` when both fields are present", () => {
-    expect(emailBodyKeyOf(req({ email: "a@x.com", identifier: "b@x.com" }))).toBe(
-      "email:a@x.com",
+  // The limiter runs before core's body validator, so req.body still carries
+  // whatever extra keys the caller sent. Reading "whichever field is present"
+  // would let an attacker park a decoy in the field the route ignores and get
+  // a fresh bucket per attempt while still bombing the real account.
+  it("ignores a decoy in the field the route does not read", () => {
+    expect(
+      emailBodyKeyOf(req({ email: "decoy@x.com", identifier: "victim@x.com" }, RESET)),
+    ).toBe("email:victim@x.com");
+    expect(
+      emailBodyKeyOf(req({ email: "victim@x.com", identifier: "decoy@x.com" }, LOGIN)),
+    ).toBe("email:victim@x.com");
+  });
+
+  it("returns undefined when only the route's UNUSED field is set", () => {
+    expect(emailBodyKeyOf(req({ identifier: "a@x.com" }, LOGIN))).toBe(
+      undefined,
     );
+    expect(emailBodyKeyOf(req({ email: "a@x.com" }, RESET))).toBe(undefined);
   });
 
   // Keyspace bound: a limiter key derived from unvalidated body input is a
@@ -695,11 +712,12 @@ describe("createAuthIdentifierRateLimit (Plan 081)", () => {
       next: MedusaNextFunction,
     ) => Promise<void>,
     body: unknown,
+    path = "/auth/customer/emailpass",
   ): Promise<{ passed: boolean; status: number | undefined }> => {
     const next = jest.fn();
     const { res, statusOf } = makeRes();
     await mw(
-      { ip: "203.0.113.9", body } as unknown as MedusaRequest,
+      { ip: "203.0.113.9", path, body } as unknown as MedusaRequest,
       res,
       next as unknown as MedusaNextFunction,
     );
@@ -723,8 +741,17 @@ describe("createAuthIdentifierRateLimit (Plan 081)", () => {
     expect((await post(mw, { email: "b@x.com", password: "p" })).passed).toBe(
       true,
     );
-    // ...and the reset path's `identifier` field shares a@x.com's bucket.
-    expect((await post(mw, { identifier: "a@x.com" })).passed).toBe(false);
+    // ...and the reset path's `identifier` field shares a@x.com's bucket, so
+    // login attempts and reset requests for one account cannot be split apart.
+    expect(
+      (
+        await post(
+          mw,
+          { identifier: "a@x.com" },
+          "/auth/customer/emailpass/reset-password",
+        )
+      ).passed,
+    ).toBe(false);
   });
 
   it("does not consume any budget for a body with no identifier (skipWhenNoKey)", async () => {
