@@ -122,10 +122,8 @@ async function mutateAccounts(
   mutate: (accounts: SavedBankAccount[]) => SavedBankAccount[] | null,
 ): Promise<SavedBankAccount[]> {
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
-  const customers = req.scope.resolve(Modules.CUSTOMER);
   const metadata = await packs.mutateCustomerMetadata({
     customerId: requireCustomerId(customerId),
-    customers,
     mutate: (current) => {
       const next = mutate(parseSavedBankAccounts(current.bank_accounts));
       return next === null ? null : { ...current, bank_accounts: next };

@@ -277,18 +277,6 @@ type LedgerSqlManager = {
   execute<T = unknown>(query: string, params?: unknown[]): Promise<T>;
 };
 
-/** The slice of the customer module `mutateCustomerMetadata` drives. Declared
- *  structurally so this module never imports another module's service type;
- *  the real ICustomerModuleService satisfies it. */
-export type CustomerMetadataStore = {
-  retrieveCustomer(
-    id: string,
-  ): Promise<{ metadata?: Record<string, unknown> | null }>;
-  updateCustomers(
-    id: string,
-    data: { metadata: Record<string, unknown> },
-  ): Promise<unknown>;
-};
 
 /** One raw `ledger_entry` row as listLedgerEntriesForAdmin reads it. */
 export type LedgerEntryRow = {
@@ -2552,26 +2540,35 @@ class PacksModuleService extends MedusaService({
   // here may be composed into a transaction that already holds a `credit:`
   // lock.
   //
-  // The customer read and write are driven through the caller's customer-module
-  // handle rather than raw SQL, so they run on the module's own connection —
-  // outside this locked transaction. Mutual exclusion still holds: a second
-  // caller blocks on the advisory lock until THIS transaction commits, which
-  // happens after the customer write has committed, so the loser's read is
-  // fresh. This transaction writes nothing itself, so there is nothing for a
-  // rollback to have to undo.
+  // The lock, the read and the write are all raw SQL on the SAME `em`, i.e. the
+  // SAME pooled connection. This is load-bearing, not a style choice: driving
+  // the customer I/O through the customer module instead would acquire a SECOND
+  // connection while this transaction holds the first, and
+  // utils/db-driver-options.ts caps the pool at 5 PER PROCESS (shared by all ~25
+  // modules) with idle_in_transaction_session_timeout at 30s. Five concurrent
+  // mutations would each hold one connection and wait for another — a pool
+  // deadlock — and under lesser contention the 30s kill would drop this session
+  // (releasing the advisory lock) while the module's write committed anyway on
+  // its own connection. That is the lock silently failing under exactly the
+  // contention it exists for. Keeping everything on one connection also makes
+  // the write atomic with the lock: a rollback undoes it.
+  //
+  // Reaching into the core `customer` table is the price. It is bounded to one
+  // column, and the alternative breaks a documented invariant.
   @InjectTransactionManager()
   async mutateCustomerMetadata(
     input: {
       customerId: string;
-      /** The customer module (or any structural stand-in) doing the I/O. */
-      customers: CustomerMetadataStore;
       /**
        * Applied to the metadata read INSIDE the lock — never to a blob the
-       * caller read earlier, which is the whole point of this method. Returning
-       * `null` means "nothing changed": no write is issued, so an idempotent
-       * no-op (deleting an already-gone bank account) stays write-free.
-       * Throwing refuses the whole mutation and rolls the lock back — that is
-       * how a cap check gets enforced against the locked read.
+       * caller read earlier, which is the whole point of this method. Called
+       * EXACTLY ONCE per invocation, so a callback may capture out-of-band
+       * values from the blob it is handed (the avatar route reads the replaced
+       * file id that way). Returning `null` means "nothing changed": no write
+       * is issued, so an idempotent no-op (deleting an already-gone bank
+       * account) stays write-free. Throwing refuses the whole mutation and
+       * rolls the transaction back — that is how a cap check gets enforced
+       * against the locked read.
        */
       mutate: (
         metadata: Record<string, unknown>,
@@ -2583,13 +2580,25 @@ class PacksModuleService extends MedusaService({
     await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
       `metadata:${input.customerId}`,
     ]);
-    const customer = await input.customers.retrieveCustomer(input.customerId);
-    const current = (customer.metadata ?? {}) as Record<string, unknown>;
+    const rows = await em.execute<{ metadata: Record<string, unknown> | null }[]>(
+      'SELECT metadata FROM customer WHERE id = ? AND deleted_at IS NULL',
+      [input.customerId],
+    );
+    if (rows.length === 0) {
+      // Same shape retrieveCustomer raised before this went through SQL, so the
+      // routes' 404 behaviour is unchanged.
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        `Customer with id: ${input.customerId} was not found`,
+      );
+    }
+    const current = rows[0].metadata ?? {};
     const next = input.mutate(current);
     if (next === null) return current;
-    await input.customers.updateCustomers(input.customerId, {
-      metadata: next,
-    });
+    await em.execute(
+      'UPDATE customer SET metadata = ?::jsonb, updated_at = now() WHERE id = ? AND deleted_at IS NULL',
+      [JSON.stringify(next), input.customerId],
+    );
     return next;
   }
 

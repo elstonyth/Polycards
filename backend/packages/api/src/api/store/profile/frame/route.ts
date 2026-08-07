@@ -2,7 +2,7 @@ import type {
   AuthenticatedMedusaRequest,
   MedusaResponse,
 } from '@medusajs/framework/http';
-import { MedusaError, Modules } from '@medusajs/framework/utils';
+import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
 
@@ -63,10 +63,8 @@ export async function POST(
     }
   }
 
-  const customers = req.scope.resolve(Modules.CUSTOMER);
   await packs.mutateCustomerMetadata({
     customerId,
-    customers,
     mutate: (metadata) => ({ ...metadata, equipped_frame_level: level }),
   });
 

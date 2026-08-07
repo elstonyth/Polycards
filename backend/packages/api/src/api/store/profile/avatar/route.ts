@@ -3,7 +3,7 @@ import type {
   AuthenticatedMedusaRequest,
   MedusaResponse,
 } from '@medusajs/framework/http';
-import { MedusaError, Modules } from '@medusajs/framework/utils';
+import { MedusaError } from '@medusajs/framework/utils';
 import {
   deleteFilesWorkflow,
   uploadFilesWorkflow,
@@ -159,7 +159,6 @@ export async function POST(
   }
 
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
-  const customers = req.scope.resolve(Modules.CUSTOMER);
   // Provider file id of the photo being replaced — avatars uploaded before this
   // field existed have none and are simply left in place. Captured from the
   // blob read INSIDE the lock: a pre-lock read could name a file a concurrent
@@ -168,7 +167,6 @@ export async function POST(
   const replaced: { fileId: string | null } = { fileId: null };
   await packs.mutateCustomerMetadata({
     customerId,
-    customers,
     mutate: (metadata) => {
       const merged = mergeAvatarMetadata(metadata, {
         url,

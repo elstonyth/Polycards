@@ -18,27 +18,26 @@ import {
 const retrieveCustomer = jest.fn();
 const updateCustomers = jest.fn();
 
-// Stand-in for PacksModuleService.mutateCustomerMetadata. It reproduces the
-// real method's ORDER — read, then mutate, then write (or skip the write on
-// null) — against the same customer-module mocks, so the assertions below stay
-// about what the ROUTE does. That the real one wraps this in a
-// `metadata:<customer>` advisory lock, and that the read happens after the lock
-// statement, is pinned separately in
-// modules/packs/__tests__/customer-metadata-lock.unit.spec.ts — a route spec
-// cannot execute two transactions against a Postgres lock.
+// Stand-in for PacksModuleService.mutateCustomerMetadata. The real one does the
+// read and the write as raw SQL on its own locked transaction, so there is
+// nothing here for a route spec to observe — this fake reproduces only the
+// contract the ROUTE depends on: mutate is handed the current blob exactly
+// once, `null` means no write, and the return value is what landed. The lock
+// itself, the read-after-lock ordering and the single-connection property are
+// pinned in modules/packs/__tests__/customer-metadata-lock.unit.spec.ts.
+//
+// `retrieveCustomer` / `updateCustomers` below therefore stand in for the SQL,
+// which keeps the pre-existing merge assertions meaningful.
 const mutateCustomerMetadata = jest.fn(
   async (input: {
     customerId: string;
-    customers: { retrieveCustomer: jest.Mock; updateCustomers: jest.Mock };
-    mutate: (
-      m: Record<string, unknown>,
-    ) => Record<string, unknown> | null;
+    mutate: (m: Record<string, unknown>) => Record<string, unknown> | null;
   }) => {
-    const customer = await input.customers.retrieveCustomer(input.customerId);
+    const customer = await retrieveCustomer(input.customerId);
     const current = (customer.metadata ?? {}) as Record<string, unknown>;
     const next = input.mutate(current);
     if (next === null) return current;
-    await input.customers.updateCustomers(input.customerId, { metadata: next });
+    await updateCustomers(input.customerId, { metadata: next });
     return next;
   },
 );
