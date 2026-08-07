@@ -75,8 +75,9 @@ describe('POST /store/credits/deposit — customer IP', () => {
     expect(sentIp()).toBe('0.0.0.0');
   });
 
-  // Node hands back an array for a repeated header. Stringifying it would send
-  // the gateway '[object Object]' / a comma-joined list as an IP address.
+  // The header type permits string[] — Node's parser comma-joins repeats and
+  // never emits one, but middleware could assign one. Stringifying it would
+  // send the gateway '[object Object]' as an IP address.
   it('ignores an array X-Forwarded-For instead of stringifying it', async () => {
     await POST(
       mkReq({
