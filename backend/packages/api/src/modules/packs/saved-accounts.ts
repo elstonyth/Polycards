@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import { MedusaError } from '@medusajs/framework/utils';
 import { positiveIntFromEnv } from '../../api/utils/rate-limit';
-import type { CustomerMetadataStore } from './service';
 
 // The customer's saved payout destinations — the shape, the deterministic id,
 // the defensive parse, and the cooling-off rule that decides whether one may
@@ -199,16 +198,37 @@ export function resolveWithdrawalDestination(args: {
   return account;
 }
 
+/** The MikroORM manager surface this file needs — declared structurally rather
+ *  than imported from service.ts, which imports this module. */
+type SqlManager = {
+  execute<T = unknown>(query: string, params?: unknown[]): Promise<T>;
+};
+
 /**
- * Read one customer's saved accounts. Read-only, takes no lock: callers that
- * WRITE the list go through PacksModuleService.mutateCustomerMetadata, which
- * does its own locked read.
+ * Read one customer's saved accounts, on whatever manager the caller hands in.
+ *
+ * Raw SQL rather than the customer module's `retrieveCustomer`, and the SELECT
+ * is byte-identical to the one mutateCustomerMetadata uses, so the read and the
+ * write of this blob agree on what "the current metadata" is. The payoff is at
+ * the call site in withdrawForCashout: passing that method's own transaction
+ * manager puts this read on the SAME connection and transaction as the advisory
+ * lock and the debit, instead of on a second connection the lock has no
+ * relationship with.
+ *
+ * Takes no lock ITSELF — the caller decides. Writers go through
+ * PacksModuleService.mutateCustomerMetadata, which locks `metadata:<customer>`.
+ *
+ * A customer id that matches no row yields an empty list, so the destination
+ * lookup refuses with "Select a saved bank account." That is the fail-closed
+ * direction: a deleted or unknown customer has no saved destination.
  */
 export async function loadSavedBankAccounts(
-  customers: Pick<CustomerMetadataStore, 'retrieveCustomer'>,
+  em: SqlManager,
   customerId: string,
 ): Promise<SavedBankAccount[]> {
-  const customer = await customers.retrieveCustomer(customerId);
-  const metadata = (customer.metadata ?? {}) as Record<string, unknown>;
-  return parseSavedBankAccounts(metadata.bank_accounts);
+  const rows = await em.execute<{ metadata: Record<string, unknown> | null }[]>(
+    'SELECT metadata FROM customer WHERE id = ? AND deleted_at IS NULL',
+    [customerId],
+  );
+  return parseSavedBankAccounts((rows[0]?.metadata ?? {}).bank_accounts);
 }

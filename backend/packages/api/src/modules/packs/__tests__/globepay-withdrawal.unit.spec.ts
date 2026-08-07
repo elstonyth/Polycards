@@ -1,4 +1,4 @@
-import { MedusaError, Modules } from '@medusajs/framework/utils';
+import { MedusaError } from '@medusajs/framework/utils';
 import {
   globepayWithdrawalsEnabled,
   startGlobePayWithdrawal,
@@ -50,12 +50,11 @@ const SAVED_ACCOUNT = {
 };
 
 function harness(savedAccounts: unknown[] = [SAVED_ACCOUNT]) {
-  const customers = {
-    retrieveCustomer: jest
-      .fn()
-      .mockResolvedValue({ metadata: { bank_accounts: savedAccounts } }),
-  };
   const packs = {
+    // The unlocked precheck's list read. The AUTHORITATIVE one is inside
+    // withdrawForCashout, on that method's own transaction manager — see the
+    // service describe below, which runs the real SQL against a fake `em`.
+    savedBankAccountsFor: jest.fn().mockResolvedValue(savedAccounts),
     createGlobePayWithdrawals: jest.fn().mockResolvedValue([{ id: 'gpw_1' }]),
     updateGlobePayWithdrawals: jest.fn().mockResolvedValue(undefined),
     // The gate + debit unit. Everything the old caller-side policy check did
@@ -101,13 +100,8 @@ function harness(savedAccounts: unknown[] = [SAVED_ACCOUNT]) {
   return {
     packs,
     logger,
-    customers,
     scope: {
-      resolve: (k: string) => {
-        if (k === 'logger') return logger;
-        if (k === Modules.CUSTOMER) return customers;
-        return packs;
-      },
+      resolve: (k: string) => (k === 'logger' ? logger : packs),
     } as never,
   };
 }
@@ -591,10 +585,32 @@ const fakeService = (
   wallet = fakeWallet(),
   windowCents = 0,
   selfRowCents = 0,
+  /**
+   * The saved-account lists, BY CUSTOMER — the fake `customer` table.
+   *
+   * Keyed, and that is what keeps the cross-customer test below honest: `cus_2`
+   * genuinely owns `acc_theirs`, and the real method's
+   * `SELECT metadata FROM customer WHERE id = ?` binds the TOKEN OWNER's id, so
+   * asking for someone else's account while authenticated as `cus_1` really
+   * does look it up in `cus_1`'s row and really does not find it. A fake that
+   * ignored the bound id would make that test pass for free.
+   */
+  byCustomer: Record<string, unknown[]> = {
+    cus_1: [SAVED_ACCOUNT],
+    cus_2: [OTHER_CUSTOMERS_ACCOUNT],
+  },
 ) => {
   const svc = Object.create(PacksModuleService.prototype) as PacksModuleService;
   const em = {
     execute: jest.fn(async (q: string, params?: unknown[]) => {
+      // The destination read. Runs on THIS manager — i.e. inside the same
+      // transaction the advisory lock was taken on.
+      if (q.includes('FROM customer')) {
+        const id = params?.[0] as string;
+        return byCustomer[id] === undefined
+          ? [] // no such customer row
+          : [{ metadata: { bank_accounts: byCustomer[id] } }];
+      }
       if (!q.includes('globepay_withdrawal')) return [];
       const excludesSelf = params?.[1] === cashout.merchantTransactionId;
       return [
@@ -633,13 +649,7 @@ const fakeService = (
   return { svc, em, ctx, walletSummary, withdrawCreditsWithLedger };
 };
 
-/**
- * The customer module handle the method reads the saved list through. Keyed on
- * the customer ID it is asked for — which is what makes the cross-customer test
- * below real rather than vacuous: `cus_2` has their OWN account with a
- * different id, so asking for `cus_2`'s id while authenticated as `cus_1`
- * genuinely looks it up in `cus_1`'s list and genuinely does not find it.
- */
+/** Another customer's saved destination — see fakeService's `byCustomer`. */
 const OTHER_CUSTOMERS_ACCOUNT = {
   id: 'acc_theirs',
   bankCode: 'CIMB',
@@ -649,24 +659,12 @@ const OTHER_CUSTOMERS_ACCOUNT = {
   savedAt: new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString(),
 };
 
-const fakeCustomers = (
-  byCustomer: Record<string, unknown[]> = {
-    cus_1: [SAVED_ACCOUNT],
-    cus_2: [OTHER_CUSTOMERS_ACCOUNT],
-  },
-) => ({
-  retrieveCustomer: jest.fn(async (id: string) => ({
-    metadata: { bank_accounts: byCustomer[id] ?? [] },
-  })),
-});
-
 const cashout = {
   customerId: 'cus_1',
   amount: 50,
   merchantTransactionId: 'PC-abc',
   idempotencyReference: 'wd:deadbeef',
   accountId: 'acc_owned',
-  customers: fakeCustomers(),
 };
 
 describe('PacksModuleService.withdrawForCashout', () => {
@@ -752,11 +750,13 @@ describe('PacksModuleService.withdrawForCashout', () => {
     // this path carry a full bank account number.
     expect(f.withdrawCreditsWithLedger.mock.calls.length).toBe(0);
     // Proof the guard is ownership and not "that id does not exist anywhere":
-    // the very same id resolves for the customer who owns it.
+    // the very same id resolves for the customer who owns it, off the same
+    // fake customer table.
+    const owner = fakeService();
     await expect(
-      f.svc.withdrawForCashout(
+      owner.svc.withdrawForCashout(
         { ...cashout, customerId: 'cus_2', accountId: 'acc_theirs' },
-        fakeService().ctx,
+        owner.ctx,
       ),
     ).resolves.toMatchObject({
       destination: expect.objectContaining({ id: 'acc_theirs' }),
@@ -772,8 +772,7 @@ describe('PacksModuleService.withdrawForCashout', () => {
   });
 
   it('refuses an account still cooling off — no debit', async () => {
-    const f = fakeService();
-    const customers = fakeCustomers({
+    const f = fakeService(fakeWallet(), 0, 0, {
       cus_1: [
         {
           ...SAVED_ACCOUNT,
@@ -782,7 +781,7 @@ describe('PacksModuleService.withdrawForCashout', () => {
       ],
     });
     await expect(
-      f.svc.withdrawForCashout({ ...cashout, customers }, f.ctx),
+      f.svc.withdrawForCashout(cashout, f.ctx),
     ).rejects.toMatchObject({
       type: MedusaError.Types.NOT_ALLOWED,
       message: expect.stringMatching(/not available for withdrawals yet/i),
@@ -794,11 +793,10 @@ describe('PacksModuleService.withdrawForCashout', () => {
   // timestamp resolves to REFUSED, with its own message. `undefined` never
   // means "usable".
   it('refuses an account with no savedAt — no debit, and says to re-save it', async () => {
-    const f = fakeService();
     const { savedAt: _dropped, ...noTimestamp } = SAVED_ACCOUNT;
-    const customers = fakeCustomers({ cus_1: [noTimestamp] });
+    const f = fakeService(fakeWallet(), 0, 0, { cus_1: [noTimestamp] });
     await expect(
-      f.svc.withdrawForCashout({ ...cashout, customers }, f.ctx),
+      f.svc.withdrawForCashout(cashout, f.ctx),
     ).rejects.toMatchObject({
       type: MedusaError.Types.NOT_ALLOWED,
       message: expect.stringMatching(/remove it and save it again/i),
@@ -809,15 +807,24 @@ describe('PacksModuleService.withdrawForCashout', () => {
   // The destination must be pinned by the SAME serialized unit that debits: if
   // a future edit hoists the lookup out to the caller, or above the lock, it
   // can be swapped between check and debit.
-  it('resolves the destination AFTER the lock and BEFORE the debit', async () => {
+  //
+  // Both statements go through `em`, so this pins three things at once: the
+  // destination read is the SECOND statement on the transaction the lock was
+  // taken on (never before it, never on another connection), it binds the
+  // TOKEN OWNER's id — the IDOR guard, in SQL — and it lands before the debit.
+  it('reads the destination on the LOCKED transaction, after the lock and before the debit', async () => {
     const f = fakeService();
-    const customers = fakeCustomers();
-    await f.svc.withdrawForCashout({ ...cashout, customers }, f.ctx);
-    expect(customers.retrieveCustomer).toHaveBeenCalledWith('cus_1');
-    expect(f.em.execute.mock.invocationCallOrder[0]).toBeLessThan(
-      customers.retrieveCustomer.mock.invocationCallOrder[0],
-    );
-    expect(customers.retrieveCustomer.mock.invocationCallOrder[0]).toBeLessThan(
+    await f.svc.withdrawForCashout(cashout, f.ctx);
+
+    const [lockSql] = f.em.execute.mock.calls[0] as [string, unknown[]];
+    const [readSql, readParams] = f.em.execute.mock.calls[1] as [
+      string,
+      unknown[],
+    ];
+    expect(lockSql).toContain('pg_advisory_xact_lock');
+    expect(readSql).toContain('FROM customer');
+    expect(readParams).toEqual(['cus_1']);
+    expect(f.em.execute.mock.invocationCallOrder[1]).toBeLessThan(
       f.withdrawCreditsWithLedger.mock.invocationCallOrder[0],
     );
   });
@@ -900,7 +907,12 @@ describe('PacksModuleService.withdrawForCashout', () => {
   it('counts only pending+settled in the last 24h, excluding this attempt', async () => {
     const f = fakeService();
     await f.svc.withdrawForCashout(cashout, f.ctx);
-    const [sql, params] = f.em.execute.mock.calls[1] as [string, unknown[]];
+    // Found by content, not by index: the statement order ahead of it (lock,
+    // destination read) is pinned by its own test above, and hard-coding an
+    // index here would make this fail for an unrelated reason.
+    const [sql, params] = f.em.execute.mock.calls.find(([q]) =>
+      (q as string).includes('globepay_withdrawal'),
+    ) as [string, unknown[]];
     expect(sql).toContain('globepay_withdrawal');
     expect(sql).toContain("status IN ('pending', 'settled')");
     expect(sql).not.toContain('failed');

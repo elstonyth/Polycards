@@ -34,7 +34,7 @@
  * raise.
  */
 import { ExecArgs } from '@medusajs/framework/types';
-import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
+import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import PacksModuleService from '../modules/packs/service';
 import { PACKS_MODULE } from '../modules/packs';
 import {
@@ -66,7 +66,6 @@ export default async function backfillPayoutDestinations({
 }: ExecArgs): Promise<void> {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
-  const customers = container.resolve(Modules.CUSTOMER);
 
   // The picker's label. It lives only in the gateway's bank list, never on the
   // withdrawal row, so ask them once. If that call is unavailable (payouts
@@ -126,7 +125,6 @@ export default async function backfillPayoutDestinations({
     try {
       await packs.mutateCustomerMetadata({
         customerId,
-        customers,
         mutate: (metadata) => {
           const accounts = parseSavedBankAccounts(metadata.bank_accounts);
           let changed = false;

@@ -1175,8 +1175,6 @@ class PacksModuleService extends MedusaService({
        *  bank code and account number are looked up from their own saved list
        *  below, so a request body cannot name where the money goes. */
       accountId: unknown;
-      /** The customer module (or a structural stand-in) this reads through. */
-      customers: Pick<CustomerMetadataStore, 'retrieveCustomer'>;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<
@@ -1219,21 +1217,29 @@ class PacksModuleService extends MedusaService({
     //    customer simply is not in it and lands on the "Select a saved bank
     //    account." refusal — before the gate and before any debit.
     //
+    //    The read runs on `em` — THIS method's transaction manager — so it is
+    //    the same connection and the same transaction as the advisory lock
+    //    above and the debit below, and it issues the same
+    //    `SELECT metadata FROM customer` that mutateCustomerMetadata reads the
+    //    blob with. Routing it through the customer module instead would put it
+    //    on a second connection that the lock has no relationship with.
+    //
     //    What "under the lock" does and does not buy here, precisely: this read
     //    runs after pg_advisory_xact_lock and before the debit, so no two
     //    withdrawals for this customer can interleave around it. It does NOT
     //    exclude a concurrent saved-accounts write — that path serializes on
     //    `metadata:<customer>`, a different key, and mutateCustomerMetadata may
-    //    not be composed into a `credit:`-locked transaction. It does not need
-    //    to: savedBankAccountId is derived from (bankCode, accountNumber), so an
-    //    id can never be repointed at a different bank account — only its
-    //    display label can change. The id pins where the money goes; the lock
-    //    pins when.
+    //    not be composed into a `credit:`-locked transaction. Nor would being
+    //    in-transaction exclude it on its own: under READ COMMITTED each
+    //    statement takes a fresh snapshot, so this SELECT sees whatever last
+    //    committed either way.
     //
-    //    The customer read goes through the caller's module handle, so it runs
-    //    on that module's own connection rather than inside this transaction —
-    //    the same arrangement (and the same reasoning) as
-    //    mutateCustomerMetadata.
+    //    It does not need to. savedBankAccountId is derived from
+    //    (bankCode, accountNumber), so a concurrent write can add an entry,
+    //    delete one, or relabel one — it can never repoint an id at a different
+    //    bank account. The worst interleaving pays a destination the customer
+    //    owned and had cooled off, deleted moments ago. The id pins WHERE the
+    //    money goes; the lock pins WHEN.
     //
     //    PRECEDENCE, since it is a deliberate choice and not the order the
     //    wallet gate uses: a bad destination outranks a bad wallet. A frozen
@@ -1244,7 +1250,7 @@ class PacksModuleService extends MedusaService({
     //    outranks playthrough outranks the cap) is untouched — it orders the
     //    three WALLET refusals against each other, all of which sit below this.
     const destination = resolveWithdrawalDestination({
-      accounts: await loadSavedBankAccounts(input.customers, input.customerId),
+      accounts: await loadSavedBankAccounts(em, input.customerId),
       accountId: input.accountId,
     });
 
@@ -2586,6 +2592,27 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     return data;
+  }
+
+  // One customer's saved payout destinations, unlocked.
+  //
+  // Exists for ONE caller: globepay-withdrawal.ts's pre-row destination
+  // precheck, which has no transaction of its own. The decision that matters
+  // does not come through here — withdrawForCashout calls loadSavedBankAccounts
+  // directly on its own locked transaction manager, so this method cannot be
+  // swapped underneath it.
+  //
+  // (The saved-accounts GET route reads the same blob through the customer
+  // module instead. Same row, same content; it is a display list with no
+  // transaction to join, so there is nothing to gain by routing it here.)
+  @InjectManager()
+  async savedBankAccountsFor(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<SavedBankAccount[]> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    return await loadSavedBankAccounts(em, customerId);
   }
 
   // Every destination that has actually RECEIVED money, one row per

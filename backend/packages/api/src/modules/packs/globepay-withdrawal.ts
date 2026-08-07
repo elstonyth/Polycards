@@ -1,11 +1,8 @@
 import { createHash } from 'node:crypto';
-import { MedusaError, Modules } from '@medusajs/framework/utils';
+import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from './index';
 import type PacksModuleService from './service';
-import {
-  loadSavedBankAccounts,
-  resolveWithdrawalDestination,
-} from './saved-accounts';
+import { resolveWithdrawalDestination } from './saved-accounts';
 import {
   globepayConfigFromEnv,
   submitWithdrawal,
@@ -189,9 +186,6 @@ export async function startGlobePayWithdrawal(
 
   const config = globepayConfigFromEnv();
   const packs = scope.resolve<PacksModuleService>(PACKS_MODULE);
-  const customers = scope.resolve<
-    Parameters<PacksModuleService['withdrawForCashout']>[0]['customers']
-  >(Modules.CUSTOMER);
 
   // 0a) DESTINATION PRECHECK — NOT the gate, exactly like the wallet precheck
   // below. The authoritative resolution happens inside packs.withdrawForCashout
@@ -205,7 +199,7 @@ export async function startGlobePayWithdrawal(
   // same list, and savedBankAccountId is derived from (bankCode, accountNumber),
   // so an id resolves to the same destination in both reads or to nothing.
   const precheckDestination = resolveWithdrawalDestination({
-    accounts: await loadSavedBankAccounts(customers, input.customerId),
+    accounts: await packs.savedBankAccountsFor(input.customerId),
     accountId: input.accountId,
   });
 
@@ -281,7 +275,6 @@ export async function startGlobePayWithdrawal(
         merchantTransactionId,
       ),
       accountId: input.accountId,
-      customers,
     });
   } catch (error) {
     // Nothing was debited; the row must not sit pending or the sweep would
