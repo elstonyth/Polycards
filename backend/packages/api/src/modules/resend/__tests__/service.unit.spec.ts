@@ -1,6 +1,7 @@
 import ResendNotificationProviderService from '../service';
 import {
   PASSWORD_RESET_TEMPLATE,
+  PHONE_CHANGED_TEMPLATE,
   escapeHtml,
   renderTemplate,
 } from '../templates';
@@ -219,5 +220,30 @@ describe('renderTemplate', () => {
 
   it('escapes every HTML metacharacter', () => {
     expect(escapeHtml(`&<>"'`)).toBe('&amp;&lt;&gt;&quot;&#39;');
+  });
+
+  // Pins the payload contract against store/phone-verification/change/route.ts,
+  // which sends exactly these two keys. Nothing else would catch a drift: an
+  // unrenderable payload makes `send` above log an error and record the
+  // notification SUCCESS, so the phone-change security email would silently
+  // stop going out with every suite still green.
+  it('renders the phone-changed notice from the route’s exact payload', () => {
+    const rendered = renderTemplate(PHONE_CHANGED_TEMPLATE, {
+      old_phone_masked: '••••7781',
+      new_phone_masked: '••••7790',
+    })!;
+    expect(rendered.html).toContain('••••7781');
+    expect(rendered.html).toContain('••••7790');
+    expect(rendered.text).toContain('••••7790');
+  });
+
+  it('refuses a phone-changed payload missing either number', () => {
+    expect(
+      renderTemplate(PHONE_CHANGED_TEMPLATE, { old_phone_masked: '••••7781' }),
+    ).toBeUndefined();
+    expect(
+      renderTemplate(PHONE_CHANGED_TEMPLATE, { new_phone_masked: '••••7790' }),
+    ).toBeUndefined();
+    expect(renderTemplate(PHONE_CHANGED_TEMPLATE, null)).toBeUndefined();
   });
 });

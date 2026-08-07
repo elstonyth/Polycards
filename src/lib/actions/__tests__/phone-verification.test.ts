@@ -2,7 +2,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Same wholesale-mock shape as auth.test.ts: the real data modules import
 // 'server-only' and touch next/headers, so only the action logic runs here.
-const mocks = vi.hoisted(() => ({ clientFetch: vi.fn(), logError: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  clientFetch: vi.fn(),
+  logError: vi.fn(),
+  getAuthToken: vi.fn(),
+}));
 
 vi.mock('@/lib/medusa', () => ({
   sdk: { client: { fetch: mocks.clientFetch } },
@@ -15,15 +19,17 @@ vi.mock('@/lib/logger', () => ({
     debug: vi.fn(),
   },
 }));
-vi.mock('@/lib/data/customer', () => ({ getAuthToken: vi.fn() }));
+vi.mock('@/lib/data/customer', () => ({ getAuthToken: mocks.getAuthToken }));
 
-const { startPhoneOtp } = await import('@/lib/actions/phone-verification');
+const { startPhoneOtp, changePhone } =
+  await import('@/lib/actions/phone-verification');
 
 const MY = '+60107667787';
 const GB = '+442079460958';
 
 beforeEach(() => {
   mocks.clientFetch.mockReset().mockResolvedValue({});
+  mocks.getAuthToken.mockReset().mockResolvedValue('tok_customer');
 });
 
 describe('startPhoneOtp — served-destination gate', () => {
@@ -72,5 +78,75 @@ describe('startPhoneOtp — served-destination gate', () => {
       error: 'Please enter a valid phone number for the selected country.',
     });
     expect(mocks.clientFetch).not.toHaveBeenCalled();
+  });
+});
+
+// The re-auth fields the backend's phone-change gate needs. `password` must
+// reach the wire (an omitted one 401s), and it must be OMITTED rather than sent
+// empty — the route distinguishes "no password supplied" from "wrong password"
+// by presence alone.
+describe('changePhone — re-auth fields', () => {
+  // `!` because the assertions that follow are exactly what proves a call
+  // happened — an undefined here should read as "no request was made".
+  const bodyOf = () => mocks.clientFetch.mock.calls[0]![1].body;
+
+  beforeEach(() => {
+    mocks.clientFetch.mockResolvedValue({ customer: { phone: MY } });
+  });
+
+  it('forwards the current password', async () => {
+    await expect(
+      changePhone({ phone: MY, token: 'proof', password: 'hunter2' }),
+    ).resolves.toEqual({ ok: true, phone: MY });
+    expect(bodyOf()).toEqual({
+      phone: MY,
+      token: 'proof',
+      password: 'hunter2',
+    });
+  });
+
+  it('forwards old_phone_token under its snake_case wire name', async () => {
+    await changePhone({ phone: MY, token: 'proof', oldPhoneToken: 'oldproof' });
+    expect(bodyOf()).toEqual({
+      phone: MY,
+      token: 'proof',
+      old_phone_token: 'oldproof',
+    });
+  });
+
+  it('omits both keys when neither is supplied', async () => {
+    await changePhone({ phone: MY, token: 'proof' });
+    expect(bodyOf()).toEqual({ phone: MY, token: 'proof' });
+  });
+
+  it('omits an empty password rather than sending it', async () => {
+    await changePhone({ phone: MY, token: 'proof', password: '' });
+    expect(bodyOf()).toEqual({ phone: MY, token: 'proof' });
+  });
+
+  // The genericizer would otherwise turn this into "Could not update your phone
+  // number. Please try again." in front of someone who mistyped their password.
+  it('surfaces the backend re-auth refusals instead of the generic copy', async () => {
+    mocks.clientFetch.mockRejectedValue(
+      new Error('Enter your current password to change your phone number.'),
+    );
+    const result = await changePhone({
+      phone: MY,
+      token: 'proof',
+      password: 'wrong',
+    });
+    expect(result).toEqual({
+      ok: false,
+      error:
+        'That password is incorrect. Enter your current password to change your phone number.',
+    });
+
+    mocks.clientFetch.mockRejectedValue(
+      new Error('Verify your current phone number to change it.'),
+    );
+    await expect(changePhone({ phone: MY, token: 'proof' })).resolves.toEqual({
+      ok: false,
+      error: 'Verify your current phone number before changing it.',
+    });
   });
 });
