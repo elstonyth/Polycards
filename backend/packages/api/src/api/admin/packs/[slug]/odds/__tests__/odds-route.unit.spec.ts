@@ -221,8 +221,8 @@ describe('GET /admin/packs/:slug/odds — 3 sets', () => {
       b = byId(body, 'b');
     expect([a.pct, b.pct]).toEqual([50, 50]);
     // Σ = 13000 (8000 explicit + 5000 inherited) — the mixed denominator.
-    expect([a.pct_2, b.pct_2]).toEqual([61.54, 38.46]);
-    expect([a.pct_3, b.pct_3]).toEqual([61.54, 38.46]);
+    expect([a.pct_2, b.pct_2]).toEqual([61.5385, 38.4615]);
+    expect([a.pct_3, b.pct_3]).toEqual([61.5385, 38.4615]);
   });
 
   it('mirrors set 1 when no card materializes set 2/3', async () => {

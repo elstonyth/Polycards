@@ -8,6 +8,7 @@ import {
   Modules,
 } from '@medusajs/framework/utils';
 import type { Context, HttpTypes } from '@medusajs/framework/types';
+import { PCT_SCALE } from '@acme/odds-math';
 import type { OddsRarity, TierRangeMap } from '@acme/odds-math';
 import {
   validateDeliveryRequest,
@@ -502,7 +503,7 @@ class PacksModuleService extends MedusaService({
       pack_id: string;
       // weight_2/weight_3 ride along with weight: a membership edit recomputes
       // ALL THREE odds sets, so writing only `weight` would leave a
-      // materialized set 2/3 resolving to something other than 10000.
+      // materialized set 2/3 resolving to something other than the full total.
       create: {
         pack_id: string;
         card_id: string;
@@ -5386,8 +5387,12 @@ class PacksModuleService extends MedusaService({
       return { status: 'capped' };
     }
 
-    // 3) Roll over the box's stored weights (locked rows included).
-    const roll = randomInt(10000);
+    // 3) Roll over the box's stored weights (locked rows included). The bound
+    // is the ACTUAL Σweight, not a fixed constant, so the draw is
+    // scale-invariant like the pack roll — rows saved on either side of the
+    // 4dp scale migration roll correctly.
+    const totalPrizeWeight = prizeRows.reduce((s, p) => s + p.weight, 0);
+    const roll = randomInt(Math.max(1, totalPrizeWeight));
     const won = pickPrize(
       prizeRows.map((p) => ({ ...p, weight: p.weight })),
       roll,
@@ -5673,7 +5678,7 @@ class PacksModuleService extends MedusaService({
         kind: p.kind,
         payload: p.payload,
         locked: p.locked,
-        pct: p.weight / 100,
+        pct: p.weight / PCT_SCALE,
       })),
     };
   }

@@ -10,6 +10,10 @@ import type PacksModuleService from '../../modules/packs/service';
 export type PublishedOdds = {
   overall: number;
   tiers: Partial<Record<OddsRarity, number>>;
+  /** Decimal places the tier percentages are published at (0-4). Purely a
+   *  display/authoring precision: the validator rounds every tier to this many
+   *  places on save, so the storefront prints stored values verbatim. */
+  decimals: number;
 };
 
 // Sparse tiers → the full-key WRITE shape (null = tier not published). The
@@ -30,9 +34,14 @@ export const fillPublishedTiers = (
 // published_odds runs this, so no consumer ever sees the null-filled storage
 // shape (the admin editor seeds inputs with String(tiers[r]), and "null" in a
 // win-rate field is exactly the garbage this prevents).
+/** Pre-decimals rows have no 'decimals' key — they were authored at the old
+ *  hard-coded 2-place rounding, so 2 is the faithful default. */
+export const PUBLISHED_DECIMALS_DEFAULT = 2;
+export const MAX_PUBLISHED_DECIMALS = 4;
+
 export const normalizePublishedOdds = (raw: unknown): PublishedOdds | null => {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-  const o = raw as { overall?: unknown; tiers?: unknown };
+  const o = raw as { overall?: unknown; tiers?: unknown; decimals?: unknown };
   const overall =
     typeof o.overall === 'number' && Number.isFinite(o.overall)
       ? o.overall
@@ -43,7 +52,14 @@ export const normalizePublishedOdds = (raw: unknown): PublishedOdds | null => {
     const v = stored[r];
     if (typeof v === 'number' && Number.isFinite(v)) tiers[r] = v;
   }
-  return { overall, tiers };
+  const decimals =
+    typeof o.decimals === 'number' &&
+    Number.isInteger(o.decimals) &&
+    o.decimals >= 0 &&
+    o.decimals <= MAX_PUBLISHED_DECIMALS
+      ? o.decimals
+      : PUBLISHED_DECIMALS_DEFAULT;
+  return { overall, tiers, decimals };
 };
 
 export type PackWriteInput = {
@@ -122,6 +138,7 @@ export const createPackStep = createStep(
           : {
               overall: input.published_odds.overall,
               tiers: fillPublishedTiers(input.published_odds.tiers),
+              decimals: input.published_odds.decimals,
             }) as unknown as Record<string, unknown> | null,
         tier_ranges: (input.tier_ranges == null
           ? null

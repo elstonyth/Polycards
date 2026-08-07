@@ -85,8 +85,10 @@ export function orderDateTime(iso: string): string {
   return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()} ${p(h % 12 || 12)}:${p(d.getMinutes())} ${h < 12 ? 'AM' : 'PM'}`;
 }
 
+// Up to 4 decimals (the odds storage grain, 1 unit = 0.0001%), trailing
+// zeros trimmed: 0.68 -> "0.68%", 0.6842 -> "0.6842%", 12 -> "12%".
 export const fmtPct = (n: number): string =>
-  `${Number.isInteger(n) ? n : n.toFixed(2)}%`;
+  `${Number.isInteger(n) ? n : String(Math.round(n * 10_000) / 10_000)}%`;
 
 // Kebab-case a typed handle/slug for the backend's HANDLE_RE
 // (/^[a-z0-9]+(?:-[a-z0-9]+)*$/ — packs/validate.ts, cards/validate.ts):

@@ -56,13 +56,13 @@ describe('computeBoxWeights', () => {
       credit(100, true, 90),
       credit(1), credit(2),
     ]);
-    expect(w[0]).toEqual({ weight: 9000, locked: true });
-    expect(w[1].weight + w[2].weight).toBe(1000);
+    expect(w[0]).toEqual({ weight: 900_000, locked: true });
+    expect(w[1].weight + w[2].weight).toBe(100_000);
     expect(Math.abs(w[1].weight - w[2].weight)).toBeLessThanOrEqual(1); // equal-ish split
   });
-  test('weights always sum to 10000', () => {
+  test('weights always sum to 1,000,000', () => {
     const w = computeBoxWeights([credit(1), credit(2), credit(3)]);
-    expect(w.reduce((a, b) => a + b.weight, 0)).toBe(10000);
+    expect(w.reduce((a, b) => a + b.weight, 0)).toBe(1_000_000);
   });
   test('throws when locked total exceeds 100%', () => {
     expect(() => computeBoxWeights([credit(1, true, 60), credit(2, true, 50)])).toThrow();

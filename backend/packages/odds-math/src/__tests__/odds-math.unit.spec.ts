@@ -2,7 +2,7 @@ import {
   computeOdds,
   RARITY_WEIGHT,
   RARITIES,
-  TOTAL_BPS,
+  TOTAL_UNITS,
   type OddsInput,
 } from '../index';
 
@@ -27,23 +27,23 @@ const locked = (
 });
 
 describe('computeOdds — same-rarity (even-split) invariants', () => {
-  it('splits evenly across all-unlocked same-rarity cards and sums to exactly 10000 bps', () => {
+  it('splits evenly across all-unlocked same-rarity cards and sums to exactly 1,000,000 units', () => {
     const entries = ['a', 'b', 'c', 'd'].map((id) => unlocked(id));
     const { computed, error } = computeOdds(entries);
     expect(error).toBeNull();
-    expect(sumWeight(computed)).toBe(TOTAL_BPS);
-    expect(computed.map((c) => c.weight)).toEqual([2500, 2500, 2500, 2500]);
+    expect(sumWeight(computed)).toBe(TOTAL_UNITS);
+    expect(computed.map((c) => c.weight)).toEqual([250_000, 250_000, 250_000, 250_000]);
   });
 
-  it('distributes the rounding remainder so the total is still exactly 10000', () => {
+  it('distributes the rounding remainder so the total is still exactly 1,000,000', () => {
     const entries = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((id) =>
       unlocked(id),
     );
     const { computed, error } = computeOdds(entries);
     expect(error).toBeNull();
-    expect(sumWeight(computed)).toBe(TOTAL_BPS);
+    expect(sumWeight(computed)).toBe(TOTAL_UNITS);
     const weights = computed.map((c) => c.weight).sort((x, y) => x - y);
-    expect(weights).toEqual([1428, 1428, 1428, 1429, 1429, 1429, 1429]);
+    expect(weights).toEqual([142_857, 142_857, 142_857, 142_857, 142_857, 142_857, 142_858]);
   });
 
   it('locks one card and splits the remainder evenly among the rest (advisor example)', () => {
@@ -55,23 +55,23 @@ describe('computeOdds — same-rarity (even-split) invariants', () => {
     ];
     const { computed, error } = computeOdds(entries);
     expect(error).toBeNull();
-    expect(sumWeight(computed)).toBe(TOTAL_BPS);
+    expect(sumWeight(computed)).toBe(TOTAL_UNITS);
     const byId = Object.fromEntries(computed.map((c) => [c.card_id, c.weight]));
-    expect(byId.a).toBe(4000);
-    expect(byId.b).toBe(2000);
-    expect(byId.c).toBe(2000);
-    expect(byId.d).toBe(2000);
+    expect(byId.a).toBe(400_000);
+    expect(byId.b).toBe(200_000);
+    expect(byId.c).toBe(200_000);
+    expect(byId.d).toBe(200_000);
   });
 
-  it('supports fractional locked percentages (2 dp → bps)', () => {
+  it('supports fractional locked percentages (4 dp → units)', () => {
     const entries = [locked('a', 12.5), unlocked('b'), unlocked('c')];
     const { computed, error } = computeOdds(entries);
     expect(error).toBeNull();
     const byId = Object.fromEntries(computed.map((c) => [c.card_id, c.weight]));
-    expect(byId.a).toBe(1250);
-    expect(byId.b).toBe(4375);
-    expect(byId.c).toBe(4375);
-    expect(sumWeight(computed)).toBe(TOTAL_BPS);
+    expect(byId.a).toBe(125_000);
+    expect(byId.b).toBe(437_500);
+    expect(byId.c).toBe(437_500);
+    expect(sumWeight(computed)).toBe(TOTAL_UNITS);
   });
 });
 
@@ -101,9 +101,9 @@ describe('computeOdds — rarity-weighted split', () => {
     const { computed, error } = computeOdds(entries);
     expect(error).toBeNull();
     const byId = Object.fromEntries(computed.map((c) => [c.card_id, c.weight]));
-    expect(byId.leg).toBe(99);
-    expect(byId.com).toBe(9901);
-    expect(sumWeight(computed)).toBe(TOTAL_BPS);
+    expect(byId.leg).toBe(9_901);
+    expect(byId.com).toBe(990_099);
+    expect(sumWeight(computed)).toBe(TOTAL_UNITS);
   });
 
   it('combines a locked % with a rarity-weighted remainder', () => {
@@ -115,10 +115,10 @@ describe('computeOdds — rarity-weighted split', () => {
     const { computed, error } = computeOdds(entries);
     expect(error).toBeNull();
     const byId = Object.fromEntries(computed.map((c) => [c.card_id, c.weight]));
-    expect(byId.a).toBe(4000);
-    expect(byId.b).toBe(59);
-    expect(byId.c).toBe(5941);
-    expect(sumWeight(computed)).toBe(TOTAL_BPS);
+    expect(byId.a).toBe(400_000);
+    expect(byId.b).toBe(5_941);
+    expect(byId.c).toBe(594_059);
+    expect(sumWeight(computed)).toBe(TOTAL_UNITS);
   });
 
   it('treats an unknown rarity string as Common instead of throwing', () => {
@@ -126,8 +126,8 @@ describe('computeOdds — rarity-weighted split', () => {
     const { computed, error } = computeOdds(entries);
     expect(error).toBeNull();
     const byId = Object.fromEntries(computed.map((c) => [c.card_id, c.weight]));
-    expect(byId.a).toBe(5000);
-    expect(byId.b).toBe(5000);
+    expect(byId.a).toBe(500_000);
+    expect(byId.b).toBe(500_000);
   });
 
   it('is order-independent: the same set in any order yields the same per-card weights', () => {
@@ -150,7 +150,7 @@ describe('computeOdds — rarity-weighted split', () => {
       computeOdds(b).computed.map((c) => [c.card_id, c.weight]),
     );
     expect(wa).toEqual(wb);
-    expect(sumWeight(computeOdds(a).computed)).toBe(TOTAL_BPS);
+    expect(sumWeight(computeOdds(a).computed)).toBe(TOTAL_UNITS);
   });
 });
 
@@ -168,7 +168,7 @@ describe('computeOdds — validation', () => {
   it('accepts when every card is locked and the total is exactly 100%', () => {
     const { computed, error } = computeOdds([locked('a', 70), locked('b', 30)]);
     expect(error).toBeNull();
-    expect(sumWeight(computed)).toBe(TOTAL_BPS);
+    expect(sumWeight(computed)).toBe(TOTAL_UNITS);
   });
 
   it('allows locked cards to sum to 100% with unlocked cards going to 0%', () => {
@@ -176,7 +176,7 @@ describe('computeOdds — validation', () => {
     const { computed, error } = computeOdds(entries);
     expect(error).toBeNull();
     const byId = Object.fromEntries(computed.map((c) => [c.card_id, c.weight]));
-    expect(byId.a).toBe(TOTAL_BPS);
+    expect(byId.a).toBe(TOTAL_UNITS);
     expect(byId.b).toBe(0);
     expect(byId.c).toBe(0);
   });
