@@ -481,12 +481,32 @@ medusaIntegrationTestRunner({
       // the happy-path test's single successful update is that guard working
       // WITH this route, not a gap in coverage.
       describe("POST /store/phone-verification/password-reset", () => {
-        const passwordReset = (body: Record<string, unknown>) =>
-          unwrapResponse(
-            api.post("/store/phone-verification/password-reset", body, {
-              headers,
-            }),
-          );
+        // The exchange refuses unless PHONE_VERIFICATION_REQUIRED is on: while
+        // it is off, blockUnverifiedPhoneWrite no-ops and any live session can
+        // write an unproven number straight to /store/customers/me, so the
+        // phone on the row proves nothing and must not mint a reset token (see
+        // the route's own gate comment). Armed per CALL rather than in a
+        // describe-wide beforeAll on purpose - registerCustomerWithPhone above
+        // posts /store/customers WITH a phone and no x-phone-verification
+        // header, so arming it for the whole block would make
+        // requireSignupPhoneProof reject the fixtures instead. The guards read
+        // process.env per request (see the "gated signup" note below), so this
+        // reaches the already-booted app.
+        const passwordReset = async (body: Record<string, unknown>) => {
+          const prev = process.env.PHONE_VERIFICATION_REQUIRED;
+          process.env.PHONE_VERIFICATION_REQUIRED = "true";
+          try {
+            return await unwrapResponse(
+              api.post("/store/phone-verification/password-reset", body, {
+                headers,
+              }),
+            );
+          } finally {
+            if (prev === undefined)
+              delete process.env.PHONE_VERIFICATION_REQUIRED;
+            else process.env.PHONE_VERIFICATION_REQUIRED = prev;
+          }
+        };
 
         it("runs the full loop: proof -> reset token -> emailpass update -> login with the new password", async () => {
           const email = "pw-reset-happy@test.dev";
@@ -617,6 +637,43 @@ medusaIntegrationTestRunner({
           expect(res.data).toMatchObject({
             message: "This account signs in with Google.",
           });
+        });
+
+        // The flag-off bypass, end to end. PHONE_VERIFICATION_REQUIRED is the
+        // documented fail-open rollback lever and has been flipped for real
+        // (PR #390 disabled the phone gates during the Twilio 21608 outage,
+        // #391 re-armed them). While it is off, the re-auth gate on
+        // ../change/route.ts is irrelevant: the attacker writes the phone
+        // through /store/customers/me instead. So a valid, freshly-OTP'd
+        // password-reset proof must still buy nothing.
+        it("400s and mints no reset token while the phone gate is off", async () => {
+          const email = "pw-reset-gate-off@test.dev";
+          const phone = "+60107667805";
+          await registerCustomerWithPhone(email, phone);
+
+          await start({ phone, purpose: "password-reset" });
+          const checked = await check({
+            phone,
+            purpose: "password-reset",
+            code: "000000",
+          });
+          expect(checked.status).toBe(200);
+
+          // Deliberately NOT through the passwordReset helper above - that
+          // helper arms the flag. This is the raw call in the suite's default
+          // (unset = off) state, which is the state under test.
+          const res = await unwrapResponse(
+            api.post(
+              "/store/phone-verification/password-reset",
+              { token: checked.data.token },
+              { headers },
+            ),
+          );
+          expect(res.status).toBe(400);
+          expect(res.data).toMatchObject({
+            message: "Phone recovery is unavailable. Reset by email instead.",
+          });
+          expect(res.data.token).toBeUndefined();
         });
       });
 

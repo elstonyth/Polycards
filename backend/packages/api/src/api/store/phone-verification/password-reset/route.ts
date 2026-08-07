@@ -2,7 +2,10 @@ import type { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
 import { MedusaError, Modules } from '@medusajs/framework/utils';
 import type { ICustomerModuleService } from '@medusajs/framework/types';
 import { generateResetPasswordTokenWorkflow } from '@medusajs/core-flows';
-import { verifyPhoneProof } from '../../../../utils/phone-verification';
+import {
+  isPhoneVerificationRequired,
+  verifyPhoneProof,
+} from '../../../../utils/phone-verification';
 
 // Workflow contract (Task 5 Step 1 — verified against @medusajs/medusa dist
 // and @medusajs/core-flows dist, not guessed):
@@ -82,6 +85,44 @@ export async function POST(req: MedusaRequest<Body>, res: MedusaResponse): Promi
     typeof token === 'string' ? verifyPhoneProof(jwtSecret, token, 'password-reset') : null;
   if (!proof)
     throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Phone verification required.');
+
+  // ── THE PHONE IS ONLY A FACTOR WHILE PHONE WRITES ARE GATED ────────────────
+  // A phone can serve as an authentication factor only while the system claims
+  // phones are verified. With PHONE_VERIFICATION_REQUIRED off,
+  // blockUnverifiedPhoneWrite (api/utils/phone-verification-guard.ts) no-ops
+  // and any live customer session can write an arbitrary, unproven number
+  // straight to POST /store/customers/me — so the phone on the row proves
+  // nothing about who holds the account, and must not mint a password-reset
+  // token. Without this, flipping the documented fail-open rollback lever
+  // (CONTEXT.md; exercised by PR #390/#391 during the Twilio 21608 outage)
+  // reopens the exact takeover chain the re-auth gate in ../change/route.ts
+  // closes, by routing around that route entirely.
+  //
+  // isPhoneVerificationRequired, NOT isPhoneGateRequired. The question here is
+  // "is WRITING a phone gated", which is precisely what
+  // PHONE_VERIFICATION_REQUIRED governs. isPhoneGateRequired is the money/goods
+  // gate and only FALLS BACK to that flag when unset, so
+  // PHONE_VERIFICATION_REQUIRED=false + PHONE_GATE_REQUIRED=true is a reachable
+  // state in which /me phone writes are wide open while isPhoneGateRequired
+  // returns true — gating on it would hand over a token anyway.
+  //
+  // Placed AFTER the proof check for the same reason the change route's re-auth
+  // gate is: a caller who holds no valid phone proof learns nothing from this
+  // route, flag state included.
+  //
+  // The refusal lives HERE and not in ../start/route.ts on purpose. start's
+  // whole contract is that it answers an identical `{ ok: true }` for every
+  // outcome, so a refusal there could only be a silent no-send — i.e. "the code
+  // never arrives", the exact failure shape CONTEXT.md records costing a day to
+  // diagnose in the 21608 incident. Refusing at the exchange instead keeps that
+  // response uniform and gives the caller the one thing they can act on: the
+  // email reset flow, which this flag does not touch. The message names no
+  // cause.
+  if (!isPhoneVerificationRequired(process.env))
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'Phone recovery is unavailable. Reset by email instead.',
+    );
 
   const customerService: ICustomerModuleService = req.scope.resolve(Modules.CUSTOMER);
   const matches = await customerService.listCustomers(
