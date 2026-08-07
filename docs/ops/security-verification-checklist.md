@@ -39,7 +39,10 @@ Two standing rules:
 ## Already settled in the repo
 
 Harvested before the questions were written, so nobody re-answers what is recorded.
-These are in-repo facts with citations — **not** console readings.
+Every row below is already written down **in this repository** and carries its
+`file:line`. None was obtained by opening a console for this checklist — where a row
+does record a past console observation (#2), it is cited to the file that recorded it
+and carries the date it was observed.
 
 | # | Fact | Citation |
 | --- | --- | --- |
