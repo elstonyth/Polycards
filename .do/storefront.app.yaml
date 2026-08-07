@@ -164,10 +164,10 @@ services:
       # Enabled 2026-08-04 (backend routes + Twilio verified live first). Like
       # every NEXT_PUBLIC_* here, the root Dockerfile ARG default is what the
       # bundle actually gets — this key moves together with that ARG.
-      # Rolled back to false 2026-08-07: the Twilio trial ran out of credit and
-      # every send 403s, so the OTP step became a dead end for signup and
-      # phone-change. Backend flag went false first. Both flip back once the
-      # Twilio account is upgraded (paid) and a real send returns 2xx.
+      # Rolled back to false 2026-08-07: Twilio 21608 (no approved primary
+      # compliance profile on the account) makes every send fail, so the OTP
+      # step is a dead end. Moves back to 'true' with the Dockerfile ARG once a
+      # real send returns 2xx.
       - key: NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED
         scope: RUN_AND_BUILD_TIME
         value: 'false'

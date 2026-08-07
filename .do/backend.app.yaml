@@ -226,14 +226,21 @@ envs:
   # or phone signups 400 until it catches up. Rollback lever: set this to
   # "false" and re-apply — every gate opens instantly, storefront unaffected.
   #
-  # ROLLED BACK to "false" 2026-08-07 (applied to prod the same day): the Twilio
-  # account is still a TRIAL and its credit ran out, so every
-  # POST /Verifications came back 403 and nobody could receive a code. With the
-  # flag on and PHONE_GATE_REQUIRED unset, that also froze the money path —
-  # unverified accounts could not top up, deposit, or order delivery, and could
-  # not verify their way out. Flip back to "true" once the Twilio account is
-  # UPGRADED (paid, not trial: trial only delivers to verified caller IDs) and a
-  # real send is confirmed 2xx — together with the storefront ARG, step 3 first.
+  # ROLLED BACK to "false" 2026-08-07 (applied to prod the same day). Twilio
+  # refuses every send with 403 / error 21608, which reads as "trial accounts
+  # cannot message unverified numbers" but ALSO fires on an upgraded account
+  # that has no APPROVED PRIMARY COMPLIANCE PROFILE — which is this account's
+  # actual state (Trust Hub still offers "Business Profile → Get Started").
+  # Upgrading to paid and funding it did NOT clear the error; only an approved
+  # profile does, and that is a review that takes days.
+  #
+  # This flag had to move because PHONE_GATE_REQUIRED is unset and therefore
+  # follows it: with it on, every unverified account was frozen out of topup /
+  # deposit / delivery and could not verify its way out.
+  #
+  # Re-arm (storefront ARG first, then this) only after a real send returns
+  # 2xx. Diagnose with the account's compliance profile + `type` + balance
+  # BEFORE touching any gate here — the failure is upstream of all of them.
   - key: PHONE_VERIFICATION_REQUIRED
     scope: RUN_TIME
     value: "false"
