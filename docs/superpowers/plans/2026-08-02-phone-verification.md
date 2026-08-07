@@ -1031,8 +1031,11 @@ export type PhoneOtpPurpose = 'signup' | 'phone-change' | 'password-reset';
 /**
  * Phone-OTP server actions. Thin proxies onto the backend's
  * /store/phone-verification/* routes — running server-side keeps the
- * publishable-key transport consistent with every other action and lets the
- * backend's IP rate limiter see the real client via x-forwarded-for.
+ * publishable-key transport consistent with every other action. The backend
+ * sees THIS server's single egress IP, not the visitor's — see the shipped
+ * comment in
+ * src/lib/actions/phone-verification.ts (corrected by plan 090; the version
+ * originally drafted here claimed the opposite).
  */
 import { sdk } from '@/lib/medusa';
 import { logger } from '@/lib/logger';

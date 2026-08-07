@@ -4,6 +4,7 @@ import {
   isPhoneOtpPurpose,
   isPhoneVerificationRequired,
   isTwilioVerifyConfigured,
+  resolvePhoneGateState,
   unresolvableSmsCountries,
   signPhoneProof,
   verifyPhoneProof,
@@ -39,6 +40,93 @@ describe('predicates', () => {
   it('purpose guard', () => {
     expect(isPhoneOtpPurpose('signup')).toBe(true);
     expect(isPhoneOtpPurpose('admin')).toBe(false);
+  });
+});
+
+// The boot reporter is the only thing that will ever say out loud which gate
+// state a deploy came up in. It must report the fail-open coupling honestly and
+// flag a value an operator clearly meant as "on" — without ever echoing a raw
+// env value into a deploy log.
+describe('resolved gate state (boot reporter)', () => {
+  const TWILIO = {
+    TWILIO_ACCOUNT_SID: 'AC1',
+    TWILIO_AUTH_TOKEN: 't',
+    TWILIO_VERIFY_SERVICE_SID: 'VA1',
+  };
+
+  it('both gates on, twilio configured — nothing to warn about', () => {
+    expect(
+      resolvePhoneGateState({
+        PHONE_VERIFICATION_REQUIRED: 'true',
+        PHONE_GATE_REQUIRED: 'true',
+        ...TWILIO,
+      }),
+    ).toEqual({
+      phoneVerificationRequired: true,
+      phoneGateRequired: true,
+      twilioConfigured: true,
+      warnings: [],
+    });
+  });
+
+  // The fail-open coupling, asserted for the first time: an unset write flag
+  // takes the MONEY gate down with it. That is the recorded design (CONTEXT.md
+  // rollback lever) — pinned here so it can only ever change deliberately.
+  it('unset PHONE_VERIFICATION_REQUIRED drops the money gate with it', () => {
+    const state = resolvePhoneGateState({});
+    expect(state.phoneVerificationRequired).toBe(false);
+    expect(state.phoneGateRequired).toBe(false);
+    expect(state.twilioConfigured).toBe(false);
+    expect(state.warnings).toEqual([]); // unset is not a typo
+  });
+
+  // The documented in-a-hurry lever: money off, writes still gated. An explicit
+  // 'false' is a deliberate act, so it must NOT be reported as a mistake.
+  it('PHONE_GATE_REQUIRED=false is the money-only rollback, not a warning', () => {
+    const state = resolvePhoneGateState({
+      PHONE_VERIFICATION_REQUIRED: 'true',
+      PHONE_GATE_REQUIRED: 'false',
+    });
+    expect(state.phoneVerificationRequired).toBe(true);
+    expect(state.phoneGateRequired).toBe(false);
+    expect(state.warnings).toEqual([]);
+  });
+
+  it('an explicit false on the write gate warns about nothing either', () => {
+    const state = resolvePhoneGateState({ PHONE_VERIFICATION_REQUIRED: 'false' });
+    expect(state.phoneVerificationRequired).toBe(false);
+    expect(state.warnings).toEqual([]);
+  });
+
+  // The whole reason this reporter exists: the parse is strict `=== 'true'`, so
+  // an operator who typed 'True' (or '1', or 'yes') silently disarmed every
+  // gate. Do not fix by loosening the parse — the strictness is pinned above.
+  it.each(['True', '1', 'yes', 'TRUE'])(
+    'flags PHONE_VERIFICATION_REQUIRED=%s as read-as-false',
+    (raw) => {
+      const state = resolvePhoneGateState({ PHONE_VERIFICATION_REQUIRED: raw });
+      expect(state.phoneVerificationRequired).toBe(false);
+      expect(state.phoneGateRequired).toBe(false);
+      expect(state.warnings).toHaveLength(1);
+      expect(state.warnings[0]).toContain('PHONE_VERIFICATION_REQUIRED');
+      expect(state.warnings[0]).toContain('read as false');
+      // The raw value must never reach a log line: these two are boolean-shaped
+      // today, but the habit of echoing env values is how credentials land in a
+      // public deploy log.
+      expect(state.warnings[0]).not.toContain(raw);
+    },
+  );
+
+  it('flags a bad PHONE_GATE_REQUIRED independently of the write gate', () => {
+    const state = resolvePhoneGateState({
+      PHONE_VERIFICATION_REQUIRED: 'true',
+      PHONE_GATE_REQUIRED: 'yes',
+    });
+    expect(state.phoneVerificationRequired).toBe(true);
+    expect(state.phoneGateRequired).toBe(false);
+    expect(state.warnings).toEqual([
+      expect.stringContaining('PHONE_GATE_REQUIRED'),
+    ]);
   });
 });
 
