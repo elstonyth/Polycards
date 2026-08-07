@@ -1,12 +1,14 @@
 # Security Verification Checklist — the controls code cannot enforce
 
-**Status:** open. Every item below is a question this repository **cannot answer**,
+**Status:** open. Every item in A–G is a question this repository **cannot answer**,
 because the answer lives in a third-party console (Twilio, GlobePay365) or in the
-running production environment. Nothing here is answered by reading the code.
+running production environment. Nothing there is answered by reading the code.
 
 **Written:** 2026-08-07, at commit `db2767f5`, out of the round-10 security audit.
 Referenced plans **083, 084, 086, 090** were all status **TODO** in `plans/README.md`
-at the time of writing (rows at `plans/README.md:1635`, `:1636`, `:1638`, `:1642`).
+at the time of writing. Those plan files were not yet committed when this was
+written, so a reader on a fresh clone may not find them — check the branch that
+carries them before concluding a reference is dangling.
 
 **Why it exists:** each of these questions changes how severe a code-level finding
 is. The audit's arithmetic assumes documented defaults; a different console setting
@@ -17,11 +19,17 @@ re-derived every round.
 
 ## How to use this
 
-Work top to bottom. For each item, record the answer **inline, in the item, with the
-date you checked** — the same habit the neighbouring runbooks use, where the evidence
-a step produced matters as much as the step. An answered item is **not deleted**: move
-it to "Already settled" below with its date and source, so the next auditor knows it
-was checked and when.
+Work top to bottom. Answering an item is **two sequential steps**, not a choice
+between them:
+
+1. **Record it in place.** Replace that item's `> **Answer:** _(open)_` line with the
+   answer and the date you checked. The item keeps its full context — the question,
+   why it matters, and what you were asked to record — the same habit the
+   neighbouring runbooks use, where the evidence a step produced matters as much as
+   the step.
+2. **Then copy the one-line fact up** into "Already settled" with its date and
+   source. The item itself is **never deleted**, so the next auditor can see both the
+   summary and the reasoning behind it.
 
 Re-run the whole list at the start of each audit round. **This document goes stale by
 design** — its answers are third-party console state and change without a commit.
@@ -38,27 +46,37 @@ Two standing rules:
 
 ## Already settled in the repo
 
-Harvested before the questions were written, so nobody re-answers what is recorded.
-Every row below is already written down **in this repository** and carries its
-`file:line`. None was obtained by opening a console for this checklist — where a row
-does record a past console observation (#2), it is cited to the file that recorded it
-and carries the date it was observed.
+Rows 1–13 were harvested before the questions were written, so nobody re-answers what
+is already recorded. As items A–G get answered, their one-line facts join this table.
 
-| # | Fact | Citation |
-| --- | --- | --- |
-| 1 | Our OTP check route accepts **any 4–10 digit** code: `/^\d{4,10}$/`. A short code configured upstream would be accepted here without complaint — this is what makes item **A** load-bearing. | `backend/packages/api/src/api/store/phone-verification/check/route.ts:24` |
-| 2 | Malaysia (`+60`) **was** enabled in SMS geo permissions, observed during the 2026-08-07 outage triage. What **else** is enabled is unrecorded — that is the open half of item **B**. | `CONTEXT.md:188` |
-| 3 | Twilio failure logs carry the numeric error code beside the HTTP status, so a compliance block, a geo block and a Fraud Guard hit are distinguishable **without** a console session. | `CONTEXT.md:200` |
-| 4 | Diagnosis order if OTP breaks again: compliance profile → account type/balance → destination geo permission. All three sit upstream of every feature flag. | `CONTEXT.md:194-198` |
-| 5 | The RSA callback signature is the **only** gate on the deposit hook — source-IP allowlisting was deliberately rejected (DO's LB hides their address). Nothing backstops a signature that verifies, which is what makes item **C** load-bearing. | `docs/payments/globepay365-setup.md:310-317` |
-| 6 | Key **direction** is settled: outbound requests are signed with our merchant private key, inbound callbacks verified with GlobePay's public key (`GLOBEPAY_PUBLIC_KEY`). Key **scoping** — one platform key or one per merchant — is not stated anywhere. | `docs/payments/globepay365-setup.md:26-28`, `:38` |
-| 7 | Only the `Data` object is covered by the signature; `TransactionId`, `MerchantTransactionId` and `Version` sit outside it and are mutable on an otherwise-genuine body. | `docs/payments/globepay365-setup.md:180-190` |
-| 8 | `PMT10016` is the **documented** not-found code, but staging returned a bare 400 "Not found" **without** it. Both sweeps therefore treat any 400 as not-found. Partial answer to item **D**; what an **auth** failure returns is unrecorded. | `backend/packages/api/src/jobs/globepay-reconcile.ts:69-74`, `docs/payments/globepay365-setup.md:203` |
-| 9 | Known error codes: `PMT10005` amount out of range, `PMT10024` payment-method routing gap, `PMT10000` duplicate merchant transaction id. None of these is an authentication failure. | `docs/payments/globepay365-setup.md:222`, `:239-242`, `backend/packages/api/src/modules/packs/models/globepay-deposit.ts:19-21` |
-| 10 | Live deposit band is RM 30 – RM 10,000; payout band RM 50 – RM 50,000. Confirmed by the provider 2026-07-29, but nobody has submitted either ceiling against the live account. | `docs/payments/globepay365-setup.md:391-417` |
-| 11 | The prod spec sets `PHONE_VERIFICATION_REQUIRED` only; `PHONE_GATE_REQUIRED` is deliberately **unset** and therefore follows it. So item **E** is one resolved value plus a confirmation that the second is still absent. | `.do/backend.app.yaml:235`, `:243` |
-| 12 | `CONTEXT.md:175` records the OTP as valid for **10 minutes**. Treat this as **unconfirmed**: the same sentence attributes the six-digit length to "Twilio's own default", so the TTL is most likely the documented default rather than a reading of our service. Item **A** still asks for it. | `CONTEXT.md:175` |
-| 13 | Alerting on a deposit pending past its window is **not built**. The admin Deposits page shows it; someone has to look. Both of plan 084's loud log lines are still only log lines. | `docs/payments/globepay365-setup.md:388-389` |
+**Every row is one of two kinds, and must say which:**
+
+- **In-repo** — the fact is written down somewhere in this repository. Citation is a
+  `file:line`. Source reads `in-repo`; Date is `—` unless the cited text itself
+  carries one.
+- **Console-observed** — the fact came from a third-party console or a person.
+  There is no `file:line` to give, so Citation reads `—`, **Date and Source are
+  mandatory**, and Source names who observed or supplied it.
+
+Do not put a console answer in an `in-repo` row. The distinction is the whole value of
+this table: it tells the next auditor which facts they can re-check by reading, and
+which they must go and ask about again.
+
+| # | Fact | Citation | Date | Source |
+| --- | --- | --- | --- | --- |
+| 1 | Our OTP check route accepts **any 4–10 digit** code: `/^\d{4,10}$/`. A short code configured upstream would be accepted here without complaint — this is what makes item **A** load-bearing. | `backend/packages/api/src/api/store/phone-verification/check/route.ts:24` | — | in-repo |
+| 2 | Malaysia (`+60`) **was** enabled in SMS geo permissions, observed during the 2026-08-07 outage triage. What **else** is enabled is unrecorded — that is the open half of item **B**. | `CONTEXT.md:188` | 2026-08-07 | in-repo (outage triage) |
+| 3 | Twilio failure logs carry the numeric error code beside the HTTP status, so a compliance block, a geo block and a Fraud Guard hit are distinguishable **without** a console session. | `CONTEXT.md:200` | — | in-repo |
+| 4 | Diagnosis order if OTP breaks again: compliance profile → account type/balance → destination geo permission. All three sit upstream of every feature flag. | `CONTEXT.md:194-198` | — | in-repo |
+| 5 | The RSA callback signature is the **only** gate on the deposit hook — source-IP allowlisting was deliberately rejected (DO's LB hides their address). Nothing backstops a signature that verifies, which is what makes item **C** load-bearing. | `docs/payments/globepay365-setup.md:310-317` | — | in-repo |
+| 6 | Key **direction** is settled: outbound requests are signed with our merchant private key, inbound callbacks verified with GlobePay's public key (`GLOBEPAY_PUBLIC_KEY`). Key **scoping** — one platform key or one per merchant — is not stated anywhere. | `docs/payments/globepay365-setup.md:26-28`, `:38` | — | in-repo |
+| 7 | Only the `Data` object is covered by the signature; `TransactionId`, `MerchantTransactionId` and `Version` sit outside it and are mutable on an otherwise-genuine body. | `docs/payments/globepay365-setup.md:180-190` | — | in-repo |
+| 8 | `PMT10016` is the **documented** not-found code, but staging returned a bare 400 "Not found" **without** it. Both sweeps therefore treat any 400 as not-found. Partial answer to item **D**; what an **auth** failure returns is unrecorded. | `backend/packages/api/src/jobs/globepay-reconcile.ts:69-74`, `docs/payments/globepay365-setup.md:203` | — | in-repo |
+| 9 | Known error codes: `PMT10005` amount out of range, `PMT10024` payment-method routing gap, `PMT10000` duplicate merchant transaction id. None of these is an authentication failure. | `docs/payments/globepay365-setup.md:222`, `:239-242`, `backend/packages/api/src/modules/packs/models/globepay-deposit.ts:19-21` | — | in-repo |
+| 10 | Live deposit band is RM 30 – RM 10,000; payout band RM 50 – RM 50,000. Confirmed by the provider 2026-07-29, but nobody has submitted either ceiling against the live account. | `docs/payments/globepay365-setup.md:391-417` | 2026-07-29 | in-repo (provider) |
+| 11 | The prod spec sets `PHONE_VERIFICATION_REQUIRED` only; `PHONE_GATE_REQUIRED` is deliberately **unset** and therefore follows it. So item **E** is one resolved value plus a confirmation that the second is still absent. | `.do/backend.app.yaml:235`, `:243` | — | in-repo |
+| 12 | `CONTEXT.md:175` records the OTP as valid for **10 minutes**. Treat this as **unconfirmed**: the same sentence attributes the six-digit length to "Twilio's own default", so the TTL is most likely the documented default rather than a reading of our service. Item **A** still asks for it. | `CONTEXT.md:175` | — | in-repo |
+| 13 | Alerting on a deposit pending past its window is **not built**. The admin Deposits page shows it; someone has to look. Both of plan 084's loud log lines are still only log lines. | `docs/payments/globepay365-setup.md:388-389` | — | in-repo |
 
 ---
 
@@ -91,7 +109,7 @@ by SID.
 
 **Why it matters.** Plan 086 (TODO) adds a code-side destination allowlist; this is
 the upstream half. It is the difference between an unauthenticated endpoint reaching
-~7,200 billable destinations/day and reaching only the served market. Malaysia is
+~7,200 billable sends/day and reaching only the served market. Malaysia is
 known enabled (settled #2); the rest of the list is not. `CONTEXT.md:236` instructs an
 operator to turn Fraud Guard on — that is an instruction, **not** evidence it is on.
 
@@ -159,13 +177,15 @@ and auth/merchant-code failure. Note the date and which environment.
 **Question.** Do `PHONE_VERIFICATION_REQUIRED` and `PHONE_GATE_REQUIRED` resolve to
 the intended values in the **running** production app — not just in the `.do` spec?
 
-**Why it matters.** The parse is a strict `=== 'true'`, so unset, empty, `'True'`,
-`'1'`, or a misspelled key all resolve to **false** and silently open every gate,
-including the money gates. The flags live in two `.do` specs plus a `Dockerfile` build
-ARG (`.do/backend.app.yaml:243`, `.do/storefront.app.yaml:170`, `Dockerfile:84`), and
-were flipped off and back on during the 2026-08-07 Twilio incident (commits `3e36a623`
-/ `db2767f5`). A partially-applied spec or a rebuild that missed the ARG would not
-show up anywhere.
+**Why it matters.** The parse is a strict `=== 'true'`
+(`backend/packages/api/src/utils/phone-verification.ts:29-30`), so unset, empty,
+`'True'`, `'1'`, or a misspelled key all resolve to **false** and silently open every
+gate, including the money gates. The backend flag lives in the backend spec
+(`.do/backend.app.yaml:243`), plus a storefront `NEXT_PUBLIC_` mirror in a second spec
+and a `Dockerfile` ARG (`.do/storefront.app.yaml:170`, `Dockerfile:84`). They were
+flipped off and back on during the 2026-08-07 Twilio incident (commits `3e36a623` /
+`db2767f5`). A partially-applied spec or a rebuild that missed the ARG would not show
+up anywhere.
 
 **Where to look.** Once plan 090 (TODO) lands, read the `[phone-gate]` boot log line
 in the deploy log — that is the whole point of it. Until then: the app's Environment
