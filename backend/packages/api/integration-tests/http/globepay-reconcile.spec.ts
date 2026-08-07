@@ -18,9 +18,13 @@ jest.mock('../../src/modules/packs/globepay-client', () => {
   return { ...actual, getDepositDetail: jest.fn() };
 });
 
-import { getDepositDetail } from '../../src/modules/packs/globepay-client';
+import {
+  GlobePayError,
+  getDepositDetail,
+} from '../../src/modules/packs/globepay-client';
 import globepayReconcileJob from '../../src/jobs/globepay-reconcile';
 import {
+  GLOBEPAY_AMBIGUOUS_GIVEUP_DEFAULT_MS,
   GLOBEPAY_EXPIRED_RETRY_MS,
   GLOBEPAY_STALE_AFTER_MS,
 } from '../../src/modules/packs/globepay-reconcile';
@@ -304,6 +308,90 @@ medusaIntegrationTestRunner({
         await sweep();
         await sweep();
 
+        expect(await ledger()).toHaveLength(0);
+        expect((await rowOf(row.id)).status).toBe('expired');
+      });
+
+      // The job-level guard for the ambiguous-400 branch. The pure classifier is
+      // unit-tested, but nothing executed the branch in the JOB that consumes it
+      // — delete it and the sweep silently resumes writing off every pending
+      // deposit the moment a merchant credential breaks.
+      //
+      // This is the shape staging actually returns: HTTP 400, plain-text
+      // "Not found", no PMT10016 (docs/payments/globepay365-setup.md:124). It is
+      // indistinguishable from a rotated key, so it must not write anything off.
+      const ambiguous400 = () =>
+        new GlobePayError(
+          'GlobePay365 /api/Deposit/GetDepositDetail: non-JSON response (HTTP 400): Not found',
+          [],
+          400,
+        );
+
+      it('does NOT write off a deposit on an unattributable 400, however old', async () => {
+        const row = await seed(
+          'PC-reconcile-ambiguous',
+          GLOBEPAY_STALE_AFTER_MS * 24,
+        );
+        requery.mockRejectedValue(ambiguous400());
+
+        await sweep();
+
+        expect(await ledger()).toHaveLength(0);
+        // Still 'pending' — not 'failed', not 'expired'. It stays in the live
+        // queue and is requeried next run.
+        expect((await rowOf(row.id)).status).toBe('pending');
+      });
+
+      it('does NOT write off an unattributable 400 even when the row HAS a gateway id', async () => {
+        const row = await seed(
+          'PC-reconcile-ambiguous-known',
+          GLOBEPAY_STALE_AFTER_MS * 24,
+        );
+        await packs().updateGlobePayDeposits({
+          id: row.id,
+          gateway_transaction_id: 'D2026072112415767',
+        } as never);
+        requery.mockRejectedValue(ambiguous400());
+
+        await sweep();
+
+        expect(await ledger()).toHaveLength(0);
+        expect((await rowOf(row.id)).status).toBe('pending');
+      });
+
+      // ...but not forever, or these rows fill the oldest-first window and the
+      // sweep never reaches a fresh deposit whose callback was dropped.
+      it('ages an endlessly-ambiguous deposit out to expired, never to failed', async () => {
+        const row = await seed(
+          'PC-reconcile-ambiguous-ancient',
+          GLOBEPAY_AMBIGUOUS_GIVEUP_DEFAULT_MS + 60 * 60 * 1000,
+        );
+        requery.mockRejectedValue(ambiguous400());
+
+        await sweep();
+
+        expect(await ledger()).toHaveLength(0);
+        // 'expired', so the second tier keeps requerying it and a late callback
+        // can still settle it. A write-off would have been 'failed'.
+        expect((await rowOf(row.id)).status).toBe('expired');
+      });
+
+      // The bound is operator-tunable, and the ONLY thing that reads the env var
+      // is the job's default-parameter path — so a unit test that passes `env`
+      // explicitly proves the arithmetic but not the plumbing. This exercises
+      // the var the way an operator actually sets it.
+      it('honours GLOBEPAY_AMBIGUOUS_GIVEUP_MS through the job', async () => {
+        const row = await seed('PC-reconcile-ambiguous-tuned', 60_000);
+        requery.mockRejectedValue(ambiguous400());
+        process.env.GLOBEPAY_AMBIGUOUS_GIVEUP_MS = '1000';
+        try {
+          await sweep();
+        } finally {
+          delete process.env.GLOBEPAY_AMBIGUOUS_GIVEUP_MS;
+        }
+
+        // A one-minute-old row would wait for a week at the default; the
+        // override ages it out immediately — and still only to 'expired'.
         expect(await ledger()).toHaveLength(0);
         expect((await rowOf(row.id)).status).toBe('expired');
       });

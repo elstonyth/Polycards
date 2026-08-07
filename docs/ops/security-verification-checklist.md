@@ -267,15 +267,79 @@ leave). Date it. A zero count is a result worth recording too.
 
 ---
 
+## H. Withdrawals stranded by the plan-084 narrowing
+
+**Question.** What should happen to a payout whose requery only ever returns an
+**unattributable** 400 — where the customer's credits are already debited and nothing
+will ever refund them automatically?
+
+**Why it matters.** Plan 084 narrowed both sweeps so that only an explicit `PMT10016`
+authorises the unknown-transaction path
+(`backend/packages/api/src/modules/packs/globepay-reconcile.ts`,
+`classifyRequeryError`). That was the right call — the alternative refunds every
+in-flight payout the moment a merchant credential breaks, while the banks still execute
+them. But item **D** records that the gateway's real not-found is a plain-text 400
+carrying **no** code (`docs/payments/globepay365-setup.md:124`), so on the live gateway
+`PMT10016` may never arrive at all. That makes the unknown path effectively unreachable,
+and the two sides are no longer symmetric:
+
+- **Deposits survive it.** `expire` is still reachable from the ordinary non-final
+  requery path, and plan 084 built the machinery around it: a non-terminal `expired`
+  status, a bounded second scan tier that keeps requerying, an admin view and a badge,
+  and an ageing bound (`ambiguousRefusalAction`) so endlessly-ambiguous rows leave the
+  live queue instead of starving it.
+- **Withdrawals got the narrowing with none of the machinery.** There is deliberately
+  no `expire` for a payout — "expiring" one would confiscate a debit — so an ambiguous
+  refusal resolves to `wait`, forever. The affected population is precisely the one the
+  refund is **definitely owed** to: `SubmitWithdrawal` timed out, so the row carries no
+  `gateway_transaction_id` and the crash-recovery refund was the only thing that would
+  ever return the customer's money. Today those rows accumulate in the sweep's
+  50-row oldest-first window (starving it exactly as the deposit zombies would have),
+  emit a `logger.error` every ten minutes that nothing pages on, and appear on **no**
+  operator surface — `/admin/globepay/withdrawals` has no view for them.
+
+**Proposed shape (NOT built — this needs its own plan).** A `needs_review` withdrawal
+status, reached after a bounded age of nothing but ambiguous refusals, that is
+explicitly **not** a refund and **not** a closure: it takes the row out of the live
+queue, gives an operator a list to work, and leaves the refund decision to a human who
+can check the bank. Mirrors the deposit side's `expired` without ever implying the
+payout did not happen. Needs the status, a migration, an admin view and a badge.
+
+**Where to look.** Answer item **D** first — a confirmed not-found code would make the
+unknown path reachable again and shrink this to a much smaller problem. Failing that,
+count the population in production:
+
+```sql
+-- READ-ONLY. Payouts the sweep can no longer resolve on its own: debited, still
+-- pending, no gateway id (so SubmitWithdrawal never returned), and older than any
+-- plausible in-flight submit.
+select id, merchant_transaction_id, customer_id, amount, created_at
+from globepay_withdrawal
+where status = 'pending'
+  and gateway_transaction_id is null
+  and created_at < now() - interval '1 day'
+  and deleted_at is null
+order by created_at asc;
+```
+
+**Record.** The row count and the total RM in limbo. A zero count is worth recording —
+it says the narrowing cost nothing in practice and this can stay unbuilt.
+
+> **Answer:** _(open)_
+
+---
+
 ## Maintenance notes
 
 - **Answered items move up, they do not disappear.** The next auditor needs to know a
   question was checked and when — a deleted item reads as a question nobody asked.
 - **Dates are the point.** An undated answer to a console question is indistinguishable
   from a guess a year later.
-- Items **A**, **B** and **E** gate how the phone-OTP findings are scored; **C**, **D**
-  and **G** gate the GlobePay ones. If an audit round starts before these are answered,
-  score those findings at their **worst** plausible reading, not their best.
+- Items **A**, **B** and **E** gate how the phone-OTP findings are scored; **C**, **D**,
+  **G** and **H** gate the GlobePay ones. If an audit round starts before these are
+  answered, score those findings at their **worst** plausible reading, not their best.
+  **D** gates **H** in particular: a confirmed not-found code would shrink H
+  substantially, so answering D first may save building anything for it.
 - A reviewer of this file should check two things: that no item asserts an answer
   nobody verified, and that no credential value has been recorded into an
   "Answer:" line.
