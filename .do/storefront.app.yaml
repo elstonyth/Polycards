@@ -164,13 +164,12 @@ services:
       # Enabled 2026-08-04 (backend routes + Twilio verified live first). Like
       # every NEXT_PUBLIC_* here, the root Dockerfile ARG default is what the
       # bundle actually gets — this key moves together with that ARG.
-      # Rolled back to false 2026-08-07: Twilio 21608 (no approved primary
-      # compliance profile on the account) makes every send fail, so the OTP
-      # step is a dead end. Moves back to 'true' with the Dockerfile ARG once a
-      # real send returns 2xx.
+      # Off for a few hours on 2026-08-07 (Twilio 21608 — no approved primary
+      # compliance profile); re-armed the same day once an Individual profile
+      # was twilio-approved and a live send returned 201/pending.
       - key: NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED
         scope: RUN_AND_BUILD_TIME
-        value: 'false'
+        value: 'true'
       # Withdrawal UI gate (/bank-withdrawal form + saved-accounts flow).
       # Armed 2026-08-05 together with the backend's
       # GLOBEPAY_WITHDRAWALS_ENABLED — the backend flag is the real money gate
