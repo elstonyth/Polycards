@@ -239,8 +239,15 @@ export interface RateLimitMiddlewareOptions {
    * into one sitewide bucket. Returning undefined falls through to the
    * existing actor_id → IP logic, so a route with no meaningful alternate key
    * (e.g. a malformed body) still gets a working budget.
+   *
+   * May return SEVERAL keys, in which case every one of them is charged and
+   * the first denial wins. That is for a body carrying more than one candidate
+   * identifier: charging only the one the route is believed to read makes the
+   * limiter's correctness depend on route-matching semantics, and a caller who
+   * can steer that choice gets a fresh bucket per request (see
+   * `emailBodyKeyOf`). Charging all of them cannot be steered.
    */
-  keyOf?: (req: MedusaRequest) => string | undefined;
+  keyOf?: (req: MedusaRequest) => string | string[] | undefined;
   /**
    * Opt-in: when `keyOf` yields no key, SKIP this limiter entirely instead of
    * falling back to actor_id/IP. Only for a narrow per-identifier tier that is
@@ -255,6 +262,19 @@ export interface RateLimitMiddlewareOptions {
    * runs on the same matcher, so a keyless request is never unlimited.
    * Default OFF: the phone tiers deliberately want the IP fallback, so a
    * malformed body still costs budget.
+   *
+   * KNOWN BLAST RADIUS (accepted, 2026-08-07). Skipping is all-or-nothing per
+   * matcher, so it also applies to a LOGIN whose body has no key. The emailpass
+   * provider never validates format — it uses `email` verbatim as entity_id —
+   * so an account whose entity_id is not email-shaped (e.g. `user@localhost`)
+   * produces no key, this tier steps aside, and that ONE account is bounded
+   * only by the sitewide tier. The population is near-empty (the storefront
+   * validates the format at signup and Google OAuth supplies real addresses),
+   * and the alternative — a second limiter instance with the flag off for the
+   * exact login matcher — caps every non-email-shaped login attempt at the
+   * narrow tier's per-ACCOUNT numbers applied SITEWIDE, which is the
+   * single-bucket bug this plan exists to remove, and splits the in-memory
+   * failover budget across two instances. Documented rather than fixed.
    */
   skipWhenNoKey?: boolean;
   onError?: (err: unknown) => void;
@@ -298,15 +318,35 @@ export function createRateLimitMiddleware(
       const auth = (req as AuthenticatedMedusaRequest).auth_context as
         | AuthenticatedMedusaRequest['auth_context']
         | undefined;
-      const ownKey = keyOf?.(req);
-      // Falsy (not just undefined) so the skip and the fallback below agree on
-      // what "no key" means — an extractor returning '' must not key on ''.
-      if (!ownKey && skipWhenNoKey) {
+      const own = keyOf?.(req);
+      // Falsy entries dropped (not just undefined) so the skip and the
+      // fallback agree on what "no key" means — an extractor returning ''
+      // must not key on ''.
+      const ownKeys = (Array.isArray(own) ? own : [own]).filter(
+        (k): k is string => Boolean(k),
+      );
+      if (!ownKeys.length && skipWhenNoKey) {
         next();
         return;
       }
-      const key = ownKey || auth?.actor_id || `ip:${req.ip ?? 'unknown'}`;
-      decision = await store.consume(prefix + key, rules, Date.now());
+      const keys = ownKeys.length
+        ? ownKeys
+        : [auth?.actor_id || `ip:${req.ip ?? 'unknown'}`];
+      // First denial wins. ponytail: the all-or-nothing guarantee holds per
+      // key, not across keys — when one of several keys denies, the earlier
+      // ones have already recorded their event. Bounded at one extra event on
+      // one bucket, and only reachable for a body carrying two identifiers,
+      // which no legitimate client sends. A cross-key atomic path would mean a
+      // multi-key Lua script; add it only if multi-key ever becomes the norm.
+      decision = { allowed: true, retryAfterMs: 0 };
+      const now = Date.now();
+      for (const k of keys) {
+        const d = await store.consume(prefix + k, rules, now);
+        if (!d.allowed) {
+          decision = d;
+          break;
+        }
+      }
     } catch (err) {
       // A limiter bug must not take the endpoint down. The Redis store
       // already fails over to in-memory, so reaching here is exceptional.
@@ -461,26 +501,46 @@ const MAX_EMAIL_LEN = 254;
  * oversized body string would otherwise key (and grow) a Redis-backed
  * limiter's keyspace directly off unvalidated input. The `email:` prefix keeps
  * it from ever colliding with a `phone:` or `ip:` key.
+ *
+ * Returns EVERY email-shaped candidate in the body, not just the one this
+ * route is expected to read, and the middleware charges all of them. This
+ * middleware runs BEFORE core's body validator (app wildcard matchers sort
+ * ahead of core's param matchers), so req.body still carries whatever extra
+ * keys the caller sent, and each route family reads only ONE of the two names.
+ * Charging just the expected one made the control depend on route matching:
+ * express 4 defaults here are `strict: false` / `caseSensitive: false`, so
+ * `.../reset-password/` and `.../Reset-Password` route to the same handler,
+ * and an exact path test misses them. A caller who can steer the choice sends
+ * { email: '<fresh random>@x.com', identifier: 'victim@x.com' }, gets a brand
+ * new bucket every request, and bombs the victim with reset mail unbounded.
+ * The path is normalized below (both defects fixed), but charging every
+ * candidate is what makes the guarantee independent of express's matching
+ * semantics — one framework upgrade must not silently reopen this.
+ * Legitimate clients send exactly one of the two fields, so this is one key
+ * and one `consume` on every real request.
  */
-export const emailBodyKeyOf = (req: MedusaRequest): string | undefined => {
+export const emailBodyKeyOf = (req: MedusaRequest): string[] | undefined => {
   const body = req.body as
     | { email?: unknown; identifier?: unknown }
     | undefined;
-  // Read the field the ROUTE actually acts on, never "whichever is present":
-  // this middleware runs BEFORE core's body validator (app wildcard matchers
-  // sort ahead of core's param matchers), so req.body still carries any extra
-  // keys the caller sent. Accepting both names unconditionally would let an
-  // attacker put a decoy in the one the route ignores — e.g. POST
-  // .../reset-password { email: 'decoy@x.com', identifier: 'victim@x.com' } —
-  // and buy a fresh bucket per attempt while still bombing the victim.
-  const raw = req.path?.endsWith('/reset-password')
-    ? body?.identifier
-    : body?.email;
-  if (typeof raw !== 'string') return undefined;
-  const normalized = raw.trim().toLowerCase();
-  return normalized.length <= MAX_EMAIL_LEN && EMAIL_RE.test(normalized)
-    ? `email:${normalized}`
-    : undefined;
+  const toKey = (raw: unknown): string | undefined => {
+    if (typeof raw !== 'string') return undefined;
+    const normalized = raw.trim().toLowerCase();
+    return normalized.length <= MAX_EMAIL_LEN && EMAIL_RE.test(normalized)
+      ? `email:${normalized}`
+      : undefined;
+  };
+  // Trailing slashes and casing are both insignificant to express's matcher,
+  // so they must be insignificant here too. Ordering only decides which key is
+  // charged FIRST (nicer 429 attribution); both are charged either way.
+  const path = (req.path ?? '').toLowerCase().replace(/\/+$/, '');
+  const fields = path.endsWith('/reset-password')
+    ? [body?.identifier, body?.email]
+    : [body?.email, body?.identifier];
+  const keys = [...new Set(fields.map(toKey))].filter(
+    (k): k is string => k !== undefined,
+  );
+  return keys.length ? keys : undefined;
 };
 
 /**
@@ -494,7 +554,7 @@ function createEnvRateLimit(opts: {
   name: string;
   message?: RateLimitMessage;
   defaults: EnvLimiterDefaults;
-  keyOf?: (req: MedusaRequest) => string | undefined;
+  keyOf?: (req: MedusaRequest) => string | string[] | undefined;
   skipWhenNoKey?: boolean;
 }): MiddlewareHandler {
   const { name, defaults } = opts;
