@@ -94,6 +94,24 @@ export default async function globepayWithdrawalReconcileJob(
       }
 
       if (action.kind === 'settle') {
+        // The emailed record — BEFORE the terminal row update: once the row
+        // leaves 'pending' this sweep never selects it again and a retried
+        // callback early-returns, so a crash between the update and a later
+        // send would lose the email forever. A crash after this send re-runs
+        // the branch next sweep and the notification module's unique
+        // idempotency_key dedupes. Non-throwing.
+        await sendWithdrawalReceipt(container, {
+          customerId: withdrawal.customer_id,
+          amount: Number(withdrawal.amount),
+          // `||`, not `??` — an empty-string gateway id must fall through, or
+          // the template fails closed AFTER the idempotency key is burned and
+          // the email is permanently unsent.
+          reference:
+            withdrawal.gateway_transaction_id ||
+            withdrawal.merchant_transaction_id,
+          merchantTransactionId: withdrawal.merchant_transaction_id,
+          outcome: 'paid',
+        });
         await packs.updateGlobePayWithdrawals({
           selector: { id: withdrawal.id, status: 'pending' },
           data: {
@@ -124,20 +142,6 @@ export default async function globepayWithdrawalReconcileJob(
         } catch {
           // Never fail a committed settle over a notification.
         }
-        // Same receipt the callback would have sent. The shared idempotency
-        // anchor means a late callback cannot produce a second one.
-        await sendWithdrawalReceipt(container, {
-          customerId: withdrawal.customer_id,
-          amount: Number(withdrawal.amount),
-          // `||`, not `??` — an empty-string gateway id must fall through, or
-          // the template fails closed AFTER the idempotency key is burned and
-          // the email is permanently unsent.
-          reference:
-            withdrawal.gateway_transaction_id ||
-            withdrawal.merchant_transaction_id,
-          merchantTransactionId: withdrawal.merchant_transaction_id,
-          outcome: 'paid',
-        });
         continue;
       }
 
@@ -187,6 +191,21 @@ export default async function globepayWithdrawalReconcileJob(
             withdrawal.merchant_transaction_id,
         },
       });
+      // The emailed record — after the refund commit, BEFORE the terminal row
+      // update, outside any !replayed guard: once the row leaves 'pending'
+      // nothing re-runs this branch, so a crash between the update and a
+      // later send would lose the email forever. A crash after this send
+      // re-runs the branch next sweep (the refund replays, the notification
+      // module's unique idempotency_key dedupes the email). Non-throwing.
+      await sendWithdrawalReceipt(container, {
+        customerId: withdrawal.customer_id,
+        amount: Number(withdrawal.amount),
+        reference:
+          withdrawal.gateway_transaction_id ||
+          withdrawal.merchant_transaction_id,
+        merchantTransactionId: withdrawal.merchant_transaction_id,
+        outcome: 'refunded',
+      });
       await packs.updateGlobePayWithdrawals({
         selector: { id: withdrawal.id, status: 'pending' },
         data: { status: 'failed', gateway_status: gatewayStatus },
@@ -212,19 +231,6 @@ export default async function globepayWithdrawalReconcileJob(
           // Never fail a committed refund over a notification.
         }
       }
-      // DELIBERATELY outside the !replayed guard — a crash between the refund
-      // commit and this send leaves replayed=true on the next sweep, and
-      // gating on it would lose the email forever. The notification module's
-      // unique idempotency_key dedupes instead.
-      await sendWithdrawalReceipt(container, {
-        customerId: withdrawal.customer_id,
-        amount: Number(withdrawal.amount),
-        reference:
-          withdrawal.gateway_transaction_id ||
-          withdrawal.merchant_transaction_id,
-        merchantTransactionId: withdrawal.merchant_transaction_id,
-        outcome: 'refunded',
-      });
     } catch (error) {
       // One bad payout must not abort the sweep. It stays pending and is
       // retried next run.

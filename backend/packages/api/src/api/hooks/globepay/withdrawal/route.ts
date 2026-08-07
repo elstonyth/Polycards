@@ -168,6 +168,21 @@ export async function POST(
         },
       });
 
+      // The emailed record — BEFORE the terminal row update, and outside any
+      // !replayed guard: once the row leaves 'pending', a retried callback
+      // early-returns and the sweep no longer selects it, so a crash between
+      // the update and a later send would lose the email forever. Sending
+      // here, a crash before the update re-enters this branch on retry (the
+      // refund replays, the notification module's unique idempotency_key
+      // dedupes the email), and the send itself never throws.
+      await sendWithdrawalReceipt(req.scope, {
+        customerId: withdrawal.customer_id,
+        amount: Number(withdrawal.amount),
+        reference: gatewayTransactionId || merchantTransactionId,
+        merchantTransactionId,
+        outcome: 'refunded',
+      });
+
       await packs.updateGlobePayWithdrawals({
         selector: { id: withdrawal.id, status: 'pending' },
         data: {
@@ -193,18 +208,6 @@ export async function POST(
           // Never fail a committed refund over a notification.
         }
       }
-      // The emailed record. DELIBERATELY outside the !replayed guard: a crash
-      // between the refund commit and this send leaves replayed=true on the
-      // gateway's retry, and gating on it would lose the email forever. The
-      // notification module's unique idempotency_key is what dedupes — a
-      // second insert throws and sendWithdrawalReceipt swallows it.
-      await sendWithdrawalReceipt(req.scope, {
-        customerId: withdrawal.customer_id,
-        amount: Number(withdrawal.amount),
-        reference: gatewayTransactionId || merchantTransactionId,
-        merchantTransactionId,
-        outcome: 'refunded',
-      });
     } catch (error) {
       // Transient: do NOT ack — the customer's refund must land on retry.
       req.scope
@@ -231,6 +234,19 @@ export async function POST(
       );
   }
 
+  // The emailed record — BEFORE the terminal row update: once the row is
+  // 'settled', a retried callback early-returns and the sweep skips it, so a
+  // crash between the update and a later send would lose the email forever.
+  // A crash after this send re-enters this branch on retry and the
+  // notification module's unique idempotency_key dedupes. Non-throwing.
+  await sendWithdrawalReceipt(req.scope, {
+    customerId: withdrawal.customer_id,
+    amount: Number(withdrawal.amount),
+    reference: gatewayTransactionId || merchantTransactionId,
+    merchantTransactionId,
+    outcome: 'paid',
+  });
+
   await packs.updateGlobePayWithdrawals({
     selector: { id: withdrawal.id, status: 'pending' },
     data: {
@@ -255,17 +271,6 @@ export async function POST(
   } catch {
     // Never fail a committed settle over a notification.
   }
-
-  // The emailed record. Same replay guard family as the feed row, and its own
-  // send is non-throwing — the settle is committed and must not be undone by
-  // an email problem.
-  await sendWithdrawalReceipt(req.scope, {
-    customerId: withdrawal.customer_id,
-    amount: Number(withdrawal.amount),
-    reference: gatewayTransactionId || merchantTransactionId,
-    merchantTransactionId,
-    outcome: 'paid',
-  });
 
   res.status(200).send('success');
 }

@@ -250,6 +250,23 @@ export async function POST(
       ),
     });
 
+    // The emailed receipt — after the credit commit, BEFORE the terminal row
+    // update, and outside the !replayed guard: once the row is 'settled' a
+    // retried callback early-returns and the sweep skips it, so a crash
+    // between the update and a later send would lose the email forever. A
+    // crash after this send re-enters this branch on retry (the credit
+    // replays, the notification module's unique idempotency_key dedupes the
+    // email — a second insert throws and sendTopupReceipt swallows it). Its
+    // own send is non-throwing; the committed credit is never undone by an
+    // email problem.
+    await sendTopupReceipt(req.scope, {
+      customerId: deposit.customer_id,
+      amount: creditedAmount,
+      reference: gatewayTransactionId || merchantTransactionId,
+      merchantTransactionId,
+      paymentMethodCode: deposit.payment_method_code,
+    });
+
     // Conditional flip on the status we READ, not a literal 'pending': the
     // recovery branch above reaches here with a 'failed' row, and a hardcoded
     // 'pending' selector would match nothing — the credit would land while the
@@ -290,21 +307,6 @@ export async function POST(
         // Never fail a committed credit over a notification.
       }
     }
-
-    // The emailed receipt. DELIBERATELY outside the !replayed guard (unlike
-    // the feed row): a crash between the credit commit and this send leaves
-    // replayed=true on the gateway's retry, and gating on it would lose the
-    // email forever. The notification module's unique idempotency_key is what
-    // dedupes — a second insert throws and sendTopupReceipt swallows it. Its
-    // own send is non-throwing; the committed credit is never undone by an
-    // email problem.
-    await sendTopupReceipt(req.scope, {
-      customerId: deposit.customer_id,
-      amount: creditedAmount,
-      reference: gatewayTransactionId || merchantTransactionId,
-      merchantTransactionId,
-      paymentMethodCode: deposit.payment_method_code,
-    });
   } catch (error) {
     // Transient (DB down, lock timeout): do NOT ack, so they retry and the
     // customer's money still lands.

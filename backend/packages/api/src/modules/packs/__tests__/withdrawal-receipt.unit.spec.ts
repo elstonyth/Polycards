@@ -66,8 +66,23 @@ describe('withdrawal receipt template', () => {
     ['reference', { ...DATA, reference: '' }],
     ['outcome', { ...DATA, outcome: 'exploded' }],
     ['site url', { ...DATA, site_url: '' }],
-  ])('fails closed on a bad %s rather than sending a vague receipt', (_l, d) => {
-    expect(renderTemplate(WITHDRAWAL_RECEIPT_TEMPLATE, d)).toBeUndefined();
+  ])(
+    'fails closed on a bad %s rather than sending a vague receipt',
+    (_l, d) => {
+      expect(renderTemplate(WITHDRAWAL_RECEIPT_TEMPLATE, d)).toBeUndefined();
+    },
+  );
+
+  it('omits the Date line when occurred_at is missing or not a string', () => {
+    for (const occurred_at of [undefined, 42]) {
+      const r = renderTemplate(WITHDRAWAL_RECEIPT_TEMPLATE, {
+        ...DATA,
+        occurred_at,
+      })!;
+      expect(r).toBeDefined();
+      expect(r.html).not.toContain('(MYT)');
+      expect(r.text).not.toContain('Date:');
+    }
   });
 
   it('escapes a reference so a hostile value cannot inject markup', () => {
@@ -133,6 +148,21 @@ describe('sendWithdrawalReceipt', () => {
       amount_myr: 120,
       reference: 'W1',
       outcome: 'paid',
+    });
+  });
+
+  it('refunded outcome carries its own key and payload', async () => {
+    const h = harness();
+    await expect(
+      sendWithdrawalReceipt(h.container, { ...input, outcome: 'refunded' }),
+    ).resolves.toBe(true);
+    expect(h.createNotifications).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idempotency_key: withdrawalReceiptKey('PC-1', 'refunded'),
+      }),
+    );
+    expect(h.createNotifications.mock.calls[0][0].data).toMatchObject({
+      outcome: 'refunded',
     });
   });
 

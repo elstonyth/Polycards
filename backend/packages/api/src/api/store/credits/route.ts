@@ -62,7 +62,7 @@ export async function GET(
       // reversal rows carry internal txn ids — neither may reach a customer.
       reference:
         t.reason === "topup" || t.reason === "cashout"
-          ? (t.reference ?? null)
+          ? t.reference || null
           : null,
       pull_id: t.pull_id,
       created_at: t.created_at,
