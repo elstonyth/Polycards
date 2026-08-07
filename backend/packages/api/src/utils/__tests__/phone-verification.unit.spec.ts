@@ -119,6 +119,26 @@ describe('twilio transport', () => {
     );
   });
 
+  // A refused send must log Twilio's numeric error code, not just the bare
+  // status: on 2026-08-07 an unfunded trial account and a geo-permission block
+  // were indistinguishable 403s in the app logs. The phone number lives in the
+  // same response body (message echoes To=), so it must NOT reach the log.
+  it('send logs the twilio error code and never the phone number', async () => {
+    jest.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ code: 60410, message: `Blocked for ${PHONE}` }), {
+        status: 403,
+      }),
+    );
+    const logger = { warn: jest.fn(), error: jest.fn(), info: jest.fn() } as never;
+    await expect(sendPhoneOtp(env, logger, PHONE)).rejects.toThrow(
+      /could not send the verification code/i,
+    );
+    const line = (logger as { warn: jest.Mock }).warn.mock.calls[0][0] as string;
+    expect(line).toContain('403');
+    expect(line).toContain('60410');
+    expect(line).not.toContain(PHONE);
+  });
+
   // An abort (timeout, or any other fetch-level failure) must map to the
   // same retryable message as a bad Twilio response — never escape as a raw
   // AbortError / unhandled rejection.

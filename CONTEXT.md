@@ -185,6 +185,20 @@ Stateless HMAC-signed token — NOT a JWT: a custom 2-segment `base64url(payload
 
 Build-time storefront flag `NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED` displays OTP UI; flag drift is UX-only, backend gates are authoritative. Verification state is visible per player in the admin Players list ("Phone verified" column).
 
+**Enforcement is OFF (2026-08-07) — Twilio error 21608, no approved compliance profile.** Every `POST /Verifications` answers **403** and no customer can receive a code. The deployment is not at fault: all three `TWILIO_*` secrets are present and authenticate, the Verify service `VA9f…` is owned by the account, and Malaysia (+60) is enabled in SMS geo permissions.
+
+Twilio's reply is error **21608**, whose message only mentions trial accounts — misleading here. [Twilio's own docs](https://www.twilio.com/docs/api/errors/21608) give it **two** causes, and the second is the one that applies: an **upgraded account with no approved primary compliance profile** is restricted exactly like a trial one. The account started the day as a trial with a negative balance, which masked this; upgrading to paid (`type: Full`, funded, trial badge gone) did **not** clear the 403, and Trust Hub still offers "Business Profile → Get Started", i.e. no profile has ever been created.
+
+Order of diagnosis if OTP breaks again — all three upstream of every flag below:
+
+1. Primary compliance profile approved? (Trust Hub → Compliance profiles)
+2. Account `type` and balance — `GET /2010-04-01/Accounts/{sid}.json`
+3. Destination country enabled in SMS geo permissions
+
+The failure logs now carry Twilio's numeric error code next to the HTTP status, so 21608 (compliance/trial), a geo block and a Fraud Guard hit are distinguishable without a console session.
+
+Both flags went to `false` while this is unresolved, because `PHONE_GATE_REQUIRED` is unset and therefore follows `PHONE_VERIFICATION_REQUIRED`: with enforcement on, every unverified account was frozen out of topup / deposit / delivery and could not verify its way out. Re-arm via the normal Deploy Order (storefront step 3, backend step 4) once an approved profile makes a real send return 2xx. Interim workaround for testing only: add specific numbers as **verified caller IDs**, which are exempt from the restriction.
+
 **Flows**:
 
 - **Signup**: POST /store/customers with `x-phone-verification` header (proof token) when a phone is provided and feature flag is on.
