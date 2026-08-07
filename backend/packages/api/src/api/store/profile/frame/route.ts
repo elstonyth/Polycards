@@ -10,9 +10,11 @@ import type PacksModuleService from '../../../../modules/packs/service';
 // unequip (null) an avatar frame. Frames exist only at milestone levels
 // (workbook '^': every 10th level) and unlock when highest_level_ever ≥
 // level; the catalog must actually carry an image for that level. Writes
-// customer.metadata.equipped_frame_level (merged — see the avatar route's
-// note on reserved metadata keys). Levels never decrease (cumulative spend),
-// so an equipped frame can't silently re-lock.
+// customer.metadata.equipped_frame_level (merged under the
+// `metadata:<customer>` advisory lock — see the avatar route's note on reserved
+// metadata keys and on why an unlocked merge of the shared blob loses data).
+// Levels never decrease (cumulative spend), so an equipped frame can't silently
+// re-lock.
 export async function POST(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
@@ -62,9 +64,10 @@ export async function POST(
   }
 
   const customers = req.scope.resolve(Modules.CUSTOMER);
-  const customer = await customers.retrieveCustomer(customerId);
-  await customers.updateCustomers(customerId, {
-    metadata: { ...(customer.metadata ?? {}), equipped_frame_level: level },
+  await packs.mutateCustomerMetadata({
+    customerId,
+    customers,
+    mutate: (metadata) => ({ ...metadata, equipped_frame_level: level }),
   });
 
   res.json({ equipped_frame_level: level });

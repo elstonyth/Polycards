@@ -116,3 +116,64 @@ describe('POST /store/phone-verification/start — destination allowlist', () =>
     expect(lines.some((l) => l.includes('ALLOWED_SMS_COUNTRIES'))).toBe(false);
   });
 });
+
+/**
+ * The duplicate-phone dead end. An account whose phone matches zero or two-plus
+ * rows can never complete phone recovery — the check step refuses a multi-match
+ * outright — and until now the route said "we'll text you a code" and recorded
+ * nothing, so support had no way to tell that story apart from a lost SMS.
+ *
+ * The identical 200 is the ANTI-ENUMERATION property and is asserted below in
+ * all three branches precisely so nobody "helpfully" differentiates it. The fix
+ * is a log line, not a different response.
+ */
+describe('POST /store/phone-verification/start — duplicate-phone diagnosability', () => {
+  const line = () => warn.mock.calls.map((c) => String(c[0])).join('\n');
+
+  it('zero matches: identical 200, no SMS, and a warn carrying the count', async () => {
+    const { res, out } = mkRes();
+    await startVerification(mkReq(MY, 'password-reset', []), res);
+    expect(sendCount()).toBe(0);
+    expect(out.body).toEqual({ ok: true });
+    expect(line()).toContain('matched 0 accounts');
+  });
+
+  it('two matches: byte-identical response, warn with count 2', async () => {
+    const { res, out } = mkRes();
+    await startVerification(
+      mkReq(MY, 'password-reset', [{ id: 'cus_1' }, { id: 'cus_2' }]),
+      res,
+    );
+    expect(sendCount()).toBe(0);
+    // Same object as the zero-match and the success branch — a distinct status,
+    // body or message here is a phone-enumeration oracle.
+    expect(out.body).toEqual({ ok: true });
+    expect(line()).toContain('matched 2 accounts');
+  });
+
+  it('exactly one match: SMS sent and NOTHING logged (no happy-path noise)', async () => {
+    const { res, out } = mkRes();
+    await startVerification(mkReq(MY, 'password-reset', [{ id: 'cus_1' }]), res);
+    expect(sendCount()).toBe(1);
+    expect(out.body).toEqual({ ok: true });
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  // The PII rule, asserted across EVERY warn call rather than calls[0] — an
+  // index-based check silently stops covering a branch as soon as call order
+  // shifts. A phone number in a log line is the leak this guards.
+  it.each([
+    ['zero matches', [] as unknown[]],
+    ['two matches', [{ id: 'cus_1' }, { id: 'cus_2' }]],
+  ])('never logs the phone number itself (%s)', async (_case, matches) => {
+    await startVerification(
+      mkReq(MY, 'password-reset', matches),
+      mkRes().res,
+    );
+    expect(warn).toHaveBeenCalled();
+    expect(line()).not.toContain(MY);
+    // Not even the subscriber part on its own — '+60' as a calling code is
+    // fine, the dialable remainder is not.
+    expect(line()).not.toContain(MY.slice(3));
+  });
+});

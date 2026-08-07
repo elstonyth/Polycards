@@ -85,6 +85,20 @@ export async function POST(
       // would refuse anyway. Same 200 either way — no oracle. Timing skew vs
       // the Twilio call exists; accepted (the email flow has the same shape:
       // core 201s unknown emails without sending).
+      //
+      // The identical 200 is the ANTI-ENUMERATION property and stays: a
+      // distinct status, body, or error message here would turn this route into
+      // a "does this number have an account" oracle. What was missing is not a
+      // different response but DIAGNOSABILITY — a duplicate-phone account can
+      // never complete phone recovery (the check step 400s on a multi-match)
+      // and until now nothing recorded that the dead end had been reached.
+      //
+      // Count ONLY, never `phone`: the number is PII and this log is not the
+      // place for it. The count is what support needs — 0 means "no account on
+      // that number", 2 means "duplicate rows, fix the data".
+      logger.warn(
+        `[phone-otp] password-reset start matched ${matches.length} accounts — no SMS sent`,
+      );
       res.json({ ok: true });
       return;
     }
