@@ -27,9 +27,35 @@ export const GLOBEPAY_VERSION = 0;
  * (C# Rfc2898DeriveBytes, Java PBKDF2WithHmacSHA1, PHP hash_pbkdf2 sha1) do
  * it. 1000 iterations is C#'s Rfc2898DeriveBytes default, spelled out
  * explicitly in the Java and PHP samples.
+ *
+ * MEMOIZED, and keyed on the AES key STRING rather than a boolean "already
+ * derived", so pointing the config at a different key derives that key instead
+ * of handing back the previous one. The map is bounded by configuration, not by
+ * traffic: every caller passes `config.aesKey`, which globepay-client.ts reads
+ * once from GLOBEPAY_AES_KEY, so it holds a single entry in practice — no
+ * request input reaches this cache key.
+ *
+ * Why it is worth caching at all: §1.16 forces `openCallback` to decrypt BEFORE
+ * it can verify the signature, so every anonymous POST /hooks/globepay/* paid a
+ * fresh 1000-round PBKDF2 on the single event loop (the deposit hook decrypts
+ * twice) before anything had authenticated it.
+ *
+ * Returns a COPY of the cached buffer. Neither call site mutates it today —
+ * both hand it to createCipheriv/createDecipheriv — but a 32-byte memcpy is
+ * unmeasurable against 1000 HMAC rounds, and it keeps the cache correct without
+ * resting on that staying true for a future in-module caller.
+ *
+ * Never log this key or the derived buffer, and never put either in an error.
  */
+const aesKeyCache = new Map<string, Buffer>();
+
 function deriveAesKey(aesKey: string): Buffer {
-  return pbkdf2Sync(aesKey, aesKey, 1000, 32, 'sha1');
+  let derived = aesKeyCache.get(aesKey);
+  if (!derived) {
+    derived = pbkdf2Sync(aesKey, aesKey, 1000, 32, 'sha1');
+    aesKeyCache.set(aesKey, derived);
+  }
+  return Buffer.from(derived);
 }
 
 /**

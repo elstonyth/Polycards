@@ -943,6 +943,65 @@ export function createAdminActionRateLimit(): MiddlewareHandler {
   });
 }
 
+/**
+ * The gateway-hook limiter (POST /hooks/globepay/{deposit,withdrawal,
+ * payout-verify}). Those routes are unauthenticated BY DESIGN — a webhook
+ * carries no token and its authentication is the RSA signature — so before
+ * this existed an anonymous caller had no budget at all on an endpoint that
+ * does blocking cryptography: §1.16 forces `openCallback` to decrypt before it
+ * can verify, so a forged body still cost a real AES decrypt (and, until plan
+ * 089 memoized it, a 1000-round PBKDF2) on the single event loop.
+ *
+ * THIS IS AN ABUSE CEILING, NOT AUTHENTICATION and not fairness between
+ * callers. The gateway is the only legitimate caller and should never come
+ * near these numbers. The signature is, and stays, the real gate — see the
+ * maintenance note in plan 089: "the hooks are rate-limited now" is never a
+ * reason to relax signature verification.
+ *
+ * Keyed on IP (the middleware's default) — a webhook has no auth_context and
+ * no useful body key: every field is inside the encrypted `Data` blob.
+ * Medusa's express loader sets `trust proxy` 1 unconditionally (see
+ * utils/payer-ip.ts), so `req.ip` comes from the proxy chain and a caller
+ * cannot rotate its own key by spoofing X-Forwarded-For. If the deployed chain
+ * is deeper than one hop the key collapses to one upstream address for all
+ * callers — which does not weaken a ceiling on a surface that has exactly one
+ * legitimate caller.
+ *
+ * Sized generously, because a 429 to a genuine callback costs something:
+ * - deposit / withdrawal callbacks: recoverable. The gateway retries (per the
+ *   integration guide, not observed here), and — independently of whether it
+ *   does — the two reconcile jobs (src/jobs/globepay-*reconcile.ts, cron every
+ *   10 min) requery the gateway for anything still pending, so the settlement
+ *   lands late rather than never.
+ * - payout-verify: fails CLOSED. Anything but a literal "success" makes the
+ *   gateway refuse that payout, so a 429 blocks a legitimate withdrawal from
+ *   paying out (no money moves wrongly, but a customer waits).
+ * That asymmetry is why the ceiling sits orders of magnitude above real
+ * callback volume: if one ever trips it, raise the env var, don't remove it.
+ *
+ * The two rules are deliberately CONSISTENT (100 per 10s = 600 per minute =
+ * the sustained rule). The burst is always the binding rule, so a tighter one
+ * silently overrides the sustained ceiling and makes the documented number a
+ * lie — the scar recorded on AUTH_DEFAULTS above. Plan 089 suggested 60/10s;
+ * that would have made the real ceiling 360/min, so the burst was raised to
+ * match rather than shipping an inconsistent pair.
+ * Env-tunable:
+ * GATEWAY_HOOK_RATE_BURST_LIMIT / GATEWAY_HOOK_RATE_BURST_WINDOW_MS (100/10s)
+ * GATEWAY_HOOK_RATE_LIMIT / GATEWAY_HOOK_RATE_WINDOW_MS (600/60s)
+ */
+export function createGatewayHookRateLimit(): MiddlewareHandler {
+  return createEnvRateLimit({
+    name: 'gateway-hook',
+    message: 'Too many callback requests.',
+    defaults: {
+      burstLimit: 100,
+      burstWindowMs: 10_000,
+      limit: 600,
+      windowMs: 60_000,
+    },
+  });
+}
+
 // Phone-OTP limiters are keyed in TWO independent dimensions, both applied
 // (see middlewares.ts): a per-phone tier (below) and this IP tier. Why both —
 // the storefront's phone-verification server actions proxy every OTP request
