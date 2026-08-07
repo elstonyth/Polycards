@@ -101,13 +101,16 @@ jobs:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
-    # 30, not 20: the `bnm2-*` node_modules cache below is currently absent
-    # repo-wide (nothing has saved one — the only cache in the repo is the yarn
-    # berry one), so every backend job pays a COLD ~16 min install instead of
-    # the ~71s verify the cache was sized for. At 20 the jobs were dying
-    # mid-run with "The operation was canceled" AFTER their tests had passed,
-    # which reads as a red build caused by the diff. Drop this back to 20 once
-    # a bnm2 cache exists on master.
+    # 30, not 20: this workflow declares several caches, but the one that pays
+    # for the install below — `bnm2-*` (node_modules + install-state) — has no
+    # stored entry at all. `gh api .../actions/caches` lists exactly one entry
+    # for the whole repo, the `yarn-*` berry cache saved on master 2026-08-04,
+    # so every backend job restores nothing here and pays a COLD ~16 min
+    # `yarn install` instead of the ~71s immutable verify the cache was sized
+    # for. At 20 the jobs were being killed mid-step with "The operation was
+    # canceled" — backend-quality during its build, integration-http shard 4
+    # right after printing "63 passed" — which reads as a red build caused by
+    # the diff. Drop this back to 20 once a bnm2 entry exists on master.
     timeout-minutes: 30
     steps:
       - name: Checkout
