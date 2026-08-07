@@ -15,6 +15,12 @@ import { payerIpOf } from '../../../utils/payer-ip';
 // comes ONLY from the verified token. The gateway's own callback is
 // POST /hooks/globepay/withdrawal, outside /store/*, authenticated by the RSA
 // signature.
+//
+// The body names an `account_id` and NOTHING about the bank. Bank code, account
+// number and holder name are resolved from the caller's OWN saved accounts,
+// inside the locked transaction that debits — so a stolen token cannot pay out
+// to an account its owner never registered and cooled off. Do not re-add bank
+// fields here.
 export async function POST(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
@@ -32,9 +38,7 @@ export async function POST(
   }
   const body = (req.body ?? {}) as {
     amount?: unknown;
-    bank_code?: unknown;
-    account_number?: unknown;
-    account_holder_name?: unknown;
+    account_id?: unknown;
   };
 
   const notifyUrl = process.env.GLOBEPAY_WITHDRAW_NOTIFY_URL;
@@ -59,9 +63,7 @@ export async function POST(
     {
       customerId,
       amount: body.amount,
-      bankCode: body.bank_code,
-      accountNumber: body.account_number,
-      accountHolderName: body.account_holder_name,
+      accountId: body.account_id,
       ipAddress,
     },
     notifyUrl,

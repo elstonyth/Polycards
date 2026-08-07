@@ -236,6 +236,27 @@ export const NOTIFICATION_COPY: Record<string, NotificationCopy> = {
     action: 'Try again',
   },
 
+  bank_account_added: {
+    icon: Landmark,
+    variant: 'info',
+    // DOES toast, and deliberately: this is the storefront half of a security
+    // alert (the email is the other half). If someone else added a payout
+    // destination, a toast in the real owner's open tab is the fastest way they
+    // learn about it — the cooling-off window is only useful if they notice it.
+    // Nothing else announces this: the /bank add form updates its list in place
+    // without raising a toast of its own.
+    policy: 'always',
+    title: 'New bank account added',
+    body: (data) => {
+      const bank = strOf(data, 'bank_name');
+      const last4 = strOf(data, 'account_last4');
+      if (!last4) return null;
+      return `${bank ? `${bank} ` : ''}····${last4} was added to your withdrawal accounts. If this wasn't you, remove it and change your password.`;
+    },
+    href: '/bank',
+    action: 'Review accounts',
+  },
+
   challenge_payout: {
     icon: Trophy,
     variant: 'reward',

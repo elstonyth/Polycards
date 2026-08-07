@@ -1,17 +1,16 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { CheckCircle2 } from 'lucide-react';
-import { rm, rm0 } from '@/lib/format';
+import Link from 'next/link';
+import { CheckCircle2, Landmark } from 'lucide-react';
+import { rm, rm0, timeUntil } from '@/lib/format';
 import {
-  addSavedBankAccount,
   fetchSavedBankAccounts,
-  fetchWithdrawBanks,
   startWithdrawal,
   type SavedBankAccount,
-  type WithdrawBank,
 } from '@/lib/actions/vault';
-import { Pill } from '@/components/ui/pill';
+import { Pill, pillVariants } from '@/components/ui/pill';
+import { cn } from '@/lib/utils';
 
 // The real payout band (mirrors the backend's GLOBEPAY_WD_MIN/MAX): RM 50 –
 // RM 50,000, confirmed by the provider 2026-07-29. NOT the same band as
@@ -20,11 +19,37 @@ import { Pill } from '@/components/ui/pill';
 const WD_MIN_RM = 50;
 const WD_MAX_RM = 50000;
 
+/** Can this destination receive money right now? The server's `usableFrom` is
+ *  the only input — the cooling-off duration is never duplicated here, so
+ *  retuning it on the backend moves this UI with it. Absent/null means "not
+ *  without re-saving", which is also the safe reading of a backend that has not
+ *  shipped the field. */
+const isUsable = (account: SavedBankAccount, now: Date) =>
+  typeof account.usableFrom === 'string' &&
+  new Date(account.usableFrom).getTime() <= now.getTime();
+
+/** Why a destination cannot be picked yet, in the customer's terms. */
+function unusableReason(account: SavedBankAccount, now: Date): string | null {
+  if (typeof account.usableFrom !== 'string') {
+    return 'save it again to use it';
+  }
+  const wait = timeUntil(account.usableFrom, now);
+  return wait ? `available ${wait}` : null;
+}
+
 /**
  * Bank-withdrawal form. The balance is debited the moment the request is
  * accepted — the success state says "on its way", never "paid", because the
  * bank transfer completes asynchronously and a failed payout refunds the
  * debit automatically.
+ *
+ * Payouts go to a SAVED account and nothing else: this form submits an account
+ * id, and the server resolves the bank details from the customer's own list. A
+ * newly added destination waits out a cooling-off window first, so adding one
+ * lives on /bank rather than here — a form that let you type a destination and
+ * pay it in the same breath is exactly what that window exists to prevent.
+ * Accounts still cooling off are shown DISABLED with their timing, never
+ * hidden: a saved account that vanished from the picker reads as a bug.
  */
 export default function WithdrawForm({
   withdrawable,
@@ -32,13 +57,9 @@ export default function WithdrawForm({
   /** The server's freeze/locked/playthrough-gated figure — NOT raw balance. */
   withdrawable: number | null;
 }) {
-  const [banks, setBanks] = useState<WithdrawBank[] | null>(null);
-  const [saved, setSaved] = useState<SavedBankAccount[]>([]);
-  const [bankCode, setBankCode] = useState('');
-  const [accountNumber, setAccountNumber] = useState('');
-  const [holderName, setHolderName] = useState('');
+  const [saved, setSaved] = useState<SavedBankAccount[] | null>(null);
+  const [accountId, setAccountId] = useState('');
   const [amountText, setAmountText] = useState('');
-  const [saveAccount, setSaveAccount] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<{
@@ -49,51 +70,37 @@ export default function WithdrawForm({
 
   useEffect(() => {
     let cancelled = false;
-    // Saved accounts load alongside the bank list; a failed saved-accounts
-    // read degrades to the plain form (it's a prefill, never a gate).
-    Promise.all([fetchWithdrawBanks(), fetchSavedBankAccounts()]).then(
-      ([banksRes, savedRes]) => {
-        if (cancelled) return;
-        if (banksRes.ok) setBanks(banksRes.banks);
-        else setError(banksRes.error);
-        if (savedRes.ok) {
-          setSaved(savedRes.accounts);
-          // One saved account and an empty form: prefill it outright — the
-          // common case is withdrawing to the same account every time. Guarded
-          // per field via the functional setters: this resolves asynchronously,
-          // and a customer who already started typing a different destination
-          // must not have it replaced under their cursor.
-          const only =
-            savedRes.accounts.length === 1 ? savedRes.accounts[0] : undefined;
-          if (only) {
-            setBankCode((cur) => cur || only.bankCode);
-            setAccountNumber((cur) => cur || only.accountNumber);
-            setHolderName((cur) => cur || only.accountHolderName);
-          }
-        }
-      },
-    );
+    fetchSavedBankAccounts().then((res) => {
+      if (cancelled) return;
+      if (!res.ok) {
+        setError(res.error);
+        setSaved([]);
+        return;
+      }
+      setSaved(res.accounts);
+      // Exactly one usable destination is the common case — preselect it.
+      const usable = res.accounts.filter((a) => isUsable(a, new Date()));
+      const only = usable.length === 1 ? usable[0] : undefined;
+      if (only) setAccountId((cur) => cur || only.id);
+    });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  // Does the typed-in account already exist in the saved list? Drives both
-  // the picker highlight and whether "save for next time" is offered.
-  const matchesSaved = saved.some(
-    (a) => a.bankCode === bankCode && a.accountNumber === accountNumber,
-  );
+  // Recomputed per render rather than stored: a page left open long enough for
+  // an account to finish cooling off re-reads it on the next interaction.
+  const now = new Date();
+  const accounts = saved ?? [];
+  const usableAccounts = accounts.filter((a) => isUsable(a, now));
 
   const amount = Number.parseFloat(amountText);
   const amountValid =
     Number.isFinite(amount) &&
     amount > 0 &&
     Math.abs(amount * 100 - Math.round(amount * 100)) < 1e-6;
-  const formValid =
-    amountValid &&
-    bankCode !== '' &&
-    /^[0-9]{6,34}$/.test(accountNumber) &&
-    holderName.trim().length >= 2;
+  const selected = usableAccounts.find((a) => a.id === accountId);
+  const formValid = amountValid && selected !== undefined;
 
   async function submit() {
     if (submitting || !formValid) return;
@@ -110,31 +117,10 @@ export default function WithdrawForm({
     }
     setSubmitting(true);
     try {
-      const res = await startWithdrawal({
-        amount,
-        bankCode,
-        accountNumber,
-        accountHolderName: holderName.trim(),
-      });
+      const res = await startWithdrawal({ amount, accountId });
       if (!res.ok) {
         setError(res.error);
         return;
-      }
-      // The withdrawal is already accepted — saving the account is a
-      // convenience side effect and must never surface as a payout error.
-      // Fire-and-forget. The action catches its own failures, but the ACTION
-      // CALL itself (a network round-trip) can still reject — swallow that
-      // too, or a flaky connection turns a successful payout into an
-      // unhandled-rejection overlay.
-      if (saveAccount && !matchesSaved) {
-        const bankName =
-          (banks ?? []).find((b) => b.bankCode === bankCode)?.bankName ?? '';
-        void addSavedBankAccount({
-          bankCode,
-          bankName,
-          accountNumber,
-          accountHolderName: holderName.trim(),
-        }).catch(() => undefined);
       }
       setDone({
         amount: res.amount,
@@ -182,86 +168,64 @@ export default function WithdrawForm({
         </div>
       </div>
 
-      {saved.length > 0 && (
+      {saved !== null && accounts.length === 0 && (
+        <div className="mt-4 rounded-2xl border border-white/10 bg-neutral-900 px-5 py-6 text-center">
+          <Landmark className="mx-auto h-8 w-8 text-neutral-500" aria-hidden />
+          <p className="mt-2 text-sm text-neutral-300">
+            No saved bank accounts yet.
+          </p>
+          <p className="mt-1 text-[13px] text-neutral-500">
+            Withdrawals go to an account you saved earlier. Add one now — it
+            becomes available for withdrawals a day later.
+          </p>
+          <Link
+            href="/bank"
+            className={cn(pillVariants({ size: 'lg' }), 'mt-4 w-full')}
+          >
+            Add a bank account
+          </Link>
+        </div>
+      )}
+
+      {accounts.length > 0 && (
         <label className="mt-4 block text-[13px] font-semibold text-neutral-300">
-          Saved accounts
+          Withdraw to
           <select
-            // Reflects the current fields when they match a saved account, so
-            // switching between saved accounts and hand-editing stay in sync.
-            value={
-              saved.find(
-                (a) =>
-                  a.bankCode === bankCode && a.accountNumber === accountNumber,
-              )?.id ?? ''
-            }
-            onChange={(e) => {
-              const account = saved.find((a) => a.id === e.target.value);
-              if (!account) return;
-              setBankCode(account.bankCode);
-              setAccountNumber(account.accountNumber);
-              setHolderName(account.accountHolderName);
-            }}
-            aria-label="Saved bank accounts"
+            value={accountId}
+            onChange={(e) => setAccountId(e.target.value)}
+            aria-label="Saved bank account"
             className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-neutral-900 px-3 text-sm text-white outline-none focus:border-white/25"
           >
             <option value="" disabled>
-              Choose a saved account
+              {usableAccounts.length === 0
+                ? 'No account is available yet'
+                : 'Choose a saved account'}
             </option>
-            {saved.map((account) => (
-              <option key={account.id} value={account.id}>
-                {account.bankName} ···· {account.accountNumber.slice(-4)} —{' '}
-                {account.accountHolderName}
-              </option>
-            ))}
+            {accounts.map((account) => {
+              const reason = unusableReason(account, now);
+              return (
+                <option
+                  key={account.id}
+                  value={account.id}
+                  disabled={!isUsable(account, now)}
+                >
+                  {account.bankName} ···· {account.accountNumber.slice(-4)} —{' '}
+                  {account.accountHolderName}
+                  {reason ? ` (${reason})` : ''}
+                </option>
+              );
+            })}
           </select>
         </label>
       )}
 
-      <label className="mt-4 block text-[13px] font-semibold text-neutral-300">
-        Bank
-        <select
-          value={bankCode}
-          onChange={(e) => setBankCode(e.target.value)}
-          aria-label="Destination bank"
-          className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-neutral-900 px-3 text-sm text-white outline-none focus:border-white/25"
-        >
-          <option value="" disabled>
-            {banks == null ? 'Loading banks…' : 'Choose your bank'}
-          </option>
-          {(banks ?? []).map((bank) => (
-            <option key={bank.bankCode} value={bank.bankCode}>
-              {bank.bankName}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <label className="mt-3 block text-[13px] font-semibold text-neutral-300">
-        Account number
-        <input
-          type="text"
-          inputMode="numeric"
-          value={accountNumber}
-          onChange={(e) =>
-            setAccountNumber(e.target.value.replace(/[^0-9]/g, ''))
-          }
-          aria-label="Account number"
-          placeholder="Digits only"
-          className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-neutral-900 px-3 text-sm text-white outline-none placeholder:text-neutral-600 focus:border-white/25"
-        />
-      </label>
-
-      <label className="mt-3 block text-[13px] font-semibold text-neutral-300">
-        Account holder name
-        <input
-          type="text"
-          value={holderName}
-          onChange={(e) => setHolderName(e.target.value)}
-          aria-label="Account holder name"
-          placeholder="Exactly as the bank has it"
-          className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-neutral-900 px-3 text-sm text-white outline-none placeholder:text-neutral-600 focus:border-white/25"
-        />
-      </label>
+      {accounts.length > 0 && usableAccounts.length === 0 && (
+        <p className="mt-2 text-[13px] text-neutral-400">
+          A newly saved bank account can only receive withdrawals a day after
+          you add it. This protects your balance if someone else ever gets into
+          your account.
+        </p>
+      )}
 
       <label className="mt-3 block text-[13px] font-semibold text-neutral-300">
         Amount
@@ -278,18 +242,6 @@ export default function WithdrawForm({
           />
         </span>
       </label>
-
-      {!matchesSaved && (
-        <label className="mt-3 flex items-center gap-2 text-[13px] text-neutral-300">
-          <input
-            type="checkbox"
-            checked={saveAccount}
-            onChange={(e) => setSaveAccount(e.target.checked)}
-            className="h-4 w-4 rounded border-white/20 bg-neutral-900 accent-white"
-          />
-          Save this account for future withdrawals
-        </label>
-      )}
 
       {error && (
         <p

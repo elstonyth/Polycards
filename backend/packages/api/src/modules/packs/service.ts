@@ -18,6 +18,11 @@ import {
 } from './delivery';
 import { rewardsRedemptionEnabled } from './rewards-gate';
 import { playthroughState, withdrawalGateError } from './withdrawable';
+import {
+  loadSavedBankAccounts,
+  resolveWithdrawalDestination,
+  type SavedBankAccount,
+} from './saved-accounts';
 import { FRAME_LEVELS } from './avatar-frames';
 import Pack from './models/pack';
 import Card from './models/card';
@@ -1140,8 +1145,8 @@ class PacksModuleService extends MedusaService({
     return result;
   }
 
-  // The ONE writer of a cashout DEBIT: the withdrawal gate and the debit, as a
-  // single serialized unit.
+  // The ONE writer of a cashout DEBIT: the destination lookup, the withdrawal
+  // gate and the debit, as a single serialized unit.
   //
   // Why the gate cannot merely PRECEDE the debit (it used to, in
   // globepay-withdrawal.ts, with no lock held across the two): `floor: 0` in
@@ -1178,11 +1183,21 @@ class PacksModuleService extends MedusaService({
       /** Our payout reference — also the ledger `reference` and gateway ref. */
       merchantTransactionId: string;
       idempotencyReference: string;
-      bankCode: string | null;
-      accountNumber: string | null;
+      /** The SAVED destination the customer picked. Never bank details: the
+       *  bank code and account number are looked up from their own saved list
+       *  below, so a request body cannot name where the money goes. */
+      accountId: unknown;
+      /** The customer module (or a structural stand-in) this reads through. */
+      customers: Pick<CustomerMetadataStore, 'retrieveCustomer'>;
     },
     @MedusaContext() sharedContext: Context = {},
-  ): ReturnType<PacksModuleService['mutateCreditAtomic']> {
+  ): Promise<
+    Awaited<ReturnType<PacksModuleService['mutateCreditAtomic']>> & {
+      /** What the gateway must be told to pay — resolved here, under the lock,
+       *  so the caller cannot submit a destination this method never approved. */
+      destination: SavedBankAccount;
+    }
+  > {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
 
     // Sign guard. This method inverts the caller's convention (positive RM in,
@@ -1210,7 +1225,33 @@ class PacksModuleService extends MedusaService({
       `credit:${input.customerId}`,
     ]);
 
-    // 2) The withdrawal gate, read INSIDE the lock (withdrawable.ts's own
+    // 2) The DESTINATION, resolved here rather than taken from the request.
+    //    Ownership is structural: the list read is keyed on input.customerId
+    //    (which comes from the verified token), so an id belonging to another
+    //    customer simply is not in it and lands on the "Select a saved bank
+    //    account." refusal — before the gate and before any debit.
+    //
+    //    What "under the lock" does and does not buy here, precisely: this read
+    //    runs after pg_advisory_xact_lock and before the debit, so no two
+    //    withdrawals for this customer can interleave around it. It does NOT
+    //    exclude a concurrent saved-accounts write — that path serializes on
+    //    `metadata:<customer>`, a different key, and mutateCustomerMetadata may
+    //    not be composed into a `credit:`-locked transaction. It does not need
+    //    to: savedBankAccountId is derived from (bankCode, accountNumber), so an
+    //    id can never be repointed at a different bank account — only its
+    //    display label can change. The id pins where the money goes; the lock
+    //    pins when.
+    //
+    //    The customer read goes through the caller's module handle, so it runs
+    //    on that module's own connection rather than inside this transaction —
+    //    the same arrangement (and the same reasoning) as
+    //    mutateCustomerMetadata.
+    const destination = resolveWithdrawalDestination({
+      accounts: await loadSavedBankAccounts(input.customers, input.customerId),
+      accountId: input.accountId,
+    });
+
+    // 3) The withdrawal gate, read INSIDE the lock (withdrawable.ts's own
     //    invariant: "the cashout writer MUST route through this").
     //    walletSummary folds THREE limits into one number: the freeze flag
     //    (frozen accounts withdraw nothing — it is the fraud-response tool),
@@ -1230,7 +1271,7 @@ class PacksModuleService extends MedusaService({
     const gateError = withdrawalGateError(wallet, input.amount);
     if (gateError) throw gateError;
 
-    // 3) Rolling-24h VALUE cap, summed under the same lock so the sum and the
+    // 4) Rolling-24h VALUE cap, summed under the same lock so the sum and the
     //    debit cannot interleave either.
     //
     //    `pending` and `settled` both moved (or are still moving) money;
@@ -1281,14 +1322,14 @@ class PacksModuleService extends MedusaService({
       );
     }
 
-    // 4) Debit on the SAME context, so it joins this locked transaction instead
+    // 5) Debit on the SAME context, so it joins this locked transaction instead
     //    of opening its own.
     //
     //    The cap above runs BEFORE mutateCreditAtomic's idempotent-replay
     //    check, so in principle a genuine replay could be cap-rejected. Not
     //    reachable today: newMerchantTransactionId() mints a fresh reference
     //    per attempt, so no two calls here ever share an idempotencyReference.
-    return await this.withdrawCreditsWithLedger(
+    const debit = await this.withdrawCreditsWithLedger(
       {
         customerId: input.customerId,
         amount: -input.amount,
@@ -1298,14 +1339,15 @@ class PacksModuleService extends MedusaService({
         floor: 0,
         ledger: {
           outcome: 'requested',
-          bankCode: input.bankCode,
-          accountNumber: input.accountNumber,
+          bankCode: destination.bankCode,
+          accountNumber: destination.accountNumber,
           // Their id does not exist yet — SubmitWithdrawal has not run.
           gatewayRef: input.merchantTransactionId,
         },
       },
       sharedContext,
     );
+    return { ...debit, destination };
   }
 
   // Append-only reversal of a single ledger row (the open-saga compensation).
@@ -2547,6 +2589,44 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     return data;
+  }
+
+  // Every destination that has actually RECEIVED money, one row per
+  // (customer, bank, account), carrying its earliest settlement.
+  //
+  // Read by scripts/backfill-payout-destinations.ts only. It exists because
+  // plan 088 made a payout resolve its destination from the customer's saved
+  // list: a customer who was paid to an account BEFORE that list existed has
+  // proven they control it, and should not sit out a cooling-off window to be
+  // paid there again. `settled` is the whole point of the filter — `pending`
+  // has not landed and `failed` came back, so neither is evidence of control.
+  //
+  // MIN(created_at) rather than settled_at: settled_at is nullable on rows that
+  // predate it, and created_at is never null. Both are in the past, which is all
+  // the backfill needs — it stamps a savedAt that is already outside the window.
+  @InjectManager()
+  async listSettledPayoutDestinations(
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<
+    {
+      customer_id: string;
+      bank_code: string;
+      account_number: string;
+      account_holder_name: string;
+      first_settled_at: Date;
+    }[]
+  > {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    return await em.execute(
+      'SELECT customer_id, bank_code, account_number, ' +
+        '  MIN(account_holder_name) AS account_holder_name, ' +
+        '  MIN(created_at) AS first_settled_at ' +
+        'FROM globepay_withdrawal ' +
+        "WHERE status = 'settled' AND deleted_at IS NULL " +
+        'GROUP BY customer_id, bank_code, account_number ' +
+        'ORDER BY customer_id, first_settled_at',
+    );
   }
 
   // Serialized read-modify-write of `customer.metadata`, the shared JSONB blob

@@ -2,11 +2,18 @@ import type {
   AuthenticatedMedusaRequest,
   MedusaResponse,
 } from '@medusajs/framework/http';
-import { createHash } from 'node:crypto';
 import { MedusaError, Modules } from '@medusajs/framework/utils';
 import { withdrawalDetailsError } from '../../../../../modules/packs/globepay-withdrawal';
 import { PACKS_MODULE } from '../../../../../modules/packs';
 import type PacksModuleService from '../../../../../modules/packs/service';
+import {
+  MAX_SAVED_BANK_ACCOUNTS,
+  parseSavedBankAccounts,
+  savedBankAccountId,
+  savedBankAccountViews,
+  type SavedBankAccount,
+} from '../../../../../modules/packs/saved-accounts';
+import { sendSavedAccountAddedNotice } from '../../../../../modules/packs/saved-account-notice';
 
 // Saved payout bank accounts — GET (list) / POST (add) / DELETE (remove) on
 // /store/credits/withdraw/accounts. Storage is customer.metadata.bank_accounts,
@@ -18,71 +25,33 @@ import type PacksModuleService from '../../../../../modules/packs/service';
 // avatar and frame routes, and an unlocked merge drops whichever key the loser
 // had just written.
 //
-// This is a CONVENIENCE store, not the enforcement point: the actual payout
-// (POST /store/credits/withdraw) re-validates every field on submit, and the
-// gateway pays only to what that request carries. Saving a malformed account
-// here is therefore refused with the same withdrawalDetailsError the payout
-// path uses, so the picker can never offer an account the submit would reject.
+// THIS LIST IS THE ENFORCEMENT POINT for where a payout may go (plan 088; it
+// used to be a convenience store, and that comment is gone because it stopped
+// being true). POST /store/credits/withdraw carries an `account_id` and no bank
+// fields at all: the bank code, account number and holder name it submits to the
+// gateway are resolved from this list, inside the debiting transaction, by
+// modules/packs/saved-accounts.ts. Two consequences to keep in mind here:
+//
+//   - Every account is stamped with `savedAt` on creation and cannot receive
+//     money until PAYOUT_DESTINATION_COOLDOWN_HOURS (default 24) have passed.
+//     Adding a destination is therefore a security event, not a preference —
+//     hence the email + feed notice below.
+//   - The same withdrawalDetailsError the payout path uses still gates a save,
+//     so the picker can never offer an account the submit would reject.
 //
 // AUTH + RATE LIMIT: registered in src/api/middlewares.ts. The customer id
 // comes ONLY from the verified token — an account list is per-customer and
 // never keyed by anything in the body.
 
-/** Hard cap on saved accounts. A picker, not an address book. */
-export const MAX_SAVED_BANK_ACCOUNTS = 5;
-
-export type SavedBankAccount = {
-  id: string;
-  bankCode: string;
-  bankName: string;
-  accountNumber: string;
-  accountHolderName: string;
+// Re-exported for the module's own tests and any older importer: the
+// definitions moved to modules/packs/saved-accounts.ts so the money path and
+// the backfill script can share them without importing an API route.
+export {
+  MAX_SAVED_BANK_ACCOUNTS,
+  parseSavedBankAccounts,
+  savedBankAccountId,
+  type SavedBankAccount,
 };
-
-/**
- * Deterministic id from what the gateway actually pays to. Same bank + same
- * account number = same id, so re-adding an existing account is an idempotent
- * no-op instead of a duplicate picker entry.
- */
-export function savedBankAccountId(
-  bankCode: string,
-  accountNumber: string,
-): string {
-  return createHash('sha256')
-    .update(JSON.stringify({ bankCode, accountNumber }))
-    .digest('hex')
-    .slice(0, 16);
-}
-
-/**
- * Defensive parse of the metadata blob. Metadata is schemaless JSON that other
- * writers merge around; a malformed entry (however it got there) is dropped
- * rather than crashing every reader of the list.
- */
-export function parseSavedBankAccounts(value: unknown): SavedBankAccount[] {
-  if (!Array.isArray(value)) return [];
-  const accounts: SavedBankAccount[] = [];
-  for (const entry of value) {
-    if (typeof entry !== 'object' || entry === null) continue;
-    const e = entry as Record<string, unknown>;
-    if (
-      typeof e.id === 'string' &&
-      typeof e.bankCode === 'string' &&
-      typeof e.bankName === 'string' &&
-      typeof e.accountNumber === 'string' &&
-      typeof e.accountHolderName === 'string'
-    ) {
-      accounts.push({
-        id: e.id,
-        bankCode: e.bankCode,
-        bankName: e.bankName,
-        accountNumber: e.accountNumber,
-        accountHolderName: e.accountHolderName,
-      });
-    }
-  }
-  return accounts;
-}
 
 /**
  * Register-phase JWTs pass authenticate('customer') with actor_id '' (the
@@ -149,7 +118,7 @@ export async function GET(
   res: MedusaResponse,
 ): Promise<void> {
   const accounts = await loadAccounts(req, req.auth_context.actor_id);
-  noStore(res).json({ accounts });
+  noStore(res).json({ accounts: savedBankAccountViews(accounts) });
 }
 
 export async function POST(
@@ -196,17 +165,28 @@ export async function POST(
     bankName: bankName.trim(),
     accountNumber,
     accountHolderName: (body.account_holder_name as string).trim(),
+    savedAt: new Date().toISOString(),
   };
 
   // The cap is checked against the list read INSIDE the lock, not against one
   // this handler read earlier — otherwise two concurrent saves could both see
   // MAX-1 accounts and both be allowed through.
+  let added = false;
   const saved = await mutateAccounts(req, customerId, (accounts) => {
     const existing = accounts.findIndex((a) => a.id === account.id);
     if (existing >= 0) {
       // Idempotent re-add: refresh the label/holder in place (a customer fixing
-      // a typo'd holder name must not need a delete + re-add dance).
-      return accounts.map((a, i) => (i === existing ? account : a));
+      // a typo'd holder name must not need a delete + re-add dance), but KEEP
+      // the original savedAt so the cooling-off window is not restarted. Safe
+      // because savedBankAccountId is derived from (bankCode, accountNumber):
+      // a re-add cannot repoint an id at a different bank account, only relabel
+      // the one it already names. A row that predates savedAt keeps having
+      // none — re-saving a stale account must not silently arm it, only a
+      // delete-then-add (a new entry, stamped now) does.
+      const prior = accounts[existing] as SavedBankAccount;
+      return accounts.map((a, i) =>
+        i === existing ? { ...account, savedAt: prior.savedAt } : a,
+      );
     }
     if (accounts.length >= MAX_SAVED_BANK_ACCOUNTS) {
       throw new MedusaError(
@@ -214,9 +194,26 @@ export async function POST(
         `You can save up to ${MAX_SAVED_BANK_ACCOUNTS} bank accounts — remove one first.`,
       );
     }
+    added = true;
     return [...accounts, account];
   });
-  noStore(res).json({ accounts: saved });
+
+  // A NEW payout destination is the event worth telling the account owner
+  // about: it is the first half of "steal a token, wait out the cooling-off,
+  // cash out". Fired after the write has committed and never allowed to fail
+  // the save (the helper swallows its own errors) — a dropped notice must not
+  // cost the customer their saved account. Re-saving an account they already
+  // had is not news, so it stays silent.
+  if (added) {
+    await sendSavedAccountAddedNotice(req.scope, {
+      customerId,
+      accountId: account.id,
+      bankName: account.bankName,
+      accountNumber: account.accountNumber,
+      savedAt: account.savedAt as string,
+    });
+  }
+  noStore(res).json({ accounts: savedBankAccountViews(saved) });
 }
 
 export async function DELETE(
@@ -239,5 +236,5 @@ export async function DELETE(
     // error. `null` = nothing changed, so no write is issued at all.
     return next.length === accounts.length ? null : next;
   });
-  noStore(res).json({ accounts: saved });
+  noStore(res).json({ accounts: savedBankAccountViews(saved) });
 }
