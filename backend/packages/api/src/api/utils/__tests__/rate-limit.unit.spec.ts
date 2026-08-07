@@ -13,7 +13,11 @@ import {
   createProfileAppearanceRateLimit,
   createPhoneOtpStartPhoneRateLimit,
   createPhoneOtpCheckPhoneRateLimit,
+  createAuthIdentifierRateLimit,
+  createAuthRateLimit,
   phoneBodyKeyOf,
+  emailBodyKeyOf,
+  AUTH_DEFAULTS,
   STORE_READ_DEFAULTS,
   PROFILE_APPEARANCE_DEFAULTS,
   positiveIntFromEnv,
@@ -289,6 +293,80 @@ describe("createRateLimitMiddleware", () => {
     );
   });
 
+  // Plan 081: the credential endpoints have the same shared-egress-IP problem
+  // as the OTP routes — the storefront issues login/register/reset from a
+  // server action, so an IP key is one sitewide bucket for every visitor.
+  it("uses emailBodyKeyOf's key over actor_id/IP for an email body", async () => {
+    const store: RateLimitStore = {
+      consume: jest.fn().mockResolvedValue({ allowed: true, retryAfterMs: 0 }),
+    };
+    const mw = createRateLimitMiddleware({
+      store,
+      rules,
+      prefix: "rl:t:",
+      keyOf: emailBodyKeyOf,
+    });
+    await mw(
+      makeReq({ body: { email: " A@X.com " } }),
+      makeRes().res,
+      jest.fn() as unknown as MedusaNextFunction,
+    );
+    expect(store.consume).toHaveBeenCalledWith(
+      "rl:t:email:a@x.com",
+      rules,
+      expect.any(Number),
+    );
+  });
+
+  // Plan case 4: WITHOUT skipWhenNoKey, a keyless body still gets a working
+  // budget (the IP fallback). This is the default `keyOf` contract and the
+  // behaviour the phone tiers rely on.
+  it("emailBodyKeyOf falls back to the IP bucket when the body has no email", async () => {
+    const store: RateLimitStore = {
+      consume: jest.fn().mockResolvedValue({ allowed: true, retryAfterMs: 0 }),
+    };
+    const mw = createRateLimitMiddleware({
+      store,
+      rules,
+      prefix: "rl:t:",
+      keyOf: emailBodyKeyOf,
+    });
+    await mw(
+      makeReq({ body: { token: "proof", password: "hunter2" } }),
+      makeRes().res,
+      jest.fn() as unknown as MedusaNextFunction,
+    );
+    expect(store.consume).toHaveBeenCalledWith(
+      "rl:t:ip:10.0.0.1",
+      rules,
+      expect.any(Number),
+    );
+  });
+
+  // ...but the per-identifier auth tier opts INTO skipping instead. Its
+  // matcher also covers /auth/*/emailpass/update, which carries no identifier;
+  // falling back to `ip:` there would impose this tier's per-account numbers
+  // as a SITEWIDE ceiling tighter than the circuit breaker it sits under. If
+  // someone deletes the flag, this test is what fails.
+  it("skipWhenNoKey: steps aside (no budget consumed) when keyOf yields nothing", async () => {
+    const store: RateLimitStore = {
+      consume: jest.fn().mockResolvedValue({ allowed: true, retryAfterMs: 0 }),
+    };
+    const mw = createRateLimitMiddleware({
+      store,
+      rules,
+      prefix: "rl:t:",
+      keyOf: emailBodyKeyOf,
+      skipWhenNoKey: true,
+    });
+    const next = jest.fn() as unknown as MedusaNextFunction;
+    const { res, out } = makeRes();
+    await mw(makeReq({ body: { token: "reset-jwt" } }), res, next);
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(store.consume).not.toHaveBeenCalled();
+    expect(out.statusCode).toBeUndefined();
+  });
+
   it("falls back to actor_id/IP when keyOf returns undefined", async () => {
     const store: RateLimitStore = {
       consume: jest.fn().mockResolvedValue({ allowed: true, retryAfterMs: 0 }),
@@ -508,6 +586,228 @@ describe("phone-otp per-phone limiter factories (Finding 1)", () => {
   });
   it("createPhoneOtpCheckPhoneRateLimit resolves", () => {
     expect(() => createPhoneOtpCheckPhoneRateLimit()).not.toThrow();
+  });
+});
+
+describe("emailBodyKeyOf (Plan 081)", () => {
+  const LOGIN = "/auth/customer/emailpass";
+  const RESET = "/auth/customer/emailpass/reset-password";
+
+  const req = (body: unknown, path = LOGIN): MedusaRequest =>
+    ({ ip: "10.0.0.1", path, body }) as unknown as MedusaRequest;
+
+  it("normalizes case and surrounding whitespace into one bucket", () => {
+    expect(emailBodyKeyOf(req({ email: " A@X.com " }))).toBe("email:a@x.com");
+    expect(emailBodyKeyOf(req({ email: "a@x.com" }))).toBe("email:a@x.com");
+  });
+
+  // Core's reset-password route validates `identifier`, not `email`
+  // (@medusajs/medusa/dist/api/auth/validators.js:6), and the storefront sends
+  // the address in it — so this is the field the LIVE reset path uses.
+  it("reads `identifier` on the reset-password route", () => {
+    expect(emailBodyKeyOf(req({ identifier: "A@X.com" }, RESET))).toBe(
+      "email:a@x.com",
+    );
+  });
+
+  // The limiter runs before core's body validator, so req.body still carries
+  // whatever extra keys the caller sent. Reading "whichever field is present"
+  // would let an attacker park a decoy in the field the route ignores and get
+  // a fresh bucket per attempt while still bombing the real account.
+  it("ignores a decoy in the field the route does not read", () => {
+    expect(
+      emailBodyKeyOf(req({ email: "decoy@x.com", identifier: "victim@x.com" }, RESET)),
+    ).toBe("email:victim@x.com");
+    expect(
+      emailBodyKeyOf(req({ email: "victim@x.com", identifier: "decoy@x.com" }, LOGIN)),
+    ).toBe("email:victim@x.com");
+  });
+
+  it("returns undefined when only the route's UNUSED field is set", () => {
+    expect(emailBodyKeyOf(req({ identifier: "a@x.com" }, LOGIN))).toBe(
+      undefined,
+    );
+    expect(emailBodyKeyOf(req({ email: "a@x.com" }, RESET))).toBe(undefined);
+  });
+
+  // Keyspace bound: a limiter key derived from unvalidated body input is a
+  // Redis memory-growth vector, so anything that is not email-shaped and short
+  // returns undefined (→ the caller's fallback), it never becomes a key.
+  it("returns undefined for a missing body", () => {
+    expect(emailBodyKeyOf({ ip: "10.0.0.1" } as unknown as MedusaRequest)).toBe(
+      undefined,
+    );
+  });
+
+  it("returns undefined for a body with no email/identifier", () => {
+    expect(emailBodyKeyOf(req({ token: "t", password: "p" }))).toBe(undefined);
+  });
+
+  it("returns undefined for a non-string email", () => {
+    expect(emailBodyKeyOf(req({ email: { toString: () => "a@x.com" } }))).toBe(
+      undefined,
+    );
+    expect(emailBodyKeyOf(req({ email: 12345 }))).toBe(undefined);
+  });
+
+  it("returns undefined for an email over 254 chars", () => {
+    const long = `${"a".repeat(250)}@x.com`; // 256 chars, email-shaped
+    expect(long.length).toBeGreaterThan(254);
+    expect(emailBodyKeyOf(req({ email: long }))).toBe(undefined);
+  });
+
+  it("returns undefined for a string that is not email-shaped", () => {
+    for (const bad of ["", "   ", "not-an-email", "a@b", "a b@x.com"]) {
+      expect(emailBodyKeyOf(req({ email: bad }))).toBe(undefined);
+    }
+  });
+});
+
+describe("the two auth rate-limit tiers (Plan 081)", () => {
+  const BURST_ENV = "AUTH_IDENTIFIER_RATE_BURST_LIMIT";
+  let saved: Array<[string, string | undefined]> = [];
+
+  beforeEach(() => {
+    // These factories read env AT CONSTRUCTION, so the environment has to be
+    // pinned before the create calls below. Two things must go:
+    //  - REDIS_URL, so the limiter stays on its in-memory store (a unit test
+    //    must not open a socket);
+    //  - every AUTH_*_RATE_* override, because .env.test widens the auth
+    //    limiter for the http suite — leaving those in place would make the
+    //    sitewide test below assert .env.test's numbers instead of
+    //    AUTH_DEFAULTS, i.e. pass no matter what the defaults say.
+    saved = ["REDIS_URL", ...Object.keys(process.env).filter((k) => /^AUTH_.*RATE/.test(k))]
+      .map((k) => [k, process.env[k]] as [string, string | undefined]);
+    for (const [k] of saved) delete process.env[k];
+    process.env[BURST_ENV] = "1";
+  });
+
+  afterEach(() => {
+    delete process.env[BURST_ENV];
+    for (const [k, v] of saved) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
+
+  const makeRes = (): { res: MedusaResponse; statusOf: () => number | undefined } => {
+    let statusCode: number | undefined;
+    const res = {
+      status(code: number) {
+        statusCode = code;
+        return res;
+      },
+      set() {
+        return res;
+      },
+      json() {
+        return res;
+      },
+    };
+    return {
+      res: res as unknown as MedusaResponse,
+      statusOf: () => statusCode,
+    };
+  };
+
+  // Every request below comes from the SAME ip — that is the production
+  // topology (one Next.js egress IP for the whole storefront). Before this
+  // tier existed, that meant one shared bucket; the point of the change is
+  // that two different accounts no longer 429 each other.
+  const post = async (
+    mw: (
+      req: MedusaRequest,
+      res: MedusaResponse,
+      next: MedusaNextFunction,
+    ) => Promise<void>,
+    body: unknown,
+    path = "/auth/customer/emailpass",
+  ): Promise<{ passed: boolean; status: number | undefined }> => {
+    const next = jest.fn();
+    const { res, statusOf } = makeRes();
+    await mw(
+      { ip: "203.0.113.9", path, body } as unknown as MedusaRequest,
+      res,
+      next as unknown as MedusaNextFunction,
+    );
+    return { passed: next.mock.calls.length === 1, status: statusOf() };
+  };
+
+  it("gives different emails from the same IP different buckets", async () => {
+    const mw = createAuthIdentifierRateLimit();
+
+    // Burst limit is 1, so the second attempt on the SAME email is denied...
+    expect((await post(mw, { email: "a@x.com", password: "p" })).passed).toBe(
+      true,
+    );
+    const second = await post(mw, { email: "a@x.com", password: "p" });
+    expect(second.passed).toBe(false);
+    expect(second.status).toBe(429);
+
+    // ...while a different account is unaffected. This is the whole point of
+    // the change: it fails if `keyOf: emailBodyKeyOf` is removed from the
+    // factory, because both requests would then key on the shared IP.
+    expect((await post(mw, { email: "b@x.com", password: "p" })).passed).toBe(
+      true,
+    );
+    // ...and the reset path's `identifier` field shares a@x.com's bucket, so
+    // login attempts and reset requests for one account cannot be split apart.
+    expect(
+      (
+        await post(
+          mw,
+          { identifier: "a@x.com" },
+          "/auth/customer/emailpass/reset-password",
+        )
+      ).passed,
+    ).toBe(false);
+  });
+
+  it("does not consume any budget for a body with no identifier (skipWhenNoKey)", async () => {
+    const mw = createAuthIdentifierRateLimit();
+    // /auth/*/emailpass/update — token + password, no identifier. Repeated
+    // well past the burst limit of 1; none of it may bind.
+    for (let i = 0; i < 5; i++) {
+      expect((await post(mw, { password: "new-password" })).passed).toBe(true);
+    }
+  });
+
+  // The sitewide tier keys on IP, and in prod that is ONE storefront egress IP
+  // for every visitor — so its budget is whole-site traffic, not one client's.
+  // The BURST is the binding rule: at the old 5/10s the real ceiling was 30
+  // requests per minute for the entire site, which 429'd honest sign-ins and
+  // was a trivial DoS lever. Guards a revert of that number specifically.
+  it("admits far more than 30 sign-ins a minute from the one storefront IP", async () => {
+    const mw = createAuthRateLimit(); // real defaults, no env override
+    for (let i = 0; i < 40; i++) {
+      const r = await post(mw, { email: `user${i}@x.com`, password: "p" });
+      expect({ i, ...r }).toMatchObject({ passed: true });
+    }
+  });
+});
+
+describe("AUTH_DEFAULTS (Plan 081)", () => {
+  // The IP tier is a SITEWIDE circuit breaker, not per-client fairness — every
+  // visitor's credential request arrives from the storefront's one egress IP.
+  // createAuthIdentifierRateLimit is the tier that bounds one account, so this
+  // one only has to sit above legitimate whole-site traffic.
+  it("is sized as a sitewide budget, not a per-user one", () => {
+    expect(AUTH_DEFAULTS.limit).toBeGreaterThanOrEqual(300);
+    expect(AUTH_DEFAULTS.windowMs).toBeLessThanOrEqual(60_000);
+  });
+
+  // The burst is the BINDING rule — a low one silently overrides the sustained
+  // ceiling. Keep the two consistent, or the sitewide bucket comes back.
+  it("has a burst that does not shadow the sustained ceiling", () => {
+    const burstsPerWindow = AUTH_DEFAULTS.windowMs / AUTH_DEFAULTS.burstWindowMs;
+    expect(AUTH_DEFAULTS.burstLimit * burstsPerWindow).toBeGreaterThanOrEqual(
+      AUTH_DEFAULTS.limit,
+    );
+  });
+
+  it("factories resolve", () => {
+    expect(() => createAuthRateLimit()).not.toThrow();
+    expect(() => createAuthIdentifierRateLimit()).not.toThrow();
   });
 });
 
