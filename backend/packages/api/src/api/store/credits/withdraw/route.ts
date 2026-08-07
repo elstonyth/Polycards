@@ -19,6 +19,16 @@ export async function POST(
   res: MedusaResponse,
 ): Promise<void> {
   const customerId = req.auth_context.actor_id;
+  // Register-phase JWTs pass authenticate('customer') with actor_id '' (the
+  // documented repo trap — see withdraw/accounts/route.ts and
+  // profile/frame/route.ts). Without this guard the empty id flows into the
+  // withdrawal gate, whose walletSummary('') sums an empty ledger and reports
+  // "You can withdraw up to RM 0.00 right now." — a confusing INVALID_DATA
+  // where the truth is a 401, so the client's isAuthError never offers the
+  // login prompt.
+  if (!customerId) {
+    throw new MedusaError(MedusaError.Types.UNAUTHORIZED, 'Unauthorized');
+  }
   const body = (req.body ?? {}) as {
     amount?: unknown;
     bank_code?: unknown;
