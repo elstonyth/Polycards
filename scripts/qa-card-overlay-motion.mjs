@@ -73,7 +73,14 @@ async function run() {
     // extend past it, but the glyphs must sit on the column's edge.
     const range = document.createRange();
     range.selectNodeContents(price.firstChild);
-    const badge = price.parentElement.children[1] ?? null;
+    // The delta badge is the next IN-FLOW sibling. Index-based lookup breaks
+    // the moment anything else joins the value block — the sr-only
+    // [role="status"] region did exactly that, and being position:absolute it
+    // reported a nonsense rect while contributing nothing to the real gap.
+    const badge =
+      [...price.parentElement.children].find(
+        (el) => el !== price && getComputedStyle(el).position !== 'absolute',
+      ) ?? null;
     return {
       h1Left: h1.getBoundingClientRect().left,
       priceTextLeft: range.getBoundingClientRect().left,

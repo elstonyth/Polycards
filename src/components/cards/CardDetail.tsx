@@ -159,6 +159,18 @@ export function CardDetail({
             {priceLabel}
             <span className="ml-2 text-sm font-normal text-white/50">est.</span>
           </p>
+          {/* The pulse says "the market moved" in colour and motion alone,
+              which is nothing to a screen reader — the number simply differs
+              next time it is read. This carries the same signal. It is NOT
+              keyed: a live region has to be in the DOM before its content
+              changes or the change is never announced, which is exactly why
+              this can't live on the remounted <p> above. Empty until a
+              genuine tick, so mounting the page announces nothing. */}
+          <span role="status" className="sr-only">
+            {next.n > 0
+              ? `Price ${next.up ? 'rose' : 'fell'} to ${priceLabel}`
+              : ''}
+          </span>
           {delta !== null && delta !== 0 && (
             <span
               className={

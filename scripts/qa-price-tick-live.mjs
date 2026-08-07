@@ -26,20 +26,39 @@ await page.goto(`${BASE}/card/${encodeURIComponent(CARD)}`, {
 const read = () =>
   page.evaluate((q) => {
     const el = document.querySelector(q);
+    const status = document.querySelector('[role="status"]');
     return {
       text: el?.textContent?.trim() ?? null,
       pulsing: el?.classList.contains('price-tick') ?? false,
+      // The screen-reader half of the same signal. Must EXIST from first paint
+      // (a live region added at change time is never announced) and must be
+      // EMPTY until a genuine tick.
+      statusPresent: status !== null,
+      status: status?.textContent?.trim() ?? null,
     };
   }, PRICE);
 
 const start = await read();
 console.log('initial:', JSON.stringify(start));
-if (start.pulsing) {
-  console.error(
-    'FAIL: pulsing on first paint — the baseline is being treated as a change.',
-  );
+const fail = async (msg) => {
+  console.error(`FAIL: ${msg}`);
   await browser.close();
   process.exit(1);
+};
+if (start.pulsing) {
+  await fail(
+    'pulsing on first paint — the baseline is being treated as a change.',
+  );
+}
+if (!start.statusPresent) {
+  await fail(
+    'no [role="status"] region at first paint — a live region created at change time is never announced.',
+  );
+}
+if (start.status) {
+  await fail(
+    `[role="status"] already says ${JSON.stringify(start.status)} on load — it must be empty until a real tick, or mounting the page announces a change that never happened.`,
+  );
 }
 
 console.log(`watching for ${WAIT_MS / 1000}s — change the price now...`);
@@ -62,6 +81,19 @@ if (!pulsed) {
 }
 
 console.log('pulsed:', JSON.stringify(pulsed));
+if (pulsed.text === start.text) {
+  await fail(
+    `pulse fired but the rendered price is still ${JSON.stringify(start.text)} — the animation is firing on something the reader cannot see.`,
+  );
+}
+if (!pulsed.status) {
+  await fail(
+    'pulse fired but [role="status"] stayed empty — the change is conveyed by colour and motion only.',
+  );
+}
+
 await page.screenshot({ path: 'docs/research/motion-price-tick.png' });
 await browser.close();
-console.log(`OK — ${start.text} → ${pulsed.text}, pulse class applied.`);
+console.log(
+  `OK — ${start.text} → ${pulsed.text}, pulse class applied, announced as ${JSON.stringify(pulsed.status)}.`,
+);
