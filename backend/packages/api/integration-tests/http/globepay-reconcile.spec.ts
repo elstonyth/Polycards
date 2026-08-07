@@ -20,7 +20,10 @@ jest.mock('../../src/modules/packs/globepay-client', () => {
 
 import { getDepositDetail } from '../../src/modules/packs/globepay-client';
 import globepayReconcileJob from '../../src/jobs/globepay-reconcile';
-import { GLOBEPAY_STALE_AFTER_MS } from '../../src/modules/packs/globepay-reconcile';
+import {
+  GLOBEPAY_EXPIRED_RETRY_MS,
+  GLOBEPAY_STALE_AFTER_MS,
+} from '../../src/modules/packs/globepay-reconcile';
 
 const requery = getDepositDetail as jest.Mock;
 
@@ -200,7 +203,74 @@ medusaIntegrationTestRunner({
         await sweep();
 
         expect(await ledger()).toHaveLength(0);
-        expect((await rowOf(row.id)).status).toBe('failed');
+        // 'expired', NOT 'failed': the gateway never ruled on this deposit, we
+        // just stopped waiting. Writing 'failed' here made the row terminal —
+        // the sweep only scanned 'pending' — so a bank transfer landing later
+        // credited nobody and nothing ever looked at it again.
+        expect((await rowOf(row.id)).status).toBe('expired');
+      });
+
+      // The second scan tier. Without it 'expired' would just be a prettier
+      // name for the same dead end.
+      it('requeries an expired deposit and credits it when it finally settles', async () => {
+        const row = await seed(
+          'PC-reconcile-late-settle',
+          GLOBEPAY_STALE_AFTER_MS + 60_000,
+        );
+        requery.mockResolvedValue({
+          state: 'pending',
+          amount: 50,
+          statusId: 4,
+        });
+        await sweep();
+        expect((await rowOf(row.id)).status).toBe('expired');
+
+        // The bank transfer lands hours after we gave up.
+        requery.mockResolvedValue({ state: 'success', amount: 50, statusId: 6 });
+        await sweep();
+
+        const rows = await ledger();
+        expect(rows).toHaveLength(1);
+        expect(Number(rows[0].amount)).toBe(50);
+        expect((await rowOf(row.id)).status).toBe('settled');
+      });
+
+      it('leaves an expired deposit older than the retry window alone', async () => {
+        const row = await seed(
+          'PC-reconcile-ancient',
+          GLOBEPAY_EXPIRED_RETRY_MS + 60 * 60 * 1000,
+        );
+        await packs().updateGlobePayDeposits({
+          id: row.id,
+          status: 'expired',
+        } as never);
+
+        requery.mockResolvedValue({ state: 'success', amount: 50, statusId: 6 });
+        await sweep();
+
+        // Past the window the row is not even requeried — the tier is bounded
+        // so it can never grow into a full-table scan.
+        expect(requery).not.toHaveBeenCalled();
+        expect(await ledger()).toHaveLength(0);
+        expect((await rowOf(row.id)).status).toBe('expired');
+      });
+
+      it('re-expiring an already-expired row is a no-op', async () => {
+        const row = await seed(
+          'PC-reconcile-still-stale',
+          GLOBEPAY_STALE_AFTER_MS + 60_000,
+        );
+        requery.mockResolvedValue({
+          state: 'pending',
+          amount: 50,
+          statusId: 4,
+        });
+
+        await sweep();
+        await sweep();
+
+        expect(await ledger()).toHaveLength(0);
+        expect((await rowOf(row.id)).status).toBe('expired');
       });
 
       it('keeps sweeping after one deposit errors', async () => {
