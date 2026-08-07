@@ -88,10 +88,15 @@ check(
 // only the countries the backend will actually SMS (ALLOWED_PHONE_COUNTRIES /
 // ALLOWED_SMS_COUNTRIES), so there is no second option to switch to; restore
 // this check if the allowlist ever widens.
+// `=== 1`, not a comparison of two counts: equal counts are also true when both
+// are 0, i.e. when the picker never rendered — a check that passes hardest when
+// the thing under test is missing.
+const optionCount = await countrySelect.locator('option').count();
 check(
-  'picker offers only served countries',
-  (await countrySelect.locator('option').count()) ===
-    (await countrySelect.locator('option[value="MY"]').count()),
+  'picker offers exactly the one served country',
+  optionCount === 1 &&
+    (await countrySelect.locator('option[value="MY"]').count()) === 1,
+  `${optionCount} option(s)`,
 );
 await page.screenshot({ path: `${OUT}/signup-country-picker.png` });
 

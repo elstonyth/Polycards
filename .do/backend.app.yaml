@@ -260,7 +260,7 @@ envs:
   # Destination geo-lock for the UNAUTHENTICATED send route: every call there
   # bills a real SMS, and the per-phone limiter bounds one number, not a pumping
   # run rotating fresh ones. Plain value, NOT a secret — do-apply.ps1 aborts the
-  # whole apply on any unresolved __SECRET__ token anywhere in this file, so
+  # whole apply if any redacted-secret placeholder survives substitution, so
   # never write one here for a non-secret. Empty/unset falls back to MY in code.
   # Widening this alone is not enough: the ISO->dialling-code row in
   # src/utils/phone-verification.ts and the storefront's ALLOWED_PHONE_COUNTRIES

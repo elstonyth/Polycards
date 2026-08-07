@@ -90,4 +90,29 @@ describe('POST /store/phone-verification/start — destination allowlist', () =>
     expect(sendCount()).toBe(0);
     expect(out.body).toEqual({ ok: true });
   });
+
+  // A configuration that refuses EVERY destination (including the default) is
+  // the failure mode most likely to be misread as a Twilio outage, so it must
+  // name itself in the log rather than just going quiet.
+  it('names dead ISO codes in the log when the allowlist resolves to nothing', async () => {
+    const prev = process.env.ALLOWED_SMS_COUNTRIES;
+    process.env.ALLOWED_SMS_COUNTRIES = 'SG';
+    try {
+      await startVerification(mkReq(MY), mkRes().res);
+      expect(sendCount()).toBe(0); // even the default destination is dead now
+      const lines = warn.mock.calls.map((c) => c[0] as string);
+      expect(lines.some((l) => l.includes('ALLOWED_SMS_COUNTRIES') && l.includes('SG'))).toBe(
+        true,
+      );
+    } finally {
+      if (prev === undefined) delete process.env.ALLOWED_SMS_COUNTRIES;
+      else process.env.ALLOWED_SMS_COUNTRIES = prev;
+    }
+  });
+
+  it('stays quiet about ISO codes when the allowlist is sound', async () => {
+    await startVerification(mkReq(GB), mkRes().res);
+    const lines = warn.mock.calls.map((c) => c[0] as string);
+    expect(lines.some((l) => l.includes('ALLOWED_SMS_COUNTRIES'))).toBe(false);
+  });
 });

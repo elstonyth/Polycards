@@ -6,6 +6,7 @@ import {
   isAllowedSmsDestination,
   isPhoneOtpPurpose,
   sendPhoneOtp,
+  unresolvableSmsCountries,
 } from '../../../../utils/phone-verification';
 
 // Public: sends (or dev-logs) an OTP for one of the three phone flows. The
@@ -50,12 +51,25 @@ export async function POST(
     // it never discloses what it did. Checked BEFORE the customer lookup so a
     // pumping run costs no query either.
     //
-    // Log the calling-code prefix ONLY, never `phone`: at most three digits,
-    // which is nobody's dialable number, and enough to see a pumping attempt
-    // in the logs. Same PII rule as the Twilio error-code logging above.
+    // Log the leading `+` and three digits ONLY, never `phone`. That covers
+    // every calling code (max three digits) and can carry at most a couple of
+    // subscriber digits — enough to identify the destination region in a
+    // pumping attempt, far short of a dialable number. Same PII rule as the
+    // Twilio error-code logging in sendPhoneOtp.
     logger.warn(
       `[phone-otp] refused send to unserved destination ${phone.slice(0, 4)}`,
     );
+    // A misconfigured allowlist refuses EVERYTHING, +60 included, and looks
+    // exactly like a Twilio outage. Name the dead ISO codes next to the
+    // refusal they caused. Emitted per refusal rather than once per process:
+    // no module state to get stale or leak between tests, the sitewide IP
+    // limiter already caps the volume, and during such an outage this is the
+    // line the operator needs in the window they are actually staring at.
+    const dead = unresolvableSmsCountries(process.env);
+    if (dead.length)
+      logger.warn(
+        `[phone-otp] ALLOWED_SMS_COUNTRIES lists ISO codes with no dialling-code row: ${dead.join(', ')}`,
+      );
     res.json({ ok: true });
     return;
   }
