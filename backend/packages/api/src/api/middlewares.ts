@@ -9,6 +9,7 @@ import { MedusaError } from '@medusajs/framework/utils';
 import multer from 'multer';
 import {
   createAdminActionRateLimit,
+  createAuthIdentifierRateLimit,
   createAuthRateLimit,
   createCreditTopupRateLimit,
   createDeliveryWriteRateLimit,
@@ -65,6 +66,13 @@ import { noStoreForAuthenticatedStore } from './utils/cache-headers';
 // together in the UI, so they share one budget (and one Redis connection).
 const storeReadRateLimit = createStoreReadRateLimit();
 const authRateLimit = createAuthRateLimit();
+// The per-identifier (per-email) credential tier. ONE instance shared by every
+// credential matcher below: they are one budget per account across login,
+// register and reset, and one instance also means one Redis connection fronting
+// the single `rl:auth-identifier:` keyspace (two instances would share the
+// Redis budget but NOT the in-memory failover budget — split-brain when Redis
+// blips).
+const authIdentifierRateLimit = createAuthIdentifierRateLimit();
 // Shared by ALL write-tier matchers below (delivery-order writes, rewards
 // claim/withdraw, daily draw, avatar upload, verified phone change): one
 // budget + one Redis connection, distinct from the read budget. The 429
@@ -233,15 +241,29 @@ export default defineMiddlewares({
     // (/auth/customer/*, /auth/user/*, ...). Token refresh is NOT matched —
     // it is high-frequency, already requires a valid token, and throttling it
     // would log users out under normal use.
+    //
+    // TWO independent tiers, per-identifier FIRST so a hammered account 429s
+    // before spending the sitewide budget — the same ordering rule (and the
+    // same reason) as the OTP matchers below: the storefront issues every
+    // credential request from a server action, so in prod the backend sees ONE
+    // egress IP for every visitor and an IP-only limiter here is a single
+    // sitewide bucket. See the "Phone-OTP limiters" comment in
+    // utils/rate-limit.ts for the full shared-egress-IP rationale.
+    //
+    // The wildcard matcher also covers .../emailpass/update (reset completion),
+    // which carries a token + password and NO identifier. authIdentifierRateLimit
+    // is built with skipWhenNoKey, so it steps aside there instead of degrading
+    // into a sitewide IP bucket with per-account numbers; that route's budget is
+    // authRateLimit alone, exactly as before this tier existed.
     {
       matcher: '/auth/*/emailpass',
       method: 'POST',
-      middlewares: [authRateLimit],
+      middlewares: [authIdentifierRateLimit, authRateLimit],
     },
     {
       matcher: '/auth/*/emailpass/*',
       method: 'POST',
-      middlewares: [authRateLimit],
+      middlewares: [authIdentifierRateLimit, authRateLimit],
     },
     {
       // OTP send — TWO independent limiter tiers, per-phone FIRST so a
@@ -286,6 +308,19 @@ export default defineMiddlewares({
       // brute-force budget rather than deliveryWriteRateLimit (that one's for
       // authed writes; this is a credential-issuing endpoint, same family as
       // login/register below).
+      //
+      // Deliberately NOT on authIdentifierRateLimit: the body is only
+      // { token } — a phone-possession proof, no email — so there is nothing
+      // for emailBodyKeyOf to read, and the only identifier available is the
+      // phone INSIDE the proof, which a middleware could reach only by
+      // re-running the HMAC verification the route already does
+      // (utils/phone-verification.ts verifyPhoneProof). Duplicating credential
+      // verification inside a rate limiter is not worth it, because this route
+      // already has a genuine per-identifier bound one hop upstream: a caller
+      // cannot obtain the proof without spending
+      // createPhoneOtpCheckPhoneRateLimit's per-number budget (30/24h) on
+      // /store/phone-verification/check. authRateLimit (IP) is the sitewide
+      // circuit breaker on top of that.
       matcher: '/store/phone-verification/password-reset',
       method: 'POST',
       middlewares: [authRateLimit],
