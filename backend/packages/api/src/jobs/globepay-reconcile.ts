@@ -18,6 +18,7 @@ import {
   GLOBEPAY_EXPIRED_RETRY_BATCH,
   GLOBEPAY_EXPIRED_RETRY_MS,
   GLOBEPAY_RECONCILE_BATCH,
+  ambiguousRefusalAction,
   classifyRequeryError,
   reconcileAction,
   unknownDepositAction,
@@ -101,10 +102,14 @@ export default async function globepayReconcileJob(container: MedusaContainer) {
               error instanceof Error ? error.message : String(error)
             }) — NOT writing it off; check merchant credentials`,
           );
-          // Deliberately reuses 'wait' rather than adding a ReconcileAction
-          // kind: the write-off branch below is an explicit `if`, and a new
-          // kind is exactly what could one day be forgotten there.
-          action = { kind: 'wait' } as const;
+          // 'wait' until the give-up bound, then 'expire' — deliberately reusing
+          // existing ReconcileAction kinds rather than adding one: the write-off
+          // branch below is an explicit `if`, and a new kind is exactly what
+          // could one day be forgotten there. The bound matters as much as the
+          // waiting does: without it these rows sit in the oldest-first window
+          // forever and starve the sweep of fresh deposits. See
+          // ambiguousRefusalAction.
+          action = ambiguousRefusalAction(new Date(deposit.created_at), now);
         } else {
           action = unknownDepositAction(
             new Date(deposit.created_at),
@@ -125,11 +130,14 @@ export default async function globepayReconcileJob(container: MedusaContainer) {
       if (action.kind === 'wait') continue;
 
       // Requeried above the deposit ceiling. Quarantine, exactly as the callback
-      // route does: no credit, and NOT written off — the row stays pending so
-      // the next sweep sees it again and an operator can settle it by hand.
+      // route does: no credit, and NOT written off — the row keeps whatever
+      // status it already had, so a 'pending' one is seen again next sweep and
+      // an 'expired' one (reached via the second scan tier) is seen again for as
+      // long as it stays inside the retry window. Either way an operator can
+      // settle it by hand.
       if (action.kind === 'quarantine') {
         logger.error(
-          `[globepay-reconcile] ${deposit.merchant_transaction_id} requeried at ${action.amount}, above the RM ${GLOBEPAY_MAX_RM} deposit ceiling — not credited, not written off; left pending for manual settlement`,
+          `[globepay-reconcile] ${deposit.merchant_transaction_id} requeried at ${action.amount}, above the RM ${GLOBEPAY_MAX_RM} deposit ceiling — not credited, not written off; left ${deposit.status} for manual settlement`,
         );
         continue;
       }

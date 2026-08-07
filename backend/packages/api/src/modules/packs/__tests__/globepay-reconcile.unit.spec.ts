@@ -1,5 +1,8 @@
 import {
+  GLOBEPAY_AMBIGUOUS_GIVEUP_DEFAULT_MS,
   GLOBEPAY_STALE_AFTER_MS,
+  ambiguousGiveUpMs,
+  ambiguousRefusalAction,
   classifyRequeryError,
   reconcileAction,
   unknownDepositAction,
@@ -191,6 +194,59 @@ describe('classifyRequeryError', () => {
     expect(
       classifyRequeryError(new GlobePayError('boom', [], 500)),
     ).toEqual({ kind: 'rethrow' });
+  });
+});
+
+// Waiting forever is its own outage: these rows sit in a 50-row, oldest-first
+// window and would starve the sweep of fresh deposits whose callback was
+// dropped. The bound ends that WITHOUT writing anything off.
+describe('ambiguousRefusalAction', () => {
+  it('waits while the row is younger than the give-up bound', () => {
+    expect(
+      ambiguousRefusalAction(
+        new Date(now.getTime() - GLOBEPAY_AMBIGUOUS_GIVEUP_DEFAULT_MS + 1000),
+        now,
+      ),
+    ).toEqual({ kind: 'wait' });
+  });
+
+  it('waits well past the ordinary stale window — an outage lasts days', () => {
+    // The whole point of the bound being a week: a two-day credential breakage
+    // must not sweep the live queue out of 'pending'.
+    expect(
+      ambiguousRefusalAction(
+        new Date(now.getTime() - GLOBEPAY_STALE_AFTER_MS * 48),
+        now,
+      ),
+    ).toEqual({ kind: 'wait' });
+  });
+
+  it('expires — never fails — once past the bound', () => {
+    const action = ambiguousRefusalAction(
+      new Date(now.getTime() - GLOBEPAY_AMBIGUOUS_GIVEUP_DEFAULT_MS - 1000),
+      now,
+    );
+    expect(action).toEqual({ kind: 'expire' });
+    // 'expired' stays requeryable and callback-recoverable; 'fail' would not.
+    expect(action.kind).not.toBe('fail');
+  });
+
+  it('honours the env override without touching process.env', () => {
+    const env = { GLOBEPAY_AMBIGUOUS_GIVEUP_MS: '1000' };
+    expect(
+      ambiguousRefusalAction(new Date(now.getTime() - 2000), now, env),
+    ).toEqual({ kind: 'expire' });
+    expect(ambiguousGiveUpMs(env)).toBe(1000);
+  });
+
+  it('falls back to the default on junk or non-positive env values', () => {
+    expect(ambiguousGiveUpMs({ GLOBEPAY_AMBIGUOUS_GIVEUP_MS: 'soon' })).toBe(
+      GLOBEPAY_AMBIGUOUS_GIVEUP_DEFAULT_MS,
+    );
+    expect(ambiguousGiveUpMs({ GLOBEPAY_AMBIGUOUS_GIVEUP_MS: '0' })).toBe(
+      GLOBEPAY_AMBIGUOUS_GIVEUP_DEFAULT_MS,
+    );
+    expect(ambiguousGiveUpMs({})).toBe(GLOBEPAY_AMBIGUOUS_GIVEUP_DEFAULT_MS);
   });
 });
 

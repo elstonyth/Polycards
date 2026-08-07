@@ -146,6 +146,70 @@ export function classifyRequeryError(error: unknown): RequeryRefusal {
 }
 
 /**
+ * How long a deposit may sit on nothing but ambiguous refusals before the sweep
+ * stops carrying it in the live queue.
+ *
+ * This bound is NOT optional, it is what keeps "wait instead of writing off"
+ * from becoming its own outage. globepay-deposit.ts:245-249 deliberately leaves
+ * a row 'pending' when SubmitDeposit fails ambiguously, precisely so the sweep
+ * requeries it — and on the live gateway that requery answers with the
+ * plain-text 400 that lands here. Waiting forever means those rows accumulate
+ * in a GLOBEPAY_RECONCILE_BATCH-sized, oldest-first window until the sweep does
+ * nothing but requery zombies and never reaches a fresh deposit whose callback
+ * was dropped: the exact loss this job exists to prevent. They would also each
+ * render an orange "Overdue" on the admin deposits page forever.
+ *
+ * A WEEK, and the size is the whole point. The failures that produce an
+ * ambiguous 400 are credential/whitelist/config breakages resolved by a support
+ * loop with the provider — the 2026-08-04 PMT10006 cutover took until 2026-08-06
+ * to clear, so a bound of hours would let a two-day breakage sweep the entire
+ * live queue out of 'pending'. Seven days is roughly three times the worst
+ * outage this integration has actually seen. Ageing out is NOT a write-off: the
+ * row goes to 'expired', which the second scan tier keeps requerying and a late
+ * callback can still settle.
+ *
+ * Env-tunable because the right value is an operational judgement about the
+ * provider, not a code constant — raise it during a known long outage.
+ *
+ * Note it equals GLOBEPAY_EXPIRED_RETRY_MS, so a row aged out this way lands at
+ * the far edge of the second tier's window and the sweep will not requery it
+ * again. Deliberate: after a week of nothing but ambiguous refusals another ten
+ * requeries buy nothing, and the row's real recovery path is the callback route,
+ * which recovers an 'expired' row at any age.
+ */
+export const GLOBEPAY_AMBIGUOUS_GIVEUP_DEFAULT_MS = 7 * 24 * 60 * 60 * 1000;
+
+export function ambiguousGiveUpMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number(env.GLOBEPAY_AMBIGUOUS_GIVEUP_MS);
+  return Number.isFinite(raw) && raw > 0
+    ? raw
+    : GLOBEPAY_AMBIGUOUS_GIVEUP_DEFAULT_MS;
+}
+
+/**
+ * What the deposit sweep does with a row whose requery keeps coming back as an
+ * unattributable 400. Waits — never a write-off — until the row is older than
+ * the give-up bound, then expires it out of the live queue.
+ *
+ * Deliberately deposits-only: the withdrawal sweep has no 'expire', because
+ * "expiring" a payout would confiscate a debit that already left the customer's
+ * balance. Its ambiguous rows therefore still wait indefinitely; that gap is
+ * tracked as docs/ops/security-verification-checklist.md item H, which also
+ * carries the proposed 'needs_review' shape and the query to size the
+ * population. Do not solve it here — it needs a status, a migration and an
+ * admin surface of its own.
+ */
+export function ambiguousRefusalAction(
+  createdAt: Date,
+  now: Date,
+  env: NodeJS.ProcessEnv = process.env,
+): ReconcileAction {
+  return now.getTime() - createdAt.getTime() > ambiguousGiveUpMs(env)
+    ? { kind: 'expire' }
+    : { kind: 'wait' };
+}
+
+/**
  * How far back the second scan tier requeries 'expired' deposits. Expiry means
  * "we stopped chasing", never "the gateway said no", so a bank transfer that
  * lands late must still be recoverable — but not at the cost of a growing
