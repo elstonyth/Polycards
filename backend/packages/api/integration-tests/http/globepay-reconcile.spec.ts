@@ -21,6 +21,7 @@ jest.mock('../../src/modules/packs/globepay-client', () => {
 import { getDepositDetail } from '../../src/modules/packs/globepay-client';
 import globepayReconcileJob from '../../src/jobs/globepay-reconcile';
 import { GLOBEPAY_STALE_AFTER_MS } from '../../src/modules/packs/globepay-reconcile';
+import { GLOBEPAY_MAX_RM } from '../../src/modules/packs/globepay-deposit';
 
 const requery = getDepositDetail as jest.Mock;
 
@@ -170,6 +171,40 @@ medusaIntegrationTestRunner({
 
         expect(await ledger()).toHaveLength(0);
         expect((await rowOf(row.id)).status).toBe('failed');
+      });
+
+      // The sweep's other half of plan 083's ceiling. reconcileAction returning
+      // 'quarantine' is unit-tested; what THIS pins is the job's handling of it,
+      // which is what decides whether the money stays recoverable: an over-cap
+      // requery must credit nothing AND must not write the row off. Landing in
+      // the fail/expire branch would mark it 'failed', and the sweep only ever
+      // rescans status='pending' — so the row would never be looked at again.
+      it('quarantines an over-cap requery: no credit, and the row is NOT written off', async () => {
+        const row = await seed('PC-reconcile-over-cap');
+        requery.mockResolvedValue({
+          state: 'success',
+          amount: GLOBEPAY_MAX_RM + 1,
+          statusId: 6,
+        });
+
+        await sweep();
+
+        expect(await ledger()).toHaveLength(0);
+        expect((await rowOf(row.id)).status).toBe('pending');
+      });
+
+      it('still settles a requery exactly AT the ceiling', async () => {
+        const row = await seed('PC-reconcile-at-cap');
+        requery.mockResolvedValue({
+          state: 'success',
+          amount: GLOBEPAY_MAX_RM,
+          statusId: 6,
+        });
+
+        await sweep();
+
+        expect(Number((await ledger())[0].amount)).toBe(GLOBEPAY_MAX_RM);
+        expect((await rowOf(row.id)).status).toBe('settled');
       });
 
       it('leaves a recent non-final deposit pending', async () => {

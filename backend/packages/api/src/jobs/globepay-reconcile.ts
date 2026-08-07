@@ -53,6 +53,7 @@ export default async function globepayReconcileJob(container: MedusaContainer) {
   let settled = 0;
   let failed = 0;
   let expired = 0;
+  let quarantined = 0;
 
   for (const deposit of outstanding) {
     try {
@@ -84,7 +85,15 @@ export default async function globepayReconcileJob(container: MedusaContainer) {
       // Requeried above the deposit ceiling. Quarantine, exactly as the callback
       // route does: no credit, and NOT written off — the row stays pending so
       // the next sweep sees it again and an operator can settle it by hand.
+      //
+      // NOTE: this is the sweep's FIRST non-terminating outcome. Before it,
+      // every pending deposit eventually reached settled or failed; a
+      // quarantined row is now requeried every run forever and permanently
+      // occupies a slot in the oldest-first GLOBEPAY_RECONCILE_BATCH window.
+      // Expected N is 0 (the gateway caps at the same RM 10,000), but if that
+      // ever stops holding, this is the property that has to be revisited.
       if (action.kind === 'quarantine') {
+        quarantined += 1;
         logger.error(
           `[globepay-reconcile] ${deposit.merchant_transaction_id} requeried at ${action.amount}, above the RM ${GLOBEPAY_MAX_RM} deposit ceiling — not credited, not written off; left pending for manual settlement`,
         );
@@ -181,9 +190,12 @@ export default async function globepayReconcileJob(container: MedusaContainer) {
     }
   }
 
-  if (settled || failed || expired) {
+  // Quarantines are counted in the summary as well as logged individually:
+  // this line is what an operator actually reads, and a deposit held back for
+  // manual settlement must not be invisible in it.
+  if (settled || failed || expired || quarantined) {
     logger.info(
-      `[globepay-reconcile] swept ${outstanding.length}: ${settled} settled, ${failed} failed, ${expired} expired`,
+      `[globepay-reconcile] swept ${outstanding.length}: ${settled} settled, ${failed} failed, ${expired} expired, ${quarantined} quarantined`,
     );
   }
 }

@@ -89,7 +89,10 @@ export async function POST(
   // sent this, not that the payout is ours. Checked before the row lookup so a
   // foreign callback can never touch one of our rows. Case-insensitive, because
   // a casing difference is a config nuisance, not an attack.
-  if (data.MerchantCode?.toUpperCase() !== config.merchantCode.toUpperCase()) {
+  if (
+    String(data.MerchantCode ?? '').toUpperCase() !==
+    config.merchantCode.toUpperCase()
+  ) {
     req.scope
       .resolve('logger')
       .error(

@@ -58,7 +58,10 @@ export async function POST(
   // SIGNED copy — PayoutVerifyBody declares an envelope MerchantCode too, and
   // that one is attacker-mutable, so checking it would guard nothing.
   // Case-insensitive, because a casing difference is a config nuisance.
-  if (data.MerchantCode?.toUpperCase() !== config.merchantCode.toUpperCase()) {
+  if (
+    String(data.MerchantCode ?? '').toUpperCase() !==
+    config.merchantCode.toUpperCase()
+  ) {
     req.scope
       .resolve('logger')
       .error(
