@@ -40,7 +40,10 @@ import {
   blockDisabledCustomerSession,
   blockDisabledEmailpassLogin,
 } from './utils/disabled-guard';
-import { noStoreForAuthenticatedStore } from './utils/cache-headers';
+import {
+  noStoreForAuthenticatedAdmin,
+  noStoreForAuthenticatedStore,
+} from './utils/cache-headers';
 
 // Custom-route middleware. /store/* is NOT a default customer-protected prefix
 // (only /store/customers/me/* is), so every customer-owned route here must opt
@@ -950,6 +953,30 @@ export default defineMiddlewares({
         noStoreForAuthenticatedStore,
         blockDisabledCustomerSession,
       ],
+    },
+    // The /admin twin of the entry above — read the two as a pair. Same
+    // blanket-matcher rationale: the framework registers
+    // `app.use('/admin', authenticate('user', ['bearer','session','api-key']))`
+    // (router.js:89) BEFORE any middleware from this file, so req.auth_context
+    // is populated wherever the sorter places this, and every /admin route —
+    // including the 61 with no Cache-Control of their own and any added next
+    // month — is covered without anyone remembering to opt in.
+    //
+    // Matcher '/admin/*', not '/admin': the sorter DROPS a zero-segment
+    // matcher (see the '/*' comment above), and a bare '/admin' would match
+    // only the namespace root, which has no route.ts here. '*' spans '/' under
+    // the installed path-to-regexp 0.1.x, so '/admin/*' compiles to
+    // ^/admin/(.*)$ and covers every nested admin path.
+    //
+    // This is additive, never a reorder: no method filter, no early return,
+    // just setHeader + next(). The sorter puts a wildcard entry ahead of the
+    // static/params ones, so it runs BEFORE adminActionRateLimit on the
+    // money-mutation routes — both still run, and their relative order is
+    // unchanged (verified by replaying the real RoutesSorter over the matcher
+    // list with and without this entry).
+    {
+      matcher: '/admin/*',
+      middlewares: [noStoreForAuthenticatedAdmin],
     },
   ],
 });
