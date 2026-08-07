@@ -53,7 +53,11 @@ type SettledDestination = {
   bank_code: string;
   account_number: string;
   account_holder_name: string;
-  /** When this destination was FIRST settled — the savedAt we stamp. */
+  /** When this destination was FIRST settled — the savedAt we stamp. Held as a
+   *  Date only after an explicit `new Date(...)`: the SQL read hands back a raw
+   *  driver value, and this script's only real run is against production, where
+   *  a `.getTime()` on a string would abort the whole backfill on customer one.
+   *  Same discipline as every other raw-SQL read in service.ts. */
   first_settled_at: Date;
 };
 
@@ -94,8 +98,16 @@ export default async function backfillPayoutDestinations({
 
   const byCustomer = new Map<string, SettledDestination[]>();
   for (const row of rows) {
+    // Coerce at the boundary — see SettledDestination.first_settled_at.
+    const settledAt = new Date(row.first_settled_at);
+    if (Number.isNaN(settledAt.getTime())) {
+      logger.warn(
+        `[backfill-payout-destinations] customer ${row.customer_id}: unreadable settlement time for ${row.bank_code}; skipped.`,
+      );
+      continue;
+    }
     const list = byCustomer.get(row.customer_id) ?? [];
-    list.push(row);
+    list.push({ ...row, first_settled_at: settledAt });
     byCustomer.set(row.customer_id, list);
   }
 

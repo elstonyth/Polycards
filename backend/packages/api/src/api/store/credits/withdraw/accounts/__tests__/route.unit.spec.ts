@@ -269,8 +269,11 @@ describe('POST /store/credits/withdraw/accounts', () => {
       /remove one first/i,
     );
     expect(updateCustomers).not.toHaveBeenCalled();
-    // Exactly one read, and it is the mutator's. A second read would mean a
-    // caller-side copy of the blob exists to go stale.
+    // Exactly one read on the REFUSAL path, and it is the mutator's. A second
+    // read here would mean a caller-side copy of the blob exists to go stale.
+    // (The success path does read the customer a second time — the new-account
+    // notice needs their email address — but that read happens after the write
+    // has committed and decides nothing.)
     expect(retrieveCustomer).toHaveBeenCalledTimes(1);
   });
 
@@ -368,6 +371,33 @@ describe('POST accounts — the new-destination notice', () => {
       mkRes(),
     );
     expect(createNotifications.mock.calls.length).toBe(0);
+  });
+
+  // The attack this notice exists for, second attempt: the owner noticed the
+  // first one and deleted it, so the destination is gone from the list and
+  // re-adding it is a genuinely new entry with a new cooling-off window. It
+  // MUST alarm again. The notification idempotency key folds in savedAt for
+  // exactly this reason — without it, this second alert is deduped away
+  // against the first and the owner never hears about it.
+  it('alarms again when a deleted destination is re-added', async () => {
+    retrieveCustomer.mockResolvedValue({
+      metadata: {},
+      email: 'player@example.test',
+    });
+    await POST(mkReq(VALID_BODY), mkRes());
+    const firstKey = createNotifications.mock.calls
+      .map(([args]) => args)
+      .find((args) => args.channel === 'email').idempotency_key;
+
+    // …deleted, then added again (an empty list is what DELETE leaves behind).
+    createNotifications.mockClear();
+    await new Promise((r) => setTimeout(r, 2));
+    await POST(mkReq(VALID_BODY), mkRes());
+    const second = createNotifications.mock.calls
+      .map(([args]) => args)
+      .find((args) => args.channel === 'email');
+    expect(second).toBeDefined();
+    expect(second.idempotency_key).not.toBe(firstKey);
   });
 
   // The account is already saved by the time this runs; a mail problem must

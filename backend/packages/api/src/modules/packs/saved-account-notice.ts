@@ -16,13 +16,25 @@ import { payoutDestinationCooldownHours } from './saved-accounts';
 // number (last 4 only, same rule the WD ledger payload follows), and never
 // throw.
 
-/** Idempotency anchor. Keyed on the customer + the saved account's id, which is
- *  itself derived from (bankCode, accountNumber) — so a retried save of the same
- *  destination cannot send a second alarm. */
+/**
+ * Idempotency anchor. Keyed on the customer, the saved account's id AND the
+ * instant it was saved.
+ *
+ * `savedAt` is in there deliberately, and dropping it re-opens the hole this
+ * whole notice exists to close: an attacker whose first attempt was noticed and
+ * deleted could re-add the SAME destination — a fresh entry with a fresh
+ * cooling-off window — and a key without `savedAt` would match the alert
+ * already sent, so the owner would never hear about the second attempt.
+ *
+ * Retried POSTs are not what this guards: the route only calls the notice when
+ * the account was genuinely appended, and a re-save of an existing entry takes
+ * the update-in-place branch and stays silent.
+ */
 export const savedAccountNoticeKey = (
   customerId: string,
   accountId: string,
-): string => `bank-account-added:${customerId}:${accountId}`;
+  savedAt: string,
+): string => `bank-account-added:${customerId}:${accountId}:${savedAt}`;
 
 export type SavedAccountAddedInput = {
   customerId: string;
@@ -46,7 +58,11 @@ export async function sendSavedAccountAddedNotice(
   input: SavedAccountAddedInput,
 ): Promise<boolean> {
   const last4 = input.accountNumber.slice(-4);
-  const key = savedAccountNoticeKey(input.customerId, input.accountId);
+  const key = savedAccountNoticeKey(
+    input.customerId,
+    input.accountId,
+    input.savedAt,
+  );
   const usableFrom = new Date(
     new Date(input.savedAt).getTime() +
       payoutDestinationCooldownHours() * 60 * 60 * 1000,

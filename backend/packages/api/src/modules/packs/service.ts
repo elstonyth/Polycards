@@ -1246,6 +1246,15 @@ class PacksModuleService extends MedusaService({
     //    on that module's own connection rather than inside this transaction —
     //    the same arrangement (and the same reasoning) as
     //    mutateCustomerMetadata.
+    //
+    //    PRECEDENCE, since it is a deliberate choice and not the order the
+    //    wallet gate uses: a bad destination outranks a bad wallet. A frozen
+    //    account naming an un-cooled destination hears about the destination,
+    //    not the freeze. That is the quieter answer to someone holding a stolen
+    //    token, and it keeps this method and globepay-withdrawal.ts's precheck
+    //    in the same order. withdrawable.ts's own precedence rule (freeze
+    //    outranks playthrough outranks the cap) is untouched — it orders the
+    //    three WALLET refusals against each other, all of which sit below this.
     const destination = resolveWithdrawalDestination({
       accounts: await loadSavedBankAccounts(input.customers, input.customerId),
       accountId: input.accountId,
@@ -2613,7 +2622,11 @@ class PacksModuleService extends MedusaService({
       bank_code: string;
       account_number: string;
       account_holder_name: string;
-      first_settled_at: Date;
+      /** RAW driver value, deliberately widened: whether pg hands back a Date
+       *  or a string is a driver/config detail, and the one caller only ever
+       *  runs against production. Declaring `Date` would be an unverifiable
+       *  claim that turns into a TypeError there; this forces the coercion. */
+      first_settled_at: string | Date;
     }[]
   > {
     const em = (sharedContext.transactionManager ??
