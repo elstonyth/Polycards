@@ -93,6 +93,162 @@
   --ring: oklch(0.556 0 0);
 }
 
+/* ---- Motion tokens ---- */
+/* Exponential ease-out — the curve CardDetailOverlay already animates its panel
+   on ([0.16, 1, 0.3, 1]). Named once so the hero and the card page decelerate
+   identically instead of landing on three near-miss curves. No bounce/elastic
+   anywhere: overshoot draws attention to the animation instead of the card. */
+:root {
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+/* ---- Shared first-paint entrance ---- */
+/* Deliberately a CSS animation, not a JS-gated class transition. `Reveal` needs
+   an IntersectionObserver to fire, which is the wrong tool above the fold — it
+   never triggers in a headless renderer or a background tab, which is exactly
+   how a hero ships blank. A CSS animation always runs, and when it does not run
+   the element simply keeps its own base style — which here is the fully visible
+   state — so content can't be stranded invisible either way.
+   prefers-reduced-motion is handled by the global backstop at the bottom of
+   this file: it zeroes duration AND delay, so the whole choreography resolves
+   on frame one rather than being skipped.
+
+   Stagger with --i on the element: style={{ '--i': 2 }}. 70ms/step, kept under
+   ~6 steps everywhere so the last item lands inside a second.
+
+   Fill mode is `backwards`, NOT `both`. Backwards is what actually matters —
+   it holds the 0% frame during the stagger delay. The forwards half buys
+   nothing (every end frame equals the element's own base style: opacity 1, no
+   transform, no filter) and costs a permanent pin: `both` leaves an identity
+   `transform: matrix(1,0,0,1,0,0)` on every revealed element and a
+   `filter: brightness(1)` on the box wrapping the autoplaying hero video —
+   each one a containing block, a stacking context, and a compositing hint that
+   outlives the animation by the entire life of the page.
+
+   The class rules live in @layer utilities so a later `motion-reduce:animate-none`
+   (or any Tailwind animation utility) can actually override them. Unlayered CSS
+   beats every layer, so leaving them bare would make that override a silent
+   no-op — the keyframes themselves stay unlayered, which is correct. */
+@keyframes riseIn {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 14px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+@layer utilities {
+  .rise-in {
+    animation: riseIn 620ms var(--ease-out-expo) backwards;
+    animation-delay: calc(var(--i, 0) * 70ms);
+  }
+}
+
+/* Home board 01 — the shop window lighting up. Deliberately NO opacity: the
+   clip's poster is this page's LCP image, and starting it transparent would
+   push LCP out by the length of the animation to buy an effect the brightness
+   ramp already delivers. The panel is painted from frame one and lights up in
+   place, which is what "the shop is open" is supposed to read as. */
+@keyframes windowIn {
+  from {
+    transform: scale(0.965);
+    filter: brightness(0.55);
+  }
+  to {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+}
+@layer utilities {
+  .window-in {
+    animation: windowIn 900ms var(--ease-out-expo) backwards;
+    animation-delay: calc(var(--i, 0) * 70ms);
+  }
+}
+
+/* The money beat. The top chase is the one thing on this fold worth shouting,
+   so it lands last and carries a single decaying bloom in its own Chase Gold —
+   "Glow Is Earned" (DESIGN.md §4): the hue is inherited from the value itself,
+   and it fires once. It does not loop.
+   rgb(255, 176, 32) is --color-chase (#ffb020) — keyframes can't read the token
+   through a var() inside rgba(), so it is spelled out; keep the two in sync. */
+@keyframes chaseLand {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 16px, 0) scale(0.94);
+    text-shadow: 0 0 0 rgba(255, 176, 32, 0);
+  }
+  /* Peaks early and tight. A wider/longer bloom stopped reading as light on
+     the number and started reading as a soft gold rectangle behind it — which
+     is the casino-neon direction PRODUCT.md rules out. */
+  45% {
+    text-shadow: 0 0 30px rgba(255, 176, 32, 0.45);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+    text-shadow: 0 0 0 rgba(255, 176, 32, 0);
+  }
+}
+@layer utilities {
+  .chase-land {
+    animation: chaseLand 760ms var(--ease-out-expo) backwards;
+    animation-delay: calc(var(--i, 0) * 70ms);
+  }
+}
+
+/* /card/[handle] — the slab fades up in place. Opacity ONLY: the operator
+   removed the slab's idle float (2026-07-18) and the tier frame's traveling
+   light sweep (2026-07-17), so nothing here scales, drifts, or ramps the halo.
+   The rarity glow renders at full strength from the first frame, exactly as it
+   does today. */
+@keyframes slabArrive {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@layer utilities {
+  .slab-arrive {
+    animation: slabArrive 520ms var(--ease-out-quart) backwards;
+  }
+}
+
+/* Live price change — the 60s poll landed on a different number. One pulse in
+   the direction's own signal colour (buyback green up, alarm red down, set as
+   --tick-rgb at the call site) so a moving market reads as a state change
+   instead of a silent text swap. Re-armed by remounting via React key.
+
+   The tint reaches 8px past the text via box-shadow SPREAD rather than
+   padding + negative margin. Padding would have to be paid for with -mx-2,
+   and that margin is charged whether or not a pulse is running: it silently
+   halved the gap-x-4 to the 30d delta badge sitting beside the value. A
+   shadow costs no layout at all. */
+@keyframes priceTick {
+  0% {
+    background-color: rgba(var(--tick-rgb), 0);
+    box-shadow: 0 0 0 8px rgba(var(--tick-rgb), 0);
+  }
+  25% {
+    background-color: rgba(var(--tick-rgb), 0.22);
+    box-shadow: 0 0 0 8px rgba(var(--tick-rgb), 0.22);
+  }
+  100% {
+    background-color: rgba(var(--tick-rgb), 0);
+    box-shadow: 0 0 0 8px rgba(var(--tick-rgb), 0);
+  }
+}
+@layer utilities {
+  .price-tick {
+    animation: priceTick 900ms var(--ease-out-quart) backwards;
+  }
+}
+
 /* Marquee (RECENT WINS ticker) */
 @keyframes sp-scroll-x {
   from {
