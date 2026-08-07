@@ -566,6 +566,9 @@ export type CreditTxn = {
   // to a prettified generic label) instead of the row being dropped upstream.
   reason: string;
   createdAt: string;
+  // Gateway reference on topup/cashout rows (what support quotes); null on
+  // pack opens, buybacks and other internal rows.
+  reference: string | null;
 };
 
 export type TransactionsResult =
@@ -625,6 +628,7 @@ export async function getTransactions(
         amount: r.amount,
         reason: r.reason,
         createdAt: r.created_at,
+        reference: r.reference ?? null,
       })),
       page: safePage,
       hasMore: totals?.has_more ?? false,

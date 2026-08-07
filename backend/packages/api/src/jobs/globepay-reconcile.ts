@@ -96,6 +96,26 @@ export default async function globepayReconcileJob(container: MedusaContainer) {
           ),
         });
 
+        // Same receipt the callback would have sent — after the credit
+        // commit, BEFORE the terminal row update, outside the !replayed
+        // guard: once the row leaves 'pending' this sweep never selects it
+        // again and a retried callback early-returns, so a crash between the
+        // update and a later send would lose the email forever. A crash after
+        // this send re-runs the branch next sweep (the credit replays, the
+        // notification module's unique idempotency_key dedupes). Non-throwing.
+        await sendTopupReceipt(container, {
+          customerId: deposit.customer_id,
+          amount: action.amount,
+          // `||`, not `??` — an empty-string gateway id must fall through, or
+          // the template fails closed AFTER the idempotency key is burned and
+          // the email is permanently unsent.
+          reference:
+            deposit.gateway_transaction_id ||
+            deposit.merchant_transaction_id,
+          merchantTransactionId: deposit.merchant_transaction_id,
+          paymentMethodCode: deposit.payment_method_code,
+        });
+
         await packs.updateGlobePayDeposits({
           selector: { id: deposit.id, status: 'pending' },
           data: {
@@ -126,19 +146,8 @@ export default async function globepayReconcileJob(container: MedusaContainer) {
           } catch {
             // Never fail a committed credit over a notification.
           }
-
-          // Same receipt the callback would have sent. The shared idempotency
-          // anchor means a late callback cannot produce a second one.
-          await sendTopupReceipt(container, {
-            customerId: deposit.customer_id,
-            amount: action.amount,
-            reference:
-              deposit.gateway_transaction_id ??
-              deposit.merchant_transaction_id,
-            merchantTransactionId: deposit.merchant_transaction_id,
-            paymentMethodCode: deposit.payment_method_code,
-          });
         }
+
         continue;
       }
 

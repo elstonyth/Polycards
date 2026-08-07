@@ -9,6 +9,7 @@
 
 export const PASSWORD_RESET_TEMPLATE = 'password-reset';
 export const TOPUP_RECEIPT_TEMPLATE = 'topup-receipt';
+export const WITHDRAWAL_RECEIPT_TEMPLATE = 'withdrawal-receipt';
 
 export type Rendered = { subject: string; html: string; text: string };
 
@@ -171,6 +172,80 @@ const topupReceipt = (d: ReceiptData): Rendered => {
   };
 };
 
+// The payout mirror of topupReceipt. One template, two outcomes: 'paid' (the
+// bank transfer completed) and 'refunded' (the bank rejected it and the debit
+// came back). Deliberately NO bank account details — email is the least
+// private channel this data could travel through; the reference is what
+// support needs, and the account is on the admin Withdrawals row.
+type WithdrawalReceiptData = {
+  amount: number;
+  reference: string;
+  outcome: 'paid' | 'refunded';
+  occurredAt: string;
+  siteUrl: string;
+};
+
+const withdrawalReceipt = (d: WithdrawalReceiptData): Rendered => {
+  const amount = rm(d.amount);
+  const when = settledAt(d.occurredAt);
+  const site = escapeHtml(d.siteUrl.replace(/\/+$/, ''));
+  const logo = `${site}/branding/polycards-logo.png`;
+  const paid = d.outcome === 'paid';
+
+  const heading = paid ? 'Withdrawal paid' : 'Withdrawal returned';
+  const lede = paid
+    ? 'Your bank transfer is complete — the money has left Polycards and reached your bank.'
+    : 'Your bank rejected this transfer, so the full amount is back in your Polycards balance. Nothing was lost.';
+
+  return {
+    subject: paid
+      ? `Your ${amount} withdrawal has been paid — Polycards`
+      : `Your ${amount} withdrawal was returned to your balance — Polycards`,
+    text: [
+      heading,
+      '',
+      lede,
+      '',
+      `Amount:     ${amount}`,
+      `Reference:  ${d.reference}`,
+      when ? `Date:       ${when}` : '',
+      '',
+      `See it in your history: ${d.siteUrl.replace(/\/+$/, '')}/transactions`,
+      '',
+      'Keep this email for your records.',
+    ]
+      .filter((line) => line !== '')
+      .join('\n'),
+    html: `<!doctype html>
+<html lang="en">
+  <body style="margin:0;padding:0;background:#171717;">
+    <div style="max-width:520px;margin:0 auto;padding:40px 24px;font-family:ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;color:#fafafa;">
+      <img src="${logo}" alt="Polycards" width="150" style="display:block;width:150px;max-width:60%;height:auto;margin:0 0 32px;" />
+
+      <p style="margin:0 0 8px;font-size:13px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#a3a3a3;">${escapeHtml(heading)}</p>
+      <h1 style="margin:0 0 8px;font-size:40px;line-height:1.1;font-weight:800;letter-spacing:-0.02em;">${escapeHtml(amount)}</h1>
+      <p style="margin:0 0 32px;font-size:15px;line-height:1.6;color:#d4d4d4;">
+        ${escapeHtml(lede)}
+      </p>
+
+      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="width:100%;border-collapse:collapse;border-top:1px solid #404040;border-bottom:1px solid #404040;margin:0 0 32px;">
+        ${row('Amount', amount, true)}
+        ${row('Reference', d.reference)}
+        ${when ? row('Date', when) : ''}
+      </table>
+
+      <a href="${site}/transactions" style="display:inline-block;padding:12px 24px;border-radius:9999px;background:#fafafa;color:#171717;font-size:15px;font-weight:700;text-decoration:none;">View your history</a>
+
+      <p style="margin:32px 0 0;font-size:12px;line-height:1.6;color:#737373;">
+        Keep this email for your records. Questions about this payout? Reply to
+        this email and quote the reference above.
+      </p>
+    </div>
+  </body>
+</html>`,
+  };
+};
+
 // Returns undefined for an unknown template or missing/invalid data, letting the
 // caller decide how to report it. `data` is Medusa's untyped notification payload,
 // so the shape is validated here rather than trusted.
@@ -204,6 +279,31 @@ export const renderTemplate = (
       amount,
       reference,
       method: typeof method === 'string' ? method : '',
+      occurredAt: typeof occurredAt === 'string' ? occurredAt : '',
+      siteUrl,
+    });
+  }
+
+  if (template === WITHDRAWAL_RECEIPT_TEMPLATE) {
+    const amount = data?.amount_myr;
+    const reference = data?.reference;
+    const outcome = data?.outcome;
+    const occurredAt = data?.occurred_at;
+    const siteUrl = data?.site_url;
+    // Same fail-closed rule as the top-up receipt: an email about a payout with
+    // no amount, no reference, or an unrecognized outcome misinforms — skip it.
+    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
+      return undefined;
+    }
+    if (typeof reference !== 'string' || reference.length === 0) {
+      return undefined;
+    }
+    if (outcome !== 'paid' && outcome !== 'refunded') return undefined;
+    if (typeof siteUrl !== 'string' || siteUrl.length === 0) return undefined;
+    return withdrawalReceipt({
+      amount,
+      reference,
+      outcome,
       occurredAt: typeof occurredAt === 'string' ? occurredAt : '',
       siteUrl,
     });

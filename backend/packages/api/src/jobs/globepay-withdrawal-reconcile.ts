@@ -14,6 +14,7 @@ import {
 } from '../modules/packs/globepay-client';
 import { notifyFeed } from '../modules/packs/notify-feed';
 import { withdrawalFeedKey } from '../modules/packs/feed-events';
+import { sendWithdrawalReceipt } from '../modules/packs/withdrawal-receipt';
 import {
   GLOBEPAY_RECONCILE_BATCH,
   GLOBEPAY_WD_SLOW_AFTER_MS,
@@ -93,6 +94,24 @@ export default async function globepayWithdrawalReconcileJob(
       }
 
       if (action.kind === 'settle') {
+        // The emailed record — BEFORE the terminal row update: once the row
+        // leaves 'pending' this sweep never selects it again and a retried
+        // callback early-returns, so a crash between the update and a later
+        // send would lose the email forever. A crash after this send re-runs
+        // the branch next sweep and the notification module's unique
+        // idempotency_key dedupes. Non-throwing.
+        await sendWithdrawalReceipt(container, {
+          customerId: withdrawal.customer_id,
+          amount: Number(withdrawal.amount),
+          // `||`, not `??` — an empty-string gateway id must fall through, or
+          // the template fails closed AFTER the idempotency key is burned and
+          // the email is permanently unsent.
+          reference:
+            withdrawal.gateway_transaction_id ||
+            withdrawal.merchant_transaction_id,
+          merchantTransactionId: withdrawal.merchant_transaction_id,
+          outcome: 'paid',
+        });
         await packs.updateGlobePayWithdrawals({
           selector: { id: withdrawal.id, status: 'pending' },
           data: {
@@ -171,6 +190,21 @@ export default async function globepayWithdrawalReconcileJob(
             withdrawal.gateway_transaction_id ??
             withdrawal.merchant_transaction_id,
         },
+      });
+      // The emailed record — after the refund commit, BEFORE the terminal row
+      // update, outside any !replayed guard: once the row leaves 'pending'
+      // nothing re-runs this branch, so a crash between the update and a
+      // later send would lose the email forever. A crash after this send
+      // re-runs the branch next sweep (the refund replays, the notification
+      // module's unique idempotency_key dedupes the email). Non-throwing.
+      await sendWithdrawalReceipt(container, {
+        customerId: withdrawal.customer_id,
+        amount: Number(withdrawal.amount),
+        reference:
+          withdrawal.gateway_transaction_id ||
+          withdrawal.merchant_transaction_id,
+        merchantTransactionId: withdrawal.merchant_transaction_id,
+        outcome: 'refunded',
       });
       await packs.updateGlobePayWithdrawals({
         selector: { id: withdrawal.id, status: 'pending' },
