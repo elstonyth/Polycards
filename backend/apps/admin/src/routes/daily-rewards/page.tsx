@@ -620,7 +620,7 @@ const BoxesTab = ({ dirtyRef }: { dirtyRef: MutableRefObject<boolean> }) => {
                   type="number"
                   min={0}
                   max={100}
-                  step={0.01}
+                  step={0.0001}
                   disabled={!r.locked}
                   value={r.locked ? r.pctInput : ''}
                   placeholder={r.locked ? '' : 'auto'}

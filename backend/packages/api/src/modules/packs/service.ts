@@ -8,7 +8,7 @@ import {
   Modules,
 } from '@medusajs/framework/utils';
 import type { Context, HttpTypes } from '@medusajs/framework/types';
-import { PCT_SCALE, TOTAL_UNITS } from '@acme/odds-math';
+import { PCT_SCALE } from '@acme/odds-math';
 import type { OddsRarity, TierRangeMap } from '@acme/odds-math';
 import {
   validateDeliveryRequest,
@@ -5387,8 +5387,12 @@ class PacksModuleService extends MedusaService({
       return { status: 'capped' };
     }
 
-    // 3) Roll over the box's stored weights (locked rows included).
-    const roll = randomInt(TOTAL_UNITS);
+    // 3) Roll over the box's stored weights (locked rows included). The bound
+    // is the ACTUAL Σweight, not a fixed constant, so the draw is
+    // scale-invariant like the pack roll — rows saved on either side of the
+    // 4dp scale migration roll correctly.
+    const totalPrizeWeight = prizeRows.reduce((s, p) => s + p.weight, 0);
+    const roll = randomInt(Math.max(1, totalPrizeWeight));
     const won = pickPrize(
       prizeRows.map((p) => ({ ...p, weight: p.weight })),
       roll,

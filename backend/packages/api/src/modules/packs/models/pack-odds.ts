@@ -33,10 +33,10 @@ export const PackOdds = model
     // COMMON IS THE BALANCER (POLYCARD-BACK §2.4): on save every non-Common row
     // keeps its submitted % verbatim — locked or not — and locked Common rows
     // are pinned too; only UNLOCKED Common rows absorb the remaining
-    // (10000 − Σpinned) bps, split evenly. So `locked` no longer decides who
+    // (1,000,000 − Σpinned) units, split evenly. So `locked` no longer decides who
     // floats, it only pins a Common. See @acme/odds-math balanceOdds.
     locked: model.boolean().default(false),
-    // Win-rate sets 2 and 3 (POLYCARD-BACK §2.4 / D2). Basis points like
+    // Win-rate sets 2 and 3 (POLYCARD-BACK §2.4 / D2). Integer units like
     // `weight` (set 1). NULL = "inherit the previous set" PER CARD (2→1, 3→2)
     // — resolution lives in odds-sets.ts weightForSet(). After any save, every
     // set's RESOLVED weights sum to 1,000,000 (save-pack-odds re-balances all

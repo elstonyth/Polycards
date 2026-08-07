@@ -18,10 +18,10 @@ export type SetPackMembersInput = {
 
 // A freshly added member gets a positive relative weight so it can be rolled
 // immediately (the roll is scale-invariant). The operator then fine-tunes the
-// real percentages in the win-rate editor, which normalizes to basis points.
+// real percentages in the win-rate editor, which normalizes to integer units.
 // Only used on the degraded path (the pool can't be balanced — see below);
 // normally the new member comes out of computeSetWeights as a balancer.
-const NEW_MEMBER_WEIGHT = 100;
+const NEW_MEMBER_WEIGHT = 10_000; // ~1% of a normalized 1,000,000-unit pool
 
 // Snapshots MUST carry weight_2/weight_3: a compensation that restored only
 // `weight` would silently wipe the pack's set-2/3 tables (same rule as
