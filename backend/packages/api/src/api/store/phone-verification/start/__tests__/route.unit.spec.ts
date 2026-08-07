@@ -27,10 +27,17 @@ const mkRes = () => {
 };
 
 const warn = jest.fn();
-const mkReq = (phone: string, purpose = 'signup') =>
+// `matches` is what listCustomers returns for the password-reset lookup: one
+// row means "exactly one account carries this phone", the only case that sends.
+const mkReq = (phone: string, purpose = 'signup', matches: unknown[] = [{ id: 'cus_1' }]) =>
   ({
     body: { phone, purpose },
-    scope: { resolve: (key: string) => (key === 'logger' ? { warn } : {}) },
+    scope: {
+      resolve: (key: string) =>
+        key === 'logger'
+          ? { warn }
+          : { listCustomers: jest.fn(async () => matches) },
+    },
   }) as never;
 
 beforeEach(() => {
@@ -62,5 +69,25 @@ describe('POST /store/phone-verification/start — destination allowlist', () =>
     const line = warn.mock.calls[0][0] as string;
     expect(line).toContain('+44');
     expect(line).not.toContain(GB);
+  });
+
+  // password-reset is exempt: it already refuses unless exactly one registered
+  // account carries the number, so it can only text a phone already on file.
+  // Customers who registered a non-MY number before the allowlist existed must
+  // keep being able to recover their account.
+  it('still sends a password reset to an unserved destination on file', async () => {
+    const { res, out } = mkRes();
+    await startVerification(mkReq(GB, 'password-reset'), res);
+    expect(sendCount()).toBe(1);
+    expect(out.body).toEqual({ ok: true });
+  });
+
+  // …but the exemption rides on the account match, not on the purpose string:
+  // an unknown number gets the pre-existing silent no-send either way.
+  it('does not send a password reset to a number on no account', async () => {
+    const { res, out } = mkRes();
+    await startVerification(mkReq(GB, 'password-reset', []), res);
+    expect(sendCount()).toBe(0);
+    expect(out.body).toEqual({ ok: true });
   });
 });
