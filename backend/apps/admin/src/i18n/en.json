@@ -385,6 +385,7 @@
       "pending": "Pending",
       "settled": "Settled",
       "failed": "Failed",
+      "expired": "Expired",
       "all": "All"
     },
     "when": "Started",
@@ -397,7 +398,8 @@
     "statusLabel": {
       "pending": "Pending",
       "settled": "Settled",
-      "failed": "Failed"
+      "failed": "Failed",
+      "expired": "Expired"
     },
     "statusStale": "Overdue",
     "staleWarning": "{{n}} row(s) on this page are past the reconcile window. Check the deposit in the GlobePay back office before crediting anyone by hand.",

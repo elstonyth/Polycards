@@ -180,13 +180,14 @@ export async function POST(
       (deposit.status === 'failed' || deposit.status === 'expired');
     // Mirrors the withdrawal route's guard: any callback disagreeing with the
     // row we already wrote is worth an operator's attention, recoverable or not.
-    // A 'failed' callback on an 'expired' row does NOT disagree — expiry means
-    // "we stopped waiting", so their refusal is the answer we were waiting for.
+    // Left as-is for 'expired': a status-7 callback on a row we expired is not
+    // a contradiction so much as the answer arriving late, but it DOES leave
+    // the row 'expired' (the !recoverable return below skips the flip) until
+    // the sweep's second tier requeries it — so the log line is the only trace
+    // that happened, and silence would be worse than a slightly loud alert.
     const contradicts =
       (state === 'success' && deposit.status !== 'settled') ||
-      (state === 'failed' &&
-        deposit.status !== 'failed' &&
-        deposit.status !== 'expired');
+      (state === 'failed' && deposit.status !== 'failed');
     if (contradicts) {
       req.scope
         .resolve('logger')
