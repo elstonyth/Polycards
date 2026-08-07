@@ -10,6 +10,7 @@ import {
   unknownWithdrawalAction,
   withdrawalReconcileAction,
 } from '../globepay-reconcile';
+import { savedBankAccountId } from '../saved-accounts';
 import PacksModuleService from '../service';
 import { POST as withdrawRoute } from '../../../api/store/credits/withdraw/route';
 
@@ -41,7 +42,7 @@ const submitMock = submitWithdrawal as jest.Mock;
  *  bank code and number live HERE, in the saved list, and nowhere in a request:
  *  that is the whole point of plan 088. */
 const SAVED_ACCOUNT = {
-  id: 'acc_owned',
+  id: savedBankAccountId('MBB', '1234567890'),
   bankCode: 'MBB',
   bankName: 'Maybank',
   accountNumber: '1234567890',
@@ -110,7 +111,7 @@ const input = {
   customerId: 'cus_1',
   amount: 50,
   // The ONLY thing a caller may say about the destination.
-  accountId: 'acc_owned',
+  accountId: SAVED_ACCOUNT.id,
   ipAddress: '1.2.3.4',
 };
 
@@ -226,7 +227,7 @@ describe('startGlobePayWithdrawal — money ordering', () => {
       expect.objectContaining({
         customerId: 'cus_1',
         amount: 50,
-        accountId: 'acc_owned',
+        accountId: SAVED_ACCOUNT.id,
         idempotencyReference: expect.stringMatching(/^wd:/),
       }),
     );
@@ -528,8 +529,20 @@ describe('startGlobePayWithdrawal — money ordering', () => {
   // same check on save, so a stored account that fails it was written around
   // that route (or predates it). The gateway must not see it either way.
   it('rejects a SAVED account whose stored details are malformed', async () => {
-    const h = harness([{ ...SAVED_ACCOUNT, accountNumber: 'abc' }]);
-    await expect(start(h)).rejects.toThrow(/account number/i);
+    // The id is derived from the MUTATED number, so the row is INTERNALLY
+    // CONSISTENT: resolveWithdrawalDestination's recompute passes it through
+    // and withdrawalDetailsError is still what refuses it. Leave a stale id
+    // here instead and the recompute refuses first — this case would go on
+    // passing while covering none of globepay-withdrawal.ts:209.
+    const malformed = {
+      ...SAVED_ACCOUNT,
+      accountNumber: 'abc',
+      id: savedBankAccountId('MBB', 'abc'),
+    };
+    const h = harness([malformed]);
+    await expect(start(h, { accountId: malformed.id })).rejects.toThrow(
+      /account number/i,
+    );
     expect(h.packs.createGlobePayWithdrawals).not.toHaveBeenCalled();
     expect(h.packs.withdrawForCashout.mock.calls.length).toBe(0);
   });
@@ -589,7 +602,7 @@ const fakeService = (
    * The saved-account lists, BY CUSTOMER — the fake `customer` table.
    *
    * Keyed, and that is what keeps the cross-customer test below honest: `cus_2`
-   * genuinely owns `acc_theirs`, and the real method's
+   * genuinely owns OTHER_CUSTOMERS_ACCOUNT, and the real method's
    * `SELECT metadata FROM customer WHERE id = ?` binds the TOKEN OWNER's id, so
    * asking for someone else's account while authenticated as `cus_1` really
    * does look it up in `cus_1`'s row and really does not find it. A fake that
@@ -651,7 +664,7 @@ const fakeService = (
 
 /** Another customer's saved destination — see fakeService's `byCustomer`. */
 const OTHER_CUSTOMERS_ACCOUNT = {
-  id: 'acc_theirs',
+  id: savedBankAccountId('CIMB', '5555555555'),
   bankCode: 'CIMB',
   bankName: 'CIMB Bank',
   accountNumber: '5555555555',
@@ -664,7 +677,7 @@ const cashout = {
   amount: 50,
   merchantTransactionId: 'PC-abc',
   idempotencyReference: 'wd:deadbeef',
-  accountId: 'acc_owned',
+  accountId: SAVED_ACCOUNT.id,
 };
 
 describe('PacksModuleService.withdrawForCashout', () => {
@@ -727,20 +740,20 @@ describe('PacksModuleService.withdrawForCashout', () => {
     expect(result.balance).toBe(950);
     // And it hands that same destination back for the gateway call.
     expect(result.destination).toMatchObject({
-      id: 'acc_owned',
+      id: SAVED_ACCOUNT.id,
       bankCode: SAVED_ACCOUNT.bankCode,
       accountNumber: SAVED_ACCOUNT.accountNumber,
     });
   });
 
-  // THE IDOR GUARD (test-plan case 2). `cus_2` really does own `acc_theirs` —
+  // THE IDOR GUARD (test-plan case 2). `cus_2` really does own OTHER_CUSTOMERS_ACCOUNT —
   // fakeCustomers is keyed by customer id — so this is not passing because the
   // fixture has one customer or an empty list. The lookup happens in the
   // TOKEN OWNER's list, so someone else's id is simply not there.
   it("refuses another customer's account id — no debit", async () => {
     const f = fakeService();
     await expect(
-      f.svc.withdrawForCashout({ ...cashout, accountId: 'acc_theirs' }, f.ctx),
+      f.svc.withdrawForCashout({ ...cashout, accountId: OTHER_CUSTOMERS_ACCOUNT.id }, f.ctx),
     ).rejects.toMatchObject({
       type: MedusaError.Types.INVALID_DATA,
       message: 'Select a saved bank account.',
@@ -755,11 +768,11 @@ describe('PacksModuleService.withdrawForCashout', () => {
     const owner = fakeService();
     await expect(
       owner.svc.withdrawForCashout(
-        { ...cashout, customerId: 'cus_2', accountId: 'acc_theirs' },
+        { ...cashout, customerId: 'cus_2', accountId: OTHER_CUSTOMERS_ACCOUNT.id },
         owner.ctx,
       ),
     ).resolves.toMatchObject({
-      destination: expect.objectContaining({ id: 'acc_theirs' }),
+      destination: expect.objectContaining({ id: OTHER_CUSTOMERS_ACCOUNT.id }),
     });
   });
 
