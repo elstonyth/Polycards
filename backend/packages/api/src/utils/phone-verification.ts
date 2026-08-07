@@ -78,7 +78,7 @@ export const E164_RE = /^\+[1-9]\d{6,14}$/;
  * fraud. E164_RE stays permissive — that is a shape check, this is a business
  * check, and they are deliberately separate.
  */
-export const DEFAULT_ALLOWED_SMS_COUNTRIES = ['MY'];
+export const DEFAULT_ALLOWED_SMS_COUNTRIES = ['MY'] as const;
 
 // ISO 3166-1 alpha-2 → E.164 calling-code prefix.
 //
