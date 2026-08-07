@@ -87,16 +87,23 @@ export const DEFAULT_ALLOWED_SMS_COUNTRIES = ['MY'] as const;
 // storefront does) — pulling a parser in for a handful of string comparisons
 // is not worth it.
 //
-// An ISO code with NO row here resolves to nothing, so naming it in
-// ALLOWED_SMS_COUNTRIES widens nothing at all: add the row in the same change
-// that widens the env var (and the storefront picker with it).
+// DO NOT add a `+1` or `+7` row on that reasoning. A prefix is only "coarse but
+// safe" where the calling code maps to ONE country. `US: '+1'` would admit the
+// whole NANP — including +1-809, +1-876 and the other classic revenue-share
+// destinations — so a one-line "widening" would reopen precisely the toll fraud
+// this table exists to stop. Those calling codes need a real parser or an
+// area-code deny list, not a prefix.
+//
+// An ISO code with NO row here resolves to nothing. See
+// unresolvableSmsCountries below: the route logs those, because otherwise the
+// misconfiguration is invisible.
 const SMS_DIAL_PREFIX: Record<string, string> = {
   MY: '+60',
   GB: '+44',
 };
 
 /**
- * True iff `phone` (already E.164-shaped) is in a served destination.
+ * The configured ISO codes, or the default set when nothing usable is set.
  *
  * Env is read PER CALL, not at module top, so one booted app can be driven
  * through both states (plan 066's convention).
@@ -106,20 +113,39 @@ const SMS_DIAL_PREFIX: Record<string, string> = {
  * equally never as "allow nothing" — a stray blank in the DO spec would then
  * brick every signup.
  */
-export const isAllowedSmsDestination = (
-  env: PhoneVerificationEnv,
-  phone: string,
-): boolean => {
+const allowedSmsCountries = (env: PhoneVerificationEnv): readonly string[] => {
   const configured = (env.ALLOWED_SMS_COUNTRIES ?? '')
     .split(',')
     .map((iso) => iso.trim().toUpperCase())
     .filter(Boolean);
-  const countries = configured.length ? configured : DEFAULT_ALLOWED_SMS_COUNTRIES;
-  return countries.some((iso) => {
+  return configured.length ? configured : DEFAULT_ALLOWED_SMS_COUNTRIES;
+};
+
+/**
+ * Configured ISO codes that resolve to no dialling-code prefix, i.e. that do
+ * nothing at all.
+ *
+ * This is the loud half of the trap above. `ALLOWED_SMS_COUNTRIES=SG` is
+ * non-empty, so the default is NOT substituted, and SG matches nothing — which
+ * stops EVERY signup and phone-change OTP, `+60` included, with no error
+ * anywhere. That failure is indistinguishable from a Twilio outage; CONTEXT.md
+ * records a same-shaped incident (21608) that cost a day to diagnose. The
+ * caller logs whatever this returns.
+ */
+export const unresolvableSmsCountries = (
+  env: PhoneVerificationEnv,
+): string[] =>
+  allowedSmsCountries(env).filter((iso) => SMS_DIAL_PREFIX[iso] === undefined);
+
+/** True iff `phone` (already E.164-shaped) is in a served destination. */
+export const isAllowedSmsDestination = (
+  env: PhoneVerificationEnv,
+  phone: string,
+): boolean =>
+  allowedSmsCountries(env).some((iso) => {
     const prefix = SMS_DIAL_PREFIX[iso];
     return prefix !== undefined && phone.startsWith(prefix);
   });
-};
 
 export const PHONE_OTP_PURPOSES = ['signup', 'phone-change', 'password-reset'] as const;
 export type PhoneOtpPurpose = (typeof PHONE_OTP_PURPOSES)[number];

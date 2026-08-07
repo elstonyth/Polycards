@@ -4,6 +4,7 @@ import {
   isPhoneOtpPurpose,
   isPhoneVerificationRequired,
   isTwilioVerifyConfigured,
+  unresolvableSmsCountries,
   signPhoneProof,
   verifyPhoneProof,
   sendPhoneOtp,
@@ -87,9 +88,21 @@ describe('sms destination allowlist', () => {
     expect(isAllowedSmsDestination({ ALLOWED_SMS_COUNTRIES: 'SG' }, '+6561234567')).toBe(
       false,
     );
-    // …and an all-unknown value is still not "allow nothing at all" by accident:
-    // it resolves to a non-empty list that simply matches no number.
+    // Worse than "widens nothing": a non-empty value suppresses the default, so
+    // this configuration also stops the numbers that USED to work. Every send
+    // dies at once, which is why unresolvableSmsCountries exists.
     expect(isAllowedSmsDestination({ ALLOWED_SMS_COUNTRIES: 'SG' }, PHONE)).toBe(false);
+  });
+
+  it('reports the ISO codes that resolve to nothing', () => {
+    expect(unresolvableSmsCountries({ ALLOWED_SMS_COUNTRIES: ' my , sg , zz ' })).toEqual(
+      ['SG', 'ZZ'],
+    );
+    // Silence when the configuration is sound — including the fallback path,
+    // so a blank env never produces a spurious misconfiguration warning.
+    expect(unresolvableSmsCountries({ ALLOWED_SMS_COUNTRIES: 'MY,GB' })).toEqual([]);
+    expect(unresolvableSmsCountries({ ALLOWED_SMS_COUNTRIES: '   ' })).toEqual([]);
+    expect(unresolvableSmsCountries({})).toEqual([]);
   });
 });
 
