@@ -48,6 +48,14 @@ export default function SettingsForm({ customer }: Props) {
     'closed',
   );
   const [pendingPhone, setPendingPhone] = useState('');
+  // The backend refuses to MOVE a phone on a session alone (see the re-auth
+  // gate in store/phone-verification/change/route.ts): a stolen session could
+  // otherwise take the recovery number and turn itself into a permanent
+  // takeover via the phone password-reset. Collected in the 'entry' step rather
+  // than after the OTP so the whole ask is on one screen, and NOT `required` —
+  // an account with no password (Google-only, adding its first number) must
+  // still be able to submit, and the backend answers those cases itself.
+  const [currentPassword, setCurrentPassword] = useState('');
   // 'entry' step's PhoneField isn't inside a <form> of its own (nesting it in
   // the outer profile <form> is invalid HTML and unpredictable) — read its
   // hidden E.164 input straight off the DOM instead of via FormData.
@@ -228,6 +236,7 @@ export default function SettingsForm({ customer }: Props) {
               disabled={busy}
               onClick={() => {
                 setNote(null);
+                setCurrentPassword('');
                 setPhoneChange('entry');
               }}
               className="h-11 shrink-0 rounded-xl border border-white/10 bg-white/[0.05] px-4 text-sm font-medium text-white transition-colors hover:bg-white/[0.1] disabled:opacity-70"
@@ -262,6 +271,31 @@ export default function SettingsForm({ customer }: Props) {
                 }}
               />
             </div>
+            {/* Not form-associated, for the same reason the PhoneField above
+                isn't: this block lives outside the profile <form>, and wiring
+                it in would make Enter here trigger a profile SAVE. */}
+            <label className="block">
+              <span className="mb-1.5 block text-[12px] font-medium text-white/55">
+                Current password
+              </span>
+              <input
+                type="password"
+                name="current_password"
+                autoComplete="current-password"
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter') return;
+                  e.preventDefault();
+                  void onSendCode();
+                }}
+                placeholder="Your account password"
+                className={INPUT_CLASS}
+              />
+              <span className="mt-1 block text-[11px] text-white/55">
+                Confirms it&apos;s really you before your recovery number moves.
+              </span>
+            </label>
             <div className="flex items-center gap-3">
               <button
                 type="button"
@@ -280,6 +314,9 @@ export default function SettingsForm({ customer }: Props) {
                 onClick={() => {
                   setNote(null);
                   setPendingPhone('');
+                  // Don't leave a password sitting in state for a flow the
+                  // user abandoned.
+                  setCurrentPassword('');
                   setPhoneChange('closed');
                 }}
                 className="text-[12px] text-white/55 hover:text-white disabled:opacity-70"
@@ -295,9 +332,14 @@ export default function SettingsForm({ customer }: Props) {
             purpose="phone-change"
             onBack={() => setPhoneChange('entry')}
             onVerified={async (token) => {
-              const result = await changePhone({ phone: pendingPhone, token });
+              const result = await changePhone({
+                phone: pendingPhone,
+                token,
+                password: currentPassword,
+              });
               if (result.ok) {
                 setPhone(result.phone);
+                setCurrentPassword('');
                 setPhoneChange('closed');
                 setNote({ ok: true, text: 'Phone updated.' });
                 router.refresh();
@@ -313,7 +355,8 @@ export default function SettingsForm({ customer }: Props) {
         )}
         {phoneChange === 'closed' && (
           <span className="mt-1 block text-[11px] text-white/55">
-            Changing your phone requires a verification code.
+            Changing your phone requires a verification code, and your account
+            password if you have one.
           </span>
         )}
       </div>

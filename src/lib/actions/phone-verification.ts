@@ -54,6 +54,23 @@ const PHONE_RESET_RULES: ErrorRule[] = [
   [/this account signs in with google/i, 'This account signs in with Google.'],
 ];
 
+// The change route's two re-auth refusals. These MUST survive `messageOf`'s
+// genericizer: "Could not update your phone number. Please try again." in front
+// of someone who mistyped their password is a dead end — they retry the same
+// password forever. Both strings are the route's own MedusaError text
+// (backend/packages/api/src/api/store/phone-verification/change/route.ts), read
+// off FetchError.message by the same mechanism PHONE_RESET_RULES relies on.
+const PHONE_CHANGE_RULES: ErrorRule[] = [
+  [
+    /enter your current password/i,
+    'That password is incorrect. Enter your current password to change your phone number.',
+  ],
+  [
+    /verify your current phone number/i,
+    'Verify your current phone number before changing it.',
+  ],
+];
+
 export async function startPhoneOtp(input: {
   phone: string;
   purpose: PhoneOtpPurpose;
@@ -106,9 +123,18 @@ export async function checkPhoneOtp(input: {
   }
 }
 
+// The backend refuses to MOVE a phone on a session alone — a stolen session
+// could otherwise take the recovery number and convert itself into a permanent
+// takeover through /store/phone-verification/password-reset. It wants the
+// account's current password (emailpass accounts) or an OTP proof for the
+// number being moved away from (Google-only accounts). Both fields are optional
+// here because the one path that needs neither is still live: a Google account
+// adding its FIRST phone.
 export async function changePhone(input: {
   phone: string;
   token: string;
+  password?: string;
+  oldPhoneToken?: string;
 }): Promise<{ ok: true; phone: string } | Fail> {
   const phone = normalizePhone(input.phone);
   if (!phone)
@@ -124,16 +150,32 @@ export async function changePhone(input: {
     }>('/store/phone-verification/change', {
       method: 'POST',
       headers: { Authorization: `Bearer ${authToken}` },
-      body: { phone, token: input.token },
+      // Omitted rather than sent empty when absent: the backend distinguishes
+      // "no password supplied" from "wrong password" only by presence.
+      body: {
+        phone,
+        token: input.token,
+        ...(input.password ? { password: input.password } : {}),
+        ...(input.oldPhoneToken
+          ? { old_phone_token: input.oldPhoneToken }
+          : {}),
+      },
     });
     return { ok: true, phone: customer.phone };
   } catch (error) {
     logger.error('[phone-otp] change failed:', error);
-    // Same 429 retry-hint passthrough as startPhoneOtp/checkPhoneOtp — a
-    // rate-limited change should say how long to wait, not invite an
-    // immediate retry.
+    // Re-auth refusals win; then the same 429 retry-hint passthrough as
+    // startPhoneOtp/checkPhoneOtp — a rate-limited change should say how long
+    // to wait, not invite an immediate retry; then the generic copy.
     return fail(
-      messageOf(error, 'Could not update your phone number. Please try again.'),
+      friendlyError(
+        error,
+        PHONE_CHANGE_RULES,
+        messageOf(
+          error,
+          'Could not update your phone number. Please try again.',
+        ),
+      ),
     );
   }
 }
