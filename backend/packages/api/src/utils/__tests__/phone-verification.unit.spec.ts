@@ -148,12 +148,25 @@ describe('sms destination allowlist', () => {
   // GB carries no prefix row: naming it widens NOTHING rather than quietly
   // admitting three extra jurisdictions. Pinned here because the tempting
   // one-line "fix" — putting `GB: '+44'` back — is what this asserts against.
+  //
+  // BE PRECISE ABOUT WHAT THIS PINS. It pins "GB resolves to no prefix, so every
+  // +44 number is refused". It does NOT discriminate a Crown Dependency number
+  // from a UK one — no prefix scheme can, which is the entire reason the row was
+  // deleted instead of deny-listed. Read the pairs below: JERSEY_MOBILE and
+  // UK_MOBILE differ only in digits an allocation table knows about, so a
+  // `GB: '+44'` row plus a deny list of the GEOGRAPHIC codes (+441534/+441481/
+  // +441624) would still text every Crown Dependency mobile. If a future change
+  // makes this test red on UK_LONDON alone, that change is the partial fix this
+  // comment is warning about — do not "fix" the test, revert the row.
   it('refuses +44 even when GB is named, Crown Dependencies included', () => {
     const JERSEY = '+441534123456';
     const GUERNSEY = '+441481123456';
     const IOM = '+441624123456';
+    // The pair that defeats a geographic deny list: both are +447, and only an
+    // allocated-range table tells them apart.
+    const JERSEY_MOBILE = '+447797123456';
     const UK_MOBILE = '+447700900123';
-    for (const number of [GB, JERSEY, GUERNSEY, IOM, UK_MOBILE]) {
+    for (const number of [GB, JERSEY, GUERNSEY, IOM, JERSEY_MOBILE, UK_MOBILE]) {
       expect(
         isAllowedSmsDestination({ ALLOWED_SMS_COUNTRIES: 'MY,GB' }, number),
       ).toBe(false);
