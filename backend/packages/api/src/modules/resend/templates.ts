@@ -9,6 +9,7 @@
 
 export const PASSWORD_RESET_TEMPLATE = 'password-reset';
 export const TOPUP_RECEIPT_TEMPLATE = 'topup-receipt';
+export const PHONE_CHANGED_TEMPLATE = 'phone-changed';
 
 export type Rendered = { subject: string; html: string; text: string };
 
@@ -171,6 +172,50 @@ const topupReceipt = (d: ReceiptData): Rendered => {
   };
 };
 
+// Security notice for a recovery-phone move. This is the ONLY warning the real
+// owner gets when someone with a live session changes the number — the phone
+// itself is exactly what an attacker would have just taken, so the copy points
+// at password reset (which lands back in this same inbox) rather than at any
+// SMS flow.
+//
+// Both numbers arrive already masked to their last 4 digits by the caller
+// (store/phone-verification/change/route.ts) — do NOT start rendering a full
+// number here, it would put PII in the persisted notification row.
+const phoneChanged = (oldMasked: string, newMasked: string): Rendered => {
+  const from = escapeHtml(oldMasked);
+  const to = escapeHtml(newMasked);
+  return {
+    subject: 'Your Polycards phone number was changed',
+    text: [
+      'Your Polycards phone number was changed',
+      '',
+      `The phone number on your Polycards account was changed from ${oldMasked} to ${newMasked}.`,
+      '',
+      "If you did this, nothing more is needed. If you didn't, reset your",
+      'password immediately — your account may have been accessed by someone',
+      'else, and the new number can be used to recover it.',
+    ].join('\n'),
+    html: `<!doctype html>
+<html lang="en">
+  <body style="margin:0;padding:0;background:#171717;">
+    <div style="max-width:520px;margin:0 auto;padding:40px 24px;font-family:ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;color:#fafafa;">
+      <h1 style="margin:0 0 20px;font-size:24px;line-height:1.25;font-weight:800;letter-spacing:-0.01em;">Your phone number was changed</h1>
+      <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#d4d4d4;">
+        The phone number on your Polycards account was changed from
+        <strong style="color:#fafafa;">${from}</strong> to
+        <strong style="color:#fafafa;">${to}</strong>.
+      </p>
+      <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#d4d4d4;">
+        If this was you, no action is needed. If it wasn't, reset your password
+        immediately — someone else may have access to your account, and the new
+        number can be used to recover it.
+      </p>
+    </div>
+  </body>
+</html>`,
+  };
+};
+
 // Returns undefined for an unknown template or missing/invalid data, letting the
 // caller decide how to report it. `data` is Medusa's untyped notification payload,
 // so the shape is validated here rather than trusted.
@@ -207,6 +252,19 @@ export const renderTemplate = (
       occurredAt: typeof occurredAt === 'string' ? occurredAt : '',
       siteUrl,
     });
+  }
+
+  if (template === PHONE_CHANGED_TEMPLATE) {
+    const oldMasked = data?.old_phone_masked;
+    const newMasked = data?.new_phone_masked;
+    // A security notice that can't say which number changed is worse than
+    // none — it alarms without telling the owner whether it was them. Fail
+    // closed, same posture as the receipt above.
+    if (typeof oldMasked !== 'string' || oldMasked.length === 0)
+      return undefined;
+    if (typeof newMasked !== 'string' || newMasked.length === 0)
+      return undefined;
+    return phoneChanged(oldMasked, newMasked);
   }
 
   return undefined;
