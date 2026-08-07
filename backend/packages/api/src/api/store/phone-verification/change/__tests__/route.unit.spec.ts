@@ -49,7 +49,12 @@ const authenticate = jest.fn(async () =>
     : { success: false, error: 'Invalid email or password' },
 );
 const markPhoneVerified = jest.fn(async () => undefined);
-const createNotifications = jest.fn(async () => []);
+// Typed parameter, not `async () => []`: jest infers an empty args tuple from a
+// zero-arg factory, and `createNotifications.mock.calls[0][0]` below then fails
+// to compile (TS2493).
+const createNotifications = jest.fn(
+  async (_payload: Record<string, unknown>) => [],
+);
 const warn = jest.fn();
 
 const scope = {
