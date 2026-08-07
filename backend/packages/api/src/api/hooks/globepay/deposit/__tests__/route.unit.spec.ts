@@ -7,6 +7,7 @@ jest.mock('../../../../../modules/packs/notify-feed', () => ({
 }));
 
 import { POST } from '../route';
+import { GLOBEPAY_MAX_RM } from '../../../../../modules/packs/globepay-deposit';
 
 const { privateKey, publicKey } = generateKeyPairSync('rsa', {
   modulusLength: 2048,
@@ -237,6 +238,77 @@ describe('deposit callback — ack contract', () => {
     const res = await run(h, callback({ ...settled, Amount: 0 }));
     expect(res.statusCode).toBe(400);
     expect(h.packs.topUpCreditsWithLedger).not.toHaveBeenCalled();
+  });
+});
+
+// The signature authenticates the SENDER, not the payee. MerchantCode is the
+// only signed field that says the money is ours, and it was declared and never
+// read — so a validly-signed callback describing a payment into another
+// merchant account would have been credited to one of our customers.
+describe('deposit callback — merchant code', () => {
+  it('refuses a callback naming a different merchant', async () => {
+    const h = harness(pendingRow);
+    const res = await run(
+      h,
+      callback({ ...settled, MerchantCode: 'SomeoneElse' }),
+    );
+    expect(res.statusCode).toBe(400);
+    expect(res.body).not.toBe('success');
+    expect(h.packs.topUpCreditsWithLedger).not.toHaveBeenCalled();
+  });
+
+  // Checked before the row is even looked up: the CurrencyCode guard sits after
+  // the status-7 branch, so a late check would let a foreign callback write one
+  // of our live deposits off as failed before refusing it.
+  it('refuses a foreign status 7 without writing our row off', async () => {
+    const h = harness(pendingRow);
+    const res = await run(
+      h,
+      callback({ ...settled, MerchantCode: 'SomeoneElse', Status: 7 }),
+    );
+    expect(res.statusCode).toBe(400);
+    expect(h.packs.updateGlobePayDeposits).not.toHaveBeenCalled();
+  });
+
+  it('accepts a merchant code differing only in case — that is config drift, not an attack', async () => {
+    const h = harness(pendingRow);
+    const res = await run(
+      h,
+      callback({ ...settled, MerchantCode: 'TESTPOLYCARD' }),
+    );
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe('success');
+    expect(h.packs.topUpCreditsWithLedger).toHaveBeenCalled();
+  });
+});
+
+// The ceiling. Not an equality check against amount_requested — a customer may
+// legitimately pay a different sum — but nothing the gateway confirms may
+// exceed what the submit path could ever have created.
+describe('deposit callback — amount ceiling', () => {
+  it('refuses an amount above the deposit ceiling and QUARANTINES the row', async () => {
+    const h = harness(pendingRow);
+    const res = await run(
+      h,
+      callback({ ...settled, Amount: GLOBEPAY_MAX_RM + 1 }),
+    );
+    expect(res.statusCode).toBe(400);
+    expect(res.body).not.toBe('success');
+    expect(h.packs.topUpCreditsWithLedger).not.toHaveBeenCalled();
+    // The row must stay 'pending': the customer may genuinely have paid, so
+    // this is an operator alert, not a write-off. Marking it failed would turn
+    // the alert into silent money loss.
+    expect(h.packs.updateGlobePayDeposits).not.toHaveBeenCalled();
+    expect(h.logger.error).toHaveBeenCalled();
+  });
+
+  it('still credits an amount exactly AT the ceiling', async () => {
+    const h = harness(pendingRow);
+    const res = await run(h, callback({ ...settled, Amount: GLOBEPAY_MAX_RM }));
+    expect(res.statusCode).toBe(200);
+    expect(h.packs.topUpCreditsWithLedger).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: GLOBEPAY_MAX_RM }),
+    );
   });
 });
 

@@ -2,7 +2,10 @@ import { MedusaContainer } from '@medusajs/framework/types';
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../modules/packs';
 import type PacksModuleService from '../modules/packs/service';
-import { globepayEnabled } from '../modules/packs/globepay-deposit';
+import {
+  GLOBEPAY_MAX_RM,
+  globepayEnabled,
+} from '../modules/packs/globepay-deposit';
 import {
   GlobePayError,
   getDepositDetail,
@@ -78,6 +81,16 @@ export default async function globepayReconcileJob(container: MedusaContainer) {
 
       if (action.kind === 'wait') continue;
 
+      // Requeried above the deposit ceiling. Quarantine, exactly as the callback
+      // route does: no credit, and NOT written off — the row stays pending so
+      // the next sweep sees it again and an operator can settle it by hand.
+      if (action.kind === 'quarantine') {
+        logger.error(
+          `[globepay-reconcile] ${deposit.merchant_transaction_id} requeried at ${action.amount}, above the RM ${GLOBEPAY_MAX_RM} deposit ceiling — not credited, not written off; left pending for manual settlement`,
+        );
+        continue;
+      }
+
       if (action.kind === 'settle') {
         const mutation = await packs.topUpCreditsWithLedger({
           customerId: deposit.customer_id,
@@ -145,12 +158,18 @@ export default async function globepayReconcileJob(container: MedusaContainer) {
       // 'fail' (the gateway says so) and 'expire' (non-final but too old to keep
       // chasing) both close the row without touching the ledger. Conditional on
       // status so a callback that settled it mid-sweep is never overwritten.
-      await packs.updateGlobePayDeposits({
-        selector: { id: deposit.id, status: 'pending' },
-        data: { status: 'failed' },
-      });
-      if (action.kind === 'fail') failed += 1;
-      else expired += 1;
+      //
+      // Named explicitly rather than left as the fallthrough: writing a row off
+      // is the one irreversible thing this loop does, and a fallthrough would
+      // silently swallow any ReconcileAction added later (tsc cannot catch it).
+      if (action.kind === 'fail' || action.kind === 'expire') {
+        await packs.updateGlobePayDeposits({
+          selector: { id: deposit.id, status: 'pending' },
+          data: { status: 'failed' },
+        });
+        if (action.kind === 'fail') failed += 1;
+        else expired += 1;
+      }
     } catch (error) {
       // One bad deposit must not abort the sweep — the next one may be a
       // customer waiting on credit. It stays pending and is retried next run.

@@ -1,4 +1,5 @@
 import type { SettlementState } from './globepay';
+import { GLOBEPAY_MAX_RM } from './globepay-deposit';
 
 // Reconciliation policy for outstanding GlobePay365 deposits. Pure decisions,
 // no container and no HTTP, so the rules are unit-testable — the job wires them
@@ -36,7 +37,13 @@ export type ReconcileAction =
   /** Still live at the gateway: leave it alone and look again next sweep. */
   | { kind: 'wait' }
   /** Non-final AND older than the stale window: stop chasing it. */
-  | { kind: 'expire' };
+  | { kind: 'expire' }
+  /**
+   * Requery says settled, but for more than the submit path could ever have
+   * created. Neither credit it nor write it off — the row stays pending for an
+   * operator. Deliberately NOT 'wait': the sweep must say so out loud.
+   */
+  | { kind: 'quarantine'; amount: number };
 
 export type ReconcileInput = {
   state: SettlementState;
@@ -58,6 +65,15 @@ export function reconcileAction(input: ReconcileInput): ReconcileAction {
   if (input.state === 'success') {
     // Trust the requery's amount over our requested one, for the same reason
     // the callback path does: the customer may have paid a different sum.
+    //
+    // Bounded by the submit path's own ceiling, though — the same guard the
+    // callback route applies, for the same reason: an inflated amount from the
+    // gateway converts 1:1 into withdrawable balance, and nothing downstream
+    // caps a top-up. Over it we quarantine rather than settle or write off,
+    // because the customer may genuinely have paid.
+    if (input.amount > GLOBEPAY_MAX_RM) {
+      return { kind: 'quarantine', amount: input.amount };
+    }
     return { kind: 'settle', amount: input.amount };
   }
   if (input.state === 'failed') {

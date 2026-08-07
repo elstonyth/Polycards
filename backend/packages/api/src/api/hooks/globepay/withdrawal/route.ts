@@ -84,6 +84,20 @@ export async function POST(
     res.status(400).send('rejected');
     return;
   }
+
+  // Same guard as the deposit hook, same reason: the signature proves GlobePay
+  // sent this, not that the payout is ours. Checked before the row lookup so a
+  // foreign callback can never touch one of our rows. Case-insensitive, because
+  // a casing difference is a config nuisance, not an attack.
+  if (data.MerchantCode?.toUpperCase() !== config.merchantCode.toUpperCase()) {
+    req.scope
+      .resolve('logger')
+      .error(
+        `[globepay] withdrawal callback for ${merchantTransactionId} names merchant ${data.MerchantCode}, expected ${config.merchantCode} — refusing`,
+      );
+    res.status(400).send('rejected');
+    return;
+  }
   const state = withdrawalState(data.Status);
 
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
