@@ -21,10 +21,12 @@ import {
   useChallengeSchedules,
   useChallengeWinners,
   useCreateChallengeSchedule,
+  useUpdateChallengeSchedule,
   useDeleteChallengeSchedule,
   useChallengeSettings,
   useSaveChallengeSettings,
   type ChallengeStageDTO,
+  type ChallengeScheduleDTO,
   type ChallengeSettingsDTO,
 } from '../../lib/queries';
 import { resolveImageUrl } from '../../lib/image-url';
@@ -640,6 +642,7 @@ const AddChallengeModal = ({
   open,
   onClose,
   seedFrom,
+  editing,
   openedAt,
 }: {
   open: boolean;
@@ -648,6 +651,10 @@ const AddChallengeModal = ({
    *  the last one, and an empty ladder means "no challenge", which is almost
    *  never what the operator wanted to schedule. */
   seedFrom: ChallengeStageDTO[];
+  /** A QUEUED row being edited in place, or null when adding a new one. The
+   *  modal seeds from this row instead of the live stages, and saves through
+   *  the update mutation rather than queueing a second edition. */
+  editing: ChallengeScheduleDTO | null;
   /** Clock reading from the click that opened this modal. Passed in rather than
    *  read here so render stays pure — see startValid below. */
   openedAt: number;
@@ -657,6 +664,7 @@ const AddChallengeModal = ({
   // players already competing on those thresholds.
   const { data: settings } = useChallengeSettings();
   const create = useCreateChallengeSchedule();
+  const update = useUpdateChallengeSchedule();
   const [rows, setRows] = useState<StageRow[]>([]);
   const [startsAt, setStartsAt] = useState('');
   const [label, setLabel] = useState('');
@@ -669,13 +677,18 @@ const AddChallengeModal = ({
   // later would be worse than an empty field for the half-second it takes.
   if (open && !seededOpen && settings) {
     setSeededOpen(true);
-    setRows(seedFrom.map(stageFromDTO));
-    setStartsAt(toLocalInput(nextWeeklyReset(settings)));
-    setLabel('');
+    setRows((editing?.stages ?? seedFrom).map(stageFromDTO));
+    setStartsAt(
+      editing
+        ? toLocalInput(new Date(editing.starts_at))
+        : toLocalInput(nextWeeklyReset(settings)),
+    );
+    setLabel(editing?.label ?? '');
     setReason('');
   }
   if (!open && seededOpen) setSeededOpen(false);
 
+  const pending = create.isPending || update.isPending;
   const errors = stageErrors(rows);
   const start = startsAt === '' ? null : new Date(startsAt);
   // Mirrors the route's guard: a past start would be promoted by the very next
@@ -691,20 +704,19 @@ const AddChallengeModal = ({
     !Number.isNaN(start.getTime()) &&
     start.getTime() > openedAt;
   const canSave =
-    !create.isPending &&
-    startValid &&
-    errors.length === 0 &&
-    reason.trim() !== '';
+    !pending && startValid && errors.length === 0 && reason.trim() !== '';
 
   async function onSave() {
     if (!canSave || start === null) return;
+    const body = {
+      starts_at: start.toISOString(),
+      label: label.trim() || null,
+      stages: toStageDTOs(rows),
+      reason: reason.trim(),
+    };
     try {
-      await create.mutateAsync({
-        starts_at: start.toISOString(),
-        label: label.trim() || null,
-        stages: toStageDTOs(rows),
-        reason: reason.trim(),
-      });
+      if (editing) await update.mutateAsync({ id: editing.id, ...body });
+      else await create.mutateAsync(body);
       onClose();
     } catch {
       /* onError toasts */
@@ -722,17 +734,19 @@ const AddChallengeModal = ({
             <Button
               size="small"
               onClick={onSave}
-              isLoading={create.isPending}
+              isLoading={pending}
               disabled={!canSave}
             >
-              Schedule challenge
+              {editing ? 'Save changes' : 'Schedule challenge'}
             </Button>
           </div>
         </FocusModal.Header>
         <FocusModal.Body className="pc-admin flex flex-col items-center overflow-auto p-10">
           <div className="flex w-full max-w-[860px] flex-col gap-y-4">
             <FocusModal.Title asChild>
-              <Heading level="h2">Add weekly challenge</Heading>
+              <Heading level="h2">
+                {editing ? 'Edit scheduled challenge' : 'Add weekly challenge'}
+              </Heading>
             </FocusModal.Title>
             <Text className="text-ui-fg-subtle" size="small">
               Queued, not live. It replaces the current milestone ladder on the
@@ -821,8 +835,13 @@ const ScheduleTab = () => {
   // timezone, to render the queue in the shop's clock rather than the browser's.
   const { data: settings } = useChallengeSettings();
   const remove = useDeleteChallengeSchedule();
-  const [adding, setAdding] = useState(false);
-  const [openedAt, setOpenedAt] = useState(0);
+  // One state drives both doors into the modal: `editing: null` is "add new",
+  // a row is "edit that row in place". openedAt travels with it because the
+  // clock may only be read in the handler that opened the modal.
+  const [modal, setModal] = useState<{
+    editing: ChallengeScheduleDTO | null;
+    openedAt: number;
+  } | null>(null);
 
   const schedules = data?.schedules ?? [];
 
@@ -838,10 +857,7 @@ const ScheduleTab = () => {
             the modal only needs "now" as of the moment it opened. */}
         <Button
           variant="secondary"
-          onClick={() => {
-            setOpenedAt(Date.now());
-            setAdding(true);
-          }}
+          onClick={() => setModal({ editing: null, openedAt: Date.now() })}
         >
           Add weekly challenge
         </Button>
@@ -918,6 +934,11 @@ const ScheduleTab = () => {
                         subject={s.label ?? orderDateTime(s.starts_at)}
                         actions={[
                           {
+                            label: 'Edit',
+                            onSelect: () =>
+                              setModal({ editing: s, openedAt: Date.now() }),
+                          },
+                          {
                             label: 'Remove from schedule',
                             danger: true,
                             onSelect: () => remove.mutate(s.id),
@@ -934,10 +955,11 @@ const ScheduleTab = () => {
       )}
 
       <AddChallengeModal
-        open={adding}
-        onClose={() => setAdding(false)}
+        open={modal !== null}
+        onClose={() => setModal(null)}
         seedFrom={live?.stages ?? []}
-        openedAt={openedAt}
+        editing={modal?.editing ?? null}
+        openedAt={modal?.openedAt ?? 0}
       />
     </div>
   );

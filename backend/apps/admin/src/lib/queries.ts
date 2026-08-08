@@ -29,6 +29,7 @@ import {
   getChallengeSchedules,
   getChallengeWinners,
   createChallengeSchedule,
+  updateChallengeSchedule,
   deleteChallengeSchedule,
   getCustomerAudit,
   getCustomerGacha,
@@ -806,6 +807,25 @@ export const useCreateChallengeSchedule = () => {
       qc.invalidateQueries({ queryKey: qk.challengeSchedules });
       qc.invalidateQueries({ queryKey: qk.challengeStages });
       toast.success('Weekly challenge scheduled');
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+export const useUpdateChallengeSchedule = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: {
+      id: string;
+      starts_at: string;
+      label: string | null;
+      stages: ChallengeStageDTO[];
+      reason: string;
+    }) => updateChallengeSchedule(vars.id, vars),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.challengeSchedules });
+      qc.invalidateQueries({ queryKey: qk.challengeStages });
+      toast.success('Scheduled challenge updated');
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });

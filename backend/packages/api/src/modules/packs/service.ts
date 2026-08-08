@@ -6060,8 +6060,13 @@ class PacksModuleService extends MedusaService({
         // to open one from. In production this carries a plain read context, so
         // each row opens its OWN transaction — which is exactly the per-row
         // atomicity wanted.
-        await this.promoteOneChallengeSchedule(row, sharedContext);
-        promoted += 1;
+        //
+        // `false` means the row vanished or stopped being due between the list
+        // above and the locked re-read inside — an operator removed or
+        // rescheduled it mid-batch. Not promoted, not failed: there is nothing
+        // left to retry.
+        if (await this.promoteOneChallengeSchedule(row.id, now, sharedContext))
+          promoted += 1;
       } catch {
         // Swallowed on purpose: a later edition must still get its chance, and
         // the unstamped row IS the error report (visible in the admin, retried
@@ -6081,6 +6086,16 @@ class PacksModuleService extends MedusaService({
    * would re-run saveChallengeStages, silently reverting any edit an operator
    * made to the live ladder in the meantime.
    *
+   * The row is RE-READ here, under FOR UPDATE, rather than trusted from the
+   * caller's list: an admin edit or delete can land between that list and this
+   * transaction, and promoting the captured copy would push stale stages live
+   * (or resurrect a just-removed edition) while the admin route had already
+   * reported success. The lock closes the other half too — an edit that
+   * arrives DURING this transaction blocks on the row, then its
+   * `applied_at: null` selector matches nothing and the route reports "went
+   * live while you were editing" instead of a false success. A row that is
+   * gone, already stamped, or no longer due answers `false`: nothing to do.
+   *
    * The stage write goes through the normal save path, NOT a raw write: that is
    * what validates the prize cards still exist and what writes the audit row,
    * so a promoted edition is indistinguishable from a hand-saved one. Both
@@ -6089,21 +6104,44 @@ class PacksModuleService extends MedusaService({
    */
   @InjectTransactionManager()
   async promoteOneChallengeSchedule(
-    row: { id: string; label: string | null; starts_at: Date; stages: unknown },
+    id: string,
+    now: Date,
     @MedusaContext() sharedContext: Context = {},
-  ): Promise<void> {
+  ): Promise<boolean> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const [fresh] = await em.execute<
+      {
+        id: string;
+        starts_at: Date | string;
+        label: string | null;
+        stages: unknown;
+      }[]
+    >(
+      `SELECT id, starts_at, label, stages
+         FROM challenge_schedule
+        WHERE id = ? AND applied_at IS NULL AND deleted_at IS NULL
+          FOR UPDATE`,
+      [id],
+    );
+    if (!fresh || new Date(fresh.starts_at).getTime() > now.getTime())
+      return false;
     await this.saveChallengeStages(
       {
-        stages: (row.stages as ChallengeStageInput[]) ?? [],
+        stages: (fresh.stages as ChallengeStageInput[]) ?? [],
         adminId: 'system',
-        reason: `Scheduled challenge promoted (${row.label ?? new Date(row.starts_at).toISOString()})`,
+        reason: `Scheduled challenge promoted (${fresh.label ?? new Date(fresh.starts_at).toISOString()})`,
       },
       sharedContext,
     );
+    // Selector repeats the unapplied condition out of the same discipline as
+    // the admin routes — under the row lock it cannot actually lose, but an
+    // id-only stamp is the exact shape this method exists to forbid.
     await this.updateChallengeSchedules(
-      { selector: { id: row.id }, data: { applied_at: new Date() } },
+      { selector: { id, applied_at: null }, data: { applied_at: new Date() } },
       sharedContext,
     );
+    return true;
   }
 
   // The settled weeks, newest first, with enough per-week summary to drive a
@@ -6318,8 +6356,7 @@ class PacksModuleService extends MedusaService({
     // per settleChallengeWinner call), so row 0 is representative — this is
     // not an ordering assumption.
     const prior = existingRows[0]?.snapshot as unknown as
-      | SettleSnapshot
-      | undefined;
+      SettleSnapshot | undefined;
 
     // Sequential, not Promise.all: challengeWeekPool resolves
     // transactionManager ?? manager and listChallengeStages resolves the SAME

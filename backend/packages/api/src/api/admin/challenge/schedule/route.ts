@@ -32,7 +32,7 @@ export interface ScheduleView {
   }[];
 }
 
-const view = (
+export const view = (
   r: {
     id: string;
     starts_at: Date | string;
@@ -110,19 +110,12 @@ export async function GET(
   });
 }
 
-// POST /admin/challenge/schedule — queue one. Same stage validation as the
-// live save, so an edition can never be scheduled in a shape the promotion
-// would then reject.
-export async function POST(
-  req: AuthenticatedMedusaRequest,
-  res: MedusaResponse,
-): Promise<void> {
-  const adminId = req.auth_context.actor_id;
-  const reason = reqReason(req.body);
-  const body = req.body as {
-    starts_at?: unknown;
-    label?: unknown;
-  } | null;
+// Shared by POST here (queue one) and POST /:id (edit a queued one) — an
+// edition must pass identical checks whichever door it comes through.
+export const parseScheduleFields = (
+  raw: unknown,
+): { startsAt: Date; label: string | null } => {
+  const body = raw as { starts_at?: unknown; label?: unknown } | null;
 
   if (typeof body?.starts_at !== 'string')
     throw new MedusaError(
@@ -154,6 +147,20 @@ export async function POST(
       );
     label = body.label.trim().slice(0, MAX_LABEL) || null;
   }
+
+  return { startsAt, label };
+};
+
+// POST /admin/challenge/schedule — queue one. Same stage validation as the
+// live save, so an edition can never be scheduled in a shape the promotion
+// would then reject.
+export async function POST(
+  req: AuthenticatedMedusaRequest,
+  res: MedusaResponse,
+): Promise<void> {
+  const adminId = req.auth_context.actor_id;
+  const reason = reqReason(req.body);
+  const { startsAt, label } = parseScheduleFields(req.body);
 
   const stages = validateChallengeStages(req.body);
 
