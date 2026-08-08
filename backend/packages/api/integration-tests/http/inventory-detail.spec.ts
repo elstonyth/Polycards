@@ -321,11 +321,11 @@ medusaIntegrationTestRunner({
 
         // POSITIVE CONTROL: the metadata path is genuinely wired, so the nulls
         // above are the blank being rejected and not a dead reader. 20 USD at
-        // 4.5 is RM 90, and with no Card row there is no multiplier, so
-        // fmv === price.
+        // 4.5 is RM 90 FMV; a non-card row prices at the default +20% margin
+        // (DEFAULT_MARKET_MULTIPLIER), so price is RM 108.
         const real = (await getDetail('detail-real-fmv')).data.item;
         expect(real.fmv).toBe(90);
-        expect(real.price).toBe(90);
+        expect(real.price).toBe(108);
       });
     });
   },

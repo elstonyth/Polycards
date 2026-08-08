@@ -16,7 +16,11 @@ import {
 } from '../../modules/packs/card-product';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
-import { displayMarketPrice, resolveFxRate } from '../../modules/packs/pricing';
+import {
+  DEFAULT_MARKET_MULTIPLIER,
+  displayMarketPrice,
+  resolveFxRate,
+} from '../../modules/packs/pricing';
 import {
   ingestPcImage,
   isPcImageUrl,
@@ -100,12 +104,17 @@ export const createProductFromPcInvoke = async (
 ) => {
   const ctx = await resolveCardProductContext(container);
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
-  // MYR listing price: plain FMV(USD) × FX, unless the caller sent one. NO
-  // markup here — margin is a gacha-card concern (Card.market_multiplier),
-  // chosen when the product is registered as a card.
+  // MYR listing price: FMV(USD) × FX × the default +20% margin, unless the
+  // caller sent an explicit price. Operator request 2026-08-08: a from-PC
+  // listing must carry the same DEFAULT_MARKET_MULTIPLIER a registered card
+  // gets, not raw FMV — inventory-view mirrors this for non-card rows.
   const price =
     input.price ??
-    displayMarketPrice(input.market_value, await resolveFxRate(packs), 1);
+    displayMarketPrice(
+      input.market_value,
+      await resolveFxRate(packs),
+      DEFAULT_MARKET_MULTIPLIER,
+    );
 
   // A PriceCharting image is never hotlinked: ingest it through the media
   // pipeline (validated + stored on OUR file provider) and persist that URL.

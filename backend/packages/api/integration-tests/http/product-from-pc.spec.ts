@@ -105,8 +105,8 @@ medusaIntegrationTestRunner({
       });
 
       it('creates a product with the PC link on metadata (no card)', async () => {
-        // Pin FX so the no-markup listing price is a deterministic golden
-        // vector: FMV 100 × FX 4.0 × NO margin = RM 400.
+        // Pin FX so the listing price is a deterministic golden vector:
+        // FMV 100 × FX 4.0 × DEFAULT_MARKET_MULTIPLIER 1.2 = RM 480.
         const fxPost = await unwrapResponse(
           api.post(
             '/admin/pricing/fx',
@@ -167,8 +167,8 @@ medusaIntegrationTestRunner({
         expect(prod.data.product.metadata.market_multiplier).toBeUndefined();
         expect(prod.data.product.metadata.pixel_pokemon_id).toBe(pixelId);
 
-        // Listing price is plain FMV × FX (no markup) and the default stock
-        // is 0 — units are counted when the physical slabs are in hand.
+        // Listing price is FMV × FX × the default +20% margin, and the default
+        // stock is 0 — units are counted when the physical slabs are in hand.
         const query = getContainer().resolve('query');
         const { data } = await query.graph({
           entity: 'product',
@@ -194,7 +194,7 @@ medusaIntegrationTestRunner({
         const amounts = (variant?.prices ?? []).map((p: { amount: unknown }) =>
           Number(p.amount),
         );
-        expect(amounts).toContain(400);
+        expect(amounts).toContain(480);
         const stocked =
           variant?.inventory_items?.[0]?.inventory?.location_levels?.[0]
             ?.stocked_quantity;

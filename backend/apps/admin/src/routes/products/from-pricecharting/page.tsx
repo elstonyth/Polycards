@@ -44,9 +44,10 @@ export const config: RouteConfig = {
   rank: 1,
 };
 
-// NOTE: usdToMyr is display-only preview math; the value submitted to the backend
-// is always the raw USD grade price. NO markup is applied anywhere on this page —
-// margin belongs to gacha-card registration.
+// NOTE: usdToMyr is display-only preview math showing the raw FMV in RM; the
+// value submitted to the backend is always the raw USD grade price. The BACKEND
+// applies the default +20% margin (DEFAULT_MARKET_MULTIPLIER) to the listing
+// price at create time — this page never sends `price`.
 
 // Client mirror of backend api/admin/media/ingest-pc-image.ts isPcImageUrl —
 // PriceCharting's price API exposes no image, so the backend scrapes the photo

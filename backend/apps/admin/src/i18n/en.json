@@ -744,6 +744,7 @@
     "selectAll": "Select all items",
     "selectOne": "Select {{name}}",
     "selected": "{{n}} selected",
+    "shiftHint": "Tip: Shift-click selects every row between two clicks.",
     "listToCard": "List to gacha card",
     "bulkDone": "{{n}} card(s) created",
     "bulkDoneSkipped": "{{n}} card(s) created, {{skipped}} skipped",
