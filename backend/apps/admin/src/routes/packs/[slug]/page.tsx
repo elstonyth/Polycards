@@ -69,6 +69,8 @@ import {
   seedRangeRows,
 } from '../../../lib/tier-ranges';
 import { shouldSeedBuffer } from '../../../lib/seed-buffer';
+import { applyRangeSelect } from '../../../lib/range-select';
+import { useTableSort } from '../../../lib/use-table-sort';
 import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
 
 // A card staged by the cards list's bulk "Add to gacha pack" — NOT a pool
@@ -247,6 +249,62 @@ const PackOddsEditorPage = () => {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const savingMembers = saveMembersMut.isPending;
 
+  // ── Pool picker search + sort + shift-select ──────────────────────────────
+  // Same tools as the Gacha Cards list. Display-only: `selected` (the
+  // membership draft) is untouched by narrowing the view, so a card picked
+  // and then filtered out of sight still saves — the subtitle count keeps it
+  // honest.
+  const [poolQ, setPoolQ] = useState('');
+  const {
+    sort: poolSort,
+    sortHeader: poolSortHeader,
+    resetSort: resetPoolSort,
+  } = useTableSort<'name' | 'grade' | 'value'>(null);
+  const poolAnchorRef = useRef<string | null>(null);
+  const visiblePool = useMemo(() => {
+    const needle = poolQ.trim().toLowerCase();
+    const filtered = (allCards ?? []).filter(
+      (c) =>
+        !needle ||
+        c.name.toLowerCase().includes(needle) ||
+        c.handle.toLowerCase().includes(needle),
+    );
+    if (!poolSort) return filtered;
+    const dir = poolSort.dir === 'asc' ? 1 : -1;
+    const val = (c: AdminCard): number | string =>
+      poolSort.key === 'name'
+        ? c.name
+        : poolSort.key === 'grade'
+          ? [c.grader, c.grade].filter(Boolean).join(' ')
+          : c.priceBreakdown.marketMyr;
+    return [...filtered].sort((a, b) => {
+      const av = val(a);
+      const bv = val(b);
+      if (typeof av === 'string' && typeof bv === 'string') {
+        return dir * av.localeCompare(bv);
+      }
+      return dir * (av < bv ? -1 : av > bv ? 1 : 0);
+    });
+  }, [allCards, poolQ, poolSort]);
+  const poolVisibleIds = visiblePool.map((c) => c.handle);
+  const allPoolVisibleSelected =
+    poolVisibleIds.length > 0 && poolVisibleIds.every((id) => selected.has(id));
+  const somePoolVisibleSelected = poolVisibleIds.some((id) => selected.has(id));
+  // Header checkbox scopes to the VISIBLE rows (add/remove them only), so a
+  // search + select-all can build up a pool additively. Decide add-vs-remove
+  // from `prev`, not the rendered flag — a refetch can swap rows mid-click.
+  const togglePoolVisible = () =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      const every =
+        poolVisibleIds.length > 0 && poolVisibleIds.every((id) => prev.has(id));
+      for (const id of poolVisibleIds) {
+        if (every) next.delete(id);
+        else next.add(id);
+      }
+      return next;
+    });
+
   // Staged rows need the catalog for their name/image/price, so hold the seed
   // until that query SETTLES — gating on "loaded" would leave the whole editor
   // on the skeleton forever if the catalog fetch fails.
@@ -310,16 +368,25 @@ const PackOddsEditorPage = () => {
 
   const openPool = () => {
     setSelected(new Set((rows ?? []).map((r) => r.card_id)));
+    // A reopened picker is a fresh view — a leftover anchor would
+    // range-select across rows the operator never clicked, and a leftover
+    // search/sort would silently pre-filter the catalog from last session.
+    poolAnchorRef.current = null;
+    setPoolQ('');
+    resetPoolSort();
     setPoolOpen(true);
   };
 
-  const toggleCard = (handle: string) =>
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(handle)) next.delete(handle);
-      else next.add(handle);
-      return next;
-    });
+  // Shift-click range select (the Gmail convention) — the range math lives in
+  // lib/range-select.ts (pure, vitest-covered). Ranges follow the picker's
+  // CURRENT filter+sort order.
+  const toggleCard = (handle: string, shiftKey: boolean) => {
+    const anchor = poolAnchorRef.current;
+    poolAnchorRef.current = handle;
+    setSelected((prev) =>
+      applyRangeSelect(prev, poolVisibleIds, anchor, handle, shiftKey),
+    );
+  };
 
   // Top-hit ORDER (1 = leftmost on the pack page; empty = not a Top Hit).
   // Typed freely into the row buffer, saved on blur/Enter as the complete
@@ -495,6 +562,22 @@ const PackOddsEditorPage = () => {
   // `checked`, not `selected` — that name already belongs to the prize-pool
   // picker's membership selection above, a different set entirely.
   const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
+  // Shift-click range-select anchor (the previously clicked row). A ref, not
+  // state — it never needs a re-render.
+  const anchorRef = useRef<string | null>(null);
+
+  // ── Table search + sort ───────────────────────────────────────────────────
+  // Same tools as the Gacha Cards list, per the operator's ask. Display-only:
+  // the odds math, the EV tiles and the save all keep reading the FULL
+  // `effective` set — filtering the view must never filter what gets saved.
+  // `initial: null` keeps the pool's saved order until a header is clicked.
+  // Declared before the per-pack reset block below, which clears both.
+  const [tableQ, setTableQ] = useState('');
+  const {
+    sort: tableSort,
+    sortHeader: tableSortHeader,
+    resetSort: resetTableSort,
+  } = useTableSort<'name' | 'rarity' | 'value' | 'current'>(null);
   // Selection belongs to a PACK — same render-phase reset as `defaults` above.
   // card_id is the card HANDLE, which the same card carries in EVERY pack it
   // belongs to, and the router reuses this component across `:slug`. Without
@@ -504,24 +587,83 @@ const PackOddsEditorPage = () => {
   if (checkedFor !== slug) {
     setCheckedFor(slug);
     setChecked(new Set());
+    // Search + sort belong to a PACK too: without this, navigating pack A →
+    // pack B opens B pre-filtered by A's leftover search (possibly "0 of N"
+    // with an empty table) — the same ghost-state class this reset exists
+    // to kill. Display-only state, so render-phase setState is safe here.
+    setTableQ('');
+    resetTableSort();
   }
-  const checkedIds = effective
+  // An effect, not a line in the render-phase reset above: refs are off-limits
+  // during render (react-hooks/refs), and an effect keyed on slug fires at the
+  // same moment for this purpose.
+  useEffect(() => {
+    anchorRef.current = null;
+  }, [slug]);
+  const displayRows = useMemo(() => {
+    const needle = tableQ.trim().toLowerCase();
+    const filtered = needle
+      ? effective.filter(
+          (r) =>
+            r.name.toLowerCase().includes(needle) ||
+            r.card_id.toLowerCase().includes(needle),
+        )
+      : effective;
+    if (!tableSort) return filtered;
+    const dir = tableSort.dir === 'asc' ? 1 : -1;
+    const val = (r: EditRow): number | string => {
+      switch (tableSort.key) {
+        case 'name':
+          return r.name;
+        // Tier ladder order (Immortal → Common), not alphabetical.
+        case 'rarity':
+          return RARITIES.indexOf(r.rarity as OddsRarity);
+        case 'value':
+          return r.market_value;
+        case 'current':
+          return r.currentPct;
+      }
+    };
+    return [...filtered].sort((a, b) => {
+      const av = val(a);
+      const bv = val(b);
+      if (typeof av === 'string' && typeof bv === 'string') {
+        return dir * av.localeCompare(bv);
+      }
+      return dir * (av < bv ? -1 : av > bv ? 1 : 0);
+    });
+  }, [effective, tableQ, tableSort]);
+
+  // Selection scope is the VISIBLE rows: search clears the selection (below),
+  // so `checked` can never hold a row the operator can't see, and select-all
+  // ranges over what's on screen.
+  const checkedIds = displayRows
     .map((r) => r.card_id)
     .filter((id) => checked.has(id));
   const allChecked =
-    effective.length > 0 && checkedIds.length === effective.length;
+    displayRows.length > 0 && checkedIds.length === displayRows.length;
 
-  const toggleChecked = (cardId: string) =>
-    setChecked((prev) => {
-      const next = new Set(prev);
-      if (!next.delete(cardId)) next.add(cardId);
-      return next;
-    });
+  // Shift-click range select (the Gmail convention) — same wiring as the
+  // inventory and cards lists; the range math lives in lib/range-select.ts
+  // (pure, vitest-covered). Ranges follow the CURRENT filter+sort order.
+  const toggleChecked = (cardId: string, shiftKey: boolean) => {
+    const anchor = anchorRef.current;
+    anchorRef.current = cardId;
+    setChecked((prev) =>
+      applyRangeSelect(
+        prev,
+        displayRows.map((r) => r.card_id),
+        anchor,
+        cardId,
+        shiftKey,
+      ),
+    );
+  };
   // Decide add-vs-clear from `prev`, not from the rendered `allChecked`: a
   // reseed can swap the rows between the click and the update.
   const toggleCheckAll = () =>
     setChecked((prev) => {
-      const ids = effective.map((r) => r.card_id);
+      const ids = displayRows.map((r) => r.card_id);
       return ids.length > 0 && ids.every((id) => prev.has(id))
         ? new Set<string>()
         : new Set(ids);
@@ -854,6 +996,34 @@ const PackOddsEditorPage = () => {
             ) : null;
           })()}
 
+          {/* Table toolbar: search over the pool (name or handle) + a count so
+              a filtered view is never mistaken for the whole pool. */}
+          <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-3">
+            <Input
+              type="search"
+              className="w-72"
+              placeholder={t('packs.editor.searchPlaceholder')}
+              aria-label={t('packs.editor.searchPlaceholder')}
+              value={tableQ}
+              onChange={(e) => {
+                setTableQ(e.target.value);
+                // Narrowing the list changes WHICH rows are on screen — drop
+                // the selection so the bulk bar can never act on a row the
+                // operator can no longer see, and the stale anchor with it.
+                setChecked(new Set());
+                anchorRef.current = null;
+              }}
+            />
+            <Text size="small" className="text-ui-fg-subtle tabular-nums">
+              {tableQ.trim()
+                ? t('packs.editor.countFiltered', {
+                    shown: displayRows.length,
+                    total: effective.length,
+                  })
+                : t('packs.editor.count', { count: effective.length })}
+            </Text>
+          </div>
+
           {/* Bulk bar — only while something is checked, so the editor is
               unchanged for the common single-row edit. */}
           {checkedIds.length > 0 && (
@@ -931,19 +1101,13 @@ const PackOddsEditorPage = () => {
                       onCheckedChange={toggleCheckAll}
                     />
                   </Table.HeaderCell>
-                  <Table.HeaderCell>{t('packs.editor.card')}</Table.HeaderCell>
-                  <Table.HeaderCell>
-                    {t('packs.editor.rarity')}
-                  </Table.HeaderCell>
+                  {tableSortHeader('name', t('packs.editor.card'))}
+                  {tableSortHeader('rarity', t('packs.editor.rarity'))}
                   <Table.HeaderCell className="text-center">
                     {t('packs.editor.topHit')}
                   </Table.HeaderCell>
-                  <Table.HeaderCell className="text-right">
-                    {t('packs.editor.value')}
-                  </Table.HeaderCell>
-                  <Table.HeaderCell className="text-right">
-                    {t('packs.editor.current')}
-                  </Table.HeaderCell>
+                  {tableSortHeader('value', t('packs.editor.value'), true)}
+                  {tableSortHeader('current', t('packs.editor.current'), true)}
                   <Table.HeaderCell className="text-center">
                     {t('packs.editor.lock')}
                   </Table.HeaderCell>
@@ -955,11 +1119,11 @@ const PackOddsEditorPage = () => {
                 </Table.Row>
               </Table.Header>
               <Table.Body>
-                {/* `effective`, not `rows` — the preview, the EV tiles and the
-                    save all read it, so the body must too or the table is one
-                    derivation behind them. Same card_ids either way; edits
-                    still write through `setRow` to `rows`. */}
-                {effective.map((r) => {
+                {/* `displayRows` — `effective` (which the preview, the EV
+                    tiles and the save all read) filtered+sorted for display
+                    only. Same card_ids; edits still write through `setRow`
+                    to `rows`. */}
+                {displayRows.map((r) => {
                   // Price drift vs the assigned tier's configured range
                   // (/tier-defaults). Signal only — the tier NEVER switches on
                   // its own; 'unset' (tier not configured) shows nothing.
@@ -970,13 +1134,15 @@ const PackOddsEditorPage = () => {
                   );
                   return (
                     <Table.Row key={r.card_id}>
-                      <Table.Cell>
+                      {/* select-none: a shift-click must range-select, not
+                          smear a text selection across the rows in between. */}
+                      <Table.Cell className="select-none">
                         <Checkbox
                           aria-label={t('packs.editor.bulk.selectOne', {
                             name: r.name,
                           })}
                           checked={checked.has(r.card_id)}
-                          onCheckedChange={() => toggleChecked(r.card_id)}
+                          onClick={(e) => toggleChecked(r.card_id, e.shiftKey)}
                         />
                       </Table.Cell>
                       <Table.Cell>
@@ -1170,7 +1336,7 @@ const PackOddsEditorPage = () => {
             </div>
           </FocusModal.Header>
           <FocusModal.Body className="flex flex-col items-center overflow-auto p-10">
-            <div className="flex w-full max-w-[640px] flex-col gap-y-4">
+            <div className="flex w-full max-w-[860px] flex-col gap-y-4">
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <FocusModal.Title asChild>
@@ -1203,6 +1369,32 @@ const PackOddsEditorPage = () => {
                   </Button>
                 </div>
               </div>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <Input
+                  type="search"
+                  className="w-72"
+                  placeholder={t('packs.pool.searchPlaceholder')}
+                  aria-label={t('packs.pool.searchPlaceholder')}
+                  value={poolQ}
+                  onChange={(e) => {
+                    setPoolQ(e.target.value);
+                    // New search = new visible list — a stale anchor would
+                    // range-select across unrelated rows. The membership
+                    // draft (`selected`) deliberately survives.
+                    poolAnchorRef.current = null;
+                  }}
+                />
+                {allCards !== null && (
+                  <Text size="small" className="text-ui-fg-subtle tabular-nums">
+                    {poolQ.trim()
+                      ? t('packs.pool.countFiltered', {
+                          shown: visiblePool.length,
+                          total: allCards.length,
+                        })
+                      : t('packs.pool.count', { count: allCards.length })}
+                  </Text>
+                )}
+              </div>
               {allCards === null ? (
                 <LoadingSkeleton />
               ) : allCards.length === 0 ? (
@@ -1210,34 +1402,81 @@ const PackOddsEditorPage = () => {
                   {t('packs.pool.noCards')}
                 </Text>
               ) : (
-                <div className="divide-y rounded-lg border">
-                  {allCards.map((c) => (
-                    <label
-                      key={c.handle}
-                      className="hover:bg-ui-bg-base-hover flex cursor-pointer items-center gap-3 px-4 py-2"
-                    >
-                      <Checkbox
-                        checked={selected.has(c.handle)}
-                        onCheckedChange={() => toggleCard(c.handle)}
-                      />
-                      <img
-                        src={resolveImageUrl(c.slab_image || c.image)}
-                        alt=""
-                        loading="lazy"
-                        decoding="async"
-                        className="h-9 w-7 shrink-0 rounded object-contain"
-                      />
-                      <div className="flex flex-1 flex-col">
-                        <span className="truncate text-sm font-medium">
-                          {c.name}
-                        </span>
-                        <span className="text-ui-fg-subtle text-xs">
-                          {[c.grader, c.grade].filter(Boolean).join(' ') || '—'}{' '}
-                          · {rm(c.priceBreakdown.marketMyr)}
-                        </span>
-                      </div>
-                    </label>
-                  ))}
+                <div className="overflow-x-auto rounded-lg border">
+                  <Table>
+                    <Table.Header>
+                      <Table.Row>
+                        <Table.HeaderCell className="w-10">
+                          <Checkbox
+                            aria-label={t('packs.pool.selectVisible')}
+                            checked={
+                              allPoolVisibleSelected
+                                ? true
+                                : somePoolVisibleSelected
+                                  ? 'indeterminate'
+                                  : false
+                            }
+                            onCheckedChange={togglePoolVisible}
+                          />
+                        </Table.HeaderCell>
+                        {poolSortHeader('name', t('packs.editor.card'))}
+                        {poolSortHeader('grade', t('packs.pool.grade'))}
+                        {poolSortHeader('value', t('packs.editor.value'), true)}
+                      </Table.Row>
+                    </Table.Header>
+                    <Table.Body>
+                      {visiblePool.map((c) => (
+                        <Table.Row
+                          key={c.handle}
+                          className="cursor-pointer"
+                          onClick={(e) => toggleCard(c.handle, e.shiftKey)}
+                        >
+                          {/* select-none: a shift-click must range-select, not
+                              smear a text selection across rows. The row IS
+                              the click target (like the old <label>), so the
+                              checkbox only stops propagation. */}
+                          <Table.Cell className="select-none">
+                            <Checkbox
+                              aria-label={t('packs.editor.bulk.selectOne', {
+                                name: c.name,
+                              })}
+                              checked={selected.has(c.handle)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleCard(c.handle, e.shiftKey);
+                              }}
+                            />
+                          </Table.Cell>
+                          <Table.Cell className="select-none">
+                            <div className="flex items-center gap-3">
+                              <img
+                                src={resolveImageUrl(c.slab_image || c.image)}
+                                alt=""
+                                loading="lazy"
+                                decoding="async"
+                                className="h-9 w-7 shrink-0 rounded object-contain"
+                              />
+                              <span className="max-w-[22rem] truncate text-sm font-medium">
+                                {c.name}
+                              </span>
+                            </div>
+                          </Table.Cell>
+                          <Table.Cell className="text-ui-fg-subtle select-none text-sm">
+                            {[c.grader, c.grade].filter(Boolean).join(' ') ||
+                              '—'}
+                          </Table.Cell>
+                          <Table.Cell className="text-ui-fg-subtle select-none text-right text-sm tabular-nums">
+                            {rm(c.priceBreakdown.marketMyr)}
+                          </Table.Cell>
+                        </Table.Row>
+                      ))}
+                    </Table.Body>
+                  </Table>
+                  {visiblePool.length === 0 && (
+                    <Text className="text-ui-fg-subtle block px-4 py-3 text-sm">
+                      {t('packs.pool.noMatches')}
+                    </Text>
+                  )}
                 </div>
               )}
             </div>

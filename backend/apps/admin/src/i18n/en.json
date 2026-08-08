@@ -101,7 +101,14 @@
       "outsideTitle": "Card value outside every tier range",
       "outsideDesc_one": "{{count}} of the cards you are adding falls outside every configured tier price range (see Tier Defaults). It will join as Common. Add it anyway?",
       "outsideDesc_other": "{{count}} of the cards you are adding fall outside every configured tier price range (see Tier Defaults). They will join as Common. Add them anyway?",
-      "outsideConfirm": "Add anyway"
+      "outsideConfirm": "Add anyway",
+      "searchPlaceholder": "Search name or handle…",
+      "grade": "Grade",
+      "selectVisible": "Select all visible cards",
+      "count_one": "{{count}} card",
+      "count_other": "{{count}} cards",
+      "countFiltered": "{{shown}} of {{total}} cards",
+      "noMatches": "No cards match this search."
     },
     "tierRanges": {
       "title": "Tier price ranges",
@@ -148,6 +155,10 @@
       "unitsOwed": "{{count}} owed to winners",
       "topHit": "Top hit #",
       "pendingRow": "new — not in pool until saved",
+      "searchPlaceholder": "Search name or handle…",
+      "count_one": "{{count}} card in pool",
+      "count_other": "{{count}} cards in pool",
+      "countFiltered": "{{shown}} of {{total}} cards",
       "outOfRangeBelow": "below tier range",
       "outOfRangeAbove": "above tier range",
       "outOfRangeHint": "Value {{value}} is outside the configured {{tier}} price range (Tier Defaults). The tier never switches on its own — retier manually if needed.",
