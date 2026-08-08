@@ -310,3 +310,142 @@ describe('promoteDueChallengeSchedules', () => {
     );
   });
 });
+
+// editChallengeSchedule — the transactional half of the admin edit route.
+// Conflict check, write, and audit share one transaction behind the same
+// FOR UPDATE lock promotion uses, so a failed audit rolls the edit back and
+// concurrent writers serialize instead of clobbering each other.
+describe('editChallengeSchedule', () => {
+  type FreshRow = {
+    id: string;
+    starts_at: Date;
+    label: string | null;
+    stages: unknown;
+    applied_at: Date | null;
+  };
+
+  const queuedRow: FreshRow = {
+    id: 'sch_1',
+    starts_at: new Date('2100-01-01T00:00:00.000Z'),
+    label: 'old label',
+    stages: [stage(1)],
+    applied_at: null,
+  };
+
+  const input = () => ({
+    id: 'sch_1',
+    startsAt: new Date('2100-01-05T00:00:00.000Z'),
+    label: 'new label',
+    stages: [stage(1), stage(2)],
+    adminId: 'admin_1',
+    reason: 'bigger prizes',
+  });
+
+  const mkSvc = (fresh: FreshRow | null, { failAudit = false } = {}) => {
+    const svc = Object.create(
+      PacksModuleService.prototype,
+    ) as PacksModuleService;
+    const updateChallengeSchedules = jest.fn(async () => []);
+    const createAdminActionAudits = jest.fn(async () => {
+      if (failAudit) throw new Error('audit insert failed');
+      return [];
+    });
+    const execute = jest.fn(async () => (fresh ? [fresh] : []));
+    const stubManager = { execute };
+    const ctx = {
+      manager: stubManager,
+      transactionManager: stubManager,
+    } as never;
+    Object.assign(svc, { updateChallengeSchedules, createAdminActionAudits });
+    return {
+      svc,
+      ctx,
+      updateChallengeSchedules,
+      createAdminActionAudits,
+      execute,
+    };
+  };
+
+  it('locks the row, writes the edited stages, and audits before/after', async () => {
+    const {
+      svc,
+      ctx,
+      execute,
+      updateChallengeSchedules,
+      createAdminActionAudits,
+    } = mkSvc(queuedRow);
+
+    await svc.editChallengeSchedule(input(), ctx);
+
+    const [sql, params] = execute.mock.calls[0] as unknown as [
+      string,
+      unknown[],
+    ];
+    expect(sql).toMatch(/FOR UPDATE/);
+    expect(params).toEqual(['sch_1']);
+    // The edited LADDER is the payload that matters — starts_at/label looking
+    // right while the stages regressed is the failure this pins.
+    expect(updateChallengeSchedules).toHaveBeenCalledWith(
+      expect.objectContaining({
+        selector: { id: 'sch_1', applied_at: null },
+        data: expect.objectContaining({ stages: [stage(1), stage(2)] }),
+      }),
+      expect.anything(),
+    );
+    expect(createAdminActionAudits).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          entity_type: 'challenge_stages',
+          entity_id: 'sch_1',
+          action: 'edit',
+          before: expect.objectContaining({
+            label: 'old label',
+            stages: [stage(1)],
+          }),
+          after: expect.objectContaining({
+            label: 'new label',
+            stages: [stage(1), stage(2)],
+          }),
+          reason: 'bigger prizes',
+        }),
+      ],
+      expect.anything(),
+    );
+  });
+
+  it('refuses a row that already went live, writing nothing', async () => {
+    const { svc, ctx, updateChallengeSchedules, createAdminActionAudits } =
+      mkSvc({
+        ...queuedRow,
+        applied_at: new Date('2026-08-03T00:00:00.000Z'),
+      });
+
+    await expect(svc.editChallengeSchedule(input(), ctx)).rejects.toThrow(
+      /already went live/,
+    );
+    expect(updateChallengeSchedules).not.toHaveBeenCalled();
+    expect(createAdminActionAudits).not.toHaveBeenCalled();
+  });
+
+  it('404s a row that is gone, writing nothing', async () => {
+    const { svc, ctx, updateChallengeSchedules } = mkSvc(null);
+
+    await expect(svc.editChallengeSchedule(input(), ctx)).rejects.toThrow(
+      /not found/,
+    );
+    expect(updateChallengeSchedules).not.toHaveBeenCalled();
+  });
+
+  it('propagates an audit-insert failure so the transaction rolls the edit back', async () => {
+    // Unit scope can only pin the throw; the rollback itself is the
+    // @InjectTransactionManager contract — audit and edit share one txn.
+    const { svc, ctx, updateChallengeSchedules } = mkSvc(queuedRow, {
+      failAudit: true,
+    });
+
+    await expect(svc.editChallengeSchedule(input(), ctx)).rejects.toThrow(
+      /audit insert failed/,
+    );
+    expect(updateChallengeSchedules).toHaveBeenCalled();
+  });
+});

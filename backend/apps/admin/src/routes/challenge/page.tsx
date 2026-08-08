@@ -673,15 +673,19 @@ const AddChallengeModal = ({
   // seeding once would hand the operator their previous draft — including one
   // they already saved.
   const [seededOpen, setSeededOpen] = useState(false);
-  // Waits for settings: seeding a wrong default and silently correcting it
-  // later would be worse than an empty field for the half-second it takes.
-  if (open && !seededOpen && settings) {
+  // ADD waits for settings: its default start is derived from them, and
+  // seeding a wrong default then silently correcting it would be worse than an
+  // empty field for the half-second it takes. EDIT seeds from the row itself,
+  // so it must not block on (or break with) the settings query.
+  if (open && !seededOpen && (settings || editing)) {
     setSeededOpen(true);
     setRows((editing?.stages ?? seedFrom).map(stageFromDTO));
     setStartsAt(
       editing
         ? toLocalInput(new Date(editing.starts_at))
-        : toLocalInput(nextWeeklyReset(settings)),
+        : settings
+          ? toLocalInput(nextWeeklyReset(settings))
+          : '',
     );
     setLabel(editing?.label ?? '');
     setReason('');

@@ -6144,6 +6144,100 @@ class PacksModuleService extends MedusaService({
     return true;
   }
 
+  /**
+   * Edit a QUEUED edition in place — new start, name, prize ladder — with the
+   * conflict check, the write, and its audit row in ONE transaction.
+   *
+   * Same FOR UPDATE idiom as promoteOneChallengeSchedule, and against the same
+   * rivals: the row lock serializes this edit against the hourly promotion
+   * (an edit arriving while a promotion holds the row blocks, then reads
+   * `applied_at` and refuses) and against another operator's concurrent
+   * edit/delete (they apply one after the other, each auditing the state it
+   * actually replaced — `before` can never skip an intervening write).
+   *
+   * The audit insert shares the transaction, so a failed audit rolls the
+   * schedule change back with it: no edit can land unrecorded.
+   */
+  @InjectTransactionManager()
+  async editChallengeSchedule(
+    input: {
+      id: string;
+      startsAt: Date;
+      label: string | null;
+      stages: ChallengeStageInput[];
+      adminId: string;
+      reason: string;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    // No `applied_at IS NULL` in the WHERE: a promoted row must be READ and
+    // refused with the right message, not skipped as if it never existed.
+    const [row] = await em.execute<
+      {
+        id: string;
+        starts_at: Date | string;
+        label: string | null;
+        stages: unknown;
+        applied_at: Date | string | null;
+      }[]
+    >(
+      `SELECT id, starts_at, label, stages, applied_at
+         FROM challenge_schedule
+        WHERE id = ? AND deleted_at IS NULL
+          FOR UPDATE`,
+      [input.id],
+    );
+    if (!row)
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        'Scheduled challenge not found.',
+      );
+    if (row.applied_at)
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'This challenge already went live — edit the live stages instead.',
+      );
+    // Selector repeats the unapplied condition — same discipline as the stamp
+    // above; under the row lock it cannot lose.
+    await this.updateChallengeSchedules(
+      {
+        selector: { id: input.id, applied_at: null },
+        data: {
+          starts_at: input.startsAt,
+          label: input.label,
+          // model.json() wants Record<string, unknown>; a plain array has no
+          // string index signature (same double-cast as saveChallengeStages).
+          stages: input.stages as unknown as Record<string, unknown>,
+        },
+      },
+      sharedContext,
+    );
+    await this.createAdminActionAudits(
+      [
+        {
+          admin_id: input.adminId,
+          entity_type: 'challenge_stages',
+          entity_id: input.id,
+          action: 'edit',
+          before: {
+            starts_at: new Date(row.starts_at).toISOString(),
+            label: row.label,
+            stages: row.stages,
+          },
+          after: {
+            starts_at: input.startsAt.toISOString(),
+            label: input.label,
+            stages: input.stages,
+          },
+          reason: input.reason,
+        },
+      ],
+      sharedContext,
+    );
+  }
+
   // The settled weeks, newest first, with enough per-week summary to drive a
   // selector without loading every payout row.
   //
