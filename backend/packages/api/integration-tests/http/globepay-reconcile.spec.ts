@@ -25,6 +25,7 @@ import {
 import globepayReconcileJob from '../../src/jobs/globepay-reconcile';
 import {
   GLOBEPAY_AMBIGUOUS_GIVEUP_DEFAULT_MS,
+  GLOBEPAY_EXPIRED_RETRY_BATCH,
   GLOBEPAY_EXPIRED_RETRY_MS,
   GLOBEPAY_STALE_AFTER_MS,
 } from '../../src/modules/packs/globepay-reconcile';
@@ -274,6 +275,32 @@ medusaIntegrationTestRunner({
         expect((await rowOf(row.id)).status).toBe('settled');
       });
 
+      // The tier is capped at GLOBEPAY_EXPIRED_RETRY_BATCH and requerying an
+      // expired row leaves it expired, so the batch ORDER decides which rows are
+      // ever asked about again. This fails under 'ASC': the cap fills with the
+      // rows nearest the far edge of the window and the freshly-expired one — the
+      // only one a late bank transfer could still settle — is never requeried.
+      it('requeries the freshly-expired row, not the ten nearest ageing out', async () => {
+        const expire = async (id: string) =>
+          packs().updateGlobePayDeposits({ id, status: 'expired' } as never);
+
+        // Fill the batch with rows an hour inside the far edge of the window.
+        for (let i = 0; i < GLOBEPAY_EXPIRED_RETRY_BATCH; i++) {
+          const stale = await seed(
+            `PC-reconcile-crowd-${i}`,
+            GLOBEPAY_EXPIRED_RETRY_MS - 60 * 60 * 1000,
+          );
+          await expire(stale.id);
+        }
+        // Newest row in the whole suite, so the ordering is unambiguous.
+        const fresh = await seed('PC-reconcile-fresh-expiry');
+        await expire(fresh.id);
+
+        requery.mockResolvedValue({ state: 'success', amount: 50, statusId: 6 });
+        await sweep();
+
+        expect((await rowOf(fresh.id)).status).toBe('settled');
+      });
       it('leaves an expired deposit older than the retry window alone', async () => {
         const row = await seed(
           'PC-reconcile-ancient',

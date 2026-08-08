@@ -63,7 +63,18 @@ export default async function globepayReconcileJob(container: MedusaContainer) {
       status: 'expired',
       created_at: { $gte: new Date(now.getTime() - GLOBEPAY_EXPIRED_RETRY_MS) },
     },
-    { take: GLOBEPAY_EXPIRED_RETRY_BATCH, order: { created_at: 'ASC' } },
+    // NEWEST first, unlike the live queue above. Requerying an 'expired' row
+    // leaves it 'expired' (the `deposit.status === next` no-op below), so the row
+    // stays in this population forever. Oldest-first therefore pinned the batch to
+    // the same ten rows closest to ageing OUT of the window and never reached one
+    // that had just expired — the exact case this tier exists for, since a late
+    // bank transfer lands hours after we gave up, not days. Newest-first asks
+    // about the rows most likely to have changed, and matches what
+    // GLOBEPAY_AMBIGUOUS_GIVEUP_MS already documents: a row aged out by the
+    // ambiguous bound has spent a week yielding nothing and is not worth ten more
+    // requeries. No column records WHEN a row expired, so created_at is the only
+    // sort key available.
+    { take: GLOBEPAY_EXPIRED_RETRY_BATCH, order: { created_at: 'DESC' } },
   );
 
   const outstanding = [...pending, ...revivable];
