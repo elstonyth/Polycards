@@ -1039,7 +1039,12 @@ export const createPixelPokemon = (body: CreatePixelPokemonBody) =>
 // window into money-in. 'stale' means the row is still pending past the
 // reconciliation sweep's window, i.e. a payment that may have landed at the
 // gateway without ever being credited here.
-export type GlobePayDepositView = 'pending' | 'settled' | 'failed' | 'all';
+export type GlobePayDepositView =
+  | 'pending'
+  | 'settled'
+  | 'failed'
+  | 'expired'
+  | 'all';
 
 export interface GlobePayDeposit {
   id: string;
@@ -1050,7 +1055,11 @@ export interface GlobePayDeposit {
   amount_requested: number;
   amount_settled: number | null;
   payment_method_code: string;
-  status: 'pending' | 'settled' | 'failed';
+  // 'expired' = the reconcile sweep stopped chasing it, but the gateway never
+  // ruled on it — NOT a synonym for 'failed', and still creditable by a late
+  // callback or the sweep's second scan tier. The withdrawal type below
+  // deliberately has no such value: expiring a payout would confiscate a debit.
+  status: 'pending' | 'settled' | 'failed' | 'expired';
   gateway_status: number | null;
   created_at: string;
   settled_at: string | null;
@@ -1099,6 +1108,8 @@ export interface GlobePayWithdrawal {
   customer_email: string | null;
   amount: number;
   bank_code: string;
+  /** MASKED (`••••1234`) — the list never serves a full account number. The
+   *  full value comes one row at a time from getGlobePayWithdrawalAccount. */
   account_number: string;
   account_holder_name: string;
   status: 'pending' | 'settled' | 'failed';
@@ -1131,6 +1142,17 @@ export function getGlobePayWithdrawals(
   if (sort) params.set('sort', sort);
   return getJson<GlobePayWithdrawalsResponse>(
     `/admin/globepay/withdrawals?${params}`,
+  );
+}
+
+/** Reveal ONE withdrawal's full destination account (the list masks it).
+ *  Deliberately not a react-query hook and not prefetched: the backend logs
+ *  and rate-limits every call, so it must fire only when an operator asks. */
+export function getGlobePayWithdrawalAccount(
+  id: string,
+): Promise<{ id: string; account_number: string }> {
+  return getJson<{ id: string; account_number: string }>(
+    `/admin/globepay/withdrawals/${encodeURIComponent(id)}/account`,
   );
 }
 

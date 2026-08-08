@@ -3,12 +3,14 @@
 import { useMemo, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import {
-  getCountries,
   getCountryCallingCode,
   parsePhoneNumberFromString,
   type CountryCode,
 } from 'libphonenumber-js/min';
-import { DEFAULT_PHONE_COUNTRY } from '@/lib/profile-validation';
+import {
+  ALLOWED_PHONE_COUNTRIES,
+  DEFAULT_PHONE_COUNTRY,
+} from '@/lib/profile-validation';
 
 /**
  * Phone input with a country-code picker (operator request 2026-08-01: "select
@@ -27,15 +29,17 @@ const flagOf = (iso: string) =>
   );
 
 // Country names from the built-in Intl API — no bundled name table.
+// The list is ALLOWED_PHONE_COUNTRIES, not libphonenumber's full getCountries():
+// the backend refuses to SMS a destination outside its own allowlist, and an
+// option here that the backend refuses would leave the user waiting for a code
+// that never comes. See ALLOWED_PHONE_COUNTRIES for the pairing rule.
 const COUNTRIES: Country[] = (() => {
   const names = new Intl.DisplayNames(['en'], { type: 'region' });
-  return getCountries()
-    .map((iso) => ({
-      iso,
-      dial: getCountryCallingCode(iso),
-      name: names.of(iso) ?? iso,
-    }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  return ALLOWED_PHONE_COUNTRIES.map((iso) => ({
+    iso,
+    dial: getCountryCallingCode(iso),
+    name: names.of(iso) ?? iso,
+  })).sort((a, b) => a.name.localeCompare(b.name));
 })();
 
 export function PhoneField({
@@ -65,6 +69,12 @@ export function PhoneField({
   const seeded = defaultValue
     ? parsePhoneNumberFromString(defaultValue)
     : undefined;
+  // A number stored before the allowlist narrowed the picker can seed a country
+  // with no <option> (e.g. a saved +44). NOT clamped to the default on purpose:
+  // clamping would silently re-prefix a customer's real number the moment they
+  // opened settings. The facade and the E.164 value both read `country`
+  // directly, so they stay correct; only the hidden <select> renders with no
+  // selection until the user picks a served country.
   const [country, setCountry] = useState<CountryCode>(
     seeded?.country ?? DEFAULT_PHONE_COUNTRY,
   );
@@ -85,7 +95,7 @@ export function PhoneField({
   return (
     <div className="flex gap-2">
       {/* Invisible native select over a styled facade: the closed control
-          shows only "🇲🇾 +60", the open picker lists every country. */}
+          shows only "🇲🇾 +60", the open picker lists the served countries. */}
       <div className="relative w-28 shrink-0">
         <span
           aria-hidden

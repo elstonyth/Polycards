@@ -3,13 +3,28 @@
 /**
  * Phone-OTP server actions. Thin proxies onto the backend's
  * /store/phone-verification/* routes — running server-side keeps the
- * publishable-key transport consistent with every other action and lets the
- * backend's IP rate limiter see the real client via x-forwarded-for.
+ * publishable-key transport consistent with every other action, and lets
+ * changePhone read the httpOnly auth cookie it converts to a Bearer header
+ * (getAuthToken, below). The proof token itself round-trips through the
+ * browser by design: checkPhoneOtp returns it and changePhone takes it back.
+ *
+ * It does NOT let the backend see the visitor: `sdk` (src/lib/medusa.ts) is
+ * built from a base URL and a publishable key and forwards no client headers,
+ * so every OTP request arrives from this server's single egress IP. The
+ * backend's IP-keyed OTP limiters are therefore a whole-STOREFRONT circuit
+ * breaker, and the PER-PHONE tier is the only real per-client / SMS-cost
+ * budget — do not delete it as "redundant with the IP tier". Full topology:
+ * the phone-OTP limiter module comment in
+ * backend/packages/api/src/api/utils/rate-limit.ts.
  */
 import { sdk } from '@/lib/medusa';
 import { logger } from '@/lib/logger';
 import { getAuthToken } from '@/lib/data/customer';
-import { normalizePhone } from '@/lib/profile-validation';
+import {
+  isServedPhoneCountry,
+  normalizePhone,
+  UNSERVED_PHONE_COUNTRY_ERROR,
+} from '@/lib/profile-validation';
 import type { PhoneOtpPurpose } from '@/lib/phone-verification';
 import { friendlyError, type ErrorRule } from '@/lib/errors';
 
@@ -39,6 +54,44 @@ const PHONE_RESET_RULES: ErrorRule[] = [
   [/this account signs in with google/i, 'This account signs in with Google.'],
 ];
 
+// The change route's two re-auth refusals. These MUST survive `messageOf`'s
+// genericizer: "Could not update your phone number. Please try again." in front
+// of someone who mistyped their password is a dead end — they retry the same
+// password forever. Both strings are the route's own MedusaError text
+// (backend/packages/api/src/api/store/phone-verification/change/route.ts), read
+// off FetchError.message by the same mechanism PHONE_RESET_RULES relies on.
+// The Google-only branch's refusal, kept as a named constant because it is
+// CONTROL FLOW as well as copy: SettingsForm turns it into a second OTP step
+// for the current number. One regex, used both to pick the message below and to
+// set `needsOldPhoneProof`, so a reworded rule can never leave the two
+// disagreeing.
+const NEEDS_OLD_PHONE_PROOF = /verify your current phone number/i;
+
+const PHONE_CHANGE_RULES: ErrorRule[] = [
+  [
+    /enter your current password/i,
+    'That password is incorrect. Enter your current password to change your phone number.',
+  ],
+  [
+    NEEDS_OLD_PHONE_PROOF,
+    'Verify your current phone number before changing it.',
+  ],
+  // Expiry, not a mistake the user made. A proof is good for 10 minutes
+  // (PROOF_TTL_MS, backend/packages/api/src/utils/phone-verification.ts —
+  // fixed, no env knob), and the Google-only flow spends that budget twice:
+  // SettingsForm submits the change, is refused for the OLD number, then runs a
+  // whole second SMS round-trip while still replaying the NEW number's original
+  // proof. Carrier delay plus reading a code out of a notification can outlive
+  // the first token, and the generic "Could not update your phone number.
+  // Please try again." sends them back round the same loop with the same dead
+  // token — the retry can never succeed. Name the expiry so "start again"
+  // reads as the fix rather than the thing that just failed.
+  [
+    /phone verification required/i,
+    'That verification expired. Request a new code and enter it within 10 minutes.',
+  ],
+];
+
 export async function startPhoneOtp(input: {
   phone: string;
   purpose: PhoneOtpPurpose;
@@ -46,6 +99,14 @@ export async function startPhoneOtp(input: {
   const phone = normalizePhone(input.phone);
   if (!phone)
     return fail('Please enter a valid phone number for the selected country.');
+  // The one choke point every OTP send passes through, so the check lives here
+  // rather than in AuthForm and SettingsForm separately. Mirrors the backend's
+  // isAllowedSmsDestination — including its password-reset exemption, which
+  // can only text a number already on an account and must keep working for
+  // customers whose stored number predates the allowlist. Without this the
+  // backend refuses silently and the user just never gets a code.
+  if (input.purpose !== 'password-reset' && !isServedPhoneCountry(phone))
+    return fail(UNSERVED_PHONE_COUNTRY_ERROR);
   try {
     await sdk.client.fetch('/store/phone-verification/start', {
       method: 'POST',
@@ -83,10 +144,29 @@ export async function checkPhoneOtp(input: {
   }
 }
 
+// The backend refuses to MOVE a phone on a session alone — a stolen session
+// could otherwise take the recovery number and convert itself into a permanent
+// takeover through /store/phone-verification/password-reset. It wants the
+// account's current password (emailpass accounts) or an OTP proof for the
+// number being moved away from (Google-only accounts). Both fields are optional
+// here because the one path that needs neither is still live: a Google account
+// adding its FIRST phone.
 export async function changePhone(input: {
   phone: string;
   token: string;
-}): Promise<{ ok: true; phone: string } | Fail> {
+  password?: string;
+  oldPhoneToken?: string;
+}): Promise<
+  | { ok: true; phone: string }
+  // `needsOldPhoneProof` says the account has no emailpass identity and already
+  // has a phone, so the backend wants an OTP proof for the CURRENT number. The
+  // caller cannot work that out for itself: the backend's rule is "has an
+  // emailpass identity", and an account holding BOTH a password and a Google
+  // login takes the password branch — any client-side "is this Google-only?"
+  // guess would have to reproduce that precedence and would drift from it. The
+  // route's own refusal cannot.
+  | (Fail & { needsOldPhoneProof?: true })
+> {
   const phone = normalizePhone(input.phone);
   if (!phone)
     return fail('Please enter a valid phone number for the selected country.');
@@ -101,17 +181,33 @@ export async function changePhone(input: {
     }>('/store/phone-verification/change', {
       method: 'POST',
       headers: { Authorization: `Bearer ${authToken}` },
-      body: { phone, token: input.token },
+      // Omitted rather than sent empty when absent: the backend distinguishes
+      // "no password supplied" from "wrong password" only by presence.
+      body: {
+        phone,
+        token: input.token,
+        ...(input.password ? { password: input.password } : {}),
+        ...(input.oldPhoneToken
+          ? { old_phone_token: input.oldPhoneToken }
+          : {}),
+      },
     });
     return { ok: true, phone: customer.phone };
   } catch (error) {
     logger.error('[phone-otp] change failed:', error);
-    // Same 429 retry-hint passthrough as startPhoneOtp/checkPhoneOtp — a
-    // rate-limited change should say how long to wait, not invite an
-    // immediate retry.
-    return fail(
+    // Re-auth refusals win; then the same 429 retry-hint passthrough as
+    // startPhoneOtp/checkPhoneOtp — a rate-limited change should say how long
+    // to wait, not invite an immediate retry; then the generic copy.
+    const message = friendlyError(
+      error,
+      PHONE_CHANGE_RULES,
       messageOf(error, 'Could not update your phone number. Please try again.'),
     );
+    return NEEDS_OLD_PHONE_PROOF.test(
+      error instanceof Error ? error.message : String(error),
+    )
+      ? { ok: false, error: message, needsOldPhoneProof: true }
+      : fail(message);
   }
 }
 

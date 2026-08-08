@@ -70,16 +70,21 @@ const TONE: Record<DeliveryStatus, 'orange' | 'blue' | 'green' | 'grey'> = {
 // error here rather than a raw token in the badge.
 const DEPOSIT_TONE: Record<
   GlobePayDeposit['status'],
-  'orange' | 'green' | 'red'
+  'orange' | 'green' | 'red' | 'purple'
 > = {
   pending: 'orange',
   settled: 'green',
   failed: 'red',
+  // Purple, matching routes/deposits/page.tsx: 'expired' is the sweep giving up
+  // while the gateway never ruled, so it is the likeliest UNCREDITED payment on
+  // the page and must not read as either settled, refused, or still-in-flight.
+  expired: 'purple',
 };
 const DEPOSIT_STATUS_LABEL: Record<GlobePayDeposit['status'], string> = {
   pending: 'Pending',
   settled: 'Settled',
   failed: 'Failed',
+  expired: 'Expired',
 };
 
 // First item's thumbnail + name/handle with a "+N more" tail — the operator
