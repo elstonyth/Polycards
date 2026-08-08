@@ -12,24 +12,24 @@ import { CardTile } from '@/components/cards/CardTile';
 
 /**
  * The default header (`view.title` below) — the caller pre-filters the RAIL
- * to Rare+ (commons/uncommons are catalogue noise there). The rail is ONE
- * horizontally-swipeable strip of the Rare+ subset (value-sorted desc, so
- * the top hits lead) — the catalog's
+ * to the top three tiers (Immortal/Legendary/Mythical — lower tiers are
+ * catalogue noise there). The rail is ONE horizontally-swipeable strip of
+ * that subset (value-sorted desc, so the top hits lead) — the catalog's
  * rail idiom, per the 90scard reference. The header's expand button opens a
- * full-screen dialog listing the SAME Rare+ subset grouped by canonical tier
- * (rarest first) as a grid — operator decision 2026-08-02: the expanded view
- * is the rail's "see everything in this tier band" companion, and commons are
- * catalogue noise there too. (This deliberately re-opens the gap the round-8
- * display-truth pass closed: the odds panel below still quotes value ranges
- * over the FULL pool, including tiers the dialog doesn't list. Operator
- * preference wins; don't "fix" one side without asking.)
+ * full-screen dialog listing the SAME top-tier subset grouped by canonical
+ * tier (rarest first) as a grid — operator decision 2026-08-08: the expanded
+ * view is the rail's "see everything in this tier band" companion, and lower
+ * tiers are catalogue noise there too. (This deliberately re-opens the gap
+ * the round-8 display-truth pass closed: the odds panel below still quotes
+ * value ranges over the FULL pool, including tiers the dialog doesn't list.
+ * Operator preference wins; don't "fix" one side without asking.)
  * Group headers carry the rarity dot + count and, when the admin published
  * odds, that tier's pull chance (the same data the odds panel shows; nothing
  * invented).
  *
- * A save-only Common/Uncommon pack has an EMPTY Rare+ rail but a non-empty
- * `full` pool — the caller still renders this component (gated on `pool`,
- * not `topPool`; see PackDetailClient's note). With no Rare+ subset to show,
+ * A pack with no top-tier cards has an EMPTY rail but a non-empty `full`
+ * pool — the caller still renders this component (gated on `pool`, not
+ * `topPool`; see PackDetailClient's note). With no top-tier subset to show,
  * the rail strip is skipped and BOTH the header and the dialog fall back to
  * the full pool ("All cards" / "Every card in this pack.") so the pool keeps
  * an entry point on the page.
@@ -40,9 +40,9 @@ export function PoolByRarity({
   tierChances,
   onOpen,
 }: {
-  /** Rare+ subset for the teaser rail, value-sorted. */
+  /** Top-tier subset for the teaser rail, value-sorted. */
   rail: PackCard[];
-  /** FULL pack pool (every tier) — the dialog's zero-Rare fallback only; with
+  /** FULL pack pool (every tier) — the dialog's zero-top-hit fallback only; with
    *  a non-empty `rail` the dialog shows `rail` (operator decision, header note). */
   full: PackCard[];
   /** Admin-published per-tier chances; null = this pack has no published odds. */
@@ -54,14 +54,14 @@ export function PoolByRarity({
   const drag = useDragScroll<HTMLDivElement>();
   const hasRail = rail.length > 0;
   // One derivation for every rendered string keyed on hasRail (h2, aria-label,
-  // blurb, and the dialog's cards/title) -- the QA script and any snapshots
-  // key on these exact strings, so they must stay byte-identical to before.
-  // Dialog shows the Rare+ subset whenever one exists (operator decision,
-  // see the header comment); the full pool only backs the zero-Rare edge.
+  // blurb, and the dialog's cards/title) -- the QA scripts key on these exact
+  // strings (scripts/qa-pool-modal.mjs, qa-mobile-cards.mjs); change together.
+  // Dialog shows the top-tier subset whenever one exists (operator decision,
+  // see the header comment); the full pool only backs the zero-top-hit edge.
   const view = hasRail
     ? {
-        title: 'Rare & above',
-        blurb: 'The Rare-and-up cards available in this pack.',
+        title: 'Top Hits',
+        blurb: 'The top-tier cards available in this pack.',
         cards: rail,
       }
     : {
@@ -83,7 +83,7 @@ export function PoolByRarity({
             aria-haspopup="dialog"
             aria-label={
               hasRail
-                ? `Show the ${view.cards.length} ${view.title} cards grouped by rarity`
+                ? `Show the ${view.cards.length} top-tier cards grouped by rarity`
                 : `Show all ${view.cards.length} cards grouped by rarity`
             }
             className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-white/60 transition-colors hover:bg-white/10 hover:text-white"
@@ -106,8 +106,8 @@ export function PoolByRarity({
           partly cancels px-10, leaving a small leading indent — the trade for
           a fully-lit first card without horizontal overflow. Adjacent cards'
           halos overlap across the gap and blend into one smooth glow.
-          Skipped entirely when the pack has no Rare+ cards — an empty strip
-          would still eat the halo padding for nothing to tease. */}
+          Skipped entirely when the pack has no top-tier cards — an empty
+          strip would still eat the halo padding for nothing to tease. */}
       {hasRail && (
         <div
           {...drag}
