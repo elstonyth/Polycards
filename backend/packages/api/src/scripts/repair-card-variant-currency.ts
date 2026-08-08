@@ -107,8 +107,33 @@ export default async function repairCardVariantCurrency({
   );
 
   // Sequential on purpose (pool posture); each update is one product.
+  //
+  // TOCTOU guard (PR #398 review): the plan is built from a snapshot, and a
+  // concurrent card edit (now fixed to write myr) could land between the
+  // snapshot and this loop — replacing its fresh price with the stale planned
+  // amount. Re-read the variant right before writing and skip if a myr row
+  // has appeared. A shared write lock would close the residual ~ms window,
+  // but this is a one-shot operator script; the recheck keeps it dependency-
+  // free and the skip is counted, not silent.
   let repaired = 0;
+  let skippedRace = 0;
   for (const action of plan.actions) {
+    const { data: fresh } = await query.graph({
+      entity: 'product',
+      fields: ['variants.prices.currency_code'],
+      filters: { id: action.product_id },
+    });
+    const freshPrices =
+      (fresh[0] as VariantPriceRow | undefined)?.variants?.[0]?.prices ?? [];
+    if (
+      freshPrices.some((p) => p?.currency_code?.toLowerCase() === 'myr')
+    ) {
+      skippedRace += 1;
+      logger.info(
+        `[repair-card-variant-currency] ${action.handle}: myr appeared since the snapshot (concurrent edit) — skipped.`,
+      );
+      continue;
+    }
     await updateProductsWorkflow(container).run({
       input: {
         products: [
@@ -131,6 +156,8 @@ export default async function repairCardVariantCurrency({
   }
 
   logger.info(
-    `[repair-card-variant-currency] Repaired ${repaired} variant(s). Done.`,
+    `[repair-card-variant-currency] Repaired ${repaired} variant(s)` +
+      (skippedRace > 0 ? `, ${skippedRace} skipped to a concurrent edit` : '') +
+      `. Done.`,
   );
 }
