@@ -156,6 +156,9 @@ export async function loadInventoryRows(
     // the from-PC importer now creates listings at FMV × FX × 1.2 (operator
     // request 2026-08-08), so showing raw FMV here would understate the price
     // the listing actually carries. A Card's own multiplier still wins.
+    // NOTE: this column is DERIVED (FMV × live fx × mult), never read from the
+    // variant's stored price — it equals the stored listing exactly only when
+    // the listing was created/backfilled at the same fx rate.
     const mult = card
       ? toMoney(card.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER)
       : DEFAULT_MARKET_MULTIPLIER;

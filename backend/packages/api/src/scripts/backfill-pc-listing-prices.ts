@@ -18,15 +18,19 @@
  * Idempotent: a re-run at the same fx rate finds every row already at target
  * and updates nothing.
  *
- * RUN (backend must be up):
+ * RUN (local, DB reachable):
  *   corepack yarn medusa exec ./src/scripts/backfill-pc-listing-prices.ts
+ *
+ * PROD: run via scripts/do-exec.mjs (the DO app console websocket — a piped
+ * `doctl apps console` has no TTY), and on the API component, not the worker:
+ * the basic-xxs worker OOMs on `medusa exec`.
  */
 import { ExecArgs } from '@medusajs/framework/types';
 import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
 import { updateProductsWorkflow } from '@medusajs/medusa/core-flows';
 import { PACKS_MODULE } from '../modules/packs';
 import type PacksModuleService from '../modules/packs/service';
-import { resolveFxRate } from '../modules/packs/pricing';
+import { resolveFxRateStrict } from '../modules/packs/pricing';
 import { toOptionalMoney } from '../modules/packs/money';
 import { pageAll } from '../api/utils/page-all';
 import {
@@ -102,7 +106,12 @@ export default async function backfillPcListingPrices({
     };
   });
 
-  const fx = await resolveFxRate(packs);
+  // STRICT resolver, not resolveFxRate: this is a mass money-write, and the
+  // display resolver silently falls back to DEFAULT_USD_MYR on a failed FX
+  // read — which would reprice the whole from-PC catalog at the hardcoded
+  // 4.7 in one shot. Same doctrine as the buyback credit path (audit
+  // 2026-07-07 M3): a money write must refuse an unfirm quote.
+  const fx = await resolveFxRateStrict(packs);
   const plan = planPcListingPriceBackfill(rows, fx);
 
   logger.info(

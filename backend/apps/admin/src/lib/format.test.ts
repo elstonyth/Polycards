@@ -6,6 +6,7 @@ import {
   slugKeystroke,
   toSlug,
   usdToMyr,
+  usdToMyrListing,
   gradeToGrader,
   graderFromInclude,
   orderDateTime,
@@ -167,6 +168,27 @@ describe('usdToMyr — parity with backend displayMarketPrice(usd, fx, 1)', () =
     ['usd < 0 (matches displayMarketPrice raw < 0 guard)', -5, 4.7],
   ])('collapses to 0 on bad input (%s)', (_label, usd, fx) => {
     expect(usdToMyr(usd, fx)).toBe(0);
+  });
+});
+
+describe('usdToMyrListing — parity with backend displayMarketPrice(usd, fx, 1.2)', () => {
+  it.each([
+    // usd,   fx,  expected = Math.round(usd*fx*1.2*100)/100 — the first two
+    // are the exact golden vectors pricing.unit.spec.ts pins on the backend.
+    [100, 4.7, 564],
+    [19.99, 4.5, 107.95],
+    [100, 4.0, 480], // product-from-pc.spec's listing golden vector
+    [0, 4.7, 0],
+  ])('usdToMyrListing(%f, %f) === %f', (usd, fx, expected) => {
+    expect(usdToMyrListing(usd, fx)).toBe(expected);
+  });
+
+  it.each([
+    ['fx = 0', 10, 0],
+    ['fx = NaN', 10, NaN],
+    ['usd < 0', -5, 4.7],
+  ])('collapses to 0 on bad input (%s)', (_label, usd, fx) => {
+    expect(usdToMyrListing(usd, fx)).toBe(0);
   });
 });
 

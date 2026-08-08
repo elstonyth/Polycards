@@ -201,6 +201,58 @@ medusaIntegrationTestRunner({
         expect(Number(stocked)).toBe(0);
       });
 
+      it('an explicit price beats the default +20% margin', async () => {
+        // `input.price ??` is now the ONLY way to opt out of the default
+        // markup — pin that an explicit price is stored verbatim, not
+        // FMV × FX × 1.2 (fx is still the pinned 4.0, so the default would
+        // have been 480).
+        const pp = await unwrapResponse(
+          api.post(
+            '/admin/pixel-pokemon',
+            {
+              name: 'Blastoise',
+              dex: 9,
+              image_url: 'https://example.com/blastoise-pixel.png',
+            },
+            adminHeaders(),
+          ),
+        );
+        const res = await unwrapResponse(
+          api.post(
+            '/admin/products/from-pricecharting',
+            {
+              pc_product_id: '6911',
+              pc_grade: 'PSA 9',
+              name: 'Blastoise',
+              set: 'Base Set',
+              grader: 'PSA',
+              grade: '9',
+              market_value: 100,
+              price: 55,
+              image: 'https://example.com/blastoise.png',
+              pixel_pokemon_id: pp.data.pixel_pokemon.id as string,
+            },
+            adminHeaders(),
+          ),
+        );
+        expect(res.status).toBe(201);
+
+        const query = getContainer().resolve('query');
+        const { data } = await query.graph({
+          entity: 'product',
+          fields: ['variants.prices.amount'],
+          filters: { id: res.data.product.id },
+        });
+        const variant = data[0].variants?.[0] as
+          | { prices?: { amount: unknown }[] }
+          | undefined;
+        const amounts = (variant?.prices ?? []).map((p: { amount: unknown }) =>
+          Number(p.amount),
+        );
+        expect(amounts).toContain(55);
+        expect(amounts).not.toContain(480);
+      });
+
       it('rejects creation without a pixel_pokemon_id', async () => {
         // Business rule (2026-07-11): a from-PC product must carry its pixel
         // Pokémon at add-time. The old "resolves from the card name" fallback

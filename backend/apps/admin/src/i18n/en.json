@@ -205,7 +205,7 @@
       "label": "Grade tier",
       "loadError": "Could not load prices for this product.",
       "empty": "No prices available for this product.",
-      "fxHint": "Prices shown in RM at the live FX rate — no markup applied. Margin is set when the card is registered for gacha."
+      "fxHint": "Raw market comps in RM at the live FX rate. The listing itself is created at +20% over the picked FMV."
     },
     "stock": {
       "label": "Stock quantity",
@@ -213,7 +213,7 @@
     },
     "preview": {
       "loading": "Loading FX rate…",
-      "line": "Raw ${{raw}} · FX {{fx}} · Listing RM{{market}} (no markup)"
+      "line": "Raw ${{raw}} · FX {{fx}} · FMV RM{{market}} · Lists at RM{{listing}} (+20% margin)"
     },
     "image": {
       "label": "Image",
