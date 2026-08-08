@@ -30,8 +30,27 @@ function dashboardHost(): { proto: string; host: string } {
   return { proto: "http:", host: "localhost" };
 }
 
+// Schemes this helper will hand to an <img src>. Anything with a scheme that
+// is not http(s) or an image data: URI is refused outright.
+//
+// Not exploitable today — all ~28 call sites are <img src>, and no current
+// browser runs javascript: from one — but the values reaching here are not all
+// ours: PriceCharting responses and admin free-text both flow in. Refusing the
+// scheme at the one shared helper is cheaper than auditing every future sink,
+// and the first call site to use an href would otherwise make it live.
+const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
+const SAFE_SCHEME = /^(?:https?:|data:image\/)/i;
+
+/** Relative paths (no scheme) are fine; a scheme must be http(s) or data:image. */
+function isSafeImageUrl(url: string): boolean {
+  return !HAS_SCHEME.test(url) || SAFE_SCHEME.test(url);
+}
+
 export function resolveImageUrl(url: string | null | undefined): string {
   if (!url) return "";
+  // ABOVE the data: passthrough on purpose: put it below and `data:text/html`
+  // would walk straight past the check.
+  if (!isSafeImageUrl(url)) return "";
   if (url.startsWith("data:")) return url;
 
   const { proto, host } = dashboardHost();
