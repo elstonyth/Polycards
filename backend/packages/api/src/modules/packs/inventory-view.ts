@@ -152,12 +152,16 @@ export async function loadInventoryRows(
       ? toMoney(card.market_value)
       : (toOptionalMoney(meta.fmv) ?? NaN);
     const hasFmv = Number.isFinite(fmvUsd);
-    // A product with no Card row has no configured multiplier, so price ===
-    // fmv reads honestly as "no markup set". Inventing DEFAULT_MARKET_MULTIPLIER
-    // here would show the operator a price they never chose.
+    // A product with no Card row prices at the DEFAULT_MARKET_MULTIPLIER —
+    // the from-PC importer now creates listings at FMV × FX × 1.2 (operator
+    // request 2026-08-08), so showing raw FMV here would understate the price
+    // the listing actually carries. A Card's own multiplier still wins.
+    // NOTE: this column is DERIVED (FMV × live fx × mult), never read from the
+    // variant's stored price — it equals the stored listing exactly only when
+    // the listing was created/backfilled at the same fx rate.
     const mult = card
       ? toMoney(card.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER)
-      : 1;
+      : DEFAULT_MARKET_MULTIPLIER;
     const grader =
       card?.grader ?? (typeof meta.grader === 'string' ? meta.grader : '');
     const b = buckets.get(p.handle);

@@ -51,6 +51,20 @@ export const usdToMyr = (usd: number, fx: number): number =>
     ? Math.round(usd * fx * 100) / 100
     : 0;
 
+// Client mirror of backend DEFAULT_MARKET_MULTIPLIER (packs/pricing.ts) —
+// separate packages, no shared import; keep in sync. The from-PC create
+// applies this margin to the listing price server-side (2026-08-08 fix).
+export const DEFAULT_MARKET_MULTIPLIER = 1.2;
+
+// USD → MYR LISTING price at the default +20% margin — what a from-PC import
+// actually lists at. COUPLED MIRROR of
+// displayMarketPrice(usd, fx, DEFAULT_MARKET_MULTIPLIER); parity asserted in
+// ./format.test.ts. Same bad-input collapse to 0 as usdToMyr.
+export const usdToMyrListing = (usd: number, fx: number): number =>
+  Number.isFinite(usd) && usd >= 0 && Number.isFinite(fx) && fx > 0
+    ? Math.round(usd * fx * DEFAULT_MARKET_MULTIPLIER * 100) / 100
+    : 0;
+
 // MYR → USD at the given rate (2dp) — the inverse, used when an operator authors
 // a value in RM but the stored/submitted FMV must stay USD so the daily
 // PriceCharting sync and buyback math keep their USD source of truth.

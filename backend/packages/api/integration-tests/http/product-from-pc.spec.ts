@@ -105,8 +105,8 @@ medusaIntegrationTestRunner({
       });
 
       it('creates a product with the PC link on metadata (no card)', async () => {
-        // Pin FX so the no-markup listing price is a deterministic golden
-        // vector: FMV 100 × FX 4.0 × NO margin = RM 400.
+        // Pin FX so the listing price is a deterministic golden vector:
+        // FMV 100 × FX 4.0 × DEFAULT_MARKET_MULTIPLIER 1.2 = RM 480.
         const fxPost = await unwrapResponse(
           api.post(
             '/admin/pricing/fx',
@@ -167,8 +167,8 @@ medusaIntegrationTestRunner({
         expect(prod.data.product.metadata.market_multiplier).toBeUndefined();
         expect(prod.data.product.metadata.pixel_pokemon_id).toBe(pixelId);
 
-        // Listing price is plain FMV × FX (no markup) and the default stock
-        // is 0 — units are counted when the physical slabs are in hand.
+        // Listing price is FMV × FX × the default +20% margin, and the default
+        // stock is 0 — units are counted when the physical slabs are in hand.
         const query = getContainer().resolve('query');
         const { data } = await query.graph({
           entity: 'product',
@@ -194,11 +194,73 @@ medusaIntegrationTestRunner({
         const amounts = (variant?.prices ?? []).map((p: { amount: unknown }) =>
           Number(p.amount),
         );
-        expect(amounts).toContain(400);
+        expect(amounts).toContain(480);
         const stocked =
           variant?.inventory_items?.[0]?.inventory?.location_levels?.[0]
             ?.stocked_quantity;
         expect(Number(stocked)).toBe(0);
+      });
+
+      it('an explicit price beats the default +20% margin', async () => {
+        // `input.price ??` is now the ONLY way to opt out of the default
+        // markup — pin that an explicit price is stored verbatim, not
+        // FMV × FX × 1.2 (fx is still the pinned 4.0, so the default would
+        // have been 480).
+        const pp = await unwrapResponse(
+          api.post(
+            '/admin/pixel-pokemon',
+            {
+              name: 'Blastoise',
+              dex: 9,
+              image_url: 'https://example.com/blastoise-pixel.png',
+            },
+            adminHeaders(),
+          ),
+        );
+        const res = await unwrapResponse(
+          api.post(
+            '/admin/products/from-pricecharting',
+            {
+              pc_product_id: '6911',
+              pc_grade: 'PSA 9',
+              name: 'Blastoise',
+              set: 'Base Set',
+              grader: 'PSA',
+              grade: '9',
+              market_value: 100,
+              price: 55,
+              image: 'https://example.com/blastoise.png',
+              pixel_pokemon_id: pp.data.pixel_pokemon.id as string,
+            },
+            adminHeaders(),
+          ),
+        );
+        expect(res.status).toBe(201);
+
+        const query = getContainer().resolve('query');
+        const { data } = await query.graph({
+          entity: 'product',
+          fields: ['variants.prices.amount'],
+          filters: { id: res.data.product.id },
+        });
+        const variant = data[0].variants?.[0] as
+          | { prices?: { amount: unknown }[] }
+          | undefined;
+        const amounts = (variant?.prices ?? []).map((p: { amount: unknown }) =>
+          Number(p.amount),
+        );
+        expect(amounts).toContain(55);
+        expect(amounts).not.toContain(480);
+
+        // Provenance marker: the repricing backfill skips manual prices, and
+        // this metadata flag is the only thing that distinguishes them.
+        const prod = await unwrapResponse(
+          api.get(
+            `/admin/products/${res.data.product.id}?fields=+metadata`,
+            adminHeaders(),
+          ),
+        );
+        expect(prod.data.product.metadata.price_source).toBe('manual');
       });
 
       it('rejects creation without a pixel_pokemon_id', async () => {

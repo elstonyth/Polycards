@@ -1,4 +1,4 @@
-// QA: pool rail ("Rare & above" / "All cards") + expand modal on /slots/[slug].
+// QA: pool rail ("Top Hits" / "All cards") + expand modal on /slots/[slug].
 // Usage: node scripts/qa-pool-modal.mjs [baseUrl]
 // Screenshots to docs/research/qa-pool-modal-*.png, JSON to stdout.
 import { mkdirSync } from 'node:fs';
@@ -7,11 +7,11 @@ import { chromium } from 'playwright';
 const BASE = process.argv[2] ?? 'http://127.0.0.1:4000';
 mkdirSync('docs/research', { recursive: true });
 
-// The dialog's aria-label mirrors its heading — "Rare & above" normally,
-// "All cards" for a zero-Rare pack. One selector for both, and specific
-// enough to never match the cookie-consent dialog.
+// The dialog's aria-label mirrors its heading — "Top Hits" normally,
+// "All cards" for a pack with no top-tier cards. One selector for both, and
+// specific enough to never match the cookie-consent dialog.
 const DIALOG_SEL =
-  '[role="dialog"][aria-label="Rare & above"], [role="dialog"][aria-label="All cards"]';
+  '[role="dialog"][aria-label="Top Hits"], [role="dialog"][aria-label="All cards"]';
 
 // Every probe boolean below (scrollable, dragScrolls, clickStillWorks,
 // escStack, the heading/rail consistency check) feeds this -- a failed
@@ -21,7 +21,7 @@ let anyFailure = false;
 const browser = await chromium.launch();
 try {
   // Find pack slugs that actually render the section (any non-empty pool —
-  // "Rare & above" normally, the "All cards" fallback for zero-Rare packs).
+  // "Top Hits" normally, the "All cards" fallback for zero-top-hit packs).
   const scout = await browser.newPage();
   await scout.goto(`${BASE}/slots`, { waitUntil: 'domcontentloaded' });
   await scout.waitForTimeout(2000);
@@ -50,7 +50,7 @@ try {
         timeout: 30000,
       });
       const h2 = page
-        .locator('h2', { hasText: /^(Rare & above|All cards)$/ })
+        .locator('h2', { hasText: /^(Top Hits|All cards)$/ })
         .first();
       try {
         await h2.waitFor({ timeout: 8000 });
@@ -65,7 +65,7 @@ try {
         path: `docs/research/qa-pool-modal-${label}-1-rail.png`,
       });
 
-      // Expand via the header icon button (aria: "Show the N Rare & above
+      // Expand via the header icon button (aria: "Show the N top-tier
       // cards grouped by rarity" / "Show all N cards grouped by rarity").
       const expand = page
         .locator('button[aria-label*="grouped by rarity"]')
@@ -87,7 +87,10 @@ try {
           scrollable: d.scrollHeight > d.clientHeight,
         };
       }, DIALOG_SEL);
-      if (!m.scrollable) anyFailure = true;
+      // Only demand a scrollable dialog when it holds more than two grid
+      // rows' worth of cards — the top-tier subset can be small enough to
+      // fit inside the 85vh panel, and that's healthy, not a regression.
+      if (!m.scrollable && m.cardCount > 6) anyFailure = true;
       console.log(JSON.stringify({ slug, label, ...m }));
       await page.screenshot({
         path: `docs/research/qa-pool-modal-${label}-2-modal.png`,
@@ -137,26 +140,26 @@ try {
 
       // Mouse drag-to-scroll on the rail: drag moves scrollLeft and opens
       // nothing; a plain click still opens the card overlay. Only meaningful
-      // where the rail overflows (narrow viewports). A zero-Rare pack (the
+      // where the rail overflows (narrow viewports). A zero-top-hit pack (the
       // "All cards" fallback) renders NO rail at all — count() first, or
       // rail.evaluate() would wait 30s and throw, aborting the whole run.
       const rail = page.locator('div.cursor-grab').first();
       if ((await page.locator('div.cursor-grab').count()) === 0) {
         if (headingText === 'All cards') {
-          // Genuine zero-Rare fallback -- no rail is correct here. Don't
-          // mark done: keep looking for a Rare+ pack so the drag probe
-          // actually runs at least once per viewport.
+          // Genuine zero-top-hit fallback -- no rail is correct here. Don't
+          // mark done: keep looking for a pack with top-tier cards so the
+          // drag probe actually runs at least once per viewport.
           console.log(
             JSON.stringify({
               slug,
               label,
-              drag: 'skipped: no rail (zero-Rare "All cards" fallback)',
+              drag: 'skipped: no rail (zero-top-hit "All cards" fallback)',
             }),
           );
         } else {
-          // The heading says "Rare & above" (or is unrecognized) but no
+          // The heading says "Top Hits" (or is unrecognized) but no
           // rail rendered -- that's a real regression, not the documented
-          // zero-Rare edge case.
+          // zero-top-hit edge case.
           anyFailure = true;
           console.log(
             JSON.stringify({
@@ -174,11 +177,20 @@ try {
         cw: el.clientWidth,
       }));
       // boundingBox() is null when the rail isn't visible — bail with a
-      // report line instead of throwing and aborting the whole run.
-      const box = dims.sw > dims.cw ? await rail.boundingBox() : null;
+      // report line instead of throwing and aborting the whole run. Require
+      // MEANINGFUL overflow (> 40px, roughly a quarter card): the Top Hits
+      // subset is small, and on wide viewports the negative-margin/padding
+      // hack leaves a few sub-card pixels of scrollWidth that a drag can't
+      // register against — that's not a drag regression.
+      if (dims.sw - dims.cw > 40) await rail.scrollIntoViewIfNeeded();
+      const box = dims.sw - dims.cw > 40 ? await rail.boundingBox() : null;
       if (box) {
         const cx = box.x + box.width / 2;
-        const cy = box.y + box.height / 2;
+        // Clamp INSIDE the viewport: the rail is tall (slab halo padding) and
+        // its box center can land below the fold — mouse events at off-screen
+        // coordinates silently no-op and read as a fake drag regression.
+        const vh = page.viewportSize().height;
+        const cy = Math.min(Math.max(box.y + box.height / 2, 10), vh - 10);
         await page.mouse.move(cx, cy);
         await page.mouse.down();
         for (let i = 1; i <= 8; i++) await page.mouse.move(cx - i * 25, cy);
@@ -211,6 +223,9 @@ try {
           }),
         );
       } else {
+        // Not marking done — mirror the no-rail branch: the Top Hits rail
+        // is small and often fits wide viewports, so keep scanning packs
+        // until one overflows and the drag probe actually runs.
         console.log(
           JSON.stringify({
             slug,
@@ -218,13 +233,19 @@ try {
             drag: 'skipped: rail not overflowing or not visible',
           }),
         );
+        await page.close();
+        continue;
       }
       done = true;
       await page.close();
     }
     if (!done)
       console.log(
-        JSON.stringify({ label, error: 'no pack with pool section' }),
+        JSON.stringify({
+          label,
+          warning:
+            'drag probe never ran: no pack with a pool section and an overflowing rail',
+        }),
       );
   }
   if (anyFailure) process.exitCode = 1;
