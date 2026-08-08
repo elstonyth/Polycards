@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -25,6 +25,7 @@ import {
 } from '../../../lib/admin-rest';
 import { orderDateTime, rm } from '../../../lib/format';
 import { resolveImageUrl } from '../../../lib/image-url';
+import { applyRangeSelect } from '../../../lib/range-select';
 import { useTableSort } from '../../../lib/use-table-sort';
 import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
 
@@ -177,12 +178,18 @@ const InventoryListPage = () => {
       return next;
     });
 
-  const toggleOne = (id: string) =>
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (!next.delete(id)) next.add(id);
-      return next;
-    });
+  // Shift-click range select (the Gmail convention) — the range math lives in
+  // lib/range-select.ts (pure, vitest-covered). The anchor is the previously
+  // clicked row; a ref, not state, because it never needs a re-render. pageIds
+  // is the CURRENT sort order, so a range always matches what is on screen.
+  const anchorRef = useRef<string | null>(null);
+  const handleRowCheck = (handle: string, shiftKey: boolean) => {
+    const anchor = anchorRef.current;
+    anchorRef.current = handle;
+    setSelected((prev) =>
+      applyRangeSelect(prev, pageIds, anchor, handle, shiftKey),
+    );
+  };
 
   // Partial success by design, same summary shape as the deliveries bulk tool.
   // Two skip classes, both counted rather than silently dropped: a row that is
@@ -268,6 +275,7 @@ const InventoryListPage = () => {
     // refetches the eligible-products map this run just invalidated. Keeping
     // the selection after a run would leave that map stale for the session.
     setSelected(new Set());
+    anchorRef.current = null;
   };
 
   // Exports `q`, the APPLIED filter, and never `search`: `search` is the raw
@@ -314,6 +322,9 @@ const InventoryListPage = () => {
             onChange={(e) => {
               setSearch(e.target.value);
               setSelected(new Set());
+              // A new search is a new list — a stale anchor would range-select
+              // across unrelated rows on the first shift-click.
+              anchorRef.current = null;
             }}
           />
           <Button
@@ -346,6 +357,9 @@ const InventoryListPage = () => {
           >
             {t('inventory.listToCard')}
           </Button>
+          <Text size="xsmall" className="text-ui-fg-subtle">
+            {t('inventory.shiftHint')}
+          </Text>
         </div>
       )}
 
@@ -409,12 +423,20 @@ const InventoryListPage = () => {
                   className="cursor-pointer"
                   onClick={() => navigate(`/inventory/list/${r.handle}`)}
                 >
-                  {/* stopPropagation so ticking a row does not also navigate. */}
-                  <Table.Cell onClick={(e) => e.stopPropagation()}>
+                  {/* stopPropagation so ticking a row does not also navigate.
+                      select-none so a shift-click can't smear a text selection
+                      across the rows it just swept. onClick, not
+                      onCheckedChange: only the DOM event carries shiftKey, and
+                      Radix checkboxes fire click for keyboard activation too,
+                      so no second handler is needed. */}
+                  <Table.Cell
+                    className="select-none"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <Checkbox
                       aria-label={t('inventory.selectOne', { name: r.name })}
                       checked={selected.has(r.handle)}
-                      onCheckedChange={() => toggleOne(r.handle)}
+                      onClick={(e) => handleRowCheck(r.handle, e.shiftKey)}
                     />
                   </Table.Cell>
                   <Table.Cell>

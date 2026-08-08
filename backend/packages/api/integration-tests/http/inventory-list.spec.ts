@@ -181,9 +181,10 @@ medusaIntegrationTestRunner({
         expect(zzyzx!.graded).toBe(true);
         expect(zzyzx!.name).toBe('Zzyzx Eligible Product');
         expect(zzyzx!.sku).toBe('zzyzx-eligible'); // no variant -> handle
-        // 77 USD x 4.5 with NO multiplier (not a card): fmv === price.
+        // 77 USD x 4.5 x DEFAULT_MARKET_MULTIPLIER 1.2: a non-card row prices
+        // at the default margin (matches the from-PC importer's listing price).
         expect(zzyzx!.fmv).toBe(346.5);
-        expect(zzyzx!.price).toBe(346.5);
+        expect(zzyzx!.price).toBe(415.8);
 
         // A search that matches NOTHING must render an empty list, not a 500.
         // handles === [] is a real hazard, not a formality: every aggregate
