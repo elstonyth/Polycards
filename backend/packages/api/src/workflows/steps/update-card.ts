@@ -1,5 +1,9 @@
 import { createStep, StepResponse } from '@medusajs/framework/workflows-sdk';
-import { DEFAULT_MARKET_MULTIPLIER } from '../../modules/packs/pricing';
+import {
+  DEFAULT_MARKET_MULTIPLIER,
+  displayMarketPrice,
+  resolveFxRate,
+} from '../../modules/packs/pricing';
 import type { MedusaContainer } from '@medusajs/framework/types';
 import { MedusaError, ProductStatus, Modules } from '@medusajs/framework/utils';
 import {
@@ -146,7 +150,22 @@ export const updateCardInvoke = async (
     label_note: card.label_note ?? null,
   };
 
-  const salePrice = input.price ?? input.market_value;
+  // MYR listing amount for the Product mirror. Card.price is MYR (the admin
+  // renders it with rm()); the NULL-price "use FMV" fallback must CONVERT —
+  // market_value is raw USD — at the card's own multiplier, matching the
+  // admin cards list (`c.price ?? priceBreakdown.displayPrice`) and the
+  // from-PC create path. The old `input.price ?? input.market_value` mixed a
+  // MYR price with a USD FMV in one field, and the mirror below stamped it
+  // 'usd' — which REPLACED the variant's myr price outright
+  // (updatePriceSets swaps the whole set), leaving every edited card
+  // usd-only in a store whose single region sells in MYR.
+  const salePrice =
+    input.price ??
+    displayMarketPrice(
+      input.market_value,
+      await resolveFxRate(packs),
+      input.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER,
+    );
 
   // Slab bake (spec §C): re-bake on EVERY save (no dirty-check — one
   // composite per admin save is cheap and can never go stale when the photo
@@ -261,7 +280,10 @@ export const updateCardInvoke = async (
                     variants: [
                       {
                         id: variantId,
-                        prices: [{ currency_code: 'usd', amount: salePrice }],
+                        // 'myr', matching buildCardProductInput — the single
+                        // MYR region resolves calculated_price from this row,
+                        // and this list REPLACES the whole price set.
+                        prices: [{ currency_code: 'myr', amount: salePrice }],
                       },
                     ],
                   }
@@ -414,10 +436,21 @@ export const updateCardStep = createStep(
                     variants: [
                       {
                         id: p.variantId,
+                        // Restore in MYR like the forward path — the prior
+                        // variant price was never loaded (it lives in a price
+                        // set), so it is recomputed from the Card snapshot:
+                        // stored MYR price, or the FMV-derived display price
+                        // at compensation-time fx.
                         prices: [
                           {
-                            currency_code: 'usd',
-                            amount: data.card.price ?? data.card.market_value,
+                            currency_code: 'myr',
+                            amount:
+                              data.card.price ??
+                              displayMarketPrice(
+                                data.card.market_value,
+                                await resolveFxRate(packs),
+                                data.card.market_multiplier,
+                              ),
                           },
                         ],
                       },
