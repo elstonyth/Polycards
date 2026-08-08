@@ -8,7 +8,6 @@ import {
   ArrowLeft,
   ArrowRight,
   Clock,
-  Flame,
   Info,
   Minus,
   Play,
@@ -36,7 +35,7 @@ import {
   poolValueRange,
   tierValueRanges,
 } from '@/lib/packs-format';
-import { RARITY_ORDER } from '@/lib/rarity';
+import { isTopRarity } from '@/lib/rarity';
 import { useLiveRecentPulls } from '@/lib/use-recent-pulls';
 import { useTopUp } from '@/components/app-shell/TopUpProvider';
 import { CardTile } from '@/components/cards/CardTile';
@@ -109,7 +108,6 @@ export default function PackDetailClient({
   // state (no mock fallback). Pull Odds are the SECRET-decoupled, statically-
   // published `ODDS` — they never reflect the admin-tuned win rates (see
   // packs.ts / route.ts).
-  const topHits = liveDetail?.topHits ?? [];
 
   // The reel (openBatch) caps a single open at 3 packs.
   const maxQty = 3;
@@ -124,25 +122,20 @@ export default function PackDetailClient({
   // The full public prize pool (value-sorted) — feeds the odds panel's
   // valueRange/tierRanges, gates the guest demo-spin CTA (pure theater on the
   // reel, /spin?demo=1 — no charge, nothing won), and backs the pool dialog
-  // only in the zero-Rare fallback (PoolByRarity's `full` prop).
+  // only in the zero-top-hit fallback (PoolByRarity's `full` prop).
   // Memoized so the `?? []` fallback doesn't mint a fresh array every render —
   // that identity churn would make the valueRange memo below recompute always.
   const pool = useMemo(() => liveDetail?.pool ?? [], [liveDetail?.pool]);
 
-  // Rare+ subset for the "Rare & above" section: the rail shows the whole subset,
-  // the expand dialog lists the same Rare-and-above cards grouped by tier
-  // (commons/uncommons are catalogue noise there). Order inherited (pool is
+  // Top-tier subset for the "Top Hits" section (Immortal/Legendary/Mythical —
+  // operator decision 2026-08-08): the rail shows the whole subset, the expand
+  // dialog lists the same cards grouped by tier. Order inherited (pool is
   // value-sorted desc). The FULL pool still feeds the demo spin + odds range.
-  // Memoized like `pool` above (stable prop identity for PoolByRarity); the
-  // i >= 0 bound keeps an unknown rarity string (indexOf -1) out rather than
-  // letting it pass the <= check.
-  const topPool = useMemo(() => {
-    const rareIndex = RARITY_ORDER.indexOf('Rare');
-    return pool.filter((c) => {
-      const i = RARITY_ORDER.indexOf(c.rarity);
-      return i >= 0 && i <= rareIndex;
-    });
-  }, [pool]);
+  // Memoized like `pool` above (stable prop identity for PoolByRarity).
+  const topPool = useMemo(
+    () => pool.filter((c) => isTopRarity(c.rarity)),
+    [pool],
+  );
 
   // Card-value range over the FULL pool (not topPool) — one derivation feeding
   // both the odds-panel gate and its range row.
@@ -484,45 +477,26 @@ export default function PackDetailClient({
             min-w-0: the pool rails hold nowrap prices whose min-content width
             would otherwise stretch this grid item past the viewport. */}
         <div className="flex min-w-0 flex-col gap-6 lg:col-start-1 lg:row-start-2">
-          {/* Top Hits — admin-ordered (1 = leftmost). Hidden entirely when the
-              admin picked none: an un-curated pack must not fake a curated
-              section (the old fallback showed the 5 highest-value cards). */}
-          {topHits.length > 0 && (
-            <Reveal as="section">
-              <div className="mb-1 flex items-center gap-2">
-                <Flame className="h-4 w-4 text-chase" aria-hidden />
-                <h2 className="font-heading text-lg font-bold tracking-tight text-white">
-                  Top Hits
-                </h2>
-              </div>
-              <p className="mb-3 text-[13px] text-white/70">
-                The top items available in this pack.
-              </p>
-              <div className="grid grid-cols-3 gap-3 sm:grid-cols-5">
-                {topHits.map((c) => (
-                  <CardTile
-                    key={c.id}
-                    card={c}
-                    onOpen={(card) => setOpenCard(toSeed(card))}
-                  />
-                ))}
-              </div>
-            </Reveal>
-          )}
+          {/* The admin-CURATED top-hits grid that used to render here was
+              removed 2026-08-08 (operator decision): the rail below is THE
+              "Top Hits" section now. `liveDetail.topHits` and the admin
+              curation UI (backend/apps/admin packs/[slug]) still exist —
+              don't prune them; only the storefront rendering is retired. */}
 
-          {/* Rare & above — Rare+ only, as a swipeable rail whose expand
-              button opens a dialog of the SAME Rare+ subset (rarest first,
-              per-tier pull chance when published) — operator decision
-              2026-08-02; commons are catalogue noise in the expanded view
-              too. The odds panel below still quotes value ranges over the
-              FULL pool — a deliberate, operator-accepted mismatch (see
-              PoolByRarity's header note before "fixing" it). Header lives
-              inside the component (the expand button sits in it). Gated on
-              `pool`, not `topPool`: a save-only Common/Uncommon pack has an
-              empty Rare+ subset but a non-empty pool — PoolByRarity drops
-              the rail strip and falls back to the full pool under an
-              "All cards" header, so the pool keeps an entry point instead of
-              vanishing under an odds panel with nothing to point at. */}
+          {/* Top Hits — Immortal/Legendary/Mythical only, as a swipeable
+              rail whose expand button opens a dialog of the SAME top-tier
+              subset (rarest first, per-tier pull chance when published) —
+              operator decision 2026-08-08; lower tiers are catalogue noise
+              in the expanded view too. The odds panel below still quotes
+              value ranges over the FULL pool — a deliberate,
+              operator-accepted mismatch (see PoolByRarity's header note
+              before "fixing" it). Header lives inside the component (the
+              expand button sits in it). Gated on `pool`, not `topPool`: a
+              pack with no top-tier cards has an empty subset but a
+              non-empty pool — PoolByRarity drops the rail strip and falls
+              back to the full pool under an "All cards" header, so the pool
+              keeps an entry point instead of vanishing under an odds panel
+              with nothing to point at. */}
           {pool.length > 0 && (
             <Reveal as="section">
               <PoolByRarity
