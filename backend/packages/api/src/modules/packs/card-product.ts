@@ -41,6 +41,10 @@ export type CardProductMetadata = {
   // Public slab-composite mirror (URL only — the private provider key never
   // belongs in product metadata). Present only for graded cards.
   slab_image?: string | null;
+  // Price provenance: 'manual' = the operator/API supplied an explicit price
+  // at create time, so the repricing backfill must never overwrite it.
+  // Absent = derived from FMV.
+  price_source?: 'manual';
 };
 
 export type CardProductSeed = {
@@ -128,6 +132,9 @@ export function buildCardProductInput(
         : {}),
       ...(card.metadata.slab_image !== undefined
         ? { slab_image: card.metadata.slab_image }
+        : {}),
+      ...(card.metadata.price_source !== undefined
+        ? { price_source: card.metadata.price_source }
         : {}),
     },
   };

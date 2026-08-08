@@ -30,7 +30,12 @@ import {
 } from '../../../lib/queries';
 import { resolveImageUrl } from '../../../lib/image-url';
 import { validateImageFile } from '../../../lib/image-validation';
-import { rm, usdToMyr, gradeToGrader } from '../../../lib/format';
+import {
+  rm,
+  usdToMyr,
+  usdToMyrListing,
+  gradeToGrader,
+} from '../../../lib/format';
 import CardPokemonFields, {
   type CardPokemonValue,
 } from '../../cards/CardPokemonFields';
@@ -44,9 +49,10 @@ export const config: RouteConfig = {
   rank: 1,
 };
 
-// NOTE: usdToMyr is display-only preview math; the value submitted to the backend
-// is always the raw USD grade price. NO markup is applied anywhere on this page —
-// margin belongs to gacha-card registration.
+// NOTE: usdToMyr is display-only preview math showing the raw FMV in RM; the
+// value submitted to the backend is always the raw USD grade price. The BACKEND
+// applies the default +20% margin (DEFAULT_MARKET_MULTIPLIER) to the listing
+// price at create time — this page never sends `price`.
 
 // Client mirror of backend api/admin/media/ingest-pc-image.ts isPcImageUrl —
 // PriceCharting's price API exposes no image, so the backend scrapes the photo
@@ -492,7 +498,7 @@ const AddFromPriceChartingPage = () => {
           </div>
         )}
 
-        {/* Step 3 — live preview (raw USD → MYR, no markup) */}
+        {/* Step 3 — live preview: raw FMV in RM plus the actual +20% listing */}
         {pcGrade !== null && marketValue !== null && (
           <div className="bg-ui-bg-subtle rounded-lg p-4">
             {fxEffective === null ? (
@@ -511,6 +517,7 @@ const AddFromPriceChartingPage = () => {
                   raw: marketValue.toFixed(2),
                   fx: fxEffective.toFixed(4),
                   market: usdToMyr(marketValue, fxEffective).toFixed(2),
+                  listing: usdToMyrListing(marketValue, fxEffective).toFixed(2),
                 })}
               </Text>
             )}
