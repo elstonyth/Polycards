@@ -30,6 +30,7 @@ import {
 } from '../../../lib/queries';
 import { resolveImageUrl } from '../../../lib/image-url';
 import { useTableSort } from '../../../lib/use-table-sort';
+import { applyRangeSelect } from '../../../lib/range-select';
 import {
   rm,
   usdToMyr,
@@ -326,6 +327,28 @@ const AddFromPcCollectionPage = () => {
   const picked = (offers ?? []).filter((o) => selected[offerKey(o)]);
   const allVisibleSelected =
     visible.length > 0 && visible.every((o) => selected[offerKey(o)]);
+
+  // Shift-click range select (the Gmail convention) — the range math lives in
+  // lib/range-select.ts (pure, vitest-covered). The selection here is a
+  // Record (it survives filter changes by design), so convert to a Set for
+  // applyRangeSelect and back; keys outside the visible range pass through
+  // untouched. A stale anchor (filtered out) falls back to a plain toggle.
+  const anchorRef = useRef<string | null>(null);
+  const handleRowCheck = (key: string, shiftKey: boolean) => {
+    const anchor = anchorRef.current;
+    anchorRef.current = key;
+    setSelected((prev) => {
+      const prevSet = new Set(Object.keys(prev).filter((k) => prev[k]));
+      const nextSet = applyRangeSelect(
+        prevSet,
+        visible.map(offerKey),
+        anchor,
+        key,
+        shiftKey,
+      );
+      return Object.fromEntries([...nextSet].map((k) => [k, true]));
+    });
+  };
 
   const toggleAllVisible = () => {
     setSelected((prev) => {
@@ -714,16 +737,16 @@ const AddFromPcCollectionPage = () => {
                     const key = offerKey(o);
                     return (
                       <Table.Row key={key}>
-                        <Table.Cell>
+                        {/* select-none: a shift-click must range-select, not
+                            smear a text selection across the rows in between. */}
+                        <Table.Cell className="select-none">
                           <Checkbox
                             checked={!!selected[key]}
                             aria-label={t('pcCollection.selectRow', {
                               name: o.name || o.product_id,
                               tag: o.include || '—',
                             })}
-                            onCheckedChange={(v) =>
-                              setSelected((s) => ({ ...s, [key]: v === true }))
-                            }
+                            onClick={(e) => handleRowCheck(key, e.shiftKey)}
                           />
                         </Table.Cell>
                         <Table.Cell>
