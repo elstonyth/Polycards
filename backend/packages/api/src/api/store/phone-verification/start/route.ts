@@ -48,6 +48,8 @@ export async function POST(
     }
   }
 
-  await sendPhoneOtp(process.env, logger, phone);
+  // purpose is validated above; it selects the Verify template so the SMS
+  // names the flow the code is for.
+  await sendPhoneOtp(process.env, logger, phone, purpose);
   res.json({ ok: true });
 }
