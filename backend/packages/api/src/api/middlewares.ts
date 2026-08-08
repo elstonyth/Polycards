@@ -805,6 +805,13 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      // Edit a queued challenge in place (POST /admin/challenge/schedule/:id)
+      // — same credit-minting surface as queueing one, same admin budget.
+      matcher: '/admin/challenge/schedule/*',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
       // Drop a queued challenge (DELETE /admin/challenge/schedule/:id).
       matcher: '/admin/challenge/schedule/*',
       method: 'DELETE',

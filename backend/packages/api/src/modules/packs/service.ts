@@ -6060,8 +6060,13 @@ class PacksModuleService extends MedusaService({
         // to open one from. In production this carries a plain read context, so
         // each row opens its OWN transaction — which is exactly the per-row
         // atomicity wanted.
-        await this.promoteOneChallengeSchedule(row, sharedContext);
-        promoted += 1;
+        //
+        // `false` means the row vanished or stopped being due between the list
+        // above and the locked re-read inside — an operator removed or
+        // rescheduled it mid-batch. Not promoted, not failed: there is nothing
+        // left to retry.
+        if (await this.promoteOneChallengeSchedule(row.id, now, sharedContext))
+          promoted += 1;
       } catch {
         // Swallowed on purpose: a later edition must still get its chance, and
         // the unstamped row IS the error report (visible in the admin, retried
@@ -6081,6 +6086,16 @@ class PacksModuleService extends MedusaService({
    * would re-run saveChallengeStages, silently reverting any edit an operator
    * made to the live ladder in the meantime.
    *
+   * The row is RE-READ here, under FOR UPDATE, rather than trusted from the
+   * caller's list: an admin edit or delete can land between that list and this
+   * transaction, and promoting the captured copy would push stale stages live
+   * (or resurrect a just-removed edition) while the admin route had already
+   * reported success. The lock closes the other half too — an edit that
+   * arrives DURING this transaction blocks on the row, then its
+   * `applied_at: null` selector matches nothing and the route reports "went
+   * live while you were editing" instead of a false success. A row that is
+   * gone, already stamped, or no longer due answers `false`: nothing to do.
+   *
    * The stage write goes through the normal save path, NOT a raw write: that is
    * what validates the prize cards still exist and what writes the audit row,
    * so a promoted edition is indistinguishable from a hand-saved one. Both
@@ -6089,19 +6104,136 @@ class PacksModuleService extends MedusaService({
    */
   @InjectTransactionManager()
   async promoteOneChallengeSchedule(
-    row: { id: string; label: string | null; starts_at: Date; stages: unknown },
+    id: string,
+    now: Date,
     @MedusaContext() sharedContext: Context = {},
-  ): Promise<void> {
+  ): Promise<boolean> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const [fresh] = await em.execute<
+      {
+        id: string;
+        starts_at: Date | string;
+        label: string | null;
+        stages: unknown;
+      }[]
+    >(
+      `SELECT id, starts_at, label, stages
+         FROM challenge_schedule
+        WHERE id = ? AND applied_at IS NULL AND deleted_at IS NULL
+          FOR UPDATE`,
+      [id],
+    );
+    if (!fresh || new Date(fresh.starts_at).getTime() > now.getTime())
+      return false;
     await this.saveChallengeStages(
       {
-        stages: (row.stages as ChallengeStageInput[]) ?? [],
+        stages: (fresh.stages as ChallengeStageInput[]) ?? [],
         adminId: 'system',
-        reason: `Scheduled challenge promoted (${row.label ?? new Date(row.starts_at).toISOString()})`,
+        reason: `Scheduled challenge promoted (${fresh.label ?? new Date(fresh.starts_at).toISOString()})`,
       },
       sharedContext,
     );
+    // Selector repeats the unapplied condition out of the same discipline as
+    // the admin routes — under the row lock it cannot actually lose, but an
+    // id-only stamp is the exact shape this method exists to forbid.
     await this.updateChallengeSchedules(
-      { selector: { id: row.id }, data: { applied_at: new Date() } },
+      { selector: { id, applied_at: null }, data: { applied_at: new Date() } },
+      sharedContext,
+    );
+    return true;
+  }
+
+  /**
+   * Edit a QUEUED edition in place — new start, name, prize ladder — with the
+   * conflict check, the write, and its audit row in ONE transaction.
+   *
+   * Same FOR UPDATE idiom as promoteOneChallengeSchedule, and against the same
+   * rivals: the row lock serializes this edit against the hourly promotion
+   * (an edit arriving while a promotion holds the row blocks, then reads
+   * `applied_at` and refuses) and against another operator's concurrent
+   * edit/delete (they apply one after the other, each auditing the state it
+   * actually replaced — `before` can never skip an intervening write).
+   *
+   * The audit insert shares the transaction, so a failed audit rolls the
+   * schedule change back with it: no edit can land unrecorded.
+   */
+  @InjectTransactionManager()
+  async editChallengeSchedule(
+    input: {
+      id: string;
+      startsAt: Date;
+      label: string | null;
+      stages: ChallengeStageInput[];
+      adminId: string;
+      reason: string;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    // No `applied_at IS NULL` in the WHERE: a promoted row must be READ and
+    // refused with the right message, not skipped as if it never existed.
+    const [row] = await em.execute<
+      {
+        id: string;
+        starts_at: Date | string;
+        label: string | null;
+        stages: unknown;
+        applied_at: Date | string | null;
+      }[]
+    >(
+      `SELECT id, starts_at, label, stages, applied_at
+         FROM challenge_schedule
+        WHERE id = ? AND deleted_at IS NULL
+          FOR UPDATE`,
+      [input.id],
+    );
+    if (!row)
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        'Scheduled challenge not found.',
+      );
+    if (row.applied_at)
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'This challenge already went live — edit the live stages instead.',
+      );
+    // Selector repeats the unapplied condition — same discipline as the stamp
+    // above; under the row lock it cannot lose.
+    await this.updateChallengeSchedules(
+      {
+        selector: { id: input.id, applied_at: null },
+        data: {
+          starts_at: input.startsAt,
+          label: input.label,
+          // model.json() wants Record<string, unknown>; a plain array has no
+          // string index signature (same double-cast as saveChallengeStages).
+          stages: input.stages as unknown as Record<string, unknown>,
+        },
+      },
+      sharedContext,
+    );
+    await this.createAdminActionAudits(
+      [
+        {
+          admin_id: input.adminId,
+          entity_type: 'challenge_stages',
+          entity_id: input.id,
+          action: 'edit',
+          before: {
+            starts_at: new Date(row.starts_at).toISOString(),
+            label: row.label,
+            stages: row.stages,
+          },
+          after: {
+            starts_at: input.startsAt.toISOString(),
+            label: input.label,
+            stages: input.stages,
+          },
+          reason: input.reason,
+        },
+      ],
       sharedContext,
     );
   }
@@ -6318,8 +6450,7 @@ class PacksModuleService extends MedusaService({
     // per settleChallengeWinner call), so row 0 is representative — this is
     // not an ordering assumption.
     const prior = existingRows[0]?.snapshot as unknown as
-      | SettleSnapshot
-      | undefined;
+      SettleSnapshot | undefined;
 
     // Sequential, not Promise.all: challengeWeekPool resolves
     // transactionManager ?? manager and listChallengeStages resolves the SAME
