@@ -11,9 +11,11 @@
  * once a card is registered, its price is card-managed (Card.market_multiplier)
  * and this script must not touch it.
  *
- * NOTE: recomputes from metadata.fmv at the CURRENT fx rate, so it also
- * overwrites a price an operator set by hand on a from-PC product. Every
- * update is logged old → new for eyeballing.
+ * An explicit price sent to the create route is marked
+ * metadata.price_source: 'manual' and is NEVER overwritten here. Legacy rows
+ * carry no marker and count as derived — the admin pages never send `price`,
+ * so an unmarked listing is FMV-derived by construction. Recomputes at the
+ * CURRENT fx rate; every update is logged old → new for eyeballing.
  *
  * Idempotent: a re-run at the same fx rate finds every row already at target
  * and updates nothing.
@@ -101,6 +103,7 @@ export default async function backfillPcListingPrices({
       handle: p.handle,
       is_card: cardHandles.has(p.handle),
       fmv_usd: toOptionalMoney((p.metadata ?? {}).fmv),
+      manual_price: (p.metadata ?? {}).price_source === 'manual',
       variant_id: variant?.id ?? null,
       current_myr: myr === null ? null : Number(myr),
     };
@@ -116,8 +119,9 @@ export default async function backfillPcListingPrices({
 
   logger.info(
     `[backfill-pc-listing-prices] fx=${fx}; ${plan.actions.length} to update, ` +
-      `skipped: ${plan.skippedCard} card-managed, ${plan.skippedNoFmv} no FMV, ` +
-      `${plan.skippedNoVariant} no variant, ${plan.skippedCurrent} already current.`,
+      `skipped: ${plan.skippedCard} card-managed, ${plan.skippedManual} manual-price, ` +
+      `${plan.skippedNoFmv} no FMV, ${plan.skippedNoVariant} no variant, ` +
+      `${plan.skippedCurrent} already current.`,
   );
 
   // Sequential on purpose (pool posture again); each update is one product.

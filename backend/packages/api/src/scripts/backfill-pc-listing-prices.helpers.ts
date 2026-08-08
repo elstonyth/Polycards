@@ -14,6 +14,10 @@ export type PcListingRow = {
   is_card: boolean;
   /** product.metadata.fmv, money-coerced; null = blank/absent/unparseable. */
   fmv_usd: number | null;
+  /** metadata.price_source === 'manual' — operator/API-supplied price, never
+   * overwritten. Legacy rows carry no marker and count as derived: the admin
+   * pages never send `price`, so an unmarked price is FMV-derived. */
+  manual_price: boolean;
   variant_id: string | null;
   /** Current MYR listing amount on the variant; null = none found. */
   current_myr: number | null;
@@ -30,6 +34,7 @@ export type PcListingAction = {
 export type PcListingPlan = {
   actions: PcListingAction[];
   skippedCard: number;
+  skippedManual: number;
   skippedNoFmv: number;
   skippedNoVariant: number;
   skippedCurrent: number;
@@ -48,6 +53,7 @@ export function planPcListingPriceBackfill(
   const plan: PcListingPlan = {
     actions: [],
     skippedCard: 0,
+    skippedManual: 0,
     skippedNoFmv: 0,
     skippedNoVariant: 0,
     skippedCurrent: 0,
@@ -55,6 +61,10 @@ export function planPcListingPriceBackfill(
   for (const row of rows) {
     if (row.is_card) {
       plan.skippedCard += 1;
+      continue;
+    }
+    if (row.manual_price) {
+      plan.skippedManual += 1;
       continue;
     }
     if (row.fmv_usd === null) {

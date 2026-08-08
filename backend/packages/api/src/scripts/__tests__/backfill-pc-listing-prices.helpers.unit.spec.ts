@@ -7,6 +7,7 @@ const row = (
   handle: 'h1',
   is_card: false,
   fmv_usd: 100,
+  manual_price: false,
   variant_id: 'var_1',
   current_myr: 400,
   ...over,
@@ -37,6 +38,17 @@ describe('planPcListingPriceBackfill', () => {
     const plan = planPcListingPriceBackfill([row({ is_card: true })], 4.0);
     expect(plan.actions).toEqual([]);
     expect(plan.skippedCard).toBe(1);
+  });
+
+  it('never touches an operator-supplied (manual) price', () => {
+    // metadata.price_source === 'manual' — an explicit `price` in the create
+    // request is preserved, not re-derived from FMV.
+    const plan = planPcListingPriceBackfill(
+      [row({ manual_price: true, current_myr: 55 })],
+      4.0,
+    );
+    expect(plan.actions).toEqual([]);
+    expect(plan.skippedManual).toBe(1);
   });
 
   it('skips rows with no FMV or no variant rather than defaulting', () => {

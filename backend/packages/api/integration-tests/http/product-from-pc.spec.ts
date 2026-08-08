@@ -251,6 +251,16 @@ medusaIntegrationTestRunner({
         );
         expect(amounts).toContain(55);
         expect(amounts).not.toContain(480);
+
+        // Provenance marker: the repricing backfill skips manual prices, and
+        // this metadata flag is the only thing that distinguishes them.
+        const prod = await unwrapResponse(
+          api.get(
+            `/admin/products/${res.data.product.id}?fields=+metadata`,
+            adminHeaders(),
+          ),
+        );
+        expect(prod.data.product.metadata.price_source).toBe('manual');
       });
 
       it('rejects creation without a pixel_pokemon_id', async () => {

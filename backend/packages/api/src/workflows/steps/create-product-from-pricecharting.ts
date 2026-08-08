@@ -139,6 +139,10 @@ export const createProductFromPcInvoke = async (
         year: new Date().getFullYear(),
         pc_product_id: input.pc_product_id,
         pc_grade: input.pc_grade,
+        // Price provenance: 'manual' marks an operator/API-supplied price so
+        // the repricing backfill never overwrites it; absent = derived from
+        // FMV (the admin pages never send `price`).
+        ...(input.price != null ? { price_source: 'manual' } : {}),
         ...(input.pixel_pokemon_id
           ? { pixel_pokemon_id: input.pixel_pokemon_id }
           : {}),
