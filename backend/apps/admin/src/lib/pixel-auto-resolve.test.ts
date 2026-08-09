@@ -1,6 +1,11 @@
-import { describe, expect, it } from 'vitest';
-import { matchSeededEntry } from './pixel-auto-resolve';
-import type { PixelPokemonRow } from './admin-rest';
+import { describe, expect, it, vi, type Mock } from 'vitest';
+import {
+  fetchSeededCandidates,
+  matchSeededEntry,
+} from './pixel-auto-resolve';
+import { getPixelPokemon, type PixelPokemonRow } from './admin-rest';
+
+vi.mock('./admin-rest', () => ({ getPixelPokemon: vi.fn() }));
 
 const row = (over: Partial<PixelPokemonRow>): PixelPokemonRow => ({
   id: 'id',
@@ -36,5 +41,30 @@ describe('matchSeededEntry', () => {
 
   it('returns null when the seeded row is absent from the page', () => {
     expect(matchSeededEntry('Pikachu VMAX', [])).toBeNull();
+  });
+});
+
+describe('fetchSeededCandidates', () => {
+  it('dedupes identical species lookups and filters to seeded rows', async () => {
+    const rows = [row({})];
+    (getPixelPokemon as Mock).mockResolvedValue({ pixel_pokemon: rows });
+    const [a, b] = await Promise.all([
+      fetchSeededCandidates('Pikachu'),
+      fetchSeededCandidates('Pikachu'),
+    ]);
+    expect(a).toBe(b); // same memoized promise, not two requests
+    expect(getPixelPokemon).toHaveBeenCalledTimes(1);
+    expect(getPixelPokemon).toHaveBeenCalledWith({
+      q: 'Pikachu',
+      variant: 'normal',
+      custom: 'false',
+    });
+  });
+
+  it('drops a failed lookup from the memo so a later mount retries', async () => {
+    (getPixelPokemon as Mock).mockRejectedValueOnce(new Error('net down'));
+    await expect(fetchSeededCandidates('Eevee')).rejects.toThrow('net down');
+    (getPixelPokemon as Mock).mockResolvedValueOnce({ pixel_pokemon: [] });
+    await expect(fetchSeededCandidates('Eevee')).resolves.toEqual([]);
   });
 });

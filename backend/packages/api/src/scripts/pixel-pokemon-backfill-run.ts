@@ -63,6 +63,7 @@ export default async function backfillRun({ container }: ExecArgs) {
   let linked = 0;
   let ambiguousSkipped = 0;
   let noMatch = 0;
+  let linkedMeanwhile = 0;
   for (const row of rows) {
     // Never auto-link an ambiguous card — a human must pick the species.
     if (row.ambiguous) {
@@ -79,6 +80,15 @@ export default async function backfillRun({ container }: ExecArgs) {
       noMatch++;
       continue;
     }
+    // Re-check at write time: a manual link made between the scan and this
+    // write (e.g. an admin editing the card mid-run) must win.
+    // ponytail: read-then-write leaves a ms race window; switch to a
+    // null-conditioned UPDATE if this ever runs concurrently at scale.
+    const [fresh] = await packs.listCards({ id: patch.id }, { take: 1 });
+    if (fresh?.pixel_pokemon_id) {
+      linkedMeanwhile++;
+      continue;
+    }
     await packs.updateCards([
       {
         id: patch.id,
@@ -91,6 +101,6 @@ export default async function backfillRun({ container }: ExecArgs) {
   }
 
   logger.info(
-    `backfill-run: ${cards.length} cards — linked ${linked}, ambiguous-skipped ${ambiguousSkipped}, no-match/no-seed ${noMatch}.`,
+    `backfill-run: ${cards.length} cards — linked ${linked}, ambiguous-skipped ${ambiguousSkipped}, no-match/no-seed ${noMatch}, linked-meanwhile-skipped ${linkedMeanwhile}.`,
   );
 }

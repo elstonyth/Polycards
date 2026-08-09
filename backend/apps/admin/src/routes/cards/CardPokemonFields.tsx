@@ -8,9 +8,10 @@ import {
 } from '../../lib/queries';
 import { validateImageFile } from '../../lib/image-validation';
 import { resolveImageUrl } from '../../lib/image-url';
-import { getPixelPokemon, type PixelPokemonRow } from '../../lib/admin-rest';
+import type { PixelPokemonRow } from '../../lib/admin-rest';
 import {
   autoResolveQuery,
+  fetchSeededCandidates,
   matchSeededEntry,
 } from '../../lib/pixel-auto-resolve';
 
@@ -170,10 +171,10 @@ const CardPokemonFields = ({
     const q = autoResolveQuery(autoResolveName);
     if (!q) return;
     let stale = false;
-    getPixelPokemon({ q, limit: PICKER_LIMIT })
-      .then((page) => {
+    fetchSeededCandidates(q)
+      .then((rows) => {
         if (stale) return;
-        const entry = matchSeededEntry(autoResolveName, page.pixel_pokemon);
+        const entry = matchSeededEntry(autoResolveName, rows);
         if (entry) {
           setPicked(entry);
           onChangeRef.current({ pixel_pokemon_id: entry.id });
