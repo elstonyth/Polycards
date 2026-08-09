@@ -5,6 +5,49 @@ import type {
 import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../../modules/packs';
 import type PacksModuleService from '../../../../../modules/packs/service';
+import { validateChallengeStages } from '../../../../../modules/packs/challenge-validate';
+import { reqReason } from '../../../rewards-settings/validate';
+import { parseScheduleFields, view } from '../route';
+
+// POST /admin/challenge/schedule/:id — edit a QUEUED edition in place: new
+// start, name, and/or prize ladder. Same validation as queueing one, so an
+// edit can never leave the row in a shape promotion would reject. An
+// already-promoted row is refused for the same reason DELETE refuses it: its
+// stages are the live challenge now, and rewriting the row would only falsify
+// the record of what went live.
+//
+// The conflict check, the write, and the audit row live in ONE service
+// transaction (editChallengeSchedule) behind a row lock — this handler only
+// validates the payload and shapes the response.
+export async function POST(
+  req: AuthenticatedMedusaRequest,
+  res: MedusaResponse,
+): Promise<void> {
+  const adminId = req.auth_context.actor_id;
+  const reason = reqReason(req.body);
+  const { startsAt, label } = parseScheduleFields(req.body);
+  const stages = validateChallengeStages(req.body);
+  const { id } = req.params;
+  const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+
+  await packs.editChallengeSchedule({
+    id,
+    startsAt,
+    label,
+    stages,
+    adminId,
+    reason,
+  });
+
+  // The service threw if the edit did not land, so these ARE the row's values
+  // now — echoed through the same view() as GET so the shape cannot drift.
+  res.json({
+    schedule: view(
+      { id, starts_at: startsAt, label, applied_at: null, stages },
+      Date.now(),
+    ),
+  });
+}
 
 // DELETE /admin/challenge/schedule/:id — drop a queued edition before it goes
 // live. An ALREADY-PROMOTED row is refused: deleting it would not un-apply

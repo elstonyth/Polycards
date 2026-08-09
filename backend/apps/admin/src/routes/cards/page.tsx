@@ -33,6 +33,7 @@ import { outsideEveryRange } from '../../lib/tier-ranges';
 import { resolveImageUrl } from '../../lib/image-url';
 import { validateImageFile } from '../../lib/image-validation';
 import { rm, timeAgo, myrToUsd } from '../../lib/format';
+import { applyRangeSelect } from '../../lib/range-select';
 import RegisterCardModal from './RegisterCardModal';
 import CardPokemonFields from './CardPokemonFields';
 import { GachaPipelineHint } from '../../components/GachaPipelineHint';
@@ -343,12 +344,18 @@ const GachaCardsPage = () => {
       return next;
     });
 
-  const toggleOne = (handle: string) =>
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (!next.delete(handle)) next.add(handle);
-      return next;
-    });
+  // Shift-click range select (the Gmail convention) — same wiring as the
+  // inventory list; the range math lives in lib/range-select.ts (pure,
+  // vitest-covered). pageIds is the CURRENT filter+sort order, so a range
+  // always matches what is on screen.
+  const anchorRef = useRef<string | null>(null);
+  const handleRowCheck = (handle: string, shiftKey: boolean) => {
+    const anchor = anchorRef.current;
+    anchorRef.current = handle;
+    setSelected((prev) =>
+      applyRangeSelect(prev, pageIds, anchor, handle, shiftKey),
+    );
+  };
 
   // Stage the selected cards in a pack's win-rate editor. Nothing is written
   // here: the editor appends them as PENDING rows (rarity defaulted from the
@@ -422,6 +429,9 @@ const GachaCardsPage = () => {
             // selection so the bulk bar's count can never include a row the
             // operator can no longer see.
             setSelected(new Set());
+            // A new search is a new list — a stale anchor would range-select
+            // across unrelated rows on the first shift-click.
+            anchorRef.current = null;
           }}
         />
         <Button
@@ -523,11 +533,13 @@ const GachaCardsPage = () => {
             <Table.Body>
               {visible.map((c) => (
                 <Table.Row key={c.handle}>
-                  <Table.Cell>
+                  {/* select-none: a shift-click must range-select, not smear a
+                      text selection across the rows in between. */}
+                  <Table.Cell className="select-none">
                     <Checkbox
                       aria-label={`Select ${c.name}`}
                       checked={selected.has(c.handle)}
-                      onCheckedChange={() => toggleOne(c.handle)}
+                      onClick={(e) => handleRowCheck(c.handle, e.shiftKey)}
                     />
                   </Table.Cell>
                   <Table.Cell>
