@@ -25,12 +25,18 @@ export default async function backfillRun({ container }: ExecArgs) {
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
   const pixels = asPixelPokemonCrud(packs);
 
-  // All cards, paged — never silently truncate (mirrors propose).
+  // All UNLINKED cards, paged — never silently truncate (mirrors propose).
+  // Skip already-linked cards: since the 2026-07-11 manual-link era a link can
+  // be an operator's deliberate pick (e.g. a custom sprite), and re-deriving
+  // from the name would clobber it with the seeded normal entry.
   const cards: { id: string; name: string }[] = [];
   const PAGE = 1000;
   for (let skip = 0; ; skip += PAGE) {
     const batch = await packs.listCards({}, { skip, take: PAGE });
-    for (const c of batch) cards.push({ id: c.id, name: c.name });
+    for (const c of batch) {
+      if (c.pixel_pokemon_id) continue;
+      cards.push({ id: c.id, name: c.name });
+    }
     if (batch.length < PAGE) break;
   }
   const rows = cards.map((c) => proposeRow(c));
