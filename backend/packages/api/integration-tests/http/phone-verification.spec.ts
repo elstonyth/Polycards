@@ -1,6 +1,6 @@
 import { medusaIntegrationTestRunner } from "@medusajs/test-utils";
 import { Modules } from "@medusajs/framework/utils";
-import { unwrapResponse } from "./utils";
+import { postStoreCustomer, unwrapResponse } from "./utils";
 
 jest.setTimeout(240 * 1000);
 
@@ -84,8 +84,9 @@ medusaIntegrationTestRunner({
           email,
           password: PASSWORD,
         });
-        await api.post(
-          "/store/customers",
+        await postStoreCustomer(
+          api,
+          getContainer(),
           { email, phone },
           { headers: { ...headers, authorization: `Bearer ${reg.data.token}` } },
         );
@@ -175,8 +176,9 @@ medusaIntegrationTestRunner({
             email,
             password: PASSWORD,
           });
-          await api.post(
-            "/store/customers",
+          await postStoreCustomer(
+            api,
+            getContainer(),
             { email },
             {
               headers: {
@@ -582,8 +584,9 @@ medusaIntegrationTestRunner({
           const token = await register(email);
 
           const res = await unwrapResponse(
-            api.post(
-              "/store/customers",
+            postStoreCustomer(
+              api,
+              getContainer(),
               { email, phone },
               { headers: { ...headers, authorization: `Bearer ${token}` } },
             ),
@@ -612,8 +615,9 @@ medusaIntegrationTestRunner({
           const proof = checked.data.token as string;
 
           const res = await unwrapResponse(
-            api.post(
-              "/store/customers",
+            postStoreCustomer(
+              api,
+              getContainer(),
               { email, phone },
               {
                 headers: {
@@ -632,8 +636,9 @@ medusaIntegrationTestRunner({
           const email = "gated-me-change@test.dev";
           const token = await register(email);
           await unwrapResponse(
-            api.post(
-              "/store/customers",
+            postStoreCustomer(
+              api,
+              getContainer(),
               { email },
               { headers: { ...headers, authorization: `Bearer ${token}` } },
             ),
@@ -688,8 +693,9 @@ medusaIntegrationTestRunner({
               email,
               password: PASSWORD,
             });
-            await api.post(
-              "/store/customers",
+            await postStoreCustomer(
+              api,
+              getContainer(),
               { email },
               {
                 headers: {

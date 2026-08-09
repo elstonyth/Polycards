@@ -2,7 +2,7 @@ import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
 import { Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
-import { unwrapResponse } from './utils';
+import { postStoreCustomer, unwrapResponse } from './utils';
 
 jest.setTimeout(180 * 1000);
 
@@ -46,8 +46,9 @@ medusaIntegrationTestRunner({
           email,
           password: PASSWORD,
         });
-        const created = await api.post(
-          '/store/customers',
+        const created = await postStoreCustomer(
+          api,
+          getContainer(),
           { email },
           {
             headers: {

@@ -1,6 +1,6 @@
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
 import { Modules } from '@medusajs/framework/utils';
-import { unwrapResponse } from './utils';
+import { postStoreCustomer, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
 
@@ -31,8 +31,9 @@ medusaIntegrationTestRunner({
           email,
           password: PASSWORD,
         });
-        await api.post(
-          '/store/customers',
+        await postStoreCustomer(
+          api,
+          getContainer(),
           { email },
           {
             headers: {
@@ -99,7 +100,7 @@ medusaIntegrationTestRunner({
         // Same identity, no metadata → the legitimate register-completion flow
         // still succeeds (the guard doesn't break account creation).
         const ok = await unwrapResponse(
-          api.post('/store/customers', { email }, { headers }),
+          postStoreCustomer(api, getContainer(), { email }, { headers }),
         );
         expect(ok.data.customer.email).toBe(email);
         expect(ok.data.customer.metadata ?? {}).not.toHaveProperty(

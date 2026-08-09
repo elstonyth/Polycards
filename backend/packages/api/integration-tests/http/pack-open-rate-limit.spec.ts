@@ -2,8 +2,9 @@ import { medusaIntegrationTestRunner } from "@medusajs/test-utils";
 import { Modules } from "@medusajs/framework/utils";
 import type Redis from "ioredis";
 import {
-  connectTestRedisOrFail,
   TEST_REDIS_URL,
+  connectTestRedisOrFail,
+  postStoreCustomer,
   unwrapResponse,
 } from "./utils";
 
@@ -93,8 +94,9 @@ medusaIntegrationTestRunner({
           email,
           password: PASSWORD,
         });
-        await api.post(
-          "/store/customers",
+        await postStoreCustomer(
+          api,
+          getContainer(),
           { email },
           {
             headers: {

@@ -1,10 +1,16 @@
 import Redis from "ioredis";
 import { Modules } from "@medusajs/framework/utils";
-import type { MedusaContainer } from "@medusajs/framework/types";
+import type {
+  ICustomerModuleService,
+  MedusaContainer,
+} from "@medusajs/framework/types";
 import {
   DEFAULT_MARKET_MULTIPLIER,
   DEFAULT_USD_MYR,
 } from "../../src/modules/packs/pricing";
+import { PACKS_MODULE } from "../../src/modules/packs";
+import type PacksModuleService from "../../src/modules/packs/service";
+import { isPhoneVerificationRequired } from "../../src/utils/phone-verification";
 
 // Shared harness policy for the HTTP suites — the two idioms every suite was
 // copy-pasting. Not a spec file (jest's http testMatch only picks *.spec.ts).
@@ -121,4 +127,94 @@ export async function connectTestRedisOrFail(purpose: string): Promise<Redis> {
     );
   }
   return redis;
+}
+
+/**
+ * POST /store/customers, then WAIT for the customer.created subscribers to land
+ * their writes. Drop-in replacement for `api.post("/store/customers", …)` —
+ * same arguments after the two harness ones, same thrown-on-4xx behaviour.
+ *
+ * WHY: createCustomersWorkflow emits customer.created and the route answers 200
+ * WITHOUT awaiting the subscribers (the local event bus is a bare EventEmitter
+ * and keeps no handles). Two subscribers then write:
+ *   - customer-default-group  -> INSERT customer_group_customer   (always)
+ *   - customer-phone-verified -> upsert customer_account_state     (only when
+ *     PHONE_VERIFICATION_REQUIRED is on AND the customer carries a phone)
+ *
+ * The runner TRUNCATEs ~200 tables in its PER-TEST teardown
+ * (@medusajs/test-utils medusa-test-runner.js: afterEach -> dbUtils.teardown),
+ * so either write can meet that TRUNCATE mid-flight and deadlock on a
+ * lock-order inversion — TRUNCATE holds AccessExclusive on the FK parent and
+ * waits for it on the pivot, while the insert holds the pivot and wants
+ * RowShare on the parent. Whichever session's deadlock_timeout expires first is
+ * the victim, which is why this reads as intermittent: the subscriber losing is
+ * swallowed into a "[customer-default-group] could not assign …" warn and the
+ * suite stays GREEN, while the TRUNCATE losing fails teardown and reds it.
+ *
+ * Draining here removes the race rather than re-winning it. It is deliberately
+ * a HARNESS wait: fire-and-forget is correct in production, where the insert
+ * landing a beat after the 200 costs nothing and making it synchronous would be
+ * a real latency regression on a cosmetic write.
+ */
+export async function postStoreCustomer(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  api: any,
+  container: MedusaContainer,
+  body: Record<string, unknown>,
+  config?: Record<string, unknown>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): Promise<any> {
+  const res = await api.post("/store/customers", body, config);
+  const customer = res?.data?.customer as
+    | { id?: string; phone?: string | null }
+    | undefined;
+  if (customer?.id) {
+    await drainCustomerCreated(container, customer.id, customer.phone);
+  }
+  return res;
+}
+
+/** How long a subscriber write may take before the wait is called a failure. */
+const DRAIN_TIMEOUT_MS = 15_000;
+
+/**
+ * Polls until both customer.created subscribers have landed for `customerId`.
+ * Throws (loudly, naming which half is missing) rather than returning early —
+ * a silent give-up would put the flake straight back.
+ */
+async function drainCustomerCreated(
+  container: MedusaContainer,
+  customerId: string,
+  phone?: string | null,
+): Promise<void> {
+  const customers = container.resolve<ICustomerModuleService>(Modules.CUSTOMER);
+  // Mirrors customer-phone-verified.ts's own gate: with either half false that
+  // subscriber returns having written nothing, so there is nothing to wait for.
+  const packs =
+    isPhoneVerificationRequired(process.env) &&
+    typeof phone === "string" &&
+    phone !== ""
+      ? container.resolve<PacksModuleService>(PACKS_MODULE)
+      : null;
+
+  const deadline = Date.now() + DRAIN_TIMEOUT_MS;
+  for (;;) {
+    const grouped =
+      (await customers.listCustomerGroupCustomers({ customer_id: customerId }))
+        .length > 0;
+    const stamped =
+      !packs ||
+      (
+        await packs.listCustomerAccountStates({ customer_id: customerId })
+      ).some((s: { phone_verified_at?: Date | null }) => !!s.phone_verified_at);
+    if (grouped && stamped) return;
+    if (Date.now() > deadline) {
+      throw new Error(
+        `customer.created subscribers did not land for ${customerId} within ` +
+          `${DRAIN_TIMEOUT_MS}ms (default group: ${grouped}, phone stamp: ` +
+          `${stamped}) — look for a swallowed subscriber warn in the run log.`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
 }
