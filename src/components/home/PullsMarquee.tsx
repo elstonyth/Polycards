@@ -44,11 +44,22 @@ export default function PullsMarquee({ pulls }: { pulls: RecentPull[] }) {
       aria-label="Live pulls — browse all packs"
       className="block w-full border-y border-white/10 bg-neutral-900 py-2.5 transition-colors hover:bg-neutral-800"
     >
-      {/* Animated loop; reduced motion → static swipeable row (gutter lives on
+      {/* Animated loop; reduced motion → static CLIPPED row (gutter lives on
           the wrapper — track padding would break the −50% loop invariant, see
-          SlotStatusBar's marquee). */}
+          SlotStatusBar's marquee).
+
+          Clipped, not scrollable, on purpose: `motion-reduce:overflow-x-auto`
+          made this a scroll container with no keyboard access, which is a real
+          axe `scrollable-region-focusable` failure for reduced-motion users.
+          The repo's usual fix (RecentPullsSection: tabIndex={0} + role="group"
+          + focus ring) can't apply here — this box sits INSIDE the band's
+          <Link>, so it would nest focusable content in an anchor and add a
+          permanent tab stop for a scroll that only exists under reduced
+          motion. The same pulls render right below on / in
+          RecentPullsSection, which IS keyboard-reachable, so clipping costs no
+          content. Don't re-add overflow-x-auto. */}
       {/* Reduced-motion gutter mirrors .px-fluid (can't variant-prefix a custom class) */}
-      <div className="overflow-hidden motion-reduce:overflow-x-auto motion-reduce:[padding-inline:clamp(1rem,1.6vw,4.5rem)]">
+      <div className="overflow-hidden motion-reduce:[padding-inline:clamp(1rem,1.6vw,4.5rem)]">
         <div className="flex w-max animate-[sp-scroll-x_30s_linear_infinite] hover:[animation-play-state:paused] active:[animation-play-state:paused] motion-reduce:animate-none">
           {track(false)}
           <div className="motion-reduce:hidden">{track(true)}</div>
