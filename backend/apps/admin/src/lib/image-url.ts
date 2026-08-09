@@ -41,12 +41,38 @@ function dashboardHost(): { proto: string; host: string } {
 const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
 const SAFE_SCHEME = /^(?:https?:|data:image\/)/i;
 
+/**
+ * The URL as a browser will actually parse it. Two normalisations, both from
+ * the URL spec's "basic URL parser", and the check has to see the same string
+ * the browser dispatches on or the scheme policy is bypassable:
+ *
+ *   1. ASCII tab / LF / CR are removed from ANYWHERE in the input, so
+ *      "java<TAB>script:alert(1)" is javascript: to a browser but reads as
+ *      scheme-less to a naive regex.
+ *   2. Leading C0 controls and space are stripped, so "<TAB>javascript:..."
+ *      likewise.
+ *
+ * Measured against this helper's regexes: unnormalised, six such spellings slip
+ * through; stripping only leading whitespace still lets the three interior-
+ * control ones through.
+ */
+const asBrowserParses = (url: string): string =>
+  // no-control-regex is disabled deliberately: matching these control
+  // characters IS the point here. The rule exists to catch ones that appear
+  // by accident.
+  // eslint-disable-next-line no-control-regex
+  url.replace(/[\u0009\u000A\u000D]/g, "").replace(/^[\u0000-\u0020]+/, "");
+
 /** Relative paths (no scheme) are fine; a scheme must be http(s) or data:image. */
 function isSafeImageUrl(url: string): boolean {
   return !HAS_SCHEME.test(url) || SAFE_SCHEME.test(url);
 }
 
-export function resolveImageUrl(url: string | null | undefined): string {
+export function resolveImageUrl(raw: string | null | undefined): string {
+  if (!raw) return "";
+  // Normalise BEFORE anything reads the string, so the scheme check and every
+  // branch below agree with the browser about what this URL is.
+  const url = asBrowserParses(raw);
   if (!url) return "";
   // ABOVE the data: passthrough on purpose: put it below and `data:text/html`
   // would walk straight past the check.
