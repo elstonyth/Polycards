@@ -25,12 +25,18 @@ export default async function backfillRun({ container }: ExecArgs) {
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
   const pixels = asPixelPokemonCrud(packs);
 
-  // All cards, paged — never silently truncate (mirrors propose).
+  // All UNLINKED cards, paged — never silently truncate (mirrors propose).
+  // Skip already-linked cards: since the 2026-07-11 manual-link era a link can
+  // be an operator's deliberate pick (e.g. a custom sprite), and re-deriving
+  // from the name would clobber it with the seeded normal entry.
   const cards: { id: string; name: string }[] = [];
   const PAGE = 1000;
   for (let skip = 0; ; skip += PAGE) {
     const batch = await packs.listCards({}, { skip, take: PAGE });
-    for (const c of batch) cards.push({ id: c.id, name: c.name });
+    for (const c of batch) {
+      if (c.pixel_pokemon_id) continue;
+      cards.push({ id: c.id, name: c.name });
+    }
     if (batch.length < PAGE) break;
   }
   const rows = cards.map((c) => proposeRow(c));
@@ -57,6 +63,7 @@ export default async function backfillRun({ container }: ExecArgs) {
   let linked = 0;
   let ambiguousSkipped = 0;
   let noMatch = 0;
+  let linkedMeanwhile = 0;
   for (const row of rows) {
     // Never auto-link an ambiguous card — a human must pick the species.
     if (row.ambiguous) {
@@ -73,6 +80,15 @@ export default async function backfillRun({ container }: ExecArgs) {
       noMatch++;
       continue;
     }
+    // Re-check at write time: a manual link made between the scan and this
+    // write (e.g. an admin editing the card mid-run) must win.
+    // ponytail: read-then-write leaves a ms race window; switch to a
+    // null-conditioned UPDATE if this ever runs concurrently at scale.
+    const [fresh] = await packs.listCards({ id: patch.id }, { take: 1 });
+    if (fresh?.pixel_pokemon_id) {
+      linkedMeanwhile++;
+      continue;
+    }
     await packs.updateCards([
       {
         id: patch.id,
@@ -85,6 +101,6 @@ export default async function backfillRun({ container }: ExecArgs) {
   }
 
   logger.info(
-    `backfill-run: ${cards.length} cards — linked ${linked}, ambiguous-skipped ${ambiguousSkipped}, no-match/no-seed ${noMatch}.`,
+    `backfill-run: ${cards.length} cards — linked ${linked}, ambiguous-skipped ${ambiguousSkipped}, no-match/no-seed ${noMatch}, linked-meanwhile-skipped ${linkedMeanwhile}.`,
   );
 }

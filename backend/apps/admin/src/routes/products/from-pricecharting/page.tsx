@@ -608,6 +608,7 @@ const AddFromPriceChartingPage = () => {
               value={pokemon}
               onChange={(p) => setPokemon((v) => ({ ...v, ...p }))}
               suggestionName={pcProduct?.name ?? ''}
+              autoResolveName={pcProduct?.name}
             />
             {pokemon.pixel_pokemon_id === null && (
               <Text size="small" className="text-ui-fg-error">
