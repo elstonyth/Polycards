@@ -11,6 +11,7 @@ import {
   sendPhoneOtp,
   checkPhoneOtpCode,
 } from '../phone-verification';
+import type { PhoneOtpPurpose } from '../phone-verification';
 
 const SECRET = 'test-secret';
 const PHONE = '+60107667787';
@@ -264,7 +265,7 @@ describe('dev-code transport (NODE_ENV=test)', () => {
   // jest runs with NODE_ENV=test, so the dev/test branch is the live one here.
   it('send logs instead of calling twilio', async () => {
     const logger = { warn: jest.fn(), error: jest.fn(), info: jest.fn() } as never;
-    await sendPhoneOtp({}, logger, PHONE);
+    await sendPhoneOtp({}, logger, PHONE, 'signup');
     expect((logger as { warn: jest.Mock }).warn).toHaveBeenCalledWith(
       expect.stringContaining(PHONE),
     );
@@ -289,7 +290,7 @@ describe('twilio transport', () => {
     const fetchMock = jest
       .spyOn(globalThis, 'fetch')
       .mockResolvedValue(new Response(JSON.stringify({ status: 'pending' }), { status: 201 }));
-    await sendPhoneOtp(env, noopLogger, PHONE);
+    await sendPhoneOtp(env, noopLogger, PHONE, 'signup');
     const [url, init] = fetchMock.mock.calls[0];
     expect(String(url)).toBe('https://verify.twilio.com/v2/Services/VA1/Verifications');
     expect((init?.headers as Record<string, string>).Authorization).toBe(
@@ -309,7 +310,9 @@ describe('twilio transport', () => {
     await expect(checkPhoneOtpCode(env, noopLogger, PHONE, '123456')).resolves.toBe(false);
   });
   it('send throws MedusaError when unconfigured in prod', async () => {
-    await expect(sendPhoneOtp({ NODE_ENV: 'production' }, noopLogger, PHONE)).rejects.toThrow(
+    await expect(
+      sendPhoneOtp({ NODE_ENV: 'production' }, noopLogger, PHONE, 'signup'),
+    ).rejects.toThrow(
       /not configured/i,
     );
   });
@@ -325,7 +328,7 @@ describe('twilio transport', () => {
       }),
     );
     const logger = { warn: jest.fn(), error: jest.fn(), info: jest.fn() } as never;
-    await expect(sendPhoneOtp(env, logger, PHONE)).rejects.toThrow(
+    await expect(sendPhoneOtp(env, logger, PHONE, 'signup')).rejects.toThrow(
       /could not send the verification code/i,
     );
     const line = (logger as { warn: jest.Mock }).warn.mock.calls[0][0] as string;
@@ -339,7 +342,7 @@ describe('twilio transport', () => {
   // AbortError / unhandled rejection.
   it('send maps an aborted fetch to the friendly retryable error', async () => {
     jest.spyOn(globalThis, 'fetch').mockRejectedValue(new DOMException('The operation was aborted.', 'AbortError'));
-    await expect(sendPhoneOtp(env, noopLogger, PHONE)).rejects.toThrow(
+    await expect(sendPhoneOtp(env, noopLogger, PHONE, 'signup')).rejects.toThrow(
       /could not send the verification code/i,
     );
   });
@@ -348,5 +351,81 @@ describe('twilio transport', () => {
     await expect(checkPhoneOtpCode(env, noopLogger, PHONE, '123456')).rejects.toThrow(
       /could not verify the code/i,
     );
+  });
+});
+
+// The OTP text is what the human reads before handing a code over. Twilio
+// verifies on (phone, code) alone, so with one shared template a code given up
+// under a "verify your number" pretext is exchangeable at /check for a
+// 'password-reset' proof — and that route returns a live reset token. Naming
+// the flow in the SMS is what lets the person reading it refuse.
+describe('per-purpose Verify template', () => {
+  const base = {
+    NODE_ENV: 'production',
+    TWILIO_ACCOUNT_SID: 'AC1',
+    TWILIO_AUTH_TOKEN: 'tok',
+    TWILIO_VERIFY_SERVICE_SID: 'VA1',
+  };
+  const env = {
+    ...base,
+    TWILIO_VERIFY_TEMPLATE_SID_SIGNUP: 'HJsignup',
+    TWILIO_VERIFY_TEMPLATE_SID_PHONE_CHANGE: 'HJchange',
+    TWILIO_VERIFY_TEMPLATE_SID_PASSWORD_RESET: 'HJreset',
+  };
+  afterEach(() => jest.restoreAllMocks());
+
+  const sendWith = async (e: Record<string, string>, purpose: PhoneOtpPurpose) => {
+    const fetchMock = jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify({ status: 'pending' }), { status: 201 }));
+    await sendPhoneOtp(e, noopLogger, PHONE, purpose);
+    return new URLSearchParams(String(fetchMock.mock.calls[0][1]?.body));
+  };
+
+  it('sends a DIFFERENT template for each purpose', async () => {
+    expect((await sendWith(env, 'signup')).get('TemplateSid')).toBe('HJsignup');
+    jest.restoreAllMocks();
+    expect((await sendWith(env, 'phone-change')).get('TemplateSid')).toBe('HJchange');
+    jest.restoreAllMocks();
+    expect((await sendWith(env, 'password-reset')).get('TemplateSid')).toBe('HJreset');
+  });
+
+  it('omits TemplateSid entirely when that purpose has no template configured', async () => {
+    // Ships dark: before the operator creates the templates this is byte-for-byte
+    // the old request, so deploying the code cannot change what customers receive.
+    const body = await sendWith(base, 'password-reset');
+    expect(body.has('TemplateSid')).toBe(false);
+    expect(body.get('Channel')).toBe('sms');
+    expect(body.get('To')).toBe(PHONE);
+  });
+
+  it('does not fall back to another purpose template when its own is unset', async () => {
+    // The dangerous failure: password-reset silently borrowing the signup text.
+    const partial = { ...base, TWILIO_VERIFY_TEMPLATE_SID_SIGNUP: 'HJsignup' };
+    expect((await sendWith(partial, 'password-reset')).has('TemplateSid')).toBe(false);
+  });
+
+  it('names the purpose in the dev transport log', async () => {
+    const logger = { warn: jest.fn(), error: jest.fn(), info: jest.fn() } as never;
+    await sendPhoneOtp({}, logger, PHONE, 'password-reset');
+    expect((logger as { warn: jest.Mock }).warn).toHaveBeenCalledWith(
+      expect.stringContaining('password-reset'),
+    );
+  });
+});
+
+// createHmac('sha256', '') is legal in Node and returns a MAC anyone can
+// recompute, so an empty secret makes every proof forgeable. Unreachable today
+// — all four call sites guard first — but the guard stops a fifth caller from
+// silently downgrading the scheme.
+describe('empty-secret guard', () => {
+  it('refuses to sign or verify with an empty secret', () => {
+    expect(() => signPhoneProof('', PHONE, 'signup')).toThrow(/not configured/i);
+    expect(() => verifyPhoneProof('', 'anything.atall', 'signup')).toThrow(/not configured/i);
+  });
+
+  it('still signs and verifies with a real secret', () => {
+    const token = signPhoneProof(SECRET, PHONE, 'signup');
+    expect(verifyPhoneProof(SECRET, token, 'signup')).toEqual({ phone: PHONE });
   });
 });
