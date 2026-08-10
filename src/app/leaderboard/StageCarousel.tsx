@@ -26,7 +26,11 @@ import { RankRewardSheet } from './RankRewardSheet';
 const RANKS = [
   { label: '1', suffix: 'ST', tone: 'text-chase' },
   { label: '2', suffix: 'ND', tone: 'text-neutral-300' },
-  { label: '3', suffix: 'RD', tone: 'text-amber-600' },
+  // amber-500, not amber-600: GalleryRail dims peek neighbours to 0.75, and
+  // amber-600 composited over the locked card (#151515) lands at 3.71:1 —
+  // under AA for the 12px `suffix` span. amber-500 gives 5.29:1 dimmed /
+  // 8.55:1 active. Still bronze against #1ST chase gold and #2ND silver.
+  { label: '3', suffix: 'RD', tone: 'text-amber-500' },
 ] as const;
 
 function RankNumeral({ rank }: { rank: (typeof RANKS)[number] }) {
