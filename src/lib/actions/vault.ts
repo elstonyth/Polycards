@@ -31,7 +31,7 @@ import {
   VaultItemSchema,
   VaultShowcaseSchema,
   BalanceSchema,
-  VaultLatestSchema,
+  LatestEventSchema,
   AmountBalanceSchema,
   BuybackResultSchema,
   DepositStartSchema,
@@ -130,7 +130,7 @@ export async function getVaultLatest(): Promise<string | null> {
   if (!token) return null;
   try {
     const parsed = parseOne(
-      VaultLatestSchema,
+      LatestEventSchema,
       await sdk.client.fetch('/store/vault/latest', {
         headers: { Authorization: `Bearer ${token}` },
         cache: 'no-store',
@@ -139,6 +139,30 @@ export async function getVaultLatest(): Promise<string | null> {
     return parsed?.latest_event_at ?? null;
   } catch (error) {
     logger.error('[vault] latest-event read failed:', error);
+    return null;
+  }
+}
+
+// The newest balance movement for the caller — the Me tab's money-dot signal.
+// Every ledger row counts (sell-back, top-up, withdrawal, commission, reward,
+// pack-open charge): the row IS what the customer opens /transactions to read,
+// so filtering to money-in would drop the debits people most want to verify.
+// Null = logged out, no transactions, or a failed read; callers render no dot
+// rather than a wrong one.
+export async function getCreditsLatest(): Promise<string | null> {
+  const token = await getAuthToken();
+  if (!token) return null;
+  try {
+    const parsed = parseOne(
+      LatestEventSchema,
+      await sdk.client.fetch('/store/credits/latest', {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
+      }),
+    );
+    return parsed?.latest_event_at ?? null;
+  } catch (error) {
+    logger.error('[credits] latest-event read failed:', error);
     return null;
   }
 }

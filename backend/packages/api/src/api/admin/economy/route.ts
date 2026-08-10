@@ -21,9 +21,10 @@ function isoOrUndefined(v: unknown): string | undefined {
 
 // GET /admin/economy — the operator's money report: ledger totals
 // (revenue / payouts / top-ups / adjustments / net) for an optional [from, to)
-// period window (omit both = all time), the outstanding vault liability (raw
-// FMV of every vaulted pull), and a per-active-pack theoretical RTP table from
-// the CURRENT odds × card DISPLAY values (FMV × markup — the buyback basis).
+// period window (omit both = all time), the outstanding vault liability, and a
+// per-active-pack theoretical RTP table from the CURRENT odds. Liability, EV
+// and RTP all read card DISPLAY values (FMV × markup — the buyback basis), so
+// the report no longer shows two bases side by side (issue #263).
 // Only the ledger totals are period-scoped; liability and
 // RTP are current-state snapshots. Reads only; pure math lives in
 // modules/packs/economy.ts.
@@ -41,8 +42,9 @@ export async function GET(
   const to = isoOrUndefined(req.query.to);
   const totals = ledgerTotals(await packs.ledgerReasonTotals(from, to));
 
-  // Vault liability: FMV of every card customers still hold, summed in SQL
-  // (audit 2026-07-07 #5b) instead of paging every vaulted pull into Node.
+  // Vault liability: display value of every card customers still hold, summed
+  // in SQL (audit 2026-07-07 #5b) instead of paging every vaulted pull into
+  // Node. Same basis as the EV/RTP map below.
   const allCards = await pageAll((opts) => packs.listCards({}, opts));
   const fx = await resolveFxRate(packs);
   // Card FMV is stored in USD; the economy report shows MYR at the live FX rate.

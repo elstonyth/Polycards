@@ -1,6 +1,6 @@
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
 import { Modules } from '@medusajs/framework/utils';
-import { mintSuperAdmin, unwrapResponse } from './utils';
+import { mintSuperAdmin, postStoreCustomer, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
 
@@ -71,8 +71,9 @@ medusaIntegrationTestRunner({
           email,
           password: PASSWORD,
         });
-        const created = await api.post(
-          '/store/customers',
+        const created = await postStoreCustomer(
+          api,
+          getContainer(),
           { email },
           {
             headers: {

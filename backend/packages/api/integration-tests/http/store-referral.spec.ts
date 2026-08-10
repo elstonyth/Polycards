@@ -1,6 +1,6 @@
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
 import { Modules } from '@medusajs/framework/utils';
-import { unwrapResponse } from './utils';
+import { postStoreCustomer, unwrapResponse } from './utils';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
 
@@ -42,8 +42,9 @@ medusaIntegrationTestRunner({
           email: 'store-referral-get-a@test.dev',
           password: PASSWORD,
         });
-        await api.post(
-          '/store/customers',
+        await postStoreCustomer(
+          api,
+          getContainer(),
           { email: 'store-referral-get-a@test.dev' },
           {
             headers: {
@@ -126,8 +127,9 @@ medusaIntegrationTestRunner({
           email: 'store-ref-t7-recruit@test.dev',
           password: PASSWORD,
         });
-        const created = await api.post(
-          '/store/customers',
+        const created = await postStoreCustomer(
+          api,
+          getContainer(),
           { email: 'store-ref-t7-recruit@test.dev' },
           {
             headers: {

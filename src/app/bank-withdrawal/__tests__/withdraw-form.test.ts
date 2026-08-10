@@ -19,6 +19,14 @@ vi.mock('@/lib/actions/vault', () => ({
   fetchSavedBankAccounts: () => fetchSavedBankAccounts(),
 }));
 
+// The form repaints the header balance on success, so it now reads useTopUp —
+// which throws outside its provider. Stubbing the hook keeps these cases about
+// the money guards instead of dragging the whole app-shell provider stack in.
+const applyBalance = vi.fn();
+vi.mock('@/components/app-shell/TopUpProvider', () => ({
+  useTopUp: () => ({ applyBalance }),
+}));
+
 import WithdrawForm from '../WithdrawForm';
 
 let container: HTMLDivElement;
@@ -227,6 +235,10 @@ describe('WithdrawForm', () => {
       amount: 50,
       accountId: READY_ACCOUNT.id,
     });
+    // The payout debits the balance server-side; the form must repaint it, or
+    // the header chip stays stale and the Me tab's money dot never lights until
+    // a focus event.
+    expect(applyBalance).toHaveBeenCalledWith(50);
     const text = container.textContent ?? '';
     expect(text).toContain('RM 50.00 ON ITS WAY');
     // The transfer is asynchronous — the form must not claim it completed.

@@ -182,9 +182,16 @@ medusaIntegrationTestRunner({
         expect(a.total_spend).toBe(summary.vipSpendTotal);
         expect(a.total_pulls).toBe(1);
         expect(a.vault_count).toBe(1);
-        // Vault is FMV at multiplier 1 — the admin convention (vaultLiabilityMyr).
+        // Vault is the card's DISPLAY value (FMV × its own multiplier) — the
+        // basis buyback credits against, shared with vaultLiabilityMyr and the
+        // economy report (issue #263). Read the multiplier off the live row so
+        // this stays an oracle, not a restatement of the DB default.
         expect(a.vault_value).toBe(
-          displayMarketPrice(toMoney(card.market_value), fx, 1),
+          displayMarketPrice(
+            toMoney(card.market_value),
+            fx,
+            toMoney(card.market_multiplier),
+          ),
         );
         expect(a.vip_level).toBe(3);
         expect(a.last_spend_at).not.toBeNull();

@@ -3,6 +3,7 @@ import { AccountHeader, Pager, StatCards } from '@/components/account/ui';
 import { rm } from '@/lib/format';
 import { getTransactions } from '@/lib/actions/vault';
 import { reasonLabel, signedRm } from '@/lib/transactions';
+import { MarkCreditsSeen } from '@/components/account/credit-dot';
 
 export const metadata: Metadata = { title: 'Transactions' };
 
@@ -43,6 +44,9 @@ export default async function TransactionsPage({
 
   return (
     <>
+      {/* Success branch only: clearing the money dot after a FAILED read would
+          hide activity the customer never got to see. */}
+      <MarkCreditsSeen />
       <AccountHeader title="Transactions" sub="Your top-ups and spending." />
       <StatCards
         items={[

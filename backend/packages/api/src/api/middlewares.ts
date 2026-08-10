@@ -470,6 +470,13 @@ export default defineMiddlewares({
       middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
     },
     {
+      // Money-dot signal (GET /store/credits/latest). Own entry because the
+      // '/store/credits' matcher below is EXACT — same reason
+      // '/store/credits/balance' has one.
+      matcher: '/store/credits/latest',
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+    },
+    {
       // The customer's vault list (GET /store/vault).
       matcher: '/store/vault',
       middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
