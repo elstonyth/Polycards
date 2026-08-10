@@ -58,5 +58,9 @@ export function useTableSort<K extends string>(
     );
   };
 
-  return { sort, toggleSort, sortHeader };
+  // For pages that reuse one mounted component across a route-param change
+  // (e.g. the pack editor across `:slug`) and must drop per-view sort state.
+  const resetSort = () => setSort(initial);
+
+  return { sort, toggleSort, sortHeader, resetSort };
 }

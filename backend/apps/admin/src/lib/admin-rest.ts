@@ -893,6 +893,21 @@ export const createChallengeSchedule = (body: {
     body,
   );
 
+/** Edit a QUEUED edition in place. The backend refuses once it has gone live. */
+export const updateChallengeSchedule = (
+  id: string,
+  body: {
+    starts_at: string;
+    label: string | null;
+    stages: ChallengeStageDTO[];
+    reason: string;
+  },
+) =>
+  postJson<{ schedule: ChallengeScheduleDTO }>(
+    `/admin/challenge/schedule/${encodeURIComponent(id)}`,
+    body,
+  );
+
 export async function deleteChallengeSchedule(id: string): Promise<void> {
   const res = await fetch(
     `${__BACKEND_URL__}/admin/challenge/schedule/${encodeURIComponent(id)}`,

@@ -9,6 +9,11 @@ import {
 import { validateImageFile } from '../../lib/image-validation';
 import { resolveImageUrl } from '../../lib/image-url';
 import type { PixelPokemonRow } from '../../lib/admin-rest';
+import {
+  autoResolveQuery,
+  fetchSeededCandidates,
+  matchSeededEntry,
+} from '../../lib/pixel-auto-resolve';
 
 // Spec 2 §5 — the card's Pokémon is assigned by LINKING a PixelPokemon library
 // entry by id (id-only). The picker replaces the old dex combobox: search the
@@ -31,6 +36,12 @@ type Props = {
    *  every instance shares `card-pokemon-search`, so clicking any label focuses
    *  the FIRST input and every aria-controls points at the first listbox. */
   idPrefix?: string;
+  /** Opt-in (from-PC flows only): while unassigned, derive the species from
+   *  this product name and auto-link its seeded normal-variant library entry.
+   *  Tried once per name — a manual "Clear link" is never re-overridden. NOT
+   *  passed by the card edit modal, where auto-linking on open would silently
+   *  mutate an intentionally-unlinked card on save. */
+  autoResolveName?: string;
 };
 
 const PICKER_LIMIT = 40;
@@ -52,6 +63,7 @@ const CardPokemonFields = ({
   currentDex,
   suggestionName,
   idPrefix = 'card',
+  autoResolveName,
 }: Props) => {
   const searchId = `${idPrefix}-pokemon-search`;
   const listboxId = `${idPrefix}-pokemon-listbox`;
@@ -140,6 +152,39 @@ const CardPokemonFields = ({
     onChange({ pixel_pokemon_id: e.id });
     setSearch('');
   };
+
+  // Auto-resolve (opt-in, from-PC flows): derive the species from the product
+  // name and link its seeded entry. Tried once per name — the ref guard means a
+  // manual "Clear link" (which flips `linked` back to false) does NOT re-link.
+  // onChange rides a latest-ref (not a dep): parents pass inline arrows, and a
+  // dep on an ever-new identity would cancel the in-flight fetch on every
+  // parent render while autoTried blocks the retry.
+  const autoTried = useRef<string | null>(null);
+  const onChangeRef = useRef(onChange);
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  });
+  useEffect(() => {
+    if (!autoResolveName || linked) return;
+    if (autoTried.current === autoResolveName) return;
+    autoTried.current = autoResolveName;
+    const q = autoResolveQuery(autoResolveName);
+    if (!q) return;
+    let stale = false;
+    fetchSeededCandidates(q)
+      .then((rows) => {
+        if (stale) return;
+        const entry = matchSeededEntry(autoResolveName, rows);
+        if (entry) {
+          setPicked(entry);
+          onChangeRef.current({ pixel_pokemon_id: entry.id });
+        }
+      })
+      .catch(() => {}); // best-effort — the operator can still link by hand
+    return () => {
+      stale = true;
+    };
+  }, [autoResolveName, linked]);
 
   const clear = () => {
     setPicked(null);
