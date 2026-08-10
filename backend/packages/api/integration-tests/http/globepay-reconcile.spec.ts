@@ -18,9 +18,18 @@ jest.mock('../../src/modules/packs/globepay-client', () => {
   return { ...actual, getDepositDetail: jest.fn() };
 });
 
-import { getDepositDetail } from '../../src/modules/packs/globepay-client';
+import {
+  GlobePayError,
+  getDepositDetail,
+} from '../../src/modules/packs/globepay-client';
 import globepayReconcileJob from '../../src/jobs/globepay-reconcile';
-import { GLOBEPAY_STALE_AFTER_MS } from '../../src/modules/packs/globepay-reconcile';
+import {
+  GLOBEPAY_AMBIGUOUS_GIVEUP_DEFAULT_MS,
+  GLOBEPAY_EXPIRED_RETRY_BATCH,
+  GLOBEPAY_EXPIRED_RETRY_MS,
+  GLOBEPAY_STALE_AFTER_MS,
+} from '../../src/modules/packs/globepay-reconcile';
+import { GLOBEPAY_MAX_RM } from '../../src/modules/packs/globepay-deposit';
 
 const requery = getDepositDetail as jest.Mock;
 
@@ -172,6 +181,40 @@ medusaIntegrationTestRunner({
         expect((await rowOf(row.id)).status).toBe('failed');
       });
 
+      // The sweep's other half of plan 083's ceiling. reconcileAction returning
+      // 'quarantine' is unit-tested; what THIS pins is the job's handling of it,
+      // which is what decides whether the money stays recoverable: an over-cap
+      // requery must credit nothing AND must not write the row off. Landing in
+      // the fail/expire branch would mark it 'failed', and the sweep only ever
+      // rescans status='pending' — so the row would never be looked at again.
+      it('quarantines an over-cap requery: no credit, and the row is NOT written off', async () => {
+        const row = await seed('PC-reconcile-over-cap');
+        requery.mockResolvedValue({
+          state: 'success',
+          amount: GLOBEPAY_MAX_RM + 1,
+          statusId: 6,
+        });
+
+        await sweep();
+
+        expect(await ledger()).toHaveLength(0);
+        expect((await rowOf(row.id)).status).toBe('pending');
+      });
+
+      it('still settles a requery exactly AT the ceiling', async () => {
+        const row = await seed('PC-reconcile-at-cap');
+        requery.mockResolvedValue({
+          state: 'success',
+          amount: GLOBEPAY_MAX_RM,
+          statusId: 6,
+        });
+
+        await sweep();
+
+        expect(Number((await ledger())[0].amount)).toBe(GLOBEPAY_MAX_RM);
+        expect((await rowOf(row.id)).status).toBe('settled');
+      });
+
       it('leaves a recent non-final deposit pending', async () => {
         const row = await seed('PC-reconcile-young');
         requery.mockResolvedValue({
@@ -200,7 +243,184 @@ medusaIntegrationTestRunner({
         await sweep();
 
         expect(await ledger()).toHaveLength(0);
-        expect((await rowOf(row.id)).status).toBe('failed');
+        // 'expired', NOT 'failed': the gateway never ruled on this deposit, we
+        // just stopped waiting. Writing 'failed' here made the row terminal —
+        // the sweep only scanned 'pending' — so a bank transfer landing later
+        // credited nobody and nothing ever looked at it again.
+        expect((await rowOf(row.id)).status).toBe('expired');
+      });
+
+      // The second scan tier. Without it 'expired' would just be a prettier
+      // name for the same dead end.
+      it('requeries an expired deposit and credits it when it finally settles', async () => {
+        const row = await seed(
+          'PC-reconcile-late-settle',
+          GLOBEPAY_STALE_AFTER_MS + 60_000,
+        );
+        requery.mockResolvedValue({
+          state: 'pending',
+          amount: 50,
+          statusId: 4,
+        });
+        await sweep();
+        expect((await rowOf(row.id)).status).toBe('expired');
+
+        // The bank transfer lands hours after we gave up.
+        requery.mockResolvedValue({ state: 'success', amount: 50, statusId: 6 });
+        await sweep();
+
+        const rows = await ledger();
+        expect(rows).toHaveLength(1);
+        expect(Number(rows[0].amount)).toBe(50);
+        expect((await rowOf(row.id)).status).toBe('settled');
+      });
+
+      // The tier is capped at GLOBEPAY_EXPIRED_RETRY_BATCH and requerying an
+      // expired row leaves it expired, so the batch ORDER decides which rows are
+      // ever asked about again. This fails under 'ASC': the cap fills with the
+      // rows nearest the far edge of the window and the freshly-expired one — the
+      // only one a late bank transfer could still settle — is never requeried.
+      it('requeries the freshly-expired row, not the ten nearest ageing out', async () => {
+        const expire = async (id: string) =>
+          packs().updateGlobePayDeposits({ id, status: 'expired' } as never);
+
+        // Fill the batch with rows an hour inside the far edge of the window.
+        for (let i = 0; i < GLOBEPAY_EXPIRED_RETRY_BATCH; i++) {
+          const stale = await seed(
+            `PC-reconcile-crowd-${i}`,
+            GLOBEPAY_EXPIRED_RETRY_MS - 60 * 60 * 1000,
+          );
+          await expire(stale.id);
+        }
+        // Newest row in the whole suite, so the ordering is unambiguous.
+        const fresh = await seed('PC-reconcile-fresh-expiry');
+        await expire(fresh.id);
+
+        requery.mockResolvedValue({ state: 'success', amount: 50, statusId: 6 });
+        await sweep();
+
+        expect((await rowOf(fresh.id)).status).toBe('settled');
+      });
+      it('leaves an expired deposit older than the retry window alone', async () => {
+        const row = await seed(
+          'PC-reconcile-ancient',
+          GLOBEPAY_EXPIRED_RETRY_MS + 60 * 60 * 1000,
+        );
+        await packs().updateGlobePayDeposits({
+          id: row.id,
+          status: 'expired',
+        } as never);
+
+        requery.mockResolvedValue({ state: 'success', amount: 50, statusId: 6 });
+        await sweep();
+
+        // Past the window the row is not even requeried — the tier is bounded
+        // so it can never grow into a full-table scan.
+        expect(requery).not.toHaveBeenCalled();
+        expect(await ledger()).toHaveLength(0);
+        expect((await rowOf(row.id)).status).toBe('expired');
+      });
+
+      it('re-expiring an already-expired row is a no-op', async () => {
+        const row = await seed(
+          'PC-reconcile-still-stale',
+          GLOBEPAY_STALE_AFTER_MS + 60_000,
+        );
+        requery.mockResolvedValue({
+          state: 'pending',
+          amount: 50,
+          statusId: 4,
+        });
+
+        await sweep();
+        await sweep();
+
+        expect(await ledger()).toHaveLength(0);
+        expect((await rowOf(row.id)).status).toBe('expired');
+      });
+
+      // The job-level guard for the ambiguous-400 branch. The pure classifier is
+      // unit-tested, but nothing executed the branch in the JOB that consumes it
+      // — delete it and the sweep silently resumes writing off every pending
+      // deposit the moment a merchant credential breaks.
+      //
+      // This is the shape staging actually returns: HTTP 400, plain-text
+      // "Not found", no PMT10016 (docs/payments/globepay365-setup.md:124). It is
+      // indistinguishable from a rotated key, so it must not write anything off.
+      const ambiguous400 = () =>
+        new GlobePayError(
+          'GlobePay365 /api/Deposit/GetDepositDetail: non-JSON response (HTTP 400): Not found',
+          [],
+          400,
+        );
+
+      it('does NOT write off a deposit on an unattributable 400, however old', async () => {
+        const row = await seed(
+          'PC-reconcile-ambiguous',
+          GLOBEPAY_STALE_AFTER_MS * 24,
+        );
+        requery.mockRejectedValue(ambiguous400());
+
+        await sweep();
+
+        expect(await ledger()).toHaveLength(0);
+        // Still 'pending' — not 'failed', not 'expired'. It stays in the live
+        // queue and is requeried next run.
+        expect((await rowOf(row.id)).status).toBe('pending');
+      });
+
+      it('does NOT write off an unattributable 400 even when the row HAS a gateway id', async () => {
+        const row = await seed(
+          'PC-reconcile-ambiguous-known',
+          GLOBEPAY_STALE_AFTER_MS * 24,
+        );
+        await packs().updateGlobePayDeposits({
+          id: row.id,
+          gateway_transaction_id: 'D2026072112415767',
+        } as never);
+        requery.mockRejectedValue(ambiguous400());
+
+        await sweep();
+
+        expect(await ledger()).toHaveLength(0);
+        expect((await rowOf(row.id)).status).toBe('pending');
+      });
+
+      // ...but not forever, or these rows fill the oldest-first window and the
+      // sweep never reaches a fresh deposit whose callback was dropped.
+      it('ages an endlessly-ambiguous deposit out to expired, never to failed', async () => {
+        const row = await seed(
+          'PC-reconcile-ambiguous-ancient',
+          GLOBEPAY_AMBIGUOUS_GIVEUP_DEFAULT_MS + 60 * 60 * 1000,
+        );
+        requery.mockRejectedValue(ambiguous400());
+
+        await sweep();
+
+        expect(await ledger()).toHaveLength(0);
+        // 'expired', so the second tier keeps requerying it and a late callback
+        // can still settle it. A write-off would have been 'failed'.
+        expect((await rowOf(row.id)).status).toBe('expired');
+      });
+
+      // The bound is operator-tunable, and the ONLY thing that reads the env var
+      // is the job's default-parameter path — so a unit test that passes `env`
+      // explicitly proves the arithmetic but not the plumbing. This exercises
+      // the var the way an operator actually sets it.
+      it('honours GLOBEPAY_AMBIGUOUS_GIVEUP_MS through the job', async () => {
+        const row = await seed('PC-reconcile-ambiguous-tuned', 60_000);
+        requery.mockRejectedValue(ambiguous400());
+        process.env.GLOBEPAY_AMBIGUOUS_GIVEUP_MS = '1000';
+        try {
+          await sweep();
+        } finally {
+          delete process.env.GLOBEPAY_AMBIGUOUS_GIVEUP_MS;
+        }
+
+        // A one-minute-old row would wait for a week at the default; the
+        // override ages it out immediately — and still only to 'expired'.
+        expect(await ledger()).toHaveLength(0);
+        expect((await rowOf(row.id)).status).toBe('expired');
       });
 
       it('keeps sweeping after one deposit errors', async () => {
