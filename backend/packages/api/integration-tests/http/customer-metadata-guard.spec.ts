@@ -1,15 +1,35 @@
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
 import { Modules } from '@medusajs/framework/utils';
-import { unwrapResponse } from './utils';
+import { postStoreCustomer, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
 
 const PASSWORD = 'metadata-guard-test-password-1';
 
-// Medusa's stock POST /store/customers/me accepts arbitrary `metadata`. This
-// app reserves customer metadata for server-validated keys (avatar_url,
-// equipped_frame_level, handle) written only by dedicated routes — a
-// client-supplied metadata object would bypass frame-unlock validation.
+// Medusa's stock POST /store/customers/me accepts arbitrary `metadata` — read
+// from the installed package, not assumed:
+// node_modules/@medusajs/medusa/dist/api/store/customers/validators.js declares
+// StoreUpdateCustomer with `metadata: z.record(z.unknown()).nullish()` and
+// .../customers/me/route.js forwards req.validatedBody into
+// updateCustomersWorkflow. The ONLY thing that refuses it is this app's
+// rejectCustomerMetadata (src/api/utils/customer-metadata-guard.ts), wired at
+// middlewares.ts:405 (/store/customers) and :419 (/store/customers/me). Unwire
+// either entry and the matching case below goes red — that is what this file is
+// for.
+//
+// It started as a cosmetic guard: metadata holds server-validated keys
+// (avatar_url, equipped_frame_level, handle) written only by dedicated routes,
+// and a client-supplied blob bought a locked frame or an arbitrary avatar URL.
+// Plan 088 put saved payout bank accounts in the SAME blob and made that list
+// the enforcement point for where a withdrawal goes, so the guard is now a
+// money control: without it a stolen bearer token plants a bank_accounts entry
+// with a backdated `savedAt` (clearing the cooling-off window) and withdraws
+// to it.
+//
+// Both cases assert the guard's EXACT message, not just the 400. Status alone
+// is satisfied by any rejection — stock validation, or the phone guards sharing
+// these two matchers — so a message-less assertion would stay green while the
+// thing it names was gone.
 medusaIntegrationTestRunner({
   inApp: true,
   testSuite: ({ api, getContainer }) => {
@@ -31,8 +51,9 @@ medusaIntegrationTestRunner({
           email,
           password: PASSWORD,
         });
-        await api.post(
-          '/store/customers',
+        await postStoreCustomer(
+          api,
+          getContainer(),
           { email },
           {
             headers: {
@@ -61,6 +82,9 @@ medusaIntegrationTestRunner({
           )
           .catch((e: any) => e.response);
         expect(rejected.status).toBe(400);
+        expect(rejected.data.message).toBe(
+          'metadata is not updatable on this route.',
+        );
 
         const ok = await unwrapResponse(
           api.post('/store/customers/me', { first_name: 'Ash' }, { headers }),
@@ -95,11 +119,14 @@ medusaIntegrationTestRunner({
           )
           .catch((e: any) => e.response);
         expect(rejected.status).toBe(400);
+        expect(rejected.data.message).toBe(
+          'metadata is not updatable on this route.',
+        );
 
         // Same identity, no metadata → the legitimate register-completion flow
         // still succeeds (the guard doesn't break account creation).
         const ok = await unwrapResponse(
-          api.post('/store/customers', { email }, { headers }),
+          postStoreCustomer(api, getContainer(), { email }, { headers }),
         );
         expect(ok.data.customer.email).toBe(email);
         expect(ok.data.customer.metadata ?? {}).not.toHaveProperty(

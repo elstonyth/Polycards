@@ -3,6 +3,7 @@ import { AccountHeader, Pager, StatCards } from '@/components/account/ui';
 import { rm } from '@/lib/format';
 import { getTransactions } from '@/lib/actions/vault';
 import { reasonLabel, signedRm } from '@/lib/transactions';
+import { MarkCreditsSeen } from '@/components/account/credit-dot';
 
 export const metadata: Metadata = { title: 'Transactions' };
 
@@ -43,6 +44,9 @@ export default async function TransactionsPage({
 
   return (
     <>
+      {/* Success branch only: clearing the money dot after a FAILED read would
+          hide activity the customer never got to see. */}
+      <MarkCreditsSeen />
       <AccountHeader title="Transactions" sub="Your top-ups and spending." />
       <StatCards
         items={[
@@ -80,6 +84,7 @@ export default async function TransactionsPage({
               <tr className="border-b border-white/10">
                 <th className="px-4 py-3 font-medium">Date</th>
                 <th className="px-4 py-3 font-medium">Type</th>
+                <th className="px-4 py-3 font-medium">Reference</th>
                 <th className="px-4 py-3 text-right font-medium">Amount</th>
               </tr>
             </thead>
@@ -101,6 +106,12 @@ export default async function TransactionsPage({
                     </td>
                     <td className="px-4 py-3 text-white/90">
                       {reasonLabel(t.reason)}
+                    </td>
+                    {/* The gateway id support asks for — same value the
+                        receipt email and the admin pages show. Internal rows
+                        (pack opens, buybacks) have none. */}
+                    <td className="px-4 py-3 font-mono text-[12px] text-white/50 break-all">
+                      {t.reference ?? '—'}
                     </td>
                     <td
                       className={`whitespace-nowrap px-4 py-3 text-right font-medium tabular-nums ${

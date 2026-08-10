@@ -1,3 +1,7 @@
+import type {
+  AuthenticatedMedusaRequest,
+  MedusaResponse,
+} from '@medusajs/framework/http';
 import { GET as latest } from '../route';
 
 // The route's whole job is: read the caller's own newest vault-visible pull.
@@ -13,7 +17,7 @@ const mkRes = () => {
     res: {
       json: (b: unknown) => (out.body = b),
       setHeader: (k: string, v: string) => (out.headers[k] = v),
-    } as never,
+    } as unknown as MedusaResponse,
     out,
   };
 };
@@ -35,7 +39,7 @@ describe('GET /store/vault/latest', () => {
   it("reads only the caller's own vaulted pulls, newest first, one row", async () => {
     const { res, out } = mkRes();
 
-    await latest(mkReq('cus_me') as never, res);
+    await latest(mkReq('cus_me') as unknown as AuthenticatedMedusaRequest, res);
 
     expect(listPulls).toHaveBeenCalledWith(
       { customer_id: 'cus_me', status: 'vaulted' },
@@ -49,7 +53,7 @@ describe('GET /store/vault/latest', () => {
     listPulls.mockResolvedValue([{ id: 'pull_1', updated_at: when }]);
     const { res, out } = mkRes();
 
-    await latest(mkReq() as never, res);
+    await latest(mkReq() as unknown as AuthenticatedMedusaRequest, res);
 
     expect(out.body).toEqual({ latest_event_at: when });
   });
@@ -62,7 +66,7 @@ describe('GET /store/vault/latest', () => {
     };
     const { res } = mkRes();
 
-    await latest(req as never, res);
+    await latest(req as unknown as AuthenticatedMedusaRequest, res);
 
     expect(listPulls).toHaveBeenCalledWith(
       expect.objectContaining({ customer_id: 'cus_me' }),

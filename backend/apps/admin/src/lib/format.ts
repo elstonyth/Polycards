@@ -51,6 +51,20 @@ export const usdToMyr = (usd: number, fx: number): number =>
     ? Math.round(usd * fx * 100) / 100
     : 0;
 
+// Client mirror of backend DEFAULT_MARKET_MULTIPLIER (packs/pricing.ts) —
+// separate packages, no shared import; keep in sync. The from-PC create
+// applies this margin to the listing price server-side (2026-08-08 fix).
+export const DEFAULT_MARKET_MULTIPLIER = 1.2;
+
+// USD → MYR LISTING price at the default +20% margin — what a from-PC import
+// actually lists at. COUPLED MIRROR of
+// displayMarketPrice(usd, fx, DEFAULT_MARKET_MULTIPLIER); parity asserted in
+// ./format.test.ts. Same bad-input collapse to 0 as usdToMyr.
+export const usdToMyrListing = (usd: number, fx: number): number =>
+  Number.isFinite(usd) && usd >= 0 && Number.isFinite(fx) && fx > 0
+    ? Math.round(usd * fx * DEFAULT_MARKET_MULTIPLIER * 100) / 100
+    : 0;
+
 // MYR → USD at the given rate (2dp) — the inverse, used when an operator authors
 // a value in RM but the stored/submitted FMV must stay USD so the daily
 // PriceCharting sync and buyback math keep their USD source of truth.
@@ -85,8 +99,10 @@ export function orderDateTime(iso: string): string {
   return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()} ${p(h % 12 || 12)}:${p(d.getMinutes())} ${h < 12 ? 'AM' : 'PM'}`;
 }
 
+// Up to 4 decimals (the odds storage grain, 1 unit = 0.0001%), trailing
+// zeros trimmed: 0.68 -> "0.68%", 0.6842 -> "0.6842%", 12 -> "12%".
 export const fmtPct = (n: number): string =>
-  `${Number.isInteger(n) ? n : n.toFixed(2)}%`;
+  `${Number.isInteger(n) ? n : String(Math.round(n * 10_000) / 10_000)}%`;
 
 // Kebab-case a typed handle/slug for the backend's HANDLE_RE
 // (/^[a-z0-9]+(?:-[a-z0-9]+)*$/ — packs/validate.ts, cards/validate.ts):

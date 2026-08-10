@@ -4,7 +4,7 @@ import type { ICustomerModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
 import { clearPackDetailCache } from '../../src/api/store/packs/[slug]/route';
-import { unwrapResponse } from './utils';
+import { postStoreCustomer, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
 
@@ -46,7 +46,7 @@ const PACK_PRICE = 10;
 const FMV = 50;
 const MULTIPLIER = 1.2;
 const MANUAL_RATE = 4.0;
-const TOTAL_BPS = 10000;
+const TOTAL_UNITS = 1_000_000;
 
 medusaIntegrationTestRunner({
   inApp: true,
@@ -111,7 +111,7 @@ medusaIntegrationTestRunner({
             card_id: ALPHA,
             rarity: 'Rare' as const,
             locked: false,
-            weight: TOTAL_BPS,
+            weight: TOTAL_UNITS,
             weight_2: 0,
           },
           {
@@ -120,7 +120,7 @@ medusaIntegrationTestRunner({
             rarity: 'Rare' as const,
             locked: false,
             weight: 0,
-            weight_2: TOTAL_BPS,
+            weight_2: TOTAL_UNITS,
           },
         ]);
 
@@ -134,8 +134,8 @@ medusaIntegrationTestRunner({
         );
         const alphaRow = seeded.find((o) => o.card_id === ALPHA);
         const betaRow = seeded.find((o) => o.card_id === BETA);
-        expect(alphaRow).toMatchObject({ weight: TOTAL_BPS, weight_2: 0 });
-        expect(betaRow).toMatchObject({ weight: 0, weight_2: TOTAL_BPS });
+        expect(alphaRow).toMatchObject({ weight: TOTAL_UNITS, weight_2: 0 });
+        expect(betaRow).toMatchObject({ weight: 0, weight_2: TOTAL_UNITS });
         // NULL weight_3 on both rows is what makes set 3 inherit set 2.
         expect(alphaRow?.weight_3 ?? null).toBeNull();
         expect(betaRow?.weight_3 ?? null).toBeNull();
@@ -185,8 +185,9 @@ medusaIntegrationTestRunner({
           email,
           password: PASSWORD,
         });
-        await api.post(
-          '/store/customers',
+        await postStoreCustomer(
+          api,
+          getContainer(),
           { email },
           {
             headers: {
@@ -346,7 +347,7 @@ medusaIntegrationTestRunner({
             locked: false,
             weight: 0,
             weight_2: 0,
-            weight_3: TOTAL_BPS,
+            weight_3: TOTAL_UNITS,
           },
         ]);
         clearPackDetailCache();

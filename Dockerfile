@@ -76,12 +76,12 @@ ARG NEXT_PUBLIC_PAYMENTS_PROVIDER=globepay
 # what reaches the bundle — moves together with the .do/storefront.app.yaml
 # value. The backend PHONE_VERIFICATION_REQUIRED flag (step 4) flips only
 # after a build with this ARG is live, or phone signups 400.
-# Rolled back to false 2026-08-07: Twilio refuses every OTP send with error
-# 21608 because the account has no approved primary compliance profile (see
-# .do/backend.app.yaml). Leaving the UI on strands signup and phone-change
-# behind a code that cannot arrive. Backend PHONE_VERIFICATION_REQUIRED went
-# false first — the safe order when DISABLING, the reverse of step 3/4 above.
-ARG NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED=false
+# Off for a few hours on 2026-08-07 while Twilio refused every send with error
+# 21608 (no approved primary compliance profile). Back on the same day: an
+# Individual primary profile reached twilio-approved and a live send returned
+# 201/pending. This ARG re-arms FIRST (step 3); the backend flag follows once
+# a build carrying it is ACTIVE.
+ARG NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED=true
 # Withdrawal UI gate. Armed 2026-08-05 alongside the backend's
 # GLOBEPAY_WITHDRAWALS_ENABLED (the actual money gate — this only renders the
 # form). Same rule as the ARGs above: this default is what reaches the bundle;

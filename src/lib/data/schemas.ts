@@ -240,9 +240,9 @@ export const VaultShowcaseSchema = z.looseObject({
 /** GET /store/credits — finite balance. */
 export const BalanceSchema = z.looseObject({ balance: finite });
 
-/** GET /store/vault/latest — the newest vault-visible event (unread-dot signal).
- *  null when the vault is empty; the client renders no dot for null. */
-export const VaultLatestSchema = z.looseObject({
+/** GET /store/vault/latest and GET /store/credits/latest — the newest event on
+ *  an unread-dot surface. null when there is nothing; the client renders no dot. */
+export const LatestEventSchema = z.looseObject({
   latest_event_at: z.string().nullable(),
 });
 
@@ -289,6 +289,9 @@ export const CreditTransactionSchema = z.looseObject({
   amount: finite,
   reason: z.string(),
   created_at: z.string(),
+  // Payment-gateway reference (topup/cashout rows; null otherwise). Optional
+  // so an older backend that omits the field still parses.
+  reference: z.string().nullable().optional(),
 });
 
 /** POST /store/credits/topup response — finite amount + balance. `replayed`
@@ -330,7 +333,14 @@ export const WithdrawBanksSchema = z.looseObject({
 });
 
 /** /store/credits/withdraw/accounts responses (GET/POST/DELETE all return the
- *  full list) — the customer's saved payout accounts. */
+ *  full list) — the customer's saved payout accounts.
+ *
+ *  `usableFrom` is the server's verdict on the cooling-off window and the only
+ *  source of it: an ISO instant the account becomes payable, or null when it
+ *  never will without being re-saved. The client renders it and never
+ *  recomputes the window, so retuning the backend env moves the UI too.
+ *  `.nullish()` because a backend that predates the field omits it entirely —
+ *  which lands on the same "not usable" rendering as null, the safe direction. */
 export const SavedBankAccountsSchema = z.looseObject({
   accounts: z.array(
     z.looseObject({
@@ -339,6 +349,7 @@ export const SavedBankAccountsSchema = z.looseObject({
       bankName: z.string(),
       accountNumber: z.string(),
       accountHolderName: z.string(),
+      usableFrom: z.string().nullish(),
     }),
   ),
 });

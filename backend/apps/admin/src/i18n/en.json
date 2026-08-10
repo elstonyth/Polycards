@@ -42,6 +42,7 @@
       "title": "Published odds (public)",
       "subtitle": "What players see on the pack page. Display-only — independent of the real win rates below.",
       "overall": "Overall win %",
+      "decimals": "Decimals",
       "fillFromDefaults": "Use defaults",
       "save": "Save",
       "saved": "Published odds saved.",
@@ -100,7 +101,14 @@
       "outsideTitle": "Card value outside every tier range",
       "outsideDesc_one": "{{count}} of the cards you are adding falls outside every configured tier price range (see Tier Defaults). It will join as Common. Add it anyway?",
       "outsideDesc_other": "{{count}} of the cards you are adding fall outside every configured tier price range (see Tier Defaults). They will join as Common. Add them anyway?",
-      "outsideConfirm": "Add anyway"
+      "outsideConfirm": "Add anyway",
+      "searchPlaceholder": "Search name or handle…",
+      "grade": "Grade",
+      "selectVisible": "Select all visible cards",
+      "count_one": "{{count}} card",
+      "count_other": "{{count}} cards",
+      "countFiltered": "{{shown}} of {{total}} cards",
+      "noMatches": "No cards match this search."
     },
     "tierRanges": {
       "title": "Tier price ranges",
@@ -147,6 +155,10 @@
       "unitsOwed": "{{count}} owed to winners",
       "topHit": "Top hit #",
       "pendingRow": "new — not in pool until saved",
+      "searchPlaceholder": "Search name or handle…",
+      "count_one": "{{count}} card in pool",
+      "count_other": "{{count}} cards in pool",
+      "countFiltered": "{{shown}} of {{total}} cards",
       "outOfRangeBelow": "below tier range",
       "outOfRangeAbove": "above tier range",
       "outOfRangeHint": "Value {{value}} is outside the configured {{tier}} price range (Tier Defaults). The tier never switches on its own — retier manually if needed.",
@@ -204,7 +216,7 @@
       "label": "Grade tier",
       "loadError": "Could not load prices for this product.",
       "empty": "No prices available for this product.",
-      "fxHint": "Prices shown in RM at the live FX rate — no markup applied. Margin is set when the card is registered for gacha."
+      "fxHint": "Raw market comps in RM at the live FX rate. The listing itself is created at +20% over the picked FMV."
     },
     "stock": {
       "label": "Stock quantity",
@@ -212,7 +224,7 @@
     },
     "preview": {
       "loading": "Loading FX rate…",
-      "line": "Raw ${{raw}} · FX {{fx}} · Listing RM{{market}} (no markup)"
+      "line": "Raw ${{raw}} · FX {{fx}} · FMV RM{{market}} · Lists at RM{{listing}} (+20% margin)"
     },
     "image": {
       "label": "Image",
@@ -385,6 +397,7 @@
       "pending": "Pending",
       "settled": "Settled",
       "failed": "Failed",
+      "expired": "Expired",
       "all": "All"
     },
     "when": "Started",
@@ -397,7 +410,8 @@
     "statusLabel": {
       "pending": "Pending",
       "settled": "Settled",
-      "failed": "Failed"
+      "failed": "Failed",
+      "expired": "Expired"
     },
     "statusStale": "Overdue",
     "staleWarning": "{{n}} row(s) on this page are past the reconcile window. Check the deposit in the GlobePay back office before crediting anyone by hand.",
@@ -417,6 +431,7 @@
     "when": "Started",
     "customer": "Customer",
     "destination": "Destination",
+    "reveal": "Reveal",
     "amount": "Amount",
     "status": "Status",
     "reference": "References",
@@ -573,7 +588,7 @@
     "payouts": "Payouts (buybacks)",
     "net": "Net margin",
     "liability": "Vault liability",
-    "liabilityHint": "{{count}} cards owed",
+    "liabilityHint": "{{count}} cards owed · display value (FMV × markup, the buyback basis)",
     "topups": "Top-ups",
     "adjustments": "Adjustments (net)",
     "rtpTitle": "Pack RTP (theoretical)",
@@ -743,6 +758,7 @@
     "selectAll": "Select all items",
     "selectOne": "Select {{name}}",
     "selected": "{{n}} selected",
+    "shiftHint": "Tip: Shift-click selects every row between two clicks.",
     "listToCard": "List to gacha card",
     "bulkDone": "{{n}} card(s) created",
     "bulkDoneSkipped": "{{n}} card(s) created, {{skipped}} skipped",

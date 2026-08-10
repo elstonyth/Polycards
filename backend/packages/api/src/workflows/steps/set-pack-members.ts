@@ -5,6 +5,7 @@ import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
 import {
   computeSetWeights,
+  PCT_SCALE,
   type SetEntry,
   type OddsRarity,
 } from '@acme/odds-math';
@@ -17,10 +18,10 @@ export type SetPackMembersInput = {
 
 // A freshly added member gets a positive relative weight so it can be rolled
 // immediately (the roll is scale-invariant). The operator then fine-tunes the
-// real percentages in the win-rate editor, which normalizes to basis points.
+// real percentages in the win-rate editor, which normalizes to integer units.
 // Only used on the degraded path (the pool can't be balanced — see below);
 // normally the new member comes out of computeSetWeights as a balancer.
-const NEW_MEMBER_WEIGHT = 100;
+const NEW_MEMBER_WEIGHT = 10_000; // ~1% of a normalized 1,000,000-unit pool
 
 // Snapshots MUST carry weight_2/weight_3: a compensation that restored only
 // `weight` would silently wipe the pack's set-2/3 tables (same rule as
@@ -136,7 +137,7 @@ export const setPackMembersInvoke = async (
   }
 
   // Re-normalize so a membership edit can never dilute a tuned win rate:
-  // appending a row to a normalized Σ=10000 pool would otherwise shave every
+  // appending a row to a normalized Σ=TOTAL_UNITS pool would otherwise shave every
   // rate, and since the UI no longer shows weights nobody would notice — the
   // next save would bake the diluted rate in permanently.
   //
@@ -149,7 +150,7 @@ export const setPackMembersInvoke = async (
   //
   // All THREE sets are recomputed: a survivor's explicit weight_2/weight_3 is
   // fed back in as pct_2/pct_3 so an appended/removed card can't leave set 2/3
-  // resolving to something other than 10000. New members enter unlocked/Common
+  // resolving to its full total. New members enter unlocked/Common
   // with no set overrides (spec §2.2 — the operator sets their rates in the
   // editor afterwards); being an unlocked Common makes them a balancer, so they
   // come out of the box with a rollable share of the remainder.
@@ -167,8 +168,8 @@ export const setPackMembersInvoke = async (
       locked: o.locked,
       pct: (o.weight / originalTotal) * 100,
       rarity: (o.rarity ?? 'Common') as string,
-      pct_2: o.weight_2 != null ? o.weight_2 / 100 : null,
-      pct_3: o.weight_3 != null ? o.weight_3 / 100 : null,
+      pct_2: o.weight_2 != null ? o.weight_2 / PCT_SCALE : null,
+      pct_3: o.weight_3 != null ? o.weight_3 / PCT_SCALE : null,
     })),
     ...toAdd.map((card_id) => ({
       card_id,
@@ -247,7 +248,7 @@ export const setPackMembersInvoke = async (
     // Compared across ALL THREE sets: a row's set-1 weight can be unchanged
     // while its materialized weight_2/weight_3 moved (e.g. dropping a
     // zero-weight card that carried an explicit pct_2), and skipping it there
-    // would leave that set resolving to less than 10000.
+    // would leave that set resolving short of the full total.
     reweigh: rowByCard
       ? survivors.flatMap((o) => {
           const row = rowByCard.get(o.card_id);

@@ -10,7 +10,7 @@
 //              body forges customer_id/notification_ids pointing at B.
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
 import { Modules } from '@medusajs/framework/utils';
-import { unwrapResponse } from './utils';
+import { postStoreCustomer, unwrapResponse } from './utils';
 import { CUSTOMER_FEED_CHANNEL } from '../../src/modules/packs/notify-feed';
 
 jest.setTimeout(120 * 1000);
@@ -41,8 +41,9 @@ medusaIntegrationTestRunner({
           email: 'read-all-a@test.dev',
           password: PASSWORD,
         });
-        await api.post(
-          '/store/customers',
+        await postStoreCustomer(
+          api,
+          getContainer(),
           { email: 'read-all-a@test.dev' },
           {
             headers: {
@@ -64,8 +65,9 @@ medusaIntegrationTestRunner({
           email: 'read-all-b@test.dev',
           password: PASSWORD,
         });
-        await api.post(
-          '/store/customers',
+        await postStoreCustomer(
+          api,
+          getContainer(),
           { email: 'read-all-b@test.dev' },
           {
             headers: {

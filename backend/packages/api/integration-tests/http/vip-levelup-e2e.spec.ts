@@ -20,7 +20,7 @@ import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
 import { VIP_LEVELS } from '../../src/scripts/vip-levels.data';
-import { unwrapResponse } from './utils';
+import { postStoreCustomer, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
 
@@ -57,8 +57,9 @@ medusaIntegrationTestRunner({
           email,
           password: PASSWORD,
         });
-        const created = await api.post(
-          '/store/customers',
+        const created = await postStoreCustomer(
+          api,
+          getContainer(),
           { email },
           {
             headers: {

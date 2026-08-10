@@ -84,6 +84,7 @@ export const updatePackStep = createStep(
           : ({
               overall: stored.overall,
               tiers: fillPublishedTiers(stored.tiers),
+              decimals: stored.decimals,
             } as unknown as Record<string, unknown>);
       })(),
       tier_ranges:
@@ -122,6 +123,7 @@ export const updatePackStep = createStep(
                   : ({
                       overall: input.published_odds.overall,
                       tiers: fillPublishedTiers(input.published_odds.tiers),
+                      decimals: input.published_odds.decimals,
                     } as unknown as Record<string, unknown>),
             }
           : {}),

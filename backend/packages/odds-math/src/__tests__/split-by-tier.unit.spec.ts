@@ -3,7 +3,7 @@ import {
   DEFAULT_TIER_PCT,
   MIN_PCT,
   splitByTier,
-  TOTAL_BPS,
+  TOTAL_UNITS,
   type OddsInput,
   type TierSplitRow,
 } from '../index';
@@ -135,10 +135,10 @@ describe('splitByTier', () => {
     expect(tierOf(r, 'Legendary')?.count).toBe(0);
   });
 
-  it('raises a sub-1-bps share to the floor and flags the tier', () => {
-    // 0.1% across 20 Immortals is 0.005% each — under MIN_PCT, so every one
-    // would round to weight 0 and become unpullable.
-    const many = Array.from({ length: 20 }, (_, i) =>
+  it('raises a sub-1-unit share to the floor and flags the tier', () => {
+    // 0.1% across 2000 Immortals is 0.00005% each — under MIN_PCT (0.0001%),
+    // so every one would round to weight 0 and become unpullable.
+    const many = Array.from({ length: 2000 }, (_, i) =>
       row(`i${i}`, 'Immortal'),
     ).concat(row('c', 'Common'));
     const r = splitByTier(many);
@@ -187,7 +187,7 @@ describe('splitByTier → balanceOdds', () => {
     const res = balanceOdds(applied(FULL));
     expect(res.error).toBeNull();
     const sum = res.computed.reduce((s, c) => s + c.weight, 0);
-    expect(sum).toBe(TOTAL_BPS);
+    expect(sum).toBe(TOTAL_UNITS);
     // Every tier present ⇒ Common lands on exactly its documented share.
     expect(res.computed.find((c) => c.card_id === 'com')?.pct).toBe(43);
   });
@@ -196,7 +196,7 @@ describe('splitByTier → balanceOdds', () => {
     const noLegendary = FULL.filter((r) => r.rarity !== 'Legendary');
     const res = balanceOdds(applied(noLegendary));
     expect(res.error).toBeNull();
-    expect(res.computed.reduce((s, c) => s + c.weight, 0)).toBe(TOTAL_BPS);
+    expect(res.computed.reduce((s, c) => s + c.weight, 0)).toBe(TOTAL_UNITS);
     expect(res.computed.find((c) => c.card_id === 'com')?.pct).toBe(44.4);
   });
 });

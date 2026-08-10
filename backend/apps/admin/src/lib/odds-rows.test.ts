@@ -88,9 +88,9 @@ describe('mapOddsToRows', () => {
     expect(b.topHitInput).toBe('');
   });
 
-  it('seeds set-2/3 inputs from the RAW weights: null → inherit, bps → %', () => {
+  it('seeds set-2/3 inputs from the RAW weights: null → inherit, units → %', () => {
     const [a, b] = mapOddsToRows([
-      oddsRow({ weight_2: 1250, weight_3: null }),
+      oddsRow({ weight_2: 125_000, weight_3: null }),
       oddsRow({ card_id: 'card_2', weight_2: null, weight_3: 0 }),
     ]);
     expect(a.pctInput2).toBe('12.5');

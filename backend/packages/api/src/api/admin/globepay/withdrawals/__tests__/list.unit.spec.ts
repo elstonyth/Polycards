@@ -1,4 +1,7 @@
-import { GET, parseStatusFilter } from '../route';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { GET, maskAccountNumber, parseStatusFilter } from '../route';
+import { GET as REVEAL } from '../[id]/account/route';
 import { GLOBEPAY_STALE_AFTER_MS } from '../../../../../modules/packs/globepay-reconcile';
 
 // Money-OUT mirror of ../deposits — same contract, inverted stakes: a stale
@@ -72,19 +75,37 @@ describe('parseStatusFilter', () => {
 });
 
 describe('GET /admin/globepay/withdrawals', () => {
-  it('normalizes bigNumber strings, joins the email, keeps the destination verbatim', async () => {
+  it('normalizes bigNumber strings, joins the email, masks the destination account', async () => {
     const { scope } = mkScope([withdrawal(1)]);
     const { res, out } = mkRes();
     await GET({ scope, query: {} } as any, res);
     const row = out.body.withdrawals[0];
     expect(row.amount).toBe(50);
     expect(row.customer_email).toBe('a@b.c');
-    // The destination is the dispute record — never truncated or masked here.
     expect(row.bank_code).toBe('MBB');
-    expect(row.account_number).toBe('1234567890');
+    // THE regression guard: this list serves up to 100 rows per request, so a
+    // full account number here hands out every listed customer's bank details
+    // for one row's worth of operator need. Full value = ./[id]/account only.
+    expect(row.account_number).not.toBe('1234567890');
+    expect(row.account_number).toBe('••••7890');
+    // The last 4 must survive — an operator matches a row to a dispute by it.
+    expect(row.account_number).toContain('7890');
+    // NOT masked: the other half of the same match. Masking it would overreach
+    // and push the lookup somewhere unaudited.
     expect(row.account_holder_name).toBe('Tan Ah Kow');
-    // Emails + full bank accounts must never be cacheable (CWE-524).
+    // Identity-varying (emails) — must never be cacheable (CWE-524).
     expect(out.headers['Cache-Control']).toBe('no-store');
+  });
+
+  // The mask agrees with setPayoutDetails' audit-row last4 (service.ts): digits
+  // only, and only when there are MORE than four of them — for a <=4-digit
+  // account the "last 4" IS the whole number, which is what must not leak.
+  it('masks formatting characters and refuses to reveal a short account whole', () => {
+    expect(maskAccountNumber('1234-5678 90')).toBe('••••7890');
+    expect(maskAccountNumber('12345')).toBe('••••2345');
+    expect(maskAccountNumber('1234')).toBe('••••');
+    expect(maskAccountNumber('')).toBe('••••');
+    expect(maskAccountNumber(null)).toBe('••••');
   });
 
   it('flags a pending row past the sweep window as stale, fresh ones not', async () => {
@@ -132,9 +153,10 @@ describe('GET /admin/globepay/withdrawals', () => {
     expect(calls.opts.order).toEqual({ amount: 'ASC', id: 'ASC' });
   });
 
-  // account_number is deliberately NOT allowlisted — the full destination is on
-  // the row for dispute quoting, not as a sort axis. A refused key falls back
-  // to the VIEW's default (pending = oldest-first here), same as deposits.
+  // account_number is deliberately NOT allowlisted — it is a masked display
+  // string here, not a sort axis (and sorting by it would order rows by the
+  // very digits the mask withholds). A refused key falls back to the VIEW's
+  // default (pending = oldest-first here), same as deposits.
   it('an unknown sort key degrades to the view default, never a passthrough', async () => {
     const { scope, calls } = mkScope([withdrawal(1)]);
     const { res } = mkRes();
@@ -146,5 +168,89 @@ describe('GET /admin/globepay/withdrawals', () => {
       res,
     );
     expect(calls.opts.order).toEqual({ created_at: 'DESC', id: 'DESC' });
+  });
+});
+
+// The other half of the masking: without a reveal path an operator chasing a
+// disputed payout goes to the database console, where nothing is logged and
+// nothing is rate-limited.
+describe('GET /admin/globepay/withdrawals/:id/account', () => {
+  const mkRevealScope = (rows: any[]) => {
+    const calls: { filter?: any; opts?: any } = {};
+    const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
+    const packs = {
+      listGlobePayWithdrawals: async (filter: any, opts: any) => {
+        calls.filter = filter;
+        calls.opts = opts;
+        return rows;
+      },
+    };
+    return {
+      calls,
+      logger,
+      scope: { resolve: (k: string) => (k === 'logger' ? logger : packs) },
+    };
+  };
+
+  const mkReq = (scope: any, id: string) => ({
+    scope,
+    params: { id },
+    auth_context: { actor_id: 'usr_admin_1' },
+  });
+
+  it('returns the FULL number for one id, uncacheable', async () => {
+    const { scope, calls } = mkRevealScope([withdrawal(1)]);
+    const { res, out } = mkRes();
+    await REVEAL(mkReq(scope, 'gpw_1') as any, res);
+    expect(out.body).toEqual({ id: 'gpw_1', account_number: '1234567890' });
+    // Single row per request, selected by id — no bulk variant exists, and the
+    // take:1 means a filter bug cannot turn this into a table dump.
+    expect(calls.filter).toEqual({ id: 'gpw_1' });
+    expect(calls.opts).toEqual({ take: 1 });
+    expect(out.headers['Cache-Control']).toBe('no-store');
+  });
+
+  it('logs the reveal with the row and the actor, and NEVER the number', async () => {
+    const { scope, logger } = mkRevealScope([withdrawal(1)]);
+    const { res } = mkRes();
+    await REVEAL(mkReq(scope, 'gpw_1') as any, res);
+    expect(logger.info).toHaveBeenCalledTimes(1);
+    const line = logger.info.mock.calls[0][0] as string;
+    expect(line).toContain('gpw_1');
+    expect(line).toContain('usr_admin_1');
+    // Boolean, not .not.toContain(): a failing toContain prints the whole
+    // logged string — i.e. the account number this assertion exists to keep
+    // out of logs — into a public CI log.
+    expect(line.includes('1234567890')).toBe(false);
+  });
+
+  it('404s an unknown id WITHOUT logging a reveal that never happened', async () => {
+    const { scope, logger } = mkRevealScope([]);
+    const { res } = mkRes();
+    await expect(REVEAL(mkReq(scope, 'gpw_nope') as any, res)).rejects.toThrow(
+      /not found/i,
+    );
+    expect(logger.info.mock.calls.length).toBe(0);
+  });
+
+  // Auth is NOT exercised here: this spec calls the handler directly, so there
+  // is no router and no middleware chain. The route is protected by the
+  // framework's blanket `/admin` guard (registered in router.js before any
+  // matcher in src/api/middlewares.ts), exactly like every sibling admin route
+  // in this directory — none of which test auth either. What this spec CAN
+  // pin is the rate-limit registration, which is ours and is easy to drop.
+  // Source-text, not an import: middlewares.ts constructs its rate limiters at
+  // module load (Redis connections), which a unit spec must not do.
+  it('is registered on the admin action rate limiter', () => {
+    const middlewares = readFileSync(
+      join(__dirname, '../../../../middlewares.ts'),
+      'utf8',
+    );
+    // The whole entry, not just the matcher string: a matcher registered
+    // without adminActionRateLimit would leave the reveal unthrottled, which is
+    // the failure this guards.
+    expect(middlewares).toMatch(
+      /matcher: '\/admin\/globepay\/withdrawals\/\*\/account',\s*method: 'GET',\s*middlewares: \[adminActionRateLimit\]/,
+    );
   });
 });

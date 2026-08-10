@@ -104,6 +104,15 @@ const buildContainer = (
 const packsStub = () => ({
   listCards: jest.fn().mockResolvedValue([CARD]),
   updateCards: jest.fn().mockResolvedValue([]),
+  // resolveFxRate reads this for the NULL-price "use FMV" fallback (the MYR
+  // mirror recomputes FMV × fx × multiplier). A firm 4.5 keeps the golden
+  // vectors below deterministic. NOTE: pricing.ts caches the display rate
+  // process-wide for 30s, so every stub in this file must agree on 4.5.
+  listFxRates: jest
+    .fn()
+    .mockResolvedValue([
+      { pair: 'USD_MYR', rate: 4.5, manual_override: false },
+    ]),
 });
 
 describe('updateCardInvoke slab bake', () => {
@@ -194,6 +203,41 @@ describe('updateCardInvoke slab bake', () => {
     expect(metadata).toMatchObject({ slab_image: '/static/slab-new.webp' });
     expect(metadata).not.toHaveProperty('slab_image_key');
     expect(deleteSlabFile).toHaveBeenCalledWith(expect.anything(), 'old-key');
+  });
+});
+
+describe('updateCardInvoke variant price mirror', () => {
+  beforeEach(() => {
+    jest.mocked(bakeSlabImage).mockReset().mockResolvedValue(null);
+    jest.mocked(deleteSlabFile).mockReset().mockResolvedValue(undefined);
+  });
+
+  // Regression (2026-08-08 review of PR #397): this mirror used to write
+  // `currency_code: 'usd', amount: price ?? market_value` — which both mixed
+  // units (Card.price is MYR, market_value is USD) and, because
+  // updatePriceSets REPLACES the whole set, deleted the variant's myr price
+  // on every card edit. The store's single region sells in MYR.
+  it('NULL card price mirrors the FMV-derived MYR display price, never a USD amount', async () => {
+    const packs = packsStub();
+    await updateCardInvoke(INPUT, { container: buildContainer(packs) });
+    const run = jest.mocked(updateProductsWorkflow).mock.results.at(-1)!.value
+      .run as jest.Mock;
+    const variant = run.mock.calls[0][0].input.products[0].variants[0];
+    // 25 USD × 4.5 × 1.2 (CARD carries no explicit input multiplier → the 1.2
+    // default) = 135. The raw USD 25 must never appear as the amount.
+    expect(variant.prices).toEqual([{ currency_code: 'myr', amount: 135 }]);
+  });
+
+  it('an explicit MYR price is mirrored verbatim under myr', async () => {
+    const packs = packsStub();
+    await updateCardInvoke(
+      { ...INPUT, price: 99 },
+      { container: buildContainer(packs) },
+    );
+    const run = jest.mocked(updateProductsWorkflow).mock.results.at(-1)!.value
+      .run as jest.Mock;
+    const variant = run.mock.calls[0][0].input.products[0].variants[0];
+    expect(variant.prices).toEqual([{ currency_code: 'myr', amount: 99 }]);
   });
 });
 

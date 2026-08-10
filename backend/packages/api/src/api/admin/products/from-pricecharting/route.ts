@@ -7,9 +7,10 @@ import { resolvePixelPokemonPatch } from '../../../../modules/packs/card-pixel-p
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
 
-// No `market_multiplier` here: margin is a GACHA-card concern set at card
-// registration (Card.market_multiplier) — product creation carries none, and
-// the listing price is plain FMV × FX.
+// No `market_multiplier` field here: the per-card override still lives on the
+// gacha Card (set at registration). When no explicit `price` is sent, the
+// listing price defaults to FMV × FX × DEFAULT_MARKET_MULTIPLIER (+20%) — see
+// the create step.
 type Body = {
   pc_product_id?: unknown;
   pc_grade?: unknown;

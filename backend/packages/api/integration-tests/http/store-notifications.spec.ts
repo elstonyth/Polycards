@@ -8,7 +8,7 @@
 //               decrements; A marking B's notification → 404 (no existence leak).
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
 import { Modules } from '@medusajs/framework/utils';
-import { unwrapResponse } from './utils';
+import { postStoreCustomer, unwrapResponse } from './utils';
 import { CUSTOMER_FEED_CHANNEL } from '../../src/modules/packs/notify-feed';
 
 jest.setTimeout(120 * 1000);
@@ -42,8 +42,9 @@ medusaIntegrationTestRunner({
           email: 'notif-a@test.dev',
           password: PASSWORD,
         });
-        await api.post(
-          '/store/customers',
+        await postStoreCustomer(
+          api,
+          getContainer(),
           { email: 'notif-a@test.dev' },
           {
             headers: {
@@ -74,8 +75,9 @@ medusaIntegrationTestRunner({
           email: 'notif-b@test.dev',
           password: PASSWORD,
         });
-        await api.post(
-          '/store/customers',
+        await postStoreCustomer(
+          api,
+          getContainer(),
           { email: 'notif-b@test.dev' },
           {
             headers: {

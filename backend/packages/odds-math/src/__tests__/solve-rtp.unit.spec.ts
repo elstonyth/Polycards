@@ -49,7 +49,9 @@ describe('solveOddsForRtp', () => {
     const noAbsorber: RtpSolveRow[] = [
       { card_id: 'a', locked: false, rarity: 'Rare', value: 100, pct: 0 },
     ];
-    expect(solveOddsForRtp(noAbsorber, 50, 0.7).error).toMatch(/unlocked Common/);
+    expect(solveOddsForRtp(noAbsorber, 50, 0.7).error).toMatch(
+      /unlocked Common/,
+    );
 
     const noChase: RtpSolveRow[] = [
       { card_id: 'a', locked: false, rarity: 'Common', value: 100, pct: 0 },
@@ -60,7 +62,9 @@ describe('solveOddsForRtp', () => {
       { card_id: 'a', locked: false, rarity: 'Common', value: 100, pct: 0 },
       { card_id: 'b', locked: false, rarity: 'Rare', value: 100, pct: 0 },
     ];
-    expect(solveOddsForRtp(sameValue, 50, 0.7).error).toMatch(/same average value/);
+    expect(solveOddsForRtp(sameValue, 50, 0.7).error).toMatch(
+      /same average value/,
+    );
 
     expect(solveOddsForRtp(SIMPLE, 0, 0.7).error).toMatch(/Pack price/);
     expect(solveOddsForRtp([], 50, 0.7).error).toMatch(/No cards/);
@@ -76,7 +80,13 @@ describe('solveOddsForRtp', () => {
 
     for (const bad of [-1, Number.NaN]) {
       const rows: RtpSolveRow[] = [
-        { card_id: 'broken', locked: false, rarity: 'Rare', value: bad, pct: 0 },
+        {
+          card_id: 'broken',
+          locked: false,
+          rarity: 'Rare',
+          value: bad,
+          pct: 0,
+        },
         ...SIMPLE,
       ];
       const res = solveOddsForRtp(rows, 50, 0.7);
@@ -89,7 +99,13 @@ describe('solveOddsForRtp', () => {
   it('rejects a locked row whose rate is not a usable number', () => {
     for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, -1, 101]) {
       const rows: RtpSolveRow[] = [
-        { card_id: 'pinned', locked: true, rarity: 'Rare', value: 500, pct: bad },
+        {
+          card_id: 'pinned',
+          locked: true,
+          rarity: 'Rare',
+          value: 500,
+          pct: bad,
+        },
         ...SIMPLE,
       ];
       const res = solveOddsForRtp(rows, 50, 0.7);
@@ -101,9 +117,27 @@ describe('solveOddsForRtp', () => {
 
   it('ignores an unusable rate on an UNLOCKED row', () => {
     const rows: RtpSolveRow[] = [
-      { card_id: 'chase', locked: false, rarity: 'Rare', value: 500, pct: Number.NaN },
-      { card_id: 'cheap-a', locked: false, rarity: 'Common', value: 20, pct: 0 },
-      { card_id: 'cheap-b', locked: false, rarity: 'Common', value: 40, pct: 0 },
+      {
+        card_id: 'chase',
+        locked: false,
+        rarity: 'Rare',
+        value: 500,
+        pct: Number.NaN,
+      },
+      {
+        card_id: 'cheap-a',
+        locked: false,
+        rarity: 'Common',
+        value: 20,
+        pct: 0,
+      },
+      {
+        card_id: 'cheap-b',
+        locked: false,
+        rarity: 'Common',
+        value: 40,
+        pct: 0,
+      },
     ];
     const res = solveOddsForRtp(rows, 50, 0.7);
     expect(res.error).toBeNull();
@@ -115,16 +149,76 @@ import { MIN_PCT, RARITY_WEIGHT } from '../index';
 
 // The real bronze-pack pool with corrected (value-banded) rarities.
 const BRONZE: RtpSolveRow[] = [
-  { card_id: 'pw-pikachu', locked: false, rarity: 'Common', value: 24.55, pct: 0 },
-  { card_id: 'pw-bulbasaur', locked: false, rarity: 'Common', value: 39.27, pct: 0 },
-  { card_id: 'pw-jolteon', locked: false, rarity: 'Uncommon', value: 122.73, pct: 0 },
-  { card_id: 'pw-gengar', locked: false, rarity: 'Rare', value: 589.1, pct: 0 },
-  { card_id: 'pw-charizard', locked: false, rarity: 'Rare', value: 1718.22, pct: 0 },
-  { card_id: 'mega-dragonite', locked: false, rarity: 'Rare', value: 1829.51, pct: 0 },
-  { card_id: 'pw-mewtwo', locked: false, rarity: 'Mythical', value: 4418.28, pct: 0 },
-  { card_id: 'pikachu-grey-felt', locked: false, rarity: 'Mythical', value: 4856.08, pct: 0 },
-  { card_id: 'pikachu-ex-238', locked: false, rarity: 'Mythical', value: 4860.11, pct: 0 },
-  { card_id: 'mega-charizard-x', locked: false, rarity: 'Legendary', value: 9867.49, pct: 0 },
+  {
+    card_id: 'pw-pikachu',
+    locked: false,
+    rarity: 'Common',
+    value: 24.55,
+    pct: 0,
+  },
+  {
+    card_id: 'pw-bulbasaur',
+    locked: false,
+    rarity: 'Common',
+    value: 39.27,
+    pct: 0,
+  },
+  {
+    card_id: 'pw-jolteon',
+    locked: false,
+    rarity: 'Uncommon',
+    value: 12_273,
+    pct: 0,
+  },
+  {
+    card_id: 'pw-gengar',
+    locked: false,
+    rarity: 'Rare',
+    value: 58_910,
+    pct: 0,
+  },
+  {
+    card_id: 'pw-charizard',
+    locked: false,
+    rarity: 'Rare',
+    value: 171_822,
+    pct: 0,
+  },
+  {
+    card_id: 'mega-dragonite',
+    locked: false,
+    rarity: 'Rare',
+    value: 182_951,
+    pct: 0,
+  },
+  {
+    card_id: 'pw-mewtwo',
+    locked: false,
+    rarity: 'Mythical',
+    value: 441_828,
+    pct: 0,
+  },
+  {
+    card_id: 'pikachu-grey-felt',
+    locked: false,
+    rarity: 'Mythical',
+    value: 485_608,
+    pct: 0,
+  },
+  {
+    card_id: 'pikachu-ex-238',
+    locked: false,
+    rarity: 'Mythical',
+    value: 486_011,
+    pct: 0,
+  },
+  {
+    card_id: 'mega-charizard-x',
+    locked: false,
+    rarity: 'Legendary',
+    value: 986_749,
+    pct: 0,
+  },
 ];
 
 // A pool where pass 0 floors one row (an Immortal so valuable that even its
@@ -135,8 +229,14 @@ const BRONZE: RtpSolveRow[] = [
 const INFEASIBLE_AFTER_FLOOR: RtpSolveRow[] = [
   { card_id: 'cheap-a', locked: false, rarity: 'Common', value: 20, pct: 0 },
   { card_id: 'cheap-b', locked: false, rarity: 'Common', value: 40, pct: 0 },
-  { card_id: 'the-one', locked: false, rarity: 'Immortal', value: 1_000_000, pct: 0 },
-  { card_id: 'a-rare', locked: false, rarity: 'Rare', value: 300, pct: 0 },
+  {
+    card_id: 'the-one',
+    locked: false,
+    rarity: 'Immortal',
+    value: 100_000_000,
+    pct: 0,
+  },
+  { card_id: 'a-rare', locked: false, rarity: 'Rare', value: 30_000, pct: 0 },
 ];
 
 // Exactly one tier (Legendary, one row) floors; Rare (the only other chase
@@ -147,8 +247,14 @@ const INFEASIBLE_AFTER_FLOOR: RtpSolveRow[] = [
 const ONE_TIER_FLOORS: RtpSolveRow[] = [
   { card_id: 'cheap-a', locked: false, rarity: 'Common', value: 20, pct: 0 },
   { card_id: 'cheap-b', locked: false, rarity: 'Common', value: 40, pct: 0 },
-  { card_id: 'legend', locked: false, rarity: 'Legendary', value: 5000, pct: 0 },
-  { card_id: 'rare', locked: false, rarity: 'Rare', value: 300, pct: 0 },
+  {
+    card_id: 'legend',
+    locked: false,
+    rarity: 'Legendary',
+    value: 500_000,
+    pct: 0,
+  },
+  { card_id: 'rare', locked: false, rarity: 'Rare', value: 30_000, pct: 0 },
 ];
 
 // Four identical Rare rows, each worth 400x the pack price: pass 0 splits a
@@ -159,17 +265,19 @@ const ONE_TIER_FLOORS: RtpSolveRow[] = [
 const ALL_CHASE_FLOORS: RtpSolveRow[] = [
   { card_id: 'cheap-a', locked: false, rarity: 'Common', value: 20, pct: 0 },
   { card_id: 'cheap-b', locked: false, rarity: 'Common', value: 40, pct: 0 },
-  { card_id: 'r1', locked: false, rarity: 'Rare', value: 20000, pct: 0 },
-  { card_id: 'r2', locked: false, rarity: 'Rare', value: 20000, pct: 0 },
-  { card_id: 'r3', locked: false, rarity: 'Rare', value: 20000, pct: 0 },
-  { card_id: 'r4', locked: false, rarity: 'Rare', value: 20000, pct: 0 },
+  { card_id: 'r1', locked: false, rarity: 'Rare', value: 2_000_000, pct: 0 },
+  { card_id: 'r2', locked: false, rarity: 'Rare', value: 2_000_000, pct: 0 },
+  { card_id: 'r3', locked: false, rarity: 'Rare', value: 2_000_000, pct: 0 },
+  { card_id: 'r4', locked: false, rarity: 'Rare', value: 2_000_000, pct: 0 },
 ];
 
-describe('solveOddsForRtp — 1 bps floor', () => {
+describe('solveOddsForRtp — 1-unit floor', () => {
   it('never emits a chase row below the floor', () => {
     const res = solveOddsForRtp(BRONZE, 50, 0.7);
     expect(res.error).toBeNull();
-    const chase = res.computed.filter((c) => !['pw-pikachu', 'pw-bulbasaur'].includes(c.card_id));
+    const chase = res.computed.filter(
+      (c) => !['pw-pikachu', 'pw-bulbasaur'].includes(c.card_id),
+    );
     for (const row of chase) expect(row.pct).toBeGreaterThanOrEqual(MIN_PCT);
   });
 
@@ -177,7 +285,12 @@ describe('solveOddsForRtp — 1 bps floor', () => {
     const res = solveOddsForRtp(BRONZE, 50, 0.7);
     const ids = res.floored.map((f) => f.card_id).sort();
     expect(ids).toEqual(
-      ['mega-charizard-x', 'pikachu-ex-238', 'pikachu-grey-felt', 'pw-mewtwo'].sort(),
+      [
+        'mega-charizard-x',
+        'pikachu-ex-238',
+        'pikachu-grey-felt',
+        'pw-mewtwo',
+      ].sort(),
     );
   });
 
@@ -244,14 +357,13 @@ describe('solveOddsForRtp — 1 bps floor', () => {
     const maxPct = Number(match![4]);
 
     // Correct bound: flooredEv (RM 100, from the-one pinned at MIN_PCT) plus
-    // the remaining free mass valued at the FREE mean (a-rare alone, RM 300)
-    // -> ~RM 399.97 / ~799.94%. A regression back to using the pre-loop `vH`
-    // (the mean over {the-one, a-rare} BEFORE flooring, ~6920.53) would
-    // print ~RM 7019.84 / ~14039.68% instead -- off by ~18x, since it values
-    // the free mass as if the already-floored, far-more-valuable Immortal
-    // were still competing for it.
-    expect(maxEv).toBeCloseTo(399.97, 1);
-    expect(maxPct).toBeCloseTo(799.94, 1);
+    // the remaining free mass valued at the FREE mean (a-rare alone, RM 30,000)
+    // -> ~RM 30,099.97 / ~60,199.94%. A regression back to using the pre-loop
+    // `vH` (the mean over {the-one, a-rare} BEFORE flooring) would print a
+    // bound ~23x larger, since it values the free mass as if the
+    // already-floored, far-more-valuable Immortal were still competing for it.
+    expect(maxEv).toBeCloseTo(30099.97, 1);
+    expect(maxPct).toBeCloseTo(60199.94, 1);
   });
 
   it('does not flag tierCollapse when only ONE tier is fully floored', () => {
@@ -275,7 +387,12 @@ describe('solveOddsForRtp — 1 bps floor', () => {
     // call (index.ts:521-524), which this exercises.
     const res = solveOddsForRtp(ALL_CHASE_FLOORS, 50, 0.7);
     expect(res.error).toBeNull();
-    expect(res.floored.map((f) => f.card_id).sort()).toEqual(['r1', 'r2', 'r3', 'r4']);
+    expect(res.floored.map((f) => f.card_id).sort()).toEqual([
+      'r1',
+      'r2',
+      'r3',
+      'r4',
+    ]);
 
     const total = res.computed.reduce((s, c) => s + c.pct, 0);
     expect(total).toBeCloseTo(100, 6);
