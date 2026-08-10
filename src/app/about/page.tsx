@@ -175,7 +175,13 @@ export default function AboutPage() {
           {STEPS.map((step, i) => (
             <Reveal key={step.num} delay={i * 90} className="h-full">
               <div className="flex h-full items-start gap-4 rounded-2xl border border-white/10 bg-neutral-900 p-4">
-                <span className="font-heading text-4xl leading-none text-neutral-700">
+                {/* neutral-500 (3.78:1 on charcoal), not neutral-700 (1.72:1):
+                    36px Nekst is WCAG large text, so 3:1 is the bar and 700
+                    missed it. aria-hidden is NOT an escape here — axe's
+                    color-contrast rule sets excludeHidden:false and gates on
+                    visual, not screen-reader, visibility. Same idiom on
+                    /contact. */}
+                <span className="font-heading text-4xl leading-none text-neutral-500">
                   {step.num}
                 </span>
                 <div>
@@ -313,9 +319,13 @@ export default function AboutPage() {
           </Link>
           <p className="mt-4 text-[13px] text-neutral-400">
             Real graded slabs · {BUYBACK_RATE_LABEL} buyback ·{' '}
+            {/* Persistent underline, not hover:underline — this link sits in a
+                run of text and only 1.74:1 separates it from the neutral-400
+                around it, so colour alone can't distinguish it
+                (axe link-in-text-block). */}
             <a
               href="mailto:hello@polycards.com"
-              className="text-neutral-300 underline-offset-2 hover:underline"
+              className="text-neutral-300 underline underline-offset-2"
             >
               hello@polycards.com
             </a>

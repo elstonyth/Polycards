@@ -118,6 +118,29 @@ describe('payout verification', () => {
     expect(res.statusCode).toBe(400);
   });
 
+  it('refuses a verification naming a different merchant', async () => {
+    const h = harness(pendingRow);
+    // The envelope MerchantCode (set by body()) still says 'Testpolycard' — a
+    // guard reading THAT would approve this. Only the signed copy counts.
+    const res = await run(
+      h,
+      body({ ...verification, MerchantCode: 'Someone' }),
+    );
+    expect(res.statusCode).toBe(400);
+    expect(res.body).not.toBe('success');
+    expect(h.packs.listGlobePayWithdrawals).not.toHaveBeenCalled();
+  });
+
+  it('approves a merchant code differing only in case', async () => {
+    const h = harness(pendingRow);
+    const res = await run(
+      h,
+      body({ ...verification, MerchantCode: 'TESTPOLYCARD' }),
+    );
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe('success');
+  });
+
   it('refuses a verification signed with the wrong key', async () => {
     const attacker = generateKeyPairSync('rsa', {
       modulusLength: 2048,

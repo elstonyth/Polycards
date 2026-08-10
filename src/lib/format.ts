@@ -70,3 +70,19 @@ export function relativeTime(iso: string, now: Date = new Date()): string {
   if (days < 365) return `${days}d ago`;
   return `${Math.floor(days / 365)}y ago`;
 }
+
+// The mirror of relativeTime for a FUTURE instant ("in 45m", "in 23h", "in 2d")
+// — used by the saved-payout-account surfaces to say when a cooling-off
+// destination becomes usable. Returns null for a time that has already passed
+// or cannot be parsed, so callers branch on "is there still a wait" rather than
+// rendering "in 0m". Rounds UP: a label must never promise a moment that is
+// still refused server-side.
+export function timeUntil(iso: string, now: Date = new Date()): string | null {
+  const ms = new Date(iso).getTime() - now.getTime();
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  const minutes = Math.ceil(ms / 60_000);
+  if (minutes < 60) return `in ${minutes}m`;
+  const hours = Math.ceil(minutes / 60);
+  if (hours < 48) return `in ${hours}h`;
+  return `in ${Math.ceil(hours / 24)}d`;
+}

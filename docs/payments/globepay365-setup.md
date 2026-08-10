@@ -6,6 +6,10 @@ is not issued until GlobePay365 finishes back-office setup.
 Source: <https://api.globepay365.com/api/globepay365_api_doc.html> (Merchant
 Integration Guide v1.0.0).
 
+> Console-side questions this document cannot answer — callback key scoping, the
+> refusal/error taxonomy, and the deposits-written-off-in-error query — are tracked
+> in [`docs/ops/security-verification-checklist.md`](../ops/security-verification-checklist.md).
+
 ## Environments
 
 |                                            | Production                     | Staging                                  |

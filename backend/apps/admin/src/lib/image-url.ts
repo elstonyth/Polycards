@@ -30,8 +30,53 @@ function dashboardHost(): { proto: string; host: string } {
   return { proto: "http:", host: "localhost" };
 }
 
-export function resolveImageUrl(url: string | null | undefined): string {
+// Schemes this helper will hand to an <img src>. Anything with a scheme that
+// is not http(s) or an image data: URI is refused outright.
+//
+// Not exploitable today — all ~28 call sites are <img src>, and no current
+// browser runs javascript: from one — but the values reaching here are not all
+// ours: PriceCharting responses and admin free-text both flow in. Refusing the
+// scheme at the one shared helper is cheaper than auditing every future sink,
+// and the first call site to use an href would otherwise make it live.
+const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
+const SAFE_SCHEME = /^(?:https?:|data:image\/)/i;
+
+/**
+ * The URL as a browser will actually parse it. Two normalisations, both from
+ * the URL spec's "basic URL parser", and the check has to see the same string
+ * the browser dispatches on or the scheme policy is bypassable:
+ *
+ *   1. ASCII tab / LF / CR are removed from ANYWHERE in the input, so
+ *      "java<TAB>script:alert(1)" is javascript: to a browser but reads as
+ *      scheme-less to a naive regex.
+ *   2. Leading C0 controls and space are stripped, so "<TAB>javascript:..."
+ *      likewise.
+ *
+ * Measured against this helper's regexes: unnormalised, six such spellings slip
+ * through; stripping only leading whitespace still lets the three interior-
+ * control ones through.
+ */
+const asBrowserParses = (url: string): string =>
+  // no-control-regex is disabled deliberately: matching these control
+  // characters IS the point here. The rule exists to catch ones that appear
+  // by accident.
+  // eslint-disable-next-line no-control-regex
+  url.replace(/[\u0009\u000A\u000D]/g, "").replace(/^[\u0000-\u0020]+/, "");
+
+/** Relative paths (no scheme) are fine; a scheme must be http(s) or data:image. */
+function isSafeImageUrl(url: string): boolean {
+  return !HAS_SCHEME.test(url) || SAFE_SCHEME.test(url);
+}
+
+export function resolveImageUrl(raw: string | null | undefined): string {
+  if (!raw) return "";
+  // Normalise BEFORE anything reads the string, so the scheme check and every
+  // branch below agree with the browser about what this URL is.
+  const url = asBrowserParses(raw);
   if (!url) return "";
+  // ABOVE the data: passthrough on purpose: put it below and `data:text/html`
+  // would walk straight past the check.
+  if (!isSafeImageUrl(url)) return "";
   if (url.startsWith("data:")) return url;
 
   const { proto, host } = dashboardHost();

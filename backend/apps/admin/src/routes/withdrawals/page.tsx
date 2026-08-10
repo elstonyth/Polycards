@@ -9,10 +9,12 @@ import {
   Table,
   Select,
   StatusBadge,
+  toast,
 } from '@medusajs/ui';
 import { ArrowUpTray } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import { useGlobePayWithdrawals } from '../../lib/queries';
+import { getGlobePayWithdrawalAccount } from '../../lib/admin-rest';
 import type {
   GlobePayWithdrawal,
   GlobePayWithdrawalView,
@@ -66,6 +68,35 @@ const WithdrawalsPage = () => {
     view,
     sort ? `${sort.key}:${sort.dir}` : undefined,
   );
+
+  // Revealed account numbers, keyed by row id. Kept in component state rather
+  // than the query cache on purpose: each reveal is a logged, rate-limited
+  // server call, so it must not be re-fetched on a refocus, and it must not
+  // outlive this page — navigating away drops them.
+  const [revealed, setRevealed] = useState<Record<string, string>>({});
+  // A SET, not one id: two reveals can be in flight at once. With a single
+  // slot, clicking row A then row B overwrites the id, and A settling clears it
+  // while B is still loading — B's button re-enables and can be clicked again.
+  // Each click is a logged, rate-limited server call, so the disabled state has
+  // to be accurate per row.
+  const [revealing, setRevealing] = useState<ReadonlySet<string>>(new Set());
+
+  const reveal = async (id: string) => {
+    if (revealing.has(id)) return;
+    setRevealing((prev) => new Set(prev).add(id));
+    try {
+      const { account_number } = await getGlobePayWithdrawalAccount(id);
+      setRevealed((prev) => ({ ...prev, [id]: account_number }));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRevealing((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  };
 
   // A view change restarts paging — page 3 of "pending" has nothing to do
   // with page 3 of "all".
@@ -191,11 +222,25 @@ const WithdrawalsPage = () => {
                         {w.customer_email ?? w.customer_id.slice(0, 8)}
                       </button>
                     </Table.Cell>
-                    {/* The destination we instructed, verbatim — the dispute
-                        record. Their callback never echoes it. */}
+                    {/* The destination we instructed — the dispute record,
+                        since their callback never echoes it. Masked by the
+                        route; the full number is fetched per row on demand,
+                        and every reveal is logged server-side. */}
                     <Table.Cell className="text-ui-fg-subtle">
-                      <div className="whitespace-nowrap">
-                        {w.bank_code} · {w.account_number}
+                      <div className="flex items-center gap-x-2 whitespace-nowrap">
+                        <span>
+                          {w.bank_code} · {revealed[w.id] ?? w.account_number}
+                        </span>
+                        {!revealed[w.id] && (
+                          <button
+                            type="button"
+                            className="text-ui-fg-interactive text-xs hover:underline disabled:opacity-50"
+                            disabled={revealing.has(w.id)}
+                            onClick={() => reveal(w.id)}
+                          >
+                            {t('withdrawals.reveal')}
+                          </button>
+                        )}
                       </div>
                       <div className="text-ui-fg-muted text-xs">
                         {w.account_holder_name}

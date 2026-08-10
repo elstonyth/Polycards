@@ -28,7 +28,13 @@ export const config: RouteConfig = {
   rank: 2,
 };
 
-const VIEWS: GlobePayDepositView[] = ['pending', 'settled', 'failed', 'all'];
+const VIEWS: GlobePayDepositView[] = [
+  'pending',
+  'settled',
+  'failed',
+  'expired',
+  'all',
+];
 
 // EXACTLY the backend's SORTABLE allow-list (api/admin/globepay/deposits/
 // route.ts) — real columns only. Customer and status are computed/joined
@@ -46,6 +52,14 @@ const statusBadge = (d: GlobePayDeposit, label: string) => {
     return <StatusBadge color="green">{label}</StatusBadge>;
   if (d.status === 'failed')
     return <StatusBadge color="red">{label}</StatusBadge>;
+  // 'expired' needs its OWN colour, not the pending fall-through: the sweep
+  // gave up on it while the gateway never ruled, which makes it the likeliest
+  // uncredited payment on the page — exactly the row that must not read as
+  // "still being chased". Purple because the other four are spoken for and
+  // each carries a meaning this state would contradict: green settled, red
+  // refused, orange the stale-PENDING alarm, grey healthy-pending.
+  if (d.status === 'expired')
+    return <StatusBadge color="purple">{label}</StatusBadge>;
   return <StatusBadge color={d.stale ? 'orange' : 'grey'}>{label}</StatusBadge>;
 };
 

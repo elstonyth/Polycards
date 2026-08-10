@@ -8,7 +8,7 @@
 // Cleans up after itself: restores pokemon-mythic's seed odds and deletes the
 // simulation's Pull rows (by the throwaway customer's id) so the demo ledger
 // stays clean.
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
 const API = 'http://localhost:9000';
@@ -113,13 +113,35 @@ const topWins = tally[topId] || 0;
 const topFreqPct = opened ? (topWins / opened) * 100 : 0;
 
 // --- cleanup: delete sim pulls + restore seed odds ---
-execSync(
-  `docker exec pokenic-postgres psql -U medusa -d medusa -c "DELETE FROM pull WHERE customer_id = '${meId}';"`,
-  { stdio: 'pipe' },
-);
-execSync(
-  `docker exec pokenic-postgres psql -U medusa -d medusa -c "UPDATE pack_odds po SET weight = CASE c.rarity WHEN 'Legendary' THEN 5 WHEN 'Epic' THEN 45 WHEN 'Rare' THEN 150 WHEN 'Uncommon' THEN 300 WHEN 'Common' THEN 500 ELSE 100 END, locked = false FROM card c WHERE po.card_id = c.handle AND po.pack_id = '${SLUG}';"`,
-  { stdio: 'pipe' },
+// -i so docker forwards stdin. The SQL goes in on stdin rather than via -c
+// because psql only interpolates :'var' for a script it reads — NOT inside -c,
+// where ":'id'" is just a syntax error (verified against the running container).
+const PSQL_ARGV = [
+  'exec',
+  '-i',
+  'pokenic-postgres',
+  'psql',
+  '-U',
+  'medusa',
+  '-d',
+  'medusa',
+  '-v',
+  'ON_ERROR_STOP=1',
+];
+const psql = (sql, vars) =>
+  execFileSync('docker', [...PSQL_ARGV, ...vars], {
+    input: sql,
+    stdio: 'pipe',
+  });
+// meId comes off the /store/customers/me response, so it must not be pasted
+// into either a command line or a SQL string. execFileSync drops the shell, and
+// psql quotes the value server-side, so both layers treat it as data.
+psql("DELETE FROM pull WHERE customer_id = :'id';", ['-v', `id=${meId}`]);
+psql(
+  // rarity lives on pack_odds now; the old `FROM card c ... c.rarity` join
+  // errors with "column c.rarity does not exist" (card no longer carries it).
+  "UPDATE pack_odds SET weight = CASE rarity WHEN 'Legendary' THEN 5 WHEN 'Epic' THEN 45 WHEN 'Rare' THEN 150 WHEN 'Uncommon' THEN 300 WHEN 'Common' THEN 500 ELSE 100 END, locked = false WHERE pack_id = :'slug';",
+  ['-v', `slug=${SLUG}`],
 );
 
 const out = {

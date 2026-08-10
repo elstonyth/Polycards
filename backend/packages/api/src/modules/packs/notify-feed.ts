@@ -9,6 +9,7 @@ export type FeedTemplate =
   | 'topup_credited'
   | 'withdrawal_paid'
   | 'withdrawal_refunded'
+  | 'bank_account_added'
   | 'challenge_payout';
 
 // The channel our CUSTOMER in-app feed lives on. Deliberately NOT 'feed':

@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { money, rm, rm0, num, relativeTime, affordable } from '../format';
+import {
+  money,
+  rm,
+  rm0,
+  num,
+  relativeTime,
+  timeUntil,
+  affordable,
+} from '../format';
 
 describe('affordable — integer-sen comparison', () => {
   it('does not false-block a fractional cost that a float would', () => {
@@ -83,5 +91,29 @@ describe('relativeTime', () => {
   it('treats future and unparsable dates as "just now"', () => {
     expect(relativeTime('2026-06-16T13:00:00Z', now)).toBe('just now');
     expect(relativeTime('not-a-date', now)).toBe('just now');
+  });
+});
+
+// The forward-looking twin, used to say when a cooling-off payout destination
+// becomes usable. Null (not "in 0m") for an elapsed instant is what lets the
+// callers branch on "is there still a wait".
+describe('timeUntil', () => {
+  const now = new Date('2026-06-16T12:00:00Z');
+
+  it('steps through minutes/hours/days', () => {
+    expect(timeUntil('2026-06-16T12:05:00Z', now)).toBe('in 5m');
+    expect(timeUntil('2026-06-17T11:00:00Z', now)).toBe('in 23h');
+    expect(timeUntil('2026-06-19T12:00:00Z', now)).toBe('in 3d');
+  });
+
+  // Rounds UP: a label must never promise a moment the server still refuses.
+  it('rounds a part-minute up rather than down to zero', () => {
+    expect(timeUntil('2026-06-16T12:00:01Z', now)).toBe('in 1m');
+  });
+
+  it('returns null once the instant has passed, and for garbage', () => {
+    expect(timeUntil('2026-06-16T12:00:00Z', now)).toBeNull();
+    expect(timeUntil('2026-06-16T11:00:00Z', now)).toBeNull();
+    expect(timeUntil('not-a-date', now)).toBeNull();
   });
 });

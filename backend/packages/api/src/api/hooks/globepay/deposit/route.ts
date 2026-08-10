@@ -1,12 +1,9 @@
 import { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
-import {
-  aesDecrypt,
-  depositState,
-  openCallback,
-} from '../../../../modules/packs/globepay';
+import { depositState, openCallback } from '../../../../modules/packs/globepay';
 import { globepayConfigFromEnv } from '../../../../modules/packs/globepay-client';
+import { GLOBEPAY_MAX_RM } from '../../../../modules/packs/globepay-deposit';
 import { topupIdempotencyReference } from '../../../../modules/packs/topup';
 import { sendTopupReceipt } from '../../../../modules/packs/topup-receipt';
 import { notifyFeed } from '../../../../modules/packs/notify-feed';
@@ -27,6 +24,13 @@ import { topupFeedKey } from '../../../../modules/packs/feed-events';
 //     so a genuine callback we failed to process gets retried.
 // The distinction that matters: a status-7 (failed) deposit is HANDLED, not an
 // error. Returning non-2xx for it would make them retry a dead deposit forever.
+//
+// ONE DELIBERATE EXCEPTION: the three "this callback is wrong about itself"
+// guards below — wrong merchant, wrong currency, amount over the deposit
+// ceiling — also answer non-2xx, and a retry can never fix any of them. That
+// is the point. Each says a payment exists that we refuse to act on, so the
+// row must stay claimable and the retries must keep the event visible until a
+// human looks. Acking would file it as handled when nothing was handled.
 type DepositCallbackBody = {
   TransactionId?: string;
   MerchantTransactionId?: string;
@@ -108,6 +112,31 @@ export async function POST(
     res.status(400).send('rejected');
     return;
   }
+
+  // The signature says "GlobePay sent this". It does NOT say "this payment is
+  // yours" — MerchantCode is the one signed field that does, and until now it
+  // was declared and never read. If their callbacks are signed with a
+  // platform-wide key rather than a per-merchant one, a payment into someone
+  // else's merchant account would verify here.
+  //
+  // Checked BEFORE the row lookup, not beside the CurrencyCode guard further
+  // down: that one sits after the status-7 branch, so a foreign callback whose
+  // reference collided with ours would already have written a live deposit off
+  // as failed. Case-insensitive — a casing difference between the configured
+  // value and what they echo is a config nuisance, not an attack, and a
+  // case-sensitive compare would reject legitimate traffic.
+  if (
+    String(data.MerchantCode ?? '').toUpperCase() !==
+    config.merchantCode.toUpperCase()
+  ) {
+    req.scope
+      .resolve('logger')
+      .error(
+        `[globepay] deposit callback for ${merchantTransactionId} names merchant ${data.MerchantCode}, expected ${config.merchantCode} — refusing`,
+      );
+    res.status(400).send('rejected');
+    return;
+  }
   const state = depositState(data.Status);
 
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
@@ -136,20 +165,32 @@ export async function POST(
   // the transient-error path below leaves the row 'pending', so a callback we
   // genuinely failed to process still gets reprocessed.
   //
-  // EXCEPT success-on-failed, which is money in with no credit. The sweep can
-  // write a row off (globepay-reconcile.ts: a requery 400 read as "never
-  // existed", or a non-final status older than GLOBEPAY_STALE_AFTER_MS), and
-  // it only ever scans status='pending' — so once written off, the row is
-  // never requeried again. Before this branch existed, the customer's own
+  // EXCEPT success-on-a-closed-row, which is money in with no credit. The sweep
+  // can close a row (globepay-reconcile.ts: an explicit not-found requery, or a
+  // non-final status older than GLOBEPAY_STALE_AFTER_MS), and its live queue is
+  // status='pending' — the second scan tier revisits 'expired' rows for a
+  // bounded window, but nothing ever requeries a 'failed' one.
+  // Before this branch existed, the customer's own
   // settlement callback then arrived here, was acked 200, credited nothing and
   // logged nothing: the payment vanished with the only trace sitting in
   // GlobePay's back office. Recover it instead. Crediting late is safe — the
   // signed-anchor dedupe in mutateCreditAtomic collapses this with any other
   // delivery of the same deposit — whereas swallowing it is not.
   if (deposit.status !== 'pending') {
-    const recoverable = state === 'success' && deposit.status === 'failed';
+    // 'expired' as well as 'failed': the sweep now writes 'expired' when it
+    // merely stopped chasing a deposit the gateway never ruled on, which is
+    // precisely the row a late settlement callback belongs to. Recovering only
+    // 'failed' would have re-opened the same hole for the new status.
+    const recoverable =
+      state === 'success' &&
+      (deposit.status === 'failed' || deposit.status === 'expired');
     // Mirrors the withdrawal route's guard: any callback disagreeing with the
     // row we already wrote is worth an operator's attention, recoverable or not.
+    // Left as-is for 'expired': a status-7 callback on a row we expired is not
+    // a contradiction so much as the answer arriving late, but it DOES leave
+    // the row 'expired' (the !recoverable return below skips the flip) until
+    // the sweep's second tier requeries it — so the log line is the only trace
+    // that happened, and silence would be worse than a slightly loud alert.
     const contradicts =
       (state === 'success' && deposit.status !== 'settled') ||
       (state === 'failed' && deposit.status !== 'failed');
@@ -220,6 +261,31 @@ export async function POST(
       .resolve('logger')
       .error(
         `[globepay] settled callback for ${merchantTransactionId} carried a non-positive Amount (${data.Amount}) — refusing to credit`,
+      );
+    res.status(400).send('rejected');
+    return;
+  }
+
+  // A CEILING, not an equality check — the decision above stands: a customer
+  // may legitimately pay a sum other than the one we asked for. But no callback
+  // should confirm more than the submit path could ever have created, and that
+  // path refuses anything over GLOBEPAY_MAX_RM (globepay-deposit.ts). The same
+  // constant is imported here on purpose: raise it for product reasons and this
+  // ceiling follows, so the two can never drift apart. Without it a single
+  // validly-signed event with an inflated Amount — a gateway bug, a key
+  // compromise, an account reconfiguration — becomes withdrawable cash 1:1,
+  // because mutateCreditAtomic's only top-up guard is deltaCents > 0.
+  //
+  // QUARANTINE, never write off: the row is left untouched (whatever status it
+  // had — usually 'pending', but the recovery branch above reaches here with a
+  // 'failed' one) and we answer non-2xx so they retry and an operator can
+  // settle it by hand. The customer may genuinely have paid; writing the row
+  // off here would convert an operator alert into silent money loss.
+  if (creditedAmount > GLOBEPAY_MAX_RM) {
+    req.scope
+      .resolve('logger')
+      .error(
+        `[globepay] settled callback for ${merchantTransactionId} claims Amount ${creditedAmount}, above the RM ${GLOBEPAY_MAX_RM} deposit ceiling — refusing to credit; the row remains ${deposit.status} for manual settlement`,
       );
     res.status(400).send('rejected');
     return;
@@ -319,19 +385,20 @@ export async function POST(
     return;
   }
 
-  // AdditionalInformationData is decrypted for logging only — it carries the
-  // receiving bank details (§1.2.4), never anything the credit depends on.
-  if (body.AdditionalInformationData) {
-    try {
-      req.scope
-        .resolve('logger')
-        .info(
-          `[globepay] ${merchantTransactionId} extra: ${aesDecrypt(body.AdditionalInformationData, config.aesKey)}`,
-        );
-    } catch {
-      // Non-fatal: the credit is committed; bad extra data must not undo it.
-    }
-  }
+  // AdditionalInformationData is declared on the body type above and
+  // deliberately NEVER read. Unlike MerchantCode — which was declared-and-
+  // unread as a BUG, because it is the one signed field saying the money is
+  // ours — this one is declared-and-unread as the FIX:
+  //   - it is UNSIGNED (only `Data` is covered by the signature, per the
+  //     SIGNED vs UNSIGNED note above), so its contents are not authenticated;
+  //   - it carries the receiving bank details (§1.2.4), and nothing the credit
+  //     depends on;
+  //   - it used to be decrypted straight into an info log line. Logs have a
+  //     wider access population and a longer retention than the database, so
+  //     that put customer bank details somewhere they outlive the deposit row —
+  //     defeating the minimization the withdrawal ledger applies (it stores
+  //     account_last4 only, see modules/packs/service.ts).
+  // The field stays on the type to document the wire shape. Do not log it.
 
   res.status(200).send('success');
 }
