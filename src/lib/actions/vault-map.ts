@@ -11,6 +11,10 @@ export type VaultItem = {
   rolledAt: string;
   packId: string;
   packTitle: string;
+  /** Won in the Weekly Pulled Value Challenge. Such a card keeps the
+   *  challenge's prism frame here instead of taking the card's pack tier — it
+   *  was won there, not pulled from a pack. */
+  challengePrize: boolean;
   showcased: boolean;
   card: {
     handle: string;
@@ -35,6 +39,8 @@ export interface BackendVaultItem {
   rolled_at: string;
   pack_id: string;
   pack_title: string;
+  /** Absent on an older backend → false (the pre-prism behaviour). */
+  challenge_prize?: boolean;
   card: {
     handle: string;
     name: string;
@@ -53,6 +59,7 @@ export function mapVaultItem(i: BackendVaultItem): VaultItem {
     rolledAt: i.rolled_at,
     packId: i.pack_id,
     packTitle: i.pack_title,
+    challengePrize: i.challenge_prize ?? false,
     showcased: (i as unknown as { showcased?: boolean }).showcased ?? false,
     card: {
       handle: i.card.handle,

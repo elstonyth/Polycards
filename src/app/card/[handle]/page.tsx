@@ -34,11 +34,19 @@ export async function generateMetadata({
 
 export default async function CardPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ handle: string }>;
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
   const { handle } = await params;
   const result = await resolveCard(handle);
+  // `?prize=weekly` marks an arrival from the Weekly Pulled Value Challenge, so
+  // the card keeps the challenge's prism frame here instead of switching to its
+  // pack tier — a prize should still read as a prize when you open it. Any
+  // other value (or none) renders the tier frame as usual.
+  const { prize } = await searchParams;
+  const frameVariant = prize === 'weekly' ? ('prism' as const) : undefined;
   // A transient backend failure must NOT 404: this card may well exist (and be
   // owned by whoever bookmarked it). Only a genuine miss gets notFound().
   if (result.status === 'error') {
@@ -76,7 +84,7 @@ export default async function CardPage({
         />{' '}
         All packs
       </Link>
-      <CardDetailHydrated initial={result.card} />
+      <CardDetailHydrated initial={result.card} frameVariant={frameVariant} />
     </div>
   );
 }

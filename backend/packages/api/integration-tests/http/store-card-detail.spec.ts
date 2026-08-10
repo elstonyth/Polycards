@@ -105,6 +105,96 @@ medusaIntegrationTestRunner({
         expect(JSON.stringify(res.data)).not.toContain('weight');
       });
 
+      // The card in the seed sits in ONE pack. A real catalogue card sits in
+      // several, at DIFFERENT tiers — and the route used to answer with the
+      // OLDEST pack's row, so a card that is Immortal in the live pack served
+      // the Common frame because some older draft listed it as Common.
+      it('answers with the best tier among the LIVE packs, not the oldest row', async () => {
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        // Draft pack first (oldest row wins under the old behaviour) …
+        await packs.createPacks([
+          {
+            slug: 'cd-pack-draft',
+            title: 'CD Draft Pack',
+            category: 'pokemon',
+            price: 10,
+            image: '/cdn/test-pack.webp',
+            status: 'draft' as const,
+          },
+          {
+            slug: 'cd-pack-live',
+            title: 'CD Live Pack',
+            category: 'pokemon',
+            price: 10,
+            image: '/cdn/test-pack.webp',
+            status: 'active' as const,
+          },
+        ]);
+        await packs.createPackOdds([
+          {
+            pack_id: 'cd-pack-draft',
+            card_id: CARD_HANDLE,
+            weight: 100,
+            locked: false,
+            rarity: 'Common' as const,
+          },
+          {
+            pack_id: 'cd-pack-live',
+            card_id: CARD_HANDLE,
+            weight: 100,
+            locked: false,
+            rarity: 'Immortal' as const,
+          },
+        ]);
+
+        const res = await api
+          .get(`/store/cards/${CARD_HANDLE}`, { headers: storeHeaders })
+          .catch((e: { response: unknown }) => e.response);
+        expect(res.status).toBe(200);
+        expect(res.data.card.rarity).toBe('Immortal');
+      });
+
+      it('a draft-only card keeps its tier rather than losing the frame', async () => {
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        const handle = 'cd-card-draft-only';
+        await packs.createCards([
+          {
+            handle,
+            name: 'Draft Only Card',
+            set: 'Test Set',
+            grader: 'PSA',
+            grade: '10',
+            market_value: FMV,
+            image: '/cdn/test-card.webp',
+          },
+        ]);
+        await packs.createPacks([
+          {
+            slug: 'cd-pack-draft-only',
+            title: 'CD Draft Only',
+            category: 'pokemon',
+            price: 10,
+            image: '/cdn/test-pack.webp',
+            status: 'draft' as const,
+          },
+        ]);
+        await packs.createPackOdds([
+          {
+            pack_id: 'cd-pack-draft-only',
+            card_id: handle,
+            weight: 100,
+            locked: false,
+            rarity: 'Legendary' as const,
+          },
+        ]);
+
+        const res = await api
+          .get(`/store/cards/${handle}`, { headers: storeHeaders })
+          .catch((e: { response: unknown }) => e.response);
+        expect(res.status).toBe(200);
+        expect(res.data.card.rarity).toBe('Legendary');
+      });
+
       it('404s an unknown handle', async () => {
         const res = await api
           .get('/store/cards/definitely-not-a-card', { headers: storeHeaders })

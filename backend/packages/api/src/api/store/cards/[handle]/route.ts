@@ -7,9 +7,13 @@ import {
   displayMarketPrice,
   resolveFxRate,
 } from '../../../../modules/packs/pricing';
+import { bestRarity } from '../../../../modules/packs/rarity';
 
 const HISTORY_DAYS = 30;
 const HISTORY_MAX_ROWS = 60;
+// A card in more packs than this is not a real catalogue shape; the cap keeps
+// one deep link from scanning an unbounded odds table.
+const ODDS_SCAN_MAX = 50;
 
 // GET /store/cards/:handle — public display fields for ONE card, powering the
 // storefront card-detail view (deep links + the 60s price refresh).
@@ -42,14 +46,33 @@ export async function GET(
   const toMyr = (usd: unknown) =>
     displayMarketPrice(toMoney(usd), fxRate, multiplier);
 
-  // Rarity fallback for deep links — the first pack this card appears in
-  // (created_at ASC pins "first" deterministically; unordered, the displayed
-  // rarity could vary between requests when a card sits in multiple packs).
-  // When the view is opened FROM a pack/vault/feed, that context's rarity wins
-  // client-side; this value only covers direct /card/<handle> visits.
-  const [oddsRow] = await packs.listPackOdds(
+  // Rarity fallback for deep links. A card can sit in SEVERAL packs at
+  // different tiers, so "oldest row wins" showed whichever pack happened to be
+  // created first — a card that is Immortal in the live bronze pack rendered
+  // the Common frame because a draft test pack listed it as Common. Take the
+  // best tier the card holds in a pack customers can actually open instead;
+  // that is the tier every pack surface already shows it at.
+  //
+  // Draft-only cards keep their tier rather than dropping to no frame: the
+  // active filter is a preference, not a requirement.
+  //
+  // When the view is opened FROM a pack/vault/feed, that context's rarity still
+  // wins client-side; this value only covers direct /card/<handle> visits.
+  const oddsRows = await packs.listPackOdds(
     { card_id: handle },
-    { take: 1, order: { created_at: 'ASC' } },
+    { take: ODDS_SCAN_MAX },
+  );
+  const packSlugs = [...new Set(oddsRows.map((o) => o.pack_id))];
+  const livePacks = packSlugs.length
+    ? await packs.listPacks(
+        { slug: packSlugs, status: 'active' },
+        { take: packSlugs.length, select: ['slug'] },
+      )
+    : [];
+  const liveSlugs = new Set(livePacks.map((p) => p.slug));
+  const liveRows = oddsRows.filter((o) => liveSlugs.has(o.pack_id));
+  const rarity = bestRarity(
+    (liveRows.length > 0 ? liveRows : oddsRows).map((o) => o.rarity),
   );
 
   const since = new Date(Date.now() - HISTORY_DAYS * 24 * 60 * 60 * 1000);
@@ -67,7 +90,7 @@ export async function GET(
       grade: card.grade,
       image: card.image,
       slab_image: card.slab_image ?? null,
-      rarity: oddsRow?.rarity ?? null,
+      rarity,
       marketPriceMyr: toMyr(card.market_value),
       pcSyncedAt: card.pc_synced_at ?? null,
       priceHistory: history.map((h) => ({

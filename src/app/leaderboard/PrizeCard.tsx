@@ -85,7 +85,10 @@ export function PrizeCard({
 
   return (
     <Link
-      href={`/card/${encodeURIComponent(card.handle)}`}
+      // `prize=weekly` tells the card page this arrival came from the
+      // challenge, so the slab keeps the prism frame it wears here instead of
+      // switching to the card's pack tier.
+      href={`/card/${encodeURIComponent(card.handle)}?prize=weekly`}
       aria-label={`View details for ${card.name}`}
       className={cn(
         'group relative mx-auto block w-fit',

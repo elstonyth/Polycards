@@ -8,6 +8,7 @@ import {
   buybackAmount,
   resolveBuybackRate,
 } from '../../../modules/packs/buyback-rate';
+import { isChallengePrizePack } from '../../../modules/packs/challenge-prize';
 import {
   cardByHandle,
   makeRarityOf,
@@ -116,6 +117,11 @@ export async function GET(
         rolled_at: p.rolled_at,
         pack_id: p.pack_id,
         pack_title: pack?.title ?? p.pack_id,
+        // A weekly-challenge prize keeps the challenge's own prism frame in the
+        // vault instead of taking the card's pack tier — it was won there, not
+        // pulled from a pack. Stated by the backend rather than left to the
+        // storefront to infer from the synthetic pack id.
+        challenge_prize: isChallengePrizePack(p.pack_id),
         showcased: (p as unknown as { showcased: boolean }).showcased ?? false,
         card: {
           ...toCardView(card, rarityOf(p.pack_id, p.card_id)),
@@ -149,6 +155,7 @@ export async function GET(
       pull_id: p.id,
       rolled_at: p.rolled_at,
       pack_id: p.pack_id,
+      challenge_prize: isChallengePrizePack(p.pack_id),
       title: snap.title ?? 'Reward prize',
       image: snap.image ?? '',
       source: 'reward' as const,

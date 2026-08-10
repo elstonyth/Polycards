@@ -12,6 +12,7 @@ import {
   cardByHandle,
   makeRarityOf,
 } from '../../../../modules/packs/card-view';
+import { RARITY_ORDER, type Rarity } from '../../../../modules/packs/rarity';
 import { toMoney } from '../../../../modules/packs/money';
 import {
   DEFAULT_MARKET_MULTIPLIER,
@@ -37,8 +38,9 @@ const RECENT_PAGE = RECENT_N * 3;
 // rows only), so this is a semantic ceiling, not a working-set size.
 const SHOWCASE_MAX = 20_000;
 
-const RARITIES = ['Immortal', 'Legendary', 'Mythical', 'Rare', 'Uncommon', 'Common'] as const;
-type Rarity = (typeof RARITIES)[number];
+// One list, shared with the card deep-link route and mirrored by the
+// pack_odds enum — a tier added in one place must not silently miss the other.
+const RARITIES = RARITY_ORDER;
 
 type PullRow = Awaited<ReturnType<PacksModuleService['listPulls']>>[number];
 type CardRow = Awaited<ReturnType<PacksModuleService['listCards']>>[number];

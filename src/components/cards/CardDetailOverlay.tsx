@@ -19,6 +19,12 @@ export interface CardSeed {
   slabImage: string | null;
   value: string;
   rarity: Rarity | null;
+  /** Cosmetic frame that OVERRIDES the tier frame. A weekly-challenge prize
+   *  wears the challenge's prism frame wherever it is shown — the stage grid,
+   *  this overlay, the card page opened from it, and the winner's vault — so it
+   *  still reads as a challenge prize rather than as a pack pull. Travels on
+   *  the seed so every surface that opens a card carries it automatically. */
+  frameVariant?: 'prism';
 }
 
 /**
