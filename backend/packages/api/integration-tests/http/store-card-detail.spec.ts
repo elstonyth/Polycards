@@ -154,6 +154,127 @@ medusaIntegrationTestRunner({
         expect(res.data.card.rarity).toBe('Immortal');
       });
 
+      // The discriminating case. In the test above, best-among-live and
+      // best-among-ALL are both Immortal, so it passes even if the live-pack
+      // filter is a no-op. Here the DRAFT pack holds the higher tier, so the
+      // only way to answer Rare is to actually exclude drafts — this fails
+      // loudly if the status filter, the slug array filter or the `select`
+      // projection ever silently degrades.
+      it('a draft pack does NOT lend its higher tier to a live card', async () => {
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        const handle = 'cd-card-draft-outranks';
+        await packs.createCards([
+          {
+            handle,
+            name: 'Draft Outranks Card',
+            set: 'Test Set',
+            grader: 'PSA',
+            grade: '10',
+            market_value: FMV,
+            image: '/cdn/test-card.webp',
+          },
+        ]);
+        await packs.createPacks([
+          {
+            slug: 'cd-pack-draft-high',
+            title: 'CD Draft High',
+            category: 'pokemon',
+            price: 10,
+            image: '/cdn/test-pack.webp',
+            status: 'draft' as const,
+          },
+          {
+            slug: 'cd-pack-live-low',
+            title: 'CD Live Low',
+            category: 'pokemon',
+            price: 10,
+            image: '/cdn/test-pack.webp',
+            status: 'active' as const,
+          },
+        ]);
+        await packs.createPackOdds([
+          {
+            pack_id: 'cd-pack-draft-high',
+            card_id: handle,
+            weight: 100,
+            locked: false,
+            rarity: 'Immortal' as const,
+          },
+          {
+            pack_id: 'cd-pack-live-low',
+            card_id: handle,
+            weight: 100,
+            locked: false,
+            rarity: 'Rare' as const,
+          },
+        ]);
+
+        const res = await api
+          .get(`/store/cards/${handle}`, { headers: storeHeaders })
+          .catch((e: { response: unknown }) => e.response);
+        expect(res.status).toBe(200);
+        expect(res.data.card.rarity).toBe('Rare');
+      });
+
+      // reward_box packs are active but internal draw pools, excluded from the
+      // public catalogue — so they must not lend their tier to a deep link
+      // either. Same shape as the draft case, different exclusion reason.
+      it('a reward_box pool does NOT lend its higher tier', async () => {
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        const handle = 'cd-card-rewardbox';
+        await packs.createCards([
+          {
+            handle,
+            name: 'Reward Box Card',
+            set: 'Test Set',
+            grader: 'PSA',
+            grade: '10',
+            market_value: FMV,
+            image: '/cdn/test-card.webp',
+          },
+        ]);
+        await packs.createPacks([
+          {
+            slug: 'cd-pack-rewardbox',
+            title: 'CD Reward Box',
+            category: 'reward_box',
+            price: 10,
+            image: '/cdn/test-pack.webp',
+            status: 'active' as const,
+          },
+          {
+            slug: 'cd-pack-live-uncommon',
+            title: 'CD Live Uncommon',
+            category: 'pokemon',
+            price: 10,
+            image: '/cdn/test-pack.webp',
+            status: 'active' as const,
+          },
+        ]);
+        await packs.createPackOdds([
+          {
+            pack_id: 'cd-pack-rewardbox',
+            card_id: handle,
+            weight: 100,
+            locked: false,
+            rarity: 'Legendary' as const,
+          },
+          {
+            pack_id: 'cd-pack-live-uncommon',
+            card_id: handle,
+            weight: 100,
+            locked: false,
+            rarity: 'Uncommon' as const,
+          },
+        ]);
+
+        const res = await api
+          .get(`/store/cards/${handle}`, { headers: storeHeaders })
+          .catch((e: { response: unknown }) => e.response);
+        expect(res.status).toBe(200);
+        expect(res.data.card.rarity).toBe('Uncommon');
+      });
+
       it('a draft-only card keeps its tier rather than losing the frame', async () => {
         const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
         const handle = 'cd-card-draft-only';

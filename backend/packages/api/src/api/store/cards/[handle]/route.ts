@@ -58,14 +58,25 @@ export async function GET(
   //
   // When the view is opened FROM a pack/vault/feed, that context's rarity still
   // wins client-side; this value only covers direct /card/<handle> visits.
+  // Ordered even under the cap: an unordered LIMIT is nondeterministic in
+  // Postgres, and the failure that buys you is a card's frame flickering
+  // between tiers on refresh — miserable to reproduce, free to prevent.
   const oddsRows = await packs.listPackOdds(
     { card_id: handle },
-    { take: ODDS_SCAN_MAX },
+    { take: ODDS_SCAN_MAX, order: { created_at: 'ASC' } },
   );
   const packSlugs = [...new Set(oddsRows.map((o) => o.pack_id))];
+  // "Openable" means what the public catalogue means by it (store/packs
+  // route.ts:41): active AND not a reward_box, which is an internal draw pool.
+  // Without the category clause a card sitting in a draw pool at a high tier
+  // would inherit that tier on a deep link nobody can trace to a pack.
   const livePacks = packSlugs.length
     ? await packs.listPacks(
-        { slug: packSlugs, status: 'active' },
+        {
+          slug: packSlugs,
+          status: 'active',
+          category: { $ne: 'reward_box' },
+        } as Parameters<typeof packs.listPacks>[0],
         { take: packSlugs.length, select: ['slug'] },
       )
     : [];

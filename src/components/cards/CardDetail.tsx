@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type CSSProperties } from 'react';
-import { SlabImage } from '@/components/SlabImage';
+import { SlabImage, VARIANT_RGB } from '@/components/SlabImage';
 import { cn } from '@/lib/utils';
 import { initialPriceTick, nextPriceTick } from '@/lib/price-tick';
 import { rarityRgb } from '@/lib/rarity';
@@ -39,8 +39,10 @@ export function CardDetail({
   // own rarity — a prize frame changes the presentation, not the fact.
   const rarityRgbValue = rarity ? rarityRgb(rarity) : '255,255,255';
   // The ambient page glow follows whatever frame the slab is actually WEARING,
-  // or the two disagree — an orange bloom around a prism-framed slab.
-  const rgb = frameVariant ? '255,255,255' : rarityRgbValue;
+  // or the two disagree — an orange bloom around a prism-framed slab. Read from
+  // SlabImage's own table so a future variant can't set the frame one colour
+  // and the page glow another.
+  const rgb = frameVariant ? VARIANT_RGB[frameVariant] : rarityRgbValue;
   const priceLabel = detail ? rm(detail.marketPriceMyr) : seed.value;
 
   // Entrance slot helpers — see globals.css "Shared first-paint entrance".

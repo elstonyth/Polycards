@@ -16,6 +16,11 @@ export const CHALLENGE_PACK_PREFIX = 'challenge-';
 export const challengePackId = (weekStartIso: string): string =>
   `${CHALLENGE_PACK_PREFIX}${weekStartIso.slice(0, 10)}`;
 
+/** Matches exactly what challengePackId() mints. A bare prefix test would
+ *  false-positive on an admin-authored slug like `challenge-cup-2026` and put
+ *  the prize frame on an ordinary pull; nothing reserves the prefix. */
+const CHALLENGE_PACK_RE = /^challenge-\d{4}-\d{2}-\d{2}$/;
+
 /** Was this pull minted as a weekly-challenge prize? */
 export const isChallengePrizePack = (packId: string | null | undefined) =>
-  typeof packId === 'string' && packId.startsWith(CHALLENGE_PACK_PREFIX);
+  typeof packId === 'string' && CHALLENGE_PACK_RE.test(packId);

@@ -76,7 +76,7 @@ function frameSrc(rarity: string): string {
  * back to Common gray.
  */
 export type FrameVariant = 'prism';
-const VARIANT_RGB: Record<FrameVariant, string> = {
+export const VARIANT_RGB: Record<FrameVariant, string> = {
   prism: '255, 255, 255', // white — the gradient's own endpoints
 };
 

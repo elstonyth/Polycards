@@ -38,9 +38,6 @@ const RECENT_PAGE = RECENT_N * 3;
 // rows only), so this is a semantic ceiling, not a working-set size.
 const SHOWCASE_MAX = 20_000;
 
-// One list, shared with the card deep-link route and mirrored by the
-// pack_odds enum — a tier added in one place must not silently miss the other.
-const RARITIES = RARITY_ORDER;
 
 type PullRow = Awaited<ReturnType<PacksModuleService['listPulls']>>[number];
 type CardRow = Awaited<ReturnType<PacksModuleService['listCards']>>[number];
@@ -85,7 +82,7 @@ export async function GET(
   // — the cap and the C1 source='pack' filter now live inside the SQL
   // aggregate, see PacksModuleService.profileStatsForCustomer).
   const stats = await packs.profileStatsForCustomer(customer.id);
-  const byRarity = Object.fromEntries(RARITIES.map((r) => [r, 0])) as Record<
+  const byRarity = Object.fromEntries(RARITY_ORDER.map((r) => [r, 0])) as Record<
     Rarity,
     number
   >;
