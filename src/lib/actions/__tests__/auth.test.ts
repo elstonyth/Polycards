@@ -481,18 +481,62 @@ describe('googleCallback — OAuth callback branches', () => {
 describe('googleLoginStart — callback_url host guard', () => {
   it('allowed host + x-forwarded-proto https → ok:true, https callback_url', async () => {
     setHeaders({ host: 'polycards.gg', 'x-forwarded-proto': 'https' });
-    mocks.clientFetch.mockResolvedValueOnce({
-      location: 'https://accounts.google/x',
-    });
+    // The real shape auth-google's getRedirect() returns — five params, one of
+    // them the opaque `state` key. The fixture MUST carry them: re-parsing the
+    // URL to append `prompt` is only safe if every existing param survives
+    // re-serialization, and a param-less stub can't catch losing them.
+    const backendLocation =
+      'https://accounts.google.com/o/oauth2/v2/auth' +
+      '?redirect_uri=https%3A%2F%2Fpolycards.gg%2Fauth%2Fgoogle%2Fcallback' +
+      '&client_id=abc.apps.googleusercontent.com' +
+      '&response_type=code' +
+      '&scope=email+profile+openid' +
+      '&state=opaque-state-key';
+    mocks.clientFetch.mockResolvedValueOnce({ location: backendLocation });
 
     const r = await googleLoginStart();
 
-    expect(r).toEqual({ ok: true, location: 'https://accounts.google/x' });
+    // prompt=select_account is appended so a user with several Google accounts
+    // always gets the chooser (auth-google never sets `prompt` itself).
+    expect(r).toEqual({
+      ok: true,
+      location: `${backendLocation}&prompt=select_account`,
+    });
     const [path, opts] = mocks.clientFetch.mock.calls[0]!;
     expect(path).toBe('/auth/customer/google');
     expect(opts.body.callback_url).toBe(
       'https://polycards.gg/auth/google/callback',
     );
+  });
+
+  it('location already carrying a prompt → overwritten, state preserved', async () => {
+    setHeaders({ host: 'polycards.gg', 'x-forwarded-proto': 'https' });
+    // Guards the `set` (not `append`) semantics: if the provider ever starts
+    // emitting its own `prompt`, we must replace it rather than send two.
+    mocks.clientFetch.mockResolvedValueOnce({
+      location:
+        'https://accounts.google.com/o/oauth2/v2/auth?state=keep-me&prompt=none',
+    });
+
+    const r = await googleLoginStart();
+
+    expect(r).toEqual({
+      ok: true,
+      location:
+        'https://accounts.google.com/o/oauth2/v2/auth?state=keep-me&prompt=select_account',
+    });
+  });
+
+  it('malformed location → generic start error, nothing half-built returned', async () => {
+    setHeaders({ host: 'polycards.gg', 'x-forwarded-proto': 'https' });
+    mocks.clientFetch.mockResolvedValueOnce({ location: '/not-absolute' });
+
+    const r = await googleLoginStart();
+
+    expect(r).toEqual({
+      ok: false,
+      error: 'Could not start Google sign-in. Please try again.',
+    });
   });
 
   it('disallowed host → origin error, no backend call', async () => {

@@ -1,7 +1,7 @@
 import {
   balanceOdds,
   computeSetWeights,
-  TOTAL_BPS,
+  TOTAL_UNITS,
   type SetEntry,
   type SetWeightsResult,
 } from '../index';
@@ -54,10 +54,10 @@ describe('computeSetWeights — 3-set inheritance + balancer', () => {
     const r = byId(rows);
 
     expect(error).toBeNull();
-    expect(r.get('a')!.weight_2).toBe(4000); // explicit
+    expect(r.get('a')!.weight_2).toBe(400_000); // explicit
     expect(r.get('b')!.weight_2).toBeNull(); // untouched → inherits set 1
-    expect(r.get('c')!.weight_2).toBe(3000); // balancer absorbs the remainder
-    expect(resolvedSum(rows, 2)).toBe(TOTAL_BPS);
+    expect(r.get('c')!.weight_2).toBe(300_000); // balancer absorbs the remainder
+    expect(resolvedSum(rows, 2)).toBe(TOTAL_UNITS);
   });
 
   it('chains set 3 off set 2 RESOLVED values, not set 1', () => {
@@ -69,14 +69,14 @@ describe('computeSetWeights — 3-set inheritance + balancer', () => {
     const r = byId(rows);
 
     expect(error).toBeNull();
-    expect(r.get('a')!.weight_2).toBe(3000);
+    expect(r.get('a')!.weight_2).toBe(300_000);
     // `a` has no explicit pct_3 and is not the balancer → stays NULL, and the
     // fallback chain resolves it to set 2's 30% (NOT set 1's 20%).
     expect(r.get('a')!.weight_3).toBeNull();
-    expect(resolved(r.get('a')!, 3)).toBe(3000);
-    expect(r.get('b')!.weight_3).toBe(1000);
-    expect(r.get('c')!.weight_3).toBe(6000); // 10000 − 3000 − 1000
-    expect(resolvedSum(rows, 3)).toBe(TOTAL_BPS);
+    expect(resolved(r.get('a')!, 3)).toBe(300_000);
+    expect(r.get('b')!.weight_3).toBe(100_000);
+    expect(r.get('c')!.weight_3).toBe(600_000); // 1_000_000 − 300_000 − 100_000
+    expect(resolvedSum(rows, 3)).toBe(TOTAL_UNITS);
   });
 
   it('skips an empty set 2 without breaking set 3 (double fallback 3→2→1)', () => {
@@ -91,11 +91,11 @@ describe('computeSetWeights — 3-set inheritance + balancer', () => {
     // Set 2 has no override anywhere → stays entirely NULL, and set 3's
     // effective rates come off set 1 (b = 30) rather than off nothing.
     expect(rows.every((row) => row.weight_2 === null)).toBe(true);
-    expect(r.get('a')!.weight_3).toBe(1000);
+    expect(r.get('a')!.weight_3).toBe(100_000);
     expect(r.get('b')!.weight_3).toBeNull();
-    expect(resolved(r.get('b')!, 3)).toBe(3000);
-    expect(r.get('c')!.weight_3).toBe(6000);
-    expect(resolvedSum(rows, 3)).toBe(TOTAL_BPS);
+    expect(resolved(r.get('b')!, 3)).toBe(300_000);
+    expect(r.get('c')!.weight_3).toBe(600_000);
+    expect(resolvedSum(rows, 3)).toBe(TOTAL_UNITS);
   });
 
   it('labels a set-2 failure with its set number', () => {
@@ -132,7 +132,7 @@ describe('computeSetWeights — 3-set inheritance + balancer', () => {
 
     expect(r.get('a')!.weight_2).toBe(0);
     expect(r.get('a')!.weight_2).not.toBeNull();
-    expect(r.get('c')!.weight_2).toBe(7000); // 10000 − 0 − 3000 inherited
-    expect(resolvedSum(rows, 2)).toBe(TOTAL_BPS);
+    expect(r.get('c')!.weight_2).toBe(700_000); // 1_000_000 − 0 − 300_000 inherited
+    expect(resolvedSum(rows, 2)).toBe(TOTAL_UNITS);
   });
 });

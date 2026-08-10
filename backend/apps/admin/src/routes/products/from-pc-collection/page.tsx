@@ -29,6 +29,8 @@ import {
   type PcQueueItem,
 } from '../../../lib/queries';
 import { resolveImageUrl } from '../../../lib/image-url';
+import { useTableSort } from '../../../lib/use-table-sort';
+import { applyRangeSelect } from '../../../lib/range-select';
 import {
   rm,
   usdToMyr,
@@ -194,6 +196,12 @@ const AddFromPcCollectionPage = () => {
   const [cardsOnly, setCardsOnly] = useState(true);
   const [gradedOnly, setGradedOnly] = useState(true);
   const [filter, setFilter] = useState('');
+  // Client-side sort over the WHOLE match set (see the pre-slice note in
+  // `matches`). Null = scan order. Selection is keyed by offer_id and survives
+  // reordering by design, same as it survives filter changes.
+  const { sort, sortHeader } = useTableSort<
+    'item' | 'pcTag' | 'tier' | 'offerValue'
+  >(null);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
 
   // Step 3 — import (one per-grade price lookup per picked product, sequential:
@@ -238,7 +246,8 @@ const AddFromPcCollectionPage = () => {
         // set but is not the account the token reads. Importing them would put
         // other people's cards in our catalog, so the API already dropped them;
         // say so instead of quietly serving a short page.
-        if (data.foreign_dropped > 0) foreignRef.current += data.foreign_dropped;
+        if (data.foreign_dropped > 0)
+          foreignRef.current += data.foreign_dropped;
         setOffers((prev) => {
           const rows = prev ?? [];
           const seen = new Set(rows.map(offerKey));
@@ -273,7 +282,7 @@ const AddFromPcCollectionPage = () => {
 
   const matches = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    return (offers ?? []).filter((o) => {
+    const filtered = (offers ?? []).filter((o) => {
       if (cardsOnly && !o.is_card) return false;
       if (gradedOnly && !isGraded(o)) return false;
       if (q === '') return true;
@@ -286,7 +295,31 @@ const AddFromPcCollectionPage = () => {
         o.condition.toLowerCase().includes(q)
       );
     });
-  }, [offers, filter, cardsOnly, gradedOnly]);
+    // Sorted HERE, before the MAX_VISIBLE_ROWS slice below — sorting only the
+    // visible 300 would reorder an arbitrary prefix of a five-figure list.
+    if (!sort) return filtered;
+    const dir = sort.dir === 'asc' ? 1 : -1;
+    const val = (o: PcOffer): number | string => {
+      switch (sort.key) {
+        case 'item':
+          return o.name;
+        case 'pcTag':
+          return o.include || o.condition;
+        case 'tier':
+          return o.grade ?? '';
+        case 'offerValue':
+          return o.value_usd ?? Number.NEGATIVE_INFINITY;
+      }
+    };
+    return [...filtered].sort((a, b) => {
+      const av = val(a);
+      const bv = val(b);
+      if (typeof av === 'string' && typeof bv === 'string') {
+        return dir * av.localeCompare(bv);
+      }
+      return dir * (av < bv ? -1 : av > bv ? 1 : 0);
+    });
+  }, [offers, filter, cardsOnly, gradedOnly, sort]);
 
   const visible = matches.slice(0, MAX_VISIBLE_ROWS);
 
@@ -295,6 +328,28 @@ const AddFromPcCollectionPage = () => {
   const picked = (offers ?? []).filter((o) => selected[offerKey(o)]);
   const allVisibleSelected =
     visible.length > 0 && visible.every((o) => selected[offerKey(o)]);
+
+  // Shift-click range select (the Gmail convention) — the range math lives in
+  // lib/range-select.ts (pure, vitest-covered). The selection here is a
+  // Record (it survives filter changes by design), so convert to a Set for
+  // applyRangeSelect and back; keys outside the visible range pass through
+  // untouched. A stale anchor (filtered out) falls back to a plain toggle.
+  const anchorRef = useRef<string | null>(null);
+  const handleRowCheck = (key: string, shiftKey: boolean) => {
+    const anchor = anchorRef.current;
+    anchorRef.current = key;
+    setSelected((prev) => {
+      const prevSet = new Set(Object.keys(prev).filter((k) => prev[k]));
+      const nextSet = applyRangeSelect(
+        prevSet,
+        visible.map(offerKey),
+        anchor,
+        key,
+        shiftKey,
+      );
+      return Object.fromEntries([...nextSet].map((k) => [k, true]));
+    });
+  };
 
   const toggleAllVisible = () => {
     setSelected((prev) => {
@@ -570,11 +625,14 @@ const AddFromPcCollectionPage = () => {
           </Text>
         )}
 
-        {offers !== null && scanned === 0 && !scanning && scanError === null && (
-          <Text className="text-ui-fg-subtle" size="small">
-            {t('pcCollection.empty')}
-          </Text>
-        )}
+        {offers !== null &&
+          scanned === 0 &&
+          !scanning &&
+          scanError === null && (
+            <Text className="text-ui-fg-subtle" size="small">
+              {t('pcCollection.empty')}
+            </Text>
+          )}
 
         {/* Step 2 — narrow + pick */}
         {offers !== null && scanned > 0 && (
@@ -672,18 +730,10 @@ const AddFromPcCollectionPage = () => {
                 <Table.Header>
                   <Table.Row>
                     <Table.HeaderCell />
-                    <Table.HeaderCell>
-                      {t('pcCollection.col.item')}
-                    </Table.HeaderCell>
-                    <Table.HeaderCell>
-                      {t('pcCollection.col.pcTag')}
-                    </Table.HeaderCell>
-                    <Table.HeaderCell>
-                      {t('pcCollection.col.tier')}
-                    </Table.HeaderCell>
-                    <Table.HeaderCell>
-                      {t('pcCollection.col.offerValue')}
-                    </Table.HeaderCell>
+                    {sortHeader('item', t('pcCollection.col.item'))}
+                    {sortHeader('pcTag', t('pcCollection.col.pcTag'))}
+                    {sortHeader('tier', t('pcCollection.col.tier'))}
+                    {sortHeader('offerValue', t('pcCollection.col.offerValue'))}
                   </Table.Row>
                 </Table.Header>
                 <Table.Body>
@@ -691,16 +741,16 @@ const AddFromPcCollectionPage = () => {
                     const key = offerKey(o);
                     return (
                       <Table.Row key={key}>
-                        <Table.Cell>
+                        {/* select-none: a shift-click must range-select, not
+                            smear a text selection across the rows in between. */}
+                        <Table.Cell className="select-none">
                           <Checkbox
                             checked={!!selected[key]}
                             aria-label={t('pcCollection.selectRow', {
                               name: o.name || o.product_id,
                               tag: o.include || '—',
                             })}
-                            onCheckedChange={(v) =>
-                              setSelected((s) => ({ ...s, [key]: v === true }))
-                            }
+                            onClick={(e) => handleRowCheck(key, e.shiftKey)}
                           />
                         </Table.Cell>
                         <Table.Cell>
@@ -903,6 +953,7 @@ const AddFromPcCollectionPage = () => {
                       }
                       suggestionName={d.name}
                       idPrefix={`draft-${d.key}`}
+                      autoResolveName={d.name}
                     />
                     {d.pokemon.pixel_pokemon_id === null && (
                       <Text size="small" className="text-ui-fg-error">

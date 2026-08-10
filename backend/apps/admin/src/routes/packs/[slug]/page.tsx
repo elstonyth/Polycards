@@ -69,6 +69,8 @@ import {
   seedRangeRows,
 } from '../../../lib/tier-ranges';
 import { shouldSeedBuffer } from '../../../lib/seed-buffer';
+import { applyRangeSelect } from '../../../lib/range-select';
+import { useTableSort } from '../../../lib/use-table-sort';
 import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
 
 // A card staged by the cards list's bulk "Add to gacha pack" — NOT a pool
@@ -124,7 +126,8 @@ const PackOddsEditorPage = () => {
   const tierSettingsQuery = useTierSettings();
   const globalTierRanges = (tierSettingsQuery.data?.ranges ??
     {}) as TierRangeMap;
-  const packTierRanges = (data?.pack.tier_ranges ?? null) as TierRangeMap | null;
+  const packTierRanges = (data?.pack.tier_ranges ??
+    null) as TierRangeMap | null;
   const tierRanges = packTierRanges ?? globalTierRanges;
   const tiersConfigured = Object.keys(tierRanges).length > 0;
   // Settled (not "loaded") for the same reason as catalogSettled below: staged
@@ -246,6 +249,62 @@ const PackOddsEditorPage = () => {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const savingMembers = saveMembersMut.isPending;
 
+  // ── Pool picker search + sort + shift-select ──────────────────────────────
+  // Same tools as the Gacha Cards list. Display-only: `selected` (the
+  // membership draft) is untouched by narrowing the view, so a card picked
+  // and then filtered out of sight still saves — the subtitle count keeps it
+  // honest.
+  const [poolQ, setPoolQ] = useState('');
+  const {
+    sort: poolSort,
+    sortHeader: poolSortHeader,
+    resetSort: resetPoolSort,
+  } = useTableSort<'name' | 'grade' | 'value'>(null);
+  const poolAnchorRef = useRef<string | null>(null);
+  const visiblePool = useMemo(() => {
+    const needle = poolQ.trim().toLowerCase();
+    const filtered = (allCards ?? []).filter(
+      (c) =>
+        !needle ||
+        c.name.toLowerCase().includes(needle) ||
+        c.handle.toLowerCase().includes(needle),
+    );
+    if (!poolSort) return filtered;
+    const dir = poolSort.dir === 'asc' ? 1 : -1;
+    const val = (c: AdminCard): number | string =>
+      poolSort.key === 'name'
+        ? c.name
+        : poolSort.key === 'grade'
+          ? [c.grader, c.grade].filter(Boolean).join(' ')
+          : c.priceBreakdown.marketMyr;
+    return [...filtered].sort((a, b) => {
+      const av = val(a);
+      const bv = val(b);
+      if (typeof av === 'string' && typeof bv === 'string') {
+        return dir * av.localeCompare(bv);
+      }
+      return dir * (av < bv ? -1 : av > bv ? 1 : 0);
+    });
+  }, [allCards, poolQ, poolSort]);
+  const poolVisibleIds = visiblePool.map((c) => c.handle);
+  const allPoolVisibleSelected =
+    poolVisibleIds.length > 0 && poolVisibleIds.every((id) => selected.has(id));
+  const somePoolVisibleSelected = poolVisibleIds.some((id) => selected.has(id));
+  // Header checkbox scopes to the VISIBLE rows (add/remove them only), so a
+  // search + select-all can build up a pool additively. Decide add-vs-remove
+  // from `prev`, not the rendered flag — a refetch can swap rows mid-click.
+  const togglePoolVisible = () =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      const every =
+        poolVisibleIds.length > 0 && poolVisibleIds.every((id) => prev.has(id));
+      for (const id of poolVisibleIds) {
+        if (every) next.delete(id);
+        else next.add(id);
+      }
+      return next;
+    });
+
   // Staged rows need the catalog for their name/image/price, so hold the seed
   // until that query SETTLES — gating on "loaded" would leave the whole editor
   // on the skeleton forever if the catalog fetch fails.
@@ -309,16 +368,25 @@ const PackOddsEditorPage = () => {
 
   const openPool = () => {
     setSelected(new Set((rows ?? []).map((r) => r.card_id)));
+    // A reopened picker is a fresh view — a leftover anchor would
+    // range-select across rows the operator never clicked, and a leftover
+    // search/sort would silently pre-filter the catalog from last session.
+    poolAnchorRef.current = null;
+    setPoolQ('');
+    resetPoolSort();
     setPoolOpen(true);
   };
 
-  const toggleCard = (handle: string) =>
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(handle)) next.delete(handle);
-      else next.add(handle);
-      return next;
-    });
+  // Shift-click range select (the Gmail convention) — the range math lives in
+  // lib/range-select.ts (pure, vitest-covered). Ranges follow the picker's
+  // CURRENT filter+sort order.
+  const toggleCard = (handle: string, shiftKey: boolean) => {
+    const anchor = poolAnchorRef.current;
+    poolAnchorRef.current = handle;
+    setSelected((prev) =>
+      applyRangeSelect(prev, poolVisibleIds, anchor, handle, shiftKey),
+    );
+  };
 
   // Top-hit ORDER (1 = leftmost on the pack page; empty = not a Top Hit).
   // Typed freely into the row buffer, saved on blur/Enter as the complete
@@ -400,9 +468,7 @@ const PackOddsEditorPage = () => {
       // above deliberately keeps the `rows` basis so already-prompted staged
       // cards aren't confirmed twice.
       const inServerPool = new Set((data?.odds ?? []).map((o) => o.card_id));
-      setAutoTierAdd(
-        Array.from(selected).filter((h) => !inServerPool.has(h)),
-      );
+      setAutoTierAdd(Array.from(selected).filter((h) => !inServerPool.has(h)));
       toast.success(
         t('packs.pool.saved', { added: res.added, removed: res.removed }),
       );
@@ -454,7 +520,7 @@ const PackOddsEditorPage = () => {
         const sum = [...pct.values()].reduce((s, p) => s + p, 0);
         return {
           n,
-          total: pct.size === 0 ? null : Math.round(sum * 100) / 100,
+          total: pct.size === 0 ? null : Math.round(sum * 10_000) / 10_000,
           ev: money?.ev ?? null,
           rtp: money?.rtp ?? null,
           // Whether this set has a table of its OWN, rather than inheriting
@@ -496,6 +562,22 @@ const PackOddsEditorPage = () => {
   // `checked`, not `selected` — that name already belongs to the prize-pool
   // picker's membership selection above, a different set entirely.
   const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
+  // Shift-click range-select anchor (the previously clicked row). A ref, not
+  // state — it never needs a re-render.
+  const anchorRef = useRef<string | null>(null);
+
+  // ── Table search + sort ───────────────────────────────────────────────────
+  // Same tools as the Gacha Cards list, per the operator's ask. Display-only:
+  // the odds math, the EV tiles and the save all keep reading the FULL
+  // `effective` set — filtering the view must never filter what gets saved.
+  // `initial: null` keeps the pool's saved order until a header is clicked.
+  // Declared before the per-pack reset block below, which clears both.
+  const [tableQ, setTableQ] = useState('');
+  const {
+    sort: tableSort,
+    sortHeader: tableSortHeader,
+    resetSort: resetTableSort,
+  } = useTableSort<'name' | 'rarity' | 'value' | 'current'>(null);
   // Selection belongs to a PACK — same render-phase reset as `defaults` above.
   // card_id is the card HANDLE, which the same card carries in EVERY pack it
   // belongs to, and the router reuses this component across `:slug`. Without
@@ -505,24 +587,83 @@ const PackOddsEditorPage = () => {
   if (checkedFor !== slug) {
     setCheckedFor(slug);
     setChecked(new Set());
+    // Search + sort belong to a PACK too: without this, navigating pack A →
+    // pack B opens B pre-filtered by A's leftover search (possibly "0 of N"
+    // with an empty table) — the same ghost-state class this reset exists
+    // to kill. Display-only state, so render-phase setState is safe here.
+    setTableQ('');
+    resetTableSort();
   }
-  const checkedIds = effective
+  // An effect, not a line in the render-phase reset above: refs are off-limits
+  // during render (react-hooks/refs), and an effect keyed on slug fires at the
+  // same moment for this purpose.
+  useEffect(() => {
+    anchorRef.current = null;
+  }, [slug]);
+  const displayRows = useMemo(() => {
+    const needle = tableQ.trim().toLowerCase();
+    const filtered = needle
+      ? effective.filter(
+          (r) =>
+            r.name.toLowerCase().includes(needle) ||
+            r.card_id.toLowerCase().includes(needle),
+        )
+      : effective;
+    if (!tableSort) return filtered;
+    const dir = tableSort.dir === 'asc' ? 1 : -1;
+    const val = (r: EditRow): number | string => {
+      switch (tableSort.key) {
+        case 'name':
+          return r.name;
+        // Tier ladder order (Immortal → Common), not alphabetical.
+        case 'rarity':
+          return RARITIES.indexOf(r.rarity as OddsRarity);
+        case 'value':
+          return r.market_value;
+        case 'current':
+          return r.currentPct;
+      }
+    };
+    return [...filtered].sort((a, b) => {
+      const av = val(a);
+      const bv = val(b);
+      if (typeof av === 'string' && typeof bv === 'string') {
+        return dir * av.localeCompare(bv);
+      }
+      return dir * (av < bv ? -1 : av > bv ? 1 : 0);
+    });
+  }, [effective, tableQ, tableSort]);
+
+  // Selection scope is the VISIBLE rows: search clears the selection (below),
+  // so `checked` can never hold a row the operator can't see, and select-all
+  // ranges over what's on screen.
+  const checkedIds = displayRows
     .map((r) => r.card_id)
     .filter((id) => checked.has(id));
   const allChecked =
-    effective.length > 0 && checkedIds.length === effective.length;
+    displayRows.length > 0 && checkedIds.length === displayRows.length;
 
-  const toggleChecked = (cardId: string) =>
-    setChecked((prev) => {
-      const next = new Set(prev);
-      if (!next.delete(cardId)) next.add(cardId);
-      return next;
-    });
+  // Shift-click range select (the Gmail convention) — same wiring as the
+  // inventory and cards lists; the range math lives in lib/range-select.ts
+  // (pure, vitest-covered). Ranges follow the CURRENT filter+sort order.
+  const toggleChecked = (cardId: string, shiftKey: boolean) => {
+    const anchor = anchorRef.current;
+    anchorRef.current = cardId;
+    setChecked((prev) =>
+      applyRangeSelect(
+        prev,
+        displayRows.map((r) => r.card_id),
+        anchor,
+        cardId,
+        shiftKey,
+      ),
+    );
+  };
   // Decide add-vs-clear from `prev`, not from the rendered `allChecked`: a
   // reseed can swap the rows between the click and the update.
   const toggleCheckAll = () =>
     setChecked((prev) => {
-      const ids = effective.map((r) => r.card_id);
+      const ids = displayRows.map((r) => r.card_id);
       return ids.length > 0 && ids.every((id) => prev.has(id))
         ? new Set<string>()
         : new Set(ids);
@@ -591,8 +732,8 @@ const PackOddsEditorPage = () => {
   };
 
   // Locking hands the operator the wheel, pre-filled with the rate the card has
-  // right now — rounded to the 2dp the 1 bps storage floor can actually hold, so
-  // a derived 0.0333 does not land in the input as an out-of-step value.
+  // right now — rounded to the 4dp the 1-unit storage floor can actually hold,
+  // so a derived 0.00003333 does not land in the input as an out-of-step value.
   const toggleLock = (r: EditRow) => {
     // While the preview is errored `previewSets` returns empty maps, so fall
     // back to the card's last SAVED rate. Without this the newly editable field
@@ -603,7 +744,7 @@ const PackOddsEditorPage = () => {
       locked: !r.locked,
       ...(r.locked
         ? {}
-        : { pctInput: String(Math.round(derived * 100) / 100) }),
+        : { pctInput: String(Math.round(derived * 10_000) / 10_000) }),
     });
   };
 
@@ -765,7 +906,10 @@ const PackOddsEditorPage = () => {
           saving={updatePack.isPending}
           onSave={async (ranges) => {
             try {
-              await updatePack.mutateAsync({ ...fullPack, tier_ranges: ranges });
+              await updatePack.mutateAsync({
+                ...fullPack,
+                tier_ranges: ranges,
+              });
               toast.success(t('packs.tierRanges.saved'));
             } catch (err) {
               toast.error(err instanceof Error ? err.message : String(err));
@@ -789,6 +933,9 @@ const PackOddsEditorPage = () => {
               toast.success(t('packs.published.saved'));
             } catch (err) {
               toast.error(err instanceof Error ? err.message : String(err));
+              // Rethrow so the section knows the save failed and leaves the
+              // operator's typed values alone (it normalizes on success only).
+              throw err;
             }
           }}
         />
@@ -848,6 +995,34 @@ const PackOddsEditorPage = () => {
               </div>
             ) : null;
           })()}
+
+          {/* Table toolbar: search over the pool (name or handle) + a count so
+              a filtered view is never mistaken for the whole pool. */}
+          <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-3">
+            <Input
+              type="search"
+              className="w-72"
+              placeholder={t('packs.editor.searchPlaceholder')}
+              aria-label={t('packs.editor.searchPlaceholder')}
+              value={tableQ}
+              onChange={(e) => {
+                setTableQ(e.target.value);
+                // Narrowing the list changes WHICH rows are on screen — drop
+                // the selection so the bulk bar can never act on a row the
+                // operator can no longer see, and the stale anchor with it.
+                setChecked(new Set());
+                anchorRef.current = null;
+              }}
+            />
+            <Text size="small" className="text-ui-fg-subtle tabular-nums">
+              {tableQ.trim()
+                ? t('packs.editor.countFiltered', {
+                    shown: displayRows.length,
+                    total: effective.length,
+                  })
+                : t('packs.editor.count', { count: effective.length })}
+            </Text>
+          </div>
 
           {/* Bulk bar — only while something is checked, so the editor is
               unchanged for the common single-row edit. */}
@@ -926,19 +1101,13 @@ const PackOddsEditorPage = () => {
                       onCheckedChange={toggleCheckAll}
                     />
                   </Table.HeaderCell>
-                  <Table.HeaderCell>{t('packs.editor.card')}</Table.HeaderCell>
-                  <Table.HeaderCell>
-                    {t('packs.editor.rarity')}
-                  </Table.HeaderCell>
+                  {tableSortHeader('name', t('packs.editor.card'))}
+                  {tableSortHeader('rarity', t('packs.editor.rarity'))}
                   <Table.HeaderCell className="text-center">
                     {t('packs.editor.topHit')}
                   </Table.HeaderCell>
-                  <Table.HeaderCell className="text-right">
-                    {t('packs.editor.value')}
-                  </Table.HeaderCell>
-                  <Table.HeaderCell className="text-right">
-                    {t('packs.editor.current')}
-                  </Table.HeaderCell>
+                  {tableSortHeader('value', t('packs.editor.value'), true)}
+                  {tableSortHeader('current', t('packs.editor.current'), true)}
                   <Table.HeaderCell className="text-center">
                     {t('packs.editor.lock')}
                   </Table.HeaderCell>
@@ -950,11 +1119,11 @@ const PackOddsEditorPage = () => {
                 </Table.Row>
               </Table.Header>
               <Table.Body>
-                {/* `effective`, not `rows` — the preview, the EV tiles and the
-                    save all read it, so the body must too or the table is one
-                    derivation behind them. Same card_ids either way; edits
-                    still write through `setRow` to `rows`. */}
-                {effective.map((r) => {
+                {/* `displayRows` — `effective` (which the preview, the EV
+                    tiles and the save all read) filtered+sorted for display
+                    only. Same card_ids; edits still write through `setRow`
+                    to `rows`. */}
+                {displayRows.map((r) => {
                   // Price drift vs the assigned tier's configured range
                   // (/tier-defaults). Signal only — the tier NEVER switches on
                   // its own; 'unset' (tier not configured) shows nothing.
@@ -965,13 +1134,15 @@ const PackOddsEditorPage = () => {
                   );
                   return (
                     <Table.Row key={r.card_id}>
-                      <Table.Cell>
+                      {/* select-none: a shift-click must range-select, not
+                          smear a text selection across the rows in between. */}
+                      <Table.Cell className="select-none">
                         <Checkbox
                           aria-label={t('packs.editor.bulk.selectOne', {
                             name: r.name,
                           })}
                           checked={checked.has(r.card_id)}
-                          onCheckedChange={() => toggleChecked(r.card_id)}
+                          onClick={(e) => toggleChecked(r.card_id, e.shiftKey)}
                         />
                       </Table.Cell>
                       <Table.Cell>
@@ -1165,7 +1336,7 @@ const PackOddsEditorPage = () => {
             </div>
           </FocusModal.Header>
           <FocusModal.Body className="flex flex-col items-center overflow-auto p-10">
-            <div className="flex w-full max-w-[640px] flex-col gap-y-4">
+            <div className="flex w-full max-w-[860px] flex-col gap-y-4">
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <FocusModal.Title asChild>
@@ -1198,6 +1369,32 @@ const PackOddsEditorPage = () => {
                   </Button>
                 </div>
               </div>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <Input
+                  type="search"
+                  className="w-72"
+                  placeholder={t('packs.pool.searchPlaceholder')}
+                  aria-label={t('packs.pool.searchPlaceholder')}
+                  value={poolQ}
+                  onChange={(e) => {
+                    setPoolQ(e.target.value);
+                    // New search = new visible list — a stale anchor would
+                    // range-select across unrelated rows. The membership
+                    // draft (`selected`) deliberately survives.
+                    poolAnchorRef.current = null;
+                  }}
+                />
+                {allCards !== null && (
+                  <Text size="small" className="text-ui-fg-subtle tabular-nums">
+                    {poolQ.trim()
+                      ? t('packs.pool.countFiltered', {
+                          shown: visiblePool.length,
+                          total: allCards.length,
+                        })
+                      : t('packs.pool.count', { count: allCards.length })}
+                  </Text>
+                )}
+              </div>
               {allCards === null ? (
                 <LoadingSkeleton />
               ) : allCards.length === 0 ? (
@@ -1205,34 +1402,81 @@ const PackOddsEditorPage = () => {
                   {t('packs.pool.noCards')}
                 </Text>
               ) : (
-                <div className="divide-y rounded-lg border">
-                  {allCards.map((c) => (
-                    <label
-                      key={c.handle}
-                      className="hover:bg-ui-bg-base-hover flex cursor-pointer items-center gap-3 px-4 py-2"
-                    >
-                      <Checkbox
-                        checked={selected.has(c.handle)}
-                        onCheckedChange={() => toggleCard(c.handle)}
-                      />
-                      <img
-                        src={resolveImageUrl(c.slab_image || c.image)}
-                        alt=""
-                        loading="lazy"
-                        decoding="async"
-                        className="h-9 w-7 shrink-0 rounded object-contain"
-                      />
-                      <div className="flex flex-1 flex-col">
-                        <span className="truncate text-sm font-medium">
-                          {c.name}
-                        </span>
-                        <span className="text-ui-fg-subtle text-xs">
-                          {[c.grader, c.grade].filter(Boolean).join(' ') || '—'}{' '}
-                          · {rm(c.priceBreakdown.marketMyr)}
-                        </span>
-                      </div>
-                    </label>
-                  ))}
+                <div className="overflow-x-auto rounded-lg border">
+                  <Table>
+                    <Table.Header>
+                      <Table.Row>
+                        <Table.HeaderCell className="w-10">
+                          <Checkbox
+                            aria-label={t('packs.pool.selectVisible')}
+                            checked={
+                              allPoolVisibleSelected
+                                ? true
+                                : somePoolVisibleSelected
+                                  ? 'indeterminate'
+                                  : false
+                            }
+                            onCheckedChange={togglePoolVisible}
+                          />
+                        </Table.HeaderCell>
+                        {poolSortHeader('name', t('packs.editor.card'))}
+                        {poolSortHeader('grade', t('packs.pool.grade'))}
+                        {poolSortHeader('value', t('packs.editor.value'), true)}
+                      </Table.Row>
+                    </Table.Header>
+                    <Table.Body>
+                      {visiblePool.map((c) => (
+                        <Table.Row
+                          key={c.handle}
+                          className="cursor-pointer"
+                          onClick={(e) => toggleCard(c.handle, e.shiftKey)}
+                        >
+                          {/* select-none: a shift-click must range-select, not
+                              smear a text selection across rows. The row IS
+                              the click target (like the old <label>), so the
+                              checkbox only stops propagation. */}
+                          <Table.Cell className="select-none">
+                            <Checkbox
+                              aria-label={t('packs.editor.bulk.selectOne', {
+                                name: c.name,
+                              })}
+                              checked={selected.has(c.handle)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleCard(c.handle, e.shiftKey);
+                              }}
+                            />
+                          </Table.Cell>
+                          <Table.Cell className="select-none">
+                            <div className="flex items-center gap-3">
+                              <img
+                                src={resolveImageUrl(c.slab_image || c.image)}
+                                alt=""
+                                loading="lazy"
+                                decoding="async"
+                                className="h-9 w-7 shrink-0 rounded object-contain"
+                              />
+                              <span className="max-w-[22rem] truncate text-sm font-medium">
+                                {c.name}
+                              </span>
+                            </div>
+                          </Table.Cell>
+                          <Table.Cell className="text-ui-fg-subtle select-none text-sm">
+                            {[c.grader, c.grade].filter(Boolean).join(' ') ||
+                              '—'}
+                          </Table.Cell>
+                          <Table.Cell className="text-ui-fg-subtle select-none text-right text-sm tabular-nums">
+                            {rm(c.priceBreakdown.marketMyr)}
+                          </Table.Cell>
+                        </Table.Row>
+                      ))}
+                    </Table.Body>
+                  </Table>
+                  {visiblePool.length === 0 && (
+                    <Text className="text-ui-fg-subtle block px-4 py-3 text-sm">
+                      {t('packs.pool.noMatches')}
+                    </Text>
+                  )}
                 </div>
               )}
             </div>
@@ -1503,8 +1747,8 @@ const DefaultOddsSection = ({
   const { t } = useTranslation();
   const total =
     Math.round(
-      RARITIES.reduce((s, r) => s + (Number(defaults[r]) || 0), 0) * 100,
-    ) / 100;
+      RARITIES.reduce((s, r) => s + (Number(defaults[r]) || 0), 0) * 10_000,
+    ) / 10_000;
   const byRarity = new Map((split?.tiers ?? []).map((x) => [x.rarity, x]));
   const noBalancer =
     split !== null && (byRarity.get('Common')?.balancerCount ?? 0) === 0;
@@ -1530,7 +1774,7 @@ const DefaultOddsSection = ({
     return tier.lockedCount > 0
       ? `${each} · ${t('packs.defaults.plusLocked', {
           n: tier.lockedCount,
-          pct: fmtPct(Math.round(tier.lockedPct * 100) / 100),
+          pct: fmtPct(Math.round(tier.lockedPct * 10_000) / 10_000),
         })}`
       : each;
   };
@@ -1561,7 +1805,7 @@ const DefaultOddsSection = ({
                 type="number"
                 min={0}
                 max={100}
-                step={0.01}
+                step={0.0001}
                 value={defaults[r] ?? ''}
                 onChange={(e) => onChange(r, e.target.value)}
                 className="tabular-nums"
@@ -1582,7 +1826,7 @@ const DefaultOddsSection = ({
         </span>
         {(split?.unusedPct ?? 0) > 0 &&
           ` · ${t('packs.defaults.unused', {
-            pct: fmtPct(Math.round((split?.unusedPct ?? 0) * 100) / 100),
+            pct: fmtPct(Math.round((split?.unusedPct ?? 0) * 10_000) / 10_000),
           })}`}
       </Text>
 
@@ -1677,12 +1921,13 @@ const SetRateCell = ({
 
   const value =
     set === 1 ? row.pctInput : set === 2 ? row.pctInput2 : row.pctInput3;
-  // Weights store as whole basis points, so a typed 7.567 persists as 7.57.
+  // Weights store as integer units of 0.0001%, so a typed 7.56789 persists as
+  // 7.5679.
   // The input keeps what the operator is typing (clobbering it mid-keystroke is
   // worse), and the resolved rate shows beside it ONLY when the two differ —
   // otherwise "what you see is what's saved" quietly stops being true.
   const typed = Number(value);
-  // A rate under half a basis point rounds to weight 0 — the card can never be
+  // A rate under half a unit (0.00005%) rounds to weight 0 — the card can never be
   // pulled, and nothing else in the editor would say so. Called out separately
   // from ordinary rounding because it is a different kind of wrong.
   const unpullable =
@@ -1693,7 +1938,7 @@ const SetRateCell = ({
   const rounds =
     effective !== null &&
     value.trim() !== '' &&
-    Math.abs(effective - typed) >= 0.005;
+    Math.abs(effective - typed) >= 0.00005;
   return (
     <Table.Cell>
       <div className="flex items-center gap-x-1.5">
@@ -1701,7 +1946,7 @@ const SetRateCell = ({
           type="number"
           min={0}
           max={100}
-          step={0.01}
+          step={0.0001}
           aria-label={label}
           value={value}
           placeholder={set === 1 || effective === null ? '' : String(effective)}
@@ -1750,6 +1995,11 @@ const PublishedOddsSection = ({
   const [overall, setOverall] = useState<string>(
     pack.published_odds ? String(pack.published_odds.overall) : '100',
   );
+  // Publish precision (0–4 decimal places). The server rounds every tier to
+  // this on save, so the storefront shows exactly what the operator chose.
+  const [decimals, setDecimals] = useState<number>(
+    pack.published_odds?.decimals ?? 2,
+  );
   // Seeded once (the section is mounted with key={slug}); a pack that HAS
   // published odds keeps them verbatim — the preset must never silently
   // overwrite live public numbers.
@@ -1783,8 +2033,8 @@ const PublishedOddsSection = ({
     RARITIES.every((r) => validPct(tiers[r] ?? ''));
   const sum =
     Math.round(
-      RARITIES.reduce((s, r) => s + (Number(tiers[r]) || 0), 0) * 100,
-    ) / 100;
+      RARITIES.reduce((s, r) => s + (Number(tiers[r]) || 0), 0) * 10_000,
+    ) / 10_000;
   // What the PUBLISHED percentages promise the player, priced off the pool the
   // operator is looking at — live against the tier inputs being typed (the
   // packs list carries the saved figure). The gap against the per-set EV chips
@@ -1798,16 +2048,38 @@ const PublishedOddsSection = ({
     [rows, tiers],
   );
 
-  const save = () =>
-    onSave({
-      overall: Number(overall),
-      tiers: Object.fromEntries(
-        RARITIES.filter((r) => (tiers[r] ?? '').trim() !== '').map((r) => [
-          r,
-          Number(tiers[r]),
-        ]),
+  const save = async () => {
+    try {
+      await onSave({
+        overall: Number(overall),
+        tiers: Object.fromEntries(
+          RARITIES.filter((r) => (tiers[r] ?? '').trim() !== '').map((r) => [
+            r,
+            Number(tiers[r]),
+          ]),
+        ),
+        decimals,
+      });
+    } catch {
+      // Parent already toasted; keep the operator's typed values untouched.
+      return;
+    }
+    // The server rounds overall + tiers to 'decimals' places on save
+    // (validate.ts
+    // pct()); mirror that exact rounding into the inputs so the editor shows
+    // what was actually published (e.g. decimals 0: a typed 99.5 saved as 100).
+    const scale = 10 ** decimals;
+    const round = (n: number) => Math.round(n * scale) / scale;
+    setOverall((v) => (v.trim() === '' ? v : String(round(Number(v)))));
+    setTiers((m) =>
+      Object.fromEntries(
+        RARITIES.map((r) => {
+          const v = m[r] ?? '';
+          return [r, v.trim() === '' ? v : String(round(Number(v)))];
+        }),
       ),
-    });
+    );
+  };
 
   return (
     <div className="px-6 py-5">
@@ -1819,6 +2091,30 @@ const PublishedOddsSection = ({
           </Text>
         </div>
         <div className="flex shrink-0 items-center gap-x-2">
+          <div className="flex items-center gap-x-1.5">
+            <Label size="xsmall" htmlFor="published-decimals">
+              {t('packs.published.decimals')}
+            </Label>
+            <Select
+              size="small"
+              value={String(decimals)}
+              onValueChange={(v) => setDecimals(Number(v))}
+            >
+              <Select.Trigger
+                id="published-decimals"
+                className="w-16 tabular-nums"
+              >
+                <Select.Value />
+              </Select.Trigger>
+              <Select.Content>
+                {[0, 1, 2, 3, 4].map((d) => (
+                  <Select.Item key={d} value={String(d)}>
+                    {String(d)}
+                  </Select.Item>
+                ))}
+              </Select.Content>
+            </Select>
+          </div>
           <Button
             size="small"
             variant="transparent"
@@ -1868,7 +2164,7 @@ const PublishedOddsSection = ({
                 type="number"
                 min={0}
                 max={100}
-                step={0.1}
+                step={10 ** -decimals}
                 placeholder="—"
                 value={tiers[r] ?? ''}
                 onChange={(e) =>

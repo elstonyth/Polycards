@@ -27,6 +27,7 @@ import {
   DEFAULT_PLAYER_GROUP_NAME,
   isDefaultPlayerGroup,
 } from '../../lib/player-groups';
+import { useTableSort } from '../../lib/use-table-sort';
 import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
@@ -42,6 +43,12 @@ export const config: RouteConfig = {
 // CURRENT state; useSetPlayerDisabled takes the TARGET state, so the mutation
 // is handed the negation. The two conventions sit one line apart — don't merge.
 type Target = { id: string; email: string; disabled: boolean };
+
+// EXACTLY the backend's SORTABLE allow-list (api/admin/players/route.ts) —
+// real `customer` columns only. Every other column (wallet, vault, spend,
+// pulls, VIP level, group, status) is a JS-side aggregate over the already-
+// paged ids, so the server cannot order by it; those headers stay plain.
+type SortKey = 'created_at' | 'email' | 'name';
 
 const PlayersPage = () => {
   const { t } = useTranslation();
@@ -65,11 +72,22 @@ const PlayersPage = () => {
     return () => clearTimeout(id);
   }, [search]);
 
+  // Sorting resets to page 0 — the operator re-ordered the whole result set,
+  // so staying on page 3 of the old order would show an arbitrary slice.
+  const { sort, sortHeader } = useTableSort<SortKey>(
+    { key: 'created_at', dir: 'desc' },
+    { onChange: () => setPage(0) },
+  );
+
   // A blank filter is passed as undefined, never ''. listPlayers omits it from
   // the URL either way, but qk.players(page, '') and qk.players(page, undefined)
   // are DIFFERENT cache keys — type-then-clear would double-cache every
   // unfiltered page and refetch what is already in hand.
-  const { data, isError, isPlaceholderData } = usePlayers(page, q || undefined);
+  const { data, isError, isPlaceholderData } = usePlayers(
+    page,
+    q || undefined,
+    sort ? `${sort.key}:${sort.dir}` : 'created_at:desc',
+  );
   const setDisabled = useSetPlayerDisabled();
 
   const closeModal = () => {
@@ -147,8 +165,8 @@ const PlayersPage = () => {
             <Table>
               <Table.Header>
                 <Table.Row>
-                  <Table.HeaderCell>{t('players.name')}</Table.HeaderCell>
-                  <Table.HeaderCell>{t('players.email')}</Table.HeaderCell>
+                  {sortHeader('name', t('players.name'))}
+                  {sortHeader('email', t('players.email'))}
                   <Table.HeaderCell>{t('players.phone')}</Table.HeaderCell>
                   <Table.HeaderCell>{t('players.verified')}</Table.HeaderCell>
                   <Table.HeaderCell>{t('players.group')}</Table.HeaderCell>
@@ -165,7 +183,7 @@ const PlayersPage = () => {
                   <Table.HeaderCell className="text-right">
                     {t('players.pulls')}
                   </Table.HeaderCell>
-                  <Table.HeaderCell>{t('players.registered')}</Table.HeaderCell>
+                  {sortHeader('created_at', t('players.registered'))}
                   <Table.HeaderCell>{t('players.lastSpend')}</Table.HeaderCell>
                   <Table.HeaderCell>{t('players.status')}</Table.HeaderCell>
                 </Table.Row>

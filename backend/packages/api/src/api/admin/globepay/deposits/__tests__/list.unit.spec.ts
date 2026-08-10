@@ -5,6 +5,7 @@ const mkRes = () => {
   const out: { body?: any; status?: number } = {};
   return {
     res: {
+      setHeader: () => {},
       json: (b: any) => {
         out.body = b;
       },
@@ -75,7 +76,10 @@ describe('GET /admin/globepay/deposits', () => {
     await GET({ scope, query: {} } as any, res);
 
     expect(calls.filter).toEqual({ status: 'pending' });
-    expect(calls.opts.order).toEqual({ created_at: 'ASC' });
+    // `id` tiebreaks the DEFAULT path too — two deposits written in the same
+    // tick share a created_at, and offset pagination needs a unique secondary
+    // key or such a row lands on two pages / on neither.
+    expect(calls.opts.order).toEqual({ created_at: 'ASC', id: 'ASC' });
     expect(out.body.status).toBe('pending');
   });
 
@@ -85,8 +89,42 @@ describe('GET /admin/globepay/deposits', () => {
     await GET({ scope, query: { status: 'all' } } as any, res);
 
     expect(calls.filter).toEqual({});
-    expect(calls.opts.order).toEqual({ created_at: 'DESC' });
+    expect(calls.opts.order).toEqual({ created_at: 'DESC', id: 'DESC' });
     expect(out.body.total).toBe(2);
+  });
+
+  it('an explicit ?sort= overrides the status-dependent default, with id tiebreaker', async () => {
+    const { res } = mkRes();
+    const { scope, calls } = mkScope([deposit(1)]);
+    await GET({ scope, query: { sort: 'amount_requested:asc' } } as any, res);
+
+    expect(calls.opts.order).toEqual({ amount_requested: 'ASC', id: 'ASC' });
+  });
+
+  // No ?status= means the pending view, whose default is oldest-first. A
+  // refused key must land on THAT default, not on a hardcoded newest-first —
+  // otherwise a typo in the dashboard silently empties the top of the
+  // stranded-payment work queue.
+  it('an unknown sort key degrades to the view default, never a passthrough', async () => {
+    const { res } = mkRes();
+    const { scope, calls } = mkScope([deposit(1)]);
+    await GET(
+      { scope, query: { sort: 'customer_email; DROP TABLE x:desc' } } as any,
+      res,
+    );
+
+    expect(calls.opts.order).toEqual({ created_at: 'ASC', id: 'ASC' });
+  });
+
+  it('a refused key on a history view keeps that view newest-first', async () => {
+    const { res } = mkRes();
+    const { scope, calls } = mkScope([deposit(1)]);
+    await GET(
+      { scope, query: { status: 'all', sort: 'customer_email:asc' } } as any,
+      res,
+    );
+
+    expect(calls.opts.order).toEqual({ created_at: 'DESC', id: 'DESC' });
   });
 
   it('joins the customer email and normalizes bigNumber amounts', async () => {
@@ -134,7 +172,10 @@ describe('GET /admin/globepay/deposits', () => {
     const { res, out } = mkRes();
     const rows = Array.from({ length: 120 }, (_, i) => deposit(i));
     await GET(
-      { scope: mkScope(rows).scope, query: { limit: '50', offset: '50' } } as any,
+      {
+        scope: mkScope(rows).scope,
+        query: { limit: '50', offset: '50' },
+      } as any,
       res,
     );
     expect(out.body.total).toBe(120);

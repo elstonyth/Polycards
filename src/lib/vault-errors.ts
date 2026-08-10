@@ -29,7 +29,9 @@ export const VAULT_RULES: ErrorRule[] = [
   // SMS flow, and without the pointer this reads as a dead end.
   [
     /verify your phone/i,
-    'Verify your phone number in Account settings before topping up.',
+    // "continuing", not "topping up": since 2026-08-05 the same guard sits on
+    // the withdrawal submit too, and naming the wrong action reads as a bug.
+    'Verify your phone number in Account settings before continuing.',
   ],
   [
     /declined/i,
@@ -65,11 +67,13 @@ export const VAULT_RULES: ErrorRule[] = [
   // MUST stay above /amount/i — see the ORDER note in the file header.
   //
   // The copy deliberately does NOT suggest choosing another payment method,
-  // even though the backend message does: TopUpSheet has no method picker, the
-  // method is always GLOBEPAY_DEFAULT_METHOD, so that advice would strand the
-  // customer on an action the UI cannot perform. Generic wording also keeps
-  // this correct for the mock top-up path, whose own "could not start your
-  // top-up" message reaches the same table.
+  // even though the backend message does. That held when TopUpSheet had no
+  // picker, and it still holds now that it has one: how many channels are on
+  // offer is decided per request (DEPOSIT_METHODS_ENABLED), so "try the other
+  // one" is advice this table cannot know is true — and when it IS true the
+  // tiles are sitting directly above this error anyway. Generic wording also
+  // keeps it correct for the mock top-up path, whose own "could not start your
+  // top-up" message reaches the same table with no picker at all.
   [
     /could not start your top-up/i,
     'The payment gateway could not start this top-up. Please try again in a moment.',

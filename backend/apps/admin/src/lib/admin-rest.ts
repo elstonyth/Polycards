@@ -37,7 +37,14 @@ export const httpStatus = (err: unknown): number | undefined => {
 // profile (pack ≈ square, card ≈ 5:7).
 export async function uploadImage(
   file: File,
-  kind: 'pack' | 'display' | 'card' | 'sprite' | 'frame' | 'avatar-frame' | 'delivery',
+  kind:
+    | 'pack'
+    | 'display'
+    | 'card'
+    | 'sprite'
+    | 'frame'
+    | 'avatar-frame'
+    | 'delivery',
 ): Promise<string> {
   const body = new FormData();
   body.append('files', file);
@@ -612,6 +619,7 @@ export async function listDeliveryOrders(
   q?: string,
   limit = 50,
   customerId?: string,
+  sort?: string,
 ): Promise<DeliveryOrdersPage> {
   const params = new URLSearchParams({
     limit: String(limit),
@@ -623,6 +631,9 @@ export async function listDeliveryOrders(
   if (q) params.set('q', q.slice(0, 64));
   // Scopes the table to one player. Blank is OMITTED, never sent empty.
   if (customerId) params.set('customer_id', customerId);
+  // `<column>:<asc|desc>`; the route allowlists the column and falls back to
+  // created_at:desc. Omitted = server default (newest first).
+  if (sort) params.set('sort', sort);
   return getJson<DeliveryOrdersPage>(`/admin/delivery-orders?${params}`);
 }
 
@@ -822,8 +833,10 @@ export const getVipLevels = () =>
 
 // Replace-all the ladder. Audited edit; `reason` mandatory. Throws
 // Error(message) on a 400 (httpError surfaces the backend MedusaError).
-export const saveVipLevels = (body: { levels: VipLevelDTO[]; reason: string }) =>
-  postJson<{ levels: VipLevelDTO[] }>('/admin/vip-levels', body);
+export const saveVipLevels = (body: {
+  levels: VipLevelDTO[];
+  reason: string;
+}) => postJson<{ levels: VipLevelDTO[] }>('/admin/vip-levels', body);
 
 // ── Weekly Challenge (milestone stages + week/payout settings) ───────────────
 
@@ -849,7 +862,8 @@ export const getChallengeStages = () =>
 export const saveChallengeStages = (body: {
   stages: ChallengeStageDTO[];
   reason: string;
-}) => postJson<{ stages: ChallengeStageDTO[] }>('/admin/challenge/stages', body);
+}) =>
+  postJson<{ stages: ChallengeStageDTO[] }>('/admin/challenge/stages', body);
 
 /** One Weekly Challenge queued to take over later. `applied_at` non-null means
  *  it already went live (the hourly settle job promoted it); a due row that is
@@ -876,6 +890,21 @@ export const createChallengeSchedule = (body: {
 }) =>
   postJson<{ schedule: ChallengeScheduleDTO }>(
     '/admin/challenge/schedule',
+    body,
+  );
+
+/** Edit a QUEUED edition in place. The backend refuses once it has gone live. */
+export const updateChallengeSchedule = (
+  id: string,
+  body: {
+    starts_at: string;
+    label: string | null;
+    stages: ChallengeStageDTO[];
+    reason: string;
+  },
+) =>
+  postJson<{ schedule: ChallengeScheduleDTO }>(
+    `/admin/challenge/schedule/${encodeURIComponent(id)}`,
     body,
   );
 
@@ -1025,7 +1054,12 @@ export const createPixelPokemon = (body: CreatePixelPokemonBody) =>
 // window into money-in. 'stale' means the row is still pending past the
 // reconciliation sweep's window, i.e. a payment that may have landed at the
 // gateway without ever being credited here.
-export type GlobePayDepositView = 'pending' | 'settled' | 'failed' | 'all';
+export type GlobePayDepositView =
+  | 'pending'
+  | 'settled'
+  | 'failed'
+  | 'expired'
+  | 'all';
 
 export interface GlobePayDeposit {
   id: string;
@@ -1036,7 +1070,11 @@ export interface GlobePayDeposit {
   amount_requested: number;
   amount_settled: number | null;
   payment_method_code: string;
-  status: 'pending' | 'settled' | 'failed';
+  // 'expired' = the reconcile sweep stopped chasing it, but the gateway never
+  // ruled on it — NOT a synonym for 'failed', and still creditable by a late
+  // callback or the sweep's second scan tier. The withdrawal type below
+  // deliberately has no such value: expiring a payout would confiscate a debit.
+  status: 'pending' | 'settled' | 'failed' | 'expired';
   gateway_status: number | null;
   created_at: string;
   settled_at: string | null;
@@ -1055,13 +1093,82 @@ export function getGlobePayDeposits(
   page: number,
   status: GlobePayDepositView,
   pageSize = 50,
+  sort?: string,
 ): Promise<GlobePayDepositsResponse> {
   const params = new URLSearchParams({
     status,
     limit: String(pageSize),
     offset: String(page * pageSize),
   });
-  return getJson<GlobePayDepositsResponse>(`/admin/globepay/deposits?${params}`);
+  // `<column>:<asc|desc>`, allowlisted server-side. OMITTED when unset — the
+  // route's default order is status-dependent (pending = oldest-first work
+  // queue) and an always-sent sort would silently flatten that.
+  if (sort) params.set('sort', sort);
+  return getJson<GlobePayDepositsResponse>(
+    `/admin/globepay/deposits?${params}`,
+  );
+}
+
+// GlobePay365 withdrawals (GET /admin/globepay/withdrawals) — the money-OUT
+// mirror of the deposits window. 'stale' = still pending past the sweep's
+// window; for a withdrawal that means a customer already debited with no
+// payout confirmed and no refund, i.e. the row to chase first.
+export type GlobePayWithdrawalView = 'pending' | 'settled' | 'failed' | 'all';
+
+export interface GlobePayWithdrawal {
+  id: string;
+  merchant_transaction_id: string;
+  gateway_transaction_id: string | null;
+  customer_id: string;
+  customer_email: string | null;
+  amount: number;
+  bank_code: string;
+  /** MASKED (`••••1234`) — the list never serves a full account number. The
+   *  full value comes one row at a time from getGlobePayWithdrawalAccount. */
+  account_number: string;
+  account_holder_name: string;
+  status: 'pending' | 'settled' | 'failed';
+  gateway_status: number | null;
+  created_at: string;
+  settled_at: string | null;
+  stale: boolean;
+}
+
+export interface GlobePayWithdrawalsResponse {
+  total: number;
+  offset: number;
+  limit: number;
+  status: GlobePayWithdrawalView;
+  withdrawals: GlobePayWithdrawal[];
+}
+
+export function getGlobePayWithdrawals(
+  page: number,
+  status: GlobePayWithdrawalView,
+  pageSize = 50,
+  sort?: string,
+): Promise<GlobePayWithdrawalsResponse> {
+  const params = new URLSearchParams({
+    status,
+    limit: String(pageSize),
+    offset: String(page * pageSize),
+  });
+  // Same contract as getGlobePayDeposits: omitted = status-dependent default.
+  if (sort) params.set('sort', sort);
+  return getJson<GlobePayWithdrawalsResponse>(
+    `/admin/globepay/withdrawals?${params}`,
+  );
+}
+
+/** Reveal ONE withdrawal's full destination account (the list masks it).
+ *  Deliberately not a react-query hook and not prefetched: the backend logs
+ *  and rate-limits every call, so it must fire only when an operator asks. */
+export function getGlobePayWithdrawalAccount(
+  id: string,
+): Promise<{ id: string; account_number: string }> {
+  return getJson<{ id: string; account_number: string }>(
+    `/admin/globepay/withdrawals/${encodeURIComponent(id)}/account`,
+  );
 }
 
 // ── Epic 2 (Players) ─────────────────────────────────────────────────────────
@@ -1099,9 +1206,16 @@ export interface PlayersPage {
   players: PlayerRow[];
 }
 
-export const listPlayers = (page = 0, q?: string, limit = 50) =>
+// `sort` is `<column>:<asc|desc>`; the route allowlists the column
+// (created_at | email | name) and falls back to created_at.
+export const listPlayers = (
+  page = 0,
+  q?: string,
+  limit = 50,
+  sort = 'created_at:desc',
+) =>
   getJson<PlayersPage>(
-    `/admin/players?limit=${limit}&offset=${page * limit}${q ? `&q=${encodeURIComponent(q)}` : ''}`,
+    `/admin/players?limit=${limit}&offset=${page * limit}&sort=${encodeURIComponent(sort)}${q ? `&q=${encodeURIComponent(q)}` : ''}`,
   );
 
 // Login block / unblock. `reason` is mandatory (1–500 chars) and audited; the
@@ -1273,6 +1387,9 @@ export const listLedger = (
     from?: string;
     to?: string;
     limit?: number;
+    /** `<column>:<asc|desc>`; allowlisted server-side (occurred_at |
+     *  display_id | type), falls back to occurred_at:desc. */
+    sort?: string;
   } = {},
 ) => {
   const limit = opts.limit ?? 50;
@@ -1284,6 +1401,7 @@ export const listLedger = (
   if (opts.q) params.set('q', opts.q);
   if (opts.from) params.set('from', opts.from);
   if (opts.to) params.set('to', opts.to);
+  if (opts.sort) params.set('sort', opts.sort);
   return getJson<AdminLedgerPage>(`/admin/ledger?${params.toString()}`);
 };
 // ── Epic 5 (Inventory) ───────────────────────────────────────────────────────
@@ -1329,8 +1447,10 @@ export interface AdminPurchaseInvoice {
 
 // agent_email is NOT omitted: GET /:id joins the user module the same way the
 // list route does, so both pages name the same person for one invoice.
-export interface AdminPurchaseInvoiceDetail
-  extends Omit<AdminPurchaseInvoice, 'total_qty' | 'subtotal' | 'total_fmv'> {
+export interface AdminPurchaseInvoiceDetail extends Omit<
+  AdminPurchaseInvoice,
+  'total_qty' | 'subtotal' | 'total_fmv'
+> {
   lines: AdminPurchaseInvoiceLine[];
 }
 

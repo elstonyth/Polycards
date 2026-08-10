@@ -12,6 +12,7 @@ import { CurrencyDollar } from "@medusajs/icons";
 import type { RouteConfig } from "@mercurjs/dashboard-sdk";
 import { useEconomy } from "../../lib/queries";
 import { rm } from "../../lib/format";
+import { useTableSort } from "../../lib/use-table-sort";
 import { LoadingSkeleton } from "../../components/LoadingSkeleton";
 
 export const config: RouteConfig = {
@@ -24,6 +25,10 @@ export const config: RouteConfig = {
 // time (memoized below); `to` is always "now", so we omit it (nothing is
 // future-dated). Only ledger totals are scoped — liability + RTP stay current.
 type Period = "daily" | "weekly" | "monthly" | "yearly" | "overall";
+
+// Client-side sort over the RTP table — the report is unpaged, every pack is
+// in hand. Nullable ev/rtp_pct sort as -Infinity (inventory/list precedent).
+type EconomySortKey = "pack" | "category" | "price" | "ev" | "rtp";
 const DAY_MS = 86_400_000;
 
 const PERIODS: { value: Period; label: string; scope: string }[] = [
@@ -64,17 +69,61 @@ const EconomyPage = () => {
   const from = useMemo(() => periodFrom(period), [period]);
   const { data, isError } = useEconomy(from);
   const scope = PERIODS.find((p) => p.value === period)?.scope ?? "All time";
+  // Starts NULL = keep the server's order until a column is picked.
+  const { sort, sortHeader } = useTableSort<EconomySortKey>(null);
+
+  const packRows = useMemo(() => {
+    const list = data?.packs ?? [];
+    if (!sort) return list;
+    const dir = sort.dir === "asc" ? 1 : -1;
+    const val = (p: (typeof list)[number]): number | string => {
+      switch (sort.key) {
+        case "pack":
+          return p.title;
+        case "category":
+          return p.category;
+        case "price":
+          return p.price;
+        case "ev":
+          return p.ev ?? Number.NEGATIVE_INFINITY;
+        case "rtp":
+          return p.rtp_pct ?? Number.NEGATIVE_INFINITY;
+      }
+    };
+    return [...list].sort((a, b) => {
+      const av = val(a);
+      const bv = val(b);
+      if (typeof av === "string" && typeof bv === "string") {
+        return dir * av.localeCompare(bv);
+      }
+      return dir * (av < bv ? -1 : av > bv ? 1 : 0);
+    });
+  }, [data, sort]);
 
   const stats: {
     key: string;
     value: string;
     hint?: string;
     current?: boolean;
+    /**
+     * Semantic ink for the figure, set only when the sign is the signal.
+     * A literal union, not string: a typo in a Tailwind class is invisible at
+     * runtime, so let the compiler catch it. Widen when a second tone earns
+     * its place.
+     */
+    tone?: "text-ui-fg-error";
   }[] = data
     ? [
         { key: "revenue", value: rm(data.totals.revenue) },
         { key: "payouts", value: rm(data.totals.payouts) },
-        { key: "net", value: rm(data.totals.net) },
+        {
+          key: "net",
+          value: rm(data.totals.net),
+          // The one figure on this page whose sign changes what the operator
+          // has to do. Positive stays default ink — margin is the expected
+          // state, so only the loss shouts.
+          tone: data.totals.net < 0 ? "text-ui-fg-error" : undefined,
+        },
         {
           key: "liability",
           value: rm(data.liability.market_value),
@@ -132,7 +181,10 @@ const EconomyPage = () => {
                     </Badge>
                   )}
                 </div>
-                <Heading level="h1" className="mt-1 tabular-nums">
+                <Heading
+                  level="h1"
+                  className={`mt-1 tabular-nums ${s.tone ?? ""}`}
+                >
                   {s.value}
                 </Heading>
                 {s.hint && (
@@ -164,21 +216,15 @@ const EconomyPage = () => {
           <Table>
             <Table.Header>
               <Table.Row>
-                <Table.HeaderCell>{t("economy.pack")}</Table.HeaderCell>
-                <Table.HeaderCell>{t("economy.category")}</Table.HeaderCell>
-                <Table.HeaderCell className="text-right">
-                  {t("economy.price")}
-                </Table.HeaderCell>
-                <Table.HeaderCell className="text-right">
-                  {t("economy.ev")}
-                </Table.HeaderCell>
-                <Table.HeaderCell className="text-right">
-                  {t("economy.rtp")}
-                </Table.HeaderCell>
+                {sortHeader("pack", t("economy.pack"))}
+                {sortHeader("category", t("economy.category"))}
+                {sortHeader("price", t("economy.price"), true)}
+                {sortHeader("ev", t("economy.ev"), true)}
+                {sortHeader("rtp", t("economy.rtp"), true)}
               </Table.Row>
             </Table.Header>
             <Table.Body>
-              {data.packs.map((p) => (
+              {packRows.map((p) => (
                 <Table.Row key={p.slug}>
                   <Table.Cell>{p.title}</Table.Cell>
                   <Table.Cell className="text-ui-fg-subtle">

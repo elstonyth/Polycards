@@ -1,8 +1,10 @@
 import { MedusaError } from '@medusajs/framework/utils';
 import { RARITIES, type TierRangeMap } from '@acme/odds-math';
-import type {
-  PackWriteInput,
-  PublishedOdds,
+import {
+  MAX_PUBLISHED_DECIMALS,
+  PUBLISHED_DECIMALS_DEFAULT,
+  type PackWriteInput,
+  type PublishedOdds,
 } from '../../../workflows/steps/create-pack';
 import { FLAT_PERCENT } from '../../../modules/packs/buyback-rate';
 import { validateTierRangeMap } from '../../../modules/packs/tier-settings-validate';
@@ -72,13 +74,32 @@ const num = (
   return v as number;
 };
 
-// A published-odds percentage: finite, 0–100, stored to 2 decimals.
-const pct = (v: unknown, key: string): number => {
+// A published-odds percentage: finite, 0–100, stored rounded to the odds'
+// configured decimal places (default 2, max 4 — see coercePublishedOdds).
+const pct = (v: unknown, key: string, decimals: number): number => {
   const n = typeof v === 'string' ? Number(v) : v;
   if (typeof n !== 'number' || !Number.isFinite(n) || n < 0 || n > 100) {
     bad(`'${key}' must be a number between 0 and 100.`);
   }
-  return Math.round((n as number) * 100) / 100;
+  const scale = 10 ** decimals;
+  return Math.round((n as number) * scale) / scale;
+};
+
+// How many decimal places this pack publishes its odds at. Absent/null → the
+// legacy default (2). Anything else must be an integer 0–4.
+const publishedDecimals = (v: unknown): number => {
+  if (v === undefined || v === null) return PUBLISHED_DECIMALS_DEFAULT;
+  if (
+    typeof v !== 'number' ||
+    !Number.isInteger(v) ||
+    v < 0 ||
+    v > MAX_PUBLISHED_DECIMALS
+  ) {
+    bad(
+      `'published_odds.decimals' must be an integer between 0 and ${MAX_PUBLISHED_DECIMALS}.`,
+    );
+  }
+  return v as number;
 };
 
 // PUBLIC display odds. undefined → keep the stored value (writers that don't
@@ -100,15 +121,22 @@ const coercePublishedOdds = (v: unknown): PublishedOdds | null | undefined => {
   ) {
     bad(`'published_odds.tiers' must be an object.`);
   }
+  const decimals = publishedDecimals(
+    (o as Record<string, unknown>).decimals,
+  );
   const tiersIn = (rawTiers ?? {}) as Record<string, unknown>;
   const tiers: PublishedOdds['tiers'] = {};
   for (const r of RARITIES) {
     const t = tiersIn[r];
     if (t !== undefined && t !== null && t !== '') {
-      tiers[r] = pct(t, `published_odds.tiers.${r}`);
+      tiers[r] = pct(t, `published_odds.tiers.${r}`, decimals);
     }
   }
-  return { overall: pct(o.overall ?? 100, 'published_odds.overall'), tiers };
+  return {
+    overall: pct(o.overall ?? 100, 'published_odds.overall', decimals),
+    tiers,
+    decimals,
+  };
 };
 
 // Per-pack tier price-range override. Tri-state like published_odds:

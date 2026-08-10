@@ -9,6 +9,9 @@
 
 export const PASSWORD_RESET_TEMPLATE = 'password-reset';
 export const TOPUP_RECEIPT_TEMPLATE = 'topup-receipt';
+export const WITHDRAWAL_RECEIPT_TEMPLATE = 'withdrawal-receipt';
+export const PHONE_CHANGED_TEMPLATE = 'phone-changed';
+export const BANK_ACCOUNT_ADDED_TEMPLATE = 'bank-account-added';
 
 export type Rendered = { subject: string; html: string; text: string };
 
@@ -171,6 +174,190 @@ const topupReceipt = (d: ReceiptData): Rendered => {
   };
 };
 
+// Security notice for a recovery-phone move. This is the ONLY warning the real
+// owner gets when someone with a live session changes the number — the phone
+// itself is exactly what an attacker would have just taken, so the copy points
+// at password reset (which lands back in this same inbox) rather than at any
+// SMS flow.
+//
+// Both numbers arrive already masked to their last 4 digits by the caller
+// (store/phone-verification/change/route.ts) — do NOT start rendering a full
+// number here, it would put PII in the persisted notification row.
+const phoneChanged = (oldMasked: string, newMasked: string): Rendered => {
+  const from = escapeHtml(oldMasked);
+  const to = escapeHtml(newMasked);
+  return {
+    subject: 'Your Polycards phone number was changed',
+    text: [
+      'Your Polycards phone number was changed',
+      '',
+      `The phone number on your Polycards account was changed from ${oldMasked} to ${newMasked}.`,
+      '',
+      "If you did this, nothing more is needed. If you didn't, reset your",
+      'password immediately — your account may have been accessed by someone',
+      'else, and the new number can be used to recover it.',
+    ].join('\n'),
+    html: `<!doctype html>
+<html lang="en">
+  <body style="margin:0;padding:0;background:#171717;">
+    <div style="max-width:520px;margin:0 auto;padding:40px 24px;font-family:ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;color:#fafafa;">
+      <h1 style="margin:0 0 20px;font-size:24px;line-height:1.25;font-weight:800;letter-spacing:-0.01em;">Your phone number was changed</h1>
+      <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#d4d4d4;">
+        The phone number on your Polycards account was changed from
+        <strong style="color:#fafafa;">${from}</strong> to
+        <strong style="color:#fafafa;">${to}</strong>.
+      </p>
+      <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#d4d4d4;">
+        If this was you, no action is needed. If it wasn't, reset your password
+        immediately — someone else may have access to your account, and the new
+        number can be used to recover it.
+      </p>
+    </div>
+  </body>
+</html>`,
+  };
+};
+
+// "A new bank account can now be paid out to" — the security alert half of the
+// payout-destination binding (plan 088). Deliberately blunt and action-first:
+// its whole job is to give the account owner the day-long cooling-off window to
+// react in, so the "wasn't you" instruction outranks the pleasantry. Carries the
+// last 4 digits only; the full number never leaves the database.
+const bankAccountAdded = (d: {
+  bankName: string;
+  last4: string;
+  usableFrom: string;
+  siteUrl: string;
+}): Rendered => {
+  const site = escapeHtml(d.siteUrl.replace(/\/+$/, ''));
+  const logo = `${site}/branding/polycards-logo.png`;
+  const account = `${d.bankName} ····${d.last4}`;
+  const when = settledAt(d.usableFrom);
+  const armed = when
+    ? `It can receive withdrawals from ${when}.`
+    : 'It can receive withdrawals after a short waiting period.';
+
+  return {
+    subject: 'A new bank account was added to your Polycards account',
+    text: [
+      'A new withdrawal bank account was added',
+      '',
+      `Account:  ${account}`,
+      armed,
+      '',
+      "If this wasn't you, sign in and remove it now, then change your password —",
+      'nothing can be withdrawn to it before the time above.',
+      '',
+      `${d.siteUrl.replace(/\/+$/, '')}/bank`,
+    ].join('\n'),
+    html: `<!doctype html>
+<html lang="en">
+  <body style="margin:0;padding:0;background:#171717;">
+    <div style="max-width:520px;margin:0 auto;padding:40px 24px;font-family:ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;color:#fafafa;">
+      <img src="${logo}" alt="Polycards" width="150" style="display:block;width:150px;max-width:60%;height:auto;margin:0 0 32px;" />
+
+      <p style="margin:0 0 8px;font-size:13px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#a3a3a3;">Security alert</p>
+      <h1 style="margin:0 0 16px;font-size:28px;line-height:1.2;font-weight:800;letter-spacing:-0.01em;">A new bank account was added</h1>
+
+      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="width:100%;border-collapse:collapse;border-top:1px solid #404040;border-bottom:1px solid #404040;margin:0 0 24px;">
+        ${row('Account', account, true)}
+        ${when ? row('Can be withdrawn to from', when) : ''}
+      </table>
+
+      <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#d4d4d4;">
+        If you added it, there is nothing to do — it becomes available for
+        withdrawals automatically.
+      </p>
+      <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#d4d4d4;">
+        <strong>If this wasn't you</strong>, remove it and change your password
+        now. Nothing can be withdrawn to it before the time above.
+      </p>
+
+      <a href="${site}/bank" style="display:inline-block;padding:12px 24px;border-radius:9999px;background:#fafafa;color:#171717;font-size:15px;font-weight:700;text-decoration:none;">Review your bank accounts</a>
+
+      <p style="margin:32px 0 0;font-size:12px;line-height:1.6;color:#737373;">
+        We only ever show the last four digits of a saved account.
+      </p>
+    </div>
+  </body>
+</html>`,
+  };
+};
+
+// The payout mirror of topupReceipt. One template, two outcomes: 'paid' (the
+// bank transfer completed) and 'refunded' (the bank rejected it and the debit
+// came back). Deliberately NO bank account details — email is the least
+// private channel this data could travel through; the reference is what
+// support needs, and the account is on the admin Withdrawals row.
+type WithdrawalReceiptData = {
+  amount: number;
+  reference: string;
+  outcome: 'paid' | 'refunded';
+  occurredAt: string;
+  siteUrl: string;
+};
+
+const withdrawalReceipt = (d: WithdrawalReceiptData): Rendered => {
+  const amount = rm(d.amount);
+  const when = settledAt(d.occurredAt);
+  const site = escapeHtml(d.siteUrl.replace(/\/+$/, ''));
+  const logo = `${site}/branding/polycards-logo.png`;
+  const paid = d.outcome === 'paid';
+
+  const heading = paid ? 'Withdrawal paid' : 'Withdrawal returned';
+  const lede = paid
+    ? 'Your bank transfer is complete — the money has left Polycards and reached your bank.'
+    : 'Your bank rejected this transfer, so the full amount is back in your Polycards balance. Nothing was lost.';
+
+  return {
+    subject: paid
+      ? `Your ${amount} withdrawal has been paid — Polycards`
+      : `Your ${amount} withdrawal was returned to your balance — Polycards`,
+    text: [
+      heading,
+      '',
+      lede,
+      '',
+      `Amount:     ${amount}`,
+      `Reference:  ${d.reference}`,
+      when ? `Date:       ${when}` : '',
+      '',
+      `See it in your history: ${d.siteUrl.replace(/\/+$/, '')}/transactions`,
+      '',
+      'Keep this email for your records.',
+    ]
+      .filter((line) => line !== '')
+      .join('\n'),
+    html: `<!doctype html>
+<html lang="en">
+  <body style="margin:0;padding:0;background:#171717;">
+    <div style="max-width:520px;margin:0 auto;padding:40px 24px;font-family:ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;color:#fafafa;">
+      <img src="${logo}" alt="Polycards" width="150" style="display:block;width:150px;max-width:60%;height:auto;margin:0 0 32px;" />
+
+      <p style="margin:0 0 8px;font-size:13px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#a3a3a3;">${escapeHtml(heading)}</p>
+      <h1 style="margin:0 0 8px;font-size:40px;line-height:1.1;font-weight:800;letter-spacing:-0.02em;">${escapeHtml(amount)}</h1>
+      <p style="margin:0 0 32px;font-size:15px;line-height:1.6;color:#d4d4d4;">
+        ${escapeHtml(lede)}
+      </p>
+
+      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="width:100%;border-collapse:collapse;border-top:1px solid #404040;border-bottom:1px solid #404040;margin:0 0 32px;">
+        ${row('Amount', amount, true)}
+        ${row('Reference', d.reference)}
+        ${when ? row('Date', when) : ''}
+      </table>
+
+      <a href="${site}/transactions" style="display:inline-block;padding:12px 24px;border-radius:9999px;background:#fafafa;color:#171717;font-size:15px;font-weight:700;text-decoration:none;">View your history</a>
+
+      <p style="margin:32px 0 0;font-size:12px;line-height:1.6;color:#737373;">
+        Keep this email for your records. Questions about this payout? Reply to
+        this email and quote the reference above.
+      </p>
+    </div>
+  </body>
+</html>`,
+  };
+};
+
 // Returns undefined for an unknown template or missing/invalid data, letting the
 // caller decide how to report it. `data` is Medusa's untyped notification payload,
 // so the shape is validated here rather than trusted.
@@ -204,6 +391,68 @@ export const renderTemplate = (
       amount,
       reference,
       method: typeof method === 'string' ? method : '',
+      occurredAt: typeof occurredAt === 'string' ? occurredAt : '',
+      siteUrl,
+    });
+  }
+
+  if (template === PHONE_CHANGED_TEMPLATE) {
+    const oldMasked = data?.old_phone_masked;
+    const newMasked = data?.new_phone_masked;
+    // A security notice that can't say which number changed is worse than
+    // none — it alarms without telling the owner whether it was them. Fail
+    // closed, same posture as the receipt above.
+    if (typeof oldMasked !== 'string' || oldMasked.length === 0)
+      return undefined;
+    if (typeof newMasked !== 'string' || newMasked.length === 0)
+      return undefined;
+    return phoneChanged(oldMasked, newMasked);
+  }
+
+  if (template === BANK_ACCOUNT_ADDED_TEMPLATE) {
+    const bankName = data?.bank_name;
+    const last4 = data?.account_last4;
+    const siteUrl = data?.site_url;
+    // A security alert that cannot name the account is worse than none — it
+    // would tell the customer "something changed" with nothing to check.
+    //
+    // EXACTLY four digits, not merely non-empty. The only producer
+    // (packs/saved-account-notice.ts) slices the last 4 off a digits-only
+    // number, so this can never refuse a well-formed payload — it is the
+    // backstop for a malformed one, where "non-empty" would happily print a
+    // FULL account number into an email and undo plan 087's whole point.
+    if (typeof last4 !== 'string' || !/^\d{4}$/.test(last4)) return undefined;
+    if (typeof siteUrl !== 'string' || siteUrl.length === 0) return undefined;
+    return bankAccountAdded({
+      bankName: typeof bankName === 'string' && bankName ? bankName : 'Bank',
+      last4,
+      // Optional: without it the body drops to the generic wording rather than
+      // refusing to send the alert at all.
+      usableFrom: typeof data?.usable_from === 'string' ? data.usable_from : '',
+      siteUrl,
+    });
+  }
+
+  if (template === WITHDRAWAL_RECEIPT_TEMPLATE) {
+    const amount = data?.amount_myr;
+    const reference = data?.reference;
+    const outcome = data?.outcome;
+    const occurredAt = data?.occurred_at;
+    const siteUrl = data?.site_url;
+    // Same fail-closed rule as the top-up receipt: an email about a payout with
+    // no amount, no reference, or an unrecognized outcome misinforms — skip it.
+    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
+      return undefined;
+    }
+    if (typeof reference !== 'string' || reference.length === 0) {
+      return undefined;
+    }
+    if (outcome !== 'paid' && outcome !== 'refunded') return undefined;
+    if (typeof siteUrl !== 'string' || siteUrl.length === 0) return undefined;
+    return withdrawalReceipt({
+      amount,
+      reference,
+      outcome,
       occurredAt: typeof occurredAt === 'string' ? occurredAt : '',
       siteUrl,
     });

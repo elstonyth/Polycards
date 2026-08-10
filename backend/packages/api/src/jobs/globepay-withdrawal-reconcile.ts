@@ -8,15 +8,16 @@ import {
   withdrawalRefundReference,
 } from '../modules/packs/globepay-withdrawal';
 import {
-  GlobePayError,
   getWithdrawalDetail,
   globepayConfigFromEnv,
 } from '../modules/packs/globepay-client';
 import { notifyFeed } from '../modules/packs/notify-feed';
 import { withdrawalFeedKey } from '../modules/packs/feed-events';
+import { sendWithdrawalReceipt } from '../modules/packs/withdrawal-receipt';
 import {
   GLOBEPAY_RECONCILE_BATCH,
   GLOBEPAY_WD_SLOW_AFTER_MS,
+  classifyRequeryError,
   unknownWithdrawalAction,
   withdrawalReconcileAction,
 } from '../modules/packs/globepay-reconcile';
@@ -64,22 +65,38 @@ export default async function globepayWithdrawalReconcileJob(
         gatewayStatus = detail.statusId;
         action = withdrawalReconcileAction(detail.state);
       } catch (error) {
-        const notFound =
-          error instanceof GlobePayError &&
-          (error.httpStatus === 400 || error.has('PMT10016'));
-        if (!notFound) throw error;
-        if (withdrawal.gateway_transaction_id) {
-          // The payout provably exists (their W… id is on our row) — a 400
-          // requery is OUR config being broken, never non-existence.
+        // An unattributable 400 must never reach the refund path: the same bare
+        // 400 comes back from a rotated key or a wrong merchant code, so
+        // reading it as "never existed" would refund every in-flight payout
+        // while the banks still executed them — money out AND credited back.
+        // See classifyRequeryError for why only an explicit not-found acts.
+        const refusal = classifyRequeryError(error);
+        if (refusal.kind === 'rethrow') throw error;
+        if (refusal.kind === 'ambiguous') {
           logger.error(
-            `[globepay-wd-reconcile] requery 400 for ${withdrawal.merchant_transaction_id} which HAS gateway id ${withdrawal.gateway_transaction_id} — refusing the unknown-refund path; check merchant credentials`,
+            `[globepay-wd-reconcile] requery refused ${withdrawal.merchant_transaction_id} with an unattributable 400 (${
+              error instanceof Error ? error.message : String(error)
+            }) — NOT refunding; check merchant credentials`,
+          );
+          // 'wait' rather than a new action kind, so the refund branch below
+          // stays reachable only from an outcome the gateway actually gave.
+          // It also picks up the 24h slow-payout escalation just below.
+          action = { kind: 'wait' } as const;
+        } else {
+          if (withdrawal.gateway_transaction_id) {
+            // The payout provably exists (their W… id is on our row) — an
+            // explicit not-found is OUR config being broken, never
+            // non-existence.
+            logger.error(
+              `[globepay-wd-reconcile] requery says ${withdrawal.merchant_transaction_id} is unknown, but it HAS gateway id ${withdrawal.gateway_transaction_id} — refusing the unknown-refund path; check merchant credentials`,
+            );
+          }
+          action = unknownWithdrawalAction(
+            new Date(withdrawal.created_at),
+            now,
+            Boolean(withdrawal.gateway_transaction_id),
           );
         }
-        action = unknownWithdrawalAction(
-          new Date(withdrawal.created_at),
-          now,
-          Boolean(withdrawal.gateway_transaction_id),
-        );
       }
 
       if (action.kind === 'wait') {
@@ -93,6 +110,24 @@ export default async function globepayWithdrawalReconcileJob(
       }
 
       if (action.kind === 'settle') {
+        // The emailed record — BEFORE the terminal row update: once the row
+        // leaves 'pending' this sweep never selects it again and a retried
+        // callback early-returns, so a crash between the update and a later
+        // send would lose the email forever. A crash after this send re-runs
+        // the branch next sweep and the notification module's unique
+        // idempotency_key dedupes. Non-throwing.
+        await sendWithdrawalReceipt(container, {
+          customerId: withdrawal.customer_id,
+          amount: Number(withdrawal.amount),
+          // `||`, not `??` — an empty-string gateway id must fall through, or
+          // the template fails closed AFTER the idempotency key is burned and
+          // the email is permanently unsent.
+          reference:
+            withdrawal.gateway_transaction_id ||
+            withdrawal.merchant_transaction_id,
+          merchantTransactionId: withdrawal.merchant_transaction_id,
+          outcome: 'paid',
+        });
         await packs.updateGlobePayWithdrawals({
           selector: { id: withdrawal.id, status: 'pending' },
           data: {
@@ -171,6 +206,21 @@ export default async function globepayWithdrawalReconcileJob(
             withdrawal.gateway_transaction_id ??
             withdrawal.merchant_transaction_id,
         },
+      });
+      // The emailed record — after the refund commit, BEFORE the terminal row
+      // update, outside any !replayed guard: once the row leaves 'pending'
+      // nothing re-runs this branch, so a crash between the update and a
+      // later send would lose the email forever. A crash after this send
+      // re-runs the branch next sweep (the refund replays, the notification
+      // module's unique idempotency_key dedupes the email). Non-throwing.
+      await sendWithdrawalReceipt(container, {
+        customerId: withdrawal.customer_id,
+        amount: Number(withdrawal.amount),
+        reference:
+          withdrawal.gateway_transaction_id ||
+          withdrawal.merchant_transaction_id,
+        merchantTransactionId: withdrawal.merchant_transaction_id,
+        outcome: 'refunded',
       });
       await packs.updateGlobePayWithdrawals({
         selector: { id: withdrawal.id, status: 'pending' },

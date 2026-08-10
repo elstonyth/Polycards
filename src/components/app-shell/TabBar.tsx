@@ -60,8 +60,14 @@ export default function TabBar() {
               )}
             >
               <span className="relative inline-flex">
+                {/* The active icon's step up in size eases in rather than
+                    snapping — 180ms, the tab-switch feedback itself. The
+                    global reduced-motion backstop zeroes it. */}
                 <Icon
-                  className={cn('h-6 w-6', active && 'scale-105')}
+                  className={cn(
+                    'h-6 w-6 transition-transform duration-200 ease-out',
+                    active ? 'scale-105' : 'scale-100',
+                  )}
                   strokeWidth={active ? 2.25 : 2}
                   aria-hidden
                 />

@@ -101,7 +101,17 @@ jobs:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 30, not 20: this workflow declares several caches, but the one that pays
+    # for the install below — `bnm2-*` (node_modules + install-state) — has no
+    # stored entry at all. `gh api .../actions/caches` lists exactly one entry
+    # for the whole repo, the `yarn-*` berry cache saved on master 2026-08-04,
+    # so every backend job restores nothing here and pays a COLD ~16 min
+    # `yarn install` instead of the ~71s immutable verify the cache was sized
+    # for. At 20 the jobs were being killed mid-step with "The operation was
+    # canceled" — backend-quality during its build, integration-http shard 4
+    # right after printing "63 passed" — which reads as a red build caused by
+    # the diff. Drop this back to 20 once a bnm2 entry exists on master.
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -180,7 +190,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 25, not 15: see backend-quality — a cold install alone spent 15m47s here
+    # and the job was killed before a single test ran.
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -269,7 +281,10 @@ jobs:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 30, not 20: see backend-quality. Shard 4 reported "63 passed" and was
+    # then cancelled in the same second, twice, because a cold install had
+    # already eaten 16 of the 20 minutes.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:

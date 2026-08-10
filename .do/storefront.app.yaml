@@ -108,6 +108,31 @@ services:
       - key: NEXT_PUBLIC_PAYMENTS_PROVIDER
         scope: RUN_AND_BUILD_TIME
         value: globepay
+      # DEPOSIT_METHODS_ENABLED — deliberately NOT set here. Add it only to
+      # retract a deposit channel:
+      #
+      #   - key: DEPOSIT_METHODS_ENABLED
+      #     scope: RUN_TIME
+      #     value: BQR                 # QR only; pulls online banking
+      #
+      # Unset means every provisioned channel, so leaving it out is also what
+      # keeps a future third channel from needing a spec edit to reach anyone.
+      # Same for a value naming nothing recognised: it degrades to all of them
+      # and logs, because a typo must not leave customers unable to pay. To stop
+      # top-ups ENTIRELY, use GLOBEPAY_ENABLED on the backend instead.
+      #
+      # This is the per-channel lever now — the storefront names a method on
+      # every deposit request, so the backend's GLOBEPAY_DEPOSIT_METHOD is a
+      # fallback customer traffic never reaches. It matters because OB (online
+      # banking) has never been proven live: GetSupportedBanks answered 200 for
+      # it all through the 2026-08-06 outage while every OB deposit was refused.
+      #
+      # Unlike the flag above this is NOT a NEXT_PUBLIC and NOT read in the root
+      # layout — the sheet asks a server action on open, and startDeposit
+      # re-checks the code. Layout-resolving it would have baked the list into
+      # the prerendered routes (/task, /about, …) at BUILD time, i.e. exactly
+      # the trap the note above this describes. Retracting is a spec apply plus
+      # a restart, with no rebuild, on every route.
       # Enforce the CSP. Without this, next.config.ts serves
       # Content-Security-Policy-Report-Only — report-only had a clean run
       # (qa:csp + Sentry), flip assessed safe. GO-LIVE checklist: must be true.
@@ -139,6 +164,9 @@ services:
       # Enabled 2026-08-04 (backend routes + Twilio verified live first). Like
       # every NEXT_PUBLIC_* here, the root Dockerfile ARG default is what the
       # bundle actually gets — this key moves together with that ARG.
+      # Off for a few hours on 2026-08-07 (Twilio 21608 — no approved primary
+      # compliance profile); re-armed the same day once an Individual profile
+      # was twilio-approved and a live send returned 201/pending.
       - key: NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED
         scope: RUN_AND_BUILD_TIME
         value: 'true'

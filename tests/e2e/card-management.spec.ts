@@ -1,8 +1,9 @@
 // Card management workflow through the admin dashboard UI: register an inventory
 // product as a gacha card, adjust its facts (FMV + marketplace toggle), and prove
-// the adjustment is captured on the storefront. The storefront's pack-detail
-// "Top Hits" is driven by the card's market_value via GET /store/packs/{slug} —
-// so a card FMV edit must surface there.
+// the adjustment is captured on the storefront. The pack page's only card grid
+// is the "Top Hits" rail (per-pack Immortal/Legendary/Mythical tiers, priced
+// from market_value via GET /store/packs/{slug}) — so the card FMV edit must
+// surface there once the card's per-pack tier is top-tier.
 //
 // Requires one eligible (un-registered) inventory product with handle
 // 'pw-test-card'. The nightly's seed:e2e (seed-e2e-fixtures.ts) mints it; run it
@@ -18,6 +19,7 @@ import {
   deleteCardIfExists,
   getOdds,
   setMembers,
+  setOdds,
 } from './helpers/api';
 import {
   ensureAdmin,
@@ -93,6 +95,22 @@ test('card lifecycle: register from inventory → adjust FMV → reflects on sto
 
     await test.step('put the card in an active pack so it surfaces publicly', async () => {
       await setMembers(admin, POOL_PACK, [...originalPool, CARD_HANDLE]);
+      // New members join at per-pack tier Common (set-pack-members), but the
+      // pack page's only card grid is the "Top Hits" rail, which lists ONLY
+      // Immortal/Legendary/Mythical tiers — promote the test card so the UI
+      // step below can see it. Pcts are echoed verbatim (the new row holds
+      // 0%), so the odds budget still sums and the POST validates.
+      const rows = (await getOdds(admin, POOL_PACK)).odds;
+      await setOdds(
+        admin,
+        POOL_PACK,
+        rows.map((r) => ({
+          card_id: r.card_id,
+          locked: r.locked,
+          pct: r.pct,
+          rarity: r.name === PRODUCT_TITLE ? 'Mythical' : r.rarity,
+        })),
+      );
     });
 
     await test.step('storefront pack data reflects the new FMV', async () => {
@@ -110,9 +128,12 @@ test('card lifecycle: register from inventory → adjust FMV → reflects on sto
       await page.goto(`${BASE}/slots/${POOL_PACK}`, {
         waitUntil: 'domcontentloaded',
       });
-      // The full pool grid always renders every card (Top Hits shows only when
-      // the admin curated some, so don't gate on that heading).
-      await expect(page.getByText(/cards in this pack/i).first()).toBeVisible();
+      // The pool section heads "Top Hits" whenever the pack holds any
+      // top-tier card — always true here (the shared fixture pool carries a
+      // Mythical, plus the test card was promoted above).
+      await expect(
+        page.getByRole('heading', { name: 'Top Hits' }),
+      ).toBeVisible();
       // A card tile is ONE button named after the card; its slab <img> alt is
       // empty by design.
       await expect(

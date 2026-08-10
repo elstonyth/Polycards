@@ -4,6 +4,7 @@ import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
 import {
   computeSetWeights,
+  PCT_SCALE,
   RARITIES,
   type SetEntry,
   type OddsRarity,
@@ -36,10 +37,11 @@ type OddsSnapshot = {
 };
 
 // save-pack-odds — the one mutation in the win-rate editor: normalize a pack's
-// per-card weights to basis points (Σ = 10000) with Common as the balancer and
+// per-card weights to integer units (Σ = TOTAL_UNITS = 1,000,000; 1 unit = 0.0001%)
+// with Common as the balancer and
 // persist rarity + weight/weight_2/weight_3 + locked. All THREE sets are
 // recomputed on every save (see computeSetWeights' storage rule), so a set-1
-// edit keeps sets 2/3 summing to 10000. Compensated by restoring the pre-save
+// edit keeps sets 2/3 summing to TOTAL_UNITS. Compensated by restoring the pre-save
 // snapshot.
 //
 // Validation (reject → 400/404 via MedusaError, BEFORE any write):
@@ -134,7 +136,7 @@ export const savePackOddsStep = createStep(
       card_id: r.card_id,
       weight: r.weight,
       locked: r.locked,
-      pct: r.weight / 100,
+      pct: r.weight / PCT_SCALE,
     }));
 
     // Return the computed odds; carry the snapshot as the compensation payload.

@@ -4,7 +4,18 @@ import type { ICustomerModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
 import { resolveFxRate } from '../../../modules/packs/pricing';
-import { parsePaginationParams } from '../../../utils/pagination';
+import {
+  parsePaginationParams,
+  parseSortParam,
+} from '../../../utils/pagination';
+
+// Sortable columns are an allowlist, not a passthrough — `order` goes straight
+// into the customer query builder. Only real `customer` columns qualify:
+// everything else on a player row (wallet, vault, spend, pulls, VIP level) is a
+// JS-side aggregate over the ALREADY-PAGED ids, so ordering on it server-side
+// would need a different query shape entirely, not an option change. `name` is
+// the JS join of first_name + last_name, expressed as the two columns in order.
+const SORTABLE = new Set(['created_at', 'email', 'name']);
 
 // GET /admin/players — the All Players list (POLYCARD-BACK §4.2). Page of
 // Medusa customers + batched per-player aggregates (playersOverview): one
@@ -38,13 +49,25 @@ export async function GET(
   const customers = req.scope.resolve<ICustomerModuleService>(Modules.CUSTOMER);
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
 
+  const { key: sortKey, dir: sortDir } = parseSortParam(
+    req.query.sort,
+    SORTABLE,
+    'created_at',
+  );
+  // `id` is the tiebreaker, not decoration: email/name are non-unique enough to
+  // reorder rows across pages without it (purchase-invoices precedent).
+  const order =
+    sortKey === 'name'
+      ? { first_name: sortDir, last_name: sortDir, id: sortDir }
+      : { [sortKey]: sortDir, id: sortDir };
+
   // ponytail: to-many `groups` join under skip/take — Medusa paginates on the
   // customer, and players-list.spec.ts pages limit=1 with a grouped customer in
   // the set, so this holds; revisit only if a page ever short-counts.
   const [page, total] = await customers.listAndCountCustomers(q ? { q } : {}, {
     skip: offset,
     take: limit,
-    order: { created_at: 'DESC', id: 'DESC' },
+    order,
     relations: ['groups'],
   });
   const ids = page.map((c) => c.id);

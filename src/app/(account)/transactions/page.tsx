@@ -84,6 +84,7 @@ export default async function TransactionsPage({
               <tr className="border-b border-white/10">
                 <th className="px-4 py-3 font-medium">Date</th>
                 <th className="px-4 py-3 font-medium">Type</th>
+                <th className="px-4 py-3 font-medium">Reference</th>
                 <th className="px-4 py-3 text-right font-medium">Amount</th>
               </tr>
             </thead>
@@ -105,6 +106,12 @@ export default async function TransactionsPage({
                     </td>
                     <td className="px-4 py-3 text-white/90">
                       {reasonLabel(t.reason)}
+                    </td>
+                    {/* The gateway id support asks for — same value the
+                        receipt email and the admin pages show. Internal rows
+                        (pack opens, buybacks) have none. */}
+                    <td className="px-4 py-3 font-mono text-[12px] text-white/50 break-all">
+                      {t.reference ?? '—'}
                     </td>
                     <td
                       className={`whitespace-nowrap px-4 py-3 text-right font-medium tabular-nums ${

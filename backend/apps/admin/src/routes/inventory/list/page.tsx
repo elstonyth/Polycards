@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -25,6 +25,8 @@ import {
 } from '../../../lib/admin-rest';
 import { orderDateTime, rm } from '../../../lib/format';
 import { resolveImageUrl } from '../../../lib/image-url';
+import { applyRangeSelect } from '../../../lib/range-select';
+import { useTableSort } from '../../../lib/use-table-sort';
 import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
 
 // NOT `src/routes/inventory/page.tsx`, which is what spec §3.3's task brief
@@ -100,7 +102,7 @@ const InventoryListPage = () => {
   const [q, setQ] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState(false);
-  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({
+  const { sort, sortHeader } = useTableSort<SortKey>({
     key: 'created_at',
     dir: 'desc',
   });
@@ -141,13 +143,15 @@ const InventoryListPage = () => {
 
   const rows = useMemo(() => {
     const list = [...(data?.rows ?? [])];
+    if (!sort) return list;
     const dir = sort.dir === 'asc' ? 1 : -1;
+    const key = sort.key;
     list.sort((a, b) => {
-      if (sort.key === 'name') {
+      if (key === 'name') {
         return dir * a.name.localeCompare(b.name);
       }
-      const av = sortValue(a, sort.key);
-      const bv = sortValue(b, sort.key);
+      const av = sortValue(a, key);
+      const bv = sortValue(b, key);
       return dir * (av < bv ? -1 : av > bv ? 1 : 0);
     });
     return list;
@@ -174,12 +178,18 @@ const InventoryListPage = () => {
       return next;
     });
 
-  const toggleOne = (id: string) =>
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (!next.delete(id)) next.add(id);
-      return next;
-    });
+  // Shift-click range select (the Gmail convention) — the range math lives in
+  // lib/range-select.ts (pure, vitest-covered). The anchor is the previously
+  // clicked row; a ref, not state, because it never needs a re-render. pageIds
+  // is the CURRENT sort order, so a range always matches what is on screen.
+  const anchorRef = useRef<string | null>(null);
+  const handleRowCheck = (handle: string, shiftKey: boolean) => {
+    const anchor = anchorRef.current;
+    anchorRef.current = handle;
+    setSelected((prev) =>
+      applyRangeSelect(prev, pageIds, anchor, handle, shiftKey),
+    );
+  };
 
   // Partial success by design, same summary shape as the deliveries bulk tool.
   // Two skip classes, both counted rather than silently dropped: a row that is
@@ -265,6 +275,7 @@ const InventoryListPage = () => {
     // refetches the eligible-products map this run just invalidated. Keeping
     // the selection after a run would leave that map stale for the session.
     setSelected(new Set());
+    anchorRef.current = null;
   };
 
   // Exports `q`, the APPLIED filter, and never `search`: `search` is the raw
@@ -282,42 +293,6 @@ const InventoryListPage = () => {
     exportInventoryXlsx(q || undefined)
       .catch((e) => toast.error(e instanceof Error ? e.message : String(e)))
       .finally(() => setExporting(false));
-  };
-
-  // A new column starts descending (newest/biggest first, what an operator
-  // scanning stock wants); clicking the active column flips it.
-  const toggleSort = (key: SortKey) =>
-    setSort((s) => ({
-      key,
-      dir: s.key === key && s.dir === 'desc' ? 'asc' : 'desc',
-    }));
-
-  const sortHeader = (key: SortKey, label: string, align = true) => {
-    const active = sort.key === key;
-    return (
-      <Table.HeaderCell
-        aria-sort={
-          active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'
-        }
-      >
-        {/* Real button, not an onClick on the cell: a sortable header has to be
-            reachable by keyboard. */}
-        {/* `w-full justify-end`, NOT `ml-auto`: Tailwind's `flex` makes this a
-            block-level flex container with width:auto, and an auto margin on a
-            width:auto block resolves to 0 — so ml-auto would leave every
-            numeric header left-aligned over right-aligned cells. */}
-        <button
-          type="button"
-          className={`hover:text-ui-fg-base flex items-center gap-1 whitespace-nowrap ${align ? 'w-full justify-end' : ''}`}
-          onClick={() => toggleSort(key)}
-        >
-          {label}
-          <span aria-hidden="true">
-            {active ? (sort.dir === 'asc' ? '↑' : '↓') : ''}
-          </span>
-        </button>
-      </Table.HeaderCell>
-    );
   };
 
   return (
@@ -347,6 +322,9 @@ const InventoryListPage = () => {
             onChange={(e) => {
               setSearch(e.target.value);
               setSelected(new Set());
+              // A new search is a new list — a stale anchor would range-select
+              // across unrelated rows on the first shift-click.
+              anchorRef.current = null;
             }}
           />
           <Button
@@ -379,6 +357,9 @@ const InventoryListPage = () => {
           >
             {t('inventory.listToCard')}
           </Button>
+          <Text size="xsmall" className="text-ui-fg-subtle">
+            {t('inventory.shiftHint')}
+          </Text>
         </div>
       )}
 
@@ -419,17 +400,17 @@ const InventoryListPage = () => {
                   />
                 </Table.HeaderCell>
                 <Table.HeaderCell>{t('inventory.photo')}</Table.HeaderCell>
-                {sortHeader('name', t('inventory.name'), false)}
+                {sortHeader('name', t('inventory.name'))}
                 <Table.HeaderCell>{t('inventory.sku')}</Table.HeaderCell>
                 <Table.HeaderCell>{t('inventory.titleCol')}</Table.HeaderCell>
-                {sortHeader('fmv', t('inventory.fmv'))}
-                {sortHeader('price', t('inventory.price'))}
-                {sortHeader('cost', t('inventory.cost'))}
-                {sortHeader('created_at', t('inventory.created'))}
-                {sortHeader('on_hand', t('inventory.onHand'))}
-                {sortHeader('in_vault', t('inventory.inVault'))}
-                {sortHeader('requested', t('inventory.requested'))}
-                {sortHeader('shipped', t('inventory.shipped'))}
+                {sortHeader('fmv', t('inventory.fmv'), true)}
+                {sortHeader('price', t('inventory.price'), true)}
+                {sortHeader('cost', t('inventory.cost'), true)}
+                {sortHeader('created_at', t('inventory.created'), true)}
+                {sortHeader('on_hand', t('inventory.onHand'), true)}
+                {sortHeader('in_vault', t('inventory.inVault'), true)}
+                {sortHeader('requested', t('inventory.requested'), true)}
+                {sortHeader('shipped', t('inventory.shipped'), true)}
                 <Table.HeaderCell className="text-right">
                   {t('inventory.listingShow')}
                 </Table.HeaderCell>
@@ -442,12 +423,20 @@ const InventoryListPage = () => {
                   className="cursor-pointer"
                   onClick={() => navigate(`/inventory/list/${r.handle}`)}
                 >
-                  {/* stopPropagation so ticking a row does not also navigate. */}
-                  <Table.Cell onClick={(e) => e.stopPropagation()}>
+                  {/* stopPropagation so ticking a row does not also navigate.
+                      select-none so a shift-click can't smear a text selection
+                      across the rows it just swept. onClick, not
+                      onCheckedChange: only the DOM event carries shiftKey, and
+                      Radix checkboxes fire click for keyboard activation too,
+                      so no second handler is needed. */}
+                  <Table.Cell
+                    className="select-none"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <Checkbox
                       aria-label={t('inventory.selectOne', { name: r.name })}
                       checked={selected.has(r.handle)}
-                      onCheckedChange={() => toggleOne(r.handle)}
+                      onClick={(e) => handleRowCheck(r.handle, e.shiftKey)}
                     />
                   </Table.Cell>
                   <Table.Cell>

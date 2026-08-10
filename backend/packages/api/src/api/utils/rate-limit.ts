@@ -239,8 +239,44 @@ export interface RateLimitMiddlewareOptions {
    * into one sitewide bucket. Returning undefined falls through to the
    * existing actor_id → IP logic, so a route with no meaningful alternate key
    * (e.g. a malformed body) still gets a working budget.
+   *
+   * May return SEVERAL keys, in which case every one of them is charged and
+   * the first denial wins. That is for a body carrying more than one candidate
+   * identifier: charging only the one the route is believed to read makes the
+   * limiter's correctness depend on route-matching semantics, and a caller who
+   * can steer that choice gets a fresh bucket per request (see
+   * `emailBodyKeyOf`). Charging all of them cannot be steered.
    */
-  keyOf?: (req: MedusaRequest) => string | undefined;
+  keyOf?: (req: MedusaRequest) => string | string[] | undefined;
+  /**
+   * Opt-in: when `keyOf` yields no key, SKIP this limiter entirely instead of
+   * falling back to actor_id/IP. Only for a narrow per-identifier tier that is
+   * stacked in front of a sitewide IP tier on a matcher whose route set is not
+   * uniform — e.g. the auth wildcard matcher also covers the emailpass
+   * `update` route, which carries a token and a password but no identifier
+   * (see middlewares.ts). Without this, that route would
+   * silently inherit the narrow tier's per-identifier ceiling as a SITEWIDE IP
+   * ceiling (one storefront egress IP), which is tighter than the sitewide
+   * tier it is supposed to sit under — the exact single-bucket bug the
+   * per-identifier tier exists to fix. Safe because the sitewide tier still
+   * runs on the same matcher, so a keyless request is never unlimited.
+   * Default OFF: the phone tiers deliberately want the IP fallback, so a
+   * malformed body still costs budget.
+   *
+   * KNOWN BLAST RADIUS (accepted, 2026-08-07). Skipping is all-or-nothing per
+   * matcher, so it also applies to a LOGIN whose body has no key. The emailpass
+   * provider never validates format — it uses `email` verbatim as entity_id —
+   * so an account whose entity_id is not email-shaped (e.g. `user@localhost`)
+   * produces no key, this tier steps aside, and that ONE account is bounded
+   * only by the sitewide tier. The population is near-empty (the storefront
+   * validates the format at signup and Google OAuth supplies real addresses),
+   * and the alternative — a second limiter instance with the flag off for the
+   * exact login matcher — caps every non-email-shaped login attempt at the
+   * narrow tier's per-ACCOUNT numbers applied SITEWIDE, which is the
+   * single-bucket bug this plan exists to remove, and splits the in-memory
+   * failover budget across two instances. Documented rather than fixed.
+   */
+  skipWhenNoKey?: boolean;
   onError?: (err: unknown) => void;
 }
 
@@ -259,7 +295,7 @@ type MiddlewareHandler = (
 export function createRateLimitMiddleware(
   opts: RateLimitMiddlewareOptions,
 ): MiddlewareHandler {
-  const { store, rules, prefix, onError, keyOf } = opts;
+  const { store, rules, prefix, onError, keyOf, skipWhenNoKey } = opts;
   // Misconfigured rules must fail at boot, loudly — limit 0 would 429 every
   // request and windowMs 0 would never deny one (see evaluateSlidingWindow's
   // strict window bound). Env parsing guarantees this for the pack-open
@@ -282,9 +318,35 @@ export function createRateLimitMiddleware(
       const auth = (req as AuthenticatedMedusaRequest).auth_context as
         | AuthenticatedMedusaRequest['auth_context']
         | undefined;
-      const key =
-        keyOf?.(req) || auth?.actor_id || `ip:${req.ip ?? 'unknown'}`;
-      decision = await store.consume(prefix + key, rules, Date.now());
+      const own = keyOf?.(req);
+      // Falsy entries dropped (not just undefined) so the skip and the
+      // fallback agree on what "no key" means — an extractor returning ''
+      // must not key on ''.
+      const ownKeys = (Array.isArray(own) ? own : [own]).filter(
+        (k): k is string => Boolean(k),
+      );
+      if (!ownKeys.length && skipWhenNoKey) {
+        next();
+        return;
+      }
+      const keys = ownKeys.length
+        ? ownKeys
+        : [auth?.actor_id || `ip:${req.ip ?? 'unknown'}`];
+      // First denial wins. ponytail: the all-or-nothing guarantee holds per
+      // key, not across keys — when one of several keys denies, the earlier
+      // ones have already recorded their event. Bounded at one extra event on
+      // one bucket, and only reachable for a body carrying two identifiers,
+      // which no legitimate client sends. A cross-key atomic path would mean a
+      // multi-key Lua script; add it only if multi-key ever becomes the norm.
+      decision = { allowed: true, retryAfterMs: 0 };
+      const now = Date.now();
+      for (const k of keys) {
+        const d = await store.consume(prefix + k, rules, now);
+        if (!d.allowed) {
+          decision = d;
+          break;
+        }
+      }
     } catch (err) {
       // A limiter bug must not take the endpoint down. The Redis store
       // already fails over to in-memory, so reaching here is exceptional.
@@ -405,6 +467,82 @@ export const phoneBodyKeyOf = (req: MedusaRequest): string | undefined => {
     : undefined;
 };
 
+// Same shape the storefront validates with before it ever calls the backend
+// (src/lib/actions/auth.ts EMAIL_RE) — deliberately permissive, its job is to
+// BOUND the limiter keyspace, not to validate an address (the route's own
+// provider does that).
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// RFC 5321 maximum forward-path length. A limiter key must never be able to
+// grow with attacker-supplied input.
+const MAX_EMAIL_LEN = 254;
+
+/**
+ * Per-identifier key for the credential endpoints — the email sibling of
+ * `phoneBodyKeyOf`, for the same shared-egress-IP reason (see the "Phone-OTP
+ * limiters" comment below; the storefront issues every login/register/reset
+ * from a server action, so the backend sees one egress IP for every visitor).
+ *
+ * Field names verified against the installed packages, not assumed:
+ * - `email`      — POST /auth/:actor/emailpass (login) and .../register:
+ *                  @medusajs/auth-emailpass/dist/services/emailpass.js:51,100
+ *                  (`const { email, password } = userData.body ?? {}`).
+ * - `identifier` — POST /auth/:actor/:provider/reset-password:
+ *                  @medusajs/medusa/dist/api/auth/validators.js:6 and that
+ *                  route's route.js:8. The storefront sends the email in it
+ *                  (src/lib/actions/auth.ts:377-378).
+ * - .../update carries only a token + password (no identifier at all:
+ *   @medusajs/medusa/dist/api/auth/[actor_type]/[auth_provider]/update/route.js:8-11),
+ *   so this returns undefined there — see `skipWhenNoKey` above.
+ *
+ * Normalizes (trim + lowercase) so `A@x.com ` and `a@x.com` share one bucket,
+ * and bounds the keyspace the same way `phoneBodyKeyOf` does: only an
+ * email-shaped value of at most 254 chars becomes a key — an arbitrary or
+ * oversized body string would otherwise key (and grow) a Redis-backed
+ * limiter's keyspace directly off unvalidated input. The `email:` prefix keeps
+ * it from ever colliding with a `phone:` or `ip:` key.
+ *
+ * Returns EVERY email-shaped candidate in the body, not just the one this
+ * route is expected to read, and the middleware charges all of them. This
+ * middleware runs BEFORE core's body validator (app wildcard matchers sort
+ * ahead of core's param matchers), so req.body still carries whatever extra
+ * keys the caller sent, and each route family reads only ONE of the two names.
+ * Charging just the expected one made the control depend on route matching:
+ * express 4 defaults here are `strict: false` / `caseSensitive: false`, so
+ * `.../reset-password/` and `.../Reset-Password` route to the same handler,
+ * and an exact path test misses them. A caller who can steer the choice sends
+ * { email: '<fresh random>@x.com', identifier: 'victim@x.com' }, gets a brand
+ * new bucket every request, and bombs the victim with reset mail unbounded.
+ * The path is normalized below (both defects fixed), but charging every
+ * candidate is what makes the guarantee independent of express's matching
+ * semantics — one framework upgrade must not silently reopen this.
+ * Legitimate clients send exactly one of the two fields, so this is one key
+ * and one `consume` on every real request.
+ */
+export const emailBodyKeyOf = (req: MedusaRequest): string[] | undefined => {
+  const body = req.body as
+    | { email?: unknown; identifier?: unknown }
+    | undefined;
+  const toKey = (raw: unknown): string | undefined => {
+    if (typeof raw !== 'string') return undefined;
+    const normalized = raw.trim().toLowerCase();
+    return normalized.length <= MAX_EMAIL_LEN && EMAIL_RE.test(normalized)
+      ? `email:${normalized}`
+      : undefined;
+  };
+  // Trailing slashes and casing are both insignificant to express's matcher,
+  // so they must be insignificant here too. Ordering only decides which key is
+  // charged FIRST (nicer 429 attribution); both are charged either way.
+  const path = (req.path ?? '').toLowerCase().replace(/\/+$/, '');
+  const fields = path.endsWith('/reset-password')
+    ? [body?.identifier, body?.email]
+    : [body?.email, body?.identifier];
+  const keys = [...new Set(fields.map(toKey))].filter(
+    (k): k is string => k !== undefined,
+  );
+  return keys.length ? keys : undefined;
+};
+
 /**
  * Builds a burst + sustained limiter for one endpoint family. Everything
  * derives from `name` (kebab-case, e.g. "pack-open") so the three identities
@@ -416,7 +554,8 @@ function createEnvRateLimit(opts: {
   name: string;
   message?: RateLimitMessage;
   defaults: EnvLimiterDefaults;
-  keyOf?: (req: MedusaRequest) => string | undefined;
+  keyOf?: (req: MedusaRequest) => string | string[] | undefined;
+  skipWhenNoKey?: boolean;
 }): MiddlewareHandler {
   const { name, defaults } = opts;
   const envPrefix = `${name.toUpperCase().replace(/-/g, '_')}_RATE`;
@@ -444,6 +583,7 @@ function createEnvRateLimit(opts: {
     prefix: `rl:${name}:`,
     message: opts.message,
     keyOf: opts.keyOf,
+    skipWhenNoKey: opts.skipWhenNoKey,
     onError: (err) => warn('limiter error; request allowed through', err),
   });
 }
@@ -575,19 +715,87 @@ export function createReferralRecruitRateLimit(): MiddlewareHandler {
 }
 
 /**
- * The auth-endpoint limiter (login / register / password reset). These routes
- * are PUBLIC — there is no auth_context yet — so the middleware keys on the
- * request IP (its designed fallback): this is brute-force/credential-stuffing
- * protection, not per-account fairness. Defaults are deliberately roomier than
- * a single user needs but far below hammering rates. Env-tunable:
- * AUTH_RATE_BURST_LIMIT / AUTH_RATE_BURST_WINDOW_MS (default 5/10s)
- * AUTH_RATE_LIMIT / AUTH_RATE_WINDOW_MS (default 20/60s)
+ * The auth-endpoint limiter, SITEWIDE (login / register / password reset /
+ * reset-completion). These routes are PUBLIC — there is no auth_context yet —
+ * so the middleware keys on the request IP (its designed fallback), and the
+ * storefront issues every credential request from a SERVER ACTION
+ * (src/lib/actions/auth.ts is 'use server'; src/lib/medusa.ts forwards no
+ * client headers), so in production that IP is the one Next.js egress IP for
+ * every visitor. This tier is therefore a whole-site CIRCUIT BREAKER, not
+ * per-client fairness — same stance as createProfileReadRateLimit and the
+ * phone-OTP IP tiers. `createAuthIdentifierRateLimit` below is the tier that
+ * bounds attempts against ONE account; it runs first (middlewares.ts).
+ *
+ * Its own defaults object, NOT the shared `DEFAULTS`: that one is also read by
+ * createPackOpenRateLimit / createPackOpenBatchRateLimit, and widening it in
+ * place would silently widen two unrelated gameplay limiters.
+ *
+ * The two rules are deliberately CONSISTENT (50 per 10s = 300 per minute).
+ * Do not "tighten" the burst on its own: the burst is the binding rule, so a
+ * low one silently overrides the sustained ceiling and re-creates the sitewide
+ * bucket this tier was widened to remove — at 5/10s the real ceiling was
+ * 30/min sitewide, a trivial DoS lever that 429'd honest sign-ins. Sized below
+ * the repo's other by-topology-sitewide limiters (createProfileReadRateLimit
+ * 60/10s + 600/60s, STORE_READ_DEFAULTS 120/10s + 480/60s) because auth volume
+ * is far lower, and still orders of magnitude under a credential-stuffing run
+ * — which createAuthIdentifierRateLimit bounds PER ACCOUNT anyway. That tier,
+ * not this one, is what protects a single account.
+ * Env-tunable:
+ * AUTH_RATE_BURST_LIMIT / AUTH_RATE_BURST_WINDOW_MS (default 50/10s)
+ * AUTH_RATE_LIMIT / AUTH_RATE_WINDOW_MS (default 300/60s)
  */
+export const AUTH_DEFAULTS: EnvLimiterDefaults = {
+  burstLimit: 50,
+  burstWindowMs: 10_000,
+  limit: 300,
+  windowMs: 60_000,
+};
+
 export function createAuthRateLimit(): MiddlewareHandler {
   return createEnvRateLimit({
     name: 'auth',
     message: 'Too many sign-in attempts.',
-    defaults: DEFAULTS,
+    defaults: AUTH_DEFAULTS,
+  });
+}
+
+/**
+ * The auth-endpoint limiter, PER-IDENTIFIER (login / register / password
+ * reset). Keys on the email in the request body (`emailBodyKeyOf`) so it
+ * survives the single-egress-IP topology described above — the email sibling
+ * of createPhoneOtpStartPhoneRateLimit, and the reason this plan exists: an
+ * IP-only auth limiter is one sitewide bucket, so one user's retries can 429
+ * every other user's sign-in, and anyone who knows that can hold the bucket
+ * empty. Runs BEFORE the IP tier (middlewares.ts) so a hammered account 429s
+ * before spending the sitewide budget.
+ *
+ * `skipWhenNoKey` because the '/auth/*' wildcard matcher also covers the
+ * emailpass `update` route, which carries no identifier: without it that route
+ * would fall back to `ip:` and inherit these per-account numbers as a SITEWIDE
+ * ceiling far tighter than the circuit breaker above. It still consumes the
+ * sitewide tier on the same matcher, so nothing is unlimited.
+ *
+ * Budget: a human who has forgotten their password tries a handful of times in
+ * a minute and a couple of dozen in an hour; a credential-stuffing run against
+ * one account does far more. Deliberately roomier than a legitimate user needs
+ * and far below hammering rates. Note login and password-reset share this one
+ * per-email budget, so ~5 login typos inside a minute also defer the immediate
+ * "forgot password" click by up to that minute. Env-tunable:
+ * AUTH_IDENTIFIER_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 5/60s)
+ * AUTH_IDENTIFIER_RATE_LIMIT / _WINDOW_MS (default 20/1h)
+ */
+export function createAuthIdentifierRateLimit(): MiddlewareHandler {
+  return createEnvRateLimit({
+    name: 'auth-identifier',
+    message: 'Too many sign-in attempts for this account.',
+    keyOf: emailBodyKeyOf,
+    skipWhenNoKey: true,
+    defaults: {
+      burstLimit: 5,
+      burstWindowMs: 60_000,
+      limit: 20,
+      windowMs: 3_600_000,
+    },
   });
 }
 
@@ -730,6 +938,65 @@ export function createAdminActionRateLimit(): MiddlewareHandler {
       burstLimit: 30,
       burstWindowMs: 10_000,
       limit: 200,
+      windowMs: 60_000,
+    },
+  });
+}
+
+/**
+ * The gateway-hook limiter (POST /hooks/globepay/{deposit,withdrawal,
+ * payout-verify}). Those routes are unauthenticated BY DESIGN — a webhook
+ * carries no token and its authentication is the RSA signature — so before
+ * this existed an anonymous caller had no budget at all on an endpoint that
+ * does blocking cryptography: §1.16 forces `openCallback` to decrypt before it
+ * can verify, so a forged body still cost a real AES decrypt (and, until plan
+ * 089 memoized it, a 1000-round PBKDF2) on the single event loop.
+ *
+ * THIS IS AN ABUSE CEILING, NOT AUTHENTICATION and not fairness between
+ * callers. The gateway is the only legitimate caller and should never come
+ * near these numbers. The signature is, and stays, the real gate — see the
+ * maintenance note in plan 089: "the hooks are rate-limited now" is never a
+ * reason to relax signature verification.
+ *
+ * Keyed on IP (the middleware's default) — a webhook has no auth_context and
+ * no useful body key: every field is inside the encrypted `Data` blob.
+ * Medusa's express loader sets `trust proxy` 1 unconditionally (see
+ * utils/payer-ip.ts), so `req.ip` comes from the proxy chain and a caller
+ * cannot rotate its own key by spoofing X-Forwarded-For. If the deployed chain
+ * is deeper than one hop the key collapses to one upstream address for all
+ * callers — which does not weaken a ceiling on a surface that has exactly one
+ * legitimate caller.
+ *
+ * Sized generously, because a 429 to a genuine callback costs something:
+ * - deposit / withdrawal callbacks: recoverable. The gateway retries (per the
+ *   integration guide, not observed here), and — independently of whether it
+ *   does — the two reconcile jobs (src/jobs/globepay-*reconcile.ts, cron every
+ *   10 min) requery the gateway for anything still pending, so the settlement
+ *   lands late rather than never.
+ * - payout-verify: fails CLOSED. Anything but a literal "success" makes the
+ *   gateway refuse that payout, so a 429 blocks a legitimate withdrawal from
+ *   paying out (no money moves wrongly, but a customer waits).
+ * That asymmetry is why the ceiling sits orders of magnitude above real
+ * callback volume: if one ever trips it, raise the env var, don't remove it.
+ *
+ * The two rules are deliberately CONSISTENT (100 per 10s = 600 per minute =
+ * the sustained rule). The burst is always the binding rule, so a tighter one
+ * silently overrides the sustained ceiling and makes the documented number a
+ * lie — the scar recorded on AUTH_DEFAULTS above. Plan 089 suggested 60/10s;
+ * that would have made the real ceiling 360/min, so the burst was raised to
+ * match rather than shipping an inconsistent pair.
+ * Env-tunable:
+ * GATEWAY_HOOK_RATE_BURST_LIMIT / GATEWAY_HOOK_RATE_BURST_WINDOW_MS (100/10s)
+ * GATEWAY_HOOK_RATE_LIMIT / GATEWAY_HOOK_RATE_WINDOW_MS (600/60s)
+ */
+export function createGatewayHookRateLimit(): MiddlewareHandler {
+  return createEnvRateLimit({
+    name: 'gateway-hook',
+    message: 'Too many callback requests.',
+    defaults: {
+      burstLimit: 100,
+      burstWindowMs: 10_000,
+      limit: 600,
       windowMs: 60_000,
     },
   });

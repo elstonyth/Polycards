@@ -17,6 +17,10 @@ import type { ComputedOdd, OddsRarity, SetEntry } from '@acme/odds-math';
 export interface PublishedOdds {
   overall: number;
   tiers: Partial<Record<OddsRarity, number>>;
+  /** Decimal places the tier percentages are published at (0–4, default 2).
+   *  The server rounds every tier to this on save, so the storefront prints
+   *  stored values verbatim. */
+  decimals: number;
 }
 
 export interface AdminPack {
@@ -38,7 +42,10 @@ export interface AdminPack {
   /** Per-pack tier price-range override (rarity → { min, max }, RM display
    *  price). Null = inherit the global Tier Defaults; a stored map (even {})
    *  replaces the global ladder wholesale for this pack. */
-  tier_ranges: Record<string, { min: number | null; max: number | null }> | null;
+  tier_ranges: Record<
+    string,
+    { min: number | null; max: number | null }
+  > | null;
   /** RAW / GRADED / MIX composition of the prize pool — AUTO-DETECTED from the
    *  members' graders, never operator-set. Null = empty pool (nothing to infer
    *  from, which is not the same as "raw"). */
@@ -74,7 +81,10 @@ export interface AdminPackWrite {
   published_odds?: PublishedOdds | null;
   /** OMITTED = keep the stored value; null = clear (inherit the global Tier
    *  Defaults); map = pack-specific ranges. */
-  tier_ranges?: Record<string, { min: number | null; max: number | null }> | null;
+  tier_ranges?: Record<
+    string,
+    { min: number | null; max: number | null }
+  > | null;
 }
 
 // No rarity here — rarity is a per-pack property (PackOdds), edited in each
@@ -187,7 +197,7 @@ export interface OddsRow {
   /** Available physical units; `null` = untracked (infinite). */
   stock: number | null;
   weight: number;
-  /** RAW set-2/3 basis points; null = this card inherits the previous set. The
+  /** RAW set-2/3 integer units; null = this card inherits the previous set. The
    *  editor seeds its override inputs from these (not from pct_2/pct_3) so
    *  "overridden" stays distinguishable from "inherited". */
   weight_2: number | null;

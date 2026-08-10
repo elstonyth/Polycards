@@ -44,7 +44,51 @@ describe('coercePackBody — published_odds', () => {
     expect(out).toEqual({
       overall: 100,
       tiers: { Immortal: 0.1, Mythical: 4.5, Common: 50 },
+      decimals: 2,
     });
+  });
+
+  it('rounds tiers to the configured decimals and carries the setting', () => {
+    const fine = coercePackBody(
+      {
+        ...base,
+        published_odds: {
+          overall: 100,
+          tiers: { Legendary: 0.68425 },
+          decimals: 4,
+        },
+      },
+      'test-pack',
+    ).published_odds;
+    expect(fine).toEqual({
+      overall: 100,
+      tiers: { Legendary: 0.6843 },
+      decimals: 4,
+    });
+
+    const coarse = coercePackBody(
+      {
+        ...base,
+        published_odds: { overall: 100, tiers: { Legendary: 0.6842 } },
+      },
+      'test-pack',
+    ).published_odds;
+    expect(coarse).toEqual({
+      overall: 100,
+      tiers: { Legendary: 0.68 },
+      decimals: 2,
+    });
+  });
+
+  it('rejects a non-integer or out-of-range decimals', () => {
+    for (const decimals of [5, -1, 1.5, '2', {}]) {
+      expect(() =>
+        coercePackBody(
+          { ...base, published_odds: { overall: 100, tiers: {}, decimals } },
+          'test-pack',
+        ),
+      ).toThrow(/published_odds.decimals/);
+    }
   });
 
   it('rejects out-of-range percentages', () => {
@@ -96,8 +140,10 @@ describe('coercePackBody — display_image (optional hero)', () => {
       ).display_image,
     ).toBe('https://cdn.x/hero.webp');
     expect(
-      coercePackBody({ ...base, display_image: '/images/hero.webp' }, 'test-pack')
-        .display_image,
+      coercePackBody(
+        { ...base, display_image: '/images/hero.webp' },
+        'test-pack',
+      ).display_image,
     ).toBe('/images/hero.webp');
   });
 
@@ -106,10 +152,16 @@ describe('coercePackBody — display_image (optional hero)', () => {
       coercePackBody({ ...base, display_image: 42 }, 'test-pack'),
     ).toThrow(/display_image/);
     expect(() =>
-      coercePackBody({ ...base, display_image: 'data:image/png;x' }, 'test-pack'),
+      coercePackBody(
+        { ...base, display_image: 'data:image/png;x' },
+        'test-pack',
+      ),
     ).toThrow(/display_image/);
     expect(() =>
-      coercePackBody({ ...base, display_image: '//evil.example/x.gif' }, 'test-pack'),
+      coercePackBody(
+        { ...base, display_image: '//evil.example/x.gif' },
+        'test-pack',
+      ),
     ).toThrow(/display_image/);
   });
 });

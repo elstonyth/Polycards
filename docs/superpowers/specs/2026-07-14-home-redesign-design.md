@@ -4,9 +4,10 @@
 
 ## Why
 
-Home's job changes: every product tap now routes to `/slots` (the catalog), never a
-pack detail page. That makes home a **hype funnel** — the movie trailer, not the
-store. This redesign rebuilds the home sections (and lightly the app shell) as a
+Home's job changes: product taps route to `/slots` (the catalog) rather than a
+pack detail page — with one exception added 2026-08-06, the RIP A PACK ladder
+rows, which deep-link to the pack each row names (see "The routing rule" below).
+That makes home a **hype funnel** — the movie trailer, not the store. This redesign rebuilds the home sections (and lightly the app shell) as a
 phone-first editorial scroll story in the shipped Midnight Rip system
 (`DESIGN.md`), with hypebeast-drop energy: huge Nekst lockups, a tier ladder,
 data marquees, one white pill per zone.
@@ -38,8 +39,16 @@ data marquees, one white pill per zone.
 ## The routing rule
 
 Every **product** tap on home lands on plain `/slots`:
-hero CTA pill, marquee band, every ladder row, JUST PULLED
-cards, final CTA pill. Sold-out rows stay inert (non-links). Non-product links
+hero CTA pill, marquee band, JUST PULLED
+cards, final CTA pill. Sold-out rows stay inert (non-links).
+
+> **Exception (operator, 2026-08-06):** RIP A PACK ladder rows are the one
+> deep-link on home — a row goes to `/slots/<slug>?count=1`, the pack it
+> actually shows. A row names one pack and prices it, so bouncing to the index
+> made the tap feel like it did nothing. `qa-home-redesign.mjs` exempts that
+> section from the audit; every other product surface still obeys the rule.
+
+Non-product links
 keep their targets: `All packs →` (`/slots`), `How it works →`
 (`/how-it-works`), `See ranks →` (`/leaderboard`).
 

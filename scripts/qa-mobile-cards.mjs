@@ -1,6 +1,6 @@
 // Mobile verification (390x844 phone viewport):
 //  1. vault grid = 3-up, tiles compact (needs scripts/.dev-logins + backend)
-//  2. pack "Rare & above" rail — distinct tile x positions = cards visible
+//  2. pack "Top Hits" rail — distinct tile x positions = cards visible
 //     across the viewport (it's a horizontal rail now, not the old 3-up grid)
 //  3. card-detail overlay fits the viewport WITHOUT scrolling
 // Usage: node scripts/qa-mobile-cards.mjs [baseUrl]
@@ -70,13 +70,13 @@ console.log(
 );
 await page.screenshot({ path: `${OUT}/vault-mobile.png`, fullPage: false });
 
-// 2. pack pool rail ("Rare & above" normally, "All cards" for zero-Rare packs)
+// 2. pack pool rail ("Top Hits" normally, "All cards" for zero-top-hit packs)
 await page.goto(`${BASE}/slots/bronze-pack`, {
   waitUntil: 'networkidle',
 });
 await page.waitForTimeout(1000);
 const heading = page.getByRole('heading', {
-  name: /^(Rare & above|All cards)$/,
+  name: /^(Top Hits|All cards)$/,
 });
 await heading.scrollIntoViewIfNeeded();
 await page.waitForTimeout(600);

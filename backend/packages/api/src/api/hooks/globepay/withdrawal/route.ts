@@ -9,6 +9,7 @@ import { globepayConfigFromEnv } from '../../../../modules/packs/globepay-client
 import { withdrawalRefundReference } from '../../../../modules/packs/globepay-withdrawal';
 import { notifyFeed } from '../../../../modules/packs/notify-feed';
 import { withdrawalFeedKey } from '../../../../modules/packs/feed-events';
+import { sendWithdrawalReceipt } from '../../../../modules/packs/withdrawal-receipt';
 
 // POST /hooks/globepay/withdrawal — GlobePay365 server-to-server payout
 // callback (§1.6). The deposit hook's mirror with the money flow inverted:
@@ -80,6 +81,23 @@ export async function POST(
       .resolve('logger')
       .warn(
         '[globepay] rejected withdrawal callback: signed payload carried no MerchantTransactionId',
+      );
+    res.status(400).send('rejected');
+    return;
+  }
+
+  // Same guard as the deposit hook, same reason: the signature proves GlobePay
+  // sent this, not that the payout is ours. Checked before the row lookup so a
+  // foreign callback can never touch one of our rows. Case-insensitive, because
+  // a casing difference is a config nuisance, not an attack.
+  if (
+    String(data.MerchantCode ?? '').toUpperCase() !==
+    config.merchantCode.toUpperCase()
+  ) {
+    req.scope
+      .resolve('logger')
+      .error(
+        `[globepay] withdrawal callback for ${merchantTransactionId} names merchant ${data.MerchantCode}, expected ${config.merchantCode} — refusing`,
       );
     res.status(400).send('rejected');
     return;
@@ -167,6 +185,21 @@ export async function POST(
         },
       });
 
+      // The emailed record — BEFORE the terminal row update, and outside any
+      // !replayed guard: once the row leaves 'pending', a retried callback
+      // early-returns and the sweep no longer selects it, so a crash between
+      // the update and a later send would lose the email forever. Sending
+      // here, a crash before the update re-enters this branch on retry (the
+      // refund replays, the notification module's unique idempotency_key
+      // dedupes the email), and the send itself never throws.
+      await sendWithdrawalReceipt(req.scope, {
+        customerId: withdrawal.customer_id,
+        amount: Number(withdrawal.amount),
+        reference: gatewayTransactionId || merchantTransactionId,
+        merchantTransactionId,
+        outcome: 'refunded',
+      });
+
       await packs.updateGlobePayWithdrawals({
         selector: { id: withdrawal.id, status: 'pending' },
         data: {
@@ -217,6 +250,19 @@ export async function POST(
         `[globepay] withdrawal ${merchantTransactionId} settled at ${data.Amount}, but ${withdrawal.amount} was debited — investigate before adjusting`,
       );
   }
+
+  // The emailed record — BEFORE the terminal row update: once the row is
+  // 'settled', a retried callback early-returns and the sweep skips it, so a
+  // crash between the update and a later send would lose the email forever.
+  // A crash after this send re-enters this branch on retry and the
+  // notification module's unique idempotency_key dedupes. Non-throwing.
+  await sendWithdrawalReceipt(req.scope, {
+    customerId: withdrawal.customer_id,
+    amount: Number(withdrawal.amount),
+    reference: gatewayTransactionId || merchantTransactionId,
+    merchantTransactionId,
+    outcome: 'paid',
+  });
 
   await packs.updateGlobePayWithdrawals({
     selector: { id: withdrawal.id, status: 'pending' },

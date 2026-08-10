@@ -18,7 +18,7 @@ import { pageAll } from '../../api/utils/page-all';
 // draw and pack-open ids. crypto.randomInt uses rejection sampling, so unlike
 // `randomBytes()/2**48` (division introduces modulo bias — CodeQL
 // js/biased-cryptographic-random) every value in [0, bound) is exactly equally
-// likely. Pack weights are normalized to integer basis points (Σweight = 10000),
+// likely. Pack weights are normalized to integer units (Σweight = 1,000,000),
 // so `bound` is an integer in practice; floor guards a legacy fractional total
 // (randomInt requires an integer max) and Math.max(1, …) guards the lower edge
 // (fetchPackData already throws on totalWeight <= 0). A roll in [0, bound) is

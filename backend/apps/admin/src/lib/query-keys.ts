@@ -14,9 +14,13 @@ export const qk = {
   // 2-segment prefix — invalidates ALL pages of the pull ledger in one call
   pullsKey: ['admin', 'pulls'] as const,
   // Keyed on (view, page): each deposit view caches independently, so
-  // switching filters never shows another view's rows.
-  globepayDeposits: (page: number, status: string) =>
-    ['admin', 'globepay-deposits', status, page] as const,
+  // switching filters never shows another view's rows. `sort` always renders
+  // (default '' = the route's status-dependent default order) — same
+  // always-rendered-segment rule as qk.pulls.
+  globepayDeposits: (page: number, status: string, sort?: string) =>
+    ['admin', 'globepay-deposits', status, page, sort ?? ''] as const,
+  globepayWithdrawals: (page: number, status: string, sort?: string) =>
+    ['admin', 'globepay-withdrawals', status, page, sort ?? ''] as const,
   economy: ['admin', 'economy'] as const,
   eligibleProducts: ['admin', 'eligible-products'] as const,
   customerGacha: (id: string) => ['admin', 'customer', id, 'gacha'] as const,
@@ -55,6 +59,7 @@ export const qk = {
     page: number,
     q?: string,
     customerId?: string,
+    sort?: string,
   ) =>
     [
       'admin',
@@ -63,6 +68,7 @@ export const qk = {
       page,
       q ?? '',
       customerId ?? 'all',
+      sort ?? 'created_at:desc',
     ] as const,
   // 2-segment prefix — invalidates ALL delivery-order pages/filters in one call
   deliveryOrdersKey: ['admin', 'delivery-orders'] as const,
@@ -85,8 +91,8 @@ export const qk = {
   tierSettings: ['admin', 'tier-settings'] as const,
 
   // ── Epic 2 (Players) ───────────────────────────────────────────────────────
-  players: (page: number, q?: string) =>
-    ['admin', 'players', page, q ?? ''] as const,
+  players: (page: number, q?: string, sort?: string) =>
+    ['admin', 'players', page, q ?? '', sort ?? 'created_at:desc'] as const,
   // 2-segment prefix — invalidates ALL pages/searches of the players list
   playersKey: ['admin', 'players'] as const,
   // The core Medusa customer record behind the Profile tab. Named rather than
@@ -119,6 +125,7 @@ export const qk = {
     q?: string,
     from?: string,
     to?: string,
+    sort?: string,
   ) =>
     [
       'admin',
@@ -128,6 +135,7 @@ export const qk = {
       q ?? '',
       from ?? '',
       to ?? '',
+      sort ?? 'occurred_at:desc',
     ] as const,
   // 2-segment prefix — invalidates ALL pages/filters of the ledger in one call
   ledgerKey: ['admin', 'ledger'] as const,

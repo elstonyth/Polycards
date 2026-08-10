@@ -18,6 +18,15 @@ export type SfxName =
   | 'tensionRise';
 
 let ctx: AudioContext | null = null;
+/**
+ * The one AudioContext for the whole slot screen — the cue synth here and the
+ * ambient bed in use-sound both run through it. Browsers cap live contexts, and
+ * a second one would also need its own gesture unlock.
+ */
+export function sharedAudioContext(): AudioContext | null {
+  return audio();
+}
+
 function audio(): AudioContext | null {
   if (typeof window === 'undefined') return null;
   try {

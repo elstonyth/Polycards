@@ -2,6 +2,8 @@ import { createStep, StepResponse } from "@medusajs/framework/workflows-sdk";
 import { MedusaError, Modules } from "@medusajs/framework/utils";
 import { HANDLE_RE, deriveHandle } from "../../utils/profile-handle";
 import { findCustomerByHandle } from "../../utils/customer-by-handle";
+import PacksModuleService from "../../modules/packs/service";
+import { PACKS_MODULE } from "../../modules/packs";
 
 export type EnsureProfileHandleInput = {
   customer_id: string; // from the authenticated token — NEVER the request body
@@ -53,8 +55,17 @@ export const ensureProfileHandleStep = createStep(
       );
     }
 
-    await customers.updateCustomers(customer.id, {
-      metadata: { ...metadata, handle },
+    // Through the `metadata:<customer>` advisory lock, NOT
+    // customers.updateCustomers. `customer.metadata` is one shared JSONB blob
+    // (handle / avatar_url / avatar_file_id / equipped_frame_level /
+    // bank_accounts) and every writer spread-merges the whole thing, so an
+    // unlocked read-then-write here republishes the blob as it looked before a
+    // concurrent avatar upload or saved bank account — silently losing it.
+    // This step was the last writer left outside the lock plan 092 added.
+    const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
+    await packs.mutateCustomerMetadata({
+      customerId: customer.id,
+      mutate: (locked) => ({ ...locked, handle }),
     });
 
     const result: EnsureProfileHandleResult = { handle };
@@ -74,16 +85,19 @@ export const ensureProfileHandleStep = createStep(
     // captured snapshot would wipe metadata written concurrently between
     // snapshot and rollback (e.g. equipped_frame_level / avatar_url) — the
     // metadata-wipe class of bug from the 2026-07-07 frames incident.
-    const customers = container.resolve(Modules.CUSTOMER);
-    const current = await customers.retrieveCustomer(data.customerId);
-    await customers.updateCustomers(data.customerId, {
-      metadata: {
-        ...(current.metadata ?? {}),
+    // Same lock as the forward path: the rollback is a read-modify-write of the
+    // same shared blob, so leaving it on the customer module would clobber
+    // concurrent writes exactly where the forward write no longer does.
+    const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
+    await packs.mutateCustomerMetadata({
+      customerId: data.customerId,
+      mutate: (locked) => ({
+        ...locked,
         // Optional-chained: durable-workflow payloads can be deserialized by
         // NEWER code than produced them — a rollback handler never throws on
         // shape drift.
         handle: data.previousMetadata?.handle ?? null,
-      },
+      }),
     });
   },
 );

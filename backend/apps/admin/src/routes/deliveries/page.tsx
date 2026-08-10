@@ -38,6 +38,8 @@ import {
   rm,
 } from '../../lib/format';
 import { resolveImageUrl } from '../../lib/image-url';
+import { useTableSort } from '../../lib/use-table-sort';
+import { applyRangeSelect } from '../../lib/range-select';
 import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
@@ -69,16 +71,21 @@ const TONE: Record<DeliveryStatus, 'orange' | 'blue' | 'green' | 'grey'> = {
 // error here rather than a raw token in the badge.
 const DEPOSIT_TONE: Record<
   GlobePayDeposit['status'],
-  'orange' | 'green' | 'red'
+  'orange' | 'green' | 'red' | 'purple'
 > = {
   pending: 'orange',
   settled: 'green',
   failed: 'red',
+  // Purple, matching routes/deposits/page.tsx: 'expired' is the sweep giving up
+  // while the gateway never ruled, so it is the likeliest UNCREDITED payment on
+  // the page and must not read as either settled, refused, or still-in-flight.
+  expired: 'purple',
 };
 const DEPOSIT_STATUS_LABEL: Record<GlobePayDeposit['status'], string> = {
   pending: 'Pending',
   settled: 'Settled',
   failed: 'Failed',
+  expired: 'Expired',
 };
 
 // First item's thumbnail + name/handle with a "+N more" tail — the operator
@@ -336,6 +343,11 @@ const Topups = () => {
 
 type OrderKind = 'shipping' | 'purchases' | 'topups';
 
+// EXACTLY the backend's SORTABLE allow-list (api/admin/delivery-orders/
+// route.ts) — real columns only. Item/Qty/Player are joined or derived
+// server-side after the page is fetched, so those headers stay plain.
+type DeliverySortKey = 'created_at' | 'status';
+
 const DeliveriesPage = () => {
   // Which kind of record the page is showing. 'shipping' is everything the page
   // did before: status tabs, id search, bulk tool, Manage modal.
@@ -346,7 +358,24 @@ const DeliveriesPage = () => {
   const [q, setQ] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkStatus, setBulkStatus] = useState<DeliveryStatus>('processed');
-  const { data, isError } = useDeliveryOrders(filter, page, q || undefined);
+  // Re-sorting changes which rows are on screen, so it follows the same rule
+  // as every other view change here: back to page 0, selection dropped.
+  const { sort, sortHeader } = useTableSort<DeliverySortKey>(
+    { key: 'created_at', dir: 'desc' },
+    {
+      onChange: () => {
+        setPage(0);
+        setSelected(new Set());
+      },
+    },
+  );
+  const { data, isError } = useDeliveryOrders(
+    filter,
+    page,
+    q || undefined,
+    undefined,
+    sort ? `${sort.key}:${sort.dir}` : 'created_at:desc',
+  );
   const orders = data?.orders ?? null;
   const update = useUpdateDeliveryOrder();
   const bulk = useBulkUpdateDeliveryOrders();
@@ -393,12 +422,21 @@ const DeliveriesPage = () => {
       return next;
     });
 
-  const toggleOne = (id: string) =>
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (!next.delete(id)) next.add(id);
-      return next;
-    });
+  // Shift-click range select (the Gmail convention) — same wiring as the
+  // inventory list; the range math lives in lib/range-select.ts (pure,
+  // vitest-covered). pageIds is the server's current page+sort order, so a
+  // range always matches what is on screen. The anchor doesn't need explicit
+  // clearing on view changes: applyRangeSelect falls back to a plain toggle
+  // when the anchor has left the list, and clearSelection() empties the
+  // selection anyway.
+  const anchorRef = useRef<string | null>(null);
+  const handleRowCheck = (id: string, shiftKey: boolean) => {
+    const anchor = anchorRef.current;
+    anchorRef.current = id;
+    setSelected((prev) =>
+      applyRangeSelect(prev, pageIds, anchor, id, shiftKey),
+    );
+  };
 
   // Partial success is the endpoint's contract. Two classes of skip:
   // `already <status>` is benign (the backend refuses to audit a no-op) and
@@ -633,11 +671,11 @@ const DeliveriesPage = () => {
                     />
                   </Table.HeaderCell>
                   <Table.HeaderCell>Order</Table.HeaderCell>
-                  <Table.HeaderCell>Date</Table.HeaderCell>
+                  {sortHeader('created_at', 'Date')}
                   <Table.HeaderCell>Item</Table.HeaderCell>
                   <Table.HeaderCell>Qty</Table.HeaderCell>
                   <Table.HeaderCell>Player</Table.HeaderCell>
-                  <Table.HeaderCell>Status</Table.HeaderCell>
+                  {sortHeader('status', 'Status')}
                   <Table.HeaderCell className="text-right">
                     Actions
                   </Table.HeaderCell>
@@ -646,11 +684,13 @@ const DeliveriesPage = () => {
               <Table.Body>
                 {orders.map((o) => (
                   <Table.Row key={o.id}>
-                    <Table.Cell>
+                    {/* select-none: a shift-click must range-select, not smear
+                        a text selection across the rows in between. */}
+                    <Table.Cell className="select-none">
                       <Checkbox
                         aria-label={`Select order #${o.id.slice(-6)}`}
                         checked={selected.has(o.id)}
-                        onCheckedChange={() => toggleOne(o.id)}
+                        onClick={(e) => handleRowCheck(o.id, e.shiftKey)}
                       />
                     </Table.Cell>
                     <Table.Cell className="font-mono text-xs">

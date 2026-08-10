@@ -4,7 +4,7 @@
 // can't skew the operator's money reports.
 
 export type OddsValue = {
-  /** Relative win weight (normalized to 10000 bps on save, but the math
+  /** Relative win weight (normalized to 1,000,000 units on save, but the math
    *  normalizes by the actual sum so stale rows still report correctly). */
   weight: number;
   /** Card FMV. USD at rest, but /admin/economy feeds MYR (converted at the live

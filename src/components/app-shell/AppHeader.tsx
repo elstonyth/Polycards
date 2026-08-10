@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { LogIn, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { rm } from '@/lib/format';
+import { useCountedValue } from '@/lib/use-counted-value';
 import AuthModal from '@/components/AuthModal';
 import { openAuth } from '@/components/AuthButton';
 import { useAuth } from '@/components/auth/AuthProvider';
@@ -28,6 +29,10 @@ export default function AppHeader() {
   const { balance, openTopUp } = useTopUp();
   const { show: vaultDot } = useVaultDot();
   const { show: creditDot } = useCreditDot();
+  // A pack open or a sell-back moves this number; counting to the new figure
+  // (and tinting money-in green for a beat) is what tells the customer the
+  // action landed. Snaps under reduced motion; the tint still fires.
+  const { value: countedBalance, direction } = useCountedValue(balance);
 
   return (
     <header
@@ -130,8 +135,16 @@ export default function AppHeader() {
                 {/* DESIGN.md "Money Is Display": the balance is the app's most
                     repeated RM value — set it in the Nekst ledger voice, not
                     Geist chrome. tabular-nums keeps digits from jittering. */}
-                <span className="font-heading text-[15px] leading-none tabular-nums text-white">
-                  {balance == null ? 'RM —' : rm(balance)}
+                <span
+                  className={cn(
+                    'font-heading text-[15px] leading-none tabular-nums transition-colors duration-300',
+                    // Money-in gets the green beat (DESIGN.md's one use for
+                    // it); spending is not an error, so a debit just counts
+                    // down in plain white.
+                    direction === 'up' ? 'text-buyback-fg' : 'text-white',
+                  )}
+                >
+                  {countedBalance == null ? 'RM —' : rm(countedBalance)}
                 </span>
                 <span className="flex h-8 w-8 items-center justify-center rounded-full bg-neutral-50 text-neutral-950">
                   <Plus className="h-4 w-4" strokeWidth={3} aria-hidden />

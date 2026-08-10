@@ -97,7 +97,7 @@ envs:
   # deploy:migrate-user (create-admin.ts). Skipped if the user already exists.
   - key: ADMIN_EMAIL
     scope: RUN_TIME
-    value: admin@pokenic.app
+    value: admin@polycards.gg
   - key: ADMIN_PASSWORD
     scope: RUN_TIME
     type: SECRET
@@ -225,6 +225,21 @@ envs:
   # and this spec must only be APPLIED after that storefront build is ACTIVE,
   # or phone signups 400 until it catches up. Rollback lever: set this to
   # "false" and re-apply — every gate opens instantly, storefront unaffected.
+  #
+  # Off for a few hours on 2026-08-07, then restored. Twilio refused every send
+  # with 403 / error 21608, whose text blames trial accounts but which ALSO
+  # fires on an upgraded account with no APPROVED PRIMARY COMPLIANCE PROFILE —
+  # the actual state here. Upgrading to paid and funding it changed nothing; an
+  # approved Individual profile did, and a live send then returned 201/pending.
+  #
+  # The flag had to move at all because PHONE_GATE_REQUIRED is unset and so
+  # follows it: with a dead SMS transport and this on, every unverified account
+  # was frozen out of topup / deposit / delivery with no way to verify out.
+  #
+  # If OTP breaks again, check IN THIS ORDER before touching any gate here —
+  # all three are upstream of them: (1) primary compliance profile approved,
+  # (2) account `type` + balance, (3) destination country in SMS geo
+  # permissions. Re-arm is storefront ARG first, this second.
   - key: PHONE_VERIFICATION_REQUIRED
     scope: RUN_TIME
     value: "true"
@@ -242,6 +257,18 @@ envs:
     scope: RUN_TIME
     type: SECRET
     value: __SECRET__TWILIO_VERIFY_SERVICE_SID__
+  # Destination geo-lock for the UNAUTHENTICATED send route: every call there
+  # bills a real SMS, and the per-phone limiter bounds one number, not a pumping
+  # run rotating fresh ones. Plain value, NOT a secret — do-apply.ps1 aborts the
+  # whole apply if any redacted-secret placeholder survives substitution, so
+  # never write one here for a non-secret. Empty/unset falls back to MY in code.
+  # Widening this alone is not enough: the ISO->dialling-code row in
+  # src/utils/phone-verification.ts and the storefront's ALLOWED_PHONE_COUNTRIES
+  # must move in the same change, or the picker offers a country whose code
+  # never arrives. Twilio's own SMS geo permissions are the upstream half.
+  - key: ALLOWED_SMS_COUNTRIES
+    scope: RUN_TIME
+    value: "MY"
   # ╔═══════════════════════════════════════════════════════════════════════╗
   # ║ DO NOT APPLY THIS SPEC UNTIL PR #252 IS MERGED.                        ║
   # ║ ALLOW_MOCK_TOPUP is GONE (the go-live blocker is cleared) and the      ║
@@ -297,16 +324,21 @@ envs:
   # API-side and only their support can fix it — do not rotate methods again.
   #
   # CORRECTION 2026-08-05: BQR did return PMT10006, but "both channels are dead"
-  # was the wrong read. The API whitelist is the actual blocker. GlobePay
-  # whitelisted 206.189.94.252 / 168.144.35.100; DigitalOcean released that pair
-  # on 2026-07-30 and production has egressed from 188.166.181.61 /
-  # 188.166.181.204 ever since (read back live 2026-08-05). The new pair was
-  # never sent, so every deposit since the 2026-08-04 cutover has called from an
-  # un-allowlisted address — which rejects before the payment method is even
-  # consulted. That is why every method failed identically and why Sean could
-  # truthfully say OB and BQR are usable. The channel value below is very likely
-  # fine; the fix is the whitelist, not this var. See the "Both whitelists"
-  # checklist item in docs/payments/globepay365-setup.md.
+  # was the wrong read — the API whitelist was on the old, released IP pair.
+  #
+  # WHITELIST CLEARED 2026-08-06: GlobePay added 188.166.181.61 /
+  # 188.166.181.204 and CheckBalance now succeeds from BOTH components (worker
+  # on .61, service on .204). So the whitelist is no longer a candidate
+  # explanation for anything.
+  #
+  # THIS VAR IS NOT THE PROBLEM EITHER — stop rotating it. With the whitelist
+  # green, SubmitDeposit was swept from production across BQR/OB/DN/FPX, across
+  # each method's own bank codes, and across RM 30/50/100/500. Every single
+  # combination returns PMT10006. Meanwhile GetSupportedBanks answers 200 for
+  # BQR (1 bank) and OB (7 banks), so their system knows both codes for merchant
+  # Polycard. Deposits are disabled ACCOUNT-side and only GlobePay support can
+  # enable them; see "Deposits are dead ACCOUNT-side" in
+  # docs/payments/globepay365-setup.md for the table to send them.
   - key: GLOBEPAY_DEPOSIT_METHOD
     scope: RUN_TIME
     value: BQR

@@ -38,8 +38,32 @@ import {
 import { resolveImageUrl } from '../../lib/image-url';
 import { validateImageFile } from '../../lib/image-validation';
 import { fmtPct, rm, slugKeystroke, toSlug } from '../../lib/format';
+import { useTableSort } from '../../lib/use-table-sort';
 import { GachaPipelineHint } from '../../components/GachaPipelineHint';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
+
+// Client-side sort — this list is unpaged, the whole catalog is in hand.
+// 'rtp' orders the EV / RTP column ("which pack leaks money" reads by RTP).
+type PackSortKey = 'title' | 'category' | 'status' | 'group' | 'rtp' | 'price';
+
+// Nullable numerics sort as -Infinity so "unknown" stays last on desc and
+// first on asc (inventory/list precedent); null group sorts as ''.
+const packSortValue = (p: AdminPack, key: PackSortKey): number | string => {
+  switch (key) {
+    case 'title':
+      return p.title;
+    case 'category':
+      return p.category;
+    case 'status':
+      return p.status;
+    case 'group':
+      return p.group ?? '';
+    case 'rtp':
+      return p.rtp.s1 ?? Number.NEGATIVE_INFINITY;
+    case 'price':
+      return p.price;
+  }
+};
 
 // Sidebar entry. The label is literal (internal single-operator tool); switch to
 // RouteConfig.translationNs if this dashboard is ever localized.
@@ -142,6 +166,10 @@ const PacksListPage = () => {
   // it keeps the row open if the operator clears the filter again.
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const filtering = q.trim() !== '' || statusFilter !== 'all';
+  // Starts NULL: the default order IS the rank ladder the reorder arrows edit.
+  // While a column sort is active the arrows are disabled (same rule as
+  // `filtering`) — position numbers refer to rank order, not screen order.
+  const { sort, sortHeader } = useTableSort<PackSortKey>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const displayFileRef = useRef<HTMLInputElement>(null);
   const uploading = uploadImg.isPending;
@@ -230,9 +258,7 @@ const PacksListPage = () => {
       !(buybackValue >= 90) ||
       !(buybackValue <= 100)) &&
       t('packs.form.buybackPercent'),
-    form.rank.trim() !== '' &&
-      Number.isNaN(rankValue) &&
-      t('packs.form.rank'),
+    form.rank.trim() !== '' && Number.isNaN(rankValue) && t('packs.form.rank'),
     mode === 'create' && !SLUG_RE.test(slugValue) && t('packs.form.slug'),
   ].filter((f): f is string => typeof f === 'string');
   const canSave = missing.length === 0 && !saving && !uploading;
@@ -295,11 +321,24 @@ const PacksListPage = () => {
   // match what's on screen, even while duplicate ranks are still unnormalized.
   const rows = useMemo(() => [...grouped.values()].flat(), [grouped]);
 
-  const visibleRows = rows.filter((p) => {
-    if (statusFilter !== 'all' && p.status !== statusFilter) return false;
-    const needle = q.trim().toLowerCase();
-    return !needle || p.title.toLowerCase().includes(needle);
-  });
+  const visibleRows = useMemo(() => {
+    const filtered = rows.filter((p) => {
+      if (statusFilter !== 'all' && p.status !== statusFilter) return false;
+      const needle = q.trim().toLowerCase();
+      return !needle || p.title.toLowerCase().includes(needle);
+    });
+    if (!sort) return filtered;
+    const dir = sort.dir === 'asc' ? 1 : -1;
+    const key = sort.key;
+    return [...filtered].sort((a, b) => {
+      const av = packSortValue(a, key);
+      const bv = packSortValue(b, key);
+      if (typeof av === 'string' && typeof bv === 'string') {
+        return dir * av.localeCompare(bv);
+      }
+      return dir * (av < bv ? -1 : av > bv ? 1 : 0);
+    });
+  }, [rows, statusFilter, q, sort]);
 
   // Move a pack one position up/down within its category and persist rank =
   // position for every row that changed — this also normalizes duplicate
@@ -388,193 +427,208 @@ const PacksListPage = () => {
           <Text className="text-ui-fg-subtle">{t('packs.list.empty')}</Text>
         </div>
       ) : (
-        <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Packs table">
-        <Table>
-          <Table.Header>
-            <Table.Row>
-              <Table.HeaderCell>{t('packs.list.order')}</Table.HeaderCell>
-              <Table.HeaderCell>{t('packs.list.pack')}</Table.HeaderCell>
-              <Table.HeaderCell>{t('packs.list.category')}</Table.HeaderCell>
-              <Table.HeaderCell>{t('packs.list.status')}</Table.HeaderCell>
-              <Table.HeaderCell>Group</Table.HeaderCell>
-              {/* Set 1 only — sets 2/3 and the published pair live in the row
-                  expander so this stays a readable table, not ten columns. */}
-              <Table.HeaderCell className="text-right">
-                EV / RTP
-              </Table.HeaderCell>
-              <Table.HeaderCell>Odds</Table.HeaderCell>
-              <Table.HeaderCell>{t('packs.list.price')}</Table.HeaderCell>
-              <Table.HeaderCell className="text-right">
-                {t('packs.list.actions')}
-              </Table.HeaderCell>
-            </Table.Row>
-          </Table.Header>
-          <Table.Body>
-            {visibleRows.map((p) => {
-              const group = grouped.get(p.category) ?? [];
-              const pos = group.findIndex((x) => x.slug === p.slug);
-              const open = expanded.has(p.slug);
-              return (
-              <Fragment key={p.slug}>
-              <Table.Row
-                className="cursor-pointer"
-                onClick={() => navigate(`/packs/${p.slug}`)}
-              >
-                <Table.Cell>
-                  <div className="flex items-center gap-1">
-                    <span className="text-ui-fg-subtle w-6 tabular-nums">
-                      {pos + 1}
-                    </span>
-                    <IconButton
-                      size="small"
-                      variant="transparent"
-                      aria-label={t('packs.list.moveUp')}
-                      disabled={
-                        filtering ||
-                        pos <= 0 ||
-                        reorderPacks.isPending ||
-                        updatePack.isPending
-                      }
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void movePack(p, -1);
-                      }}
-                    >
-                      <ArrowUpMini />
-                    </IconButton>
-                    <IconButton
-                      size="small"
-                      variant="transparent"
-                      aria-label={t('packs.list.moveDown')}
-                      disabled={
-                        filtering ||
-                        pos >= group.length - 1 ||
-                        reorderPacks.isPending ||
-                        updatePack.isPending
-                      }
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void movePack(p, 1);
-                      }}
-                    >
-                      <ArrowDownMini />
-                    </IconButton>
-                  </div>
-                </Table.Cell>
-                <Table.Cell className="font-medium">{p.title}</Table.Cell>
-                <Table.Cell className="text-ui-fg-subtle">
-                  {p.category}
-                </Table.Cell>
-                <Table.Cell>
-                  <StatusBadge color={p.status === 'active' ? 'green' : 'grey'}>
-                    {p.status}
-                  </StatusBadge>
-                </Table.Cell>
-                <Table.Cell>
-                  {p.group ? (
-                    <Badge size="2xsmall" color={GROUP_COLOR[p.group]}>
-                      {p.group}
-                    </Badge>
-                  ) : (
-                    <span className="text-ui-fg-muted">—</span>
-                  )}
-                </Table.Cell>
-                <Table.Cell className="text-right">
-                  <div className="flex items-center justify-end gap-x-1">
-                    <span className="tabular-nums">
-                      {evRtp(p.ev.s1, p.rtp.s1)}
-                    </span>
-                    <Button
-                      size="small"
-                      variant="transparent"
-                      aria-expanded={open}
-                      aria-label={`${open ? 'Hide' : 'Show'} odds-set detail for ${p.title}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleExpanded(p.slug);
-                      }}
-                    >
-                      {open ? <ChevronDownMini /> : <ChevronRightMini />}
-                    </Button>
-                  </div>
-                </Table.Cell>
-                <Table.Cell>
-                  <StatusBadge color={p.published_odds ? 'green' : 'orange'}>
-                    {p.published_odds ? 'Published' : 'Not set'}
-                  </StatusBadge>
-                </Table.Cell>
-                <Table.Cell className="tabular-nums">{rm(p.price)}</Table.Cell>
-                <Table.Cell className="text-right">
-                  <div className="flex justify-end gap-2">
-                    <Button
-                      size="small"
-                      variant="secondary"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigate(`/packs/${p.slug}`);
-                      }}
-                    >
-                      {t('packs.list.winRates')}
-                    </Button>
-                    <Button
-                      size="small"
-                      variant="secondary"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openEdit(p);
-                      }}
-                    >
-                      {t('packs.list.edit')}
-                    </Button>
-                    <Button
-                      size="small"
-                      variant="transparent"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDeleteTarget(p);
-                      }}
-                    >
-                      {t('packs.list.delete')}
-                    </Button>
-                  </div>
-                </Table.Cell>
+        <div
+          className="overflow-x-auto"
+          tabIndex={0}
+          role="region"
+          aria-label="Packs table"
+        >
+          <Table>
+            <Table.Header>
+              <Table.Row>
+                <Table.HeaderCell>{t('packs.list.order')}</Table.HeaderCell>
+                {sortHeader('title', t('packs.list.pack'))}
+                {sortHeader('category', t('packs.list.category'))}
+                {sortHeader('status', t('packs.list.status'))}
+                {sortHeader('group', 'Group')}
+                {/* Set 1 only — sets 2/3 and the published pair live in the row
+                  expander so this stays a readable table, not ten columns.
+                  Sorts by RTP: "which pack leaks money" reads by RTP. */}
+                {sortHeader('rtp', 'EV / RTP', true)}
+                <Table.HeaderCell>Odds</Table.HeaderCell>
+                {sortHeader('price', t('packs.list.price'))}
+                <Table.HeaderCell className="text-right">
+                  {t('packs.list.actions')}
+                </Table.HeaderCell>
               </Table.Row>
-              {open && (
-                /* Sets 2 and 3 read IDENTICAL to set 1 while a pack is pure
+            </Table.Header>
+            <Table.Body>
+              {visibleRows.map((p) => {
+                const group = grouped.get(p.category) ?? [];
+                const pos = group.findIndex((x) => x.slug === p.slug);
+                const open = expanded.has(p.slug);
+                return (
+                  <Fragment key={p.slug}>
+                    <Table.Row
+                      className="cursor-pointer"
+                      onClick={() => navigate(`/packs/${p.slug}`)}
+                    >
+                      <Table.Cell>
+                        <div className="flex items-center gap-1">
+                          <span className="text-ui-fg-subtle w-6 tabular-nums">
+                            {pos + 1}
+                          </span>
+                          <IconButton
+                            size="small"
+                            variant="transparent"
+                            aria-label={t('packs.list.moveUp')}
+                            disabled={
+                              filtering ||
+                              sort !== null ||
+                              pos <= 0 ||
+                              reorderPacks.isPending ||
+                              updatePack.isPending
+                            }
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void movePack(p, -1);
+                            }}
+                          >
+                            <ArrowUpMini />
+                          </IconButton>
+                          <IconButton
+                            size="small"
+                            variant="transparent"
+                            aria-label={t('packs.list.moveDown')}
+                            disabled={
+                              filtering ||
+                              sort !== null ||
+                              pos >= group.length - 1 ||
+                              reorderPacks.isPending ||
+                              updatePack.isPending
+                            }
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void movePack(p, 1);
+                            }}
+                          >
+                            <ArrowDownMini />
+                          </IconButton>
+                        </div>
+                      </Table.Cell>
+                      <Table.Cell className="font-medium">{p.title}</Table.Cell>
+                      <Table.Cell className="text-ui-fg-subtle">
+                        {p.category}
+                      </Table.Cell>
+                      <Table.Cell>
+                        <StatusBadge
+                          color={p.status === 'active' ? 'green' : 'grey'}
+                        >
+                          {p.status}
+                        </StatusBadge>
+                      </Table.Cell>
+                      <Table.Cell>
+                        {p.group ? (
+                          <Badge size="2xsmall" color={GROUP_COLOR[p.group]}>
+                            {p.group}
+                          </Badge>
+                        ) : (
+                          <span className="text-ui-fg-muted">—</span>
+                        )}
+                      </Table.Cell>
+                      <Table.Cell className="text-right">
+                        <div className="flex items-center justify-end gap-x-1">
+                          <span className="tabular-nums">
+                            {evRtp(p.ev.s1, p.rtp.s1)}
+                          </span>
+                          <Button
+                            size="small"
+                            variant="transparent"
+                            aria-expanded={open}
+                            aria-label={`${open ? 'Hide' : 'Show'} odds-set detail for ${p.title}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleExpanded(p.slug);
+                            }}
+                          >
+                            {open ? <ChevronDownMini /> : <ChevronRightMini />}
+                          </Button>
+                        </div>
+                      </Table.Cell>
+                      <Table.Cell>
+                        <StatusBadge
+                          color={p.published_odds ? 'green' : 'orange'}
+                        >
+                          {p.published_odds ? 'Published' : 'Not set'}
+                        </StatusBadge>
+                      </Table.Cell>
+                      <Table.Cell className="tabular-nums">
+                        {rm(p.price)}
+                      </Table.Cell>
+                      <Table.Cell className="text-right">
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            size="small"
+                            variant="secondary"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(`/packs/${p.slug}`);
+                            }}
+                          >
+                            {t('packs.list.winRates')}
+                          </Button>
+                          <Button
+                            size="small"
+                            variant="secondary"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openEdit(p);
+                            }}
+                          >
+                            {t('packs.list.edit')}
+                          </Button>
+                          <Button
+                            size="small"
+                            variant="transparent"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeleteTarget(p);
+                            }}
+                          >
+                            {t('packs.list.delete')}
+                          </Button>
+                        </div>
+                      </Table.Cell>
+                    </Table.Row>
+                    {open && (
+                      /* Sets 2 and 3 read IDENTICAL to set 1 while a pack is pure
                    inheritance (no card carries a weight_2/weight_3 override) —
                    expected, not a bug: an unset per-set weight falls back
                    3→2→1. They diverge as soon as the odds editor overrides one. */
-                <Table.Row className="bg-ui-bg-subtle">
-                  {/* Plain <td>: Medusa types Table.Cell as HTMLAttributes,
+                      <Table.Row className="bg-ui-bg-subtle">
+                        {/* Plain <td>: Medusa types Table.Cell as HTMLAttributes,
                       which has no colSpan (its runtime <td> forwards it fine),
                       so the spanning cell can't use the component. */}
-                  <td colSpan={COLUMN_COUNT} className="pl-0 pr-6">
-                    <div className="grid max-w-xl grid-cols-3 gap-x-6 py-2">
-                      {(
-                        [
-                          ['Set 2', evRtp(p.ev.s2, p.rtp.s2)],
-                          ['Set 3', evRtp(p.ev.s3, p.rtp.s3)],
-                          ['Published', evRtp(p.pub_ev, p.pub_rtp)],
-                        ] as const
-                      ).map(([label, value]) => (
-                        <div key={label} className="flex flex-col">
-                          <Text size="xsmall" className="text-ui-fg-subtle">
-                            {label}
-                          </Text>
-                          <Text size="small" className="tabular-nums">
-                            {value}
-                          </Text>
-                        </div>
-                      ))}
-                    </div>
-                  </td>
-                </Table.Row>
-              )}
-              </Fragment>
-              );
-            })}
-          </Table.Body>
-        </Table>
+                        <td colSpan={COLUMN_COUNT} className="pl-0 pr-6">
+                          <div className="grid max-w-xl grid-cols-3 gap-x-6 py-2">
+                            {(
+                              [
+                                ['Set 2', evRtp(p.ev.s2, p.rtp.s2)],
+                                ['Set 3', evRtp(p.ev.s3, p.rtp.s3)],
+                                ['Published', evRtp(p.pub_ev, p.pub_rtp)],
+                              ] as const
+                            ).map(([label, value]) => (
+                              <div key={label} className="flex flex-col">
+                                <Text
+                                  size="xsmall"
+                                  className="text-ui-fg-subtle"
+                                >
+                                  {label}
+                                </Text>
+                                <Text size="small" className="tabular-nums">
+                                  {value}
+                                </Text>
+                              </div>
+                            ))}
+                          </div>
+                        </td>
+                      </Table.Row>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </Table.Body>
+          </Table>
         </div>
       )}
 

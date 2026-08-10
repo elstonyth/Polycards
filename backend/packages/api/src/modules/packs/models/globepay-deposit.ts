@@ -35,7 +35,17 @@ export const GlobePayDeposit = model
     // Our own lifecycle, NOT their numeric status: 'pending' covers every
     // non-final state (including their status 4 "VerifyFail", which the doc
     // marks explicitly non-final and which must never be read as failure).
-    status: model.enum(['pending', 'settled', 'failed']).default('pending'),
+    //
+    // 'expired' is NOT 'failed' and never becomes it automatically. 'failed'
+    // means the gateway said no; 'expired' means we stopped chasing a deposit
+    // it never ruled on. Collapsing the two (as this column did until
+    // Migration20260807120000) made an expired row unreachable forever: the
+    // sweep only scanned 'pending', so a bank transfer landing after the stale
+    // window credited nobody and nothing ever looked again. A late callback or
+    // the sweep's second scan tier can still settle an 'expired' row.
+    status: model
+      .enum(['pending', 'settled', 'failed', 'expired'])
+      .default('pending'),
     // Their raw numeric status from the last callback/requery, for support.
     gateway_status: model.number().nullable(),
     settled_at: model.dateTime().nullable(),

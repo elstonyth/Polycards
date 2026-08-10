@@ -3,7 +3,10 @@ import { Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
 import { GLOBEPAY_STALE_AFTER_MS } from '../../../../modules/packs/globepay-reconcile';
-import { parsePaginationParams } from '../../../../utils/pagination';
+import {
+  parsePaginationParams,
+  parseSortParam,
+} from '../../../../utils/pagination';
 
 // GET /admin/globepay/deposits — operator visibility into the GlobePay365
 // deposit table.
@@ -22,7 +25,17 @@ import { parsePaginationParams } from '../../../../utils/pagination';
 // legitimate operator visibility — the same call the Pull Ledger makes.
 
 // 'all' is a view, not a stored status: it drops the status filter entirely.
-const STATUS_FILTERS = ['pending', 'settled', 'failed', 'all'] as const;
+// 'expired' IS a stored status — the sweep writes it when it stopped chasing a
+// deposit the gateway never ruled on. It needs its own view precisely because
+// this page exists to answer "did somebody pay and not get credit?", and an
+// expired row is the strongest candidate for a yes.
+const STATUS_FILTERS = [
+  'pending',
+  'settled',
+  'failed',
+  'expired',
+  'all',
+] as const;
 type StatusFilter = (typeof STATUS_FILTERS)[number];
 
 /** Unknown/absent status falls back to 'pending' — the view that matters. */
@@ -32,6 +45,14 @@ export function parseStatusFilter(raw: unknown): StatusFilter {
     ? (raw as StatusFilter)
     : 'pending';
 }
+
+// Sortable columns are an allowlist, not a passthrough — `order` goes straight
+// into the query builder. Real columns only: customer_email and stale are
+// computed in JS after the page is fetched. The two money columns are
+// `bigNumber` fields, which store a numeric column plus a raw_* jsonb sidecar;
+// ordering targets the numeric column (proved against a real database in
+// integration-tests/http/globepay-reconcile.spec.ts, not just a mock).
+const SORTABLE = new Set(['created_at', 'amount_requested', 'amount_settled']);
 
 export async function GET(
   req: MedusaRequest,
@@ -49,18 +70,38 @@ export async function GET(
   // Pending sorts OLDEST first (the ['status','created_at'] index): the row most
   // likely to be a stranded payment is the one that has been waiting longest, so
   // it belongs at the top rather than buried on the last page. Every other view
-  // is a history read, where newest-first is what an operator expects.
+  // is a history read, where newest-first is what an operator expects. That
+  // status-dependent default only holds while the operator has NOT picked a
+  // sort — an explicit `?sort=` overrides it.
+  //
+  // `id` is the tiebreaker on BOTH paths, not just the sorted one: offset
+  // pagination needs a unique secondary key, and two deposits written in the
+  // same tick share a created_at often enough that a row can otherwise land on
+  // two pages or on neither. It cannot reorder rows with distinct created_at,
+  // so the default view's meaning is unchanged.
+  //
+  // The status-dependent direction is passed as the parser's FALLBACK, which is
+  // what makes it survive an unhonoured `?sort=` as well as an absent one:
+  // degrading a bad key to a hardcoded DESC would silently flip the pending
+  // view out of oldest-first, the one ordering this endpoint exists to give.
+  const defaultDir = status === 'pending' ? 'ASC' : 'DESC';
+  const { key, dir } = parseSortParam(
+    req.query.sort,
+    SORTABLE,
+    'created_at',
+    defaultDir,
+  );
+  const order: Record<string, 'ASC' | 'DESC'> = { [key]: dir, id: dir };
+
   const [rows, total] = await packs.listAndCountGlobePayDeposits(
     status === 'all' ? {} : { status },
-    {
-      skip: offset,
-      take: limit,
-      order: { created_at: status === 'pending' ? 'ASC' : 'DESC' },
-    },
+    { skip: offset, take: limit, order },
   );
 
   const customerIds = [
-    ...new Set(rows.map((r) => r.customer_id).filter((id): id is string => !!id)),
+    ...new Set(
+      rows.map((r) => r.customer_id).filter((id): id is string => !!id),
+    ),
   ];
   const customers = customerIds.length
     ? await customerService.listCustomers(
@@ -98,5 +139,9 @@ export async function GET(
       now - new Date(r.created_at).getTime() > GLOBEPAY_STALE_AFTER_MS,
   }));
 
+  // Identity-varying response carrying emails
+  // (CWE-524): a cached copy could outlive the admin session in a shared
+  // browser profile. Same rule as the store saved-accounts route.
+  res.setHeader('Cache-Control', 'no-store');
   res.json({ total, offset, limit, status, deposits });
 }

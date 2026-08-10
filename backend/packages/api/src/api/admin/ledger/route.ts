@@ -3,14 +3,26 @@ import { MedusaError, Modules } from '@medusajs/framework/utils';
 import type { ICustomerModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
-import { parsePaginationParams } from '../../../utils/pagination';
+import {
+  parsePaginationParams,
+  parseSortParam,
+} from '../../../utils/pagination';
 import {
   parseMytBound,
   type LedgerPayload,
   type LedgerType,
 } from '../../../modules/packs/ledger';
 
-const LEDGER_TYPES: LedgerType[] = ['TP', 'SP', 'SE', 'OD', 'RF', 'AD', 'WP', 'WD'];
+const LEDGER_TYPES: LedgerType[] = [
+  'TP',
+  'SP',
+  'SE',
+  'OD',
+  'RF',
+  'AD',
+  'WP',
+  'WD',
+];
 
 export type AdminLedgerRow = {
   id: string;
@@ -111,6 +123,17 @@ export async function GET(
     matchingCustomerIds = matches.map((c) => c.id);
   }
 
+  // Sortable columns are an allowlist (silent degrade, purchase-invoices
+  // precedent) — deliberately narrower than the SELECT list: customer name/
+  // email live in another module and the wallet/vault deltas render as one
+  // combined Affect cell, so neither is offered. The service re-maps the key
+  // through its own literal table before it reaches the raw ORDER BY.
+  const { key, dir } = parseSortParam(
+    req.query.sort,
+    new Set(['occurred_at', 'display_id', 'type']),
+    'occurred_at',
+  );
+
   const { entries, total } = await packs.listLedgerEntriesForAdmin({
     type,
     q,
@@ -119,6 +142,7 @@ export async function GET(
     to,
     limit,
     offset,
+    sort: { key: key as 'occurred_at' | 'display_id' | 'type', dir },
   });
 
   // ONE batched customer lookup for the whole page, never per row.
@@ -126,7 +150,10 @@ export async function GET(
   const rows = customerIds.length
     ? await customers.listCustomers(
         { id: customerIds },
-        { take: customerIds.length, select: ['id', 'email', 'first_name', 'last_name'] },
+        {
+          take: customerIds.length,
+          select: ['id', 'email', 'first_name', 'last_name'],
+        },
       )
     : [];
   const byId = new Map(rows.map((c) => [c.id, c]));
