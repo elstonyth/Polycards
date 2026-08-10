@@ -100,19 +100,30 @@ export async function GET(
   ];
   // slab_image is carried SEPARATELY from image so the storefront knows when
   // the art is a real graded slab (frameable, wears the prism frame) vs raw
-  // card art (not).
+  // card art (not). `handle` is the card's public route key — it is what lets a
+  // prize thumbnail link to /card/<handle>, the same "View Details" affordance
+  // the pack pool tiles have.
   const cards: Record<
     string,
-    { name: string; image: string; slab_image: string | null }
+    {
+      name: string;
+      handle: string;
+      image: string;
+      slab_image: string | null;
+    }
   > = {};
   if (cardIds.length > 0) {
     const rows = await packs.listCards(
       { id: cardIds },
-      { select: ['id', 'name', 'image', 'slab_image'], take: cardIds.length },
+      {
+        select: ['id', 'name', 'handle', 'image', 'slab_image'],
+        take: cardIds.length,
+      },
     );
     for (const c of rows) {
       cards[c.id] = {
         name: c.name,
+        handle: c.handle,
         image: c.slab_image ?? c.image,
         slab_image: c.slab_image ?? null,
       };

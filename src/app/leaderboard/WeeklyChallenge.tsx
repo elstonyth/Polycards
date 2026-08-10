@@ -1,8 +1,8 @@
 import Image from 'next/image';
 import { Trophy, Coins, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { SlabImage } from '@/components/SlabImage';
 import type { Challenge } from '@/lib/data/challenge';
+import { PrizeCard } from './PrizeCard';
 import { StageCarousel } from './StageCarousel';
 
 // The standard's rules block (页面介绍) — rendered under the live content.
@@ -216,32 +216,15 @@ export function WeeklyChallenge({ challenge }: { challenge: Challenge }) {
                       Top 3 will receive
                     </p>
                     <div className="mt-4 flex flex-wrap items-end justify-center gap-4 sm:justify-start">
-                      {summary.cards.map((c, i) =>
-                        // Same rule as the stage tiles: graded prizes wear the
-                        // prism frame, raw card art stays an unframed <img>.
-                        c.slabImage ? (
-                          <SlabImage
-                            key={`${c.name}-${i}`}
-                            src={c.image}
-                            slabSrc={c.slabImage}
-                            alt={c.name}
-                            frameVariant="prism"
-                            glowScale={0.4}
-                            sizes="384px"
-                            className="h-32"
-                          />
-                        ) : (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            key={`${c.name}-${i}`}
-                            src={c.image}
-                            alt={c.name}
-                            loading="lazy"
-                            decoding="async"
-                            className="h-32 object-contain drop-shadow-[0_10px_20px_rgba(0,0,0,0.6)]"
-                          />
-                        ),
-                      )}
+                      {summary.cards.map((c, i) => (
+                        <PrizeCard
+                          key={`${c.name}-${i}`}
+                          card={c}
+                          glowScale={0.4}
+                          sizes="384px"
+                          className="h-32"
+                        />
+                      ))}
                     </div>
                     <p className="mt-3 text-sm text-neutral-400">
                       Podium prize cards (ranks 1–3) from stages 1–

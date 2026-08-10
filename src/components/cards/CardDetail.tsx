@@ -197,7 +197,7 @@ export function CardDetail({
         {detail?.pcSyncedAt && (
           <p style={at(5)} className={cn(rise, 'text-[12px] text-white/50')}>
             Market price · synced {relativeTime(detail.pcSyncedAt)} via
-            PriceCharting
+            Proprietary Fair Market Value (FMV) Valuation Methodology
           </p>
         )}
       </div>

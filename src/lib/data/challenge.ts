@@ -22,6 +22,11 @@ import { parseOne, ChallengeSchema } from '@/lib/data/schemas';
 export interface ChallengeCard {
   name: string;
   image: string;
+  /** Public route key — drives the "View Details" link to /card/<handle>, the
+   *  same affordance the pack pool tiles carry. Null on an older backend that
+   *  doesn't send it; the thumbnail then renders unlinked rather than pointing
+   *  at a route that 404s. */
+  handle: string | null;
   /** The graded-slab composite, when the card has one. Only a real slab gets
    *  the prism frame — raw card art has the wrong aspect for the band. */
   slabImage: string | null;
@@ -156,14 +161,27 @@ export async function getChallenge(): Promise<Challenge | null> {
     const data = parseOne(ChallengeSchema, raw);
     if (!data || !data.active || data.stages.length === 0) return null;
 
+    // ONE mapper for every prize thumbnail on the page (summary, per-stage
+    // rank table, standings prize column), so a field added to the payload
+    // reaches all three surfaces or none — they used to construct the shape
+    // inline in three places.
+    const toCard = (c: {
+      name: string;
+      image: string;
+      handle?: string | null;
+      slab_image?: string | null;
+    }): ChallengeCard => ({
+      name: c.name,
+      image: c.image,
+      handle: c.handle ?? null,
+      slabImage: c.slab_image ?? null,
+    });
     // Flat resolver: drop ids the backend couldn't resolve (deleted card).
     // Used for the summary, where order/rank don't matter.
     const resolveCards = (ids: string[]): ChallengeCard[] =>
       ids.flatMap((id) => {
         const c = data.cards[id];
-        return c
-          ? [{ name: c.name, image: c.image, slabImage: c.slab_image ?? null }]
-          : [];
+        return c ? [toCard(c)] : [];
       });
     // Resolver for a stage per-rank prize table. `rank` comes from the row
     // itself, so an unresolvable card id can never shift a lower rank under the
@@ -184,13 +202,7 @@ export async function getChallenge(): Promise<Challenge | null> {
               rank: r.rank,
               // slabImage drives the prism frame: only a real graded slab is
               // framed, raw card art has the wrong aspect for the band.
-              card: c
-                ? {
-                    name: c.name,
-                    image: c.image,
-                    slabImage: c.slab_image ?? null,
-                  }
-                : null,
+              card: c ? toCard(c) : null,
               credits,
               creditsLabel: credits > 0 ? rm0(credits) : null,
             },
@@ -242,13 +254,7 @@ export async function getChallenge(): Promise<Challenge | null> {
       return [
         {
           rank,
-          cards: cards
-            .map((c) => ({
-              name: c.name,
-              image: c.image,
-              slabImage: c.slab_image ?? null,
-            }))
-            .reverse(),
+          cards: cards.map(toCard).reverse(),
           creditsLabel: credits > 0 ? rm0(credits) : null,
         },
       ];

@@ -430,13 +430,18 @@ medusaIntegrationTestRunner({
         });
         // slab_image is emitted per card (null when the card has no graded
         // slab, as here) so the storefront can pick the prism-framed path.
+        // handle is the /card/<handle> route key behind each prize thumbnail's
+        // "View Details" link — without it the storefront renders the art
+        // unlinked, so this asserts the field, not just the shape.
         expect(body.cards[cxId]).toEqual({
           name: 'X',
+          handle: SC_X,
           image: '/x.webp',
           slab_image: null,
         });
         expect(body.cards[cyId]).toEqual({
           name: 'Y',
+          handle: SC_Y,
           image: '/x.webp',
           slab_image: null,
         });

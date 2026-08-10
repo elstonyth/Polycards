@@ -8,7 +8,6 @@ import { useState } from 'react';
 import { useReducedMotion } from 'motion/react';
 import { Check, Lock } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { SlabImage } from '@/components/SlabImage';
 import type {
   ChallengeCard,
   ChallengeRankReward,
@@ -16,6 +15,7 @@ import type {
   ChallengeStageState,
 } from '@/lib/data/challenge';
 import { GalleryRail } from '@/app/slots/[slug]/GalleryRail';
+import { PrizeCard } from './PrizeCard';
 import { RankRewardSheet } from './RankRewardSheet';
 
 // Medal-gradient rank numerals (#1ST gold / #2ND silver / #3RD bronze) — the
@@ -115,8 +115,8 @@ function StageCard({
           is carried on the row, so a dropped card never shifts a lower one
           under the wrong numeral — plus a 4th tile that OPENS the ranks 4-10
           sheet (the per-rank table can hold seven more prizes than this grid
-          can show). Plain <img> (admin picker pattern) so backend-hosted art
-          needs no Next remote-image config. */}
+          can show). PrizeCard renders the art unoptimised (admin picker
+          pattern), so backend-hosted art needs no Next remote-image config. */}
       <div className="mt-4 grid grid-cols-2 gap-2">
         {podium.map((r) => (
           <div
@@ -124,30 +124,17 @@ function StageCard({
             className="flex flex-col rounded-xl border border-white/5 bg-white/[0.04] p-2.5"
           >
             <RankNumeral rank={RANKS[r.rank - 1]!} />
-            {/* Graded prizes wear the prism frame (the challenge own cosmetic
-                frame); raw card art has the wrong aspect for the band, so it
-                stays a plain <img>. Halo scaled right down — at this size the
-                full 44px glow is wider than the card. */}
-            {r.card.slabImage ? (
-              <SlabImage
-                src={r.card.image}
-                slabSrc={r.card.slabImage}
-                alt=""
-                frameVariant="prism"
-                glowScale={0.25}
-                sizes="256px"
-                className="mx-auto mt-2 h-20"
-              />
-            ) : (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={r.card.image}
-                alt=""
-                loading="lazy"
-                decoding="async"
-                className="mx-auto mt-2 h-20 object-contain drop-shadow-[0_8px_16px_rgba(0,0,0,0.6)]"
-              />
-            )}
+            {/* Halo scaled right down — at this size the full 44px glow is
+                wider than the card. The frame rule (graded slab → prism, raw
+                art → plain img) and the "View Details" link live in
+                PrizeCard. */}
+            <PrizeCard
+              card={r.card}
+              glowScale={0.25}
+              sizes="256px"
+              className="mx-auto mt-2 h-20"
+              compact
+            />
             <p className="mt-2 line-clamp-2 text-[10px] leading-tight font-semibold tracking-wide text-neutral-300 uppercase">
               {r.card.name}
             </p>

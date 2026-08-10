@@ -6,7 +6,7 @@ import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import type { ChallengeRankReward } from '@/lib/data/challenge';
 import { useModalA11y } from '@/lib/use-modal-a11y';
-import { SlabImage } from '@/components/SlabImage';
+import { PrizeCard } from './PrizeCard';
 
 /** The per-rank prize rows themselves — one row per CONFIGURED rank, with its
  *  card and/or credits. Split out of the sheet (same reason as OddsSheet's
@@ -37,28 +37,18 @@ export function RankRewardList({
           <span className="font-heading w-10 shrink-0 text-base leading-none text-white/70 italic">
             #{r.rank}
           </span>
-          {/* Graded slabs wear the prism frame, same as the podium tiles;
-              raw card art has the wrong aspect for the band and stays a plain
-              <img>; a credits-only rank shows the coin stack. */}
-          {r.card?.slabImage ? (
-            <SlabImage
-              src={r.card.image}
-              slabSrc={r.card.slabImage}
-              alt=""
-              frameVariant="prism"
-              glowScale={0.18}
-              sizes="128px"
-              className="h-14 shrink-0"
-            />
-          ) : r.card ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={r.card.image}
-              alt=""
-              loading="lazy"
-              decoding="async"
-              className="h-14 w-10 shrink-0 object-contain drop-shadow-[0_6px_12px_rgba(0,0,0,0.6)]"
-            />
+          {/* Prize art + its "View Details" link live in PrizeCard; a
+              credits-only rank shows the coin stack instead. */}
+          {r.card ? (
+            <span className="w-10 shrink-0">
+              <PrizeCard
+                card={r.card}
+                glowScale={0.18}
+                sizes="128px"
+                className="h-14"
+                compact
+              />
+            </span>
           ) : (
             // eslint-disable-next-line @next/next/no-img-element
             <img
