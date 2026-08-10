@@ -12,6 +12,10 @@
  */
 export const CHALLENGE_PACK_PREFIX = 'challenge-';
 
+/** SQL LIKE pattern for the same convention, for queries that must select
+ *  prize pulls without loading them first. */
+export const CHALLENGE_PACK_LIKE = `${CHALLENGE_PACK_PREFIX}%`;
+
 /** Synthetic pack id for the week's prize pulls. */
 export const challengePackId = (weekStartIso: string): string =>
   `${CHALLENGE_PACK_PREFIX}${weekStartIso.slice(0, 10)}`;

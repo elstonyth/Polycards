@@ -7,6 +7,7 @@ import {
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
 import { findCardInventoryTarget } from '../../modules/packs/card-stock';
+import { isChallengePrizePack } from '../../modules/packs/challenge-prize';
 import {
   buybackAmount,
   resolveBuybackRate,
@@ -75,9 +76,12 @@ export const buybackPullStep = createStep(
           : 'This card was already sold back.';
       throw new MedusaError(MedusaError.Types.NOT_ALLOWED, reason);
     }
-    // C1: reward prizes are not sellable — guard before listCards so the
-    // sentinel card_id (product handle) never reaches the card lookup.
-    if (pull.source === 'reward') {
+    // C1: reward-BOX prizes are not sellable — guard before listCards so the
+    // sentinel card_id (a product handle, not a card) never reaches the card
+    // lookup. Weekly-challenge prizes share source='reward' but not that
+    // shape: they carry a real card handle and are sellable like any pulled
+    // card (operator decision), so the sentinel rationale doesn't apply.
+    if (pull.source === 'reward' && !isChallengePrizePack(pull.pack_id)) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
         "Reward prizes can't be sold back",

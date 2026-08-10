@@ -7,13 +7,10 @@ import {
   displayMarketPrice,
   resolveFxRate,
 } from '../../../../modules/packs/pricing';
-import { bestRarity } from '../../../../modules/packs/rarity';
+import { bestLiveTierByHandle } from '../../../../modules/packs/card-tier';
 
 const HISTORY_DAYS = 30;
 const HISTORY_MAX_ROWS = 60;
-// A card in more packs than this is not a real catalogue shape; the cap keeps
-// one deep link from scanning an unbounded odds table.
-const ODDS_SCAN_MAX = 50;
 
 // GET /store/cards/:handle — public display fields for ONE card, powering the
 // storefront card-detail view (deep links + the 60s price refresh).
@@ -58,33 +55,10 @@ export async function GET(
   //
   // When the view is opened FROM a pack/vault/feed, that context's rarity still
   // wins client-side; this value only covers direct /card/<handle> visits.
-  // Ordered even under the cap: an unordered LIMIT is nondeterministic in
-  // Postgres, and the failure that buys you is a card's frame flickering
-  // between tiers on refresh — miserable to reproduce, free to prevent.
-  const oddsRows = await packs.listPackOdds(
-    { card_id: handle },
-    { take: ODDS_SCAN_MAX, order: { created_at: 'ASC' } },
-  );
-  const packSlugs = [...new Set(oddsRows.map((o) => o.pack_id))];
-  // "Openable" means what the public catalogue means by it (store/packs
-  // route.ts:41): active AND not a reward_box, which is an internal draw pool.
-  // Without the category clause a card sitting in a draw pool at a high tier
-  // would inherit that tier on a deep link nobody can trace to a pack.
-  const livePacks = packSlugs.length
-    ? await packs.listPacks(
-        {
-          slug: packSlugs,
-          status: 'active',
-          category: { $ne: 'reward_box' },
-        } as Parameters<typeof packs.listPacks>[0],
-        { take: packSlugs.length, select: ['slug'] },
-      )
-    : [];
-  const liveSlugs = new Set(livePacks.map((p) => p.slug));
-  const liveRows = oddsRows.filter((o) => liveSlugs.has(o.pack_id));
-  const rarity = bestRarity(
-    (liveRows.length > 0 ? liveRows : oddsRows).map((o) => o.rarity),
-  );
+  // Shared with the vault so the same card can't wear one tier here and
+  // another there (see modules/packs/card-tier.ts for the "openable" rule).
+  const rarity =
+    (await bestLiveTierByHandle(packs, [handle])).get(handle) ?? null;
 
   const since = new Date(Date.now() - HISTORY_DAYS * 24 * 60 * 60 * 1000);
   const history = await packs.listCardPriceHistories(
