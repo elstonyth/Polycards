@@ -3,13 +3,15 @@ import type {
   AuthenticatedMedusaRequest,
   MedusaResponse,
 } from '@medusajs/framework/http';
-import { MedusaError, Modules } from '@medusajs/framework/utils';
+import { MedusaError } from '@medusajs/framework/utils';
 import {
   deleteFilesWorkflow,
   uploadFilesWorkflow,
 } from '@medusajs/medusa/core-flows';
 import sharp from 'sharp';
 import { validateImage } from '../../../admin/media/validate';
+import { PACKS_MODULE } from '../../../../modules/packs';
+import type PacksModuleService from '../../../../modules/packs/service';
 
 // Tighter than the shared 20 MB multer edge cap — avatars are small.
 const AVATAR_MAX_BYTES = 5 * 1024 * 1024;
@@ -27,14 +29,52 @@ type UploadedFile = {
   size: number;
 };
 
+/**
+ * The avatar route's metadata merge, factored out of the handler so the
+ * cross-writer property is directly assertable without standing up sharp, the
+ * file provider and the upload workflow: an avatar upload must carry every key
+ * it does not own (bank_accounts, equipped_frame_level, handle) through
+ * untouched.
+ *
+ * `previousFileId` comes out alongside the next blob rather than being read
+ * separately, because the cleanup it feeds must be derived from the SAME read
+ * the write is derived from — see the call site.
+ */
+export function mergeAvatarMetadata(
+  metadata: Record<string, unknown>,
+  uploaded: { url: string; fileId: string | null },
+): { metadata: Record<string, unknown>; previousFileId: string | null } {
+  return {
+    previousFileId:
+      typeof metadata.avatar_file_id === 'string'
+        ? metadata.avatar_file_id
+        : null,
+    metadata: {
+      ...metadata,
+      avatar_url: uploaded.url,
+      avatar_file_id: uploaded.fileId,
+    },
+  };
+}
+
 // POST /store/profile/avatar — the logged-in customer's profile photo.
 // Same validation pipeline as /admin/media (declared-type allowlist +
 // magic-byte sniff + dimension gates, 'avatar' profile) with a 5 MB cap.
 // Stores the original via the configured file provider and writes
 // customer.metadata.avatar_url. Metadata is MERGED (read-modify-write) so
-// equipping a frame and changing the photo never clobber each other; the
-// stock POST /store/customers/me rejects client metadata, so these keys are
-// written only here and in /store/profile/frame.
+// equipping a frame and changing the photo never clobber each other. These keys
+// are written only here and in /store/profile/frame — but that is enforced by
+// OUR middleware, not the framework: Medusa's stock POST /store/customers/me
+// accepts client metadata (StoreUpdateCustomer declares it `nullish()` and the
+// route forwards req.validatedBody), and rejectCustomerMetadata
+// (../../../utils/customer-metadata-guard.ts, wired at middlewares.ts:405
+// and :419) is what refuses it. Since plan 088 that guard also gates saved
+// payout destinations, so it is a money control now — see
+// store/credits/withdraw/accounts/route.ts. The merge runs through
+// PacksModuleService.mutateCustomerMetadata so the read and the write are
+// serialized on a `metadata:<customer>` advisory lock — the blob is shared with
+// the saved-bank-account route, and an unlocked merge here silently drops an
+// account the customer saved a moment earlier.
 export async function POST(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
@@ -124,27 +164,33 @@ export async function POST(
     );
   }
 
-  const customers = req.scope.resolve(Modules.CUSTOMER);
-  const customer = await customers.retrieveCustomer(customerId);
-  // Provider file id of the photo being replaced — avatars uploaded before
-  // this field existed have none and are simply left in place.
-  const previousFileId =
-    typeof customer.metadata?.avatar_file_id === 'string'
-      ? customer.metadata.avatar_file_id
-      : null;
-  await customers.updateCustomers(customerId, {
-    metadata: {
-      ...(customer.metadata ?? {}),
-      avatar_url: url,
-      avatar_file_id: uploaded.id ?? null,
+  const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+  // Provider file id of the photo being replaced — avatars uploaded before this
+  // field existed have none and are simply left in place. Captured from the
+  // blob read INSIDE the lock: a pre-lock read could name a file a concurrent
+  // upload has already replaced, and the cleanup below would delete the LIVE
+  // photo.
+  const replaced: { fileId: string | null } = { fileId: null };
+  await packs.mutateCustomerMetadata({
+    customerId,
+    mutate: (metadata) => {
+      const merged = mergeAvatarMetadata(metadata, {
+        url,
+        fileId: uploaded.id ?? null,
+      });
+      replaced.fileId = merged.previousFileId;
+      return merged.metadata;
     },
   });
 
   // Best-effort cleanup of the replaced photo so re-uploads don't accumulate
   // orphaned objects in the file provider — never fail the upload over it.
-  if (previousFileId && previousFileId !== uploaded.id) {
+  // Deliberately OUTSIDE the mutator: a file-provider round trip must not be
+  // held under the metadata lock, and its swallowed failure must stay swallowed
+  // rather than becoming a transaction rollback.
+  if (replaced.fileId && replaced.fileId !== uploaded.id) {
     await deleteFilesWorkflow(req.scope)
-      .run({ input: { ids: [previousFileId] } })
+      .run({ input: { ids: [replaced.fileId] } })
       .catch(() => undefined);
   }
 

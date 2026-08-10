@@ -301,6 +301,13 @@ export type SavedBankAccount = {
   bankName: string;
   accountNumber: string;
   accountHolderName: string;
+  /**
+   * When this destination may receive a payout — the server's verdict, never
+   * recomputed here. A future instant = saved but still cooling off; null (or
+   * absent) = it cannot be paid to at all until it is saved again. Both render
+   * as visible-and-disabled; neither is hidden, which would read as a bug.
+   */
+  usableFrom?: string | null;
 };
 
 export type SavedBankAccountsResult =
@@ -433,12 +440,15 @@ export type StartWithdrawalResult =
  * completes asynchronously, and a failed payout refunds the debit — so the
  * money is never both spendable and in flight. No Idempotency-Key: the backend
  * mints a fresh reference per attempt, and each attempt debits atomically.
+ *
+ * Takes an `accountId`, never bank details: the destination is resolved
+ * server-side from the caller's own saved accounts, inside the transaction that
+ * debits. Do not re-add bank fields here — the backend ignores them, and
+ * accepting them would suggest they still decide something.
  */
 export async function startWithdrawal(input: {
   amount: number;
-  bankCode: string;
-  accountNumber: string;
-  accountHolderName: string;
+  accountId: string;
 }): Promise<StartWithdrawalResult> {
   // Validate at the boundary — a server action is a public endpoint.
   if (
@@ -448,12 +458,8 @@ export async function startWithdrawal(input: {
   ) {
     return { ok: false, error: 'Enter a valid amount.' };
   }
-  if (
-    typeof input.bankCode !== 'string' ||
-    typeof input.accountNumber !== 'string' ||
-    typeof input.accountHolderName !== 'string'
-  ) {
-    return { ok: false, error: 'Fill in every bank field.' };
+  if (typeof input.accountId !== 'string' || input.accountId === '') {
+    return { ok: false, error: 'Select a saved bank account.' };
   }
 
   const token = await getAuthToken();
@@ -469,9 +475,7 @@ export async function startWithdrawal(input: {
         headers: { Authorization: `Bearer ${token}` },
         body: {
           amount: input.amount,
-          bank_code: input.bankCode,
-          account_number: input.accountNumber,
-          account_holder_name: input.accountHolderName,
+          account_id: input.accountId,
         },
       }),
     );

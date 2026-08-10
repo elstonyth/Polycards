@@ -9,9 +9,11 @@ import { MedusaError } from '@medusajs/framework/utils';
 import multer from 'multer';
 import {
   createAdminActionRateLimit,
+  createAuthIdentifierRateLimit,
   createAuthRateLimit,
   createCreditTopupRateLimit,
   createDeliveryWriteRateLimit,
+  createGatewayHookRateLimit,
   createNotificationReadAllRateLimit,
   createNotificationReadRateLimit,
   createPackOpenBatchRateLimit,
@@ -39,7 +41,10 @@ import {
   blockDisabledCustomerSession,
   blockDisabledEmailpassLogin,
 } from './utils/disabled-guard';
-import { noStoreForAuthenticatedStore } from './utils/cache-headers';
+import {
+  noStoreForAuthenticatedAdmin,
+  noStoreForAuthenticatedStore,
+} from './utils/cache-headers';
 
 // Custom-route middleware. /store/* is NOT a default customer-protected prefix
 // (only /store/customers/me/* is), so every customer-owned route here must opt
@@ -65,6 +70,13 @@ import { noStoreForAuthenticatedStore } from './utils/cache-headers';
 // together in the UI, so they share one budget (and one Redis connection).
 const storeReadRateLimit = createStoreReadRateLimit();
 const authRateLimit = createAuthRateLimit();
+// The per-identifier (per-email) credential tier. ONE instance shared by every
+// credential matcher below: they are one budget per account across login,
+// register and reset, and one instance also means one Redis connection fronting
+// the single `rl:auth-identifier:` keyspace (two instances would share the
+// Redis budget but NOT the in-memory failover budget — split-brain when Redis
+// blips).
+const authIdentifierRateLimit = createAuthIdentifierRateLimit();
 // Shared by ALL write-tier matchers below (delivery-order writes, rewards
 // claim/withdraw, daily draw, avatar upload, verified phone change): one
 // budget + one Redis connection, distinct from the read budget. The 429
@@ -86,6 +98,10 @@ const profileAppearanceRateLimit = createProfileAppearanceRateLimit();
 // budget and one Redis connection (a compromised admin token is throttled
 // across all mutation routes together).
 const adminActionRateLimit = createAdminActionRateLimit();
+// One instance for all three GlobePay365 callback routes: they are one
+// gateway's traffic against one abuse ceiling, so one budget and one Redis
+// connection (see createGatewayHookRateLimit for the sizing rationale).
+const gatewayHookRateLimit = createGatewayHookRateLimit();
 
 // In-memory multipart parsing for the custom image-upload route. memoryStorage
 // hands the route a Buffer (no temp files); the 20 MB cap is the hard edge gate
@@ -233,15 +249,63 @@ export default defineMiddlewares({
     // (/auth/customer/*, /auth/user/*, ...). Token refresh is NOT matched —
     // it is high-frequency, already requires a valid token, and throttling it
     // would log users out under normal use.
+    //
+    // TWO independent tiers, per-identifier FIRST so a hammered account 429s
+    // before spending the sitewide budget — the same ordering rule (and the
+    // same reason) as the OTP matchers below: the storefront issues every
+    // credential request from a server action, so in prod the backend sees ONE
+    // egress IP for every visitor and an IP-only limiter here is a single
+    // sitewide bucket. See the "Phone-OTP limiters" comment in
+    // utils/rate-limit.ts for the full shared-egress-IP rationale.
+    //
+    // The wildcard matcher also covers .../emailpass/update (reset completion),
+    // which carries a token + password and NO identifier. authIdentifierRateLimit
+    // is built with skipWhenNoKey, so it steps aside there instead of degrading
+    // into a sitewide IP bucket with per-account numbers; that route's budget is
+    // authRateLimit alone, exactly as before this tier existed.
     {
       matcher: '/auth/*/emailpass',
       method: 'POST',
-      middlewares: [authRateLimit],
+      middlewares: [authIdentifierRateLimit, authRateLimit],
     },
     {
       matcher: '/auth/*/emailpass/*',
       method: 'POST',
-      middlewares: [authRateLimit],
+      middlewares: [authIdentifierRateLimit, authRateLimit],
+    },
+    {
+      // GlobePay365 callbacks (deposit / withdrawal / payout-verify). These
+      // routes are deliberately UNAUTHENTICATED — a webhook carries no token
+      // and its authentication is the RSA signature over the decrypted
+      // payload — so this limiter is the ONLY thing bounding an anonymous
+      // caller on an endpoint that must decrypt before it can verify (§1.16).
+      // It is a ceiling, never a substitute for the signature check.
+      //
+      // Matcher shape verified empirically against the INSTALLED packages
+      // (express 4.22.2 + path-to-regexp 0.1.13 at packages/api/node_modules),
+      // not assumed: this entry carries a `method`, so define-middlewares.js:17
+      // gives it `methods: ['POST']` and router.js:189 takes the
+      // `app.post(matcher, …)` branch — the ROUTE form, compiled with
+      // `end: true` as /^\/hooks\/globepay\/(.*)\/?$/i (the `app.use` branch's
+      // `end: false` form does NOT apply here). Booting a real express app with
+      // that registration, all three hook paths match, as do their
+      // trailing-slash and mixed-case variants (strict:false, caseSensitive:
+      // false — and the routes themselves match those too, so coverage is not
+      // dodgeable); '/hooks/globepay', '/hooks', '/hooksfoo/bar',
+      // '/hooks/globepayfoo/deposit' and '/store/credits/deposit' do not.
+      //
+      // It also runs BEFORE those routes' own handlers, which is what makes it
+      // more than decoration: router.js:107-110 sorts ONE list
+      // (`[].concat(middlewares).concat(routes)`) and registers in that order,
+      // and under the shared /hooks/globepay branch this entry's last segment
+      // '*' lands in the sorter's `wildcard` bucket while each route's
+      // 'deposit'/'withdrawal'/'payout-verify' lands in `static` — wildcard
+      // precedes static in the default orderBy. Replayed through the real
+      // RoutesSorter with the routes listed both after AND before this entry:
+      // the middleware sorts first either way.
+      matcher: '/hooks/globepay/*',
+      method: 'POST',
+      middlewares: [gatewayHookRateLimit],
     },
     {
       // OTP send — TWO independent limiter tiers, per-phone FIRST so a
@@ -286,6 +350,19 @@ export default defineMiddlewares({
       // brute-force budget rather than deliveryWriteRateLimit (that one's for
       // authed writes; this is a credential-issuing endpoint, same family as
       // login/register below).
+      //
+      // Deliberately NOT on authIdentifierRateLimit: the body is only
+      // { token } — a phone-possession proof, no email — so there is nothing
+      // for emailBodyKeyOf to read, and the only identifier available is the
+      // phone INSIDE the proof, which a middleware could reach only by
+      // re-running the HMAC verification the route already does
+      // (utils/phone-verification.ts verifyPhoneProof). Duplicating credential
+      // verification inside a rate limiter is not worth it, because this route
+      // already has a genuine per-identifier bound one hop upstream: a caller
+      // cannot obtain the proof without spending
+      // createPhoneOtpCheckPhoneRateLimit's per-number budget (30/24h) on
+      // /store/phone-verification/check. authRateLimit (IP) is the sitewide
+      // circuit breaker on top of that.
       matcher: '/store/phone-verification/password-reset',
       method: 'POST',
       middlewares: [authRateLimit],
@@ -805,6 +882,13 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      // Edit a queued challenge in place (POST /admin/challenge/schedule/:id)
+      // — same credit-minting surface as queueing one, same admin budget.
+      matcher: '/admin/challenge/schedule/*',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
       // Drop a queued challenge (DELETE /admin/challenge/schedule/:id).
       matcher: '/admin/challenge/schedule/*',
       method: 'DELETE',
@@ -848,6 +932,22 @@ export default defineMiddlewares({
       // -wide; same admin money-mutation budget as site-settings.
       matcher: '/admin/avatar-frames',
       method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Per-row bank-account reveal (GET /admin/globepay/withdrawals/:id/account).
+      // The ONE deliberate READ on this limiter — every other matcher sharing
+      // adminActionRateLimit is a POST or a DELETE (checked across the whole
+      // array, not just the neighbours), so do not read this as a mutation.
+      // The generous admin budget (30/10s burst, 200/60s) is what keeps the
+      // reveal usable: an operator working a dispute queue must not be 429'd
+      // back to the database console. It shares that budget
+      // because the withdrawals list masks account_number and this is the only
+      // route that still serves one in full: throttled, it stays a per-dispute
+      // lookup; unthrottled, a compromised admin token walks the table and
+      // re-derives exactly the bulk view the masking removed.
+      matcher: '/admin/globepay/withdrawals/*/account',
+      method: 'GET',
       middlewares: [adminActionRateLimit],
     },
     {
@@ -915,6 +1015,35 @@ export default defineMiddlewares({
         noStoreForAuthenticatedStore,
         blockDisabledCustomerSession,
       ],
+    },
+    // The /admin twin of the entry above — read the two as a pair. Same
+    // blanket-matcher rationale: the framework registers
+    // `app.use('/admin', authenticate('user', ['bearer','session','api-key']))`
+    // (router.js:89) BEFORE any middleware from this file, so req.auth_context
+    // is populated wherever the sorter places this, and every /admin route —
+    // including the 61 with no Cache-Control of their own and any added next
+    // month — is covered without anyone remembering to opt in.
+    //
+    // Matcher '/admin/*', not '/admin': the sorter DROPS a zero-segment
+    // matcher (see the '/*' comment above), and a bare '/admin' would match
+    // only the namespace root, which has no route.ts here. '*' spans '/' under
+    // the installed path-to-regexp 0.1.13, so '/admin/*' covers every nested
+    // admin path. Compiled regex, checked against the installed package rather
+    // than recalled: /^\/admin\/(.*)\/?$/i in route form, and — because this
+    // entry has no `method`, so registerExpressHandler takes the
+    // `app.use(matcher, …)` branch (router.js:200) — /^\/admin\/(.*)\/?(?=\/|$)/i
+    // as actually registered. Both match every /admin/… path and neither
+    // matches bare '/admin', '/cdn/cards/*', '/store/*' or '/adminfoo/bar'.
+    //
+    // This is additive, never a reorder: no method filter, no early return,
+    // just setHeader + next(). The sorter puts a wildcard entry ahead of the
+    // static/params ones, so it runs BEFORE adminActionRateLimit on the
+    // money-mutation routes — both still run, and their relative order is
+    // unchanged (verified by replaying the real RoutesSorter over the matcher
+    // list with and without this entry).
+    {
+      matcher: '/admin/*',
+      middlewares: [noStoreForAuthenticatedAdmin],
     },
   ],
 });

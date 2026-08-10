@@ -84,19 +84,23 @@ check(
   hiddenVal,
 );
 
-await countrySelect.selectOption('GB');
-const hiddenGb = await page
-  .locator('input[type="hidden"][name="phone"]')
-  .inputValue();
+// The country-switch round-trip used to select GB here. The picker now offers
+// only the countries the backend will actually SMS (ALLOWED_PHONE_COUNTRIES /
+// ALLOWED_SMS_COUNTRIES), so there is no second option to switch to; restore
+// this check if the allowlist ever widens.
+// `=== 1`, not a comparison of two counts: equal counts are also true when both
+// are 0, i.e. when the picker never rendered — a check that passes hardest when
+// the thing under test is missing.
+const optionCount = await countrySelect.locator('option').count();
 check(
-  'country switch re-prefixes the number',
-  hiddenGb.startsWith('+44'),
-  hiddenGb,
+  'picker offers exactly the one served country',
+  optionCount === 1 &&
+    (await countrySelect.locator('option[value="MY"]').count()) === 1,
+  `${optionCount} option(s)`,
 );
 await page.screenshot({ path: `${OUT}/signup-country-picker.png` });
 
 // invalid number → inline error
-await countrySelect.selectOption('MY');
 await page.locator('input[name="username"]').fill('bibibo');
 await page.locator('input[name="email"]').fill('demo@example.com');
 await page.getByLabel('Phone number').fill('123');
