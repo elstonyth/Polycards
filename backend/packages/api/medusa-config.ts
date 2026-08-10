@@ -3,6 +3,7 @@ import { DashboardModuleOptions } from '@mercurjs/types';
 import path from 'path';
 import { assertMockTopupSafe } from './src/modules/packs/topup';
 import { isResendConfigured } from './src/modules/resend/options';
+import { resolvePhoneGateState } from './src/utils/phone-verification';
 import { productionDatabaseDriverOptions } from './src/utils/db-driver-options';
 loadEnv(process.env.NODE_ENV || 'development', process.cwd());
 
@@ -11,6 +12,25 @@ loadEnv(process.env.NODE_ENV || 'development', process.cwd());
 // (ALLOW_MOCK_TOPUP=true in prod). Runs at config load, the same fail-fast point
 // as the JWT/COOKIE secret checks below.
 assertMockTopupSafe(process.env);
+
+// Boot EVIDENCE, not a guard — the opposite of the line above, deliberately.
+// The phone gates fail OPEN (CONTEXT.md's documented rollback lever, flipped
+// twice under time pressure on 2026-08-07) and a fail-open deploy is a
+// legitimate configuration, so this must never throw. What was missing is any
+// record of WHICH state booted: a typo in a .do spec, a partially-applied spec
+// or a rebuild that misses the Dockerfile ARG silently disarms signup proof,
+// the /me phone-write block and every money gate. Console is the only logger
+// available at config load (no container yet). Resolved booleans only — never
+// a raw env value.
+const phoneGate = resolvePhoneGateState(process.env);
+console.info(
+  `[phone-gate] write=${phoneGate.phoneVerificationRequired} ` +
+    `money=${phoneGate.phoneGateRequired} ` +
+    `twilio=${phoneGate.twilioConfigured ? 'configured' : 'unconfigured'}`,
+);
+for (const warning of phoneGate.warnings) {
+  console.warn(`[phone-gate] ${warning}`);
+}
 
 // Secrets pass through UNDEFINED when unset so Medusa's own ConfigManager
 // gate stays live: it already fail-fasts in production on a missing

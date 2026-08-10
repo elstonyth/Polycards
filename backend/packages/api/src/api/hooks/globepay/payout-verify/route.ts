@@ -53,6 +53,24 @@ export async function POST(
     return;
   }
 
+  // Same guard as the two callback hooks: the signature proves GlobePay sent
+  // this, not that the payout is ours. Note it reads data.MerchantCode, the
+  // SIGNED copy — PayoutVerifyBody declares an envelope MerchantCode too, and
+  // that one is attacker-mutable, so checking it would guard nothing.
+  // Case-insensitive, because a casing difference is a config nuisance.
+  if (
+    String(data.MerchantCode ?? '').toUpperCase() !==
+    config.merchantCode.toUpperCase()
+  ) {
+    req.scope
+      .resolve('logger')
+      .error(
+        `[globepay] payout verification REFUSED for ${data.MerchantTransactionId}: names merchant ${data.MerchantCode}, expected ${config.merchantCode}`,
+      );
+    res.status(400).send('rejected');
+    return;
+  }
+
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
   const [withdrawal] = await packs.listGlobePayWithdrawals(
     { merchant_transaction_id: data.MerchantTransactionId ?? '' },
