@@ -75,6 +75,20 @@ describe('POST /store/credits/deposit — customer IP', () => {
     expect(sentIp()).toBe('0.0.0.0');
   });
 
+  // The header type permits string[] — Node's parser comma-joins repeats and
+  // never emits one, but middleware could assign one. Stringifying it would
+  // send the gateway '[object Object]' as an IP address.
+  it('ignores an array X-Forwarded-For instead of stringifying it', async () => {
+    await POST(
+      mkReq({
+        headers: { 'x-forwarded-for': ['1.2.3.4', '5.6.7.8'] },
+        socket: { remoteAddress: '10.0.0.1' },
+      }),
+      res,
+    );
+    expect(sentIp()).toBe('10.0.0.1');
+  });
+
   // Either URL missing must fail closed. Covering only NOTIFY would let a
   // dropped RETURN guard through — money in, no credit, no test.
   it.each(['GLOBEPAY_NOTIFY_URL', 'GLOBEPAY_RETURN_URL'] as const)(

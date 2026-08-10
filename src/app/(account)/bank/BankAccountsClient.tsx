@@ -12,16 +12,41 @@ import {
   type WithdrawBank,
 } from '@/lib/actions/vault';
 import { Pill, pillVariants } from '@/components/ui/pill';
+import { timeUntil } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
-// Saved payout accounts — list, add, remove. The withdraw form reads the same
-// list to prefill; this page is where a customer manages it. The backend caps
-// the list at 5 and validates with the payout-submit rules, so anything saved
-// here is guaranteed submittable.
+// Saved payout accounts — list, add, remove. This list is where withdrawals
+// GO: the withdraw form submits an account id and the server resolves the bank
+// details from here, so this page is the only place a payout destination is
+// chosen. The backend caps the list at 5 and validates with the payout-submit
+// rules, so anything saved here is guaranteed submittable.
+//
+// A newly added account cannot receive money immediately — it waits out a
+// cooling-off window, and the server says when via `usableFrom`. That state is
+// rendered here rather than recomputed: the duration is the backend's to tune.
 
 /** Show only the tail on the list — enough to recognise, nothing to shoulder-surf. */
 const maskAccount = (accountNumber: string) =>
   `···· ${accountNumber.slice(-4)}`;
+
+/**
+ * The account's payout status, as the customer needs to read it. Three states,
+ * and none of them hides the account: a saved account missing from this list
+ * would read as data loss.
+ */
+function payoutStatus(
+  account: SavedBankAccount,
+  now: Date,
+): { label: string; ready: boolean } {
+  if (typeof account.usableFrom !== 'string') {
+    // Saved before the cooling-off rule existed: waiting will never arm it.
+    return { label: 'Remove and save again to withdraw to it', ready: false };
+  }
+  const wait = timeUntil(account.usableFrom, now);
+  return wait
+    ? { label: `Available for withdrawals ${wait}`, ready: false }
+    : { label: 'Ready for withdrawals', ready: true };
+}
 
 export function BankAccountsClient() {
   const [accounts, setAccounts] = useState<SavedBankAccount[] | null>(null);
@@ -119,38 +144,51 @@ export function BankAccountsClient() {
             No saved bank accounts yet.
           </p>
           <p className="mt-1 text-[13px] text-neutral-500">
-            Save one and withdrawals prefill it — no retyping account numbers.
+            Withdrawals go to an account saved here. A new one becomes available
+            for withdrawals a day after you add it.
           </p>
         </div>
       )}
 
-      {(accounts ?? []).map((account) => (
-        <div
-          key={account.id}
-          className="flex items-center gap-3 rounded-2xl border border-white/10 bg-neutral-900 px-4 py-3"
-        >
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-neutral-800">
-            <Landmark className="h-5 w-5 text-neutral-300" aria-hidden />
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold text-white">
-              {account.bankName}
-            </p>
-            <p className="text-[13px] text-neutral-400">
-              {maskAccount(account.accountNumber)} · {account.accountHolderName}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => remove(account.id)}
-            disabled={removingId !== null}
-            aria-label={`Remove ${account.bankName} ${maskAccount(account.accountNumber)}`}
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-neutral-500 transition-colors hover:bg-neutral-800 hover:text-red-300 disabled:opacity-50"
+      {(accounts ?? []).map((account) => {
+        const status = payoutStatus(account, new Date());
+        return (
+          <div
+            key={account.id}
+            className="flex items-center gap-3 rounded-2xl border border-white/10 bg-neutral-900 px-4 py-3"
           >
-            <Trash2 className="h-4 w-4" aria-hidden />
-          </button>
-        </div>
-      ))}
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-neutral-800">
+              <Landmark className="h-5 w-5 text-neutral-300" aria-hidden />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold text-white">
+                {account.bankName}
+              </p>
+              <p className="text-[13px] text-neutral-400">
+                {maskAccount(account.accountNumber)} ·{' '}
+                {account.accountHolderName}
+              </p>
+              <p
+                className={cn(
+                  'mt-0.5 text-[12px]',
+                  status.ready ? 'text-neutral-500' : 'text-amber-300/80',
+                )}
+              >
+                {status.label}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => remove(account.id)}
+              disabled={removingId !== null}
+              aria-label={`Remove ${account.bankName} ${maskAccount(account.accountNumber)}`}
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-neutral-500 transition-colors hover:bg-neutral-800 hover:text-red-300 disabled:opacity-50"
+            >
+              <Trash2 className="h-4 w-4" aria-hidden />
+            </button>
+          </div>
+        );
+      })}
 
       {error && (
         <p
