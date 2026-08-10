@@ -8,7 +8,6 @@ import {
   withdrawalRefundReference,
 } from '../modules/packs/globepay-withdrawal';
 import {
-  GlobePayError,
   getWithdrawalDetail,
   globepayConfigFromEnv,
 } from '../modules/packs/globepay-client';
@@ -18,6 +17,7 @@ import { sendWithdrawalReceipt } from '../modules/packs/withdrawal-receipt';
 import {
   GLOBEPAY_RECONCILE_BATCH,
   GLOBEPAY_WD_SLOW_AFTER_MS,
+  classifyRequeryError,
   unknownWithdrawalAction,
   withdrawalReconcileAction,
 } from '../modules/packs/globepay-reconcile';
@@ -65,22 +65,38 @@ export default async function globepayWithdrawalReconcileJob(
         gatewayStatus = detail.statusId;
         action = withdrawalReconcileAction(detail.state);
       } catch (error) {
-        const notFound =
-          error instanceof GlobePayError &&
-          (error.httpStatus === 400 || error.has('PMT10016'));
-        if (!notFound) throw error;
-        if (withdrawal.gateway_transaction_id) {
-          // The payout provably exists (their W… id is on our row) — a 400
-          // requery is OUR config being broken, never non-existence.
+        // An unattributable 400 must never reach the refund path: the same bare
+        // 400 comes back from a rotated key or a wrong merchant code, so
+        // reading it as "never existed" would refund every in-flight payout
+        // while the banks still executed them — money out AND credited back.
+        // See classifyRequeryError for why only an explicit not-found acts.
+        const refusal = classifyRequeryError(error);
+        if (refusal.kind === 'rethrow') throw error;
+        if (refusal.kind === 'ambiguous') {
           logger.error(
-            `[globepay-wd-reconcile] requery 400 for ${withdrawal.merchant_transaction_id} which HAS gateway id ${withdrawal.gateway_transaction_id} — refusing the unknown-refund path; check merchant credentials`,
+            `[globepay-wd-reconcile] requery refused ${withdrawal.merchant_transaction_id} with an unattributable 400 (${
+              error instanceof Error ? error.message : String(error)
+            }) — NOT refunding; check merchant credentials`,
+          );
+          // 'wait' rather than a new action kind, so the refund branch below
+          // stays reachable only from an outcome the gateway actually gave.
+          // It also picks up the 24h slow-payout escalation just below.
+          action = { kind: 'wait' } as const;
+        } else {
+          if (withdrawal.gateway_transaction_id) {
+            // The payout provably exists (their W… id is on our row) — an
+            // explicit not-found is OUR config being broken, never
+            // non-existence.
+            logger.error(
+              `[globepay-wd-reconcile] requery says ${withdrawal.merchant_transaction_id} is unknown, but it HAS gateway id ${withdrawal.gateway_transaction_id} — refusing the unknown-refund path; check merchant credentials`,
+            );
+          }
+          action = unknownWithdrawalAction(
+            new Date(withdrawal.created_at),
+            now,
+            Boolean(withdrawal.gateway_transaction_id),
           );
         }
-        action = unknownWithdrawalAction(
-          new Date(withdrawal.created_at),
-          now,
-          Boolean(withdrawal.gateway_transaction_id),
-        );
       }
 
       if (action.kind === 'wait') {

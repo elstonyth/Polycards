@@ -245,6 +245,31 @@ describe('withdrawal callback — non-final and edge states', () => {
     expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
   });
 
+  // Same guard as the deposit hook: the signature proves GlobePay sent it, not
+  // that the payout is ours. Checked before the row lookup, so a foreign
+  // callback cannot settle or refund one of our rows.
+  it('refuses a callback naming a different merchant', async () => {
+    const h = harness(pendingRow);
+    const res = await run(
+      h,
+      callback({ ...paid, MerchantCode: 'SomeoneElse' }),
+    );
+    expect(res.statusCode).toBe(400);
+    expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+    expect(h.packs.updateGlobePayWithdrawals).not.toHaveBeenCalled();
+  });
+
+  it('accepts a merchant code differing only in case', async () => {
+    const h = harness(pendingRow);
+    const res = await run(
+      h,
+      callback({ ...paid, MerchantCode: 'TESTPOLYCARD' }),
+    );
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe('success');
+    expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalled();
+  });
+
   it('refuses a final callback in another currency', async () => {
     const h = harness(pendingRow);
     const res = await run(h, callback({ ...paid, CurrencyCode: 'VND' }));

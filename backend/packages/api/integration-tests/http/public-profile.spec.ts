@@ -4,7 +4,7 @@ import { PACKS_MODULE } from "../../src/modules/packs";
 import type PacksModuleService from "../../src/modules/packs/service";
 import { HANDLE_RE } from "../../src/utils/profile-handle";
 import { clearProfileCache } from "../../src/api/store/profiles/[handle]/route";
-import { myrDisplay as MYR, unwrapResponse } from "./utils";
+import { myrDisplay as MYR, postStoreCustomer, unwrapResponse } from "./utils";
 
 jest.setTimeout(240 * 1000);
 
@@ -149,8 +149,9 @@ medusaIntegrationTestRunner({
           email,
           password: PASSWORD,
         });
-        await api.post(
-          "/store/customers",
+        await postStoreCustomer(
+          api,
+          getContainer(),
           { email },
           {
             headers: {

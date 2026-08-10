@@ -22,6 +22,13 @@ export type PhoneVerificationEnv = {
   TWILIO_AUTH_TOKEN?: string;
   TWILIO_VERIFY_SERVICE_SID?: string;
   PHONE_OTP_DEV_CODE?: string;
+  // One Twilio Verify custom-template SID per purpose. Unset = Twilio's default
+  // template, i.e. exactly today's behaviour, so this ships dark and the
+  // operator turns it on per flow once the templates clear Twilio's approval.
+  TWILIO_VERIFY_TEMPLATE_SID_SIGNUP?: string;
+  TWILIO_VERIFY_TEMPLATE_SID_PHONE_CHANGE?: string;
+  TWILIO_VERIFY_TEMPLATE_SID_PASSWORD_RESET?: string;
+  ALLOWED_SMS_COUNTRIES?: string;
 };
 
 type Logger = { warn: (msg: string) => void };
@@ -54,9 +61,154 @@ export const isPhoneGateRequired = (env: PhoneVerificationEnv): boolean => {
 export const isTwilioVerifyConfigured = (env: PhoneVerificationEnv): boolean =>
   Boolean(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_VERIFY_SERVICE_SID);
 
+export type PhoneGateState = {
+  phoneVerificationRequired: boolean;
+  phoneGateRequired: boolean;
+  twilioConfigured: boolean;
+  /** Variables an operator set to something that resolves to `false`. */
+  warnings: string[];
+};
+
+// Only these two are boolean-parsed, and only they can be silently misread.
+const BOOLEAN_GATE_VARS = [
+  'PHONE_VERIFICATION_REQUIRED',
+  'PHONE_GATE_REQUIRED',
+] as const;
+
+/**
+ * The RESOLVED gate state, for the boot log in medusa-config.ts. Pure (env in,
+ * object out) — it changes no semantics and MUST NOT throw: a fail-open deploy
+ * is a legitimate configuration, so this is observability, not a guard
+ * (contrast assertMockTopupSafe, which refuses to boot by design).
+ *
+ * Why it exists: the parse is strictly `=== 'true'`, so unset, empty, 'True',
+ * '1' or a misspelled key all resolve to false, and PHONE_GATE_REQUIRED
+ * FOLLOWS PHONE_VERIFICATION_REQUIRED when unset — one wrong value opens the
+ * money gates as well as the write gates. That fail-open default is a recorded
+ * decision (CONTEXT.md's rollback lever, exercised on 2026-08-07), but nothing
+ * logged or asserted the resolved state, and the flag lives in two .do specs
+ * plus a Dockerfile ARG. Now the state a deploy actually booted with is in the
+ * log.
+ *
+ * `warnings` fires only when a raw value is neither 'true' nor 'false' — an
+ * operator meant something by it and got `false`. An explicit 'false' is not a
+ * typo (it is the in-a-hurry lever) and never warns. The raw value is
+ * deliberately NOT carried: these two are boolean-shaped, but a reporter that
+ * echoes env values is one copy-paste from printing a credential into a public
+ * deploy log.
+ */
+export const resolvePhoneGateState = (
+  env: PhoneVerificationEnv,
+): PhoneGateState => ({
+  phoneVerificationRequired: isPhoneVerificationRequired(env),
+  phoneGateRequired: isPhoneGateRequired(env),
+  twilioConfigured: isTwilioVerifyConfigured(env),
+  warnings: BOOLEAN_GATE_VARS.filter((name) => {
+    const raw = env[name];
+    return raw !== undefined && raw !== '' && raw !== 'true' && raw !== 'false';
+  }).map((name) => `${name} is neither 'true' nor 'false' — read as false`),
+});
+
 /** E.164: +, non-zero lead digit, 7–15 digits total. The storefront normalizes
  *  with libphonenumber before sending; this is the backend's shape re-check. */
 export const E164_RE = /^\+[1-9]\d{6,14}$/;
+
+/**
+ * Destinations this business serves. POST /store/phone-verification/start is
+ * UNAUTHENTICATED and bills a real SMS per call; the per-phone limiter bounds
+ * one number, so a pumping run using fresh numbers is bounded only by the
+ * sitewide IP tier — thousands of attacker-chosen destinations a day. This is
+ * the coarse geo-lock the repo can enforce; Twilio's own geo permissions are
+ * the other half (console state, not code).
+ *
+ * Default is MY alone: CONTEXT.md records Malaysia (+60) as the one country
+ * confirmed enabled in Twilio's SMS geo permissions, and DEFAULT_PHONE_COUNTRY
+ * is 'MY'. Widen via ALLOWED_SMS_COUNTRIES.
+ *
+ * PAIRED with the storefront picker (ALLOWED_PHONE_COUNTRIES in
+ * src/lib/profile-validation.ts, rendered by src/components/PhoneField.tsx).
+ * Widen BOTH or neither: narrowing only here makes the UI offer a country
+ * whose code silently never arrives; narrowing only there reopens the toll
+ * fraud. E164_RE stays permissive — that is a shape check, this is a business
+ * check, and they are deliberately separate.
+ */
+export const DEFAULT_ALLOWED_SMS_COUNTRIES = ['MY'] as const;
+
+// ISO 3166-1 alpha-2 → E.164 calling-code prefix.
+//
+// ponytail: a prefix match, not a phone-number parser. The allowlist is coarse
+// by design and the backend does not depend on libphonenumber-js (only the
+// storefront does) — pulling a parser in for a handful of string comparisons
+// is not worth it.
+//
+// DO NOT add a `+1`, `+7` or `+44` row on that reasoning. A prefix is only
+// "coarse but safe" where the calling code maps to ONE country. `US: '+1'`
+// would admit the whole NANP — including +1-809, +1-876 and the other classic
+// revenue-share destinations — so a one-line "widening" would reopen precisely
+// the toll fraud this table exists to stop. Those calling codes need a real
+// parser or an area-code deny list, not a prefix.
+//
+// `GB: '+44'` was here and was REMOVED for the same reason: +44 is shared with
+// the Crown Dependencies — Jersey, Guernsey and the Isle of Man are not part of
+// the United Kingdom, and Twilio bills and geo-permits them separately. A
+// deny list of their geographic codes (+441534/+441481/+441624) does not fix
+// it either: SMS goes to MOBILE ranges (+447797, +447781, +447624, …), which
+// are numerous and change. Serving the UK needs a real parser or an exact
+// allocated-range policy — not a prefix, and not a partial deny list, which
+// would only convert an honest coarseness into false assurance.
+//
+// An ISO code with NO row here resolves to nothing. See
+// unresolvableSmsCountries below: the route logs those, because otherwise the
+// misconfiguration is invisible. `ALLOWED_SMS_COUNTRIES=GB` is now exactly that
+// case — loudly inert rather than quietly over-broad.
+const SMS_DIAL_PREFIX: Record<string, string> = {
+  MY: '+60',
+};
+
+/**
+ * The configured ISO codes, or the default set when nothing usable is set.
+ *
+ * Env is read PER CALL, not at module top, so one booted app can be driven
+ * through both states (plan 066's convention).
+ *
+ * An empty or whitespace-only value falls back to the default set. It must
+ * never be read as "allow everything" (that is the whole exposure), and
+ * equally never as "allow nothing" — a stray blank in the DO spec would then
+ * brick every signup.
+ */
+const allowedSmsCountries = (env: PhoneVerificationEnv): readonly string[] => {
+  const configured = (env.ALLOWED_SMS_COUNTRIES ?? '')
+    .split(',')
+    .map((iso) => iso.trim().toUpperCase())
+    .filter(Boolean);
+  return configured.length ? configured : DEFAULT_ALLOWED_SMS_COUNTRIES;
+};
+
+/**
+ * Configured ISO codes that resolve to no dialling-code prefix, i.e. that do
+ * nothing at all.
+ *
+ * This is the loud half of the trap above. `ALLOWED_SMS_COUNTRIES=SG` is
+ * non-empty, so the default is NOT substituted, and SG matches nothing — which
+ * stops EVERY signup and phone-change OTP, `+60` included, with no error
+ * anywhere. That failure is indistinguishable from a Twilio outage; CONTEXT.md
+ * records a same-shaped incident (21608) that cost a day to diagnose. The
+ * caller logs whatever this returns.
+ */
+export const unresolvableSmsCountries = (
+  env: PhoneVerificationEnv,
+): string[] =>
+  allowedSmsCountries(env).filter((iso) => SMS_DIAL_PREFIX[iso] === undefined);
+
+/** True iff `phone` (already E.164-shaped) is in a served destination. */
+export const isAllowedSmsDestination = (
+  env: PhoneVerificationEnv,
+  phone: string,
+): boolean =>
+  allowedSmsCountries(env).some((iso) => {
+    const prefix = SMS_DIAL_PREFIX[iso];
+    return prefix !== undefined && phone.startsWith(prefix);
+  });
 
 export const PHONE_OTP_PURPOSES = ['signup', 'phone-change', 'password-reset'] as const;
 export type PhoneOtpPurpose = (typeof PHONE_OTP_PURPOSES)[number];
@@ -79,12 +231,33 @@ const PROOF_HMAC_DOMAIN = 'phone-proof.v1';
 
 type ProofPayload = { phone: string; purpose: PhoneOtpPurpose; exp: number };
 
+/**
+ * Refuses an empty key. `createHmac('sha256', '')` is legal in Node and returns
+ * a MAC anyone can recompute, so an empty secret would make every phone proof
+ * forgeable — which on this codebase means minting password-reset tokens.
+ *
+ * Unreachable today: all four call sites reject a falsy/non-string jwtSecret
+ * first, and prod cannot boot without JWT_SECRET. The guard exists so a fifth
+ * caller that forgets cannot silently downgrade the whole scheme; the
+ * duplicated call-site checks stay, because they answer with a route-shaped
+ * error instead of a 500.
+ */
+function assertSecret(secret: string): void {
+  if (!secret) {
+    throw new MedusaError(
+      MedusaError.Types.UNEXPECTED_STATE,
+      'Phone proof secret is not configured.',
+    );
+  }
+}
+
 export function signPhoneProof(
   secret: string,
   phone: string,
   purpose: PhoneOtpPurpose,
   nowMs: number = Date.now(),
 ): string {
+  assertSecret(secret);
   const payload = Buffer.from(
     JSON.stringify({ phone, purpose, exp: nowMs + PROOF_TTL_MS } satisfies ProofPayload),
   ).toString('base64url');
@@ -100,11 +273,22 @@ export function verifyPhoneProof(
   purpose: PhoneOtpPurpose,
   nowMs: number = Date.now(),
 ): { phone: string } | null {
+  assertSecret(secret);
   const dot = token.lastIndexOf('.');
   if (dot <= 0) return null;
   const payload = token.slice(0, dot);
   const sig = token.slice(dot + 1);
+  // CodeQL models signPhoneProof's return value as a 'password' and then flags
+  // this single-round HMAC as an insufficient password hash. It is neither. The
+  // key is the server's jwtSecret (resolved from configModule at every call
+  // site — store/phone-verification/check/route.ts, .../change/route.ts,
+  // .../password-reset/route.ts and api/utils/phone-verification-guard.ts —
+  // never anything a request supplies), and the MAC'd message is a token this
+  // server minted 10 minutes ago, not a credential a human chose. Real user
+  // passwords never reach this file: the phone-change re-auth hands them to
+  // Medusa's emailpass provider (change/route.ts:152).
   const expected = createHmac('sha256', secret)
+    // codeql[js/insufficient-password-hash]: not a password hash — HMAC-SHA256 authenticating a server-minted 10-minute proof token under the server's own jwtSecret; a KDF would be wrong here because there is no low-entropy user-chosen secret to stretch and nothing is being stored for later comparison.
     .update(`${PROOF_HMAC_DOMAIN}.${payload}`)
     .digest('base64url');
   const a = Buffer.from(sig);
@@ -154,6 +338,33 @@ const twilioErrorCode = async (res: Response): Promise<number | null> => {
   }
 };
 
+const TEMPLATE_SID_ENV: Record<PhoneOtpPurpose, keyof PhoneVerificationEnv> = {
+  signup: 'TWILIO_VERIFY_TEMPLATE_SID_SIGNUP',
+  'phone-change': 'TWILIO_VERIFY_TEMPLATE_SID_PHONE_CHANGE',
+  'password-reset': 'TWILIO_VERIFY_TEMPLATE_SID_PASSWORD_RESET',
+};
+
+/**
+ * The Verify template to send this purpose's code under, or undefined for
+ * Twilio's default.
+ *
+ * WHY per purpose: Twilio verifies on (phone, code) alone, and the default
+ * template is identical for all three flows — so a code a victim reads back
+ * under a "verify your number" pretext is exchangeable at /check for a
+ * 'password-reset' proof, and that route returns a live reset token. The MAC'd
+ * `purpose` stops a signup proof being REPLAYED at password-reset, but it is a
+ * scope tag on the token, not evidence of what the human agreed to. Naming the
+ * flow in the SMS is what lets the person reading it refuse.
+ *
+ * Not a complete fix: it makes the pretext visible, it does not make the
+ * exchange impossible. Binding it outright needs a separate Verify Service per
+ * purpose, so a code minted for one cannot check against another.
+ */
+export const otpTemplateSid = (
+  env: PhoneVerificationEnv,
+  purpose: PhoneOtpPurpose,
+): string | undefined => env[TEMPLATE_SID_ENV[purpose]] || undefined;
+
 /** Sends the OTP. Dev/test: logs the fixed dev code (the log is the SMS
  *  transport). Prod without Twilio: throws — enforcement on + unconfigured
  *  must brick LOUDLY, never silently skip verification. */
@@ -161,9 +372,12 @@ export async function sendPhoneOtp(
   env: PhoneVerificationEnv,
   logger: Logger,
   phone: string,
+  purpose: PhoneOtpPurpose,
 ): Promise<void> {
   if (isDevOrTest(env)) {
-    logger.warn(`[phone-otp] dev transport — code for ${phone} is ${devCode(env)}`);
+    logger.warn(
+      `[phone-otp] dev transport — ${purpose} code for ${phone} is ${devCode(env)}`,
+    );
     return;
   }
   if (!isTwilioVerifyConfigured(env)) {
@@ -172,12 +386,19 @@ export async function sendPhoneOtp(
       'Phone verification is not configured.',
     );
   }
+  const templateSid = otpTemplateSid(env, purpose);
   let res: Response;
   try {
     res = await fetch(`${twilioBase(env)}/Verifications`, {
       method: 'POST',
       headers: twilioHeaders(env),
-      body: new URLSearchParams({ To: phone, Channel: 'sms' }).toString(),
+      // TemplateSid is SMS-only (Twilio error 60408 rejects it on call/email);
+      // this transport is sms-only, so it is always safe to include here.
+      body: new URLSearchParams({
+        To: phone,
+        Channel: 'sms',
+        ...(templateSid ? { TemplateSid: templateSid } : {}),
+      }).toString(),
       signal: AbortSignal.timeout(TWILIO_TIMEOUT_MS),
     });
   } catch {

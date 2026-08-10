@@ -148,7 +148,14 @@ export default function VaultClient({
   // resolves would otherwise stamp nothing, and a pull landing DURING the visit
   // clears itself on the next focus refresh instead of leaving a dot behind for
   // cards the customer is looking at right now.
-  const { latestAt, markSeen } = useVaultDot();
+  const { latestAt, markSeen, refresh } = useVaultDot();
+  // Re-read first: arriving by client-side nav neither remounts the provider
+  // nor fires focus, so `latestAt` can be OLDER than the items this page just
+  // server-rendered. Stamping that would clear the dot now and relight it on
+  // the next focus for a card already seen.
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
   useEffect(() => {
     if (latestAt) markSeen();
   }, [latestAt, markSeen]);

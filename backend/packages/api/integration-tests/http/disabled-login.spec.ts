@@ -10,7 +10,7 @@
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
 import { Modules } from '@medusajs/framework/utils';
 import type { ICustomerModuleService } from '@medusajs/framework/types';
-import { mintSuperAdmin, unwrapResponse } from './utils';
+import { mintSuperAdmin, postStoreCustomer, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
 
@@ -55,8 +55,9 @@ medusaIntegrationTestRunner({
           email: PLAYER_EMAIL,
           password: PASSWORD,
         });
-        await api.post(
-          '/store/customers',
+        await postStoreCustomer(
+          api,
+          getContainer(),
           { email: PLAYER_EMAIL },
           {
             headers: {

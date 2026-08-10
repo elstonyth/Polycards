@@ -2,7 +2,7 @@ import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
 import { Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
-import { mintSuperAdmin, unwrapResponse } from './utils';
+import { mintSuperAdmin, postStoreCustomer, unwrapResponse } from './utils';
 import { VIP_LEVELS } from '../../src/scripts/vip-levels.data';
 
 jest.setTimeout(240 * 1000);
@@ -25,7 +25,7 @@ medusaIntegrationTestRunner({
     const adminHeaders = () => ({ authorization: `Bearer ${adminToken}` });
     const registerCustomer = async (email: string): Promise<string> => {
       const reg = await api.post('/auth/customer/emailpass/register', { email, password: PASSWORD });
-      const created = await api.post('/store/customers', { email },
+      const created = await postStoreCustomer(api, getContainer(), { email },
         { headers: { ...storeHeaders, authorization: `Bearer ${reg.data.token}` } });
       return created.data.customer.id;
     };

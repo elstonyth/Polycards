@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { openAuth } from '@/components/AuthButton';
 import { useAuth } from '@/components/auth/AuthProvider';
+import { useCreditDot } from './CreditDotProvider';
 import { useVaultDot } from './VaultDotProvider';
 import { TABS, isTabActive } from './tabs';
 
@@ -17,6 +18,7 @@ export default function TabBar() {
   const pathname = usePathname();
   const { customer, isLoading } = useAuth();
   const { show: vaultDot } = useVaultDot();
+  const { show: creditDot } = useCreditDot();
 
   return (
     <nav
@@ -28,7 +30,16 @@ export default function TabBar() {
         {TABS.map((tab) => {
           const active = isTabActive(tab, pathname);
           const Icon = tab.icon;
-          const dot = vaultDot && tab.href === '/vault';
+          // One dot per destination, and each announces what it actually
+          // signals: the vault gets new CARDS, the Me tab gets balance movement
+          // (its /transactions child is where they are read). Kept in step with
+          // AppHeader, which renders the same five destinations on lg+.
+          const dotLabel =
+            tab.href === '/vault' && vaultDot
+              ? 'new items'
+              : tab.href === '/me' && creditDot
+                ? 'new activity'
+                : null;
           return (
             <Link
               key={tab.href}
@@ -45,7 +56,7 @@ export default function TabBar() {
                   : undefined
               }
               aria-current={active ? 'page' : undefined}
-              aria-label={dot ? `${tab.label}, new items` : undefined}
+              aria-label={dotLabel ? `${tab.label}, ${dotLabel}` : undefined}
               className={cn(
                 'flex flex-1 flex-col items-center justify-center gap-1 transition-colors',
                 active
@@ -65,7 +76,7 @@ export default function TabBar() {
                   strokeWidth={active ? 2.25 : 2}
                   aria-hidden
                 />
-                {dot && (
+                {dotLabel && (
                   <span
                     aria-hidden
                     className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-neutral-50"

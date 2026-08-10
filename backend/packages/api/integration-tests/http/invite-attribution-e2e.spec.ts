@@ -17,7 +17,7 @@
 // actually break — handle round-trips sponsor → link → summary).
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
 import { Modules } from '@medusajs/framework/utils';
-import { unwrapResponse } from './utils';
+import { postStoreCustomer, unwrapResponse } from './utils';
 
 jest.setTimeout(180 * 1000);
 
@@ -39,8 +39,9 @@ medusaIntegrationTestRunner({
           email,
           password: PASSWORD,
         });
-        await api.post(
-          '/store/customers',
+        await postStoreCustomer(
+          api,
+          getContainer(),
           { email },
           {
             headers: {
