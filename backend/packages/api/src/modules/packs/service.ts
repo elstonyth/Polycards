@@ -18,7 +18,12 @@ import {
   type DeliveryStatus,
 } from './delivery';
 import { rewardsRedemptionEnabled } from './rewards-gate';
-import { playthroughState } from './withdrawable';
+import { playthroughState, withdrawalGateError } from './withdrawable';
+import {
+  loadSavedBankAccounts,
+  resolveWithdrawalDestination,
+  type SavedBankAccount,
+} from './saved-accounts';
 import { FRAME_LEVELS } from './avatar-frames';
 import Pack from './models/pack';
 import Card from './models/card';
@@ -65,6 +70,7 @@ import PurchaseInvoice from './models/purchase-invoice';
 import PurchaseInvoiceLine from './models/purchase-invoice-line';
 import StockMovement from './models/stock-movement';
 import { pageAll } from '../../api/utils/page-all';
+import { positiveIntFromEnv } from '../../api/utils/rate-limit';
 import {
   resolveBuybackRate,
   buybackAmount,
@@ -128,6 +134,17 @@ import type { MedusaContainer } from '@medusajs/framework/types';
 // between creditSummary and walletSummary so the two SQL scans can't drift.
 const DEPOSITED_PT_FILTER =
   "reason = 'topup' AND amount > 0 AND external_funded_cents IS NOT NULL";
+
+// Default rolling-24h cashout ceiling, in RM. The per-transaction payout band
+// (RM 50 – RM 50,000, globepay-withdrawal.ts) bounds ONE payout; before this
+// cap nothing summed prior withdrawals over any window, so a compromised
+// account's blast radius was "the whole balance, as fast as the rate limiter
+// allows" with no velocity signal to alert on.
+//
+// The env override is read PER CALL inside withdrawForCashout (never latched at
+// module load) so a spec can drive both cap states through one booted app —
+// the convention plan 066 established.
+const GLOBEPAY_WD_DAILY_MAX_RM_DEFAULT = 50_000;
 
 // Postgres unique-violation detector (SQLSTATE 23505) for the commission
 // idempotency index. See settleOpen's commission catch for the exact semantics
@@ -265,6 +282,7 @@ export type AuditRow = {
 type LedgerSqlManager = {
   execute<T = unknown>(query: string, params?: unknown[]): Promise<T>;
 };
+
 
 /** One raw `ledger_entry` row as listLedgerEntriesForAdmin reads it. */
 export type LedgerEntryRow = {
@@ -1114,6 +1132,226 @@ class PacksModuleService extends MedusaService({
       );
     }
     return result;
+  }
+
+  // The ONE writer of a cashout DEBIT: the destination lookup, the withdrawal
+  // gate and the debit, as a single serialized unit.
+  //
+  // Why the gate cannot merely PRECEDE the debit (it used to, in
+  // globepay-withdrawal.ts, with no lock held across the two): `floor: 0` in
+  // mutateCreditAtomic guards the RAW balance. It knows nothing about `locked`
+  // — walletSummary's withdrawable is `balance − locked` (minus the freeze flag
+  // and the playthrough gate), and the floor cannot see any of that. So N
+  // concurrent POST /store/credits/withdraw requests all read the SAME
+  // withdrawable, all pass the policy check, and all debit, bounded only by the
+  // raw balance: a customer holding unmatured or suspended commission credits
+  // could move up to `locked` more than they are entitled to, out to a bank,
+  // after which the reversal and auto-freeze machinery has nothing left to claw
+  // back. The rate limiter permits a 5-request burst per 10s, so that
+  // concurrency is reachable. Holding `credit:<customer>` across the read AND
+  // the write is what makes the policy layer atomic; floor 0 stays underneath
+  // as the raw-overdraft backstop.
+  //
+  // Rejected alternative: making `floor` mean `balance − locked` globally.
+  // Packs are deliberately spendable from the raw balance (walletSummary:
+  // "Spending on packs stays unrestricted either way — the gate only limits
+  // cashout"), so that would change what players can spend on packs. `floor`
+  // and `withdrawable` mean different things and always will.
+  //
+  // Re-entrancy: withdrawCreditsWithLedger → mutateCreditAtomic re-acquires
+  // this SAME advisory key below. Postgres advisory locks are re-entrant per
+  // session, so that is a no-op. The invariant it must not break is at most one
+  // DISTINCT `credit:` key per transaction (see matureDueCommissions) — this
+  // method only ever takes its own customer's.
+  @InjectTransactionManager()
+  async withdrawForCashout(
+    input: {
+      customerId: string;
+      /** POSITIVE RM to withdraw; the ledger debit is written as −amount. */
+      amount: number;
+      /** Our payout reference — also the ledger `reference` and gateway ref. */
+      merchantTransactionId: string;
+      idempotencyReference: string;
+      /** The SAVED destination the customer picked. Never bank details: the
+       *  bank code and account number are looked up from their own saved list
+       *  below, so a request body cannot name where the money goes. */
+      accountId: unknown;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<
+    Awaited<ReturnType<PacksModuleService['mutateCreditAtomic']>> & {
+      /** What the gateway must be told to pay — resolved here, under the lock,
+       *  so the caller cannot submit a destination this method never approved. */
+      destination: SavedBankAccount;
+    }
+  > {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+
+    // Sign guard. This method inverts the caller's convention (positive RM in,
+    // negative delta out), so a caller passing an already-negated amount would
+    // silently CREDIT the customer instead of debiting them. Fail loud — the
+    // same reasoning as mutateCreditAtomic's own topup/pack_open sign
+    // invariants.
+    if (!Number.isFinite(input.amount) || input.amount <= 0) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'Withdrawal amount must be greater than 0.',
+      );
+    }
+
+    // 1) Serialize this customer's credit mutations across the WHOLE gate +
+    //    debit. Same idiom and same key as mutateCreditAtomic.
+    //
+    //    Note what this widened: the lock now spans walletSummary (~4 queries)
+    //    + the cap scan + the debit, where it used to cover the debit alone.
+    //    That is fine at withdrawal volume — payouts are rare, per-customer, and
+    //    human-initiated — but it is a real assumption. A future high-volume
+    //    path must not inherit it without re-measuring; only mutations for THIS
+    //    customer contend, so the blast radius is one account either way.
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `credit:${input.customerId}`,
+    ]);
+
+    // 2) The DESTINATION, resolved here rather than taken from the request.
+    //    Ownership is structural: the list read is keyed on input.customerId
+    //    (which comes from the verified token), so an id belonging to another
+    //    customer simply is not in it and lands on the "Select a saved bank
+    //    account." refusal — before the gate and before any debit.
+    //
+    //    The read runs on `em` — THIS method's transaction manager — so it is
+    //    the same connection and the same transaction as the advisory lock
+    //    above and the debit below, and it issues the same
+    //    `SELECT metadata FROM customer` that mutateCustomerMetadata reads the
+    //    blob with. Routing it through the customer module instead would put it
+    //    on a second connection that the lock has no relationship with.
+    //
+    //    What "under the lock" does and does not buy here, precisely: this read
+    //    runs after pg_advisory_xact_lock and before the debit, so no two
+    //    withdrawals for this customer can interleave around it. It does NOT
+    //    exclude a concurrent saved-accounts write — that path serializes on
+    //    `metadata:<customer>`, a different key, and mutateCustomerMetadata may
+    //    not be composed into a `credit:`-locked transaction. Nor would being
+    //    in-transaction exclude it on its own: under READ COMMITTED each
+    //    statement takes a fresh snapshot, so this SELECT sees whatever last
+    //    committed either way.
+    //
+    //    It does not need to. savedBankAccountId is derived from
+    //    (bankCode, accountNumber), so a concurrent write can add an entry,
+    //    delete one, or relabel one — it can never repoint an id at a different
+    //    bank account. The worst interleaving pays a destination the customer
+    //    owned and had cooled off, deleted moments ago. The id pins WHERE the
+    //    money goes; the lock pins WHEN.
+    //
+    //    PRECEDENCE, since it is a deliberate choice and not the order the
+    //    wallet gate uses: a bad destination outranks a bad wallet. A frozen
+    //    account naming an un-cooled destination hears about the destination,
+    //    not the freeze. That is the quieter answer to someone holding a stolen
+    //    token, and it keeps this method and globepay-withdrawal.ts's precheck
+    //    in the same order. withdrawable.ts's own precedence rule (freeze
+    //    outranks playthrough outranks the cap) is untouched — it orders the
+    //    three WALLET refusals against each other, all of which sit below this.
+    const destination = resolveWithdrawalDestination({
+      accounts: await loadSavedBankAccounts(em, input.customerId),
+      accountId: input.accountId,
+    });
+
+    // 3) The withdrawal gate, read INSIDE the lock (withdrawable.ts's own
+    //    invariant: "the cashout writer MUST route through this").
+    //    walletSummary folds THREE limits into one number: the freeze flag
+    //    (frozen accounts withdraw nothing — it is the fraud-response tool),
+    //    locked unmatured commissions, and the playthrough gate (deposits must
+    //    be spent on packs before they can leave to a bank — the
+    //    anti-laundering rule). Threading sharedContext is what makes the read
+    //    see this locked transaction rather than a separate connection.
+    const wallet = await this.walletSummary(
+      input.customerId,
+      undefined,
+      sharedContext,
+    );
+    //    THIS is the authoritative gate — the decision that makes the payout
+    //    safe. globepay-withdrawal.ts calls the same helper unlocked before
+    //    writing its row, but only to avoid leaving debris on a refusal that is
+    //    already certain; it decides nothing.
+    const gateError = withdrawalGateError(wallet, input.amount);
+    if (gateError) throw gateError;
+
+    // 4) Rolling-24h VALUE cap, summed under the same lock so the sum and the
+    //    debit cannot interleave either.
+    //
+    //    `pending` and `settled` both moved (or are still moving) money;
+    //    `failed` did not — a refused or refunded payout must never consume the
+    //    customer's cap. Those three are the entire domain of the column's
+    //    CHECK constraint (Migration20260722170000), which also supplies the
+    //    (status, created_at) and (customer_id) partial indexes this scan uses.
+    //
+    //    The just-created row is EXCLUDED by merchant_transaction_id:
+    //    globepay-withdrawal.ts writes it as `pending` BEFORE calling this
+    //    method (the callback echoes only MerchantTransactionId, so that row is
+    //    the only way back to the customer), so an unfiltered sum would count
+    //    this very attempt against its own cap and refuse every withdrawal
+    //    above half the ceiling.
+    //
+    //    A CONCURRENT attempt's row does still count, though: request B writes
+    //    its own `pending` row before it takes this lock, so A's sum includes B
+    //    even if B goes on to fail the gate and flip to `failed`. That
+    //    over-counts, never under-counts, and it self-heals as the 24h window
+    //    slides — the fail-closed direction is the right default for a cap
+    //    whose job is bounding blast radius.
+    const capCents =
+      positiveIntFromEnv(
+        'GLOBEPAY_WD_DAILY_MAX_RM',
+        GLOBEPAY_WD_DAILY_MAX_RM_DEFAULT,
+      ) * 100;
+    const capRows = await em.execute<{ sum_cents: string | null }[]>(
+      'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS sum_cents ' +
+        'FROM globepay_withdrawal ' +
+        'WHERE customer_id = ? AND deleted_at IS NULL ' +
+        "AND status IN ('pending', 'settled') " +
+        "AND created_at > now() - interval '24 hours' " +
+        'AND merchant_transaction_id <> ?',
+      [input.customerId, input.merchantTransactionId],
+    );
+    // Integer cents throughout — the ledger's unit convention; comparing RM
+    // floats here would drift against the amounts actually written.
+    const windowCents = Number(capRows[0]?.sum_cents ?? 0);
+    const amountCents = Math.round(input.amount * 100);
+    if (windowCents + amountCents > capCents) {
+      // Clamped at 0: a customer already over the ceiling (an operator
+      // adjustment, or a lowered env) must not be told they may withdraw a
+      // NEGATIVE amount more today.
+      const remaining = Math.max(0, capCents - windowCents) / 100;
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `Daily withdrawal limit reached. You can withdraw RM ${remaining.toFixed(2)} more today.`,
+      );
+    }
+
+    // 5) Debit on the SAME context, so it joins this locked transaction instead
+    //    of opening its own.
+    //
+    //    The cap above runs BEFORE mutateCreditAtomic's idempotent-replay
+    //    check, so in principle a genuine replay could be cap-rejected. Not
+    //    reachable today: newMerchantTransactionId() mints a fresh reference
+    //    per attempt, so no two calls here ever share an idempotencyReference.
+    const debit = await this.withdrawCreditsWithLedger(
+      {
+        customerId: input.customerId,
+        amount: -input.amount,
+        reason: 'cashout',
+        reference: input.merchantTransactionId,
+        idempotencyReference: input.idempotencyReference,
+        floor: 0,
+        ledger: {
+          outcome: 'requested',
+          bankCode: destination.bankCode,
+          accountNumber: destination.accountNumber,
+          // Their id does not exist yet — SubmitWithdrawal has not run.
+          gatewayRef: input.merchantTransactionId,
+        },
+      },
+      sharedContext,
+    );
+    return { ...debit, destination };
   }
 
   // Append-only reversal of a single ledger row (the open-saga compensation).
@@ -2357,6 +2595,148 @@ class PacksModuleService extends MedusaService({
     return data;
   }
 
+  // One customer's saved payout destinations, unlocked.
+  //
+  // Exists for ONE caller: globepay-withdrawal.ts's pre-row destination
+  // precheck, which has no transaction of its own. The decision that matters
+  // does not come through here — withdrawForCashout calls loadSavedBankAccounts
+  // directly on its own locked transaction manager, so this method cannot be
+  // swapped underneath it.
+  //
+  // (The saved-accounts GET route reads the same blob through the customer
+  // module instead. Same row, same content; it is a display list with no
+  // transaction to join, so there is nothing to gain by routing it here.)
+  @InjectManager()
+  async savedBankAccountsFor(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<SavedBankAccount[]> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    return await loadSavedBankAccounts(em, customerId);
+  }
+
+  // Every destination that has actually RECEIVED money, one row per
+  // (customer, bank, account), carrying its earliest settlement.
+  //
+  // Read by scripts/backfill-payout-destinations.ts only. It exists because
+  // plan 088 made a payout resolve its destination from the customer's saved
+  // list: a customer who was paid to an account BEFORE that list existed has
+  // proven they control it, and should not sit out a cooling-off window to be
+  // paid there again. `settled` is the whole point of the filter — `pending`
+  // has not landed and `failed` came back, so neither is evidence of control.
+  //
+  // MIN(created_at) rather than settled_at: settled_at is nullable on rows that
+  // predate it, and created_at is never null. Both are in the past, which is all
+  // the backfill needs — it stamps a savedAt that is already outside the window.
+  @InjectManager()
+  async listSettledPayoutDestinations(
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<
+    {
+      customer_id: string;
+      bank_code: string;
+      account_number: string;
+      account_holder_name: string;
+      /** RAW driver value, deliberately widened: whether pg hands back a Date
+       *  or a string is a driver/config detail, and the one caller only ever
+       *  runs against production. Declaring `Date` would be an unverifiable
+       *  claim that turns into a TypeError there; this forces the coercion. */
+      first_settled_at: string | Date;
+    }[]
+  > {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    return await em.execute(
+      'SELECT customer_id, bank_code, account_number, ' +
+        '  MIN(account_holder_name) AS account_holder_name, ' +
+        '  MIN(created_at) AS first_settled_at ' +
+        'FROM globepay_withdrawal ' +
+        "WHERE status = 'settled' AND deleted_at IS NULL " +
+        'GROUP BY customer_id, bank_code, account_number ' +
+        'ORDER BY customer_id, first_settled_at',
+    );
+  }
+
+  // Serialized read-modify-write of `customer.metadata`, the shared JSONB blob
+  // that holds avatar_url / avatar_file_id / equipped_frame_level /
+  // bank_accounts / handle. Every writer of it spread-merges the WHOLE blob, so
+  // an unlocked read-then-write loses data: an avatar upload landing between a
+  // saved bank account's read and its write republishes the pre-save blob and
+  // the account the customer just saved is silently gone (and vice versa). The
+  // same window lets two concurrent saves both pass a "under the cap" check.
+  //
+  // Precedent: setPayoutDetails above, which takes `payout:<customer>` for
+  // exactly this reason — "the list-then-create still needs a lock".
+  //
+  // Key namespace is `metadata:`, NOT `credit:`. The credit ledger's invariant
+  // (at most one `credit:` advisory lock per transaction, ever — see
+  // matureDueCommissions) is untouched by a different namespace, but nothing
+  // here may be composed into a transaction that already holds a `credit:`
+  // lock.
+  //
+  // The lock, the read and the write are all raw SQL on the SAME `em`, i.e. the
+  // SAME pooled connection. This is load-bearing, not a style choice: driving
+  // the customer I/O through the customer module instead would acquire a SECOND
+  // connection while this transaction holds the first, and
+  // utils/db-driver-options.ts caps the pool at 5 PER PROCESS (shared by all ~25
+  // modules) with idle_in_transaction_session_timeout at 30s. Five concurrent
+  // mutations would each hold one connection and wait for another — a pool
+  // deadlock — and under lesser contention the 30s kill would drop this session
+  // (releasing the advisory lock) while the module's write committed anyway on
+  // its own connection. That is the lock silently failing under exactly the
+  // contention it exists for. Keeping everything on one connection also makes
+  // the write atomic with the lock: a rollback undoes it.
+  //
+  // Reaching into the core `customer` table is the price. It is bounded to one
+  // column, and the alternative breaks a documented invariant.
+  @InjectTransactionManager()
+  async mutateCustomerMetadata(
+    input: {
+      customerId: string;
+      /**
+       * Applied to the metadata read INSIDE the lock — never to a blob the
+       * caller read earlier, which is the whole point of this method. Called
+       * EXACTLY ONCE per invocation, so a callback may capture out-of-band
+       * values from the blob it is handed (the avatar route reads the replaced
+       * file id that way). Returning `null` means "nothing changed": no write
+       * is issued, so an idempotent no-op (deleting an already-gone bank
+       * account) stays write-free. Throwing refuses the whole mutation and
+       * rolls the transaction back — that is how a cap check gets enforced
+       * against the locked read.
+       */
+      mutate: (
+        metadata: Record<string, unknown>,
+      ) => Record<string, unknown> | null;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<Record<string, unknown>> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `metadata:${input.customerId}`,
+    ]);
+    const rows = await em.execute<{ metadata: Record<string, unknown> | null }[]>(
+      'SELECT metadata FROM customer WHERE id = ? AND deleted_at IS NULL',
+      [input.customerId],
+    );
+    if (rows.length === 0) {
+      // Same shape retrieveCustomer raised before this went through SQL, so the
+      // routes' 404 behaviour is unchanged.
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        `Customer with id: ${input.customerId} was not found`,
+      );
+    }
+    const current = rows[0].metadata ?? {};
+    const next = input.mutate(current);
+    if (next === null) return current;
+    await em.execute(
+      'UPDATE customer SET metadata = ?::jsonb, updated_at = now() WHERE id = ? AND deleted_at IS NULL',
+      [JSON.stringify(next), input.customerId],
+    );
+    return next;
+  }
+
   // FX manual-override edit + audit row in the same transaction. The audit row
   // is the only record of who repriced the catalog — never split these writes.
   @InjectTransactionManager()
@@ -3314,10 +3694,20 @@ class PacksModuleService extends MedusaService({
     }));
   }
 
-  // Vault liability = Σ over vaulted pulls of ROUND(card FMV × fx × 100) sen,
-  // computed in the DB. Matches the old JS loop exactly: multiplier 1 (markup
-  // lives on sale price, not FMV), reward pulls and orphaned card refs drop out
-  // via the JOIN.
+  // Vault liability = Σ over vaulted pulls of ROUND(card DISPLAY value × fx ×
+  // 100) sen, computed in the DB. Display value (FMV × market_multiplier, via
+  // the shared LIVE_VALUE_USD_SQL) is the basis buyback percents credit
+  // against, so this is the obligation the operator actually owes if every
+  // vaulted card were sold — raw FMV understated it by the markup (issue #263).
+  // profileStatsForCustomer and the economy report's EV/RTP already used this
+  // basis; the admin aggregates were the last raw-FMV holdouts.
+  //
+  // There is NO source filter: a vaulted pull is an obligation whoever won it,
+  // so reward pulls count too — as they should, since the operator owes those
+  // cards as much as pulled ones. What the INNER JOIN drops is a pull whose
+  // card reference is orphaned or soft-deleted (a reward-box prize points at a
+  // PRODUCT handle, not a card, so it falls out here for that reason, not
+  // because of its source). `playersOverview`'s twin behaves identically.
   @InjectManager()
   async vaultLiabilityMyr(
     fx: number,
@@ -3327,11 +3717,11 @@ class PacksModuleService extends MedusaService({
       sharedContext.manager) as unknown as LedgerSqlManager;
     const rows = await em.execute<{ n: string; cents: string }[]>(
       'SELECT COUNT(*)::bigint AS n, ' +
-        '       COALESCE(SUM(ROUND(c.market_value * ? * 100)), 0)::bigint AS cents ' +
+        `       COALESCE(SUM(ROUND(${LIVE_VALUE_USD_SQL} * ? * 100)), 0)::bigint AS cents ` +
         '  FROM pull p ' +
         '  JOIN card c ON c.handle = p.card_id AND c.deleted_at IS NULL ' +
         " WHERE p.status = 'vaulted' AND p.deleted_at IS NULL",
-      [fx],
+      [DEFAULT_MARKET_MULTIPLIER, fx],
     );
     return {
       count: Number(rows[0]?.n ?? 0),
@@ -3759,9 +4149,9 @@ class PacksModuleService extends MedusaService({
   // Batched per-player aggregates for the admin Players list (POLYCARD-BACK
   // §4.2): ONE query per aggregate per page, never per-row. The credit SQL is
   // the GROUP BY twin of creditSummary (service.ts:661) and the vault SQL the
-  // customer-scoped twin of vaultLiabilityMyr (service.ts:2735) — same FMV
-  // convention (multiplier 1), same 'vaulted' predicate, no source filter, and
-  // the same INNER JOIN, so a vaulted pull whose card was soft-deleted drops out
+  // customer-scoped twin of vaultLiabilityMyr — same display-value convention
+  // (FMV × market_multiplier, issue #263), same 'vaulted' predicate, no source
+  // filter, and the same INNER JOIN, so a vaulted pull whose card was soft-deleted drops out
   // of BOTH vault_count and vault_value (profileStatsForCustomer deliberately
   // differs — its LEFT JOIN still counts the pull at 0). Keeping the twin exact
   // is what makes the Players list and the economy dashboard agree.
@@ -3816,10 +4206,10 @@ class PacksModuleService extends MedusaService({
       { customer_id: string; n: string; cents: string }[]
     >(
       'SELECT p.customer_id, COUNT(*)::bigint AS n, ' +
-        '  COALESCE(SUM(ROUND(c.market_value * ? * 100)), 0)::bigint AS cents ' +
+        `  COALESCE(SUM(ROUND(${LIVE_VALUE_USD_SQL} * ? * 100)), 0)::bigint AS cents ` +
         '  FROM pull p JOIN card c ON c.handle = p.card_id AND c.deleted_at IS NULL ' +
         ` WHERE p.status = 'vaulted' AND p.deleted_at IS NULL AND p.customer_id IN (${ph}) GROUP BY p.customer_id`,
-      [fx, ...ids],
+      [DEFAULT_MARKET_MULTIPLIER, fx, ...ids],
     );
     const pulls = await em.execute<{ customer_id: string; n: string }[]>(
       `SELECT customer_id, COUNT(*)::bigint AS n FROM pull WHERE source = 'pack' AND deleted_at IS NULL AND customer_id IN (${ph}) GROUP BY customer_id`,
@@ -6060,8 +6450,13 @@ class PacksModuleService extends MedusaService({
         // to open one from. In production this carries a plain read context, so
         // each row opens its OWN transaction — which is exactly the per-row
         // atomicity wanted.
-        await this.promoteOneChallengeSchedule(row, sharedContext);
-        promoted += 1;
+        //
+        // `false` means the row vanished or stopped being due between the list
+        // above and the locked re-read inside — an operator removed or
+        // rescheduled it mid-batch. Not promoted, not failed: there is nothing
+        // left to retry.
+        if (await this.promoteOneChallengeSchedule(row.id, now, sharedContext))
+          promoted += 1;
       } catch {
         // Swallowed on purpose: a later edition must still get its chance, and
         // the unstamped row IS the error report (visible in the admin, retried
@@ -6081,6 +6476,16 @@ class PacksModuleService extends MedusaService({
    * would re-run saveChallengeStages, silently reverting any edit an operator
    * made to the live ladder in the meantime.
    *
+   * The row is RE-READ here, under FOR UPDATE, rather than trusted from the
+   * caller's list: an admin edit or delete can land between that list and this
+   * transaction, and promoting the captured copy would push stale stages live
+   * (or resurrect a just-removed edition) while the admin route had already
+   * reported success. The lock closes the other half too — an edit that
+   * arrives DURING this transaction blocks on the row, then its
+   * `applied_at: null` selector matches nothing and the route reports "went
+   * live while you were editing" instead of a false success. A row that is
+   * gone, already stamped, or no longer due answers `false`: nothing to do.
+   *
    * The stage write goes through the normal save path, NOT a raw write: that is
    * what validates the prize cards still exist and what writes the audit row,
    * so a promoted edition is indistinguishable from a hand-saved one. Both
@@ -6089,19 +6494,136 @@ class PacksModuleService extends MedusaService({
    */
   @InjectTransactionManager()
   async promoteOneChallengeSchedule(
-    row: { id: string; label: string | null; starts_at: Date; stages: unknown },
+    id: string,
+    now: Date,
     @MedusaContext() sharedContext: Context = {},
-  ): Promise<void> {
+  ): Promise<boolean> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const [fresh] = await em.execute<
+      {
+        id: string;
+        starts_at: Date | string;
+        label: string | null;
+        stages: unknown;
+      }[]
+    >(
+      `SELECT id, starts_at, label, stages
+         FROM challenge_schedule
+        WHERE id = ? AND applied_at IS NULL AND deleted_at IS NULL
+          FOR UPDATE`,
+      [id],
+    );
+    if (!fresh || new Date(fresh.starts_at).getTime() > now.getTime())
+      return false;
     await this.saveChallengeStages(
       {
-        stages: (row.stages as ChallengeStageInput[]) ?? [],
+        stages: (fresh.stages as ChallengeStageInput[]) ?? [],
         adminId: 'system',
-        reason: `Scheduled challenge promoted (${row.label ?? new Date(row.starts_at).toISOString()})`,
+        reason: `Scheduled challenge promoted (${fresh.label ?? new Date(fresh.starts_at).toISOString()})`,
       },
       sharedContext,
     );
+    // Selector repeats the unapplied condition out of the same discipline as
+    // the admin routes — under the row lock it cannot actually lose, but an
+    // id-only stamp is the exact shape this method exists to forbid.
     await this.updateChallengeSchedules(
-      { selector: { id: row.id }, data: { applied_at: new Date() } },
+      { selector: { id, applied_at: null }, data: { applied_at: new Date() } },
+      sharedContext,
+    );
+    return true;
+  }
+
+  /**
+   * Edit a QUEUED edition in place — new start, name, prize ladder — with the
+   * conflict check, the write, and its audit row in ONE transaction.
+   *
+   * Same FOR UPDATE idiom as promoteOneChallengeSchedule, and against the same
+   * rivals: the row lock serializes this edit against the hourly promotion
+   * (an edit arriving while a promotion holds the row blocks, then reads
+   * `applied_at` and refuses) and against another operator's concurrent
+   * edit/delete (they apply one after the other, each auditing the state it
+   * actually replaced — `before` can never skip an intervening write).
+   *
+   * The audit insert shares the transaction, so a failed audit rolls the
+   * schedule change back with it: no edit can land unrecorded.
+   */
+  @InjectTransactionManager()
+  async editChallengeSchedule(
+    input: {
+      id: string;
+      startsAt: Date;
+      label: string | null;
+      stages: ChallengeStageInput[];
+      adminId: string;
+      reason: string;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    // No `applied_at IS NULL` in the WHERE: a promoted row must be READ and
+    // refused with the right message, not skipped as if it never existed.
+    const [row] = await em.execute<
+      {
+        id: string;
+        starts_at: Date | string;
+        label: string | null;
+        stages: unknown;
+        applied_at: Date | string | null;
+      }[]
+    >(
+      `SELECT id, starts_at, label, stages, applied_at
+         FROM challenge_schedule
+        WHERE id = ? AND deleted_at IS NULL
+          FOR UPDATE`,
+      [input.id],
+    );
+    if (!row)
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        'Scheduled challenge not found.',
+      );
+    if (row.applied_at)
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'This challenge already went live — edit the live stages instead.',
+      );
+    // Selector repeats the unapplied condition — same discipline as the stamp
+    // above; under the row lock it cannot lose.
+    await this.updateChallengeSchedules(
+      {
+        selector: { id: input.id, applied_at: null },
+        data: {
+          starts_at: input.startsAt,
+          label: input.label,
+          // model.json() wants Record<string, unknown>; a plain array has no
+          // string index signature (same double-cast as saveChallengeStages).
+          stages: input.stages as unknown as Record<string, unknown>,
+        },
+      },
+      sharedContext,
+    );
+    await this.createAdminActionAudits(
+      [
+        {
+          admin_id: input.adminId,
+          entity_type: 'challenge_stages',
+          entity_id: input.id,
+          action: 'edit',
+          before: {
+            starts_at: new Date(row.starts_at).toISOString(),
+            label: row.label,
+            stages: row.stages,
+          },
+          after: {
+            starts_at: input.startsAt.toISOString(),
+            label: input.label,
+            stages: input.stages,
+          },
+          reason: input.reason,
+        },
+      ],
       sharedContext,
     );
   }
@@ -6318,8 +6840,7 @@ class PacksModuleService extends MedusaService({
     // per settleChallengeWinner call), so row 0 is representative — this is
     // not an ordering assumption.
     const prior = existingRows[0]?.snapshot as unknown as
-      | SettleSnapshot
-      | undefined;
+      SettleSnapshot | undefined;
 
     // Sequential, not Promise.all: challengeWeekPool resolves
     // transactionManager ?? manager and listChallengeStages resolves the SAME

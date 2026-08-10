@@ -200,7 +200,10 @@ export default function ContactPage() {
                 href={q.href}
                 className="group flex h-full items-start gap-4 rounded-2xl border border-white/10 bg-neutral-900 p-4 transition-colors hover:border-white/25"
               >
-                <span className="font-heading text-4xl leading-none text-neutral-700 transition-colors group-hover:text-neutral-500">
+                {/* Same numeral idiom (and same 1.72:1 contrast miss) as
+                    /about's steps — /contact is not in QA_ROUTES, so the a11y
+                    gate never caught it. Kept in step with that fix. */}
+                <span className="font-heading text-4xl leading-none text-neutral-500 transition-colors group-hover:text-neutral-400">
                   {q.num}
                 </span>
                 <div>

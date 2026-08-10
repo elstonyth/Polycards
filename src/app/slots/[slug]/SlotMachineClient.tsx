@@ -14,6 +14,7 @@ import { openBatch, revealPull, closeInstantWindow } from '@/lib/actions/packs';
 import type { WonCard } from '@/lib/actions/packs';
 import { sellBackPull } from '@/lib/actions/vault';
 import { useTopUp } from '@/components/app-shell/TopUpProvider';
+import { useVaultDot } from '@/components/app-shell/VaultDotProvider';
 import { useSound } from '@/lib/use-sound';
 import { rm, affordable } from '@/lib/format';
 import { logger } from '@/lib/logger';
@@ -206,6 +207,7 @@ export default function SlotMachineClient({
   // Aliased: `applyBalance` sets a known number (the balance a spin or
   // sell-back returned). `refetchBalance` re-reads it from the server.
   const { balance, applyBalance, refreshBalance: refetchBalance } = useTopUp();
+  const { refresh: refreshVaultDot } = useVaultDot();
   const [recent, setRecent] = useState<RecentPull[]>(recentPulls);
   const [phase, setPhase] = useState<Phase>('idle');
   // Warm the reveal art while the reels are still turning. Measured: mounting
@@ -477,6 +479,17 @@ export default function SlotMachineClient({
     // account's balance onto whoever is signed in now.
     if (res.balance != null && customer.id === customerIdRef.current) {
       applyBalance(res.balance);
+    }
+
+    // The cards are in the vault as of this response — the open workflow writes
+    // every pull `status: 'vaulted'` at roll time, before a reel turns. Tell the
+    // Vault tab now: it otherwise only re-reads on login and on window focus,
+    // and a spin is neither, so the dot could not light until the customer
+    // switched tabs away and back or reloaded. Same identity guard as the
+    // balance above — never light the spun account's dot for whoever is signed
+    // in now.
+    if (customer.id === customerIdRef.current) {
+      refreshVaultDot();
     }
 
     // Build (but don't yet apply) the post-spin state — spoiler guard.

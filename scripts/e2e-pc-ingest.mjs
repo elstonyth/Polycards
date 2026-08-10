@@ -109,7 +109,16 @@ async function getToken() {
 const body = await res.json();
 const prod = body.products?.[0];
 console.log('thumbnail:', prod?.thumbnail);
-console.log('hotlinked:', prod?.thumbnail?.includes('storage.googleapis.com'));
+// Compare the parsed hostname, not a substring: a URL merely CONTAINING
+// 'storage.googleapis.com' (in a path or query) is not hosted there.
+const hostedOnGcs = (u) => {
+  try {
+    return new URL(u).hostname === 'storage.googleapis.com';
+  } catch {
+    return false;
+  }
+};
+console.log('hotlinked:', hostedOnGcs(prod?.thumbnail));
 console.log('metadata.market_multiplier:', prod?.metadata?.market_multiplier);
 console.log('metadata.pokemon_dex:', prod?.metadata?.pokemon_dex);
 

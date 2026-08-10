@@ -76,9 +76,11 @@ medusaIntegrationTestRunner({
 
         // Cards: $10 and $30 USD FMV. The report converts FMV to MYR at the live
         // rate (no FxRate row seeded → default 4.7), so $10→RM47, $30→RM141;
-        // EV/RTP additionally apply each card's display multiplier.
-        // Vault: TWO vaulted pulls of the $10 card (liability RM94) + one
-        // bought-back (excluded).
+        // EV/RTP and the vault liability apply each card's display multiplier
+        // (issue #263 — one basis across the whole report).
+        // Vault: TWO vaulted pulls of the $10 card (eco-low rides the 1.2
+        // default → RM56.40 each, liability RM112.80) + one bought-back
+        // (excluded).
         await packs.createCards([
           {
             handle: 'eco-low',
@@ -187,7 +189,10 @@ medusaIntegrationTestRunner({
           net: 38.39,
         });
 
-        expect(res.data.liability).toEqual({ count: 2, market_value: 94 });
+        // Display basis: 2 × ROUND($10 × 1.2 × 4.7 × 100)/100 = RM112.80. At the
+        // old raw-FMV basis this was RM94 — understated by the markup buyback
+        // actually credits against (issue #263).
+        expect(res.data.liability).toEqual({ count: 2, market_value: 112.8 });
 
         expect(res.data.packs).toHaveLength(1);
         expect(res.data.packs[0]).toMatchObject({

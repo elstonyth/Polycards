@@ -12,6 +12,7 @@ import { useAuth } from '@/components/auth/AuthProvider';
 import NotificationBell from '@/components/NotificationBell';
 import { Pill } from '@/components/ui/pill';
 import { useTopUp } from './TopUpProvider';
+import { useCreditDot } from './CreditDotProvider';
 import { useVaultDot } from './VaultDotProvider';
 import { TABS, isTabActive } from './tabs';
 
@@ -27,6 +28,7 @@ export default function AppHeader() {
   const { customer, isLoading } = useAuth();
   const { balance, openTopUp } = useTopUp();
   const { show: vaultDot } = useVaultDot();
+  const { show: creditDot } = useCreditDot();
   // A pack open or a sell-back moves this number; counting to the new figure
   // (and tinting money-in green for a beat) is what tells the customer the
   // action landed. Snaps under reduced motion; the tint still fires.
@@ -62,7 +64,17 @@ export default function AppHeader() {
             {TABS.map((tab) => {
               const active = isTabActive(tab, pathname);
               const Icon = tab.icon;
-              const dot = vaultDot && tab.href === '/vault';
+              // One dot per destination, and each announces what it actually
+              // signals: the vault gets new CARDS, the Me tab gets balance
+              // movement (its /transactions child is where they are read). A
+              // shared "new items" label told screen-reader users the wrong
+              // content type on /me.
+              const dotLabel =
+                tab.href === '/vault' && vaultDot
+                  ? 'new items'
+                  : tab.href === '/me' && creditDot
+                    ? 'new activity'
+                    : null;
               return (
                 <Link
                   key={tab.href}
@@ -77,7 +89,9 @@ export default function AppHeader() {
                       : undefined
                   }
                   aria-current={active ? 'page' : undefined}
-                  aria-label={dot ? `${tab.label}, new items` : undefined}
+                  aria-label={
+                    dotLabel ? `${tab.label}, ${dotLabel}` : undefined
+                  }
                   className={cn(
                     'flex h-10 items-center gap-2 rounded-full px-3.5 text-[13px] font-semibold transition-colors',
                     active
@@ -87,7 +101,7 @@ export default function AppHeader() {
                 >
                   <span className="relative inline-flex">
                     <Icon className="h-4 w-4" aria-hidden />
-                    {dot && (
+                    {dotLabel && (
                       // The active pill is bg-neutral-50, so Paper White would
                       // vanish on it. Normally moot (being on /vault clears the
                       // dot), but reachable: a pull can land while the customer

@@ -76,7 +76,7 @@ let link = null;
 for (let i = 0; i < 20 && !link; i++) {
   const log = readFileSync(LOG_FILE, 'utf8');
   const re = new RegExp(
-    `\\[password-reset\\] reset link for ${EMAIL.replace(/[.+]/g, '\\$&')}: (\\S+)`,
+    `\\[password-reset\\] reset link for ${EMAIL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}: (\\S+)`,
   );
   link = log.match(re)?.[1] ?? null;
   if (!link) await new Promise((r) => setTimeout(r, 500));

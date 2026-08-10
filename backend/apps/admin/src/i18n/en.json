@@ -397,6 +397,7 @@
       "pending": "Pending",
       "settled": "Settled",
       "failed": "Failed",
+      "expired": "Expired",
       "all": "All"
     },
     "when": "Started",
@@ -409,7 +410,8 @@
     "statusLabel": {
       "pending": "Pending",
       "settled": "Settled",
-      "failed": "Failed"
+      "failed": "Failed",
+      "expired": "Expired"
     },
     "statusStale": "Overdue",
     "staleWarning": "{{n}} row(s) on this page are past the reconcile window. Check the deposit in the GlobePay back office before crediting anyone by hand.",
@@ -429,6 +431,7 @@
     "when": "Started",
     "customer": "Customer",
     "destination": "Destination",
+    "reveal": "Reveal",
     "amount": "Amount",
     "status": "Status",
     "reference": "References",
@@ -585,7 +588,7 @@
     "payouts": "Payouts (buybacks)",
     "net": "Net margin",
     "liability": "Vault liability",
-    "liabilityHint": "{{count}} cards owed",
+    "liabilityHint": "{{count}} cards owed · display value (FMV × markup, the buyback basis)",
     "topups": "Top-ups",
     "adjustments": "Adjustments (net)",
     "rtpTitle": "Pack RTP (theoretical)",

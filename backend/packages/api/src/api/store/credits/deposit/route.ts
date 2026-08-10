@@ -4,6 +4,7 @@ import {
 } from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
 import { startGlobePayDeposit } from '../../../../modules/packs/globepay-deposit';
+import { payerIpOf } from '../../../utils/payer-ip';
 
 // POST /store/credits/deposit — start a real GlobePay365 top-up. Returns a
 // cashier URL; NO credit is issued here. The customer pays on their page, and
@@ -42,18 +43,10 @@ export async function POST(
     );
   }
 
-  // THEIR requirement is the paying customer's IP, not ours. req.ip FIRST:
-  // Medusa's express-loader sets `trust proxy` 1 unconditionally, so req.ip is
-  // derived from the proxy chain and a client cannot set it. The raw
-  // X-Forwarded-For first hop is client-controlled — reading it first let a
-  // caller choose the IP we report to GlobePay365, so it is only a fallback for
-  // a deployment where req.ip is somehow empty.
-  const forwarded = req.headers['x-forwarded-for'];
-  const ipAddress =
-    req.ip ||
-    (typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : '') ||
-    req.socket?.remoteAddress ||
-    '0.0.0.0';
+  // The paying customer's IP, derived from the proxy chain — NOT from the
+  // client-settable header. See src/api/utils/payer-ip.ts for why the order
+  // matters.
+  const ipAddress = payerIpOf(req);
 
   const method =
     typeof body.payment_method_code === 'string'
