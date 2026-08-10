@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type CSSProperties } from 'react';
-import { SlabImage } from '@/components/SlabImage';
+import { SlabImage, VARIANT_RGB } from '@/components/SlabImage';
 import { cn } from '@/lib/utils';
 import { initialPriceTick, nextPriceTick } from '@/lib/price-tick';
 import { rarityRgb } from '@/lib/rarity';
@@ -32,7 +32,17 @@ export function CardDetail({
   entrance?: boolean;
 }) {
   const rarity = seed.rarity ?? detail?.rarity ?? null;
-  const rgb = rarity ? rarityRgb(rarity) : '255,255,255';
+  // A challenge prize keeps the challenge's prism frame here; the card's pack
+  // tier still reads on the chip below, so no information is lost.
+  const frameVariant = seed.frameVariant;
+  // Tier colour, for anything STATING the tier (the chip). Always the card's
+  // own rarity — a prize frame changes the presentation, not the fact.
+  const rarityRgbValue = rarity ? rarityRgb(rarity) : '255,255,255';
+  // The ambient page glow follows whatever frame the slab is actually WEARING,
+  // or the two disagree — an orange bloom around a prism-framed slab. Read from
+  // SlabImage's own table so a future variant can't set the frame one colour
+  // and the page glow another.
+  const rgb = frameVariant ? VARIANT_RGB[frameVariant] : rarityRgbValue;
   const priceLabel = detail ? rm(detail.marketPriceMyr) : seed.value;
 
   // Entrance slot helpers — see globals.css "Shared first-paint entrance".
@@ -84,6 +94,7 @@ export function CardDetail({
             src={seed.image}
             slabSrc={detail?.slab_image ?? seed.slabImage}
             rarity={rarity}
+            frameVariant={frameVariant}
             alt={seed.name}
             sizes="(max-width: 768px) 62vw, 420px"
             priority
@@ -123,8 +134,8 @@ export function CardDetail({
             )}
             style={{
               ...at(2),
-              color: `rgb(${rgb})`,
-              backgroundColor: `rgba(${rgb},0.12)`,
+              color: `rgb(${rarityRgbValue})`,
+              backgroundColor: `rgba(${rarityRgbValue},0.12)`,
             }}
           >
             {rarity}
@@ -197,7 +208,7 @@ export function CardDetail({
         {detail?.pcSyncedAt && (
           <p style={at(5)} className={cn(rise, 'text-[12px] text-white/50')}>
             Market price · synced {relativeTime(detail.pcSyncedAt)} via
-            PriceCharting
+            Proprietary Fair Market Value (FMV) Valuation Methodology
           </p>
         )}
       </div>

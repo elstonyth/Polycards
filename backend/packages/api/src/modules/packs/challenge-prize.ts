@@ -1,0 +1,30 @@
+/**
+ * Weekly-challenge prizes are minted as pulls against a synthetic pack id
+ * (`challenge-<week start>`) — there is no real Pack row to point at. That id is
+ * also the ONLY marker distinguishing a challenge prize from any other reward
+ * pull once it is sitting in a customer's vault, so the convention lives here
+ * rather than being spelled inline at the mint site and re-parsed by readers.
+ *
+ * Why it matters beyond bookkeeping: a challenge prize wears the challenge's
+ * own prism frame everywhere it appears — the stage grid, the card page opened
+ * from it, and the vault — instead of the card's pack tier. The storefront must
+ * be TOLD that, not left to sniff an id prefix.
+ */
+export const CHALLENGE_PACK_PREFIX = 'challenge-';
+
+/** SQL LIKE pattern for the same convention, for queries that must select
+ *  prize pulls without loading them first. */
+export const CHALLENGE_PACK_LIKE = `${CHALLENGE_PACK_PREFIX}%`;
+
+/** Synthetic pack id for the week's prize pulls. */
+export const challengePackId = (weekStartIso: string): string =>
+  `${CHALLENGE_PACK_PREFIX}${weekStartIso.slice(0, 10)}`;
+
+/** Matches exactly what challengePackId() mints. A bare prefix test would
+ *  false-positive on an admin-authored slug like `challenge-cup-2026` and put
+ *  the prize frame on an ordinary pull; nothing reserves the prefix. */
+const CHALLENGE_PACK_RE = /^challenge-\d{4}-\d{2}-\d{2}$/;
+
+/** Was this pull minted as a weekly-challenge prize? */
+export const isChallengePrizePack = (packId: string | null | undefined) =>
+  typeof packId === 'string' && CHALLENGE_PACK_RE.test(packId);

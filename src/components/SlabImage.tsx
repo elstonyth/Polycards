@@ -76,7 +76,7 @@ function frameSrc(rarity: string): string {
  * back to Common gray.
  */
 export type FrameVariant = 'prism';
-const VARIANT_RGB: Record<FrameVariant, string> = {
+export const VARIANT_RGB: Record<FrameVariant, string> = {
   prism: '255, 255, 255', // white — the gradient's own endpoints
 };
 
@@ -149,6 +149,11 @@ export function SlabImage({
     : rarityRgb(rarity ?? '');
   return (
     <span
+      // Stable hook for the QA scripts, which assert this box still measures
+      // SLAB_ASPECT. The ratio only holds while ONE dimension is auto: a caller
+      // that pins BOTH (e.g. a height class plus `w-full`) makes it inert and
+      // the frame band stretches around a correctly-proportioned card photo.
+      data-slab=""
       className={cn('relative block', className)}
       style={{ aspectRatio: String(SLAB_ASPECT) }}
     >

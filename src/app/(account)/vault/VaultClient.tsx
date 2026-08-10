@@ -440,6 +440,9 @@ export default function VaultClient({
                 src={item.card.image}
                 slabSrc={item.card.slabImage}
                 rarity={item.card.rarity}
+                // Won in the weekly challenge → keeps the challenge's prism
+                // frame here, the same one it wore on the stage grid.
+                frameVariant={item.challengePrize ? 'prism' : undefined}
                 alt={item.card.name}
                 sizes="(max-width: 1024px) 33vw, 25vw"
                 className="w-full"
@@ -520,6 +523,10 @@ export default function VaultClient({
                         rarity: isRarity(item.card.rarity)
                           ? item.card.rarity
                           : null,
+                        // The overlay shows the same frame the tile does.
+                        frameVariant: item.challengePrize
+                          ? ('prism' as const)
+                          : undefined,
                       })
                     }
                     aria-label={`View details for ${item.card.name}`}

@@ -12,6 +12,12 @@ import {
   cardByHandle,
   makeRarityOf,
 } from '../../../../modules/packs/card-view';
+import { RARITY_ORDER, type Rarity } from '../../../../modules/packs/rarity';
+import {
+  CHALLENGE_PACK_LIKE,
+  isChallengePrizePack,
+} from '../../../../modules/packs/challenge-prize';
+import { bestLiveTierByHandle } from '../../../../modules/packs/card-tier';
 import { toMoney } from '../../../../modules/packs/money';
 import {
   DEFAULT_MARKET_MULTIPLIER,
@@ -36,9 +42,6 @@ const RECENT_PAGE = RECENT_N * 3;
 // inherited from MAX_PULLS. The query is showcased-filtered (explicit opt-in
 // rows only), so this is a semantic ceiling, not a working-set size.
 const SHOWCASE_MAX = 20_000;
-
-const RARITIES = ['Immortal', 'Legendary', 'Mythical', 'Rare', 'Uncommon', 'Common'] as const;
-type Rarity = (typeof RARITIES)[number];
 
 type PullRow = Awaited<ReturnType<PacksModuleService['listPulls']>>[number];
 type CardRow = Awaited<ReturnType<PacksModuleService['listCards']>>[number];
@@ -83,10 +86,9 @@ export async function GET(
   // — the cap and the C1 source='pack' filter now live inside the SQL
   // aggregate, see PacksModuleService.profileStatsForCustomer).
   const stats = await packs.profileStatsForCustomer(customer.id);
-  const byRarity = Object.fromEntries(RARITIES.map((r) => [r, 0])) as Record<
-    Rarity,
-    number
-  >;
+  const byRarity = Object.fromEntries(
+    RARITY_ORDER.map((r) => [r, 0]),
+  ) as Record<Rarity, number>;
   for (const [rarity, n] of Object.entries(stats.by_rarity)) {
     // pack_odds.rarity is enum-constrained to RARITIES (NULL → 'Common' in
     // the SQL), so every key lands on an initialized bucket.
@@ -136,14 +138,27 @@ export async function GET(
   // still vaulted). Now its own filtered, bounded query (opt-in rows only)
   // instead of a JS filter over the 20k list. The activity feed (recent)
   // stays ungated as decided at spec time.
-  const showcasePulls = await packs.listPulls(
+  // Weekly-challenge prizes are showcase-able like pulled cards (operator
+  // decision) — they are real cards the customer won, not the private
+  // reward-box prizes the source filter exists to keep off the profile. The
+  // ACTIVITY feed above stays pack-only: a prize is not a pack open, and C1
+  // reserves those slots for opens.
+  //
+  // The LIKE is a coarse pre-filter — it also accepts an admin-authored slug
+  // like `challenge-cup-2026`, which is NOT a prize pack. `isChallengePrizePack`
+  // is the strict rule (the minted date shape), so a reward pull against such a
+  // slug is dropped below rather than being published on a public profile.
+  const showcaseCandidates = await packs.listPulls(
     {
       customer_id: customer.id,
-      source: 'pack',
+      $or: [{ source: 'pack' }, { pack_id: { $like: CHALLENGE_PACK_LIKE } }],
       showcased: true,
       status: 'vaulted',
-    },
+    } as Parameters<typeof packs.listPulls>[0],
     { take: SHOWCASE_MAX, order: { rolled_at: 'DESC' } },
+  );
+  const showcasePulls = showcaseCandidates.filter(
+    (p) => p.source === 'pack' || isChallengePrizePack(p.pack_id),
   );
 
   // Per-pack rarity for BOTH the recent rows and the showcased ones (the
@@ -195,10 +210,22 @@ export async function GET(
   // no tier frame for null, whereas rarityOf's 'Common' fallback would paint a
   // WRONG-tier frame — worse than none. `recent` keeps the Common fallback
   // (pre-existing convention, pinned by the stats-parity spec).
+  // A challenge prize's synthetic pack has no odds row at all, so the miss
+  // above would blank its frame. Resolve those the way the card page and the
+  // vault do — best tier among openable packs — from one batched lookup.
+  const prizeTier = await bestLiveTierByHandle(
+    packs,
+    showcasePulls
+      .filter((p) => isChallengePrizePack(p.pack_id))
+      .map((p) => p.card_id)
+      .filter((h): h is string => Boolean(h)),
+  );
   const rarityOrNull = (packId: string, cardId: string): Rarity | null =>
-    cardOdds.some((o) => o.pack_id === packId && o.card_id === cardId)
-      ? rarityOf(packId, cardId)
-      : null;
+    isChallengePrizePack(packId)
+      ? (prizeTier.get(cardId) ?? null)
+      : cardOdds.some((o) => o.pack_id === packId && o.card_id === cardId)
+        ? rarityOf(packId, cardId)
+        : null;
 
   const recent = recentTop.map(({ pull: p, card }) => ({
     pack_id: p.pack_id,

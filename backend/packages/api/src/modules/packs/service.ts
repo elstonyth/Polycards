@@ -25,6 +25,7 @@ import {
   type SavedBankAccount,
 } from './saved-accounts';
 import { FRAME_LEVELS } from './avatar-frames';
+import { challengePackId } from './challenge-prize';
 import Pack from './models/pack';
 import Card from './models/card';
 import CardPriceHistory from './models/card-price-history';
@@ -7105,7 +7106,7 @@ class PacksModuleService extends MedusaService({
         const minted = await this.createPulls(
           Array.from({ length: qty }, () => ({
             customer_id: customerId,
-            pack_id: `challenge-${weekStartIso.slice(0, 10)}`,
+            pack_id: challengePackId(weekStartIso),
             card_id: handle!,
             order_id: null,
             rolled_at: new Date(),

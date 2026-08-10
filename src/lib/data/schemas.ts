@@ -169,6 +169,10 @@ export const ChallengeSchema = z.looseObject({
     z.looseObject({
       name: z.string(),
       image: z.string(),
+      /** Public route key for /card/<handle>. Optional for deploy skew — an
+       *  older backend omits it and the thumbnail renders without a link
+       *  rather than pointing at /card/undefined. */
+      handle: z.string().nullish(),
       /** The graded-slab composite when the card has one. Optional for deploy
        *  skew — an older backend omits it and the card renders unframed. */
       slab_image: z.string().nullish(),

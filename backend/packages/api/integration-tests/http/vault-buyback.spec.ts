@@ -191,6 +191,17 @@ medusaIntegrationTestRunner({
         return login.data.token;
       };
 
+      // The register token carries an empty actor_id until the customer row is
+      // linked, so derive the id from the authenticated /store/customers/me
+      // read rather than from the JWT.
+      const customerIdOf = async (token: string): Promise<string> => {
+        const me = await request('get', '/store/customers/me', authed(token));
+        expect(me.status).toBe(200);
+        const id: string = me.data.customer.id;
+        expect(id).toBeTruthy();
+        return id;
+      };
+
       it('rejects unauthenticated vault access with 401', async () => {
         expect(
           (await request('get', '/store/vault', storeHeaders)).status,
@@ -213,7 +224,9 @@ medusaIntegrationTestRunner({
         const fund = await api.post(
           '/store/credits/topup',
           { amount: TOPUP },
-          { headers: { ...authed(tokenA), 'idempotency-key': 'vb-fund-topup' } },
+          {
+            headers: { ...authed(tokenA), 'idempotency-key': 'vb-fund-topup' },
+          },
         );
         expect(fund.status).toBe(200);
 
@@ -400,7 +413,9 @@ medusaIntegrationTestRunner({
         await api.post(
           '/store/credits/topup',
           { amount: TOPUP },
-          { headers: { ...authed(token), 'idempotency-key': 'vb-frozen-topup' } },
+          {
+            headers: { ...authed(token), 'idempotency-key': 'vb-frozen-topup' },
+          },
         );
         const open = await request(
           'post',
@@ -450,6 +465,77 @@ medusaIntegrationTestRunner({
         );
         expect(after.frozen).toBe(false);
         expect(after.unfreeze_cause).toBe('repaid');
+      });
+
+      // A weekly-challenge prize is minted source='reward' against a synthetic
+      // `challenge-<week>` pack. Before this, the vault route sent it down the
+      // reward branch (no card, no buyback) and the storefront schema dropped
+      // it outright — a WON card rendered as nothing at all, and selling it was
+      // refused by the reward-box guard. Operator decision: a won card behaves
+      // like a pulled one.
+      it('a weekly-challenge prize shows in the vault as a card and sells back', async () => {
+        const token = await registerCustomer('vb-prize@test.dev');
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        const customerId = await customerIdOf(token);
+
+        // Mint the prize exactly as challenge settlement does.
+        const [prize] = await packs.createPulls([
+          {
+            customer_id: customerId,
+            pack_id: 'challenge-2026-07-19',
+            card_id: CARD_HANDLE,
+            order_id: null,
+            rolled_at: new Date(),
+            status: 'vaulted' as const,
+            source: 'reward' as const,
+          },
+        ]);
+
+        const vault = await request('get', '/store/vault', authed(token));
+        expect(vault.status).toBe(200);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const row = vault.data.items.find((i: any) => i.pull_id === prize.id);
+        expect(row).toBeDefined();
+        // It renders as a CARD (name + buyback), not a bare reward row …
+        expect(row.card.name).toBe('VB Test Card PSA 10');
+        expect(row.buyback.amount).toBeGreaterThan(0);
+        // … it is flagged so the storefront can wear the challenge frame …
+        expect(row.challenge_prize).toBe(true);
+        expect(row.pack_title).toBe('Weekly Challenge');
+        // … its tier comes from the live pack, not the synthetic one …
+        expect(row.card.rarity).toBe('Rare');
+        // … and it sells like any pulled card.
+        const sell = await request(
+          'post',
+          `/store/vault/${prize.id}/buyback`,
+          authed(token),
+        );
+        expect(sell.status).toBe(200);
+        expect(sell.data.amount).toBe(row.buyback.amount);
+      });
+
+      // The reward-box guard must still refuse an actual reward-box prize —
+      // widening it for challenge prizes must not open the sentinel path.
+      it('still refuses to sell a reward-box prize', async () => {
+        const token = await registerCustomer('vb-rewardbox@test.dev');
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        const [prize] = await packs.createPulls([
+          {
+            customer_id: await customerIdOf(token),
+            pack_id: 'reward-box-gold',
+            card_id: CARD_HANDLE,
+            order_id: null,
+            rolled_at: new Date(),
+            status: 'vaulted' as const,
+            source: 'reward' as const,
+          },
+        ]);
+        const sell = await request(
+          'post',
+          `/store/vault/${prize.id}/buyback`,
+          authed(token),
+        );
+        expect(sell.status).toBe(400);
       });
     });
   },

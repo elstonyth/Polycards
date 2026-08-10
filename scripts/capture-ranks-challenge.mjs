@@ -30,8 +30,33 @@ for (const s of SIZES) {
     ].map((n) => n.getAttribute('aria-label')),
     scrollW: document.documentElement.scrollWidth,
     clientW: document.documentElement.clientWidth,
+    // Prize thumbnails link to /card/<handle> (the "View Details" affordance).
+    // The ratio check is the point: SlabImage holds its aspect only while ONE
+    // dimension stays auto, so any caller that pins both (a stray `w-full`)
+    // silently stretches the prism band into a landscape smear. That shipped
+    // once; a link count alone did not catch it.
+    prizeLinks: [...document.querySelectorAll('a[href^="/card/"]')].length,
+    slabRatios: [
+      ...new Set(
+        [...document.querySelectorAll('a[href^="/card/"] [data-slab]')].map(
+          (n) => {
+            const r = n.getBoundingClientRect();
+            return r.height > 0 ? (r.width / r.height).toFixed(2) : 'n/a';
+          },
+        ),
+      ),
+    ],
   }));
   console.log(s.key, JSON.stringify(report));
+  // ~0.59 is SLAB_ASPECT. A 3D-transformed carousel neighbour reads slightly
+  // off, hence the band rather than an equality check.
+  const stretched = report.slabRatios.filter((r) => Number(r) > 0.7);
+  if (stretched.length > 0) {
+    console.error(
+      `  ✗ ${s.key}: slab aspect broken (${stretched.join(', ')}) — a caller is pinning both width and height`,
+    );
+    process.exitCode = 1;
+  }
 
   await page.screenshot({
     path: `docs/research/ranks-challenge-${s.key}.png`,

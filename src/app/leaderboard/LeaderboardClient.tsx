@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { pillVariants } from '@/components/ui/pill';
 import { FramedAvatar } from '@/components/FramedAvatar';
-import { SlabImage } from '@/components/SlabImage';
+import { PrizeCard } from './PrizeCard';
 import type { LeaderboardEntry } from '@/lib/data/leaderboard';
 import type { ChallengeRankPrize } from '@/lib/data/challenge';
 
@@ -210,33 +210,19 @@ export default function LeaderboardClient({
                           .join(', ')}`}
                       >
                         {/* EVERY prize card renders (operator rejected the +N
-                            collapse). Graded prizes wear the prism frame (same
-                            treatment as the stage podium); raw card art stays
-                            a plain <img> — wrong aspect for the band. */}
-                        {prize.cards.map((card, ci) =>
-                          card.slabImage ? (
-                            <SlabImage
-                              key={`${card.name}-${ci}`}
-                              src={card.image}
-                              slabSrc={card.slabImage}
-                              alt=""
-                              frameVariant="prism"
+                            collapse). Frame rule and the "View Details" link
+                            live in PrizeCard. */}
+                        {prize.cards.map((card, ci) => (
+                          <span key={`${card.name}-${ci}`} className="shrink-0">
+                            <PrizeCard
+                              card={card}
                               glowScale={0.15}
                               sizes="96px"
-                              className="h-10 shrink-0"
+                              className="h-10 drop-shadow-[0_4px_8px_rgba(0,0,0,0.6)]"
+                              affordance="ring"
                             />
-                          ) : (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              key={`${card.name}-${ci}`}
-                              src={card.image}
-                              alt=""
-                              loading="lazy"
-                              decoding="async"
-                              className="h-10 w-7 shrink-0 object-contain drop-shadow-[0_4px_8px_rgba(0,0,0,0.6)]"
-                            />
-                          ),
-                        )}
+                          </span>
+                        ))}
                         {prize.creditsLabel && (
                           <span className="text-chase text-xs font-semibold whitespace-nowrap">
                             {prize.creditsLabel}

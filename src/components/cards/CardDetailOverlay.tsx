@@ -19,6 +19,12 @@ export interface CardSeed {
   slabImage: string | null;
   value: string;
   rarity: Rarity | null;
+  /** Cosmetic frame that OVERRIDES the tier frame. A weekly-challenge prize
+   *  wears the challenge's prism frame wherever it is shown — the stage grid,
+   *  this overlay, the card page opened from it, and the winner's vault — so it
+   *  still reads as a challenge prize rather than as a pack pull. Travels on
+   *  the seed so every surface that opens a card carries it automatically. */
+  frameVariant?: 'prism';
 }
 
 /**
@@ -61,6 +67,17 @@ export function CardDetailOverlay({
   // from "closed by Esc/Close" (we still owe a history.back()).
   const pushedRef = useRef(false);
 
+  // The URL this overlay writes must round-trip: /card/<handle> reads the
+  // prize marker from the query string, so dropping it would make a reload or
+  // a shared link render the pack tier where the customer saw the prize frame.
+  const cardUrl = (h: string, variant?: 'prism'): string =>
+    `/card/${encodeURIComponent(h)}${variant === 'prism' ? '?prize=weekly' : ''}`;
+  const frameVariant = seed?.frameVariant;
+  const frameVariantRef = useRef(frameVariant);
+  useEffect(() => {
+    frameVariantRef.current = frameVariant;
+  });
+
   // One pushed history entry per open/close cycle. Keyed on `open` (null↔card
   // transitions only) so a card→card switch never tears this effect down —
   // that's what made back() race pushState.
@@ -69,7 +86,7 @@ export function CardDetailOverlay({
     window.history.pushState(
       { polycardsCardOverlay: true },
       '',
-      `/card/${encodeURIComponent(handleRef.current ?? '')}`,
+      cardUrl(handleRef.current ?? '', frameVariantRef.current),
     );
     pushedRef.current = true;
     const onPop = () => {
@@ -93,10 +110,10 @@ export function CardDetailOverlay({
       window.history.replaceState(
         { polycardsCardOverlay: true },
         '',
-        `/card/${encodeURIComponent(handle)}`,
+        cardUrl(handle, frameVariant),
       );
     }
-  }, [handle]);
+  }, [handle, frameVariant]);
 
   if (!seed) return null;
 

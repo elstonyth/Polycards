@@ -8,6 +8,8 @@ import {
   buybackAmount,
   resolveBuybackRate,
 } from '../../../modules/packs/buyback-rate';
+import { isChallengePrizePack } from '../../../modules/packs/challenge-prize';
+import { bestLiveTierByHandle } from '../../../modules/packs/card-tier';
 import {
   cardByHandle,
   makeRarityOf,
@@ -50,8 +52,21 @@ export async function GET(
   );
 
   // Separate reward pulls (rendered from prize_snapshot) from normal card pulls.
-  const normalPulls = pulls.filter((p) => p.source !== 'reward');
-  const rewardPulls = pulls.filter((p) => p.source === 'reward');
+  //
+  // Weekly-challenge prizes are minted source='reward' but are NOT reward-box
+  // prizes: they carry a real card handle, not a product sentinel, and have no
+  // reward_draw row. Sent down the reward branch they emitted no card/buyback
+  // and the storefront's VaultItemSchema dropped them outright — a won card
+  // rendered as NOTHING in the winner's vault. They belong on the card path,
+  // where they sell and showcase like any pulled card (operator decision).
+  const isChallengePrize = (p: { source?: string | null; pack_id: string }) =>
+    p.source === 'reward' && isChallengePrizePack(p.pack_id);
+  const normalPulls = pulls.filter(
+    (p) => p.source !== 'reward' || isChallengePrize(p),
+  );
+  const rewardPulls = pulls.filter(
+    (p) => p.source === 'reward' && !isChallengePrize(p),
+  );
 
   // For normal card pulls: resolve cards, packs, and odds as before.
   const handles = [...new Set(normalPulls.map((p) => p.card_id))];
@@ -77,6 +92,16 @@ export async function GET(
   );
   const rarityOf = makeRarityOf(cardOdds);
 
+  // A challenge prize's synthetic pack has no odds rows, so makeRarityOf would
+  // fall back to 'Common' and paint an Immortal card with the Common chip —
+  // the exact wrong-tier report this work started from. Resolve those the same
+  // way the card page does (best tier among openable packs), from ONE batched
+  // lookup, and only when the customer actually holds a prize.
+  const prizeHandles = normalPulls
+    .filter((p) => isChallengePrizePack(p.pack_id))
+    .map((p) => p.card_id);
+  const prizeTier = await bestLiveTierByHandle(packs, prizeHandles);
+
   // For reward pulls: load matching reward_draw rows keyed by vault_pull_id.
   // ponytail: single batch query; vault is capped at 500 so N is bounded.
   const rewardPullIds = rewardPulls.map((p) => p.id);
@@ -96,6 +121,7 @@ export async function GET(
       const marketValue = toMoney(card.market_value);
       if (!Number.isFinite(marketValue)) return null;
       const pack = packBySlug.get(p.pack_id);
+      const prize = isChallengePrizePack(p.pack_id);
       const { percent, rate_type } = resolveBuybackRate(pack, {
         rolled_at: p.rolled_at,
         revealed_at: p.revealed_at,
@@ -115,10 +141,24 @@ export async function GET(
         pull_id: p.id,
         rolled_at: p.rolled_at,
         pack_id: p.pack_id,
-        pack_title: pack?.title ?? p.pack_id,
+        // The synthetic `challenge-<week>` id is not a pack title anyone should
+        // read; name the surface it was won on instead.
+        pack_title: pack?.title ?? (prize ? 'Weekly Challenge' : p.pack_id),
+        // A weekly-challenge prize keeps the challenge's own prism frame in the
+        // vault instead of taking the card's pack tier — it was won there, not
+        // pulled from a pack. Stated by the backend rather than left to the
+        // storefront to infer from the synthetic pack id.
+        challenge_prize: prize,
         showcased: (p as unknown as { showcased: boolean }).showcased ?? false,
         card: {
-          ...toCardView(card, rarityOf(p.pack_id, p.card_id)),
+          // A prize's synthetic pack has no odds row, so rarityOf would answer
+          // 'Common' for it; use the resolved live tier instead.
+          ...toCardView(
+            card,
+            prize
+              ? (prizeTier.get(p.card_id) ?? '')
+              : rarityOf(p.pack_id, p.card_id),
+          ),
           marketPriceMyr,
         },
         buyback: {
@@ -149,6 +189,7 @@ export async function GET(
       pull_id: p.id,
       rolled_at: p.rolled_at,
       pack_id: p.pack_id,
+      challenge_prize: isChallengePrizePack(p.pack_id),
       title: snap.title ?? 'Reward prize',
       image: snap.image ?? '',
       source: 'reward' as const,

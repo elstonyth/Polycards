@@ -69,6 +69,7 @@ describe('getChallenge', () => {
     cards: {
       c1: {
         name: 'Charizard',
+        handle: 'charizard-psa-10',
         image: 'http://x/charizard.webp',
         slab_image: 'http://x/charizard-slab.webp',
       },
@@ -78,6 +79,7 @@ describe('getChallenge', () => {
       dup: {
         name: 'Alt Charizard',
         image: 'http://x/charizard.webp',
+        handle: null,
         slabImage: null,
       },
     },
@@ -119,6 +121,7 @@ describe('getChallenge', () => {
         card: {
           name: 'Charizard',
           image: 'http://x/charizard.webp',
+          handle: 'charizard-psa-10',
           slabImage: 'http://x/charizard-slab.webp',
         },
         credits: 0,
@@ -154,6 +157,7 @@ describe('getChallenge', () => {
         card: {
           name: 'Charizard',
           image: 'http://x/charizard.webp',
+          handle: 'charizard-psa-10',
           slabImage: 'http://x/charizard-slab.webp',
         },
         credits: 0,
@@ -164,6 +168,7 @@ describe('getChallenge', () => {
         card: {
           name: 'Mewtwo',
           image: 'http://x/mewtwo.webp',
+          handle: null,
           slabImage: null,
         },
         credits: 25,
@@ -205,6 +210,7 @@ describe('getChallenge', () => {
         {
           name: 'Charizard',
           image: 'http://x/charizard.webp',
+          handle: 'charizard-psa-10',
           slabImage: 'http://x/charizard-slab.webp',
         },
       ],
@@ -242,7 +248,12 @@ describe('getChallenge', () => {
     });
     const c = await getChallenge();
     expect(c!.summary!.cards).toEqual([
-      { name: 'Pikachu', image: 'http://x/pikachu.webp', slabImage: null },
+      {
+        name: 'Pikachu',
+        handle: null,
+        image: 'http://x/pikachu.webp',
+        slabImage: null,
+      },
     ]);
   });
 
@@ -263,6 +274,7 @@ describe('getChallenge', () => {
       {
         name: 'Charizard',
         image: 'http://x/charizard.webp',
+        handle: 'charizard-psa-10',
         slabImage: 'http://x/charizard-slab.webp',
       },
     ]);
@@ -279,6 +291,7 @@ describe('getChallenge', () => {
           {
             name: 'Charizard',
             image: 'http://x/charizard.webp',
+            handle: 'charizard-psa-10',
             slabImage: 'http://x/charizard-slab.webp',
           },
         ],
@@ -314,10 +327,16 @@ describe('getChallenge', () => {
       {
         rank: 1,
         cards: [
-          { name: 'Pikachu', image: 'http://x/pikachu.webp', slabImage: null },
+          {
+            name: 'Pikachu',
+            handle: null,
+            image: 'http://x/pikachu.webp',
+            slabImage: null,
+          },
           {
             name: 'Charizard',
             image: 'http://x/charizard.webp',
+            handle: 'charizard-psa-10',
             slabImage: 'http://x/charizard-slab.webp',
           },
         ],
@@ -406,6 +425,7 @@ describe('getChallenge', () => {
       card: {
         name: 'Pikachu',
         image: 'http://x/pikachu.webp',
+        handle: null,
         slabImage: null,
       },
       credits: 0,
@@ -414,6 +434,7 @@ describe('getChallenge', () => {
     expect(rows[1]!.card).toEqual({
       name: 'Mewtwo',
       image: 'http://x/mewtwo.webp',
+      handle: null,
       slabImage: null,
     });
   });
@@ -460,11 +481,13 @@ describe('getChallenge', () => {
       {
         name: 'Charizard',
         image: 'http://x/charizard.webp',
+        handle: 'charizard-psa-10',
         slabImage: 'http://x/charizard-slab.webp',
       },
       {
         name: 'Alt Charizard',
         image: 'http://x/charizard.webp',
+        handle: null,
         slabImage: null,
       },
     ]);
@@ -516,6 +539,7 @@ describe('getChallenge', () => {
       card: {
         name: 'Charizard',
         image: 'http://x/charizard.webp',
+        handle: 'charizard-psa-10',
         slabImage: 'http://x/charizard-slab.webp',
       },
       credits: 0,
