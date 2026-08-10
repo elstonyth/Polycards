@@ -9,6 +9,7 @@ import {
   startWithdrawal,
   type SavedBankAccount,
 } from '@/lib/actions/vault';
+import { useTopUp } from '@/components/app-shell/TopUpProvider';
 import { Pill, pillVariants } from '@/components/ui/pill';
 import { cn } from '@/lib/utils';
 
@@ -57,6 +58,10 @@ export default function WithdrawForm({
   /** The server's freeze/locked/playthrough-gated figure — NOT raw balance. */
   withdrawable: number | null;
 }) {
+  // The payout debits the balance server-side; repaint it here so the header
+  // chip is not stale, and so the money dot lights without waiting for a focus
+  // event (withdrawals are one of the movements it is meant to announce).
+  const { applyBalance } = useTopUp();
   const [saved, setSaved] = useState<SavedBankAccount[] | null>(null);
   const [accountId, setAccountId] = useState('');
   const [amountText, setAmountText] = useState('');
@@ -127,6 +132,10 @@ export default function WithdrawForm({
         setError(res.error);
         return;
       }
+      // The payout already debited server-side; repaint the header chip now so
+      // it is not stale. Adding a destination lives on /bank since Plan 088, so
+      // there is no save-the-account side effect left to fire here.
+      applyBalance(res.balance);
       setDone({
         amount: res.amount,
         balance: res.balance,

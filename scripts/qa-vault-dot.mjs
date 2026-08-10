@@ -125,15 +125,47 @@ check(
   'latest_event_at is non-null for a non-empty vault',
 );
 
+const creditsRes = await call(`${API}/store/credits/latest`, { headers: CH });
+check(
+  creditsRes.status === 200,
+  `authed /store/credits/latest 200s (got ${creditsRes.status})`,
+);
+const credits = await creditsRes.json();
+console.log(`   credits latest_event_at = ${credits.latest_event_at}`);
+// Typed, not merely non-null: `!== null` also passes when the field is absent
+// or a non-string, so a malformed payload would read as a healthy one. The
+// schema promises `string | null`, and this customer has ledger rows.
+check(
+  typeof credits.latest_event_at === 'string' &&
+    credits.latest_event_at.length > 0,
+  'credits latest_event_at is a nonempty string for a customer with ledger rows',
+);
+
+const creditsAnon = await call(`${API}/store/credits/latest`, {
+  headers: { 'x-publishable-api-key': PUB },
+});
+check(
+  creditsAnon.status === 401,
+  `unauthenticated /store/credits/latest 401s (got ${creditsAnon.status})`,
+);
+
 // ------------------------------------------------------------------- rendering
 // Both navs carry aria-label="Primary" and the desktop one is `hidden lg:flex`
 // (present in the DOM, display:none), so count only what is actually visible.
-async function visibleDots(page) {
-  const all = page.locator('a[aria-label="Vault, new items"]');
+async function visibleWithLabel(page, label) {
+  const all = page.locator(`a[aria-label="${label}"]`);
   const n = await all.count();
   let visible = 0;
   for (let i = 0; i < n; i++) if (await all.nth(i).isVisible()) visible++;
   return visible;
+}
+
+async function visibleDots(page) {
+  return visibleWithLabel(page, 'Vault, new items');
+}
+
+async function visibleMoneyDots(page) {
+  return visibleWithLabel(page, 'Me, new items');
 }
 
 // The dot appears only after getVaultLatest() resolves client-side.
@@ -251,6 +283,100 @@ try {
     fullPage: false,
   });
   await desktop.close();
+
+  // --- 2b. money dot: Me tab + the /me History tile, cleared by /transactions -
+  console.log('\n--- money dot (420x900) ---');
+  const money = await browser.newContext({
+    viewport: { width: 420, height: 900 },
+  });
+  await money.addCookies([cookie]);
+  const moneyPage = await money.newPage();
+
+  await moneyPage.goto(FRONT, {
+    waitUntil: 'domcontentloaded',
+    timeout: 20000,
+  });
+  const moneyLit = await (async () => {
+    const start = Date.now();
+    for (;;) {
+      const n = await visibleMoneyDots(moneyPage);
+      if (n > 0) return n;
+      if (Date.now() - start > 20000) return n;
+      await moneyPage.waitForTimeout(500);
+    }
+  })();
+  check(moneyLit === 1, 'money dot is lit on the Me tab');
+  await moneyPage.screenshot({
+    path: 'docs/research/vault-dot-money-lit.png',
+    fullPage: false,
+  });
+
+  // The in-page marker (the second half of the request): the History tile on
+  // /me carries the same signal, reached via the sr-only text it appends.
+  await moneyPage.goto(`${FRONT}/me`, {
+    waitUntil: 'domcontentloaded',
+    timeout: 30000,
+  });
+  await moneyPage.waitForTimeout(3000);
+  const tile = moneyPage.locator('a[href="/transactions"]');
+  check(
+    (await tile.count()) > 0 &&
+      (await tile.first().innerText()).includes('History'),
+    'the /me History tile is present',
+  );
+  check(
+    ((await tile.first().getAttribute('aria-label')) ?? '')
+      .concat(await tile.first().innerText())
+      .includes('new activity'),
+    'the History tile announces new activity to screen readers',
+  );
+  await moneyPage.screenshot({
+    path: 'docs/research/vault-dot-money-tile.png',
+    fullPage: false,
+  });
+
+  await moneyPage.goto(`${FRONT}/transactions`, {
+    waitUntil: 'domcontentloaded',
+    timeout: 30000,
+  });
+  await moneyPage.waitForTimeout(4000);
+
+  const creditStamp = await moneyPage.evaluate(() =>
+    Object.keys(window.localStorage).filter((k) =>
+      k.startsWith('polycards.credits_seen_at'),
+    ),
+  );
+  check(
+    creditStamp.length === 1 &&
+      /^polycards\.credits_seen_at:cus_/.test(creditStamp[0] ?? ''),
+    `money stamp is customer-scoped and its own namespace: ${creditStamp[0]}`,
+  );
+  // The two dots must not share a stamp. This context never visited /vault, so
+  // the vault key should be ABSENT — proving clearing money wrote only its own.
+  const vaultStamp = await moneyPage.evaluate(() =>
+    Object.keys(window.localStorage).filter((k) =>
+      k.startsWith('polycards.vault_seen_at'),
+    ),
+  );
+  check(
+    vaultStamp.length === 0,
+    'clearing the money dot did NOT touch the vault stamp',
+  );
+
+  await moneyPage.goto(FRONT, {
+    waitUntil: 'domcontentloaded',
+    timeout: 20000,
+  });
+  await moneyPage.waitForTimeout(4000);
+  check(
+    (await visibleMoneyDots(moneyPage)) === 0,
+    'money dot is cleared after visiting /transactions',
+  );
+  check(
+    (await visibleDots(moneyPage)) === 1,
+    'the vault dot is still lit — the two dots are independent',
+  );
+  await money.close();
 
   // --- 3. logged out: no dot, no request ------------------------------------
   console.log('\n--- logged out (420x900) ---');

@@ -240,9 +240,9 @@ export const VaultShowcaseSchema = z.looseObject({
 /** GET /store/credits — finite balance. */
 export const BalanceSchema = z.looseObject({ balance: finite });
 
-/** GET /store/vault/latest — the newest vault-visible event (unread-dot signal).
- *  null when the vault is empty; the client renders no dot for null. */
-export const VaultLatestSchema = z.looseObject({
+/** GET /store/vault/latest and GET /store/credits/latest — the newest event on
+ *  an unread-dot surface. null when there is nothing; the client renders no dot. */
+export const LatestEventSchema = z.looseObject({
   latest_event_at: z.string().nullable(),
 });
 

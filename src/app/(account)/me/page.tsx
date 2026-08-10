@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { QuickAccessCreditDot } from '@/components/account/credit-dot';
 import Image from 'next/image';
 import Link from 'next/link';
 import {
@@ -321,8 +322,9 @@ export default async function MePage() {
                   href={item.href}
                   className="flex flex-col items-center gap-1.5 text-neutral-300 transition-colors hover:text-white"
                 >
-                  <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-neutral-800">
+                  <span className="relative flex h-11 w-11 items-center justify-center rounded-2xl bg-neutral-800">
                     <Icon className="h-5 w-5" aria-hidden />
+                    {item.href === '/transactions' && <QuickAccessCreditDot />}
                   </span>
                   <span className="text-[11px] font-semibold">
                     {item.label}
