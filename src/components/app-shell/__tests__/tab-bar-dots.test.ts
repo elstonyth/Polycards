@@ -76,11 +76,14 @@ describe('TabBar dots', () => {
     expect(labelFor('/')).toBeNull();
   });
 
+  // The two dots signal DIFFERENT things, so they announce differently: the
+  // vault gains cards, /me gains balance movement. A shared "new items" told a
+  // screen-reader user the wrong content type on /me (review finding).
   test('the money dot lands on /me and nowhere else', async () => {
     creditDot.show = true;
     await render();
 
-    expect(labelFor('/me')).toBe('Me, new items');
+    expect(labelFor('/me')).toBe('Me, new activity');
     expect(labelFor('/vault')).toBeNull();
   });
 
@@ -90,7 +93,7 @@ describe('TabBar dots', () => {
     await render();
 
     expect(labelFor('/vault')).toBe('Vault, new items');
-    expect(labelFor('/me')).toBe('Me, new items');
+    expect(labelFor('/me')).toBe('Me, new activity');
     // The other three destinations never take a dot.
     for (const href of ['/task', '/leaderboard', '/']) {
       expect(labelFor(href)).toBeNull();

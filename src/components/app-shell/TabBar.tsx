@@ -30,11 +30,16 @@ export default function TabBar() {
         {TABS.map((tab) => {
           const active = isTabActive(tab, pathname);
           const Icon = tab.icon;
-          // One dot per destination: the vault's arrivals, and the Me tab's
-          // balance movements (its /transactions child is where they are read).
-          const dot =
-            (tab.href === '/vault' && vaultDot) ||
-            (tab.href === '/me' && creditDot);
+          // One dot per destination, and each announces what it actually
+          // signals: the vault gets new CARDS, the Me tab gets balance movement
+          // (its /transactions child is where they are read). Kept in step with
+          // AppHeader, which renders the same five destinations on lg+.
+          const dotLabel =
+            tab.href === '/vault' && vaultDot
+              ? 'new items'
+              : tab.href === '/me' && creditDot
+                ? 'new activity'
+                : null;
           return (
             <Link
               key={tab.href}
@@ -51,7 +56,7 @@ export default function TabBar() {
                   : undefined
               }
               aria-current={active ? 'page' : undefined}
-              aria-label={dot ? `${tab.label}, new items` : undefined}
+              aria-label={dotLabel ? `${tab.label}, ${dotLabel}` : undefined}
               className={cn(
                 'flex flex-1 flex-col items-center justify-center gap-1 transition-colors',
                 active
@@ -71,7 +76,7 @@ export default function TabBar() {
                   strokeWidth={active ? 2.25 : 2}
                   aria-hidden
                 />
-                {dot && (
+                {dotLabel && (
                   <span
                     aria-hidden
                     className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-neutral-50"

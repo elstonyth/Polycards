@@ -132,9 +132,13 @@ check(
 );
 const credits = await creditsRes.json();
 console.log(`   credits latest_event_at = ${credits.latest_event_at}`);
+// Typed, not merely non-null: `!== null` also passes when the field is absent
+// or a non-string, so a malformed payload would read as a healthy one. The
+// schema promises `string | null`, and this customer has ledger rows.
 check(
-  credits.latest_event_at !== null,
-  'credits latest_event_at is non-null for a customer with ledger rows',
+  typeof credits.latest_event_at === 'string' &&
+    credits.latest_event_at.length > 0,
+  'credits latest_event_at is a nonempty string for a customer with ledger rows',
 );
 
 const creditsAnon = await call(`${API}/store/credits/latest`, {
