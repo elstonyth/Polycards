@@ -22,6 +22,12 @@ export type PhoneVerificationEnv = {
   TWILIO_AUTH_TOKEN?: string;
   TWILIO_VERIFY_SERVICE_SID?: string;
   PHONE_OTP_DEV_CODE?: string;
+  // One Twilio Verify custom-template SID per purpose. Unset = Twilio's default
+  // template, i.e. exactly today's behaviour, so this ships dark and the
+  // operator turns it on per flow once the templates clear Twilio's approval.
+  TWILIO_VERIFY_TEMPLATE_SID_SIGNUP?: string;
+  TWILIO_VERIFY_TEMPLATE_SID_PHONE_CHANGE?: string;
+  TWILIO_VERIFY_TEMPLATE_SID_PASSWORD_RESET?: string;
   ALLOWED_SMS_COUNTRIES?: string;
 };
 
@@ -225,12 +231,33 @@ const PROOF_HMAC_DOMAIN = 'phone-proof.v1';
 
 type ProofPayload = { phone: string; purpose: PhoneOtpPurpose; exp: number };
 
+/**
+ * Refuses an empty key. `createHmac('sha256', '')` is legal in Node and returns
+ * a MAC anyone can recompute, so an empty secret would make every phone proof
+ * forgeable — which on this codebase means minting password-reset tokens.
+ *
+ * Unreachable today: all four call sites reject a falsy/non-string jwtSecret
+ * first, and prod cannot boot without JWT_SECRET. The guard exists so a fifth
+ * caller that forgets cannot silently downgrade the whole scheme; the
+ * duplicated call-site checks stay, because they answer with a route-shaped
+ * error instead of a 500.
+ */
+function assertSecret(secret: string): void {
+  if (!secret) {
+    throw new MedusaError(
+      MedusaError.Types.UNEXPECTED_STATE,
+      'Phone proof secret is not configured.',
+    );
+  }
+}
+
 export function signPhoneProof(
   secret: string,
   phone: string,
   purpose: PhoneOtpPurpose,
   nowMs: number = Date.now(),
 ): string {
+  assertSecret(secret);
   const payload = Buffer.from(
     JSON.stringify({ phone, purpose, exp: nowMs + PROOF_TTL_MS } satisfies ProofPayload),
   ).toString('base64url');
@@ -246,6 +273,7 @@ export function verifyPhoneProof(
   purpose: PhoneOtpPurpose,
   nowMs: number = Date.now(),
 ): { phone: string } | null {
+  assertSecret(secret);
   const dot = token.lastIndexOf('.');
   if (dot <= 0) return null;
   const payload = token.slice(0, dot);
@@ -310,6 +338,33 @@ const twilioErrorCode = async (res: Response): Promise<number | null> => {
   }
 };
 
+const TEMPLATE_SID_ENV: Record<PhoneOtpPurpose, keyof PhoneVerificationEnv> = {
+  signup: 'TWILIO_VERIFY_TEMPLATE_SID_SIGNUP',
+  'phone-change': 'TWILIO_VERIFY_TEMPLATE_SID_PHONE_CHANGE',
+  'password-reset': 'TWILIO_VERIFY_TEMPLATE_SID_PASSWORD_RESET',
+};
+
+/**
+ * The Verify template to send this purpose's code under, or undefined for
+ * Twilio's default.
+ *
+ * WHY per purpose: Twilio verifies on (phone, code) alone, and the default
+ * template is identical for all three flows — so a code a victim reads back
+ * under a "verify your number" pretext is exchangeable at /check for a
+ * 'password-reset' proof, and that route returns a live reset token. The MAC'd
+ * `purpose` stops a signup proof being REPLAYED at password-reset, but it is a
+ * scope tag on the token, not evidence of what the human agreed to. Naming the
+ * flow in the SMS is what lets the person reading it refuse.
+ *
+ * Not a complete fix: it makes the pretext visible, it does not make the
+ * exchange impossible. Binding it outright needs a separate Verify Service per
+ * purpose, so a code minted for one cannot check against another.
+ */
+export const otpTemplateSid = (
+  env: PhoneVerificationEnv,
+  purpose: PhoneOtpPurpose,
+): string | undefined => env[TEMPLATE_SID_ENV[purpose]] || undefined;
+
 /** Sends the OTP. Dev/test: logs the fixed dev code (the log is the SMS
  *  transport). Prod without Twilio: throws — enforcement on + unconfigured
  *  must brick LOUDLY, never silently skip verification. */
@@ -317,9 +372,12 @@ export async function sendPhoneOtp(
   env: PhoneVerificationEnv,
   logger: Logger,
   phone: string,
+  purpose: PhoneOtpPurpose,
 ): Promise<void> {
   if (isDevOrTest(env)) {
-    logger.warn(`[phone-otp] dev transport — code for ${phone} is ${devCode(env)}`);
+    logger.warn(
+      `[phone-otp] dev transport — ${purpose} code for ${phone} is ${devCode(env)}`,
+    );
     return;
   }
   if (!isTwilioVerifyConfigured(env)) {
@@ -328,12 +386,19 @@ export async function sendPhoneOtp(
       'Phone verification is not configured.',
     );
   }
+  const templateSid = otpTemplateSid(env, purpose);
   let res: Response;
   try {
     res = await fetch(`${twilioBase(env)}/Verifications`, {
       method: 'POST',
       headers: twilioHeaders(env),
-      body: new URLSearchParams({ To: phone, Channel: 'sms' }).toString(),
+      // TemplateSid is SMS-only (Twilio error 60408 rejects it on call/email);
+      // this transport is sms-only, so it is always safe to include here.
+      body: new URLSearchParams({
+        To: phone,
+        Channel: 'sms',
+        ...(templateSid ? { TemplateSid: templateSid } : {}),
+      }).toString(),
       signal: AbortSignal.timeout(TWILIO_TIMEOUT_MS),
     });
   } catch {
