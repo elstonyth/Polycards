@@ -132,8 +132,7 @@ function StageCard({
               card={r.card}
               glowScale={0.25}
               sizes="256px"
-              className="mx-auto mt-2 h-20"
-              compact
+              className="mx-auto mt-2 h-20 drop-shadow-[0_8px_16px_rgba(0,0,0,0.6)]"
             />
             <p className="mt-2 line-clamp-2 text-[10px] leading-tight font-semibold tracking-wide text-neutral-300 uppercase">
               {r.card.name}

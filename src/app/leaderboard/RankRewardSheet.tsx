@@ -40,13 +40,13 @@ export function RankRewardList({
           {/* Prize art + its "View Details" link live in PrizeCard; a
               credits-only rank shows the coin stack instead. */}
           {r.card ? (
-            <span className="w-10 shrink-0">
+            <span className="shrink-0">
               <PrizeCard
                 card={r.card}
                 glowScale={0.18}
                 sizes="128px"
-                className="h-14"
-                compact
+                className="h-14 drop-shadow-[0_6px_12px_rgba(0,0,0,0.6)]"
+                affordance="ring"
               />
             </span>
           ) : (

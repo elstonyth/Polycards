@@ -9,13 +9,26 @@ import type { ChallengeCard } from '@/lib/data/challenge';
  * the standings prize column.
  *
  * Art rule (unchanged, just centralised): a graded slab wears the prism frame,
- * raw card art stays a plain <img> — it has the wrong aspect for the band.
+ * raw card art stays an unframed image — it has the wrong aspect for the band.
  *
- * The whole thumbnail is the link, with the "View Details" pill fading in on
- * hover AND keyboard focus — the same affordance as the pack pool tiles
- * (components/cards/CardTile). Pack tiles open an overlay because they already
- * hold a priced seed; a prize thumbnail carries no price or rarity, so it
- * navigates to /card/<handle> and lets that page do the fetching.
+ * GEOMETRY: pass a HEIGHT only. SlabImage holds its aspect ratio by leaving the
+ * other dimension auto, so pinning both (a stray `w-full` here) makes the ratio
+ * inert and stretches the prism band into a landscape smear around a
+ * correctly-proportioned card photo. The Link is `w-fit` for the same reason —
+ * it hugs the art instead of handing it a definite width, which also keeps the
+ * hover/click target on the card rather than the dead space beside it.
+ *
+ * The whole thumbnail is the link. How the affordance reads scales with the
+ * art: the pack-tile pill (components/cards/CardTile) is sized for a ~200px
+ * grid tile and overflows every prize thumbnail here — the widest is 76px — so
+ * the pill is set in the smaller label size, and the 40-56px sheet and
+ * standings thumbs, narrower than the words themselves, get a ring instead.
+ * Both fade in on hover AND keyboard focus, and the link's aria-label carries
+ * the semantics either way.
+ *
+ * Pack tiles open an overlay because they already hold a priced seed; a prize
+ * thumbnail carries no price or rarity, so it navigates to /card/<handle> and
+ * lets that page do the fetching.
  *
  * `handle` is null on an older backend that doesn't send it — the thumbnail
  * then renders exactly as before, unlinked, instead of pointing at a 404.
@@ -25,31 +38,38 @@ export function PrizeCard({
   className,
   sizes,
   glowScale,
-  compact = false,
+  affordance = 'pill',
 }: {
   card: ChallengeCard;
-  /** Sizing/position classes for the art itself (h-32, mx-auto mt-2 h-20, …). */
+  /** HEIGHT + position classes for the art (h-32, mx-auto mt-2 h-20, …). Never
+   *  a width — see the GEOMETRY note above. A drop-shadow passed here overrides
+   *  the default via tailwind-merge, which is how each site keeps a shadow
+   *  scaled to its own size. */
   className?: string;
   sizes?: string;
   glowScale?: number;
-  /** Smaller pill for the h-14/h-20 tiles, where the default overflows. */
-  compact?: boolean;
+  /** How the "view details" hint reads at this size. */
+  affordance?: 'pill' | 'ring';
 }) {
+  // Unlinked (no handle) the image is the only thing announcing this prize, so
+  // it needs its name; linked, the anchor's aria-label already carries it and a
+  // named image would just repeat it to a screen reader.
+  const alt = card.handle ? '' : card.name;
   const art = card.slabImage ? (
     <SlabImage
       src={card.image}
       slabSrc={card.slabImage}
-      alt=""
+      alt={alt}
       frameVariant="prism"
       glowScale={glowScale}
       sizes={sizes}
-      className={cn('w-full', className)}
+      className={className}
     />
   ) : (
     // eslint-disable-next-line @next/next/no-img-element
     <img
       src={card.image}
-      alt=""
+      alt={alt}
       loading="lazy"
       decoding="async"
       className={cn(
@@ -61,28 +81,38 @@ export function PrizeCard({
 
   if (!card.handle) return art;
 
+  const ring = affordance === 'ring';
+
   return (
     <Link
-      href={`/card/${card.handle}`}
+      href={`/card/${encodeURIComponent(card.handle)}`}
       aria-label={`View details for ${card.name}`}
-      className="group relative block"
+      className={cn(
+        'group relative mx-auto block w-fit',
+        ring &&
+          'rounded-md ring-white/70 transition-shadow hover:ring-2 focus-visible:ring-2',
+      )}
     >
-      <span className="block transition-opacity duration-200 group-hover:opacity-60 group-focus-visible:opacity-60">
+      <span
+        className={cn(
+          'block transition duration-200',
+          ring
+            ? 'group-hover:brightness-125 group-focus-visible:brightness-125'
+            : 'group-hover:opacity-60 group-focus-visible:opacity-60',
+        )}
+      >
         {art}
       </span>
-      <span
-        aria-hidden
-        className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100"
-      >
+      {!ring && (
         <span
-          className={cn(
-            'rounded-full bg-white font-bold text-neutral-950 shadow-lg',
-            compact ? 'px-2 py-0.5 text-[9px]' : 'px-3.5 py-1.5 text-[12px]',
-          )}
+          aria-hidden
+          className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100"
         >
-          View Details
+          <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-bold whitespace-nowrap text-neutral-950 shadow-lg">
+            View Details
+          </span>
         </span>
-      </span>
+      )}
     </Link>
   );
 }

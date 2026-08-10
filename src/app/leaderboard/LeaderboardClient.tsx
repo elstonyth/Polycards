@@ -213,16 +213,13 @@ export default function LeaderboardClient({
                             collapse). Frame rule and the "View Details" link
                             live in PrizeCard. */}
                         {prize.cards.map((card, ci) => (
-                          <span
-                            key={`${card.name}-${ci}`}
-                            className="w-7 shrink-0"
-                          >
+                          <span key={`${card.name}-${ci}`} className="shrink-0">
                             <PrizeCard
                               card={card}
                               glowScale={0.15}
                               sizes="96px"
-                              className="h-10"
-                              compact
+                              className="h-10 drop-shadow-[0_4px_8px_rgba(0,0,0,0.6)]"
+                              affordance="ring"
                             />
                           </span>
                         ))}

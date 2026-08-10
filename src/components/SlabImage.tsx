@@ -149,6 +149,11 @@ export function SlabImage({
     : rarityRgb(rarity ?? '');
   return (
     <span
+      // Stable hook for the QA scripts, which assert this box still measures
+      // SLAB_ASPECT. The ratio only holds while ONE dimension is auto: a caller
+      // that pins BOTH (e.g. a height class plus `w-full`) makes it inert and
+      // the frame band stretches around a correctly-proportioned card photo.
+      data-slab=""
       className={cn('relative block', className)}
       style={{ aspectRatio: String(SLAB_ASPECT) }}
     >
