@@ -3700,8 +3700,14 @@ class PacksModuleService extends MedusaService({
   // against, so this is the obligation the operator actually owes if every
   // vaulted card were sold — raw FMV understated it by the markup (issue #263).
   // profileStatsForCustomer and the economy report's EV/RTP already used this
-  // basis; the admin aggregates were the last raw-FMV holdouts. Reward pulls
-  // and orphaned card refs drop out via the JOIN.
+  // basis; the admin aggregates were the last raw-FMV holdouts.
+  //
+  // There is NO source filter: a vaulted pull is an obligation whoever won it,
+  // so reward pulls count too — as they should, since the operator owes those
+  // cards as much as pulled ones. What the INNER JOIN drops is a pull whose
+  // card reference is orphaned or soft-deleted (a reward-box prize points at a
+  // PRODUCT handle, not a card, so it falls out here for that reason, not
+  // because of its source). `playersOverview`'s twin behaves identically.
   @InjectManager()
   async vaultLiabilityMyr(
     fx: number,
