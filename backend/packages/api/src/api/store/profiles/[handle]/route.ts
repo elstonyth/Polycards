@@ -43,7 +43,6 @@ const RECENT_PAGE = RECENT_N * 3;
 // rows only), so this is a semantic ceiling, not a working-set size.
 const SHOWCASE_MAX = 20_000;
 
-
 type PullRow = Awaited<ReturnType<PacksModuleService['listPulls']>>[number];
 type CardRow = Awaited<ReturnType<PacksModuleService['listCards']>>[number];
 
@@ -87,10 +86,9 @@ export async function GET(
   // — the cap and the C1 source='pack' filter now live inside the SQL
   // aggregate, see PacksModuleService.profileStatsForCustomer).
   const stats = await packs.profileStatsForCustomer(customer.id);
-  const byRarity = Object.fromEntries(RARITY_ORDER.map((r) => [r, 0])) as Record<
-    Rarity,
-    number
-  >;
+  const byRarity = Object.fromEntries(
+    RARITY_ORDER.map((r) => [r, 0]),
+  ) as Record<Rarity, number>;
   for (const [rarity, n] of Object.entries(stats.by_rarity)) {
     // pack_odds.rarity is enum-constrained to RARITIES (NULL → 'Common' in
     // the SQL), so every key lands on an initialized bucket.
@@ -145,7 +143,12 @@ export async function GET(
   // reward-box prizes the source filter exists to keep off the profile. The
   // ACTIVITY feed above stays pack-only: a prize is not a pack open, and C1
   // reserves those slots for opens.
-  const showcasePulls = await packs.listPulls(
+  //
+  // The LIKE is a coarse pre-filter — it also accepts an admin-authored slug
+  // like `challenge-cup-2026`, which is NOT a prize pack. `isChallengePrizePack`
+  // is the strict rule (the minted date shape), so a reward pull against such a
+  // slug is dropped below rather than being published on a public profile.
+  const showcaseCandidates = await packs.listPulls(
     {
       customer_id: customer.id,
       $or: [{ source: 'pack' }, { pack_id: { $like: CHALLENGE_PACK_LIKE } }],
@@ -153,6 +156,9 @@ export async function GET(
       status: 'vaulted',
     } as Parameters<typeof packs.listPulls>[0],
     { take: SHOWCASE_MAX, order: { rolled_at: 'DESC' } },
+  );
+  const showcasePulls = showcaseCandidates.filter(
+    (p) => p.source === 'pack' || isChallengePrizePack(p.pack_id),
   );
 
   // Per-pack rarity for BOTH the recent rows and the showcased ones (the
