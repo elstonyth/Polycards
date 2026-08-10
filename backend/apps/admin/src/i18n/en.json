@@ -585,7 +585,7 @@
     "payouts": "Payouts (buybacks)",
     "net": "Net margin",
     "liability": "Vault liability",
-    "liabilityHint": "{{count}} cards owed",
+    "liabilityHint": "{{count}} cards owed · display value (FMV × markup, the buyback basis)",
     "topups": "Top-ups",
     "adjustments": "Adjustments (net)",
     "rtpTitle": "Pack RTP (theoretical)",

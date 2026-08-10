@@ -3314,10 +3314,14 @@ class PacksModuleService extends MedusaService({
     }));
   }
 
-  // Vault liability = Σ over vaulted pulls of ROUND(card FMV × fx × 100) sen,
-  // computed in the DB. Matches the old JS loop exactly: multiplier 1 (markup
-  // lives on sale price, not FMV), reward pulls and orphaned card refs drop out
-  // via the JOIN.
+  // Vault liability = Σ over vaulted pulls of ROUND(card DISPLAY value × fx ×
+  // 100) sen, computed in the DB. Display value (FMV × market_multiplier, via
+  // the shared LIVE_VALUE_USD_SQL) is the basis buyback percents credit
+  // against, so this is the obligation the operator actually owes if every
+  // vaulted card were sold — raw FMV understated it by the markup (issue #263).
+  // profileStatsForCustomer and the economy report's EV/RTP already used this
+  // basis; the admin aggregates were the last raw-FMV holdouts. Reward pulls
+  // and orphaned card refs drop out via the JOIN.
   @InjectManager()
   async vaultLiabilityMyr(
     fx: number,
@@ -3327,11 +3331,11 @@ class PacksModuleService extends MedusaService({
       sharedContext.manager) as unknown as LedgerSqlManager;
     const rows = await em.execute<{ n: string; cents: string }[]>(
       'SELECT COUNT(*)::bigint AS n, ' +
-        '       COALESCE(SUM(ROUND(c.market_value * ? * 100)), 0)::bigint AS cents ' +
+        `       COALESCE(SUM(ROUND(${LIVE_VALUE_USD_SQL} * ? * 100)), 0)::bigint AS cents ` +
         '  FROM pull p ' +
         '  JOIN card c ON c.handle = p.card_id AND c.deleted_at IS NULL ' +
         " WHERE p.status = 'vaulted' AND p.deleted_at IS NULL",
-      [fx],
+      [DEFAULT_MARKET_MULTIPLIER, fx],
     );
     return {
       count: Number(rows[0]?.n ?? 0),
@@ -3759,9 +3763,9 @@ class PacksModuleService extends MedusaService({
   // Batched per-player aggregates for the admin Players list (POLYCARD-BACK
   // §4.2): ONE query per aggregate per page, never per-row. The credit SQL is
   // the GROUP BY twin of creditSummary (service.ts:661) and the vault SQL the
-  // customer-scoped twin of vaultLiabilityMyr (service.ts:2735) — same FMV
-  // convention (multiplier 1), same 'vaulted' predicate, no source filter, and
-  // the same INNER JOIN, so a vaulted pull whose card was soft-deleted drops out
+  // customer-scoped twin of vaultLiabilityMyr — same display-value convention
+  // (FMV × market_multiplier, issue #263), same 'vaulted' predicate, no source
+  // filter, and the same INNER JOIN, so a vaulted pull whose card was soft-deleted drops out
   // of BOTH vault_count and vault_value (profileStatsForCustomer deliberately
   // differs — its LEFT JOIN still counts the pull at 0). Keeping the twin exact
   // is what makes the Players list and the economy dashboard agree.
@@ -3816,10 +3820,10 @@ class PacksModuleService extends MedusaService({
       { customer_id: string; n: string; cents: string }[]
     >(
       'SELECT p.customer_id, COUNT(*)::bigint AS n, ' +
-        '  COALESCE(SUM(ROUND(c.market_value * ? * 100)), 0)::bigint AS cents ' +
+        `  COALESCE(SUM(ROUND(${LIVE_VALUE_USD_SQL} * ? * 100)), 0)::bigint AS cents ` +
         '  FROM pull p JOIN card c ON c.handle = p.card_id AND c.deleted_at IS NULL ' +
         ` WHERE p.status = 'vaulted' AND p.deleted_at IS NULL AND p.customer_id IN (${ph}) GROUP BY p.customer_id`,
-      [fx, ...ids],
+      [DEFAULT_MARKET_MULTIPLIER, fx, ...ids],
     );
     const pulls = await em.execute<{ customer_id: string; n: string }[]>(
       `SELECT customer_id, COUNT(*)::bigint AS n FROM pull WHERE source = 'pack' AND deleted_at IS NULL AND customer_id IN (${ph}) GROUP BY customer_id`,
