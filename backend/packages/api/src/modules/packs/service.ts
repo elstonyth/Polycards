@@ -5040,15 +5040,23 @@ class PacksModuleService extends MedusaService({
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
     const rows = await em.execute<{ sen: string | null }[]>(
-      // Debits ONLY (`amount < 0`). reverseOpen's compensating row is also
-      // reason 'pack_open' but POSITIVE, and excluding it is what makes this
-      // counter monotonic — which is the point. The monotonic counter is what
-      // stops a clawback-then-respend from re-earning a VIP level-up grant
-      // (level-up-grant.spec.ts marks that invariant CRITICAL).
+      // Debits ONLY (`amount < 0`) — a committed decision, not an oversight.
+      // ADR 0003 specs it, and vip-lifetime.ts's lifetimeTurnoverSen is the
+      // pure-fold mirror that has to agree with this SQL; changing one without
+      // the other desyncs the tests from production silently. Spec §3: a refund
+      // never lowers the counter.
       //
-      // Reversals are NOT ignored by the system, they are reflected on the OTHER
-      // basis: creditSummary().vipSpendTotal is net, drops on reversal, and
-      // drives current_level. highest_level_ever uses this monotonic one.
+      // What this filter is NOT is the re-grant guard. A clawback-then-respend
+      // cannot re-earn a level-up grant because highest_level_ever is a ratchet
+      // (GREATEST on upsert, in upsertVipMemberState) and levelsToGrant starts
+      // at max(highestEver + 1, 2) — a LOWER level yields an empty grant list
+      // whichever way this counter is summed. Reversals DO move the system,
+      // just on the other basis: creditSummary().vipSpendTotal is net, drops on
+      // reversal, and drives current_level. This monotonic one feeds
+      // highest_level_ever.
+      //
+      // Three audit passes have now flagged the `amount < 0` as a bug and one
+      // of them got as far as changing it. It is WON'T-FIX — see ADR 0003.
       `SELECT COALESCE(SUM(ROUND(-amount * 100)), 0)::bigint AS sen
          FROM credit_transaction
         WHERE customer_id = ? AND reason = 'pack_open' AND amount < 0 AND deleted_at IS NULL`,
