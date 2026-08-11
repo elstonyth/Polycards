@@ -302,10 +302,13 @@ const bankAccountAdded = (d: {
 };
 
 // The payout mirror of topupReceipt. One template, two outcomes: 'paid' (the
-// bank transfer completed) and 'refunded' (the bank rejected it and the debit
-// came back). Deliberately NO bank account details — email is the least
-// private channel this data could travel through; the reference is what
-// support needs, and the account is on the admin Withdrawals row.
+// bank transfer completed) and 'refunded' (the transfer could not be
+// completed and the debit came back — cause-agnostic deliberately: a denied
+// HELD withdrawal, plan 094, never reached a bank to reject it, and neither
+// does a gateway-side refusal, so this must not name the bank). Deliberately
+// NO bank account details — email is the least private channel this data
+// could travel through; the reference is what support needs, and the
+// account is on the admin Withdrawals row.
 type WithdrawalReceiptData = {
   amount: number;
   reference: string;
