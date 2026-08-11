@@ -1297,14 +1297,15 @@ class PacksModuleService extends MedusaService({
     //    created_at) and (customer_id) partial indexes this scan uses.
     //
     //    The just-created row is EXCLUDED by merchant_transaction_id:
-    //    globepay-withdrawal.ts writes it as `pending` BEFORE calling this
-    //    method (the callback echoes only MerchantTransactionId, so that row is
-    //    the only way back to the customer), so an unfiltered sum would count
-    //    this very attempt against its own cap and refuse every withdrawal
-    //    above half the ceiling.
+    //    globepay-withdrawal.ts writes it with its final status (`pending` or
+    //    `held`) BEFORE calling this method (the callback echoes only
+    //    MerchantTransactionId, so that row is the only way back to the
+    //    customer), so an unfiltered sum would count this very attempt
+    //    against its own cap and refuse every withdrawal above half the
+    //    ceiling.
     //
     //    A CONCURRENT attempt's row does still count, though: request B writes
-    //    its own `pending` row before it takes this lock, so A's sum includes B
+    //    its own row before it takes this lock, so A's sum includes B
     //    even if B goes on to fail the gate and flip to `failed`. That
     //    over-counts, never under-counts, and it self-heals as the 24h window
     //    slides — the fail-closed direction is the right default for a cap
