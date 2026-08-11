@@ -11,6 +11,7 @@ import {
 } from '@/lib/actions/vault';
 import { useTopUp } from '@/components/app-shell/TopUpProvider';
 import { Pill, pillVariants } from '@/components/ui/pill';
+import { PhoneGateAction } from '@/components/account/PhoneGateAction';
 import { cn } from '@/lib/utils';
 
 // The real payout band (mirrors the backend's GLOBEPAY_WD_MIN/MAX): RM 50 –
@@ -265,6 +266,7 @@ export default function WithdrawForm({
           {error}
         </p>
       )}
+      <PhoneGateAction error={error} />
 
       <Pill
         onClick={submit}

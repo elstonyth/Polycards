@@ -11,6 +11,7 @@ import {
 } from '@/lib/actions/vault';
 import { leaveFor } from '@/lib/navigation';
 import { Pill } from '@/components/ui/pill';
+import { PhoneGateAction } from '@/components/account/PhoneGateAction';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
 import {
@@ -390,6 +391,9 @@ export default function TopUpSheet({
                 {error}
               </p>
             )}
+            {/* Closes the sheet on the way out — it lives in a global provider
+                and would otherwise stay overlaid on /settings. */}
+            <PhoneGateAction error={error} onNavigate={onClose} />
 
             <Pill
               onClick={submit}

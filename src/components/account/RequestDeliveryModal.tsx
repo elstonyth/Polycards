@@ -13,6 +13,7 @@ import { addressViewFromInput } from '@/lib/address-view';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { Pill } from '@/components/ui/pill';
 import { INPUT_CLASS } from '@/components/account/ui';
+import { PhoneGateAction } from '@/components/account/PhoneGateAction';
 import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
 
 type Props = {
@@ -279,6 +280,9 @@ export default function RequestDeliveryModal({
             {error}
           </p>
         )}
+        {/* Dismisses the modal on the way out — a bare link would leave it
+            overlaying /settings. */}
+        <PhoneGateAction error={error} onNavigate={onClose} />
 
         <div className="mt-5 flex justify-end gap-2">
           <button

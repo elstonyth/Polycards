@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import { QuickAccessCreditDot } from '@/components/account/credit-dot';
 import Image from 'next/image';
 import Link from 'next/link';
 import {
@@ -76,6 +75,11 @@ export default async function MePage() {
     [customer.first_name, customer.last_name].filter(Boolean).join(' ') ||
     handle ||
     customer.email;
+  // Presence, not verification: `phone_verified_at` lives on a backend state
+  // row the storefront never reads. The cohort that field would add — a number
+  // written before enforcement, still unverified — is covered where it
+  // matters, by PhoneGateAction on the blocked action itself.
+  const needsPhone = !customer.phone;
   const meta = (customer.metadata ?? {}) as Record<string, unknown>;
   const avatarUrl =
     typeof meta.avatar_url === 'string' ? meta.avatar_url : null;
@@ -316,19 +320,47 @@ export default async function MePage() {
           <div className="mt-4 grid grid-cols-4 gap-y-5">
             {QUICK_ACCESS.map((item) => {
               const Icon = item.icon;
+              // A phoneless account is refused by every money/goods path
+              // (backend requirePhoneVerified: top-up, deposit, withdraw,
+              // delivery), and nothing on this screen says so until they hit
+              // the wall. Light the tile that fixes it.
+              const highlight = needsPhone && item.href === '/settings';
               return (
                 <Link
                   key={item.href}
                   href={item.href}
-                  className="flex flex-col items-center gap-1.5 text-neutral-300 transition-colors hover:text-white"
+                  className={cn(
+                    'flex flex-col items-center gap-1.5 transition-colors',
+                    highlight
+                      ? 'text-chase'
+                      : 'text-neutral-300 hover:text-white',
+                  )}
                 >
-                  <span className="relative flex h-11 w-11 items-center justify-center rounded-2xl bg-neutral-800">
+                  <span
+                    className={cn(
+                      'relative flex h-11 w-11 items-center justify-center rounded-2xl',
+                      highlight
+                        ? 'bg-chase/15 ring-1 ring-chase/40'
+                        : 'bg-neutral-800',
+                    )}
+                  >
                     <Icon className="h-5 w-5" aria-hidden />
-                    {item.href === '/transactions' && <QuickAccessCreditDot />}
+                    {highlight && (
+                      <span
+                        aria-hidden
+                        className="bg-chase absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full"
+                      />
+                    )}
                   </span>
                   <span className="text-[11px] font-semibold">
                     {item.label}
                   </span>
+                  {/* Colour alone is invisible to a screen reader, and it is
+                      the only thing separating this tile from the other
+                      seven. */}
+                  {highlight && (
+                    <span className="sr-only">— add your phone number</span>
+                  )}
                 </Link>
               );
             })}

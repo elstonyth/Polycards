@@ -5,7 +5,6 @@ import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { openAuth } from '@/components/AuthButton';
 import { useAuth } from '@/components/auth/AuthProvider';
-import { useCreditDot } from './CreditDotProvider';
 import { useVaultDot } from './VaultDotProvider';
 import { TABS, isTabActive } from './tabs';
 
@@ -18,7 +17,6 @@ export default function TabBar() {
   const pathname = usePathname();
   const { customer, isLoading } = useAuth();
   const { show: vaultDot } = useVaultDot();
-  const { show: creditDot } = useCreditDot();
 
   return (
     <nav
@@ -30,16 +28,13 @@ export default function TabBar() {
         {TABS.map((tab) => {
           const active = isTabActive(tab, pathname);
           const Icon = tab.icon;
-          // One dot per destination, and each announces what it actually
-          // signals: the vault gets new CARDS, the Me tab gets balance movement
-          // (its /transactions child is where they are read). Kept in step with
-          // AppHeader, which renders the same five destinations on lg+.
+          // The vault's "new CARDS" dot is the only one left: the Me tab's
+          // balance-movement dot (credits) was retired 2026-08-11 along with
+          // its /me History tile — the operator did not want /transactions
+          // announcing itself. Kept in step with AppHeader, which renders the
+          // same five destinations on lg+.
           const dotLabel =
-            tab.href === '/vault' && vaultDot
-              ? 'new items'
-              : tab.href === '/me' && creditDot
-                ? 'new activity'
-                : null;
+            tab.href === '/vault' && vaultDot ? 'new items' : null;
           return (
             <Link
               key={tab.href}
