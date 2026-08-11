@@ -138,10 +138,23 @@ moduleIntegrationTestRunner<PacksModuleService>({
       // never fires for raw SQL.
       it('lists updated_at, and the claim moves it forward from a backdated value — the submit clock', async () => {
         const row = await seed('5', 'held');
-        await MikroOrmWrapper.getManager().execute(
-          "UPDATE globepay_withdrawal SET updated_at = now() - interval '2 hours' WHERE id = ?",
+        // RETURNING id, checked below: without it a bind mismatch or a typo'd
+        // table/column name matches zero rows and this backdate silently
+        // no-ops. The assertions past that point would then compare
+        // `before` (captured moments after row creation) against `after`
+        // (captured moments after the claim) — a real but sub-second gap
+        // that can still satisfy `toBeGreaterThan` most of the time, so the
+        // failure this guards would flake red under timing jitter rather
+        // than fail loudly every time. Same pattern this test's own header
+        // comment already relies on for `>=` vs strict `>` — an unasserted
+        // no-op is the same class of false pass.
+        const backdated = await MikroOrmWrapper.getManager().execute<
+          { id: string }[]
+        >(
+          "UPDATE globepay_withdrawal SET updated_at = now() - interval '2 hours' WHERE id = ? RETURNING id",
           [row.id],
         );
+        expect(backdated).toHaveLength(1);
         const [before] = await service.listGlobePayWithdrawals(
           { id: row.id },
           { take: 1 },
