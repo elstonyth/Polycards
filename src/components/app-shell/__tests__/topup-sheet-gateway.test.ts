@@ -147,9 +147,9 @@ function typeAmount(value: string) {
 }
 
 describe('TopUpSheet gateway branch', () => {
-  it('offers only gateway-band presets and defaults to RM 50', () => {
+  it('offers only gateway-band presets and defaults to RM 300', () => {
     const labels = buttons().map((b) => b.textContent);
-    for (const preset of ['RM 50', 'RM 250', 'RM 500', 'RM 5,000']) {
+    for (const preset of ['RM 300', 'RM 600', 'RM 1,200', 'RM 5,000']) {
       expect(labels).toContain(preset);
     }
     // The mock's RM 10 / RM 25 rungs sit below the gateway floor and would
@@ -160,7 +160,7 @@ describe('TopUpSheet gateway branch', () => {
       container.querySelector<HTMLInputElement>(
         'input[aria-label="Top-up amount in RM"]',
       )?.value,
-    ).toBe('50');
+    ).toBe('300');
   });
 
   it('promises no immediate credit: "Balance once paid" copy and a Pay button', () => {
@@ -168,7 +168,7 @@ describe('TopUpSheet gateway branch', () => {
     expect(text).toContain('Balance once paid');
     expect(text).not.toContain('New balance');
     expect(text).toContain('GlobePay365');
-    expect(payButton().textContent).toBe('Pay RM 50.00');
+    expect(payButton().textContent).toBe('Pay RM 300.00');
     expect(text).not.toContain('add RM');
     // The mock sheet's "Demo" badge must not ride along on a flow that takes
     // real money at a real cashier.
@@ -201,10 +201,10 @@ describe('TopUpSheet gateway branch', () => {
     startDeposit.mockResolvedValue({
       ok: true,
       url: 'https://cashier.example/pay/abc',
-      amount: 50,
+      amount: 300,
     });
     await click(payButton());
-    expect(startDeposit).toHaveBeenCalledExactlyOnceWith(50, 'BQR');
+    expect(startDeposit).toHaveBeenCalledExactlyOnceWith(300, 'BQR');
     expect(leaveFor).toHaveBeenCalledExactlyOnceWith(
       'https://cashier.example/pay/abc',
     );
@@ -216,7 +216,7 @@ describe('TopUpSheet gateway branch', () => {
     startDeposit.mockResolvedValue({
       ok: true,
       url: 'https://cashier.example/pay/ob',
-      amount: 50,
+      amount: 300,
     });
     // By value, not by DOM position: adding or reordering channels should not
     // break a test about which code gets sent.
@@ -228,7 +228,7 @@ describe('TopUpSheet gateway branch', () => {
     expect(onlineBanking.checked).toBe(false);
     await selectRadio(onlineBanking);
     await click(payButton());
-    expect(startDeposit).toHaveBeenCalledExactlyOnceWith(50, 'OB');
+    expect(startDeposit).toHaveBeenCalledExactlyOnceWith(300, 'OB');
   });
 
   it('hides the picker when the operator has retracted a channel, and still sends it', async () => {
@@ -241,11 +241,11 @@ describe('TopUpSheet gateway branch', () => {
     startDeposit.mockResolvedValue({
       ok: true,
       url: 'https://cashier.example/pay/ob-only',
-      amount: 50,
+      amount: 300,
     });
     expect(methodRadios()).toHaveLength(0);
     await click(payButton());
-    expect(startDeposit).toHaveBeenCalledExactlyOnceWith(50, 'OB');
+    expect(startDeposit).toHaveBeenCalledExactlyOnceWith(300, 'OB');
   });
 
   it('shows the server error and stays put when the deposit fails', async () => {
