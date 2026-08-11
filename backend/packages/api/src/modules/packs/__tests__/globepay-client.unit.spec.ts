@@ -91,6 +91,18 @@ describe('globepayConfigFromEnv', () => {
   });
 });
 
+// The submit payload is irrelevant to the error-classification cases below;
+// naming it once keeps them about the response shape they actually test.
+const DEPOSIT_INPUT = {
+  merchantTransactionId: 'T1',
+  merchantClientId: 'c',
+  amount: 25,
+  notifyUrl: 'n',
+  returnUrl: 'r',
+  ipAddress: '1.2.3.4',
+  paymentMethodCode: 'FPX',
+};
+
 describe('submitDeposit', () => {
   it('sends an envelope whose signature covers the encrypted payload', async () => {
     const calls = stubFetch({
@@ -179,25 +191,57 @@ describe('submitDeposit', () => {
     await expect(call).rejects.toThrow(GlobePayError);
     await call.catch((e: GlobePayError) => {
       expect(e.has('PMT10000')).toBe(true);
+      // An explicit refusal, so no transaction exists there and the caller is
+      // entitled to refund and close the row.
+      expect(e.definite).toBe(true);
     });
   });
 
   it('does not treat isSuccess:true with a null data as success', async () => {
     stubFetch({ isSuccess: true, data: null, errorMessage: 'nope' });
-    await expect(
-      submitDeposit(
-        {
-          merchantTransactionId: 'T1',
-          merchantClientId: 'c',
-          amount: 25,
-          notifyUrl: 'n',
-          returnUrl: 'r',
-          ipAddress: '1.2.3.4',
-          paymentMethodCode: 'FPX',
-        },
-        config,
-      ),
-    ).rejects.toThrow(/nope/);
+    await expect(submitDeposit(DEPOSIT_INPUT, config)).rejects.toThrow(/nope/);
+  });
+
+  // Capture the rejection rather than asserting inside `.catch`: a callback
+  // that never runs is a test that never fails.
+  const refusalFrom = async (body: unknown): Promise<GlobePayError> => {
+    stubFetch(body);
+    const error = await submitDeposit(DEPOSIT_INPUT, config).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(GlobePayError);
+    return error as GlobePayError;
+  };
+
+  // The distinction that decides whether a customer can be paid twice. Both
+  // shapes throw; only one of them licenses a refund.
+  it('marks isSuccess:true with no data AMBIGUOUS, not a refusal', async () => {
+    // They ACCEPTED it; we just could not read the payload. Treating this as
+    // definite would refund a payout that still executes on the withdrawal
+    // path, and write off a live payment on the deposit path — and closing the
+    // row drops it out of the sweep's status='pending' scan for good.
+    const error = await refusalFrom({
+      isSuccess: true,
+      data: null,
+      errorMessage: 'nope',
+    });
+    expect(error.definite).toBe(false);
+  });
+
+  it('marks a body with no isSuccess at all AMBIGUOUS', async () => {
+    // A JSON error page from something sitting in front of them parses fine
+    // but is not their envelope, so it proves nothing about the transaction.
+    const error = await refusalFrom({ message: 'upstream connect error' });
+    expect(error.definite).toBe(false);
+  });
+
+  it('still marks an explicit isSuccess:false DEFINITE, codes or not', async () => {
+    // The DN channel refuses with an empty errorList (see the setup doc), so
+    // "no codes" must not be read as "not a refusal" — this is the shape the
+    // refund path depends on.
+    const error = await refusalFrom({ isSuccess: false, errorList: [] });
+    expect(error.definite).toBe(true);
   });
 
   it('reports a non-JSON body (WAF/error page) with its status', async () => {
