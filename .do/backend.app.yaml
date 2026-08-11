@@ -380,6 +380,22 @@ envs:
     scope: RUN_TIME
     value: https://admin.polycards.gg/hooks/globepay/payout-verify
 
+  # Cooling-off window on a newly saved payout destination, in hours. The code
+  # default is 24; "0" here switches it OFF, so a bank account can be withdrawn
+  # to the moment it is saved. Operator decision, 2026-08-11 — the 24h wait was
+  # blocking real customers on their first withdrawal.
+  #
+  # KNOW WHAT THIS COSTS BEFORE RAISING IT AGAIN OR LEAVING IT: the window was
+  # the delay that let an account owner react to "steal a token, add a bank
+  # account, cash out". With it at 0 the only thing left in that path is the
+  # add-a-destination email + feed alert (modules/packs/saved-account-notice.ts),
+  # which now has to be the whole defence — so RESEND_API_KEY breaking is a
+  # security incident here, not just a missing email. Restore the wait by
+  # deleting this key (back to 24) or setting a positive number of hours.
+  - key: PAYOUT_DESTINATION_COOLDOWN_HOURS
+    scope: RUN_TIME
+    value: "0"
+
 # Dedicated outbound IPs. DO assigns one per component (the service makes the
 # customer-facing calls, the worker runs the reconciliation sweeps) and
 # GlobePay365 runs an ACTIVE API whitelist keyed on those exact addresses, so
