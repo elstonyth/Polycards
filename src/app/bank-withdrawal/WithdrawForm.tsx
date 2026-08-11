@@ -11,6 +11,7 @@ import {
 } from '@/lib/actions/vault';
 import { useTopUp } from '@/components/app-shell/TopUpProvider';
 import { Pill, pillVariants } from '@/components/ui/pill';
+import { PhoneGateAction } from '@/components/account/PhoneGateAction';
 import { cn } from '@/lib/utils';
 
 // The real payout band (mirrors the backend's GLOBEPAY_WD_MIN/MAX): RM 50 –
@@ -59,8 +60,8 @@ export default function WithdrawForm({
   withdrawable: number | null;
 }) {
   // The payout debits the balance server-side; repaint it here so the header
-  // chip is not stale, and so the money dot lights without waiting for a focus
-  // event (withdrawals are one of the movements it is meant to announce).
+  // chip is not stale. (This used to light the Me-tab money dot too — that dot
+  // was suspended 2026-08-11; see components/account/credit-dot.tsx.)
   const { applyBalance } = useTopUp();
   const [saved, setSaved] = useState<SavedBankAccount[] | null>(null);
   const [accountId, setAccountId] = useState('');
@@ -257,13 +258,16 @@ export default function WithdrawForm({
         </span>
       </label>
 
+      {/* The remedy sits INSIDE role="alert" so problem and way out are one
+          announcement. No onNavigate here — this is a page, not a modal. */}
       {error && (
-        <p
+        <div
           role="alert"
-          className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-[13px] font-medium text-red-300"
+          className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2"
         >
-          {error}
-        </p>
+          <p className="text-[13px] font-medium text-red-300">{error}</p>
+          <PhoneGateAction error={error} />
+        </div>
       )}
 
       <Pill

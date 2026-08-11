@@ -11,6 +11,7 @@ import {
 } from '@/lib/actions/vault';
 import { leaveFor } from '@/lib/navigation';
 import { Pill } from '@/components/ui/pill';
+import { PhoneGateAction } from '@/components/account/PhoneGateAction';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
 import {
@@ -382,13 +383,18 @@ export default function TopUpSheet({
               </div>
             </div>
 
+            {/* The remedy sits INSIDE role="alert" so a screen reader gets the
+                problem and the way out in one utterance. PhoneGateAction closes
+                the sheet on the way out — it lives in a global provider and
+                would otherwise stay overlaid on /settings. */}
             {error && (
-              <p
+              <div
                 role="alert"
-                className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-[13px] font-medium text-red-300"
+                className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2"
               >
-                {error}
-              </p>
+                <p className="text-[13px] font-medium text-red-300">{error}</p>
+                <PhoneGateAction error={error} onNavigate={onClose} />
+              </div>
             )}
 
             <Pill
