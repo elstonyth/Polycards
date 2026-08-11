@@ -82,8 +82,8 @@ const WithdrawalsPage = () => {
   const [page, setPage] = useState(0);
   const [view, setView] = useState<GlobePayWithdrawalView>('held');
   // Starts NULL, not seeded — same contract as the Deposits page: the route's
-  // status-dependent default order (pending oldest-first) holds until the
-  // operator explicitly picks a column.
+  // status-dependent default order (pending AND held oldest-first — Task 6,
+  // plan 094) holds until the operator explicitly picks a column.
   const { sort, sortHeader } = useTableSort<SortKey>(null, {
     onChange: () => setPage(0),
   });
