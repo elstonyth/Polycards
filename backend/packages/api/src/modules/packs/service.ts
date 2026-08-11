@@ -3469,7 +3469,16 @@ class PacksModuleService extends MedusaService({
         : null;
 
     const frozen = await this.isFrozen(customerId, sharedContext);
-    const available = frozen ? 0 : balance - locked;
+    // ONE division, from the integer-cent values, instead of subtracting two
+    // already-divided floats. `balanceCents/100 - lockedCents/100` can land a
+    // hair under the exact figure (6407/100 - 1407/100 === 49.99999999999999),
+    // and because withdrawalGateError compares `amount <= withdrawable` while
+    // the UI renders the same number with toFixed(2), the customer is shown
+    // "RM 50.00" and refused when they type 50. At the RM 50 minimum that
+    // leaves nothing they can withdraw at all until the arithmetic shifts.
+    const available = frozen
+      ? 0
+      : (Math.round(balance * 100) - Math.round(locked * 100)) / 100;
 
     // Playthrough gate: all-or-nothing on the available balance. Spending on
     // packs stays unrestricted either way — the gate only limits cashout.
