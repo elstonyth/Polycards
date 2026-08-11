@@ -5037,24 +5037,18 @@ class PacksModuleService extends MedusaService({
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
     const rows = await em.execute<{ sen: string | null }[]>(
-      // NET over every pack_open row, not just the debits.
+      // Debits ONLY (`amount < 0`). reverseOpen's compensating row is also
+      // reason 'pack_open' but POSITIVE, and excluding it is what makes this
+      // counter monotonic — which is the point. The monotonic counter is what
+      // stops a clawback-then-respend from re-earning a VIP level-up grant
+      // (level-up-grant.spec.ts marks that invariant CRITICAL).
       //
-      // reverseOpen writes its compensating row as reason 'pack_open' with a
-      // POSITIVE amount, so `amount < 0` filtered the reversal out and the
-      // monotonic counter stayed inflated forever. That is real money: the
-      // counter drives the sponsor's direct_referral_pct tier, VIP ladder grants
-      // and the daily-box tier.
-      //
-      // This does NOT contradict the specced refund-immunity of turnover.
-      // reverseOpen has exactly two callers, both saga compensations
-      // (charge-pack-open, charge-pack-batch) — an open that never completed and
-      // recorded no pull. There is no refund path through here to make immune.
-      //
-      // GREATEST(0, …) because a counter described as monotonic must never read
-      // negative if compensations somehow outweigh debits.
-      `SELECT GREATEST(0, COALESCE(SUM(ROUND(-amount * 100)), 0))::bigint AS sen
+      // Reversals are NOT ignored by the system, they are reflected on the OTHER
+      // basis: creditSummary().vipSpendTotal is net, drops on reversal, and
+      // drives current_level. highest_level_ever uses this monotonic one.
+      `SELECT COALESCE(SUM(ROUND(-amount * 100)), 0)::bigint AS sen
          FROM credit_transaction
-        WHERE customer_id = ? AND reason = 'pack_open' AND deleted_at IS NULL`,
+        WHERE customer_id = ? AND reason = 'pack_open' AND amount < 0 AND deleted_at IS NULL`,
       [customerId],
     );
     return Number(rows[0]?.sen ?? 0);
