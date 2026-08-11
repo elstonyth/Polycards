@@ -49,8 +49,17 @@ const withdrawal = (i: number, over: Partial<Record<string, any>> = {}) => ({
 // frozen — the list route's Task 6 addition (plan 094): the queue must surface
 // the SAME flag the admin approve route refuses on, or an approver clicks into
 // a refusal with no explanation.
-function mkScope(rows: any[], frozenIds: string[] = []) {
+//
+// `frozenStateError`, when set, makes listCustomerAccountStates reject
+// instead — the review-fix regression fixture for the route's .catch(() =>
+// []) degrade (see the 'frozen-state lookup fails' test below).
+function mkScope(
+  rows: any[],
+  frozenIds: string[] = [],
+  frozenStateError?: Error,
+) {
   const calls: { filter?: any; opts?: any; frozenFilter?: any } = {};
+  const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
   const packs = {
     listAndCountGlobePayWithdrawals: async (filter: any, opts: any) => {
       calls.filter = filter;
@@ -65,6 +74,7 @@ function mkScope(rows: any[], frozenIds: string[] = []) {
     // JS instead of trusting an array-id + boolean filter to combine right.
     listCustomerAccountStates: async (filter: any) => {
       calls.frozenFilter = filter;
+      if (frozenStateError) throw frozenStateError;
       const ids: string[] = Array.isArray(filter?.customer_id)
         ? filter.customer_id
         : [filter?.customer_id].filter(Boolean);
@@ -75,11 +85,14 @@ function mkScope(rows: any[], frozenIds: string[] = []) {
   };
   return {
     calls,
+    logger,
     scope: {
-      resolve: (key: string) =>
-        typeof key === 'string' && key.toLowerCase().includes('customer')
+      resolve: (key: string) => {
+        if (key === 'logger') return logger;
+        return typeof key === 'string' && key.toLowerCase().includes('customer')
           ? { listCustomers: async () => [{ id: 'cus_1', email: 'a@b.c' }] }
-          : packs,
+          : packs;
+      },
     },
   };
 }
@@ -149,6 +162,24 @@ describe('GET /admin/globepay/withdrawals', () => {
     expect(calls.frozenFilter).toBeUndefined();
   });
 
+  // Review-fix regression: this lookup sits on the critical path of the
+  // whole page, including the `pending` view operators use to find a
+  // stranded debit. A failure here must degrade to `frozen: false` — exactly
+  // pre-094 behaviour — not 500 the page. Nothing unsafe follows from the
+  // degraded view: approve re-checks the freeze live before it acts.
+  it('degrades to frozen:false for the whole page when the freeze lookup fails, rather than 500ing it', async () => {
+    const { scope, logger } = mkScope(
+      [withdrawal(1, { customer_id: 'cus_1' })],
+      [],
+      new Error('db timeout'),
+    );
+    const { res, out } = mkRes();
+    await GET({ scope, query: {} } as any, res);
+    expect(out.body.withdrawals[0].frozen).toBe(false);
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(String(logger.error.mock.calls[0][0])).toContain('db timeout');
+  });
+
   // The mask agrees with setPayoutDetails' audit-row last4 (service.ts): digits
   // only, and only when there are MORE than four of them — for a <=4-digit
   // account the "last 4" IS the whole number, which is what must not leak.
@@ -195,6 +226,12 @@ describe('GET /admin/globepay/withdrawals', () => {
       withdrawal(1, {
         status: 'settled',
         created_at: new Date(Date.now() - 10 * GLOBEPAY_STALE_AFTER_MS),
+        // AGED, not just created_at: `stale` reads updated_at, and the
+        // factory default is a fresh 5-minutes-old value that is never
+        // stale on its own. Without this, the test passed even with the
+        // `status === 'pending'` gate deleted entirely — it was proving
+        // "a fresh row isn't stale", not "a settled row isn't".
+        updated_at: new Date(Date.now() - 10 * GLOBEPAY_STALE_AFTER_MS),
       }),
     ]);
     const { res, out } = mkRes();

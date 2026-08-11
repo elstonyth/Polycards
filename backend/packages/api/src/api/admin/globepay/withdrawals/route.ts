@@ -100,6 +100,9 @@ export async function GET(
 ): Promise<void> {
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
   const customerService = req.scope.resolve(Modules.CUSTOMER);
+  const logger = req.scope.resolve<{ error: (message: string) => void }>(
+    'logger',
+  );
 
   const { limit, offset } = parsePaginationParams(
     { limit: req.query.limit, offset: req.query.offset },
@@ -156,11 +159,29 @@ export async function GET(
   // `frozen: true` (the single-id shape ./[id]/approve uses) has never been
   // proven against the real query builder. Filtering `frozen` in JS below
   // avoids resting the whole list on that unproven combination.
+  // .catch, not a try/catch around the whole handler: this lookup is a
+  // PREVIEW (approve re-checks the freeze live, per the comment on `frozen`
+  // below), so its failure must degrade the page to `frozen: false` for
+  // every row — exactly pre-plan-094 behaviour, when this call did not exist
+  // — rather than 500 the entire withdrawals list, including the `pending`
+  // view operators use to find a stranded debit. This is also the only
+  // caller anywhere passing an ARRAY customer_id to
+  // listCustomerAccountStates, so it is the one query on this page least
+  // proven against the real query builder.
   const frozenStates = customerIds.length
-    ? await packs.listCustomerAccountStates(
-        { customer_id: customerIds },
-        { take: customerIds.length },
-      )
+    ? await packs
+        .listCustomerAccountStates(
+          { customer_id: customerIds },
+          { take: customerIds.length },
+        )
+        .catch((error) => {
+          logger.error(
+            `[globepay-admin-withdrawals] frozen-state lookup failed for ${customerIds.length} customer(s) — degrading to frozen:false for this page: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+          return [];
+        })
     : [];
   const frozenIds = new Set(
     frozenStates.filter((s) => s.frozen).map((s) => s.customer_id),
