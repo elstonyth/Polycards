@@ -2989,6 +2989,18 @@ class PacksModuleService extends MedusaService({
       // Net basis reaches zero on clawback (reverseOpen negates externalFundedCents),
       // so the basis is NOT refund-stable at the ledger level. The monotonic
       // lifetime counter (built in a later task) is the rank basis; spec §3.
+      // SUSPENDED (referral programme retired): this fan-out is UNREACHABLE for
+      // any new customer. It is gated on a referral_relationship row, and
+      // linkSponsor — the only writer of that table — was removed. Existing
+      // edges (if any survive in production) still pay, which is deliberate:
+      // silently dropping a commission a recruit already earned would be a
+      // money change disguised as a cleanup.
+      //
+      // Kept rather than excised because settleOpen is the atomic
+      // open-settlement seam (debit + fan-out under ONE advisory lock) and the
+      // guard below costs one indexed lookup that returns nothing. Excising it
+      // is a separate, reviewable change against the most load-bearing money
+      // function in the module — do not fold it into a cleanup commit.
       const basisSen = -externalFundedCents;
       if (basisSen > 0) {
         const [rel] = await this.listReferralRelationships(
@@ -3730,76 +3742,20 @@ class PacksModuleService extends MedusaService({
     };
   }
 
-  // Insert a recruit→sponsor edge with the fraud guards (spec §7). Under ONE
-  // transaction holding advisory locks on BOTH customer ids (sorted, so two
-  // concurrent inserts can't deadlock), it: rejects self-referral; rejects a
-  // cycle via a WITH RECURSIVE ancestor walk from the proposed sponsor; relies on
-  // the unique customer_id index for immutability (a second link throws). The
-  // route layer binds recruitId to the authenticated actor (Task 11) so a sponsor
-  // can't insert recruits under themselves.
-  @InjectTransactionManager()
-  async linkSponsor(
-    input: { recruitId: string; sponsorId: string },
-    @MedusaContext() sharedContext: Context = {},
-  ): Promise<{ id: string }> {
-    if (input.recruitId === input.sponsorId) {
-      throw new MedusaError(
-        MedusaError.Types.INVALID_DATA,
-        'A customer cannot refer themselves.',
-      );
-    }
-    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    // Lock both ids in a stable (sorted) order to avoid deadlocks with a
-    // concurrent reciprocal insert.
-    const [lo, hi] = [input.recruitId, input.sponsorId].sort();
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `referral:${lo}`,
-    ]);
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `referral:${hi}`,
-    ]);
-
-    // Cycle check: walk the proposed sponsor's upline; if the recruit appears,
-    // linking would close a loop. customer_id is unique so the upline is a simple
-    // path (no diamonds) — the recursion terminates.
-    const ancestors = await em.execute<{ sponsor_id: string }[]>(
-      `WITH RECURSIVE up AS (
-         SELECT sponsor_id FROM referral_relationship
-           WHERE customer_id = ? AND deleted_at IS NULL
-         UNION ALL
-         SELECT r.sponsor_id FROM referral_relationship r
-           JOIN up ON r.customer_id = up.sponsor_id
-           WHERE r.deleted_at IS NULL
-       )
-       SELECT sponsor_id FROM up WHERE sponsor_id = ? LIMIT 1`,
-      [input.sponsorId, input.recruitId],
-    );
-    if (ancestors.length > 0) {
-      throw new MedusaError(
-        MedusaError.Types.INVALID_DATA,
-        'This referral would create a cycle in the sponsor tree.',
-      );
-    }
-
-    // Immutability: the unique customer_id index rejects a second link. Surface a
-    // clean error rather than a raw constraint violation.
-    const existing = await this.listReferralRelationships(
-      { customer_id: input.recruitId },
-      { take: 1 },
-    );
-    if (existing.length > 0) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_ALLOWED,
-        'This customer already has a sponsor.',
-      );
-    }
-
-    const [rel] = await this.createReferralRelationships(
-      [{ customer_id: input.recruitId, sponsor_id: input.sponsorId }],
-      sharedContext,
-    );
-    return { id: rel.id };
-  }
+  // linkSponsor was REMOVED (referral programme retired).
+  //
+  // It was the only writer of referral_relationship, and its cycle probe was a
+  // recursive CTE with UNION ALL, no depth bound and no dedup: against a cyclic
+  // graph where the sought id is not on the walk it never terminated, pinning a
+  // pooled connection until the pool was exhausted. Postgres does not detect
+  // cycles without an explicit CYCLE clause, and statement_timeout cannot be set
+  // through databaseDriverOptions (see utils/db-driver-options.ts).
+  //
+  // The commission fan-out in settleOpen is now unreachable for any new
+  // customer: it is guarded by a referral_relationship lookup, and with no
+  // writer left no new edge can exist. It is deliberately left in place rather
+  // than excised, because settleOpen is the atomic open-settlement seam and its
+  // invariants are load-bearing — see the SUSPENDED note at that guard.
 
   // Privacy-bounded referral summary for ONE customer (spec §7 / Task 5).
   // Returns ONLY the caller's own earnings and their gen-1 (direct) recruits —

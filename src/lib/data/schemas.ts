@@ -460,20 +460,6 @@ export const VipSchema = z.looseObject({
     .default([]),
 });
 
-// --- actions/referral.ts ----------------------------------------------------
-
-/** GET /store/referral — referral summary for the authenticated customer. */
-export const ReferralSummarySchema = z.looseObject({
-  directRecruits: z.array(
-    z.looseObject({ handle: z.string().nullable(), contribution: finite }),
-  ),
-  downstreamCount: finite,
-  totalEarned: finite,
-});
-
-/** POST /store/referral — apply-referral response (just the new link id). */
-export const ReferralApplySchema = z.looseObject({ id: z.string() });
-
 // --- actions/notifications.ts -----------------------------------------------
 
 /** GET /store/notifications — single notification row in the feed. */

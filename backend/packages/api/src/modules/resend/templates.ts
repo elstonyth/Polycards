@@ -12,6 +12,7 @@ export const TOPUP_RECEIPT_TEMPLATE = 'topup-receipt';
 export const WITHDRAWAL_RECEIPT_TEMPLATE = 'withdrawal-receipt';
 export const PHONE_CHANGED_TEMPLATE = 'phone-changed';
 export const BANK_ACCOUNT_ADDED_TEMPLATE = 'bank-account-added';
+export const BANK_ACCOUNT_REMOVED_TEMPLATE = 'bank-account-removed';
 
 export type Rendered = { subject: string; html: string; text: string };
 
@@ -229,6 +230,64 @@ const phoneChanged = (oldMasked: string, newMasked: string): Rendered => {
 // with no delay left to promise, this mail must stop claiming one and become a
 // pure "act now" alert. Promising a protection that is switched off is worse
 // than sending nothing.
+// Removal is the mirror of addition and is a security event for the same
+// reason: with the cooling-off window disabled, quietly deleting the real
+// destinations is how an attacker keeps the owner's own alert from standing
+// out. Same last-4-only rule — the full number never leaves the database.
+const bankAccountRemoved = (d: {
+  bankName: string;
+  last4: string;
+  siteUrl: string;
+}): Rendered => {
+  const site = escapeHtml(d.siteUrl.replace(/\/+$/, ''));
+  const logo = `${site}/branding/polycards-logo.png`;
+  const account = `${d.bankName} ····${d.last4}`;
+
+  return {
+    subject: 'A bank account was removed from your Polycards account',
+    text: [
+      'A withdrawal bank account was removed',
+      '',
+      `Account:  ${account}`,
+      '',
+      "If this wasn't you, sign in and check your bank accounts now, then",
+      'change your password — someone with access to your account can add a',
+      'new destination and withdraw to it.',
+      '',
+      `${d.siteUrl.replace(/\/+$/, '')}/bank`,
+    ].join('\n'),
+    html: `<!doctype html>
+<html lang="en">
+  <body style="margin:0;padding:0;background:#171717;">
+    <div style="max-width:520px;margin:0 auto;padding:40px 24px;font-family:ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;color:#fafafa;">
+      <img src="${logo}" alt="Polycards" width="150" style="display:block;width:150px;max-width:60%;height:auto;margin:0 0 32px;" />
+
+      <p style="margin:0 0 8px;font-size:13px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#a3a3a3;">Security alert</p>
+      <h1 style="margin:0 0 16px;font-size:28px;line-height:1.2;font-weight:800;letter-spacing:-0.01em;">A bank account was removed</h1>
+
+      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="width:100%;border-collapse:collapse;border-top:1px solid #404040;border-bottom:1px solid #404040;margin:0 0 24px;">
+        ${row('Account', account, true)}
+      </table>
+
+      <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#d4d4d4;">
+        If you removed it, there is nothing to do.
+      </p>
+      <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#d4d4d4;">
+        <strong>If this wasn't you</strong>, review your bank accounts and
+        change your password now. Someone with access to your account can add
+        a new destination and withdraw to it.
+      </p>
+
+      <a href="${site}/bank" style="display:inline-block;padding:12px 24px;border-radius:9999px;background:#fafafa;color:#171717;font-size:15px;font-weight:700;text-decoration:none;">Review your bank accounts</a>
+
+      <p style="margin:32px 0 0;font-size:12px;line-height:1.6;color:#737373;">
+        We only ever show the last four digits of a saved account.
+      </p>
+    </div>
+  </body>
+</html>`,
+  };
+};
 const bankAccountAdded = (d: {
   bankName: string;
   last4: string;
@@ -450,6 +509,20 @@ export const renderTemplate = (
     });
   }
 
+  if (template === BANK_ACCOUNT_REMOVED_TEMPLATE) {
+    const bankName = data?.bank_name;
+    const last4 = data?.account_last4;
+    const siteUrl = data?.site_url;
+    // Same EXACTLY-four-digits backstop as the added alert: "non-empty"
+    // would happily print a FULL account number into an email.
+    if (typeof last4 !== 'string' || !/^\d{4}$/.test(last4)) return undefined;
+    if (typeof siteUrl !== 'string' || siteUrl.length === 0) return undefined;
+    return bankAccountRemoved({
+      bankName: typeof bankName === 'string' && bankName ? bankName : 'Bank',
+      last4,
+      siteUrl,
+    });
+  }
   if (template === WITHDRAWAL_RECEIPT_TEMPLATE) {
     const amount = data?.amount_myr;
     const reference = data?.reference;

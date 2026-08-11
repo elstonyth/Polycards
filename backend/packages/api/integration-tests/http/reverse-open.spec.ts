@@ -28,9 +28,17 @@ medusaIntegrationTestRunner({
         const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
         await seedLadder(packs);
         const recruit = "cus_rv_recruit", s1 = "cus_rv_s1", s2 = "cus_rv_s2", s3 = "cus_rv_s3";
-        await packs.linkSponsor({ recruitId: recruit, sponsorId: s1 });
-        await packs.linkSponsor({ recruitId: s1, sponsorId: s2 });
-        await packs.linkSponsor({ recruitId: s2, sponsorId: s3 });
+        // Referral writes were retired with linkSponsor; the model is kept, so the
+        // edge is seeded directly for setup.
+        await packs.createReferralRelationships([
+          { customer_id: recruit, sponsor_id: s1 },
+        ]);
+        await packs.createReferralRelationships([
+          { customer_id: s1, sponsor_id: s2 },
+        ]);
+        await packs.createReferralRelationships([
+          { customer_id: s2, sponsor_id: s3 },
+        ]);
         await packs.mutateCreditAtomic({
           customerId: recruit, amount: 100, reason: "topup", reference: "mock_rv",
         });
@@ -66,7 +74,9 @@ medusaIntegrationTestRunner({
         const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
         await seedLadder(packs);
         const recruit = "cus_neg_recruit", s1 = "cus_neg_s1";
-        await packs.linkSponsor({ recruitId: recruit, sponsorId: s1 });
+        await packs.createReferralRelationships([
+          { customer_id: recruit, sponsor_id: s1 },
+        ]);
         await packs.mutateCreditAtomic({
           customerId: recruit, amount: 100, reason: "topup", reference: "mock_neg",
         });

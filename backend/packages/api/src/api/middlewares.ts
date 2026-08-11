@@ -450,16 +450,6 @@ export default defineMiddlewares({
       ],
     },
     {
-      // The recruit calls this to set their sponsor. recruitId is taken from the
-      // bearer token (auth_context.actor_id) — never from the body.
-      matcher: '/store/referral',
-      method: 'POST',
-      middlewares: [
-        authenticate('customer', ['bearer']),
-        createReferralRecruitRateLimit(),
-      ],
-    },
-    {
       // Referral summary (GET /store/referral) — separate entry because the
       // existing POST entry above pins method:'POST'; omitting method here
       // would protect both verbs with one entry, but method:'GET' keeps the

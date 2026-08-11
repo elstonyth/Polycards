@@ -13,7 +13,10 @@ import {
   savedBankAccountViews,
   type SavedBankAccount,
 } from '../../../../../modules/packs/saved-accounts';
-import { sendSavedAccountAddedNotice } from '../../../../../modules/packs/saved-account-notice';
+import {
+  sendSavedAccountAddedNotice,
+  sendSavedAccountRemovedNotice,
+} from '../../../../../modules/packs/saved-account-notice';
 
 // Saved payout bank accounts — GET (list) / POST (add) / DELETE (remove) on
 // /store/credits/withdraw/accounts. Storage is customer.metadata.bank_accounts,
@@ -163,6 +166,18 @@ export async function POST(
   // bankName is display-only (the picker label); the code is what pays. Still
   // bounded so metadata can't be stuffed through the free-text field.
   const bankName = body.bank_name;
+  // Control characters are rejected, not just length-bounded. This value is
+  // interpolated RAW into the text/plain half of the added/removed security
+  // alert (resend/templates.ts) — the HTML half escapes, the plain-text half
+  // cannot — so an interior newline lets attacker-authored text prepend
+  // reassuring lines above the real warning. \p{Cc} covers CR/LF/TAB, \p{Cf}
+  // covers the bidi and zero-width formatting characters.
+  if (typeof bankName === 'string' && /[\p{Cc}\p{Cf}]/u.test(bankName)) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      'Choose a bank from the list.',
+    );
+  }
   if (
     typeof bankName !== 'string' ||
     bankName.trim().length < 2 ||
@@ -246,12 +261,29 @@ export async function DELETE(
     );
   }
 
+  let removed: SavedBankAccount | null = null;
   const saved = await mutateAccounts(req, customerId, (accounts) => {
     const next = accounts.filter((a) => a.id !== id);
     // Removing an already-gone account succeeds: the customer's goal (that
     // account no longer listed) is met, and a refresh-then-retry must not
     // error. `null` = nothing changed, so no write is issued at all.
-    return next.length === accounts.length ? null : next;
+    if (next.length === accounts.length) return null;
+    removed = accounts.find((a) => a.id === id) ?? null;
+    return next;
   });
+
+  // Removal is as much a security event as addition — see
+  // sendSavedAccountRemovedNotice. Fired after the write commits, never allowed
+  // to fail the delete, and silent on a no-op delete (nothing changed, so there
+  // is nothing to report).
+  if (removed) {
+    await sendSavedAccountRemovedNotice(req.scope, {
+      customerId,
+      accountId: (removed as SavedBankAccount).id,
+      bankName: (removed as SavedBankAccount).bankName,
+      accountNumber: (removed as SavedBankAccount).accountNumber,
+      removedAt: new Date().toISOString(),
+    });
+  }
   noStore(res).json({ accounts: savedBankAccountViews(saved) });
 }

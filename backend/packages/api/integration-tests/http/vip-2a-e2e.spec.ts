@@ -215,7 +215,11 @@ medusaIntegrationTestRunner({
         const recruitId = "cus_launder_recruit_gate";
 
         // Wire the relationship directly (no HTTP needed for this invariant test).
-        await packs.linkSponsor({ recruitId, sponsorId });
+        // Referral writes were retired with linkSponsor; the model is kept, so the
+        // edge is seeded directly for setup.
+        await packs.createReferralRelationships([
+          { customer_id: recruitId, sponsor_id: sponsorId },
+        ]);
 
         // Recruit tops up and opens — triggers commission to sponsor.
         await packs.mutateCreditAtomic({
@@ -262,7 +266,9 @@ medusaIntegrationTestRunner({
         // Seed at least one commission so the reconciliation loop has data.
         const sponsorId = "cus_recon_sponsor";
         const recruitId = "cus_recon_recruit";
-        await packs.linkSponsor({ recruitId, sponsorId });
+        await packs.createReferralRelationships([
+          { customer_id: recruitId, sponsor_id: sponsorId },
+        ]);
         await packs.mutateCreditAtomic({
           customerId: recruitId,
           amount: 50,
