@@ -478,6 +478,9 @@ export interface SettledWinner {
   cardHandles: string[]; // granted — DISTINCT handles
   cardCount: number; // pulls actually minted (a handle repeats when qty > 1)
   skippedCardIds: string[]; // recorded skipped_no_stock
+  /** Granted cards whose inventory units are not taken yet. Taken AFTER
+   *  this winner's payout transaction commits — see reserveSettledStock. */
+  reservations: { handle: string; qty: number; pullIds: string[] }[];
 }
 // The frozen decision inputs, written verbatim onto EVERY payout row of a week
 // (card rows extend it with qty/pull_ids, the credits row with
@@ -6991,10 +6994,11 @@ class PacksModuleService extends MedusaService({
         handleById,
         snapshot,
         getStock: deps.getStock,
-        decrementStock: deps.decrementStock,
       });
       if (!settled) continue;
       winners.push(settled);
+      // Committed above; the units are taken now, outside that transaction.
+      await this.reserveSettledStock(settled, deps.decrementStock, weekStartIso);
       // Fired AFTER this winner's transaction committed, never inside it.
       if (!deps.onSettled) continue;
       try {
@@ -7142,6 +7146,7 @@ class PacksModuleService extends MedusaService({
     const cardHandles: string[] = [];
     let cardCount = 0; // pulls minted, NOT distinct handles (qty can exceed 1)
     const skippedCardIds: string[] = [];
+    const reservations: SettledWinner['reservations'] = [];
     const handles = [...qtyById.keys()]
       .map((id) => input.handleById.get(id))
       .filter((h): h is string => Boolean(h));
@@ -7163,29 +7168,17 @@ class PacksModuleService extends MedusaService({
       // kept — the row's scalar pull_id can only hold the first.
       let pullIds: string[] = [];
       if (inStock) {
-        // TAKE the units before minting the claims. The gate above is kept on
-        // purpose — an out-of-stock prize becoming a manual-fulfilment item is
-        // a product decision the job logs for an operator — but a gate that
-        // never decrements is the read-then-check race
-        // decrement-card-stock.ts:24-28 exists to avoid: winners settle in
-        // separate transactions and each re-reads the same pre-grant value.
+        // The gate above is kept on purpose — an out-of-stock prize becoming a
+        // manual-fulfilment item is a product decision the job logs for an
+        // operator — but a gate that never decrements is the read-then-check
+        // race decrement-card-stock.ts:24-28 exists to avoid.
         //
-        // Ordering: decrement first. If the mint then fails and this winner's
-        // transaction rolls back, the counter reads LOW — the same conservative
-        // direction the pack-open step documents, and far better than handing
-        // out claims against stock that is not there. A throw here skips the
-        // grant entirely rather than granting unreserved.
-        let earmarked = false;
-        if (input.decrementStock) {
-          try {
-            earmarked = await input.decrementStock(handle!, qty);
-          } catch {
-            // Could not reserve — treat exactly like out of stock so the card
-            // lands in the manual-fulfilment queue instead of being over-granted.
-            skippedCardIds.push(cardId);
-            continue;
-          }
-        }
+        // The TAKE itself does not belong in this transaction. adjustInventory
+        // is Medusa's inventory module on its own connection and commits
+        // independently, so it cannot roll back with us: called from in here, a
+        // later throw rolled the payout back while the take stood, and the next
+        // hourly tick took the units again. reserveSettledStock runs it after
+        // this transaction commits — see there for why the race stays closed.
         const minted = await this.createPulls(
           Array.from({ length: qty }, () => ({
             customer_id: customerId,
@@ -7194,16 +7187,18 @@ class PacksModuleService extends MedusaService({
             order_id: null,
             rolled_at: new Date(),
             source: 'reward' as const,
-            // Only when a tracked unit was actually taken — buyback restores
-            // flagged pulls only, and restoring an untracked one would mint a
-            // phantom unit (decrement-card-stock.ts:52-56).
-            stock_earmarked: earmarked,
+            // Minted UNRESERVED; flipped only once a unit is really taken.
+            // Buyback restores flagged pulls only, so false is the safe
+            // default — giving back a unit that was never taken would mint a
+            // phantom one (decrement-card-stock.ts:52-56).
+            stock_earmarked: false,
           })),
           sharedContext,
         );
         pullIds = minted.map((p) => p.id);
         cardCount += pullIds.length;
         cardHandles.push(handle!);
+        reservations.push({ handle: handle!, qty, pullIds });
       } else {
         skippedCardIds.push(cardId);
       }
@@ -7267,7 +7262,63 @@ class PacksModuleService extends MedusaService({
       cardHandles,
       cardCount,
       skippedCardIds,
+      reservations,
     };
+  }
+
+  /**
+   * Take the inventory units for a winner whose payout has COMMITTED.
+   *
+   * Deliberately outside settleChallengeWinner's transaction. adjustInventory
+   * belongs to Medusa's inventory module and commits on its own connection, so
+   * it cannot roll back with ours. Called from inside, a throw after it — a
+   * duplicate-payout constraint, the ledger write, a dropped connection — rolled
+   * the payout back while the take stood. And because the re-entry gate is per
+   * CUSTOMER (settledCustomers, built from payout rows), the winner was then
+   * absent from it, so the next hourly tick re-settled them and took the units
+   * AGAIN, every hour for the ~168 ticks weeksBack:1 keeps the week in scope.
+   *
+   * Post-commit the winner is in settledCustomers for good, so this runs at
+   * most once per winner. The read-then-check race the take was added for stays
+   * closed: the winner loop is sequential and awaits, so the next winner's
+   * getStock read sees this take.
+   *
+   * Failures are logged and bounded, never thrown — the payout is already
+   * committed and must not be undone over a counter. Both directions are
+   * conservative: a failed take leaves the pulls unflagged, so buyback can
+   * never restore a unit that was not taken.
+   */
+  private async reserveSettledStock(
+    winner: SettledWinner,
+    decrementStock:
+      | ((handle: string, qty: number) => Promise<boolean>)
+      | undefined,
+    weekStartIso: string,
+  ): Promise<void> {
+    if (!decrementStock) return;
+    for (const r of winner.reservations) {
+      try {
+        // false = untracked product: nothing counted, so nothing to flag.
+        if (!(await decrementStock(r.handle, r.qty))) continue;
+        if (r.pullIds.length === 0) continue;
+        await this.updatePulls({
+          selector: { id: r.pullIds },
+          data: { stock_earmarked: true },
+        });
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          '[settleChallengeWeek] stock take failed AFTER the payout committed — counter reads high, prize already granted',
+          {
+            customer_id: winner.customerId,
+            week_start: weekStartIso,
+            handle: r.handle,
+            qty: r.qty,
+            error: String(err),
+          },
+        );
+      }
+    }
   }
 
   // One-shot backfill for the recorded-pull-value follow-up (spec 2026-07-19

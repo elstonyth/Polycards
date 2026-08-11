@@ -105,7 +105,14 @@ function validateRankRewards(
  * still mint an effectively unbounded payout.
  */
 export const MAX_STAGES = 100;
-export const MAX_AGGREGATE_RANK_CREDITS_MYR = 10_000;
+// Headroom over the SHIPPED ladder, not a round number picked in the
+// abstract. The live challenge_stage rows pay rank 4-10 an aggregate of
+// RM 18,500 across their four stages, so a RM 10,000 ceiling refused the
+// ladder already in production: saveChallengeStages is a whole-set replace, so
+// every admin edit reposts the full ladder and would have 400'd. Same trap as
+// MAX_VOUCHER_MYR vs the seeded L90/L100 rungs (#247) — query the real rows
+// before pinning a bound the editor has to clear.
+export const MAX_AGGREGATE_RANK_CREDITS_MYR = 50_000;
 
 export function validateChallengeStages(raw: unknown): ChallengeStageInput[] {
   const body = (raw as { stages?: unknown } | null)?.stages;

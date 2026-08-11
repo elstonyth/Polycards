@@ -268,6 +268,17 @@ export async function startGlobePayWithdrawal(
       { customer_id: input.customerId, idempotency_key: idempotencyKey },
       { take: 1 },
     );
+    // A FAILED prior attempt never moved money, so replaying it as a success
+    // shape would report a payout that is never coming. It also cannot just be
+    // retried under the same key: the partial unique index does not exclude
+    // failed rows, so the insert below would raise a raw 23505. Say what
+    // happened and ask for a fresh key.
+    if (prior && prior.status === "failed") {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        "This Idempotency-Key was already used for a withdrawal that failed. Retry with a new key.",
+      );
+    }
     if (prior) {
       return {
         merchantTransactionId: prior.merchant_transaction_id,
