@@ -1186,6 +1186,85 @@ describe('PacksModuleService.withdrawForCashout', () => {
   });
 });
 
+/**
+ * PacksModuleService.claimGlobePayWithdrawalStatus — the mutex behind both
+ * admin routes (plan 094 Task 5).
+ *
+ * SCOPE, same as the withdrawForCashout describe above: the real method body
+ * runs against a fake `em`, so what these pin is the SHAPE OF THE STATEMENT —
+ * one conditional UPDATE with the accepted statuses in its WHERE clause, and
+ * a RETURNING row as the answer to "did I win the claim". The mutex itself is
+ * a Postgres property: a single-statement UPDATE re-evaluates its predicate
+ * against committed state after the row lock releases, so of two concurrent
+ * claims the loser matches zero rows. No test here runs two transactions.
+ *
+ * The regression this guards is the one the brief names explicitly: doing the
+ * flip with updateGlobePayWithdrawals({ selector, data }) instead. That
+ * type-checks and returns an array, but it is a find-then-write with no row
+ * lock, so two concurrent approves both read 'held' and both submit — a
+ * duplicate payout to a real bank account.
+ */
+describe('PacksModuleService.claimGlobePayWithdrawalStatus', () => {
+  const fakeClaim = (returned: { id: string }[]) => {
+    const svc = Object.create(
+      PacksModuleService.prototype,
+    ) as PacksModuleService;
+    // Parameters declared (not inferred away) so the call-argument assertions
+    // below can index mock.calls[0][1] under `strict` — same reason as the
+    // withdrawForCashout harness above.
+    const em = {
+      execute: jest.fn(async (_query: string, _params?: unknown[]) => returned),
+    };
+    return { svc, em, ctx: { transactionManager: em } as never };
+  };
+
+  it('claims with ONE conditional UPDATE, answered by RETURNING', async () => {
+    const f = fakeClaim([{ id: 'gpw_1' }]);
+    await expect(
+      f.svc.claimGlobePayWithdrawalStatus(
+        { id: 'gpw_1', from: ['held'], to: 'pending' },
+        f.ctx,
+      ),
+    ).resolves.toBe(true);
+
+    expect(f.em.execute).toHaveBeenCalledTimes(1);
+    const [sql, params] = f.em.execute.mock.calls[0];
+    expect(sql).toMatch(/^UPDATE globepay_withdrawal/);
+    expect(sql).toContain('SET status = ?');
+    expect(sql).toContain('WHERE id = ?');
+    // The whole point: the FROM-state is part of the predicate, so the write
+    // and the check cannot be separated by another transaction.
+    expect(sql).toContain('status IN (?)');
+    expect(sql).toContain('deleted_at IS NULL');
+    // Without RETURNING the caller could only learn "the row exists", never
+    // "I am the one who moved it".
+    expect(sql).toContain('RETURNING id');
+    expect(params).toEqual(['pending', 'gpw_1', 'held']);
+  });
+
+  it('binds one placeholder per accepted status — never interpolated', async () => {
+    const f = fakeClaim([{ id: 'gpw_1' }]);
+    await f.svc.claimGlobePayWithdrawalStatus(
+      { id: 'gpw_1', from: ['held', 'failed'], to: 'failed' },
+      f.ctx,
+    );
+    const [sql, params] = f.em.execute.mock.calls[0];
+    expect(sql).toContain('status IN (?, ?)');
+    expect(sql).not.toContain("'held'");
+    expect(params).toEqual(['failed', 'gpw_1', 'held', 'failed']);
+  });
+
+  it('a zero-row result is a LOST claim, not an error', async () => {
+    const f = fakeClaim([]);
+    await expect(
+      f.svc.claimGlobePayWithdrawalStatus(
+        { id: 'gpw_1', from: ['held'], to: 'pending' },
+        f.ctx,
+      ),
+    ).resolves.toBe(false);
+  });
+});
+
 describe('POST /store/credits/withdraw — actor_id guard', () => {
   it('401s a register-phase token (actor_id "") without starting a withdrawal', async () => {
     process.env.GLOBEPAY_WITHDRAW_NOTIFY_URL = 'https://us/notify-wd';
