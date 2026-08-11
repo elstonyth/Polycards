@@ -564,12 +564,17 @@ describe('startGlobePayWithdrawal — money ordering', () => {
     });
   });
 
-  it('stamps their W… id on the row after a successful submit', async () => {
+  it('stamps their W… id on the row after a successful submit, scoped to pending', async () => {
     const h = harness();
     const result = await start(h);
+    // Re-pointed, not relaxed: the old shape (`{id, gateway_transaction_id}`)
+    // had no status guard at all. Scoped so a sweep that raced ahead and
+    // closed the row while this submit was in flight cannot have a gateway
+    // id written back onto it afterwards — same reasoning as the identical
+    // scope on the admin approve route's own stamp for this field.
     expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith({
-      id: 'gpw_1',
-      gateway_transaction_id: 'W2026072200000001',
+      selector: { id: 'gpw_1', status: 'pending' },
+      data: { gateway_transaction_id: 'W2026072200000001' },
     });
     expect(result.transactionId).toBe('W2026072200000001');
     expect(result.balance).toBe(50);

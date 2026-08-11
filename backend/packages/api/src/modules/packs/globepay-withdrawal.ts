@@ -481,9 +481,16 @@ export async function startGlobePayWithdrawal(
     };
   }
 
+  // Scoped to 'pending', matching the identical stamp in the callback route
+  // (api/hooks/globepay/withdrawal/route.ts) and the admin approve route's
+  // own terminal write for this same field: if the sweep resolved this row
+  // while the submit above was still in flight (refunded and closed it
+  // 'failed'), an unscoped write would land a gateway id onto a refunded row
+  // afterwards — the one shape that makes a later reader believe the money
+  // went out. A silent no-op otherwise.
   await packs.updateGlobePayWithdrawals({
-    id: row.id,
-    gateway_transaction_id: result.transactionId,
+    selector: { id: row.id, status: 'pending' },
+    data: { gateway_transaction_id: result.transactionId },
   });
 
   return {
