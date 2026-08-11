@@ -236,8 +236,8 @@ describe('WithdrawForm', () => {
       accountId: READY_ACCOUNT.id,
     });
     // The payout debits the balance server-side; the form must repaint it, or
-    // the header chip stays stale and the Me tab's money dot never lights until
-    // a focus event.
+    // the header chip stays stale. (It also used to light the Me-tab money dot
+    // — suspended 2026-08-11, see components/account/credit-dot.tsx.)
     expect(applyBalance).toHaveBeenCalledWith(50);
     const text = container.textContent ?? '';
     expect(text).toContain('RM 50.00 ON ITS WAY');

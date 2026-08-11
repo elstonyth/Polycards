@@ -60,8 +60,8 @@ export default function WithdrawForm({
   withdrawable: number | null;
 }) {
   // The payout debits the balance server-side; repaint it here so the header
-  // chip is not stale, and so the money dot lights without waiting for a focus
-  // event (withdrawals are one of the movements it is meant to announce).
+  // chip is not stale. (This used to light the Me-tab money dot too — that dot
+  // was suspended 2026-08-11; see components/account/credit-dot.tsx.)
   const { applyBalance } = useTopUp();
   const [saved, setSaved] = useState<SavedBankAccount[] | null>(null);
   const [accountId, setAccountId] = useState('');

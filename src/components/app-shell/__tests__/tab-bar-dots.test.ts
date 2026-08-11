@@ -19,6 +19,9 @@ vi.mock('@/components/AuthButton', () => ({ openAuth: vi.fn() }));
 vi.mock('../VaultDotProvider', () => ({
   useVaultDot: () => vaultDot,
 }));
+// TabBar no longer imports this — keep the mock anyway. It is what makes a
+// re-added Me-tab dot fail LEGIBLY (labelFor('/me') becomes non-null) instead
+// of blowing up on useDot's null-context throw.
 vi.mock('../CreditDotProvider', () => ({
   useCreditDot: () => creditDot,
 }));

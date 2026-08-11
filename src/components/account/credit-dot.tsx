@@ -1,21 +1,33 @@
 'use client';
 
+/**
+ * PARTIALLY SUSPENDED 2026-08-11 — this file has one dead export and one live
+ * one; read both paragraphs before pruning either.
+ *
+ * SUSPENDED: `QuickAccessCreditDot`. The operator asked for the History tile to
+ * stop announcing itself, so all three render sites went in one change — this
+ * tile (me/page.tsx) and the Me-tab dot the same signal fed on both chrome
+ * surfaces (TabBar.tsx, AppHeader.tsx). Restoring the dot means re-adding those
+ * three call sites AND the `refreshCreditDot()` call that went with them from
+ * TopUpProvider. Don't delete this export in the meantime.
+ *
+ * STILL LIVE: `MarkCreditsSeen`, mounted by /transactions. It keeps the seen
+ * stamp moving while the dot is dark, so a restored dot lights on new activity
+ * instead of a backlog the customer already read.
+ *
+ * Also still wired: CreditDotProvider in layout.tsx. Unmounting it is an
+ * app-shell crash rather than a cleanup — useDot throws on a null context, and
+ * MarkCreditsSeen below is a consumer.
+ *
+ * Live residue while suspended: one throttled getCreditsLatest read per
+ * login/focus, plus one unthrottled read per /transactions visit (below), both
+ * feeding the stamp rather than any pixel.
+ */
+
 import { useEffect } from 'react';
 import { useCreditDot } from '@/components/app-shell/CreditDotProvider';
 
 /**
- * SUSPENDED 2026-08-11 — nothing renders this. The operator asked for the
- * History tile to stop announcing itself, so all three render sites went in one
- * change: this tile (me/page.tsx) and the Me-tab dot it fed on both chrome
- * surfaces (TabBar.tsx, AppHeader.tsx). Everything BEHIND it stays wired —
- * CreditDotProvider is still mounted in layout.tsx and TopUpProvider still
- * calls useCreditDot(), so unmounting the provider is an app-shell crash, not a
- * cleanup (useDot throws on a null context). Restoring the dot is re-adding the
- * three call sites; leave this file alone.
- *
- * Live residue: one throttled getCreditsLatest read per login/focus that now
- * drives nothing visible.
- *
  * The money dot on /me's History tile. Rendered INSIDE the tile's icon square,
  * which is why it needs no positioning context of its own.
  *

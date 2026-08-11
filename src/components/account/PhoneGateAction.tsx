@@ -29,7 +29,13 @@ export function PhoneGateAction({
     <Link
       href="/settings"
       onClick={onNavigate}
-      className={cn(pillVariants({ size: 'sm' }), 'mt-2 w-full')}
+      // secondary, not primary: this sits directly above each surface's own
+      // white full-width CTA (Pay / Request delivery / Withdraw), and two
+      // identical primaries compete instead of reading as an escape hatch.
+      className={cn(
+        pillVariants({ variant: 'secondary', size: 'sm' }),
+        'mt-2 w-full',
+      )}
     >
       Add your phone number
     </Link>

@@ -68,7 +68,15 @@ await page.goto(`${STORE}/me`, { waitUntil: 'networkidle' });
 await page.waitForTimeout(1200);
 await page.screenshot({ path: `${OUT}/me-phone-nudge.png`, fullPage: true });
 
-// Assertions, so the PNG is not the only evidence.
+// Counters that THROW, so the PNG is not the only evidence and a regression
+// fails the run instead of printing a wrong number nobody reads.
+const check = (label, actual, expected) => {
+  if (actual !== expected) {
+    throw new Error(`${label}: expected ${expected}, got ${actual}`);
+  }
+  log(`ok ${label}=${actual}`);
+};
+
 const settingsTile = page.locator('a[href="/settings"]').last();
 const dots = await page
   .locator('a[href="/transactions"] span.rounded-full')
@@ -78,39 +86,41 @@ const srHint = await settingsTile.getByText(/add your phone number/i).count();
 const meTabDot = await page
   .locator('nav[aria-label="Primary"] a[href="/me"] span[aria-hidden]')
   .count();
-log(
-  JSON.stringify({
-    historyTileDots: dots,
-    settingsHighlightRing: settingsRing,
-    settingsSrHint: srHint,
-    meTabDotSpans: meTabDot,
-  }),
-);
+check('historyTileDots', dots, 0);
+check('settingsHighlightRing', settingsRing, 1);
+check('settingsSrHint', srHint, 1);
+check('meTabDotSpans', meTabDot, 0);
 
-// Phase 2 — the nudge must CLEAR once a number is saved, and it must clear on
-// the client-side nav back (this repo has a logged stale-RSC-on-back-nav
-// failure, so SettingsForm's router.refresh() is verified, not assumed).
+// Phase 2 — the nudge must CLEAR once a number is saved, on BOTH ways back to
+// /me. Forward nav and browser Back are separate cases here: the repo's logged
+// /notifications staleness reproduced only on Back (the router cache serves the
+// pre-click RSC payload), so SettingsForm's router.refresh() is checked against
+// that path too rather than inferred from Next's cache semantics.
+const ringNow = () =>
+  page.locator('a[href="/settings"]').last().locator('span.ring-1').count();
+
 await page.goto(`${STORE}/settings`, { waitUntil: 'networkidle' });
 await page.getByLabel('Phone number').fill('012 345 6789');
 await page.getByRole('button', { name: /save changes/i }).click();
 await page.getByText(/changes saved/i).waitFor({ timeout: 15000 });
 log('phone saved');
 
-await page.locator('nav[aria-label="Primary"] a[href="/me"]').last().click();
+// Back first: /me is the entry this history stack came from, so this is the
+// exact stale-payload case.
+await page.goBack();
 await page.waitForURL('**/me');
 await page.waitForTimeout(1500);
+check('afterSave_back_ring', await ringNow(), 0);
 await page.screenshot({
   path: `${OUT}/me-phone-nudge-cleared.png`,
   fullPage: true,
 });
-log(
-  JSON.stringify({
-    afterSave_settingsHighlightRing: await page
-      .locator('a[href="/settings"]')
-      .last()
-      .locator('span.ring-1')
-      .count(),
-  }),
-);
+
+// Then a forward client-side nav, which takes a different cache path.
+await page.goto(`${STORE}/settings`, { waitUntil: 'networkidle' });
+await page.locator('nav[aria-label="Primary"] a[href="/me"]').last().click();
+await page.waitForURL('**/me');
+await page.waitForTimeout(1500);
+check('afterSave_forwardNav_ring', await ringNow(), 0);
 
 await browser.close();
