@@ -35,7 +35,7 @@ __metadata:
   dependencies:
     "@acme/odds-math": "workspace:*"
     "@acme/pokemon": "workspace:*"
-    "@medusajs/admin-sdk": "npm:2.13.4"
+    "@medusajs/admin-sdk": "npm:2.13.6"
     "@medusajs/admin-shared": "npm:2.13.6"
     "@medusajs/auth-google": "npm:2.13.6"
     "@medusajs/cli": "npm:2.13.4"
@@ -2743,13 +2743,13 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@medusajs/admin-sdk@npm:2.13.4":
-  version: 2.13.4
-  resolution: "@medusajs/admin-sdk@npm:2.13.4"
+"@medusajs/admin-sdk@npm:2.13.6":
+  version: 2.13.6
+  resolution: "@medusajs/admin-sdk@npm:2.13.6"
   dependencies:
-    "@medusajs/admin-shared": "npm:2.13.4"
+    "@medusajs/admin-shared": "npm:2.13.6"
     zod: "npm:3.25.76"
-  checksum: 10c0/62b0d92456eaba2badaaa38f1f5fc85dbc2aa899ceb7c2c9f847ffa8bb8f26101971cb268801375b5e87331f8a87a735019166bc9049b901608b0b42ebe739e2
+  checksum: 10c0/052c536a868d961afb0a3947d7fb97647b87b628cbb7b6e0d6325c2fa89e9ddb26b8a7c07afb1ec7dffb421fb564dfa05179ef41e26930a8bb74dbdeb6895368
   languageName: node
   linkType: hard
 
