@@ -243,12 +243,17 @@ describe('POST /admin/globepay/withdrawals/:id/approve', () => {
     expect(notifyFeedMock).toHaveBeenCalledTimes(1);
 
     // Their reason, on record — the only thing that can tell PMT10013 (empty
-    // merchant float) apart from genuinely bad bank details later.
+    // merchant float) apart from genuinely bad bank details later: a
+    // definitively refused submit leaves NOTHING at the gateway to requery.
+    // All seven fields are pinned, so none can be dropped from the line.
     const warned = h.logger.warn.mock.calls.map((c) => String(c[0])).join('\n');
     expect(warned).toContain('PMT10013');
+    expect(warned).toContain('httpStatus=400');
     expect(warned).toContain('definite=true');
     expect(warned).toContain('bankCode=MBB');
+    expect(warned).toContain('amount=1500');
     expect(warned).toContain('PW-HELD-1');
+    expect(warned).toContain('Insufficient payout float');
   });
 
   it('an AMBIGUOUS submit error leaves the row pending for the sweep — never a refund', async () => {
