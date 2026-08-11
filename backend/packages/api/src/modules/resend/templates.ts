@@ -324,7 +324,13 @@ const withdrawalReceipt = (d: WithdrawalReceiptData): Rendered => {
   const heading = paid ? 'Withdrawal paid' : 'Withdrawal returned';
   const lede = paid
     ? 'Your bank transfer is complete — the money has left Polycards and reached your bank.'
-    : 'Your bank rejected this transfer, so the full amount is back in your Polycards balance. Nothing was lost.';
+    : // Cause-agnostic on purpose, same reasoning as copy.ts's withdrawal_refunded
+      // (the storefront half of this same fix): this outcome fires on a denied
+      // HELD withdrawal (plan 094), which was never submitted to the gateway, so
+      // no bank ever saw it, and on a gateway-side refusal (e.g. PMT10013, an
+      // empty merchant payout float) that is not the bank either. "Your bank
+      // rejected this" was flatly false on both paths.
+      'The transfer could not be completed, so the full amount is back in your Polycards balance. Nothing was lost.';
 
   return {
     subject: paid
