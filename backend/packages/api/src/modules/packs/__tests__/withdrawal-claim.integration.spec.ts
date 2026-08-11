@@ -28,7 +28,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
   moduleName: PACKS_MODULE,
   resolve: path.resolve(__dirname, '../../..', 'modules/packs'),
   moduleModels: [GlobePayWithdrawal],
-  testSuite: ({ service }) => {
+  testSuite: ({ service, MikroOrmWrapper }) => {
     const seed = async (
       suffix: string,
       status: 'pending' | 'settled' | 'failed' | 'held',
@@ -122,8 +122,26 @@ moduleIntegrationTestRunner<PacksModuleService>({
       // test still green. That is the one part of the "updated_at is the
       // submit clock" argument no writer audit can establish, so it is checked
       // here against a real row.
-      it('lists updated_at, and the claim moves it — the submit clock', async () => {
+      //
+      // Backdated by a raw statement BEFORE the claim, on MikroOrmWrapper's
+      // manager (same real database, a separate connection from the module
+      // service) — two hours, then a STRICT `>`. Neither is decorative:
+      // `before === after` (the claim's SQL never touching the column at all)
+      // still satisfies `>=`, so the previous version of this assertion passed
+      // whether or not `updated_at = now()` was even present in
+      // claimGlobePayWithdrawalStatus's raw SQL (service.ts) — see plan 094's
+      // ledger. Comparing against created_at instead was considered and
+      // rejected: JS `Date` truncates to milliseconds, so two statements a
+      // fraction of a millisecond apart make that flaky too. This is the only
+      // thing in the repo that proves the claim's write reaches the column at
+      // all, since it goes through `em.execute` and MikroORM's onUpdate hook
+      // never fires for raw SQL.
+      it('lists updated_at, and the claim moves it forward from a backdated value — the submit clock', async () => {
         const row = await seed('5', 'held');
+        await MikroOrmWrapper.getManager().execute(
+          "UPDATE globepay_withdrawal SET updated_at = now() - interval '2 hours' WHERE id = ?",
+          [row.id],
+        );
         const [before] = await service.listGlobePayWithdrawals(
           { id: row.id },
           { take: 1 },
@@ -139,10 +157,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
           { id: row.id },
           { take: 1 },
         );
-        // `>=` not `>`: two statements can land inside the same millisecond.
-        // What this pins is that the claim's `updated_at = now()` reaches the
-        // column at all, so an approval genuinely restarts the clock.
-        expect(after.updated_at.getTime()).toBeGreaterThanOrEqual(
+        expect(after.updated_at.getTime()).toBeGreaterThan(
           before.updated_at.getTime(),
         );
         expect(after.created_at.getTime()).toBe(before.created_at.getTime());
