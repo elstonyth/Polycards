@@ -314,3 +314,24 @@ export function unknownWithdrawalAction(
 /** Past this age a still-processing payout warrants a loud log line every
  * sweep — a payout stuck for a day is a support case, not background noise. */
 export const GLOBEPAY_WD_SLOW_AFTER_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Past this age, the OLDEST held withdrawal warrants its own loud log line
+ * every sweep (plan 094 review fix) — the held-row mirror of
+ * GLOBEPAY_WD_SLOW_AFTER_MS above, for a completely different failure mode.
+ * A 'pending' row goes quiet because the GATEWAY is slow; a 'held' row goes
+ * quiet because a HUMAN hasn't looked, and nothing else ever ages it: the
+ * sweep never selects one for processing (by design — see the model's
+ * 'held' comment) and the admin list's `stale` flag is `status === 'pending'`
+ * only, so without this a held row can sit forever with zero automated
+ * signal that anyone forgot it. The plan states the approval queue's
+ * response time is a customer-support commitment; this is its only
+ * automated backstop.
+ *
+ * Same 24h bar as GLOBEPAY_WD_SLOW_AFTER_MS, deliberately not a looser one —
+ * a held row is, if anything, the MORE urgent of the two: nothing is
+ * automatically retrying it the way the sweep retries a slow gateway. A
+ * customer's money sitting untouched for a day is equally a support case
+ * whether the cause is a slow provider or a queue nobody worked.
+ */
+export const GLOBEPAY_WD_HELD_STALE_AFTER_MS = 24 * 60 * 60 * 1000;

@@ -16,6 +16,7 @@ import { withdrawalFeedKey } from '../modules/packs/feed-events';
 import { sendWithdrawalReceipt } from '../modules/packs/withdrawal-receipt';
 import {
   GLOBEPAY_RECONCILE_BATCH,
+  GLOBEPAY_WD_HELD_STALE_AFTER_MS,
   GLOBEPAY_WD_SLOW_AFTER_MS,
   classifyRequeryError,
   unknownWithdrawalAction,
@@ -43,6 +44,26 @@ export default async function globepayWithdrawalReconcileJob(
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
   const config = globepayConfigFromEnv();
   const now = new Date();
+
+  // HELD-ROW STALENESS WATCH (plan 094 review fix). Read-only: this must
+  // NEVER requery, refund, or write to a held row — the whole feature rests
+  // on the sweep leaving 'held' alone (see the held-row regression test
+  // below), so this is the one deliberate exception, and it only looks.
+  // Runs BEFORE the `outstanding.length === 0` return just below, so it
+  // still fires on a run with no pending rows at all — a queue that is
+  // 100% held is exactly the case this exists to catch.
+  const [oldestHeld] = await packs.listGlobePayWithdrawals(
+    { status: 'held' },
+    { take: 1, order: { created_at: 'ASC' } },
+  );
+  if (oldestHeld) {
+    const heldAge = now.getTime() - new Date(oldestHeld.created_at).getTime();
+    if (heldAge > GLOBEPAY_WD_HELD_STALE_AFTER_MS) {
+      logger.error(
+        `[globepay-wd-reconcile] held withdrawal ${oldestHeld.merchant_transaction_id} still awaiting admin review after ${Math.round(heldAge / 3_600_000)}h — customer ${oldestHeld.customer_id} has RM ${oldestHeld.amount} waiting on a decision; work the approval queue`,
+      );
+    }
+  }
 
   const outstanding = await packs.listGlobePayWithdrawals(
     { status: 'pending' },

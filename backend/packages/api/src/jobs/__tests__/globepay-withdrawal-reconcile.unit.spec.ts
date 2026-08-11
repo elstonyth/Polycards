@@ -79,7 +79,21 @@ const pendingRow = {
 
 function harness(withdrawal: Record<string, unknown> = pendingRow) {
   const packs = {
-    listGlobePayWithdrawals: jest.fn().mockResolvedValue([withdrawal]),
+    // Selector-aware, unlike a bare mockResolvedValue: the job now makes TWO
+    // differently-filtered listGlobePayWithdrawals calls (pending, then
+    // held), so a mock that returns `withdrawal` for any selector would hand
+    // it back for BOTH regardless of its actual `.status` — misreporting a
+    // pending fixture as the oldest held row (or vice versa) in nearly every
+    // test in this file, since most fixtures share pendingRow's very old
+    // created_at. Filtering by status is what a real query does.
+    listGlobePayWithdrawals: jest.fn(
+      (selector: Record<string, unknown> = {}) =>
+        Promise.resolve(
+          selector.status === undefined || selector.status === withdrawal.status
+            ? [withdrawal]
+            : [],
+        ),
+    ),
     updateGlobePayWithdrawals: jest.fn().mockResolvedValue(undefined),
     // A debit row EXISTS, so the "never refund what was never debited" guard
     // cannot be what makes these tests pass — only the ambiguity check can.
@@ -395,5 +409,57 @@ describe('withdrawal sweep — the 24h slow-payout alert reads the submit clock'
     expect(h.logger.error).toHaveBeenCalledWith(
       expect.stringContaining('chase the provider'),
     );
+  });
+});
+
+describe('withdrawal sweep — a held row gets its own staleness watch', () => {
+  // Nothing else ages a held row: it is structurally invisible to the
+  // sweep's PROCESSING loop (see the describe block above), and the admin
+  // list's `stale` flag is `status === 'pending'` only (route.ts). This is
+  // the one place a held row is read at all, and it is read-only — never
+  // requeried, refunded, or written to.
+  const freshHeldRow = {
+    ...pendingRow,
+    id: 'gpw_held_fresh',
+    merchant_transaction_id: 'PW-HELD-FRESH',
+    status: 'held',
+    created_at: new Date(Date.now() - 60 * 1000),
+  };
+  const staleHeldRow = {
+    ...pendingRow,
+    id: 'gpw_held_stale',
+    merchant_transaction_id: 'PW-HELD-STALE',
+    customer_id: 'cus_stale',
+    amount: 5000,
+    status: 'held',
+    created_at: new Date(Date.now() - 25 * 60 * 60 * 1000),
+  };
+
+  it('logs nothing for a held row still inside the grace window', async () => {
+    const h = harness(freshHeldRow);
+
+    await globepayWithdrawalReconcileJob(h.container);
+
+    expect(h.logger.error).not.toHaveBeenCalled();
+    // Read-only, even though it was read: nothing about the row moved.
+    expect(h.packs.updateGlobePayWithdrawals).not.toHaveBeenCalled();
+    expect(requery).not.toHaveBeenCalled();
+  });
+
+  // Also proves the check does not live behind the `outstanding.length === 0`
+  // early return: this fixture's status is 'held', so the pending query
+  // returns nothing and the sweep would otherwise stop right after — a queue
+  // that is 100% held must still get the watch.
+  it('warns once a held row has waited past the threshold — nothing else will', async () => {
+    const h = harness(staleHeldRow);
+
+    await globepayWithdrawalReconcileJob(h.container);
+
+    expect(h.logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('PW-HELD-STALE'),
+    );
+    // Still read-only past the threshold — a log line, not an action.
+    expect(h.packs.updateGlobePayWithdrawals).not.toHaveBeenCalled();
+    expect(requery).not.toHaveBeenCalled();
   });
 });
