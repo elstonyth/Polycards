@@ -46,7 +46,7 @@ import {
 // details for one row's worth of need. The reveal endpoint is what keeps that
 // workflow off the database console, where nothing is audited.
 
-const STATUS_FILTERS = ['pending', 'settled', 'failed', 'all'] as const;
+const STATUS_FILTERS = ['pending', 'settled', 'failed', 'held', 'all'] as const;
 type StatusFilter = (typeof STATUS_FILTERS)[number];
 
 // Display mask for the destination account: `••••1234`.
@@ -63,7 +63,14 @@ export function maskAccountNumber(raw: string | null | undefined): string {
   return digits.length > 4 ? `••••${digits.slice(-4)}` : '••••';
 }
 
-/** Unknown/absent status falls back to 'pending' — the view that matters. */
+/** Unknown/absent status falls back to 'pending'. Task 6 (plan 094) made
+ *  'held' the operator-facing DEFAULT VIEW, but that default lives in the
+ *  admin SPA, which always sends an explicit `?status=` on every request (see
+ *  getGlobePayWithdrawals) — this fallback only ever fires for a caller that
+ *  omits the param entirely, and flipping it would not change what the SPA
+ *  shows. Left on 'pending' so a bare request (old bookmark, script, a future
+ *  caller that forgets `?status=`) still lands on "is a customer's money
+ *  stuck mid-transfer", not the approval queue. */
 export function parseStatusFilter(raw: unknown): StatusFilter {
   return typeof raw === 'string' &&
     (STATUS_FILTERS as readonly string[]).includes(raw)
@@ -92,16 +99,20 @@ export async function GET(
   );
   const status = parseStatusFilter(req.query.status);
 
-  // Pending oldest-first (the ['status','created_at'] index): the longest-
-  // waiting payout is the likeliest stranded debit. History views newest-first.
-  // That status-dependent default only holds while the operator has NOT picked
-  // a sort — an explicit `?sort=` overrides it.
+  // Pending AND held oldest-first (the ['status','created_at'] index covers
+  // both — it is not partial): for pending, the longest-waiting payout is the
+  // likeliest stranded debit; for held (Task 6, plan 094) the longest-waiting
+  // row is the customer who has waited longest for a human to look at it —
+  // same "oldest is the one to chase first" reasoning, added rather than
+  // replaced. History views newest-first. That status-dependent default only
+  // holds while the operator has NOT picked a sort — an explicit `?sort=`
+  // overrides it.
   //
   // `id` tiebreaks BOTH paths and the status-dependent direction is the
   // parser's fallback, so it survives an absent OR an unhonoured `?sort=`.
   // See the deposits route for the full reasoning — these two lists stay
   // structurally identical on purpose.
-  const defaultDir = status === 'pending' ? 'ASC' : 'DESC';
+  const defaultDir = status === 'pending' || status === 'held' ? 'ASC' : 'DESC';
   const { key, dir } = parseSortParam(
     req.query.sort,
     SORTABLE,
@@ -128,6 +139,25 @@ export async function GET(
     : [];
   const emailById = new Map(customers.map((c) => [c.id, c.email]));
 
+  // Task 6 (plan 094): the admin approve route refuses a frozen customer's
+  // account, so an approver who cannot see the flag clicks straight into a
+  // refusal with no explanation. Batched (one call for the whole page, not
+  // one per row — a 100-row page cannot afford an N+1 here) and UNFILTERED on
+  // `frozen` on purpose: this is the only route that asks for more than one
+  // customer's state at once, so an array customer_id combined with
+  // `frozen: true` (the single-id shape ./[id]/approve uses) has never been
+  // proven against the real query builder. Filtering `frozen` in JS below
+  // avoids resting the whole list on that unproven combination.
+  const frozenStates = customerIds.length
+    ? await packs.listCustomerAccountStates(
+        { customer_id: customerIds },
+        { take: customerIds.length },
+      )
+    : [];
+  const frozenIds = new Set(
+    frozenStates.filter((s) => s.frozen).map((s) => s.customer_id),
+  );
+
   const now = Date.now();
   const withdrawals = rows.map((r) => ({
     id: r.id,
@@ -151,6 +181,11 @@ export async function GET(
     stale:
       r.status === 'pending' &&
       now - new Date(r.created_at).getTime() > GLOBEPAY_STALE_AFTER_MS,
+    // Re-checked live by ./[id]/approve at click time — this is a PREVIEW for
+    // the operator, not the gate. A freeze that lands in the ~60s between two
+    // polls can still make the real approve refuse even though this said
+    // false a moment ago.
+    frozen: frozenIds.has(r.customer_id),
   }));
 
   // Identity-varying response carrying customer emails (CWE-524): a cached

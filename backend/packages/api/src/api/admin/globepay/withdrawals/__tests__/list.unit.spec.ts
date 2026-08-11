@@ -39,14 +39,32 @@ const withdrawal = (i: number, over: Partial<Record<string, any>> = {}) => ({
   ...over,
 });
 
-function mkScope(rows: any[]) {
-  const calls: { filter?: any; opts?: any } = {};
+// `frozenIds` seeds which customers listCustomerAccountStates reports as
+// frozen — the list route's Task 6 addition (plan 094): the queue must surface
+// the SAME flag the admin approve route refuses on, or an approver clicks into
+// a refusal with no explanation.
+function mkScope(rows: any[], frozenIds: string[] = []) {
+  const calls: { filter?: any; opts?: any; frozenFilter?: any } = {};
   const packs = {
     listAndCountGlobePayWithdrawals: async (filter: any, opts: any) => {
       calls.filter = filter;
       calls.opts = opts;
       const skip = opts?.skip ?? 0;
       return [rows.slice(skip, skip + (opts?.take ?? 50)), rows.length];
+    },
+    // Deliberately UNFILTERED on `frozen` (unlike the approve route's
+    // single-id + frozen:true call) — this mock is the ONLY thing standing
+    // between a wrong compound-filter assumption and a 500 on the real route,
+    // so the route fetches every state for these ids and filters `frozen` in
+    // JS instead of trusting an array-id + boolean filter to combine right.
+    listCustomerAccountStates: async (filter: any) => {
+      calls.frozenFilter = filter;
+      const ids: string[] = Array.isArray(filter?.customer_id)
+        ? filter.customer_id
+        : [filter?.customer_id].filter(Boolean);
+      return ids
+        .filter((id) => frozenIds.includes(id))
+        .map((id) => ({ id: `cas_${id}`, customer_id: id, frozen: true }));
     },
   };
   return {
@@ -67,8 +85,8 @@ describe('parseStatusFilter', () => {
     expect(parseStatusFilter(['settled'])).toBe('pending');
   });
 
-  it('accepts the four supported views', () => {
-    for (const s of ['pending', 'settled', 'failed', 'all']) {
+  it('accepts the five supported views', () => {
+    for (const s of ['pending', 'settled', 'failed', 'held', 'all']) {
       expect(parseStatusFilter(s)).toBe(s);
     }
   });
@@ -95,6 +113,34 @@ describe('GET /admin/globepay/withdrawals', () => {
     expect(row.account_holder_name).toBe('Tan Ah Kow');
     // Identity-varying (emails) — must never be cacheable (CWE-524).
     expect(out.headers['Cache-Control']).toBe('no-store');
+  });
+
+  // Task 6 (plan 094): approve refuses on a frozen account, so the queue must
+  // show the SAME flag before the operator clicks — batched in ONE call
+  // (never one listCustomerAccountStates per row, which would be an N+1 on a
+  // 100-row page).
+  it('carries the customer frozen state per row, fetched in one batched call', async () => {
+    const { scope, calls } = mkScope(
+      [
+        withdrawal(1, { customer_id: 'cus_1' }),
+        withdrawal(2, { customer_id: 'cus_2' }),
+      ],
+      ['cus_2'],
+    );
+    const { res, out } = mkRes();
+    await GET({ scope, query: {} } as any, res);
+    expect(out.body.withdrawals[0].frozen).toBe(false);
+    expect(out.body.withdrawals[1].frozen).toBe(true);
+    // ONE call naming both ids — not one lookup per row.
+    expect(calls.frozenFilter).toEqual({ customer_id: ['cus_1', 'cus_2'] });
+  });
+
+  it('skips the frozen-state lookup when the page has no rows', async () => {
+    const { scope, calls } = mkScope([]);
+    const { res, out } = mkRes();
+    await GET({ scope, query: {} } as any, res);
+    expect(out.body.withdrawals).toEqual([]);
+    expect(calls.frozenFilter).toBeUndefined();
   });
 
   // The mask agrees with setPayoutDetails' audit-row last4 (service.ts): digits
@@ -133,12 +179,20 @@ describe('GET /admin/globepay/withdrawals', () => {
     expect(out.body.withdrawals[0].stale).toBe(false);
   });
 
-  it('pending sorts oldest-first, other views newest-first, all drops the filter', async () => {
+  // held joins pending on the oldest-first side (Task 6, plan 094): the
+  // longest-WAITING held row is the customer who has waited longest for a
+  // human, the same reasoning as the longest-pending row being the likeliest
+  // stranded debit — see the defaultDir comment in route.ts.
+  it('pending and held sort oldest-first, other views newest-first, all drops the filter', async () => {
     const { scope, calls } = mkScope([withdrawal(1)]);
     const { res } = mkRes();
     await GET({ scope, query: { status: 'pending' } } as any, res);
     expect(calls.filter).toEqual({ status: 'pending' });
     // `id` tiebreaks the default path too — see the deposits spec.
+    expect(calls.opts.order).toEqual({ created_at: 'ASC', id: 'ASC' });
+
+    await GET({ scope, query: { status: 'held' } } as any, res);
+    expect(calls.filter).toEqual({ status: 'held' });
     expect(calls.opts.order).toEqual({ created_at: 'ASC', id: 'ASC' });
 
     await GET({ scope, query: { status: 'all' } } as any, res);
