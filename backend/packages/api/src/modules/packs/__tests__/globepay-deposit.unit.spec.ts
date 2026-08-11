@@ -212,6 +212,30 @@ describe('startGlobePayDeposit', () => {
     });
   });
 
+  // The log is diagnostics; the MedusaError is the customer's instruction. A
+  // logger that throws must not be able to swap one for the other — before the
+  // try/catch it escaped this branch and the caller saw the logger's crash
+  // instead, turning a 400 with actionable copy into an opaque 500.
+  it('still refuses with the customer-facing message when the logger throws', async () => {
+    const h = harness();
+    h.logger.warn.mockImplementation(() => {
+      throw new Error('logger exploded');
+    });
+    submitMock.mockRejectedValue(
+      new GlobePayError('nope', ['PMT10005'], 200, true),
+    );
+    await expect(start(h)).rejects.toThrow(/could not start your top-up/i);
+    // Self-contained on purpose: without this the test would still pass if the
+    // log were deleted outright, and the deletion is the regression it exists
+    // to catch.
+    expect(h.logger.warn).toHaveBeenCalled();
+    // And the row was still closed, so the sweep is not left chasing it.
+    expect(h.packs.updateGlobePayDeposits).toHaveBeenCalledWith({
+      id: 'gpd_1',
+      status: 'failed',
+    });
+  });
+
   // The other half of that rule, and the one that costs real money if it is
   // wrong. A timeout/socket reset/WAF page does NOT mean the gateway refused —
   // the submit may have landed. The reconciliation sweep only scans

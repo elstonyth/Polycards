@@ -219,21 +219,39 @@ export async function startGlobePayDeposit(
       // cutover had a live deposit failing with no way to tell a bad key from
       // an unprovisioned payment method from an IP the gateway refuses.
       //
-      // AFTER the status update on purpose: the row write is money-path state
-      // and must not depend on the logger resolving. `error.message` carries
-      // the diagnosis when `codes` is empty — a non-JSON/WAF response (an
-      // un-allowlisted IP lands here) is built from the response text alone,
-      // see globepay-client.ts. Safe to log: their codes and message, the HTTP
-      // status, our own opaque reference, the method and the amount. NEVER the
-      // request or response envelope — those carry the signed/encrypted body.
-      scope
-        .resolve<{ warn: (message: string) => void }>('logger')
-        .warn(
-          `[globepay] deposit refused: codes=${error.codes.join(',') || 'none'} ` +
-            `httpStatus=${error.httpStatus} definite=${error.definite} ` +
-            `method=${paymentMethodCode} amount=${amount} ref=${merchantTransactionId} ` +
-            `msg=${error.message}`,
-        );
+      // AFTER the status update. The try/catch below already covers a logger
+      // that THROWS, so ordering is not what protects the row write from that;
+      // what it still buys is protection from a logger that HANGS — a blocked
+      // transport or a full disk — which no catch can rescue. The cost is a
+      // blind spot: if updateGlobePayDeposits itself throws, the refusal never
+      // reaches the logs. Accepted, because a hung logger stranding the row
+      // write is worse than a rare unlogged double failure. Same trade as the
+      // payout branch (globepay-withdrawal.ts), which these two are kept
+      // deliberately parallel to.
+      //
+      // `error.message` carries the diagnosis when `codes` is empty — a
+      // non-JSON/WAF response (an un-allowlisted IP lands here) is built from
+      // the response text alone, see globepay-client.ts. Safe to log: their
+      // codes and message, the HTTP status, our own opaque reference, the
+      // method and the amount. NEVER the request or response envelope — those
+      // carry the signed/encrypted body.
+      //
+      // Best-effort. Without the catch, a throw from `resolve` or `warn`
+      // escapes in place of the MedusaError below and the customer gets a 500
+      // instead of the sentence telling them to try another amount or method.
+      try {
+        scope
+          .resolve<{ warn: (message: string) => void }>('logger')
+          .warn(
+            `[globepay] deposit refused: codes=${error.codes.join(',') || 'none'} ` +
+              `httpStatus=${error.httpStatus} definite=${error.definite} ` +
+              `method=${paymentMethodCode} amount=${amount} ref=${merchantTransactionId} ` +
+              `msg=${error.message}`,
+          );
+      } catch {
+        // Swallowed deliberately: the logger is the thing that failed, so there
+        // is nothing left to report it with.
+      }
       // Their validation errors are the customer's problem to fix (amount out
       // of range, method unavailable), not a 500.
       throw new MedusaError(
