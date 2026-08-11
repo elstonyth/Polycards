@@ -265,6 +265,30 @@ export async function startGlobePayDeposit(
     // the authoritative answer (globepay-reconcile.ts). Marking it 'failed'
     // here would drop it out of the sweep's status='pending' scan permanently
     // and strand a real payment.
+    //
+    // Say so before rethrowing, for the same reason the refusal above is
+    // logged: this branch CREATES a pending row and nothing else records why.
+    // The rethrow reaches Medusa's default handler, which logs the bare error
+    // message — no reference, no method, no amount — so without this line the
+    // row and the cause it came from cannot be tied together. The payout twin
+    // has logged its ambiguous outcome all along (globepay-withdrawal.ts); this
+    // is the half of that parallel the deposit path was missing.
+    //
+    // Guarded like the refusal log: a throw from the logger here would replace
+    // the gateway error with its own, and the gateway error is what the sweep's
+    // operator needs to read.
+    try {
+      scope
+        .resolve<{ error: (msg: string) => void }>('logger')
+        .error(
+          `[globepay] deposit ${merchantTransactionId} submit outcome AMBIGUOUS ` +
+            `(${(error as Error).message}) — left pending for the sweep`,
+        );
+    } catch {
+      // Swallowed deliberately: the logger is the thing that failed. The row
+      // stays 'pending', so the sweep still resolves this deposit whether or
+      // not anyone ever reads about it.
+    }
     throw error;
   }
 

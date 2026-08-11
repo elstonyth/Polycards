@@ -236,6 +236,34 @@ describe('startGlobePayDeposit', () => {
     });
   });
 
+  // The ambiguous branch is the one that LEAVES a row behind. Medusa's default
+  // handler logs the bare error message with no reference, so this line is the
+  // only thing that ties the pending row to the cause that created it.
+  it('names the reference when it leaves a row pending for the sweep', async () => {
+    const h = harness();
+    submitMock.mockRejectedValue(new Error('socket hang up'));
+    await expect(start(h)).rejects.toThrow(/socket hang up/);
+    const line = h.logger.error.mock.calls[0][0] as string;
+    expect(line).toContain('AMBIGUOUS');
+    expect(line).toContain('socket hang up');
+    expect(line).toMatch(/deposit PC-/);
+    // Still pending: closing it here would drop a live payment out of the
+    // sweep's status='pending' scan permanently.
+    expect(h.packs.updateGlobePayDeposits).not.toHaveBeenCalled();
+  });
+
+  it('still rethrows the gateway error when the AMBIGUOUS logger throws', async () => {
+    // The gateway error is what the operator needs; the logger must not be
+    // able to replace it with its own.
+    const h = harness();
+    h.logger.error.mockImplementation(() => {
+      throw new Error('logger exploded');
+    });
+    submitMock.mockRejectedValue(new Error('socket hang up'));
+    await expect(start(h)).rejects.toThrow(/socket hang up/);
+    expect(h.packs.updateGlobePayDeposits).not.toHaveBeenCalled();
+  });
+
   // The other half of that rule, and the one that costs real money if it is
   // wrong. A timeout/socket reset/WAF page does NOT mean the gateway refused —
   // the submit may have landed. The reconciliation sweep only scans
