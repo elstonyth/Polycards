@@ -85,6 +85,37 @@ export async function POST(
   }
   const amount = Number(row.amount);
 
+  // FREEZE, re-read at approval time. This is the ONE piece of the
+  // request-time gate that must be re-checked: the whole point of a held
+  // queue is that a human looks at a suspicious payout, and a freeze landing
+  // between the request and the click is exactly how "suspicious" gets
+  // recorded. Task 6's brief does not require the queue to surface the flag,
+  // so the approver may not be able to see it — this is not something to
+  // leave to the human.
+  //
+  // A BARE freeze read, deliberately: the rest of withdrawForCashout's gate
+  // must NOT be re-run here. The debit already landed, so re-checking the
+  // balance or the playthrough would judge a payout against a wallet the
+  // payout itself has already reduced, and the held row already counts
+  // against its own rolling-24h cap.
+  //
+  // Cause-agnostic (no `cause` filter), matching the request-time gate, which
+  // refuses on walletSummary.isFrozen for BOTH causes. Not
+  // packs.assertNotFrozen: that one is scoped to cause='manual' so a clawback
+  // auto-freeze cannot block the top-up/buyback that repays it — right for an
+  // inflow-repayable path, wrong here, where it would pay a real bank account
+  // out of an account already in clawback debt.
+  const [frozen] = await packs.listCustomerAccountStates(
+    { customer_id: row.customer_id, frozen: true },
+    { take: 1 },
+  );
+  if (frozen) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'This customer’s account is frozen. Unfreeze it before approving a payout, or deny the withdrawal.',
+    );
+  }
+
   // DEBIT-EXISTENCE GUARD, the same one the sweep runs above its refund (see
   // jobs/globepay-withdrawal-reconcile.ts). A held row is NOT always debited:
   // startGlobePayWithdrawal writes it 'held' at step 1 and debits at step 2,
@@ -217,15 +248,15 @@ export async function POST(
     // gateway id — precisely the state the reconcile sweep resolves (requery
     // success -> settle, failed -> refund, unknown-and-stale -> refund).
     //
-    // ONE THING THE SWEEP MEASURES DIFFERENTLY for a row that got here: its
-    // "too old for an in-flight submit" clock (unknownWithdrawalAction) runs
-    // from created_at, which is when the CUSTOMER asked — possibly days
-    // before this approval. So a row approved long after it was held is
-    // already past that grace period the moment it becomes pending, and a
-    // requery that has not caught up with a just-accepted payout would be
-    // read as "never existed" and refunded. That is the sweep's decision to
-    // make, not this route's (plan 094 Task 4b) — flagged here because this
-    // is where the state comes from.
+    // WHAT MAKES THAT SAFE for a row that waited: the sweep's "too old for an
+    // in-flight submit" clock reads the row's updated_at, not its created_at,
+    // precisely so an approval restarts it (the claim above wrote it one hop
+    // ago). Left on created_at, a row approved days after the customer asked
+    // would be born stale — the next sweep tick would read a not-yet-
+    // propagated payout as "never existed" and refund a transfer the bank
+    // then executes. See unknownWithdrawalAction and the job's call site;
+    // that clock is an invariant this route depends on, not an incidental
+    // column choice.
     //
     // Returns rather than throws, for the same reason the store path does: a
     // 500 here reads as "nothing happened" and invites a retry. A retry is in
@@ -250,9 +281,19 @@ export async function POST(
     return;
   }
 
+  // Their W… id, recorded as early as it can be — it does not exist until the
+  // call above returns, and this is the next statement. The gap still matters:
+  // until the id lands, unknownWithdrawalAction's hasGatewayTransactionId
+  // guard cannot protect this row, and only the submit clock does.
+  //
+  // Scoped to 'pending' like every other terminal write on this path. Without
+  // the scope, a sweep that resolved this row while the submit was in flight
+  // (refunded and closed it 'failed') would have a gateway id written back
+  // onto it afterwards — a refunded row wearing the id of a payout, which is
+  // the one shape that makes a later reader believe the money went out.
   await packs.updateGlobePayWithdrawals({
-    id: row.id,
-    gateway_transaction_id: result.transactionId,
+    selector: { id: row.id, status: 'pending' },
+    data: { gateway_transaction_id: result.transactionId },
   });
 
   res.setHeader('Cache-Control', 'no-store');

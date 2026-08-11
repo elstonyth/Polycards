@@ -244,6 +244,41 @@ describe('withdrawal sweep — the state an admin approval could leave ambiguous
     account_number: '9876543210',
   };
 
+  // THE regression guard for plan 094's staleness clock. A held row is as old
+  // as the human took to look at it; the submit happened at APPROVAL. Read the
+  // grace window off created_at and this row is born stale — this very tick
+  // requeries a payout that has not propagated yet, gets a not-found, and
+  // refunds a transfer the bank goes on to execute. Money out AND credited
+  // back, unrecoverable.
+  //
+  // Deliberately the same not-found answer as the test below, and the row
+  // sorts to the front of the batch (pending, oldest created_at first), so
+  // nothing but the clock separates the two outcomes.
+  const approvedMinutesAgoRow = {
+    ...pendingRow,
+    id: 'gpw_approved_fresh',
+    customer_id: 'cus_3',
+    merchant_transaction_id: 'PW-APPROVED-FRESH',
+    // The customer asked six hours ago...
+    created_at: new Date(Date.now() - 6 * 60 * 60 * 1000),
+    // ...an admin approved it one minute ago, and the claim stamped this.
+    updated_at: new Date(Date.now() - 60 * 1000),
+  };
+
+  it('does NOT refund a row approved minutes ago, however old the request is', async () => {
+    const h = harness(approvedMinutesAgoRow);
+    requery.mockRejectedValue(
+      new GlobePayError('Not found', ['PMT10016'], 400, true),
+    );
+
+    await globepayWithdrawalReconcileJob(h.container);
+
+    expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+    expect(h.packs.updateGlobePayWithdrawals).not.toHaveBeenCalled();
+    expect(receipt).not.toHaveBeenCalled();
+    expect(notifyFeedMock).not.toHaveBeenCalled();
+  });
+
   it('refunds exactly once, on the shared anchor, and closes failed', async () => {
     const h = harness(approvedThenAmbiguousRow);
     requery.mockRejectedValue(

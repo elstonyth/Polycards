@@ -91,8 +91,29 @@ export default async function globepayWithdrawalReconcileJob(
               `[globepay-wd-reconcile] requery says ${withdrawal.merchant_transaction_id} is unknown, but it HAS gateway id ${withdrawal.gateway_transaction_id} — refusing the unknown-refund path; check merchant credentials`,
             );
           }
+          // SUBMIT time, not created_at — see unknownWithdrawalAction for why
+          // the difference is money. `updated_at` is the submit clock because
+          // of an audit, not a coincidence: EVERY write this codebase makes to
+          // a 'pending' row also CLOSES it (the callback route's two branches,
+          // this sweep's settle and no-debit closes, the refund helper's
+          // terminal update, startGlobePayWithdrawal's two failure closes),
+          // and the only two writes that leave a row pending both stamp a
+          // gateway_transaction_id — after which the guard above returns
+          // 'wait' regardless of any clock. So nothing can push this forward
+          // on the rows that reach the branch below, which is exactly the
+          // invariant that function demands. The admin approve route's claim
+          // (held -> pending) is the one write that legitimately restarts it,
+          // one HTTP hop before its submit.
+          //
+          // Adding a write that leaves a row 'pending' without a gateway id
+          // BREAKS this. Give that row a real submit-timestamp column instead
+          // of quietly extending its grace period.
+          //
+          // The ?? is unreachable in production (the column is `not null
+          // default now()`, Migration20260722170000) — it only keeps a test
+          // fixture that omits the field on the old reading.
           action = unknownWithdrawalAction(
-            new Date(withdrawal.created_at),
+            new Date(withdrawal.updated_at ?? withdrawal.created_at),
             now,
             Boolean(withdrawal.gateway_transaction_id),
           );

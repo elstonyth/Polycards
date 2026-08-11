@@ -282,14 +282,31 @@ export function withdrawalReconcileAction(
  *   code), never non-existence. Refunding here would systematically double-
  *   pay every in-flight payout while the banks still execute them — so this
  *   path always waits, however old the row gets (the job logs it loudly).
+ *
+ * `submittedAt` is SUBMIT time, not row-creation time, and the distinction is
+ * load-bearing (plan 094). GLOBEPAY_STALE_AFTER_MS is an hour of grace for a
+ * payout to become visible at the gateway before we call it non-existent —
+ * so the clock has to start when we told them about it. For every row the
+ * store path writes those two instants are the same, but an admin-approved
+ * row (globepay/withdrawals/[id]/approve) was CREATED when the customer
+ * asked, possibly days earlier, and submitted only when a human clicked. Feed
+ * this created_at and such a row is born stale: the very next sweep tick
+ * reads a not-yet-propagated payout as "never existed" and refunds a transfer
+ * the bank goes on to execute — money out AND credited back.
+ *
+ * The invariant on whatever the caller feeds here: it must ADVANCE ONLY AT
+ * SUBMIT. A clock that any later touch can push forward inverts the failure —
+ * the row never ages out, and a debit that never reached the bank is stranded
+ * pending forever, which no sweep will ever recover. See the job's call site
+ * for the audit that keeps that true.
  */
 export function unknownWithdrawalAction(
-  createdAt: Date,
+  submittedAt: Date,
   now: Date,
   hasGatewayTransactionId: boolean,
 ): WithdrawalReconcileAction {
   if (hasGatewayTransactionId) return { kind: 'wait' };
-  return now.getTime() - createdAt.getTime() > GLOBEPAY_STALE_AFTER_MS
+  return now.getTime() - submittedAt.getTime() > GLOBEPAY_STALE_AFTER_MS
     ? { kind: 'refund' }
     : { kind: 'wait' };
 }
