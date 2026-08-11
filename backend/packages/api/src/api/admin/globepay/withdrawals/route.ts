@@ -34,10 +34,18 @@ import {
 // which is precisely what the database console this page exists to replace
 // does not.
 //
-// `stale` reuses the deposits' window (GLOBEPAY_STALE_AFTER_MS): the sweep has
-// had the same number of chances to resolve the payout, so past it means "look
-// at this row by hand" — with the extra weight that for a withdrawal a stuck
-// pending row is a customer ALREADY charged.
+// `stale` reuses the deposits' window (GLOBEPAY_STALE_AFTER_MS), read off
+// updated_at — the SUBMIT clock the sweep's own staleness check reads
+// (unknownWithdrawalAction, plan 094) — not created_at: the sweep has had the
+// same number of chances to resolve the payout since THAT moment, so past it
+// means "look at this row by hand", with the extra weight that for a
+// withdrawal a stuck pending row is a customer ALREADY charged. created_at
+// would disagree with the sweep on any admin-approved row, which can wait
+// days for a human before a submit ever happens — no `?? created_at`
+// fallback, deliberately (see the job's identical choice). updated_at
+// arriving on the entity is proved against a real row in
+// withdrawal-claim.integration.spec.ts; this route's own list call below
+// selects no narrower than that same list call.
 //
 // Admin-only (auto-protected /admin/* route). The destination account is
 // MASKED here and revealed one row at a time by ./[id]/account: support does
@@ -180,7 +188,7 @@ export async function GET(
     settled_at: r.settled_at,
     stale:
       r.status === 'pending' &&
-      now - new Date(r.created_at).getTime() > GLOBEPAY_STALE_AFTER_MS,
+      now - new Date(r.updated_at).getTime() > GLOBEPAY_STALE_AFTER_MS,
     // Re-checked live by ./[id]/approve at click time — this is a PREVIEW for
     // the operator, not the gate. A freeze that lands in the ~60s between two
     // polls can still make the real approve refuse even though this said

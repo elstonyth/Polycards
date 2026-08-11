@@ -124,7 +124,16 @@ export default async function globepayWithdrawalReconcileJob(
       }
 
       if (action.kind === 'wait') {
-        const age = now.getTime() - new Date(withdrawal.created_at).getTime();
+        // SUBMIT time, not created_at — the same reasoning as the
+        // unknown-requery branch above (unknownWithdrawalAction). "Still
+        // unresolved … chase the provider" is a claim about how long the
+        // GATEWAY has sat on this payout, and for an admin-approved row
+        // (plan 094) that clock starts at the claim, which can be hours or
+        // days after created_at. Left on created_at this fires on the very
+        // first sweep tick after every approval — a payout submitted five
+        // minutes ago reported as unresolved for days — and an alert that
+        // cries wolf on every approved payout trains operators to ignore it.
+        const age = now.getTime() - new Date(withdrawal.updated_at).getTime();
         if (age > GLOBEPAY_WD_SLOW_AFTER_MS) {
           logger.error(
             `[globepay-wd-reconcile] payout ${withdrawal.merchant_transaction_id} still unresolved after ${Math.round(age / 3_600_000)}h — customer ${withdrawal.customer_id} has RM ${withdrawal.amount} in limbo; chase the provider`,

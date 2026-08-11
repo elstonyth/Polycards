@@ -35,6 +35,12 @@ const withdrawal = (i: number, over: Partial<Record<string, any>> = {}) => ({
   status: 'pending',
   gateway_status: null,
   created_at: new Date(Date.now() - 5 * 60 * 1000),
+  // Equal to created_at by default — a store-path row's updated_at IS its
+  // created_at until something writes to it (plan 094's submit clock; same
+  // convention as globepay-withdrawal-reconcile.unit.spec.ts's pendingRow).
+  // Both columns are NOT NULL in the schema, and `stale` below now reads
+  // this one.
+  updated_at: new Date(Date.now() - 5 * 60 * 1000),
   settled_at: null,
   ...over,
 });
@@ -156,7 +162,7 @@ describe('GET /admin/globepay/withdrawals', () => {
 
   it('flags a pending row past the sweep window as stale, fresh ones not', async () => {
     const old = withdrawal(1, {
-      created_at: new Date(Date.now() - GLOBEPAY_STALE_AFTER_MS - 60_000),
+      updated_at: new Date(Date.now() - GLOBEPAY_STALE_AFTER_MS - 60_000),
     });
     const { scope } = mkScope([old, withdrawal(2)]);
     const { res, out } = mkRes();
@@ -165,6 +171,23 @@ describe('GET /admin/globepay/withdrawals', () => {
       true,
       false,
     ]);
+  });
+
+  // THE regression guard for plan 094's final review: stale must read the
+  // SUBMIT clock (updated_at), not created_at. A held row approved and
+  // submitted minutes ago carries a fresh updated_at but a created_at from
+  // whenever the customer originally asked — possibly days earlier. Left on
+  // created_at this row is flagged stale the instant it lands on the pending
+  // view, the same sweep tick an approval would otherwise have resolved it.
+  it('does not flag a just-approved row stale, however old the original request', async () => {
+    const justApproved = withdrawal(1, {
+      created_at: new Date(Date.now() - 6 * 60 * 60 * 1000),
+      updated_at: new Date(Date.now() - 60 * 1000),
+    });
+    const { scope } = mkScope([justApproved]);
+    const { res, out } = mkRes();
+    await GET({ scope, query: { status: 'pending' } } as any, res);
+    expect(out.body.withdrawals[0].stale).toBe(false);
   });
 
   it('never marks a settled row stale, however old', async () => {

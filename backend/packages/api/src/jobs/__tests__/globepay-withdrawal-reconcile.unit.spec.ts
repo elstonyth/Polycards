@@ -95,18 +95,20 @@ function harness(withdrawal: Record<string, unknown> = pendingRow) {
   return { packs, logger, container };
 }
 
-describe('withdrawal sweep — an unattributable 400 never refunds', () => {
-  // The shape staging actually returns for a requery it does not recognise:
-  // HTTP 400, plain-text "Not found", no PMT10016
-  // (docs/payments/globepay365-setup.md:124). Indistinguishable from a rotated
-  // key or a de-whitelisted IP, so it must not move money.
-  const ambiguous400 = () =>
-    new GlobePayError(
-      'GlobePay365 /api/Withdrawal/GetWithdrawalDetail: non-JSON response (HTTP 400): Not found',
-      [],
-      400,
-    );
+// The shape staging actually returns for a requery it does not recognise:
+// HTTP 400, plain-text "Not found", no PMT10016
+// (docs/payments/globepay365-setup.md:124). Indistinguishable from a rotated
+// key or a de-whitelisted IP, so it must not move money. Hoisted to module
+// scope — a pure move, no logic change — so the slow-payout-clock tests
+// further down can drive the same 'wait' branch without a second copy.
+const ambiguous400 = () =>
+  new GlobePayError(
+    'GlobePay365 /api/Withdrawal/GetWithdrawalDetail: non-JSON response (HTTP 400): Not found',
+    [],
+    400,
+  );
 
+describe('withdrawal sweep — an unattributable 400 never refunds', () => {
   it('does not refund, does not close the row, and says so loudly', async () => {
     const h = harness();
     requery.mockRejectedValue(ambiguous400());
@@ -342,6 +344,56 @@ describe('withdrawal sweep — the state an admin approval could leave ambiguous
     // caller, so the email has to go out first.
     expect(receipt.mock.invocationCallOrder[0]).toBeLessThan(
       h.packs.updateGlobePayWithdrawals.mock.invocationCallOrder[0],
+    );
+  });
+});
+
+describe('withdrawal sweep — the 24h slow-payout alert reads the submit clock', () => {
+  // Both rows are still 'processing' at the gateway (the ambiguous-400 wait
+  // branch, same mechanism as the first describe block above) — only their
+  // clocks differ. This is the regression net for plan 094's final review:
+  // the slow-payout log used to read created_at, so an admin-approved row
+  // (held for days, then approved and submitted a minute ago) fired "still
+  // unresolved" on the very next sweep tick — an alert that cries wolf on
+  // every approved payout trains operators to ignore it.
+  const justApprovedRow = {
+    ...pendingRow,
+    id: 'gpw_slow_fresh',
+    merchant_transaction_id: 'PW-SLOW-FRESH',
+    // The customer asked three days ago...
+    created_at: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
+    // ...an admin approved it a minute ago, and the claim stamped this.
+    updated_at: new Date(Date.now() - 60 * 1000),
+  };
+  const genuinelyStuckRow = {
+    ...pendingRow,
+    id: 'gpw_slow_stuck',
+    merchant_transaction_id: 'PW-SLOW-STUCK',
+    // A store-path row: submitted (and therefore created) 25 hours ago,
+    // still unresolved at the gateway. Proves the fix is a clock swap, not a
+    // silent delete of the alert.
+    created_at: new Date(Date.now() - 25 * 60 * 60 * 1000),
+    updated_at: new Date(Date.now() - 25 * 60 * 60 * 1000),
+  };
+
+  it('does not cry wolf on a payout approved minutes ago, however old the request', async () => {
+    const h = harness(justApprovedRow);
+    requery.mockRejectedValue(ambiguous400());
+
+    await globepayWithdrawalReconcileJob(h.container);
+
+    const messages = h.logger.error.mock.calls.map(([m]: [string]) => m);
+    expect(messages.some((m) => m.includes('still unresolved'))).toBe(false);
+  });
+
+  it('still warns once the payout itself has sat at the gateway over a day', async () => {
+    const h = harness(genuinelyStuckRow);
+    requery.mockRejectedValue(ambiguous400());
+
+    await globepayWithdrawalReconcileJob(h.container);
+
+    expect(h.logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('chase the provider'),
     );
   });
 });
