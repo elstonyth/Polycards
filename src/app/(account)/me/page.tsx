@@ -332,15 +332,20 @@ export default async function MePage() {
                   className={cn(
                     'flex flex-col items-center gap-1.5 transition-colors',
                     highlight
-                      ? 'text-chase'
+                      ? 'text-white'
                       : 'text-neutral-300 hover:text-white',
                   )}
                 >
+                  {/* Paper White, not Chase Gold: DESIGN.md §2 reserves gold
+                      for prize and value moments, and a collector trained on
+                      gold = prize reads a gold Settings tile as "reward
+                      waiting". White is this system's action color, which is
+                      exactly what this tile is asking for. */}
                   <span
                     className={cn(
                       'relative flex h-11 w-11 items-center justify-center rounded-2xl',
                       highlight
-                        ? 'bg-chase/15 ring-1 ring-chase/40'
+                        ? 'bg-white/10 ring-1 ring-white/40'
                         : 'bg-neutral-800',
                     )}
                   >
@@ -348,7 +353,7 @@ export default async function MePage() {
                     {highlight && (
                       <span
                         aria-hidden
-                        className="bg-chase absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full"
+                        className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-neutral-50"
                       />
                     )}
                   </span>

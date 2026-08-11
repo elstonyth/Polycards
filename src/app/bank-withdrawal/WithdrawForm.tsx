@@ -258,15 +258,17 @@ export default function WithdrawForm({
         </span>
       </label>
 
+      {/* The remedy sits INSIDE role="alert" so problem and way out are one
+          announcement. No onNavigate here — this is a page, not a modal. */}
       {error && (
-        <p
+        <div
           role="alert"
-          className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-[13px] font-medium text-red-300"
+          className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2"
         >
-          {error}
-        </p>
+          <p className="text-[13px] font-medium text-red-300">{error}</p>
+          <PhoneGateAction error={error} />
+        </div>
       )}
-      <PhoneGateAction error={error} />
 
       <Pill
         onClick={submit}
