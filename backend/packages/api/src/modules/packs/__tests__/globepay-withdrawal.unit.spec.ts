@@ -426,9 +426,33 @@ describe('startGlobePayWithdrawal — money ordering', () => {
       new GlobePayError('nope', ['PMT10013'], 200, true),
     );
     await expect(start(h)).rejects.toThrow(/could not start your withdrawal/i);
+    // Self-contained on purpose: without this the test would still pass if the
+    // log were deleted outright, and the deletion is the regression it exists
+    // to catch.
+    expect(h.logger.warn).toHaveBeenCalled();
     // And the money path still completed: refund issued, row closed.
     expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
     expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith({
+      id: 'gpw_1',
+      status: 'failed',
+    });
+  });
+
+  it('still leaves the row pending for the sweep when the AMBIGUOUS logger throws', async () => {
+    // The costly one. This branch RETURNS rather than throws; a logger that
+    // escapes turns it into a 500, and a customer whose balance is already gone
+    // retries — debiting again and submitting a second payout that also
+    // executes. The row must stay 'pending' and the call must still resolve.
+    const h = harness();
+    h.logger.error.mockImplementation(() => {
+      throw new Error('logger exploded');
+    });
+    submitMock.mockRejectedValue(new Error('socket hang up'));
+    await expect(start(h)).resolves.toMatchObject({ transactionId: null });
+    expect(h.logger.error).toHaveBeenCalled();
+    // No refund, and the row was never closed — the sweep still owns this one.
+    expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+    expect(h.packs.updateGlobePayWithdrawals).not.toHaveBeenCalledWith({
       id: 'gpw_1',
       status: 'failed',
     });
