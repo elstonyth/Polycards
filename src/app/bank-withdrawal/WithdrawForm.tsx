@@ -189,8 +189,8 @@ export default function WithdrawForm({
             No saved bank accounts yet.
           </p>
           <p className="mt-1 text-[13px] text-neutral-500">
-            Withdrawals go to an account you saved earlier. Add one now — it
-            becomes available for withdrawals a day later.
+            Withdrawals go to an account you saved earlier. Add one to get
+            started.
           </p>
           <Link
             href="/bank"
@@ -235,9 +235,9 @@ export default function WithdrawForm({
 
       {accounts.length > 0 && usableAccounts.length === 0 && (
         <p className="mt-2 text-[13px] text-neutral-400">
-          A newly saved bank account can only receive withdrawals a day after
-          you add it. This protects your balance if someone else ever gets into
-          your account.
+          A newly saved bank account waits before it can receive withdrawals —
+          the picker says how long. This protects your balance if someone else
+          ever gets into your account.
         </p>
       )}
 

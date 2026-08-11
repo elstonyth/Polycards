@@ -1,5 +1,6 @@
 import { MedusaError } from '@medusajs/framework/utils';
 import {
+  payoutDestinationCooldownHours,
   resolveWithdrawalDestination,
   savedBankAccountId,
   type SavedBankAccount,
@@ -85,5 +86,77 @@ describe('resolveWithdrawalDestination — the id binds the destination', () => 
 
     expect(error.type).toBe(MedusaError.Types.INVALID_DATA);
     expect(error.message).toBe('Select a saved bank account.');
+  });
+});
+
+// The cooling-off window is the control that stops a stolen token from adding a
+// bank account and cashing out in one sitting, so the ONLY thing allowed to
+// disarm it is an operator typing an explicit `0`. These cases pin both halves:
+// what parses as "off", and that everything else still lands on 24.
+describe('payoutDestinationCooldownHours — 0 is the only off switch', () => {
+  const ORIGINAL = process.env.PAYOUT_DESTINATION_COOLDOWN_HOURS;
+  afterEach(() => {
+    if (ORIGINAL === undefined) {
+      delete process.env.PAYOUT_DESTINATION_COOLDOWN_HOURS;
+    } else {
+      process.env.PAYOUT_DESTINATION_COOLDOWN_HOURS = ORIGINAL;
+    }
+    jest.restoreAllMocks();
+  });
+
+  it('defaults to 24 hours when unset', () => {
+    delete process.env.PAYOUT_DESTINATION_COOLDOWN_HOURS;
+    expect(payoutDestinationCooldownHours()).toBe(24);
+  });
+
+  it('accepts an explicit 0', () => {
+    process.env.PAYOUT_DESTINATION_COOLDOWN_HOURS = '0';
+    expect(payoutDestinationCooldownHours()).toBe(0);
+  });
+
+  // '0.5' is the one that matters: floored, it would read as "off" — a typo
+  // silently disarming a money control. A negative would do the same by making
+  // usableAt earlier than savedAt.
+  it.each(['0.5', '-1', '-0.5', 'off', 'true', 'NaN'])(
+    'falls back to 24 for %p',
+    (raw) => {
+      jest.spyOn(console, 'warn').mockImplementation(() => {});
+      process.env.PAYOUT_DESTINATION_COOLDOWN_HOURS = raw;
+      expect(payoutDestinationCooldownHours()).toBe(24);
+    },
+  );
+
+  // Parsing 0 is only half of it — this is the behaviour the setting exists to
+  // produce: an account saved THIS INSTANT is payable, at the exact boundary.
+  it('pays an account saved this instant when the wait is off', () => {
+    const account: SavedBankAccount = {
+      ...genuine(),
+      savedAt: NOW.toISOString(),
+    };
+
+    expect(
+      resolveWithdrawalDestination({
+        accounts: [account],
+        accountId: account.id,
+        now: NOW,
+        cooldownHours: 0,
+      }),
+    ).toEqual(account);
+  });
+
+  // The control for the case above: the same account under the DEFAULT window
+  // must still be refused, or that test would pass against a cooling-off check
+  // that had stopped working altogether.
+  it('still refuses that same account under the default window', () => {
+    delete process.env.PAYOUT_DESTINATION_COOLDOWN_HOURS;
+    const account: SavedBankAccount = {
+      ...genuine(),
+      savedAt: NOW.toISOString(),
+    };
+
+    const error = refusal([account], account.id);
+
+    expect(error.type).toBe(MedusaError.Types.NOT_ALLOWED);
+    expect(error.message).toMatch(/not available for withdrawals yet/i);
   });
 });

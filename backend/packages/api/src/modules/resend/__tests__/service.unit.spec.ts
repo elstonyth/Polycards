@@ -1,5 +1,6 @@
 import ResendNotificationProviderService from '../service';
 import {
+  BANK_ACCOUNT_ADDED_TEMPLATE,
   PASSWORD_RESET_TEMPLATE,
   PHONE_CHANGED_TEMPLATE,
   escapeHtml,
@@ -248,5 +249,51 @@ describe('renderTemplate', () => {
       renderTemplate(PHONE_CHANGED_TEMPLATE, { new_phone_masked: '••••7790' }),
     ).toBeUndefined();
     expect(renderTemplate(PHONE_CHANGED_TEMPLATE, null)).toBeUndefined();
+  });
+
+  // The bank-account-added alert reads `usable_from` and changes its promise on
+  // it, because PAYOUT_DESTINATION_COOLDOWN_HOURS may be 0 (it is, in
+  // production): with no waiting period left, an email still claiming "nothing
+  // can be withdrawn to it before the time above" would be telling a customer
+  // they have a reaction window they do not have. These three cases pin the
+  // branch — there is no other coverage of this template's copy.
+  const bankAccount = (usableFrom: string) =>
+    renderTemplate(BANK_ACCOUNT_ADDED_TEMPLATE, {
+      bank_name: 'Hong Leong Bank Berhad',
+      account_last4: '3558',
+      usable_from: usableFrom,
+      site_url: 'https://polycards.gg',
+    })!;
+
+  it('says the account is payable right away when the wait is off', () => {
+    const rendered = bankAccount(new Date(Date.now() - 1000).toISOString());
+
+    expect(rendered.text).toContain('right away');
+    expect(rendered.text).toContain('already be withdrawn to');
+    expect(rendered.text).not.toContain('before the time above');
+    // The "from <date>" row would print a timestamp already in the past.
+    expect(rendered.html).not.toContain('Can be withdrawn to from');
+    expect(rendered.html).toContain('already be withdrawn to');
+  });
+
+  it('still quotes the arming time while a wait is configured', () => {
+    const rendered = bankAccount(
+      new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+    );
+
+    expect(rendered.text).toContain('It can receive withdrawals from ');
+    expect(rendered.text).toContain('before the time above');
+    expect(rendered.html).toContain('Can be withdrawn to from');
+  });
+
+  // Date.parse('') is NaN, and NaN <= now is false — an unreadable timestamp
+  // must land on the CAUTIOUS branch rather than telling the owner the account
+  // is already live. renderTemplate maps a missing usable_from to ''.
+  it('treats an unreadable usable_from as still waiting', () => {
+    const rendered = bankAccount('not-a-date');
+
+    expect(rendered.text).toContain('after a short waiting period');
+    expect(rendered.text).toContain('before the time above');
+    expect(rendered.text).not.toContain('right away');
   });
 });
