@@ -327,13 +327,23 @@ export const DepositStartSchema = z.looseObject({
  *  held for admin approval instead of submitted (see `status`).
  *  `status: 'held'` means the amount left the balance but a human has not yet
  *  approved sending it to the gateway (plan 094) — the form must not render
- *  that as a completed payout. */
+ *  that as a completed payout.
+ *  `.optional()`, not required: this field shipped in plan 094, and the
+ *  storefront and backend are separate deploy units (own DO app components) —
+ *  a storefront build that rolls out ahead of the backend must still parse a
+ *  response with no `status` at all. Absent means a pre-094 backend, which
+ *  has no held state, so defaulting to 'pending' downstream (vault.ts) is the
+ *  true reading, not a guess. Same reasoning as `usableFrom` on
+ *  SavedBankAccountsSchema below: making this required would fail the WHOLE
+ *  object during that skew window, and `parseOne` returning null AFTER the
+ *  backend already debited is the exact "money vanished" failure this plan
+ *  exists to prevent, reached through a different door. */
 export const WithdrawStartSchema = z.looseObject({
   merchantTransactionId: z.string(),
   transactionId: z.string().nullable(),
   amount: finite,
   balance: finite,
-  status: z.enum(['pending', 'held']),
+  status: z.enum(['pending', 'held']).optional(),
 });
 
 /** GET /store/credits/withdraw/banks response — the payout bank picker. */

@@ -171,7 +171,7 @@ export default function WithdrawForm({
         </p>
         <p className="mt-2 max-w-sm text-sm text-neutral-400">
           {held
-            ? "Withdrawals this size go through a manual review before they're sent to your bank — the amount has already left your balance, and returns automatically if it isn't approved. Either way, we'll let you know."
+            ? "Withdrawals this size go through a manual review before they're sent to your bank — the amount has already left your balance, and returns automatically if the withdrawal isn't approved. Either way, we'll let you know."
             : 'Your bank transfer is processing — most arrive within minutes. If the bank rejects it, the full amount returns to your balance automatically.'}
         </p>
         <p className="mt-3 text-[12px] text-neutral-500">

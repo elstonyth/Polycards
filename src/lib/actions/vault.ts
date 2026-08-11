@@ -526,7 +526,11 @@ export async function startWithdrawal(input: {
       // Their W… id when the submit confirmed; our reference when the
       // outcome is still resolving asynchronously.
       reference: parsed.transactionId ?? parsed.merchantTransactionId,
-      status: parsed.status,
+      // `parsed.status` is optional on the wire (see WithdrawStartSchema) so a
+      // storefront deployed ahead of the backend still parses. Absent means a
+      // pre-094 backend, which has no held state — 'pending' is the accurate
+      // default there, not a guess.
+      status: parsed.status ?? 'pending',
     };
   } catch (error) {
     logger.error('[vault] withdrawal start failed:', error);
