@@ -403,10 +403,35 @@ describe('startGlobePayWithdrawal — money ordering', () => {
     const [logged] = h.logger.warn.mock.calls[0];
     expect(logged).toMatch(/PMT10013/);
     expect(logged).toMatch(/ref=/);
+    // Every field the branch claims to log, asserted. Named individually rather
+    // than as one big regex so a dropped field says WHICH one went missing.
+    expect(logged).toMatch(/httpStatus=200/);
+    expect(logged).toMatch(/definite=true/);
+    expect(logged).toMatch(/amount=50/);
     // Diagnostic, not a data leak: bank code yes, the customer's account number
     // and holder name never.
     expect(logged).toMatch(/bankCode=MBB/);
     expect(logged).not.toMatch(/1234567890|AHMAD BIN ALI/i);
+  });
+
+  it('still refuses with the customer-facing message when the logger throws', async () => {
+    // The log is diagnostics; the MedusaError is the customer's instruction.
+    // A logger that throws must not be able to swap one for the other — before
+    // the try/catch it escaped this branch and the caller saw the logger crash.
+    const h = harness();
+    h.logger.warn.mockImplementation(() => {
+      throw new Error('logger exploded');
+    });
+    submitMock.mockRejectedValue(
+      new GlobePayError('nope', ['PMT10013'], 200, true),
+    );
+    await expect(start(h)).rejects.toThrow(/could not start your withdrawal/i);
+    // And the money path still completed: refund issued, row closed.
+    expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
+    expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith({
+      id: 'gpw_1',
+      status: 'failed',
+    });
   });
 
   // The classic double-payout window: the request reached the gateway and

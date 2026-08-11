@@ -343,14 +343,26 @@ export async function startGlobePayWithdrawal(
       // their payout channel will not accept), the amount and our own opaque
       // reference. NEVER the account number or the holder name — those are the
       // customer's PII, and never the envelope, which is signed/encrypted.
-      scope
-        .resolve<{ warn: (message: string) => void }>('logger')
-        .warn(
-          `[globepay] withdrawal refused: codes=${error.codes.join(',') || 'none'} ` +
-            `httpStatus=${error.httpStatus} definite=${error.definite} ` +
-            `bankCode=${bankCode} amount=${amount} ref=${merchantTransactionId} ` +
-            `msg=${error.message}`,
-        );
+      //
+      // Best-effort, and the try/catch is what makes the paragraph above true.
+      // Ordering alone only protects the row writes; a throw from `resolve` or
+      // `warn` here would still escape in place of the MedusaError below, and
+      // the customer would get a logger crash instead of the one sentence that
+      // tells them what to do. The refund is already committed by this point,
+      // so a lost log line is the cheapest casualty available.
+      try {
+        scope
+          .resolve<{ warn: (message: string) => void }>('logger')
+          .warn(
+            `[globepay] withdrawal refused: codes=${error.codes.join(',') || 'none'} ` +
+              `httpStatus=${error.httpStatus} definite=${error.definite} ` +
+              `bankCode=${bankCode} amount=${amount} ref=${merchantTransactionId} ` +
+              `msg=${error.message}`,
+          );
+      } catch {
+        // Swallowed deliberately: the logger is the thing that failed, so there
+        // is nothing left to report it with.
+      }
       throw new MedusaError(
         MedusaError.Types.INVALID_DATA,
         'We could not start your withdrawal. Please check the bank details and try again.',
