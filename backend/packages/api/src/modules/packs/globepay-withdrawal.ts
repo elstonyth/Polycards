@@ -544,8 +544,7 @@ export async function refundGlobePayWithdrawal(
       bankCode: withdrawal.bank_code,
       accountNumber: withdrawal.account_number,
       gatewayRef:
-        withdrawal.gateway_transaction_id ??
-        withdrawal.merchant_transaction_id,
+        withdrawal.gateway_transaction_id ?? withdrawal.merchant_transaction_id,
     },
   });
   // The emailed record — after the refund commit, BEFORE the terminal row
