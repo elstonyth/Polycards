@@ -462,4 +462,34 @@ describe('withdrawal sweep — a held row gets its own staleness watch', () => {
     expect(h.packs.updateGlobePayWithdrawals).not.toHaveBeenCalled();
     expect(requery).not.toHaveBeenCalled();
   });
+
+  // Review-fix companion: the watch sits in its own try/catch specifically so
+  // it can never take the money-resolving loop below down with it. A DB blip
+  // on this read-only query must not cost a stranded pending debit its
+  // resolution for the tick.
+  it('a throw from the watch is logged, and the pending sweep below still runs', async () => {
+    const h = harness(pendingRow);
+    h.packs.listGlobePayWithdrawals.mockImplementation(
+      (selector: Record<string, unknown> = {}) => {
+        if (selector.status === 'held') {
+          return Promise.reject(new Error('db blip'));
+        }
+        return Promise.resolve(
+          selector.status === undefined || selector.status === pendingRow.status
+            ? [pendingRow]
+            : [],
+        );
+      },
+    );
+    requery.mockResolvedValue({ state: 'failed', statusId: 5 });
+
+    await globepayWithdrawalReconcileJob(h.container);
+
+    expect(h.logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('held-row staleness watch failed'),
+    );
+    // The pending row was still resolved — the throw above cost this tick
+    // nothing but the one log line.
+    expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
+  });
 });
