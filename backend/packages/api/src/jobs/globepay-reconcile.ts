@@ -22,7 +22,7 @@ import {
   GLOBEPAY_RECONCILE_BATCH,
   ambiguousRefusalAction,
   classifyRequeryError,
-  isFullSweep,
+  isFullSweepDue,
   reconcileAction,
   unknownDepositAction,
 } from '../modules/packs/globepay-reconcile';
@@ -40,6 +40,12 @@ import {
  * (signed MerchantTransactionId), so a callback and a sweep racing on the same
  * deposit produce exactly one credit — whichever gets there first.
  */
+// Last run that covered every tier. Module-scoped rather than persisted: the
+// worker is instance_count 1 and BullMQ runs scheduled jobs at concurrency 1,
+// so there is exactly one reader/writer, and a restart resets this to null,
+// which forces a full sweep on the next run — more coverage, never less.
+let lastFullSweepAt: Date | null = null;
+
 export default async function globepayReconcileJob(container: MedusaContainer) {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
   if (!globepayEnabled()) return;
@@ -51,9 +57,13 @@ export default async function globepayReconcileJob(container: MedusaContainer) {
   // TWO cadences in one job. Most runs are the fast tier: only deposits young
   // enough that a customer is plausibly still watching their balance. Every
   // tenth run is the full sweep the slow tiers below were sized for. See
-  // isFullSweep and GLOBEPAY_FAST_WINDOW_MS for why the split, not the cron,
+  // isFullSweepDue and GLOBEPAY_FAST_WINDOW_MS for why the split, not the cron,
   // carries this decision.
-  const fullSweep = isFullSweep(now);
+  const fullSweep = isFullSweepDue(now, lastFullSweepAt);
+  // Stamped BEFORE the work, not after: a full sweep that throws part way still
+  // counts as attempted, so a persistently failing run cannot turn every
+  // subsequent run into a full sweep and hammer the gateway.
+  if (fullSweep) lastFullSweepAt = now;
 
   // Oldest first (the status+created_at index): a backlog drains over several
   // runs instead of starving the earliest deposits.
@@ -322,7 +332,7 @@ export const config = {
   // the customer's wait: ten minutes of it, measured on a real RM 300 top-up on
   // 2026-08-11 (paid 09:04:11Z, credited 09:10:01Z).
   //
-  // The extra runs are cheap because they are not the same sweep: isFullSweep
+  // The extra runs are cheap because they are not the same sweep: isFullSweepDue
   // keeps the stale and 'expired' tiers on the old ten-minute cadence, so a
   // minute-cadence run costs one requery per deposit started in the last twenty
   // minutes — normally zero.

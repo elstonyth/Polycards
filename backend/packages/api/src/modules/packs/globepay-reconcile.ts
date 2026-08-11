@@ -64,12 +64,32 @@ export const GLOBEPAY_FULL_SWEEP_EVERY_MIN = 10;
 /**
  * Does this run cover every tier, or only the fast window?
  *
- * Keyed on minute-of-hour rather than a stored "last full sweep" timestamp so
- * the job stays stateless: a run the worker missed (deploy, restart) cannot
- * shift the full sweep's phase or make two of them land back to back.
+ * Decided from ELAPSED TIME since the last full sweep, not from the handler's
+ * minute-of-hour.
+ *
+ * The minute-of-hour version looked stateless and safe, and it is safe against
+ * PHASE SHIFT — BullMQ re-anchors each occurrence with cron.next() from
+ * wall-clock now, so a '* * * * *' schedule snaps back to the whole-minute grid
+ * and delay does not accumulate. What it is NOT safe against is OMISSION: a run
+ * picked up at 09:11 instead of 09:10 simply skips that decade's full sweep,
+ * with no catch-up and no log line. The pickup does not even need this handler
+ * to be slow — every scheduled job shares ONE BullMQ worker at concurrency 1,
+ * and globepay-withdrawal-reconcile runs on a ten-minute cron, i.e. exactly
+ * the minutes this predicate wanted. Under sustained overrun the intended
+ * ten-minute guarantee measured out past an hour, silently, on the only path
+ * that credits a paid deposit in production.
+ *
+ * Elapsed-time is self-correcting: however late a run is, it still asks "has it
+ * been long enough", so a missed slot is picked up by the next run rather than
+ * abandoned.
  */
-export const isFullSweep = (now: Date): boolean =>
-  now.getUTCMinutes() % GLOBEPAY_FULL_SWEEP_EVERY_MIN === 0;
+export const isFullSweepDue = (
+  now: Date,
+  lastFullSweepAt: Date | null,
+): boolean =>
+  lastFullSweepAt === null ||
+  now.getTime() - lastFullSweepAt.getTime() >=
+    GLOBEPAY_FULL_SWEEP_EVERY_MIN * 60 * 1000;
 
 export type ReconcileAction =
   /** Requery says settled: credit it, exactly as a callback would have. */

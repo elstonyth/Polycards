@@ -5,7 +5,7 @@ import {
   ambiguousGiveUpMs,
   ambiguousRefusalAction,
   classifyRequeryError,
-  isFullSweep,
+  isFullSweepDue,
   reconcileAction,
   unknownDepositAction,
   unknownWithdrawalAction,
@@ -16,22 +16,53 @@ import { GlobePayError } from '../globepay-client';
 const now = new Date('2026-07-21T12:00:00Z');
 const minutesAgo = (m: number) => new Date(now.getTime() - m * 60 * 1000);
 
-describe('isFullSweep', () => {
-  it('runs the full sweep once per GLOBEPAY_FULL_SWEEP_EVERY_MIN minutes', () => {
-    const full = Array.from({ length: 60 }, (_, minute) =>
-      isFullSweep(new Date(Date.UTC(2026, 7, 11, 9, minute))),
-    ).filter(Boolean).length;
+describe('isFullSweepDue', () => {
+  const at = (iso: string) => new Date(iso);
 
-    expect(full).toBe(60 / GLOBEPAY_FULL_SWEEP_EVERY_MIN);
+  it('runs a full sweep on the first run after boot', () => {
+    // null marker = we have never covered every tier in this process. Erring
+    // toward MORE coverage is the whole point of resetting on restart.
+    expect(isFullSweepDue(at('2026-08-11T09:04:11Z'), null)).toBe(true);
   });
 
-  it('keeps the fast tier on every other minute', () => {
-    // The property the job depends on: a minute that is NOT a full sweep still
-    // runs — it just narrows to the fast window. A regression that made every
+  it('keeps the fast tier until the interval has elapsed', () => {
+    const last = at('2026-08-11T09:10:00Z');
+    // The property the job depends on: a run that is NOT a full sweep still
+    // runs, it just narrows to the fast window. A regression that made every
     // run a full sweep would requery week-old rows sixty times an hour.
-    expect(isFullSweep(new Date('2026-08-11T09:10:00Z'))).toBe(true);
-    expect(isFullSweep(new Date('2026-08-11T09:11:00Z'))).toBe(false);
-    expect(isFullSweep(new Date('2026-08-11T09:04:11Z'))).toBe(false);
+    expect(isFullSweepDue(at('2026-08-11T09:11:00Z'), last)).toBe(false);
+    expect(isFullSweepDue(at('2026-08-11T09:19:59Z'), last)).toBe(false);
+  });
+
+  it('runs a full sweep once the interval has elapsed, to the millisecond', () => {
+    const last = at('2026-08-11T09:10:00Z');
+    expect(isFullSweepDue(at('2026-08-11T09:20:00Z'), last)).toBe(true);
+    expect(isFullSweepDue(at('2026-08-11T09:20:01Z'), last)).toBe(true);
+  });
+
+  it('still covers a run that arrives LATE — the bug this replaced', () => {
+    // The old predicate keyed on minute-of-hour, so a run picked up at :11
+    // instead of :10 skipped that decade's full sweep entirely, with no
+    // catch-up and no log. Every scheduled job shares one BullMQ worker at
+    // concurrency 1, so a late pickup does not even require this handler to be
+    // slow. Elapsed-time asks "has it been long enough", so lateness delays the
+    // sweep, it never cancels it.
+    const last = at('2026-08-11T09:10:00Z');
+    for (const late of ['09:21:00', '09:37:00', '11:02:00']) {
+      expect(isFullSweepDue(at(`2026-08-11T${late}Z`), last)).toBe(true);
+    }
+  });
+
+  it('honours GLOBEPAY_FULL_SWEEP_EVERY_MIN rather than a hardcoded ten', () => {
+    const last = at('2026-08-11T09:00:00Z');
+    const justUnder = new Date(
+      last.getTime() + GLOBEPAY_FULL_SWEEP_EVERY_MIN * 60 * 1000 - 1,
+    );
+    const exactly = new Date(
+      last.getTime() + GLOBEPAY_FULL_SWEEP_EVERY_MIN * 60 * 1000,
+    );
+    expect(isFullSweepDue(justUnder, last)).toBe(false);
+    expect(isFullSweepDue(exactly, last)).toBe(true);
   });
 });
 
