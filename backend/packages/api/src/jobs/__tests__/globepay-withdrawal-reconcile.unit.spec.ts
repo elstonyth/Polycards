@@ -9,13 +9,33 @@ jest.mock('../../modules/packs/globepay-client', () => {
 jest.mock('../../modules/packs/notify-feed', () => ({
   notifyFeed: jest.fn().mockResolvedValue(undefined),
 }));
+// Unmocked, sendWithdrawalReceipt's REAL body runs and silently swallows its
+// own failure (the bare mock container resolves Modules.CUSTOMER to `packs`,
+// which has no retrieveCustomer, so it throws internally, logs, and returns
+// false) — every existing test already tolerated that with zero assertions
+// on it. Mocking it here doesn't change what any existing test observes
+// (none inspect it or its would-be internal log line); it only makes step 2
+// of the extracted refund ordering assertable, same as notify-feed already is.
+jest.mock('../../modules/packs/withdrawal-receipt', () => ({
+  sendWithdrawalReceipt: jest.fn().mockResolvedValue(true),
+}));
 
 import { getWithdrawalDetail } from '../../modules/packs/globepay-client';
+import { notifyFeed } from '../../modules/packs/notify-feed';
+import { sendWithdrawalReceipt } from '../../modules/packs/withdrawal-receipt';
 import globepayWithdrawalReconcileJob from '../globepay-withdrawal-reconcile';
 import { GLOBEPAY_STALE_AFTER_MS } from '../../modules/packs/globepay-reconcile';
 import { withdrawalRefundReference } from '../../modules/packs/globepay-withdrawal';
 
 const requery = getWithdrawalDetail as jest.Mock;
+// Both are module-level mocks shared across every test in this file (Jest
+// does not reset them automatically — no resetMocks/clearMocks in
+// jest.config.js), so their call history is cleared per-test in beforeEach
+// below. requery is fully mockReset (every test sets its own resolved/
+// rejected value); these two keep their default resolved value and are only
+// mockClear'd, since nothing needs to override it per test.
+const notifyFeedMock = notifyFeed as jest.Mock;
+const receipt = sendWithdrawalReceipt as jest.Mock;
 
 // WHY this file exists: nothing in the repo imported this job. The unit specs
 // cover the SUBMIT path and the integration specs cover the CALLBACK loop —
@@ -24,6 +44,8 @@ const requery = getWithdrawalDetail as jest.Mock;
 // be deleted with the whole suite still green. On the money-OUT path.
 beforeEach(() => {
   requery.mockReset();
+  notifyFeedMock.mockClear();
+  receipt.mockClear();
   process.env.GLOBEPAY_ENABLED = 'true';
   process.env.GLOBEPAY_WITHDRAWALS_ENABLED = 'true';
   process.env.GLOBEPAY_MERCHANT_CODE = 'Testpolycard';
@@ -196,6 +218,8 @@ describe('withdrawal sweep — a held row is structurally invisible to it', () =
     expect(h.packs.listCreditTransactions).not.toHaveBeenCalled();
     expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
     expect(h.packs.updateGlobePayWithdrawals).not.toHaveBeenCalled();
+    expect(receipt).not.toHaveBeenCalled();
+    expect(notifyFeedMock).not.toHaveBeenCalled();
   });
 });
 
@@ -254,5 +278,28 @@ describe('withdrawal sweep — the state an admin approval could leave ambiguous
       // the row was never heard of, so there is no gateway status to record.
       data: { status: 'failed', gateway_status: null },
     });
+
+    // Step 2 and step 4 of the extracted ordering — untouched by the
+    // argument assertions above, which only reach steps 1 and 3.
+    expect(receipt).toHaveBeenCalledTimes(1);
+    expect(receipt).toHaveBeenCalledWith(h.container, {
+      customerId: approvedThenAmbiguousRow.customer_id,
+      amount: approvedThenAmbiguousRow.amount,
+      // No gateway id: `||` falls through to the merchant reference (see
+      // the `||` vs `??` comment on this line in globepay-withdrawal.ts).
+      reference: approvedThenAmbiguousRow.merchant_transaction_id,
+      merchantTransactionId: approvedThenAmbiguousRow.merchant_transaction_id,
+      outcome: 'refunded',
+    });
+    expect(notifyFeedMock).toHaveBeenCalledTimes(1);
+
+    // Ordering: the receipt send must happen BEFORE the terminal row
+    // update (see the load-bearing comment on this in
+    // globepay-withdrawal.ts) — a crash after the update leaves nothing
+    // that will ever re-run this branch for a held row's future deny
+    // caller, so the email has to go out first.
+    expect(receipt.mock.invocationCallOrder[0]).toBeLessThan(
+      h.packs.updateGlobePayWithdrawals.mock.invocationCallOrder[0],
+    );
   });
 });
