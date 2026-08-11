@@ -50,9 +50,11 @@ import { sendSavedAccountAddedNotice } from '../../../../../modules/packs/saved-
 // modules/packs/saved-accounts.ts. Two consequences to keep in mind here:
 //
 //   - Every account is stamped with `savedAt` on creation and cannot receive
-//     money until PAYOUT_DESTINATION_COOLDOWN_HOURS (default 24) have passed.
-//     Adding a destination is therefore a security event, not a preference —
-//     hence the email + feed notice below.
+//     money until PAYOUT_DESTINATION_COOLDOWN_HOURS have passed — 24 unless an
+//     operator sets it, and `0` switches the wait off entirely. Adding a
+//     destination is a security event either way, not a preference — hence the
+//     email + feed notice below, which is the ONLY control left when the wait is
+//     zero.
 //   - The same withdrawalDetailsError the payout path uses still gates a save,
 //     so the picker can never offer an account the submit would reject.
 //

@@ -1,9 +1,11 @@
 import {
   GLOBEPAY_AMBIGUOUS_GIVEUP_DEFAULT_MS,
+  GLOBEPAY_FULL_SWEEP_EVERY_MIN,
   GLOBEPAY_STALE_AFTER_MS,
   ambiguousGiveUpMs,
   ambiguousRefusalAction,
   classifyRequeryError,
+  isFullSweep,
   reconcileAction,
   unknownDepositAction,
   unknownWithdrawalAction,
@@ -13,6 +15,25 @@ import { GlobePayError } from '../globepay-client';
 
 const now = new Date('2026-07-21T12:00:00Z');
 const minutesAgo = (m: number) => new Date(now.getTime() - m * 60 * 1000);
+
+describe('isFullSweep', () => {
+  it('runs the full sweep once per GLOBEPAY_FULL_SWEEP_EVERY_MIN minutes', () => {
+    const full = Array.from({ length: 60 }, (_, minute) =>
+      isFullSweep(new Date(Date.UTC(2026, 7, 11, 9, minute))),
+    ).filter(Boolean).length;
+
+    expect(full).toBe(60 / GLOBEPAY_FULL_SWEEP_EVERY_MIN);
+  });
+
+  it('keeps the fast tier on every other minute', () => {
+    // The property the job depends on: a minute that is NOT a full sweep still
+    // runs — it just narrows to the fast window. A regression that made every
+    // run a full sweep would requery week-old rows sixty times an hour.
+    expect(isFullSweep(new Date('2026-08-11T09:10:00Z'))).toBe(true);
+    expect(isFullSweep(new Date('2026-08-11T09:11:00Z'))).toBe(false);
+    expect(isFullSweep(new Date('2026-08-11T09:04:11Z'))).toBe(false);
+  });
+});
 
 describe('reconcileAction', () => {
   it('settles with the amount the GATEWAY reports, not the one we requested', () => {

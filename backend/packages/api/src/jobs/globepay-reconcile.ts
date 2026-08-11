@@ -17,9 +17,12 @@ import { topupFeedKey } from '../modules/packs/feed-events';
 import {
   GLOBEPAY_EXPIRED_RETRY_BATCH,
   GLOBEPAY_EXPIRED_RETRY_MS,
+  GLOBEPAY_FAST_BATCH,
+  GLOBEPAY_FAST_WINDOW_MS,
   GLOBEPAY_RECONCILE_BATCH,
   ambiguousRefusalAction,
   classifyRequeryError,
+  isFullSweep,
   reconcileAction,
   unknownDepositAction,
 } from '../modules/packs/globepay-reconcile';
@@ -45,11 +48,28 @@ export default async function globepayReconcileJob(container: MedusaContainer) {
   const config = globepayConfigFromEnv();
   const now = new Date();
 
+  // TWO cadences in one job. Most runs are the fast tier: only deposits young
+  // enough that a customer is plausibly still watching their balance. Every
+  // tenth run is the full sweep the slow tiers below were sized for. See
+  // isFullSweep and GLOBEPAY_FAST_WINDOW_MS for why the split, not the cron,
+  // carries this decision.
+  const fullSweep = isFullSweep(now);
+
   // Oldest first (the status+created_at index): a backlog drains over several
   // runs instead of starving the earliest deposits.
   const pending = await packs.listGlobePayDeposits(
-    { status: 'pending' },
-    { take: GLOBEPAY_RECONCILE_BATCH, order: { created_at: 'ASC' } },
+    fullSweep
+      ? { status: 'pending' }
+      : {
+          status: 'pending',
+          created_at: {
+            $gte: new Date(now.getTime() - GLOBEPAY_FAST_WINDOW_MS),
+          },
+        },
+    {
+      take: fullSweep ? GLOBEPAY_RECONCILE_BATCH : GLOBEPAY_FAST_BATCH,
+      order: { created_at: 'ASC' },
+    },
   );
 
   // Second, smaller tier: deposits we gave up chasing. 'expired' means the
@@ -57,25 +77,31 @@ export default async function globepayReconcileJob(container: MedusaContainer) {
   // without this tier that row would never be requeried again and the payment
   // would be lost silently. Bounded on BOTH axes so it can never grow into a
   // full-table scan: a 7-day age window (same ['status','created_at'] index)
-  // and a batch a fifth the size of the live queue.
-  const revivable = await packs.listGlobePayDeposits(
-    {
-      status: 'expired',
-      created_at: { $gte: new Date(now.getTime() - GLOBEPAY_EXPIRED_RETRY_MS) },
-    },
-    // NEWEST first, unlike the live queue above. Requerying an 'expired' row
-    // leaves it 'expired' (the `deposit.status === next` no-op below), so the row
-    // stays in this population forever. Oldest-first therefore pinned the batch to
-    // the same ten rows closest to ageing OUT of the window and never reached one
-    // that had just expired — the exact case this tier exists for, since a late
-    // bank transfer lands hours after we gave up, not days. Newest-first asks
-    // about the rows most likely to have changed, and matches what
-    // GLOBEPAY_AMBIGUOUS_GIVEUP_MS already documents: a row aged out by the
-    // ambiguous bound has spent a week yielding nothing and is not worth ten more
-    // requeries. No column records WHEN a row expired, so created_at is the only
-    // sort key available.
-    { take: GLOBEPAY_EXPIRED_RETRY_BATCH, order: { created_at: 'DESC' } },
-  );
+  // and a batch a fifth the size of the live queue. Full sweeps only, on top
+  // of that: a row we already gave up chasing has, by definition, nobody
+  // waiting on the next sixty seconds.
+  const revivable = !fullSweep
+    ? []
+    : await packs.listGlobePayDeposits(
+        {
+          status: 'expired',
+          created_at: {
+            $gte: new Date(now.getTime() - GLOBEPAY_EXPIRED_RETRY_MS),
+          },
+        },
+        // NEWEST first, unlike the live queue above. Requerying an 'expired' row
+        // leaves it 'expired' (the `deposit.status === next` no-op below), so the row
+        // stays in this population forever. Oldest-first therefore pinned the batch to
+        // the same ten rows closest to ageing OUT of the window and never reached one
+        // that had just expired — the exact case this tier exists for, since a late
+        // bank transfer lands hours after we gave up, not days. Newest-first asks
+        // about the rows most likely to have changed, and matches what
+        // GLOBEPAY_AMBIGUOUS_GIVEUP_MS already documents: a row aged out by the
+        // ambiguous bound has spent a week yielding nothing and is not worth ten more
+        // requeries. No column records WHEN a row expired, so created_at is the only
+        // sort key available.
+        { take: GLOBEPAY_EXPIRED_RETRY_BATCH, order: { created_at: 'DESC' } },
+      );
 
   const outstanding = [...pending, ...revivable];
   if (outstanding.length === 0) return;
@@ -289,8 +315,16 @@ export default async function globepayReconcileJob(container: MedusaContainer) {
 
 export const config = {
   name: 'globepay-reconcile',
-  // Every 10 minutes: their cashier times out in 10, so this is roughly one
-  // sweep per deposit lifetime — fast enough that a customer whose callback was
-  // dropped waits minutes, not hours.
-  schedule: '*/10 * * * *',
+  // Every minute. It used to be every ten — "roughly one sweep per deposit
+  // lifetime", which was sized for a world where the callback did the crediting
+  // and this was only the safety net. In production the callback never arrives,
+  // so this sweep is the ONLY thing that credits a payment and its period is
+  // the customer's wait: ten minutes of it, measured on a real RM 300 top-up on
+  // 2026-08-11 (paid 09:04:11Z, credited 09:10:01Z).
+  //
+  // The extra runs are cheap because they are not the same sweep: isFullSweep
+  // keeps the stale and 'expired' tiers on the old ten-minute cadence, so a
+  // minute-cadence run costs one requery per deposit started in the last twenty
+  // minutes — normally zero.
+  schedule: '* * * * *',
 };

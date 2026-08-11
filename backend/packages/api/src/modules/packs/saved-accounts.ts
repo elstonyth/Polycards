@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
 import { MedusaError } from '@medusajs/framework/utils';
-import { positiveIntFromEnv } from '../../api/utils/rate-limit';
 
 // The customer's saved payout destinations — the shape, the deterministic id,
 // the defensive parse, and the cooling-off rule that decides whether one may
@@ -93,15 +92,36 @@ export function parseSavedBankAccounts(value: unknown): SavedBankAccount[] {
 
 /**
  * Hours a newly saved destination must wait before it can receive a payout.
+ * `0` switches the wait OFF — a saved account can be paid immediately.
  *
  * Read PER CALL (the plan-066 convention, same as GLOBEPAY_WD_DAILY_MAX_RM) so
- * support can retune it without a redeploy. positiveIntFromEnv only accepts a
- * positive safe integer: `0`, a fraction and any garbage fall back to 24 and
- * warn, so the smallest window an operator can actually set is 1 hour and the
- * cooling-off can never be switched off by an env typo.
+ * support can retune it without a redeploy.
+ *
+ * Parsed here rather than through positiveIntFromEnv, which refuses `0` on
+ * purpose: that helper is shared with the rate limiter, where windowMs=0 would
+ * disable a rule and limit=0 would hard-block an endpoint. This setting is the
+ * one place `0` is a meaningful value, so it gets its own parse instead of
+ * loosening a helper the rate limiter depends on.
+ *
+ * OFF IS A DELIBERATE OPERATOR CHOICE, NOT A DEFAULT. Unset still means 24: the
+ * window is what stops a stolen customer token from adding a bank account and
+ * cashing out in one sitting, so only an explicit `0` may disarm it. A fraction,
+ * a negative and any garbage all fall back to 24 and warn — `"0.5"` in
+ * particular must not floor its way to "off".
  */
 export function payoutDestinationCooldownHours(): number {
-  return positiveIntFromEnv('PAYOUT_DESTINATION_COOLDOWN_HOURS', 24);
+  const raw = process.env.PAYOUT_DESTINATION_COOLDOWN_HOURS;
+  if (raw === undefined || raw === '') return 24;
+  const hours = Number(raw);
+  if (!Number.isSafeInteger(hours) || hours < 0) {
+    console.warn(
+      `[saved-accounts] ignoring invalid PAYOUT_DESTINATION_COOLDOWN_HOURS=${JSON.stringify(
+        raw,
+      )}; using 24`,
+    );
+    return 24;
+  }
+  return hours;
 }
 
 /**

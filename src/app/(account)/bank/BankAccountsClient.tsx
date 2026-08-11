@@ -21,9 +21,11 @@ import { cn } from '@/lib/utils';
 // chosen. The backend caps the list at 5 and validates with the payout-submit
 // rules, so anything saved here is guaranteed submittable.
 //
-// A newly added account cannot receive money immediately — it waits out a
-// cooling-off window, and the server says when via `usableFrom`. That state is
-// rendered here rather than recomputed: the duration is the backend's to tune.
+// A newly added account may have to wait out a cooling-off window before it can
+// receive money; the server says when via `usableFrom`. That state is rendered
+// here rather than recomputed — the duration is the backend's to tune, down to
+// and including zero (PAYOUT_DESTINATION_COOLDOWN_HOURS), so no copy on this
+// page may name one.
 
 /** Show only the tail on the list — enough to recognise, nothing to shoulder-surf. */
 const maskAccount = (accountNumber: string) =>
@@ -144,8 +146,7 @@ export function BankAccountsClient() {
             No saved bank accounts yet.
           </p>
           <p className="mt-1 text-[13px] text-neutral-500">
-            Withdrawals go to an account saved here. A new one becomes available
-            for withdrawals a day after you add it.
+            Withdrawals go to an account saved here. Add one to get started.
           </p>
         </div>
       )}

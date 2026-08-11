@@ -220,9 +220,15 @@ const phoneChanged = (oldMasked: string, newMasked: string): Rendered => {
 
 // "A new bank account can now be paid out to" — the security alert half of the
 // payout-destination binding (plan 088). Deliberately blunt and action-first:
-// its whole job is to give the account owner the day-long cooling-off window to
-// react in, so the "wasn't you" instruction outranks the pleasantry. Carries the
-// last 4 digits only; the full number never leaves the database.
+// its whole job is to hand the account owner the cooling-off window to react in,
+// so the "wasn't you" instruction outranks the pleasantry. Carries the last 4
+// digits only; the full number never leaves the database.
+//
+// That window is operator-tunable and may be ZERO
+// (PAYOUT_DESTINATION_COOLDOWN_HOURS=0), which is what `armedNow` below is for:
+// with no delay left to promise, this mail must stop claiming one and become a
+// pure "act now" alert. Promising a protection that is switched off is worse
+// than sending nothing.
 const bankAccountAdded = (d: {
   bankName: string;
   last4: string;
@@ -233,9 +239,17 @@ const bankAccountAdded = (d: {
   const logo = `${site}/branding/polycards-logo.png`;
   const account = `${d.bankName} ····${d.last4}`;
   const when = settledAt(d.usableFrom);
-  const armed = when
-    ? `It can receive withdrawals from ${when}.`
-    : 'It can receive withdrawals after a short waiting period.';
+  // An unparseable timestamp reads as "not payable yet" — the cautious side, and
+  // the same direction destinationUsableAt takes on a missing savedAt.
+  const armedNow = Date.parse(d.usableFrom) <= Date.now();
+  const armed = armedNow
+    ? 'It can receive withdrawals right away.'
+    : when
+      ? `It can receive withdrawals from ${when}.`
+      : 'It can receive withdrawals after a short waiting period.';
+  const caution = armedNow
+    ? 'this account can already be withdrawn to.'
+    : 'nothing can be withdrawn to it before the time above.';
 
   return {
     subject: 'A new bank account was added to your Polycards account',
@@ -246,7 +260,7 @@ const bankAccountAdded = (d: {
       armed,
       '',
       "If this wasn't you, sign in and remove it now, then change your password —",
-      'nothing can be withdrawn to it before the time above.',
+      caution,
       '',
       `${d.siteUrl.replace(/\/+$/, '')}/bank`,
     ].join('\n'),
@@ -261,16 +275,19 @@ const bankAccountAdded = (d: {
 
       <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="width:100%;border-collapse:collapse;border-top:1px solid #404040;border-bottom:1px solid #404040;margin:0 0 24px;">
         ${row('Account', account, true)}
-        ${when ? row('Can be withdrawn to from', when) : ''}
+        ${when && !armedNow ? row('Can be withdrawn to from', when) : ''}
       </table>
 
       <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#d4d4d4;">
-        If you added it, there is nothing to do — it becomes available for
-        withdrawals automatically.
+        If you added it, there is nothing to do.
       </p>
       <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#d4d4d4;">
         <strong>If this wasn't you</strong>, remove it and change your password
-        now. Nothing can be withdrawn to it before the time above.
+        now. ${
+          armedNow
+            ? 'This account can already be withdrawn to.'
+            : 'Nothing can be withdrawn to it before the time above.'
+        }
       </p>
 
       <a href="${site}/bank" style="display:inline-block;padding:12px 24px;border-radius:9999px;background:#fafafa;color:#171717;font-size:15px;font-weight:700;text-decoration:none;">Review your bank accounts</a>

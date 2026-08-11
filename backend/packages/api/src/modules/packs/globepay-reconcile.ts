@@ -30,6 +30,47 @@ export const GLOBEPAY_STALE_AFTER_MS = 60 * 60 * 1000;
  */
 export const GLOBEPAY_RECONCILE_BATCH = 50;
 
+/**
+ * Fast tier: how young a pending deposit has to be to get requeried EVERY
+ * minute instead of every tenth one.
+ *
+ * WHY the tier exists: the gateway is not delivering deposit callbacks in
+ * production (verified 2026-08-11 — every settled deposit is credited by the
+ * sweep, logging "the callback for this deposit was never received"), so the
+ * sweep cadence IS the customer's wait. Ten minutes of staring at an unchanged
+ * balance after paying is not a wait we get to charge them.
+ *
+ * It is a WINDOW rather than "every pending row" because the slow tiers must
+ * NOT come along for the ride: an abandoned row stays pending for an hour
+ * (GLOBEPAY_STALE_AFTER_MS) and an 'expired' row is re-read for seven days
+ * without ever leaving that population, so requerying them sixty times as often
+ * would spend the provider's rate budget on rows nobody is waiting for.
+ * Twenty minutes covers the whole live window — their cashier times out in ten
+ * — with margin for a bank transfer that lands just after it.
+ */
+export const GLOBEPAY_FAST_WINDOW_MS = 20 * 60 * 1000;
+
+/**
+ * Cap for one fast-tier run. Smaller than GLOBEPAY_RECONCILE_BATCH because the
+ * tier runs ten times as often and can only ever see the last twenty minutes of
+ * deposits; anything bigger than this is a backlog, which is the full sweep's
+ * job.
+ */
+export const GLOBEPAY_FAST_BATCH = 20;
+
+/** Minutes between full sweeps (stale pending rows + the 'expired' tier). */
+export const GLOBEPAY_FULL_SWEEP_EVERY_MIN = 10;
+
+/**
+ * Does this run cover every tier, or only the fast window?
+ *
+ * Keyed on minute-of-hour rather than a stored "last full sweep" timestamp so
+ * the job stays stateless: a run the worker missed (deploy, restart) cannot
+ * shift the full sweep's phase or make two of them land back to back.
+ */
+export const isFullSweep = (now: Date): boolean =>
+  now.getUTCMinutes() % GLOBEPAY_FULL_SWEEP_EVERY_MIN === 0;
+
 export type ReconcileAction =
   /** Requery says settled: credit it, exactly as a callback would have. */
   | { kind: 'settle'; amount: number }

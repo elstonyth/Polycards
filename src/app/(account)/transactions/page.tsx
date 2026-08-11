@@ -4,6 +4,7 @@ import { rm } from '@/lib/format';
 import { getTransactions } from '@/lib/actions/vault';
 import { reasonLabel, signedRm } from '@/lib/transactions';
 import { MarkCreditsSeen } from '@/components/account/credit-dot';
+import { DepositAutoRefresh } from '@/components/account/deposit-autorefresh';
 
 export const metadata: Metadata = { title: 'Transactions' };
 
@@ -47,6 +48,10 @@ export default async function TransactionsPage({
       {/* Success branch only: clearing the money dot after a FAILED read would
           hide activity the customer never got to see. */}
       <MarkCreditsSeen />
+      {/* This page is the gateway's ReturnUrl. A deposit credited by the
+          reconcile sweep lands seconds AFTER the customer gets back here, so
+          the return trip re-reads itself for a bounded window. */}
+      <DepositAutoRefresh />
       <AccountHeader title="Transactions" sub="Your top-ups and spending." />
       <StatCards
         items={[
