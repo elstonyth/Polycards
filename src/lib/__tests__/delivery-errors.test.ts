@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { friendlyError } from '@/lib/errors';
 import { DELIVERY_RULES, DELIVERY_FALLBACK } from '@/lib/delivery-errors';
+import { isPhoneGateError } from '@/lib/phone-gate';
 
 // Contract test for the message-substring coupling flagged in PR #130 review:
 // the backend can't ship a machine-readable code through @medusajs/js-sdk
@@ -54,6 +55,13 @@ describe('DELIVERY_RULES backend-message contract', () => {
     expect(map('Verify your phone number before continuing.')).toBe(
       'Verify your phone number in Account settings before requesting delivery.',
     );
+    // PhoneGateAction renders the "add your phone number" button off this
+    // sentence — display text is its only handle, so a reword that drops the
+    // phrase takes the button with it. Same assertion guards VAULT_RULES.
+    expect(
+      isPhoneGateError(map('Verify your phone number before continuing.')),
+    ).toBe(true);
+    expect(isPhoneGateError(map('Shipping address not found.'))).toBe(false);
   });
 
   it('falls back on unknown text without leaking it', () => {

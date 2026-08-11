@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { friendlyError } from '@/lib/errors';
 import { VAULT_RULES, VAULT_FALLBACK } from '@/lib/vault-errors';
+import { isPhoneGateError } from '@/lib/phone-gate';
 
 // Contract test for the same message-substring coupling as delivery-errors:
 // @medusajs/js-sdk's FetchError keeps only message/status, so there is no code
@@ -66,6 +67,14 @@ describe('VAULT_RULES backend-message contract', () => {
     expect(map('Verify your phone number before continuing.')).toBe(
       'Verify your phone number in Account settings before continuing.',
     );
+    // ...and the copy must stay recognisable to PhoneGateAction, which turns
+    // that sentence into the button that goes there. Matching display text is
+    // the only handle it has (the action returns a plain string), so a reword
+    // that drops the phrase would silently remove the button.
+    expect(
+      isPhoneGateError(map('Verify your phone number before continuing.')),
+    ).toBe(true);
+    expect(isPhoneGateError(map('kaboom'))).toBe(false);
   });
 
   // The kill switch is the documented incident response for a dead gateway

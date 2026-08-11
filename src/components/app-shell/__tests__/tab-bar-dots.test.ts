@@ -19,6 +19,9 @@ vi.mock('@/components/AuthButton', () => ({ openAuth: vi.fn() }));
 vi.mock('../VaultDotProvider', () => ({
   useVaultDot: () => vaultDot,
 }));
+// TabBar no longer imports this — keep the mock anyway. It is what makes a
+// re-added Me-tab dot fail LEGIBLY (labelFor('/me') becomes non-null) instead
+// of blowing up on useDot's null-context throw.
 vi.mock('../CreditDotProvider', () => ({
   useCreditDot: () => creditDot,
 }));
@@ -76,26 +79,26 @@ describe('TabBar dots', () => {
     expect(labelFor('/')).toBeNull();
   });
 
-  // The two dots signal DIFFERENT things, so they announce differently: the
-  // vault gains cards, /me gains balance movement. A shared "new items" told a
-  // screen-reader user the wrong content type on /me (review finding).
-  test('the money dot lands on /me and nowhere else', async () => {
+  // The Me tab's balance-movement dot was retired 2026-08-11 with the /me
+  // History tile it pointed at (operator: the History dot should stop popping).
+  // The provider is still mounted — TopUpProvider depends on it — so "lit
+  // credits state" remains reachable; nothing may render from it.
+  test('a lit credit dot no longer reaches the Me tab', async () => {
     creditDot.show = true;
     await render();
 
-    expect(labelFor('/me')).toBe('Me, new activity');
+    expect(labelFor('/me')).toBeNull();
     expect(labelFor('/vault')).toBeNull();
   });
 
-  test('both can be lit at once without bleeding into other tabs', async () => {
+  test('the vault dot never bleeds into another tab', async () => {
     vaultDot.show = true;
     creditDot.show = true;
     await render();
 
     expect(labelFor('/vault')).toBe('Vault, new items');
-    expect(labelFor('/me')).toBe('Me, new activity');
-    // The other three destinations never take a dot.
-    for (const href of ['/task', '/leaderboard', '/']) {
+    // Every other destination, /me included, stays undecorated.
+    for (const href of ['/me', '/task', '/leaderboard', '/']) {
       expect(labelFor(href)).toBeNull();
     }
   });

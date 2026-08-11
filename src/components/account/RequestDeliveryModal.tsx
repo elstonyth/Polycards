@@ -13,6 +13,7 @@ import { addressViewFromInput } from '@/lib/address-view';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { Pill } from '@/components/ui/pill';
 import { INPUT_CLASS } from '@/components/account/ui';
+import { PhoneGateAction } from '@/components/account/PhoneGateAction';
 import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
 
 type Props = {
@@ -271,13 +272,17 @@ export default function RequestDeliveryModal({
           </div>
         )}
 
+        {/* The remedy sits INSIDE role="alert" so problem and way out are one
+            announcement. PhoneGateAction dismisses the modal on the way out —
+            a bare link would leave it overlaying /settings. */}
         {error && (
-          <p
+          <div
             role="alert"
-            className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[12px] text-red-300"
+            className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2"
           >
-            {error}
-          </p>
+            <p className="text-[12px] text-red-300">{error}</p>
+            <PhoneGateAction error={error} onNavigate={onClose} />
+          </div>
         )}
 
         <div className="mt-5 flex justify-end gap-2">
