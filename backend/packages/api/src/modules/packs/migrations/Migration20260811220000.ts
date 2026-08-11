@@ -10,18 +10,19 @@ import { Migration } from '@medusajs/framework/mikro-orm/migrations';
 // 'failed', refunded). This migration only widens the constraint — no code
 // path writes 'held' yet; that lands in a later plan-094 task.
 //
-// LOCKING — same shape as the sibling globepay_deposit widening
-// (Migration20260807120000), because this is also a live money table:
-//   - The new constraint is a strict WIDENING (every existing row already
-//     satisfies it), so `not valid` is sound: it skips the full-table
-//     validation scan and takes only a brief catalog-level ACCESS EXCLUSIVE
-//     lock, never a scan-length one.
-//   - `validate constraint` then promotes it under SHARE UPDATE EXCLUSIVE,
-//     which does not block concurrent reads or writes.
-//
 // The constraint's name is looked up from information_schema rather than
 // assumed: Postgres, not this migration, chose it when the table was first
 // created (Migration20260722170000), by auto-naming an unnamed column CHECK.
+//
+// Plain ADD CONSTRAINT, not the NOT VALID + VALIDATE CONSTRAINT two-step the
+// sibling globepay_deposit widening uses (Migration20260807120000). That
+// two-step is only non-blocking when the ADD and the VALIDATE run as
+// separate, independently-committed transactions — this migration runner
+// wraps the whole up() in ONE transaction (mikro-orm's default
+// `transactional: true`, unoverridden anywhere in this repo), so the ACCESS
+// EXCLUSIVE lock the DROP/ADD CONSTRAINT take is held straight through to
+// commit either way. Splitting the statement here would buy nothing but
+// more code, so it is not done.
 export class Migration20260811220000 extends Migration {
   override async up(): Promise<void> {
     this.addSql(`
@@ -44,10 +45,7 @@ export class Migration20260811220000 extends Migration {
       END $$;
     `);
     this.addSql(
-      `alter table if exists "globepay_withdrawal" add constraint "globepay_withdrawal_status_check" check ("status" in ('pending', 'settled', 'failed', 'held')) not valid;`,
-    );
-    this.addSql(
-      `alter table if exists "globepay_withdrawal" validate constraint "globepay_withdrawal_status_check";`,
+      `alter table if exists "globepay_withdrawal" add constraint "globepay_withdrawal_status_check" check ("status" in ('pending', 'settled', 'failed', 'held'));`,
     );
   }
 
