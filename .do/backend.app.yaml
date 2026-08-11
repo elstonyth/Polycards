@@ -453,6 +453,21 @@ workers:
     instance_size_slug: basic-xxs
     instance_count: 1
     run_command: corepack yarn start
+    # This component runs the scheduled jobs, including the GlobePay deposit
+    # reconcile sweep. Callbacks are not delivered in production, so that sweep
+    # is the ONLY writer that credits a paid deposit — if this worker is down,
+    # customers pay at the bank and their balance never moves, silently, while
+    # the web service stays green. A worker has no HTTP health check, so these
+    # rules are the only signal. Thresholds mirror the service component.
+    alerts:
+      - rule: MEM_UTILIZATION
+        value: 85
+        operator: GREATER_THAN
+        window: FIVE_MINUTES
+      - rule: RESTART_COUNT
+        value: 5
+        operator: GREATER_THAN
+        window: FIVE_MINUTES
     envs:
       - key: MEDUSA_WORKER_MODE
         scope: RUN_TIME

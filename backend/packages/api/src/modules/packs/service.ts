@@ -71,7 +71,8 @@ import PurchaseInvoice from './models/purchase-invoice';
 import PurchaseInvoiceLine from './models/purchase-invoice-line';
 import StockMovement from './models/stock-movement';
 import { pageAll } from '../../api/utils/page-all';
-import { positiveIntFromEnv } from '../../api/utils/rate-limit';
+import { positiveIntFromEnv,
+  nonNegativeIntFromEnv } from '../../api/utils/rate-limit';
 import {
   resolveBuybackRate,
   buybackAmount,
@@ -108,7 +109,11 @@ import {
   type DailyBoxBody,
   type BoxPrizeInput,
 } from './daily-box';
-import { foldRanges, type VoucherRange } from './voucher-ranges';
+import {
+  foldRanges,
+  MAX_VOUCHER_MYR,
+  type VoucherRange,
+} from './voucher-ranges';
 import type { VipLevelInput } from './vip-levels-validate';
 import type {
   ChallengeRankReward,
@@ -1329,8 +1334,13 @@ class PacksModuleService extends MedusaService({
     //    over-counts, never under-counts, and it self-heals as the 24h window
     //    slides — the fail-closed direction is the right default for a cap
     //    whose job is bounding blast radius.
+    // nonNegativeIntFromEnv, NOT positiveIntFromEnv: setting this cap to 0 is
+    // the operator's stop lever for money-out during an incident, and the
+    // positive-only parser routed 0 to the DEFAULT — silently leaving
+    // withdrawals wide open at RM 50,000 while the logs said the value was
+    // ignored.
     const capCents =
-      positiveIntFromEnv(
+      nonNegativeIntFromEnv(
         'GLOBEPAY_WD_DAILY_MAX_RM',
         GLOBEPAY_WD_DAILY_MAX_RM_DEFAULT,
       ) * 100;
@@ -1934,9 +1944,33 @@ class PacksModuleService extends MedusaService({
 
     let amountMyr: number | undefined;
     if (grant.kind === 'voucher') {
-      amountMyr = Number(
+      const raw = Number(
         (grant.payload as { amount_myr?: number } | null)?.amount_myr ?? 0,
       );
+      // The payload is SNAPSHOTTED at grant time, so the admin-side cap in
+      // voucher-ranges.ts does not bind it: a grant minted while the ladder held
+      // a larger figure stays claimable at that figure, and
+      // Migration20260805000000 deliberately left already-minted grants
+      // claimable after zeroing the ladder. mutateCreditAtomic sign-checks only
+      // topup and pack_open, so 'voucher_claim' reached the ledger unbounded.
+      //
+      // Clamp rather than refuse: the grant is a real obligation and refusing it
+      // outright would strand a customer's legitimate reward. Clamping pays what
+      // the operator's own ceiling allows and records the discrepancy.
+      if (!Number.isFinite(raw) || raw < 0) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `Voucher grant ${grantId} carries a non-payable amount.`,
+        );
+      }
+      amountMyr = Math.min(raw, MAX_VOUCHER_MYR);
+      if (amountMyr !== raw) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          '[claimReward] voucher grant above the ceiling — paying the cap',
+          { grant_id: grantId, requested_myr: raw, paid_myr: amountMyr },
+        );
+      }
       // ext=0 (basis-neutral); idempotent on the grant id so a replay that
       // somehow reaches the credit step before the status flip still no-ops.
       await this.mutateCreditAtomic(
@@ -5003,9 +5037,24 @@ class PacksModuleService extends MedusaService({
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
     const rows = await em.execute<{ sen: string | null }[]>(
-      `SELECT COALESCE(SUM(ROUND(-amount * 100)), 0)::bigint AS sen
+      // NET over every pack_open row, not just the debits.
+      //
+      // reverseOpen writes its compensating row as reason 'pack_open' with a
+      // POSITIVE amount, so `amount < 0` filtered the reversal out and the
+      // monotonic counter stayed inflated forever. That is real money: the
+      // counter drives the sponsor's direct_referral_pct tier, VIP ladder grants
+      // and the daily-box tier.
+      //
+      // This does NOT contradict the specced refund-immunity of turnover.
+      // reverseOpen has exactly two callers, both saga compensations
+      // (charge-pack-open, charge-pack-batch) — an open that never completed and
+      // recorded no pull. There is no refund path through here to make immune.
+      //
+      // GREATEST(0, …) because a counter described as monotonic must never read
+      // negative if compensations somehow outweigh debits.
+      `SELECT GREATEST(0, COALESCE(SUM(ROUND(-amount * 100)), 0))::bigint AS sen
          FROM credit_transaction
-        WHERE customer_id = ? AND reason = 'pack_open' AND amount < 0 AND deleted_at IS NULL`,
+        WHERE customer_id = ? AND reason = 'pack_open' AND deleted_at IS NULL`,
       [customerId],
     );
     return Number(rows[0]?.sen ?? 0);

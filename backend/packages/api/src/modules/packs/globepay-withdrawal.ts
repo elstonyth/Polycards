@@ -130,6 +130,12 @@ export type StartWithdrawalInput = {
   accountId: unknown;
   /** The CUSTOMER's IP (they require it), not our server's. */
   ipAddress: string;
+  /**
+   * Optional client retry token (the Idempotency-Key header). When present, a
+   * repeat of the same intent resolves to the withdrawal already created
+   * instead of minting a second one.
+   */
+  idempotencyKey?: string;
 };
 
 export type StartWithdrawalResult = {
@@ -141,6 +147,12 @@ export type StartWithdrawalResult = {
   amount: number;
   /** Ledger balance after the debit. */
   balance: number;
+  /**
+   * True when this request replayed an Idempotency-Key already used: nothing
+   * new was debited and no second payout was submitted. Without it a replay is
+   * indistinguishable from a second successful withdrawal.
+   */
+  replayed?: boolean;
 };
 
 /**
@@ -183,6 +195,13 @@ export async function startGlobePayWithdrawal(
       `Withdrawals must be between RM ${GLOBEPAY_WD_MIN_RM} and RM ${GLOBEPAY_WD_MAX_RM.toLocaleString('en-US')}.`,
     );
   }
+
+  // Empty/whitespace is treated as absent so a client sending the header
+  // blank does not create a single shared key across every withdrawal.
+  const idempotencyKey =
+    typeof input.idempotencyKey === 'string' && input.idempotencyKey.trim()
+      ? input.idempotencyKey.trim()
+      : undefined;
 
   const config = globepayConfigFromEnv();
   const packs = scope.resolve<PacksModuleService>(PACKS_MODULE);
@@ -239,8 +258,30 @@ export async function startGlobePayWithdrawal(
 
   // 1) Row first — the callback echoes MerchantTransactionId but not our
   // customer id, so this row is the only way back (same shape as deposits).
+  // Replay check BEFORE the row insert and therefore before the debit. Scoped
+  // to this customer: the index is (customer_id, idempotency_key), so two
+  // customers reusing the same token never collide. The partial unique index is
+  // the real guarantee — this read only turns the second request into a clean
+  // replay instead of a 23505.
+  if (idempotencyKey) {
+    const [prior] = await packs.listGlobePayWithdrawals(
+      { customer_id: input.customerId, idempotency_key: idempotencyKey },
+      { take: 1 },
+    );
+    if (prior) {
+      return {
+        merchantTransactionId: prior.merchant_transaction_id,
+        transactionId: prior.gateway_transaction_id ?? null,
+        amount: Number(prior.amount),
+        balance: await packs.creditBalance(input.customerId),
+        replayed: true,
+      };
+    }
+  }
+
   const [row] = await packs.createGlobePayWithdrawals([
     {
+      idempotency_key: idempotencyKey ?? null,
       merchant_transaction_id: merchantTransactionId,
       customer_id: input.customerId,
       amount,

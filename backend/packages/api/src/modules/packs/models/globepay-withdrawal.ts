@@ -35,6 +35,12 @@ export const GlobePayWithdrawal = model
     // 5 = fail, else processing), for support.
     gateway_status: model.number().nullable(),
     settled_at: model.dateTime().nullable(),
+    // Client-supplied retry token, scoped to the customer. NULL for callers
+    // that send none (the header is optional, so pre-existing clients keep
+    // working). A partial unique index on (customer_id, idempotency_key) makes
+    // the replay check race-safe; Postgres ignores NULLs in unique indexes, so
+    // keyless withdrawals never collide with each other.
+    idempotency_key: model.text().nullable(),
   })
   .indexes([
     // Callback lookup path.

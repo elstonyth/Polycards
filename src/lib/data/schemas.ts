@@ -314,7 +314,18 @@ export const AmountBalanceSchema = z.looseObject({
  *  is the only field the redirect flow needs; the bank/QR extras ride along on
  *  the loose object for a future in-page renderer. */
 export const DepositStartSchema = z.looseObject({
-  url: z.string(),
+  // The cashier URL comes from the GATEWAY's response body, which — unlike
+  // their callbacks — carries no signature; TLS is the only thing vouching for
+  // it, and it flows straight into window.location.assign. A bare z.string()
+  // accepts 'javascript:' and 'data:', which CSP script-src does not block for
+  // a navigation. Requires a compromised gateway or TLS interception, so this
+  // is a trust-boundary belt, not a live hole.
+  url: z
+    .string()
+    .refine(
+      (u) => /^https:\/\//i.test(u),
+      'cashier url must be https',
+    ),
   transactionId: z.string(),
   merchantTransactionId: z.string(),
   amount: finite,
