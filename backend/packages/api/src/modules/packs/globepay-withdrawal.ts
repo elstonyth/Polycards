@@ -325,6 +325,32 @@ export async function startGlobePayWithdrawal(
         },
       });
       await packs.updateGlobePayWithdrawals({ id: row.id, status: 'failed' });
+      // Log their reason before it is flattened into the customer-facing
+      // message below — the sibling deposit branch has done this since
+      // 2026-08-04 and this one never did, so a live payout could refuse with
+      // NOTHING on record: the row stores status 'failed' with no code, and a
+      // definitively-refused submit leaves no transaction at the gateway to
+      // requery. The generic message that reaches the customer ("check the bank
+      // details") is a guess, and an empty merchant payout float (PMT10013)
+      // produces exactly the same words. This line is the only thing that can
+      // tell those apart.
+      //
+      // AFTER the refund and the status update on purpose, mirroring the
+      // deposit branch: both are money-path state and must not depend on the
+      // logger resolving. `error.message` carries the diagnosis when `codes` is
+      // empty. Safe to log: their codes and message, the HTTP status, the
+      // destination BANK CODE (the prime suspect when a picker offers a code
+      // their payout channel will not accept), the amount and our own opaque
+      // reference. NEVER the account number or the holder name — those are the
+      // customer's PII, and never the envelope, which is signed/encrypted.
+      scope
+        .resolve<{ warn: (message: string) => void }>('logger')
+        .warn(
+          `[globepay] withdrawal refused: codes=${error.codes.join(',') || 'none'} ` +
+            `httpStatus=${error.httpStatus} definite=${error.definite} ` +
+            `bankCode=${bankCode} amount=${amount} ref=${merchantTransactionId} ` +
+            `msg=${error.message}`,
+        );
       throw new MedusaError(
         MedusaError.Types.INVALID_DATA,
         'We could not start your withdrawal. Please check the bank details and try again.',

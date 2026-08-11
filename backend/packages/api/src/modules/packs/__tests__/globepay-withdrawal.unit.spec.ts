@@ -394,6 +394,19 @@ describe('startGlobePayWithdrawal — money ordering', () => {
       id: 'gpw_1',
       status: 'failed',
     });
+
+    // Their code is the ONLY record of why a payout was refused: the row keeps
+    // no code, and a definite refusal leaves nothing at the gateway to requery.
+    // Without this the customer sees "check the bank details" for a cause that
+    // may have nothing to do with their bank (PMT10013 is an empty merchant
+    // float) and nobody can tell which.
+    const [logged] = h.logger.warn.mock.calls[0];
+    expect(logged).toMatch(/PMT10013/);
+    expect(logged).toMatch(/ref=/);
+    // Diagnostic, not a data leak: bank code yes, the customer's account number
+    // and holder name never.
+    expect(logged).toMatch(/bankCode=MBB/);
+    expect(logged).not.toMatch(/1234567890|AHMAD BIN ALI/i);
   });
 
   // The classic double-payout window: the request reached the gateway and
