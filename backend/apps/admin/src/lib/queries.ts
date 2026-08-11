@@ -923,7 +923,11 @@ export const useGlobePayDeposits = (
 // without an operator remembering to reload.
 export const useGlobePayWithdrawals = (
   page = 0,
-  status: GlobePayWithdrawalView = 'pending',
+  // No default: the sole caller (routes/withdrawals/page.tsx) always passes
+  // this explicitly, seeded from state initialized to 'held' (plan 094's
+  // operator-facing default view). A `= 'pending'` default here was dead and
+  // actively misleading — it contradicted that default without ever firing.
+  status: GlobePayWithdrawalView,
   sort?: string,
 ): UseQueryResult<GlobePayWithdrawalsResponse> =>
   useQuery({
