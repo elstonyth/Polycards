@@ -47,6 +47,8 @@ import {
   getGlobePayWithdrawals,
   type GlobePayWithdrawalView,
   type GlobePayWithdrawalsResponse,
+  approveGlobePayWithdrawal,
+  denyGlobePayWithdrawal,
   getPixelPokemon,
   createPixelPokemon,
   type PixelPokemonPage,
@@ -117,6 +119,7 @@ import {
 } from './admin-rest';
 import type { SetEntry } from '@acme/odds-math';
 import { qk } from './query-keys';
+import { classifyApproveResult, classifyDenyResult } from './withdrawal-outcome';
 
 // ── Display queries ──────────────────────────────────────────────────────────
 
@@ -929,6 +932,86 @@ export const useGlobePayWithdrawals = (
     placeholderData: keepPreviousData,
     refetchInterval: 60_000,
   });
+
+// Claim a held withdrawal and submit it to GlobePay365. Three real outcomes
+// (classifyApproveResult) get three different toasts — a plain "Approved!"
+// on all of them would hide the two that need the operator's attention:
+// - 'submitted': the normal path.
+// - 'ambiguous': the gateway didn't confirm receipt; the row is left
+//   'pending' for the reconcile sweep to resolve automatically.
+// - 'already-handled': the idempotent no-op (a double-click, or another
+//   admin's tab, already moved the row out of 'held'). Worded without
+//   asserting a specific resulting status — the route's `status` field can be
+//   stale here (see GlobePayWithdrawalApproveResult's comment) — the
+//   invalidate below is what shows the row's real current state.
+//
+// onSettled (not onSuccess) invalidates: a THROWN refusal can still have
+// closed the row server-side (a definite gateway refusal or a never-debited
+// row both refund-and-close before throwing — see approve/route.ts), so an
+// unconditional refresh is the only branch that is never wrong. The whole
+// withdrawals prefix, not just the current (page, status, sort): the row may
+// now belong to a different view than the one on screen.
+export const useApproveGlobePayWithdrawal = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => approveGlobePayWithdrawal(id),
+    onSuccess: (data) => {
+      switch (classifyApproveResult(data)) {
+        case 'submitted':
+          toast.success('Withdrawal approved', {
+            description: `Submitted to GlobePay365 (transaction ${data.transaction_id}).`,
+          });
+          break;
+        case 'ambiguous':
+          toast.warning('Submitted, outcome unconfirmed', {
+            description:
+              'The gateway did not confirm receipt. Left pending for the automatic reconcile job — check the Pending view shortly.',
+          });
+          break;
+        case 'already-handled':
+          toast.warning('No action taken', {
+            description:
+              'This withdrawal was already resolved — by an earlier click or another admin. The list has been refreshed.',
+          });
+          break;
+      }
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: qk.globepayWithdrawalsKey });
+    },
+  });
+};
+
+// Claim a held (or already-'failed', for the crash-recovery re-run)
+// withdrawal, refund it, and close it. Same onSettled-invalidate reasoning as
+// approve above.
+export const useDenyGlobePayWithdrawal = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => denyGlobePayWithdrawal(id),
+    onSuccess: (data) => {
+      switch (classifyDenyResult(data)) {
+        case 'refunded':
+          toast.success('Withdrawal denied', {
+            description: "The debit was refunded to the customer's balance.",
+          });
+          break;
+        case 'closed-no-refund':
+          // The never-debited edge case (Task 5): closed, but there was
+          // nothing to refund — worth flagging, not a silent success.
+          toast.warning('Withdrawal closed — no refund issued', {
+            description: 'No prior debit was found for this withdrawal.',
+          });
+          break;
+      }
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: qk.globepayWithdrawalsKey });
+    },
+  });
+};
 
 // ── Epic 2 (Players) ─────────────────────────────────────────────────────────
 // Own import block (not merged into the one at the top) so this whole section

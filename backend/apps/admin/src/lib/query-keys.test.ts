@@ -182,6 +182,45 @@ describe('qk', () => {
     }
   });
 
+  // Task 6 (plan 094): approve/deny can move a row across MULTIPLE cached
+  // views at once (e.g. out of 'held' and into 'pending' or 'failed'), so the
+  // mutations invalidate this 3-segment prefix rather than the single
+  // (page, status, sort) key they were called from.
+  it('keys the withdrawals list under a prefix that invalidates every view/page/sort', () => {
+    expect(qk.globepayWithdrawalsKey).toEqual(['admin', 'globepay-withdrawals']);
+    expect(qk.globepayWithdrawals(0, 'held')).toEqual([
+      'admin',
+      'globepay-withdrawals',
+      'held',
+      0,
+      '',
+    ]);
+    expect(qk.globepayWithdrawals(2, 'pending', 'amount:desc')).toEqual([
+      'admin',
+      'globepay-withdrawals',
+      'pending',
+      2,
+      'amount:desc',
+    ]);
+    for (const key of [
+      qk.globepayWithdrawals(0, 'held'),
+      qk.globepayWithdrawals(2, 'pending', 'amount:desc'),
+    ]) {
+      expect(key.slice(0, qk.globepayWithdrawalsKey.length)).toEqual([
+        ...qk.globepayWithdrawalsKey,
+      ]);
+    }
+    // Different views are SIBLINGS, same length, never a prefix of one
+    // another — approving out of 'held' must not accidentally nuke-and-merge
+    // with the 'pending' cache instead of just invalidating it too.
+    expect(qk.globepayWithdrawals(0, 'held').length).toBe(
+      qk.globepayWithdrawals(0, 'pending').length,
+    );
+    expect(qk.globepayWithdrawals(0, 'held')).not.toEqual(
+      qk.globepayWithdrawals(0, 'pending'),
+    );
+  });
+
   // Epic 3 (Odds): flat list key for the customer-group -> odds_set page.
   it('exposes the customer-groups key', () => {
     expect(qk.customerGroups).toEqual(['admin', 'customer-groups']);
