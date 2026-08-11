@@ -104,17 +104,23 @@ export async function POST(
     { take: 1 },
   );
   if (!debitRow) {
-    await packs.claimGlobePayWithdrawalStatus({
+    // Scoped to 'held' like every other claim here, so an undebited row in
+    // some other status (a 'pending' one is the sweep's to resolve) is
+    // refused without being touched. The log reports which happened rather
+    // than asserting a close that may not have landed.
+    const closed = await packs.claimGlobePayWithdrawalStatus({
       id: row.id,
       from: ['held'],
       to: 'failed',
     });
     logger.warn(
-      `[globepay] admin ${adminId} approve on withdrawal ${row.id} (${row.merchant_transaction_id}) REFUSED and closed — no debit ever landed for it`,
+      `[globepay] admin ${adminId} approve on withdrawal ${row.id} ` +
+        `(${row.merchant_transaction_id}) REFUSED — no debit ever landed ` +
+        `for it; ${closed ? 'row closed' : `row left as '${row.status}'`}`,
     );
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
-      'This withdrawal was never debited, so it cannot be paid out. It has been closed.',
+      'This withdrawal was never debited, so it cannot be paid out.',
     );
   }
 
