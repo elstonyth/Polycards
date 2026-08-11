@@ -394,6 +394,68 @@ describe('startGlobePayWithdrawal — money ordering', () => {
       id: 'gpw_1',
       status: 'failed',
     });
+
+    // Their code is the ONLY record of why a payout was refused: the row keeps
+    // no code, and a definite refusal leaves nothing at the gateway to requery.
+    // Without this the customer sees "check the bank details" for a cause that
+    // may have nothing to do with their bank (PMT10013 is an empty merchant
+    // float) and nobody can tell which.
+    const [logged] = h.logger.warn.mock.calls[0];
+    expect(logged).toMatch(/PMT10013/);
+    expect(logged).toMatch(/ref=/);
+    // Every field the branch claims to log, asserted. Named individually rather
+    // than as one big regex so a dropped field says WHICH one went missing.
+    expect(logged).toMatch(/httpStatus=200/);
+    expect(logged).toMatch(/definite=true/);
+    expect(logged).toMatch(/amount=50/);
+    // Diagnostic, not a data leak: bank code yes, the customer's account number
+    // and holder name never.
+    expect(logged).toMatch(/bankCode=MBB/);
+    expect(logged).not.toMatch(/1234567890|AHMAD BIN ALI/i);
+  });
+
+  it('still refuses with the customer-facing message when the logger throws', async () => {
+    // The log is diagnostics; the MedusaError is the customer's instruction.
+    // A logger that throws must not be able to swap one for the other — before
+    // the try/catch it escaped this branch and the caller saw the logger crash.
+    const h = harness();
+    h.logger.warn.mockImplementation(() => {
+      throw new Error('logger exploded');
+    });
+    submitMock.mockRejectedValue(
+      new GlobePayError('nope', ['PMT10013'], 200, true),
+    );
+    await expect(start(h)).rejects.toThrow(/could not start your withdrawal/i);
+    // Self-contained on purpose: without this the test would still pass if the
+    // log were deleted outright, and the deletion is the regression it exists
+    // to catch.
+    expect(h.logger.warn).toHaveBeenCalled();
+    // And the money path still completed: refund issued, row closed.
+    expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
+    expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith({
+      id: 'gpw_1',
+      status: 'failed',
+    });
+  });
+
+  it('still leaves the row pending for the sweep when the AMBIGUOUS logger throws', async () => {
+    // The costly one. This branch RETURNS rather than throws; a logger that
+    // escapes turns it into a 500, and a customer whose balance is already gone
+    // retries — debiting again and submitting a second payout that also
+    // executes. The row must stay 'pending' and the call must still resolve.
+    const h = harness();
+    h.logger.error.mockImplementation(() => {
+      throw new Error('logger exploded');
+    });
+    submitMock.mockRejectedValue(new Error('socket hang up'));
+    await expect(start(h)).resolves.toMatchObject({ transactionId: null });
+    expect(h.logger.error).toHaveBeenCalled();
+    // No refund, and the row was never closed — the sweep still owns this one.
+    expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+    expect(h.packs.updateGlobePayWithdrawals).not.toHaveBeenCalledWith({
+      id: 'gpw_1',
+      status: 'failed',
+    });
   });
 
   // The classic double-payout window: the request reached the gateway and

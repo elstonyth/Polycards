@@ -325,6 +325,53 @@ export async function startGlobePayWithdrawal(
         },
       });
       await packs.updateGlobePayWithdrawals({ id: row.id, status: 'failed' });
+      // Log their reason before it is flattened into the customer-facing
+      // message below — the sibling deposit branch has done this since
+      // 2026-08-04 and this one never did, so a live payout could refuse with
+      // NOTHING on record: the row stores status 'failed' with no code, and a
+      // definitively-refused submit leaves no transaction at the gateway to
+      // requery. The generic message that reaches the customer ("check the bank
+      // details") is a guess, and an empty merchant payout float (PMT10013)
+      // produces exactly the same words. This line is the only thing that can
+      // tell those apart.
+      //
+      // AFTER the refund and the status update, mirroring the deposit branch.
+      // The try/catch below already covers a logger that THROWS, so ordering is
+      // no longer what protects the money path from that; what it still buys is
+      // protection from a logger that HANGS — a blocked transport or a full
+      // disk — which no catch can rescue. The cost is a real blind spot: if
+      // `withdrawCreditsWithLedger` itself throws, the refusal never reaches the
+      // logs, and a definite refusal whose refund also failed is the incident
+      // you would most want a record of. Accepted, because a hung logger
+      // stranding a refund is worse than a rare unlogged double failure.
+      //
+      // `error.message` carries the diagnosis when `codes` is empty. Safe to
+      // log: their codes and message, the HTTP status, the destination BANK CODE
+      // (the prime suspect when a picker offers a code their payout channel will
+      // not accept), the amount and our own opaque reference. We never ADD the
+      // account number or the holder name — those are the customer's PII — and
+      // never the envelope, which is signed and encrypted. `msg` is the one
+      // field we do not compose: it is the gateway's own text, so if they ever
+      // echo a submitted account number in a validation message it lands here.
+      // Internal logs and a number already in our own database, so the residual
+      // risk is accepted rather than scrubbed.
+      //
+      // Best-effort. Without the catch, a throw from `resolve` or `warn` escapes
+      // in place of the MedusaError below and the customer gets a crash instead
+      // of the one sentence that tells them what to do.
+      try {
+        scope
+          .resolve<{ warn: (message: string) => void }>('logger')
+          .warn(
+            `[globepay] withdrawal refused: codes=${error.codes.join(',') || 'none'} ` +
+              `httpStatus=${error.httpStatus} definite=${error.definite} ` +
+              `bankCode=${bankCode} amount=${amount} ref=${merchantTransactionId} ` +
+              `msg=${error.message}`,
+          );
+      } catch {
+        // Swallowed deliberately: the logger is the thing that failed, so there
+        // is nothing left to report it with.
+      }
       throw new MedusaError(
         MedusaError.Types.INVALID_DATA,
         'We could not start your withdrawal. Please check the bank details and try again.',
@@ -336,11 +383,25 @@ export async function startGlobePayWithdrawal(
     // reconcile sweep resolves it: requery success -> settle, failed ->
     // refund, unknown-and-stale -> refund. The customer sees the same
     // async-processing state a slow payout produces.
-    scope
-      .resolve<{ error: (msg: string) => void }>('logger')
-      .error(
-        `[globepay] withdrawal ${merchantTransactionId} submit outcome AMBIGUOUS (${(error as Error).message}) — left pending for the sweep`,
-      );
+    //
+    // Guarded for the same reason as the branch above, and the stakes here are
+    // higher. This branch must RETURN a pending result; a throw from the logger
+    // turns it into a 500, so the customer sees a failure while their balance is
+    // already gone and the payout may be in flight. The natural response to that
+    // is to retry — which debits again and submits a SECOND payout. Both then
+    // execute: the ledger stays consistent and the merchant loses nothing, but
+    // the customer asked for one withdrawal and two left the account.
+    try {
+      scope
+        .resolve<{ error: (msg: string) => void }>('logger')
+        .error(
+          `[globepay] withdrawal ${merchantTransactionId} submit outcome AMBIGUOUS (${(error as Error).message}) — left pending for the sweep`,
+        );
+    } catch {
+      // Swallowed deliberately: the logger is the thing that failed. The row
+      // stays 'pending', so the reconcile sweep still resolves this payout
+      // whether or not anyone ever reads about it.
+    }
     return {
       merchantTransactionId,
       transactionId: null,
