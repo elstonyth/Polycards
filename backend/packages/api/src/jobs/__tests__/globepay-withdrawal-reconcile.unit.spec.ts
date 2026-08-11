@@ -13,6 +13,7 @@ jest.mock('../../modules/packs/notify-feed', () => ({
 import { getWithdrawalDetail } from '../../modules/packs/globepay-client';
 import globepayWithdrawalReconcileJob from '../globepay-withdrawal-reconcile';
 import { GLOBEPAY_STALE_AFTER_MS } from '../../modules/packs/globepay-reconcile';
+import { withdrawalRefundReference } from '../../modules/packs/globepay-withdrawal';
 
 const requery = getWithdrawalDetail as jest.Mock;
 
@@ -141,5 +142,117 @@ describe('withdrawal sweep — an unattributable 400 never refunds', () => {
     expect(h.logger.error).toHaveBeenCalledWith(
       expect.stringContaining('their outage'),
     );
+  });
+});
+
+describe('withdrawal sweep — a held row is structurally invisible to it', () => {
+  // 'held' rows are debited (plan 094) but must never be swept — see the
+  // model's 'held' status comment. The ONLY thing that keeps one out of this
+  // loop is the sweep's own query, `listGlobePayWithdrawals({status:
+  // 'pending'}, ...)`. The mock below deliberately fails OPEN: it returns
+  // the held row for any selector except the exact one the job sends today,
+  // so a regression that drops or widens that filter makes the row
+  // reappear here and the assertions below catch it. A mock that instead
+  // hard-matched `withdrawal.status === 'held'` would still return `[]` for
+  // a job that queried with no filter at all — green for a regression that
+  // ships every held row into the loop.
+  const heldRow = {
+    ...pendingRow,
+    id: 'gpw_held_1',
+    merchant_transaction_id: 'PW-HELD-1',
+    status: 'held',
+  };
+
+  it('does not sweep held rows — an approval queue would self-cancel', async () => {
+    const h = harness(heldRow);
+    h.packs.listGlobePayWithdrawals.mockImplementation(
+      (selector: Record<string, unknown> = {}) =>
+        Promise.resolve(selector.status === 'pending' ? [] : [heldRow]),
+    );
+    // Realistic gateway answer IF the filter above ever failed and this row
+    // reached the loop: a held row was never submitted, so a real requery on
+    // its merchant_transaction_id would come back not-found — the same
+    // stale-and-unknown shape unknownWithdrawalAction resolves to a refund.
+    // Configuring this (rather than leaving `requery` a bare unconfigured
+    // mock) makes the regression this test guards against actually reach
+    // withdrawCreditsWithLedger instead of crashing on an unrelated
+    // `undefined.statusId` first — the failure must be caught by the RIGHT
+    // mechanism, not an accidental one.
+    requery.mockRejectedValue(
+      new GlobePayError('Not found', ['PMT10016'], 400, true),
+    );
+
+    await globepayWithdrawalReconcileJob(h.container);
+
+    // The mechanism: this is what has to keep matching for held rows to stay
+    // out — not an assumption about what the mock happens to return.
+    expect(h.packs.listGlobePayWithdrawals).toHaveBeenCalledWith(
+      { status: 'pending' },
+      expect.anything(),
+    );
+    // The outcome: nothing about the held row moved. It never even reached
+    // the debit-existence guard, let alone a requery or a refund.
+    expect(requery).not.toHaveBeenCalled();
+    expect(h.packs.listCreditTransactions).not.toHaveBeenCalled();
+    expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+    expect(h.packs.updateGlobePayWithdrawals).not.toHaveBeenCalled();
+  });
+});
+
+describe('withdrawal sweep — the state an admin approval could leave ambiguous', () => {
+  // What plan 094 Task 5's approve route (held -> pending, then
+  // SubmitWithdrawal) would leave behind if ITS OWN submit call times out:
+  // a 'pending' row with no gateway id, already debited (a 'held' row
+  // always is — see startGlobePayWithdrawal), old enough that the sweep's
+  // "never heard of it" answer resolves rather than waits. The test above
+  // proves the SAFE state (held rows never move); this proves the REACHABLE
+  // one that leaves uncovered — that once such a row lands here, the
+  // extracted refund helper still closes it exactly once, on the same
+  // anchor a racing callback or a retried sweep would land on too.
+  const approvedThenAmbiguousRow = {
+    ...pendingRow,
+    id: 'gpw_approved_1',
+    customer_id: 'cus_2',
+    merchant_transaction_id: 'PW-APPROVED-1',
+    gateway_transaction_id: null,
+    amount: 250,
+    bank_code: 'CIMB',
+    account_number: '9876543210',
+  };
+
+  it('refunds exactly once, on the shared anchor, and closes failed', async () => {
+    const h = harness(approvedThenAmbiguousRow);
+    requery.mockRejectedValue(
+      new GlobePayError('Not found', ['PMT10016'], 400, true),
+    );
+
+    await globepayWithdrawalReconcileJob(h.container);
+
+    expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
+    expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledWith({
+      customerId: approvedThenAmbiguousRow.customer_id,
+      amount: approvedThenAmbiguousRow.amount,
+      reason: 'cashout',
+      // No gateway id on the row: both the ledger reference and the
+      // gateway ref fall back to our own merchant reference.
+      reference: approvedThenAmbiguousRow.merchant_transaction_id,
+      idempotencyReference: withdrawalRefundReference(
+        approvedThenAmbiguousRow.customer_id,
+        approvedThenAmbiguousRow.merchant_transaction_id,
+      ),
+      ledger: {
+        outcome: 'refunded',
+        bankCode: approvedThenAmbiguousRow.bank_code,
+        accountNumber: approvedThenAmbiguousRow.account_number,
+        gatewayRef: approvedThenAmbiguousRow.merchant_transaction_id,
+      },
+    });
+    expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledTimes(1);
+    expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith({
+      selector: { id: approvedThenAmbiguousRow.id, status: 'pending' },
+      // classifyRequeryError's not-found branch never sets gatewayStatus —
+      // the row was never heard of, so there is no gateway status to record.
+      data: { status: 'failed', gateway_status: null },
+    });
   });
 });
