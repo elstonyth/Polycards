@@ -289,8 +289,19 @@ export default async function globepayReconcileJob(container: MedusaContainer) {
 
 export const config = {
   name: 'globepay-reconcile',
-  // Every 10 minutes: their cashier times out in 10, so this is roughly one
-  // sweep per deposit lifetime — fast enough that a customer whose callback was
-  // dropped waits minutes, not hours.
-  schedule: '*/10 * * * *',
+  // EVERY MINUTE, not every ten. The ten-minute cadence assumed this sweep was
+  // the exception — a safety net for the occasional dropped callback. On the
+  // live merchant account it is the RULE: between 2026-08-10 18:09 and
+  // 2026-08-11 07:21 production received EIGHT deposit starts and ZERO
+  // callbacks at /hooks/globepay/deposit, and the one settlement in that window
+  // was credited here ("credited … from a REQUERY, not a callback"). So the
+  // sweep interval IS the customer's wait: a RM 500 top-up paid at 06:53
+  // credited at 07:00.
+  //
+  // A minute costs one extra requery per pending row per run (at this volume,
+  // single digits), and cuts the worst case from ten minutes to one. It does
+  // NOT fix the missing callbacks — that is a GlobePay/Cloudflare delivery
+  // question, tracked separately. Restore */10 once organic callbacks are
+  // observed arriving, since then this really is just a net again.
+  schedule: '* * * * *',
 };
