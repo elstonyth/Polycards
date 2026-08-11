@@ -143,20 +143,13 @@ medusaIntegrationTestRunner({
         const sponsor = await registerAndLogin("e2e-sponsor@polycards.test", storeHeaders);
         const recruit = await registerAndLogin("e2e-recruit@polycards.test", storeHeaders);
 
-        // Recruit registers sponsor via POST /store/referral (Task 11 route).
-        const refRes = await unwrapResponse(
-          api.post(
-            "/store/referral",
-            { sponsor_id: sponsor.actorId },
-            {
-              headers: {
-                ...storeHeaders,
-                authorization: `Bearer ${recruit.token}`,
-              },
-            },
-          ),
-        );
-        expect(refRes.status).toBe(201);
+        // Wire the referral edge directly. The referral write route was
+        // retired, so the edge is seeded through the model, the same way gate
+        // test 2 below does it. What this test gates is the OPEN route and the
+        // settleOpen commission credit, not how the edge came to exist.
+        await packs.createReferralRelationships([
+          { customer_id: recruit.actorId, sponsor_id: sponsor.actorId },
+        ]);
 
         // Recruit tops up externally (mutateCreditAtomic with reason "topup"
         // so the spend is external-funded and commissionable).

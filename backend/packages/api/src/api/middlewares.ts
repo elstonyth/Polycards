@@ -453,16 +453,6 @@ export default defineMiddlewares({
       ],
     },
     {
-      // Referral summary (GET /store/referral) — separate entry because the
-      // existing POST entry above pins method:'POST'; omitting method here
-      // would protect both verbs with one entry, but method:'GET' keeps the
-      // rate-limiting tiers clean: writes use the recruit limiter, reads share
-      // the storeReadRateLimit budget with vault/credits/vip/notifications.
-      matcher: '/store/referral',
-      method: 'GET',
-      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
-    },
-    {
       // Money-dot signal (GET /store/credits/latest). Own entry because the
       // '/store/credits' matcher below is EXACT — same reason
       // '/store/credits/balance' has one.
