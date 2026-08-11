@@ -166,42 +166,6 @@ describe('submitDeposit', () => {
     expect(payload).not.toHaveProperty('SourceClientBankCode');
   });
 
-  it('surfaces their error codes so callers can branch on PMT10000', async () => {
-    stubFetch({
-      isSuccess: false,
-      errorList: [
-        {
-          errorCode: 'PMT10000',
-          errorDescription: 'Duplicate Merchant Reference Number.',
-        },
-      ],
-    });
-    const call = submitDeposit(
-      {
-        merchantTransactionId: 'T1',
-        merchantClientId: 'c',
-        amount: 25,
-        notifyUrl: 'n',
-        returnUrl: 'r',
-        ipAddress: '1.2.3.4',
-        paymentMethodCode: 'FPX',
-      },
-      config,
-    );
-    await expect(call).rejects.toThrow(GlobePayError);
-    await call.catch((e: GlobePayError) => {
-      expect(e.has('PMT10000')).toBe(true);
-      // An explicit refusal, so no transaction exists there and the caller is
-      // entitled to refund and close the row.
-      expect(e.definite).toBe(true);
-    });
-  });
-
-  it('does not treat isSuccess:true with a null data as success', async () => {
-    stubFetch({ isSuccess: true, data: null, errorMessage: 'nope' });
-    await expect(submitDeposit(DEPOSIT_INPUT, config)).rejects.toThrow(/nope/);
-  });
-
   // Capture the rejection rather than asserting inside `.catch`: a callback
   // that never runs is a test that never fails.
   const refusalFrom = async (body: unknown): Promise<GlobePayError> => {
@@ -213,6 +177,28 @@ describe('submitDeposit', () => {
     expect(error).toBeInstanceOf(GlobePayError);
     return error as GlobePayError;
   };
+
+  it('surfaces their error codes so callers can branch on PMT10000', async () => {
+    const error = await refusalFrom({
+      isSuccess: false,
+      errorList: [
+        {
+          errorCode: 'PMT10000',
+          errorDescription: 'Duplicate Merchant Reference Number.',
+        },
+      ],
+    });
+    expect(error.has('PMT10000')).toBe(true);
+    // An explicit refusal, so definite — see the caveat on the field's docs:
+    // PMT10000 is the one definite code that does NOT mean "nothing exists
+    // there", which is why callers are given the code and not just the flag.
+    expect(error.definite).toBe(true);
+  });
+
+  it('does not treat isSuccess:true with a null data as success', async () => {
+    stubFetch({ isSuccess: true, data: null, errorMessage: 'nope' });
+    await expect(submitDeposit(DEPOSIT_INPUT, config)).rejects.toThrow(/nope/);
+  });
 
   // The distinction that decides whether a customer can be paid twice. Both
   // shapes throw; only one of them licenses a refund.

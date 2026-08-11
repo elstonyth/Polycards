@@ -81,6 +81,15 @@ export class GlobePayError extends Error {
    * but carries no `data` is an ACCEPTED request with an unreadable payload,
    * and a body missing `isSuccess` entirely is not their envelope at all —
    * both are ambiguous, however much they look like failures from here.
+   *
+   * One documented exception to "no transaction exists on their side":
+   * PMT10000 (duplicate merchant reference) is an explicit isSuccess:false, so
+   * it lands here as definite, yet it means a transaction DOES exist — it is a
+   * replay, not a refusal (see the class doc above). Refunding on it would give
+   * back a debit for a payout the gateway already holds. Unreachable today,
+   * because every submit mints a fresh merchantTransactionId and none is ever
+   * retried with the same one; if that ever changes, the money-out callers must
+   * branch on the code before they trust this flag.
    */
   readonly definite: boolean;
 
