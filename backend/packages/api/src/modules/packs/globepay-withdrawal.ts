@@ -11,6 +11,9 @@ import {
 import { newMerchantTransactionId } from './globepay-deposit';
 import { withdrawalGateError } from './withdrawable';
 import { positiveIntFromEnv } from '../../api/utils/rate-limit';
+import { notifyFeed } from './notify-feed';
+import { withdrawalFeedKey } from './feed-events';
+import { sendWithdrawalReceipt } from './withdrawal-receipt';
 
 // The submit half of the GlobePay365 payout loop (method WD), the inverse of
 // globepay-deposit.ts with the money ordering flipped:
@@ -490,4 +493,104 @@ export async function startGlobePayWithdrawal(
     balance: debit.balance,
     status: 'pending',
   };
+}
+
+/**
+ * Refund and close a withdrawal row that will never reach the bank: the
+ * reconcile sweep's stale/failed rows today, and — once plan 094's admin
+ * surface (Task 5) lands — a `held` row an admin denies. Extracted here, the
+ * module that already owns the refund's idempotency anchor, so this
+ * four-step money ordering lives in exactly one place instead of a second
+ * verbatim copy that a bug fix could land in without the other ever finding
+ * out.
+ *
+ * The caller owns two preconditions this function does not re-check:
+ *   - a debit actually exists for `withdrawal` — the sweep verifies this
+ *     itself before calling in (see the guard above its call site), because
+ *     for a 'held' row it can never be false: startGlobePayWithdrawal debits
+ *     BEFORE a row can ever become 'held', so there is no crash window to
+ *     guard against on that path;
+ *   - the row is still 'pending' — the terminal update below is scoped to
+ *     that status and is a silent no-op otherwise. Only the sweep calls this
+ *     today; a future caller acting on a 'held' row needs its own selector,
+ *     not this one (do not widen it speculatively).
+ */
+export async function refundGlobePayWithdrawal(
+  scope: { resolve: <T>(key: string) => T },
+  withdrawal: {
+    id: string;
+    customer_id: string;
+    merchant_transaction_id: string;
+    gateway_transaction_id: string | null;
+    amount: unknown;
+    bank_code: string;
+    account_number: string;
+  },
+  gatewayStatus: number | null,
+): ReturnType<PacksModuleService['withdrawCreditsWithLedger']> {
+  const packs = scope.resolve<PacksModuleService>(PACKS_MODULE);
+  const refund = await packs.withdrawCreditsWithLedger({
+    customerId: withdrawal.customer_id,
+    amount: Number(withdrawal.amount),
+    reason: 'cashout',
+    reference:
+      withdrawal.gateway_transaction_id ?? withdrawal.merchant_transaction_id,
+    idempotencyReference: withdrawalRefundReference(
+      withdrawal.customer_id,
+      withdrawal.merchant_transaction_id,
+    ),
+    ledger: {
+      outcome: 'refunded',
+      bankCode: withdrawal.bank_code,
+      accountNumber: withdrawal.account_number,
+      gatewayRef:
+        withdrawal.gateway_transaction_id ??
+        withdrawal.merchant_transaction_id,
+    },
+  });
+  // The emailed record — after the refund commit, BEFORE the terminal row
+  // update, outside any !replayed guard: once the row leaves 'pending'
+  // nothing re-runs this branch, so a crash between the update and a later
+  // send would lose the email forever. A crash after this send re-runs the
+  // branch next sweep (the refund replays, the notification module's unique
+  // idempotency_key dedupes the email). Non-throwing.
+  await sendWithdrawalReceipt(scope, {
+    customerId: withdrawal.customer_id,
+    amount: Number(withdrawal.amount),
+    // `||`, not `??` — an empty-string gateway id must fall through to the
+    // merchant reference. Same reasoning as the settle branch's identical
+    // choice in globepay-withdrawal-reconcile.ts; the fuller rationale lives
+    // there (it explains that call site too, so it did not move with this
+    // one — extracting the code must not orphan the comment from what else
+    // it covers).
+    reference:
+      withdrawal.gateway_transaction_id || withdrawal.merchant_transaction_id,
+    merchantTransactionId: withdrawal.merchant_transaction_id,
+    outcome: 'refunded',
+  });
+  await packs.updateGlobePayWithdrawals({
+    selector: { id: withdrawal.id, status: 'pending' },
+    data: { status: 'failed', gateway_status: gatewayStatus },
+  });
+  if (!refund.replayed) {
+    try {
+      await notifyFeed(scope, {
+        receiverId: withdrawal.customer_id,
+        template: 'withdrawal_refunded',
+        data: {
+          amount_myr: Number(withdrawal.amount),
+          reference:
+            withdrawal.gateway_transaction_id ??
+            withdrawal.merchant_transaction_id,
+        },
+        idempotencyKey: withdrawalFeedKey(
+          withdrawal.merchant_transaction_id,
+          'refunded',
+        ),
+      });
+    } catch {
+      // Never fail a committed refund over a notification.
+    }
+  }
+  return refund;
 }

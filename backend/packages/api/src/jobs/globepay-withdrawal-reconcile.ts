@@ -4,8 +4,8 @@ import { PACKS_MODULE } from '../modules/packs';
 import type PacksModuleService from '../modules/packs/service';
 import {
   globepayWithdrawalsEnabled,
+  refundGlobePayWithdrawal,
   withdrawalIdempotencyReference,
-  withdrawalRefundReference,
 } from '../modules/packs/globepay-withdrawal';
 import {
   getWithdrawalDetail,
@@ -187,66 +187,13 @@ export default async function globepayWithdrawalReconcileJob(
         );
         continue;
       }
-      const refund = await packs.withdrawCreditsWithLedger({
-        customerId: withdrawal.customer_id,
-        amount: Number(withdrawal.amount),
-        reason: 'cashout',
-        reference:
-          withdrawal.gateway_transaction_id ??
-          withdrawal.merchant_transaction_id,
-        idempotencyReference: withdrawalRefundReference(
-          withdrawal.customer_id,
-          withdrawal.merchant_transaction_id,
-        ),
-        ledger: {
-          outcome: 'refunded',
-          bankCode: withdrawal.bank_code,
-          accountNumber: withdrawal.account_number,
-          gatewayRef:
-            withdrawal.gateway_transaction_id ??
-            withdrawal.merchant_transaction_id,
-        },
-      });
-      // The emailed record — after the refund commit, BEFORE the terminal row
-      // update, outside any !replayed guard: once the row leaves 'pending'
-      // nothing re-runs this branch, so a crash between the update and a
-      // later send would lose the email forever. A crash after this send
-      // re-runs the branch next sweep (the refund replays, the notification
-      // module's unique idempotency_key dedupes the email). Non-throwing.
-      await sendWithdrawalReceipt(container, {
-        customerId: withdrawal.customer_id,
-        amount: Number(withdrawal.amount),
-        reference:
-          withdrawal.gateway_transaction_id ||
-          withdrawal.merchant_transaction_id,
-        merchantTransactionId: withdrawal.merchant_transaction_id,
-        outcome: 'refunded',
-      });
-      await packs.updateGlobePayWithdrawals({
-        selector: { id: withdrawal.id, status: 'pending' },
-        data: { status: 'failed', gateway_status: gatewayStatus },
-      });
+      // The four-step refund/receipt/close/notify ordering lives in
+      // refundGlobePayWithdrawal (globepay-withdrawal.ts) — shared with
+      // Task 5's admin-deny path so the money ordering has exactly one
+      // copy. This call site keeps only what is specific to the SWEEP: the
+      // debit-existence guard above, and counting the result below.
+      await refundGlobePayWithdrawal(container, withdrawal, gatewayStatus);
       refunded += 1;
-      if (!refund.replayed) {
-        try {
-          await notifyFeed(container, {
-            receiverId: withdrawal.customer_id,
-            template: 'withdrawal_refunded',
-            data: {
-              amount_myr: Number(withdrawal.amount),
-              reference:
-                withdrawal.gateway_transaction_id ??
-                withdrawal.merchant_transaction_id,
-            },
-            idempotencyKey: withdrawalFeedKey(
-              withdrawal.merchant_transaction_id,
-              'refunded',
-            ),
-          });
-        } catch {
-          // Never fail a committed refund over a notification.
-        }
-      }
     } catch (error) {
       // One bad payout must not abort the sweep. It stays pending and is
       // retried next run.
