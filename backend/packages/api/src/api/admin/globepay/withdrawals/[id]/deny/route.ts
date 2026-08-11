@@ -76,8 +76,10 @@ export async function POST(
       `Withdrawal '${row.id}' is '${row.status}' — only a held (or already-denied) withdrawal can be denied.`,
     );
   }
+  // The audit line says what the claim did — not what the refund below will
+  // do, which the debit-existence check may yet rule out.
   logger.info(
-    `[globepay] admin ${adminId} DENIED withdrawal ${row.id} (${row.merchant_transaction_id}) — RM ${Number(row.amount)} being refunded`,
+    `[globepay] admin ${adminId} DENIED withdrawal ${row.id} (${row.merchant_transaction_id}) — RM ${Number(row.amount)} closed`,
   );
 
   // 2) Only now, the money. Guard against refunding a debit that never

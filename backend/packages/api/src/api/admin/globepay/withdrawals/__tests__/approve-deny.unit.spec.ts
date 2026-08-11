@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { MedusaError } from '@medusajs/framework/utils';
 
 // The gateway's HTTP seam is the only thing stubbed — every decision under
@@ -76,13 +74,16 @@ const heldRow = () => ({
  * sweep's held-row test uses: a route that stopped claiming the row it is
  * about to act on cannot pass by accident.
  */
-function harness(row = heldRow(), debitExists = true) {
+function harness(row = heldRow(), debitExists = true, frozen = false) {
   const packs = {
     listGlobePayWithdrawals: jest.fn(async (selector: { id?: string }) =>
       selector.id === row.id ? [row] : [],
     ),
     listCreditTransactions: jest.fn(async () =>
       debitExists ? [{ id: 'ct_debit' }] : [],
+    ),
+    listCustomerAccountStates: jest.fn(async () =>
+      frozen ? [{ id: 'cas_1', frozen: true, cause: 'manual' }] : [],
     ),
     claimGlobePayWithdrawalStatus: jest.fn(
       async (input: { id: string; from: string[]; to: string }) => {
@@ -110,9 +111,12 @@ function harness(row = heldRow(), debitExists = true) {
 }
 
 const mkRes = () => {
-  const out: { body?: any } = {};
+  const out: { body?: Record<string, unknown> } = {};
   return {
-    res: { setHeader: () => {}, json: (b: any) => (out.body = b) } as never,
+    res: {
+      setHeader: () => {},
+      json: (b: Record<string, unknown>) => (out.body = b),
+    } as never,
     out,
   };
 };
@@ -166,10 +170,12 @@ describe('POST /admin/globepay/withdrawals/:id/approve', () => {
     expect(
       h.packs.claimGlobePayWithdrawalStatus.mock.invocationCallOrder[0],
     ).toBeLessThan(submitMock.mock.invocationCallOrder[0]);
-    // Their W… id lands on the row, same as startGlobePayWithdrawal does.
+    // Their W… id lands on the row — scoped to 'pending', so a sweep that
+    // closed the row while the submit was in flight cannot end up with a
+    // refunded row wearing a payout's gateway id.
     expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith({
-      id: 'gpw_1',
-      gateway_transaction_id: 'W2026081200000001',
+      selector: { id: 'gpw_1', status: 'pending' },
+      data: { gateway_transaction_id: 'W2026081200000001' },
     });
     expect(out.body).toMatchObject({
       id: 'gpw_1',
@@ -344,6 +350,27 @@ describe('POST /admin/globepay/withdrawals/:id/approve', () => {
     expect(h.row.status).toBe('held');
   });
 
+  // The one piece of the request-time gate that must be re-read: a freeze
+  // landing while the row sat held is exactly how "this payout is suspicious"
+  // gets recorded, and nothing guarantees the approver can see the flag.
+  it('refuses a frozen customer before the claim, whatever the freeze cause', async () => {
+    const h = harness(heldRow(), true, true);
+    const { res } = mkRes();
+    await expect(APPROVE(h.req, res)).rejects.toMatchObject({
+      type: MedusaError.Types.NOT_ALLOWED,
+    });
+    expect(h.packs.claimGlobePayWithdrawalStatus).not.toHaveBeenCalled();
+    expect(submitMock).not.toHaveBeenCalled();
+    expect(h.row.status).toBe('held');
+    // Cause-agnostic, like the request-time gate (walletSummary.isFrozen) —
+    // an auto clawback-debt freeze must block a payout too, which is why this
+    // is not packs.assertNotFrozen (manual-only).
+    expect(h.packs.listCustomerAccountStates).toHaveBeenCalledWith(
+      { customer_id: 'cus_1', frozen: true },
+      { take: 1 },
+    );
+  });
+
   it('a missing NotifyUrl refuses before the claim — a payout that could never refund', async () => {
     delete process.env.GLOBEPAY_WITHDRAW_NOTIFY_URL;
     const h = harness();
@@ -496,18 +523,10 @@ describe('POST /admin/globepay/withdrawals/:id/deny', () => {
 
 // Auth is NOT exercised here (no router, no middleware chain) — these routes
 // are protected by the framework's blanket '/admin' guard like every sibling.
-// What this CAN pin is the rate-limit registration, which is ours to drop.
-// Source-text, not an import: middlewares.ts opens Redis connections at module
-// load, which a unit spec must not do.
-describe('both routes are registered on the admin action rate limiter', () => {
-  const middlewares = () =>
-    readFileSync(join(__dirname, '../../../../middlewares.ts'), 'utf8');
-
-  it.each(['approve', 'deny'])('%s', (action) => {
-    expect(middlewares()).toMatch(
-      new RegExp(
-        `matcher: '\\/admin\\/globepay\\/withdrawals\\/\\*\\/${action}',\\s*method: 'POST',\\s*middlewares: \\[adminActionRateLimit\\]`,
-      ),
-    );
-  });
-});
+//
+// Nor is the rate-limit registration: api/__tests__/admin-rate-limit-coverage
+// .unit.spec.ts already fails when ANY admin route.ts exports a mutation
+// method with no adminActionRateLimit matcher covering its URL — it is what
+// caught these two routes before their matchers existed. A source-text regex
+// here would be the weaker copy of that: broken by a prettier reflow, and
+// green for a matcher typo'd to a path that matches nothing.
