@@ -617,6 +617,119 @@ describe('startGlobePayWithdrawal — money ordering', () => {
   });
 });
 
+describe('startGlobePayWithdrawal — approval threshold (held)', () => {
+  afterEach(() => {
+    delete process.env.GLOBEPAY_WD_APPROVAL_ABOVE_RM;
+  });
+
+  // Roomy enough that the precheck gate (amount <= withdrawable) never fires
+  // on its own for these RM 1,000+ amounts — these cases are about the
+  // approval threshold, not the withdrawable cap.
+  const roomyWallet = {
+    balance: 5000,
+    available: 5000,
+    locked: 0,
+    isFrozen: false,
+    nextUnlock: null,
+    withdrawable: 5000,
+    playthrough: { deposited: 0, used: 0, remaining: 0 },
+  };
+
+  it('RM 1,000.00 exactly still auto-submits — the boundary is strictly greater-than', async () => {
+    const h = harness();
+    h.packs.walletSummary.mockResolvedValue(roomyWallet);
+    const result = await start(h, { amount: 1000 });
+    expect(submitMock).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe('pending');
+    expect(h.packs.createGlobePayWithdrawals.mock.calls[0][0][0].status).toBe(
+      'pending',
+    );
+  });
+
+  it('RM 1,000.01 is held: never reaches the gateway, but the debit still happens exactly as it does today', async () => {
+    const h = harness();
+    h.packs.walletSummary.mockResolvedValue(roomyWallet);
+    const result = await start(h, { amount: 1000.01 });
+
+    expect(submitMock).not.toHaveBeenCalled();
+    expect(result.status).toBe('held');
+    expect(result.transactionId).toBeNull();
+
+    // Inserted with its FINAL status — never pending-then-flipped.
+    expect(h.packs.createGlobePayWithdrawals.mock.calls[0][0][0].status).toBe(
+      'held',
+    );
+
+    // The debit is unchanged for the held branch: same call, same shape as
+    // the non-held path.
+    expect(h.packs.withdrawForCashout).toHaveBeenCalledTimes(1);
+    expect(h.packs.withdrawForCashout).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customerId: 'cus_1',
+        amount: 1000.01,
+        idempotencyReference: expect.stringMatching(/^wd:/),
+      }),
+    );
+    expect(result.balance).toBe(50); // harness's fixed withdrawForCashout.balance
+
+    // Never touched again after the insert: no gateway id stamped, no status
+    // flip. A held row leaves ONLY via the admin approve/deny routes (task 5
+    // — nothing consumes it yet).
+    expect(h.packs.updateGlobePayWithdrawals).not.toHaveBeenCalled();
+  });
+
+  it('GLOBEPAY_WD_APPROVAL_ABOVE_RM=2000, read per call, lifts an amount that would otherwise hold', async () => {
+    process.env.GLOBEPAY_WD_APPROVAL_ABOVE_RM = '2000';
+    const h = harness();
+    h.packs.walletSummary.mockResolvedValue(roomyWallet);
+    // Above the DEFAULT 1000 threshold, below the overridden 2000 — only a
+    // per-call read (not a module-load-time latch) can see this, since the
+    // module was imported long before this assignment.
+    const result = await start(h, { amount: 1500 });
+    expect(submitMock).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe('pending');
+  });
+
+  it('GLOBEPAY_WD_APPROVAL_ABOVE_RM=60 holds an amount the default 1000 threshold would auto-submit', async () => {
+    // positiveIntFromEnv has no floor beyond "positive integer" — proved
+    // empirically here rather than only by reading the helper.
+    process.env.GLOBEPAY_WD_APPROVAL_ABOVE_RM = '60';
+    const h = harness();
+    h.packs.walletSummary.mockResolvedValue(roomyWallet);
+    const result = await start(h, { amount: 100 });
+    expect(submitMock).not.toHaveBeenCalled();
+    expect(result.status).toBe('held');
+  });
+
+  it('a held-sized withdrawal is still refused BEFORE any row is written when frozen', async () => {
+    const h = harness();
+    h.packs.walletSummary.mockResolvedValue({
+      ...roomyWallet,
+      available: 0,
+      isFrozen: true,
+      withdrawable: 0,
+    });
+    await expect(start(h, { amount: 2000 })).rejects.toThrow(/under review/i);
+    expect(h.packs.createGlobePayWithdrawals).not.toHaveBeenCalled();
+    expect(h.packs.withdrawForCashout).not.toHaveBeenCalled();
+    expect(submitMock).not.toHaveBeenCalled();
+  });
+
+  it('a held-sized withdrawal is still refused BEFORE any row is written on a playthrough refusal', async () => {
+    const h = harness();
+    h.packs.walletSummary.mockResolvedValue({
+      ...roomyWallet,
+      withdrawable: 0,
+      playthrough: { deposited: 100, used: 40, remaining: 60 },
+    });
+    await expect(start(h, { amount: 2000 })).rejects.toThrow(
+      /RM 60\.00 of your deposits must be spent on packs/,
+    );
+    expect(h.packs.createGlobePayWithdrawals).not.toHaveBeenCalled();
+    expect(h.packs.withdrawForCashout).not.toHaveBeenCalled();
+  });
+});
+
 /**
  * PacksModuleService.withdrawForCashout — the gate + debit as ONE serialized
  * unit (plan 082).

@@ -10,20 +10,27 @@ import {
 } from './globepay-client';
 import { newMerchantTransactionId } from './globepay-deposit';
 import { withdrawalGateError } from './withdrawable';
+import { positiveIntFromEnv } from '../../api/utils/rate-limit';
 
 // The submit half of the GlobePay365 payout loop (method WD), the inverse of
 // globepay-deposit.ts with the money ordering flipped:
 //
-//   write the pending row -> DEBIT the ledger (atomic, floor 0) ->
-//   SubmitWithdrawal. A DEFINITE gateway refusal refunds the debit
-//   immediately; an AMBIGUOUS submit error (timeout, reset — the payout may
-//   still execute) leaves the row pending for the sweep to resolve.
+//   write the row, its status decided up front ('held' above the approval
+//   threshold, 'pending' at or below it) -> DEBIT the ledger (atomic, floor
+//   0) -> SubmitWithdrawal, SKIPPED entirely when the row was written
+//   'held'. A DEFINITE gateway refusal refunds the debit immediately; an
+//   AMBIGUOUS submit error (timeout, reset — the payout may still execute)
+//   leaves the row pending for the sweep to resolve.
 //
 // The debit-before-submit ordering is the security property: real money must
 // never be queued to leave the merchant balance while the customer's site
 // balance still shows it. The refund path shares the row's idempotency
 // anchor, so a crash between debit and refund is recoverable by the
-// reconcile sweep, never a double refund.
+// reconcile sweep, never a double refund. A 'held' row is debited exactly
+// like a 'pending' one — the threshold only skips the gateway call — and it
+// leaves 'held' solely through an admin approve/deny action (plan 094),
+// never through this function or the reconcile sweep (which selects
+// `status: 'pending'` only, so 'held' is structurally invisible to it).
 
 /**
  * Per-transaction payout band, confirmed by the provider 2026-07-29 (Sean):
@@ -37,6 +44,22 @@ import { withdrawalGateError } from './withdrawable';
  */
 export const GLOBEPAY_WD_MIN_RM = 50;
 export const GLOBEPAY_WD_MAX_RM = 50000;
+
+/**
+ * Above this RM figure a withdrawal is HELD for admin approval instead of
+ * being submitted to the gateway (plan 094) — see the 'held' status comment
+ * on the GlobePayWithdrawal model for what that state means and how it ends.
+ *
+ * Threshold semantics are exact and strictly greater-than, in integer cents:
+ * RM 1,000.00 EXACTLY still auto-submits — only RM 1,000.01 and up holds.
+ * That boundary is the cheapest thing here to get wrong, so it is spelled out
+ * rather than left to `>` reading correctly on its own.
+ *
+ * Env override GLOBEPAY_WD_APPROVAL_ABOVE_RM, read PER CALL (the plan-066
+ * convention, same as GLOBEPAY_WD_DAILY_MAX_RM in service.ts and the cooldown
+ * in saved-accounts.ts) via positiveIntFromEnv — never latched at module load.
+ */
+export const GLOBEPAY_WD_APPROVAL_ABOVE_RM_DEFAULT = 1000;
 
 /**
  * Withdrawals get their OWN switch on top of globepayEnabled(): deposits can
@@ -135,22 +158,33 @@ export type StartWithdrawalInput = {
 export type StartWithdrawalResult = {
   merchantTransactionId: string;
   /** Their withdrawal id (W…) — null when the submit outcome is ambiguous
-   * (the request may have been accepted with the response lost); the sweep
-   * resolves it either way. */
+   * (the request may have been accepted with the response lost) OR the row
+   * was held instead of submitted; the sweep resolves the ambiguous case
+   * either way, and a held row is resolved by an admin instead. */
   transactionId: string | null;
   amount: number;
   /** Ledger balance after the debit. */
   balance: number;
+  /** 'held' when the amount crossed GLOBEPAY_WD_APPROVAL_ABOVE_RM and the row
+   * was parked for admin approval instead of being submitted to the gateway;
+   * 'pending' otherwise (submitted, or the submit outcome was ambiguous —
+   * the sweep resolves that case, not this status). */
+  status: 'pending' | 'held';
 };
 
 /**
  * Create a payout. Ordering is load-bearing:
- *   1. row (pending) — the callback needs it to find the customer
- *   2. ledger debit (atomic, floor 0, idempotent)
- *   3. SubmitWithdrawal
+ *   1. row — written with its FINAL status up front ('held' above the
+ *      approval threshold, 'pending' at or below it; never inserted pending
+ *      and then flipped) — the callback needs it to find the customer
+ *   2. ledger debit (atomic, floor 0, idempotent) — unchanged by 'held': the
+ *      money leaves the balance identically either way
+ *   3. SubmitWithdrawal — SKIPPED for a 'held' row, which returns here
+ *      instead, parked for an admin to approve or deny by hand
  * A gateway refusal refunds the debit and closes the row; a transient crash
  * after 2 leaves a pending row whose sweep resolves it (requery "not found"
- * -> refund).
+ * -> refund). A held row cannot land in that crash window at all — there is
+ * no step 3 to crash during.
  */
 export async function startGlobePayWithdrawal(
   scope: { resolve: <T>(key: string) => T },
@@ -237,8 +271,23 @@ export async function startGlobePayWithdrawal(
 
   const merchantTransactionId = newMerchantTransactionId();
 
+  // Approval-threshold check, read PER CALL — never latched at module load
+  // (the plan-066 convention). Strictly greater-than, integer cents: RM
+  // 1,000.00 exactly still auto-submits (Global Constraint 1).
+  const held =
+    Math.round(amount * 100) >
+    positiveIntFromEnv(
+      'GLOBEPAY_WD_APPROVAL_ABOVE_RM',
+      GLOBEPAY_WD_APPROVAL_ABOVE_RM_DEFAULT,
+    ) *
+      100;
+
   // 1) Row first — the callback echoes MerchantTransactionId but not our
   // customer id, so this row is the only way back (same shape as deposits).
+  // Written with its FINAL status: a held row is never inserted 'pending'
+  // and flipped, which would otherwise leave a window where a crash strands
+  // a 'pending' row with no gateway submission — the exact state the sweep
+  // refunds.
   const [row] = await packs.createGlobePayWithdrawals([
     {
       merchant_transaction_id: merchantTransactionId,
@@ -247,7 +296,7 @@ export async function startGlobePayWithdrawal(
       bank_code: precheckDestination.bankCode,
       account_number: precheckDestination.accountNumber,
       account_holder_name: precheckDestination.accountHolderName.trim(),
-      status: 'pending',
+      status: held ? 'held' : 'pending',
     },
   ]);
 
@@ -281,6 +330,22 @@ export async function startGlobePayWithdrawal(
     // chase a withdrawal that never existed at the gateway.
     await packs.updateGlobePayWithdrawals({ id: row.id, status: 'failed' });
     throw error;
+  }
+
+  // HELD stops here, after the debit and before any gateway call. The row
+  // already carries its terminal 'held' status from the step-1 insert — it
+  // is not touched again on this path. See the model's 'held' comment for
+  // how it leaves: admin approve (-> 'pending', submitted from there) or
+  // admin deny (-> 'failed', refunded). Nothing consumes 'held' yet (that is
+  // a later plan-094 task), so a row parked here simply waits.
+  if (held) {
+    return {
+      merchantTransactionId,
+      transactionId: null,
+      amount,
+      balance: debit.balance,
+      status: 'held',
+    };
   }
 
   // 3) Only now is money allowed to move on their side — and only to the
@@ -407,6 +472,9 @@ export async function startGlobePayWithdrawal(
       transactionId: null,
       amount,
       balance: debit.balance,
+      // Reached only on the non-held branch — a held row already returned
+      // above, before this submit was ever attempted.
+      status: 'pending',
     };
   }
 
@@ -420,5 +488,6 @@ export async function startGlobePayWithdrawal(
     transactionId: result.transactionId,
     amount,
     balance: debit.balance,
+    status: 'pending',
   };
 }
