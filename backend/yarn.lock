@@ -40,7 +40,7 @@ __metadata:
     "@medusajs/auth-google": "npm:2.13.6"
     "@medusajs/cli": "npm:2.13.4"
     "@medusajs/dashboard": "npm:2.13.4"
-    "@medusajs/draft-order": "npm:2.13.4"
+    "@medusajs/draft-order": "npm:2.13.6"
     "@medusajs/framework": "npm:2.13.4"
     "@medusajs/medusa": "npm:2.13.4"
     "@medusajs/test-utils": "npm:2.13.6"
@@ -3163,6 +3163,53 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@medusajs/draft-order@npm:2.13.6":
+  version: 2.13.6
+  resolution: "@medusajs/draft-order@npm:2.13.6"
+  dependencies:
+    "@ariakit/react": "npm:^0.4.15"
+    "@babel/runtime": "npm:^7.26.10"
+    "@hookform/resolvers": "npm:3.4.2"
+    "@medusajs/js-sdk": "npm:2.13.6"
+    "@tanstack/react-query": "npm:5.64.2"
+    "@uiw/react-json-view": "npm:^2.0.0-alpha.17"
+    date-fns: "npm:^3.6.0"
+    lodash.debounce: "npm:^4.0.8"
+    lodash.isequal: "npm:^4.5.0"
+    match-sorter: "npm:^6.3.4"
+    radix-ui: "npm:1.1.2"
+    react-hook-form: "npm:7.49.1"
+  peerDependencies:
+    "@medusajs/admin-sdk": 2.13.6
+    "@medusajs/cli": 2.13.6
+    "@medusajs/framework": 2.13.6
+    "@medusajs/icons": 2.13.6
+    "@medusajs/test-utils": 2.13.6
+    "@medusajs/ui": 4.1.6
+    react: ^18.3.1
+    react-dom: ^18.3.1
+    react-router-dom: 6.30.3
+  peerDependenciesMeta:
+    "@medusajs/admin-sdk":
+      optional: true
+    "@medusajs/cli":
+      optional: true
+    "@medusajs/icons":
+      optional: true
+    "@medusajs/test-utils":
+      optional: true
+    "@medusajs/ui":
+      optional: true
+    react:
+      optional: true
+    react-dom:
+      optional: true
+    react-router-dom:
+      optional: true
+  checksum: 10c0/63221acdec5817cd9f4d04ffcef8c7e898b24ebead8cb6cc48e485a788097192847c8add545b3f18ea2a175a91edc5979a25958044b1498295fa2ac8d7b64306
+  languageName: node
+  linkType: hard
+
 "@medusajs/event-bus-local@npm:2.13.4":
   version: 2.13.4
   resolution: "@medusajs/event-bus-local@npm:2.13.4"
@@ -3347,6 +3394,16 @@ __metadata:
     fetch-event-stream: "npm:^0.1.5"
     qs: "npm:^6.12.1"
   checksum: 10c0/59f34a546fc50f6f84a1bdece11e6469c164a595f9b0986cf8ce2fd0aeb71ba766974638173130133d46e5632ef7fc43c3d065d1183b36ee06f22a3554d1571c
+  languageName: node
+  linkType: hard
+
+"@medusajs/js-sdk@npm:2.13.6":
+  version: 2.13.6
+  resolution: "@medusajs/js-sdk@npm:2.13.6"
+  dependencies:
+    fetch-event-stream: "npm:^0.1.5"
+    qs: "npm:^6.12.1"
+  checksum: 10c0/2f2e432299d367c5bb6cd50873291b699250e6b094aef0a4454333b42134dc36f5fa65006b8def97d9dc8f01e9b469cb15735f678935e5c80a88ab015bf7fc2d
   languageName: node
   linkType: hard
 
