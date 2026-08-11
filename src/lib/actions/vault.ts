@@ -455,7 +455,17 @@ export async function removeSavedBankAccount(
 }
 
 export type StartWithdrawalResult =
-  | { ok: true; amount: number; balance: number; reference: string }
+  | {
+      ok: true;
+      amount: number;
+      balance: number;
+      reference: string;
+      /** 'held' — parked for admin approval, never submitted to the gateway
+       *  (the debit above already happened). 'pending' — submitted, or the
+       *  submit outcome was ambiguous; either way the sweep/callback resolves
+       *  it from here. Mirrors the backend's StartWithdrawalResult#status. */
+      status: 'pending' | 'held';
+    }
   | { ok: false; error: string; needsAuth?: boolean };
 
 /**
@@ -516,6 +526,7 @@ export async function startWithdrawal(input: {
       // Their W… id when the submit confirmed; our reference when the
       // outcome is still resolving asynchronously.
       reference: parsed.transactionId ?? parsed.merchantTransactionId,
+      status: parsed.status,
     };
   } catch (error) {
     logger.error('[vault] withdrawal start failed:', error);

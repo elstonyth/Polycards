@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { CheckCircle2, Landmark } from 'lucide-react';
+import { CheckCircle2, Clock, Landmark } from 'lucide-react';
 import { rm, rm0, timeUntil } from '@/lib/format';
 import {
   fetchSavedBankAccounts,
@@ -72,6 +72,7 @@ export default function WithdrawForm({
     amount: number;
     balance: number;
     reference: string;
+    status: 'pending' | 'held';
   } | null>(null);
 
   useEffect(() => {
@@ -141,6 +142,7 @@ export default function WithdrawForm({
         amount: res.amount,
         balance: res.balance,
         reference: res.reference,
+        status: res.status,
       });
     } catch {
       setError('Something went wrong. Please try again.');
@@ -150,16 +152,27 @@ export default function WithdrawForm({
   }
 
   if (done) {
+    // 'held' means the amount above already left the balance but was parked
+    // for a human to approve instead of being sent to the gateway — it must
+    // never read as a completed payout, and the copy below never claims the
+    // balance is still spendable (the "Balance now" line already reflects the
+    // debit). No threshold figure here on purpose: naming RM 1,000 would be a
+    // second source of truth for a value the backend reads from an env var.
+    const held = done.status === 'held';
     return (
       <div className="mt-6 flex max-w-md flex-col items-center rounded-2xl border border-white/10 bg-neutral-900 px-6 py-8 text-center">
-        <CheckCircle2 className="h-12 w-12 text-buyback-fg" aria-hidden />
+        {held ? (
+          <Clock className="h-12 w-12 text-amber-400" aria-hidden />
+        ) : (
+          <CheckCircle2 className="h-12 w-12 text-buyback-fg" aria-hidden />
+        )}
         <p className="mt-3 font-heading text-2xl text-white">
-          {rm(done.amount)} ON ITS WAY
+          {rm(done.amount)} {held ? 'UNDER REVIEW' : 'ON ITS WAY'}
         </p>
         <p className="mt-2 max-w-sm text-sm text-neutral-400">
-          Your bank transfer is processing — most arrive within minutes. If the
-          bank rejects it, the full amount returns to your balance
-          automatically.
+          {held
+            ? "Withdrawals this size go through a manual review before they're sent to your bank — the amount has already left your balance, and returns automatically if it isn't approved. Either way, we'll let you know."
+            : 'Your bank transfer is processing — most arrive within minutes. If the bank rejects it, the full amount returns to your balance automatically.'}
         </p>
         <p className="mt-3 text-[12px] text-neutral-500">
           Reference <span className="font-mono">{done.reference}</span>

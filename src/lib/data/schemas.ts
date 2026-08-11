@@ -323,12 +323,17 @@ export const DepositStartSchema = z.looseObject({
 /** POST /store/credits/withdraw response. The debit already happened —
  *  `balance` is the post-debit balance, and the payout completes (or refunds)
  *  asynchronously via the gateway callback. `transactionId` is null when the
- *  submit outcome was ambiguous (still resolves asynchronously). */
+ *  submit outcome was ambiguous (still resolves asynchronously) OR the row was
+ *  held for admin approval instead of submitted (see `status`).
+ *  `status: 'held'` means the amount left the balance but a human has not yet
+ *  approved sending it to the gateway (plan 094) — the form must not render
+ *  that as a completed payout. */
 export const WithdrawStartSchema = z.looseObject({
   merchantTransactionId: z.string(),
   transactionId: z.string().nullable(),
   amount: finite,
   balance: finite,
+  status: z.enum(['pending', 'held']),
 });
 
 /** GET /store/credits/withdraw/banks response — the payout bank picker. */
