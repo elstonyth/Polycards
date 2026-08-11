@@ -497,27 +497,27 @@ export async function startGlobePayWithdrawal(
 
 /**
  * Refund and close a withdrawal row that will never reach the bank: the
- * reconcile sweep's stale/failed rows today, and — once plan 094's admin
- * surface (Task 5) lands — a `held` row an admin denies. Extracted here, the
- * module that already owns the refund's idempotency anchor, so this
- * four-step money ordering lives in exactly one place instead of a second
- * verbatim copy that a bug fix could land in without the other ever finding
- * out.
+ * reconcile sweep's stale/failed rows, and the admin deny route's denied
+ * rows (plan 094 Task 5). Extracted here, the module that already owns the
+ * refund's idempotency anchor, so those two paths share ONE copy of this
+ * four-step money ordering instead of a second verbatim one that a bug fix
+ * could land in without the other ever finding out. A THIRD near-copy still
+ * lives in api/hooks/globepay/withdrawal/route.ts (the payout callback) and
+ * has not been folded in — the next change to this ordering still needs two
+ * edits, not one.
  *
  * The caller owns two preconditions this function does not re-check:
- *   - a debit actually exists for `withdrawal` — the sweep verifies this
- *     itself before calling in (see the guard above its call site). A held
- *     row that got past startGlobePayWithdrawal's debit-call catch is always
- *     debited (a gate refusal there closes the row 'failed', never leaves it
- *     'held') — but the row is written 'held' BEFORE that debit runs, not
- *     after, so a hard crash in between can still strand a held row with no
- *     debit. A future deny-path caller must run its own debit-existence
- *     check before calling in, same as the sweep does — do not assume a
- *     held row is exempt;
- *   - the row is still 'pending' — the terminal update below is scoped to
- *     that status and is a silent no-op otherwise. Only the sweep calls this
- *     today; a future caller acting on a 'held' row needs its own selector,
- *     not this one (do not widen it speculatively).
+ *   - a debit actually exists for `withdrawal` — both callers verify this
+ *     themselves before calling in (see the guard above each call site). A
+ *     held row is NOT exempt: the row is written 'held' at step 1 and
+ *     debited at step 2, so a hard crash in between strands a held row with
+ *     no debit, and refunding that mints money;
+ *   - the row is still in `fromStatus` — the terminal update below is scoped
+ *     to it and is a SILENT NO-OP otherwise, which would leave a committed
+ *     refund on a row that never closes. The sweep acts on rows it selected
+ *     as 'pending' (the default); the deny route claims 'failed' before
+ *     calling in and passes that. Pass the status the row is ACTUALLY in at
+ *     call time, not the one it started in.
  */
 export async function refundGlobePayWithdrawal(
   scope: { resolve: <T>(key: string) => T },
@@ -531,6 +531,7 @@ export async function refundGlobePayWithdrawal(
     account_number: string;
   },
   gatewayStatus: number | null,
+  fromStatus: 'pending' | 'held' | 'failed' = 'pending',
 ): ReturnType<PacksModuleService['withdrawCreditsWithLedger']> {
   const packs = scope.resolve<PacksModuleService>(PACKS_MODULE);
   const refund = await packs.withdrawCreditsWithLedger({
@@ -558,13 +559,16 @@ export async function refundGlobePayWithdrawal(
   // branch next sweep (the refund replays, the notification module's unique
   // idempotency_key dedupes the email). Non-throwing.
   //
-  // That "next sweep retries" recovery belongs to the sweep specifically —
-  // the only caller today — which revisits every row this branch can reach
-  // on a fixed schedule. A 'held' row is never swept (nothing lists it; see
-  // the reconcile job's query and its held-row regression test), so a
-  // future one-shot admin-deny caller does not get that retry for free: a
-  // crash in this exact window would leave a committed refund with no email
-  // ever sent and nothing left to re-drive it.
+  // That "next sweep retries" recovery belongs to the sweep specifically,
+  // which revisits every row this branch can reach on a fixed schedule. A
+  // 'held' row is never swept (nothing lists it; see the reconcile job's
+  // query and its held-row regression test), so the admin deny route does
+  // NOT get that retry for free: a crash in this exact window leaves the row
+  // stuck short of its terminal update with a committed refund behind it,
+  // and nothing automatic re-drives it. Its re-drive is a human — deny's
+  // claim accepts a 'failed' row precisely so an operator can click Deny
+  // again, which replays this whole sequence (the refund on its anchor, this
+  // send under the notification module's idempotency key) and finishes it.
   await sendWithdrawalReceipt(scope, {
     customerId: withdrawal.customer_id,
     amount: Number(withdrawal.amount),
@@ -580,7 +584,7 @@ export async function refundGlobePayWithdrawal(
     outcome: 'refunded',
   });
   await packs.updateGlobePayWithdrawals({
-    selector: { id: withdrawal.id, status: 'pending' },
+    selector: { id: withdrawal.id, status: fromStatus },
     data: { status: 'failed', gateway_status: gatewayStatus },
   });
   if (!refund.replayed) {
