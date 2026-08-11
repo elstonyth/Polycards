@@ -58,6 +58,7 @@ beforeEach(() => {
 /** An ambiguous-submit row: the debit landed, SubmitWithdrawal never returned,
  * so there is NO gateway id — the population the unknown-refund path exists
  * for, and therefore the one an ambiguous 400 could wrongly refund. */
+const REQUESTED_AT = new Date(Date.now() - GLOBEPAY_STALE_AFTER_MS * 24);
 const pendingRow = {
   id: 'gpw_1',
   customer_id: 'cus_1',
@@ -67,7 +68,13 @@ const pendingRow = {
   bank_code: 'MBB',
   account_number: '1234567890',
   status: 'pending',
-  created_at: new Date(Date.now() - GLOBEPAY_STALE_AFTER_MS * 24),
+  created_at: REQUESTED_AT,
+  // Equal to created_at, because that is what a store-path row looks like:
+  // nothing writes to it between the insert and an ambiguous submit, so its
+  // updated_at IS its submit time — the clock the sweep reads (plan 094).
+  // Both columns are NOT NULL in the schema, so a fixture carrying only one
+  // of them is not a row this code can ever meet.
+  updated_at: REQUESTED_AT,
 };
 
 function harness(withdrawal: Record<string, unknown> = pendingRow) {

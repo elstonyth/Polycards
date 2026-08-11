@@ -109,11 +109,14 @@ export default async function globepayWithdrawalReconcileJob(
           // BREAKS this. Give that row a real submit-timestamp column instead
           // of quietly extending its grace period.
           //
-          // The ?? is unreachable in production (the column is `not null
-          // default now()`, Migration20260722170000) — it only keeps a test
-          // fixture that omits the field on the old reading.
+          // Read with no fallback, deliberately: `?? created_at` would look
+          // defensive and would silently restore the unsafe reading if the
+          // field ever stopped arriving. That it DOES arrive (and that the
+          // claim moves it) is checked against a real row in
+          // modules/packs/__tests__/withdrawal-claim.integration.spec.ts —
+          // no mocked test could tell the difference.
           action = unknownWithdrawalAction(
-            new Date(withdrawal.updated_at ?? withdrawal.created_at),
+            new Date(withdrawal.updated_at),
             now,
             Boolean(withdrawal.gateway_transaction_id),
           );

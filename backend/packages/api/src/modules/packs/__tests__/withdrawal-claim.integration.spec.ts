@@ -114,6 +114,40 @@ moduleIntegrationTestRunner<PacksModuleService>({
         ).resolves.toBe(false);
       });
 
+      // The sweep reads its staleness clock off `updated_at` from exactly this
+      // list call (jobs/globepay-withdrawal-reconcile.ts, plan 094). If the
+      // field were not selected onto the entity, `new Date(undefined)` is an
+      // Invalid Date, every age comparison is false, and a debit that never
+      // reached the bank waits pending forever — with tsc and every mocked
+      // test still green. That is the one part of the "updated_at is the
+      // submit clock" argument no writer audit can establish, so it is checked
+      // here against a real row.
+      it('lists updated_at, and the claim moves it — the submit clock', async () => {
+        const row = await seed('5', 'held');
+        const [before] = await service.listGlobePayWithdrawals(
+          { id: row.id },
+          { take: 1 },
+        );
+        expect(before.updated_at).toBeInstanceOf(Date);
+
+        await service.claimGlobePayWithdrawalStatus({
+          id: row.id,
+          from: ['held'],
+          to: 'pending',
+        });
+        const [after] = await service.listGlobePayWithdrawals(
+          { id: row.id },
+          { take: 1 },
+        );
+        // `>=` not `>`: two statements can land inside the same millisecond.
+        // What this pins is that the claim's `updated_at = now()` reaches the
+        // column at all, so an approval genuinely restarts the clock.
+        expect(after.updated_at.getTime()).toBeGreaterThanOrEqual(
+          before.updated_at.getTime(),
+        );
+        expect(after.created_at.getTime()).toBe(before.created_at.getTime());
+      });
+
       it('a row that does not exist is a lost claim, not a crash', async () => {
         await expect(
           service.claimGlobePayWithdrawalStatus({
