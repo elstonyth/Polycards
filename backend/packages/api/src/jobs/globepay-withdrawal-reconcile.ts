@@ -188,10 +188,13 @@ export default async function globepayWithdrawalReconcileJob(
         continue;
       }
       // The four-step refund/receipt/close/notify ordering lives in
-      // refundGlobePayWithdrawal (globepay-withdrawal.ts) — shared with
-      // Task 5's admin-deny path so the money ordering has exactly one
-      // copy. This call site keeps only what is specific to the SWEEP: the
-      // debit-existence guard above, and counting the result below.
+      // refundGlobePayWithdrawal (globepay-withdrawal.ts) — one copy on
+      // this path, extracted so a future admin-deny route (plan 094 Task 5,
+      // not built yet) can reuse it instead of forking a second one. The
+      // payout callback in api/hooks/globepay/withdrawal/route.ts still
+      // carries its own separate variant of this ordering. This call site
+      // keeps only what is specific to the SWEEP: the debit-existence guard
+      // above, and counting the result below.
       await refundGlobePayWithdrawal(container, withdrawal, gatewayStatus);
       refunded += 1;
     } catch (error) {

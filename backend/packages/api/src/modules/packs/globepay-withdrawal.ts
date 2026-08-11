@@ -506,10 +506,14 @@ export async function startGlobePayWithdrawal(
  *
  * The caller owns two preconditions this function does not re-check:
  *   - a debit actually exists for `withdrawal` — the sweep verifies this
- *     itself before calling in (see the guard above its call site), because
- *     for a 'held' row it can never be false: startGlobePayWithdrawal debits
- *     BEFORE a row can ever become 'held', so there is no crash window to
- *     guard against on that path;
+ *     itself before calling in (see the guard above its call site). A held
+ *     row that got past startGlobePayWithdrawal's debit-call catch is always
+ *     debited (a gate refusal there closes the row 'failed', never leaves it
+ *     'held') — but the row is written 'held' BEFORE that debit runs, not
+ *     after, so a hard crash in between can still strand a held row with no
+ *     debit. A future deny-path caller must run its own debit-existence
+ *     check before calling in, same as the sweep does — do not assume a
+ *     held row is exempt;
  *   - the row is still 'pending' — the terminal update below is scoped to
  *     that status and is a silent no-op otherwise. Only the sweep calls this
  *     today; a future caller acting on a 'held' row needs its own selector,
@@ -553,6 +557,14 @@ export async function refundGlobePayWithdrawal(
   // send would lose the email forever. A crash after this send re-runs the
   // branch next sweep (the refund replays, the notification module's unique
   // idempotency_key dedupes the email). Non-throwing.
+  //
+  // That "next sweep retries" recovery belongs to the sweep specifically —
+  // the only caller today — which revisits every row this branch can reach
+  // on a fixed schedule. A 'held' row is never swept (nothing lists it; see
+  // the reconcile job's query and its held-row regression test), so a
+  // future one-shot admin-deny caller does not get that retry for free: a
+  // crash in this exact window would leave a committed refund with no email
+  // ever sent and nothing left to re-drive it.
   await sendWithdrawalReceipt(scope, {
     customerId: withdrawal.customer_id,
     amount: Number(withdrawal.amount),
