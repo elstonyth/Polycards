@@ -284,6 +284,10 @@ type LedgerSqlManager = {
   execute<T = unknown>(query: string, params?: unknown[]): Promise<T>;
 };
 
+/** The globepay_withdrawal.status domain, mirrored from the model's enum for
+ *  the raw-SQL claim below (raw SQL carries no model types). */
+type WithdrawalStatus = 'pending' | 'settled' | 'failed' | 'held';
+
 
 /** One raw `ledger_entry` row as listLedgerEntriesForAdmin reads it. */
 export type LedgerEntryRow = {
@@ -1360,6 +1364,50 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     return { ...debit, destination };
+  }
+
+  /**
+   * ATOMIC STATUS CLAIM on one globepay_withdrawal row — the mutex behind the
+   * admin approve/deny routes (plan 094).
+   *
+   * ONE conditional UPDATE, and that is the whole point: Postgres re-evaluates
+   * the predicate against committed state AFTER the row lock is released, so
+   * of two concurrent claims exactly one matches a row and the other matches
+   * none. `RETURNING id` is that answer. `true` means THIS caller moved the
+   * row and owns whatever follows it (a gateway submit, a refund); `false`
+   * means someone else already did, and the caller must not act.
+   *
+   * Do NOT reimplement this with `updateGlobePayWithdrawals({ selector, data
+   * })`. It type-checks and hands back an array, so `length === 0` reads like
+   * the same guard, but the generated service resolves the selector with a
+   * find-then-write and takes no row lock: two concurrent approves — a
+   * double-clicked button is the realistic trigger — both read 'held', both
+   * see one row, and both submit. That is a duplicate payout to a real bank
+   * account. Raw SQL for the same reason the rolling-24h cap above uses it:
+   * the module-service layer has no conditional-write primitive.
+   */
+  @InjectTransactionManager()
+  async claimGlobePayWithdrawalStatus(
+    input: {
+      id: string;
+      /** Statuses the row may be claimed FROM. A row in any other status is
+       *  left untouched and the claim answers false. */
+      from: readonly WithdrawalStatus[];
+      to: WithdrawalStatus;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<boolean> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    // One placeholder per accepted status. The list is ours (never a request
+    // value) and it stays BOUND rather than interpolated regardless.
+    const accepted = input.from.map(() => '?').join(', ');
+    const rows = await em.execute<{ id: string }[]>(
+      'UPDATE globepay_withdrawal SET status = ?, updated_at = now() ' +
+        `WHERE id = ? AND status IN (${accepted}) AND deleted_at IS NULL ` +
+        'RETURNING id',
+      [input.to, input.id, ...input.from],
+    );
+    return rows.length === 1;
   }
 
   // Append-only reversal of a single ledger row (the open-saga compensation).

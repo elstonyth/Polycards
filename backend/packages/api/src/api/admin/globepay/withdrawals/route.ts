@@ -23,6 +23,17 @@ import {
 // requery decides settled vs refund, and a manual "refund this" button here
 // would be a second, unaudited way to mint credit.
 //
+// ./[id]/approve and ./[id]/deny (plan 094) are the one exception, and they
+// are one because none of that reasoning reaches them: they act only on
+// `held` rows, which the gateway has never seen — there is no requery answer
+// for the sweep to be authoritative about, and no in-flight payout a refund
+// could double-pay. Deny does not mint credit by a second route either; it
+// calls the same refundGlobePayWithdrawal helper the sweep does, on the same
+// withdrawalRefundReference anchor, so however many times it runs exactly one
+// credit exists. And every call carries an admin actor id into the logs,
+// which is precisely what the database console this page exists to replace
+// does not.
+//
 // `stale` reuses the deposits' window (GLOBEPAY_STALE_AFTER_MS): the sweep has
 // had the same number of chances to resolve the payout, so past it means "look
 // at this row by hand" — with the extra weight that for a withdrawal a stuck
