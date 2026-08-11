@@ -680,6 +680,21 @@ export default defineMiddlewares({
       ],
     },
     {
+      // The caller's in-flight deposits (GET /store/credits/deposit) — what the
+      // Transactions page shows while a payment is still confirming.
+      //
+      // A separate entry because the one above pins method:'POST'. It also has
+      // to be a different TIER: this is a read the page polls, so it belongs on
+      // the shared store read budget, not the top-up write limiter (which is
+      // sized for gateway-creating calls and would throttle a customer watching
+      // their own payment land). No requirePhoneVerified either — the write
+      // already gated that, and refusing to SHOW someone their pending payment
+      // because a phone check regressed would be the worst possible moment.
+      matcher: '/store/credits/deposit',
+      method: 'GET',
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+    },
+    {
       // Real GlobePay365 payout (POST /store/credits/withdraw). Money OUT, so
       // it shares the top-up write tier: authenticated, own limiter. The
       // gateway's callback (POST /hooks/globepay/withdrawal) and Payout

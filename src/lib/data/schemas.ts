@@ -308,6 +308,19 @@ export const AmountBalanceSchema = z.looseObject({
   replayed: z.boolean().optional(),
 });
 
+/** GET /store/credits/deposit row — a top-up the customer has started at the
+ *  gateway that has not settled yet. `amount` is what we REQUESTED: the settled
+ *  figure can differ (a customer may pay another sum), and until it settles
+ *  nobody knows it, so the UI must say "confirming", never "credited".
+ *  `created_at` drives the elapsed-time line, `merchant_transaction_id` is the
+ *  reference support asks for. */
+export const PendingDepositSchema = z.looseObject({
+  merchant_transaction_id: z.string(),
+  amount: finite,
+  payment_method_code: z.string().optional(),
+  created_at: z.string(),
+});
+
 /** POST /store/credits/deposit response — the real payment gateway. Unlike the
  *  mock top-up this credits NOTHING yet: it returns the gateway's cashier URL,
  *  and credit only lands when their signed callback settles the deposit. `url`

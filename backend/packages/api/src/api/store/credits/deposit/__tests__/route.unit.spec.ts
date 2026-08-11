@@ -1,4 +1,5 @@
-import { POST } from '../route';
+import { POST, GET } from '../route';
+import { GLOBEPAY_STALE_AFTER_MS } from '../../../../../modules/packs/globepay-reconcile';
 
 // The IP we send as GlobePay365's `IPAddress` must be the one the proxy chain
 // derived, not one the caller typed. Medusa's express-loader sets
@@ -101,4 +102,92 @@ describe('POST /store/credits/deposit — customer IP', () => {
       expect(startMock).not.toHaveBeenCalled();
     },
   );
+});
+
+describe('GET /store/credits/deposit — in-flight deposits', () => {
+  const listMock = jest.fn(async () => [] as unknown[]);
+  const jsonMock = jest.fn();
+  const getRes = { json: jsonMock } as never;
+  const getReq = (actorId = 'cus_1', over: Record<string, unknown> = {}) =>
+    ({
+      auth_context: { actor_id: actorId },
+      scope: { resolve: () => ({ listGlobePayDeposits: listMock }) },
+      ...over,
+    }) as never;
+
+  beforeEach(() => {
+    listMock.mockClear();
+    jsonMock.mockClear();
+  });
+
+  it('selects only the caller’s own pending deposits, inside the stale window', async () => {
+    const before = Date.now();
+    await GET(getReq(), getRes);
+    const after = Date.now();
+
+    const [selector, config] = listMock.mock.calls[0] as unknown as [
+      { customer_id: string; status: string; created_at: { $gte: Date } },
+      { take: number; order: Record<string, string> },
+    ];
+    expect(selector.customer_id).toBe('cus_1');
+    expect(selector.status).toBe('pending');
+    // The floor is the sweep's own window, so the page can never claim to be
+    // confirming a deposit the sweep has already stopped chasing.
+    expect(selector.created_at.$gte.getTime()).toBeGreaterThanOrEqual(
+      before - GLOBEPAY_STALE_AFTER_MS,
+    );
+    expect(selector.created_at.$gte.getTime()).toBeLessThanOrEqual(
+      after - GLOBEPAY_STALE_AFTER_MS,
+    );
+    expect(config.order).toEqual({ created_at: 'DESC' });
+    expect(config.take).toBeGreaterThan(0);
+  });
+
+  // The IDOR guard. A query/body customer_id must be inert: the only id that
+  // may reach the selector is the one the verified token carries.
+  it('ignores a caller-supplied customer id', async () => {
+    await GET(
+      getReq('cus_1', {
+        query: { customer_id: 'cus_victim' },
+        body: { customer_id: 'cus_victim' },
+      }),
+      getRes,
+    );
+    const [selector] = listMock.mock.calls[0] as unknown as [
+      { customer_id: string },
+    ];
+    expect(selector.customer_id).toBe('cus_1');
+  });
+
+  // The requested amount, never the gateway id or our internal status — the
+  // response is what the customer may see, not the row.
+  it('returns the requested amount and reference, and nothing else', async () => {
+    const createdAt = new Date('2026-08-11T07:00:00.000Z');
+    listMock.mockResolvedValueOnce([
+      {
+        id: 'gpd_1',
+        merchant_transaction_id: 'PC-abc',
+        gateway_transaction_id: 'D123',
+        customer_id: 'cus_1',
+        status: 'pending',
+        amount_requested: 500,
+        amount_settled: null,
+        payment_method_code: 'BQR',
+        created_at: createdAt,
+      },
+    ]);
+
+    await GET(getReq(), getRes);
+
+    expect(jsonMock).toHaveBeenCalledWith({
+      deposits: [
+        {
+          merchant_transaction_id: 'PC-abc',
+          amount: 500,
+          payment_method_code: 'BQR',
+          created_at: createdAt,
+        },
+      ],
+    });
+  });
 });

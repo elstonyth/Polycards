@@ -1,9 +1,10 @@
 import type { Metadata } from 'next';
 import { AccountHeader, Pager, StatCards } from '@/components/account/ui';
 import { rm } from '@/lib/format';
-import { getTransactions } from '@/lib/actions/vault';
+import { getPendingDeposits, getTransactions } from '@/lib/actions/vault';
 import { reasonLabel, signedRm } from '@/lib/transactions';
 import { MarkCreditsSeen } from '@/components/account/credit-dot';
+import { PendingDeposits } from '@/components/account/PendingDeposits';
 
 export const metadata: Metadata = { title: 'Transactions' };
 
@@ -27,7 +28,17 @@ export default async function TransactionsPage({
 }) {
   const { page: pageRaw } = await searchParams;
   const page = Number(pageRaw);
-  const res = await getTransactions(Number.isInteger(page) ? page : 1);
+  // In parallel: the ledger read is the page, and the pending list only
+  // decorates it — serialising them would add a round-trip to the very page a
+  // customer refreshes while waiting on credit.
+  const [res, pending] = await Promise.all([
+    getTransactions(Number.isInteger(page) ? page : 1),
+    // Only on page 1: a deposit confirming NOW belongs beside the newest rows,
+    // not floating above page 7 of history.
+    Number.isInteger(page) && page > 1
+      ? Promise.resolve([])
+      : getPendingDeposits(),
+  ]);
 
   if (!res.ok) {
     return (
@@ -36,6 +47,10 @@ export default async function TransactionsPage({
         <p className="mt-4 rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/60">
           {res.error}
         </p>
+        {/* Deliberately shown on the failure branch too: a ledger read that
+            broke is the WORST moment to also hide the fact that we can see the
+            customer's payment. */}
+        <PendingDeposits deposits={pending} />
       </>
     );
   }
@@ -55,6 +70,9 @@ export default async function TransactionsPage({
           { label: 'Total spent', value: rm(res.spendTotal) },
         ]}
       />
+      {/* Above the table: an in-flight top-up is the thing the customer came
+          to look for, and the ledger cannot show it until it settles. */}
+      <PendingDeposits deposits={pending} />
       <div className="mt-5 overflow-x-auto rounded-2xl border border-white/10 bg-white/[0.03]">
         {rows.length === 0 ? (
           <div className="px-6 py-12 text-center">

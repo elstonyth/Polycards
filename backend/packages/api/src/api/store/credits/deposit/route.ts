@@ -3,7 +3,10 @@ import {
   MedusaResponse,
 } from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
+import { PACKS_MODULE } from '../../../../modules/packs';
+import type PacksModuleService from '../../../../modules/packs/service';
 import { startGlobePayDeposit } from '../../../../modules/packs/globepay-deposit';
+import { GLOBEPAY_STALE_AFTER_MS } from '../../../../modules/packs/globepay-reconcile';
 import { payerIpOf } from '../../../utils/payer-ip';
 
 // POST /store/credits/deposit — start a real GlobePay365 top-up. Returns a
@@ -61,4 +64,63 @@ export async function POST(
   );
 
   res.json(result);
+}
+
+/**
+ * How many in-flight deposits to report. A customer with more than a handful
+ * open at once is re-clicking, not paying five ways — and the storefront only
+ * needs enough to say "we can see your payment", never a history.
+ */
+const PENDING_LIMIT = 5;
+
+// GET /store/credits/deposit — the caller's OWN in-flight top-ups.
+//
+// Why this exists: the ledger is the only thing /transactions could read, and a
+// deposit writes nothing to the ledger until it settles. So a customer who paid
+// and came back landed on a page with no trace of their money at all and
+// concluded the payment had failed — worst exactly when settlement is slow,
+// which is the case this was built for.
+//
+// Deliberately NOT a status oracle: it reports what WE recorded, never a fresh
+// gateway requery. Requerying per page view would put an unauthenticated-ish
+// read on the gateway's rate budget and duplicate the sweep's job; the sweep
+// (globepay-reconcile, every minute) and the callback remain the only things
+// that resolve a deposit.
+//
+// Bounded by the same GLOBEPAY_STALE_AFTER_MS the sweep and the admin page use:
+// past that window the customer has almost certainly abandoned the cashier, and
+// showing "confirming your payment" forever would be a lie with a countdown.
+// The constant is imported, not redeclared, so the three surfaces cannot drift.
+//
+// AUTH + RATE LIMIT: registered in src/api/middlewares.ts (its own GET entry,
+// sharing the store READ budget — the POST entry above pins method:'POST').
+// The customer id comes ONLY from the verified token: filtering on a body or
+// query value would let any logged-in customer read another's deposits.
+export async function GET(
+  req: AuthenticatedMedusaRequest,
+  res: MedusaResponse,
+): Promise<void> {
+  const customerId = req.auth_context.actor_id;
+  const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+
+  const deposits = await packs.listGlobePayDeposits(
+    {
+      customer_id: customerId,
+      status: 'pending',
+      created_at: { $gte: new Date(Date.now() - GLOBEPAY_STALE_AFTER_MS) },
+    },
+    { take: PENDING_LIMIT, order: { created_at: 'DESC' } },
+  );
+
+  // Hand-picked fields, not the row: it also carries the gateway id and our
+  // internal status vocabulary, and the amount reported is the one we REQUESTED
+  // (the settled figure can differ, and until it settles we do not know it).
+  res.json({
+    deposits: deposits.map((deposit) => ({
+      merchant_transaction_id: deposit.merchant_transaction_id,
+      amount: deposit.amount_requested,
+      payment_method_code: deposit.payment_method_code,
+      created_at: deposit.created_at,
+    })),
+  });
 }
