@@ -7,6 +7,7 @@ import { PACKS_MODULE } from '../../../../../../modules/packs';
 import type PacksModuleService from '../../../../../../modules/packs/service';
 import {
   globepayWithdrawalsEnabled,
+  heldDebitGraceExpired,
   refundGlobePayWithdrawal,
   withdrawalIdempotencyReference,
 } from '../../../../../../modules/packs/globepay-withdrawal';
@@ -119,11 +120,16 @@ export async function POST(
   // DEBIT-EXISTENCE GUARD, the same one the sweep runs above its refund (see
   // jobs/globepay-withdrawal-reconcile.ts). A held row is NOT always debited:
   // startGlobePayWithdrawal writes it 'held' at step 1 and debits at step 2,
-  // so a hard crash in between strands a held row with no debit. Submitting
-  // that pays a real bank account against a balance that was never reduced —
-  // a straight cash loss — and if the gateway then refuses it definitively,
-  // the refund branch below would mint credit on top. Close it instead, and
-  // close it THROUGH the claim so it cannot race a concurrent deny.
+  // so there is a real window — not only a crash — where the row is visible
+  // as held with no debit yet, simply because step 2 has not returned.
+  // Submitting against a debit that never lands pays a real bank account out
+  // of a balance that was never reduced — a straight cash loss — and if the
+  // gateway then refuses it definitively, the refund branch below would mint
+  // credit on top. Close it instead, and close it THROUGH the claim so it
+  // cannot race a concurrent deny — but only once heldDebitGraceExpired says
+  // an in-flight debit is no longer plausible; a still-in-flight one is
+  // refused below, not closed.
+  const now = new Date();
   const [debitRow] = await packs.listCreditTransactions(
     {
       customer_id: row.customer_id,
@@ -135,6 +141,21 @@ export async function POST(
     { take: 1 },
   );
   if (!debitRow) {
+    if (!heldDebitGraceExpired(new Date(row.created_at), now)) {
+      // Too young to trust "no debit" as an orphan (see
+      // GLOBEPAY_WD_HELD_DEBIT_GRACE_MS) — refuse WITHOUT closing, leaving
+      // the row held for a retry once the in-flight debit has had time to
+      // land.
+      logger.warn(
+        `[globepay] admin ${adminId} approve on withdrawal ${row.id} ` +
+          `(${row.merchant_transaction_id}) REFUSED — created moments ago, ` +
+          `its debit may still be landing; row left held`,
+      );
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'This withdrawal was created moments ago — its debit may still be landing. Try again in a moment.',
+      );
+    }
     // Scoped to 'held' like every other claim here, so an undebited row in
     // some other status (a 'pending' one is the sweep's to resolve) is
     // refused without being touched. The log reports which happened rather

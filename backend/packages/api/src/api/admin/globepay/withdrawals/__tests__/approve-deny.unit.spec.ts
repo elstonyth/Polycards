@@ -48,7 +48,14 @@ const ACCOUNT_NUMBER = '1234567890';
 
 /** A held row: debited, never submitted, no gateway id. `amount` is a STRING
  *  because the column is model.bigNumber() — the routes must coerce it before
- *  submitWithdrawal calls .toFixed(2) on it. */
+ *  submitWithdrawal calls .toFixed(2) on it.
+ *
+ *  `created_at` defaults to several minutes old, past
+ *  GLOBEPAY_WD_HELD_DEBIT_GRACE_MS — a held row an admin is acting on is
+ *  realistically never younger than that (it has to survive at least one
+ *  60s admin-list poll first). A row THIS fresh is the deliberate exception,
+ *  covered by its own tests below (`created_at: new Date()`), not the
+ *  default every other test in this file inherits. */
 const heldRow = () => ({
   id: 'gpw_1',
   merchant_transaction_id: 'PW-HELD-1',
@@ -60,7 +67,7 @@ const heldRow = () => ({
   account_holder_name: 'AHMAD BIN ALI',
   status: 'held',
   gateway_status: null as number | null,
-  created_at: new Date(),
+  created_at: new Date(Date.now() - 5 * 60 * 1000),
   settled_at: null,
 });
 
@@ -317,6 +324,25 @@ describe('POST /admin/globepay/withdrawals/:id/approve', () => {
     expect(h.row.status).toBe('failed');
   });
 
+  // The review-fix companion to the test above: a row THIS fresh must be
+  // refused, not closed — "no debit yet" and "no debit ever" look identical
+  // from here, and closing the wrong one strands the debit forever with
+  // nothing to ever refund it.
+  it('refuses (without closing) a held row too young for its debit to have landed yet', async () => {
+    const h = harness({ ...heldRow(), created_at: new Date() }, false);
+    const { res } = mkRes();
+
+    await expect(APPROVE(h.req, res)).rejects.toMatchObject({
+      type: MedusaError.Types.NOT_ALLOWED,
+    });
+
+    expect(submitMock).not.toHaveBeenCalled();
+    expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+    // Unlike the genuine-orphan case above, the row is NOT closed.
+    expect(h.packs.claimGlobePayWithdrawalStatus).not.toHaveBeenCalled();
+    expect(h.row.status).toBe('held');
+  });
+
   it('404s an unknown id without claiming anything', async () => {
     const h = harness();
     const req = { ...(h.req as object), params: { id: 'gpw_nope' } } as never;
@@ -490,6 +516,36 @@ describe('POST /admin/globepay/withdrawals/:id/deny', () => {
     expect(
       h.logger.warn.mock.calls.map((c) => String(c[0])).join('\n'),
     ).toMatch(/no debit/i);
+  });
+
+  // The review-fix companion: deny claims 'held' -> 'failed' UNCONDITIONALLY
+  // (step 1, before it even checks for a debit), so unlike approve this gate
+  // has to sit in front of the claim, not inside a "no debit" branch — a row
+  // this fresh must be refused before it is ever claimed.
+  it('refuses a held row too young for its debit to have landed yet — no claim, stays held', async () => {
+    // Whether or not a debit already exists is irrelevant here: the gate
+    // fires before deny would even ask.
+    const h = harness({ ...heldRow(), created_at: new Date() });
+    const { res } = mkRes();
+
+    await expect(DENY(h.req, res)).rejects.toMatchObject({
+      type: MedusaError.Types.NOT_ALLOWED,
+    });
+
+    expect(h.packs.claimGlobePayWithdrawalStatus).not.toHaveBeenCalled();
+    expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+    expect(h.row.status).toBe('held');
+  });
+
+  // The gate is scoped to 'held' only — proves it does NOT also block the
+  // recovery re-run above, which legitimately reaches deny on a fresh
+  // 'failed' row (an operator re-clicking moments after the first deny).
+  it('the age gate does not block the failed-row recovery re-run, however fresh', async () => {
+    const h = harness({ ...heldRow(), status: 'failed', created_at: new Date() });
+    const { res, out } = mkRes();
+    await DENY(h.req, res);
+    expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
+    expect(out.body).toMatchObject({ status: 'failed', refunded: true });
   });
 
   // Asymmetric with approve on purpose: handing money back must not depend on

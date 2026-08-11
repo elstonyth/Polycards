@@ -33,8 +33,11 @@ export const GlobePayWithdrawal = model
     //
     // 'held' — debited, awaiting admin approval, never submitted to the
     // gateway. It has no gateway_transaction_id and the reconcile sweep must
-    // never select it. It leaves only via the admin approve route (->
-    // 'pending') or the admin deny route (-> 'failed', refunded).
+    // never select it for PROCESSING (the sweep does run one read-only
+    // staleness log across held rows, plan 094 follow-up, but never
+    // requeries, refunds, or writes to one). It leaves only via the admin
+    // approve route (-> 'pending') or the admin deny route (-> 'failed',
+    // refunded).
     status: model
       .enum(['pending', 'settled', 'failed', 'held'])
       .default('pending'),
