@@ -40,8 +40,8 @@ const GATEWAY_MAX_RM = 10000;
 // band (RM 30 – 10,000) rather than hugging its floor — 5,000 is a real ticket
 // size now that the ceiling is 10,000, and it was impossible under the test
 // account's RM 1,000 cap.
-const PRESETS = USE_GATEWAY ? [50, 250, 500, 5000] : [10, 25, 50, 100];
-const DEFAULT_AMOUNT = USE_GATEWAY ? '50' : '25';
+const PRESETS = USE_GATEWAY ? [300, 600, 1200, 5000] : [10, 25, 50, 100];
+const DEFAULT_AMOUNT = USE_GATEWAY ? '300' : '25';
 
 /**
  * Global top-up bottom sheet (90scard's profile top-up flow, dark skin).
