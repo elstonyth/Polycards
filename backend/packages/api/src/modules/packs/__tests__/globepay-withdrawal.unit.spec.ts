@@ -768,6 +768,13 @@ const fakeWallet = (over: Record<string, unknown> = {}) => ({
  *   dropping `AND merchant_transaction_id <> ?` from the real SQL makes the
  *   self-exclusion test below genuinely fail, instead of passing on a mock that
  *   ignored its arguments.
+ * @param heldCents a `held` row's worth, added to the sum ONLY when the real
+ *   SQL's status list actually contains `'held'` — same trick as
+ *   selfRowCents: it proves the WHERE clause drives the count, not the test
+ *   wiring. Drop `'held'` from the real IN-list and a test relying on this
+ *   stops summing it, instead of passing on a mock that always included it.
+ * @param failedCents mirrors heldCents for `'failed'`, which the real SQL must
+ *   never contain.
  */
 const fakeService = (
   wallet = fakeWallet(),
@@ -787,6 +794,8 @@ const fakeService = (
     cus_1: [SAVED_ACCOUNT],
     cus_2: [OTHER_CUSTOMERS_ACCOUNT],
   },
+  heldCents = 0,
+  failedCents = 0,
 ) => {
   const svc = Object.create(PacksModuleService.prototype) as PacksModuleService;
   const em = {
@@ -801,13 +810,12 @@ const fakeService = (
       }
       if (!q.includes('globepay_withdrawal')) return [];
       const excludesSelf = params?.[1] === cashout.merchantTransactionId;
-      return [
-        {
-          sum_cents: String(
-            excludesSelf ? windowCents : windowCents + selfRowCents,
-          ),
-        },
-      ];
+      const base = excludesSelf ? windowCents : windowCents + selfRowCents;
+      // Gated on the SQL text itself, not handed back unconditionally — see
+      // the heldCents/failedCents jsdoc above.
+      const held = q.includes("'held'") ? heldCents : 0;
+      const failed = q.includes("'failed'") ? failedCents : 0;
+      return [{ sum_cents: String(base + held + failed) }];
     }),
   };
   // Parameters are declared (not inferred away) so the call-argument
@@ -1088,11 +1096,13 @@ describe('PacksModuleService.withdrawForCashout', () => {
   });
 
   // The cap query is the only thing standing between a compromised account and
-  // the whole balance, so its WHERE clause is pinned literally: `failed` rows
-  // never count (that money came back), and the row this very attempt just
-  // wrote as `pending` is excluded by merchant_transaction_id — without that
-  // exclusion the attempt would be counted against its own cap.
-  it('counts only pending+settled in the last 24h, excluding this attempt', async () => {
+  // the whole balance, so its WHERE clause is pinned literally: `pending`,
+  // `settled` and `held` rows all count — a held row already debited the
+  // customer, so it consumes their blast radius exactly like a submitted one
+  // — `failed` rows never count (that money came back), and the row this very
+  // attempt just wrote as `pending` is excluded by merchant_transaction_id —
+  // without that exclusion the attempt would be counted against its own cap.
+  it('counts pending+settled+held in the last 24h, excluding this attempt and failed rows', async () => {
     const f = fakeService();
     await f.svc.withdrawForCashout(cashout, f.ctx);
     // Found by content, not by index: the statement order ahead of it (lock,
@@ -1102,11 +1112,47 @@ describe('PacksModuleService.withdrawForCashout', () => {
       (q as string).includes('globepay_withdrawal'),
     ) as [string, unknown[]];
     expect(sql).toContain('globepay_withdrawal');
-    expect(sql).toContain("status IN ('pending', 'settled')");
+    expect(sql).toContain("status IN ('pending', 'settled', 'held')");
     expect(sql).not.toContain('failed');
     expect(sql).toContain("created_at > now() - interval '24 hours'");
     expect(sql).toContain('merchant_transaction_id <> ?');
     expect(params).toEqual(['cus_1', 'PC-abc']);
+  });
+
+  // Behavioural companion to the SQL-content test above, proven through the
+  // params-aware fake rather than a string match: RM 60 cap, a lone `held`
+  // row worth RM 20 already in the window, plus this RM 50 attempt totals
+  // RM 70 > RM 60. fakeService only hands back heldCents when the real WHERE
+  // clause's status list actually says 'held' (see its jsdoc), so this fails
+  // for the right reason — resolves instead of rejects — until the
+  // production IN-list is widened. Without that, a customer could park an
+  // unbounded queue of held payouts and blow straight past the 24h ceiling
+  // the moment an operator approves them in a batch.
+  it('an existing held row inside the window counts toward the cap, else batch-approving a queue of them blows past the 24h ceiling', async () => {
+    process.env.GLOBEPAY_WD_DAILY_MAX_RM = '60';
+    const f = fakeService(fakeWallet(), 0, 0, undefined, 20_00);
+    await expect(
+      f.svc.withdrawForCashout(cashout, f.ctx),
+    ).rejects.toMatchObject({
+      type: MedusaError.Types.NOT_ALLOWED,
+      message: 'Daily withdrawal limit reached. You can withdraw RM 40.00 more today.',
+    });
+    expect(f.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+  });
+
+  // Mirror of the test above with the same RM 20 tagged `failed` instead of
+  // `held`. fakeService only counts failedCents when the real SQL asks for
+  // 'failed', which it never does, so this cannot go RED the way the held
+  // test does — it is a forward-looking regression guard, not a driver: a
+  // refused or refunded payout must never shrink the customer's next 24h, no
+  // matter its size.
+  it('a failed row inside the window never counts toward the cap', async () => {
+    process.env.GLOBEPAY_WD_DAILY_MAX_RM = '60';
+    const f = fakeService(fakeWallet(), 0, 0, undefined, 0, 20_00);
+    await expect(
+      f.svc.withdrawForCashout(cashout, f.ctx),
+    ).resolves.toMatchObject({ id: 'ct_1' });
+    expect(f.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
   });
 
   // Self-exclusion, proven by BEHAVIOUR: the only row in the window is this

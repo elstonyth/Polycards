@@ -1280,10 +1280,17 @@ class PacksModuleService extends MedusaService({
     //    debit cannot interleave either.
     //
     //    `pending` and `settled` both moved (or are still moving) money;
-    //    `failed` did not — a refused or refunded payout must never consume the
-    //    customer's cap. Those three are the entire domain of the column's
-    //    CHECK constraint (Migration20260722170000), which also supplies the
-    //    (status, created_at) and (customer_id) partial indexes this scan uses.
+    //    `held` does too — the debit already posted (see
+    //    startGlobePayWithdrawal), the row is merely parked for admin approval
+    //    instead of being sent to the gateway, and the money stays out of the
+    //    balance until a refund (admin deny) puts it back. So a held payout
+    //    consumes the customer's daily blast radius exactly like a submitted
+    //    one. `failed` alone did not move money — a refused or refunded
+    //    payout must never consume the customer's cap. Those four are the
+    //    entire domain of the column's CHECK constraint
+    //    (Migration20260722170000, widened to add `held` by
+    //    Migration20260811220000), which also supplies the (status,
+    //    created_at) and (customer_id) partial indexes this scan uses.
     //
     //    The just-created row is EXCLUDED by merchant_transaction_id:
     //    globepay-withdrawal.ts writes it as `pending` BEFORE calling this
@@ -1307,7 +1314,7 @@ class PacksModuleService extends MedusaService({
       'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS sum_cents ' +
         'FROM globepay_withdrawal ' +
         'WHERE customer_id = ? AND deleted_at IS NULL ' +
-        "AND status IN ('pending', 'settled') " +
+        "AND status IN ('pending', 'settled', 'held') " +
         "AND created_at > now() - interval '24 hours' " +
         'AND merchant_transaction_id <> ?',
       [input.customerId, input.merchantTransactionId],
