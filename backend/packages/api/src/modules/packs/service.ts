@@ -443,6 +443,21 @@ const challengeWeekAnchorParams = (
 export interface SettleDeps {
   /** Available stock per card HANDLE (job binds getCardStockByHandle). */
   getStock: (handles: string[]) => Promise<Map<string, number | null>>;
+  /**
+   * Take `qty` units of a card HANDLE out of inventory, returning true when a
+   * tracked unit was actually taken (false = untracked product, nothing to
+   * count). Injected for the same reason as getStock: inventory lives in
+   * Medusa's inventory module, reachable only through the container the JOB
+   * holds, and this module service stays container-free.
+   *
+   * Without it, settlement read stock as a GATE and never reserved, so every
+   * winner entitled to the same card re-read the same pre-grant value and all
+   * of them were granted — N claims against one physical unit, with the counter
+   * still reading 1 and no operator signal. card-stock.ts states the rule the
+   * other way round ("a FULFILMENT COUNTER, not a gate"), and the pack-open
+   * path already decrements unconditionally for exactly this reason.
+   */
+  decrementStock?: (handle: string, qty: number) => Promise<boolean>;
   /** Fired after each winner's transaction COMMITS — notifications, operator
    *  warnings. Optional + best-effort (matureDueCommissions' notify
    *  precedent): the module stays container-free, so the JOB supplies it, and
@@ -470,6 +485,22 @@ interface SettleSnapshot {
   week_end: string;
   /** Top-10 customer ids in rank order; index + 1 IS the rank. */
   ranking: string[];
+  /**
+   * The RESOLVED rank -> payout table, frozen at first settlement.
+   *
+   * unlocked_stages holds stage NUMBERS, and those numbers index into ONE live,
+   * unscoped challenge_stage table that saveChallengeStages whole-set replaces
+   * — including from promoteDueChallengeSchedules, which the very same job runs
+   * right after settlement. Because weeksBack is 1, the ended week keeps
+   * re-settling for about a week afterwards, so a winner whose rank paid nothing
+   * under the old ladder (no payout row, therefore not in settledCustomers) was
+   * paid from the PROMOTED ladder on a later tick. Freezing the resolved table
+   * makes re-settlement deterministic.
+   *
+   * Optional: snapshots written before this field existed fall back to the live
+   * re-read, which is the pre-existing behaviour.
+   */
+  by_rank?: Record<string, { rank: number; credits: number; cardIds: string[] }>;
 }
 
 class PacksModuleService extends MedusaService({
@@ -6858,7 +6889,18 @@ class PacksModuleService extends MedusaService({
     if (ranking.length === 0) {
       return { weekStartIso, settled: false, winners: [] };
     }
-    const byRank = payoutByRank(unlocked);
+    // Prefer the frozen table on a re-settlement tick. Falling back to a live
+    // payoutByRank(unlocked) is what let a promoted ladder pay an earlier week's
+    // winners; the fallback survives only for snapshots written before by_rank
+    // existed.
+    const byRank = prior?.by_rank
+      ? new Map<number, RankPayout>(
+          Object.entries(prior.by_rank).map(([rank, p]) => [
+            Number(rank),
+            { rank: Number(rank), credits: p.credits, cardIds: p.cardIds },
+          ]),
+        )
+      : payoutByRank(unlocked);
 
     // Resolve card ids -> handles ONCE (spec: rank_rewards holds Card.id,
     // pull.card_id holds Card.handle — never pass ids into createPulls).
@@ -6878,6 +6920,14 @@ class PacksModuleService extends MedusaService({
       unlocked_stages: unlocked.map((s) => s.stage_number),
       week_end: endUtc.toISOString(),
       ranking,
+      // A Map does not survive the json column — persist as a plain object and
+      // rehydrate above.
+      by_rank: Object.fromEntries(
+        [...byRank].map(([rank, p]) => [
+          String(rank),
+          { rank: p.rank, credits: p.credits, cardIds: p.cardIds },
+        ]),
+      ),
     };
     const winners: SettledWinner[] = [];
     for (const [i, customerId] of ranking.entries()) {
@@ -6898,6 +6948,7 @@ class PacksModuleService extends MedusaService({
         handleById,
         snapshot,
         getStock: deps.getStock,
+        decrementStock: deps.decrementStock,
       });
       if (!settled) continue;
       winners.push(settled);
@@ -6935,6 +6986,7 @@ class PacksModuleService extends MedusaService({
       handleById: Map<string, string>;
       snapshot: SettleSnapshot;
       getStock: (handles: string[]) => Promise<Map<string, number | null>>;
+      decrementStock?: (handle: string, qty: number) => Promise<boolean>;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<SettledWinner | null> {
@@ -7068,6 +7120,29 @@ class PacksModuleService extends MedusaService({
       // kept — the row's scalar pull_id can only hold the first.
       let pullIds: string[] = [];
       if (inStock) {
+        // TAKE the units before minting the claims. The gate above is kept on
+        // purpose — an out-of-stock prize becoming a manual-fulfilment item is
+        // a product decision the job logs for an operator — but a gate that
+        // never decrements is the read-then-check race
+        // decrement-card-stock.ts:24-28 exists to avoid: winners settle in
+        // separate transactions and each re-reads the same pre-grant value.
+        //
+        // Ordering: decrement first. If the mint then fails and this winner's
+        // transaction rolls back, the counter reads LOW — the same conservative
+        // direction the pack-open step documents, and far better than handing
+        // out claims against stock that is not there. A throw here skips the
+        // grant entirely rather than granting unreserved.
+        let earmarked = false;
+        if (input.decrementStock) {
+          try {
+            earmarked = await input.decrementStock(handle!, qty);
+          } catch {
+            // Could not reserve — treat exactly like out of stock so the card
+            // lands in the manual-fulfilment queue instead of being over-granted.
+            skippedCardIds.push(cardId);
+            continue;
+          }
+        }
         const minted = await this.createPulls(
           Array.from({ length: qty }, () => ({
             customer_id: customerId,
@@ -7076,6 +7151,10 @@ class PacksModuleService extends MedusaService({
             order_id: null,
             rolled_at: new Date(),
             source: 'reward' as const,
+            // Only when a tracked unit was actually taken — buyback restores
+            // flagged pulls only, and restoring an untracked one would mint a
+            // phantom unit (decrement-card-stock.ts:52-56).
+            stock_earmarked: earmarked,
           })),
           sharedContext,
         );

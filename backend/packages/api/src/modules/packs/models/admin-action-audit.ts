@@ -48,6 +48,9 @@ export const AdminActionAudit = model
       'disable',
       'enable',
       'create',
+      // A read that exposes data the list view masks — see
+      // Migration20260812000000.
+      'reveal',
     ]),
     before: model.json().nullable(),
     after: model.json().nullable(),

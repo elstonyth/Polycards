@@ -30,7 +30,10 @@ import {
   createVaultBuybackRateLimit,
 } from './utils/rate-limit';
 import { createResetTokenSingleUseGuard } from './utils/reset-token-guard';
-import { rejectCustomerMetadata } from './utils/customer-metadata-guard';
+import {
+  rejectCustomerMetadata,
+  rejectAdminBankAccountsMetadata,
+} from './utils/customer-metadata-guard';
 import {
   requireSignupPhoneProof,
   blockUnverifiedPhoneWrite,
@@ -807,8 +810,31 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      // The framework's own POST /admin/customers/:id writes customer.metadata
+      // directly, and mergeMetadata is a SHALLOW top-level merge — so a request
+      // could inject bank_accounts (a live payout destination) with no audit
+      // row and without the metadata:<customer> advisory lock the store-side
+      // writer holds. The admin SPA never round-trips metadata, so nothing
+      // legitimate is refused here.
+      matcher: '/admin/customers/*',
+      method: 'POST',
+      middlewares: [rejectAdminBankAccountsMetadata],
+    },
+    {
       matcher: '/admin/customers/*/payout-details',
       method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // The GET returns the FULL bank account number, so it needs the limiter at
+      // least as much as the write does. It was previously unthrottled, and the
+      // coverage guard could not catch that because
+      // admin-rate-limit-coverage.unit.spec.ts only scans POST|PUT|PATCH|DELETE
+      // exports — it is structurally unable to flag a sensitive READ. Listed as
+      // its own entry rather than by dropping the method pin, because that guard
+      // matches coverage per method.
+      matcher: '/admin/customers/*/payout-details',
+      method: 'GET',
       middlewares: [adminActionRateLimit],
     },
     {
