@@ -382,9 +382,11 @@ const WithdrawalsPage = () => {
                         </div>
                       )}
                       {/* Their Payout Verification is active, so a failed row
-                          with nothing recorded means their call never reached
-                          us — a different fault, and one no other column on
-                          this page can show. */}
+                          with no outcome recorded is worth a look — but it is a
+                          POINTER, not a verdict: their call may never have
+                          arrived, it may have been refused before we could
+                          match it to this row, or the row may predate the
+                          column. The copy says exactly that. */}
                       {w.status === 'failed' && !w.verify_outcome && (
                         <div className="text-ui-tag-orange-text mt-1 font-sans">
                           {t('withdrawals.noVerify')}

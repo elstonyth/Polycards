@@ -145,6 +145,41 @@ export function withdrawalDetailsError(input: {
   return null;
 }
 
+/**
+ * The one place a gateway refusal is turned into a `failure_reason` string
+ * (plan 095). Two callers build this — the store submit path below and the
+ * admin approve route — and they must not drift, because the redaction here is
+ * a control, not formatting.
+ *
+ * WHY REDACT AT ALL, when the log line beside each call site prints the same
+ * message unredacted and the row already stores the account number: because
+ * the two surfaces are not equivalent. The admin Withdrawals LIST masks
+ * `account_number` to `••••1234` and serves the full value only from the
+ * separate ./[id]/account route, so an unredacted provider message that echoed
+ * a submitted account number would put it back on the list page — undoing the
+ * mask through a column nobody thinks of as PII. Logs are a different audience
+ * with different access; the database column is the one that renders.
+ *
+ * `msg` is the gateway's own text and the only field we do not compose, so it
+ * is the only one that can carry anything we did not choose. Runs of 6+ digits
+ * (account numbers, phone numbers, their long transaction ids) are replaced;
+ * the words around them — which is where the diagnosis lives — survive.
+ */
+export function formatGatewayFailureReason(input: {
+  prefix: string;
+  codes: readonly string[];
+  httpStatus: number;
+  bankCode: string;
+  message: string;
+}): string {
+  const redacted = input.message.replace(/\d{6,}/g, '[redacted]');
+  return (
+    `${input.prefix}: codes=${input.codes.join(',') || 'none'} ` +
+    `httpStatus=${input.httpStatus} bankCode=${input.bankCode} ` +
+    `msg=${redacted}`
+  ).slice(0, 400);
+}
+
 export type StartWithdrawalInput = {
   /** From the verified token — NEVER the request body. */
   customerId: string;
@@ -509,17 +544,20 @@ export async function startGlobePayWithdrawal(
       // DigitalOcean run logs only cover the current deployment, so on
       // 2026-08-11 the codes for eight failed production payouts were gone by
       // the next morning while the rows themselves survived, saying only
-      // 'failed'. Same fields as the log, same PII rule: their codes, their
-      // message, the HTTP status and the destination BANK CODE — never the
-      // account number, the holder name or the signed envelope.
+      // 'failed'. Their codes, the HTTP status and the destination BANK CODE,
+      // plus their message with digit runs redacted — see
+      // formatGatewayFailureReason for why this column redacts where the log
+      // beside it does not.
       await packs.updateGlobePayWithdrawals({
         id: row.id,
         status: 'failed',
-        failure_reason: (
-          `submit refused: codes=${error.codes.join(',') || 'none'} ` +
-          `httpStatus=${error.httpStatus} bankCode=${bankCode} ` +
-          `msg=${error.message}`
-        ).slice(0, 400),
+        failure_reason: formatGatewayFailureReason({
+          prefix: 'submit refused',
+          codes: error.codes,
+          httpStatus: error.httpStatus,
+          bankCode,
+          message: error.message,
+        }),
       });
       // Log their reason before it is flattened into the customer-facing
       // message below — the sibling deposit branch has done this since
@@ -693,14 +731,15 @@ export async function refundGlobePayWithdrawal(
   gatewayStatus: number | null,
   fromStatus: 'pending' | 'held' | 'failed' = 'pending',
   /**
-   * Why this payout is being closed, stored on the row (plan 095). Optional
-   * because the three callers know three different things: the admin deny
-   * route knows a human said no, the sweep knows what a requery answered, and
-   * the approve route knows the gateway's own codes. Omitted leaves the column
-   * as it was — a caller with nothing to say must not blank a reason an
-   * earlier write already recorded.
+   * Why this payout is being closed, stored on the row (plan 095). REQUIRED,
+   * though the three callers know three different things: the admin deny route
+   * knows a human said no, the sweep knows what a requery answered, and the
+   * approve route knows the gateway's own codes. It was briefly optional, which
+   * bought an untested "omitted leaves the column alone" branch that no caller
+   * used — a closing writer with nothing to say about why is the state this
+   * whole change exists to abolish, so the type refuses it.
    */
-  failureReason?: string,
+  failureReason: string,
 ): ReturnType<PacksModuleService['withdrawCreditsWithLedger']> {
   const packs = scope.resolve<PacksModuleService>(PACKS_MODULE);
   const refund = await packs.withdrawCreditsWithLedger({

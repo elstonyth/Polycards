@@ -444,7 +444,7 @@
       "failed": "Refunded"
     },
     "statusStale": "Overdue",
-    "noVerify": "No payout verification ever arrived for this payout — check the verify URL and their reachability, not our refusal logic.",
+    "noVerify": "No payout verification outcome recorded — either their verification never reached us, it was rejected before we could match it to this row, or this payout predates outcome recording.",
     "staleWarning": "{{n}} row(s) on this page are past the reconcile window — the customer is debited with no payout confirmed. Check the withdrawal in the GlobePay back office before touching anything by hand.",
     "empty": "No withdrawals in this view.",
     "emptyView": "No {{view}} withdrawals right now. Other statuses may still have rows.",

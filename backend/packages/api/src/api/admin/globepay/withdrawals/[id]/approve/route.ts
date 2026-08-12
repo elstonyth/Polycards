@@ -6,6 +6,7 @@ import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../../../modules/packs';
 import type PacksModuleService from '../../../../../../modules/packs/service';
 import {
+  formatGatewayFailureReason,
   globepayWithdrawalsEnabled,
   refundGlobePayWithdrawal,
   withdrawalIdempotencyReference,
@@ -223,10 +224,17 @@ export async function POST(
         null,
         'pending',
         // Same fields as the log line below, kept on the row because the log
-        // itself does not survive the next deployment (plan 095).
-        `approve refused: codes=${error.codes.join(',') || 'none'} ` +
-          `httpStatus=${error.httpStatus} bankCode=${row.bank_code} ` +
-          `msg=${error.message}`,
+        // itself does not survive the next deployment (plan 095). Built by the
+        // shared formatter so this string and the store path's cannot drift —
+        // and so the digit redaction, which is a control rather than
+        // formatting, applies to both.
+        formatGatewayFailureReason({
+          prefix: 'approve refused',
+          codes: error.codes,
+          httpStatus: error.httpStatus,
+          bankCode: row.bank_code,
+          message: error.message,
+        }),
       );
       // Their reason, on record, AFTER the money moved — a definitively
       // refused submit leaves nothing at the gateway to requery later, so

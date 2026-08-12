@@ -71,8 +71,23 @@ async function recordVerifyOutcome(
       // half a word.
       verify_outcome: `${new Date().toISOString()} ${outcome.slice(0, 400)}`,
     });
-  } catch {
-    // Swallowed: see the doc comment. The log line below still fires.
+  } catch (error) {
+    // Swallowed for the money path's sake — see the doc comment — but not
+    // silently. A recorder that fails on an APPROVED verification leaves a row
+    // that looks like it was never verified at all, which is the one reading
+    // this column exists to make trustworthy. Best-effort again: the logger is
+    // the last thing left, so a throw from it has nowhere to go.
+    try {
+      scope
+        .resolve<{ warn: (message: string) => void }>('logger')
+        .warn(
+          `[globepay] could not record verify outcome for ${merchantTransactionId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+    } catch {
+      // Nothing left to report with.
+    }
   }
 }
 

@@ -1146,10 +1146,12 @@ export interface GlobePayWithdrawal {
    *  admin who denied it. Null on rows that never failed, and on the ten
    *  pre-2026-08-12 failures that predate the column. */
   failure_reason: string | null;
-  /** How we answered their Payout Verification, stamped on EVERY hit. Null
-   *  means no verification ever arrived for this payout — which, since it is
-   *  ACTIVE on the production merchant, points at their call not reaching us
-   *  rather than at anything this codebase decided. */
+  /** How we answered their Payout Verification, stamped on EVERY hit we can
+   *  match to a row. Null does NOT prove their call never came: a decrypt or
+   *  signature failure is refused before we know which withdrawal it belongs
+   *  to, and rows created before this column exist keep it null forever. It
+   *  narrows the search to those three, and the HTTP access log separates
+   *  them. */
   verify_outcome: string | null;
   created_at: string;
   settled_at: string | null;

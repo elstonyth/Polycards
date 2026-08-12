@@ -433,6 +433,35 @@ describe('startGlobePayWithdrawal — money ordering', () => {
     expect(logged).not.toMatch(/1234567890|AHMAD BIN ALI/i);
   });
 
+  it('keeps a submitted account number out of the persisted reason', async () => {
+    // `msg` is the gateway's own text — the one field of the reason we do not
+    // compose — so it is the only one that can echo something we sent them.
+    // The row's `account_number` is MASKED on the admin list (`••••1234`) and
+    // revealed only one row at a time by ./[id]/account, so an unredacted
+    // message would put the full number back on the list page through a column
+    // nobody reads as PII. The log beside this write is a different audience
+    // and stays unredacted, deliberately.
+    const h = harness();
+    submitMock.mockRejectedValue(
+      new GlobePayError(
+        'invalid beneficiary account 1234567890 for AHMAD BIN ALI',
+        ['PMT10021'],
+        200,
+        true,
+      ),
+    );
+    await expect(start(h)).rejects.toThrow(/refused by the payment provider/i);
+
+    const [{ failure_reason: reason }] =
+      h.packs.updateGlobePayWithdrawals.mock.calls[0];
+    expect(reason).not.toMatch(/1234567890/);
+    expect(reason).toMatch(/\[redacted\]/);
+    // The diagnosis around the digits survives — redaction that ate the
+    // sentence would defeat the column.
+    expect(reason).toMatch(/invalid beneficiary account/);
+    expect(reason).toMatch(/PMT10021/);
+  });
+
   it('still refuses with the customer-facing message when the logger throws', async () => {
     // The log is diagnostics; the MedusaError is the customer's instruction.
     // A logger that throws must not be able to swap one for the other — before
