@@ -92,3 +92,99 @@ describe('rawLedgerBalanceCents', () => {
     await expect(f.svc.rawLedgerBalanceCents('cus_1', f.ctx)).resolves.toBe(0);
   });
 });
+
+type PreflightSvc = PacksModuleService & {
+  rawLedgerBalanceCents: jest.Mock;
+  listGlobePayWithdrawals: jest.Mock;
+  listGlobePayDeposits: jest.Mock;
+  listPulls: jest.Mock;
+  listDeliveryOrders: jest.Mock;
+};
+
+const mkPreflight = (): PreflightSvc => {
+  const svc = Object.create(PacksModuleService.prototype) as PreflightSvc;
+  svc.rawLedgerBalanceCents = jest.fn().mockResolvedValue(0);
+  svc.listGlobePayWithdrawals = jest.fn().mockResolvedValue([]);
+  svc.listGlobePayDeposits = jest.fn().mockResolvedValue([]);
+  svc.listPulls = jest.fn().mockResolvedValue([]);
+  svc.listDeliveryOrders = jest.fn().mockResolvedValue([]);
+  return svc;
+};
+
+// @InjectManager forwards a COPY of the context, stamped with its own marker —
+// the observed third argument is {"manager":{…},"__type":"MedusaContext"}, so a
+// literal `{}` here could never match. objectContaining keeps the assertion
+// discriminating: it still proves the context was threaded through.
+const CTX_ARG = expect.objectContaining({ __type: 'MedusaContext' });
+
+describe('deleteAccountPreflight', () => {
+  it('passes a fully settled account', async () => {
+    const svc = mkPreflight();
+    await expect(svc.deleteAccountPreflight('cus_1', CTX)).resolves.toEqual({
+      ok: true,
+    });
+  });
+
+  it('blocks a positive balance', async () => {
+    const svc = mkPreflight();
+    svc.rawLedgerBalanceCents.mockResolvedValue(1250);
+    const r = await svc.deleteAccountPreflight('cus_1', CTX);
+    expect(r).toMatchObject({ ok: false, reason: 'BALANCE_NOT_ZERO' });
+  });
+
+  // The debt case. A clawback-negative account owes us money, and `> 0` would
+  // have let it delete its way out.
+  it('blocks a NEGATIVE balance', async () => {
+    const svc = mkPreflight();
+    svc.rawLedgerBalanceCents.mockResolvedValue(-500);
+    const r = await svc.deleteAccountPreflight('cus_1', CTX);
+    expect(r).toMatchObject({ ok: false, reason: 'BALANCE_NOT_ZERO' });
+  });
+
+  it('blocks a held withdrawal', async () => {
+    const svc = mkPreflight();
+    svc.listGlobePayWithdrawals.mockResolvedValue([{ id: 'w1' }]);
+    const r = await svc.deleteAccountPreflight('cus_1', CTX);
+    expect(r).toMatchObject({ ok: false, reason: 'WITHDRAWAL_PENDING' });
+    expect(svc.listGlobePayWithdrawals).toHaveBeenCalledWith(
+      { customer_id: 'cus_1', status: ['pending', 'held'] },
+      { take: 1 },
+      CTX_ARG,
+    );
+  });
+
+  // The filter is asserted, not just the outcome: an `expired` deposit can
+  // still settle (the reconcile sweep re-reads those rows and credits them),
+  // so narrowing this back to 'pending' alone is a live money bug that no
+  // outcome-only assertion would catch.
+  it('blocks an in-flight deposit, including an expired one', async () => {
+    const svc = mkPreflight();
+    svc.listGlobePayDeposits.mockResolvedValue([{ id: 'd1' }]);
+    const r = await svc.deleteAccountPreflight('cus_1', CTX);
+    expect(r).toMatchObject({ ok: false, reason: 'DEPOSIT_PENDING' });
+    expect(svc.listGlobePayDeposits).toHaveBeenCalledWith(
+      { customer_id: 'cus_1', status: ['pending', 'expired'] },
+      { take: 1 },
+      CTX_ARG,
+    );
+  });
+
+  it('blocks unsettled vault cards', async () => {
+    const svc = mkPreflight();
+    svc.listPulls.mockResolvedValue([{ id: 'p1' }]);
+    const r = await svc.deleteAccountPreflight('cus_1', CTX);
+    expect(r).toMatchObject({ ok: false, reason: 'CARDS_UNSETTLED' });
+    expect(svc.listPulls).toHaveBeenCalledWith(
+      { customer_id: 'cus_1', status: ['vaulted', 'delivering'] },
+      { take: 1 },
+      CTX_ARG,
+    );
+  });
+
+  it('blocks a delivery that has not reached a terminal status', async () => {
+    const svc = mkPreflight();
+    svc.listDeliveryOrders.mockResolvedValue([{ id: 'do1' }]);
+    const r = await svc.deleteAccountPreflight('cus_1', CTX);
+    expect(r).toMatchObject({ ok: false, reason: 'DELIVERY_IN_FLIGHT' });
+  });
+});

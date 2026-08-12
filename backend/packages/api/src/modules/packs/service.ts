@@ -388,6 +388,14 @@ export type DrawDailyBoxResult = {
   draw_day?: string;
 };
 
+/** Why an account may not be deleted yet. The storefront switches on these. */
+export type DeleteBlockReason =
+  | 'BALANCE_NOT_ZERO'
+  | 'WITHDRAWAL_PENDING'
+  | 'DEPOSIT_PENDING'
+  | 'CARDS_UNSETTLED'
+  | 'DELIVERY_IN_FLIGHT';
+
 // Defensive depth bound for referralSummary's downward fan-out CTE. linkSponsor
 // already rejects cycles, so a real tree terminates well before this; the cap
 // is belt-and-suspenders against a corrupted edge so COUNT(*) can never loop.
@@ -3690,6 +3698,117 @@ class PacksModuleService extends MedusaService({
       [customerId],
     );
     return Number(rows[0]?.balance_cents ?? 0);
+  }
+
+  // Everything that must be settled before an account may be deleted.
+  //
+  // A PLAIN READ, holding no lock and running in no transaction — it is
+  // @InjectManager, and the delete route calls it bare. Its job is the fast,
+  // friendly rejection that hands the customer one actionable reason. The
+  // authoritative check is this same method re-run INSIDE
+  // purgeAccountPacksData's advisory lock; do not read this comment as a
+  // guarantee that the two are one atomic step, because they are not.
+  //
+  // Order is cheapest-first, and each check returns immediately: the customer
+  // gets ONE actionable instruction rather than a list, and a blocked delete
+  // costs one query in the common case.
+  @InjectManager()
+  async deleteAccountPreflight(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<
+    { ok: true } | { ok: false; reason: DeleteBlockReason; detail: string }
+  > {
+    const balanceCents = await this.rawLedgerBalanceCents(
+      customerId,
+      sharedContext,
+    );
+    if (balanceCents !== 0) {
+      return {
+        ok: false,
+        reason: 'BALANCE_NOT_ZERO',
+        // Negative means the account owes us (a clawback). Both directions are
+        // refused; the copy just has to be honest about which one it is.
+        detail:
+          balanceCents > 0
+            ? `Wallet balance is RM ${(balanceCents / 100).toFixed(2)}.`
+            : `Account owes RM ${(Math.abs(balanceCents) / 100).toFixed(2)}.`,
+      };
+    }
+
+    const [withdrawal] = await this.listGlobePayWithdrawals(
+      { customer_id: customerId, status: ['pending', 'held'] },
+      { take: 1 },
+      sharedContext,
+    );
+    if (withdrawal) {
+      return {
+        ok: false,
+        reason: 'WITHDRAWAL_PENDING',
+        detail: 'A withdrawal is still being processed.',
+      };
+    }
+
+    // Production credits deposits through the reconcile sweep, not the callback,
+    // so an in-flight deposit can land hours later and credit an account that
+    // no longer has an owner.
+    //
+    // 'expired' is in this list because it is NOT terminal: the sweep selects
+    // expired rows and flips them to 'settled', crediting the customer. The
+    // failure it prevents is concrete — the transfer doesn't land, the row
+    // expires, the customer deletes at balance 0, the transfer arrives, and
+    // the sweep credits an ownerless account.
+    const [deposit] = await this.listGlobePayDeposits(
+      { customer_id: customerId, status: ['pending', 'expired'] },
+      { take: 1 },
+      sharedContext,
+    );
+    if (deposit) {
+      return {
+        ok: false,
+        reason: 'DEPOSIT_PENDING',
+        detail: 'A deposit is still being processed.',
+      };
+    }
+
+    // A vaulted pull is an owned asset the customer can still sell for credits;
+    // a delivering one is already on its way out. Either is unsettled value.
+    const [pull] = await this.listPulls(
+      { customer_id: customerId, status: ['vaulted', 'delivering'] },
+      { take: 1 },
+      sharedContext,
+    );
+    if (pull) {
+      return {
+        ok: false,
+        reason: 'CARDS_UNSETTLED',
+        detail: 'You still have cards in your vault.',
+      };
+    }
+
+    // Nothing may still be shipping to an address this purge is about to erase.
+    //
+    // Expressed as "not terminal" rather than as the list of in-flight
+    // statuses: the enumeration is an exact complement TODAY, so a status
+    // added later would silently pass the guard — a delete that fails open.
+    // The terminal set is the half that does not grow.
+    const [delivery] = await this.listDeliveryOrders(
+      {
+        customer_id: customerId,
+        status: { $nin: ['completed', 'canceled'] },
+      },
+      { take: 1 },
+      sharedContext,
+    );
+    if (delivery) {
+      return {
+        ok: false,
+        reason: 'DELIVERY_IN_FLIGHT',
+        detail: 'A delivery is still on its way.',
+      };
+    }
+
+    return { ok: true };
   }
 
   // Wallet summary: raw balance, available (freeze-aware), locked (pending-
