@@ -10,6 +10,21 @@ import type PacksModuleService from '../../modules/packs/service';
 
 const DISABLED_MESSAGE = 'This account has been disabled. Please contact support.';
 
+/**
+ * The self-disable 403 body. A CODE, not prose: the storefront must be able to
+ * tell a self-disable from an admin disable to decide whether to offer
+ * reactivation, and `src/lib/actions/auth.ts` already shows what regex-matching
+ * human copy costs (a pattern deliberately kept tight so it cannot hijack
+ * unrelated text). A code has no such failure mode.
+ */
+export const SELF_DISABLED_CODE = 'ACCOUNT_SELF_DISABLED';
+
+/**
+ * The one path a self-disabled session may reach. Exported so the route, the
+ * guard and the specs all name it once.
+ */
+export const REACTIVATE_PATH = '/store/customers/me/reactivate';
+
 // Both guards fail CLOSED: an unexpected error is handed to next(e), which the
 // framework error handler turns into a 500 — never a silent pass.
 
@@ -54,7 +69,16 @@ export async function blockDisabledEmailpassLogin(
       return;
     }
     const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
-    if (await packs.isAccountDisabled(customerId)) {
+    // Only a SELF disable is let through at the token exchange, and the test is
+    // written that way round on purpose: `=== 'self'` to GRANT, never
+    // `=== 'admin'` to deny. The inverted form is safe only for exactly the two
+    // values that exist today — any third one (a future writer, a bad backfill)
+    // would fall through it as a silent login bypass. A self-disabled customer
+    // must be able to mint a token, because reactivation is offered only after
+    // the password is proven: refusing here would announce the account's state to
+    // anyone who guessed the email, and would leave the customer no way back in.
+    const cause = await packs.accountDisabledCause(customerId);
+    if (cause !== null && cause !== 'self') {
       next(new MedusaError(MedusaError.Types.UNAUTHORIZED, DISABLED_MESSAGE));
       return;
     }
@@ -93,11 +117,39 @@ export async function blockDisabledCustomerSession(
       return;
     }
     const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
-    if (await packs.isAccountDisabled(auth.actor_id)) {
-      next(new MedusaError(MedusaError.Types.FORBIDDEN, DISABLED_MESSAGE));
+    const cause = await packs.accountDisabledCause(auth.actor_id);
+    if (cause === null) {
+      next();
       return;
     }
-    next();
+    if (cause === 'self') {
+      // The single carve-out. It lives HERE, inside the existing guard, rather
+      // than as a separate middleware entry: this guard is registered as a
+      // blanket method-less '/store/*' matcher, which the routes sorter hoists
+      // into the `global` bucket AHEAD of every per-route entry. A
+      // separately-registered exception would simply never run.
+      //
+      // It reads `originalUrl`, NOT `req.path`. Method-less registration takes
+      // the framework's `app.use(matcher, handler)` branch, and Express strips
+      // the matched prefix there: `req.path` is '/' inside this handler, so a
+      // `req.path === REACTIVATE_PATH` test is ALWAYS false and the one path a
+      // self-disabled customer is allowed to use would 403 like everything else.
+      // The repo's other `req.path` readers all sit on entries carrying
+      // `method:`, which does not strip — the difference is the registration.
+      // Normalized the same way rate-limit.ts:569 already does it.
+      const reqPath = (req.originalUrl ?? '')
+        .split('?')[0]
+        .toLowerCase()
+        .replace(/\/+$/, '');
+      if (reqPath === REACTIVATE_PATH) {
+        next();
+        return;
+      }
+      next(new MedusaError(MedusaError.Types.FORBIDDEN, SELF_DISABLED_CODE));
+      return;
+    }
+    next(new MedusaError(MedusaError.Types.FORBIDDEN, DISABLED_MESSAGE));
+    return;
   } catch (e) {
     next(e as Error);
   }

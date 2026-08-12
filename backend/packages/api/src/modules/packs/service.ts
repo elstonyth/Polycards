@@ -2744,7 +2744,7 @@ class PacksModuleService extends MedusaService({
   }
 
   // Has this account ever completed SMS verification? One read, mirroring
-  // isAccountDisabled. The stateless OTP proof cannot answer this (10m TTL),
+  // accountDisabledCause. The stateless OTP proof cannot answer this (10m TTL),
   // and `customer.phone` is not a proxy for it — see the model's comment.
   @InjectManager()
   async isPhoneVerified(
@@ -2797,21 +2797,6 @@ class PacksModuleService extends MedusaService({
         sharedContext,
       );
     }
-  }
-
-  // True if the customer's login is administratively disabled. One indexed read
-  // on the auth path — mirrors isFrozen.
-  @InjectManager()
-  async isAccountDisabled(
-    customerId: string,
-    @MedusaContext() sharedContext: Context = {},
-  ): Promise<boolean> {
-    const [state] = await this.listCustomerAccountStates(
-      { customer_id: customerId, disabled: true },
-      { take: 1 },
-      sharedContext,
-    );
-    return Boolean(state);
   }
 
   // The disable's CAUSE, or null when the account is not disabled. Fails closed
