@@ -46,6 +46,24 @@ import {
 // which forces a full sweep on the next run — more coverage, never less.
 let lastFullSweepAt: Date | null = null;
 
+/**
+ * Test seam, and the reason one exists.
+ *
+ * Keeping the marker in module state is right for the worker — one process, one
+ * reader/writer, and a restart forces a full sweep. It also makes the job
+ * stateful ACROSS invocations, which is poison in a spec that drives several
+ * sweeps in a row: only the first would be a full sweep and every later one
+ * would silently narrow to the fast window, so any assertion about an aged or
+ * expired row would quietly stop testing what it says it tests.
+ *
+ * That is not hypothetical — it is what turned integration-http shard 4 red.
+ * The predicate this replaced (minute-of-hour) was pure, so specs never had to
+ * think about it; trading purity for correctness means handing them a reset.
+ */
+export function __resetFullSweepMarkerForTests(): void {
+  lastFullSweepAt = null;
+}
+
 export default async function globepayReconcileJob(container: MedusaContainer) {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
   if (!globepayEnabled()) return;

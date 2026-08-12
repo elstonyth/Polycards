@@ -26,6 +26,10 @@ jest.mock('../globepay-client', () => {
 });
 
 import { GlobePayError, submitDeposit } from '../globepay-client';
+import {
+  GLOBEPAY_MAX_RECENT_PENDING_PER_CUSTOMER,
+  GLOBEPAY_PENDING_WINDOW_MS,
+} from '../globepay-deposit';
 
 const submitMock = submitDeposit as jest.Mock;
 
@@ -33,6 +37,9 @@ function harness() {
   const packs = {
     createGlobePayDeposits: jest.fn().mockResolvedValue([{ id: 'gpd_1' }]),
     updateGlobePayDeposits: jest.fn().mockResolvedValue(undefined),
+    // [rows, count] — the pending-deposit cap reads the count only. Default is
+    // an empty backlog so every existing case behaves as it did before the cap.
+    listAndCountGlobePayDeposits: jest.fn().mockResolvedValue([[], 0]),
   };
   // Resolve BY KEY. The old stub returned `packs` for every key, which passed
   // only because the subject resolved one dependency; the first call to
@@ -363,5 +370,55 @@ describe('startGlobePayDeposit', () => {
     const h = harness();
     await expect(start(h)).rejects.toThrow(/temporarily unavailable/i);
     expect(submitMock).not.toHaveBeenCalled();
+  });
+});
+
+// The reconcile sweep selects pending deposits oldest-first with a fixed LIMIT,
+// and in production it is the ONLY writer that credits a paid deposit. A
+// customer looping unpaid cashier sessions could hold the front of that queue
+// and starve everyone else's real payments, so the row insert is capped.
+describe('startGlobePayDeposit — pending-deposit cap', () => {
+  it('refuses once the customer already has the maximum recent pending rows', async () => {
+    const h = harness();
+    h.packs.listAndCountGlobePayDeposits.mockResolvedValue([
+      [],
+      GLOBEPAY_MAX_RECENT_PENDING_PER_CUSTOMER,
+    ]);
+
+    await expect(start(h)).rejects.toThrow(/waiting for payment/i);
+
+    // Refused BEFORE the row insert and before the gateway call — otherwise the
+    // cap would create the very backlog it exists to prevent.
+    expect(h.packs.createGlobePayDeposits).not.toHaveBeenCalled();
+    expect(submitMock).not.toHaveBeenCalled();
+  });
+
+  it('allows the request one below the cap', async () => {
+    const h = harness();
+    h.packs.listAndCountGlobePayDeposits.mockResolvedValue([
+      [],
+      GLOBEPAY_MAX_RECENT_PENDING_PER_CUSTOMER - 1,
+    ]);
+
+    await expect(start(h)).resolves.toBeTruthy();
+    expect(h.packs.createGlobePayDeposits).toHaveBeenCalled();
+  });
+
+  it('scopes the count to this customer, to pending only, and to a window', async () => {
+    const h = harness();
+    await start(h);
+
+    const filter = h.packs.listAndCountGlobePayDeposits.mock.calls[0][0];
+    expect(filter.status).toBe('pending');
+    expect(typeof filter.customer_id).toBe('string');
+    expect(filter.customer_id.length).toBeGreaterThan(0);
+    // Window-scoped on purpose: there is no customer-facing cancel endpoint, so
+    // an unscoped cap would lock out someone who merely closed a few cashier
+    // tabs until the sweep expired their rows.
+    expect(filter.created_at?.$gte).toBeInstanceOf(Date);
+    expect(Date.now() - filter.created_at.$gte.getTime()).toBeCloseTo(
+      GLOBEPAY_PENDING_WINDOW_MS,
+      -3,
+    );
   });
 });

@@ -71,7 +71,8 @@ import PurchaseInvoice from './models/purchase-invoice';
 import PurchaseInvoiceLine from './models/purchase-invoice-line';
 import StockMovement from './models/stock-movement';
 import { pageAll } from '../../api/utils/page-all';
-import { positiveIntFromEnv } from '../../api/utils/rate-limit';
+import { positiveIntFromEnv,
+  nonNegativeIntFromEnv } from '../../api/utils/rate-limit';
 import {
   resolveBuybackRate,
   buybackAmount,
@@ -108,7 +109,11 @@ import {
   type DailyBoxBody,
   type BoxPrizeInput,
 } from './daily-box';
-import { foldRanges, type VoucherRange } from './voucher-ranges';
+import {
+  foldRanges,
+  MAX_VOUCHER_MYR,
+  type VoucherRange,
+} from './voucher-ranges';
 import type { VipLevelInput } from './vip-levels-validate';
 import type {
   ChallengeRankReward,
@@ -284,6 +289,10 @@ type LedgerSqlManager = {
   execute<T = unknown>(query: string, params?: unknown[]): Promise<T>;
 };
 
+/** The globepay_withdrawal.status domain, mirrored from the model's enum for
+ *  the raw-SQL claim below (raw SQL carries no model types). */
+type WithdrawalStatus = 'pending' | 'settled' | 'failed' | 'held';
+
 
 /** One raw `ledger_entry` row as listLedgerEntriesForAdmin reads it. */
 export type LedgerEntryRow = {
@@ -443,6 +452,21 @@ const challengeWeekAnchorParams = (
 export interface SettleDeps {
   /** Available stock per card HANDLE (job binds getCardStockByHandle). */
   getStock: (handles: string[]) => Promise<Map<string, number | null>>;
+  /**
+   * Take `qty` units of a card HANDLE out of inventory, returning true when a
+   * tracked unit was actually taken (false = untracked product, nothing to
+   * count). Injected for the same reason as getStock: inventory lives in
+   * Medusa's inventory module, reachable only through the container the JOB
+   * holds, and this module service stays container-free.
+   *
+   * Without it, settlement read stock as a GATE and never reserved, so every
+   * winner entitled to the same card re-read the same pre-grant value and all
+   * of them were granted — N claims against one physical unit, with the counter
+   * still reading 1 and no operator signal. card-stock.ts states the rule the
+   * other way round ("a FULFILMENT COUNTER, not a gate"), and the pack-open
+   * path already decrements unconditionally for exactly this reason.
+   */
+  decrementStock?: (handle: string, qty: number) => Promise<boolean>;
   /** Fired after each winner's transaction COMMITS — notifications, operator
    *  warnings. Optional + best-effort (matureDueCommissions' notify
    *  precedent): the module stays container-free, so the JOB supplies it, and
@@ -458,6 +482,9 @@ export interface SettledWinner {
   cardHandles: string[]; // granted — DISTINCT handles
   cardCount: number; // pulls actually minted (a handle repeats when qty > 1)
   skippedCardIds: string[]; // recorded skipped_no_stock
+  /** Granted cards whose inventory units are not taken yet. Taken AFTER
+   *  this winner's payout transaction commits — see reserveSettledStock. */
+  reservations: { handle: string; qty: number; pullIds: string[] }[];
 }
 // The frozen decision inputs, written verbatim onto EVERY payout row of a week
 // (card rows extend it with qty/pull_ids, the credits row with
@@ -470,6 +497,22 @@ interface SettleSnapshot {
   week_end: string;
   /** Top-10 customer ids in rank order; index + 1 IS the rank. */
   ranking: string[];
+  /**
+   * The RESOLVED rank -> payout table, frozen at first settlement.
+   *
+   * unlocked_stages holds stage NUMBERS, and those numbers index into ONE live,
+   * unscoped challenge_stage table that saveChallengeStages whole-set replaces
+   * — including from promoteDueChallengeSchedules, which the very same job runs
+   * right after settlement. Because weeksBack is 1, the ended week keeps
+   * re-settling for about a week afterwards, so a winner whose rank paid nothing
+   * under the old ladder (no payout row, therefore not in settledCustomers) was
+   * paid from the PROMOTED ladder on a later tick. Freezing the resolved table
+   * makes re-settlement deterministic.
+   *
+   * Optional: snapshots written before this field existed fall back to the live
+   * re-read, which is the pre-existing behaviour.
+   */
+  by_rank?: Record<string, { rank: number; credits: number; cardIds: string[] }>;
 }
 
 class PacksModuleService extends MedusaService({
@@ -1213,6 +1256,42 @@ class PacksModuleService extends MedusaService({
       `credit:${input.customerId}`,
     ]);
 
+    // 1a) THE ROW MUST STILL BE OPEN. Read under the lock, before anything
+    //     else, and the debit half of the pact with
+    //     claimWithdrawalAgainstDebit below — see that method for the full
+    //     argument. In short: globepay-withdrawal.ts commits the row at step 1
+    //     and debits here at step 2, so an admin approve/deny can land in
+    //     between and close a row this call is about to debit. That admin
+    //     close takes THIS key first and only closes a row it read as
+    //     undebited, so whichever transaction commits first is seen by the
+    //     other: if the close won, this read returns 'failed' and we refuse
+    //     rather than strand a debit nothing would ever refund.
+    //
+    //     DEPENDS ON READ COMMITTED, which is the default and what every
+    //     caller gets today (@InjectTransactionManager forwards
+    //     `isolationLevel` from the caller's context, and these calls pass
+    //     none). Under REPEATABLE READ this read would use the snapshot taken
+    //     at the pg_advisory_xact_lock statement — from BEFORE the admin
+    //     close committed — see 'held', and debit anyway. Do not compose this
+    //     method into a context carrying a stricter isolation level.
+    //
+    //     Fail closed on a missing row too — a debit with no row to hang the
+    //     callback on is unresolvable by definition.
+    //
+    //     'pending' is checked alongside 'held' because this guard is not
+    //     held-specific: any closed row must not be debited.
+    const [openRow] = await em.execute<{ status: string }[]>(
+      'SELECT status FROM globepay_withdrawal ' +
+        'WHERE merchant_transaction_id = ? AND deleted_at IS NULL',
+      [input.merchantTransactionId],
+    );
+    if (openRow?.status !== 'pending' && openRow?.status !== 'held') {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'This withdrawal is no longer open, so nothing was debited. Start a new one.',
+      );
+    }
+
     // 2) The DESTINATION, resolved here rather than taken from the request.
     //    Ownership is structural: the list read is keyed on input.customerId
     //    (which comes from the verified token), so an id belonging to another
@@ -1280,26 +1359,39 @@ class PacksModuleService extends MedusaService({
     //    debit cannot interleave either.
     //
     //    `pending` and `settled` both moved (or are still moving) money;
-    //    `failed` did not — a refused or refunded payout must never consume the
-    //    customer's cap. Those three are the entire domain of the column's
-    //    CHECK constraint (Migration20260722170000), which also supplies the
-    //    (status, created_at) and (customer_id) partial indexes this scan uses.
+    //    `held` does too — the debit already posted (see
+    //    startGlobePayWithdrawal), the row is merely parked for admin approval
+    //    instead of being sent to the gateway, and the money stays out of the
+    //    balance until a refund (admin deny) puts it back. So a held payout
+    //    consumes the customer's daily blast radius exactly like a submitted
+    //    one. `failed` alone did not move money — a refused or refunded
+    //    payout must never consume the customer's cap. Those four are the
+    //    entire domain of the column's CHECK constraint
+    //    (Migration20260722170000, widened to add `held` by
+    //    Migration20260811220000), which also supplies the (status,
+    //    created_at) and (customer_id) partial indexes this scan uses.
     //
     //    The just-created row is EXCLUDED by merchant_transaction_id:
-    //    globepay-withdrawal.ts writes it as `pending` BEFORE calling this
-    //    method (the callback echoes only MerchantTransactionId, so that row is
-    //    the only way back to the customer), so an unfiltered sum would count
-    //    this very attempt against its own cap and refuse every withdrawal
-    //    above half the ceiling.
+    //    globepay-withdrawal.ts writes it with its final status (`pending` or
+    //    `held`) BEFORE calling this method (the callback echoes only
+    //    MerchantTransactionId, so that row is the only way back to the
+    //    customer), so an unfiltered sum would count this very attempt
+    //    against its own cap and refuse every withdrawal above half the
+    //    ceiling.
     //
     //    A CONCURRENT attempt's row does still count, though: request B writes
-    //    its own `pending` row before it takes this lock, so A's sum includes B
+    //    its own row before it takes this lock, so A's sum includes B
     //    even if B goes on to fail the gate and flip to `failed`. That
     //    over-counts, never under-counts, and it self-heals as the 24h window
     //    slides — the fail-closed direction is the right default for a cap
     //    whose job is bounding blast radius.
+    // nonNegativeIntFromEnv, NOT positiveIntFromEnv: setting this cap to 0 is
+    // the operator's stop lever for money-out during an incident, and the
+    // positive-only parser routed 0 to the DEFAULT — silently leaving
+    // withdrawals wide open at RM 50,000 while the logs said the value was
+    // ignored.
     const capCents =
-      positiveIntFromEnv(
+      nonNegativeIntFromEnv(
         'GLOBEPAY_WD_DAILY_MAX_RM',
         GLOBEPAY_WD_DAILY_MAX_RM_DEFAULT,
       ) * 100;
@@ -1307,7 +1399,7 @@ class PacksModuleService extends MedusaService({
       'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS sum_cents ' +
         'FROM globepay_withdrawal ' +
         'WHERE customer_id = ? AND deleted_at IS NULL ' +
-        "AND status IN ('pending', 'settled') " +
+        "AND status IN ('pending', 'settled', 'held') " +
         "AND created_at > now() - interval '24 hours' " +
         'AND merchant_transaction_id <> ?',
       [input.customerId, input.merchantTransactionId],
@@ -1353,6 +1445,178 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     return { ...debit, destination };
+  }
+
+  /**
+   * ATOMIC STATUS CLAIM on one globepay_withdrawal row — the mutex behind the
+   * admin approve/deny routes (plan 094).
+   *
+   * ONE conditional UPDATE, and that is the whole point: Postgres re-evaluates
+   * the predicate against committed state AFTER the row lock is released, so
+   * of two concurrent claims exactly one matches a row and the other matches
+   * none. `RETURNING id` is that answer. `true` means THIS caller moved the
+   * row and owns whatever follows it (a gateway submit, a refund); `false`
+   * means someone else already did, and the caller must not act.
+   *
+   * Do NOT reimplement this with `updateGlobePayWithdrawals({ selector, data
+   * })`. It type-checks and hands back an array, so `length === 0` reads like
+   * the same guard, but the generated service resolves the selector with a
+   * find-then-write and takes no row lock: two concurrent approves — a
+   * double-clicked button is the realistic trigger — both read 'held', both
+   * see one row, and both submit. That is a duplicate payout to a real bank
+   * account. Raw SQL for the same reason the rolling-24h cap above uses it:
+   * the module-service layer has no conditional-write primitive.
+   */
+  @InjectTransactionManager()
+  async claimGlobePayWithdrawalStatus(
+    input: {
+      id: string;
+      /** Statuses the row may be claimed FROM. A row in any other status is
+       *  left untouched and the claim answers false. */
+      from: readonly WithdrawalStatus[];
+      to: WithdrawalStatus;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<boolean> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    // One placeholder per accepted status. The list is ours (never a request
+    // value) and it stays BOUND rather than interpolated regardless.
+    const accepted = input.from.map(() => '?').join(', ');
+    const rows = await em.execute<{ id: string }[]>(
+      'UPDATE globepay_withdrawal SET status = ?, updated_at = now() ' +
+        `WHERE id = ? AND status IN (${accepted}) AND deleted_at IS NULL ` +
+        'RETURNING id',
+      [input.to, input.id, ...input.from],
+    );
+    return rows.length === 1;
+  }
+
+  /**
+   * The admin approve/deny claim, SERIALIZED AGAINST THE DEBIT — the whole
+   * reason this exists on top of claimGlobePayWithdrawalStatus (plan 094
+   * review fix, CodeRabbit).
+   *
+   * THE WINDOW. startGlobePayWithdrawal commits the withdrawal row at step 1
+   * and debits at step 2, so a committed 'held' row with no debit yet is a
+   * normal, expected state — not only a crash. An admin acting inside that
+   * window sees "no debit" and cannot tell it from "no debit EVER": close the
+   * row on the first reading and the debit that lands a moment later is
+   * stranded for good, because the reconcile sweep selects 'pending' only and
+   * never revisits a 'held' or 'failed' row.
+   *
+   * WHY NOT A TIMER. This used to be an elapsed-time gate
+   * (GLOBEPAY_WD_HELD_DEBIT_GRACE_MS): wait 60s and a still-running debit was
+   * declared impossible, on the grounds that
+   * idle_in_transaction_session_timeout would have killed it. That reasoning
+   * was FALSE. That timeout only fires on a session idle BETWEEN statements;
+   * a transaction blocked inside `SELECT pg_advisory_xact_lock(...)` is
+   * executing a statement, is reported `active` with wait_event `advisory`,
+   * and is never killed by it. Nothing in the driver config bounds a lock
+   * wait (utils/db-driver-options.ts cannot even set lock_timeout), so no
+   * amount of elapsed time proves a debit has finished. Only the lock does.
+   *
+   * THE PACT, both halves of which are required:
+   *   - here: take `credit:<customer>`, read the debit, and claim the row —
+   *     all in ONE transaction, so the answer cannot go stale between the
+   *     read and the write;
+   *   - in withdrawForCashout (step 1a): take the same key, re-read the row,
+   *     and refuse to debit a row that is no longer open.
+   *
+   * The lock alone would NOT be enough. A debit queued BEHIND this claim is
+   * invisible to the read here, so without step 1a it would go on to commit
+   * against a row this call had just closed. With both halves, the two
+   * critical sections are mutually exclusive and each reads what the other
+   * wrote: whichever commits first wins, and the loser observes it.
+   *
+   * @returns `debited` — whether a debit exists for this payout, decided
+   * under the lock, so a caller may act on `false` as "no debit will ever
+   * land". `claimed` — whether THIS caller moved the row (see
+   * claimGlobePayWithdrawalStatus).
+   */
+  @InjectTransactionManager()
+  async claimWithdrawalAgainstDebit(
+    input: {
+      id: string;
+      customerId: string;
+      /** withdrawalIdempotencyReference(customerId, merchantTransactionId) —
+       *  the `wd:` anchor the debit is stored under. */
+      debitReference: string;
+      from: readonly WithdrawalStatus[];
+      /** Where the row goes when a debit EXISTS. An UNDEBITED row is always
+       *  closed 'failed' instead: there is no other honest destination for a
+       *  payout that never took the customer's money. */
+      to: WithdrawalStatus;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ debited: boolean; claimed: boolean }> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+
+    // BOUND THE WAIT, admin-side only. Nothing else caps a lock wait —
+    // utils/db-driver-options.ts cannot set lock_timeout (see its comment),
+    // and idle_in_transaction_session_timeout does not apply to a session
+    // blocked inside a statement. Without this an admin click on a customer
+    // with a long-running credit mutation hangs indefinitely, holding one of
+    // the five pooled connections. Timing out is HARMLESS here: the statement
+    // error aborts the transaction, so the row is untouched and the operator
+    // clicks again. SET LOCAL, so it dies with this transaction rather than
+    // leaking onto the pooled connection's next borrower.
+    //
+    // Deliberately NOT applied to withdrawForCashout: there a timeout turns a
+    // merely slow withdrawal into a customer-facing error, and that call has
+    // no equivalent "try again, nothing moved" affordance.
+    await em.execute("SET LOCAL lock_timeout = '5s'");
+
+    // The try spans the WHOLE locked section, not just the advisory lock.
+    // SET LOCAL applies to every statement left in this transaction, and the
+    // claim's `UPDATE … RETURNING id` takes a ROW lock that can time out too
+    // — wrapping only the acquisition would let that one reach the operator
+    // as a raw `canceling statement due to lock timeout`, which is exactly
+    // what the translation below exists to prevent, one statement later.
+    try {
+      // Same key and same idiom as mutateCreditAtomic and withdrawForCashout.
+      // Re-entrant per session, so a refund composed onto this context later
+      // re-taking it is a no-op.
+      await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+        `credit:${input.customerId}`,
+      ]);
+
+      // The same read the routes did unlocked before this method existed —
+      // deliberately the generated lister, not new raw SQL, so its soft-delete
+      // semantics stay identical to the shipped behaviour. sharedContext is
+      // threaded so it rides THIS locked transaction.
+      const [debitRow] = await this.listCreditTransactions(
+        {
+          customer_id: input.customerId,
+          source_transaction_id: input.debitReference,
+        },
+        { take: 1 },
+        sharedContext,
+      );
+      const debited = Boolean(debitRow);
+
+      // In the SAME transaction, so the decision and the row move commit
+      // together. @InjectTransactionManager re-uses a context that already
+      // carries a transactionManager instead of opening a second transaction —
+      // if it did open one, the claim would land outside the lock and the whole
+      // pact above would silently lapse.
+      const claimed = await this.claimGlobePayWithdrawalStatus(
+        { id: input.id, from: input.from, to: debited ? input.to : 'failed' },
+        sharedContext,
+      );
+      return { debited, claimed };
+    } catch (error) {
+      // ONLY 55P03 (lock_not_available) is translated. Anything else — a
+      // dropped connection, a constraint violation — must surface as itself
+      // rather than be relabelled "someone else is busy", which would send an
+      // operator chasing contention that never happened. Never swallowed into
+      // a fabricated {debited:false}: that would close the row on a reading we
+      // never took.
+      if ((error as { code?: string })?.code !== '55P03') throw error;
+      throw new MedusaError(
+        MedusaError.Types.CONFLICT,
+        'Another balance operation for this customer is in progress. Nothing was changed — try again in a moment.',
+      );
+    }
   }
 
   // Append-only reversal of a single ledger row (the open-saga compensation).
@@ -1903,9 +2167,33 @@ class PacksModuleService extends MedusaService({
 
     let amountMyr: number | undefined;
     if (grant.kind === 'voucher') {
-      amountMyr = Number(
+      const raw = Number(
         (grant.payload as { amount_myr?: number } | null)?.amount_myr ?? 0,
       );
+      // The payload is SNAPSHOTTED at grant time, so the admin-side cap in
+      // voucher-ranges.ts does not bind it: a grant minted while the ladder held
+      // a larger figure stays claimable at that figure, and
+      // Migration20260805000000 deliberately left already-minted grants
+      // claimable after zeroing the ladder. mutateCreditAtomic sign-checks only
+      // topup and pack_open, so 'voucher_claim' reached the ledger unbounded.
+      //
+      // Clamp rather than refuse: the grant is a real obligation and refusing it
+      // outright would strand a customer's legitimate reward. Clamping pays what
+      // the operator's own ceiling allows and records the discrepancy.
+      if (!Number.isFinite(raw) || raw < 0) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `Voucher grant ${grantId} carries a non-payable amount.`,
+        );
+      }
+      amountMyr = Math.min(raw, MAX_VOUCHER_MYR);
+      if (amountMyr !== raw) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          '[claimReward] voucher grant above the ceiling — paying the cap',
+          { grant_id: grantId, requested_myr: raw, paid_myr: amountMyr },
+        );
+      }
       // ext=0 (basis-neutral); idempotent on the grant id so a replay that
       // somehow reaches the credit step before the status flip still no-ops.
       await this.mutateCreditAtomic(
@@ -2989,6 +3277,18 @@ class PacksModuleService extends MedusaService({
       // Net basis reaches zero on clawback (reverseOpen negates externalFundedCents),
       // so the basis is NOT refund-stable at the ledger level. The monotonic
       // lifetime counter (built in a later task) is the rank basis; spec §3.
+      // SUSPENDED (referral programme retired): this fan-out is UNREACHABLE for
+      // any new customer. It is gated on a referral_relationship row, and
+      // linkSponsor — the only writer of that table — was removed. Existing
+      // edges (if any survive in production) still pay, which is deliberate:
+      // silently dropping a commission a recruit already earned would be a
+      // money change disguised as a cleanup.
+      //
+      // Kept rather than excised because settleOpen is the atomic
+      // open-settlement seam (debit + fan-out under ONE advisory lock) and the
+      // guard below costs one indexed lookup that returns nothing. Excising it
+      // is a separate, reviewable change against the most load-bearing money
+      // function in the module — do not fold it into a cleanup commit.
       const basisSen = -externalFundedCents;
       if (basisSen > 0) {
         const [rel] = await this.listReferralRelationships(
@@ -3457,7 +3757,16 @@ class PacksModuleService extends MedusaService({
         : null;
 
     const frozen = await this.isFrozen(customerId, sharedContext);
-    const available = frozen ? 0 : balance - locked;
+    // ONE division, from the integer-cent values, instead of subtracting two
+    // already-divided floats. `balanceCents/100 - lockedCents/100` can land a
+    // hair under the exact figure (6407/100 - 1407/100 === 49.99999999999999),
+    // and because withdrawalGateError compares `amount <= withdrawable` while
+    // the UI renders the same number with toFixed(2), the customer is shown
+    // "RM 50.00" and refused when they type 50. At the RM 50 minimum that
+    // leaves nothing they can withdraw at all until the arithmetic shifts.
+    const available = frozen
+      ? 0
+      : (Math.round(balance * 100) - Math.round(locked * 100)) / 100;
 
     // Playthrough gate: all-or-nothing on the available balance. Spending on
     // packs stays unrestricted either way — the gate only limits cashout.
@@ -3730,76 +4039,20 @@ class PacksModuleService extends MedusaService({
     };
   }
 
-  // Insert a recruit→sponsor edge with the fraud guards (spec §7). Under ONE
-  // transaction holding advisory locks on BOTH customer ids (sorted, so two
-  // concurrent inserts can't deadlock), it: rejects self-referral; rejects a
-  // cycle via a WITH RECURSIVE ancestor walk from the proposed sponsor; relies on
-  // the unique customer_id index for immutability (a second link throws). The
-  // route layer binds recruitId to the authenticated actor (Task 11) so a sponsor
-  // can't insert recruits under themselves.
-  @InjectTransactionManager()
-  async linkSponsor(
-    input: { recruitId: string; sponsorId: string },
-    @MedusaContext() sharedContext: Context = {},
-  ): Promise<{ id: string }> {
-    if (input.recruitId === input.sponsorId) {
-      throw new MedusaError(
-        MedusaError.Types.INVALID_DATA,
-        'A customer cannot refer themselves.',
-      );
-    }
-    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    // Lock both ids in a stable (sorted) order to avoid deadlocks with a
-    // concurrent reciprocal insert.
-    const [lo, hi] = [input.recruitId, input.sponsorId].sort();
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `referral:${lo}`,
-    ]);
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `referral:${hi}`,
-    ]);
-
-    // Cycle check: walk the proposed sponsor's upline; if the recruit appears,
-    // linking would close a loop. customer_id is unique so the upline is a simple
-    // path (no diamonds) — the recursion terminates.
-    const ancestors = await em.execute<{ sponsor_id: string }[]>(
-      `WITH RECURSIVE up AS (
-         SELECT sponsor_id FROM referral_relationship
-           WHERE customer_id = ? AND deleted_at IS NULL
-         UNION ALL
-         SELECT r.sponsor_id FROM referral_relationship r
-           JOIN up ON r.customer_id = up.sponsor_id
-           WHERE r.deleted_at IS NULL
-       )
-       SELECT sponsor_id FROM up WHERE sponsor_id = ? LIMIT 1`,
-      [input.sponsorId, input.recruitId],
-    );
-    if (ancestors.length > 0) {
-      throw new MedusaError(
-        MedusaError.Types.INVALID_DATA,
-        'This referral would create a cycle in the sponsor tree.',
-      );
-    }
-
-    // Immutability: the unique customer_id index rejects a second link. Surface a
-    // clean error rather than a raw constraint violation.
-    const existing = await this.listReferralRelationships(
-      { customer_id: input.recruitId },
-      { take: 1 },
-    );
-    if (existing.length > 0) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_ALLOWED,
-        'This customer already has a sponsor.',
-      );
-    }
-
-    const [rel] = await this.createReferralRelationships(
-      [{ customer_id: input.recruitId, sponsor_id: input.sponsorId }],
-      sharedContext,
-    );
-    return { id: rel.id };
-  }
+  // linkSponsor was REMOVED (referral programme retired).
+  //
+  // It was the only writer of referral_relationship, and its cycle probe was a
+  // recursive CTE with UNION ALL, no depth bound and no dedup: against a cyclic
+  // graph where the sought id is not on the walk it never terminated, pinning a
+  // pooled connection until the pool was exhausted. Postgres does not detect
+  // cycles without an explicit CYCLE clause, and statement_timeout cannot be set
+  // through databaseDriverOptions (see utils/db-driver-options.ts).
+  //
+  // The commission fan-out in settleOpen is now unreachable for any new
+  // customer: it is guarded by a referral_relationship lookup, and with no
+  // writer left no new edge can exist. It is deliberately left in place rather
+  // than excised, because settleOpen is the atomic open-settlement seam and its
+  // invariants are load-bearing — see the SUSPENDED note at that guard.
 
   // Privacy-bounded referral summary for ONE customer (spec §7 / Task 5).
   // Returns ONLY the caller's own earnings and their gen-1 (direct) recruits —
@@ -5007,6 +5260,27 @@ class PacksModuleService extends MedusaService({
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
     const rows = await em.execute<{ sen: string | null }[]>(
+      // Debits ONLY (`amount < 0`) — deliberate, and recorded in ADR 0003 under
+      // "Reversal exclusion". vip-lifetime.ts's lifetimeTurnoverSen is the
+      // pure-fold mirror that has to agree with this SQL; netting one and not
+      // the other desyncs the tests from production silently, which is exactly
+      // what a previous attempt at fixing this line did.
+      //
+      // What this filter is NOT is the re-grant guard, and mis-stating that has
+      // already cost one bad change. Re-granting a level is impossible at the
+      // DB: grantLevelUpRewards inserts ON CONFLICT (customer_id, level, kind)
+      // DO NOTHING against UQ_vip_reward_grant_customer_level_kind. Two further
+      // guards sit above it — highest_level_ever is a GREATEST ratchet, and
+      // levelsToGrant starts at max(highestEver + 1, 2), so a LOWER level
+      // yields an empty list. None of the three depends on how this counter is
+      // summed.
+      //
+      // Reversals DO move the system, on the other basis:
+      // creditSummary().vipSpendTotal is net, drops on reversal, and drives
+      // current_level. This monotonic one feeds highest_level_ever.
+      //
+      // Three audit passes have flagged `amount < 0` as a bug and one got as
+      // far as changing it. WON'T-FIX — ADR 0003, "Reversal exclusion".
       `SELECT COALESCE(SUM(ROUND(-amount * 100)), 0)::bigint AS sen
          FROM credit_transaction
         WHERE customer_id = ? AND reason = 'pack_open' AND amount < 0 AND deleted_at IS NULL`,
@@ -6880,7 +7154,24 @@ class PacksModuleService extends MedusaService({
           .filter((s) => prior.unlocked_stages.includes(s.stage_number))
           .sort((a, b) => a.stage_number - b.stage_number)
       : unlockedStages(stages, poolMyr);
-    if (unlocked.length === 0) {
+    // The frozen table is authoritative on a re-settlement tick, so it has to
+    // be resolved BEFORE the empty-unlocked gate below. `unlocked` is rebuilt by
+    // filtering LIVE stages against prior.unlocked_stages, so an admin DELETING
+    // an unlocked stage after a partial settlement empties it — and the gate
+    // would then strand every remaining winner behind a prize table we already
+    // froze and still hold. Freezing by_rank (finding 6) only helped the ticks
+    // that got past this line.
+    const frozenByRank =
+      prior?.by_rank && Object.keys(prior.by_rank).length > 0
+        ? new Map<number, RankPayout>(
+            Object.entries(prior.by_rank).map(([rank, p]) => [
+              Number(rank),
+              { rank: Number(rank), credits: p.credits, cardIds: p.cardIds },
+            ]),
+          )
+        : null;
+
+    if (!frozenByRank && unlocked.length === 0) {
       return { weekStartIso, settled: false, winners: [] };
     }
 
@@ -6893,7 +7184,10 @@ class PacksModuleService extends MedusaService({
     if (ranking.length === 0) {
       return { weekStartIso, settled: false, winners: [] };
     }
-    const byRank = payoutByRank(unlocked);
+    // Falling back to a live payoutByRank(unlocked) is what let a promoted
+    // ladder pay an earlier week's winners; the fallback survives only for
+    // snapshots written before by_rank existed.
+    const byRank = frozenByRank ?? payoutByRank(unlocked);
 
     // Resolve card ids -> handles ONCE (spec: rank_rewards holds Card.id,
     // pull.card_id holds Card.handle — never pass ids into createPulls).
@@ -6910,9 +7204,19 @@ class PacksModuleService extends MedusaService({
 
     const snapshot: SettleSnapshot = {
       pool_myr: poolMyr,
-      unlocked_stages: unlocked.map((s) => s.stage_number),
+      // prior's list wins: re-deriving from `unlocked` would let a deleted
+      // stage shrink the frozen record, and the NEXT tick filters against it.
+      unlocked_stages: prior?.unlocked_stages ?? unlocked.map((s) => s.stage_number),
       week_end: endUtc.toISOString(),
       ranking,
+      // A Map does not survive the json column — persist as a plain object and
+      // rehydrate above.
+      by_rank: Object.fromEntries(
+        [...byRank].map(([rank, p]) => [
+          String(rank),
+          { rank: p.rank, credits: p.credits, cardIds: p.cardIds },
+        ]),
+      ),
     };
     const winners: SettledWinner[] = [];
     for (const [i, customerId] of ranking.entries()) {
@@ -6936,6 +7240,8 @@ class PacksModuleService extends MedusaService({
       });
       if (!settled) continue;
       winners.push(settled);
+      // Committed above; the units are taken now, outside that transaction.
+      await this.reserveSettledStock(settled, deps.decrementStock, weekStartIso);
       // Fired AFTER this winner's transaction committed, never inside it.
       if (!deps.onSettled) continue;
       try {
@@ -7082,6 +7388,7 @@ class PacksModuleService extends MedusaService({
     const cardHandles: string[] = [];
     let cardCount = 0; // pulls minted, NOT distinct handles (qty can exceed 1)
     const skippedCardIds: string[] = [];
+    const reservations: SettledWinner['reservations'] = [];
     const handles = [...qtyById.keys()]
       .map((id) => input.handleById.get(id))
       .filter((h): h is string => Boolean(h));
@@ -7103,6 +7410,17 @@ class PacksModuleService extends MedusaService({
       // kept — the row's scalar pull_id can only hold the first.
       let pullIds: string[] = [];
       if (inStock) {
+        // The gate above is kept on purpose — an out-of-stock prize becoming a
+        // manual-fulfilment item is a product decision the job logs for an
+        // operator — but a gate that never decrements is the read-then-check
+        // race decrement-card-stock.ts:24-28 exists to avoid.
+        //
+        // The TAKE itself does not belong in this transaction. adjustInventory
+        // is Medusa's inventory module on its own connection and commits
+        // independently, so it cannot roll back with us: called from in here, a
+        // later throw rolled the payout back while the take stood, and the next
+        // hourly tick took the units again. reserveSettledStock runs it after
+        // this transaction commits — see there for why the race stays closed.
         const minted = await this.createPulls(
           Array.from({ length: qty }, () => ({
             customer_id: customerId,
@@ -7111,12 +7429,18 @@ class PacksModuleService extends MedusaService({
             order_id: null,
             rolled_at: new Date(),
             source: 'reward' as const,
+            // Minted UNRESERVED; flipped only once a unit is really taken.
+            // Buyback restores flagged pulls only, so false is the safe
+            // default — giving back a unit that was never taken would mint a
+            // phantom one (decrement-card-stock.ts:52-56).
+            stock_earmarked: false,
           })),
           sharedContext,
         );
         pullIds = minted.map((p) => p.id);
         cardCount += pullIds.length;
         cardHandles.push(handle!);
+        reservations.push({ handle: handle!, qty, pullIds });
       } else {
         skippedCardIds.push(cardId);
       }
@@ -7180,7 +7504,63 @@ class PacksModuleService extends MedusaService({
       cardHandles,
       cardCount,
       skippedCardIds,
+      reservations,
     };
+  }
+
+  /**
+   * Take the inventory units for a winner whose payout has COMMITTED.
+   *
+   * Deliberately outside settleChallengeWinner's transaction. adjustInventory
+   * belongs to Medusa's inventory module and commits on its own connection, so
+   * it cannot roll back with ours. Called from inside, a throw after it — a
+   * duplicate-payout constraint, the ledger write, a dropped connection — rolled
+   * the payout back while the take stood. And because the re-entry gate is per
+   * CUSTOMER (settledCustomers, built from payout rows), the winner was then
+   * absent from it, so the next hourly tick re-settled them and took the units
+   * AGAIN, every hour for the ~168 ticks weeksBack:1 keeps the week in scope.
+   *
+   * Post-commit the winner is in settledCustomers for good, so this runs at
+   * most once per winner. The read-then-check race the take was added for stays
+   * closed: the winner loop is sequential and awaits, so the next winner's
+   * getStock read sees this take.
+   *
+   * Failures are logged and bounded, never thrown — the payout is already
+   * committed and must not be undone over a counter. Both directions are
+   * conservative: a failed take leaves the pulls unflagged, so buyback can
+   * never restore a unit that was not taken.
+   */
+  private async reserveSettledStock(
+    winner: SettledWinner,
+    decrementStock:
+      | ((handle: string, qty: number) => Promise<boolean>)
+      | undefined,
+    weekStartIso: string,
+  ): Promise<void> {
+    if (!decrementStock) return;
+    for (const r of winner.reservations) {
+      try {
+        // false = untracked product: nothing counted, so nothing to flag.
+        if (!(await decrementStock(r.handle, r.qty))) continue;
+        if (r.pullIds.length === 0) continue;
+        await this.updatePulls({
+          selector: { id: r.pullIds },
+          data: { stock_earmarked: true },
+        });
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          '[settleChallengeWeek] stock take failed AFTER the payout committed — counter reads high, prize already granted',
+          {
+            customer_id: winner.customerId,
+            week_start: weekStartIso,
+            handle: r.handle,
+            qty: r.qty,
+            error: String(err),
+          },
+        );
+      }
+    }
   }
 
   // One-shot backfill for the recorded-pull-value follow-up (spec 2026-07-19

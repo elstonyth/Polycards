@@ -431,6 +431,119 @@ moduleIntegrationTestRunner<PacksModuleService>({
         ).toBe(false);
       });
 
+      it('takes the unit after the payout commits and flags the minted pull', async () => {
+        const { card } = await seedBase();
+        await service.createChallengeStages([
+          {
+            stage_number: 1,
+            threshold_myr: 100,
+            rank_rewards: [
+              { rank: 1, card_id: card.id, credits: 0 },
+            ] as unknown as Record<string, unknown>,
+          },
+        ]);
+        await seedPriorWeekPull('cus_a', card);
+
+        const takes: Array<[string, number]> = [];
+        await service.settleChallengeWeek({
+          getStock: async () =>
+            new Map<string, number | null>([[card.handle, 5]]),
+          decrementStock: async (handle, qty) => {
+            takes.push([handle, qty]);
+            // The contract the fix exists for, asserted from INSIDE the
+            // callback: by the time the take runs, the payout transaction has
+            // already committed. Checked after the fact, both orderings look
+            // identical - which is why the first version of this test passed
+            // against the buggy code too.
+            const committed = await service.listChallengePayouts(
+              { kind: 'card' },
+              { take: 5 },
+            );
+            expect(committed).toHaveLength(1);
+            expect(committed[0]!.status).toBe('granted');
+            const minted = await service.listPulls(
+              { customer_id: 'cus_a', source: 'reward' },
+              { take: 5 },
+            );
+            expect(minted).toHaveLength(1);
+            expect(minted[0]!.stock_earmarked).toBe(false);
+            return true;
+          },
+        });
+
+        expect(takes).toEqual([[card.handle, 1]]);
+        const pulls = await service.listPulls(
+          { customer_id: 'cus_a', source: 'reward' },
+          { take: 5 },
+        );
+        expect(pulls).toHaveLength(1);
+        // Minted unflagged, flipped only once the take confirmed.
+        expect(pulls[0]!.stock_earmarked).toBe(true);
+      });
+
+      it('a failed take leaves the payout paid, the pull unflagged, and never retakes', async () => {
+        // Regression for two defects that shipped together. The take used to run
+        // INSIDE settleChallengeWinner's transaction, but adjustInventory commits
+        // on the inventory module's own connection and cannot roll back with us.
+        // A throw then took two victims:
+        //
+        //   1. the catch did `skippedCardIds.push(cardId); continue;`, and that
+        //      continue skipped the rows.push below — the prize vanished with no
+        //      payout row at all, not even skipped_no_stock;
+        //   2. no payout row meant the winner was absent from settledCustomers,
+        //      so the next hourly tick re-settled them and took the unit AGAIN,
+        //      every hour for the ~168 ticks weeksBack:1 keeps the week in scope.
+        //
+        // Both assertions below fail on that code: rows came back empty, and
+        // calls reached 2.
+        const { card } = await seedBase();
+        await service.createChallengeStages([
+          {
+            stage_number: 1,
+            threshold_myr: 100,
+            rank_rewards: [
+              { rank: 1, card_id: card.id, credits: 0 },
+            ] as unknown as Record<string, unknown>,
+          },
+        ]);
+        await seedPriorWeekPull('cus_a', card);
+
+        let calls = 0;
+        const deps = {
+          getStock: async () =>
+            new Map<string, number | null>([[card.handle, 5]]),
+          decrementStock: async () => {
+            calls += 1;
+            throw new Error('inventory unavailable');
+          },
+        };
+
+        const first = await service.settleChallengeWeek(deps);
+        expect(first.settled).toBe(true); // a counter must never undo a payout
+        expect(calls).toBe(1);
+
+        const rows = await service.listChallengePayouts(
+          { kind: 'card' },
+          { take: 5 },
+        );
+        expect(rows).toHaveLength(1);
+        expect(rows[0]!.status).toBe('granted');
+
+        const pulls = await service.listPulls(
+          { customer_id: 'cus_a', source: 'reward' },
+          { take: 5 },
+        );
+        expect(pulls).toHaveLength(1);
+        // Unflagged: buyback restores flagged pulls only, so a unit that was
+        // never taken must never be handed back.
+        expect(pulls[0]!.stock_earmarked).toBe(false);
+
+        // The drain guard: a second tick must not take again.
+        const second = await service.settleChallengeWeek(deps);
+        expect(second.settled).toBe(false);
+        expect(calls).toBe(1);
+      });
+
       it('maps rank from ranking position: three winners each get THEIR prize', async () => {
         const { card } = await seedBase();
         await seedStage(1, 100, [

@@ -314,7 +314,15 @@ export const AmountBalanceSchema = z.looseObject({
  *  is the only field the redirect flow needs; the bank/QR extras ride along on
  *  the loose object for a future in-page renderer. */
 export const DepositStartSchema = z.looseObject({
-  url: z.string(),
+  // The cashier URL comes from the GATEWAY's response body, which — unlike
+  // their callbacks — carries no signature; TLS is the only thing vouching for
+  // it, and it flows straight into window.location.assign. A bare z.string()
+  // accepts 'javascript:' and 'data:', which CSP script-src does not block for
+  // a navigation. Requires a compromised gateway or TLS interception, so this
+  // is a trust-boundary belt, not a live hole.
+  url: z
+    .string()
+    .refine((u) => /^https:\/\//i.test(u), 'cashier url must be https'),
   transactionId: z.string(),
   merchantTransactionId: z.string(),
   amount: finite,
@@ -323,12 +331,27 @@ export const DepositStartSchema = z.looseObject({
 /** POST /store/credits/withdraw response. The debit already happened —
  *  `balance` is the post-debit balance, and the payout completes (or refunds)
  *  asynchronously via the gateway callback. `transactionId` is null when the
- *  submit outcome was ambiguous (still resolves asynchronously). */
+ *  submit outcome was ambiguous (still resolves asynchronously) OR the row was
+ *  held for admin approval instead of submitted (see `status`).
+ *  `status: 'held'` means the amount left the balance but a human has not yet
+ *  approved sending it to the gateway (plan 094) — the form must not render
+ *  that as a completed payout.
+ *  `.optional()`, not required: this field shipped in plan 094, and the
+ *  storefront and backend are separate deploy units (own DO app components) —
+ *  a storefront build that rolls out ahead of the backend must still parse a
+ *  response with no `status` at all. Absent means a pre-094 backend, which
+ *  has no held state, so defaulting to 'pending' downstream (vault.ts) is the
+ *  true reading, not a guess. Same reasoning as `usableFrom` on
+ *  SavedBankAccountsSchema below: making this required would fail the WHOLE
+ *  object during that skew window, and `parseOne` returning null AFTER the
+ *  backend already debited is the exact "money vanished" failure this plan
+ *  exists to prevent, reached through a different door. */
 export const WithdrawStartSchema = z.looseObject({
   merchantTransactionId: z.string(),
   transactionId: z.string().nullable(),
   amount: finite,
   balance: finite,
+  status: z.enum(['pending', 'held']).optional(),
 });
 
 /** GET /store/credits/withdraw/banks response — the payout bank picker. */
@@ -459,20 +482,6 @@ export const VipSchema = z.looseObject({
     )
     .default([]),
 });
-
-// --- actions/referral.ts ----------------------------------------------------
-
-/** GET /store/referral — referral summary for the authenticated customer. */
-export const ReferralSummarySchema = z.looseObject({
-  directRecruits: z.array(
-    z.looseObject({ handle: z.string().nullable(), contribution: finite }),
-  ),
-  downstreamCount: finite,
-  totalEarned: finite,
-});
-
-/** POST /store/referral — apply-referral response (just the new link id). */
-export const ReferralApplySchema = z.looseObject({ id: z.string() });
 
 // --- actions/notifications.ts -----------------------------------------------
 

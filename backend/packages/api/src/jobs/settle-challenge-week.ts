@@ -1,7 +1,9 @@
+import { Modules } from '@medusajs/framework/utils';
 import { MedusaContainer } from '@medusajs/framework/types';
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../modules/packs';
-import { getCardStockByHandle } from '../modules/packs/card-stock';
+import { getCardStockByHandle,
+  findCardInventoryTarget } from '../modules/packs/card-stock';
 import { notifyFeedNonfatal } from '../modules/packs/notify-feed';
 import type PacksModuleService from '../modules/packs/service';
 
@@ -35,6 +37,18 @@ export default async function settleChallengeWeekJob(
 
   await packs.settleChallengeWeek({
     getStock: (handles) => getCardStockByHandle(container, handles),
+    // Settlement must RESERVE, not just read. Bound here for the same reason as
+    // getStock: the inventory module is only reachable through the container.
+    // Returns false for an untracked product — nothing to count, and the pull
+    // must not be earmarked or buyback would restore a phantom unit.
+    decrementStock: async (handle, qty) => {
+      const target = await findCardInventoryTarget(container, handle);
+      if (!target) return false;
+      await container
+        .resolve(Modules.INVENTORY)
+        .adjustInventory(target.inventoryItemId, target.locationId, -qty);
+      return true;
+    },
     onSettled: async (w, weekStartIso) => {
       // Spec §Granting: a stock-gated card is NOT substituted with credit —
       // it becomes a manual-fulfilment item. The payout row records it, but

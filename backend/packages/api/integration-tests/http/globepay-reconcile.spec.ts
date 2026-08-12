@@ -22,7 +22,9 @@ import {
   GlobePayError,
   getDepositDetail,
 } from '../../src/modules/packs/globepay-client';
-import globepayReconcileJob from '../../src/jobs/globepay-reconcile';
+import globepayReconcileJob, {
+  __resetFullSweepMarkerForTests,
+} from '../../src/jobs/globepay-reconcile';
 import {
   GLOBEPAY_AMBIGUOUS_GIVEUP_DEFAULT_MS,
   GLOBEPAY_EXPIRED_RETRY_BATCH,
@@ -58,7 +60,14 @@ medusaIntegrationTestRunner({
       const packs = () =>
         getContainer().resolve<PacksModuleService>(PACKS_MODULE);
 
-      beforeEach(() => requery.mockReset());
+      beforeEach(() => {
+        requery.mockReset();
+        // The full-sweep marker is module state that survives between sweeps.
+        // Without this reset only the FIRST sweep in this file is a full one,
+        // and every later case that seeds an aged or expired row would be
+        // asserting against the fast window instead.
+        __resetFullSweepMarkerForTests();
+      });
 
       const seed = async (mtid: string, ageMs = 0) => {
         const [row] = await packs().createGlobePayDeposits([
@@ -267,6 +276,12 @@ medusaIntegrationTestRunner({
 
         // The bank transfer lands hours after we gave up.
         requery.mockResolvedValue({ state: 'success', amount: 50, statusId: 6 });
+        // The expired-revival tier runs on the FULL sweep only, and the sweep
+        // above already claimed this run's full slot. In production the next
+        // one is minutes away (one full sweep per
+        // GLOBEPAY_FULL_SWEEP_EVERY_MIN); here the two are back to back, so the
+        // marker is cleared to stand in for that gap rather than waiting it out.
+        __resetFullSweepMarkerForTests();
         await sweep();
 
         const rows = await ledger();

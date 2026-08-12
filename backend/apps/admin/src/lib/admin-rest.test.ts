@@ -5,8 +5,13 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 // it lets the real fetch helpers run in the node test environment.
 (globalThis as Record<string, unknown>).__BACKEND_URL__ = 'http://backend.test';
 
-const { getGlobePayWithdrawalAccount, getPurchaseInvoice, httpStatus } =
-  await import('./admin-rest');
+const {
+  approveGlobePayWithdrawal,
+  denyGlobePayWithdrawal,
+  getGlobePayWithdrawalAccount,
+  getPurchaseInvoice,
+  httpStatus,
+} = await import('./admin-rest');
 
 const respondWith = (status: number, body: unknown) =>
   vi.stubGlobal(
@@ -108,6 +113,75 @@ describe('the withdrawal account reveal fetches one row', () => {
       (e: unknown) => e,
     );
     expect(httpStatus(err)).toBe(404);
+  });
+});
+
+// Task 6 (plan 094): the admin queue's Approve/Deny buttons. Both routes act
+// only on `:id` and the session's admin actor, so there is no meaningful body
+// to assert beyond "the right URL, the right method, the response comes
+// through unmodified".
+describe('the held-withdrawal approve/deny calls', () => {
+  test('approve POSTs to ./approve and returns the body verbatim', async () => {
+    const fetchMock = vi.fn<typeof fetch>(
+      async () =>
+        new Response(
+          JSON.stringify({
+            id: 'gpw_1',
+            status: 'pending',
+            transaction_id: 'W2026081200000001',
+            approved: true,
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const out = await approveGlobePayWithdrawal('gpw_1');
+    expect(out).toEqual({
+      id: 'gpw_1',
+      status: 'pending',
+      transaction_id: 'W2026081200000001',
+      approved: true,
+    });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe(
+      'http://backend.test/admin/globepay/withdrawals/gpw_1/approve',
+    );
+    expect((init as RequestInit).method).toBe('POST');
+  });
+
+  test('deny POSTs to ./deny and returns the body verbatim', async () => {
+    const fetchMock = vi.fn<typeof fetch>(
+      async () =>
+        new Response(
+          JSON.stringify({ id: 'gpw_1', status: 'failed', refunded: true }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const out = await denyGlobePayWithdrawal('gpw_1');
+    expect(out).toEqual({ id: 'gpw_1', status: 'failed', refunded: true });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe(
+      'http://backend.test/admin/globepay/withdrawals/gpw_1/deny',
+    );
+    expect((init as RequestInit).method).toBe('POST');
+  });
+
+  // A frozen-account refusal, a wrong-status deny, a closed payout channel —
+  // every refusal is a thrown MedusaError, and the operator's toast is only
+  // as good as this chain surfacing the backend's own message.
+  test('a refusal surfaces the backend MedusaError message, not a generic one', async () => {
+    respondWith(400, {
+      message:
+        'This customer’s account is frozen. Unfreeze it before approving a payout, or deny the withdrawal.',
+    });
+    const err = await approveGlobePayWithdrawal('gpw_1').catch(
+      (e: unknown) => e,
+    );
+    expect((err as Error).message).toMatch(/account is frozen/);
+    expect(httpStatus(err)).toBe(400);
   });
 });
 

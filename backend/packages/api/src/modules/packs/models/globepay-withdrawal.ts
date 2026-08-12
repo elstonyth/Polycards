@@ -30,17 +30,67 @@ export const GlobePayWithdrawal = model
     account_holder_name: model.text(),
     // 'pending' covers submitted + processing. 'failed' always means the debit
     // has been refunded (the refund shares the row's idempotency anchor).
-    status: model.enum(['pending', 'settled', 'failed']).default('pending'),
+    //
+    // 'held' — debited, awaiting admin approval, never submitted to the
+    // gateway. It has no gateway_transaction_id and the reconcile sweep must
+    // never select it for PROCESSING (the sweep does run one read-only
+    // staleness log across held rows, plan 094 follow-up, but never
+    // requeries, refunds, or writes to one). It leaves only via the admin
+    // approve route (-> 'pending') or the admin deny route (-> 'failed',
+    // refunded).
+    status: model
+      .enum(['pending', 'settled', 'failed', 'held'])
+      .default('pending'),
     // Their raw numeric status from the last callback/requery (4 = success,
     // 5 = fail, else processing), for support.
     gateway_status: model.number().nullable(),
     settled_at: model.dateTime().nullable(),
+    // Client-supplied retry token, scoped to the customer. NULL for callers
+    // that send none (the header is optional, so pre-existing clients keep
+    // working). A partial unique index on (customer_id, idempotency_key) makes
+    // the replay check race-safe; Postgres ignores NULLs in unique indexes, so
+    // keyless withdrawals never collide with each other.
+    idempotency_key: model.text().nullable(),
+    // FORENSICS (plan 095). Both columns exist because a payout that dies at
+    // the gateway leaves nothing behind that outlives DigitalOcean's log
+    // retention: the run logs only cover the CURRENT deployment, and the
+    // 2026-08-11 production failures (8 payouts created at GlobePay and
+    // immediately marked statusId 5) were already unreadable the next morning.
+    // A row that records its own cause is the difference between "we know
+    // within one attempt" and "wait for another customer to lose a day".
+    //
+    // Their Payout Verification is ACTIVE on the production merchant, so every
+    // payout is offered to /hooks/globepay/payout-verify BEFORE they execute
+    // it, and anything but the literal "success" rejects it. NULL therefore
+    // carries real information: their verification never reached us at all
+    // (wrong URL their side, blocked egress, a timeout shorter than our
+    // answer) — a config fault, not a code one. Written on EVERY invocation,
+    // 'success' included, precisely so that distinction survives.
+    verify_outcome: model.text().nullable(),
+    // Why the payout died on OUR side of the wire: the gateway's own codes and
+    // message from a definite submit refusal. Never the request envelope
+    // (signed and encrypted) and never the account number or holder name.
+    failure_reason: model.text().nullable(),
   })
   .indexes([
     // Callback lookup path.
     { on: ['merchant_transaction_id'] },
     // Reconciliation sweep: outstanding payouts, oldest first.
     { on: ['status', 'created_at'] },
+    // The real guarantee behind the Idempotency-Key replay: the read in
+    // startGlobePayWithdrawal only turns the second request into a clean replay
+    // instead of a 23505. Declared HERE and not only in
+    // Migration20260812010000 because db:generate emits a DROP for any index it
+    // cannot see on the model — the same argument
+    // docs/plans/postgres-best-practices-audit.md B6 makes for
+    // UQ_reward_draw_customer_day_ordinal. Keep the predicate identical to the
+    // migration's.
+    {
+      name: 'UQ_globepay_withdrawal_customer_idempotency_key',
+      on: ['customer_id', 'idempotency_key'],
+      unique: true,
+      where: "idempotency_key is not null and deleted_at is null and status <> 'failed'",
+    },
   ]);
 
 export default GlobePayWithdrawal;

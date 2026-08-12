@@ -209,7 +209,11 @@ medusaIntegrationTestRunner({
           ]);
 
           // Link recruit to sponsor.
-          await packs.linkSponsor({ recruitId: recruit, sponsorId: sponsor });
+          // Referral writes were retired with linkSponsor; the model is kept, so the
+        // edge is seeded directly for setup.
+        await packs.createReferralRelationships([
+          { customer_id: recruit, sponsor_id: sponsor },
+        ]);
 
           // Fund the recruit with enough to open a pack.
           await packs.mutateCreditAtomic({

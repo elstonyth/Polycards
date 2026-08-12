@@ -423,6 +423,7 @@
     "title": "Withdrawals",
     "subtitle": "GlobePay365 payouts — money already debited from a customer, and whether the bank transfer settled or refunded.",
     "view": {
+      "held": "Held",
       "pending": "Pending",
       "settled": "Settled",
       "failed": "Refunded",
@@ -435,12 +436,15 @@
     "amount": "Amount",
     "status": "Status",
     "reference": "References",
+    "actions": "Actions",
     "statusLabel": {
+      "held": "Held",
       "pending": "Pending",
       "settled": "Paid out",
       "failed": "Refunded"
     },
     "statusStale": "Overdue",
+    "noVerify": "No payout verification outcome recorded — either their verification never reached us, it was rejected before we could match it to this row, or this payout predates outcome recording.",
     "staleWarning": "{{n}} row(s) on this page are past the reconcile window — the customer is debited with no payout confirmed. Check the withdrawal in the GlobePay back office before touching anything by hand.",
     "empty": "No withdrawals in this view.",
     "emptyView": "No {{view}} withdrawals right now. Other statuses may still have rows.",
@@ -449,7 +453,14 @@
     "firstPage": "Back to the first page",
     "showAll": "Show all statuses",
     "loadError": "Could not load withdrawals.",
-    "tableLabel": "Withdrawals table"
+    "tableLabel": "Withdrawals table",
+    "frozen": "Frozen",
+    "approve": "Approve",
+    "deny": "Deny",
+    "confirmApproveTitle": "Approve this payout?",
+    "confirmApproveBody": "Send {{amount}} to {{bank}} {{account}} ({{holder}}) via GlobePay365. This submits the transfer immediately and cannot be recalled from here.",
+    "confirmDenyTitle": "Deny this withdrawal?",
+    "confirmDenyBody": "Refuse this {{amount}} withdrawal. Nothing is sent to {{bank}} {{account}} ({{holder}}) — the funds are returned to the customer's in-app balance instead."
   },
   "pulls": {
     "title": "Pull Ledger",

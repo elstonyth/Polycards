@@ -98,6 +98,22 @@ function validateRankRewards(
 // Stages: contiguous from 1, strictly-increasing thresholds, non-negative
 // per-rank reward tables. Empty list is VALID (challenge disabled). Card
 // EXISTENCE is a service-level DB check, not here.
+/**
+ * Ceiling on the number of stages in one ladder, and on a single rank's TOTAL
+ * credit once summed across all of them. Without the aggregate bound, a
+ * configuration where every individual value satisfies MAX_VOUCHER_MYR can
+ * still mint an effectively unbounded payout.
+ */
+export const MAX_STAGES = 100;
+// Headroom over the SHIPPED ladder, not a round number picked in the
+// abstract. The live challenge_stage rows pay rank 4-10 an aggregate of
+// RM 18,500 across their four stages, so a RM 10,000 ceiling refused the
+// ladder already in production: saveChallengeStages is a whole-set replace, so
+// every admin edit reposts the full ladder and would have 400'd. Same trap as
+// MAX_VOUCHER_MYR vs the seeded L90/L100 rungs (#247) — query the real rows
+// before pinning a bound the editor has to clear.
+export const MAX_AGGREGATE_RANK_CREDITS_MYR = 50_000;
+
 export function validateChallengeStages(raw: unknown): ChallengeStageInput[] {
   const body = (raw as { stages?: unknown } | null)?.stages;
   if (!Array.isArray(body)) bad('stages must be an array.');
@@ -127,6 +143,35 @@ export function validateChallengeStages(raw: unknown): ChallengeStageInput[] {
         `stage ${n}: rank_rewards`,
       ),
     });
+  }
+
+  // MAX_VOUCHER_MYR bounds each rank reward PER STAGE, but payoutByRank SUMS a
+  // rank's credits across every unlocked stage — so N stages at the cap multiply
+  // it by N, and nothing downstream bounds the total (mutateCreditAtomic has no
+  // maximum-amount guard). The per-rank cap's own comment names "a stolen admin
+  // token" as its threat model, which this defeated.
+  //
+  // Enforced HERE, on the admin save path, and deliberately NOT inside
+  // payoutByRank: throwing at settlement time would crash the hourly job
+  // (jobs/settle-challenge-week.ts awaits settleChallengeWeek with no try/catch)
+  // and starve the promotion step that runs after it.
+  if (out.length > MAX_STAGES) {
+    bad(`A ladder may have at most ${MAX_STAGES} stages; got ${out.length}.`);
+  }
+  const totalByRank = new Map<number, number>();
+  for (const stage of out) {
+    for (const rr of stage.rank_rewards) {
+      totalByRank.set(rr.rank, (totalByRank.get(rr.rank) ?? 0) + rr.credits);
+    }
+  }
+  for (const [rank, total] of totalByRank) {
+    if (total > MAX_AGGREGATE_RANK_CREDITS_MYR) {
+      bad(
+        `rank ${rank} would be paid RM ${total} summed across unlocked stages, ` +
+          `above the RM ${MAX_AGGREGATE_RANK_CREDITS_MYR} ceiling. ` +
+          'Reduce a stage reward or the stage count.',
+      );
+    }
   }
   return out;
 }

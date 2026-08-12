@@ -30,7 +30,10 @@ import {
   createVaultBuybackRateLimit,
 } from './utils/rate-limit';
 import { createResetTokenSingleUseGuard } from './utils/reset-token-guard';
-import { rejectCustomerMetadata } from './utils/customer-metadata-guard';
+import {
+  rejectCustomerMetadata,
+  rejectAdminBankAccountsMetadata,
+} from './utils/customer-metadata-guard';
 import {
   requireSignupPhoneProof,
   blockUnverifiedPhoneWrite,
@@ -450,26 +453,6 @@ export default defineMiddlewares({
       ],
     },
     {
-      // The recruit calls this to set their sponsor. recruitId is taken from the
-      // bearer token (auth_context.actor_id) — never from the body.
-      matcher: '/store/referral',
-      method: 'POST',
-      middlewares: [
-        authenticate('customer', ['bearer']),
-        createReferralRecruitRateLimit(),
-      ],
-    },
-    {
-      // Referral summary (GET /store/referral) — separate entry because the
-      // existing POST entry above pins method:'POST'; omitting method here
-      // would protect both verbs with one entry, but method:'GET' keeps the
-      // rate-limiting tiers clean: writes use the recruit limiter, reads share
-      // the storeReadRateLimit budget with vault/credits/vip/notifications.
-      matcher: '/store/referral',
-      method: 'GET',
-      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
-    },
-    {
       // Money-dot signal (GET /store/credits/latest). Own entry because the
       // '/store/credits' matcher below is EXACT — same reason
       // '/store/credits/balance' has one.
@@ -817,8 +800,31 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      // The framework's own POST /admin/customers/:id writes customer.metadata
+      // directly, and mergeMetadata is a SHALLOW top-level merge — so a request
+      // could inject bank_accounts (a live payout destination) with no audit
+      // row and without the metadata:<customer> advisory lock the store-side
+      // writer holds. The admin SPA never round-trips metadata, so nothing
+      // legitimate is refused here.
+      matcher: '/admin/customers/*',
+      method: 'POST',
+      middlewares: [rejectAdminBankAccountsMetadata],
+    },
+    {
       matcher: '/admin/customers/*/payout-details',
       method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // The GET returns the FULL bank account number, so it needs the limiter at
+      // least as much as the write does. It was previously unthrottled, and the
+      // coverage guard could not catch that because
+      // admin-rate-limit-coverage.unit.spec.ts only scans POST|PUT|PATCH|DELETE
+      // exports — it is structurally unable to flag a sensitive READ. Listed as
+      // its own entry rather than by dropping the method pin, because that guard
+      // matches coverage per method.
+      matcher: '/admin/customers/*/payout-details',
+      method: 'GET',
       middlewares: [adminActionRateLimit],
     },
     {
@@ -955,6 +961,25 @@ export default defineMiddlewares({
       // re-derives exactly the bulk view the masking removed.
       matcher: '/admin/globepay/withdrawals/*/account',
       method: 'GET',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Release a HELD payout to the gateway (plan 094). The most literal
+      // money mutation on this limiter: one call submits a real bank
+      // transfer. The row's own atomic status claim is what stops a
+      // double-click paying twice — this budget is the outer bound on how
+      // fast a compromised admin token could work the queue at all.
+      matcher: '/admin/globepay/withdrawals/*/approve',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Refuse a HELD payout and refund the debit — same budget as its
+      // approve twin. It mints no credit beyond the one refund the row's
+      // shared idempotency anchor allows, but it is still a ledger write
+      // driven by an admin token.
+      matcher: '/admin/globepay/withdrawals/*/deny',
+      method: 'POST',
       middlewares: [adminActionRateLimit],
     },
     {

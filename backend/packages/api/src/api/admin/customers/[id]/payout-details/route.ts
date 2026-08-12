@@ -38,6 +38,38 @@ export async function GET(
         account_holder_name: row.account_holder_name,
       }
     : null;
+
+  // This response carries the FULL account number, which every list view masks.
+  // The write twin audits; without this the read left no trace, so enumerating
+  // customer ids harvested the whole table invisibly. Audit only a real reveal
+  // — a miss (no row) exposes nothing.
+  //
+  // Best-effort: an audit failure must not deny an operator data they are
+  // entitled to, and the throttle (now covering GET) is the volume control.
+  if (row) {
+    const digits = (row.bank_account_number ?? '').replace(/\D/g, '');
+    try {
+      await packs.createAdminActionAudits([
+        {
+          admin_id: req.auth_context.actor_id,
+          entity_type: 'customer',
+          entity_id: req.params.id,
+          action: 'reveal',
+          before: null,
+          // Same last-4 rule as the write path: the audit feed must never carry
+          // the full number it exists to record the disclosure of.
+          after: {
+            bank_name: row.bank_name,
+            account_last4: digits.length > 4 ? digits.slice(-4) : null,
+          },
+          reason: 'payout details revealed',
+        },
+      ]);
+    } catch {
+      // Never fail the read on an audit write.
+    }
+  }
+
   res.json({ details });
 }
 
