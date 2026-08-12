@@ -264,21 +264,21 @@ export async function startGlobePayWithdrawal(
   // the real guarantee — this read only turns the second request into a clean
   // replay instead of a 23505.
   if (idempotencyKey) {
+    // Scoped OFF 'failed' on purpose, matching the partial unique index. A
+    // failed attempt never moved money and its cause is usually the customer's
+    // to fix — insufficient balance, playthrough not met, the daily cap — so
+    // replaying it would report a payout that is never coming, and refusing the
+    // key would dead-end a customer following the house convention of one key
+    // per INTENT, reused across error retries (TopUpSheet.tsx). Excluding it
+    // from both the read and the index makes the retry a plain fresh attempt.
     const [prior] = await packs.listGlobePayWithdrawals(
-      { customer_id: input.customerId, idempotency_key: idempotencyKey },
+      {
+        customer_id: input.customerId,
+        idempotency_key: idempotencyKey,
+        status: ['pending', 'settled'],
+      },
       { take: 1 },
     );
-    // A FAILED prior attempt never moved money, so replaying it as a success
-    // shape would report a payout that is never coming. It also cannot just be
-    // retried under the same key: the partial unique index does not exclude
-    // failed rows, so the insert below would raise a raw 23505. Say what
-    // happened and ask for a fresh key.
-    if (prior && prior.status === "failed") {
-      throw new MedusaError(
-        MedusaError.Types.NOT_ALLOWED,
-        "This Idempotency-Key was already used for a withdrawal that failed. Retry with a new key.",
-      );
-    }
     if (prior) {
       return {
         merchantTransactionId: prior.merchant_transaction_id,

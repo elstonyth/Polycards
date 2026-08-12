@@ -5040,23 +5040,27 @@ class PacksModuleService extends MedusaService({
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
     const rows = await em.execute<{ sen: string | null }[]>(
-      // Debits ONLY (`amount < 0`) — a committed decision, not an oversight.
-      // ADR 0003 specs it, and vip-lifetime.ts's lifetimeTurnoverSen is the
-      // pure-fold mirror that has to agree with this SQL; changing one without
-      // the other desyncs the tests from production silently. Spec §3: a refund
-      // never lowers the counter.
+      // Debits ONLY (`amount < 0`) — deliberate, and recorded in ADR 0003 under
+      // "Reversal exclusion". vip-lifetime.ts's lifetimeTurnoverSen is the
+      // pure-fold mirror that has to agree with this SQL; netting one and not
+      // the other desyncs the tests from production silently, which is exactly
+      // what a previous attempt at fixing this line did.
       //
-      // What this filter is NOT is the re-grant guard. A clawback-then-respend
-      // cannot re-earn a level-up grant because highest_level_ever is a ratchet
-      // (GREATEST on upsert, in upsertVipMemberState) and levelsToGrant starts
-      // at max(highestEver + 1, 2) — a LOWER level yields an empty grant list
-      // whichever way this counter is summed. Reversals DO move the system,
-      // just on the other basis: creditSummary().vipSpendTotal is net, drops on
-      // reversal, and drives current_level. This monotonic one feeds
-      // highest_level_ever.
+      // What this filter is NOT is the re-grant guard, and mis-stating that has
+      // already cost one bad change. Re-granting a level is impossible at the
+      // DB: grantLevelUpRewards inserts ON CONFLICT (customer_id, level, kind)
+      // DO NOTHING against UQ_vip_reward_grant_customer_level_kind. Two further
+      // guards sit above it — highest_level_ever is a GREATEST ratchet, and
+      // levelsToGrant starts at max(highestEver + 1, 2), so a LOWER level
+      // yields an empty list. None of the three depends on how this counter is
+      // summed.
       //
-      // Three audit passes have now flagged the `amount < 0` as a bug and one
-      // of them got as far as changing it. It is WON'T-FIX — see ADR 0003.
+      // Reversals DO move the system, on the other basis:
+      // creditSummary().vipSpendTotal is net, drops on reversal, and drives
+      // current_level. This monotonic one feeds highest_level_ever.
+      //
+      // Three audit passes have flagged `amount < 0` as a bug and one got as
+      // far as changing it. WON'T-FIX — ADR 0003, "Reversal exclusion".
       `SELECT COALESCE(SUM(ROUND(-amount * 100)), 0)::bigint AS sen
          FROM credit_transaction
         WHERE customer_id = ? AND reason = 'pack_open' AND amount < 0 AND deleted_at IS NULL`,
@@ -7041,7 +7045,6 @@ class PacksModuleService extends MedusaService({
       handleById: Map<string, string>;
       snapshot: SettleSnapshot;
       getStock: (handles: string[]) => Promise<Map<string, number | null>>;
-      decrementStock?: (handle: string, qty: number) => Promise<boolean>;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<SettledWinner | null> {

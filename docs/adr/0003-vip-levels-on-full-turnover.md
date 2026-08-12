@@ -56,3 +56,33 @@ to size the payout.
   live table column is a separate, higher-risk change than the code-symbol
   rename this ADR accompanies. See the column's own comment for the pointer
   back here.
+
+## Reversal exclusion (added 2026-08-12)
+
+`lifetimeTurnoverSenFor` filters `amount < 0`, so `reverseOpen`s compensating
+row — also `reason = pack_open`, but positive — is excluded and the counter
+never decreases. Three audit passes have now filed that filter as a bug and one
+of them changed it. It is deliberate and it stays.
+
+The decision above is about the *funding* basis (full turnover vs
+external-funded) and does not settle the reversal question, which is why the
+reversal filter kept being re-litigated against this ADR. Recording it here so
+the next pass has somewhere to land:
+
+- The counter is mirrored in `vip-lifetime.ts` (`lifetimeTurnoverSen`), the pure
+  fold the tests use. Netting one and not the other desyncs the tests from
+  production silently — the concrete failure of the 2026-08-12 attempt, and the
+  reason it was reverted.
+- Netting is **not** needed to stop grant farming, contrary to what that
+  attempts commit message claimed. `grantLevelUpRewards` inserts
+  `ON CONFLICT (customer_id, level, kind) ... DO NOTHING` against
+  `UQ_vip_reward_grant_customer_level_kind`, so a levels reward cannot be issued
+  twice at the database layer. `highest_level_ever` (a `GREATEST` ratchet) and
+  `levelsToGrant`s `start = max(highestEver + 1, 2)` are two further guards
+  above it. None of the three depends on the arithmetic here.
+- Reversals are reflected on the OTHER basis: `creditSummary().vipSpendTotal` is
+  net, drops on a reversal, and drives `current_level`. The monotonic counter
+  drives `highest_level_ever`. Running both is intended.
+
+Net effect: a refund never lowers lifetime turnover, and a clawback-then-respend
+neither re-earns a grant nor is blocked from opening.
