@@ -436,6 +436,36 @@ export default defineMiddlewares({
       method: 'POST',
       middlewares: [validateDeliverableAddress('update')],
     },
+    // Customer self-service account lifecycle. Rate-limited on the delivery
+    // write tier — rare, deliberate mutations, same class as saving a payout
+    // destination. authenticate() FIRST: the array is the execution order, and
+    // the limiter keys on auth_context.actor_id, so an unauthenticated request
+    // must 401 before it consumes anyone's budget.
+    //
+    // No disabled-session guard and no Cache-Control entry here: the blanket
+    // '/store/*' entry at the end of this array already applies both.
+    //
+    // The authenticate() call DOES duplicate Medusa's own registration for
+    // ALL /store/customers/me* — deliberately, not by oversight. Restricting
+    // to ['bearer'] is stricter than the framework default and matches this
+    // repo's policy at middlewares.ts:58-64, so it stays; a future reader
+    // must not delete it as dead.
+    {
+      matcher: '/store/customers/me/disable',
+      method: 'POST',
+      middlewares: [
+        authenticate('customer', ['bearer']),
+        deliveryWriteRateLimit,
+      ],
+    },
+    {
+      matcher: '/store/customers/me/reactivate',
+      method: 'POST',
+      middlewares: [
+        authenticate('customer', ['bearer']),
+        deliveryWriteRateLimit,
+      ],
+    },
     {
       matcher: '/store/packs/*/open',
       method: 'POST',
