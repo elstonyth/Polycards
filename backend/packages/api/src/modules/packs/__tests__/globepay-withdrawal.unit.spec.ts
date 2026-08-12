@@ -1147,6 +1147,60 @@ describe('startGlobePayWithdrawal — Idempotency-Key', () => {
     expect(submitMock).toHaveBeenCalled();
   });
 
+  // Two requests with the same key can both pass the read before either
+  // inserts — the read cannot close that window, only the partial unique index
+  // can. The loser must come back as a replay of the winner's row, not a 500,
+  // and critically: nothing has been debited at the point the insert fails.
+  it('replays instead of 500ing when a concurrent insert wins the unique index', async () => {
+    const h = harness();
+    let seenPrior = false;
+    // First read (pre-precheck) sees nothing; after the duplicate-key throw the
+    // winner's row is visible. That is exactly the race ordering.
+    h.packs.listGlobePayWithdrawals.mockImplementation(async () =>
+      seenPrior
+        ? [
+            {
+              merchant_transaction_id: 'PC-winner',
+              gateway_transaction_id: 'W2026081200000042',
+              amount: 50,
+            },
+          ]
+        : [],
+    );
+    h.packs.createGlobePayWithdrawals.mockImplementation(async () => {
+      seenPrior = true;
+      throw Object.assign(new Error('duplicate key value violates unique constraint'), {
+        code: '23505',
+      });
+    });
+
+    const res = await start(h, { idempotencyKey: 'raced' });
+
+    expect(res.replayed).toBe(true);
+    expect(res.merchantTransactionId).toBe('PC-winner');
+    // The loser must not debit or submit — the winner owns the payout.
+    expect(h.packs.withdrawForCashout).not.toHaveBeenCalled();
+    expect(submitMock).not.toHaveBeenCalled();
+  });
+
+  // A duplicate key with no visible active row means the winner failed and
+  // freed the key between the two statements. Inventing a success there would
+  // report a payout that does not exist.
+  it('rethrows a duplicate key when no active row is visible', async () => {
+    const h = harness();
+    h.packs.listGlobePayWithdrawals.mockResolvedValue([]);
+    h.packs.createGlobePayWithdrawals.mockRejectedValue(
+      Object.assign(new Error('duplicate key value violates unique constraint'), {
+        code: '23505',
+      }),
+    );
+
+    await expect(start(h, { idempotencyKey: 'raced-then-freed' })).rejects.toThrow(
+      /duplicate key/i,
+    );
+    expect(h.packs.withdrawForCashout).not.toHaveBeenCalled();
+  });
+
   it('stores the key on the row so the next retry can find it', async () => {
     const h = harness();
     await start(h, { idempotencyKey: '  retry-3  ' });

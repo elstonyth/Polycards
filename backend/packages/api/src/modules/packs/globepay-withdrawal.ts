@@ -164,6 +164,18 @@ export type StartWithdrawalResult = {
  * after 2 leaves a pending row whose sweep resolves it (requery "not found"
  * -> refund).
  */
+// Postgres 23505. Matched on the driver's code first and the message only as a
+// fallback, because Mikro-ORM wraps the pg error and not every layer preserves
+// `code` on the outermost object.
+function isDuplicateKeyError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const e = error as { code?: unknown; message?: unknown };
+  if (String(e.code) === '23505') return true;
+  const nested = (error as { cause?: { code?: unknown } }).cause;
+  if (nested && String(nested.code) === '23505') return true;
+  return /duplicate key value|unique constraint/i.test(String(e.message ?? ''));
+}
+
 export async function startGlobePayWithdrawal(
   scope: { resolve: <T>(key: string) => T },
   input: StartWithdrawalInput,
@@ -205,6 +217,42 @@ export async function startGlobePayWithdrawal(
 
   const config = globepayConfigFromEnv();
   const packs = scope.resolve<PacksModuleService>(PACKS_MODULE);
+
+  // Scoped OFF 'failed' on purpose, matching the partial unique index. A failed
+  // attempt never moved money and its cause is usually the customer's to fix —
+  // insufficient balance, playthrough not met, the daily cap — so replaying it
+  // would report a payout that is never coming, and refusing the key would
+  // dead-end a customer following the house convention of one key per INTENT,
+  // reused across error retries (TopUpSheet.tsx). Excluding it from both the
+  // read and the index makes such a retry a plain fresh attempt.
+  const replayExisting = async (): Promise<StartWithdrawalResult | null> => {
+    if (!idempotencyKey) return null;
+    const [prior] = await packs.listGlobePayWithdrawals(
+      {
+        customer_id: input.customerId,
+        idempotency_key: idempotencyKey,
+        status: ['pending', 'settled'],
+      },
+      { take: 1 },
+    );
+    if (!prior) return null;
+    return {
+      merchantTransactionId: prior.merchant_transaction_id,
+      transactionId: prior.gateway_transaction_id ?? null,
+      amount: Number(prior.amount),
+      balance: await packs.creditBalance(input.customerId),
+      replayed: true,
+    };
+  };
+
+  // 0) REPLAY FIRST, ahead of both prechecks. A replay reports an outcome that
+  // already happened, so it must not be re-judged against state that has moved
+  // since: deleting the saved account, or spending the balance down, would
+  // otherwise turn the retry of an in-flight withdrawal into a 400 and hide a
+  // payout the customer already has. The prechecks below exist to avoid writing
+  // a row for a refusal that is certain — a replay writes no row at all.
+  const replayedEarly = await replayExisting();
+  if (replayedEarly) return replayedEarly;
 
   // 0a) DESTINATION PRECHECK — NOT the gate, exactly like the wallet precheck
   // below. The authoritative resolution happens inside packs.withdrawForCashout
@@ -258,50 +306,39 @@ export async function startGlobePayWithdrawal(
 
   // 1) Row first — the callback echoes MerchantTransactionId but not our
   // customer id, so this row is the only way back (same shape as deposits).
-  // Replay check BEFORE the row insert and therefore before the debit. Scoped
-  // to this customer: the index is (customer_id, idempotency_key), so two
-  // customers reusing the same token never collide. The partial unique index is
-  // the real guarantee — this read only turns the second request into a clean
-  // replay instead of a 23505.
-  if (idempotencyKey) {
-    // Scoped OFF 'failed' on purpose, matching the partial unique index. A
-    // failed attempt never moved money and its cause is usually the customer's
-    // to fix — insufficient balance, playthrough not met, the daily cap — so
-    // replaying it would report a payout that is never coming, and refusing the
-    // key would dead-end a customer following the house convention of one key
-    // per INTENT, reused across error retries (TopUpSheet.tsx). Excluding it
-    // from both the read and the index makes the retry a plain fresh attempt.
-    const [prior] = await packs.listGlobePayWithdrawals(
-      {
-        customer_id: input.customerId,
-        idempotency_key: idempotencyKey,
-        status: ['pending', 'settled'],
-      },
-      { take: 1 },
-    );
-    if (prior) {
-      return {
-        merchantTransactionId: prior.merchant_transaction_id,
-        transactionId: prior.gateway_transaction_id ?? null,
-        amount: Number(prior.amount),
-        balance: await packs.creditBalance(input.customerId),
-        replayed: true,
-      };
-    }
-  }
+  // The read above turns a SEQUENTIAL retry into a clean replay; the partial
+  // unique index is what makes it safe when two requests race, because both can
+  // pass that read before either inserts. Losing that race is a replay, not a
+  // 500: re-read under the same predicate the index enforces and return the row
+  // the winner wrote. Nothing has been debited at this point either way.
+  const insertRow = async () =>
+    (
+      await packs.createGlobePayWithdrawals([
+        {
+          idempotency_key: idempotencyKey ?? null,
+          merchant_transaction_id: merchantTransactionId,
+          customer_id: input.customerId,
+          amount,
+          bank_code: precheckDestination.bankCode,
+          account_number: precheckDestination.accountNumber,
+          account_holder_name: precheckDestination.accountHolderName.trim(),
+          status: 'pending',
+        },
+      ])
+    )[0];
 
-  const [row] = await packs.createGlobePayWithdrawals([
-    {
-      idempotency_key: idempotencyKey ?? null,
-      merchant_transaction_id: merchantTransactionId,
-      customer_id: input.customerId,
-      amount,
-      bank_code: precheckDestination.bankCode,
-      account_number: precheckDestination.accountNumber,
-      account_holder_name: precheckDestination.accountHolderName.trim(),
-      status: 'pending',
-    },
-  ]);
+  let row: Awaited<ReturnType<typeof insertRow>>;
+  try {
+    row = await insertRow();
+  } catch (error) {
+    if (!idempotencyKey || !isDuplicateKeyError(error)) throw error;
+    const raced = await replayExisting();
+    if (raced) return raced;
+    // The index rejected the insert but no active row is visible — the winner
+    // must have failed and freed the key between the two statements. Surfacing
+    // the original error beats inventing a success.
+    throw error;
+  }
 
   // 2) GATE + DEBIT, as one serialized transaction inside the service.
   // The withdrawal gate lives in packs.withdrawForCashout — freeze flag,
