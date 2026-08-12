@@ -63,7 +63,17 @@ Body: `{ password?: string }`. Steps, in order:
    - `DEPOSIT_PENDING` — no in-flight `globepay_deposit`. Production credits deposits via the reconcile sweep, so one can land hours after a delete and credit a scrubbed account.
    - `CARDS_UNSETTLED` — no `pull` in status `vaulted` or `delivering`. A vaulted pull is an owned asset the customer can still sell for credits.
    - `DELIVERY_IN_FLIGHT` — no `delivery_order` in a non-terminal status (anything other than `completed` / `canceled`). Nothing may still be shipping to an address that is about to be erased.
-3. **Purge — one transaction.** Any step failing rolls the whole thing back and leaves the account fully intact and usable.
+3. **Purge — ordered and idempotent, NOT one transaction.** The purge spans four separate systems (the packs module, the customer module, the auth module, and the file provider). A Medusa `sharedContext` transaction covers one module only, so a single all-or-nothing transaction across them is not achievable, and a workflow's compensation cannot un-delete a purge. Claiming atomicity here would be a lie an implementer would then rely on.
+
+   What is guaranteed instead: **each module's own writes are transactional**, the steps run in a fixed order chosen so the most failure-prone step is last and harmless, and the whole route is **idempotent** so a partial failure can simply be re-run. The order is load-bearing:
+
+   1. Packs-module scrub — financial-row PII, `player_payout_details` delete, `notification_read` delete, account-state soft delete. One packs transaction.
+   2. Customer-module writes — delete addresses, clear `metadata` via `mutateCustomerMetadata`, scrub `email`/names/`phone`. **Metadata must be cleared before the soft delete**: `mutateCustomerMetadata`'s SQL is scoped `AND deleted_at IS NULL`, so it raises NOT_FOUND against an already-soft-deleted row.
+   3. Soft-delete the customer row.
+   4. Hard-delete the auth identities. **Last of the destructive steps** — until this runs the customer can still authenticate, which is what makes a failed run retryable rather than a lockout with data left behind.
+   5. Best-effort delete of the avatar file object, failure swallowed (`.catch(() => undefined)`, the same discipline the avatar-replace cleanup already uses). A file-provider outage must never be what fails an account deletion.
+
+   A failure between steps 1 and 4 leaves a scrubbed but still-loginable account: recoverable by re-running the route. The route logs loudly at every step boundary so a partial run is diagnosable rather than silent.
 
    **Deleted outright:**
    - Medusa customer addresses.
@@ -128,7 +138,7 @@ The existing pattern-matching in `auth.ts` keeps handling the admin-disabled mes
 
 ## 5. Error handling
 
-- The purge is a single transaction — a partial purge is impossible.
+- The purge is ordered and idempotent rather than atomic — see §2.3 for why cross-module atomicity is unavailable and what replaces it.
 - Guard reads take the same `credit:<customerId>` advisory lock the freeze/disable paths use, so a concurrent spin, sell or withdrawal cannot race the zero-balance check.
 - All new routes return MedusaError types consistent with the framework's status mapping (UNAUTHORIZED → 401, FORBIDDEN → 403, INVALID_DATA → 400).
 
