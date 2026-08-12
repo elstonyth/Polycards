@@ -13,16 +13,16 @@ Two new customer-facing account functions, surfaced in the account Settings page
 
 Decisions made during brainstorming:
 
-| Question | Decision |
-|---|---|
-| Actor | Customer self-service (admin disable already shipped) |
-| Delete data scope | Delete personal data, keep the business books |
+| Question                           | Decision                                                                           |
+| ---------------------------------- | ---------------------------------------------------------------------------------- |
+| Actor                              | Customer self-service (admin disable already shipped)                              |
+| Delete data scope                  | Delete personal data, keep the business books                                      |
 | PII inside retained financial rows | Scrub to minimum (account number → last4, holder name and shipping address nulled) |
-| Delete guards | Block until settled (zero balance, nothing pending, no unsettled cards) |
-| Re-enable path for self-disable | Log in with the correct password → explicit "reactivate?" confirm |
-| Delete confirmation UX | Re-enter password + type `DELETE`, immediate execution |
-| Google-only accounts (no password) | Typed-`DELETE` only, no password step (see Residual risk) |
-| Reversibility | Disable: reversible by the customer. Delete: irreversible, even by an admin |
+| Delete guards                      | Block until settled (zero balance, nothing pending, no unsettled cards)            |
+| Re-enable path for self-disable    | Log in with the correct password → explicit "reactivate?" confirm                  |
+| Delete confirmation UX             | Re-enter password + type `DELETE`, immediate execution                             |
+| Google-only accounts (no password) | Typed-`DELETE` only, no password step (see Residual risk)                          |
+| Reversibility                      | Disable: reversible by the customer. Delete: irreversible, even by an admin        |
 
 ## 1. Data model
 
@@ -39,16 +39,19 @@ Migration: add the column; backfill `disabled_cause = 'admin'` for every existin
 ## 2. Backend routes (store API, session-authenticated)
 
 ### POST /store/customers/me/disable
+
 - Calls `setAccountDisabled({ customerId, cause: 'self', disabled: true })`. The actor is the customer, taken from `auth_context.actor_id`, never from the body.
 - Idempotent: disabling an already-self-disabled account is a no-op success.
 - An admin-disabled account never reaches this route — the session guard blocks it first.
 
 ### POST /store/customers/me/reactivate
+
 - Succeeds only when `disabled_cause === 'self'`. Anything else (admin, or NULL) returns 403 with the existing support message.
 - Clears `disabled`, `disabled_cause`, `disabled_at`; writes an audit row.
 - This is the ONLY /store route a self-disabled session may call (see §3).
 
 ### POST /store/customers/me/delete
+
 Body: `{ password?: string }`. Steps, in order:
 
 1. **Proof of intent.**
@@ -67,7 +70,9 @@ Body: `{ password?: string }`. Steps, in order:
    - `player_payout_details` (pure PII, no money on the row).
    - `notification_read` rows.
    - The avatar file object in Spaces (from `metadata.avatar_file_id`) — the stored object itself, not just the id.
-   - All auth identities for the customer: emailpass and google, via `deleteAuthIdentities` / `deleteProviderIdentities` (both confirmed present on `IAuthModuleService`).
+   - All auth identities for the customer: emailpass and google, via **`deleteAuthIdentities`** (and `deleteProviderIdentities` for any identity the cascade leaves behind).
+
+     **This must be the hard delete, never `softDeleteAuthIdentities`.** `MedusaService` generates `delete*` (hard) and `softDelete*` (soft) as separate methods. The `provider_identity` unique index — `IDX_provider_identity_provider_entity_id` on `(entity_id, provider)` — carries **no `WHERE deleted_at IS NULL` predicate**, so a soft-deleted identity keeps occupying the `(email, 'emailpass')` slot forever and the same person could never sign up again. Verified in the installed `@medusajs/auth` migration and model.
 
    **Scrubbed on the customer row:**
    - `email` → `deleted_<customer_id>@removed.invalid`.
@@ -75,7 +80,7 @@ Body: `{ password?: string }`. Steps, in order:
    - `metadata` → cleared. **This blob is where the personal data actually lives**: `bank_accounts` (saved payout destinations, with full account numbers), `handle` (public profile identity), `avatar_file_id`, `avatar_url`, `equipped_frame_level`. There is no saved-bank-accounts table.
    - The customer row is then soft-deleted (Medusa `deleted_at`).
 
-   **The email scrub is load-bearing, not cosmetic.** The unique index is on `(email, has_account)`, so a soft-deleted row that kept its address would keep occupying that slot and block the same person from ever signing up again. Do not "simplify" it away.
+   **The email scrub is required for its own sake — it is personal data.** It is deliberately NOT what frees the address for re-signup: `IDX_customer_email_has_account_unique` on `(email, has_account)` is a partial index with `WHERE deleted_at IS NULL`, so the soft delete alone already releases that slot. What actually decides whether re-signup works is the hard delete of the auth identities above. Both are required, for different reasons — do not drop either on the theory that the other covers it.
 
    **Scrubbed on retained financial rows** (the operator's chosen minimum):
    - `globepay_withdrawal`: `account_number` → last 4 digits only, `account_holder_name` → null, `bank_code` kept. Amounts, statuses, gateway ids, `verify_outcome`, `failure_reason`, timestamps all intact. Precedent: `setPayoutDetails` already records bank name + last4 in its audit row for exactly this reason. Accepted cost: a payout dispute raised after the delete cannot be settled by quoting the full destination account.
@@ -100,6 +105,7 @@ Rate-limit the delete route with the existing rate-limit util: with a password f
 ## 4. Storefront
 
 ### Settings page (src/app/(account)/settings/page.tsx)
+
 A new "Danger zone" panel below the existing Profile and Privacy panels, following the existing `Panel` + account UI conventions:
 
 - **Disable account** — button → confirm modal (explains: your account is blocked until you log back in and reactivate) → server action → logout → redirect home.
@@ -108,6 +114,7 @@ A new "Danger zone" panel below the existing Profile and Privacy panels, followi
 The page already knows whether the customer has a password (Google-only accounts are detectable from the auth identity providers) — it renders the correct variant up front rather than a button that always fails.
 
 ### Login flow (src/lib/actions/auth.ts + login UI)
+
 After a successful login, the first authenticated fetch returns 403 with code `ACCOUNT_SELF_DISABLED`. The storefront catches that code and shows a "Your account is disabled — reactivate?" confirm:
 
 - **Confirm** → call the reactivate route → continue to the account as normal.
@@ -116,6 +123,7 @@ After a successful login, the first authenticated fetch returns 403 with code `A
 The existing pattern-matching in `auth.ts` keeps handling the admin-disabled message unchanged.
 
 ### Public surfaces after a delete
+
 `publicProfileFields` (backend/packages/api/src/utils/profile-handle.ts) is already undefined-safe: a deleted customer resolves to no record, so a ranked player renders as `Collector ####` with `handle: null` and `avatarUrl: null`. The leaderboard, the challenge top-N and `pulls/recent` therefore keep working with the row present and anonymous. This is the intended behavior, and it gets a test so a future refactor cannot turn the first real delete into a 500 on a public page.
 
 ## 5. Error handling
