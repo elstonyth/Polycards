@@ -19,17 +19,14 @@ export class Migration20260812000000 extends Migration {
     );
   }
 
-  override async down(): Promise<void> {
-    // Any row written with the new value must go before the old constraint can
-    // be restored, or the ALTER fails on existing data.
-    this.addSql(
-      `delete from "admin_action_audit" where "action" = 'reveal';`,
-    );
-    this.addSql(
-      `alter table if exists "admin_action_audit" drop constraint if exists "admin_action_audit_action_check";`,
-    );
-    this.addSql(
-      `alter table if exists "admin_action_audit" add constraint "admin_action_audit_action_check" check ("action" in ('freeze','unfreeze','reverse_commission','suspend_commission','unsuspend_commission','adjust_credit','edit_rewards_settings','edit_reward_pool','edit_daily_reward_settings','edit_daily_box','edit_voucher_ladder','edit_fx_rate','edit_site_settings','edit_avatar_frames','replace','edit','bulk_status','disable','enable','create'));`,
-    );
-  }
+  // Deliberately a NO-OP. Restoring the narrower constraint means first
+  // deleting every row with action = 'reveal', and those rows ARE the audit
+  // trail of who unmasked a customer's payout details — the whole point of the
+  // migration. A rollback must never be the thing that erases security
+  // evidence, and "the schema change is reversible" is not worth that.
+  //
+  // Leaving the widened constraint in place is harmless: it is a SUPERSET of
+  // the old one, so every value the old schema permitted is still permitted,
+  // and nothing writes 'reveal' once the route is rolled back.
+  override async down(): Promise<void> {}
 }

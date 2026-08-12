@@ -156,6 +156,12 @@ export async function sendSavedAccountRemovedNotice(
   },
 ): Promise<boolean> {
   const last4 = input.accountNumber.slice(-4);
+  // The POST guard rejects control characters, but only for accounts saved
+  // AFTER it shipped. A legacy row carrying CR/LF, bidi marks or zero-width
+  // characters would render straight into the plain-text half of this email —
+  // which, with the destination cooldown at 0, IS the security alert. Strip
+  // here so the oldest rows are covered too, not only new ones.
+  const bankName = input.bankName.replace(/[\p{Cc}\p{Cf}]/gu, '').trim();
   const key = savedAccountNoticeKey(
     input.customerId,
     `removed:${input.accountId}`,
@@ -165,7 +171,7 @@ export async function sendSavedAccountRemovedNotice(
   await notifyFeedNonfatal(container, 'saved-account-removed', {
     receiverId: input.customerId,
     template: 'bank_account_removed',
-    data: { bank_name: input.bankName, account_last4: last4 },
+    data: { bank_name: bankName, account_last4: last4 },
     idempotencyKey: `feed:${key}`,
   });
 
@@ -182,7 +188,7 @@ export async function sendSavedAccountRemovedNotice(
       channel: 'email',
       template: BANK_ACCOUNT_REMOVED_TEMPLATE,
       data: {
-        bank_name: input.bankName,
+        bank_name: bankName,
         account_last4: last4,
         site_url: receiptSiteUrl(),
       },
