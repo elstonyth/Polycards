@@ -334,7 +334,13 @@ describe('withdrawal sweep — the state an admin approval could leave ambiguous
       selector: { id: approvedThenAmbiguousRow.id, status: 'pending' },
       // classifyRequeryError's not-found branch never sets gatewayStatus —
       // the row was never heard of, so there is no gateway status to record.
-      data: { status: 'failed', gateway_status: null },
+      // Plan 095: the sweep records WHICH verdict closed the row — a stale
+      // payout with no gateway record reads differently from a requeried fail.
+      data: {
+        status: 'failed',
+        gateway_status: null,
+        failure_reason: 'sweep: stale with no gateway record',
+      },
     });
 
     // Step 2 and step 4 of the extracted ordering — untouched by the

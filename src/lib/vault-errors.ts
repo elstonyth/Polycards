@@ -40,8 +40,15 @@ export const VAULT_RULES: ErrorRule[] = [
   // Withdrawal messages are already customer-facing on the backend — pass
   // them through instead of flattening a gateway refusal into the fallback.
   [
-    /could not start your withdrawal/i,
-    'We could not start your withdrawal. Please check the bank details and try again.',
+    // Matches the backend's post-095 wording AND the pre-095 one still in
+    // flight from an older deployment, so a mid-deploy refusal never falls
+    // through to the generic "Something went wrong".
+    /refused by the payment provider|could not start your withdrawal/i,
+    // Says who refused and that the money is back, and stops short of telling
+    // the customer to fix bank details that may be perfectly correct: on
+    // 2026-08-11 two customers retried ten times against a payout channel that
+    // was refusing everything, because the old copy read as their mistake.
+    'Your withdrawal was refused by the payment provider and your balance has been returned. Check your bank details are correct — if they are, contact support rather than retrying.',
   ],
   [
     /withdrawals must be between/i,

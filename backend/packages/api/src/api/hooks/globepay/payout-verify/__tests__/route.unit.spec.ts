@@ -46,6 +46,7 @@ function harness(withdrawal: Record<string, unknown> | null) {
     listGlobePayWithdrawals: jest
       .fn()
       .mockResolvedValue(withdrawal ? [withdrawal] : []),
+    updateGlobePayWithdrawals: jest.fn().mockResolvedValue(undefined),
   };
   const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
   const req = {
@@ -128,7 +129,17 @@ describe('payout verification', () => {
     );
     expect(res.statusCode).toBe(400);
     expect(res.body).not.toBe('success');
-    expect(h.packs.listGlobePayWithdrawals).not.toHaveBeenCalled();
+    // The lookup that DOES happen here is the plan-095 recorder, not a gate:
+    // the refusal above is already decided, and the row is read only so the
+    // reason can be written to it. Before that recorder existed this asserted
+    // no lookup at all — the property worth keeping is that a mismatched
+    // merchant never reaches an approval, which the two assertions above
+    // cover.
+    expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith(
+      expect.objectContaining({
+        verify_outcome: expect.stringContaining('rejected: names merchant'),
+      }),
+    );
   });
 
   it('approves a merchant code differing only in case', async () => {
@@ -139,6 +150,70 @@ describe('payout verification', () => {
     );
     expect(res.statusCode).toBe(200);
     expect(res.body).toBe('success');
+  });
+
+  // Plan 095. Their Payout Verification is ACTIVE in production, so the row's
+  // record of it is the only thing that distinguishes "we refused their
+  // verification" from "their verification never reached us" once
+  // DigitalOcean has rotated the run logs away.
+  describe('records the outcome on the row', () => {
+    it('stamps success on an approved payout', async () => {
+      const h = harness(pendingRow);
+      await run(h, body(verification));
+      expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith({
+        id: 'gpw_1',
+        verify_outcome: expect.stringContaining('success'),
+      });
+    });
+
+    it('names the amount when that is what refused it', async () => {
+      const h = harness(pendingRow);
+      await run(h, body({ ...verification, Amount: 500 }));
+      expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith({
+        id: 'gpw_1',
+        verify_outcome: expect.stringContaining(
+          'rejected: amount 500 != debited 50',
+        ),
+      });
+    });
+
+    it('names the currency rather than blaming the amount', async () => {
+      const h = harness(pendingRow);
+      await run(h, body({ ...verification, CurrencyCode: 'VND' }));
+      // The pre-095 route collapsed both checks into one message that always
+      // said "amount", which would have sent an operator hunting a mismatch
+      // that did not exist.
+      expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith({
+        id: 'gpw_1',
+        verify_outcome: expect.stringContaining('rejected: currency VND'),
+      });
+    });
+
+    it('names the status when the row has already closed', async () => {
+      const h = harness({ ...pendingRow, status: 'failed' });
+      await run(h, body(verification));
+      expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith({
+        id: 'gpw_1',
+        verify_outcome: expect.stringContaining('rejected: row status is'),
+      });
+    });
+
+    it('writes nothing when no row matches the reference', async () => {
+      const h = harness(null);
+      const res = await run(h, body(verification));
+      expect(res.statusCode).toBe(400);
+      expect(h.packs.updateGlobePayWithdrawals).not.toHaveBeenCalled();
+    });
+
+    it('still approves when the recording write fails', async () => {
+      const h = harness(pendingRow);
+      h.packs.updateGlobePayWithdrawals.mockRejectedValue(new Error('db down'));
+      const res = await run(h, body(verification));
+      // A breadcrumb must never cost a payout: anything but "success" here
+      // makes GlobePay reject a withdrawal we had already debited.
+      expect(res.statusCode).toBe(200);
+      expect(res.body).toBe('success');
+    });
   });
 
   it('refuses a verification signed with the wrong key', async () => {

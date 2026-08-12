@@ -1142,6 +1142,15 @@ export interface GlobePayWithdrawal {
   account_holder_name: string;
   status: 'held' | 'pending' | 'settled' | 'failed';
   gateway_status: number | null;
+  /** Why the payout died — the gateway's own codes, a sweep verdict, or the
+   *  admin who denied it. Null on rows that never failed, and on the ten
+   *  pre-2026-08-12 failures that predate the column. */
+  failure_reason: string | null;
+  /** How we answered their Payout Verification, stamped on EVERY hit. Null
+   *  means no verification ever arrived for this payout — which, since it is
+   *  ACTIVE on the production merchant, points at their call not reaching us
+   *  rather than at anything this codebase decided. */
+  verify_outcome: string | null;
   created_at: string;
   settled_at: string | null;
   stale: boolean;

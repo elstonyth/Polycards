@@ -217,7 +217,17 @@ export async function POST(
       // Refund (idempotent, on the shared anchor) and close the row. The
       // claim above left it 'pending', which is what the helper's terminal
       // update must be scoped to — its default.
-      await refundGlobePayWithdrawal(req.scope, row, null);
+      await refundGlobePayWithdrawal(
+        req.scope,
+        row,
+        null,
+        'pending',
+        // Same fields as the log line below, kept on the row because the log
+        // itself does not survive the next deployment (plan 095).
+        `approve refused: codes=${error.codes.join(',') || 'none'} ` +
+          `httpStatus=${error.httpStatus} bankCode=${row.bank_code} ` +
+          `msg=${error.message}`,
+      );
       // Their reason, on record, AFTER the money moved — a definitively
       // refused submit leaves nothing at the gateway to requery later, so
       // this line is the only thing that can tell an empty merchant payout

@@ -503,7 +503,24 @@ export async function startGlobePayWithdrawal(
           gatewayRef: merchantTransactionId,
         },
       });
-      await packs.updateGlobePayWithdrawals({ id: row.id, status: 'failed' });
+      // The reason rides along with the close, on the SAME write: a second
+      // round-trip could fail on its own and leave the row closed with nothing
+      // said. `failure_reason` is the durable half of the log line below —
+      // DigitalOcean run logs only cover the current deployment, so on
+      // 2026-08-11 the codes for eight failed production payouts were gone by
+      // the next morning while the rows themselves survived, saying only
+      // 'failed'. Same fields as the log, same PII rule: their codes, their
+      // message, the HTTP status and the destination BANK CODE — never the
+      // account number, the holder name or the signed envelope.
+      await packs.updateGlobePayWithdrawals({
+        id: row.id,
+        status: 'failed',
+        failure_reason: (
+          `submit refused: codes=${error.codes.join(',') || 'none'} ` +
+          `httpStatus=${error.httpStatus} bankCode=${bankCode} ` +
+          `msg=${error.message}`
+        ).slice(0, 400),
+      });
       // Log their reason before it is flattened into the customer-facing
       // message below — the sibling deposit branch has done this since
       // 2026-08-04 and this one never did, so a live payout could refuse with
@@ -551,9 +568,17 @@ export async function startGlobePayWithdrawal(
         // Swallowed deliberately: the logger is the thing that failed, so there
         // is nothing left to report it with.
       }
+      // Says who refused, and does not instruct the customer to fix something
+      // that may well be correct. The old wording ("check the bank details")
+      // was a guess dressed as a diagnosis: on 2026-08-11 two customers retried
+      // ten times against bank details that were fine — the payout channel was
+      // refusing every attempt — and nobody escalated, because the message read
+      // as their mistake. The refund is stated because it already happened
+      // above, and it is the fact that decides whether they need support at
+      // all.
       throw new MedusaError(
         MedusaError.Types.INVALID_DATA,
-        'We could not start your withdrawal. Please check the bank details and try again.',
+        'Your withdrawal was refused by the payment provider and your balance has been returned. Check your bank details are correct — if they are, contact support rather than retrying.',
       );
     }
     // AMBIGUOUS (timeout, reset, WAF page): the request may have been
@@ -667,6 +692,15 @@ export async function refundGlobePayWithdrawal(
   },
   gatewayStatus: number | null,
   fromStatus: 'pending' | 'held' | 'failed' = 'pending',
+  /**
+   * Why this payout is being closed, stored on the row (plan 095). Optional
+   * because the three callers know three different things: the admin deny
+   * route knows a human said no, the sweep knows what a requery answered, and
+   * the approve route knows the gateway's own codes. Omitted leaves the column
+   * as it was — a caller with nothing to say must not blank a reason an
+   * earlier write already recorded.
+   */
+  failureReason?: string,
 ): ReturnType<PacksModuleService['withdrawCreditsWithLedger']> {
   const packs = scope.resolve<PacksModuleService>(PACKS_MODULE);
   const refund = await packs.withdrawCreditsWithLedger({
@@ -720,7 +754,13 @@ export async function refundGlobePayWithdrawal(
   });
   await packs.updateGlobePayWithdrawals({
     selector: { id: withdrawal.id, status: fromStatus },
-    data: { status: 'failed', gateway_status: gatewayStatus },
+    data: {
+      status: 'failed',
+      gateway_status: gatewayStatus,
+      ...(failureReason
+        ? { failure_reason: failureReason.slice(0, 400) }
+        : {}),
+    },
   });
   if (!refund.replayed) {
     try {
