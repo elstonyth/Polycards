@@ -181,10 +181,21 @@ describe('deleteAccountPreflight', () => {
     );
   });
 
+  // The filter is pinned for the same reason the other three are, and this one
+  // needs it most: the guard is stated as "NOT terminal" precisely so a status
+  // added later cannot slip past it. Without this assertion the mock returns a
+  // row whatever was asked, so swapping $nin for the fail-open enumeration —
+  // or for `$nin: []` — leaves every test in this file green while a delivery
+  // in a newly-added status ships to an address the purge already erased.
   it('blocks a delivery that has not reached a terminal status', async () => {
     const svc = mkPreflight();
     svc.listDeliveryOrders.mockResolvedValue([{ id: 'do1' }]);
     const r = await svc.deleteAccountPreflight('cus_1', CTX);
     expect(r).toMatchObject({ ok: false, reason: 'DELIVERY_IN_FLIGHT' });
+    expect(svc.listDeliveryOrders).toHaveBeenCalledWith(
+      { customer_id: 'cus_1', status: { $nin: ['completed', 'canceled'] } },
+      { take: 1 },
+      CTX_ARG,
+    );
   });
 });
