@@ -378,3 +378,222 @@ describe('purgeAccountPacksData', () => {
     expect(f.svc.createAdminActionAudits).not.toHaveBeenCalled();
   });
 });
+
+describe('deletedCustomerIds', () => {
+  it('returns the ids that have a delete_account audit row', async () => {
+    const svc = Object.create(
+      PacksModuleService.prototype,
+    ) as PacksModuleService & { listAdminActionAudits: jest.Mock };
+    svc.listAdminActionAudits = jest
+      .fn()
+      .mockResolvedValue([{ entity_id: 'cus_2' }]);
+    await expect(
+      svc.deletedCustomerIds(['cus_1', 'cus_2'], CTX),
+    ).resolves.toEqual(new Set(['cus_2']));
+    // The filter is pinned, not just the outcome. Every caller of this read is
+    // a money guard that FAILS OPEN on an empty Set, and the mock answers
+    // whatever it is asked — so a filter that silently matched nothing (a
+    // dropped `action`, an id list the query cannot express) would leave this
+    // whole file green while a deleted account keeps getting paid.
+    expect(svc.listAdminActionAudits).toHaveBeenCalledWith(
+      { entity_id: ['cus_1', 'cus_2'], action: 'delete_account' },
+      { take: 2 },
+      CTX_ARG,
+    );
+  });
+
+  it('does not query at all for an empty ranking', async () => {
+    const svc = Object.create(
+      PacksModuleService.prototype,
+    ) as PacksModuleService & { listAdminActionAudits: jest.Mock };
+    svc.listAdminActionAudits = jest.fn();
+    await expect(svc.deletedCustomerIds([], CTX)).resolves.toEqual(new Set());
+    expect(svc.listAdminActionAudits).not.toHaveBeenCalled();
+  });
+});
+
+describe('settleChallengeWeek — deleted winners', () => {
+  // Enough of the enumerator to reach the winner loop: everything it reads
+  // before paying anyone, stubbed with the smallest shape that satisfies it.
+  // settleChallengeWinner is `protected` and reserveSettledStock `private`, so
+  // the fake is typed as its mocks alone rather than intersected with the
+  // class — the prototype underneath is still the real one.
+  type SettleSvc = Record<string, jest.Mock> & {
+    settleChallengeWeek: PacksModuleService['settleChallengeWeek'];
+  };
+  const mkSettle = (deleted: string[]) => {
+    const svc = Object.create(
+      PacksModuleService.prototype,
+    ) as unknown as SettleSvc;
+    svc.challengeSettings = jest.fn().mockResolvedValue({
+      timezone: 'Asia/Kuala_Lumpur',
+      reset_day: 1,
+      reset_hour: 0,
+    });
+    svc.challengeWeekBounds = jest.fn().mockResolvedValue({
+      startUtc: new Date('2026-08-03T00:00:00Z'),
+      endUtc: new Date('2026-08-10T00:00:00Z'),
+    });
+    svc.listChallengePayouts = jest.fn().mockResolvedValue([]);
+    // threshold 0 against a non-zero pool => stage 1 unlocks; rank 1 pays
+    // credits, so the loop's "rank pays nothing" gate does not swallow it.
+    svc.listChallengeStages = jest.fn().mockResolvedValue([
+      {
+        stage_number: 1,
+        threshold_myr: 0,
+        rank_rewards: [{ rank: 1, credits: 100, card_id: null }],
+      },
+    ]);
+    svc.challengeWeekPool = jest.fn().mockResolvedValue(9_999);
+    svc.challengeWeekTop = jest
+      .fn()
+      .mockResolvedValue([{ customer_id: 'cus_gone' }]);
+    svc.listCards = jest.fn().mockResolvedValue([]);
+    svc.deletedCustomerIds = jest.fn().mockResolvedValue(new Set(deleted));
+    svc.settleChallengeWinner = jest.fn().mockResolvedValue(null);
+    svc.reserveSettledStock = jest.fn().mockResolvedValue(undefined);
+    return svc;
+  };
+
+  // Real balance and a real card, minted to an account with no owner. `pull`
+  // rows are retained by design, so a deleted customer stays ranked.
+  it('pays nothing to a deleted winner', async () => {
+    const svc = mkSettle(['cus_gone']);
+    const result = await svc.settleChallengeWeek({ getStock: jest.fn() }, CTX);
+    expect(svc.settleChallengeWinner).not.toHaveBeenCalled();
+    expect(result.winners).toEqual([]);
+  });
+
+  // The other direction, and the one that proves the fixture actually reaches
+  // the loop: without it, a stub that fell out of step with the enumerator
+  // would make the test above pass for the wrong reason.
+  it('still pays a live winner', async () => {
+    const svc = mkSettle([]);
+    await svc.settleChallengeWeek({ getStock: jest.fn() }, CTX);
+    expect(svc.settleChallengeWinner).toHaveBeenCalled();
+  });
+});
+
+// The REAL settleOpen, driven with no database: @InjectTransactionManager
+// reuses a provided sharedContext.transactionManager, so a bare prototype plus
+// a SQL-dispatching fake `em` runs the whole seam — the recruit's debit, the
+// gen-1 direct commission, AND the gens 2..N override loop. Same idiom as
+// customer-metadata-lock.unit.spec.ts:28-51.
+//
+// Driving the real method (rather than extracting the fan-out to test it in
+// isolation) is what makes the upline assertion below meaningful: the direct
+// sponsor and the override ancestors are paid from two different call sites,
+// and only the real method exercises both.
+// Members are listed one by one rather than via a `Record<string, jest.Mock>`
+// intersection: the generated list/create methods are READ-ONLY properties, so
+// an index signature leaves them unassignable (TS2540). Same shape as
+// PreflightSvc / PurgeSvc above.
+type FanOutSvc = PacksModuleService & {
+  listCustomerAccountStates: jest.Mock;
+  createCreditTransactions: jest.Mock;
+  listReferralRelationships: jest.Mock;
+  lifetimeTurnoverSenFor: jest.Mock;
+  listVipLevels: jest.Mock;
+  rewardsSettings: jest.Mock;
+  createCommissions: jest.Mock;
+  deletedCustomerIds: jest.Mock;
+};
+
+const mkFanOut = (deleted: string[]) => {
+  const svc = Object.create(PacksModuleService.prototype) as FanOutSvc;
+  let creditSeq = 0;
+  const em = {
+    execute: jest.fn(async (query: string) => {
+      // RM 1000 on hand, every sen of it externally funded, so the commission
+      // basis is the full open price.
+      if (query.includes('balance_cents'))
+        return [{ balance_cents: '100000', ext_cents: '100000' }];
+      if (query.includes('locked_cents')) return [{ locked_cents: '0' }];
+      // ONE live ancestor above the sponsor — the upline whose override an
+      // earlier draft of this guard would have docked.
+      if (query.includes('WITH RECURSIVE'))
+        return [{ ancestor_id: 'cus_anc', depth: '2' }];
+      return []; // advisory lock + the replayed-open pre-check
+    }),
+  };
+  svc.listCustomerAccountStates = jest.fn().mockResolvedValue([]); // not frozen
+  svc.createCreditTransactions = jest
+    .fn()
+    .mockImplementation(async () => [{ id: `ct_${++creditSeq}` }]);
+  svc.listReferralRelationships = jest
+    .fn()
+    .mockResolvedValue([{ sponsor_id: 'cus_sponsor' }]);
+  svc.lifetimeTurnoverSenFor = jest.fn().mockResolvedValue(0);
+  svc.listVipLevels = jest
+    .fn()
+    .mockResolvedValue([
+      { level: 1, spend_threshold: 0, direct_referral_pct: 10 },
+    ]);
+  svc.rewardsSettings = jest.fn().mockResolvedValue({
+    commissionCooldownDays: 0,
+    teamOverridePct: 0.2,
+    overrideGenerationCap: 100,
+  });
+  svc.createCommissions = jest.fn().mockResolvedValue([]);
+  const gone = new Set(deleted);
+  svc.deletedCustomerIds = jest
+    .fn()
+    .mockImplementation(async (ids: string[]) =>
+      new Set(ids.filter((id) => gone.has(id))),
+    );
+  return { svc, em, ctx: { transactionManager: em } as never };
+};
+
+// RM 50 open, fully external-funded => basis 5000 sen. 10% direct = 500 sen to
+// the sponsor; teamOverrideSchedule(500, 20) then pays gen 2 = 100 sen.
+const OPEN = {
+  customerId: 'cus_recruit',
+  amount: -50,
+  sourceTransactionId: 'open_1',
+};
+
+/** Who the fan-out actually paid, in order. */
+const paidTo = (createCommissions: jest.Mock): string[] =>
+  createCommissions.mock.calls.map(
+    (c) => (c[0] as { beneficiary: string }[])[0].beneficiary,
+  );
+
+describe('settleOpen — commission to a deleted beneficiary', () => {
+  // The direct sponsor is gone. Their downline's activity is real and their
+  // upline's override is genuinely earned, so ONLY the sponsor's share may be
+  // skipped — this is the assertion that fails if the guard is hoisted up to
+  // the sponsor lookup as a single early return.
+  it('skips a deleted SPONSOR but still pays the live upline', async () => {
+    const f = mkFanOut(['cus_sponsor']);
+    const result = await f.svc.settleOpen(OPEN, f.ctx);
+    expect(paidTo(f.svc.createCommissions)).toEqual(['cus_anc']);
+    expect(f.svc.deletedCustomerIds).toHaveBeenCalledWith(
+      ['cus_sponsor'],
+      expect.anything(),
+    );
+    // The recruit's own debit must still stand: this guard skips a payment,
+    // it never voids the paid open that triggered it.
+    expect(result.balance).toBe(950);
+    expect(f.svc.createCreditTransactions.mock.calls[0][0][0]).toMatchObject({
+      customer_id: 'cus_recruit',
+      reason: 'pack_open',
+    });
+  });
+
+  // The mirror case, and the one a sponsor-only check could never catch: the
+  // deleted account is an ANCESTOR, reached through the override loop.
+  it('skips a deleted ANCESTOR without docking the live sponsor', async () => {
+    const f = mkFanOut(['cus_anc']);
+    await f.svc.settleOpen(OPEN, f.ctx);
+    expect(paidTo(f.svc.createCommissions)).toEqual(['cus_sponsor']);
+  });
+
+  it('pays the whole fan-out when nobody is deleted', async () => {
+    const f = mkFanOut([]);
+    await f.svc.settleOpen(OPEN, f.ctx);
+    expect(paidTo(f.svc.createCommissions)).toEqual([
+      'cus_sponsor',
+      'cus_anc',
+    ]);
+  });
+});

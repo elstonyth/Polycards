@@ -3397,6 +3397,30 @@ class PacksModuleService extends MedusaService({
               kind: 'direct' | 'override',
               effectivePct: number,
             ): Promise<void> => {
+              // A purged customer keeps their referral edges — severing them
+              // would dangle a recruit's upline and silently rewrite
+              // attribution — so the edge still resolves here long after the
+              // account is gone. Paying it mints credits onto an account with
+              // no owner and no login, every time a surviving recruit opens a
+              // pack, forever. The preflight cannot cover this: at delete time
+              // the commission row does not exist yet.
+              //
+              // Per BENEFICIARY, not per sponsor. Skipping the whole fan-out
+              // when the direct sponsor is deleted would dock every live upline
+              // an override they earned; checking only the sponsor would still
+              // pay a deleted ancestor. Both are wrong; this is not.
+              //
+              // sharedContext threaded so the read joins THIS locked txn rather
+              // than taking a second pool connection (see recordPullsWithLedger).
+              // Deliberately NOT wrapped in try/catch: a swallowed read error
+              // would pay the deleted account, so a failure here rolls the open
+              // back — the same fail-closed direction as the reads above.
+              if (
+                (await this.deletedCustomerIds([beneficiary], sharedContext))
+                  .size > 0
+              ) {
+                return;
+              }
               const [credit] = await this.createCreditTransactions(
                 [
                   {
@@ -3827,6 +3851,31 @@ class PacksModuleService extends MedusaService({
     }
 
     return { ok: true };
+  }
+
+  // Which of these customers no longer have an owner.
+  //
+  // The `delete_account` audit row is the signal, rather than the account-state
+  // tombstone or the customer row's deleted_at: it is written inside the same
+  // packs transaction as the rest of the purge, it is purpose-built for this
+  // (an admin cannot produce one by typing a disable reason), and it is written
+  // BEFORE the customer soft delete, so it covers a half-finished purge too.
+  // The customer module is not reachable from this service anyway.
+  //
+  // One query for the whole list — the caller's ranking is at most ten ids, and
+  // the audit write is idempotent, so `take` can be the id count.
+  @InjectManager()
+  async deletedCustomerIds(
+    customerIds: string[],
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<Set<string>> {
+    if (customerIds.length === 0) return new Set();
+    const rows = await this.listAdminActionAudits(
+      { entity_id: customerIds, action: 'delete_account' },
+      { take: customerIds.length },
+      sharedContext,
+    );
+    return new Set(rows.map((r) => r.entity_id));
   }
 
   // The packs-module half of an account deletion: scrub the personal data out
@@ -7543,9 +7592,16 @@ class PacksModuleService extends MedusaService({
         ]),
       ),
     };
+    // A deleted customer keeps their `pull` rows — the books are retained on
+    // purpose — so they stay ranked, and settlement would mint real balance and
+    // a real card to an account with no owner. Read once for the whole ranking,
+    // outside the per-winner transactions.
+    const deleted = await this.deletedCustomerIds(ranking, sharedContext);
+
     const winners: SettledWinner[] = [];
     for (const [i, customerId] of ranking.entries()) {
       if (settledCustomers.has(customerId)) continue; // paid on a prior tick
+      if (deleted.has(customerId)) continue; // account deleted; nobody to pay
       const payout = byRank.get(i + 1);
       if (!payout || (payout.credits <= 0 && payout.cardIds.length === 0)) {
         continue; // rank pays nothing this week
