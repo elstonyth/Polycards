@@ -46,7 +46,11 @@ Migration: add the column; backfill `disabled_cause = 'admin'` for every existin
 
 ### POST /store/customers/me/reactivate
 
-- Succeeds only when `disabled_cause === 'self'`. Anything else (admin, or NULL) returns 403 with the existing support message.
+- Writes only when the account is self-disabled. The three states are distinct, and conflating the last two is a real bug:
+  - **not disabled at all** (`accountDisabledCause` returns `null`) — 200 `{ disabled: false }`, no write. This is NOT an error case: an admin can re-enable the account between the customer's login and their tap on the reactivate confirm, and answering that with "contact support" would strand a customer whose account is already working. It also makes a double-submit harmless.
+  - **self-disabled** (`'self'`) — the write happens.
+  - **anything else** (`'admin'` today, and any cause value a future release adds) — 403 with the existing support message.
+- The test is `!== 'self'` to refuse, never `=== 'admin'` to refuse. Denying only the value you can name and allowing the rest is a fail-OPEN: an unexpected cause would reactivate the account. That bug was written and caught during implementation, so it is worth stating plainly rather than leaving to the reader.
 - Clears `disabled`, `disabled_cause`, `disabled_at`; writes an audit row.
 - This is the ONLY /store route a self-disabled session may call (see §3).
 
