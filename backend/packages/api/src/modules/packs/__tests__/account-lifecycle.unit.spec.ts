@@ -199,3 +199,157 @@ describe('deleteAccountPreflight', () => {
     );
   });
 });
+
+// purgeAccountPacksData is @InjectTransactionManager, which REUSES a provided
+// sharedContext.transactionManager and calls the real method — so a bare
+// prototype plus a fake `em` drives the whole purge with no database. Idiom:
+// customer-metadata-lock.unit.spec.ts:28-51.
+type PurgeSvc = PacksModuleService & {
+  deleteAccountPreflight: jest.Mock;
+  listCustomerAccountStates: jest.Mock;
+  createCustomerAccountStates: jest.Mock;
+  updateCustomerAccountStates: jest.Mock;
+  listAdminActionAudits: jest.Mock;
+  createAdminActionAudits: jest.Mock;
+};
+
+const mkPurge = () => {
+  const svc = Object.create(PacksModuleService.prototype) as PurgeSvc;
+  const sql: string[] = [];
+  const em = {
+    execute: jest.fn(async (query: string) => {
+      sql.push(query);
+      return [];
+    }),
+  };
+  // The in-lock re-check is part of the method under test, so the fake has to
+  // answer it — without this the purge refuses before it scrubs anything.
+  svc.deleteAccountPreflight = jest.fn().mockResolvedValue({ ok: true });
+  svc.listCustomerAccountStates = jest.fn().mockResolvedValue([{ id: 'cas_1' }]);
+  svc.createCustomerAccountStates = jest.fn().mockResolvedValue([]);
+  svc.updateCustomerAccountStates = jest.fn().mockResolvedValue([]);
+  svc.listAdminActionAudits = jest.fn().mockResolvedValue([]);
+  svc.createAdminActionAudits = jest.fn().mockResolvedValue([]);
+  return { svc, em, sql, ctx: { transactionManager: em } as never };
+};
+
+const writesIn = (sql: string[]) =>
+  sql.filter((q) => /^\s*(update|delete)/i.test(q));
+
+describe('purgeAccountPacksData', () => {
+  it('takes the credit advisory lock FIRST, then re-runs the preflight inside it', async () => {
+    const f = mkPurge();
+    await f.svc.purgeAccountPacksData('cus_1', f.ctx);
+    expect(f.sql[0]).toContain('pg_advisory_xact_lock');
+    expect(f.svc.deleteAccountPreflight).toHaveBeenCalled();
+    expect(
+      f.svc.deleteAccountPreflight.mock.invocationCallOrder[0],
+    ).toBeGreaterThan(f.em.execute.mock.invocationCallOrder[0]);
+  });
+
+  // The route's preflight runs in no transaction and holds no lock, so on its
+  // own it leaves a window — minutes wide in production, because deposits are
+  // credited by the reconcile sweep — in which a spin, sell, deposit credit or
+  // withdrawal can land and be purged straight through. This re-check is what
+  // closes it, so it gets its own test rather than riding on the happy path.
+  it('refuses and writes NOTHING when the in-lock re-check fails', async () => {
+    const f = mkPurge();
+    f.svc.deleteAccountPreflight.mockResolvedValue({
+      ok: false,
+      reason: 'BALANCE_NOT_ZERO',
+      detail: 'Wallet balance is RM 12.50.',
+    });
+    await expect(f.svc.purgeAccountPacksData('cus_1', f.ctx)).rejects.toThrow(
+      /BALANCE_NOT_ZERO/,
+    );
+    expect(writesIn(f.sql)).toHaveLength(0);
+    expect(f.svc.createAdminActionAudits).not.toHaveBeenCalled();
+  });
+
+  it('scrubs the retained financial rows and deletes the pure-PII ones', async () => {
+    const f = mkPurge();
+    await f.svc.purgeAccountPacksData('cus_1', f.ctx);
+    const all = f.sql.join('\n');
+    expect(all).toContain('globepay_withdrawal');
+    expect(all).toContain('right("account_number", 4)');
+    // NOT NULL columns, so '' rather than null — a null here is a constraint
+    // violation that fails the whole purge on the first real delete.
+    expect(all).toContain(`"account_holder_name" = ''`);
+    expect(all).toContain('delivery_order');
+    expect(all).toContain('"proof_images" = null');
+    expect(writesIn(f.sql).join('\n')).toContain(
+      'delete from "player_payout_details"',
+    );
+    expect(writesIn(f.sql).join('\n')).toContain(
+      'delete from "notification_read"',
+    );
+  });
+
+  // The row IS the tombstone. Soft-deleting it re-opens the account:
+  // accountDisabledCause reads through listCustomerAccountStates, which
+  // excludes soft-deleted rows, so it would return null and the session guard
+  // would wave a still-valid bearer straight through.
+  it('tombstones the account-state row instead of soft-deleting it', async () => {
+    const f = mkPurge();
+    await f.svc.purgeAccountPacksData('cus_1', f.ctx);
+    expect(f.svc.updateCustomerAccountStates).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          disabled: true,
+          disabled_cause: 'admin',
+          disabled_reason: 'Account deleted by the customer.',
+        }),
+      }),
+      expect.anything(),
+    );
+    expect(f.sql.join('\n')).not.toMatch(
+      /customer_account_state[\s\S]*deleted_at/i,
+    );
+  });
+
+  // Most customers have never been disabled or frozen, so they have NO
+  // account-state row at all — setAccountDisabled creates it lazily. An update
+  // that no-ops for them would leave the commonest account with no tombstone
+  // and a bearer that keeps working for the rest of its TTL.
+  it('CREATES the tombstone when the customer has no account-state row', async () => {
+    const f = mkPurge();
+    f.svc.listCustomerAccountStates.mockResolvedValue([]);
+    await f.svc.purgeAccountPacksData('cus_1', f.ctx);
+    expect(f.svc.createCustomerAccountStates).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          customer_id: 'cus_1',
+          disabled: true,
+          disabled_cause: 'admin',
+        }),
+      ],
+      expect.anything(),
+    );
+    expect(f.svc.updateCustomerAccountStates).not.toHaveBeenCalled();
+  });
+
+  it('writes the delete_account audit row', async () => {
+    const f = mkPurge();
+    await f.svc.purgeAccountPacksData('cus_1', f.ctx);
+    expect(f.svc.createAdminActionAudits).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          admin_id: 'cus_1',
+          entity_id: 'cus_1',
+          action: 'delete_account',
+        }),
+      ],
+      expect.anything(),
+    );
+  });
+
+  // The route is re-runnable after a partial failure, so the audit write has
+  // to be too: a trail that grows a row per retry reports one deletion as
+  // several.
+  it('does not stack a second audit row on a retry', async () => {
+    const f = mkPurge();
+    f.svc.listAdminActionAudits.mockResolvedValue([{ id: 'aud_1' }]);
+    await f.svc.purgeAccountPacksData('cus_1', f.ctx);
+    expect(f.svc.createAdminActionAudits).not.toHaveBeenCalled();
+  });
+});

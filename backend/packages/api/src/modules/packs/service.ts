@@ -3811,6 +3811,148 @@ class PacksModuleService extends MedusaService({
     return { ok: true };
   }
 
+  // The packs-module half of an account deletion: scrub the personal data out
+  // of the rows we KEEP, and delete the rows that are pure personal data.
+  //
+  // Transactional within this module. The rest of the purge (customer row,
+  // notifications, auth identities, avatar object) lives in other modules and
+  // cannot join this transaction — see the route for the ordering that makes a
+  // partial failure recoverable.
+  //
+  // What is deliberately NOT touched: credit_transaction, ledger_entry,
+  // globepay_deposit, pull, commission, vip_member_state and
+  // referral_relationship. Those are the business books. They carry only a
+  // customer_id that no longer resolves to a person, and the referral rows in
+  // particular must survive or a downline's upline dangles.
+  @InjectTransactionManager()
+  async purgeAccountPacksData(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `credit:${customerId}`,
+    ]);
+    // Re-check INSIDE the lock. The route's earlier preflight is the fast,
+    // friendly rejection that gives the customer an actionable reason; THIS one
+    // is the correctness gate. Without it a spin, sell, deposit credit or
+    // withdrawal landing between the two calls would be purged straight
+    // through — and that window is minutes wide in production, because
+    // deposits are credited by the reconcile sweep rather than the callback.
+    const check = await this.deleteAccountPreflight(customerId, sharedContext);
+    if (!check.ok) {
+      throw new MedusaError(MedusaError.Types.NOT_ALLOWED, check.reason);
+    }
+
+    // Retained financial rows, scrubbed to the operator-chosen minimum: the
+    // amounts, statuses, gateway ids and timestamps that make the books
+    // reconcile stay; the counterparty identity goes. Last 4 of the account
+    // number is kept for the same reason setPayoutDetails keeps it in its audit
+    // row — a same-bank redirect is otherwise indistinguishable from a no-op.
+    await em.execute(
+      `update "globepay_withdrawal"
+          set "account_number" = right("account_number", 4),
+              "account_holder_name" = ''
+        where "customer_id" = ?`,
+      [customerId],
+    );
+    // proof_images goes with the address fields, not with the tracking number:
+    // a doorstep photo can show the label or the recipient, which re-exposes
+    // exactly what the ship_* scrub removes. NOTE the column holds admin-typed
+    // http(s) URLs, not file-provider ids (admin/delivery-orders/validate.ts:126),
+    // so nulling it removes our copy of the reference — an object hosted in our
+    // own bucket still needs an operator sweep, and there is no id to hand the
+    // file workflow.
+    //
+    // ship_country_code is NOT NULL and deliberately left alone: a bare country
+    // is not identifying, and it is what makes a shipped order's cost still
+    // reconcile.
+    await em.execute(
+      `update "delivery_order"
+          set "ship_name" = '', "ship_address_1" = '', "ship_address_2" = null,
+              "ship_city" = '', "ship_province" = null, "ship_postal_code" = '',
+              "ship_phone" = null, "proof_images" = null
+        where "customer_id" = ?`,
+      [customerId],
+    );
+
+    // Pure personal data, no business value — deleted outright.
+    await em.execute(
+      `delete from "player_payout_details" where "customer_id" = ?`,
+      [customerId],
+    );
+    await em.execute(`delete from "notification_read" where "customer_id" = ?`, [
+      customerId,
+    ]);
+
+    // The account-state row is the TOMBSTONE, not garbage. Soft-deleting it is
+    // what would re-open the account: accountDisabledCause reads through
+    // listCustomerAccountStates, which excludes soft-deleted rows, so it would
+    // return null and the session guard would wave requests through — and a
+    // bearer minted before the delete keeps verifying for up to a day (JWT auth
+    // does no DB lookup and medusa-config.ts sets no jwtExpiresIn, so the
+    // framework default "1d" applies). Cause 'admin', never 'self', so the
+    // reactivate carve-out can never apply to a deleted account.
+    //
+    // Upsert, not a bare UPDATE: most customers have never been disabled or
+    // frozen and therefore have NO row at all (setAccountDisabled creates it
+    // lazily, service.ts:2699-2718), and an update that no-ops for them would
+    // leave the commonest account with no tombstone at all.
+    //
+    // CONSEQUENCE, deliberate: from this write on, the blanket /store/* session
+    // guard 403s this customer's own bearer, so a retry after a later step
+    // fails is OPERATOR-driven, not customer-driven. The step order below still
+    // matters for exactly that operator re-run. Widening the guard's carve-out
+    // to admit the delete route would be worse — it would let an ADMIN-banned
+    // account purge itself and destroy the evidence.
+    const tombstone = {
+      disabled: true,
+      disabled_cause: 'admin' as const,
+      disabled_reason: 'Account deleted by the customer.',
+      disabled_at: new Date(),
+    };
+    const [state] = await this.listCustomerAccountStates(
+      { customer_id: customerId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (state) {
+      await this.updateCustomerAccountStates(
+        { selector: { id: state.id }, data: tombstone },
+        sharedContext,
+      );
+    } else {
+      await this.createCustomerAccountStates(
+        [{ customer_id: customerId, ...tombstone }],
+        sharedContext,
+      );
+    }
+
+    // Idempotent: the route is re-runnable after a partial failure, and an
+    // audit trail that grows a row per retry reports one deletion as several.
+    const [existingAudit] = await this.listAdminActionAudits(
+      { entity_id: customerId, action: 'delete_account' },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!existingAudit) {
+      await this.createAdminActionAudits(
+        [
+          {
+            admin_id: customerId,
+            entity_type: 'customer',
+            entity_id: customerId,
+            action: 'delete_account',
+            before: { deleted: false },
+            after: { deleted: true },
+            reason: 'Customer deleted their own account.',
+          },
+        ],
+        sharedContext,
+      );
+    }
+  }
+
   // Wallet summary: raw balance, available (freeze-aware), locked (pending-
   // unmatured + suspended commissions), the earliest pending maturity
   // tranche (date + amount), and the playthrough withdrawal gate

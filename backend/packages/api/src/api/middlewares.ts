@@ -8,6 +8,7 @@ import {
 import { MedusaError } from '@medusajs/framework/utils';
 import multer from 'multer';
 import {
+  createAccountDeleteRateLimit,
   createAdminActionRateLimit,
   createAuthIdentifierRateLimit,
   createAuthRateLimit,
@@ -97,6 +98,9 @@ const deliveryWriteRateLimit = createDeliveryWriteRateLimit((req) => {
 // Frame equip/unequip — cosmetic metadata write with its own generous budget
 // (sharing the delivery-write tier 429'd a collector's 11th frame swap).
 const profileAppearanceRateLimit = createProfileAppearanceRateLimit();
+// Permanent account deletion — its own tier because the route takes a password
+// and the write tier is no throttle for one (see createAccountDeleteRateLimit).
+const accountDeleteRateLimit = createAccountDeleteRateLimit();
 // One instance shared by all admin money-mutation matchers: they share one
 // budget and one Redis connection (a compromised admin token is throttled
 // across all mutation routes together).
@@ -465,6 +469,24 @@ export default defineMiddlewares({
         authenticate('customer', ['bearer']),
         deliveryWriteRateLimit,
       ],
+    },
+    {
+      matcher: '/store/customers/me/delete',
+      method: 'POST',
+      // The delete tier ONLY — not authRateLimit as well. That limiter keys on
+      // actor_id here, which makes it strictly weaker than the write tier and
+      // no throttle at all on a password field; see its comment in
+      // rate-limit.ts. authenticate() stays first so an unauthenticated request
+      // 401s before it consumes anyone's budget.
+      middlewares: [
+        authenticate('customer', ['bearer']),
+        accountDeleteRateLimit,
+      ],
+    },
+    {
+      matcher: '/store/customers/me/account',
+      method: 'GET',
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
     },
     {
       matcher: '/store/packs/*/open',
