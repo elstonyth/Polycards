@@ -202,9 +202,11 @@ describe('DELETE_LINK', () => {
     ]);
   });
 
-  // A link that 404s is worse than no link on a page that just refused a
-  // deletion, so the hrefs are pinned to routes that exist in src/app.
-  it('points at real storefront routes', () => {
+  // Shape only — that each entry is a usable root-relative href with a label.
+  // Existence was verified by hand against src/app when these were written
+  // (all six resolve under the (account) route group, plus /contact); nothing
+  // here would catch a later route rename, so re-check by hand if you move one.
+  it('gives every entry a root-relative href and a label', () => {
     for (const { href, label } of Object.values(DELETE_LINK)) {
       expect(href).toMatch(/^\/[a-z]/);
       expect(label.length).toBeGreaterThan(0);

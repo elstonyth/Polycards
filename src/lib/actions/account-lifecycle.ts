@@ -68,11 +68,19 @@ const DELETE_COPY: Record<string, string> = {
 /**
  * Pull a known refusal code out of a failed request.
  *
- * Substring rather than equality because the SDK may wrap the backend message
- * (status prefix, etc.). No code is a substring of another, so the scan is
- * unambiguous. An unrecognised failure — a network drop, a 500, or a refusal
- * code added to the backend after this map was written — yields null, and the
- * caller falls back to GENERIC rather than a blank refusal.
+ * The whole map rests on the SDK preserving the backend's message, so: on a
+ * non-2xx `@medusajs/js-sdk` throws `FetchError extends Error` with
+ * `super(jsonError.message ?? resp.statusText)` (client.js normalizeResponse).
+ * `message` is the field Medusa's error handler serializes, and the delete
+ * route constructs MedusaError with the bare code — so `error.message` arrives
+ * as exactly `BALANCE_NOT_ZERO`, unprefixed.
+ *
+ * Substring rather than equality anyway, so a future status prefix wouldn't
+ * silently break every refusal. No code is a substring of another, so the scan
+ * stays unambiguous. Anything else — a network drop, a non-JSON body (message
+ * falls back to statusText), or a refusal code added to the backend after this
+ * map was written — yields null and the caller falls back to GENERIC rather
+ * than a blank refusal.
  */
 const codeOf = (error: unknown): string | null => {
   const text = error instanceof Error ? error.message : String(error);
