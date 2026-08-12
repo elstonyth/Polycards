@@ -2817,9 +2817,11 @@ class PacksModuleService extends MedusaService({
   // The disable's CAUSE, or null when the account is not disabled. Fails closed
   // on purpose: a disabled row whose `disabled_cause` is NULL (written before
   // the column existed, or by a future writer that forgets it) resolves to
-  // 'admin', the more restrictive of the two. Callers must branch on
-  // `=== 'self'` to GRANT the self-service behaviour, never on `=== 'admin'`
-  // to deny it — that inversion is what makes a NULL a login bypass.
+  // 'admin', the more restrictive of the two. Three states, and a guard must
+  // handle all three: `null` = not disabled, take no action (the overwhelmingly
+  // common path — letting it fall into a deny branch blocks every normal
+  // login); 'self' = the self-reactivate path; anything else = block. Branch on
+  // `=== 'self'` to GRANT that path, never on "not 'admin'" to imply it.
   @InjectManager()
   async accountDisabledCause(
     customerId: string,

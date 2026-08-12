@@ -67,6 +67,14 @@ describe('rawLedgerBalanceCents', () => {
     expect(sql).toContain('credit_transaction');
     expect(sql).toContain('deleted_at IS NULL');
     expect(params).toEqual(['cus_1']);
+    // Lock-blindness, pinned. Without these two, re-adding the
+    // lockedCommissionCents subtraction still passes every test in this file:
+    // the fake em answers the SECOND query with the balance row too, so
+    // `rows[0]?.locked_cents` is undefined → 0 → the total is unchanged. A
+    // customer whose whole balance is locked commission would then read 0 and
+    // clear the deletion gate with real money stranded.
+    expect(sql).not.toMatch(/commission/i);
+    expect(f.em.execute).toHaveBeenCalledTimes(1);
   });
 
   // The security-relevant direction, and the one that never touched Postgres
