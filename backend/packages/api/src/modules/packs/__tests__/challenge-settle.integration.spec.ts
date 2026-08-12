@@ -450,6 +450,23 @@ moduleIntegrationTestRunner<PacksModuleService>({
             new Map<string, number | null>([[card.handle, 5]]),
           decrementStock: async (handle, qty) => {
             takes.push([handle, qty]);
+            // The contract the fix exists for, asserted from INSIDE the
+            // callback: by the time the take runs, the payout transaction has
+            // already committed. Checked after the fact, both orderings look
+            // identical - which is why the first version of this test passed
+            // against the buggy code too.
+            const committed = await service.listChallengePayouts(
+              { kind: 'card' },
+              { take: 5 },
+            );
+            expect(committed).toHaveLength(1);
+            expect(committed[0]!.status).toBe('granted');
+            const minted = await service.listPulls(
+              { customer_id: 'cus_a', source: 'reward' },
+              { take: 5 },
+            );
+            expect(minted).toHaveLength(1);
+            expect(minted[0]!.stock_earmarked).toBe(false);
             return true;
           },
         });
