@@ -217,7 +217,25 @@ Extend the audit `before`/`after` payloads (`:2728-2729`) so the cause is in the
 
 In `src/api/admin/customers/[id]/disable/route.ts:26-31` add `cause: 'admin',` to the `setAccountDisabled` call. Do the same in `.../enable/route.ts` (it passes `disabled: false`, where `cause` is ignored, but the field is required so it must be present — pass `cause: 'admin'`).
 
-- [ ] **Step 7: Run the migrations and typecheck**
+- [ ] **Step 7: Refresh the ORM snapshot**
+
+`src/modules/packs/migrations/.snapshot-packs.json` is git-tracked and already describes `customer_account_state`. A hand-written migration does not update it, so the next `db:generate` would diff the model against a stale snapshot and emit a **second, duplicate** `disabled_cause` migration. (The `Migration20260812000000` precedent avoided this only because a CHECK-constraint change touches no column.)
+
+```bash
+cd backend/packages/api && corepack yarn medusa db:generate packs
+```
+
+That regenerates the snapshot. It may also emit its own migration for `disabled_cause` — if it does, **delete the generated file** and keep the hand-written `Migration20260813100000.ts`, which is the only one carrying the backfill `UPDATE`. Keep the regenerated `.snapshot-packs.json`.
+
+Then prove the drift is gone by running it a second time:
+
+```bash
+cd backend/packages/api && corepack yarn medusa db:generate packs
+```
+
+Expected: no new migration file. If one still appears the snapshot did not take — resolve that before continuing, or every later `db:generate` in this repo emits spurious migrations.
+
+- [ ] **Step 8: Run the migrations and typecheck**
 
 ```bash
 cd backend/packages/api && corepack yarn medusa db:migrate
@@ -231,7 +249,7 @@ cd backend/packages/api && ./node_modules/.bin/tsc --noEmit -p tsconfig.json
 
 Expected: no errors. (Call the local `tsc` directly — a global TypeScript 7 install shadows the pinned 5.9.3 and produces a bogus TS5102/baseUrl failure.)
 
-- [ ] **Step 8: Extend the existing admin integration spec**
+- [ ] **Step 9: Extend the existing admin integration spec**
 
 In `integration-tests/http/admin-disable.spec.ts`, inside the existing `describe`, add:
 
@@ -271,7 +289,7 @@ it('an admin disable stamps disabled_cause = admin', async () => {
 });
 ```
 
-- [ ] **Step 9: Run it**
+- [ ] **Step 10: Run it**
 
 ```bash
 cd backend/packages/api && corepack yarn test:integration:http admin-disable.spec
@@ -279,7 +297,9 @@ cd backend/packages/api && corepack yarn test:integration:http admin-disable.spe
 
 Expected: PASS, including the new case.
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 11: Commit**
+
+Include the regenerated snapshot — leaving it out is what reintroduces the drift Step 7 removed.
 
 ```bash
 git add backend/packages/api/src/modules/packs backend/packages/api/src/api/admin backend/packages/api/integration-tests/http/admin-disable.spec.ts
@@ -1399,15 +1419,25 @@ export async function POST(
     last_name: null,
     phone: null,
   });
-  await customers.softDeleteCustomers([customerId]);
   logger.info(`[account-delete] customer row scrubbed for ${customerId}`);
 
-  // 5. Auth identities — the point of no return, and deliberately last among
-  //    the destructive steps. HARD delete, never softDeleteAuthIdentities:
+  // 5. Auth identities — the point of no return, and last among the steps that
+  //    can still fail.
+  //
+  //    HARD delete, never softDeleteAuthIdentities:
   //    IDX_provider_identity_provider_entity_id on (entity_id, provider) has NO
   //    deleted_at predicate, so a soft-deleted identity would keep occupying
   //    the (email, 'emailpass') slot forever and lock this person out of ever
   //    signing up again.
+  //
+  //    This is also why we do NOT use Medusa's own removeCustomerAccountWorkflow
+  //    (core-flows/customer/workflows/remove-customer-account). That workflow
+  //    only UNLINKS the identity — setAuthAppMetadataStep(value: null) — and
+  //    leaves the provider_identity row, and with it the customer's email
+  //    address, in the database permanently. For a flow whose entire purpose is
+  //    erasing personal data that is the wrong outcome twice over: the email
+  //    survives as PII, and its unique slot stays taken so the person can never
+  //    register again.
   const identities = await auth.listAuthIdentities({
     app_metadata: { customer_id: customerId },
   });
@@ -1416,7 +1446,20 @@ export async function POST(
   }
   logger.info(`[account-delete] auth identities removed for ${customerId}`);
 
-  // 6. Best-effort avatar cleanup. A file-provider outage must never be what
+  // 6. Soft-delete the customer row — AFTER the identities, and this order is
+  //    load-bearing for the retry story.
+  //
+  //    mutateCustomerMetadata (step 4) is scoped `AND deleted_at IS NULL`, so it
+  //    raises NOT_FOUND against an already-soft-deleted row. Soft-deleting
+  //    before the identity delete would therefore make a failure at step 5
+  //    unrecoverable: the re-run would die at step 4, and the customer could not
+  //    even reach the page to trigger it, because getCustomer() cannot read a
+  //    soft-deleted row. With the soft delete last, every step that can fail
+  //    runs against a live, still-loginable row and the whole route is re-runnable.
+  await customers.softDeleteCustomers([customerId]);
+  logger.info(`[account-delete] customer soft-deleted: ${customerId}`);
+
+  // 7. Best-effort avatar cleanup. A file-provider outage must never be what
   //    fails an account deletion — same discipline as the avatar-replace path.
   if (avatarFileId) {
     await deleteFilesWorkflow(req.scope)
@@ -1606,20 +1649,27 @@ describe('POST /store/customers/me/delete', () => {
     });
   });
 
-  // Ordering is the property that makes a partial failure recoverable: while
-  // the identities still exist the customer can log in and retry.
-  it('destroys the auth identities only after the customer row is scrubbed', async () => {
+  // Ordering IS the retry story, so it gets pinned rather than left to the
+  // reader. Everything that can still fail runs while the row is live and
+  // loginable; the soft delete — which would make a re-run impossible, because
+  // mutateCustomerMetadata cannot see a soft-deleted row — goes last.
+  it('soft-deletes the customer only after every step that can fail', async () => {
     withEmailpass();
     await deletePOST(mkDeleteReq({ password: 'right' }), mkRes());
-    expect(softDeleteCustomers.mock.invocationCallOrder[0]).toBeLessThan(
-      deleteAuthIdentities.mock.invocationCallOrder[0],
-    );
+    const softDelete = softDeleteCustomers.mock.invocationCallOrder[0];
     expect(purgeAccountPacksData.mock.invocationCallOrder[0]).toBeLessThan(
-      softDeleteCustomers.mock.invocationCallOrder[0],
+      softDelete,
+    );
+    expect(mutateCustomerMetadata.mock.invocationCallOrder[0]).toBeLessThan(
+      softDelete,
+    );
+    expect(updateCustomers.mock.invocationCallOrder[0]).toBeLessThan(softDelete);
+    expect(deleteAuthIdentities.mock.invocationCallOrder[0]).toBeLessThan(
+      softDelete,
     );
   });
 
-  it('clears the metadata blob before the soft delete', async () => {
+  it('clears the metadata blob while the row is still live', async () => {
     withEmailpass();
     await deletePOST(mkDeleteReq({ password: 'right' }), mkRes());
     expect(mutateCustomerMetadata.mock.invocationCallOrder[0]).toBeLessThan(
@@ -2585,14 +2635,23 @@ git commit -m "feat(account): add the settings danger zone"
 
 **Files:**
 
-- Modify: `src/lib/actions/auth.ts`
+- Modify: `src/lib/actions/auth.ts` (`login`, `googleCallback`, the `AuthResult` type)
+- Create: `src/components/auth/ReactivatePrompt.tsx`
 - Modify: `src/components/AuthForm.tsx`
+- Modify: `src/components/AuthModal.tsx`
+- Modify: `src/app/auth/google/callback/route.ts`
 - Test: `src/lib/actions/__tests__/auth.test.ts` (extend)
 
 **Interfaces:**
 
 - Consumes: `ACCOUNT_SELF_DISABLED` from the backend (Task 3), `reactivateAccount` (Task 8).
-- Produces: `AuthResult` gains a third variant — `{ ok: false; selfDisabled: true }`.
+- Produces: `AuthResult` gains a third variant — `{ ok: false; selfDisabled: true }`; `<ReactivatePrompt onDone={(reactivated: boolean) => void} />`.
+
+**Two things about this task that are bigger than they look.**
+
+*Widening `AuthResult` breaks every consumer that reads `result.error` on the failure branch* — deliberately, so the compiler enumerates them. `login`, `signup`, `googleLoginStart`, `googleCallback`, `requestPasswordReset` and `resetPassword` all return this type. Expect to touch `src/components/AuthForm.tsx`, `src/app/auth/google/callback/route.ts:70` and `src/app/reset-password/ResetPasswordClient.tsx`, plus any other `else { setError(result.error) }` site the build surfaces. Narrow with `'selfDisabled' in result`, never a cast. Only `login` and `googleCallback` can actually produce the new variant, so everywhere else the right handling is a generic fallback message.
+
+*Google-only customers can self-disable too, so they need the same way back.* Google OAuth is live in production, the Google callback is not covered by the login guard, and a self-disabled Google customer would otherwise mint a token, get `ACCOUNT_SELF_DISABLED` on every `/store` call, and bounce between the account gate and the login modal forever. That is why the prompt is extracted as `ReactivatePrompt` rather than written inline in `AuthForm`: both entry points render the same component.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2669,64 +2728,138 @@ npm test -- src/lib/actions/__tests__/auth.test.ts
 
 Expected: PASS, including every pre-existing case.
 
-- [ ] **Step 5: Add the prompt to the login form**
+- [ ] **Step 5: Extract the prompt as its own component**
 
-In `src/components/AuthForm.tsx`, hold a `selfDisabled` state flag. When `login` returns `{ selfDisabled: true }`, replace the form body with a confirm step:
+Create `src/components/auth/ReactivatePrompt.tsx`. It is a component rather than inline markup because two entry points need it — the emailpass form and the Google callback — and a Google-only customer who self-disabled has no other way back in.
+
+```tsx
+'use client';
+
+import { useState } from 'react';
+import { Loader2 } from 'lucide-react';
+import { logout } from '@/lib/actions/auth';
+import { reactivateAccount } from '@/lib/actions/account-lifecycle';
+
+/**
+ * Offered after a successful login when the account turns out to be
+ * self-disabled. The session cookie is already set at this point — that is what
+ * the reactivate call authenticates with — so declining must log out explicitly
+ * rather than just closing the prompt.
+ *
+ * `onDone(true)` means reactivated and the caller should continue into the
+ * account; `onDone(false)` means the customer declined and is now logged out.
+ */
+export default function ReactivatePrompt({
+  onDone,
+}: {
+  onDone: (reactivated: boolean) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <div>
+      <h3 className="font-heading text-lg font-bold text-white">
+        Your account is disabled
+      </h3>
+      <p className="mt-2 text-[13px] text-white/60">
+        You disabled this account. Reactivate it to pick up where you left off —
+        your cards, balance and history are all still here.
+      </p>
+      {error && (
+        <p role="alert" className="mt-3 text-[12px] text-red-400">
+          {error}
+        </p>
+      )}
+      <div className="mt-5 flex gap-2">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              await logout();
+              onDone(false);
+            } finally {
+              setBusy(false);
+            }
+          }}
+          className="inline-flex h-11 flex-1 items-center justify-center rounded-xl border border-white/15 bg-white/5 text-sm font-semibold text-white/80 transition-colors hover:bg-white/10 disabled:opacity-50"
+        >
+          Not now
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            setError(null);
+            try {
+              const r = await reactivateAccount();
+              if (r.ok) {
+                onDone(true);
+                return;
+              }
+              setError(r.error);
+            } finally {
+              setBusy(false);
+            }
+          }}
+          className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-white text-sm font-bold text-neutral-950 transition-colors hover:bg-white/90 disabled:opacity-60"
+        >
+          {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
+          {busy ? 'Reactivating…' : 'Reactivate'}
+        </button>
+      </div>
+    </div>
+  );
+}
+```
+
+- [ ] **Step 6: Wire it into the emailpass form**
+
+In `src/components/AuthForm.tsx`, hold a `selfDisabled` boolean. Set it when `login` returns the new variant, and render `<ReactivatePrompt />` in place of the form body while it is true:
 
 ```tsx
 {selfDisabled ? (
-  <div>
-    <h3 className="font-heading text-lg font-bold text-white">
-      Your account is disabled
-    </h3>
-    <p className="mt-2 text-[13px] text-white/60">
-      You disabled this account. Reactivate it to pick up where you left off —
-      your cards, balance and history are all still here.
-    </p>
-    <div className="mt-5 flex gap-2">
-      <button
-        type="button"
-        onClick={async () => {
-          await logout();
-          setSelfDisabled(false);
-        }}
-        disabled={busy}
-        className="inline-flex h-11 flex-1 items-center justify-center rounded-xl border border-white/15 bg-white/5 text-sm font-semibold text-white/80 transition-colors hover:bg-white/10 disabled:opacity-50"
-      >
-        Not now
-      </button>
-      <button
-        type="button"
-        onClick={async () => {
-          setBusy(true);
-          try {
-            const r = await reactivateAccount();
-            if (r.ok) {
-              router.refresh();
-              onSuccess?.();
-              return;
-            }
-            setError(r.error);
-          } finally {
-            setBusy(false);
-          }
-        }}
-        disabled={busy}
-        className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-white text-sm font-bold text-neutral-950 transition-colors hover:bg-white/90 disabled:opacity-60"
-      >
-        {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
-        {busy ? 'Reactivating…' : 'Reactivate'}
-      </button>
-    </div>
-  </div>
+  <ReactivatePrompt
+    onDone={(reactivated) => {
+      setSelfDisabled(false);
+      if (reactivated) {
+        router.refresh();
+        onSuccess?.();
+      }
+    }}
+  />
 ) : (
   /* the existing form markup, unchanged */
 )}
 ```
 
-Read `AuthForm.tsx` first and match its real state variable names, its success callback (the modal closes through it) and its import style. `logout` and `reactivateAccount` come from `@/lib/actions/auth` and `@/lib/actions/account-lifecycle`.
+Read `AuthForm.tsx` first and match its real state names, its success callback (the modal closes through it) and its import style — the names above are illustrative.
 
-- [ ] **Step 6: Verify the whole loop in the browser**
+- [ ] **Step 7: Give Google logins the same way back**
+
+`googleCallback` must recognise the code too. In `src/lib/actions/auth.ts`, apply the same branch it now has in `login`: if the post-token customer fetch fails with `ACCOUNT_SELF_DISABLED`, return `{ ok: false, selfDisabled: true }` and leave the cookie in place.
+
+Then in `src/app/auth/google/callback/route.ts`, handle the variant before the existing `failed(result.error)` line (`:70`) — which will no longer typecheck, since the new variant has no `error`:
+
+```ts
+    if (result.ok) {
+      return NextResponse.redirect(new URL('/me', origin));
+    }
+    // Self-disabled: the cookie is set and valid, so send them somewhere the
+    // reactivate prompt can render. Redirecting to /me instead would bounce off
+    // the account gate — getCustomer() sees the 403 and reads as logged out.
+    if ('selfDisabled' in result) {
+      return NextResponse.redirect(new URL('/?auth=reactivate', origin));
+    }
+    return failed(result.error);
+```
+
+Finally, in `src/components/AuthModal.tsx`, treat `?auth=reactivate` like the existing `?auth=login` trigger but render `<ReactivatePrompt />` as the modal body. Read the component first to match how it reads the query parameter and how it closes.
+
+- [ ] **Step 8: Verify the whole loop in the browser**
 
 ```bash
 npm run build
@@ -2738,7 +2871,9 @@ pwsh scripts/serve-standalone.ps1 -Port 4000
 
 Log in as a test customer, disable from `/settings`, then log in again with the same credentials: the reactivate prompt must appear, "Reactivate" must land you in the account, and "Not now" must return you to a logged-out state.
 
-- [ ] **Step 7: Run every suite**
+Then repeat the loop with a **Google** account — disable from `/settings`, sign in again with Google, and confirm the callback lands on the reactivate prompt rather than bouncing between the account gate and the login modal. This is the path that has no other way back in, so it is the one worth checking by hand.
+
+- [ ] **Step 9: Run every suite**
 
 ```bash
 npm test
@@ -2754,10 +2889,10 @@ cd backend/packages/api && corepack yarn test:integration:http account-self-serv
 
 Expected: all PASS.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
-git add src/lib/actions src/components/AuthForm.tsx
+git add src/lib/actions src/components src/app/auth
 git commit -m "feat(account): offer reactivation when a self-disabled customer logs in"
 ```
 
@@ -2769,6 +2904,11 @@ git commit -m "feat(account): offer reactivation when a self-disabled customer l
 
 **One deliberate gap:** the spec's public-surface test ("leaderboard renders a deleted player as `Collector ####`") has no dedicated task. `publicProfileFields` was read during planning and is already fully undefined-safe (`customer?.first_name`, `customer?.metadata ?? {}`), so this is a regression guard rather than new behaviour. Add it to `integration-tests/http/account-self-service.spec.ts` if the leaderboard is touched again; it is not a blocker for shipping.
 
-**Type consistency.** `setAccountDisabled` takes a required `cause` from Task 1 and is called that way in Tasks 4 and 7. `accountDisabledCause` returns `'admin' | 'self' | null` in Task 2 and is consumed with that exact union in Tasks 3 and 4. `DeleteBlockReason` is defined in Task 5 and its members are the keys of `DELETE_COPY` in Task 8. `LifecycleResult` / `DeleteResult` are defined in Task 8 and consumed in Tasks 9 and 10. `AuthResult`'s third variant is added in Task 10 and used only there.
+**Type consistency.** `setAccountDisabled` takes a required `cause` from Task 1 and is called that way in Tasks 4 and 7. `accountDisabledCause` returns `'admin' | 'self' | null` in Task 2 and is consumed with that exact union in Tasks 3 and 4. `DeleteBlockReason` is defined in Task 5 and its members are the keys of `DELETE_COPY` in Task 8. `LifecycleResult` / `DeleteResult` are defined in Task 8 and consumed in Tasks 9 and 10. `AuthResult`'s third variant is added in Task 10; only `login` and `googleCallback` produce it, and Task 10 lists the consumers the widening will break.
 
-**Known verification points** (each has a step that checks reality rather than assuming it): the `globepay_deposit` in-flight status literal (Task 5 Step 4), the nullability of the scrubbed columns (Task 6 Step 2), `useModalA11y`'s signature (Task 9 Step 2), `mutateCreditAtomic` / `createGlobePayWithdrawals` argument shapes (Task 7 Step 2), and `AuthForm.tsx`'s internal state names (Task 10 Step 5).
+**Known verification points** (each has a step that checks reality rather than assuming it): the `globepay_deposit` in-flight status literal (Task 5 Step 4), the nullability of the scrubbed columns (Task 6 Step 2), `useModalA11y`'s signature (Task 9 Step 2), `mutateCreditAtomic` / `createGlobePayWithdrawals` argument shapes (Task 7 Step 2), and `AuthForm.tsx` / `AuthModal.tsx` internals (Task 10 Steps 6 and 7).
+
+**Two things that were verified against the installed packages during planning, rather than assumed**, because getting either wrong is silent and serious:
+
+- `listAuthIdentities({ app_metadata: { customer_id } })` is the officially supported filter shape — Medusa's own `removeCustomerAccountWorkflow` uses exactly it. Had it not been, `emailpassEntityId` would have returned null for every account, silently skipping the password check and leaving login working after a "successful" delete, and every mocked unit test in Task 6 would still have passed.
+- `deleteAuthIdentities` is the hard delete; `softDeleteAuthIdentities` is a separate generated method. `IDX_provider_identity_provider_entity_id` carries no `deleted_at` predicate, so the soft variant would permanently block re-signup with that email. Task 7's re-registration assertion is what pins this.

@@ -68,12 +68,14 @@ Body: `{ password?: string }`. Steps, in order:
    What is guaranteed instead: **each module's own writes are transactional**, the steps run in a fixed order chosen so the most failure-prone step is last and harmless, and the whole route is **idempotent** so a partial failure can simply be re-run. The order is load-bearing:
 
    1. Packs-module scrub — financial-row PII, `player_payout_details` delete, `notification_read` delete, account-state soft delete. One packs transaction.
-   2. Customer-module writes — delete addresses, clear `metadata` via `mutateCustomerMetadata`, scrub `email`/names/`phone`. **Metadata must be cleared before the soft delete**: `mutateCustomerMetadata`'s SQL is scoped `AND deleted_at IS NULL`, so it raises NOT_FOUND against an already-soft-deleted row.
-   3. Soft-delete the customer row.
-   4. Hard-delete the auth identities. **Last of the destructive steps** — until this runs the customer can still authenticate, which is what makes a failed run retryable rather than a lockout with data left behind.
+   2. Customer-module writes — delete addresses, clear `metadata` via `mutateCustomerMetadata`, scrub `email`/names/`phone`.
+   3. Hard-delete the auth identities. The point of no return for logging in, and the last step that can still fail.
+   4. **Soft-delete the customer row — last.** `mutateCustomerMetadata` is scoped `AND deleted_at IS NULL` and raises NOT_FOUND against a soft-deleted row, so soft-deleting any earlier would make a failure at step 3 unrecoverable: the re-run would die at step 2, and the customer could not even reach the page to trigger it, because `getCustomer()` cannot read a soft-deleted row either. Keeping it last is what makes every preceding step run against a live, still-loginable row.
    5. Best-effort delete of the avatar file object, failure swallowed (`.catch(() => undefined)`, the same discipline the avatar-replace cleanup already uses). A file-provider outage must never be what fails an account deletion.
 
-   A failure between steps 1 and 4 leaves a scrubbed but still-loginable account: recoverable by re-running the route. The route logs loudly at every step boundary so a partial run is diagnosable rather than silent.
+   A failure anywhere before step 4 leaves a scrubbed but still-loginable account, which the customer can simply retry. The route logs at every step boundary so a partial run is diagnosable rather than silent.
+
+   **Not Medusa's `removeCustomerAccountWorkflow`.** The stock workflow (`core-flows/customer/workflows/remove-customer-account`) only *unlinks* the auth identity — `setAuthAppMetadataStep(value: null)` — and leaves the `provider_identity` row, and with it the customer's email address, in the database permanently. For a flow whose whole purpose is erasing personal data that fails twice: the email survives as PII, and its unique slot stays occupied so the person can never register again. Its `app_metadata: { customer_id }` filter shape is, however, the officially supported one and is what this route reuses to find the identities.
 
    **Deleted outright:**
    - Medusa customer addresses.
