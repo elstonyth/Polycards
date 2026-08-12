@@ -205,6 +205,18 @@ export async function GET(
     account_holder_name: r.account_holder_name,
     status: r.status,
     gateway_status: r.gateway_status,
+    // Plan 095. Both are operator-facing on purpose: `failure_reason` says why
+    // a payout died, and `verify_outcome` says how we answered their Payout
+    // Verification (active on the production merchant).
+    //
+    // A null verify_outcome NARROWS the search, it does not conclude it. Three
+    // things produce one: their call never reached us; it reached us but was
+    // refused before we could match it to a row (a decrypt or signature
+    // failure knows no merchant_transaction_id, so there is nothing to stamp);
+    // or the row predates this column. Only the HTTP access log separates the
+    // first two, and only for the current deployment.
+    failure_reason: r.failure_reason,
+    verify_outcome: r.verify_outcome,
     created_at: r.created_at,
     settled_at: r.settled_at,
     stale:

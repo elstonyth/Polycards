@@ -276,7 +276,13 @@ describe('POST /admin/globepay/withdrawals/:id/approve', () => {
     // be scoped to THAT status or the row never closes.
     expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith({
       selector: { id: 'gpw_1', status: 'pending' },
-      data: { status: 'failed', gateway_status: null },
+      // Plan 095: the close carries the gateway's own codes, so a refused
+      // approval stays explainable after the run logs rotate.
+      data: {
+        status: 'failed',
+        gateway_status: null,
+        failure_reason: expect.stringContaining('PMT10013'),
+      },
     });
     expect(receipt).toHaveBeenCalledTimes(1);
     expect(notifyFeedMock).toHaveBeenCalledTimes(1);
@@ -440,7 +446,13 @@ describe('POST /admin/globepay/withdrawals/:id/deny', () => {
     // no-op that would leave the four-step ordering half-applied.
     expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith({
       selector: { id: 'gpw_1', status: 'failed' },
-      data: { status: 'failed', gateway_status: null },
+      // Plan 095: names the admin, so a denied row is never later mistaken
+      // for one the gateway refused.
+      data: {
+        status: 'failed',
+        gateway_status: null,
+        failure_reason: expect.stringContaining('denied by admin'),
+      },
     });
     expect(out.body).toMatchObject({
       id: 'gpw_1',

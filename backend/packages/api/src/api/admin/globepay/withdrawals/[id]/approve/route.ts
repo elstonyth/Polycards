@@ -6,6 +6,7 @@ import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../../../modules/packs';
 import type PacksModuleService from '../../../../../../modules/packs/service';
 import {
+  formatGatewayFailureReason,
   globepayWithdrawalsEnabled,
   refundGlobePayWithdrawal,
   withdrawalIdempotencyReference,
@@ -217,7 +218,29 @@ export async function POST(
       // Refund (idempotent, on the shared anchor) and close the row. The
       // claim above left it 'pending', which is what the helper's terminal
       // update must be scoped to — its default.
-      await refundGlobePayWithdrawal(req.scope, row, null);
+      await refundGlobePayWithdrawal(
+        req.scope,
+        row,
+        null,
+        'pending',
+        // Same fields as the log line below, kept on the row because the log
+        // itself does not survive the next deployment (plan 095). Built by the
+        // shared formatter so this string and the store path's cannot drift —
+        // and so the digit redaction, which is a control rather than
+        // formatting, applies to both.
+        formatGatewayFailureReason({
+          prefix: 'approve refused',
+          codes: error.codes,
+          httpStatus: error.httpStatus,
+          bankCode: row.bank_code,
+          message: error.message,
+          // The row IS the submitted destination here (see the comment above
+          // the submit call), so these are the exact values their message
+          // could be echoing.
+          accountNumber: row.account_number,
+          accountHolderName: row.account_holder_name,
+        }),
+      );
       // Their reason, on record, AFTER the money moved — a definitively
       // refused submit leaves nothing at the gateway to requery later, so
       // this line is the only thing that can tell an empty merchant payout

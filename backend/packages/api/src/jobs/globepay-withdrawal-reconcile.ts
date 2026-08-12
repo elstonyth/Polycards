@@ -268,7 +268,19 @@ export default async function globepayWithdrawalReconcileJob(
       // specific to the SWEEP: the debit-existence guard above, counting the
       // result below, and the terminal update's 'pending' scope — the
       // helper's default, because that is the status this loop selected on.
-      await refundGlobePayWithdrawal(container, withdrawal, gatewayStatus);
+      await refundGlobePayWithdrawal(
+        container,
+        withdrawal,
+        gatewayStatus,
+        'pending',
+        // What the SWEEP knew when it closed this row (plan 095): the
+        // gateway's own status number, or its absence when the payout went
+        // stale with no record to requery. Without it a swept-closed row and
+        // a submit-refused one look identical afterwards.
+        gatewayStatus === null
+          ? 'sweep: stale with no gateway record'
+          : `sweep: requery statusId ${gatewayStatus}`,
+      );
       refunded += 1;
     } catch (error) {
       // One bad payout must not abort the sweep. It stays pending and is

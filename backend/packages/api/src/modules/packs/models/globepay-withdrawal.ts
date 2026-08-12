@@ -51,6 +51,26 @@ export const GlobePayWithdrawal = model
     // the replay check race-safe; Postgres ignores NULLs in unique indexes, so
     // keyless withdrawals never collide with each other.
     idempotency_key: model.text().nullable(),
+    // FORENSICS (plan 095). Both columns exist because a payout that dies at
+    // the gateway leaves nothing behind that outlives DigitalOcean's log
+    // retention: the run logs only cover the CURRENT deployment, and the
+    // 2026-08-11 production failures (8 payouts created at GlobePay and
+    // immediately marked statusId 5) were already unreadable the next morning.
+    // A row that records its own cause is the difference between "we know
+    // within one attempt" and "wait for another customer to lose a day".
+    //
+    // Their Payout Verification is ACTIVE on the production merchant, so every
+    // payout is offered to /hooks/globepay/payout-verify BEFORE they execute
+    // it, and anything but the literal "success" rejects it. NULL therefore
+    // carries real information: their verification never reached us at all
+    // (wrong URL their side, blocked egress, a timeout shorter than our
+    // answer) — a config fault, not a code one. Written on EVERY invocation,
+    // 'success' included, precisely so that distinction survives.
+    verify_outcome: model.text().nullable(),
+    // Why the payout died on OUR side of the wire: the gateway's own codes and
+    // message from a definite submit refusal. Never the request envelope
+    // (signed and encrypted) and never the account number or holder name.
+    failure_reason: model.text().nullable(),
   })
   .indexes([
     // Callback lookup path.
