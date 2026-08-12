@@ -64,8 +64,12 @@ async function recordVerifyOutcome(
     await packs.updateGlobePayWithdrawals({
       id: row.id,
       // Truncated: this column is a breadcrumb, not a transcript, and the
-      // gateway's own text is the only part we do not compose.
-      verify_outcome: `${new Date().toISOString()} ${outcome}`.slice(0, 400),
+      // gateway's own text is the only part we do not compose. The REASON is
+      // what gets cut, never the timestamp in front of it — slicing the joined
+      // string would spend the budget on a fixed 24-char prefix and could, on
+      // a long enough gateway message, leave a row stamped with a time and
+      // half a word.
+      verify_outcome: `${new Date().toISOString()} ${outcome.slice(0, 400)}`,
     });
   } catch {
     // Swallowed: see the doc comment. The log line below still fires.
