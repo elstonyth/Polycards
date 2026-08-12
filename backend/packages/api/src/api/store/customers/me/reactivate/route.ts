@@ -5,9 +5,7 @@ import type {
 import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../../modules/packs';
 import type PacksModuleService from '../../../../../modules/packs/service';
-
-const DISABLED_MESSAGE =
-  'This account has been disabled. Please contact support.';
+import { DISABLED_MESSAGE } from '../../../../utils/disabled-guard';
 
 // POST /store/customers/me/reactivate — lifts a customer's OWN disable.
 //

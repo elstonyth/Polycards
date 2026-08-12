@@ -8,7 +8,14 @@ import type { IAuthModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
 
-const DISABLED_MESSAGE = 'This account has been disabled. Please contact support.';
+/**
+ * The admin-disable refusal copy. Exported because the self-service routes echo
+ * this exact refusal and Task 7 asserts on the string: three private copies
+ * could silently diverge. The guard owns it — this is where the admin-disable
+ * block is decided.
+ */
+export const DISABLED_MESSAGE =
+  'This account has been disabled. Please contact support.';
 
 /**
  * The self-disable 403 body. A CODE, not prose: the storefront must be able to
