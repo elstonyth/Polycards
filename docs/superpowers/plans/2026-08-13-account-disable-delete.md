@@ -2522,23 +2522,40 @@ cd backend/packages/api && corepack yarn test:unit -- account-lifecycle
 
 Expected: FAIL — a deleted sponsor is still paid.
 
-- [ ] **Step 7: Gate the commission fan-out**
+- [ ] **Step 7: Gate the commission fan-out — inside `payCommission`, not at the sponsor lookup**
 
-In `settleOpen`, immediately after `rel?.sponsor_id` is resolved (`service.ts:3316-3320`) and before any commission is computed or written:
+**Where this guard goes is the whole finding.** An earlier draft of this plan put it right after `rel?.sponsor_id` resolves, as one early return. That is wrong in both directions and would have shipped a live money bug:
+
+- A deleted **sponsor** would have skipped the entire fan-out, **docking every live upline** the team override they had genuinely earned. Their downline's activity is real; the sponsor's deletion is not their problem.
+- A deleted **ancestor** would still have been paid, because only `sponsorId` was ever checked.
+
+The fan-out pays every beneficiary — direct and override, all generations — through one helper, `payCommission(beneficiary, amountSen, generation, kind, effectivePct)`. That is the choke point, so that is where the check belongs: **per beneficiary, at the moment of payment.** One guard there is a smaller diff than a guard per call site, and it is the only version that is correct for both cases above.
+
+As the first statement inside `payCommission`'s body:
 
 ```ts
-        // A purged sponsor keeps their referral edges — severing them would
-        // dangle the recruit's upline and silently rewrite attribution — so the
-        // edge still resolves here long after the account is gone. Paying it
-        // would mint credits onto an account with no owner and no login, every
-        // time this recruit opens a pack, forever. The preflight cannot cover
-        // this: at delete time the commission row does not exist yet.
-        if ((await this.deletedCustomerIds([sponsorId], sharedContext)).size > 0) {
-          return;
-        }
+// A purged customer keeps their referral edges — severing them
+// would dangle a recruit's upline and silently rewrite
+// attribution — so the edge still resolves here long after the
+// account is gone. Paying it mints credits onto an account with
+// no owner and no login, every time a surviving recruit opens a
+// pack, forever. The preflight cannot cover this: at delete time
+// the commission row does not exist yet.
+//
+// Per BENEFICIARY, not per sponsor. Skipping the whole fan-out
+// when the direct sponsor is deleted would dock every live upline
+// an override they earned; checking only the sponsor would still
+// pay a deleted ancestor. Both are wrong; this is not.
+if ((await this.deletedCustomerIds([beneficiary], sharedContext)).size > 0) {
+  return;
+}
 ```
 
-Thread the caller's `sharedContext` so this read joins `settleOpen`'s existing advisory-locked transaction rather than opening a second connection — the file warns about exactly that at `:2358-2362`. Adjust `return` to whatever correctly skips just the fan-out in the surrounding control flow; do not abort the open itself, because the debit must still stand.
+`payCommission` already returns `Promise<void>`, so an early `return` here skips exactly one beneficiary and nothing else — it cannot disturb `settleOpen`'s own return value or the recruit's debit, which must still stand.
+
+Thread the caller's `sharedContext` so the read joins `settleOpen`'s existing advisory-locked transaction rather than opening a second connection — the file warns about exactly that at `:2358-2362`.
+
+Adjust the Step 5 test to match this shape: assert that a deleted **beneficiary** is skipped while a live **upline in the same fan-out** is still paid. That second assertion is the one that would have caught the earlier draft.
 
 - [ ] **Step 8: Run the tests**
 
