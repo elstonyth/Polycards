@@ -2306,16 +2306,24 @@ git commit -m "feat(account): add the customer account deletion route and purge"
 
 ---
 
-## Task 6b: Skip deleted accounts when the weekly challenge settles
+## Task 6b: Stop value accruing to a deleted account
 
-The weekly challenge is LIVE, and `pull` rows are retained by design — so a deleted customer stays in the week's top-10 and `settleChallengeWeek` mints them real balance and a real card at settle. The spec excluded `vip_reward_grant` because those surfaces are SUSPENDED; nothing excluded this one, because nothing looked at it.
+**Two independent paths can pay a customer who no longer exists.** Both mint value AFTER the deletion, so no delete-time preflight can cover either — a guard cannot see a payment that has not happened yet. Both are fixed at the paying end.
 
-Fixed at the settle end rather than as another delete-time guard: a guard cannot cover a delete that happens AFTER it passes, and this can.
+**Path 1 — the weekly challenge.** It is LIVE, and `pull` rows are retained by design, so a deleted customer stays in the week's top-10 and `settleChallengeWeek` mints them real balance and a real card at settle. The spec excluded `vip_reward_grant` because those surfaces are SUSPENDED; nothing excluded this one, because nothing looked at it.
+
+**Path 2 — referral commission.** The purge deliberately RETAINS `referral_relationship` rows, because deleting one dangles a downline's upline. But the commission fan-out in `settleOpen` is gated on exactly that lookup (`service.ts:3316-3320`), so every time a surviving recruit opens a pack, commission credits land on the deleted sponsor's ownerless account — indefinitely, and invisibly to any preflight, because at preflight time the row does not exist yet.
+
+The fan-out is SUSPENDED in the sense that `linkSponsor`, its only writer, was removed, so no NEW edge can form. That bounds the blast radius; it does not close it. The code's own comment says surviving production edges "still pay, which is deliberate", and the 2026-07-25 referral investigation confirmed real edges exist in production. So this is reachable today, just rare.
+
+Note what is NOT being changed: the retention decision stands. Severing referral edges at purge would dangle the downline's upline and rewrite commission attribution — a money change disguised as a cleanup, which is exactly what `settleOpen`'s comment warns against. Skipping the payment is the smaller, reversible fix.
 
 **Files:**
 
-- Modify: `backend/packages/api/src/modules/packs/service.ts` (`settleChallengeWeek`'s winner loop, `:7221`)
+- Modify: `backend/packages/api/src/modules/packs/service.ts` — `settleChallengeWeek`'s winner loop (`:7221`) AND the commission fan-out in `settleOpen` (`:3316-3320`)
 - Test: `backend/packages/api/src/modules/packs/__tests__/account-lifecycle.unit.spec.ts` (extend)
+
+**Be careful in `settleOpen`.** It is the atomic open-settlement seam — debit plus fan-out under ONE advisory lock — and its own comment asks that changes to it not be folded into a cleanup commit. Add the guard, change nothing else, and thread the caller's `sharedContext` so the read joins the existing transaction rather than opening a second connection.
 
 Note `src/jobs/settle-challenge-week.ts` is NOT touched: it only wires `getStock`/`decrementStock`/`onSettled` and its `onSettled` runs after each winner's transaction has already committed, which is far too late to skip anyone. The loop that decides who gets paid is in the service.
 
@@ -2467,19 +2475,90 @@ and as the second line of the loop body, immediately after the already-settled g
 if (deleted.has(customerId)) continue; // account deleted; nobody to pay
 ```
 
-- [ ] **Step 5: Run the tests**
+- [ ] **Step 5: Write the failing test for the commission path**
+
+Append to the same spec file. The point of this test is the sponsor, not the recruit — a deleted SPONSOR must earn nothing from a live recruit's pack open:
+
+```ts
+describe('settleOpen — commission to a deleted sponsor', () => {
+  it('pays no commission when the sponsor account is deleted', async () => {
+    const svc = Object.create(
+      PacksModuleService.prototype,
+    ) as PacksModuleService & Record<string, jest.Mock>;
+    svc.listReferralRelationships = jest
+      .fn()
+      .mockResolvedValue([{ sponsor_id: 'cus_sponsor' }]);
+    svc.deletedCustomerIds = jest
+      .fn()
+      .mockResolvedValue(new Set(['cus_sponsor']));
+    // Any of the fan-out's own writers standing in for "commission was paid".
+    svc.createCommissions = jest.fn();
+
+    await settleOpenCommissionFanOut(svc, {
+      customerId: 'cus_recruit',
+      externalFundedCents: -5000,
+    });
+
+    expect(svc.createCommissions).not.toHaveBeenCalled();
+    expect(svc.deletedCustomerIds).toHaveBeenCalledWith(
+      ['cus_sponsor'],
+      expect.anything(),
+    );
+  });
+
+  it('still pays a live sponsor', async () => {
+    /* same fixture, deletedCustomerIds -> new Set(), assert the fan-out ran */
+  });
+});
+```
+
+**Read `settleOpen` before writing this.** It is a large method and the fan-out is a block inside it, not a separate function — so the harness above (`settleOpenCommissionFanOut`) may not exist. Choose whichever of these fits what you find, in this order of preference: drive the real `settleOpen` if its other dependencies can be stubbed cheaply; otherwise extract the fan-out block into a private method and test that; otherwise test the guard's own predicate. **Do not** restructure `settleOpen` beyond a mechanical extraction — it is the atomic open-settlement seam and its comment explicitly asks that changes to it stay reviewable on their own. Report which route you took and why.
+
+- [ ] **Step 6: Run it and watch it fail**
 
 ```bash
 cd backend/packages/api && corepack yarn test:unit -- account-lifecycle
 ```
 
-Expected: PASS (24 tests in the file).
+Expected: FAIL — a deleted sponsor is still paid.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Gate the commission fan-out**
+
+In `settleOpen`, immediately after `rel?.sponsor_id` is resolved (`service.ts:3316-3320`) and before any commission is computed or written:
+
+```ts
+        // A purged sponsor keeps their referral edges — severing them would
+        // dangle the recruit's upline and silently rewrite attribution — so the
+        // edge still resolves here long after the account is gone. Paying it
+        // would mint credits onto an account with no owner and no login, every
+        // time this recruit opens a pack, forever. The preflight cannot cover
+        // this: at delete time the commission row does not exist yet.
+        if ((await this.deletedCustomerIds([sponsorId], sharedContext)).size > 0) {
+          return;
+        }
+```
+
+Thread the caller's `sharedContext` so this read joins `settleOpen`'s existing advisory-locked transaction rather than opening a second connection — the file warns about exactly that at `:2358-2362`. Adjust `return` to whatever correctly skips just the fan-out in the surrounding control flow; do not abort the open itself, because the debit must still stand.
+
+- [ ] **Step 8: Run the tests**
+
+```bash
+cd backend/packages/api && corepack yarn test:unit -- account-lifecycle
+```
+
+Expected: PASS.
+
+```bash
+cd backend/packages/api && corepack yarn test:unit
+```
+
+Expected: PASS. Run the full tier here, not just the file — `settleOpen` is the most load-bearing money function in the module and it has coverage elsewhere.
+
+- [ ] **Step 9: Commit**
 
 ```bash
 git add backend/packages/api/src/modules/packs
-git commit -m "fix(challenge): skip deleted accounts when the weekly challenge settles"
+git commit -m "fix(payouts): stop value accruing to a deleted account"
 ```
 
 ---

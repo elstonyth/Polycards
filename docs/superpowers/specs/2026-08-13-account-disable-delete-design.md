@@ -169,5 +169,14 @@ A stolen customer session cookie can delete a Google-only account, because typed
 - A grace period or pending-deletion window (the operator chose immediate and irreversible).
 - Admin-side hard delete.
 - An email confirmation of the deletion (addable later via the existing Resend module).
-- Blocking delete on unfulfilled `vip_reward_grant` rows — considered and excluded because the rewards and voucher surfaces are SUSPENDED (#294), so no live grant path can strand value.
+- Blocking delete on unfulfilled `vip_reward_grant` rows — considered and excluded because the rewards and voucher surfaces are SUSPENDED (#294), so no live grant path can strand value. Confirmed during implementation: no API route, store or admin, reads `vip_reward_grant` at all — grants are written by `grantLevelUpRewards` and nothing can claim them. This becomes a sixth block reason the day a claim surface ships.
+
+## Value that accrues AFTER the delete
+
+A settlement guard can only see value that already exists. Two paths mint value to a customer *after* they are gone, so both are fixed at the paying end rather than as delete-time checks:
+
+- **Weekly challenge settlement.** The challenge is live and `pull` rows are retained by design, so a deleted customer stays in the week's top-10 and settlement would mint them real balance and a real card.
+- **Referral commission.** The purge deliberately retains `referral_relationship` rows — severing them would dangle the recruit's upline and rewrite attribution — but the commission fan-out is gated on exactly that lookup. So every pack a surviving recruit opens pays commission to the deleted sponsor's ownerless account, indefinitely. Bounded but not closed by the fact that the referral programme is retired: `linkSponsor` was removed so no new edge can form, yet edges that predate the retirement still pay, deliberately, and production has them.
+
+Both are covered by one shared read, `deletedCustomerIds`, consulted at the two paying sites. The retention decisions themselves stand — skipping the payment is smaller and reversible; deleting the rows would be a money change disguised as a cleanup.
 - Blocking delete on a pending weekly-challenge placing. The challenge IS live, and the retained `pull` rows keep a deleted customer ranked, so settlement would otherwise mint real balance and a card to an account with no owner. Handled at the other end instead: the settle path skips a deleted account. That is cheaper than a preflight guard and it also covers a delete that happens after the preflight passed, which a guard cannot.
