@@ -396,7 +396,13 @@ describe('deletedCustomerIds', () => {
     // dropped `action`, an id list the query cannot express) would leave this
     // whole file green while a deleted account keeps getting paid.
     expect(svc.listAdminActionAudits).toHaveBeenCalledWith(
-      { entity_id: ['cus_1', 'cus_2'], action: 'delete_account' },
+      {
+        // entity_type leads the only usable index — dropping it is a full scan
+        // on an append-only table, read inside settleOpen's advisory lock.
+        entity_type: 'customer',
+        entity_id: ['cus_1', 'cus_2'],
+        action: 'delete_account',
+      },
       { take: 2 },
       CTX_ARG,
     );
@@ -449,7 +455,16 @@ describe('settleChallengeWeek — deleted winners', () => {
       .fn()
       .mockResolvedValue([{ customer_id: 'cus_gone' }]);
     svc.listCards = jest.fn().mockResolvedValue([]);
-    svc.deletedCustomerIds = jest.fn().mockResolvedValue(new Set(deleted));
+    // Answers the ids it is ACTUALLY given, never a canned Set: a
+    // mockResolvedValue here cannot see its own argument, so narrowing the
+    // call to `deletedCustomerIds([], …)` — which makes the whole guard a
+    // no-op — would leave every test in this file green.
+    const gone = new Set(deleted);
+    svc.deletedCustomerIds = jest
+      .fn()
+      .mockImplementation(async (ids: string[]) =>
+        new Set(ids.filter((id) => gone.has(id))),
+      );
     svc.settleChallengeWinner = jest.fn().mockResolvedValue(null);
     svc.reserveSettledStock = jest.fn().mockResolvedValue(undefined);
     return svc;
@@ -462,6 +477,12 @@ describe('settleChallengeWeek — deleted winners', () => {
     const result = await svc.settleChallengeWeek({ getStock: jest.fn() }, CTX);
     expect(svc.settleChallengeWinner).not.toHaveBeenCalled();
     expect(result.winners).toEqual([]);
+    // The RANKING is what must be asked about. Without this, narrowing the
+    // read to a list that cannot match anyone still passes above.
+    expect(svc.deletedCustomerIds).toHaveBeenCalledWith(
+      ['cus_gone'],
+      expect.anything(),
+    );
   });
 
   // The other direction, and the one that proves the fixture actually reaches

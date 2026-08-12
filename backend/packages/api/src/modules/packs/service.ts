@@ -3415,9 +3415,18 @@ class PacksModuleService extends MedusaService({
               // Deliberately NOT wrapped in try/catch: a swallowed read error
               // would pay the deleted account, so a failure here rolls the open
               // back — the same fail-closed direction as the reads above.
+              //
+              // `.has(beneficiary)`, never `.size > 0`: the two are equivalent
+              // only while the entity_id filter constrains. If it ever stopped
+              // (a generated-method change, a renamed key), a size test would
+              // read ANY delete_account row as this beneficiary's and silently
+              // halt every commission to every live upline forever, as soon as
+              // one account anywhere had been deleted — the inverse failure,
+              // and the worse one, because under-paying the living is invisible
+              // where over-paying the dead is at least auditable.
               if (
                 (await this.deletedCustomerIds([beneficiary], sharedContext))
-                  .size > 0
+                  .has(beneficiary)
               ) {
                 return;
               }
@@ -3864,6 +3873,13 @@ class PacksModuleService extends MedusaService({
   //
   // One query for the whole list — the caller's ranking is at most ten ids, and
   // the audit write is idempotent, so `take` can be the id count.
+  //
+  // entity_type is redundant for correctness (only the purge writes
+  // 'delete_account', always with 'customer') but NOT for cost: the sole usable
+  // index is IDX_admin_action_audit_entity on (entity_type, entity_id), and
+  // omitting the leading column drops the seek for a full scan. admin_action_
+  // audit is append-only and grows with every admin money mutation forever,
+  // and payCommission runs this read inside settleOpen's credit advisory lock.
   @InjectManager()
   async deletedCustomerIds(
     customerIds: string[],
@@ -3871,7 +3887,11 @@ class PacksModuleService extends MedusaService({
   ): Promise<Set<string>> {
     if (customerIds.length === 0) return new Set();
     const rows = await this.listAdminActionAudits(
-      { entity_id: customerIds, action: 'delete_account' },
+      {
+        entity_type: 'customer',
+        entity_id: customerIds,
+        action: 'delete_account',
+      },
       { take: customerIds.length },
       sharedContext,
     );
