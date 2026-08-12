@@ -161,9 +161,20 @@ export function withdrawalDetailsError(input: {
  * with different access; the database column is the one that renders.
  *
  * `msg` is the gateway's own text and the only field we do not compose, so it
- * is the only one that can carry anything we did not choose. Runs of 6+ digits
- * (account numbers, phone numbers, their long transaction ids) are replaced;
- * the words around them — which is where the diagnosis lives — survive.
+ * is the only one that can carry anything we did not choose. Three rules run
+ * over it, and the caller must pass the destination so the last two can:
+ *
+ *   1. digit sequences of 6+, SEPARATOR-TOLERANT — `1234-5678-9012` and
+ *      `1234 5678 9012` are the same account number as `123456789012`, and a
+ *      contiguous-only rule (the first version of this) passed the formatted
+ *      forms straight through;
+ *   2. the exact account number we submitted, for the short accounts rule 1
+ *      cannot reach;
+ *   3. the holder name we submitted, which carries no digits at all and so was
+ *      wholly invisible to a digit rule — `AHMAD BIN ALI` is PII in a way
+ *      `PMT10021` is not.
+ *
+ * The words around the redactions — where the diagnosis lives — survive.
  */
 export function formatGatewayFailureReason(input: {
   prefix: string;
@@ -171,8 +182,24 @@ export function formatGatewayFailureReason(input: {
   httpStatus: number;
   bankCode: string;
   message: string;
+  /** The destination we submitted, so its own value can be redacted out of
+   *  their echo of it. Both callers hold it at the point they build this. */
+  accountNumber: string;
+  accountHolderName: string;
 }): string {
-  const redacted = input.message.replace(/\d{6,}/g, '[redacted]');
+  const escape = (raw: string) => raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  let redacted = input.message
+    // A digit, then 5+ more digits with an optional single space or hyphen
+    // between each — covers grouped, hyphenated and plain account numbers.
+    .replace(/\d(?:[\s-]?\d){5,}/g, '[redacted]');
+  const account = input.accountNumber.trim();
+  if (account.length >= 4) {
+    redacted = redacted.replaceAll(account, '[redacted]');
+  }
+  const holder = input.accountHolderName.trim();
+  if (holder.length >= 3) {
+    redacted = redacted.replace(new RegExp(escape(holder), 'gi'), '[redacted]');
+  }
   return (
     `${input.prefix}: codes=${input.codes.join(',') || 'none'} ` +
     `httpStatus=${input.httpStatus} bankCode=${input.bankCode} ` +
@@ -557,6 +584,10 @@ export async function startGlobePayWithdrawal(
           httpStatus: error.httpStatus,
           bankCode,
           message: error.message,
+          // The destination we actually submitted — the only values their
+          // message could echo back at us.
+          accountNumber,
+          accountHolderName,
         }),
       });
       // Log their reason before it is flattened into the customer-facing

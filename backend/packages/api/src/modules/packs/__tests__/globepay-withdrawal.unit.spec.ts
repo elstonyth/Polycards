@@ -455,11 +455,35 @@ describe('startGlobePayWithdrawal — money ordering', () => {
     const [{ failure_reason: reason }] =
       h.packs.updateGlobePayWithdrawals.mock.calls[0];
     expect(reason).not.toMatch(/1234567890/);
+    // The holder name carries no digits, so a digit-only rule left it whole.
+    expect(reason).not.toMatch(/AHMAD BIN ALI/i);
     expect(reason).toMatch(/\[redacted\]/);
     // The diagnosis around the digits survives — redaction that ate the
     // sentence would defeat the column.
     expect(reason).toMatch(/invalid beneficiary account/);
     expect(reason).toMatch(/PMT10021/);
+  });
+
+  it('redacts an account number their message reformatted with separators', async () => {
+    // `1234-5678-9012` is the same account as `123456789012`. The first
+    // version of this redaction matched contiguous digits only, so a gateway
+    // that pretty-printed the number back at us defeated it entirely.
+    const h = harness();
+    submitMock.mockRejectedValue(
+      new GlobePayError(
+        'beneficiary 1234-5678-9012 rejected by receiving bank',
+        ['PMT10021'],
+        200,
+        true,
+      ),
+    );
+    await expect(start(h)).rejects.toThrow(/refused by the payment provider/i);
+
+    const [{ failure_reason: reason }] =
+      h.packs.updateGlobePayWithdrawals.mock.calls[0];
+    expect(reason).not.toMatch(/1234-5678-9012/);
+    expect(reason).not.toMatch(/5678/);
+    expect(reason).toMatch(/rejected by receiving bank/);
   });
 
   it('still refuses with the customer-facing message when the logger throws', async () => {

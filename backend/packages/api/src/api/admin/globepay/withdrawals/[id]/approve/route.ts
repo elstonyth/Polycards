@@ -234,6 +234,11 @@ export async function POST(
           httpStatus: error.httpStatus,
           bankCode: row.bank_code,
           message: error.message,
+          // The row IS the submitted destination here (see the comment above
+          // the submit call), so these are the exact values their message
+          // could be echoing.
+          accountNumber: row.account_number,
+          accountHolderName: row.account_holder_name,
         }),
       );
       // Their reason, on record, AFTER the money moved — a definitively
