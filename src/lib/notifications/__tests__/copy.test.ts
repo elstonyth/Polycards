@@ -77,12 +77,15 @@ describe('NOTIFICATION_COPY', () => {
     // reward_won has PrizeReveal. Toasting them would double up. The two
     // withdrawal outcomes land asynchronously with no owning tab, and
     // challenge_payout settles server-side between sessions — nothing else
-    // announces any of them, so all three DO toast. bank_account_added toasts
-    // for a different reason: it is a security alert, and the tab that needs to
-    // see it is the ACCOUNT OWNER's, not the one that added the destination.
+    // announces any of them, so all three DO toast. The two bank_account_*
+    // entries toast for a different reason: they are a security alert, and the
+    // tab that needs to see them is the ACCOUNT OWNER's, not the one that
+    // changed the destination. Both halves, because swapping the owner's payout
+    // destination for the attacker's is a remove followed by an add.
     expect(always.sort()).toEqual(
       [
         'bank_account_added',
+        'bank_account_removed',
         'challenge_payout',
         'commission_matured',
         'delivery_status',
