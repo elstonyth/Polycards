@@ -10,6 +10,7 @@ import {
   topUpCredits,
 } from '@/lib/actions/vault';
 import { leaveFor } from '@/lib/navigation';
+import { markDepositInFlight } from '@/lib/deposit-return';
 import { Pill } from '@/components/ui/pill';
 import { PhoneGateAction } from '@/components/account/PhoneGateAction';
 import { useModalA11y } from '@/lib/use-modal-a11y';
@@ -164,6 +165,11 @@ export default function TopUpSheet({
         // tab: popup blockers eat a window.open() that follows an await, and
         // the customer must land back on our return URL afterwards. Nothing was
         // credited — the balance updates when their callback settles.
+        //
+        // The flag is the only thing that survives the round trip: it tells the
+        // return page to keep re-reading for a bit, because crediting happens on
+        // the backend sweep and can land after they are already back.
+        markDepositInFlight();
         leaveFor(res.url);
         return;
       }
