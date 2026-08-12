@@ -416,7 +416,7 @@ design system pieces.
 
 ## Verification
 
-```
+```sh
 cd backend/packages/api && corepack yarn jest src/modules/packs/__tests__/globepay-withdrawal.unit.spec.ts
 cd backend/packages/api && corepack yarn jest src/jobs/__tests__/globepay-withdrawal-reconcile.unit.spec.ts
 cd backend/packages/api && NODE_OPTIONS=--experimental-vm-modules TEST_TYPE=integration:http corepack yarn test:integration:http -- globepay-withdrawal
