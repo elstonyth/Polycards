@@ -2814,6 +2814,26 @@ class PacksModuleService extends MedusaService({
     return Boolean(state);
   }
 
+  // The disable's CAUSE, or null when the account is not disabled. Fails closed
+  // on purpose: a disabled row whose `disabled_cause` is NULL (written before
+  // the column existed, or by a future writer that forgets it) resolves to
+  // 'admin', the more restrictive of the two. Callers must branch on
+  // `=== 'self'` to GRANT the self-service behaviour, never on `=== 'admin'`
+  // to deny it — that inversion is what makes a NULL a login bypass.
+  @InjectManager()
+  async accountDisabledCause(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<'admin' | 'self' | null> {
+    const [state] = await this.listCustomerAccountStates(
+      { customer_id: customerId, disabled: true },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!state) return null;
+    return state.disabled_cause === 'self' ? 'self' : 'admin';
+  }
+
   // Upsert a customer's manual-cashout bank destination + audit row in ONE
   // transaction (POLYCARD-BACK §4.3). Own advisory key — the row lives in its
   // own table, so this must not serialize against the credit ledger, but the
@@ -3654,6 +3674,35 @@ class PacksModuleService extends MedusaService({
     const balanceCents = Number(rows[0]?.balance_cents ?? 0);
     const lockedCents = await this.lockedCommissionCents(customerId, em);
     return (balanceCents - lockedCents) / 100;
+  }
+
+  // The raw signed ledger balance, in INTEGER CENTS.
+  //
+  // Two deliberate divergences from this file's conventions, both required by
+  // the account-deletion gate that is its only caller:
+  //
+  //  - Cents, not the MYR decimals every sibling returns. The gate tests for
+  //    exact zero, and a float RM comparison is the wrong instrument for that.
+  //  - Freeze-blind and lock-blind. availableBalance() returns 0 for a frozen
+  //    account and subtracts lockedCommissionCents, so a frozen account still
+  //    holding funds — or one whose balance happens to equal its locked
+  //    commission — reads as 0 there. Deleting either would strand real money.
+  //
+  // Signed, so a clawback-negative account (which owes us) is also non-zero and
+  // is therefore refused by the same `!== 0` test.
+  @InjectManager()
+  async rawLedgerBalanceCents(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<number> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ balance_cents: string | null }[]>(
+      'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents ' +
+        'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
+      [customerId],
+    );
+    return Number(rows[0]?.balance_cents ?? 0);
   }
 
   // Wallet summary: raw balance, available (freeze-aware), locked (pending-
