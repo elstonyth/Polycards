@@ -302,10 +302,13 @@ const bankAccountAdded = (d: {
 };
 
 // The payout mirror of topupReceipt. One template, two outcomes: 'paid' (the
-// bank transfer completed) and 'refunded' (the bank rejected it and the debit
-// came back). Deliberately NO bank account details — email is the least
-// private channel this data could travel through; the reference is what
-// support needs, and the account is on the admin Withdrawals row.
+// bank transfer completed) and 'refunded' (the transfer could not be
+// completed and the debit came back — cause-agnostic deliberately: a denied
+// HELD withdrawal, plan 094, never reached a bank to reject it, and neither
+// does a gateway-side refusal, so this must not name the bank). Deliberately
+// NO bank account details — email is the least private channel this data
+// could travel through; the reference is what support needs, and the
+// account is on the admin Withdrawals row.
 type WithdrawalReceiptData = {
   amount: number;
   reference: string;
@@ -324,7 +327,13 @@ const withdrawalReceipt = (d: WithdrawalReceiptData): Rendered => {
   const heading = paid ? 'Withdrawal paid' : 'Withdrawal returned';
   const lede = paid
     ? 'Your bank transfer is complete — the money has left Polycards and reached your bank.'
-    : 'Your bank rejected this transfer, so the full amount is back in your Polycards balance. Nothing was lost.';
+    : // Cause-agnostic on purpose, same reasoning as copy.ts's withdrawal_refunded
+      // (the storefront half of this same fix): this outcome fires on a denied
+      // HELD withdrawal (plan 094), which was never submitted to the gateway, so
+      // no bank ever saw it, and on a gateway-side refusal (e.g. PMT10013, an
+      // empty merchant payout float) that is not the bank either. "Your bank
+      // rejected this" was flatly false on both paths.
+      'The transfer could not be completed, so the full amount is back in your Polycards balance. Nothing was lost.';
 
   return {
     subject: paid

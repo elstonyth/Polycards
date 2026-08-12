@@ -4,8 +4,11 @@ import { receiptSiteUrl } from './topup-receipt';
 
 // The emailed receipt for a resolved GlobePay365 payout — topup-receipt.ts's
 // mirror. Two outcomes reach the customer: 'paid' (the bank transfer settled)
-// and 'refunded' (the bank rejected it and the debit came back). Both carry
-// the reference support quotes to the provider; neither carries the bank
+// and 'refunded' (the transfer could not be completed and the debit came
+// back — cause-agnostic deliberately: a denied HELD withdrawal, plan 094,
+// never reached a bank to reject it, and neither does a gateway-side
+// refusal, so the template's lede must not name the bank). Both carry the
+// reference support quotes to the provider; neither carries the bank
 // account (email is the least private channel this data could travel through).
 
 /** Idempotency anchor, per (payout, outcome). Keyed on the SIGNED merchant

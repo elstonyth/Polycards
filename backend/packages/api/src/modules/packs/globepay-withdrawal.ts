@@ -10,20 +10,32 @@ import {
 } from './globepay-client';
 import { newMerchantTransactionId } from './globepay-deposit';
 import { withdrawalGateError } from './withdrawable';
+import { positiveIntFromEnv } from '../../api/utils/rate-limit';
+import { notifyFeed } from './notify-feed';
+import { withdrawalFeedKey } from './feed-events';
+import { sendWithdrawalReceipt } from './withdrawal-receipt';
 
 // The submit half of the GlobePay365 payout loop (method WD), the inverse of
 // globepay-deposit.ts with the money ordering flipped:
 //
-//   write the pending row -> DEBIT the ledger (atomic, floor 0) ->
-//   SubmitWithdrawal. A DEFINITE gateway refusal refunds the debit
-//   immediately; an AMBIGUOUS submit error (timeout, reset — the payout may
-//   still execute) leaves the row pending for the sweep to resolve.
+//   write the row, its status decided up front ('held' above the approval
+//   threshold, 'pending' at or below it) -> DEBIT the ledger (atomic, floor
+//   0) -> SubmitWithdrawal, SKIPPED entirely when the row was written
+//   'held'. A DEFINITE gateway refusal refunds the debit immediately; an
+//   AMBIGUOUS submit error (timeout, reset — the payout may still execute)
+//   leaves the row pending for the sweep to resolve.
 //
 // The debit-before-submit ordering is the security property: real money must
 // never be queued to leave the merchant balance while the customer's site
 // balance still shows it. The refund path shares the row's idempotency
 // anchor, so a crash between debit and refund is recoverable by the
-// reconcile sweep, never a double refund.
+// reconcile sweep, never a double refund. A 'held' row is debited exactly
+// like a 'pending' one — the threshold only skips the gateway call — and it
+// leaves 'held' solely through an admin approve/deny action (plan 094),
+// never through this function or the reconcile sweep's PROCESSING loop
+// (which selects `status: 'pending'` only, so 'held' is structurally
+// invisible to it — the sweep's separate read-only staleness log over held
+// rows, plan 094 follow-up, never requeries, refunds, or writes one).
 
 /**
  * Per-transaction payout band, confirmed by the provider 2026-07-29 (Sean):
@@ -37,6 +49,22 @@ import { withdrawalGateError } from './withdrawable';
  */
 export const GLOBEPAY_WD_MIN_RM = 50;
 export const GLOBEPAY_WD_MAX_RM = 50000;
+
+/**
+ * Above this RM figure a withdrawal is HELD for admin approval instead of
+ * being submitted to the gateway (plan 094) — see the 'held' status comment
+ * on the GlobePayWithdrawal model for what that state means and how it ends.
+ *
+ * Threshold semantics are exact and strictly greater-than, in integer cents:
+ * RM 1,000.00 EXACTLY still auto-submits — only RM 1,000.01 and up holds.
+ * That boundary is the cheapest thing here to get wrong, so it is spelled out
+ * rather than left to `>` reading correctly on its own.
+ *
+ * Env override GLOBEPAY_WD_APPROVAL_ABOVE_RM, read PER CALL (the plan-066
+ * convention, same as GLOBEPAY_WD_DAILY_MAX_RM in service.ts and the cooldown
+ * in saved-accounts.ts) via positiveIntFromEnv — never latched at module load.
+ */
+export const GLOBEPAY_WD_APPROVAL_ABOVE_RM_DEFAULT = 1000;
 
 /**
  * Withdrawals get their OWN switch on top of globepayEnabled(): deposits can
@@ -135,22 +163,33 @@ export type StartWithdrawalInput = {
 export type StartWithdrawalResult = {
   merchantTransactionId: string;
   /** Their withdrawal id (W…) — null when the submit outcome is ambiguous
-   * (the request may have been accepted with the response lost); the sweep
-   * resolves it either way. */
+   * (the request may have been accepted with the response lost) OR the row
+   * was held instead of submitted; the sweep resolves the ambiguous case
+   * either way, and a held row is resolved by an admin instead. */
   transactionId: string | null;
   amount: number;
   /** Ledger balance after the debit. */
   balance: number;
+  /** 'held' when the amount crossed GLOBEPAY_WD_APPROVAL_ABOVE_RM and the row
+   * was parked for admin approval instead of being submitted to the gateway;
+   * 'pending' otherwise (submitted, or the submit outcome was ambiguous —
+   * the sweep resolves that case, not this status). */
+  status: 'pending' | 'held';
 };
 
 /**
  * Create a payout. Ordering is load-bearing:
- *   1. row (pending) — the callback needs it to find the customer
- *   2. ledger debit (atomic, floor 0, idempotent)
- *   3. SubmitWithdrawal
+ *   1. row — written with its FINAL status up front ('held' above the
+ *      approval threshold, 'pending' at or below it; never inserted pending
+ *      and then flipped) — the callback needs it to find the customer
+ *   2. ledger debit (atomic, floor 0, idempotent) — unchanged by 'held': the
+ *      money leaves the balance identically either way
+ *   3. SubmitWithdrawal — SKIPPED for a 'held' row, which returns here
+ *      instead, parked for an admin to approve or deny by hand
  * A gateway refusal refunds the debit and closes the row; a transient crash
  * after 2 leaves a pending row whose sweep resolves it (requery "not found"
- * -> refund).
+ * -> refund). A held row cannot land in that crash window at all — there is
+ * no step 3 to crash during.
  */
 export async function startGlobePayWithdrawal(
   scope: { resolve: <T>(key: string) => T },
@@ -237,8 +276,23 @@ export async function startGlobePayWithdrawal(
 
   const merchantTransactionId = newMerchantTransactionId();
 
+  // Approval-threshold check, read PER CALL — never latched at module load
+  // (the plan-066 convention). Strictly greater-than, integer cents: RM
+  // 1,000.00 exactly still auto-submits (Global Constraint 1).
+  const held =
+    Math.round(amount * 100) >
+    positiveIntFromEnv(
+      'GLOBEPAY_WD_APPROVAL_ABOVE_RM',
+      GLOBEPAY_WD_APPROVAL_ABOVE_RM_DEFAULT,
+    ) *
+      100;
+
   // 1) Row first — the callback echoes MerchantTransactionId but not our
   // customer id, so this row is the only way back (same shape as deposits).
+  // Written with its FINAL status: a held row is never inserted 'pending'
+  // and flipped, which would otherwise leave a window where a crash strands
+  // a 'pending' row with no gateway submission — the exact state the sweep
+  // refunds.
   const [row] = await packs.createGlobePayWithdrawals([
     {
       merchant_transaction_id: merchantTransactionId,
@@ -247,7 +301,7 @@ export async function startGlobePayWithdrawal(
       bank_code: precheckDestination.bankCode,
       account_number: precheckDestination.accountNumber,
       account_holder_name: precheckDestination.accountHolderName.trim(),
-      status: 'pending',
+      status: held ? 'held' : 'pending',
     },
   ]);
 
@@ -279,8 +333,33 @@ export async function startGlobePayWithdrawal(
   } catch (error) {
     // Nothing was debited; the row must not sit pending or the sweep would
     // chase a withdrawal that never existed at the gateway.
+    //
+    // Safe on the newest reason to land here — withdrawForCashout's step-1a
+    // refusal, which fires precisely when an admin already closed this row
+    // 'failed' under the `credit:` lock. This write is an unscoped
+    // `status = 'failed'` by id, so re-stamping the value it already holds is
+    // a no-op, and no other close state is reachable: an admin only claims
+    // 'pending' when it has SEEN the debit (in which case this call did not
+    // throw), and nothing has submitted to the gateway yet, so 'settled' is
+    // impossible.
     await packs.updateGlobePayWithdrawals({ id: row.id, status: 'failed' });
     throw error;
+  }
+
+  // HELD stops here, after the debit and before any gateway call. The row
+  // already carries its terminal 'held' status from the step-1 insert — it
+  // is not touched again on this path. See the model's 'held' comment for
+  // how it leaves: admin approve (-> 'pending', submitted from there) or
+  // admin deny (-> 'failed', refunded). Nothing consumes 'held' yet (that is
+  // a later plan-094 task), so a row parked here simply waits.
+  if (held) {
+    return {
+      merchantTransactionId,
+      transactionId: null,
+      amount,
+      balance: debit.balance,
+      status: 'held',
+    };
   }
 
   // 3) Only now is money allowed to move on their side — and only to the
@@ -407,12 +486,22 @@ export async function startGlobePayWithdrawal(
       transactionId: null,
       amount,
       balance: debit.balance,
+      // Reached only on the non-held branch — a held row already returned
+      // above, before this submit was ever attempted.
+      status: 'pending',
     };
   }
 
+  // Scoped to 'pending', matching the identical stamp in the callback route
+  // (api/hooks/globepay/withdrawal/route.ts) and the admin approve route's
+  // own terminal write for this same field: if the sweep resolved this row
+  // while the submit above was still in flight (refunded and closed it
+  // 'failed'), an unscoped write would land a gateway id onto a refunded row
+  // afterwards — the one shape that makes a later reader believe the money
+  // went out. A silent no-op otherwise.
   await packs.updateGlobePayWithdrawals({
-    id: row.id,
-    gateway_transaction_id: result.transactionId,
+    selector: { id: row.id, status: 'pending' },
+    data: { gateway_transaction_id: result.transactionId },
   });
 
   return {
@@ -420,5 +509,138 @@ export async function startGlobePayWithdrawal(
     transactionId: result.transactionId,
     amount,
     balance: debit.balance,
+    status: 'pending',
   };
+}
+
+/**
+ * Refund and close a withdrawal row that will never reach the bank: the
+ * reconcile sweep's stale/failed rows, and the admin deny route's denied
+ * rows (plan 094 Task 5). Extracted here, the module that already owns the
+ * refund's idempotency anchor, so those two paths share ONE copy of this
+ * four-step money ordering instead of a second verbatim one that a bug fix
+ * could land in without the other ever finding out. A THIRD near-copy still
+ * lives in api/hooks/globepay/withdrawal/route.ts (the payout callback) and
+ * has not been folded in — the next change to this ordering still needs two
+ * edits, not one.
+ *
+ * The caller owns two preconditions this function does not re-check:
+ *   - a debit actually exists for `withdrawal` — both callers verify this
+ *     themselves before calling in (see the guard above each call site). A
+ *     held row is NOT exempt: the row is written 'held' at step 1 and
+ *     debited at step 2, so "no debit" can mean a genuinely stranded row (a
+ *     crash between the two steps) or nothing worse than reaching the guard
+ *     before step 2 returned — refunding either mints money if acted on too
+ *     soon. The admin routes get that distinction from
+ *     packs.claimWithdrawalAgainstDebit, which reads the debit and claims the
+ *     row in one transaction holding the customer's `credit:` advisory lock,
+ *     so its `debited: false` means no debit will EVER land (see that
+ *     method). The sweep's own call site keeps its UNLOCKED read. Not
+ *     because a 'pending' row is past its debit — it is not; a
+ *     below-threshold row is written 'pending' at step 1 and debited at
+ *     step 2, the same two-step shape as a held one — but because of two
+ *     other things. First, unknownWithdrawalAction cannot return 'refund'
+ *     until the row's updated_at is older than GLOBEPAY_STALE_AFTER_MS (1h),
+ *     so the sweep's destructive branch is unreachable inside the debit
+ *     window. Second, if it ever did close a row whose debit was queued
+ *     behind the `credit:` lock, withdrawForCashout's step-1a re-read now
+ *     refuses to debit a closed row. Narrowed, not closed: routing the
+ *     sweep through claimWithdrawalAgainstDebit with from:['pending'] is
+ *     the remaining piece, tracked separately;
+ *   - the row is still in `fromStatus` — the terminal update below is scoped
+ *     to it and is a SILENT NO-OP otherwise, which would leave a committed
+ *     refund on a row that never closes. The sweep acts on rows it selected
+ *     as 'pending' (the default); the deny route claims 'failed' before
+ *     calling in and passes that. Pass the status the row is ACTUALLY in at
+ *     call time, not the one it started in.
+ */
+export async function refundGlobePayWithdrawal(
+  scope: { resolve: <T>(key: string) => T },
+  withdrawal: {
+    id: string;
+    customer_id: string;
+    merchant_transaction_id: string;
+    gateway_transaction_id: string | null;
+    amount: unknown;
+    bank_code: string;
+    account_number: string;
+  },
+  gatewayStatus: number | null,
+  fromStatus: 'pending' | 'held' | 'failed' = 'pending',
+): ReturnType<PacksModuleService['withdrawCreditsWithLedger']> {
+  const packs = scope.resolve<PacksModuleService>(PACKS_MODULE);
+  const refund = await packs.withdrawCreditsWithLedger({
+    customerId: withdrawal.customer_id,
+    amount: Number(withdrawal.amount),
+    reason: 'cashout',
+    reference:
+      withdrawal.gateway_transaction_id ?? withdrawal.merchant_transaction_id,
+    idempotencyReference: withdrawalRefundReference(
+      withdrawal.customer_id,
+      withdrawal.merchant_transaction_id,
+    ),
+    ledger: {
+      outcome: 'refunded',
+      bankCode: withdrawal.bank_code,
+      accountNumber: withdrawal.account_number,
+      gatewayRef:
+        withdrawal.gateway_transaction_id ?? withdrawal.merchant_transaction_id,
+    },
+  });
+  // The emailed record — after the refund commit, BEFORE the terminal row
+  // update, outside any !replayed guard: once the row leaves 'pending'
+  // nothing re-runs this branch, so a crash between the update and a later
+  // send would lose the email forever. A crash after this send re-runs the
+  // branch next sweep (the refund replays, the notification module's unique
+  // idempotency_key dedupes the email). Non-throwing.
+  //
+  // That "next sweep retries" recovery belongs to the sweep specifically,
+  // which revisits every row this branch can reach on a fixed schedule. A
+  // 'held' row is never swept (nothing lists it; see the reconcile job's
+  // query and its held-row regression test), so the admin deny route does
+  // NOT get that retry for free: a crash in this exact window leaves the row
+  // stuck short of its terminal update with a committed refund behind it,
+  // and nothing automatic re-drives it. Its re-drive is a human — deny's
+  // claim accepts a 'failed' row precisely so an operator can click Deny
+  // again, which replays this whole sequence (the refund on its anchor, this
+  // send under the notification module's idempotency key) and finishes it.
+  await sendWithdrawalReceipt(scope, {
+    customerId: withdrawal.customer_id,
+    amount: Number(withdrawal.amount),
+    // `||`, not `??` — an empty-string gateway id must fall through to the
+    // merchant reference. Same reasoning as the settle branch's identical
+    // choice in globepay-withdrawal-reconcile.ts; the fuller rationale lives
+    // there (it explains that call site too, so it did not move with this
+    // one — extracting the code must not orphan the comment from what else
+    // it covers).
+    reference:
+      withdrawal.gateway_transaction_id || withdrawal.merchant_transaction_id,
+    merchantTransactionId: withdrawal.merchant_transaction_id,
+    outcome: 'refunded',
+  });
+  await packs.updateGlobePayWithdrawals({
+    selector: { id: withdrawal.id, status: fromStatus },
+    data: { status: 'failed', gateway_status: gatewayStatus },
+  });
+  if (!refund.replayed) {
+    try {
+      await notifyFeed(scope, {
+        receiverId: withdrawal.customer_id,
+        template: 'withdrawal_refunded',
+        data: {
+          amount_myr: Number(withdrawal.amount),
+          reference:
+            withdrawal.gateway_transaction_id ??
+            withdrawal.merchant_transaction_id,
+        },
+        idempotencyKey: withdrawalFeedKey(
+          withdrawal.merchant_transaction_id,
+          'refunded',
+        ),
+      });
+    } catch {
+      // Never fail a committed refund over a notification.
+    }
+  }
+  return refund;
 }

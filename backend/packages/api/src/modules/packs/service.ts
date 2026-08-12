@@ -284,6 +284,10 @@ type LedgerSqlManager = {
   execute<T = unknown>(query: string, params?: unknown[]): Promise<T>;
 };
 
+/** The globepay_withdrawal.status domain, mirrored from the model's enum for
+ *  the raw-SQL claim below (raw SQL carries no model types). */
+type WithdrawalStatus = 'pending' | 'settled' | 'failed' | 'held';
+
 
 /** One raw `ledger_entry` row as listLedgerEntriesForAdmin reads it. */
 export type LedgerEntryRow = {
@@ -1213,6 +1217,42 @@ class PacksModuleService extends MedusaService({
       `credit:${input.customerId}`,
     ]);
 
+    // 1a) THE ROW MUST STILL BE OPEN. Read under the lock, before anything
+    //     else, and the debit half of the pact with
+    //     claimWithdrawalAgainstDebit below — see that method for the full
+    //     argument. In short: globepay-withdrawal.ts commits the row at step 1
+    //     and debits here at step 2, so an admin approve/deny can land in
+    //     between and close a row this call is about to debit. That admin
+    //     close takes THIS key first and only closes a row it read as
+    //     undebited, so whichever transaction commits first is seen by the
+    //     other: if the close won, this read returns 'failed' and we refuse
+    //     rather than strand a debit nothing would ever refund.
+    //
+    //     DEPENDS ON READ COMMITTED, which is the default and what every
+    //     caller gets today (@InjectTransactionManager forwards
+    //     `isolationLevel` from the caller's context, and these calls pass
+    //     none). Under REPEATABLE READ this read would use the snapshot taken
+    //     at the pg_advisory_xact_lock statement — from BEFORE the admin
+    //     close committed — see 'held', and debit anyway. Do not compose this
+    //     method into a context carrying a stricter isolation level.
+    //
+    //     Fail closed on a missing row too — a debit with no row to hang the
+    //     callback on is unresolvable by definition.
+    //
+    //     'pending' is checked alongside 'held' because this guard is not
+    //     held-specific: any closed row must not be debited.
+    const [openRow] = await em.execute<{ status: string }[]>(
+      'SELECT status FROM globepay_withdrawal ' +
+        'WHERE merchant_transaction_id = ? AND deleted_at IS NULL',
+      [input.merchantTransactionId],
+    );
+    if (openRow?.status !== 'pending' && openRow?.status !== 'held') {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'This withdrawal is no longer open, so nothing was debited. Start a new one.',
+      );
+    }
+
     // 2) The DESTINATION, resolved here rather than taken from the request.
     //    Ownership is structural: the list read is keyed on input.customerId
     //    (which comes from the verified token), so an id belonging to another
@@ -1280,20 +1320,28 @@ class PacksModuleService extends MedusaService({
     //    debit cannot interleave either.
     //
     //    `pending` and `settled` both moved (or are still moving) money;
-    //    `failed` did not — a refused or refunded payout must never consume the
-    //    customer's cap. Those three are the entire domain of the column's
-    //    CHECK constraint (Migration20260722170000), which also supplies the
-    //    (status, created_at) and (customer_id) partial indexes this scan uses.
+    //    `held` does too — the debit already posted (see
+    //    startGlobePayWithdrawal), the row is merely parked for admin approval
+    //    instead of being sent to the gateway, and the money stays out of the
+    //    balance until a refund (admin deny) puts it back. So a held payout
+    //    consumes the customer's daily blast radius exactly like a submitted
+    //    one. `failed` alone did not move money — a refused or refunded
+    //    payout must never consume the customer's cap. Those four are the
+    //    entire domain of the column's CHECK constraint
+    //    (Migration20260722170000, widened to add `held` by
+    //    Migration20260811220000), which also supplies the (status,
+    //    created_at) and (customer_id) partial indexes this scan uses.
     //
     //    The just-created row is EXCLUDED by merchant_transaction_id:
-    //    globepay-withdrawal.ts writes it as `pending` BEFORE calling this
-    //    method (the callback echoes only MerchantTransactionId, so that row is
-    //    the only way back to the customer), so an unfiltered sum would count
-    //    this very attempt against its own cap and refuse every withdrawal
-    //    above half the ceiling.
+    //    globepay-withdrawal.ts writes it with its final status (`pending` or
+    //    `held`) BEFORE calling this method (the callback echoes only
+    //    MerchantTransactionId, so that row is the only way back to the
+    //    customer), so an unfiltered sum would count this very attempt
+    //    against its own cap and refuse every withdrawal above half the
+    //    ceiling.
     //
     //    A CONCURRENT attempt's row does still count, though: request B writes
-    //    its own `pending` row before it takes this lock, so A's sum includes B
+    //    its own row before it takes this lock, so A's sum includes B
     //    even if B goes on to fail the gate and flip to `failed`. That
     //    over-counts, never under-counts, and it self-heals as the 24h window
     //    slides — the fail-closed direction is the right default for a cap
@@ -1307,7 +1355,7 @@ class PacksModuleService extends MedusaService({
       'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS sum_cents ' +
         'FROM globepay_withdrawal ' +
         'WHERE customer_id = ? AND deleted_at IS NULL ' +
-        "AND status IN ('pending', 'settled') " +
+        "AND status IN ('pending', 'settled', 'held') " +
         "AND created_at > now() - interval '24 hours' " +
         'AND merchant_transaction_id <> ?',
       [input.customerId, input.merchantTransactionId],
@@ -1353,6 +1401,178 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     return { ...debit, destination };
+  }
+
+  /**
+   * ATOMIC STATUS CLAIM on one globepay_withdrawal row — the mutex behind the
+   * admin approve/deny routes (plan 094).
+   *
+   * ONE conditional UPDATE, and that is the whole point: Postgres re-evaluates
+   * the predicate against committed state AFTER the row lock is released, so
+   * of two concurrent claims exactly one matches a row and the other matches
+   * none. `RETURNING id` is that answer. `true` means THIS caller moved the
+   * row and owns whatever follows it (a gateway submit, a refund); `false`
+   * means someone else already did, and the caller must not act.
+   *
+   * Do NOT reimplement this with `updateGlobePayWithdrawals({ selector, data
+   * })`. It type-checks and hands back an array, so `length === 0` reads like
+   * the same guard, but the generated service resolves the selector with a
+   * find-then-write and takes no row lock: two concurrent approves — a
+   * double-clicked button is the realistic trigger — both read 'held', both
+   * see one row, and both submit. That is a duplicate payout to a real bank
+   * account. Raw SQL for the same reason the rolling-24h cap above uses it:
+   * the module-service layer has no conditional-write primitive.
+   */
+  @InjectTransactionManager()
+  async claimGlobePayWithdrawalStatus(
+    input: {
+      id: string;
+      /** Statuses the row may be claimed FROM. A row in any other status is
+       *  left untouched and the claim answers false. */
+      from: readonly WithdrawalStatus[];
+      to: WithdrawalStatus;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<boolean> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    // One placeholder per accepted status. The list is ours (never a request
+    // value) and it stays BOUND rather than interpolated regardless.
+    const accepted = input.from.map(() => '?').join(', ');
+    const rows = await em.execute<{ id: string }[]>(
+      'UPDATE globepay_withdrawal SET status = ?, updated_at = now() ' +
+        `WHERE id = ? AND status IN (${accepted}) AND deleted_at IS NULL ` +
+        'RETURNING id',
+      [input.to, input.id, ...input.from],
+    );
+    return rows.length === 1;
+  }
+
+  /**
+   * The admin approve/deny claim, SERIALIZED AGAINST THE DEBIT — the whole
+   * reason this exists on top of claimGlobePayWithdrawalStatus (plan 094
+   * review fix, CodeRabbit).
+   *
+   * THE WINDOW. startGlobePayWithdrawal commits the withdrawal row at step 1
+   * and debits at step 2, so a committed 'held' row with no debit yet is a
+   * normal, expected state — not only a crash. An admin acting inside that
+   * window sees "no debit" and cannot tell it from "no debit EVER": close the
+   * row on the first reading and the debit that lands a moment later is
+   * stranded for good, because the reconcile sweep selects 'pending' only and
+   * never revisits a 'held' or 'failed' row.
+   *
+   * WHY NOT A TIMER. This used to be an elapsed-time gate
+   * (GLOBEPAY_WD_HELD_DEBIT_GRACE_MS): wait 60s and a still-running debit was
+   * declared impossible, on the grounds that
+   * idle_in_transaction_session_timeout would have killed it. That reasoning
+   * was FALSE. That timeout only fires on a session idle BETWEEN statements;
+   * a transaction blocked inside `SELECT pg_advisory_xact_lock(...)` is
+   * executing a statement, is reported `active` with wait_event `advisory`,
+   * and is never killed by it. Nothing in the driver config bounds a lock
+   * wait (utils/db-driver-options.ts cannot even set lock_timeout), so no
+   * amount of elapsed time proves a debit has finished. Only the lock does.
+   *
+   * THE PACT, both halves of which are required:
+   *   - here: take `credit:<customer>`, read the debit, and claim the row —
+   *     all in ONE transaction, so the answer cannot go stale between the
+   *     read and the write;
+   *   - in withdrawForCashout (step 1a): take the same key, re-read the row,
+   *     and refuse to debit a row that is no longer open.
+   *
+   * The lock alone would NOT be enough. A debit queued BEHIND this claim is
+   * invisible to the read here, so without step 1a it would go on to commit
+   * against a row this call had just closed. With both halves, the two
+   * critical sections are mutually exclusive and each reads what the other
+   * wrote: whichever commits first wins, and the loser observes it.
+   *
+   * @returns `debited` — whether a debit exists for this payout, decided
+   * under the lock, so a caller may act on `false` as "no debit will ever
+   * land". `claimed` — whether THIS caller moved the row (see
+   * claimGlobePayWithdrawalStatus).
+   */
+  @InjectTransactionManager()
+  async claimWithdrawalAgainstDebit(
+    input: {
+      id: string;
+      customerId: string;
+      /** withdrawalIdempotencyReference(customerId, merchantTransactionId) —
+       *  the `wd:` anchor the debit is stored under. */
+      debitReference: string;
+      from: readonly WithdrawalStatus[];
+      /** Where the row goes when a debit EXISTS. An UNDEBITED row is always
+       *  closed 'failed' instead: there is no other honest destination for a
+       *  payout that never took the customer's money. */
+      to: WithdrawalStatus;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ debited: boolean; claimed: boolean }> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+
+    // BOUND THE WAIT, admin-side only. Nothing else caps a lock wait —
+    // utils/db-driver-options.ts cannot set lock_timeout (see its comment),
+    // and idle_in_transaction_session_timeout does not apply to a session
+    // blocked inside a statement. Without this an admin click on a customer
+    // with a long-running credit mutation hangs indefinitely, holding one of
+    // the five pooled connections. Timing out is HARMLESS here: the statement
+    // error aborts the transaction, so the row is untouched and the operator
+    // clicks again. SET LOCAL, so it dies with this transaction rather than
+    // leaking onto the pooled connection's next borrower.
+    //
+    // Deliberately NOT applied to withdrawForCashout: there a timeout turns a
+    // merely slow withdrawal into a customer-facing error, and that call has
+    // no equivalent "try again, nothing moved" affordance.
+    await em.execute("SET LOCAL lock_timeout = '5s'");
+
+    // The try spans the WHOLE locked section, not just the advisory lock.
+    // SET LOCAL applies to every statement left in this transaction, and the
+    // claim's `UPDATE … RETURNING id` takes a ROW lock that can time out too
+    // — wrapping only the acquisition would let that one reach the operator
+    // as a raw `canceling statement due to lock timeout`, which is exactly
+    // what the translation below exists to prevent, one statement later.
+    try {
+      // Same key and same idiom as mutateCreditAtomic and withdrawForCashout.
+      // Re-entrant per session, so a refund composed onto this context later
+      // re-taking it is a no-op.
+      await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+        `credit:${input.customerId}`,
+      ]);
+
+      // The same read the routes did unlocked before this method existed —
+      // deliberately the generated lister, not new raw SQL, so its soft-delete
+      // semantics stay identical to the shipped behaviour. sharedContext is
+      // threaded so it rides THIS locked transaction.
+      const [debitRow] = await this.listCreditTransactions(
+        {
+          customer_id: input.customerId,
+          source_transaction_id: input.debitReference,
+        },
+        { take: 1 },
+        sharedContext,
+      );
+      const debited = Boolean(debitRow);
+
+      // In the SAME transaction, so the decision and the row move commit
+      // together. @InjectTransactionManager re-uses a context that already
+      // carries a transactionManager instead of opening a second transaction —
+      // if it did open one, the claim would land outside the lock and the whole
+      // pact above would silently lapse.
+      const claimed = await this.claimGlobePayWithdrawalStatus(
+        { id: input.id, from: input.from, to: debited ? input.to : 'failed' },
+        sharedContext,
+      );
+      return { debited, claimed };
+    } catch (error) {
+      // ONLY 55P03 (lock_not_available) is translated. Anything else — a
+      // dropped connection, a constraint violation — must surface as itself
+      // rather than be relabelled "someone else is busy", which would send an
+      // operator chasing contention that never happened. Never swallowed into
+      // a fabricated {debited:false}: that would close the row on a reading we
+      // never took.
+      if ((error as { code?: string })?.code !== '55P03') throw error;
+      throw new MedusaError(
+        MedusaError.Types.CONFLICT,
+        'Another balance operation for this customer is in progress. Nothing was changed — try again in a moment.',
+      );
+    }
   }
 
   // Append-only reversal of a single ledger row (the open-saga compensation).

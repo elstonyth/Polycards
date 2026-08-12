@@ -30,7 +30,17 @@ export const GlobePayWithdrawal = model
     account_holder_name: model.text(),
     // 'pending' covers submitted + processing. 'failed' always means the debit
     // has been refunded (the refund shares the row's idempotency anchor).
-    status: model.enum(['pending', 'settled', 'failed']).default('pending'),
+    //
+    // 'held' — debited, awaiting admin approval, never submitted to the
+    // gateway. It has no gateway_transaction_id and the reconcile sweep must
+    // never select it for PROCESSING (the sweep does run one read-only
+    // staleness log across held rows, plan 094 follow-up, but never
+    // requeries, refunds, or writes to one). It leaves only via the admin
+    // approve route (-> 'pending') or the admin deny route (-> 'failed',
+    // refunded).
+    status: model
+      .enum(['pending', 'settled', 'failed', 'held'])
+      .default('pending'),
     // Their raw numeric status from the last callback/requery (4 = success,
     // 5 = fail, else processing), for support.
     gateway_status: model.number().nullable(),
