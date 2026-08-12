@@ -21,22 +21,29 @@ import { moduleIntegrationTestRunner } from '@medusajs/test-utils';
 import { PACKS_MODULE } from '../index';
 import type PacksModuleService from '../service';
 import GlobePayWithdrawal from '../models/globepay-withdrawal';
+import CreditTransaction from '../models/credit-transaction';
+import { withdrawalIdempotencyReference } from '../globepay-withdrawal';
 
 jest.setTimeout(300 * 1000);
 
 moduleIntegrationTestRunner<PacksModuleService>({
   moduleName: PACKS_MODULE,
   resolve: path.resolve(__dirname, '../../..', 'modules/packs'),
-  moduleModels: [GlobePayWithdrawal],
+  // CreditTransaction is here for claimWithdrawalAgainstDebit's debit read.
+  // A modules-type spec builds its schema from THIS array, never from the
+  // migrations, so omitting it is an unfixable `relation "credit_transaction"
+  // does not exist`.
+  moduleModels: [GlobePayWithdrawal, CreditTransaction],
   testSuite: ({ service, MikroOrmWrapper }) => {
     const seed = async (
       suffix: string,
       status: 'pending' | 'settled' | 'failed' | 'held',
+      customerId = 'cus_claim',
     ) => {
       const [row] = await service.createGlobePayWithdrawals([
         {
           merchant_transaction_id: `PW-CLAIM-${suffix}`,
-          customer_id: 'cus_claim',
+          customer_id: customerId,
           amount: 1500,
           bank_code: 'MBB',
           account_number: '1234567890',
@@ -184,6 +191,198 @@ moduleIntegrationTestRunner<PacksModuleService>({
             to: 'pending',
           }),
         ).resolves.toBe(false);
+      });
+    });
+
+    /**
+     * claimWithdrawalAgainstDebit — the ONLY test in the repo that observes a
+     * real advisory-lock race, and the reason this method exists.
+     *
+     * THE BUG IT PINS. The admin approve/deny routes used to read the debit
+     * unlocked and then close the row, deciding "no debit will ever land"
+     * from the row's AGE (a 60s grace, GLOBEPAY_WD_HELD_DEBIT_GRACE_MS). The
+     * justification was that idle_in_transaction_session_timeout would have
+     * killed any transaction still running past it. It does not: that
+     * timeout fires only on a session idle BETWEEN statements, and a debit
+     * blocked inside `SELECT pg_advisory_xact_lock(...)` is executing a
+     * statement — reported `active`, wait_event `advisory` — so it survives
+     * indefinitely. Every row below is backdated TWO HOURS, far past that
+     * grace, so the deleted code would have closed each of them.
+     *
+     * A mocked test cannot show this. There is no lock without a database,
+     * so the interleaving has to be driven against real Postgres on two
+     * connections: MikroOrmWrapper.forkManager() stands in for the
+     * withdrawForCashout transaction (it takes the same `credit:` key and
+     * writes the same `wd:`-anchored debit row), and the module service runs
+     * the admin close on its own.
+     */
+    describe('claimWithdrawalAgainstDebit', () => {
+      const CUSTOMER = 'cus_lockrace';
+      // The real anchor, not a stand-in: the routes derive the debit
+      // reference this way, so a divergence between them and this test would
+      // otherwise pass here and find nothing in production.
+      const debitAnchor = (mtid: string) =>
+        withdrawalIdempotencyReference(CUSTOMER, mtid);
+
+      /** Two hours old — past every grace this replaced. */
+      const backdate = async (id: string) => {
+        const rows = await MikroOrmWrapper.getManager().execute<
+          { id: string }[]
+        >(
+          "UPDATE globepay_withdrawal SET created_at = now() - interval '2 hours' WHERE id = ? RETURNING id",
+          [id],
+        );
+        // Asserted for the same reason the updated_at test above asserts its
+        // own backdate: a silent zero-row UPDATE would leave these tests
+        // passing against a FRESH row, which proves nothing about age.
+        expect(rows).toHaveLength(1);
+      };
+
+      /** Resolved?-yet probe that cannot itself hang the suite. */
+      const settledWithin = async (p: Promise<unknown>, ms: number) => {
+        let timer: NodeJS.Timeout | undefined;
+        const pending = Symbol('pending');
+        const result = await Promise.race([
+          p.then(() => 'settled' as const).catch(() => 'settled' as const),
+          new Promise((resolve) => {
+            timer = setTimeout(() => resolve(pending), ms);
+          }),
+        ]);
+        clearTimeout(timer);
+        return result !== pending;
+      };
+
+      // THE TEST CodeRabbit asked for: the debit delayed well past the old
+      // grace period. The close must WAIT for it rather than assume it away.
+      it('waits for an in-flight debit and then refuses to close the row', async () => {
+        const row = await seed('LOCK-1', 'held', CUSTOMER);
+        await backdate(row.id);
+
+        // The withdrawForCashout half: same lock key, and the debit written
+        // INSIDE the transaction that holds it — uncommitted, exactly the
+        // state the admin close used to be unable to see.
+        const debitTxn = MikroOrmWrapper.forkManager();
+        await debitTxn.begin();
+        let open = true;
+        try {
+          await debitTxn.execute(
+            'SELECT pg_advisory_xact_lock(hashtextextended(?, 0))',
+            [`credit:${CUSTOMER}`],
+          );
+          await debitTxn.execute(
+            'INSERT INTO credit_transaction ' +
+              '(id, customer_id, amount, raw_amount, reason, reference, source_transaction_id) ' +
+              "VALUES (?, ?, ?, ?::jsonb, 'cashout', ?, ?)",
+            [
+              'ct_lockrace_1',
+              CUSTOMER,
+              -1500,
+              JSON.stringify({ value: '-1500', precision: 20 }),
+              row.merchant_transaction_id,
+              debitAnchor(row.merchant_transaction_id),
+            ],
+          );
+
+          const closing = service.claimWithdrawalAgainstDebit({
+            id: row.id,
+            customerId: CUSTOMER,
+            debitReference: debitAnchor(row.merchant_transaction_id),
+            from: ['held'],
+            to: 'pending',
+          });
+
+          // BLOCKED on the lock — this is the assertion the whole fix rests
+          // on. Under the deleted age gate the row was two hours old, so the
+          // close would have run straight through and stamped it 'failed'.
+          expect(await settledWithin(closing, 750)).toBe(false);
+          expect(await statusOf(row.id)).toBe('held');
+
+          await debitTxn.commit();
+          open = false;
+
+          // Now it proceeds — and sees the debit that was invisible a moment
+          // ago, so it takes the DEBITED branch instead of the orphan close.
+          await expect(closing).resolves.toEqual({
+            debited: true,
+            claimed: true,
+          });
+          expect(await statusOf(row.id)).toBe('pending');
+        } finally {
+          // Never leave the lock held: a failed assertion above would
+          // otherwise wedge every later test on the same key.
+          if (open) await debitTxn.rollback();
+        }
+      });
+
+      // The mirror, and the reason the destructive close must stay
+      // available: a row whose debit really never landed (a crash between
+      // startGlobePayWithdrawal's step 1 and step 2) is still closable by an
+      // operator, with no refund.
+      it('closes a genuinely orphaned held row as failed', async () => {
+        const row = await seed('LOCK-2', 'held', CUSTOMER);
+        await backdate(row.id);
+        await expect(
+          service.claimWithdrawalAgainstDebit({
+            id: row.id,
+            customerId: CUSTOMER,
+            debitReference: debitAnchor(row.merchant_transaction_id),
+            from: ['held'],
+            to: 'pending',
+          }),
+        ).resolves.toEqual({ debited: false, claimed: true });
+        // 'failed', NOT the caller's `to` — an undebited payout has no other
+        // honest destination, and approve reads this as "never debited, so it
+        // cannot be paid out".
+        expect(await statusOf(row.id)).toBe('failed');
+      });
+
+      // The ordinary approve: a debit committed long ago is found, and the
+      // row is released to the gateway rather than closed.
+      it('claims a debited row to the callers status, leaving the debit alone', async () => {
+        const row = await seed('LOCK-3', 'held', CUSTOMER);
+        await backdate(row.id);
+        await MikroOrmWrapper.getManager().execute(
+          'INSERT INTO credit_transaction ' +
+            '(id, customer_id, amount, raw_amount, reason, reference, source_transaction_id) ' +
+            "VALUES (?, ?, ?, ?::jsonb, 'cashout', ?, ?)",
+          [
+            'ct_lockrace_3',
+            CUSTOMER,
+            -1500,
+            JSON.stringify({ value: '-1500', precision: 20 }),
+            row.merchant_transaction_id,
+            debitAnchor(row.merchant_transaction_id),
+          ],
+        );
+        await expect(
+          service.claimWithdrawalAgainstDebit({
+            id: row.id,
+            customerId: CUSTOMER,
+            debitReference: debitAnchor(row.merchant_transaction_id),
+            from: ['held'],
+            to: 'pending',
+          }),
+        ).resolves.toEqual({ debited: true, claimed: true });
+        expect(await statusOf(row.id)).toBe('pending');
+      });
+
+      // Deny's shape, and the double-action guard: the row is already
+      // 'pending' from the approve above, so deny's from-list matches
+      // nothing. `debited` is still reported — the read happens either way —
+      // but nothing moves.
+      it('reports the debit but loses the claim on a row it may not touch', async () => {
+        const row = await seed('LOCK-4', 'settled', CUSTOMER);
+        await backdate(row.id);
+        await expect(
+          service.claimWithdrawalAgainstDebit({
+            id: row.id,
+            customerId: CUSTOMER,
+            debitReference: debitAnchor(row.merchant_transaction_id),
+            from: ['held', 'failed'],
+            to: 'failed',
+          }),
+        ).resolves.toEqual({ debited: false, claimed: false });
+        expect(await statusOf(row.id)).toBe('settled');
       });
     });
   },

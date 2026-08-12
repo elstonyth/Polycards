@@ -67,45 +67,6 @@ export const GLOBEPAY_WD_MAX_RM = 50000;
 export const GLOBEPAY_WD_APPROVAL_ABOVE_RM_DEFAULT = 1000;
 
 /**
- * How long a HELD row may show "no debit found" before the admin approve/deny
- * routes trust that absence and close it as an orphan (plan 094 review fix).
- *
- * A held row is written 'held' at step 1, then debited at step 2 — see the
- * ordering comment above — so there is a real, committed window, not only a
- * crash, in which the row is visible as held with no debit yet, simply
- * because step 2 has not returned. An admin action landing in that window
- * must not read "no debit" as "no debit ever": closing the row now stamps it
- * 'failed' with no refund, and the debit that lands moments later is stranded
- * for good — the sweep never selects a 'held' or 'failed' row, so nothing
- * automatic ever revisits it.
- *
- * The debit itself never leaves this process — packs.withdrawForCashout is a
- * local, advisory-locked DB transaction, no gateway round trip — so under
- * normal load it resolves in milliseconds. The real ceiling is what Postgres
- * itself allows: IDLE_IN_TRANSACTION_TIMEOUT_MS (utils/db-driver-options.ts,
- * 30s in production) forcibly kills a transaction abandoned mid-flight, so
- * past that bound the debit has been committed, rolled back, or killed — it
- * is never still running. This grace is double that ceiling, comfortably
- * above it rather than flush against it: a lock-contended debit under real
- * traffic gets room to actually finish, and the failure modes are asymmetric
- * — too generous costs an admin a few extra seconds before closing a
- * genuinely orphaned row; too tight stamps 'failed' on a row whose debit was
- * never really missing, with no automatic recovery.
- */
-export const GLOBEPAY_WD_HELD_DEBIT_GRACE_MS = 60_000;
-
-/**
- * True once a held row is old enough that GLOBEPAY_WD_HELD_DEBIT_GRACE_MS
- * says a still-in-flight debit is no longer plausible — see that constant for
- * the reasoning. `now` is threaded explicitly (this codebase's convention for
- * every other age check here) so callers stay testable without mocking the
- * clock.
- */
-export function heldDebitGraceExpired(createdAt: Date, now: Date): boolean {
-  return now.getTime() - createdAt.getTime() > GLOBEPAY_WD_HELD_DEBIT_GRACE_MS;
-}
-
-/**
  * Withdrawals get their OWN switch on top of globepayEnabled(): deposits can
  * (and did) go live while payouts wait on the provider activating the WD
  * channel. Fail closed — absent config means "not open".
@@ -372,6 +333,15 @@ export async function startGlobePayWithdrawal(
   } catch (error) {
     // Nothing was debited; the row must not sit pending or the sweep would
     // chase a withdrawal that never existed at the gateway.
+    //
+    // Safe on the newest reason to land here — withdrawForCashout's step-1a
+    // refusal, which fires precisely when an admin already closed this row
+    // 'failed' under the `credit:` lock. This write is an unscoped
+    // `status = 'failed'` by id, so re-stamping the value it already holds is
+    // a no-op, and no other close state is reachable: an admin only claims
+    // 'pending' when it has SEEN the debit (in which case this call did not
+    // throw), and nothing has submitted to the gateway yet, so 'settled' is
+    // impossible.
     await packs.updateGlobePayWithdrawals({ id: row.id, status: 'failed' });
     throw error;
   }
@@ -561,11 +531,13 @@ export async function startGlobePayWithdrawal(
  *     debited at step 2, so "no debit" can mean a genuinely stranded row (a
  *     crash between the two steps) or nothing worse than reaching the guard
  *     before step 2 returned — refunding either mints money if acted on too
- *     soon. Both callers additionally gate their close on
- *     heldDebitGraceExpired before they ever call in here: approve inside its
- *     no-debit branch, deny in front of its claim (the claim itself is the
- *     destructive step there — see its route comment for why the ordering
- *     differs);
+ *     soon. The admin routes get that distinction from
+ *     packs.claimWithdrawalAgainstDebit, which reads the debit and claims the
+ *     row in one transaction holding the customer's `credit:` advisory lock,
+ *     so its `debited: false` means no debit will EVER land (see that
+ *     method); the sweep's own call site keeps its unlocked read, which is
+ *     sound there because a 'pending' row it selected is already past the
+ *     debit;
  *   - the row is still in `fromStatus` — the terminal update below is scoped
  *     to it and is a SILENT NO-OP otherwise, which would leave a committed
  *     refund on a row that never closes. The sweep acts on rows it selected

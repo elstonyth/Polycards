@@ -50,12 +50,11 @@ const ACCOUNT_NUMBER = '1234567890';
  *  because the column is model.bigNumber() — the routes must coerce it before
  *  submitWithdrawal calls .toFixed(2) on it.
  *
- *  `created_at` defaults to several minutes old, past
- *  GLOBEPAY_WD_HELD_DEBIT_GRACE_MS — a held row an admin is acting on is
- *  realistically never younger than that (it has to survive at least one
- *  60s admin-list poll first). A row THIS fresh is the deliberate exception,
- *  covered by its own tests below (`created_at: new Date()`), not the
- *  default every other test in this file inherits. */
+ *  `created_at` is carried because the model has it and the reconcile job's
+ *  staleness watch reads it. NEITHER ROUTE DOES: the row's age used to decide
+ *  whether an undebited row could be closed, and that is now the `credit:`
+ *  lock's job (packs.claimWithdrawalAgainstDebit), so no test here should
+ *  ever need to vary it. */
 const heldRow = () => ({
   id: 'gpw_1',
   merchant_transaction_id: 'PW-HELD-1',
@@ -73,25 +72,48 @@ const heldRow = () => ({
 
 /**
  * The claim fake is STATEFUL — without that, "double-approve submits once" is
- * vacuous. It models exactly what the conditional UPDATE does: flip only when
- * the row's CURRENT status is one the caller accepts, and report whether this
- * caller is the one that moved it.
+ * vacuous. It models exactly what the real method does: decide whether a
+ * debit exists, then flip the row only when its CURRENT status is one the
+ * caller accepts, reporting whether this caller is the one that moved it. An
+ * undebited row goes to 'failed' whatever `to` says, mirroring the service.
  *
- * It fails OPEN (returns true for an id it does not hold), the same trick the
- * sweep's held-row test uses: a route that stopped claiming the row it is
- * about to act on cannot pass by accident.
+ * It fails OPEN (returns claimed:true for an id it does not hold), the same
+ * trick the sweep's held-row test uses: a route that stopped claiming the row
+ * it is about to act on cannot pass by accident.
+ *
+ * What it cannot model is the LOCK — there is no database here. That the
+ * debit read and the claim are one serialized unit is proven against a real
+ * Postgres in modules/packs/__tests__/withdrawal-claim.integration.spec.ts.
+ * What these tests own is that the routes route their decision through that
+ * method at all, which is exactly what the unlocked version got wrong.
  */
 function harness(row = heldRow(), debitExists = true, frozen = false) {
   const packs = {
     listGlobePayWithdrawals: jest.fn(async (selector: { id?: string }) =>
       selector.id === row.id ? [row] : [],
     ),
+    // Present so the "no unlocked read" guard below can prove neither route
+    // calls it any more; the locked service method owns this read now.
     listCreditTransactions: jest.fn(async () =>
       debitExists ? [{ id: 'ct_debit' }] : [],
     ),
     listCustomerAccountStates: jest.fn(async () =>
       frozen ? [{ id: 'cas_1', frozen: true, cause: 'manual' }] : [],
     ),
+    claimWithdrawalAgainstDebit: jest.fn(
+      async (input: { id: string; from: string[]; to: string }) => {
+        const to = debitExists ? input.to : 'failed';
+        if (input.id !== row.id) return { debited: debitExists, claimed: true };
+        if (!input.from.includes(row.status)) {
+          return { debited: debitExists, claimed: false };
+        }
+        row.status = to;
+        return { debited: debitExists, claimed: true };
+      },
+    ),
+    // The bare, UNLOCKED claim. Same reason as listCreditTransactions: it
+    // exists here only so the guard below can prove the routes stopped
+    // reaching for it directly.
     claimGlobePayWithdrawalStatus: jest.fn(
       async (input: { id: string; from: string[]; to: string }) => {
         if (input.id !== row.id) return true;
@@ -168,14 +190,18 @@ describe('POST /admin/globepay/withdrawals/:id/approve', () => {
       destinationAccountNumber: ACCOUNT_NUMBER,
       destinationAccountHolderName: 'AHMAD BIN ALI',
     });
-    // The claim ran BEFORE the gateway saw anything.
-    expect(h.packs.claimGlobePayWithdrawalStatus).toHaveBeenCalledWith({
+    // The claim ran BEFORE the gateway saw anything, and it carried the
+    // payout's own `wd:` debit anchor so the service could resolve the debit
+    // under the lock.
+    expect(h.packs.claimWithdrawalAgainstDebit).toHaveBeenCalledWith({
       id: 'gpw_1',
+      customerId: 'cus_1',
+      debitReference: withdrawalIdempotencyReference('cus_1', 'PW-HELD-1'),
       from: ['held'],
       to: 'pending',
     });
     expect(
-      h.packs.claimGlobePayWithdrawalStatus.mock.invocationCallOrder[0],
+      h.packs.claimWithdrawalAgainstDebit.mock.invocationCallOrder[0],
     ).toBeLessThan(submitMock.mock.invocationCallOrder[0]);
     // Their W… id lands on the row — scoped to 'pending', so a sweep that
     // closed the row while the submit was in flight cannot end up with a
@@ -202,7 +228,7 @@ describe('POST /admin/globepay/withdrawals/:id/approve', () => {
     await APPROVE(h.req, second.res);
 
     expect(submitMock).toHaveBeenCalledTimes(1);
-    expect(h.packs.claimGlobePayWithdrawalStatus).toHaveBeenCalledTimes(2);
+    expect(h.packs.claimWithdrawalAgainstDebit).toHaveBeenCalledTimes(2);
     expect(second.out.body).toMatchObject({ approved: false });
     // The status flip must be the CLAIM's, never a find-then-write: an
     // updateGlobePayWithdrawals carrying a status is exactly the unlocked
@@ -293,7 +319,8 @@ describe('POST /admin/globepay/withdrawals/:id/approve', () => {
 
   // Beyond the brief's list, and deliberate: a crash between the row insert
   // and the debit strands a held row with NO debit. Submitting it pays a bank
-  // account against a balance that was never reduced.
+  // account against a balance that was never reduced. The destructive close
+  // has to stay available for exactly this row.
   it('refuses to submit a held row that was never debited, closing it instead', async () => {
     const h = harness(heldRow(), false);
     const { res } = mkRes();
@@ -304,43 +331,17 @@ describe('POST /admin/globepay/withdrawals/:id/approve', () => {
 
     expect(submitMock).not.toHaveBeenCalled();
     expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
-    // The debit lookup is the sweep's: the wd: anchor for this exact payout.
-    expect(h.packs.listCreditTransactions).toHaveBeenCalledWith(
-      {
-        customer_id: 'cus_1',
-        source_transaction_id: withdrawalIdempotencyReference(
-          'cus_1',
-          'PW-HELD-1',
-        ),
-      },
-      { take: 1 },
+    // Closed through the locked claim, so it can race neither a concurrent
+    // deny nor the debit itself.
+    expect(h.packs.claimWithdrawalAgainstDebit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'gpw_1',
+        customerId: 'cus_1',
+        debitReference: withdrawalIdempotencyReference('cus_1', 'PW-HELD-1'),
+        from: ['held'],
+      }),
     );
-    // Closed through the claim, so it cannot race a concurrent deny.
-    expect(h.packs.claimGlobePayWithdrawalStatus).toHaveBeenCalledWith({
-      id: 'gpw_1',
-      from: ['held'],
-      to: 'failed',
-    });
     expect(h.row.status).toBe('failed');
-  });
-
-  // The review-fix companion to the test above: a row THIS fresh must be
-  // refused, not closed — "no debit yet" and "no debit ever" look identical
-  // from here, and closing the wrong one strands the debit forever with
-  // nothing to ever refund it.
-  it('refuses (without closing) a held row too young for its debit to have landed yet', async () => {
-    const h = harness({ ...heldRow(), created_at: new Date() }, false);
-    const { res } = mkRes();
-
-    await expect(APPROVE(h.req, res)).rejects.toMatchObject({
-      type: MedusaError.Types.NOT_ALLOWED,
-    });
-
-    expect(submitMock).not.toHaveBeenCalled();
-    expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
-    // Unlike the genuine-orphan case above, the row is NOT closed.
-    expect(h.packs.claimGlobePayWithdrawalStatus).not.toHaveBeenCalled();
-    expect(h.row.status).toBe('held');
   });
 
   it('404s an unknown id without claiming anything', async () => {
@@ -350,7 +351,7 @@ describe('POST /admin/globepay/withdrawals/:id/approve', () => {
     await expect(APPROVE(req, res)).rejects.toMatchObject({
       type: MedusaError.Types.NOT_FOUND,
     });
-    expect(h.packs.claimGlobePayWithdrawalStatus).not.toHaveBeenCalled();
+    expect(h.packs.claimWithdrawalAgainstDebit).not.toHaveBeenCalled();
   });
 
   it('logs the actor and the row, and NEVER the account number', async () => {
@@ -372,7 +373,7 @@ describe('POST /admin/globepay/withdrawals/:id/approve', () => {
     await expect(APPROVE(h.req, res)).rejects.toMatchObject({
       type: MedusaError.Types.NOT_ALLOWED,
     });
-    expect(h.packs.claimGlobePayWithdrawalStatus).not.toHaveBeenCalled();
+    expect(h.packs.claimWithdrawalAgainstDebit).not.toHaveBeenCalled();
     expect(h.row.status).toBe('held');
   });
 
@@ -385,7 +386,7 @@ describe('POST /admin/globepay/withdrawals/:id/approve', () => {
     await expect(APPROVE(h.req, res)).rejects.toMatchObject({
       type: MedusaError.Types.NOT_ALLOWED,
     });
-    expect(h.packs.claimGlobePayWithdrawalStatus).not.toHaveBeenCalled();
+    expect(h.packs.claimWithdrawalAgainstDebit).not.toHaveBeenCalled();
     expect(submitMock).not.toHaveBeenCalled();
     expect(h.row.status).toBe('held');
     // Cause-agnostic, like the request-time gate (walletSummary.isFrozen) —
@@ -404,7 +405,7 @@ describe('POST /admin/globepay/withdrawals/:id/approve', () => {
     await expect(APPROVE(h.req, res)).rejects.toMatchObject({
       type: MedusaError.Types.NOT_ALLOWED,
     });
-    expect(h.packs.claimGlobePayWithdrawalStatus).not.toHaveBeenCalled();
+    expect(h.packs.claimWithdrawalAgainstDebit).not.toHaveBeenCalled();
     expect(submitMock).not.toHaveBeenCalled();
   });
 });
@@ -415,13 +416,15 @@ describe('POST /admin/globepay/withdrawals/:id/deny', () => {
     const { res, out } = mkRes();
     await DENY(h.req, res);
 
-    expect(h.packs.claimGlobePayWithdrawalStatus).toHaveBeenCalledWith({
+    expect(h.packs.claimWithdrawalAgainstDebit).toHaveBeenCalledWith({
       id: 'gpw_1',
+      customerId: 'cus_1',
+      debitReference: withdrawalIdempotencyReference('cus_1', 'PW-HELD-1'),
       from: ['held', 'failed'],
       to: 'failed',
     });
     expect(
-      h.packs.claimGlobePayWithdrawalStatus.mock.invocationCallOrder[0],
+      h.packs.claimWithdrawalAgainstDebit.mock.invocationCallOrder[0],
     ).toBeLessThan(
       h.packs.withdrawCreditsWithLedger.mock.invocationCallOrder[0],
     );
@@ -518,36 +521,6 @@ describe('POST /admin/globepay/withdrawals/:id/deny', () => {
     ).toMatch(/no debit/i);
   });
 
-  // The review-fix companion: deny claims 'held' -> 'failed' UNCONDITIONALLY
-  // (step 1, before it even checks for a debit), so unlike approve this gate
-  // has to sit in front of the claim, not inside a "no debit" branch — a row
-  // this fresh must be refused before it is ever claimed.
-  it('refuses a held row too young for its debit to have landed yet — no claim, stays held', async () => {
-    // Whether or not a debit already exists is irrelevant here: the gate
-    // fires before deny would even ask.
-    const h = harness({ ...heldRow(), created_at: new Date() });
-    const { res } = mkRes();
-
-    await expect(DENY(h.req, res)).rejects.toMatchObject({
-      type: MedusaError.Types.NOT_ALLOWED,
-    });
-
-    expect(h.packs.claimGlobePayWithdrawalStatus).not.toHaveBeenCalled();
-    expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
-    expect(h.row.status).toBe('held');
-  });
-
-  // The gate is scoped to 'held' only — proves it does NOT also block the
-  // recovery re-run above, which legitimately reaches deny on a fresh
-  // 'failed' row (an operator re-clicking moments after the first deny).
-  it('the age gate does not block the failed-row recovery re-run, however fresh', async () => {
-    const h = harness({ ...heldRow(), status: 'failed', created_at: new Date() });
-    const { res, out } = mkRes();
-    await DENY(h.req, res);
-    expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
-    expect(out.body).toMatchObject({ status: 'failed', refunded: true });
-  });
-
   // Asymmetric with approve on purpose: handing money back must not depend on
   // the payout channel being open.
   it('still works with the payout channel switched off', async () => {
@@ -573,8 +546,40 @@ describe('POST /admin/globepay/withdrawals/:id/deny', () => {
     await expect(DENY(req, mkRes().res)).rejects.toMatchObject({
       type: MedusaError.Types.NOT_FOUND,
     });
-    expect(h.packs.claimGlobePayWithdrawalStatus).not.toHaveBeenCalled();
+    expect(h.packs.claimWithdrawalAgainstDebit).not.toHaveBeenCalled();
   });
+});
+
+/**
+ * THE REGRESSION GUARD for the finding that produced claimWithdrawalAgainstDebit.
+ *
+ * Both routes used to read the debit with an unlocked
+ * packs.listCreditTransactions and then flip the row with a bare
+ * packs.claimGlobePayWithdrawalStatus. Between those two calls a debit
+ * queued on the customer's `credit:` lock could commit, so an admin could
+ * close a row that was about to be debited and strand the money — the sweep
+ * selects 'pending' only and never revisits a 'failed' row. The age gate that
+ * used to paper over this is gone (no elapsed time can prove a debit
+ * finished: a transaction blocked on pg_advisory_xact_lock is `active`, so
+ * idle_in_transaction_session_timeout never fires on it).
+ *
+ * Reintroducing either unlocked call reopens the window while every other
+ * test here stays green, so it is asserted directly rather than left implied.
+ */
+describe('the debit decision never happens outside the lock', () => {
+  it.each([
+    ['approve', APPROVE],
+    ['deny', DENY],
+  ])(
+    '%s reads and claims only through claimWithdrawalAgainstDebit',
+    async (_name, handler) => {
+      const h = harness();
+      await handler(h.req, mkRes().res);
+      expect(h.packs.claimWithdrawalAgainstDebit).toHaveBeenCalledTimes(1);
+      expect(h.packs.listCreditTransactions).not.toHaveBeenCalled();
+      expect(h.packs.claimGlobePayWithdrawalStatus).not.toHaveBeenCalled();
+    },
+  );
 });
 
 // Auth is NOT exercised here (no router, no middleware chain) — these routes

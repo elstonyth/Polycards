@@ -803,6 +803,10 @@ const fakeService = (
   failedCents = 0,
 ) => {
   const svc = Object.create(PacksModuleService.prototype) as PacksModuleService;
+  /** The withdrawal row step 1a re-reads. Mutable so a test can close it
+   *  (`f.row.status = 'failed'`) or delete it (`null`) without threading yet
+   *  another positional argument through this helper. */
+  const row: { status: string | null } = { status: 'held' };
   const em = {
     execute: jest.fn(async (q: string, params?: unknown[]) => {
       // The destination read. Runs on THIS manager — i.e. inside the same
@@ -812,6 +816,13 @@ const fakeService = (
         return byCustomer[id] === undefined
           ? [] // no such customer row
           : [{ metadata: { bank_accounts: byCustomer[id] } }];
+      }
+      // Step 1a's open-row re-read. Must be answered BEFORE the cap branch
+      // below, which would otherwise swallow it — both statements name
+      // globepay_withdrawal, so the discriminator is `SELECT status`, which
+      // the aggregate cap query can never contain.
+      if (q.includes('SELECT status')) {
+        return row.status === null ? [] : [{ status: row.status }];
       }
       if (!q.includes('globepay_withdrawal')) return [];
       const excludesSelf = params?.[1] === cashout.merchantTransactionId;
@@ -847,7 +858,7 @@ const fakeService = (
   );
   Object.assign(svc, { walletSummary, withdrawCreditsWithLedger });
   const ctx = { transactionManager: em } as never;
-  return { svc, em, ctx, walletSummary, withdrawCreditsWithLedger };
+  return { svc, em, ctx, row, walletSummary, withdrawCreditsWithLedger };
 };
 
 /** Another customer's saved destination — see fakeService's `byCustomer`. */
@@ -1010,7 +1021,7 @@ describe('PacksModuleService.withdrawForCashout', () => {
   // can be swapped between check and debit.
   //
   // Both statements go through `em`, so this pins three things at once: the
-  // destination read is the SECOND statement on the transaction the lock was
+  // destination read is the THIRD statement on the transaction the lock was
   // taken on (never before it, never on another connection), it binds the
   // TOKEN OWNER's id — the IDOR guard, in SQL — and it lands before the debit.
   it('reads the destination on the LOCKED transaction, after the lock and before the debit', async () => {
@@ -1018,16 +1029,95 @@ describe('PacksModuleService.withdrawForCashout', () => {
     await f.svc.withdrawForCashout(cashout, f.ctx);
 
     const [lockSql] = f.em.execute.mock.calls[0] as [string, unknown[]];
-    const [readSql, readParams] = f.em.execute.mock.calls[1] as [
+    const [openSql] = f.em.execute.mock.calls[1] as [string, unknown[]];
+    const [readSql, readParams] = f.em.execute.mock.calls[2] as [
       string,
       unknown[],
     ];
     expect(lockSql).toContain('pg_advisory_xact_lock');
+    expect(openSql).toContain('SELECT status');
     expect(readSql).toContain('FROM customer');
     expect(readParams).toEqual(['cus_1']);
+    expect(f.em.execute.mock.invocationCallOrder[2]).toBeLessThan(
+      f.withdrawCreditsWithLedger.mock.invocationCallOrder[0],
+    );
+  });
+
+  /**
+   * STEP 1a — the debit half of the pact with claimWithdrawalAgainstDebit.
+   *
+   * The admin approve/deny path closes an undebited held row under the
+   * `credit:` advisory lock. That alone does not protect a debit QUEUED
+   * BEHIND it on the same lock: the close cannot see a debit that has not run
+   * yet, so without this re-read the debit would go on to commit against a
+   * row the admin had just closed, and nothing would ever refund it (the
+   * sweep selects 'pending' only).
+   *
+   * Same fake-`em` caveat as the rest of this describe: no lock is really
+   * taken here, so what these pin is that the re-read happens ON the locked
+   * transaction, BEFORE the debit, and that its answer is obeyed. The
+   * exclusion itself is proven against a real Postgres in
+   * withdrawal-claim.integration.spec.ts.
+   */
+  it('re-reads the row on the LOCKED transaction before doing anything else', async () => {
+    const f = fakeService();
+    await f.svc.withdrawForCashout(cashout, f.ctx);
+
+    const [sql, params] = f.em.execute.mock.calls[1] as [string, unknown[]];
+    expect(sql).toContain('SELECT status');
+    expect(sql).toContain('FROM globepay_withdrawal');
+    // By the payout's OWN reference, and soft-delete aware.
+    expect(sql).toContain('merchant_transaction_id = ?');
+    expect(sql).toContain('deleted_at IS NULL');
+    expect(params).toEqual(['PC-abc']);
+    // After the lock, before the debit — the only placement that means
+    // anything.
+    expect(f.em.execute.mock.invocationCallOrder[0]).toBeLessThan(
+      f.em.execute.mock.invocationCallOrder[1],
+    );
     expect(f.em.execute.mock.invocationCallOrder[1]).toBeLessThan(
       f.withdrawCreditsWithLedger.mock.invocationCallOrder[0],
     );
+  });
+
+  it('refuses to debit a row an admin already closed — no debit, no destination read', async () => {
+    const f = fakeService();
+    f.row.status = 'failed';
+    await expect(
+      f.svc.withdrawForCashout(cashout, f.ctx),
+    ).rejects.toMatchObject({
+      type: MedusaError.Types.NOT_ALLOWED,
+      message: expect.stringMatching(/no longer open/i),
+    });
+    expect(f.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+    // Fails fast: the guard sits ahead of the destination lookup and the
+    // gate, so a closed row costs one statement, not five.
+    expect(f.walletSummary).not.toHaveBeenCalled();
+    expect(
+      f.em.execute.mock.calls.some(([q]) =>
+        (q as string).includes('FROM customer'),
+      ),
+    ).toBe(false);
+  });
+
+  it('refuses when the row has vanished — a debit with nothing to resolve it', async () => {
+    const f = fakeService();
+    f.row.status = null;
+    await expect(
+      f.svc.withdrawForCashout(cashout, f.ctx),
+    ).rejects.toMatchObject({ type: MedusaError.Types.NOT_ALLOWED });
+    expect(f.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+  });
+
+  // 'pending' is the ordinary (below-threshold) payout, and it must still go
+  // through: this guard is about CLOSED rows, not about held ones.
+  it('debits a pending row exactly as it does a held one', async () => {
+    const f = fakeService();
+    f.row.status = 'pending';
+    await expect(
+      f.svc.withdrawForCashout(cashout, f.ctx),
+    ).resolves.toMatchObject({ id: 'ct_1' });
+    expect(f.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
   });
 
   it('blocks a frozen account entirely — no debit', async () => {
@@ -1111,10 +1201,12 @@ describe('PacksModuleService.withdrawForCashout', () => {
     const f = fakeService();
     await f.svc.withdrawForCashout(cashout, f.ctx);
     // Found by content, not by index: the statement order ahead of it (lock,
-    // destination read) is pinned by its own test above, and hard-coding an
-    // index here would make this fail for an unrelated reason.
+    // open-row re-read, destination read) is pinned by its own test above,
+    // and hard-coding an index here would make this fail for an unrelated
+    // reason. Matched on SUM( rather than the table name — step 1a's re-read
+    // names globepay_withdrawal too and comes first.
     const [sql, params] = f.em.execute.mock.calls.find(([q]) =>
-      (q as string).includes('globepay_withdrawal'),
+      (q as string).includes('SUM('),
     ) as [string, unknown[]];
     expect(sql).toContain('globepay_withdrawal');
     expect(sql).toContain("status IN ('pending', 'settled', 'held')");

@@ -6,7 +6,6 @@ import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../../../modules/packs';
 import type PacksModuleService from '../../../../../../modules/packs/service';
 import {
-  heldDebitGraceExpired,
   refundGlobePayWithdrawal,
   withdrawalIdempotencyReference,
 } from '../../../../../../modules/packs/globepay-withdrawal';
@@ -46,29 +45,6 @@ export async function POST(
     );
   }
 
-  // AGE GATE, before the claim below. Deny closes a 'held' row the MOMENT it
-  // claims it (step 1), before it knows whether a debit exists (that check is
-  // step 2) — so unlike approve, this cannot live inside a "no debit found"
-  // branch; it has to guard the claim itself, since the claim IS the
-  // destructive step here. A held row is debited AFTER it is written 'held'
-  // (step 1 vs step 2 of startGlobePayWithdrawal), so a row younger than
-  // heldDebitGraceExpired's window may simply have a debit still landing, not
-  // a missing one — closing it now would strand that debit with nothing left
-  // to ever refund it (the sweep never selects 'held' or 'failed'). Scoped to
-  // 'held' only: a 'failed' row reaching here is the recovery re-run (see
-  // step 1's comment below) — its row already cleared this gate once, or was
-  // closed by the request-time gate with no debit ever attempted, so neither
-  // case is racing an in-flight debit.
-  if (
-    row.status === 'held' &&
-    !heldDebitGraceExpired(new Date(row.created_at), new Date())
-  ) {
-    throw new MedusaError(
-      MedusaError.Types.NOT_ALLOWED,
-      `Withdrawal '${row.id}' was created moments ago — its debit may still be landing. Try again in a moment.`,
-    );
-  }
-
   // 1) CLAIM FIRST — the opposite order from the reconcile sweep, which
   // refunds and then closes the row. The inversion is deliberate:
   //
@@ -85,12 +61,30 @@ export async function POST(
   //     however many times it runs. An operator who sees a 'failed' row with
   //     no refund clicks Deny again and it settles.
   //
+  // The DEBIT CHECK RIDES THE SAME CALL, and must. Deny closes the row the
+  // moment it claims it, before anything has looked for a debit — so a
+  // separate, later read could see "no debit" for a debit that is merely
+  // still in flight (startGlobePayWithdrawal writes the row 'held' at step 1
+  // and debits at step 2) and answer `refunded: false` on money that then
+  // leaves the balance for good. packs.claimWithdrawalAgainstDebit does the
+  // read and the claim in one transaction holding the customer's `credit:`
+  // advisory lock, the same key withdrawForCashout debits under, so the two
+  // cannot interleave: either the debit is already committed and we see it,
+  // or our close commits first and withdrawForCashout's own re-read refuses
+  // to debit a closed row. This replaced an elapsed-time gate in front of the
+  // claim; see that method for why a clock could never establish this.
+  //
   // A false answer means the row is in a state deny must not touch —
   // 'pending' belongs to the gateway and the sweep, 'settled' is already
   // paid. Refusing loudly is right here (unlike approve's silent no-op): the
   // operator asked to give money back and it did not happen.
-  const claimed = await packs.claimGlobePayWithdrawalStatus({
+  const { debited, claimed } = await packs.claimWithdrawalAgainstDebit({
     id: row.id,
+    customerId: row.customer_id,
+    debitReference: withdrawalIdempotencyReference(
+      row.customer_id,
+      row.merchant_transaction_id,
+    ),
     from: ['held', 'failed'],
     to: 'failed',
   });
@@ -106,25 +100,13 @@ export async function POST(
     `[globepay] admin ${adminId} DENIED withdrawal ${row.id} (${row.merchant_transaction_id}) — RM ${Number(row.amount)} closed`,
   );
 
-  // 2) Only now, the money. Guard against refunding a debit that never
-  // landed, the same check the sweep runs above its own call: a held row is
-  // written at step 1 of startGlobePayWithdrawal and debited at step 2, so
-  // "no debit" here means a genuine orphan (a crash between the two steps) —
-  // the AGE GATE above already turned away the other explanation (reaching
-  // this point before step 2 returned) for a 'held' row. "Refunding" a
-  // genuine orphan would mint credit out of nothing. The row is already
-  // closed by the claim above, so there is nothing further to do for it.
-  const [debitRow] = await packs.listCreditTransactions(
-    {
-      customer_id: row.customer_id,
-      source_transaction_id: withdrawalIdempotencyReference(
-        row.customer_id,
-        row.merchant_transaction_id,
-      ),
-    },
-    { take: 1 },
-  );
-  if (!debitRow) {
+  // 2) Only now, the money — and only if the locked read above found a debit
+  // to give back. "Refunding" a row that never took the customer's money
+  // would mint credit out of nothing, and because that read was taken under
+  // the `credit:` lock together with the claim, `debited: false` here means
+  // no debit will ever land for this row, not merely that none has yet. The
+  // row is already closed by the claim, so there is nothing further to do.
+  if (!debited) {
     logger.warn(
       `[globepay] closed ${row.merchant_transaction_id} without a refund — no debit ever landed for it`,
     );

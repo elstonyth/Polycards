@@ -7,7 +7,6 @@ import { PACKS_MODULE } from '../../../../../../modules/packs';
 import type PacksModuleService from '../../../../../../modules/packs/service';
 import {
   globepayWithdrawalsEnabled,
-  heldDebitGraceExpired,
   refundGlobePayWithdrawal,
   withdrawalIdempotencyReference,
 } from '../../../../../../modules/packs/globepay-withdrawal';
@@ -53,9 +52,11 @@ export async function POST(
   }>('logger');
   const adminId = req.auth_context.actor_id;
 
-  // EVERY precondition runs BEFORE the claim. A claim followed by a throw
-  // strands a 'pending' row that was never submitted and hands it to the
+  // EVERY precondition runs BEFORE the claim. A claim TO 'pending' followed
+  // by a throw strands a row that was never submitted and hands it to the
   // sweep for no reason — the exact state the held branch exists to avoid.
+  // (The undebited branch below also throws after claiming, but it claims to
+  // 'failed': a closed row, which the sweep never selects.)
   if (!globepayWithdrawalsEnabled()) {
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
@@ -117,77 +118,56 @@ export async function POST(
     );
   }
 
-  // DEBIT-EXISTENCE GUARD, the same one the sweep runs above its refund (see
-  // jobs/globepay-withdrawal-reconcile.ts). A held row is NOT always debited:
+  // THE DEBIT CHECK AND THE CLAIM, as ONE locked decision.
+  //
+  // Both halves matter. A held row is NOT always debited:
   // startGlobePayWithdrawal writes it 'held' at step 1 and debits at step 2,
-  // so there is a real window — not only a crash — where the row is visible
-  // as held with no debit yet, simply because step 2 has not returned.
-  // Submitting against a debit that never lands pays a real bank account out
-  // of a balance that was never reduced — a straight cash loss — and if the
-  // gateway then refuses it definitively, the refund branch below would mint
-  // credit on top. Close it instead, and close it THROUGH the claim so it
-  // cannot race a concurrent deny — but only once heldDebitGraceExpired says
-  // an in-flight debit is no longer plausible; a still-in-flight one is
-  // refused below, not closed.
-  const now = new Date();
-  const [debitRow] = await packs.listCreditTransactions(
-    {
-      customer_id: row.customer_id,
-      source_transaction_id: withdrawalIdempotencyReference(
-        row.customer_id,
-        row.merchant_transaction_id,
-      ),
-    },
-    { take: 1 },
-  );
-  if (!debitRow) {
-    if (!heldDebitGraceExpired(new Date(row.created_at), now)) {
-      // Too young to trust "no debit" as an orphan (see
-      // GLOBEPAY_WD_HELD_DEBIT_GRACE_MS) — refuse WITHOUT closing, leaving
-      // the row held for a retry once the in-flight debit has had time to
-      // land.
-      logger.warn(
-        `[globepay] admin ${adminId} approve on withdrawal ${row.id} ` +
-          `(${row.merchant_transaction_id}) REFUSED — created moments ago, ` +
-          `its debit may still be landing; row left held`,
-      );
-      throw new MedusaError(
-        MedusaError.Types.NOT_ALLOWED,
-        'This withdrawal was created moments ago — its debit may still be landing. Try again in a moment.',
-      );
-    }
-    // Scoped to 'held' like every other claim here, so an undebited row in
-    // some other status (a 'pending' one is the sweep's to resolve) is
-    // refused without being touched. The log reports which happened rather
-    // than asserting a close that may not have landed.
-    const closed = await packs.claimGlobePayWithdrawalStatus({
-      id: row.id,
-      from: ['held'],
-      to: 'failed',
-    });
+  // so there is a real committed window — not only a crash — where the row is
+  // visible as held with no debit yet, simply because step 2 has not
+  // returned. Submitting against a debit that never lands pays a real bank
+  // account out of a balance that was never reduced (a straight cash loss,
+  // and a definite gateway refusal would then mint credit on top in the
+  // refund branch below); closing a row whose debit is merely still in flight
+  // strands that debit with nothing left to refund it.
+  //
+  // packs.claimWithdrawalAgainstDebit settles both under the customer's
+  // `credit:` advisory lock — the same key withdrawForCashout debits under —
+  // so `debited: false` means no debit will ever land, and the row move
+  // commits with the reading that justified it. It replaced an elapsed-time
+  // gate that inferred the same thing from the row's age; see that method for
+  // why no clock can (in short: a debit blocked on the advisory lock is
+  // `active`, not idle, so no Postgres timeout bounds it).
+  //
+  // An undebited row is closed 'failed' by that same call — scoped to 'held',
+  // so an undebited row in another status (a 'pending' one is the sweep's to
+  // resolve) is refused without being touched.
+  const { debited, claimed } = await packs.claimWithdrawalAgainstDebit({
+    id: row.id,
+    customerId: row.customer_id,
+    debitReference: withdrawalIdempotencyReference(
+      row.customer_id,
+      row.merchant_transaction_id,
+    ),
+    from: ['held'],
+    to: 'pending',
+  });
+  if (!debited) {
+    // The log reports what the claim did rather than asserting a close that
+    // may not have landed.
     logger.warn(
       `[globepay] admin ${adminId} approve on withdrawal ${row.id} ` +
         `(${row.merchant_transaction_id}) REFUSED — no debit ever landed ` +
-        `for it; ${closed ? 'row closed' : `row left as '${row.status}'`}`,
+        `for it; ${claimed ? 'row closed' : `row left as '${row.status}'`}`,
     );
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
       'This withdrawal was never debited, so it cannot be paid out.',
     );
   }
-
-  // THE CLAIM. One conditional UPDATE holding the row lock — see
-  // claimGlobePayWithdrawalStatus for why updateGlobePayWithdrawals cannot
-  // stand in for it. A false answer means someone else already moved the row
-  // (a double-clicked button, a racing deny): return without submitting.
-  // Idempotent, not an error — the operator's intent has already happened or
-  // has already been overruled, and a second payout is the one outcome that
-  // cannot be undone.
-  const claimed = await packs.claimGlobePayWithdrawalStatus({
-    id: row.id,
-    from: ['held'],
-    to: 'pending',
-  });
+  // A false claim means someone else already moved the row (a double-clicked
+  // button, a racing deny): return without submitting. Idempotent, not an
+  // error — the operator's intent has already happened or has already been
+  // overruled, and a second payout is the one outcome that cannot be undone.
   if (!claimed) {
     logger.info(
       `[globepay] admin ${adminId} approve on withdrawal ${row.id} was a no-op — it was '${row.status}', not held`,
