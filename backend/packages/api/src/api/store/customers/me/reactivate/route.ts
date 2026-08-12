@@ -25,14 +25,20 @@ export async function POST(
   }
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
   const cause = await packs.accountDisabledCause(customerId);
-  if (cause === 'admin') {
-    throw new MedusaError(MedusaError.Types.FORBIDDEN, DISABLED_MESSAGE);
-  }
   // Already active — idempotent success, so a retry or a double-submit from the
   // login prompt is not an error.
   if (cause === null) {
     res.json({ disabled: false });
     return;
+  }
+  // Grant on an explicit 'self', never deny on `=== 'admin'`. The inverted form
+  // is safe only for exactly the two values that exist today: any third one (a
+  // future writer, a bad backfill, a rolling deploy) would fall through it
+  // straight into the reactivate write below and lift a ban this route must
+  // never lift. Same direction as the login guard in utils/disabled-guard.ts,
+  // and the rule service.ts:2808-2809 states for every reader of this contract.
+  if (cause !== 'self') {
+    throw new MedusaError(MedusaError.Types.FORBIDDEN, DISABLED_MESSAGE);
   }
   await packs.setAccountDisabled({
     customerId,

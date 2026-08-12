@@ -19,7 +19,9 @@ const mkReq = (actorId = 'cus_1') =>
 
 beforeEach(() => {
   setAccountDisabled.mockReset().mockResolvedValue({ disabled: true });
-  accountDisabledCause.mockReset();
+  // Default: not disabled. Both routes now read the cause before writing, so a
+  // bare mock returning undefined would trip their fail-closed branch.
+  accountDisabledCause.mockReset().mockResolvedValue(null);
 });
 
 describe('POST /store/customers/me/disable', () => {
@@ -41,6 +43,17 @@ describe('POST /store/customers/me/disable', () => {
   it('401s a register-phase token (empty actor_id) before writing', async () => {
     await expect(disablePOST(mkReq(''), mkRes())).rejects.toThrow(
       /unauthorized/i,
+    );
+    expect(setAccountDisabled).not.toHaveBeenCalled();
+  });
+
+  // Defence in depth: unreachable while the session guard stands, but the write
+  // stamps cause='self' unconditionally, so reaching it with an admin ban would
+  // launder that ban into a self-liftable one. Grant only on null or 'self'.
+  it('refuses an unexpected disable cause without writing', async () => {
+    accountDisabledCause.mockResolvedValue('suspended');
+    await expect(disablePOST(mkReq(), mkRes())).rejects.toThrow(
+      /has been disabled/i,
     );
     expect(setAccountDisabled).not.toHaveBeenCalled();
   });
@@ -83,5 +96,17 @@ describe('POST /store/customers/me/reactivate', () => {
     expect((res as { json: jest.Mock }).json).toHaveBeenCalledWith({
       disabled: false,
     });
+  });
+
+  // The fail-OPEN regression test. Denying on `=== 'admin'` would let any
+  // unexpected third cause (a future value, a bad write, a rolling-deploy
+  // race) fall through to the reactivate write; granting only on an explicit
+  // 'self' refuses it instead.
+  it('refuses an unexpected cause instead of reactivating', async () => {
+    accountDisabledCause.mockResolvedValue('suspended');
+    await expect(reactivatePOST(mkReq(), mkRes())).rejects.toThrow(
+      /has been disabled/i,
+    );
+    expect(setAccountDisabled).not.toHaveBeenCalled();
   });
 });
