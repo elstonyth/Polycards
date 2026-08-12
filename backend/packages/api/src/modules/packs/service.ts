@@ -7154,7 +7154,24 @@ class PacksModuleService extends MedusaService({
           .filter((s) => prior.unlocked_stages.includes(s.stage_number))
           .sort((a, b) => a.stage_number - b.stage_number)
       : unlockedStages(stages, poolMyr);
-    if (unlocked.length === 0) {
+    // The frozen table is authoritative on a re-settlement tick, so it has to
+    // be resolved BEFORE the empty-unlocked gate below. `unlocked` is rebuilt by
+    // filtering LIVE stages against prior.unlocked_stages, so an admin DELETING
+    // an unlocked stage after a partial settlement empties it — and the gate
+    // would then strand every remaining winner behind a prize table we already
+    // froze and still hold. Freezing by_rank (finding 6) only helped the ticks
+    // that got past this line.
+    const frozenByRank =
+      prior?.by_rank && Object.keys(prior.by_rank).length > 0
+        ? new Map<number, RankPayout>(
+            Object.entries(prior.by_rank).map(([rank, p]) => [
+              Number(rank),
+              { rank: Number(rank), credits: p.credits, cardIds: p.cardIds },
+            ]),
+          )
+        : null;
+
+    if (!frozenByRank && unlocked.length === 0) {
       return { weekStartIso, settled: false, winners: [] };
     }
 
@@ -7167,18 +7184,10 @@ class PacksModuleService extends MedusaService({
     if (ranking.length === 0) {
       return { weekStartIso, settled: false, winners: [] };
     }
-    // Prefer the frozen table on a re-settlement tick. Falling back to a live
-    // payoutByRank(unlocked) is what let a promoted ladder pay an earlier week's
-    // winners; the fallback survives only for snapshots written before by_rank
-    // existed.
-    const byRank = prior?.by_rank
-      ? new Map<number, RankPayout>(
-          Object.entries(prior.by_rank).map(([rank, p]) => [
-            Number(rank),
-            { rank: Number(rank), credits: p.credits, cardIds: p.cardIds },
-          ]),
-        )
-      : payoutByRank(unlocked);
+    // Falling back to a live payoutByRank(unlocked) is what let a promoted
+    // ladder pay an earlier week's winners; the fallback survives only for
+    // snapshots written before by_rank existed.
+    const byRank = frozenByRank ?? payoutByRank(unlocked);
 
     // Resolve card ids -> handles ONCE (spec: rank_rewards holds Card.id,
     // pull.card_id holds Card.handle — never pass ids into createPulls).
@@ -7195,7 +7204,9 @@ class PacksModuleService extends MedusaService({
 
     const snapshot: SettleSnapshot = {
       pool_myr: poolMyr,
-      unlocked_stages: unlocked.map((s) => s.stage_number),
+      // prior's list wins: re-deriving from `unlocked` would let a deleted
+      // stage shrink the frozen record, and the NEXT tick filters against it.
+      unlocked_stages: prior?.unlocked_stages ?? unlocked.map((s) => s.stage_number),
       week_end: endUtc.toISOString(),
       ranking,
       // A Map does not survive the json column — persist as a plain object and
