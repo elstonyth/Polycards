@@ -30,6 +30,12 @@ export const CustomerAccountState = model
     disabled_reason: model.text().nullable(),
     disabled_by: model.text().nullable(), // admin_id
     disabled_at: model.dateTime().nullable(),
+    // Who disabled this account. 'admin' is the §4.2 support lever; 'self' is
+    // the customer's own reversible disable. NULL means "written before this
+    // column existed" and every guard MUST treat it as 'admin' — see
+    // disabled-guard.ts. Deliberately a separate column from `cause` (which
+    // belongs to `frozen`): the two flags are orthogonal and share no history.
+    disabled_cause: model.enum(['admin', 'self']).nullable(),
     phone_verified_at: model.dateTime().nullable(),
   })
   .indexes([

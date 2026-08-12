@@ -28,6 +28,7 @@ export async function POST(
     adminId,
     disabled: true,
     reason: reason.trim(),
+    cause: 'admin',
   });
   res.json({ disabled: true });
 }

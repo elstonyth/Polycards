@@ -2689,6 +2689,7 @@ class PacksModuleService extends MedusaService({
       adminId: string;
       disabled: boolean;
       reason: string;
+      cause: 'admin' | 'self';
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ disabled: boolean }> {
@@ -2703,6 +2704,7 @@ class PacksModuleService extends MedusaService({
     );
     const patch = {
       disabled: input.disabled,
+      disabled_cause: input.disabled ? input.cause : null,
       disabled_reason: input.disabled ? input.reason : null,
       disabled_by: input.disabled ? input.adminId : null,
       disabled_at: input.disabled ? new Date() : null,
@@ -2725,8 +2727,14 @@ class PacksModuleService extends MedusaService({
           entity_type: 'customer',
           entity_id: input.customerId,
           action: input.disabled ? 'disable' : 'enable',
-          before: { disabled: existing?.disabled ?? false },
-          after: { disabled: input.disabled },
+          before: {
+            disabled: existing?.disabled ?? false,
+            disabled_cause: existing?.disabled_cause ?? null,
+          },
+          after: {
+            disabled: input.disabled,
+            disabled_cause: input.disabled ? input.cause : null,
+          },
           reason: input.reason,
         },
       ],

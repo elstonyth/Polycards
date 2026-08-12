@@ -43,7 +43,7 @@ medusaIntegrationTestRunner({
         );
         expect(aud.action).toBe('disable');
         expect(aud.reason).toBe('test disable');
-        expect(aud.after).toEqual({ disabled: true });
+        expect(aud.after).toMatchObject({ disabled: true });
       });
 
       it('POST /admin/customers/:id/enable → 200 { disabled: false } + audit row', async () => {
@@ -72,7 +72,41 @@ medusaIntegrationTestRunner({
           { take: 1 },
         );
         expect(aud.reason).toBe('re-enable');
-        expect(aud.after).toEqual({ disabled: false });
+        expect(aud.after).toMatchObject({ disabled: false });
+      });
+
+      it('an admin disable stamps disabled_cause = admin', async () => {
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        const cid = 'cust_disable_cause_1';
+
+        await unwrapResponse(
+          api.post(
+            `/admin/customers/${cid}/disable`,
+            { reason: 'cause test' },
+            { headers: adminHeaders() },
+          ),
+        );
+
+        const [state] = await packs.listCustomerAccountStates(
+          { customer_id: cid },
+          { take: 1 },
+        );
+        expect(state.disabled).toBe(true);
+        expect(state.disabled_cause).toBe('admin');
+
+        await unwrapResponse(
+          api.post(
+            `/admin/customers/${cid}/enable`,
+            { reason: 'lift' },
+            { headers: adminHeaders() },
+          ),
+        );
+        const [after] = await packs.listCustomerAccountStates(
+          { customer_id: cid },
+          { take: 1 },
+        );
+        expect(after.disabled).toBe(false);
+        expect(after.disabled_cause).toBeNull();
       });
 
       it('POST /admin/customers/:id/disable → 400 on missing, blank or >500-char reason', async () => {
