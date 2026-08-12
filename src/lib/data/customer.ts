@@ -87,3 +87,26 @@ export async function updateCustomerProfile(
   );
   return customer;
 }
+
+/**
+ * Account facts the Settings page needs before rendering the Danger zone.
+ *
+ * `hasPassword` is false for a Google-only signup, which removes the password
+ * field from the delete confirmation. Defaults to `true` on any failure — the
+ * safer shape, since it asks for MORE proof rather than less. (Getting it wrong
+ * the other way would drop the password field for an account that does have
+ * one, and every delete would then fail PASSWORD_REQUIRED with no way to
+ * comply.)
+ */
+export async function getAccountInfo(): Promise<{ hasPassword: boolean }> {
+  const token = await getAuthToken();
+  if (!token) return { hasPassword: true };
+  try {
+    return await sdk.client.fetch<{ hasPassword: boolean }>(
+      '/store/customers/me/account',
+      { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' },
+    );
+  } catch {
+    return { hasPassword: true };
+  }
+}
