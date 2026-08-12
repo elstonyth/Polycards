@@ -143,20 +143,13 @@ medusaIntegrationTestRunner({
         const sponsor = await registerAndLogin("e2e-sponsor@polycards.test", storeHeaders);
         const recruit = await registerAndLogin("e2e-recruit@polycards.test", storeHeaders);
 
-        // Recruit registers sponsor via POST /store/referral (Task 11 route).
-        const refRes = await unwrapResponse(
-          api.post(
-            "/store/referral",
-            { sponsor_id: sponsor.actorId },
-            {
-              headers: {
-                ...storeHeaders,
-                authorization: `Bearer ${recruit.token}`,
-              },
-            },
-          ),
-        );
-        expect(refRes.status).toBe(201);
+        // Wire the referral edge directly. The referral write route was
+        // retired, so the edge is seeded through the model, the same way gate
+        // test 2 below does it. What this test gates is the OPEN route and the
+        // settleOpen commission credit, not how the edge came to exist.
+        await packs.createReferralRelationships([
+          { customer_id: recruit.actorId, sponsor_id: sponsor.actorId },
+        ]);
 
         // Recruit tops up externally (mutateCreditAtomic with reason "topup"
         // so the spend is external-funded and commissionable).
@@ -215,7 +208,11 @@ medusaIntegrationTestRunner({
         const recruitId = "cus_launder_recruit_gate";
 
         // Wire the relationship directly (no HTTP needed for this invariant test).
-        await packs.linkSponsor({ recruitId, sponsorId });
+        // Referral writes were retired with linkSponsor; the model is kept, so the
+        // edge is seeded directly for setup.
+        await packs.createReferralRelationships([
+          { customer_id: recruitId, sponsor_id: sponsorId },
+        ]);
 
         // Recruit tops up and opens — triggers commission to sponsor.
         await packs.mutateCreditAtomic({
@@ -262,7 +259,9 @@ medusaIntegrationTestRunner({
         // Seed at least one commission so the reconciliation loop has data.
         const sponsorId = "cus_recon_sponsor";
         const recruitId = "cus_recon_recruit";
-        await packs.linkSponsor({ recruitId, sponsorId });
+        await packs.createReferralRelationships([
+          { customer_id: recruitId, sponsor_id: sponsorId },
+        ]);
         await packs.mutateCreditAtomic({
           customerId: recruitId,
           amount: 50,

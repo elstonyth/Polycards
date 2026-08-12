@@ -33,6 +33,28 @@ export const GLOBEPAY_DEFAULT_METHOD = 'BQR';
 export const GLOBEPAY_MYR_METHODS = ['FPX', 'DN', 'BQR', 'OB'] as const;
 
 /**
+ * How many deposits one customer may have awaiting payment at once, and the
+ * window that cap is measured over.
+ *
+ * The row is written BEFORE the gateway call and an UNPAID deposit requeries as
+ * statusId 4 (VerifyFail), which depositState maps to 'pending' — not 'failed'.
+ * So an unpaid row stays selectable until it ages past GLOBEPAY_STALE_AFTER_MS
+ * and a sweep actually looks at it. The sweep selects oldest-first with a fixed
+ * LIMIT (GLOBEPAY_RECONCILE_BATCH), which means a customer who opens cashier
+ * sessions and never pays can hold the front of that queue indefinitely and
+ * starve everyone else's PAID deposits of the only path that credits them
+ * (callbacks are not delivered in production — the sweep is the sole writer).
+ *
+ * The window matters as much as the cap: there is no customer-facing cancel or
+ * abandon endpoint, so a pending row only leaves 'pending' via settle, fail, or
+ * the sweep-driven expire. An UNSCOPED cap would lock a customer who merely
+ * closed a few cashier tabs out of depositing until the sweep caught up. Scoped
+ * to a window, an abandoned session stops counting against them on its own.
+ */
+export const GLOBEPAY_MAX_RECENT_PENDING_PER_CUSTOMER = 5;
+export const GLOBEPAY_PENDING_WINDOW_MS = 20 * 60 * 1000;
+
+/**
  * Per-transaction limits for the PRODUCTION merchant account, confirmed by the
  * provider 2026-07-29 (Sean): Online Banking bank-to-bank and QR e-wallet both
  * RM 30 – RM 10,000. The old RM 30–1,000 ceiling was the TEST account's, probed
@@ -169,6 +191,23 @@ export async function startGlobePayDeposit(
 
   const config = globepayConfigFromEnv();
   const packs = scope.resolve<PacksModuleService>(PACKS_MODULE);
+
+  // Bound the customer's own share of the reconcile sweep's fixed-LIMIT,
+  // oldest-first queue. Without this, creating cashier sessions and never
+  // paying is free and unbounded, and the resulting backlog delays or prevents
+  // OTHER customers' paid deposits from ever being credited.
+  const [, recentPending] = await packs.listAndCountGlobePayDeposits({
+    customer_id: input.customerId,
+    status: 'pending',
+    created_at: { $gte: new Date(Date.now() - GLOBEPAY_PENDING_WINDOW_MS) },
+  });
+  if (recentPending >= GLOBEPAY_MAX_RECENT_PENDING_PER_CUSTOMER) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'You have several top-ups still waiting for payment. Finish one, or wait a few minutes before starting another.',
+    );
+  }
+
   const merchantTransactionId = newMerchantTransactionId();
 
   const [row] = await packs.createGlobePayDeposits([

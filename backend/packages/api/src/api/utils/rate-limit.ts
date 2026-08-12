@@ -379,6 +379,39 @@ const DEFAULTS = {
   windowMs: 60_000,
 };
 
+/**
+ * Like positiveIntFromEnv, but 0 is a VALID value rather than a reason to fall
+ * back.
+ *
+ * For a rate limiter, 0 is meaningless (windowMs=0 disables the rule, limit=0
+ * hard-blocks the endpoint), which is why the sibling rejects it. For a money
+ * CEILING it is the opposite: 0 is the most important value an operator can set,
+ * because it is the stop lever during an incident. Routing it to the fallback
+ * meant reaching for that lever silently produced the DEFAULT cap — wide open —
+ * with only a log line saying the value was ignored.
+ */
+export function nonNegativeIntFromEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+  // Digits only. Number(' ') === 0 and Number('0x0') === 0, so a whitespace or
+  // alternate-notation value would otherwise read as a deliberate zero and
+  // silently disarm the cap.
+  if (!/^\d+$/.test(raw.trim())) {
+    console.warn(
+      `[rate-limit] ignoring invalid ${name}=${JSON.stringify(raw)}; using ${fallback}`,
+    );
+    return fallback;
+  }
+  const n = Number(raw.trim());
+  if (!Number.isSafeInteger(n)) {
+    console.warn(
+      `[rate-limit] ignoring out-of-range ${name}=${JSON.stringify(raw)}; using ${fallback}`,
+    );
+    return fallback;
+  }
+  return n;
+}
+
 export function positiveIntFromEnv(name: string, fallback: number): number {
   const raw = process.env[name];
   if (raw === undefined || raw === '') return fallback;

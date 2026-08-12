@@ -57,6 +57,9 @@ function harness(savedAccounts: unknown[] = [SAVED_ACCOUNT]) {
     // service describe below, which runs the real SQL against a fake `em`.
     savedBankAccountsFor: jest.fn().mockResolvedValue(savedAccounts),
     createGlobePayWithdrawals: jest.fn().mockResolvedValue([{ id: 'gpw_1' }]),
+    // Idempotency-Key replay lookup. Empty by default — no prior intent.
+    listGlobePayWithdrawals: jest.fn().mockResolvedValue([]),
+    creditBalance: jest.fn().mockResolvedValue(50),
     updateGlobePayWithdrawals: jest.fn().mockResolvedValue(undefined),
     // The gate + debit unit. Everything the old caller-side policy check did
     // (freeze, locked commissions, playthrough, the daily cap) now happens
@@ -1415,5 +1418,165 @@ describe('withdrawal reconcile decisions', () => {
     expect(
       unknownWithdrawalAction(created, new Date('2026-07-29T10:00:00Z'), true),
     ).toEqual({ kind: 'wait' });
+  });
+});
+
+// One intent must produce ONE payout. Before the Idempotency-Key existed, every
+// retry minted a fresh merchantTransactionId and therefore a second debit and a
+// second payout — and the ambiguous-submit branch returns success on a gateway
+// timeout, which is precisely when a client retries.
+describe('startGlobePayWithdrawal — Idempotency-Key', () => {
+  it('replays a prior withdrawal instead of debiting and submitting again', async () => {
+    const h = harness();
+    h.packs.listGlobePayWithdrawals.mockResolvedValue([
+      {
+        merchant_transaction_id: 'PC-prior',
+        gateway_transaction_id: 'W2026081200000009',
+        amount: 50,
+      },
+    ]);
+
+    const res = await start(h, { idempotencyKey: 'retry-1' });
+
+    expect(res.replayed).toBe(true);
+    expect(res.merchantTransactionId).toBe('PC-prior');
+    expect(res.transactionId).toBe('W2026081200000009');
+    // The three things that must NOT happen twice.
+    expect(h.packs.createGlobePayWithdrawals).not.toHaveBeenCalled();
+    expect(h.packs.withdrawForCashout).not.toHaveBeenCalled();
+    expect(submitMock).not.toHaveBeenCalled();
+  });
+
+  // Asserted as EXCLUDE-failed, not as a list of live statuses. An allowlist
+  // here silently stops matching when a status is added — plan 094 added
+  // 'held' and an enumerating read would have missed every withdrawal parked
+  // for admin approval, minting a second one on retry.
+  it('scopes the replay lookup to the customer, the key, and non-failed rows', async () => {
+    const h = harness();
+    await start(h, { idempotencyKey: 'retry-2' });
+
+    expect(h.packs.listGlobePayWithdrawals).toHaveBeenCalledWith(
+      {
+        customer_id: 'cus_1',
+        idempotency_key: 'retry-2',
+        status: { $ne: 'failed' },
+      },
+      { take: 1 },
+    );
+  });
+
+  // A failed attempt FREES the key. The row is written before the withdrawal
+  // gate runs, so the common refusals — insufficient balance, playthrough not
+  // met, the daily cap — would otherwise burn a key for a request that never
+  // moved money, and the house convention is one key per INTENT reused across
+  // error retries (TopUpSheet.tsx). Replaying it as a success would be worse
+  // still: reporting a payout that is never coming.
+  it('does not replay a FAILED prior attempt — the retry is a fresh withdrawal', async () => {
+    const h = harness();
+    // The status filter is what excludes it, so an honest mock returns nothing
+    // for the scoped query the code now issues.
+    h.packs.listGlobePayWithdrawals.mockResolvedValue([]);
+
+    const res = await start(h, { idempotencyKey: 'retry-failed' });
+
+    expect(res.replayed).toBeFalsy();
+    // The retry must actually go through: new row, real debit, real submit.
+    expect(h.packs.createGlobePayWithdrawals).toHaveBeenCalled();
+    expect(h.packs.withdrawForCashout).toHaveBeenCalled();
+    expect(submitMock).toHaveBeenCalled();
+  });
+
+  // Two requests with the same key can both pass the read before either
+  // inserts — the read cannot close that window, only the partial unique index
+  // can. The loser must come back as a replay of the winner's row, not a 500,
+  // and critically: nothing has been debited at the point the insert fails.
+  it('replays instead of 500ing when a concurrent insert wins the unique index', async () => {
+    const h = harness();
+    let seenPrior = false;
+    // First read (pre-precheck) sees nothing; after the duplicate-key throw the
+    // winner's row is visible. That is exactly the race ordering.
+    h.packs.listGlobePayWithdrawals.mockImplementation(async () =>
+      seenPrior
+        ? [
+            {
+              merchant_transaction_id: 'PC-winner',
+              gateway_transaction_id: 'W2026081200000042',
+              amount: 50,
+            },
+          ]
+        : [],
+    );
+    h.packs.createGlobePayWithdrawals.mockImplementation(async () => {
+      seenPrior = true;
+      throw Object.assign(new Error('duplicate key value violates unique constraint'), {
+        code: '23505',
+      });
+    });
+
+    const res = await start(h, { idempotencyKey: 'raced' });
+
+    expect(res.replayed).toBe(true);
+    expect(res.merchantTransactionId).toBe('PC-winner');
+    // The loser must not debit or submit — the winner owns the payout.
+    expect(h.packs.withdrawForCashout).not.toHaveBeenCalled();
+    expect(submitMock).not.toHaveBeenCalled();
+  });
+
+  // A duplicate key with no visible active row means the winner failed and
+  // freed the key between the two statements. Inventing a success there would
+  // report a payout that does not exist.
+  it('rethrows a duplicate key when no active row is visible', async () => {
+    const h = harness();
+    h.packs.listGlobePayWithdrawals.mockResolvedValue([]);
+    h.packs.createGlobePayWithdrawals.mockRejectedValue(
+      Object.assign(new Error('duplicate key value violates unique constraint'), {
+        code: '23505',
+      }),
+    );
+
+    await expect(start(h, { idempotencyKey: 'raced-then-freed' })).rejects.toThrow(
+      /duplicate key/i,
+    );
+    expect(h.packs.withdrawForCashout).not.toHaveBeenCalled();
+  });
+
+  it('stores the key on the row so the next retry can find it', async () => {
+    const h = harness();
+    await start(h, { idempotencyKey: '  retry-3  ' });
+
+    const row = (
+      h.packs.createGlobePayWithdrawals.mock.calls[0][0] as Record<
+        string,
+        unknown
+      >[]
+    )[0];
+    // Trimmed, so a client padding the header does not create a distinct key.
+    expect(row.idempotency_key).toBe('retry-3');
+  });
+
+  it('treats a blank key as absent rather than as one shared key', async () => {
+    const h = harness();
+    await start(h, { idempotencyKey: '   ' });
+
+    // No lookup, and the row records NULL — otherwise every keyless-but-blank
+    // withdrawal would collide on a single shared token.
+    expect(h.packs.listGlobePayWithdrawals).not.toHaveBeenCalled();
+    const row = (
+      h.packs.createGlobePayWithdrawals.mock.calls[0][0] as Record<
+        string,
+        unknown
+      >[]
+    )[0];
+    expect(row.idempotency_key).toBeNull();
+  });
+
+  it('is unchanged for callers that send no key at all', async () => {
+    const h = harness();
+    const res = await start(h);
+
+    expect(res.replayed).toBeUndefined();
+    expect(h.packs.listGlobePayWithdrawals).not.toHaveBeenCalled();
+    expect(h.packs.createGlobePayWithdrawals).toHaveBeenCalled();
+    expect(submitMock).toHaveBeenCalled();
   });
 });

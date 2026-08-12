@@ -45,12 +45,32 @@ export const GlobePayWithdrawal = model
     // 5 = fail, else processing), for support.
     gateway_status: model.number().nullable(),
     settled_at: model.dateTime().nullable(),
+    // Client-supplied retry token, scoped to the customer. NULL for callers
+    // that send none (the header is optional, so pre-existing clients keep
+    // working). A partial unique index on (customer_id, idempotency_key) makes
+    // the replay check race-safe; Postgres ignores NULLs in unique indexes, so
+    // keyless withdrawals never collide with each other.
+    idempotency_key: model.text().nullable(),
   })
   .indexes([
     // Callback lookup path.
     { on: ['merchant_transaction_id'] },
     // Reconciliation sweep: outstanding payouts, oldest first.
     { on: ['status', 'created_at'] },
+    // The real guarantee behind the Idempotency-Key replay: the read in
+    // startGlobePayWithdrawal only turns the second request into a clean replay
+    // instead of a 23505. Declared HERE and not only in
+    // Migration20260812010000 because db:generate emits a DROP for any index it
+    // cannot see on the model — the same argument
+    // docs/plans/postgres-best-practices-audit.md B6 makes for
+    // UQ_reward_draw_customer_day_ordinal. Keep the predicate identical to the
+    // migration's.
+    {
+      name: 'UQ_globepay_withdrawal_customer_idempotency_key',
+      on: ['customer_id', 'idempotency_key'],
+      unique: true,
+      where: "idempotency_key is not null and deleted_at is null and status <> 'failed'",
+    },
   ]);
 
 export default GlobePayWithdrawal;

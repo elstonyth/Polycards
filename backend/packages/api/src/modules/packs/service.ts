@@ -71,7 +71,8 @@ import PurchaseInvoice from './models/purchase-invoice';
 import PurchaseInvoiceLine from './models/purchase-invoice-line';
 import StockMovement from './models/stock-movement';
 import { pageAll } from '../../api/utils/page-all';
-import { positiveIntFromEnv } from '../../api/utils/rate-limit';
+import { positiveIntFromEnv,
+  nonNegativeIntFromEnv } from '../../api/utils/rate-limit';
 import {
   resolveBuybackRate,
   buybackAmount,
@@ -108,7 +109,11 @@ import {
   type DailyBoxBody,
   type BoxPrizeInput,
 } from './daily-box';
-import { foldRanges, type VoucherRange } from './voucher-ranges';
+import {
+  foldRanges,
+  MAX_VOUCHER_MYR,
+  type VoucherRange,
+} from './voucher-ranges';
 import type { VipLevelInput } from './vip-levels-validate';
 import type {
   ChallengeRankReward,
@@ -447,6 +452,21 @@ const challengeWeekAnchorParams = (
 export interface SettleDeps {
   /** Available stock per card HANDLE (job binds getCardStockByHandle). */
   getStock: (handles: string[]) => Promise<Map<string, number | null>>;
+  /**
+   * Take `qty` units of a card HANDLE out of inventory, returning true when a
+   * tracked unit was actually taken (false = untracked product, nothing to
+   * count). Injected for the same reason as getStock: inventory lives in
+   * Medusa's inventory module, reachable only through the container the JOB
+   * holds, and this module service stays container-free.
+   *
+   * Without it, settlement read stock as a GATE and never reserved, so every
+   * winner entitled to the same card re-read the same pre-grant value and all
+   * of them were granted — N claims against one physical unit, with the counter
+   * still reading 1 and no operator signal. card-stock.ts states the rule the
+   * other way round ("a FULFILMENT COUNTER, not a gate"), and the pack-open
+   * path already decrements unconditionally for exactly this reason.
+   */
+  decrementStock?: (handle: string, qty: number) => Promise<boolean>;
   /** Fired after each winner's transaction COMMITS — notifications, operator
    *  warnings. Optional + best-effort (matureDueCommissions' notify
    *  precedent): the module stays container-free, so the JOB supplies it, and
@@ -462,6 +482,9 @@ export interface SettledWinner {
   cardHandles: string[]; // granted — DISTINCT handles
   cardCount: number; // pulls actually minted (a handle repeats when qty > 1)
   skippedCardIds: string[]; // recorded skipped_no_stock
+  /** Granted cards whose inventory units are not taken yet. Taken AFTER
+   *  this winner's payout transaction commits — see reserveSettledStock. */
+  reservations: { handle: string; qty: number; pullIds: string[] }[];
 }
 // The frozen decision inputs, written verbatim onto EVERY payout row of a week
 // (card rows extend it with qty/pull_ids, the credits row with
@@ -474,6 +497,22 @@ interface SettleSnapshot {
   week_end: string;
   /** Top-10 customer ids in rank order; index + 1 IS the rank. */
   ranking: string[];
+  /**
+   * The RESOLVED rank -> payout table, frozen at first settlement.
+   *
+   * unlocked_stages holds stage NUMBERS, and those numbers index into ONE live,
+   * unscoped challenge_stage table that saveChallengeStages whole-set replaces
+   * — including from promoteDueChallengeSchedules, which the very same job runs
+   * right after settlement. Because weeksBack is 1, the ended week keeps
+   * re-settling for about a week afterwards, so a winner whose rank paid nothing
+   * under the old ladder (no payout row, therefore not in settledCustomers) was
+   * paid from the PROMOTED ladder on a later tick. Freezing the resolved table
+   * makes re-settlement deterministic.
+   *
+   * Optional: snapshots written before this field existed fall back to the live
+   * re-read, which is the pre-existing behaviour.
+   */
+  by_rank?: Record<string, { rank: number; credits: number; cardIds: string[] }>;
 }
 
 class PacksModuleService extends MedusaService({
@@ -1346,8 +1385,13 @@ class PacksModuleService extends MedusaService({
     //    over-counts, never under-counts, and it self-heals as the 24h window
     //    slides — the fail-closed direction is the right default for a cap
     //    whose job is bounding blast radius.
+    // nonNegativeIntFromEnv, NOT positiveIntFromEnv: setting this cap to 0 is
+    // the operator's stop lever for money-out during an incident, and the
+    // positive-only parser routed 0 to the DEFAULT — silently leaving
+    // withdrawals wide open at RM 50,000 while the logs said the value was
+    // ignored.
     const capCents =
-      positiveIntFromEnv(
+      nonNegativeIntFromEnv(
         'GLOBEPAY_WD_DAILY_MAX_RM',
         GLOBEPAY_WD_DAILY_MAX_RM_DEFAULT,
       ) * 100;
@@ -2123,9 +2167,33 @@ class PacksModuleService extends MedusaService({
 
     let amountMyr: number | undefined;
     if (grant.kind === 'voucher') {
-      amountMyr = Number(
+      const raw = Number(
         (grant.payload as { amount_myr?: number } | null)?.amount_myr ?? 0,
       );
+      // The payload is SNAPSHOTTED at grant time, so the admin-side cap in
+      // voucher-ranges.ts does not bind it: a grant minted while the ladder held
+      // a larger figure stays claimable at that figure, and
+      // Migration20260805000000 deliberately left already-minted grants
+      // claimable after zeroing the ladder. mutateCreditAtomic sign-checks only
+      // topup and pack_open, so 'voucher_claim' reached the ledger unbounded.
+      //
+      // Clamp rather than refuse: the grant is a real obligation and refusing it
+      // outright would strand a customer's legitimate reward. Clamping pays what
+      // the operator's own ceiling allows and records the discrepancy.
+      if (!Number.isFinite(raw) || raw < 0) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `Voucher grant ${grantId} carries a non-payable amount.`,
+        );
+      }
+      amountMyr = Math.min(raw, MAX_VOUCHER_MYR);
+      if (amountMyr !== raw) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          '[claimReward] voucher grant above the ceiling — paying the cap',
+          { grant_id: grantId, requested_myr: raw, paid_myr: amountMyr },
+        );
+      }
       // ext=0 (basis-neutral); idempotent on the grant id so a replay that
       // somehow reaches the credit step before the status flip still no-ops.
       await this.mutateCreditAtomic(
@@ -3209,6 +3277,18 @@ class PacksModuleService extends MedusaService({
       // Net basis reaches zero on clawback (reverseOpen negates externalFundedCents),
       // so the basis is NOT refund-stable at the ledger level. The monotonic
       // lifetime counter (built in a later task) is the rank basis; spec §3.
+      // SUSPENDED (referral programme retired): this fan-out is UNREACHABLE for
+      // any new customer. It is gated on a referral_relationship row, and
+      // linkSponsor — the only writer of that table — was removed. Existing
+      // edges (if any survive in production) still pay, which is deliberate:
+      // silently dropping a commission a recruit already earned would be a
+      // money change disguised as a cleanup.
+      //
+      // Kept rather than excised because settleOpen is the atomic
+      // open-settlement seam (debit + fan-out under ONE advisory lock) and the
+      // guard below costs one indexed lookup that returns nothing. Excising it
+      // is a separate, reviewable change against the most load-bearing money
+      // function in the module — do not fold it into a cleanup commit.
       const basisSen = -externalFundedCents;
       if (basisSen > 0) {
         const [rel] = await this.listReferralRelationships(
@@ -3677,7 +3757,16 @@ class PacksModuleService extends MedusaService({
         : null;
 
     const frozen = await this.isFrozen(customerId, sharedContext);
-    const available = frozen ? 0 : balance - locked;
+    // ONE division, from the integer-cent values, instead of subtracting two
+    // already-divided floats. `balanceCents/100 - lockedCents/100` can land a
+    // hair under the exact figure (6407/100 - 1407/100 === 49.99999999999999),
+    // and because withdrawalGateError compares `amount <= withdrawable` while
+    // the UI renders the same number with toFixed(2), the customer is shown
+    // "RM 50.00" and refused when they type 50. At the RM 50 minimum that
+    // leaves nothing they can withdraw at all until the arithmetic shifts.
+    const available = frozen
+      ? 0
+      : (Math.round(balance * 100) - Math.round(locked * 100)) / 100;
 
     // Playthrough gate: all-or-nothing on the available balance. Spending on
     // packs stays unrestricted either way — the gate only limits cashout.
@@ -3950,76 +4039,20 @@ class PacksModuleService extends MedusaService({
     };
   }
 
-  // Insert a recruit→sponsor edge with the fraud guards (spec §7). Under ONE
-  // transaction holding advisory locks on BOTH customer ids (sorted, so two
-  // concurrent inserts can't deadlock), it: rejects self-referral; rejects a
-  // cycle via a WITH RECURSIVE ancestor walk from the proposed sponsor; relies on
-  // the unique customer_id index for immutability (a second link throws). The
-  // route layer binds recruitId to the authenticated actor (Task 11) so a sponsor
-  // can't insert recruits under themselves.
-  @InjectTransactionManager()
-  async linkSponsor(
-    input: { recruitId: string; sponsorId: string },
-    @MedusaContext() sharedContext: Context = {},
-  ): Promise<{ id: string }> {
-    if (input.recruitId === input.sponsorId) {
-      throw new MedusaError(
-        MedusaError.Types.INVALID_DATA,
-        'A customer cannot refer themselves.',
-      );
-    }
-    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    // Lock both ids in a stable (sorted) order to avoid deadlocks with a
-    // concurrent reciprocal insert.
-    const [lo, hi] = [input.recruitId, input.sponsorId].sort();
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `referral:${lo}`,
-    ]);
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `referral:${hi}`,
-    ]);
-
-    // Cycle check: walk the proposed sponsor's upline; if the recruit appears,
-    // linking would close a loop. customer_id is unique so the upline is a simple
-    // path (no diamonds) — the recursion terminates.
-    const ancestors = await em.execute<{ sponsor_id: string }[]>(
-      `WITH RECURSIVE up AS (
-         SELECT sponsor_id FROM referral_relationship
-           WHERE customer_id = ? AND deleted_at IS NULL
-         UNION ALL
-         SELECT r.sponsor_id FROM referral_relationship r
-           JOIN up ON r.customer_id = up.sponsor_id
-           WHERE r.deleted_at IS NULL
-       )
-       SELECT sponsor_id FROM up WHERE sponsor_id = ? LIMIT 1`,
-      [input.sponsorId, input.recruitId],
-    );
-    if (ancestors.length > 0) {
-      throw new MedusaError(
-        MedusaError.Types.INVALID_DATA,
-        'This referral would create a cycle in the sponsor tree.',
-      );
-    }
-
-    // Immutability: the unique customer_id index rejects a second link. Surface a
-    // clean error rather than a raw constraint violation.
-    const existing = await this.listReferralRelationships(
-      { customer_id: input.recruitId },
-      { take: 1 },
-    );
-    if (existing.length > 0) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_ALLOWED,
-        'This customer already has a sponsor.',
-      );
-    }
-
-    const [rel] = await this.createReferralRelationships(
-      [{ customer_id: input.recruitId, sponsor_id: input.sponsorId }],
-      sharedContext,
-    );
-    return { id: rel.id };
-  }
+  // linkSponsor was REMOVED (referral programme retired).
+  //
+  // It was the only writer of referral_relationship, and its cycle probe was a
+  // recursive CTE with UNION ALL, no depth bound and no dedup: against a cyclic
+  // graph where the sought id is not on the walk it never terminated, pinning a
+  // pooled connection until the pool was exhausted. Postgres does not detect
+  // cycles without an explicit CYCLE clause, and statement_timeout cannot be set
+  // through databaseDriverOptions (see utils/db-driver-options.ts).
+  //
+  // The commission fan-out in settleOpen is now unreachable for any new
+  // customer: it is guarded by a referral_relationship lookup, and with no
+  // writer left no new edge can exist. It is deliberately left in place rather
+  // than excised, because settleOpen is the atomic open-settlement seam and its
+  // invariants are load-bearing — see the SUSPENDED note at that guard.
 
   // Privacy-bounded referral summary for ONE customer (spec §7 / Task 5).
   // Returns ONLY the caller's own earnings and their gen-1 (direct) recruits —
@@ -5227,6 +5260,27 @@ class PacksModuleService extends MedusaService({
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
     const rows = await em.execute<{ sen: string | null }[]>(
+      // Debits ONLY (`amount < 0`) — deliberate, and recorded in ADR 0003 under
+      // "Reversal exclusion". vip-lifetime.ts's lifetimeTurnoverSen is the
+      // pure-fold mirror that has to agree with this SQL; netting one and not
+      // the other desyncs the tests from production silently, which is exactly
+      // what a previous attempt at fixing this line did.
+      //
+      // What this filter is NOT is the re-grant guard, and mis-stating that has
+      // already cost one bad change. Re-granting a level is impossible at the
+      // DB: grantLevelUpRewards inserts ON CONFLICT (customer_id, level, kind)
+      // DO NOTHING against UQ_vip_reward_grant_customer_level_kind. Two further
+      // guards sit above it — highest_level_ever is a GREATEST ratchet, and
+      // levelsToGrant starts at max(highestEver + 1, 2), so a LOWER level
+      // yields an empty list. None of the three depends on how this counter is
+      // summed.
+      //
+      // Reversals DO move the system, on the other basis:
+      // creditSummary().vipSpendTotal is net, drops on reversal, and drives
+      // current_level. This monotonic one feeds highest_level_ever.
+      //
+      // Three audit passes have flagged `amount < 0` as a bug and one got as
+      // far as changing it. WON'T-FIX — ADR 0003, "Reversal exclusion".
       `SELECT COALESCE(SUM(ROUND(-amount * 100)), 0)::bigint AS sen
          FROM credit_transaction
         WHERE customer_id = ? AND reason = 'pack_open' AND amount < 0 AND deleted_at IS NULL`,
@@ -7100,7 +7154,24 @@ class PacksModuleService extends MedusaService({
           .filter((s) => prior.unlocked_stages.includes(s.stage_number))
           .sort((a, b) => a.stage_number - b.stage_number)
       : unlockedStages(stages, poolMyr);
-    if (unlocked.length === 0) {
+    // The frozen table is authoritative on a re-settlement tick, so it has to
+    // be resolved BEFORE the empty-unlocked gate below. `unlocked` is rebuilt by
+    // filtering LIVE stages against prior.unlocked_stages, so an admin DELETING
+    // an unlocked stage after a partial settlement empties it — and the gate
+    // would then strand every remaining winner behind a prize table we already
+    // froze and still hold. Freezing by_rank (finding 6) only helped the ticks
+    // that got past this line.
+    const frozenByRank =
+      prior?.by_rank && Object.keys(prior.by_rank).length > 0
+        ? new Map<number, RankPayout>(
+            Object.entries(prior.by_rank).map(([rank, p]) => [
+              Number(rank),
+              { rank: Number(rank), credits: p.credits, cardIds: p.cardIds },
+            ]),
+          )
+        : null;
+
+    if (!frozenByRank && unlocked.length === 0) {
       return { weekStartIso, settled: false, winners: [] };
     }
 
@@ -7113,7 +7184,10 @@ class PacksModuleService extends MedusaService({
     if (ranking.length === 0) {
       return { weekStartIso, settled: false, winners: [] };
     }
-    const byRank = payoutByRank(unlocked);
+    // Falling back to a live payoutByRank(unlocked) is what let a promoted
+    // ladder pay an earlier week's winners; the fallback survives only for
+    // snapshots written before by_rank existed.
+    const byRank = frozenByRank ?? payoutByRank(unlocked);
 
     // Resolve card ids -> handles ONCE (spec: rank_rewards holds Card.id,
     // pull.card_id holds Card.handle — never pass ids into createPulls).
@@ -7130,9 +7204,19 @@ class PacksModuleService extends MedusaService({
 
     const snapshot: SettleSnapshot = {
       pool_myr: poolMyr,
-      unlocked_stages: unlocked.map((s) => s.stage_number),
+      // prior's list wins: re-deriving from `unlocked` would let a deleted
+      // stage shrink the frozen record, and the NEXT tick filters against it.
+      unlocked_stages: prior?.unlocked_stages ?? unlocked.map((s) => s.stage_number),
       week_end: endUtc.toISOString(),
       ranking,
+      // A Map does not survive the json column — persist as a plain object and
+      // rehydrate above.
+      by_rank: Object.fromEntries(
+        [...byRank].map(([rank, p]) => [
+          String(rank),
+          { rank: p.rank, credits: p.credits, cardIds: p.cardIds },
+        ]),
+      ),
     };
     const winners: SettledWinner[] = [];
     for (const [i, customerId] of ranking.entries()) {
@@ -7156,6 +7240,8 @@ class PacksModuleService extends MedusaService({
       });
       if (!settled) continue;
       winners.push(settled);
+      // Committed above; the units are taken now, outside that transaction.
+      await this.reserveSettledStock(settled, deps.decrementStock, weekStartIso);
       // Fired AFTER this winner's transaction committed, never inside it.
       if (!deps.onSettled) continue;
       try {
@@ -7302,6 +7388,7 @@ class PacksModuleService extends MedusaService({
     const cardHandles: string[] = [];
     let cardCount = 0; // pulls minted, NOT distinct handles (qty can exceed 1)
     const skippedCardIds: string[] = [];
+    const reservations: SettledWinner['reservations'] = [];
     const handles = [...qtyById.keys()]
       .map((id) => input.handleById.get(id))
       .filter((h): h is string => Boolean(h));
@@ -7323,6 +7410,17 @@ class PacksModuleService extends MedusaService({
       // kept — the row's scalar pull_id can only hold the first.
       let pullIds: string[] = [];
       if (inStock) {
+        // The gate above is kept on purpose — an out-of-stock prize becoming a
+        // manual-fulfilment item is a product decision the job logs for an
+        // operator — but a gate that never decrements is the read-then-check
+        // race decrement-card-stock.ts:24-28 exists to avoid.
+        //
+        // The TAKE itself does not belong in this transaction. adjustInventory
+        // is Medusa's inventory module on its own connection and commits
+        // independently, so it cannot roll back with us: called from in here, a
+        // later throw rolled the payout back while the take stood, and the next
+        // hourly tick took the units again. reserveSettledStock runs it after
+        // this transaction commits — see there for why the race stays closed.
         const minted = await this.createPulls(
           Array.from({ length: qty }, () => ({
             customer_id: customerId,
@@ -7331,12 +7429,18 @@ class PacksModuleService extends MedusaService({
             order_id: null,
             rolled_at: new Date(),
             source: 'reward' as const,
+            // Minted UNRESERVED; flipped only once a unit is really taken.
+            // Buyback restores flagged pulls only, so false is the safe
+            // default — giving back a unit that was never taken would mint a
+            // phantom one (decrement-card-stock.ts:52-56).
+            stock_earmarked: false,
           })),
           sharedContext,
         );
         pullIds = minted.map((p) => p.id);
         cardCount += pullIds.length;
         cardHandles.push(handle!);
+        reservations.push({ handle: handle!, qty, pullIds });
       } else {
         skippedCardIds.push(cardId);
       }
@@ -7400,7 +7504,63 @@ class PacksModuleService extends MedusaService({
       cardHandles,
       cardCount,
       skippedCardIds,
+      reservations,
     };
+  }
+
+  /**
+   * Take the inventory units for a winner whose payout has COMMITTED.
+   *
+   * Deliberately outside settleChallengeWinner's transaction. adjustInventory
+   * belongs to Medusa's inventory module and commits on its own connection, so
+   * it cannot roll back with ours. Called from inside, a throw after it — a
+   * duplicate-payout constraint, the ledger write, a dropped connection — rolled
+   * the payout back while the take stood. And because the re-entry gate is per
+   * CUSTOMER (settledCustomers, built from payout rows), the winner was then
+   * absent from it, so the next hourly tick re-settled them and took the units
+   * AGAIN, every hour for the ~168 ticks weeksBack:1 keeps the week in scope.
+   *
+   * Post-commit the winner is in settledCustomers for good, so this runs at
+   * most once per winner. The read-then-check race the take was added for stays
+   * closed: the winner loop is sequential and awaits, so the next winner's
+   * getStock read sees this take.
+   *
+   * Failures are logged and bounded, never thrown — the payout is already
+   * committed and must not be undone over a counter. Both directions are
+   * conservative: a failed take leaves the pulls unflagged, so buyback can
+   * never restore a unit that was not taken.
+   */
+  private async reserveSettledStock(
+    winner: SettledWinner,
+    decrementStock:
+      | ((handle: string, qty: number) => Promise<boolean>)
+      | undefined,
+    weekStartIso: string,
+  ): Promise<void> {
+    if (!decrementStock) return;
+    for (const r of winner.reservations) {
+      try {
+        // false = untracked product: nothing counted, so nothing to flag.
+        if (!(await decrementStock(r.handle, r.qty))) continue;
+        if (r.pullIds.length === 0) continue;
+        await this.updatePulls({
+          selector: { id: r.pullIds },
+          data: { stock_earmarked: true },
+        });
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          '[settleChallengeWeek] stock take failed AFTER the payout committed — counter reads high, prize already granted',
+          {
+            customer_id: winner.customerId,
+            week_start: weekStartIso,
+            handle: r.handle,
+            qty: r.qty,
+            error: String(err),
+          },
+        );
+      }
+    }
   }
 
   // One-shot backfill for the recorded-pull-value follow-up (spec 2026-07-19

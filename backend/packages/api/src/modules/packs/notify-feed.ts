@@ -10,6 +10,7 @@ export type FeedTemplate =
   | 'withdrawal_paid'
   | 'withdrawal_refunded'
   | 'bank_account_added'
+  | 'bank_account_removed'
   | 'challenge_payout';
 
 // The channel our CUSTOMER in-app feed lives on. Deliberately NOT 'feed':
