@@ -1,6 +1,9 @@
 import {
+  ACCOUNT_INFO_PATH,
   blockDisabledCustomerSession,
   blockDisabledEmailpassLogin,
+  DELETE_PATH,
+  REACTIVATE_PATH,
   SELF_DISABLED_CODE,
 } from '../disabled-guard';
 
@@ -89,16 +92,34 @@ describe('blockDisabledEmailpassLogin', () => {
 });
 
 describe('blockDisabledCustomerSession', () => {
-  it('blocks an admin-disabled session on every path', async () => {
-    accountDisabledCause.mockResolvedValue('admin');
-    const next = mkNext();
-    await blockDisabledCustomerSession(
-      mkSessionReq('/store/customers/me/reactivate'),
-      {} as never,
-      next,
-    );
-    expect(String(next.mock.calls[0][0].message)).toMatch(/has been disabled/i);
-  });
+  // Every carve-out path, against the ADMIN branch. The carve-out is only ever
+  // widened for `self`; an admin ban must stay total, or a banned account could
+  // reach the delete route and purge the records the ban exists to preserve.
+  it.each([REACTIVATE_PATH, DELETE_PATH, ACCOUNT_INFO_PATH])(
+    'blocks an admin-disabled session on %s',
+    async (path) => {
+      accountDisabledCause.mockResolvedValue('admin');
+      const next = mkNext();
+      await blockDisabledCustomerSession(mkSessionReq(path), {} as never, next);
+      expect(String(next.mock.calls[0][0].message)).toMatch(
+        /has been disabled/i,
+      );
+    },
+  );
+
+  // A self-disabled customer chose the state and no evidence is at risk, so
+  // they must be able to delete WITHOUT reactivating first — and the Settings
+  // page needs the account read to render the Danger zone at all. Without these
+  // two the population most likely to want deletion could not reach it.
+  it.each([DELETE_PATH, ACCOUNT_INFO_PATH])(
+    'lets a self-disabled session through to %s',
+    async (path) => {
+      accountDisabledCause.mockResolvedValue('self');
+      const next = mkNext();
+      await blockDisabledCustomerSession(mkSessionReq(path), {} as never, next);
+      expect(next).toHaveBeenCalledWith();
+    },
+  );
 
   it('blocks a self-disabled session everywhere except reactivate', async () => {
     accountDisabledCause.mockResolvedValue('self');

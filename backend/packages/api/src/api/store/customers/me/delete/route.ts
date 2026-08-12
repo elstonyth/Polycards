@@ -61,15 +61,24 @@ type NotificationModuleWithDelete = INotificationModuleService & {
 // This is NOT one transaction, and pretending otherwise would mislead whoever
 // reads it next: the purge spans the packs module, the customer module, the
 // notification module, the auth module and the file provider, and a Medusa
-// sharedContext covers one module only. What holds instead is ordering plus
-// idempotency — the handler can simply be re-run after a partial failure, and
-// the auth identities (the point of no return for logging in) are destroyed
-// only after everything that could still fail has succeeded.
+// sharedContext covers one module only. What holds instead is ORDERING —
+// everything that can still fail runs before the two irreversible steps, so a
+// partial failure leaves the account in a state a human can finish from.
 //
-// "Re-run" means BY AN OPERATOR, not by the customer: step 3 writes the
-// account-state tombstone, and from that commit on the blanket /store/* session
-// guard 403s this customer's own bearer. See the note on the tombstone in
-// purgeAccountPacksData for why widening that carve-out would be worse.
+// Be honest about what recovery actually exists, because it is thinner than
+// "just re-run it" suggests and this is a deletion path:
+//   - There is NO automated retry. This route is purgeAccountPacksData's only
+//     caller — no admin route, no script entry point — so a failed purge is
+//     finished by hand.
+//   - The customer cannot retry. Step 3 commits the account-state tombstone,
+//     and from then on the blanket /store/* session guard 403s their bearer.
+//   - An operator retry means: un-disable, reset the password, authenticate as
+//     the customer. That works ONLY for a failure before step 6, because step 6
+//     destroys the identity there would be anything to reset.
+//   - A failure at or after step 6 needs manual intervention against the
+//     database. Nothing in this codebase automates it.
+// The step order below is what keeps the FIRST of those windows open; it is not
+// a promise of self-healing.
 export async function POST(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
@@ -195,6 +204,11 @@ export async function POST(
     first_name: null,
     last_name: null,
     phone: null,
+    // Reachable despite never being a field we render: Medusa's stock store
+    // validators accept company_name on create AND update, and
+    // rejectCustomerMetadata only guards `metadata`. It names the person, so it
+    // goes with the rest of them.
+    company_name: null,
   });
   logger.info(`[account-delete] customer row scrubbed for ${customerId}`);
 
@@ -226,15 +240,15 @@ export async function POST(
   logger.info(`[account-delete] auth identities removed for ${customerId}`);
 
   // 7. Soft-delete the customer row — AFTER the identities, and this order is
-  //    load-bearing for the retry story.
+  //    load-bearing for what recovery there is (see the header for its real,
+  //    narrow shape).
   //
   //    mutateCustomerMetadata (step 5) is scoped `AND deleted_at IS NULL`, so it
-  //    raises NOT_FOUND against an already-soft-deleted row. Soft-deleting
-  //    before the identity delete would therefore make a failure at step 6
-  //    unrecoverable: the re-run would die at step 5, and nothing could reach
-  //    the customer row to finish the job, because getCustomer() cannot read a
-  //    soft-deleted row. With the soft delete last, every step that can fail
-  //    runs against a live row and the whole handler is re-runnable.
+  //    raises NOT_FOUND against an already-soft-deleted row, and getCustomer()
+  //    cannot read one either. Soft-deleting earlier would therefore turn a
+  //    failure at step 6 from "hard to finish" into "impossible to finish
+  //    through any code path at all". Last, so every step that can fail runs
+  //    against a live row.
   await customers.softDeleteCustomers([customerId]);
   logger.info(`[account-delete] customer soft-deleted: ${customerId}`);
 

@@ -390,6 +390,7 @@ export type DrawDailyBoxResult = {
 
 /** Why an account may not be deleted yet. The storefront switches on these. */
 export type DeleteBlockReason =
+  | 'ACCOUNT_FROZEN'
   | 'BALANCE_NOT_ZERO'
   | 'WITHDRAWAL_PENDING'
   | 'DEPOSIT_PENDING'
@@ -3719,6 +3720,23 @@ class PacksModuleService extends MedusaService({
   ): Promise<
     { ok: true } | { ok: false; reason: DeleteBlockReason; detail: string }
   > {
+    // FIRST, because it is the cheapest check and the most absolute: a freeze is
+    // an active hold, and deletion would destroy the very evidence it preserves
+    // (the purge HARD-deletes player_payout_details — bank name, full account
+    // number, holder name — and blanks globepay_withdrawal.account_holder_name).
+    //
+    // None of the checks below catch it. `frozen` is ORTHOGONAL to `disabled`,
+    // so no store-side guard rejects a frozen session, and rawLedgerBalanceCents
+    // is deliberately freeze-blind — a frozen account whose raw balance happens
+    // to be exactly 0 cleared every other gate here.
+    if (await this.isFrozen(customerId, sharedContext)) {
+      return {
+        ok: false,
+        reason: 'ACCOUNT_FROZEN',
+        detail: 'This account is under review.',
+      };
+    }
+
     const balanceCents = await this.rawLedgerBalanceCents(
       customerId,
       sharedContext,
@@ -3900,11 +3918,13 @@ class PacksModuleService extends MedusaService({
     // leave the commonest account with no tombstone at all.
     //
     // CONSEQUENCE, deliberate: from this write on, the blanket /store/* session
-    // guard 403s this customer's own bearer, so a retry after a later step
-    // fails is OPERATOR-driven, not customer-driven. The step order below still
-    // matters for exactly that operator re-run. Widening the guard's carve-out
-    // to admit the delete route would be worse — it would let an ADMIN-banned
-    // account purge itself and destroy the evidence.
+    // guard 403s this customer's own bearer, so the customer cannot re-drive the
+    // route after a later step fails. The delete path IS carved out of that
+    // guard for a SELF-disabled session (disabled-guard.ts) — but not for
+    // 'admin', which is what this row now is, and that asymmetry is deliberate:
+    // an admin-banned account must never be able to purge the records its ban
+    // exists to preserve. Finishing a half-done purge is a manual job; see the
+    // route header for exactly how narrow that is.
     const tombstone = {
       disabled: true,
       disabled_cause: 'admin' as const,
@@ -3928,8 +3948,8 @@ class PacksModuleService extends MedusaService({
       );
     }
 
-    // Idempotent: the route is re-runnable after a partial failure, and an
-    // audit trail that grows a row per retry reports one deletion as several.
+    // Idempotent: a half-finished purge gets finished by hand, and an audit
+    // trail that grows a row per attempt reports one deletion as several.
     const [existingAudit] = await this.listAdminActionAudits(
       { entity_id: customerId, action: 'delete_account' },
       { take: 1 },

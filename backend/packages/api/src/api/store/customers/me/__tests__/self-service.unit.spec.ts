@@ -125,6 +125,9 @@ describe('POST /store/customers/me/reactivate', () => {
 
 const listAuthIdentities = jest.fn();
 const deleteAuthIdentities = jest.fn();
+// Exposed on the fake auth module ONLY so the spec can prove the route never
+// reaches for it. Nothing in the route should ever call this.
+const softDeleteAuthIdentities = jest.fn();
 const authenticate = jest.fn();
 const deleteAccountPreflight = jest.fn();
 const purgeAccountPacksData = jest.fn();
@@ -146,7 +149,12 @@ const deleteScope = {
         mutateCustomerMetadata,
       };
     if (key === 'auth')
-      return { listAuthIdentities, deleteAuthIdentities, authenticate };
+      return {
+        listAuthIdentities,
+        deleteAuthIdentities,
+        softDeleteAuthIdentities,
+        authenticate,
+      };
     if (key === 'notification') return { listNotifications, deleteNotifications };
     if (key === 'logger')
       return { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
@@ -180,6 +188,7 @@ describe('POST /store/customers/me/delete', () => {
     mockRunWorkflow.mockClear();
     listAuthIdentities.mockReset();
     deleteAuthIdentities.mockReset().mockResolvedValue(undefined);
+    softDeleteAuthIdentities.mockReset().mockResolvedValue(undefined);
     authenticate.mockReset().mockResolvedValue({ success: true });
     deleteAccountPreflight.mockReset().mockResolvedValue({ ok: true });
     purgeAccountPacksData.mockReset().mockResolvedValue(undefined);
@@ -293,6 +302,9 @@ describe('POST /store/customers/me/delete', () => {
     expect(mutate({ bank_accounts: [{}], handle: 'x' })).toEqual({});
   });
 
+  // company_name is in the live schema and Medusa's stock store validators
+  // accept it on both create and update — rejectCustomerMetadata only guards
+  // `metadata` — so it is reachable, and it names the person.
   it('scrubs the email to the tombstone address', async () => {
     withEmailpass();
     await deletePOST(mkDeleteReq({ password: 'right' }), mkRes());
@@ -301,7 +313,20 @@ describe('POST /store/customers/me/delete', () => {
       first_name: null,
       last_name: null,
       phone: null,
+      company_name: null,
     });
+  });
+
+  // The one invariant here whose violation is PERMANENTLY unrecoverable. A soft
+  // delete leaves the (entity_id, provider) slot occupied — that index carries
+  // no deleted_at predicate — so the person could never sign up with their own
+  // email again. Both halves are asserted: a future "consistency" refactor to
+  // softDeleteAuthIdentities would otherwise pass every other test in this file.
+  it('HARD-deletes the auth identities, by id, and never soft-deletes them', async () => {
+    withEmailpass();
+    await deletePOST(mkDeleteReq({ password: 'right' }), mkRes());
+    expect(deleteAuthIdentities).toHaveBeenCalledWith(['authid_1']);
+    expect(softDeleteAuthIdentities).not.toHaveBeenCalled();
   });
 
   // notification rows are keyed by EMAIL for the email channel and by

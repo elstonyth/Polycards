@@ -27,10 +27,31 @@ export const DISABLED_MESSAGE =
 export const SELF_DISABLED_CODE = 'ACCOUNT_SELF_DISABLED';
 
 /**
- * The one path a self-disabled session may reach. Exported so the route, the
- * guard and the specs all name it once.
+ * The paths a self-disabled session may reach. Exported so the routes, the
+ * guard and the specs all name them once.
  */
 export const REACTIVATE_PATH = '/store/customers/me/reactivate';
+export const DELETE_PATH = '/store/customers/me/delete';
+export const ACCOUNT_INFO_PATH = '/store/customers/me/account';
+
+/**
+ * The SELF-disable carve-out set. Deletion is here because a self-disabled
+ * customer chose that state and no evidence is at risk: forcing them to
+ * reactivate — i.e. to make the account usable again — before they may delete it
+ * is a pointless detour for the population most likely to want deletion.
+ * ACCOUNT_INFO_PATH rides along because the Settings page cannot render the
+ * Danger zone without knowing whether to ask for a password.
+ *
+ * This set is consulted ONLY on the `self` branch. The ADMIN branch stays
+ * total, and that asymmetry is the whole point: a banned account reaching the
+ * delete route would purge the payout details and withdrawal counterparties the
+ * ban exists to preserve.
+ */
+const SELF_DISABLED_ALLOWED_PATHS: ReadonlySet<string> = new Set([
+  REACTIVATE_PATH,
+  DELETE_PATH,
+  ACCOUNT_INFO_PATH,
+]);
 
 // Both guards fail CLOSED: an unexpected error is handed to next(e), which the
 // framework error handler turns into a 500 — never a silent pass.
@@ -130,7 +151,7 @@ export async function blockDisabledCustomerSession(
       return;
     }
     if (cause === 'self') {
-      // The single carve-out. It lives HERE, inside the existing guard, rather
+      // The carve-out. It lives HERE, inside the existing guard, rather
       // than as a separate middleware entry: this guard is registered as a
       // blanket method-less '/store/*' matcher, which the routes sorter hoists
       // into the `global` bucket AHEAD of every per-route entry. A
@@ -139,7 +160,7 @@ export async function blockDisabledCustomerSession(
       // It reads `originalUrl`, NOT `req.path`. Method-less registration takes
       // the framework's `app.use(matcher, handler)` branch, and Express strips
       // the matched prefix there: `req.path` is '/' inside this handler, so a
-      // `req.path === REACTIVATE_PATH` test is ALWAYS false and the one path a
+      // `req.path === REACTIVATE_PATH` test is ALWAYS false and every path a
       // self-disabled customer is allowed to use would 403 like everything else.
       // The repo's other `req.path` readers all sit on entries carrying
       // `method:`, which does not strip — the difference is the registration.
@@ -148,7 +169,7 @@ export async function blockDisabledCustomerSession(
         .split('?')[0]
         .toLowerCase()
         .replace(/\/+$/, '');
-      if (reqPath === REACTIVATE_PATH) {
+      if (SELF_DISABLED_ALLOWED_PATHS.has(reqPath)) {
         next();
         return;
       }

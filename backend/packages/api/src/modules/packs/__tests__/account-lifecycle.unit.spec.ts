@@ -95,6 +95,7 @@ describe('rawLedgerBalanceCents', () => {
 
 type PreflightSvc = PacksModuleService & {
   rawLedgerBalanceCents: jest.Mock;
+  listCustomerAccountStates: jest.Mock;
   listGlobePayWithdrawals: jest.Mock;
   listGlobePayDeposits: jest.Mock;
   listPulls: jest.Mock;
@@ -103,6 +104,8 @@ type PreflightSvc = PacksModuleService & {
 
 const mkPreflight = (): PreflightSvc => {
   const svc = Object.create(PacksModuleService.prototype) as PreflightSvc;
+  // isFrozen reads through this; [] = not frozen, the common case.
+  svc.listCustomerAccountStates = jest.fn().mockResolvedValue([]);
   svc.rawLedgerBalanceCents = jest.fn().mockResolvedValue(0);
   svc.listGlobePayWithdrawals = jest.fn().mockResolvedValue([]);
   svc.listGlobePayDeposits = jest.fn().mockResolvedValue([]);
@@ -123,6 +126,28 @@ describe('deleteAccountPreflight', () => {
     await expect(svc.deleteAccountPreflight('cus_1', CTX)).resolves.toEqual({
       ok: true,
     });
+  });
+
+  // The evidence case, and the one no other check catches. `frozen` is
+  // ORTHOGONAL to `disabled` — no store middleware reads it — and
+  // rawLedgerBalanceCents is deliberately freeze-blind, so an account under an
+  // active clawback hold sitting at raw balance exactly 0 cleared every other
+  // guard here. The purge then HARD-deletes player_payout_details (bank name,
+  // full account number, holder name) and blanks
+  // globepay_withdrawal.account_holder_name: exactly the records the freeze
+  // exists to preserve. First, because it is the cheapest and the most
+  // absolute.
+  it('blocks a FROZEN account, before it even reads the balance', async () => {
+    const svc = mkPreflight();
+    svc.listCustomerAccountStates.mockResolvedValue([{ id: 'cas_1' }]);
+    const r = await svc.deleteAccountPreflight('cus_1', CTX);
+    expect(r).toMatchObject({ ok: false, reason: 'ACCOUNT_FROZEN' });
+    expect(svc.listCustomerAccountStates).toHaveBeenCalledWith(
+      { customer_id: 'cus_1', frozen: true },
+      { take: 1 },
+      CTX_ARG,
+    );
+    expect(svc.rawLedgerBalanceCents).not.toHaveBeenCalled();
   });
 
   it('blocks a positive balance', async () => {
@@ -343,9 +368,9 @@ describe('purgeAccountPacksData', () => {
     );
   });
 
-  // The route is re-runnable after a partial failure, so the audit write has
-  // to be too: a trail that grows a row per retry reports one deletion as
-  // several.
+  // A half-finished purge gets finished by hand, so the audit write has to
+  // tolerate a second pass: a trail that grows a row per attempt reports one
+  // deletion as several.
   it('does not stack a second audit row on a retry', async () => {
     const f = mkPurge();
     f.svc.listAdminActionAudits.mockResolvedValue([{ id: 'aud_1' }]);
