@@ -1112,14 +1112,39 @@ describe('startGlobePayWithdrawal — Idempotency-Key', () => {
     expect(submitMock).not.toHaveBeenCalled();
   });
 
-  it('scopes the replay lookup to the customer AND the key', async () => {
+  it('scopes the replay lookup to the customer, the key, and non-failed rows', async () => {
     const h = harness();
     await start(h, { idempotencyKey: 'retry-2' });
 
     expect(h.packs.listGlobePayWithdrawals).toHaveBeenCalledWith(
-      { customer_id: 'cus_1', idempotency_key: 'retry-2' },
+      {
+        customer_id: 'cus_1',
+        idempotency_key: 'retry-2',
+        status: ['pending', 'settled'],
+      },
       { take: 1 },
     );
+  });
+
+  // A failed attempt FREES the key. The row is written before the withdrawal
+  // gate runs, so the common refusals — insufficient balance, playthrough not
+  // met, the daily cap — would otherwise burn a key for a request that never
+  // moved money, and the house convention is one key per INTENT reused across
+  // error retries (TopUpSheet.tsx). Replaying it as a success would be worse
+  // still: reporting a payout that is never coming.
+  it('does not replay a FAILED prior attempt — the retry is a fresh withdrawal', async () => {
+    const h = harness();
+    // The status filter is what excludes it, so an honest mock returns nothing
+    // for the scoped query the code now issues.
+    h.packs.listGlobePayWithdrawals.mockResolvedValue([]);
+
+    const res = await start(h, { idempotencyKey: 'retry-failed' });
+
+    expect(res.replayed).toBeFalsy();
+    // The retry must actually go through: new row, real debit, real submit.
+    expect(h.packs.createGlobePayWithdrawals).toHaveBeenCalled();
+    expect(h.packs.withdrawForCashout).toHaveBeenCalled();
+    expect(submitMock).toHaveBeenCalled();
   });
 
   it('stores the key on the row so the next retry can find it', async () => {

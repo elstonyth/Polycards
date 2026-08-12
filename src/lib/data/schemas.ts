@@ -322,10 +322,7 @@ export const DepositStartSchema = z.looseObject({
   // is a trust-boundary belt, not a live hole.
   url: z
     .string()
-    .refine(
-      (u) => /^https:\/\//i.test(u),
-      'cashier url must be https',
-    ),
+    .refine((u) => /^https:\/\//i.test(u), 'cashier url must be https'),
   transactionId: z.string(),
   merchantTransactionId: z.string(),
   amount: finite,
