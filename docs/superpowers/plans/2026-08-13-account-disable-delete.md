@@ -3362,11 +3362,41 @@ git commit -m "feat(account): add disable, reactivate and delete server actions"
 
 - Create: `src/components/account/DangerZone.tsx`
 - Modify: `src/app/(account)/settings/page.tsx`
+- Modify: `backend/packages/api/src/api/utils/disabled-guard.ts` (one constant — see Step 0)
+- Test: `backend/packages/api/src/api/utils/__tests__/disabled-guard.unit.spec.ts` (extend)
 
 **Interfaces:**
 
 - Consumes: `disableAccount`, `deleteAccount`, `DELETE_LINK` (Task 8), `getAccountInfo` (Task 8).
 - Produces: `<DangerZone hasPassword={boolean} />`.
+
+- [ ] **Step 0: Let a self-disabled customer actually reach this page**
+
+Task 6 widened the session guard's `cause === 'self'` carve-out to admit `/store/customers/me/delete` and `/store/customers/me/account`, so that a customer who disabled their own account can still delete it. That widening is necessary but **not sufficient**, and the gap only shows up here, at the UI:
+
+`/settings` renders behind the account layout, which calls `getCustomer()` → `sdk.store.customer.retrieve()` → **`GET /store/customers/me`**. That path is not in the carve-out set, so it 403s; `getCustomer()` swallows the error and returns `null` (`src/lib/data/customer.ts:54-68`); and `src/app/(account)/layout.tsx:13-15` then redirects to `/?auth=login`. Net effect: a self-disabled customer is bounced away from the very page holding the Delete button, and the delete route is reachable by direct API call only.
+
+Add `GET /store/customers/me` to the same `SELF_DISABLED_ALLOWED_PATHS` set:
+
+```ts
+export const CUSTOMER_ME_PATH = '/store/customers/me';
+```
+
+and include it in the set beside `REACTIVATE_PATH`, `DELETE_PATH` and `ACCOUNT_INFO_PATH`.
+
+Why this is safe, and why it is the right seam: the carve-out is exact set membership on the normalized URL, not a prefix match, so `/store/customers/me/addresses` and every other sub-path stay blocked. It reads the customer's own profile, for a customer who chose this state themselves — there is no evidence at risk, unlike the admin branch. **The `admin` branch must remain fully blocked on all four paths**; extend the existing `it.each` guard case to cover the new one and prove it.
+
+Accept that the rest of the account tree still 403s its data calls for a self-disabled session — wallet and vault will render their own error states. That is coherent (the account IS disabled) and closing it properly is a separate design question, not this task's job.
+
+- [ ] **Step 0b: Verify the whole path before building the UI**
+
+Do not build on an unverified assumption — the reason this step exists is that the previous widening looked complete and was not.
+
+```bash
+cd backend/packages/api && corepack yarn test:unit -- disabled-guard
+```
+
+Expected: PASS, including the admin case over all four paths.
 
 - [ ] **Step 1: Build the component**
 
