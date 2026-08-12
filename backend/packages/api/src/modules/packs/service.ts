@@ -1228,6 +1228,14 @@ class PacksModuleService extends MedusaService({
     //     other: if the close won, this read returns 'failed' and we refuse
     //     rather than strand a debit nothing would ever refund.
     //
+    //     DEPENDS ON READ COMMITTED, which is the default and what every
+    //     caller gets today (@InjectTransactionManager forwards
+    //     `isolationLevel` from the caller's context, and these calls pass
+    //     none). Under REPEATABLE READ this read would use the snapshot taken
+    //     at the pg_advisory_xact_lock statement — from BEFORE the admin
+    //     close committed — see 'held', and debit anyway. Do not compose this
+    //     method into a context carrying a stricter isolation level.
+    //
     //     Fail closed on a missing row too — a debit with no row to hang the
     //     callback on is unresolvable by definition.
     //
@@ -1499,37 +1507,72 @@ class PacksModuleService extends MedusaService({
   ): Promise<{ debited: boolean; claimed: boolean }> {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
 
-    // Same key and same idiom as mutateCreditAtomic and withdrawForCashout.
-    // Re-entrant per session, so a refund composed onto this context later
-    // re-taking it is a no-op.
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${input.customerId}`,
-    ]);
+    // BOUND THE WAIT, admin-side only. Nothing else caps a lock wait —
+    // utils/db-driver-options.ts cannot set lock_timeout (see its comment),
+    // and idle_in_transaction_session_timeout does not apply to a session
+    // blocked inside a statement. Without this an admin click on a customer
+    // with a long-running credit mutation hangs indefinitely, holding one of
+    // the five pooled connections. Timing out is HARMLESS here: the statement
+    // error aborts the transaction, so the row is untouched and the operator
+    // clicks again. SET LOCAL, so it dies with this transaction rather than
+    // leaking onto the pooled connection's next borrower.
+    //
+    // Deliberately NOT applied to withdrawForCashout: there a timeout turns a
+    // merely slow withdrawal into a customer-facing error, and that call has
+    // no equivalent "try again, nothing moved" affordance.
+    await em.execute("SET LOCAL lock_timeout = '5s'");
 
-    // The same read the routes did unlocked before this method existed —
-    // deliberately the generated lister, not new raw SQL, so its soft-delete
-    // semantics stay identical to the shipped behaviour. sharedContext is
-    // threaded so it rides THIS locked transaction.
-    const [debitRow] = await this.listCreditTransactions(
-      {
-        customer_id: input.customerId,
-        source_transaction_id: input.debitReference,
-      },
-      { take: 1 },
-      sharedContext,
-    );
-    const debited = Boolean(debitRow);
+    // The try spans the WHOLE locked section, not just the advisory lock.
+    // SET LOCAL applies to every statement left in this transaction, and the
+    // claim's `UPDATE … RETURNING id` takes a ROW lock that can time out too
+    // — wrapping only the acquisition would let that one reach the operator
+    // as a raw `canceling statement due to lock timeout`, which is exactly
+    // what the translation below exists to prevent, one statement later.
+    try {
+      // Same key and same idiom as mutateCreditAtomic and withdrawForCashout.
+      // Re-entrant per session, so a refund composed onto this context later
+      // re-taking it is a no-op.
+      await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+        `credit:${input.customerId}`,
+      ]);
 
-    // In the SAME transaction, so the decision and the row move commit
-    // together. @InjectTransactionManager re-uses a context that already
-    // carries a transactionManager instead of opening a second transaction —
-    // if it did open one, the claim would land outside the lock and the whole
-    // pact above would silently lapse.
-    const claimed = await this.claimGlobePayWithdrawalStatus(
-      { id: input.id, from: input.from, to: debited ? input.to : 'failed' },
-      sharedContext,
-    );
-    return { debited, claimed };
+      // The same read the routes did unlocked before this method existed —
+      // deliberately the generated lister, not new raw SQL, so its soft-delete
+      // semantics stay identical to the shipped behaviour. sharedContext is
+      // threaded so it rides THIS locked transaction.
+      const [debitRow] = await this.listCreditTransactions(
+        {
+          customer_id: input.customerId,
+          source_transaction_id: input.debitReference,
+        },
+        { take: 1 },
+        sharedContext,
+      );
+      const debited = Boolean(debitRow);
+
+      // In the SAME transaction, so the decision and the row move commit
+      // together. @InjectTransactionManager re-uses a context that already
+      // carries a transactionManager instead of opening a second transaction —
+      // if it did open one, the claim would land outside the lock and the whole
+      // pact above would silently lapse.
+      const claimed = await this.claimGlobePayWithdrawalStatus(
+        { id: input.id, from: input.from, to: debited ? input.to : 'failed' },
+        sharedContext,
+      );
+      return { debited, claimed };
+    } catch (error) {
+      // ONLY 55P03 (lock_not_available) is translated. Anything else — a
+      // dropped connection, a constraint violation — must surface as itself
+      // rather than be relabelled "someone else is busy", which would send an
+      // operator chasing contention that never happened. Never swallowed into
+      // a fabricated {debited:false}: that would close the row on a reading we
+      // never took.
+      if ((error as { code?: string })?.code !== '55P03') throw error;
+      throw new MedusaError(
+        MedusaError.Types.CONFLICT,
+        'Another balance operation for this customer is in progress. Nothing was changed — try again in a moment.',
+      );
+    }
   }
 
   // Append-only reversal of a single ledger row (the open-saga compensation).

@@ -535,9 +535,18 @@ export async function startGlobePayWithdrawal(
  *     packs.claimWithdrawalAgainstDebit, which reads the debit and claims the
  *     row in one transaction holding the customer's `credit:` advisory lock,
  *     so its `debited: false` means no debit will EVER land (see that
- *     method); the sweep's own call site keeps its unlocked read, which is
- *     sound there because a 'pending' row it selected is already past the
- *     debit;
+ *     method). The sweep's own call site keeps its UNLOCKED read. Not
+ *     because a 'pending' row is past its debit — it is not; a
+ *     below-threshold row is written 'pending' at step 1 and debited at
+ *     step 2, the same two-step shape as a held one — but because of two
+ *     other things. First, unknownWithdrawalAction cannot return 'refund'
+ *     until the row's updated_at is older than GLOBEPAY_STALE_AFTER_MS (1h),
+ *     so the sweep's destructive branch is unreachable inside the debit
+ *     window. Second, if it ever did close a row whose debit was queued
+ *     behind the `credit:` lock, withdrawForCashout's step-1a re-read now
+ *     refuses to debit a closed row. Narrowed, not closed: routing the
+ *     sweep through claimWithdrawalAgainstDebit with from:['pending'] is
+ *     the remaining piece, tracked separately;
  *   - the row is still in `fromStatus` — the terminal update below is scoped
  *     to it and is a SILENT NO-OP otherwise, which would leave a committed
  *     refund on a row that never closes. The sweep acts on rows it selected

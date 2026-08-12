@@ -334,6 +334,66 @@ moduleIntegrationTestRunner<PacksModuleService>({
         // honest destination, and approve reads this as "never debited, so it
         // cannot be paid out".
         expect(await statusOf(row.id)).toBe('failed');
+
+        // AND the other half of the pact, as far as this harness can reach:
+        // step 1a's statement, run verbatim against the same schema, sees
+        // the close this test just made — so a debit arriving after it would
+        // refuse.
+        //
+        // What this does and does not prove. It pins the identifiers and the
+        // predicate against a REAL schema (a renamed column or a stale
+        // `deleted_at` assumption fails here), and it shows the read returns
+        // the closed status. It does NOT drive withdrawForCashout, which
+        // needs the `customer` table, wallet state and saved accounts —
+        // none of which exist in a modules-type spec — so the step-1a
+        // BRANCH is pinned by the fake-`em` tests in
+        // globepay-withdrawal.unit.spec.ts instead. The SQL is duplicated
+        // here rather than exported: those unit tests already assert the
+        // shipped text contains each clause below, so drift fails there.
+        const [seen] = await MikroOrmWrapper.getManager().execute<
+          { status: string }[]
+        >(
+          'SELECT status FROM globepay_withdrawal ' +
+            'WHERE merchant_transaction_id = ? AND deleted_at IS NULL',
+          [row.merchant_transaction_id],
+        );
+        expect(seen?.status).toBe('failed');
+      });
+
+      // The lock wait is BOUNDED (SET LOCAL lock_timeout = '5s'), because
+      // nothing else bounds it — an admin click on a customer with a
+      // long-running credit mutation would otherwise hang forever holding a
+      // pooled connection. This test costs its own ~5s and earns it: it
+      // proves the claimed "harmless" part rather than asserting it — the
+      // statement error aborts the transaction, so the row is left exactly
+      // as it was and the operator can simply click again.
+      it('gives up after the lock timeout, leaving the row untouched', async () => {
+        const row = await seed('LOCK-5', 'held', CUSTOMER);
+        await backdate(row.id);
+
+        const holder = MikroOrmWrapper.forkManager();
+        await holder.begin();
+        try {
+          await holder.execute(
+            'SELECT pg_advisory_xact_lock(hashtextextended(?, 0))',
+            [`credit:${CUSTOMER}`],
+          );
+          await expect(
+            service.claimWithdrawalAgainstDebit({
+              id: row.id,
+              customerId: CUSTOMER,
+              debitReference: debitAnchor(row.merchant_transaction_id),
+              from: ['held'],
+              to: 'pending',
+            }),
+            // A translated 55P03, not a raw "canceling statement due to lock
+            // timeout" — and not a fabricated {debited:false}, which would
+            // close the row on a reading that was never taken.
+          ).rejects.toMatchObject({ type: 'conflict' });
+          expect(await statusOf(row.id)).toBe('held');
+        } finally {
+          await holder.rollback();
+        }
       });
 
       // The ordinary approve: a debit committed long ago is found, and the
