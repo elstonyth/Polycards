@@ -21,6 +21,11 @@ export const qk = {
     ['admin', 'globepay-deposits', status, page, sort ?? ''] as const,
   globepayWithdrawals: (page: number, status: string, sort?: string) =>
     ['admin', 'globepay-withdrawals', status, page, sort ?? ''] as const,
+  // 2-segment prefix — invalidates EVERY view/page/sort of the withdrawals
+  // list in one call. Needed because approve/deny (Task 6, plan 094) move a
+  // row across views (out of 'held', into 'pending' or 'failed'), unlike a
+  // plain read that only ever touches the one (page, status, sort) it fetched.
+  globepayWithdrawalsKey: ['admin', 'globepay-withdrawals'] as const,
   economy: ['admin', 'economy'] as const,
   eligibleProducts: ['admin', 'eligible-products'] as const,
   customerGacha: (id: string) => ['admin', 'customer', id, 'gacha'] as const,

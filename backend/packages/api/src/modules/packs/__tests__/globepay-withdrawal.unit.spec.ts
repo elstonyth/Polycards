@@ -567,12 +567,17 @@ describe('startGlobePayWithdrawal — money ordering', () => {
     });
   });
 
-  it('stamps their W… id on the row after a successful submit', async () => {
+  it('stamps their W… id on the row after a successful submit, scoped to pending', async () => {
     const h = harness();
     const result = await start(h);
+    // Re-pointed, not relaxed: the old shape (`{id, gateway_transaction_id}`)
+    // had no status guard at all. Scoped so a sweep that raced ahead and
+    // closed the row while this submit was in flight cannot have a gateway
+    // id written back onto it afterwards — same reasoning as the identical
+    // scope on the admin approve route's own stamp for this field.
     expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith({
-      id: 'gpw_1',
-      gateway_transaction_id: 'W2026072200000001',
+      selector: { id: 'gpw_1', status: 'pending' },
+      data: { gateway_transaction_id: 'W2026072200000001' },
     });
     expect(result.transactionId).toBe('W2026072200000001');
     expect(result.balance).toBe(50);
@@ -620,6 +625,119 @@ describe('startGlobePayWithdrawal — money ordering', () => {
   });
 });
 
+describe('startGlobePayWithdrawal — approval threshold (held)', () => {
+  afterEach(() => {
+    delete process.env.GLOBEPAY_WD_APPROVAL_ABOVE_RM;
+  });
+
+  // Roomy enough that the precheck gate (amount <= withdrawable) never fires
+  // on its own for these RM 1,000+ amounts — these cases are about the
+  // approval threshold, not the withdrawable cap.
+  const roomyWallet = {
+    balance: 5000,
+    available: 5000,
+    locked: 0,
+    isFrozen: false,
+    nextUnlock: null,
+    withdrawable: 5000,
+    playthrough: { deposited: 0, used: 0, remaining: 0 },
+  };
+
+  it('RM 1,000.00 exactly still auto-submits — the boundary is strictly greater-than', async () => {
+    const h = harness();
+    h.packs.walletSummary.mockResolvedValue(roomyWallet);
+    const result = await start(h, { amount: 1000 });
+    expect(submitMock).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe('pending');
+    expect(h.packs.createGlobePayWithdrawals.mock.calls[0][0][0].status).toBe(
+      'pending',
+    );
+  });
+
+  it('RM 1,000.01 is held: never reaches the gateway, but the debit still happens exactly as it does today', async () => {
+    const h = harness();
+    h.packs.walletSummary.mockResolvedValue(roomyWallet);
+    const result = await start(h, { amount: 1000.01 });
+
+    expect(submitMock).not.toHaveBeenCalled();
+    expect(result.status).toBe('held');
+    expect(result.transactionId).toBeNull();
+
+    // Inserted with its FINAL status — never pending-then-flipped.
+    expect(h.packs.createGlobePayWithdrawals.mock.calls[0][0][0].status).toBe(
+      'held',
+    );
+
+    // The debit is unchanged for the held branch: same call, same shape as
+    // the non-held path.
+    expect(h.packs.withdrawForCashout).toHaveBeenCalledTimes(1);
+    expect(h.packs.withdrawForCashout).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customerId: 'cus_1',
+        amount: 1000.01,
+        idempotencyReference: expect.stringMatching(/^wd:/),
+      }),
+    );
+    expect(result.balance).toBe(50); // harness's fixed withdrawForCashout.balance
+
+    // Never touched again after the insert: no gateway id stamped, no status
+    // flip. A held row leaves ONLY via the admin approve/deny routes (task 5
+    // — nothing consumes it yet).
+    expect(h.packs.updateGlobePayWithdrawals).not.toHaveBeenCalled();
+  });
+
+  it('GLOBEPAY_WD_APPROVAL_ABOVE_RM=2000, read per call, lifts an amount that would otherwise hold', async () => {
+    process.env.GLOBEPAY_WD_APPROVAL_ABOVE_RM = '2000';
+    const h = harness();
+    h.packs.walletSummary.mockResolvedValue(roomyWallet);
+    // Above the DEFAULT 1000 threshold, below the overridden 2000 — only a
+    // per-call read (not a module-load-time latch) can see this, since the
+    // module was imported long before this assignment.
+    const result = await start(h, { amount: 1500 });
+    expect(submitMock).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe('pending');
+  });
+
+  it('GLOBEPAY_WD_APPROVAL_ABOVE_RM=60 holds an amount the default 1000 threshold would auto-submit', async () => {
+    // positiveIntFromEnv has no floor beyond "positive integer" — proved
+    // empirically here rather than only by reading the helper.
+    process.env.GLOBEPAY_WD_APPROVAL_ABOVE_RM = '60';
+    const h = harness();
+    h.packs.walletSummary.mockResolvedValue(roomyWallet);
+    const result = await start(h, { amount: 100 });
+    expect(submitMock).not.toHaveBeenCalled();
+    expect(result.status).toBe('held');
+  });
+
+  it('a held-sized withdrawal is still refused BEFORE any row is written when frozen', async () => {
+    const h = harness();
+    h.packs.walletSummary.mockResolvedValue({
+      ...roomyWallet,
+      available: 0,
+      isFrozen: true,
+      withdrawable: 0,
+    });
+    await expect(start(h, { amount: 2000 })).rejects.toThrow(/under review/i);
+    expect(h.packs.createGlobePayWithdrawals).not.toHaveBeenCalled();
+    expect(h.packs.withdrawForCashout).not.toHaveBeenCalled();
+    expect(submitMock).not.toHaveBeenCalled();
+  });
+
+  it('a held-sized withdrawal is still refused BEFORE any row is written on a playthrough refusal', async () => {
+    const h = harness();
+    h.packs.walletSummary.mockResolvedValue({
+      ...roomyWallet,
+      withdrawable: 0,
+      playthrough: { deposited: 100, used: 40, remaining: 60 },
+    });
+    await expect(start(h, { amount: 2000 })).rejects.toThrow(
+      /RM 60\.00 of your deposits must be spent on packs/,
+    );
+    expect(h.packs.createGlobePayWithdrawals).not.toHaveBeenCalled();
+    expect(h.packs.withdrawForCashout).not.toHaveBeenCalled();
+  });
+});
+
 /**
  * PacksModuleService.withdrawForCashout — the gate + debit as ONE serialized
  * unit (plan 082).
@@ -658,6 +776,13 @@ const fakeWallet = (over: Record<string, unknown> = {}) => ({
  *   dropping `AND merchant_transaction_id <> ?` from the real SQL makes the
  *   self-exclusion test below genuinely fail, instead of passing on a mock that
  *   ignored its arguments.
+ * @param heldCents a `held` row's worth, added to the sum ONLY when the real
+ *   SQL's status list actually contains `'held'` — same trick as
+ *   selfRowCents: it proves the WHERE clause drives the count, not the test
+ *   wiring. Drop `'held'` from the real IN-list and a test relying on this
+ *   stops summing it, instead of passing on a mock that always included it.
+ * @param failedCents mirrors heldCents for `'failed'`, which the real SQL must
+ *   never contain.
  */
 const fakeService = (
   wallet = fakeWallet(),
@@ -677,8 +802,14 @@ const fakeService = (
     cus_1: [SAVED_ACCOUNT],
     cus_2: [OTHER_CUSTOMERS_ACCOUNT],
   },
+  heldCents = 0,
+  failedCents = 0,
 ) => {
   const svc = Object.create(PacksModuleService.prototype) as PacksModuleService;
+  /** The withdrawal row step 1a re-reads. Mutable so a test can close it
+   *  (`f.row.status = 'failed'`) or delete it (`null`) without threading yet
+   *  another positional argument through this helper. */
+  const row: { status: string | null } = { status: 'held' };
   const em = {
     execute: jest.fn(async (q: string, params?: unknown[]) => {
       // The destination read. Runs on THIS manager — i.e. inside the same
@@ -689,15 +820,21 @@ const fakeService = (
           ? [] // no such customer row
           : [{ metadata: { bank_accounts: byCustomer[id] } }];
       }
+      // Step 1a's open-row re-read. Must be answered BEFORE the cap branch
+      // below, which would otherwise swallow it — both statements name
+      // globepay_withdrawal, so the discriminator is `SELECT status`, which
+      // the aggregate cap query can never contain.
+      if (q.includes('SELECT status')) {
+        return row.status === null ? [] : [{ status: row.status }];
+      }
       if (!q.includes('globepay_withdrawal')) return [];
       const excludesSelf = params?.[1] === cashout.merchantTransactionId;
-      return [
-        {
-          sum_cents: String(
-            excludesSelf ? windowCents : windowCents + selfRowCents,
-          ),
-        },
-      ];
+      const base = excludesSelf ? windowCents : windowCents + selfRowCents;
+      // Gated on the SQL text itself, not handed back unconditionally — see
+      // the heldCents/failedCents jsdoc above.
+      const held = q.includes("'held'") ? heldCents : 0;
+      const failed = q.includes("'failed'") ? failedCents : 0;
+      return [{ sum_cents: String(base + held + failed) }];
     }),
   };
   // Parameters are declared (not inferred away) so the call-argument
@@ -724,7 +861,7 @@ const fakeService = (
   );
   Object.assign(svc, { walletSummary, withdrawCreditsWithLedger });
   const ctx = { transactionManager: em } as never;
-  return { svc, em, ctx, walletSummary, withdrawCreditsWithLedger };
+  return { svc, em, ctx, row, walletSummary, withdrawCreditsWithLedger };
 };
 
 /** Another customer's saved destination — see fakeService's `byCustomer`. */
@@ -887,7 +1024,7 @@ describe('PacksModuleService.withdrawForCashout', () => {
   // can be swapped between check and debit.
   //
   // Both statements go through `em`, so this pins three things at once: the
-  // destination read is the SECOND statement on the transaction the lock was
+  // destination read is the THIRD statement on the transaction the lock was
   // taken on (never before it, never on another connection), it binds the
   // TOKEN OWNER's id — the IDOR guard, in SQL — and it lands before the debit.
   it('reads the destination on the LOCKED transaction, after the lock and before the debit', async () => {
@@ -895,16 +1032,95 @@ describe('PacksModuleService.withdrawForCashout', () => {
     await f.svc.withdrawForCashout(cashout, f.ctx);
 
     const [lockSql] = f.em.execute.mock.calls[0] as [string, unknown[]];
-    const [readSql, readParams] = f.em.execute.mock.calls[1] as [
+    const [openSql] = f.em.execute.mock.calls[1] as [string, unknown[]];
+    const [readSql, readParams] = f.em.execute.mock.calls[2] as [
       string,
       unknown[],
     ];
     expect(lockSql).toContain('pg_advisory_xact_lock');
+    expect(openSql).toContain('SELECT status');
     expect(readSql).toContain('FROM customer');
     expect(readParams).toEqual(['cus_1']);
+    expect(f.em.execute.mock.invocationCallOrder[2]).toBeLessThan(
+      f.withdrawCreditsWithLedger.mock.invocationCallOrder[0],
+    );
+  });
+
+  /**
+   * STEP 1a — the debit half of the pact with claimWithdrawalAgainstDebit.
+   *
+   * The admin approve/deny path closes an undebited held row under the
+   * `credit:` advisory lock. That alone does not protect a debit QUEUED
+   * BEHIND it on the same lock: the close cannot see a debit that has not run
+   * yet, so without this re-read the debit would go on to commit against a
+   * row the admin had just closed, and nothing would ever refund it (the
+   * sweep selects 'pending' only).
+   *
+   * Same fake-`em` caveat as the rest of this describe: no lock is really
+   * taken here, so what these pin is that the re-read happens ON the locked
+   * transaction, BEFORE the debit, and that its answer is obeyed. The
+   * exclusion itself is proven against a real Postgres in
+   * withdrawal-claim.integration.spec.ts.
+   */
+  it('re-reads the row on the LOCKED transaction before doing anything else', async () => {
+    const f = fakeService();
+    await f.svc.withdrawForCashout(cashout, f.ctx);
+
+    const [sql, params] = f.em.execute.mock.calls[1] as [string, unknown[]];
+    expect(sql).toContain('SELECT status');
+    expect(sql).toContain('FROM globepay_withdrawal');
+    // By the payout's OWN reference, and soft-delete aware.
+    expect(sql).toContain('merchant_transaction_id = ?');
+    expect(sql).toContain('deleted_at IS NULL');
+    expect(params).toEqual(['PC-abc']);
+    // After the lock, before the debit — the only placement that means
+    // anything.
+    expect(f.em.execute.mock.invocationCallOrder[0]).toBeLessThan(
+      f.em.execute.mock.invocationCallOrder[1],
+    );
     expect(f.em.execute.mock.invocationCallOrder[1]).toBeLessThan(
       f.withdrawCreditsWithLedger.mock.invocationCallOrder[0],
     );
+  });
+
+  it('refuses to debit a row an admin already closed — no debit, no destination read', async () => {
+    const f = fakeService();
+    f.row.status = 'failed';
+    await expect(
+      f.svc.withdrawForCashout(cashout, f.ctx),
+    ).rejects.toMatchObject({
+      type: MedusaError.Types.NOT_ALLOWED,
+      message: expect.stringMatching(/no longer open/i),
+    });
+    expect(f.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+    // Fails fast: the guard sits ahead of the destination lookup and the
+    // gate, so a closed row costs one statement, not five.
+    expect(f.walletSummary).not.toHaveBeenCalled();
+    expect(
+      f.em.execute.mock.calls.some(([q]) =>
+        (q as string).includes('FROM customer'),
+      ),
+    ).toBe(false);
+  });
+
+  it('refuses when the row has vanished — a debit with nothing to resolve it', async () => {
+    const f = fakeService();
+    f.row.status = null;
+    await expect(
+      f.svc.withdrawForCashout(cashout, f.ctx),
+    ).rejects.toMatchObject({ type: MedusaError.Types.NOT_ALLOWED });
+    expect(f.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+  });
+
+  // 'pending' is the ordinary (below-threshold) payout, and it must still go
+  // through: this guard is about CLOSED rows, not about held ones.
+  it('debits a pending row exactly as it does a held one', async () => {
+    const f = fakeService();
+    f.row.status = 'pending';
+    await expect(
+      f.svc.withdrawForCashout(cashout, f.ctx),
+    ).resolves.toMatchObject({ id: 'ct_1' });
+    expect(f.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
   });
 
   it('blocks a frozen account entirely — no debit', async () => {
@@ -978,25 +1194,65 @@ describe('PacksModuleService.withdrawForCashout', () => {
   });
 
   // The cap query is the only thing standing between a compromised account and
-  // the whole balance, so its WHERE clause is pinned literally: `failed` rows
-  // never count (that money came back), and the row this very attempt just
-  // wrote as `pending` is excluded by merchant_transaction_id — without that
-  // exclusion the attempt would be counted against its own cap.
-  it('counts only pending+settled in the last 24h, excluding this attempt', async () => {
+  // the whole balance, so its WHERE clause is pinned literally: `pending`,
+  // `settled` and `held` rows all count — a held row already debited the
+  // customer, so it consumes their blast radius exactly like a submitted one
+  // — `failed` rows never count (that money came back), and the row this very
+  // attempt just wrote as `pending` is excluded by merchant_transaction_id —
+  // without that exclusion the attempt would be counted against its own cap.
+  it('counts pending+settled+held in the last 24h, excluding this attempt and failed rows', async () => {
     const f = fakeService();
     await f.svc.withdrawForCashout(cashout, f.ctx);
     // Found by content, not by index: the statement order ahead of it (lock,
-    // destination read) is pinned by its own test above, and hard-coding an
-    // index here would make this fail for an unrelated reason.
+    // open-row re-read, destination read) is pinned by its own test above,
+    // and hard-coding an index here would make this fail for an unrelated
+    // reason. Matched on SUM( rather than the table name — step 1a's re-read
+    // names globepay_withdrawal too and comes first.
     const [sql, params] = f.em.execute.mock.calls.find(([q]) =>
-      (q as string).includes('globepay_withdrawal'),
+      (q as string).includes('SUM('),
     ) as [string, unknown[]];
     expect(sql).toContain('globepay_withdrawal');
-    expect(sql).toContain("status IN ('pending', 'settled')");
+    expect(sql).toContain("status IN ('pending', 'settled', 'held')");
     expect(sql).not.toContain('failed');
     expect(sql).toContain("created_at > now() - interval '24 hours'");
     expect(sql).toContain('merchant_transaction_id <> ?');
     expect(params).toEqual(['cus_1', 'PC-abc']);
+  });
+
+  // Behavioural companion to the SQL-content test above, proven through the
+  // params-aware fake rather than a string match: RM 60 cap, a lone `held`
+  // row worth RM 20 already in the window, plus this RM 50 attempt totals
+  // RM 70 > RM 60. fakeService only hands back heldCents when the real WHERE
+  // clause's status list actually says 'held' (see its jsdoc), so this fails
+  // for the right reason — resolves instead of rejects — until the
+  // production IN-list is widened. Without that, a customer could park an
+  // unbounded queue of held payouts and blow straight past the 24h ceiling
+  // the moment an operator approves them in a batch.
+  it('an existing held row inside the window counts toward the cap, else batch-approving a queue of them blows past the 24h ceiling', async () => {
+    process.env.GLOBEPAY_WD_DAILY_MAX_RM = '60';
+    const f = fakeService(fakeWallet(), 0, 0, undefined, 20_00);
+    await expect(
+      f.svc.withdrawForCashout(cashout, f.ctx),
+    ).rejects.toMatchObject({
+      type: MedusaError.Types.NOT_ALLOWED,
+      message: 'Daily withdrawal limit reached. You can withdraw RM 40.00 more today.',
+    });
+    expect(f.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+  });
+
+  // Mirror of the test above with the same RM 20 tagged `failed` instead of
+  // `held`. fakeService only counts failedCents when the real SQL asks for
+  // 'failed', which it never does, so this cannot go RED the way the held
+  // test does — it is a forward-looking regression guard, not a driver: a
+  // refused or refunded payout must never shrink the customer's next 24h, no
+  // matter its size.
+  it('a failed row inside the window never counts toward the cap', async () => {
+    process.env.GLOBEPAY_WD_DAILY_MAX_RM = '60';
+    const f = fakeService(fakeWallet(), 0, 0, undefined, 0, 20_00);
+    await expect(
+      f.svc.withdrawForCashout(cashout, f.ctx),
+    ).resolves.toMatchObject({ id: 'ct_1' });
+    expect(f.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
   });
 
   // Self-exclusion, proven by BEHAVIOUR: the only row in the window is this
@@ -1027,6 +1283,85 @@ describe('PacksModuleService.withdrawForCashout', () => {
     ).rejects.toMatchObject({ type: MedusaError.Types.INVALID_DATA });
     expect(f.em.execute).not.toHaveBeenCalled();
     expect(f.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * PacksModuleService.claimGlobePayWithdrawalStatus — the mutex behind both
+ * admin routes (plan 094 Task 5).
+ *
+ * SCOPE, same as the withdrawForCashout describe above: the real method body
+ * runs against a fake `em`, so what these pin is the SHAPE OF THE STATEMENT —
+ * one conditional UPDATE with the accepted statuses in its WHERE clause, and
+ * a RETURNING row as the answer to "did I win the claim". The mutex itself is
+ * a Postgres property: a single-statement UPDATE re-evaluates its predicate
+ * against committed state after the row lock releases, so of two concurrent
+ * claims the loser matches zero rows. No test here runs two transactions.
+ *
+ * The regression this guards is the one the brief names explicitly: doing the
+ * flip with updateGlobePayWithdrawals({ selector, data }) instead. That
+ * type-checks and returns an array, but it is a find-then-write with no row
+ * lock, so two concurrent approves both read 'held' and both submit — a
+ * duplicate payout to a real bank account.
+ */
+describe('PacksModuleService.claimGlobePayWithdrawalStatus', () => {
+  const fakeClaim = (returned: { id: string }[]) => {
+    const svc = Object.create(
+      PacksModuleService.prototype,
+    ) as PacksModuleService;
+    // Parameters declared (not inferred away) so the call-argument assertions
+    // below can index mock.calls[0][1] under `strict` — same reason as the
+    // withdrawForCashout harness above.
+    const em = {
+      execute: jest.fn(async (_query: string, _params?: unknown[]) => returned),
+    };
+    return { svc, em, ctx: { transactionManager: em } as never };
+  };
+
+  it('claims with ONE conditional UPDATE, answered by RETURNING', async () => {
+    const f = fakeClaim([{ id: 'gpw_1' }]);
+    await expect(
+      f.svc.claimGlobePayWithdrawalStatus(
+        { id: 'gpw_1', from: ['held'], to: 'pending' },
+        f.ctx,
+      ),
+    ).resolves.toBe(true);
+
+    expect(f.em.execute).toHaveBeenCalledTimes(1);
+    const [sql, params] = f.em.execute.mock.calls[0];
+    expect(sql).toMatch(/^UPDATE globepay_withdrawal/);
+    expect(sql).toContain('SET status = ?');
+    expect(sql).toContain('WHERE id = ?');
+    // The whole point: the FROM-state is part of the predicate, so the write
+    // and the check cannot be separated by another transaction.
+    expect(sql).toContain('status IN (?)');
+    expect(sql).toContain('deleted_at IS NULL');
+    // Without RETURNING the caller could only learn "the row exists", never
+    // "I am the one who moved it".
+    expect(sql).toContain('RETURNING id');
+    expect(params).toEqual(['pending', 'gpw_1', 'held']);
+  });
+
+  it('binds one placeholder per accepted status — never interpolated', async () => {
+    const f = fakeClaim([{ id: 'gpw_1' }]);
+    await f.svc.claimGlobePayWithdrawalStatus(
+      { id: 'gpw_1', from: ['held', 'failed'], to: 'failed' },
+      f.ctx,
+    );
+    const [sql, params] = f.em.execute.mock.calls[0];
+    expect(sql).toContain('status IN (?, ?)');
+    expect(sql).not.toContain("'held'");
+    expect(params).toEqual(['failed', 'gpw_1', 'held', 'failed']);
+  });
+
+  it('a zero-row result is a LOST claim, not an error', async () => {
+    const f = fakeClaim([]);
+    await expect(
+      f.svc.claimGlobePayWithdrawalStatus(
+        { id: 'gpw_1', from: ['held'], to: 'pending' },
+        f.ctx,
+      ),
+    ).resolves.toBe(false);
   });
 });
 
@@ -1112,6 +1447,10 @@ describe('startGlobePayWithdrawal — Idempotency-Key', () => {
     expect(submitMock).not.toHaveBeenCalled();
   });
 
+  // Asserted as EXCLUDE-failed, not as a list of live statuses. An allowlist
+  // here silently stops matching when a status is added — plan 094 added
+  // 'held' and an enumerating read would have missed every withdrawal parked
+  // for admin approval, minting a second one on retry.
   it('scopes the replay lookup to the customer, the key, and non-failed rows', async () => {
     const h = harness();
     await start(h, { idempotencyKey: 'retry-2' });
@@ -1120,7 +1459,7 @@ describe('startGlobePayWithdrawal — Idempotency-Key', () => {
       {
         customer_id: 'cus_1',
         idempotency_key: 'retry-2',
-        status: ['pending', 'settled'],
+        status: { $ne: 'failed' },
       },
       { take: 1 },
     );

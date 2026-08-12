@@ -4,8 +4,8 @@ import { PACKS_MODULE } from '../modules/packs';
 import type PacksModuleService from '../modules/packs/service';
 import {
   globepayWithdrawalsEnabled,
+  refundGlobePayWithdrawal,
   withdrawalIdempotencyReference,
-  withdrawalRefundReference,
 } from '../modules/packs/globepay-withdrawal';
 import {
   getWithdrawalDetail,
@@ -16,6 +16,7 @@ import { withdrawalFeedKey } from '../modules/packs/feed-events';
 import { sendWithdrawalReceipt } from '../modules/packs/withdrawal-receipt';
 import {
   GLOBEPAY_RECONCILE_BATCH,
+  GLOBEPAY_WD_HELD_STALE_AFTER_MS,
   GLOBEPAY_WD_SLOW_AFTER_MS,
   classifyRequeryError,
   unknownWithdrawalAction,
@@ -43,6 +44,44 @@ export default async function globepayWithdrawalReconcileJob(
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
   const config = globepayConfigFromEnv();
   const now = new Date();
+
+  // HELD-ROW STALENESS WATCH (plan 094 review fix). Read-only: this must
+  // NEVER requery, refund, or write to a held row — the whole feature rests
+  // on the sweep leaving 'held' alone (see the held-row regression test
+  // below), so this is the one deliberate exception, and it only looks.
+  // Runs BEFORE the `outstanding.length === 0` return just below, so it
+  // still fires on a run with no pending rows at all — a queue that is
+  // 100% held is exactly the case this exists to catch. Cannot MOVE below
+  // the pending loop for the same reason: that early return would then skip
+  // it on the all-held tick.
+  //
+  // Own try/catch, deliberately: this is an observation-only alert bolted
+  // onto the front of the money-resolving loop below, and it must never be
+  // able to take that loop down. Same query shape and method as the pending
+  // list call two steps down, so a failure here is a transient, not a
+  // structural one — log it and let the tick continue rather than aborting
+  // a run that would otherwise have settled or refunded real payouts.
+  try {
+    const [oldestHeld] = await packs.listGlobePayWithdrawals(
+      { status: 'held' },
+      { take: 1, order: { created_at: 'ASC' } },
+    );
+    if (oldestHeld) {
+      const heldAge =
+        now.getTime() - new Date(oldestHeld.created_at).getTime();
+      if (heldAge > GLOBEPAY_WD_HELD_STALE_AFTER_MS) {
+        logger.error(
+          `[globepay-wd-reconcile] held withdrawal ${oldestHeld.merchant_transaction_id} still awaiting admin review after ${Math.round(heldAge / 3_600_000)}h — customer ${oldestHeld.customer_id} has RM ${oldestHeld.amount} waiting on a decision; work the approval queue`,
+        );
+      }
+    }
+  } catch (error) {
+    logger.error(
+      `[globepay-wd-reconcile] held-row staleness watch failed (skipping this tick, the pending sweep below still runs): ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
 
   const outstanding = await packs.listGlobePayWithdrawals(
     { status: 'pending' },
@@ -91,8 +130,32 @@ export default async function globepayWithdrawalReconcileJob(
               `[globepay-wd-reconcile] requery says ${withdrawal.merchant_transaction_id} is unknown, but it HAS gateway id ${withdrawal.gateway_transaction_id} — refusing the unknown-refund path; check merchant credentials`,
             );
           }
+          // SUBMIT time, not created_at — see unknownWithdrawalAction for why
+          // the difference is money. `updated_at` is the submit clock because
+          // of an audit, not a coincidence: EVERY write this codebase makes to
+          // a 'pending' row also CLOSES it (the callback route's two branches,
+          // this sweep's settle and no-debit closes, the refund helper's
+          // terminal update, startGlobePayWithdrawal's two failure closes),
+          // and the only two writes that leave a row pending both stamp a
+          // gateway_transaction_id — after which the guard above returns
+          // 'wait' regardless of any clock. So nothing can push this forward
+          // on the rows that reach the branch below, which is exactly the
+          // invariant that function demands. The admin approve route's claim
+          // (held -> pending) is the one write that legitimately restarts it,
+          // one HTTP hop before its submit.
+          //
+          // Adding a write that leaves a row 'pending' without a gateway id
+          // BREAKS this. Give that row a real submit-timestamp column instead
+          // of quietly extending its grace period.
+          //
+          // Read with no fallback, deliberately: `?? created_at` would look
+          // defensive and would silently restore the unsafe reading if the
+          // field ever stopped arriving. That it DOES arrive (and that the
+          // claim moves it) is checked against a real row in
+          // modules/packs/__tests__/withdrawal-claim.integration.spec.ts —
+          // no mocked test could tell the difference.
           action = unknownWithdrawalAction(
-            new Date(withdrawal.created_at),
+            new Date(withdrawal.updated_at),
             now,
             Boolean(withdrawal.gateway_transaction_id),
           );
@@ -100,7 +163,16 @@ export default async function globepayWithdrawalReconcileJob(
       }
 
       if (action.kind === 'wait') {
-        const age = now.getTime() - new Date(withdrawal.created_at).getTime();
+        // SUBMIT time, not created_at — the same reasoning as the
+        // unknown-requery branch above (unknownWithdrawalAction). "Still
+        // unresolved … chase the provider" is a claim about how long the
+        // GATEWAY has sat on this payout, and for an admin-approved row
+        // (plan 094) that clock starts at the claim, which can be hours or
+        // days after created_at. Left on created_at this fires on the very
+        // first sweep tick after every approval — a payout submitted five
+        // minutes ago reported as unresolved for days — and an alert that
+        // cries wolf on every approved payout trains operators to ignore it.
+        const age = now.getTime() - new Date(withdrawal.updated_at).getTime();
         if (age > GLOBEPAY_WD_SLOW_AFTER_MS) {
           logger.error(
             `[globepay-wd-reconcile] payout ${withdrawal.merchant_transaction_id} still unresolved after ${Math.round(age / 3_600_000)}h — customer ${withdrawal.customer_id} has RM ${withdrawal.amount} in limbo; chase the provider`,
@@ -187,66 +259,17 @@ export default async function globepayWithdrawalReconcileJob(
         );
         continue;
       }
-      const refund = await packs.withdrawCreditsWithLedger({
-        customerId: withdrawal.customer_id,
-        amount: Number(withdrawal.amount),
-        reason: 'cashout',
-        reference:
-          withdrawal.gateway_transaction_id ??
-          withdrawal.merchant_transaction_id,
-        idempotencyReference: withdrawalRefundReference(
-          withdrawal.customer_id,
-          withdrawal.merchant_transaction_id,
-        ),
-        ledger: {
-          outcome: 'refunded',
-          bankCode: withdrawal.bank_code,
-          accountNumber: withdrawal.account_number,
-          gatewayRef:
-            withdrawal.gateway_transaction_id ??
-            withdrawal.merchant_transaction_id,
-        },
-      });
-      // The emailed record — after the refund commit, BEFORE the terminal row
-      // update, outside any !replayed guard: once the row leaves 'pending'
-      // nothing re-runs this branch, so a crash between the update and a
-      // later send would lose the email forever. A crash after this send
-      // re-runs the branch next sweep (the refund replays, the notification
-      // module's unique idempotency_key dedupes the email). Non-throwing.
-      await sendWithdrawalReceipt(container, {
-        customerId: withdrawal.customer_id,
-        amount: Number(withdrawal.amount),
-        reference:
-          withdrawal.gateway_transaction_id ||
-          withdrawal.merchant_transaction_id,
-        merchantTransactionId: withdrawal.merchant_transaction_id,
-        outcome: 'refunded',
-      });
-      await packs.updateGlobePayWithdrawals({
-        selector: { id: withdrawal.id, status: 'pending' },
-        data: { status: 'failed', gateway_status: gatewayStatus },
-      });
+      // The four-step refund/receipt/close/notify ordering lives in
+      // refundGlobePayWithdrawal (globepay-withdrawal.ts) — one copy shared
+      // with the admin deny route (plan 094 Task 5), rather than a second
+      // verbatim one. The payout callback in
+      // api/hooks/globepay/withdrawal/route.ts still carries its own
+      // separate variant of this ordering. This call site keeps only what is
+      // specific to the SWEEP: the debit-existence guard above, counting the
+      // result below, and the terminal update's 'pending' scope — the
+      // helper's default, because that is the status this loop selected on.
+      await refundGlobePayWithdrawal(container, withdrawal, gatewayStatus);
       refunded += 1;
-      if (!refund.replayed) {
-        try {
-          await notifyFeed(container, {
-            receiverId: withdrawal.customer_id,
-            template: 'withdrawal_refunded',
-            data: {
-              amount_myr: Number(withdrawal.amount),
-              reference:
-                withdrawal.gateway_transaction_id ??
-                withdrawal.merchant_transaction_id,
-            },
-            idempotencyKey: withdrawalFeedKey(
-              withdrawal.merchant_transaction_id,
-              'refunded',
-            ),
-          });
-        } catch {
-          // Never fail a committed refund over a notification.
-        }
-      }
     } catch (error) {
       // One bad payout must not abort the sweep. It stays pending and is
       // retried next run.

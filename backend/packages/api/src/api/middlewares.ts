@@ -964,6 +964,25 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      // Release a HELD payout to the gateway (plan 094). The most literal
+      // money mutation on this limiter: one call submits a real bank
+      // transfer. The row's own atomic status claim is what stops a
+      // double-click paying twice — this budget is the outer bound on how
+      // fast a compromised admin token could work the queue at all.
+      matcher: '/admin/globepay/withdrawals/*/approve',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Refuse a HELD payout and refund the debit — same budget as its
+      // approve twin. It mints no credit beyond the one refund the row's
+      // shared idempotency anchor allows, but it is still a ledger write
+      // driven by an admin token.
+      matcher: '/admin/globepay/withdrawals/*/deny',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
       // Purchase-invoice writer (POLYCARD-BACK §3.5) — raises real inventory
       // counters, up to 200 lines x 1,000,000 qty per call; same admin budget.
       matcher: '/admin/purchase-invoices',

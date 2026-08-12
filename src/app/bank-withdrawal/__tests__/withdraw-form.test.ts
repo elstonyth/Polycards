@@ -249,6 +249,35 @@ describe('WithdrawForm', () => {
     expect(text).toContain('RM 50.00');
   });
 
+  it('shows a held withdrawal as under review — never "paid", never spendable', async () => {
+    await render();
+    startWithdrawal.mockResolvedValue({
+      ok: true,
+      amount: 80,
+      balance: 20,
+      reference: 'wd_merchant_ref_123',
+      status: 'held',
+    });
+    fillValidForm('80');
+    await submit();
+
+    const text = container.textContent ?? '';
+    expect(text).toContain('RM 80.00 UNDER REVIEW');
+    // A held withdrawal was never submitted to the gateway — it must never
+    // read as a completed payout.
+    expect(text).not.toMatch(/paid|complete|has been sent|ON ITS WAY/i);
+    // It must say plainly that the debit already happened and what happens
+    // if a human refuses it — without naming the threshold figure, which
+    // the backend reads from an env var.
+    expect(text).toContain('already left your balance');
+    expect(text).toContain('returns automatically');
+    expect(text).not.toMatch(/RM ?1,?000/);
+    expect(text).toContain('wd_merchant_ref_123');
+    // The POST-debit balance — showing it is how the copy avoids implying
+    // the withdrawn amount is still spendable.
+    expect(text).toContain('RM 20.00');
+  });
+
   it('shows the server error and stays on the form when the backend refuses', async () => {
     await render();
     startWithdrawal.mockResolvedValue({

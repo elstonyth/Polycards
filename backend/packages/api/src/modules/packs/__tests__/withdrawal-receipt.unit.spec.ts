@@ -41,6 +41,28 @@ describe('withdrawal receipt template', () => {
     expect(r.text).not.toContain('reached your bank');
   });
 
+  // Regression: a HELD withdrawal (plan 094) that gets denied was never
+  // submitted to the gateway, so no bank ever saw it — and a definite GATEWAY
+  // refusal (e.g. PMT10013) isn't the bank either. Both land on this outcome.
+  // "Your bank rejected this transfer" was flatly false on both and would
+  // send the customer to their bank to ask about a transfer that never
+  // existed. This template is mocked in every route/job spec that sends it,
+  // so only a direct assertion on the rendered body catches this — see
+  // copy.ts's withdrawal_refunded comment for the storefront half of the fix.
+  it('refunded: never blames the bank — the transfer may never have reached one', () => {
+    const r = renderTemplate(WITHDRAWAL_RECEIPT_TEMPLATE, {
+      ...DATA,
+      outcome: 'refunded',
+    })!;
+    for (const body of [r.html, r.text]) {
+      expect(body).not.toMatch(/bank rejected/i);
+      expect(body).not.toMatch(/your bank/i);
+      expect(body).toContain(
+        'The transfer could not be completed, so the full amount is back in your Polycards balance. Nothing was lost.',
+      );
+    }
+  });
+
   it('never carries the destination bank account', () => {
     // Email is the least private channel this data could travel through; the
     // reference is what support needs, the account is on the admin row.
