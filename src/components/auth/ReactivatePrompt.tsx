@@ -64,11 +64,19 @@ export default function ReactivatePrompt({
         You disabled this account. Reactivate it to pick up where you left off —
         your cards, balance and history are all still here.
       </p>
-      {error && (
-        <p role="alert" className="mt-3 text-[12px] text-red-400">
-          {error}
-        </p>
-      )}
+      {/* Persistent live region, same as AuthForm: an alert node inserted
+          already-populated may not be announced, so the node stays mounted
+          (sr-only while empty) and only its text swaps. Both failures announced
+          here are dead ends the customer cannot see any other way — a failed
+          logout leaves them holding a live session, a failed reactivation leaves
+          the account closed. */}
+      <p
+        aria-live="assertive"
+        aria-atomic="true"
+        className={error ? 'mt-3 text-[12px] text-red-400' : 'sr-only'}
+      >
+        {error}
+      </p>
       <div className="mt-5 flex gap-2">
         <button
           type="button"
