@@ -67,13 +67,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (result.ok) {
       return NextResponse.redirect(new URL('/me', origin));
     }
-    // Self-disabled: the cookie is set and valid, so send them somewhere the
-    // reactivate prompt can render. Redirecting to /me instead would be a dead
-    // end — the account gate reads a 403 as logged out and bounces to the login
-    // modal, which is where they just came from.
-    if ('selfDisabled' in result) {
-      return NextResponse.redirect(new URL('/?auth=reactivate', origin));
-    }
     return failed(result.error);
   } catch {
     return failed('Google sign-in could not be completed. Please try again.');

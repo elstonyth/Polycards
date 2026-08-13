@@ -566,8 +566,6 @@ export type Routes = {
                 };
                 account: typeof import("../../src/api/store/customers/me/account/route");
                 delete: typeof import("../../src/api/store/customers/me/delete/route");
-                disable: typeof import("../../src/api/store/customers/me/disable/route");
-                reactivate: typeof import("../../src/api/store/customers/me/reactivate/route");
             };
         };
         locales: typeof import("@medusajs/medusa/api/store/locales/route");

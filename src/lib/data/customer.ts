@@ -88,63 +88,27 @@ export async function updateCustomerProfile(
   return customer;
 }
 
-export type AccountInfo = {
-  hasPassword: boolean;
-  /** Why the account is disabled, or null when it is not. Only 'self' may be
-   *  offered reactivation — see the route's comment for why login reads this
-   *  field instead of watching for a 403. */
-  disabledCause: 'admin' | 'self' | null;
-};
-
-/**
- * Account facts for an EXPLICIT token, propagating failures.
- *
- * Separate from `getAccountInfo` because it runs before the cookie is readable —
- * the token is minted in the same request — and the pair mirrors
- * `fetchProfileHandle`/`getOwnProfileHandle` next door.
- *
- * It still propagates, but note what its two LOGIN-PATH callers do with that:
- * `login` and `googleCallback` (src/lib/actions/auth.ts) BOTH catch it to
- * `ASSUME_ACTIVE`, because a rejection there lands in the catch that clears the
- * auth cookie and would fail a login whose password was correct — see that
- * constant for the full reasoning and the trade it accepts. So the
- * propagate/swallow split is nominal at today's call sites; the propagation is
- * kept so a new caller must decide for itself rather than inherit a silent
- * "not disabled" it never asked for.
- */
-export async function fetchAccountInfo(token: string): Promise<AccountInfo> {
-  return await sdk.client.fetch<AccountInfo>('/store/customers/me/account', {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: 'no-store',
-  });
-}
+export type AccountInfo = { hasPassword: boolean };
 
 /**
  * Account facts the Settings page needs before rendering the Danger zone.
  *
  * `hasPassword` is false for a Google-only signup, which removes the password
  * field from the delete confirmation. Defaults to `true` on any failure — the
- * safer shape, since it asks for MORE proof rather than less. (Getting it wrong
+ * safer shape, since it asks for MORE proof rather than less. Getting it wrong
  * the other way would drop the password field for an account that does have
  * one, and every delete would then fail PASSWORD_REQUIRED with no way to
- * comply.) `disabledCause` falls back to null for the same reason in reverse:
- * a guessed disable state must never drive UI that a real one would.
- *
- * Be honest about what that costs now that the value is used: the Danger zone
- * swaps Disable for Reactivate on 'self', so a failed read shows a
- * self-disabled customer the Disable button — which 403s, since /disable is not
- * in the session guard's carve-out. That is the deploy window (a storefront
- * ahead of its backend 404s this route), it degrades to the behaviour that
- * shipped before the swap, and the login-time prompt is still a way back in.
- * Guessing 'self' instead would offer reactivation to an ADMIN-disabled
- * customer, which is a support decision this page must never appear to reverse.
+ * comply.
  */
 export async function getAccountInfo(): Promise<AccountInfo> {
   const token = await getAuthToken();
-  if (!token) return { hasPassword: true, disabledCause: null };
+  if (!token) return { hasPassword: true };
   try {
-    return await fetchAccountInfo(token);
+    return await sdk.client.fetch<AccountInfo>('/store/customers/me/account', {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+    });
   } catch {
-    return { hasPassword: true, disabledCause: null };
+    return { hasPassword: true };
   }
 }

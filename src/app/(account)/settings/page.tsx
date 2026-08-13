@@ -53,14 +53,7 @@ export default async function SettingsPage() {
           Email notifications, pull alerts, and two-factor authentication are
           still to come.
         </p>
-        {/* `disabledCause` is threaded, not dropped: this page renders for a
-            self-disabled customer (the session guard carves out the account
-            layout's read), and it is the only surface that can offer them the
-            way back in. */}
-        <DangerZone
-          hasPassword={accountInfo.hasPassword}
-          disabledCause={accountInfo.disabledCause}
-        />
+        <DangerZone hasPassword={accountInfo.hasPassword} />
       </div>
     </>
   );

@@ -1,5 +1,13 @@
 # Customer Self-Service Disable & Delete Account — Implementation Plan
 
+> **HISTORICAL — the disable half was retracted before merge.** This plan was
+> executed in full, then the customer-facing disable and reactivate were removed
+> at the operator's request: disabling is an admin action and the admin
+> dashboard already does it. Tasks 3, 4 and 10 no longer describe any shipped
+> code, and Task 1's `disabled_cause` column was dropped along with its
+> migration. Tasks 2, 5, 6, 6b, 7, 8 and 9 survive, minus their disable/
+> reactivate halves. See the retraction note at the top of the design spec.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Let a logged-in customer disable their own account (reversible by logging back in) or delete it permanently (personal data purged, login impossible forever, money records retained anonymously).

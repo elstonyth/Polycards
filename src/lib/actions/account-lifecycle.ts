@@ -1,12 +1,13 @@
 'use server';
 
 /**
- * Customer self-service account lifecycle — disable, reactivate, delete.
+ * Customer self-service account deletion.
  *
- * Backend routes (all authenticated as the caller, no id is ever passed):
- *   POST /store/customers/me/disable    → { disabled: true }
- *   POST /store/customers/me/reactivate → { disabled: false }
- *   POST /store/customers/me/delete     → { deleted: true }
+ * Backend route (authenticated as the caller, no id is ever passed):
+ *   POST /store/customers/me/delete → { deleted: true }
+ *
+ * Disabling an account is an ADMIN action and lives in the admin dashboard —
+ * there is deliberately no customer-facing disable or reactivate here.
  *
  * Server actions return errors, they never throw — a thrown action surfaces as
  * an error page, and every failure here has to render inside the modal that
@@ -19,13 +20,10 @@
 import { sdk } from '@/lib/medusa';
 import { logger } from '@/lib/logger';
 import { clearAuthToken, getAuthToken } from '@/lib/data/customer';
-import { ACCOUNT_SELF_DISABLED, GENERIC_ERROR } from './account-lifecycle-map';
+import { GENERIC_ERROR } from './account-lifecycle-map';
 
-export type LifecycleResult = { ok: true } | { ok: false; error: string };
 export type DeleteResult =
   { ok: true } | { ok: false; error: string; reason: string | null };
-/** Disable carries a refusal code too — same shape, different codes. */
-export type DisableResult = DeleteResult;
 
 /** Re-exported shape: the sentence itself lives in the client-safe map so the
  *  UI can show the same copy on a rejected action. */
@@ -97,71 +95,6 @@ const codeOf = (
   }
   return null;
 };
-
-/**
- * The one refusal DISABLE can hit that is not a failure at all: the account is
- * already disabled.
- *
- * Newly reachable, and the reason this map exists. The session guard's
- * self-disable carve-out admits the account layout's customer read, so
- * /settings renders for a self-disabled customer and the Danger zone's Disable
- * button is live — but /disable is NOT in that carve-out, so pressing it 403s.
- * Unmapped, that fell through to GENERIC and the modal said "Something went
- * wrong. Please try again." Nothing went wrong, retrying cannot help, and the
- * account the customer is being asked to disable is already disabled.
- */
-const DISABLE_COPY: Record<string, string> = {
-  [ACCOUNT_SELF_DISABLED]:
-    'Your account is already disabled. Log out, then log back in to reactivate it.',
-};
-
-/** Disable the caller's own account, then drop the session cookie. */
-export async function disableAccount(): Promise<DisableResult> {
-  const token = await getAuthToken();
-  if (!token) return { ok: false, error: LOGGED_OUT, reason: null };
-  try {
-    await sdk.client.fetch('/store/customers/me/disable', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-    });
-  } catch (error) {
-    logger.error('[account] disable failed:', error);
-    // Cookie deliberately untouched: a customer whose disable failed is still
-    // active, and logging them out would hide that from them. (That reasoning
-    // holds for ACCOUNT_SELF_DISABLED too — clearing the cookie there would
-    // sign out someone whose session is still the only way to reach delete.)
-    const reason = codeOf(error, DISABLE_COPY);
-    return {
-      ok: false,
-      reason,
-      error: (reason ? DISABLE_COPY[reason] : GENERIC) ?? GENERIC,
-    };
-  }
-  await clearAuthToken();
-  return { ok: true };
-}
-
-/**
- * Lift the caller's own disable. The session cookie stays — they continue in.
- *
- * The backend answers 200 without writing when the account is not disabled at
- * all (an admin can re-enable between the login attempt and this confirm), so
- * the response body is not inspected: any 200 is success.
- */
-export async function reactivateAccount(): Promise<LifecycleResult> {
-  const token = await getAuthToken();
-  if (!token) return { ok: false, error: LOGGED_OUT };
-  try {
-    await sdk.client.fetch('/store/customers/me/reactivate', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    return { ok: true };
-  } catch (error) {
-    logger.error('[account] reactivate failed:', error);
-    return { ok: false, error: GENERIC };
-  }
-}
 
 /**
  * Delete the caller's own account, permanently. `password` is null for a

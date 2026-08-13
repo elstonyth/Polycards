@@ -41,9 +41,7 @@ export default function AuthForm({
   onSuccess,
 }: {
   mode: 'login' | 'signup';
-  // 'reactivate' is not a mode this form renders — it hands the modal over
-  // when a correct password turns out to belong to a self-disabled account.
-  onSwitchMode: (m: 'login' | 'signup' | 'reactivate') => void;
+  onSwitchMode: (m: 'login' | 'signup') => void;
   onSuccess?: () => void;
 }) {
   const isSignup = mode === 'signup';
@@ -156,21 +154,6 @@ export default function AuthForm({
       router.refresh();
       return;
     }
-    // The self-disabled variant carries no `error`, so narrow with `in` rather
-    // than a cast — and never render it through setNote: the password was
-    // CORRECT, and showing it as a failure is what would leave the customer
-    // stuck with no way back into their own account.
-    //
-    // Handed to the MODAL rather than rendered here as a sub-view. The prompt
-    // sits on a live session cookie, so every way of dismissing it has to log
-    // out; only the modal owns the X, the backdrop and Esc. While this form
-    // rendered its own copy, the modal still believed it was showing a login
-    // form and closed all three silently — the exact stranded session the
-    // prompt exists to prevent. One renderer, one set of exits.
-    if ('selfDisabled' in result) {
-      onSwitchMode('reactivate');
-      return;
-    }
     setNote({ text: result.error });
   }
 
@@ -232,15 +215,7 @@ export default function AuthForm({
             phone,
             phone_verification_token: signupDraft.proofToken,
           });
-          // `'selfDisabled' in retry` short-circuits before the regex because
-          // that variant carries no `error` to test. It is not a
-          // verification-shaped rejection, so it takes this branch and reaches
-          // finishAuth, which shows the reactivate prompt.
-          if (
-            retry.ok ||
-            'selfDisabled' in retry ||
-            !/verif/i.test(retry.error)
-          ) {
+          if (retry.ok || !/verif/i.test(retry.error)) {
             // Keep the token for another retry (e.g. a second duplicate
             // email) and refresh the draft to what was just typed.
             setSignupDraft({

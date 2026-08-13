@@ -1,24 +1,18 @@
 // integration-tests/http/account-self-service.spec.ts
-// The customer-facing account lifecycle, end to end against a real server and a
-// real database: self-disable → reactivate, and permanent deletion.
+// Permanent customer-initiated account deletion, end to end against a real
+// server and a real database. (Disabling an account is an ADMIN action — see
+// admin-disable.spec.ts; the only disable case here is the one that proves a
+// banned account cannot delete itself out from under the ban.)
 //
 // This suite is the ONLY place on this branch where any of it runs for real.
 // Every sibling unit spec fabricates its request object or mocks the service,
 // so a handful of invariants are green there by construction rather than by
 // evidence. Two in particular are provable only from here:
 //
-//  1. The session guard's reactivate carve-out matches on a normalized
-//     `req.originalUrl`. A unit test cannot produce that value: the guard is
-//     registered as a method-less '/store/*' `app.use` entry, where Express has
-//     already stripped the matched prefix and `req.path` is '/'. The
-//     "self-disabled bearer reaches POST /reactivate → 200" case below is the
-//     only check in the plan that can catch a mistake there — and the cost of
-//     that mistake is total: /disable needs no password, so a stolen token
-//     would brick the account with no way back in.
-//  2. `rawLedgerBalanceCents`' SUM(ROUND(amount*100))::bigint has never run
+//  1. `rawLedgerBalanceCents`' SUM(ROUND(amount*100))::bigint has never run
 //     against Postgres. The negative-balance leg of the delete-guards test is
 //     what proves the sign survives the round trip, not just the JS.
-//  3. The CUSTOMER-module half of the purge — the email scrub, the metadata
+//  2. The CUSTOMER-module half of the purge — the email scrub, the metadata
 //     clear, the address delete and the notification delete. The unit spec
 //     mocks those modules, so it can only assert that the route CALLED them
 //     with a given shape; whether the rows are actually gone is knowable only
@@ -44,12 +38,11 @@ const PASSWORD = 'account-self-service-pw-1'; // gitleaks:allow
 
 /** The shipped admin-disable refusal copy, asserted verbatim (see below). */
 const DISABLED_COPY = 'This account has been disabled. Please contact support.';
-const SELF_DISABLED_CODE = 'ACCOUNT_SELF_DISABLED';
 
 medusaIntegrationTestRunner({
   inApp: true,
   testSuite: ({ api, getContainer }) => {
-    describe('customer self-service disable / delete', () => {
+    describe('customer self-service account deletion', () => {
       let storeHeaders: Record<string, string>;
 
       const packsOf = (): PacksModuleService =>
@@ -106,114 +99,12 @@ medusaIntegrationTestRunner({
         clearChallengeCache();
       });
 
-      it('disable → login still works → other routes 403 → reactivate → normal', async () => {
-        const { id, token } = await register('self-disable@test.dev');
-        const packs = packsOf();
-
-        const disabled = await post('/store/customers/me/disable', {}, token);
-        expect(disabled.status).toBe(200);
-        expect(await packs.accountDisabledCause(id)).toBe('self');
-
-        // A self-disable must NOT block the token exchange — the password has to
-        // be provable before reactivation is offered.
-        const relogin = await unwrapResponse(
-          api.post('/auth/customer/emailpass', {
-            email: 'self-disable@test.dev',
-            password: PASSWORD,
-          }),
-        );
-        expect(relogin.status).toBe(200);
-        const freshToken = relogin.data.token;
-
-        // Everything else is closed, with the machine-readable code.
-        const blocked = await unwrapResponse(
-          api.get('/store/credits', { headers: authed(freshToken) }),
-        );
-        expect(blocked.status).toBe(403);
-        expect(blocked.data.message).toBe(SELF_DISABLED_CODE);
-
-        // THE STOREFRONT'S DETECTION CONTRACT. Both halves are load-bearing and
-        // neither is provable by a mocked unit test, which is why they are here.
-        //
-        // First: GET /store/customers/me answers 200 for a self-disabled
-        // session. That is deliberate (the account layout needs it, or /settings
-        // bounces and the Delete button becomes unreachable) — but it means
-        // login SUCCEEDS for a self-disabled customer and nothing on the login
-        // path throws. An earlier plan for the reactivate prompt hung off a
-        // rejection here; this assertion is what makes that impossible to
-        // re-introduce by accident.
-        const me = await unwrapResponse(
-          api.get('/store/customers/me', { headers: authed(freshToken) }),
-        );
-        expect(me.status).toBe(200);
-
-        // Second: because that read cannot fail, the disable is reported as
-        // DATA on the account route instead. This is the only signal login has.
-        const info = await unwrapResponse(
-          api.get('/store/customers/me/account', {
-            headers: authed(freshToken),
-          }),
-        );
-        expect(info.status).toBe(200);
-        expect(info.data.disabledCause).toBe('self');
-
-        // A repeat /disable never reaches its handler: the same guard that
-        // opens /reactivate closes this. Asserted as the NEGATIVE twin of the
-        // carve-out below — together they prove the originalUrl match in both
-        // directions, which is what makes the pair conclusive rather than a
-        // guard that happens to allow everything.
-        const again = await post('/store/customers/me/disable', {}, freshToken);
-        expect(again.status).toBe(403);
-        expect(again.data.message).toBe(SELF_DISABLED_CODE);
-
-        // THE load-bearing case. See the file header.
-        const reactivated = await post(
-          '/store/customers/me/reactivate',
-          {},
-          freshToken,
-        );
-        expect(reactivated.status).toBe(200);
-        expect(await packs.accountDisabledCause(id)).toBeNull();
-
-        // The whole disable record is cleared, not just the boolean — a stale
-        // disabled_cause would make the next self-disable's carve-out decision
-        // read from a lifted ban.
-        const [state] = await packs.listCustomerAccountStates(
-          { customer_id: id },
-          { take: 1 },
-        );
-        expect(state.disabled).toBe(false);
-        expect(state.disabled_cause).toBeNull();
-        expect(state.disabled_at).toBeNull();
-        expect(state.disabled_by).toBeNull();
-
-        // The lift is disclosed: state and audit share one transaction.
-        const audits = await packs.listAdminActionAudits(
-          { entity_id: id },
-          { take: 10 },
-        );
-        expect(audits.some((a) => a.action === 'enable')).toBe(true);
-
-        const open = await unwrapResponse(
-          api.get('/store/credits', { headers: authed(freshToken) }),
-        );
-        expect(open.status).toBe(200);
-      });
-
-      // The spec originally said 403 here; the spec was wrong and was corrected
-      // (commit d55ae273). An admin can re-enable between the login prompt and
-      // the customer's reactivate confirm, and answering that race with an
-      // error would strand a customer whose account is already fine.
-      it('reactivate on an account that is NOT disabled is an idempotent 200', async () => {
-        const { id, token } = await register('reactivate-noop@test.dev');
-
-        const res = await post('/store/customers/me/reactivate', {}, token);
-        expect(res.status).toBe(200);
-        expect(res.data.disabled).toBe(false);
-        expect(await packsOf().accountDisabledCause(id)).toBeNull();
-      });
-
-      it('an admin-disabled account cannot self-reactivate OR self-disable', async () => {
+      // The security property behind admin disable: a banned account cannot
+      // delete itself out from under the ban. The session guard is total, so
+      // the request never reaches the route — which is exactly what must stay
+      // true, because a delete that DID reach it would purge the payout details
+      // and withdrawal counterparties the ban exists to preserve.
+      it('an admin-disabled account cannot delete itself', async () => {
         const { id, token } = await register('admin-disabled@test.dev');
         const packs = packsOf();
         await packs.setAccountDisabled({
@@ -221,42 +112,33 @@ medusaIntegrationTestRunner({
           adminId: 'admin_test',
           disabled: true,
           reason: 'support hold',
-          cause: 'admin',
         });
 
-        // Both routes, because the carve-out set is consulted ONLY on the
-        // 'self' branch — the admin branch stays total. A delete reaching the
-        // route would purge the payout details and withdrawal counterparties
-        // the ban exists to preserve.
-        for (const path of [
-          '/store/customers/me/reactivate',
-          '/store/customers/me/disable',
+        const res = await post(
           '/store/customers/me/delete',
-        ]) {
-          const res = await post(path, { password: PASSWORD }, token);
-          expect(res.status).toBe(403);
-          expect(res.data.message).toBe(DISABLED_COPY);
-        }
-        expect(await packs.accountDisabledCause(id)).toBe('admin');
+          { password: PASSWORD },
+          token,
+        );
+        expect(res.status).toBe(403);
+        expect(res.data.message).toBe(DISABLED_COPY);
+        expect(await packs.isAccountDisabled(id)).toBe(true);
       });
 
       it('a register-phase token (empty actor_id) is refused with 401', async () => {
         // Deliberately NOT linked with postStoreCustomer: until that runs the
         // JWT carries actor_id ''. The guard passes it through (no actor) and
-        // the routes themselves must refuse it, so this pins the routes' own
-        // check rather than the guard's.
+        // the route itself must refuse it, so this pins the route's own check
+        // rather than the guard's.
         const reg = await api.post('/auth/customer/emailpass/register', {
           email: 'register-token@test.dev',
           password: PASSWORD,
         });
-        for (const path of [
-          '/store/customers/me/disable',
-          '/store/customers/me/reactivate',
+        const res = await post(
           '/store/customers/me/delete',
-        ]) {
-          const res = await post(path, { password: PASSWORD }, reg.data.token);
-          expect(res.status).toBe(401);
-        }
+          { password: PASSWORD },
+          reg.data.token,
+        );
+        expect(res.status).toBe(401);
       });
 
       it('delete refuses a wrong password and a non-zero balance (both signs)', async () => {
@@ -307,7 +189,7 @@ medusaIntegrationTestRunner({
           api.get('/store/credits', { headers: authed(token) }),
         );
         expect(stillThere.status).toBe(200);
-        expect(await packs.accountDisabledCause(id)).toBeNull();
+        expect(await packs.isAccountDisabled(id)).toBe(false);
       });
 
       it('refuses a FROZEN account, and the balance read stays freeze-blind', async () => {

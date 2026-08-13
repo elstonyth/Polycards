@@ -2698,7 +2698,6 @@ class PacksModuleService extends MedusaService({
       adminId: string;
       disabled: boolean;
       reason: string;
-      cause: 'admin' | 'self';
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ disabled: boolean }> {
@@ -2713,7 +2712,6 @@ class PacksModuleService extends MedusaService({
     );
     const patch = {
       disabled: input.disabled,
-      disabled_cause: input.disabled ? input.cause : null,
       disabled_reason: input.disabled ? input.reason : null,
       disabled_by: input.disabled ? input.adminId : null,
       disabled_at: input.disabled ? new Date() : null,
@@ -2736,14 +2734,8 @@ class PacksModuleService extends MedusaService({
           entity_type: 'customer',
           entity_id: input.customerId,
           action: input.disabled ? 'disable' : 'enable',
-          before: {
-            disabled: existing?.disabled ?? false,
-            disabled_cause: existing?.disabled_cause ?? null,
-          },
-          after: {
-            disabled: input.disabled,
-            disabled_cause: input.disabled ? input.cause : null,
-          },
+          before: { disabled: existing?.disabled ?? false },
+          after: { disabled: input.disabled },
           reason: input.reason,
         },
       ],
@@ -2753,7 +2745,7 @@ class PacksModuleService extends MedusaService({
   }
 
   // Has this account ever completed SMS verification? One read, mirroring
-  // accountDisabledCause. The stateless OTP proof cannot answer this (10m TTL),
+  // isAccountDisabled. The stateless OTP proof cannot answer this (10m TTL),
   // and `customer.phone` is not a proxy for it — see the model's comment.
   @InjectManager()
   async isPhoneVerified(
@@ -2808,26 +2800,19 @@ class PacksModuleService extends MedusaService({
     }
   }
 
-  // The disable's CAUSE, or null when the account is not disabled. Fails closed
-  // on purpose: a disabled row whose `disabled_cause` is NULL (written before
-  // the column existed, or by a future writer that forgets it) resolves to
-  // 'admin', the more restrictive of the two. Three states, and a guard must
-  // handle all three: `null` = not disabled, take no action (the overwhelmingly
-  // common path — letting it fall into a deny branch blocks every normal
-  // login); 'self' = the self-reactivate path; anything else = block. Branch on
-  // `=== 'self'` to GRANT that path, never on "not 'admin'" to imply it.
+  // True if the customer's login is administratively disabled. One indexed read
+  // on the auth path — mirrors isFrozen.
   @InjectManager()
-  async accountDisabledCause(
+  async isAccountDisabled(
     customerId: string,
     @MedusaContext() sharedContext: Context = {},
-  ): Promise<'admin' | 'self' | null> {
+  ): Promise<boolean> {
     const [state] = await this.listCustomerAccountStates(
       { customer_id: customerId, disabled: true },
       { take: 1 },
       sharedContext,
     );
-    if (!state) return null;
-    return state.disabled_cause === 'self' ? 'self' : 'admin';
+    return Boolean(state);
   }
 
   // Upsert a customer's manual-cashout bank destination + audit row in ONE
@@ -3986,30 +3971,24 @@ class PacksModuleService extends MedusaService({
     ]);
 
     // The account-state row is the TOMBSTONE, not garbage. Soft-deleting it is
-    // what would re-open the account: accountDisabledCause reads through
+    // what would re-open the account: isAccountDisabled reads through
     // listCustomerAccountStates, which excludes soft-deleted rows, so it would
-    // return null and the session guard would wave requests through — and a
+    // return false and the session guard would wave requests through — and a
     // bearer minted before the delete keeps verifying for up to a day (JWT auth
     // does no DB lookup and medusa-config.ts sets no jwtExpiresIn, so the
-    // framework default "1d" applies). Cause 'admin', never 'self', so the
-    // reactivate carve-out can never apply to a deleted account.
+    // framework default "1d" applies).
     //
     // Upsert, not a bare UPDATE: most customers have never been disabled or
     // frozen and therefore have NO row at all (setAccountDisabled creates it
-    // lazily, service.ts:2699-2718), and an update that no-ops for them would
-    // leave the commonest account with no tombstone at all.
+    // lazily), and an update that no-ops for them would leave the commonest
+    // account with no tombstone at all.
     //
     // CONSEQUENCE, deliberate: from this write on, the blanket /store/* session
     // guard 403s this customer's own bearer, so the customer cannot re-drive the
-    // route after a later step fails. The delete path IS carved out of that
-    // guard for a SELF-disabled session (disabled-guard.ts) — but not for
-    // 'admin', which is what this row now is, and that asymmetry is deliberate:
-    // an admin-banned account must never be able to purge the records its ban
-    // exists to preserve. Finishing a half-done purge is a manual job; see the
-    // route header for exactly how narrow that is.
+    // route after a later step fails. Finishing a half-done purge is a manual
+    // job; see the route header for exactly how narrow that is.
     const tombstone = {
       disabled: true,
-      disabled_cause: 'admin' as const,
       disabled_reason: 'Account deleted by the customer.',
       disabled_at: new Date(),
     };

@@ -18,32 +18,6 @@ const mkService = (): Svc => {
   return svc;
 };
 
-describe('accountDisabledCause', () => {
-  it('returns null when the account is not disabled', async () => {
-    const svc = mkService();
-    svc.listCustomerAccountStates.mockResolvedValue([]);
-    await expect(svc.accountDisabledCause('cus_1', CTX)).resolves.toBeNull();
-  });
-
-  it('returns self for a customer self-disable', async () => {
-    const svc = mkService();
-    svc.listCustomerAccountStates.mockResolvedValue([
-      { disabled: true, disabled_cause: 'self' },
-    ]);
-    await expect(svc.accountDisabledCause('cus_1', CTX)).resolves.toBe('self');
-  });
-
-  // The fail-closed property: a disabled row whose cause predates the column
-  // must behave as an admin disable, never as a self-disable (which would let
-  // it through the login guard).
-  it('treats a NULL cause on a disabled row as admin', async () => {
-    const svc = mkService();
-    svc.listCustomerAccountStates.mockResolvedValue([
-      { disabled: true, disabled_cause: null },
-    ]);
-    await expect(svc.accountDisabledCause('cus_1', CTX)).resolves.toBe('admin');
-  });
-});
 
 // rawLedgerBalanceCents RESOLVES the manager out of the context and calls
 // .execute() on it, so it needs a context whose manager IS the fake em — CTX's
@@ -311,9 +285,9 @@ describe('purgeAccountPacksData', () => {
   });
 
   // The row IS the tombstone. Soft-deleting it re-opens the account:
-  // accountDisabledCause reads through listCustomerAccountStates, which
-  // excludes soft-deleted rows, so it would return null and the session guard
-  // would wave a still-valid bearer straight through.
+  // isAccountDisabled reads through listCustomerAccountStates, which excludes
+  // soft-deleted rows, so it would return false and the session guard would
+  // wave a still-valid bearer straight through.
   it('tombstones the account-state row instead of soft-deleting it', async () => {
     const f = mkPurge();
     await f.svc.purgeAccountPacksData('cus_1', f.ctx);
@@ -321,7 +295,6 @@ describe('purgeAccountPacksData', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           disabled: true,
-          disabled_cause: 'admin',
           disabled_reason: 'Account deleted by the customer.',
         }),
       }),
@@ -345,7 +318,6 @@ describe('purgeAccountPacksData', () => {
         expect.objectContaining({
           customer_id: 'cus_1',
           disabled: true,
-          disabled_cause: 'admin',
         }),
       ],
       expect.anything(),

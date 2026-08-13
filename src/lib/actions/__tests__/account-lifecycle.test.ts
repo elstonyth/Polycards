@@ -25,11 +25,7 @@ vi.mock('@/lib/medusa', () => ({
   sdk: { client: { fetch: mocks.clientFetch } },
 }));
 
-import {
-  disableAccount,
-  reactivateAccount,
-  deleteAccount,
-} from '../account-lifecycle';
+import { deleteAccount } from '../account-lifecycle';
 import {
   CONFIRM_WORD,
   DELETE_LINK,
@@ -44,111 +40,6 @@ beforeEach(() => {
 
 /** Must match GENERIC in the action — the copy shown when nothing is known. */
 const GENERIC = 'Something went wrong. Please try again.';
-
-describe('disableAccount', () => {
-  it('calls the route and clears the session cookie', async () => {
-    await expect(disableAccount()).resolves.toEqual({ ok: true });
-    expect(mocks.clientFetch).toHaveBeenCalledWith(
-      '/store/customers/me/disable',
-      { method: 'POST', headers: { Authorization: 'Bearer tok' } },
-    );
-    expect(mocks.clearAuthToken).toHaveBeenCalled();
-  });
-
-  // The cookie must survive a failure, or a customer whose disable errored is
-  // logged out with the account still active and no way to see what happened.
-  it('keeps the cookie when the backend refuses', async () => {
-    mocks.clientFetch.mockRejectedValue(new Error('boom'));
-    const r = await disableAccount();
-    expect(r.ok).toBe(false);
-    expect(mocks.clearAuthToken).not.toHaveBeenCalled();
-  });
-
-  it('refuses when logged out', async () => {
-    mocks.getAuthToken.mockResolvedValue(undefined);
-    await expect(disableAccount()).resolves.toEqual({
-      ok: false,
-      error: 'Please log in first.',
-      reason: null,
-    });
-    expect(mocks.clientFetch).not.toHaveBeenCalled();
-  });
-
-  // The refusal the Danger zone made reachable: /settings renders for a
-  // self-disabled customer (the guard's carve-out admits the layout's customer
-  // read) but /disable is NOT carved out, so the live Disable button 403s.
-  // Unmapped this said "Something went wrong. Please try again." — untrue,
-  // unactionable, and shown to someone whose account is already in the state
-  // they just asked for.
-  it('tells an already-disabled customer the truth', async () => {
-    mocks.clientFetch.mockRejectedValue(new Error('ACCOUNT_SELF_DISABLED'));
-    const r = await disableAccount();
-    expect(r).toEqual({
-      ok: false,
-      reason: 'ACCOUNT_SELF_DISABLED',
-      error:
-        'Your account is already disabled. Log out, then log back in to reactivate it.',
-    });
-    // Not GENERIC, and it must name the way back — the modal switches its copy
-    // and disables the retry button off this reason.
-    if (r.ok) throw new Error('expected a refusal');
-    expect(r.error).not.toBe(GENERIC);
-    expect(mocks.clearAuthToken).not.toHaveBeenCalled();
-  });
-
-  // Anything else still falls back — a disable that genuinely broke must not
-  // be dressed up as "already disabled".
-  it('still falls back to GENERIC on a real failure', async () => {
-    mocks.clientFetch.mockRejectedValue(new Error('kaboom'));
-    await expect(disableAccount()).resolves.toEqual({
-      ok: false,
-      reason: null,
-      error: GENERIC,
-    });
-  });
-});
-
-describe('reactivateAccount', () => {
-  it('posts to the reactivate route', async () => {
-    await expect(reactivateAccount()).resolves.toEqual({ ok: true });
-    expect(mocks.clientFetch).toHaveBeenCalledWith(
-      '/store/customers/me/reactivate',
-      { method: 'POST', headers: { Authorization: 'Bearer tok' } },
-    );
-    // The cookie MUST survive here — unlike disable and delete, this is the one
-    // success path the customer carries straight on through. Clearing it would
-    // log them out the instant they reactivated, which is the exact opposite of
-    // what the flow is for.
-    expect(mocks.clearAuthToken).not.toHaveBeenCalled();
-  });
-
-  // The backend answers 200 `{ disabled: false }` WITHOUT writing when the
-  // account is not disabled at all — an admin can re-enable between the login
-  // attempt and the customer confirming the prompt. That is a success, and the
-  // action must not inspect the body looking for proof a write happened.
-  it('treats an already-active account as success', async () => {
-    mocks.clientFetch.mockResolvedValue({ disabled: false });
-    await expect(reactivateAccount()).resolves.toEqual({ ok: true });
-  });
-
-  // The branch the login prompt actually depends on: a failed reactivation has
-  // to come back as a message the prompt can show, not as a thrown action.
-  it('reports a failure instead of throwing', async () => {
-    mocks.clientFetch.mockRejectedValue(new Error('boom'));
-    const r = await reactivateAccount();
-    expect(r.ok).toBe(false);
-    expect(mocks.logError).toHaveBeenCalled();
-  });
-
-  it('refuses when logged out', async () => {
-    mocks.getAuthToken.mockResolvedValue(undefined);
-    await expect(reactivateAccount()).resolves.toEqual({
-      ok: false,
-      error: 'Please log in first.',
-    });
-    expect(mocks.clientFetch).not.toHaveBeenCalled();
-  });
-});
 
 describe('deleteAccount', () => {
   it('sends the password and clears the cookie on success', async () => {

@@ -1705,19 +1705,6 @@
           "length": 6,
           "mappedType": "datetime"
         },
-        "disabled_cause": {
-          "name": "disabled_cause",
-          "type": "text",
-          "unsigned": false,
-          "autoincrement": false,
-          "primary": false,
-          "nullable": true,
-          "enumItems": [
-            "admin",
-            "self"
-          ],
-          "mappedType": "enum"
-        },
         "phone_verified_at": {
           "name": "phone_verified_at",
           "type": "timestamptz",

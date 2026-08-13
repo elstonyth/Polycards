@@ -1,8 +1,28 @@
 # Customer Self-Service: Disable Account & Delete Account
 
 **Date:** 2026-08-13
-**Status:** Approved
-**Scope:** Storefront (customer-facing) self-service. Admin disable/enable (POLYCARD-BACK §4.2) already exists and is untouched except for the `disabled_cause` backfill.
+**Status:** Partly RETRACTED — delete shipped, disable did not.
+**Scope:** Storefront (customer-facing) self-service. Admin disable/enable (POLYCARD-BACK §4.2) already exists and is untouched.
+
+> ## Retraction (2026-08-13, before merge)
+>
+> **The customer-facing DISABLE was cut at the operator's request.** Disabling an
+> account is an admin action, applied from the admin dashboard, which already
+> shipped: the `/players` page carries a per-player toggle with a mandatory
+> reason, and the customer-360 page badges who disabled the account, when, and
+> why. Everything below about self-disable is kept as the record of a decision
+> that was reversed — it does not describe the shipped system.
+>
+> **Reactivation went with it, necessarily.** Self-reactivation existed only to
+> undo a self-disable. With disabling now exclusively an admin sanction, a
+> customer-operated way to lift it would defeat the purpose, so the reactivate
+> route, the login-time prompt and the whole `disabled_cause` split were removed
+> rather than left unreachable. The session guard is back to master's shape: a
+> disabled customer is refused on every `/store` route, with no carve-outs.
+>
+> **Delete is unchanged and is what this branch ships**, including the
+> settlement preflight, the purge ordering, and the guarantee that an
+> admin-disabled account cannot delete itself out from under its ban.
 
 ## Summary
 

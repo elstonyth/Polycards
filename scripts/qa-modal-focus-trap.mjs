@@ -101,35 +101,17 @@ check(
   `body scroll unlocked on close (overflow="${overflow}")`,
 );
 
-// 6. The migration moved Escape onto a ref-read callback, so check it still
-//    reaches the reactivate DISMISSAL rather than a plain close: on this mode
-//    a dismissal means "Not now" and must log the session out, and a silent
-//    close is what strands the customer on a live token. The Google callback
-//    lands here exactly this way (/?auth=reactivate). Observed as the logout
-//    server action being POSTed — with no backend up it fails downstream, which
-//    is fine: dismiss() swallows that and closes either way. What is NOT
-//    covered here is the AuthForm handover, where the mode flips after open —
-//    that needs a real login. The stale-callback risk it carries is pinned in
-//    modal-focus-trap.test.ts instead.
-const posts = [];
-page.on('request', (r) => {
-  if (r.method() === 'POST') posts.push(r.url());
-});
+// 6. `?auth=` accepts login and signup and NOTHING else. The reactivate mode was
+//    removed with the customer-facing disable, and an unrecognised value must
+//    leave the page alone rather than open an empty dialog.
 await page.goto(`${BASE}/?auth=reactivate`, { waitUntil: 'networkidle' });
-await page.waitForSelector(PANEL);
-const reactivateShown = await page
-  .getByText('Your account is disabled')
-  .isVisible();
-check(reactivateShown, 'reactivate prompt renders from ?auth=reactivate');
-
-posts.length = 0;
-await page.keyboard.press('Escape');
-await page.waitForSelector(PANEL, { state: 'detached', timeout: 5_000 });
 check(
-  posts.length > 0,
-  `Escape on reactivate fires the logout action, not a silent close (${posts.length} POST)`,
+  (await page.locator(PANEL).count()) === 0,
+  'an unrecognised ?auth= value opens no dialog',
 );
 
+await page.goto(`${BASE}/?auth=login`, { waitUntil: 'networkidle' });
+await page.waitForSelector(PANEL);
 await page.screenshot({ path: 'docs/research/qa-modal-focus-trap.png' });
 
 // ---------------------------------------------------------------------------
@@ -218,10 +200,12 @@ if (!backendUp) {
     );
   }
 
-  // B1. DangerZone — /settings, "Disable account".
+  // B1. DangerZone — /settings, "Delete account". This is the dialog the bug
+  // was reported against; its Delete button is disabled until the confirmation
+  // is typed, which is exactly the blur-to-<body> shape.
   await page.goto(`${BASE}/settings`, { waitUntil: 'networkidle' });
   await page
-    .getByRole('button', { name: /disable account/i })
+    .getByRole('button', { name: /delete account/i })
     .first()
     .click();
   await page.waitForSelector(PANEL, { timeout: 10_000 });

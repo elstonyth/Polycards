@@ -440,11 +440,9 @@ export default defineMiddlewares({
       method: 'POST',
       middlewares: [validateDeliverableAddress('update')],
     },
-    // Customer self-service account lifecycle. Three tiers, not one: /disable
-    // and /reactivate sit on the delivery WRITE tier (rare, deliberate
-    // mutations, same class as saving a payout destination), /delete has its own
-    // stricter tier because it carries a password field (see its entry), and
-    // /account is a plain read. authenticate() FIRST on every one of them: the
+    // Customer self-service account deletion. Two tiers, not one: /delete has
+    // its own stricter tier because it carries a password field (see its
+    // entry), and /account is a plain read. authenticate() FIRST on both: the
     // array is the execution order, and the limiters key on
     // auth_context.actor_id, so an unauthenticated request must 401 before it
     // consumes anyone's budget.
@@ -457,22 +455,6 @@ export default defineMiddlewares({
     // to ['bearer'] is stricter than the framework default and matches this
     // repo's policy at middlewares.ts:58-64, so it stays; a future reader
     // must not delete it as dead.
-    {
-      matcher: '/store/customers/me/disable',
-      method: 'POST',
-      middlewares: [
-        authenticate('customer', ['bearer']),
-        deliveryWriteRateLimit,
-      ],
-    },
-    {
-      matcher: '/store/customers/me/reactivate',
-      method: 'POST',
-      middlewares: [
-        authenticate('customer', ['bearer']),
-        deliveryWriteRateLimit,
-      ],
-    },
     {
       matcher: '/store/customers/me/delete',
       method: 'POST',

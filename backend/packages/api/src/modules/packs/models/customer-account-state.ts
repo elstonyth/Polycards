@@ -28,18 +28,8 @@ export const CustomerAccountState = model
     unfreeze_cause: model.enum(['repaid', 'admin']).nullable(),
     disabled: model.boolean().default(false),
     disabled_reason: model.text().nullable(),
-    // Who performed the disable, NOT necessarily an admin: the self-disable
-    // route passes the customer's own id (store/customers/me/disable/route.ts:52)
-    // so the audit row records the real actor. Read it together with
-    // `disabled_cause` — that column is what says which kind of actor this is.
-    disabled_by: model.text().nullable(),
+    disabled_by: model.text().nullable(), // admin_id
     disabled_at: model.dateTime().nullable(),
-    // Who disabled this account. 'admin' is the §4.2 support lever; 'self' is
-    // the customer's own reversible disable. NULL means "written before this
-    // column existed" and every guard MUST treat it as 'admin' — see
-    // disabled-guard.ts. Deliberately a separate column from `cause` (which
-    // belongs to `frozen`): the two flags are orthogonal and share no history.
-    disabled_cause: model.enum(['admin', 'self']).nullable(),
     phone_verified_at: model.dateTime().nullable(),
   })
   .indexes([

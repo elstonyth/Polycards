@@ -2,24 +2,12 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useRouter } from 'next/navigation';
 import { X } from 'lucide-react';
 import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import AuthForm from './AuthForm';
-import { useAuth } from './auth/AuthProvider';
-import ReactivatePrompt, {
-  useDeclineReactivation,
-} from './auth/ReactivatePrompt';
 
-// 'reactivate' is not a form the user can switch to — it is only ever arrived
-// at, from the two places a login turns out to belong to a self-disabled
-// account: /?auth=reactivate from the Google callback (see that route), and
-// AuthForm handing the modal over when login/signup returns the selfDisabled
-// variant. Both land on the same renderer so the dismiss handling below covers
-// both; a second copy inside AuthForm is what let the X close on a live
-// session.
-type AuthMode = 'login' | 'signup' | 'reactivate';
+type AuthMode = 'login' | 'signup';
 
 /**
  * Global auth modal — mounted once (in SiteHeader, always present). Opens in response
@@ -28,44 +16,14 @@ type AuthMode = 'login' | 'signup' | 'reactivate';
  *
  * Accessibility: as an `aria-modal` dialog it moves focus into the panel on open, traps
  * Tab/Shift+Tab within it, and restores focus to the triggering element on close
- * (WCAG 2.4.3 Focus Order, 2.1.2 No Keyboard Trap). Esc and backdrop click also close —
- * except in 'reactivate' mode, where every dismissal means "Not now" (see `dismiss`).
+ * (WCAG 2.4.3 Focus Order, 2.1.2 No Keyboard Trap). Esc and backdrop click also close.
  */
 export default function AuthModal() {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<AuthMode>('login');
   const panelRef = useRef<HTMLDivElement>(null);
-  const router = useRouter();
-  const { refresh } = useAuth();
-  const decline = useDeclineReactivation();
 
-  /**
-   * Every way out of this modal that is not a button inside it: the X, the
-   * backdrop and Esc.
-   *
-   * In 'reactivate' mode that is NOT a close, it is "Not now". The session
-   * cookie is already set by the time the prompt appears, so a silent close
-   * leaves the customer holding a live token that the session guard 403s on
-   * everything except the four carved-out paths — the header still renders them
-   * signed in, /settings still loads, and nothing says the way back is to log
-   * out and log in again. Routed through the prompt's own decline path so the
-   * two cannot drift.
-   *
-   * Closed even if the logout call fails — caught rather than left to reject,
-   * since there is no error surface out here. That is exactly today's behaviour
-   * (which never attempted a logout at all), and the Settings page now carries
-   * a Reactivate action for a customer who ends up stranded anyway. The prompt's
-   * own "Not now" button keeps its retry message; this path cannot show one.
-   */
-  const dismiss = () => {
-    if (mode !== 'reactivate') {
-      setOpen(false);
-      return;
-    }
-    decline()
-      .catch(() => undefined)
-      .finally(() => setOpen(false));
-  };
+  const dismiss = () => setOpen(false);
 
   // Liquid-glass rim on the panel — subtle settings; the interior must stay
   // legible behind a form. Safari/Firefox get the frosted fallback.
@@ -89,12 +47,7 @@ export default function AuthModal() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const requested = params.get('auth');
-    if (
-      requested !== 'login' &&
-      requested !== 'signup' &&
-      requested !== 'reactivate'
-    )
-      return;
+    if (requested !== 'login' && requested !== 'signup') return;
     window.dispatchEvent(
       new CustomEvent('polycards:auth', { detail: { mode: requested } }),
     );
@@ -104,11 +57,9 @@ export default function AuthModal() {
   }, []);
 
   // Focus into the panel, Tab trap, Escape, body-scroll lock and focus restore.
-  // The hook reads `dismiss` through a ref refreshed every render, so Escape
-  // always sees the CURRENT mode (a reactivate dismissal must route through the
-  // decline path) without `mode` in an effect dep list — which is what used to
-  // tear the whole thing down on a login↔signup switch and bounce focus off the
-  // control just used.
+  // The hook re-runs only when `open` flips, so switching login↔signup no longer
+  // tears the listener down and bounces focus off the control just used — which
+  // is what listing `mode` in the old hand-rolled effect's deps did.
   useModalA11y(panelRef, open, dismiss);
 
   // `open` only flips true via a client event (post-hydration), so createPortal is
@@ -130,13 +81,7 @@ export default function AuthModal() {
         ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-label={
-          mode === 'reactivate'
-            ? 'Reactivate account'
-            : mode === 'signup'
-              ? 'Create account'
-              : 'Log in'
-        }
+        aria-label={mode === 'signup' ? 'Create account' : 'Log in'}
         tabIndex={-1}
         className="glass-panel relative z-10 max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-2xl border p-7 outline-none sm:p-8"
       >
@@ -148,33 +93,11 @@ export default function AuthModal() {
         >
           <X className="h-4 w-4" aria-hidden />
         </button>
-        {mode === 'reactivate' ? (
-          <ReactivatePrompt
-            onDone={(reactivated) => {
-              setOpen(false);
-              if (!reactivated) return;
-              // Nothing behind this modal knows the account came back: the
-              // Google callback landed on the home page holding a cookie the
-              // guard was refusing on every route but a handful.
-              //
-              // Both refreshes, because the two entry points arrive here in
-              // different states. On the emailpass path login returned the
-              // self-disabled variant, so it never called setCustomer and the
-              // auth context is empty — router.refresh() cannot fix that, since
-              // AuthProvider reads /api/me rather than the server render. On
-              // the Google path the context is already populated and the re-read
-              // is a no-op.
-              void refresh();
-              router.refresh();
-            }}
-          />
-        ) : (
-          <AuthForm
-            mode={mode}
-            onSwitchMode={setMode}
-            onSuccess={() => setOpen(false)}
-          />
-        )}
+        <AuthForm
+          mode={mode}
+          onSwitchMode={setMode}
+          onSuccess={() => setOpen(false)}
+        />
       </div>
     </div>,
     document.body,
