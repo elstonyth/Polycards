@@ -103,7 +103,7 @@ export type AccountInfo = {
  * the token is minted in the same request — and the pair mirrors
  * `fetchProfileHandle`/`getOwnProfileHandle` next door.
  *
- * It still propagates, but note what its only two callers do with that:
+ * It still propagates, but note what its two LOGIN-PATH callers do with that:
  * `login` and `googleCallback` (src/lib/actions/auth.ts) BOTH catch it to
  * `ASSUME_ACTIVE`, because a rejection there lands in the catch that clears the
  * auth cookie and would fail a login whose password was correct — see that
