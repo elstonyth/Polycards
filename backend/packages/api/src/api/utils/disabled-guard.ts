@@ -33,6 +33,7 @@ export const SELF_DISABLED_CODE = 'ACCOUNT_SELF_DISABLED';
 export const REACTIVATE_PATH = '/store/customers/me/reactivate';
 export const DELETE_PATH = '/store/customers/me/delete';
 export const ACCOUNT_INFO_PATH = '/store/customers/me/account';
+export const CUSTOMER_ME_PATH = '/store/customers/me';
 
 /**
  * The SELF-disable carve-out set. Deletion is here because a self-disabled
@@ -42,15 +43,34 @@ export const ACCOUNT_INFO_PATH = '/store/customers/me/account';
  * ACCOUNT_INFO_PATH rides along because the Settings page cannot render the
  * Danger zone without knowing whether to ask for a password.
  *
+ * CUSTOMER_ME_PATH is here because the two above were necessary but NOT
+ * sufficient: /settings renders behind the account layout, which calls
+ * getCustomer() -> GET /store/customers/me. Without this entry that read 403s,
+ * getCustomer() swallows it and returns null, and the layout redirects to
+ * /?auth=login — bouncing a self-disabled customer away from the very page
+ * holding the Delete button, leaving the delete route reachable by direct API
+ * call only.
+ *
+ * Matching is on the PATH only, not the method, so this admits
+ * POST /store/customers/me (a profile update) as well as the GET. That is
+ * accepted rather than worked around: REACTIVATE_PATH is already open, so
+ * anything an active customer may do is one POST away for a self-disabled one
+ * regardless — the carve-out grants no new capability. None of the other three
+ * entries are method-checked either.
+ *
  * This set is consulted ONLY on the `self` branch. The ADMIN branch stays
  * total, and that asymmetry is the whole point: a banned account reaching the
  * delete route would purge the payout details and withdrawal counterparties the
  * ban exists to preserve.
+ *
+ * Membership is EXACT, never a prefix: /store/customers/me/addresses and every
+ * other sub-path of the four stay blocked. The spec pins that.
  */
 const SELF_DISABLED_ALLOWED_PATHS: ReadonlySet<string> = new Set([
   REACTIVATE_PATH,
   DELETE_PATH,
   ACCOUNT_INFO_PATH,
+  CUSTOMER_ME_PATH,
 ]);
 
 // Both guards fail CLOSED: an unexpected error is handed to next(e), which the

@@ -2,6 +2,7 @@ import {
   ACCOUNT_INFO_PATH,
   blockDisabledCustomerSession,
   blockDisabledEmailpassLogin,
+  CUSTOMER_ME_PATH,
   DELETE_PATH,
   REACTIVATE_PATH,
   SELF_DISABLED_CODE,
@@ -95,7 +96,12 @@ describe('blockDisabledCustomerSession', () => {
   // Every carve-out path, against the ADMIN branch. The carve-out is only ever
   // widened for `self`; an admin ban must stay total, or a banned account could
   // reach the delete route and purge the records the ban exists to preserve.
-  it.each([REACTIVATE_PATH, DELETE_PATH, ACCOUNT_INFO_PATH])(
+  it.each([
+    REACTIVATE_PATH,
+    DELETE_PATH,
+    ACCOUNT_INFO_PATH,
+    CUSTOMER_ME_PATH,
+  ])(
     'blocks an admin-disabled session on %s',
     async (path) => {
       accountDisabledCause.mockResolvedValue('admin');
@@ -110,8 +116,13 @@ describe('blockDisabledCustomerSession', () => {
   // A self-disabled customer chose the state and no evidence is at risk, so
   // they must be able to delete WITHOUT reactivating first — and the Settings
   // page needs the account read to render the Danger zone at all. Without these
-  // two the population most likely to want deletion could not reach it.
-  it.each([DELETE_PATH, ACCOUNT_INFO_PATH])(
+  // three the population most likely to want deletion could not reach it.
+  //
+  // CUSTOMER_ME_PATH is the one that makes the other two REACHABLE: /settings
+  // renders behind the account layout, whose getCustomer() call is this path.
+  // Blocked, it 403s, the layout reads that as logged-out and redirects to
+  // /?auth=login — so the Danger zone could never be rendered at all.
+  it.each([DELETE_PATH, ACCOUNT_INFO_PATH, CUSTOMER_ME_PATH])(
     'lets a self-disabled session through to %s',
     async (path) => {
       accountDisabledCause.mockResolvedValue('self');
@@ -120,6 +131,22 @@ describe('blockDisabledCustomerSession', () => {
       expect(next).toHaveBeenCalledWith();
     },
   );
+
+  // The safety argument for admitting CUSTOMER_ME_PATH rests entirely on the
+  // set being EXACT membership rather than a prefix match. This is the test
+  // that proves it: /store/customers/me/addresses shares the whole allowed
+  // prefix and must still be refused. A future rewrite to startsWith() would
+  // open every sub-route of the customer tree, and only this case would notice.
+  it('blocks a self-disabled session on a sub-path of an allowed path', async () => {
+    accountDisabledCause.mockResolvedValue('self');
+    const next = mkNext();
+    await blockDisabledCustomerSession(
+      mkSessionReq('/store/customers/me/addresses'),
+      {} as never,
+      next,
+    );
+    expect(String(next.mock.calls[0][0].message)).toBe(SELF_DISABLED_CODE);
+  });
 
   it('blocks a self-disabled session everywhere except reactivate', async () => {
     accountDisabledCause.mockResolvedValue('self');
