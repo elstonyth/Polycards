@@ -70,7 +70,7 @@ export default function DangerZone({
   disabledCause: 'admin' | 'self' | null;
 }) {
   const router = useRouter();
-  const { setCustomer } = useAuth();
+  const { setCustomer, refresh } = useAuth();
   const [mode, setMode] = useState<'none' | 'disable' | 'delete'>('none');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -155,8 +155,14 @@ export default function DangerZone({
     try {
       const r = await reactivateAccount();
       if (r.ok) {
-        // Server-rendered from getAccountInfo(), so the refresh is what flips
-        // this panel back to its normal Disable/Delete pair.
+        // Both, and neither is redundant. router.refresh() re-renders the
+        // server components — this panel is server-rendered from
+        // getAccountInfo(), so that is what flips it back to Disable/Delete.
+        // refresh() re-reads /api/me, which hands AuthProvider a NEW customer
+        // object; the header's balance effect keys on that identity, and while
+        // the account was disabled its fetch 403'd, so without this the chip
+        // stays "RM —" until the customer happens to change tabs.
+        void refresh();
         router.refresh();
         return;
       }

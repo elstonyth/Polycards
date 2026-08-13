@@ -7,12 +7,18 @@ import { X } from 'lucide-react';
 import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
 import { lockBodyScroll, unlockBodyScroll } from '@/lib/use-modal-a11y';
 import AuthForm from './AuthForm';
+import { useAuth } from './auth/AuthProvider';
 import ReactivatePrompt, {
   useDeclineReactivation,
 } from './auth/ReactivatePrompt';
 
 // 'reactivate' is not a form the user can switch to — it is only ever arrived
-// at, via /?auth=reactivate from the Google callback (see that route).
+// at, from the two places a login turns out to belong to a self-disabled
+// account: /?auth=reactivate from the Google callback (see that route), and
+// AuthForm handing the modal over when login/signup returns the selfDisabled
+// variant. Both land on the same renderer so the dismiss handling below covers
+// both; a second copy inside AuthForm is what let the X close on a live
+// session.
 type AuthMode = 'login' | 'signup' | 'reactivate';
 
 // Tabbable-element selector used by the focus trap.
@@ -35,6 +41,7 @@ export default function AuthModal() {
   const panelRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
   const router = useRouter();
+  const { refresh } = useAuth();
   const decline = useDeclineReactivation();
 
   /**
@@ -191,10 +198,20 @@ export default function AuthModal() {
           <ReactivatePrompt
             onDone={(reactivated) => {
               setOpen(false);
+              if (!reactivated) return;
               // Nothing behind this modal knows the account came back: the
               // Google callback landed on the home page holding a cookie the
               // guard was refusing on every route but a handful.
-              if (reactivated) router.refresh();
+              //
+              // Both refreshes, because the two entry points arrive here in
+              // different states. On the emailpass path login returned the
+              // self-disabled variant, so it never called setCustomer and the
+              // auth context is empty — router.refresh() cannot fix that, since
+              // AuthProvider reads /api/me rather than the server render. On
+              // the Google path the context is already populated and the re-read
+              // is a no-op.
+              void refresh();
+              router.refresh();
             }}
           />
         ) : (

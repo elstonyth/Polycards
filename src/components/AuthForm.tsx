@@ -14,7 +14,6 @@ import { useAuth } from './auth/AuthProvider';
 import { NAME_MAX, normalizePhone } from '@/lib/profile-validation';
 import { PhoneField } from '@/components/PhoneField';
 import { PhoneOtpStep } from '@/components/auth/PhoneOtpStep';
-import ReactivatePrompt from './auth/ReactivatePrompt';
 import {
   startPhoneOtp,
   resetPasswordByPhone,
@@ -42,17 +41,16 @@ export default function AuthForm({
   onSuccess,
 }: {
   mode: 'login' | 'signup';
-  onSwitchMode: (m: 'login' | 'signup') => void;
+  // 'reactivate' is not a mode this form renders — it hands the modal over
+  // when a correct password turns out to belong to a self-disabled account.
+  onSwitchMode: (m: 'login' | 'signup' | 'reactivate') => void;
   onSuccess?: () => void;
 }) {
   const isSignup = mode === 'signup';
   const router = useRouter();
-  const { setCustomer, refresh } = useAuth();
+  const { setCustomer } = useAuth();
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<Note | null>(null);
-  // Login succeeded but the account is self-disabled — swaps the whole form for
-  // the reactivate prompt (see the sub-view below).
-  const [selfDisabled, setSelfDisabled] = useState(false);
   // Forgot-password lives inside the login mode as a sub-view (the live site
   // keeps everything in the one modal): "form" collects the email, "sent" is
   // the always-the-same confirmation (no account enumeration — the backend
@@ -162,8 +160,15 @@ export default function AuthForm({
     // than a cast — and never render it through setNote: the password was
     // CORRECT, and showing it as a failure is what would leave the customer
     // stuck with no way back into their own account.
+    //
+    // Handed to the MODAL rather than rendered here as a sub-view. The prompt
+    // sits on a live session cookie, so every way of dismissing it has to log
+    // out; only the modal owns the X, the backdrop and Esc. While this form
+    // rendered its own copy, the modal still believed it was showing a login
+    // form and closed all three silently — the exact stranded session the
+    // prompt exists to prevent. One renderer, one set of exits.
     if ('selfDisabled' in result) {
-      setSelfDisabled(true);
+      onSwitchMode('reactivate');
       return;
     }
     setNote({ text: result.error });
@@ -310,29 +315,6 @@ export default function AuthForm({
       setBusy(false);
       setNote({ text: 'Something went wrong. Please try again.' });
     }
-  }
-
-  // Wins over every other sub-view: the login already SUCCEEDED, so there is
-  // nothing left to collect and no form worth showing. Only finishAuth sets
-  // this, and only "Not now" (which logs out) clears it.
-  if (selfDisabled) {
-    return (
-      <div className="w-full">
-        <ReactivatePrompt
-          onDone={(reactivated) => {
-            setSelfDisabled(false);
-            if (!reactivated) return;
-            // No customer object on this path — login returned the failure
-            // variant, so context was never populated. router.refresh() alone
-            // would not fix that: AuthProvider's state comes from /api/me, not
-            // from the server render. refresh() is its own re-read.
-            void refresh();
-            onSuccess?.();
-            router.refresh();
-          }}
-        />
-      </div>
-    );
   }
 
   // Only the login mode owns the forgot sub-view — if something external
