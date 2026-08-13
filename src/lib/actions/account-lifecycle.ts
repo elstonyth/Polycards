@@ -23,8 +23,7 @@ import { ACCOUNT_SELF_DISABLED } from './account-lifecycle-map';
 
 export type LifecycleResult = { ok: true } | { ok: false; error: string };
 export type DeleteResult =
-  | { ok: true }
-  | { ok: false; error: string; reason: string | null };
+  { ok: true } | { ok: false; error: string; reason: string | null };
 /** Disable carries a refusal code too — same shape, different codes. */
 export type DisableResult = DeleteResult;
 

@@ -68,13 +68,29 @@ export default function DangerZone({ hasPassword }: { hasPassword: boolean }) {
   const [password, setPassword] = useState('');
   const [confirmWord, setConfirmWord] = useState('');
 
-  const close = () => {
-    if (busy) return;
-    setMode('none');
+  const reset = () => {
     setError(null);
     setReason(null);
     setPassword('');
     setConfirmWord('');
+  };
+
+  const close = () => {
+    if (busy) return;
+    setMode('none');
+    reset();
+  };
+
+  // Opening resets too, not just closing. A modal can be left behind without
+  // close() ever running: disabling the focused retry button blurs to <body>,
+  // which the focus trap does not recognise as first/last/panel, so Tab walks
+  // out of the panel and Enter on one of these triggers reaches the OTHER
+  // modal directly. Without this the delete dialog would open still showing
+  // the disable refusal — stale copy, and a `reason` its link map has no entry
+  // for.
+  const open = (next: 'disable' | 'delete') => {
+    reset();
+    setMode(next);
   };
 
   // Post-action navigation is client-side: no server action in this repo calls
@@ -150,14 +166,14 @@ export default function DangerZone({ hasPassword }: { hasPassword: boolean }) {
       <div className="flex flex-col gap-2 sm:flex-row">
         <button
           type="button"
-          onClick={() => setMode('disable')}
+          onClick={() => open('disable')}
           className="h-11 shrink-0 rounded-xl border border-white/10 bg-white/[0.05] px-4 text-sm font-medium text-white transition-colors hover:bg-white/[0.1]"
         >
           Disable account
         </button>
         <button
           type="button"
-          onClick={() => setMode('delete')}
+          onClick={() => open('delete')}
           className="h-11 shrink-0 rounded-xl border border-red-500/30 bg-red-500/10 px-4 text-sm font-semibold text-red-300 transition-colors hover:bg-red-500/20"
         >
           Delete account
