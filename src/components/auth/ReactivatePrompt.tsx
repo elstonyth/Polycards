@@ -7,6 +7,32 @@ import { reactivateAccount } from '@/lib/actions/account-lifecycle';
 import { useAuth } from './AuthProvider';
 
 /**
+ * Declining reactivation, as a hook so the prompt's "Not now" button and the
+ * modal's dismiss affordances (X, backdrop, Esc) cannot drift apart. Dismissing
+ * this prompt IS "Not now": the session cookie is already set, so a plain close
+ * strands the customer holding a live token that every route but the carve-out
+ * 403s, with nothing on screen saying the way back is to log out and in again.
+ *
+ * Clears the CLIENT context too, not just the cookie. On the Google path
+ * /api/me succeeds before this prompt shows (the guard carves out GET
+ * /store/customers/me), so AuthProvider is populated and the header renders a
+ * signed-in session that declining would otherwise leave on screen until the
+ * next navigation. router.refresh() cannot fix that — it re-renders server
+ * components, and this state is client-side. Same order as MeActions.tsx's
+ * logout. The AuthForm path only looks correct without it because its context
+ * happens to be empty.
+ *
+ * Throws if the logout call fails; each caller decides what to show.
+ */
+export function useDeclineReactivation(): () => Promise<void> {
+  const { setCustomer } = useAuth();
+  return async () => {
+    await logout();
+    setCustomer(null);
+  };
+}
+
+/**
  * Offered after a successful login when the account turns out to be
  * self-disabled. The session cookie is already set at this point — that is what
  * the reactivate call authenticates with — so declining must log out explicitly
@@ -25,7 +51,7 @@ export default function ReactivatePrompt({
 }: {
   onDone: (reactivated: boolean) => void;
 }) {
-  const { setCustomer } = useAuth();
+  const decline = useDeclineReactivation();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -51,18 +77,7 @@ export default function ReactivatePrompt({
             setBusy(true);
             setError(null);
             try {
-              await logout();
-              // Clear the CLIENT context too, not just the cookie. On the
-              // Google path /api/me succeeds before this prompt shows (the
-              // guard carves out GET /store/customers/me), so AuthProvider is
-              // populated and the header renders a signed-in session that
-              // declining would otherwise leave on screen until the next
-              // navigation. router.refresh() cannot fix that — it re-renders
-              // server components, and this state is client-side. Same order as
-              // MeActions.tsx's logout. Done here rather than in either caller
-              // so both entry points get it; the AuthForm path only looks
-              // correct today because its context happens to be empty.
-              setCustomer(null);
+              await decline();
               onDone(false);
             } catch {
               // Leaving must never dead-end. Without this the button would sit

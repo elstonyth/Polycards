@@ -7,7 +7,11 @@ import { Loader2 } from 'lucide-react';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { INPUT_CLASS, Panel } from '@/components/account/ui';
-import { disableAccount, deleteAccount } from '@/lib/actions/account-lifecycle';
+import {
+  disableAccount,
+  deleteAccount,
+  reactivateAccount,
+} from '@/lib/actions/account-lifecycle';
 // NOT from './account-lifecycle': that module is 'use server' and may export
 // only async functions. Next injects a runtime validator that rejects a plain
 // object export, and even without it a client component importing from a
@@ -54,12 +58,24 @@ function Modal({
   );
 }
 
-export default function DangerZone({ hasPassword }: { hasPassword: boolean }) {
+export default function DangerZone({
+  hasPassword,
+  disabledCause,
+}: {
+  hasPassword: boolean;
+  /** From GET /store/customers/me/account. 'self' means this page is being
+   *  read by a customer who has already disabled themselves — the one state
+   *  where /settings renders but almost nothing else does. */
+  disabledCause: 'admin' | 'self' | null;
+}) {
   const router = useRouter();
   const { setCustomer } = useAuth();
   const [mode, setMode] = useState<'none' | 'disable' | 'delete'>('none');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Its own state, not the modals' `error`: this one renders outside them and
+  // must not be cleared by opening one, or announced twice while one is open.
+  const [reactivateError, setReactivateError] = useState<string | null>(null);
   // The machine-readable refusal code, kept beside the copy so the modal can
   // offer the page that CLEARS the blocker. Every delete refusal is something
   // the customer can only fix somewhere else, so an instruction with no route
@@ -122,6 +138,27 @@ export default function DangerZone({ hasPassword }: { hasPassword: boolean }) {
     }
   }
 
+  // The in-app way back for a self-disabled customer. Without it the ONLY route
+  // to reactivation is logging out and back in — and nothing on this page, the
+  // one page their session can still reach, would say so.
+  async function onReactivate() {
+    if (busy) return;
+    setBusy(true);
+    setReactivateError(null);
+    try {
+      const r = await reactivateAccount();
+      if (r.ok) {
+        // Server-rendered from getAccountInfo(), so the refresh is what flips
+        // this panel back to its normal Disable/Delete pair.
+        router.refresh();
+        return;
+      }
+      setReactivateError(r.error);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onDelete() {
     if (busy) return;
     setBusy(true);
@@ -153,6 +190,13 @@ export default function DangerZone({ hasPassword }: { hasPassword: boolean }) {
   // stays closed until you log back in" — describes a transition that has
   // already happened, so both the copy and the button have to change.
   const alreadyDisabled = reason === ACCOUNT_SELF_DISABLED;
+  // This page renders for a self-disabled customer (the session guard carves
+  // out the account layout's read), so the account can already be disabled
+  // before anything on this panel is pressed. Offer the way back INSTEAD of a
+  // Disable button that is known-dead at render time — /disable is not in the
+  // carve-out and answers 403. Delete stays available in both states: it IS in
+  // the carve-out, precisely so nobody has to reactivate merely to leave.
+  const selfDisabled = disabledCause === 'self';
 
   return (
     <Panel className="border-red-500/25">
@@ -160,17 +204,30 @@ export default function DangerZone({ hasPassword }: { hasPassword: boolean }) {
         Danger zone
       </h2>
       <p className="mb-4 text-[13px] text-white/55">
-        Disabling is reversible — log back in any time to reactivate. Deleting
-        is not.
+        {selfDisabled
+          ? 'Your account is disabled. Reactivate it to pick up where you left off — your cards, balance and history are all still here. Deleting is permanent.'
+          : 'Disabling is reversible — log back in any time to reactivate. Deleting is not.'}
       </p>
       <div className="flex flex-col gap-2 sm:flex-row">
-        <button
-          type="button"
-          onClick={() => open('disable')}
-          className="h-11 shrink-0 rounded-xl border border-white/10 bg-white/[0.05] px-4 text-sm font-medium text-white transition-colors hover:bg-white/[0.1]"
-        >
-          Disable account
-        </button>
+        {selfDisabled ? (
+          <button
+            type="button"
+            onClick={onReactivate}
+            disabled={busy}
+            className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl bg-white px-4 text-sm font-bold text-neutral-950 transition-colors hover:bg-white/90 disabled:opacity-60"
+          >
+            {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
+            {busy ? 'Reactivating…' : 'Reactivate account'}
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => open('disable')}
+            className="h-11 shrink-0 rounded-xl border border-white/10 bg-white/[0.05] px-4 text-sm font-medium text-white transition-colors hover:bg-white/[0.1]"
+          >
+            Disable account
+          </button>
+        )}
         <button
           type="button"
           onClick={() => open('delete')}
@@ -179,6 +236,11 @@ export default function DangerZone({ hasPassword }: { hasPassword: boolean }) {
           Delete account
         </button>
       </div>
+      {reactivateError && (
+        <p role="alert" className="mt-3 text-[12px] text-red-400">
+          {reactivateError}
+        </p>
+      )}
 
       <Modal
         open={mode === 'disable'}
