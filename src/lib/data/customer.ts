@@ -88,6 +88,31 @@ export async function updateCustomerProfile(
   return customer;
 }
 
+export type AccountInfo = {
+  hasPassword: boolean;
+  /** Why the account is disabled, or null when it is not. Only 'self' may be
+   *  offered reactivation — see the route's comment for why login reads this
+   *  field instead of watching for a 403. */
+  disabledCause: 'admin' | 'self' | null;
+};
+
+/**
+ * Account facts for an EXPLICIT token, propagating failures.
+ *
+ * Separate from `getAccountInfo` because the two callers need opposite things
+ * from a failure, and the pair mirrors `fetchProfileHandle`/`getOwnProfileHandle`
+ * next door. Login calls this one: it runs before the cookie is readable (the
+ * token is minted in the same request) and a swallowed failure there would
+ * report "not disabled" for an account that is, dropping a self-disabled
+ * customer into a storefront where every page 403s and nothing explains why.
+ */
+export async function fetchAccountInfo(token: string): Promise<AccountInfo> {
+  return await sdk.client.fetch<AccountInfo>('/store/customers/me/account', {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: 'no-store',
+  });
+}
+
 /**
  * Account facts the Settings page needs before rendering the Danger zone.
  *
@@ -96,17 +121,15 @@ export async function updateCustomerProfile(
  * safer shape, since it asks for MORE proof rather than less. (Getting it wrong
  * the other way would drop the password field for an account that does have
  * one, and every delete would then fail PASSWORD_REQUIRED with no way to
- * comply.)
+ * comply.) `disabledCause` falls back to null for the same reason in reverse:
+ * a guessed disable state must never drive UI that a real one would.
  */
-export async function getAccountInfo(): Promise<{ hasPassword: boolean }> {
+export async function getAccountInfo(): Promise<AccountInfo> {
   const token = await getAuthToken();
-  if (!token) return { hasPassword: true };
+  if (!token) return { hasPassword: true, disabledCause: null };
   try {
-    return await sdk.client.fetch<{ hasPassword: boolean }>(
-      '/store/customers/me/account',
-      { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' },
-    );
+    return await fetchAccountInfo(token);
   } catch {
-    return { hasPassword: true };
+    return { hasPassword: true, disabledCause: null };
   }
 }

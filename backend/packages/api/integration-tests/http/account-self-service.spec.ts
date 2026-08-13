@@ -121,6 +121,31 @@ medusaIntegrationTestRunner({
         expect(blocked.status).toBe(403);
         expect(blocked.data.message).toBe(SELF_DISABLED_CODE);
 
+        // THE STOREFRONT'S DETECTION CONTRACT. Both halves are load-bearing and
+        // neither is provable by a mocked unit test, which is why they are here.
+        //
+        // First: GET /store/customers/me answers 200 for a self-disabled
+        // session. That is deliberate (the account layout needs it, or /settings
+        // bounces and the Delete button becomes unreachable) — but it means
+        // login SUCCEEDS for a self-disabled customer and nothing on the login
+        // path throws. An earlier plan for the reactivate prompt hung off a
+        // rejection here; this assertion is what makes that impossible to
+        // re-introduce by accident.
+        const me = await unwrapResponse(
+          api.get('/store/customers/me', { headers: authed(freshToken) }),
+        );
+        expect(me.status).toBe(200);
+
+        // Second: because that read cannot fail, the disable is reported as
+        // DATA on the account route instead. This is the only signal login has.
+        const info = await unwrapResponse(
+          api.get('/store/customers/me/account', {
+            headers: authed(freshToken),
+          }),
+        );
+        expect(info.status).toBe(200);
+        expect(info.data.disabledCause).toBe('self');
+
         // A repeat /disable never reaches its handler: the same guard that
         // opens /reactivate closes this. Asserted as the NEGATIVE twin of the
         // carve-out below — together they prove the originalUrl match in both

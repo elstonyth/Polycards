@@ -2,10 +2,16 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useRouter } from 'next/navigation';
 import { X } from 'lucide-react';
 import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
 import { lockBodyScroll, unlockBodyScroll } from '@/lib/use-modal-a11y';
 import AuthForm from './AuthForm';
+import ReactivatePrompt from './auth/ReactivatePrompt';
+
+// 'reactivate' is not a form the user can switch to — it is only ever arrived
+// at, via /?auth=reactivate from the Google callback (see that route).
+type AuthMode = 'login' | 'signup' | 'reactivate';
 
 // Tabbable-element selector used by the focus trap.
 const FOCUSABLE =
@@ -22,9 +28,10 @@ const FOCUSABLE =
  */
 export default function AuthModal() {
   const [open, setOpen] = useState(false);
-  const [mode, setMode] = useState<'login' | 'signup'>('login');
+  const [mode, setMode] = useState<AuthMode>('login');
   const panelRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
+  const router = useRouter();
 
   // Liquid-glass rim on the panel — subtle settings; the interior must stay
   // legible behind a form. Safari/Firefox get the frosted fallback.
@@ -32,7 +39,7 @@ export default function AuthModal() {
 
   useEffect(() => {
     const onOpen = (e: Event) => {
-      const detail = (e as CustomEvent<{ mode?: 'login' | 'signup' }>).detail;
+      const detail = (e as CustomEvent<{ mode?: AuthMode }>).detail;
       // Remember whatever had focus so it can be restored when the modal closes.
       triggerRef.current = document.activeElement as HTMLElement | null;
       setMode(detail?.mode ?? 'login');
@@ -48,7 +55,12 @@ export default function AuthModal() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const requested = params.get('auth');
-    if (requested !== 'login' && requested !== 'signup') return;
+    if (
+      requested !== 'login' &&
+      requested !== 'signup' &&
+      requested !== 'reactivate'
+    )
+      return;
     window.dispatchEvent(
       new CustomEvent('polycards:auth', { detail: { mode: requested } }),
     );
@@ -117,7 +129,13 @@ export default function AuthModal() {
         ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-label={mode === 'signup' ? 'Create account' : 'Log in'}
+        aria-label={
+          mode === 'reactivate'
+            ? 'Reactivate account'
+            : mode === 'signup'
+              ? 'Create account'
+              : 'Log in'
+        }
         tabIndex={-1}
         className="glass-panel relative z-10 max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-2xl border p-7 outline-none sm:p-8"
       >
@@ -129,11 +147,23 @@ export default function AuthModal() {
         >
           <X className="h-4 w-4" aria-hidden />
         </button>
-        <AuthForm
-          mode={mode}
-          onSwitchMode={setMode}
-          onSuccess={() => setOpen(false)}
-        />
+        {mode === 'reactivate' ? (
+          <ReactivatePrompt
+            onDone={(reactivated) => {
+              setOpen(false);
+              // Nothing behind this modal knows the account came back: the
+              // Google callback landed on the home page holding a cookie the
+              // guard was refusing on every route but a handful.
+              if (reactivated) router.refresh();
+            }}
+          />
+        ) : (
+          <AuthForm
+            mode={mode}
+            onSwitchMode={setMode}
+            onSuccess={() => setOpen(false)}
+          />
+        )}
       </div>
     </div>,
     document.body,

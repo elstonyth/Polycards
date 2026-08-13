@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   setAuthToken: vi.fn(),
   clearAuthToken: vi.fn(),
   fetchProfileHandle: vi.fn(),
+  fetchAccountInfo: vi.fn(),
   clientFetch: vi.fn(),
   customerRetrieve: vi.fn(),
   customerCreate: vi.fn(),
@@ -23,6 +24,7 @@ vi.mock('@/lib/data/customer', () => ({
   setAuthToken: mocks.setAuthToken,
   clearAuthToken: mocks.clearAuthToken,
   getAuthToken: vi.fn(),
+  fetchAccountInfo: mocks.fetchAccountInfo,
 }));
 vi.mock('@/lib/phone-verification', () => ({
   get PHONE_VERIFICATION_REQUIRED() {
@@ -68,6 +70,13 @@ import { GET as googleCallbackGET } from '@/app/auth/google/callback/route';
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.phoneVerificationRequired = false;
+  // Default: a healthy account. Every successful login/googleCallback now reads
+  // this — it is the ONLY thing that can report a self-disable (see the
+  // self-disabled describe below for why nothing throws on that path).
+  mocks.fetchAccountInfo.mockResolvedValue({
+    hasPassword: true,
+    disabledCause: null,
+  });
 });
 
 // #3 — a missing/undefined password must return a friendly error, never throw.
@@ -302,6 +311,108 @@ describe('login — disabled account message (§4.2)', () => {
   });
 });
 
+// A SELF-disable is a different animal from the §4.2 admin disable above, and
+// the difference is why these tests are shaped the way they are.
+//
+// The backend guard lets a self-disabled customer mint a token (the password
+// must be provable before reactivation is offered) AND carves out
+// GET /store/customers/me so the account layout keeps working. So on the login
+// path NOTHING FAILS: the retrieve returns 200 and the only signal is
+// `disabledCause` on the account read.
+//
+// These therefore mock a RESOLVED response, never a rejection. An earlier plan
+// for this feature asserted on `customerRetrieve.mockRejectedValueOnce(new
+// Error('ACCOUNT_SELF_DISABLED'))` — a rejection the backend does not produce.
+// That test passed, and the prompt it "covered" could never have rendered.
+// `account-self-service.spec.ts` pins the real 200s over real HTTP.
+const selfDisabledInfo = { hasPassword: true, disabledCause: 'self' as const };
+const okCustomer = {
+  customer: {
+    id: 'c1',
+    email: 'off@polycards.app',
+    first_name: 'A',
+    last_name: null,
+  },
+};
+
+describe('login — self-disabled account', () => {
+  it('reports selfDisabled and KEEPS the session cookie', async () => {
+    mocks.clientFetch.mockResolvedValueOnce({ token: 'tok' });
+    // The retrieve SUCCEEDS — that is the whole point.
+    mocks.customerRetrieve.mockResolvedValueOnce(okCustomer);
+    mocks.fetchProfileHandle.mockResolvedValueOnce(null);
+    mocks.fetchAccountInfo.mockResolvedValueOnce(selfDisabledInfo);
+
+    const r = await login({
+      email: 'off@polycards.app',
+      password: 'PolycardsTest123!',
+    });
+
+    expect(r).toEqual({ ok: false, selfDisabled: true });
+    // The cookie is what the reactivate call authenticates with — clearing it
+    // here would make the prompt impossible to act on.
+    expect(mocks.setAuthToken).toHaveBeenCalledWith('tok');
+    expect(mocks.clearAuthToken).not.toHaveBeenCalled();
+  });
+
+  it('carries no `error`, so it cannot be rendered as a login failure', async () => {
+    mocks.clientFetch.mockResolvedValueOnce({ token: 'tok' });
+    mocks.customerRetrieve.mockResolvedValueOnce(okCustomer);
+    mocks.fetchProfileHandle.mockResolvedValueOnce(null);
+    mocks.fetchAccountInfo.mockResolvedValueOnce(selfDisabledInfo);
+
+    const r = await login({
+      email: 'off@polycards.app',
+      password: 'PolycardsTest123!',
+    });
+
+    expect('error' in r).toBe(false);
+    expect('selfDisabled' in r).toBe(true);
+  });
+
+  // The cause is passed through, not collapsed to "disabled" — only 'self' may
+  // be offered reactivation. An admin-disabled session cannot actually reach
+  // this branch (its retrieve 403s), but keying on the exact value means a
+  // future carve-out change cannot turn a ban into a reactivate button.
+  it('does not offer reactivation for an admin disable', async () => {
+    mocks.clientFetch.mockResolvedValueOnce({ token: 'tok' });
+    mocks.customerRetrieve.mockResolvedValueOnce(okCustomer);
+    mocks.fetchProfileHandle.mockResolvedValueOnce(null);
+    mocks.fetchAccountInfo.mockResolvedValueOnce({
+      hasPassword: true,
+      disabledCause: 'admin',
+    });
+
+    const r = await login({
+      email: 'off@polycards.app',
+      password: 'PolycardsTest123!',
+    });
+
+    expect(r.ok).toBe(true);
+  });
+
+  // Fail-closed on the read itself: an unreadable account state must not be
+  // reported as "healthy", or a self-disabled customer silently lands in a
+  // storefront where every page 403s and nothing explains why.
+  it('fails the login when the account read itself fails', async () => {
+    mocks.clientFetch.mockResolvedValueOnce({ token: 'tok' });
+    mocks.customerRetrieve.mockResolvedValueOnce(okCustomer);
+    mocks.fetchProfileHandle.mockResolvedValueOnce(null);
+    mocks.fetchAccountInfo.mockRejectedValueOnce(new Error('socket hang up'));
+
+    const r = await login({
+      email: 'off@polycards.app',
+      password: 'PolycardsTest123!',
+    });
+
+    expect(r).toEqual({
+      ok: false,
+      error: 'Could not log in. Please try again.',
+    });
+    expect(mocks.clearAuthToken).toHaveBeenCalled();
+  });
+});
+
 // --- Google OAuth server actions (plan 053) -------------------------------
 
 // Mirrors decodeJwtPayload: split('.')[1] base64url-decoded to JSON.
@@ -342,6 +453,31 @@ describe('googleCallback — OAuth callback branches', () => {
     expect(mocks.customerCreate).not.toHaveBeenCalled();
     // Only the callback GET — a refresh would be a second clientFetch call.
     expect(mocks.clientFetch).toHaveBeenCalledTimes(1);
+  });
+
+  // The half with no other way back in. Google OAuth is live in production and
+  // its callback is NOT covered by the login-time guard, so a self-disabled
+  // Google customer mints a perfectly valid token; without this branch they
+  // bounce between the account gate and the login modal forever.
+  it('self-disabled returning user → selfDisabled, cookie kept', async () => {
+    const token = makeToken({ actor_id: 'cus_1' });
+    mocks.clientFetch.mockResolvedValueOnce({ token });
+    mocks.customerRetrieve.mockResolvedValueOnce({
+      customer: {
+        id: 'cus_1',
+        email: 'off@polycards.app',
+        first_name: 'R',
+        last_name: null,
+      },
+    });
+    mocks.fetchProfileHandle.mockResolvedValueOnce(null);
+    mocks.fetchAccountInfo.mockResolvedValueOnce(selfDisabledInfo);
+
+    const r = await googleCallback({ code: 'c', state: 's' });
+
+    expect(r).toEqual({ ok: false, selfDisabled: true });
+    expect(mocks.setAuthToken).toHaveBeenCalledWith(token);
+    expect(mocks.clearAuthToken).not.toHaveBeenCalled();
   });
 
   it('first login → normalizes email, refreshes, stores the REFRESHED token', async () => {
@@ -612,6 +748,38 @@ describe("callback route origin guard — resolveCallbackOrigin + the route's fa
       '/auth/google/failed?reason=origin',
     );
     expect(mocks.clientFetch).not.toHaveBeenCalled();
+  });
+
+  // The Route Handler's half of the Google reactivate path. Asserted on the
+  // real handler rather than on googleCallback alone, because the redirect
+  // TARGET is the part that matters: /me would dead-end (the account gate reads
+  // the guard's 403 as logged out and bounces back to the login modal), and
+  // ?auth=reactivate is what AuthModal turns into the prompt.
+  it('self-disabled → redirects to the reactivate prompt, not the failure page', async () => {
+    const request = new NextRequest(
+      'http://0.0.0.0:41234/auth/google/callback?code=c&state=s',
+      { headers: { 'x-forwarded-host': 'localhost:4000' } },
+    );
+    mocks.clientFetch.mockResolvedValueOnce({
+      token: makeToken({ actor_id: 'cus_1' }),
+    });
+    mocks.customerRetrieve.mockResolvedValueOnce({
+      customer: {
+        id: 'cus_1',
+        email: 'off@polycards.app',
+        first_name: null,
+        last_name: null,
+      },
+    });
+    mocks.fetchProfileHandle.mockResolvedValueOnce(null);
+    mocks.fetchAccountInfo.mockResolvedValueOnce(selfDisabledInfo);
+
+    const res = await googleCallbackGET(request);
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get('location')).toBe(
+      'http://localhost:4000/?auth=reactivate',
+    );
   });
 
   it('x-forwarded-host: localhost:4000 → succeeds with the http local origin', () => {

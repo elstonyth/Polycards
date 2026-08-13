@@ -14,6 +14,7 @@ import { useAuth } from './auth/AuthProvider';
 import { NAME_MAX, normalizePhone } from '@/lib/profile-validation';
 import { PhoneField } from '@/components/PhoneField';
 import { PhoneOtpStep } from '@/components/auth/PhoneOtpStep';
+import ReactivatePrompt from './auth/ReactivatePrompt';
 import {
   startPhoneOtp,
   resetPasswordByPhone,
@@ -46,9 +47,12 @@ export default function AuthForm({
 }) {
   const isSignup = mode === 'signup';
   const router = useRouter();
-  const { setCustomer } = useAuth();
+  const { setCustomer, refresh } = useAuth();
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<Note | null>(null);
+  // Login succeeded but the account is self-disabled — swaps the whole form for
+  // the reactivate prompt (see the sub-view below).
+  const [selfDisabled, setSelfDisabled] = useState(false);
   // Forgot-password lives inside the login mode as a sub-view (the live site
   // keeps everything in the one modal): "form" collects the email, "sent" is
   // the always-the-same confirmation (no account enumeration — the backend
@@ -154,6 +158,14 @@ export default function AuthForm({
       router.refresh();
       return;
     }
+    // The self-disabled variant carries no `error`, so narrow with `in` rather
+    // than a cast — and never render it through setNote: the password was
+    // CORRECT, and showing it as a failure is what would leave the customer
+    // stuck with no way back into their own account.
+    if ('selfDisabled' in result) {
+      setSelfDisabled(true);
+      return;
+    }
     setNote({ text: result.error });
   }
 
@@ -215,7 +227,15 @@ export default function AuthForm({
             phone,
             phone_verification_token: signupDraft.proofToken,
           });
-          if (retry.ok || !/verif/i.test(retry.error)) {
+          // `'selfDisabled' in retry` short-circuits before the regex because
+          // that variant carries no `error` to test. It is not a
+          // verification-shaped rejection, so it takes this branch and reaches
+          // finishAuth, which shows the reactivate prompt.
+          if (
+            retry.ok ||
+            'selfDisabled' in retry ||
+            !/verif/i.test(retry.error)
+          ) {
             // Keep the token for another retry (e.g. a second duplicate
             // email) and refresh the draft to what was just typed.
             setSignupDraft({
@@ -290,6 +310,29 @@ export default function AuthForm({
       setBusy(false);
       setNote({ text: 'Something went wrong. Please try again.' });
     }
+  }
+
+  // Wins over every other sub-view: the login already SUCCEEDED, so there is
+  // nothing left to collect and no form worth showing. Only finishAuth sets
+  // this, and only "Not now" (which logs out) clears it.
+  if (selfDisabled) {
+    return (
+      <div className="w-full">
+        <ReactivatePrompt
+          onDone={(reactivated) => {
+            setSelfDisabled(false);
+            if (!reactivated) return;
+            // No customer object on this path — login returned the failure
+            // variant, so context was never populated. router.refresh() alone
+            // would not fix that: AuthProvider's state comes from /api/me, not
+            // from the server render. refresh() is its own re-read.
+            void refresh();
+            onSuccess?.();
+            router.refresh();
+          }}
+        />
+      </div>
+    );
   }
 
   // Only the login mode owns the forgot sub-view — if something external

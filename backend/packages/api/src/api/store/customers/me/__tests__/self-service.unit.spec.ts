@@ -147,6 +147,9 @@ const deleteScope = {
         deleteAccountPreflight,
         purgeAccountPacksData,
         mutateCustomerMetadata,
+        // The account route reads this to tell login whether to offer
+        // reactivation. Defaulted per-test in the account describe below.
+        accountDisabledCause,
       };
     if (key === 'auth')
       return {
@@ -368,12 +371,18 @@ describe('POST /store/customers/me/delete', () => {
 });
 
 describe('GET /store/customers/me/account', () => {
+  beforeEach(() => {
+    listAuthIdentities.mockReset();
+    accountDisabledCause.mockReset().mockResolvedValue(null);
+  });
+
   it('reports hasPassword true for an emailpass account', async () => {
     withEmailpass();
     const res = mkRes();
     await accountGET(mkDeleteReq(), res);
     expect((res as { json: jest.Mock }).json).toHaveBeenCalledWith({
       hasPassword: true,
+      disabledCause: null,
     });
   });
 
@@ -385,6 +394,38 @@ describe('GET /store/customers/me/account', () => {
     await accountGET(mkDeleteReq(), res);
     expect((res as { json: jest.Mock }).json).toHaveBeenCalledWith({
       hasPassword: false,
+      disabledCause: null,
+    });
+  });
+
+  // The field login reads to decide whether to offer reactivation. Asserted on
+  // the RESPONSE, not on a rejection: the previous plan for this feature watched
+  // for an ACCOUNT_SELF_DISABLED throw on the login path, and that throw stopped
+  // happening when GET /store/customers/me entered the guard's carve-out — with
+  // every mocked test still green, because the test fabricated the rejection.
+  it('reports the disable cause verbatim, so login can offer reactivation', async () => {
+    withEmailpass();
+    accountDisabledCause.mockResolvedValue('self');
+    const res = mkRes();
+    await accountGET(mkDeleteReq(), res);
+    expect((res as { json: jest.Mock }).json).toHaveBeenCalledWith({
+      hasPassword: true,
+      disabledCause: 'self',
+    });
+    expect(accountDisabledCause).toHaveBeenCalledWith('cus_1');
+  });
+
+  // Passed through rather than collapsed to a boolean. An admin-disabled session
+  // cannot reach this route today (the guard's admin branch is total), but the
+  // storefront must key on 'self' explicitly — never on "it answered at all".
+  it('does not disguise an admin disable as a self disable', async () => {
+    withEmailpass();
+    accountDisabledCause.mockResolvedValue('admin');
+    const res = mkRes();
+    await accountGET(mkDeleteReq(), res);
+    expect((res as { json: jest.Mock }).json).toHaveBeenCalledWith({
+      hasPassword: true,
+      disabledCause: 'admin',
     });
   });
 });
