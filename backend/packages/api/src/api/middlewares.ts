@@ -440,11 +440,14 @@ export default defineMiddlewares({
       method: 'POST',
       middlewares: [validateDeliverableAddress('update')],
     },
-    // Customer self-service account lifecycle. Rate-limited on the delivery
-    // write tier — rare, deliberate mutations, same class as saving a payout
-    // destination. authenticate() FIRST: the array is the execution order, and
-    // the limiter keys on auth_context.actor_id, so an unauthenticated request
-    // must 401 before it consumes anyone's budget.
+    // Customer self-service account lifecycle. Three tiers, not one: /disable
+    // and /reactivate sit on the delivery WRITE tier (rare, deliberate
+    // mutations, same class as saving a payout destination), /delete has its own
+    // stricter tier because it carries a password field (see its entry), and
+    // /account is a plain read. authenticate() FIRST on every one of them: the
+    // array is the execution order, and the limiters key on
+    // auth_context.actor_id, so an unauthenticated request must 401 before it
+    // consumes anyone's budget.
     //
     // No disabled-session guard and no Cache-Control entry here: the blanket
     // '/store/*' entry at the end of this array already applies both.

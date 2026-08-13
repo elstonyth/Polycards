@@ -403,7 +403,12 @@ describe('deletedCustomerIds', () => {
         entity_id: ['cus_1', 'cus_2'],
         action: 'delete_account',
       },
-      { take: 2 },
+      // No `take`, and the empty config is asserted rather than `anything()`:
+      // a bound here can only subtract. Two delete_account rows for one
+      // customer (idempotency makes that unlikely, not impossible) would push
+      // another customer's row past a length-based limit, and the id it dropped
+      // would then be PAID.
+      {},
       CTX_ARG,
     );
   });

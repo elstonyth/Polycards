@@ -3871,8 +3871,21 @@ class PacksModuleService extends MedusaService({
   // BEFORE the customer soft delete, so it covers a half-finished purge too.
   // The customer module is not reachable from this service anyway.
   //
-  // One query for the whole list — the caller's ranking is at most ten ids, and
-  // the audit write is idempotent, so `take` can be the id count.
+  // The two callers use this very differently, and a comment that flatters
+  // either one would mislead the next reader: settleChallengeWeek reads the
+  // WHOLE ranking in one query (at most ten ids, outside the per-winner
+  // transactions, service.ts:7619), while payCommission calls it once per
+  // BENEFICIARY inside its fan-out loop (service.ts:3427) — inside the credit
+  // advisory lock — so one pack open runs it about five times. Hoisting a
+  // batched read out of that loop would mean restructuring it for ~5 index
+  // seeks, which is not worth doing; it is worth not claiming otherwise.
+  //
+  // No `take`. The id count looked safe because the audit write is idempotent,
+  // but "near-impossible" is not "impossible": a second delete_account row for
+  // one customer would push another customer's row past the limit and hand back
+  // a set that silently omits a deleted account — which then gets PAID. The
+  // filter already constrains the read to these ids; a bound on top of it buys
+  // nothing and can only subtract.
   //
   // entity_type is redundant for correctness (only the purge writes
   // 'delete_account', always with 'customer') but NOT for cost: the sole usable
@@ -3892,7 +3905,7 @@ class PacksModuleService extends MedusaService({
         entity_id: customerIds,
         action: 'delete_account',
       },
-      { take: customerIds.length },
+      {},
       sharedContext,
     );
     return new Set(rows.map((r) => r.entity_id));

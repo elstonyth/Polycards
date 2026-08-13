@@ -18,10 +18,21 @@
 //  2. `rawLedgerBalanceCents`' SUM(ROUND(amount*100))::bigint has never run
 //     against Postgres. The negative-balance leg of the delete-guards test is
 //     what proves the sign survives the round trip, not just the JS.
+//  3. The CUSTOMER-module half of the purge — the email scrub, the metadata
+//     clear, the address delete and the notification delete. The unit spec
+//     mocks those modules, so it can only assert that the route CALLED them
+//     with a given shape; whether the rows are actually gone is knowable only
+//     here. The notification rows matter most: they carry live password-reset
+//     URLs and bank-account last4, and a soft delete would leave both in place.
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
 import { Modules } from '@medusajs/framework/utils';
+import type {
+  ICustomerModuleService,
+  INotificationModuleService,
+} from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
+import { CUSTOMER_FEED_CHANNEL } from '../../src/modules/packs/notify-feed';
 import { seedOf } from '../../src/utils/profile-handle';
 import { clearLeaderboardCache } from '../../src/api/store/leaderboard/route';
 import { clearChallengeCache } from '../../src/api/store/challenge/route';
@@ -384,6 +395,75 @@ medusaIntegrationTestRunner({
         await packs.createNotificationReads([
           { customer_id: id, notification_id: 'noti_x' },
         ]);
+        // The metadata blob is where the customer's personal data actually
+        // lives — saved bank accounts, the public handle, the avatar id — and a
+        // freshly registered row has metadata NULL, so "it is {} afterwards"
+        // would be true whether or not the purge ran. Seed it so the assertion
+        // has something to disprove.
+        await packs.mutateCustomerMetadata({
+          customerId: id,
+          mutate: () => ({
+            handle: 'realperson',
+            avatar_url: 'https://example.test/avatar.png',
+            bank_accounts: [
+              { bank_name: 'Maybank', account_number: '1234567890' },
+            ],
+          }),
+        });
+        // Notification rows, under BOTH addressing conventions the route
+        // queries: the EMAIL (transactional mail — the password-reset payload
+        // carries a working reset URL) and the CUSTOMER ID (the in-app feed —
+        // its payloads carry bank names and account last4). The route comment
+        // warns against narrowing that filter back to the email alone, so both
+        // halves get a row here.
+        //
+        // The CHANNEL is forced by the test environment — only the local
+        // provider is registered without RESEND_*, so 'email' would throw "no
+        // provider for channel". The ADDRESS is what the purge keys on, and the
+        // address is what this fixture is testing.
+        const customers =
+          getContainer().resolve<ICustomerModuleService>(Modules.CUSTOMER);
+        const notifications = getContainer().resolve<INotificationModuleService>(
+          Modules.NOTIFICATION,
+        );
+        // A saved address — registration creates none, so without this the
+        // "addresses are gone" assertion below would hold on an empty set.
+        await customers.createCustomerAddresses([
+          {
+            customer_id: id,
+            address_name: 'Home',
+            first_name: 'Real',
+            last_name: 'Person',
+            address_1: '1 Real Road',
+            city: 'KL',
+            postal_code: '50000',
+            country_code: 'my',
+          },
+        ]);
+        await notifications.createNotifications([
+          {
+            to: email,
+            channel: CUSTOMER_FEED_CHANNEL,
+            template: 'password_reset',
+            data: { url: 'https://example.test/reset?token=real-token' },
+          },
+          {
+            to: id,
+            receiver_id: id,
+            channel: CUSTOMER_FEED_CHANNEL,
+            template: 'bank_account_added',
+            data: { bank_name: 'Maybank', account_last4: '7890' },
+          },
+        ]);
+        // Asserted BEFORE the delete with the same filters used after it: a
+        // filter that silently matched nothing would make the post-delete
+        // "they are gone" checks pass on their own.
+        expect(
+          await notifications.listNotifications({ to: [email, id] }),
+        ).toHaveLength(2);
+        expect(
+          await customers.listCustomerAddresses({ customer_id: id }),
+        ).toHaveLength(1);
         // Net-zero credit movement, so the balance guard still passes while
         // leaving two credit_transaction rows that must SURVIVE.
         await packs.mutateCreditAtomic({
@@ -450,6 +530,29 @@ medusaIntegrationTestRunner({
         ).toHaveLength(0);
         expect(
           await packs.listNotificationReads({ customer_id: id }, { take: 1 }),
+        ).toHaveLength(0);
+
+        // The CUSTOMER-module half of the purge, which every other spec on this
+        // branch only mocks. `withDeleted` on both reads: the notification rows
+        // must be HARD-deleted (a soft-deleted row keeps the reset URL and the
+        // bank last4, which is the entire reason this step exists), and the
+        // customer row is soft-deleted by step 7, so it is unreadable without
+        // it.
+        expect(
+          await notifications.listNotifications(
+            { to: [email, id] },
+            { withDeleted: true },
+          ),
+        ).toHaveLength(0);
+        const scrubbed = await customers.retrieveCustomer(id, {
+          withDeleted: true,
+        });
+        expect(scrubbed.email.startsWith('deleted_')).toBe(true);
+        expect(scrubbed.email).not.toContain(email);
+        expect(scrubbed.first_name).toBeNull();
+        expect(scrubbed.metadata).toEqual({});
+        expect(
+          await customers.listCustomerAddresses({ customer_id: id }),
         ).toHaveLength(0);
 
         // Retained untouched — the anonymous books.
