@@ -3367,7 +3367,8 @@ git commit -m "feat(account): add disable, reactivate and delete server actions"
 
 **Interfaces:**
 
-- Consumes: `disableAccount`, `deleteAccount`, `DELETE_LINK` (Task 8), `getAccountInfo` (Task 8).
+- Consumes: `disableAccount`, `deleteAccount`, `getAccountInfo` from `@/lib/actions/account-lifecycle`; and **`DELETE_LINK` from `@/lib/actions/account-lifecycle-map`, NOT from `account-lifecycle`.** A `'use server'` module may export only async functions — Next injects a runtime validator (`next-flight-loader/action-validate.js`) that rejects a plain object, and neither vitest nor `tsc` catches it. Even without the throw it could not work: a client component importing from a `'use server'` module receives server-reference proxies rather than values, so `DELETE_LINK.BALANCE_NOT_ZERO.href` would be undefined. Task 8 split the constant out for exactly this reason.
+- Note the deep-link targets (`/wallet`, `/transactions`, `/vault`, `/orders`) will themselves 403 for a self-disabled session — the carve-out admits only the four account paths. That is acceptable for the blocked-reason links, which a self-disabled customer will rarely see, but do not build anything that depends on those pages loading in that state.
 - Produces: `<DangerZone hasPassword={boolean} />`.
 
 - [ ] **Step 0: Let a self-disabled customer actually reach this page**
