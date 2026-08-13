@@ -98,13 +98,14 @@ export default function DangerZone({
     reset();
   };
 
-  // Opening resets too, not just closing. A modal can be left behind without
-  // close() ever running: disabling the focused retry button blurs to <body>,
-  // which the focus trap does not recognise as first/last/panel, so Tab walks
-  // out of the panel and Enter on one of these triggers reaches the OTHER
-  // modal directly. Without this the delete dialog would open still showing
-  // the disable refusal — stale copy, and a `reason` its link map has no entry
-  // for.
+  // Opening resets too, not just closing — a dialog must never open carrying
+  // the other one's refusal (stale copy, and a `reason` its link map has no
+  // entry for). This started as a workaround: disabling the focused retry
+  // button blurs to <body>, which the focus trap did not recognise as a
+  // boundary, so Tab walked out of the panel and Enter on the other trigger
+  // opened it behind a live refusal. useModalA11y now treats anything outside
+  // the panel as the boundary, but reset-on-open is the cheap invariant and
+  // does not depend on that.
   const open = (next: 'disable' | 'delete') => {
     reset();
     setMode(next);

@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { X } from 'lucide-react';
 import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
-import { lockBodyScroll, unlockBodyScroll } from '@/lib/use-modal-a11y';
+import { useModalA11y } from '@/lib/use-modal-a11y';
 import AuthForm from './AuthForm';
 import { useAuth } from './auth/AuthProvider';
 import ReactivatePrompt, {
@@ -21,10 +21,6 @@ import ReactivatePrompt, {
 // session.
 type AuthMode = 'login' | 'signup' | 'reactivate';
 
-// Tabbable-element selector used by the focus trap.
-const FOCUSABLE =
-  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
 /**
  * Global auth modal — mounted once (in SiteHeader, always present). Opens in response
  * to the `polycards:auth` window event dispatched by openAuth() (see AuthButton). Matches
@@ -39,7 +35,6 @@ export default function AuthModal() {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<AuthMode>('login');
   const panelRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLElement | null>(null);
   const router = useRouter();
   const { refresh } = useAuth();
   const decline = useDeclineReactivation();
@@ -79,8 +74,8 @@ export default function AuthModal() {
   useEffect(() => {
     const onOpen = (e: Event) => {
       const detail = (e as CustomEvent<{ mode?: AuthMode }>).detail;
-      // Remember whatever had focus so it can be restored when the modal closes.
-      triggerRef.current = document.activeElement as HTMLElement | null;
+      // Whatever has focus now is the trigger; useModalA11y captures it when
+      // the open flip reaches its effect and restores it on close.
       setMode(detail?.mode ?? 'login');
       setOpen(true);
     };
@@ -108,54 +103,13 @@ export default function AuthModal() {
     window.history.replaceState({}, '', url);
   }, []);
 
-  useEffect(() => {
-    if (!open) return;
-    const panel = panelRef.current;
-
-    // Move focus into the dialog on open (WCAG 2.4.3). Guarded because `mode`
-    // is in this effect's deps — Esc has to see the CURRENT mode to route a
-    // reactivate dismissal through the decline path — and without the guard,
-    // switching login↔signup would yank focus off the control just used.
-    if (!panel?.contains(document.activeElement)) panel?.focus();
-
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        dismiss();
-        return;
-      }
-      // Trap focus within the dialog so background content stays unreachable (WCAG 2.1.2).
-      if (e.key !== 'Tab' || !panel) return;
-      const focusables = Array.from(
-        panel.querySelectorAll<HTMLElement>(FOCUSABLE),
-      );
-      if (focusables.length === 0) return;
-      // length === 0 is checked above; both indices are in bounds
-      const first = focusables[0]!;
-      const last = focusables[focusables.length - 1]!;
-      const active = document.activeElement;
-      if (e.shiftKey && (active === first || active === panel)) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && active === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-
-    document.addEventListener('keydown', onKey);
-    lockBodyScroll();
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      unlockBodyScroll();
-      // Restore focus to the element that opened the modal (WCAG 2.4.3).
-      triggerRef.current?.focus();
-    };
-    // `dismiss` is rebuilt every render, so listing it would tear down and
-    // re-bind this listener (and re-run the focus/scroll-lock setup) on every
-    // parent render. `mode` is the only thing inside it this listener has to
-    // see freshly.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, mode]);
+  // Focus into the panel, Tab trap, Escape, body-scroll lock and focus restore.
+  // The hook reads `dismiss` through a ref refreshed every render, so Escape
+  // always sees the CURRENT mode (a reactivate dismissal must route through the
+  // decline path) without `mode` in an effect dep list — which is what used to
+  // tear the whole thing down on a login↔signup switch and bounce focus off the
+  // control just used.
+  useModalA11y(panelRef, open, dismiss);
 
   // `open` only flips true via a client event (post-hydration), so createPortal is
   // never reached during SSR — no separate mounted gate needed.
