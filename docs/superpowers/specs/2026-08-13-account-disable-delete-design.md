@@ -194,7 +194,7 @@ A stolen customer session cookie can delete a Google-only account, because typed
 
   What actually holds the value back is the fail-closed redemption gate. `rewardsRedemptionEnabled()` (`modules/packs/rewards-gate.ts`) is the route's FIRST line and 403s before any read or write, and `claimReward` re-checks it at the mint site (defense-in-depth, `service.ts:2151`). It returns true only when `REWARDS_REDEMPTION_ENABLED` is exactly `'true'`, which is unset — so no grant is claimable by anyone, deleted or live. `/store/rewards/withdraw` sits behind the same gate.
 
-  **Prerequisite of enabling redemption: revisit this exclusion in the same change that sets `REWARDS_REDEMPTION_ENABLED`.** The moment that flag is on, an unclaimed grant is strandable value and becomes a sixth settlement block reason. Do not treat this as a someday note — the flag flip is the trigger.
+  **Prerequisite of enabling redemption: revisit this exclusion in the same change that sets `REWARDS_REDEMPTION_ENABLED`.** The moment that flag is on, an unclaimed grant is strandable value and becomes a **seventh** settlement block reason — `DeleteBlockReason` already has six members (§5, and `service.ts:392`). Do not treat this as a someday note — the flag flip is the trigger.
 
 ## Value that accrues AFTER the delete
 
