@@ -30,7 +30,11 @@ import {
   reactivateAccount,
   deleteAccount,
 } from '../account-lifecycle';
-import { DELETE_LINK } from '../account-lifecycle-map';
+import {
+  CONFIRM_WORD,
+  DELETE_LINK,
+  deleteConfirmReady,
+} from '../account-lifecycle-map';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -249,5 +253,52 @@ describe('DELETE_LINK', () => {
       expect(href).toMatch(/^\/[a-z]/);
       expect(label.length).toBeGreaterThan(0);
     }
+  });
+});
+
+// The gate on an irreversible, unrecoverable action. For a Google-only account
+// it is the ONLY gate: no password is sent, so the backend has nothing to
+// verify beyond the session and deletes on request. Every case below is a way
+// the button could arm when it must not.
+describe('deleteConfirmReady', () => {
+  const google = { hasPassword: false, password: '' };
+  const pw = { hasPassword: true, password: 'hunter2' };
+
+  it('stays closed on an untouched form', () => {
+    expect(deleteConfirmReady({ ...google, confirmWord: '' })).toBe(false);
+    expect(deleteConfirmReady({ ...pw, password: '', confirmWord: '' })).toBe(
+      false,
+    );
+  });
+
+  // The Google branch has no server-side backstop, so a near-miss must not arm.
+  it.each(['delete', 'Delete', 'DELET', 'DELETEE', 'DEL ETE', 'x'])(
+    'stays closed when the confirm word is %p',
+    (word) => {
+      expect(deleteConfirmReady({ ...google, confirmWord: word })).toBe(false);
+      expect(deleteConfirmReady({ ...pw, confirmWord: word })).toBe(false);
+    },
+  );
+
+  it('opens for a Google account on the exact word alone', () => {
+    expect(deleteConfirmReady({ ...google, confirmWord: CONFIRM_WORD })).toBe(
+      true,
+    );
+  });
+
+  // The word alone is not enough when there IS a password to prove intent with.
+  it('still requires a password when the account has one', () => {
+    expect(
+      deleteConfirmReady({ ...pw, password: '', confirmWord: CONFIRM_WORD }),
+    ).toBe(false);
+    expect(deleteConfirmReady({ ...pw, confirmWord: CONFIRM_WORD })).toBe(true);
+  });
+
+  // Invisible whitespace leaving the button dead with no explanation is a
+  // support ticket; the capitals are the friction, the padding never was.
+  it('tolerates surrounding whitespace', () => {
+    expect(
+      deleteConfirmReady({ ...google, confirmWord: `  ${CONFIRM_WORD}\n` }),
+    ).toBe(true);
   });
 });

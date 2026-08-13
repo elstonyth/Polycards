@@ -1,4 +1,7 @@
 /**
+ * The client-safe half of the account-lifecycle contract: the blocker link map
+ * and the delete confirmation gate.
+ *
  * Where the customer has to go to clear each delete blocker.
  *
  * A plain module, deliberately NOT part of `account-lifecycle.ts`: that file
@@ -30,3 +33,33 @@ export const DELETE_LINK: Record<string, { href: string; label: string }> = {
   CARDS_UNSETTLED: { href: '/vault', label: 'Open vault' },
   DELIVERY_IN_FLIGHT: { href: '/orders', label: 'Track delivery' },
 };
+
+/** The word the customer must type to arm the permanent delete. */
+export const CONFIRM_WORD = 'DELETE';
+
+/**
+ * Whether the Delete button may be armed. Lives here rather than inline in
+ * DangerZone.tsx so it can be tested: vitest collects `src/**\/*.test.ts` only,
+ * so a predicate inside a `.tsx` is silently uncoverable.
+ *
+ * It is worth testing because the confirm word is the ONLY thing standing
+ * between a Google-only account and irreversible deletion — that account sends
+ * no password, so the backend has no proof-of-intent step to fall back on and
+ * accepts the request on the session alone. For a password account this gate is
+ * belt-and-braces (the backend re-checks); for a Google one it is the whole
+ * belt. Inverting either half of the `&&` would arm the button on an empty form.
+ *
+ * The typed word is trimmed but NOT case-folded: trailing whitespace from a
+ * paste or a mobile keyboard is invisible, and leaving the button dead with no
+ * explanation is a support ticket, whereas lowercase `delete` is a visible
+ * mismatch the customer can see and fix. The capitals are the deliberate
+ * friction; the whitespace never was.
+ */
+export function deleteConfirmReady(input: {
+  hasPassword: boolean;
+  password: string;
+  confirmWord: string;
+}): boolean {
+  if (input.confirmWord.trim() !== CONFIRM_WORD) return false;
+  return !input.hasPassword || input.password.length > 0;
+}
