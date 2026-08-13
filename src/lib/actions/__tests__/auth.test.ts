@@ -391,10 +391,13 @@ describe('login — self-disabled account', () => {
     expect(r.ok).toBe(true);
   });
 
-  // Fail-closed on the read itself: an unreadable account state must not be
-  // reported as "healthy", or a self-disabled customer silently lands in a
-  // storefront where every page 403s and nothing explains why.
-  it('fails the login when the account read itself fails', async () => {
+  // The account read may NOT gate the door. The storefront and the backend are
+  // two independently deployed apps, so a storefront running ahead of its
+  // backend 404s this route — and failing closed there would fail every login
+  // with a correct password on the deploy that ships this feature. Assume
+  // active, keep the cookie; the cost is a self-disabled customer missing the
+  // reactivation prompt for that window (see ASSUME_ACTIVE in auth.ts).
+  it('still logs in when the account read itself fails', async () => {
     mocks.clientFetch.mockResolvedValueOnce({ token: 'tok' });
     mocks.customerRetrieve.mockResolvedValueOnce(okCustomer);
     mocks.fetchProfileHandle.mockResolvedValueOnce(null);
@@ -405,11 +408,8 @@ describe('login — self-disabled account', () => {
       password: 'PolycardsTest123!',
     });
 
-    expect(r).toEqual({
-      ok: false,
-      error: 'Could not log in. Please try again.',
-    });
-    expect(mocks.clearAuthToken).toHaveBeenCalled();
+    expect(r.ok).toBe(true);
+    expect(mocks.clearAuthToken).not.toHaveBeenCalled();
   });
 });
 
@@ -780,6 +780,35 @@ describe("callback route origin guard — resolveCallbackOrigin + the route's fa
     expect(res.headers.get('location')).toBe(
       'http://localhost:4000/?auth=reactivate',
     );
+  });
+
+  // The deploy-window case on the path that has no other signal: a storefront
+  // running ahead of its backend 404s the account route, and a Google sign-in
+  // with a verified email must still land the customer in the account rather
+  // than on the failure page.
+  it('account read fails → still signs in, no failure page', async () => {
+    const request = new NextRequest(
+      'http://0.0.0.0:41234/auth/google/callback?code=c&state=s',
+      { headers: { 'x-forwarded-host': 'localhost:4000' } },
+    );
+    mocks.clientFetch.mockResolvedValueOnce({
+      token: makeToken({ actor_id: 'cus_1' }),
+    });
+    mocks.customerRetrieve.mockResolvedValueOnce({
+      customer: {
+        id: 'cus_1',
+        email: 'off@polycards.app',
+        first_name: null,
+        last_name: null,
+      },
+    });
+    mocks.fetchProfileHandle.mockResolvedValueOnce(null);
+    mocks.fetchAccountInfo.mockRejectedValueOnce(new Error('404 Not Found'));
+
+    const res = await googleCallbackGET(request);
+
+    expect(res.headers.get('location')).toBe('http://localhost:4000/me');
+    expect(mocks.clearAuthToken).not.toHaveBeenCalled();
   });
 
   it('x-forwarded-host: localhost:4000 → succeeds with the http local origin', () => {

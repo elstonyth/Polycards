@@ -99,12 +99,18 @@ export type AccountInfo = {
 /**
  * Account facts for an EXPLICIT token, propagating failures.
  *
- * Separate from `getAccountInfo` because the two callers need opposite things
- * from a failure, and the pair mirrors `fetchProfileHandle`/`getOwnProfileHandle`
- * next door. Login calls this one: it runs before the cookie is readable (the
- * token is minted in the same request) and a swallowed failure there would
- * report "not disabled" for an account that is, dropping a self-disabled
- * customer into a storefront where every page 403s and nothing explains why.
+ * Separate from `getAccountInfo` because it runs before the cookie is readable —
+ * the token is minted in the same request — and the pair mirrors
+ * `fetchProfileHandle`/`getOwnProfileHandle` next door.
+ *
+ * It still propagates, but note what its only two callers do with that:
+ * `login` and `googleCallback` (src/lib/actions/auth.ts) BOTH catch it to
+ * `ASSUME_ACTIVE`, because a rejection there lands in the catch that clears the
+ * auth cookie and would fail a login whose password was correct — see that
+ * constant for the full reasoning and the trade it accepts. So the
+ * propagate/swallow split is nominal at today's call sites; the propagation is
+ * kept so a new caller must decide for itself rather than inherit a silent
+ * "not disabled" it never asked for.
  */
 export async function fetchAccountInfo(token: string): Promise<AccountInfo> {
   return await sdk.client.fetch<AccountInfo>('/store/customers/me/account', {

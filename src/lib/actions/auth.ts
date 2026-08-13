@@ -19,6 +19,7 @@ import {
   setAuthToken,
   clearAuthToken,
   fetchAccountInfo,
+  type AccountInfo,
 } from '@/lib/data/customer';
 import { fetchProfileHandle } from '@/lib/data/profiles';
 import { friendlyError, type ErrorRule } from '@/lib/errors';
@@ -28,6 +29,29 @@ import { PHONE_VERIFICATION_REQUIRED } from '@/lib/phone-verification';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD_LENGTH = 8;
+
+/**
+ * The account-info fallback the LOGIN paths use, and only they: assume active.
+ *
+ * `fetchAccountInfo` propagates by design — the Settings page wants a failed read
+ * to read as failed. On a login path that same rejection lands in the catch that
+ * calls `clearAuthToken()`, so one unreadable read fails a login whose password
+ * was CORRECT. That is not hypothetical here: `.do/storefront.app.yaml` and
+ * `.do/backend.app.yaml` are two independently deployed apps, both
+ * `deploy_on_push: true` from master, so they never roll atomically. In the
+ * window where the storefront is ahead, GET /store/customers/me/account 404s, the
+ * SDK throws on any non-2xx, `Promise.all` rejects — and the very deploy that
+ * ships this feature takes down every emailpass login and every Google callback
+ * until the backend catches up.
+ *
+ * The trade, stated honestly rather than waved away. Swallowing costs a
+ * SELF-DISABLED customer a confusing session: no reactivation prompt, and a
+ * storefront where most pages 403 with nothing explaining why — recoverable by
+ * logging out and back in once the backend is up. Propagating costs EVERY
+ * customer their login outright. A missing account-info route must therefore
+ * degrade to "assume active"; it must not be able to gate the door.
+ */
+const ASSUME_ACTIVE: AccountInfo = { hasPassword: true, disabledCause: null };
 
 export type AuthCustomer = {
   id: string;
@@ -121,7 +145,9 @@ export async function login(input: {
         sdk.store.customer.retrieve({}, { Authorization: `Bearer ${token}` }),
         // Lazily-assigned public profile handle for the "My Profile" link.
         fetchProfileHandle(token),
-        fetchAccountInfo(token),
+        // Swallowed HERE only — see ASSUME_ACTIVE for why login may not die on
+        // this read while the Settings path still propagates it.
+        fetchAccountInfo(token).catch(() => ASSUME_ACTIVE),
       ]);
       // A self-disable is NOT an auth failure — the password was right, and the
       // retrieve above SUCCEEDS (both it and the account route sit in the
@@ -361,7 +387,9 @@ export async function googleCallback(query: {
           { Authorization: `Bearer ${sessionToken}` },
         ),
         fetchProfileHandle(sessionToken),
-        fetchAccountInfo(sessionToken),
+        // Same swallow, same reason (ASSUME_ACTIVE): a storefront deployed ahead
+        // of the backend must not turn a valid Google sign-in into a failure.
+        fetchAccountInfo(sessionToken).catch(() => ASSUME_ACTIVE),
       ]);
       // The same branch as login's, and this one matters more: the Google
       // callback is NOT covered by the login-time guard, so a self-disabled

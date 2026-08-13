@@ -254,10 +254,23 @@ export async function POST(
 
   // 8. Best-effort avatar cleanup. A file-provider outage must never be what
   //    fails an account deletion — same discipline as the avatar-replace path.
+  //
+  //    Swallowed, but NOT silent, and the log line is the entire point: step 5
+  //    already emptied `metadata`, so the moment this catch returns the id
+  //    exists NOWHERE — not on the customer row, not in the audit row, not in
+  //    any other step's log. The object itself survives in the public Spaces
+  //    bucket, addressable by URL, and it is a photograph of a person on a route
+  //    whose whole contract is that the person does not survive. Logging the id
+  //    is the only handle an operator has left to sweep the orphan with.
   if (captured.avatarFileId) {
+    const avatarFileId = captured.avatarFileId;
     await deleteFilesWorkflow(req.scope)
-      .run({ input: { ids: [captured.avatarFileId] } })
-      .catch(() => undefined);
+      .run({ input: { ids: [avatarFileId] } })
+      .catch((error) => {
+        logger.error(
+          `[account-delete] avatar file delete FAILED for ${customerId} — object ${avatarFileId} is now ORPHANED in the bucket and this log is the only surviving record of its id (${(error as Error).message})`,
+        );
+      });
   }
 
   res.json({ deleted: true });

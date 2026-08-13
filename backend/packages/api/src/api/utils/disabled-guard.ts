@@ -146,16 +146,26 @@ export async function blockDisabledEmailpassLogin(
   }
 }
 
-// Session-time block: rejects any /store request whose verified bearer belongs
-// to a disabled customer. Registered as a blanket /store/* matcher. It does NOT
-// rely on this file's per-route authenticate() entries — the routes sorter
-// hoists a method-less matcher into the `global` bucket, AHEAD of them. What
-// populates req.auth_context is the framework's own store-wide auth pass, which
-// is registered before any middleware from middlewares.ts; see the full
-// mechanism at middlewares.ts:663-672. Unauthenticated/public routes carry no
-// auth_context and pass through untouched. A Google-minted token for a disabled
-// customer is unusable for the same reason (the google callback itself is not
-// guarded — the token it mints works nowhere).
+// Session-time block: rejects /store requests whose verified bearer belongs to
+// a disabled customer — TOTAL for an ADMIN disable, but for a SELF-disable
+// everything EXCEPT the four exact paths in SELF_DISABLED_ALLOWED_PATHS above:
+// reactivate, delete, account-info, and /store/customers/me itself. Anyone
+// reading this as a blanket block will size a change wrong; the carve-out is
+// four members, matched exactly, self-only.
+//
+// Registered as a blanket /store/* matcher. It does NOT rely on this file's
+// per-route authenticate() entries — the routes sorter hoists a method-less
+// matcher into the `global` bucket, AHEAD of them. What populates
+// req.auth_context is the framework's own store-wide auth pass, registered
+// before any middleware from middlewares.ts; see the full mechanism at
+// middlewares.ts:663-672. Unauthenticated/public routes carry no
+// auth_context and pass through untouched. A Google-minted token gets no
+// separate treatment: the google callback itself is not guarded, so what that
+// token can do is decided HERE and nowhere else — for an ADMIN-disabled
+// customer it works nowhere, and for a SELF-disabled one it works on exactly
+// the four carved-out paths. That second half is a REQUIREMENT, not a leak:
+// it is what carries the Google side of the reactivate flow, whose customer has
+// no password to prove and no other route back into the account.
 //
 // FORBIDDEN, not NOT_ALLOWED: this framework's error handler maps NOT_ALLOWED
 // to 400 and FORBIDDEN to 403 (node_modules/@medusajs/framework/dist/http/
