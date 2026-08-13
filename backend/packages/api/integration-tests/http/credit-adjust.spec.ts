@@ -1,6 +1,7 @@
 import { medusaIntegrationTestRunner } from "@medusajs/test-utils";
 import { Modules } from "@medusajs/framework/utils";
 import { PACKS_MODULE } from "../../src/modules/packs";
+import { ADJUST_MAX_RM } from "../../src/modules/packs/credit-adjust";
 import type PacksModuleService from "../../src/modules/packs/service";
 import { mintSuperAdmin, postStoreCustomer, unwrapResponse } from "./utils";
 
@@ -162,7 +163,7 @@ medusaIntegrationTestRunner({
 
         for (const body of [
           { amount: 0, note: "zero" },
-          { amount: 10_000.01, note: "too big" },
+          { amount: ADJUST_MAX_RM + 0.01, note: "too big" },
           { amount: 1.234, note: "sub-cent" },
           { amount: "5", note: "string" },
           { amount: 5 }, // missing note

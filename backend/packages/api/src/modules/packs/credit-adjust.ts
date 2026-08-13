@@ -3,9 +3,12 @@
 // unit-testable without a container. Mirrors topup.ts — same epsilon cent
 // check, but signed amounts: positive grants, negative deducts.
 
-// Per-call magnitude ceiling, same rationale as TOPUP_MAX_RM: generous for
-// support work, small enough that a typo can't mint or claw an absurd amount.
-export const ADJUST_MAX_RM = 10_000;
+// Per-call magnitude ceiling. Raised from 10_000 so support can settle
+// high-value cases in one row instead of splitting them. This is NOT a
+// typo guard any more — at this size a slipped digit mints real money, so
+// the confirm Prompt in the admin UI is the only thing between an operator
+// and a six-figure grant. Every adjustment is audited (note + ledger row).
+export const ADJUST_MAX_RM = 1_000_000;
 
 export const ADJUST_NOTE_MAX = 512;
 
