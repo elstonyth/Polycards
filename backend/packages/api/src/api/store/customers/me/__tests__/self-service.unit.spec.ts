@@ -415,6 +415,25 @@ describe('GET /store/customers/me/account', () => {
     expect(accountDisabledCause).toHaveBeenCalledWith('cus_1');
   });
 
+  // The population with no other way back in: a Google-only customer who
+  // self-disabled. Their OAuth callback is not covered by the login-time guard,
+  // so this response is the only signal the storefront gets. The two fields come
+  // from independent Promise.all legs, but asserting the COMBINATION is the
+  // point — this is the one account shape where getting either half wrong is
+  // unrecoverable for the customer.
+  it('answers both fields for a self-disabled Google-only account', async () => {
+    listAuthIdentities.mockResolvedValue([
+      { id: 'authid_g', provider_identities: [{ provider: 'google' }] },
+    ]);
+    accountDisabledCause.mockResolvedValue('self');
+    const res = mkRes();
+    await accountGET(mkDeleteReq(), res);
+    expect((res as { json: jest.Mock }).json).toHaveBeenCalledWith({
+      hasPassword: false,
+      disabledCause: 'self',
+    });
+  });
+
   // Passed through rather than collapsed to a boolean. An admin-disabled session
   // cannot reach this route today (the guard's admin branch is total), but the
   // storefront must key on 'self' explicitly — never on "it answered at all".
