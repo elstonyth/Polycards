@@ -34,6 +34,17 @@ export const DELETE_LINK: Record<string, { href: string; label: string }> = {
   DELIVERY_IN_FLIGHT: { href: '/orders', label: 'Track delivery' },
 };
 
+/**
+ * The backend's `SELF_DISABLED_CODE`, duplicated across the package boundary
+ * (same reason as the keys above — the backend package cannot be imported).
+ *
+ * Reachable on DISABLE since the session guard began admitting the account
+ * layout's customer read: /settings now renders for a self-disabled customer,
+ * so the Danger zone's Disable button is live for someone who is already
+ * disabled. /disable is NOT in the carve-out, so it answers 403 with this code.
+ */
+export const ACCOUNT_SELF_DISABLED = 'ACCOUNT_SELF_DISABLED';
+
 /** The word the customer must type to arm the permanent delete. */
 export const CONFIRM_WORD = 'DELETE';
 

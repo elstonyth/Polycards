@@ -15,6 +15,7 @@ import { disableAccount, deleteAccount } from '@/lib/actions/account-lifecycle';
 // DELETE_LINK[reason].href would silently be undefined. Task 8 split these out
 // for exactly this reason.
 import {
+  ACCOUNT_SELF_DISABLED,
   CONFIRM_WORD,
   DELETE_LINK,
   deleteConfirmReady,
@@ -91,6 +92,7 @@ export default function DangerZone({ hasPassword }: { hasPassword: boolean }) {
     if (busy) return;
     setBusy(true);
     setError(null);
+    setReason(null);
     try {
       const r = await disableAccount();
       if (r.ok) {
@@ -98,6 +100,7 @@ export default function DangerZone({ hasPassword }: { hasPassword: boolean }) {
         return;
       }
       setError(r.error);
+      setReason(r.reason);
     } finally {
       setBusy(false);
     }
@@ -129,6 +132,11 @@ export default function DangerZone({ hasPassword }: { hasPassword: boolean }) {
   // Read once into a local: `noUncheckedIndexedAccess` types the lookup as
   // possibly-undefined, and the password refusals deliberately have no entry.
   const link = reason ? DELETE_LINK[reason] : undefined;
+  // The account turned out to be disabled already (see DISABLE_COPY). Retrying
+  // cannot help, and the modal's normal promise — "you'll be signed out, and it
+  // stays closed until you log back in" — describes a transition that has
+  // already happened, so both the copy and the button have to change.
+  const alreadyDisabled = reason === ACCOUNT_SELF_DISABLED;
 
   return (
     <Panel className="border-red-500/25">
@@ -165,10 +173,13 @@ export default function DangerZone({ hasPassword }: { hasPassword: boolean }) {
         <h3 className="font-heading text-lg font-bold text-white">
           Disable your account?
         </h3>
+        {/* The alert below carries the whole "already disabled → log out and
+            back in" message, so this line drops to the part still worth
+            saying rather than repeating it. */}
         <p className="mt-2 text-[13px] text-white/60">
-          You&rsquo;ll be signed out and your account stays closed until you log
-          back in and reactivate it. Your cards, balance and history are
-          untouched.
+          {alreadyDisabled
+            ? 'Your cards, balance and history are untouched.'
+            : 'You’ll be signed out and your account stays closed until you log back in and reactivate it. Your cards, balance and history are untouched.'}
         </p>
         {error && (
           <p role="alert" className="mt-3 text-[12px] text-red-400">
@@ -187,7 +198,8 @@ export default function DangerZone({ hasPassword }: { hasPassword: boolean }) {
           <button
             type="button"
             onClick={onDisable}
-            disabled={busy}
+            // Retrying a disable on an already-disabled account just 403s again.
+            disabled={busy || alreadyDisabled}
             className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-white text-sm font-bold text-neutral-950 transition-colors hover:bg-white/90 disabled:opacity-60"
           >
             {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}

@@ -53,10 +53,20 @@ export const CUSTOMER_ME_PATH = '/store/customers/me';
  *
  * Matching is on the PATH only, not the method, so this admits
  * POST /store/customers/me (a profile update) as well as the GET. That is
- * accepted rather than worked around: REACTIVATE_PATH is already open, so
- * anything an active customer may do is one POST away for a self-disabled one
- * regardless — the carve-out grants no new capability. None of the other three
- * entries are method-checked either.
+ * accepted, but NOT on the general principle that "reactivate is open anyway so
+ * nothing here grants new capability" — read broadly that would also license
+ * admitting /store/credits/withdraw, which it must not. The rule is narrower and
+ * has to be re-checked PER PATH: each admitted path must reach neither money nor
+ * auth. For this one specifically, `metadata` (which carries bank_accounts) is
+ * rejected in full by rejectCustomerMetadata, and `email` is create-only, so the
+ * writable surface is name/phone.
+ *
+ * That money control is LOAD-BEARING on the shape of the carve-out below: it
+ * calls a bare next(), so the request continues into the per-route middleware
+ * stack where rejectCustomerMetadata is wired (middlewares.ts, matcher
+ * '/store/customers/me' + method POST). Anyone reshaping this branch to
+ * short-circuit — responding here, or routing around the remaining stack —
+ * deletes that guard along with it.
  *
  * This set is consulted ONLY on the `self` branch. The ADMIN branch stays
  * total, and that asymmetry is the whole point: a banned account reaching the

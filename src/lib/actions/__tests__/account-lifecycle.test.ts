@@ -69,8 +69,42 @@ describe('disableAccount', () => {
     await expect(disableAccount()).resolves.toEqual({
       ok: false,
       error: 'Please log in first.',
+      reason: null,
     });
     expect(mocks.clientFetch).not.toHaveBeenCalled();
+  });
+
+  // The refusal the Danger zone made reachable: /settings renders for a
+  // self-disabled customer (the guard's carve-out admits the layout's customer
+  // read) but /disable is NOT carved out, so the live Disable button 403s.
+  // Unmapped this said "Something went wrong. Please try again." — untrue,
+  // unactionable, and shown to someone whose account is already in the state
+  // they just asked for.
+  it('tells an already-disabled customer the truth', async () => {
+    mocks.clientFetch.mockRejectedValue(new Error('ACCOUNT_SELF_DISABLED'));
+    const r = await disableAccount();
+    expect(r).toEqual({
+      ok: false,
+      reason: 'ACCOUNT_SELF_DISABLED',
+      error:
+        'Your account is already disabled. Log out, then log back in to reactivate it.',
+    });
+    // Not GENERIC, and it must name the way back — the modal switches its copy
+    // and disables the retry button off this reason.
+    if (r.ok) throw new Error('expected a refusal');
+    expect(r.error).not.toBe(GENERIC);
+    expect(mocks.clearAuthToken).not.toHaveBeenCalled();
+  });
+
+  // Anything else still falls back — a disable that genuinely broke must not
+  // be dressed up as "already disabled".
+  it('still falls back to GENERIC on a real failure', async () => {
+    mocks.clientFetch.mockRejectedValue(new Error('kaboom'));
+    await expect(disableAccount()).resolves.toEqual({
+      ok: false,
+      reason: null,
+      error: GENERIC,
+    });
   });
 });
 

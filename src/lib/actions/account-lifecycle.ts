@@ -19,10 +19,14 @@
 import { sdk } from '@/lib/medusa';
 import { logger } from '@/lib/logger';
 import { clearAuthToken, getAuthToken } from '@/lib/data/customer';
+import { ACCOUNT_SELF_DISABLED } from './account-lifecycle-map';
 
 export type LifecycleResult = { ok: true } | { ok: false; error: string };
 export type DeleteResult =
-  { ok: true } | { ok: false; error: string; reason: string | null };
+  | { ok: true }
+  | { ok: false; error: string; reason: string | null };
+/** Disable carries a refusal code too — same shape, different codes. */
+export type DisableResult = DeleteResult;
 
 const GENERIC = 'Something went wrong. Please try again.';
 const LOGGED_OUT = 'Please log in first.';
@@ -82,18 +86,38 @@ const DELETE_COPY: Record<string, string> = {
  * map was written — yields null and the caller falls back to GENERIC rather
  * than a blank refusal.
  */
-const codeOf = (error: unknown): string | null => {
+const codeOf = (
+  error: unknown,
+  copy: Record<string, string>,
+): string | null => {
   const text = error instanceof Error ? error.message : String(error);
-  for (const code of Object.keys(DELETE_COPY)) {
+  for (const code of Object.keys(copy)) {
     if (text.includes(code)) return code;
   }
   return null;
 };
 
+/**
+ * The one refusal DISABLE can hit that is not a failure at all: the account is
+ * already disabled.
+ *
+ * Newly reachable, and the reason this map exists. The session guard's
+ * self-disable carve-out admits the account layout's customer read, so
+ * /settings renders for a self-disabled customer and the Danger zone's Disable
+ * button is live — but /disable is NOT in that carve-out, so pressing it 403s.
+ * Unmapped, that fell through to GENERIC and the modal said "Something went
+ * wrong. Please try again." Nothing went wrong, retrying cannot help, and the
+ * account the customer is being asked to disable is already disabled.
+ */
+const DISABLE_COPY: Record<string, string> = {
+  [ACCOUNT_SELF_DISABLED]:
+    'Your account is already disabled. Log out, then log back in to reactivate it.',
+};
+
 /** Disable the caller's own account, then drop the session cookie. */
-export async function disableAccount(): Promise<LifecycleResult> {
+export async function disableAccount(): Promise<DisableResult> {
   const token = await getAuthToken();
-  if (!token) return { ok: false, error: LOGGED_OUT };
+  if (!token) return { ok: false, error: LOGGED_OUT, reason: null };
   try {
     await sdk.client.fetch('/store/customers/me/disable', {
       method: 'POST',
@@ -102,8 +126,15 @@ export async function disableAccount(): Promise<LifecycleResult> {
   } catch (error) {
     logger.error('[account] disable failed:', error);
     // Cookie deliberately untouched: a customer whose disable failed is still
-    // active, and logging them out would hide that from them.
-    return { ok: false, error: GENERIC };
+    // active, and logging them out would hide that from them. (That reasoning
+    // holds for ACCOUNT_SELF_DISABLED too — clearing the cookie there would
+    // sign out someone whose session is still the only way to reach delete.)
+    const reason = codeOf(error, DISABLE_COPY);
+    return {
+      ok: false,
+      reason,
+      error: (reason ? DISABLE_COPY[reason] : GENERIC) ?? GENERIC,
+    };
   }
   await clearAuthToken();
   return { ok: true };
@@ -148,7 +179,7 @@ export async function deleteAccount(
     });
   } catch (error) {
     logger.error('[account] delete failed:', error);
-    const reason = codeOf(error);
+    const reason = codeOf(error, DELETE_COPY);
     // `?? GENERIC` is load-bearing twice: noUncheckedIndexedAccess types the
     // lookup as possibly-undefined, and it guarantees a future code can never
     // render an empty refusal.
