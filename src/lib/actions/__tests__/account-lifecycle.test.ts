@@ -38,6 +38,9 @@ beforeEach(() => {
   mocks.clientFetch.mockResolvedValue({});
 });
 
+/** Must match GENERIC in the action — the copy shown when nothing is known. */
+const GENERIC = 'Something went wrong. Please try again.';
+
 describe('disableAccount', () => {
   it('calls the route and clears the session cookie', async () => {
     await expect(disableAccount()).resolves.toEqual({ ok: true });
@@ -74,6 +77,11 @@ describe('reactivateAccount', () => {
       '/store/customers/me/reactivate',
       { method: 'POST', headers: { Authorization: 'Bearer tok' } },
     );
+    // The cookie MUST survive here — unlike disable and delete, this is the one
+    // success path the customer carries straight on through. Clearing it would
+    // log them out the instant they reactivated, which is the exact opposite of
+    // what the flow is for.
+    expect(mocks.clearAuthToken).not.toHaveBeenCalled();
   });
 
   // The backend answers 200 `{ disabled: false }` WITHOUT writing when the
@@ -166,10 +174,40 @@ describe('deleteAccount', () => {
     });
   });
 
+  // Every row of DELETE_COPY, driven through the public action.
+  //
+  // DELETE_COPY cannot be exported and asserted directly the way DELETE_LINK is:
+  // account-lifecycle.ts carries 'use server' and may only export async
+  // functions. So the codes are duplicated here, and each is required to produce
+  // its OWN sentence — deleting any row would drop it through to GENERIC, which
+  // on a real-money path means telling a customer nothing about why their
+  // deletion was refused. Exact wording for the three that carry a deliberate
+  // decision is pinned separately below.
+  it.each([
+    'PASSWORD_REQUIRED',
+    'PASSWORD_INCORRECT',
+    'ACCOUNT_FROZEN',
+    'BALANCE_NOT_ZERO',
+    'WITHDRAWAL_PENDING',
+    'DEPOSIT_PENDING',
+    'CARDS_UNSETTLED',
+    'DELIVERY_IN_FLIGHT',
+  ])('gives %s its own actionable copy', async (code) => {
+    mocks.clientFetch.mockRejectedValue(new Error(code));
+    const r = await deleteAccount('pw');
+    if (r.ok) throw new Error(`expected ${code} to be refused`);
+    expect(r.reason).toBe(code);
+    expect(r.error).not.toBe(GENERIC);
+    expect(r.error.length).toBeGreaterThan(0);
+  });
+
   it('falls back cleanly on an unrecognised failure', async () => {
     mocks.clientFetch.mockRejectedValue(new Error('kaboom'));
     const r = await deleteAccount('pw');
-    expect(r).toMatchObject({ ok: false, reason: null });
+    // `error` is asserted, not just the shape: the whole point of the fallback
+    // is that an unmapped future code renders SOMETHING, and a shape-only
+    // assertion would happily pass while it rendered an empty string.
+    expect(r).toEqual({ ok: false, reason: null, error: GENERIC });
   });
 
   // DeleteResult carries `reason` on every failure shape; the logged-out branch
