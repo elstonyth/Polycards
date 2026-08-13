@@ -569,6 +569,39 @@ medusaIntegrationTestRunner({
         expect(audits.some((a) => a.action === 'delete_account')).toBe(true);
         expect(await packs.deletedCustomerIds([id])).toEqual(new Set([id]));
 
+        // That read is deliberately UNBOUNDED, and this is the shape that
+        // proves it: two delete_account rows for one customer plus a second
+        // deleted id. Under the old `take: customerIds.length` the third row
+        // falls off the end and the returned set omits a deleted account —
+        // which then gets paid, forever. The purge's idempotency guard means a
+        // duplicate can only arrive from a hand-finished purge, so it is
+        // written by hand here. `ghost` needs no customer row: this read only
+        // ever touches admin_action_audit.
+        const ghost = `cus_ghost_${id}`;
+        await packs.createAdminActionAudits([
+          {
+            admin_id: id,
+            entity_type: 'customer',
+            entity_id: id,
+            action: 'delete_account',
+            before: { deleted: false },
+            after: { deleted: true },
+            reason: 'Second attempt at a hand-finished purge.',
+          },
+          {
+            admin_id: ghost,
+            entity_type: 'customer',
+            entity_id: ghost,
+            action: 'delete_account',
+            before: { deleted: false },
+            after: { deleted: true },
+            reason: 'Customer deleted their own account.',
+          },
+        ]);
+        expect(await packs.deletedCustomerIds([id, ghost])).toEqual(
+          new Set([id, ghost]),
+        );
+
         // The email is reusable — this is what proves the auth identities were
         // HARD-deleted. (provider_identity's unique index has no deleted_at
         // predicate, so a soft delete would 23505 here forever.)

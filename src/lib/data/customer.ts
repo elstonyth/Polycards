@@ -129,6 +129,15 @@ export async function fetchAccountInfo(token: string): Promise<AccountInfo> {
  * one, and every delete would then fail PASSWORD_REQUIRED with no way to
  * comply.) `disabledCause` falls back to null for the same reason in reverse:
  * a guessed disable state must never drive UI that a real one would.
+ *
+ * Be honest about what that costs now that the value is used: the Danger zone
+ * swaps Disable for Reactivate on 'self', so a failed read shows a
+ * self-disabled customer the Disable button — which 403s, since /disable is not
+ * in the session guard's carve-out. That is the deploy window (a storefront
+ * ahead of its backend 404s this route), it degrades to the behaviour that
+ * shipped before the swap, and the login-time prompt is still a way back in.
+ * Guessing 'self' instead would offer reactivation to an ADMIN-disabled
+ * customer, which is a support decision this page must never appear to reverse.
  */
 export async function getAccountInfo(): Promise<AccountInfo> {
   const token = await getAuthToken();
