@@ -41,7 +41,8 @@ Migration: add the column; backfill `disabled_cause = 'admin'` for every existin
 ### POST /store/customers/me/disable
 
 - Calls `setAccountDisabled({ customerId, cause: 'self', disabled: true })`. The actor is the customer, taken from `auth_context.actor_id`, never from the body.
-- **Not idempotent, and it does not need to be.** A second call rewrites `disabled_at` and appends another audit row — it is not a no-op, and claiming otherwise would be a property the code does not have. It is also unreachable: once the account is self-disabled the session guard allows exactly one path, `/reactivate`, so a repeat `/disable` never reaches the handler.
+- **Not idempotent, and it does not need to be.** A second call rewrites `disabled_at` and appends another audit row — it is not a no-op, and claiming otherwise would be a property the code does not have.
+- **A repeat call IS reachable, and is refused rather than swallowed.** `/disable` is deliberately NOT in `SELF_DISABLED_ALLOWED_PATHS`, so a self-disabled session gets 403 `ACCOUNT_SELF_DISABLED`. That path is live because the Settings page renders for a self-disabled customer (`/store/customers/me` is carved out), and the Danger zone shows the Disable button there. The storefront maps that code to copy saying the account is already disabled and naming the way back — an earlier draft let it fall through to the generic "Something went wrong", which was a lie on the first surface a customer sees.
 - An admin-disabled account never reaches this route — the session guard blocks it first.
 
 ### POST /store/customers/me/reactivate
@@ -52,7 +53,7 @@ Migration: add the column; backfill `disabled_cause = 'admin'` for every existin
   - **anything else** (`'admin'` today, and any cause value a future release adds) — 403 with the existing support message.
 - The test is `!== 'self'` to refuse, never `=== 'admin'` to refuse. Denying only the value you can name and allowing the rest is a fail-OPEN: an unexpected cause would reactivate the account. That bug was written and caught during implementation, so it is worth stating plainly rather than leaving to the reader.
 - Clears `disabled`, `disabled_cause`, `disabled_at`; writes an audit row.
-- This is the ONLY /store route a self-disabled session may call (see §3).
+- This is one of **four** paths a self-disabled session may call — see §3 for the full set and why each earns its place. It started as the only one; `/delete` and `/account` were added so a self-disabled customer need not reactivate merely to leave, and `/store/customers/me` because without it the account layout redirects and the Settings page never renders at all.
 
 ### POST /store/customers/me/delete
 
