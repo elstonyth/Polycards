@@ -1,6 +1,7 @@
 import { medusaIntegrationTestRunner } from "@medusajs/test-utils";
 import { Modules } from "@medusajs/framework/utils";
 import { PACKS_MODULE } from "../../src/modules/packs";
+import { ADJUST_MAX_RM } from "../../src/modules/packs/credit-adjust";
 import type PacksModuleService from "../../src/modules/packs/service";
 import { mintSuperAdmin, postStoreCustomer, unwrapResponse } from "./utils";
 
@@ -162,7 +163,7 @@ medusaIntegrationTestRunner({
 
         for (const body of [
           { amount: 0, note: "zero" },
-          { amount: 10_000.01, note: "too big" },
+          { amount: ADJUST_MAX_RM + 0.01, note: "too big" },
           { amount: 1.234, note: "sub-cent" },
           { amount: "5", note: "string" },
           { amount: 5 }, // missing note
@@ -174,6 +175,38 @@ medusaIntegrationTestRunner({
         expect(await ledgerRows()).toHaveLength(0);
       });
 
+      // The ceiling is the interesting number after the 10_000 -> 1_000_000
+      // raise: `amount` is an unbounded pg numeric with a raw_amount jsonb
+      // sidecar, and nothing else asserts the new headroom actually lands.
+      // A bound below the app layer (a CHECK, a precision loss in the
+      // bigNumber round-trip) would keep every unit test green and fail on
+      // the first real six-figure grant.
+      it("grants the full ceiling without losing precision", async () => {
+        const { id, token } = await registerCustomer(
+          "adjust-customer-e@test.dev",
+        );
+
+        const granted = await adjust(
+          id,
+          { amount: ADJUST_MAX_RM, note: "ceiling grant" },
+          adminHeaders(),
+        );
+        expect(granted.status).toBe(200);
+        expect(granted.data).toMatchObject({
+          amount: ADJUST_MAX_RM,
+          balance: ADJUST_MAX_RM,
+        });
+
+        const [row] = await ledgerRows();
+        expect(Number(row.amount)).toBe(ADJUST_MAX_RM);
+
+        const credits = await unwrapResponse(
+          api.get("/store/credits", {
+            headers: { ...storeHeaders, authorization: `Bearer ${token}` },
+          }),
+        );
+        expect(credits.data.balance).toBe(ADJUST_MAX_RM);
+      });
       it("404s an unknown customer id", async () => {
         const res = await adjust(
           "cus_does_not_exist",
