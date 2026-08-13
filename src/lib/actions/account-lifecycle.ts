@@ -19,7 +19,7 @@
 import { sdk } from '@/lib/medusa';
 import { logger } from '@/lib/logger';
 import { clearAuthToken, getAuthToken } from '@/lib/data/customer';
-import { ACCOUNT_SELF_DISABLED } from './account-lifecycle-map';
+import { ACCOUNT_SELF_DISABLED, GENERIC_ERROR } from './account-lifecycle-map';
 
 export type LifecycleResult = { ok: true } | { ok: false; error: string };
 export type DeleteResult =
@@ -27,7 +27,9 @@ export type DeleteResult =
 /** Disable carries a refusal code too — same shape, different codes. */
 export type DisableResult = DeleteResult;
 
-const GENERIC = 'Something went wrong. Please try again.';
+/** Re-exported shape: the sentence itself lives in the client-safe map so the
+ *  UI can show the same copy on a rejected action. */
+const GENERIC = GENERIC_ERROR;
 const LOGGED_OUT = 'Please log in first.';
 
 /**

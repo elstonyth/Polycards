@@ -49,6 +49,19 @@ export const ACCOUNT_SELF_DISABLED = 'ACCOUNT_SELF_DISABLED';
 export const CONFIRM_WORD = 'DELETE';
 
 /**
+ * The copy shown when nothing more specific is known.
+ *
+ * Lives here rather than in `account-lifecycle.ts` for the same reason as
+ * everything else in this file: that module is `'use server'` and may export
+ * only async functions, so a `const` there is unreachable from the client. The
+ * action imports it back. DangerZone needs the same sentence for the case the
+ * action cannot cover — a server action that REJECTS rather than returning
+ * `{ ok: false }` (transport failure, a deploy mid-flight, an RSC error) never
+ * reaches the action's own fallback.
+ */
+export const GENERIC_ERROR = 'Something went wrong. Please try again.';
+
+/**
  * Whether the Delete button may be armed. Lives here rather than inline in
  * DangerZone.tsx so it can be tested: vitest collects `src/**\/*.test.ts` only,
  * so a predicate inside a `.tsx` is silently uncoverable.

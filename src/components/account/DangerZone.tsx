@@ -22,6 +22,7 @@ import {
   ACCOUNT_SELF_DISABLED,
   CONFIRM_WORD,
   DELETE_LINK,
+  GENERIC_ERROR,
   deleteConfirmReady,
 } from '@/lib/actions/account-lifecycle-map';
 
@@ -133,6 +134,12 @@ export default function DangerZone({
       }
       setError(r.error);
       setReason(r.reason);
+    } catch {
+      // The action RETURNS its failures, but the call itself can still reject at
+      // the transport/action boundary — a dropped network, a deploy mid-flight,
+      // an RSC error. Without this the spinner just stops and nothing is said,
+      // which reads as "it worked" on a button whose whole job is a state change.
+      setError(GENERIC_ERROR);
     } finally {
       setBusy(false);
     }
@@ -154,6 +161,11 @@ export default function DangerZone({
         return;
       }
       setReactivateError(r.error);
+    } catch {
+      // Same hole as onDisable/onDelete — this is the ONLY in-app way back for a
+      // self-disabled customer, so a silent failure here strands them on the one
+      // page their session can still reach.
+      setReactivateError(GENERIC_ERROR);
     } finally {
       setBusy(false);
     }
@@ -172,6 +184,11 @@ export default function DangerZone({
       }
       setError(r.error);
       setReason(r.reason);
+    } catch {
+      // See onDisable. Worse here: the purge is not atomic and IS idempotent, so
+      // a rejection can mean "partly done, re-run it". Silence would leave the
+      // customer believing nothing happened, with no prompt to retry.
+      setError(GENERIC_ERROR);
     } finally {
       setBusy(false);
     }
