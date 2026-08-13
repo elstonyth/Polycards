@@ -181,7 +181,11 @@ The existing pattern-matching in `auth.ts` keeps handling the admin-disabled mes
 
 ## Residual risk (accepted)
 
-A stolen customer session cookie can delete a Google-only account, because typed-`DELETE` is the only gate there. Bounded, and accepted by the operator: delete runs only on a settled account (zero balance, nothing pending, no unsettled cards), so an attacker destroys history rather than money — and the same stolen token already reaches the withdrawal path, which is the larger exposure. Revisit if account-takeover griefing shows up in support.
+A stolen customer session cookie can delete a Google-only account. **For such an account the session is the ONLY gate** — say it that way rather than "typed-`DELETE` is the gate", because the typed confirmation is enforced in the modal, not on the route. It prevents an accidental click; it stops no one who calls the route directly.
+
+Sending the typed word in the request body would not change that. It is a client-supplied constant, so any caller who can reach the route can include it — it would prove the caller read the API, not that a human meant it. The only thing that would actually raise this bar is a real re-authentication (a fresh Google OAuth round-trip), which the operator declined for v1.
+
+Bounded, and accepted: delete runs only on a settled account (zero balance, nothing pending, no unsettled cards), so an attacker destroys history rather than money — and the same stolen token already reaches the withdrawal path, which is the larger exposure. Revisit if account-takeover griefing shows up in support, and revisit it as *re-authentication*, not as a confirmation string.
 
 ## Out of scope (v1)
 
