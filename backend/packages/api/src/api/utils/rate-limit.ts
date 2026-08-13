@@ -833,6 +833,31 @@ export function createAuthIdentifierRateLimit(): MiddlewareHandler {
 }
 
 /**
+ * The account-delete limiter. The route takes a password, so an unthrottled
+ * one is a password oracle — but the generic `createAuthRateLimit` is the
+ * WRONG throttle for it: with no `keyOf` it keys on `auth_context.actor_id`
+ * (already populated by authenticate()), giving a per-customer 50/10s + 300/60s
+ * budget. That is looser than the write tier it would stack with, so stacking
+ * adds nothing, and ~90× looser than the login path that guards the same
+ * secret. These numbers mirror createAuthIdentifierRateLimit instead, because
+ * that is the tier bounding password guesses per account. Env-tunable:
+ * ACCOUNT_DELETE_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 3/60s)
+ * ACCOUNT_DELETE_RATE_LIMIT / _WINDOW_MS (default 20/1h)
+ */
+export function createAccountDeleteRateLimit(): MiddlewareHandler {
+  return createEnvRateLimit({
+    name: 'account-delete',
+    message: 'Too many delete attempts for this account.',
+    defaults: {
+      burstLimit: 3,
+      burstWindowMs: 60_000,
+      limit: 20,
+      windowMs: 3_600_000,
+    },
+  });
+}
+
+/**
  * The public-profile read limiter (GET /store/profiles/:handle). The route is
  * PUBLIC — no auth_context — so the middleware keys on the request IP (its
  * designed fallback). NOTE: the storefront fetches profiles SERVER-side, so

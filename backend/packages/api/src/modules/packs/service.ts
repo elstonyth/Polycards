@@ -388,6 +388,15 @@ export type DrawDailyBoxResult = {
   draw_day?: string;
 };
 
+/** Why an account may not be deleted yet. The storefront switches on these. */
+export type DeleteBlockReason =
+  | 'ACCOUNT_FROZEN'
+  | 'BALANCE_NOT_ZERO'
+  | 'WITHDRAWAL_PENDING'
+  | 'DEPOSIT_PENDING'
+  | 'CARDS_UNSETTLED'
+  | 'DELIVERY_IN_FLIGHT';
+
 // Defensive depth bound for referralSummary's downward fan-out CTE. linkSponsor
 // already rejects cycles, so a real tree terminates well before this; the cap
 // is belt-and-suspenders against a corrupted edge so COUNT(*) can never loop.
@@ -3373,6 +3382,39 @@ class PacksModuleService extends MedusaService({
               kind: 'direct' | 'override',
               effectivePct: number,
             ): Promise<void> => {
+              // A purged customer keeps their referral edges — severing them
+              // would dangle a recruit's upline and silently rewrite
+              // attribution — so the edge still resolves here long after the
+              // account is gone. Paying it mints credits onto an account with
+              // no owner and no login, every time a surviving recruit opens a
+              // pack, forever. The preflight cannot cover this: at delete time
+              // the commission row does not exist yet.
+              //
+              // Per BENEFICIARY, not per sponsor. Skipping the whole fan-out
+              // when the direct sponsor is deleted would dock every live upline
+              // an override they earned; checking only the sponsor would still
+              // pay a deleted ancestor. Both are wrong; this is not.
+              //
+              // sharedContext threaded so the read joins THIS locked txn rather
+              // than taking a second pool connection (see recordPullsWithLedger).
+              // Deliberately NOT wrapped in try/catch: a swallowed read error
+              // would pay the deleted account, so a failure here rolls the open
+              // back — the same fail-closed direction as the reads above.
+              //
+              // `.has(beneficiary)`, never `.size > 0`: the two are equivalent
+              // only while the entity_id filter constrains. If it ever stopped
+              // (a generated-method change, a renamed key), a size test would
+              // read ANY delete_account row as this beneficiary's and silently
+              // halt every commission to every live upline forever, as soon as
+              // one account anywhere had been deleted — the inverse failure,
+              // and the worse one, because under-paying the living is invisible
+              // where over-paying the dead is at least auditable.
+              if (
+                (await this.deletedCustomerIds([beneficiary], sharedContext))
+                  .has(beneficiary)
+              ) {
+                return;
+              }
               const [credit] = await this.createCreditTransactions(
                 [
                   {
@@ -3646,6 +3688,350 @@ class PacksModuleService extends MedusaService({
     const balanceCents = Number(rows[0]?.balance_cents ?? 0);
     const lockedCents = await this.lockedCommissionCents(customerId, em);
     return (balanceCents - lockedCents) / 100;
+  }
+
+  // The raw signed ledger balance, in INTEGER CENTS.
+  //
+  // Two deliberate divergences from this file's conventions, both required by
+  // the account-deletion gate that is its only caller:
+  //
+  //  - Cents, not the MYR decimals every sibling returns. The gate tests for
+  //    exact zero, and a float RM comparison is the wrong instrument for that.
+  //  - Freeze-blind and lock-blind. availableBalance() returns 0 for a frozen
+  //    account and subtracts lockedCommissionCents, so a frozen account still
+  //    holding funds — or one whose balance happens to equal its locked
+  //    commission — reads as 0 there. Deleting either would strand real money.
+  //
+  // Signed, so a clawback-negative account (which owes us) is also non-zero and
+  // is therefore refused by the same `!== 0` test.
+  @InjectManager()
+  async rawLedgerBalanceCents(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<number> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ balance_cents: string | null }[]>(
+      'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents ' +
+        'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
+      [customerId],
+    );
+    return Number(rows[0]?.balance_cents ?? 0);
+  }
+
+  // Everything that must be settled before an account may be deleted.
+  //
+  // A PLAIN READ, holding no lock and running in no transaction — it is
+  // @InjectManager, and the delete route calls it bare. Its job is the fast,
+  // friendly rejection that hands the customer one actionable reason. The
+  // authoritative check is this same method re-run INSIDE
+  // purgeAccountPacksData's advisory lock; do not read this comment as a
+  // guarantee that the two are one atomic step, because they are not.
+  //
+  // Order is cheapest-first, and each check returns immediately: the customer
+  // gets ONE actionable instruction rather than a list, and a blocked delete
+  // costs one query in the common case.
+  @InjectManager()
+  async deleteAccountPreflight(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<
+    { ok: true } | { ok: false; reason: DeleteBlockReason; detail: string }
+  > {
+    // FIRST, because it is the cheapest check and the most absolute: a freeze is
+    // an active hold, and deletion would destroy the very evidence it preserves
+    // (the purge HARD-deletes player_payout_details — bank name, full account
+    // number, holder name — and blanks globepay_withdrawal.account_holder_name).
+    //
+    // None of the checks below catch it. `frozen` is ORTHOGONAL to `disabled`,
+    // so no store-side guard rejects a frozen session, and rawLedgerBalanceCents
+    // is deliberately freeze-blind — a frozen account whose raw balance happens
+    // to be exactly 0 cleared every other gate here.
+    if (await this.isFrozen(customerId, sharedContext)) {
+      return {
+        ok: false,
+        reason: 'ACCOUNT_FROZEN',
+        detail: 'This account is under review.',
+      };
+    }
+
+    const balanceCents = await this.rawLedgerBalanceCents(
+      customerId,
+      sharedContext,
+    );
+    if (balanceCents !== 0) {
+      return {
+        ok: false,
+        reason: 'BALANCE_NOT_ZERO',
+        // Negative means the account owes us (a clawback). Both directions are
+        // refused; the copy just has to be honest about which one it is.
+        detail:
+          balanceCents > 0
+            ? `Wallet balance is RM ${(balanceCents / 100).toFixed(2)}.`
+            : `Account owes RM ${(Math.abs(balanceCents) / 100).toFixed(2)}.`,
+      };
+    }
+
+    const [withdrawal] = await this.listGlobePayWithdrawals(
+      { customer_id: customerId, status: ['pending', 'held'] },
+      { take: 1 },
+      sharedContext,
+    );
+    if (withdrawal) {
+      return {
+        ok: false,
+        reason: 'WITHDRAWAL_PENDING',
+        detail: 'A withdrawal is still being processed.',
+      };
+    }
+
+    // Production credits deposits through the reconcile sweep, not the callback,
+    // so an in-flight deposit can land hours later and credit an account that
+    // no longer has an owner.
+    //
+    // 'expired' is in this list because it is NOT terminal: the sweep selects
+    // expired rows and flips them to 'settled', crediting the customer. The
+    // failure it prevents is concrete — the transfer doesn't land, the row
+    // expires, the customer deletes at balance 0, the transfer arrives, and
+    // the sweep credits an ownerless account.
+    const [deposit] = await this.listGlobePayDeposits(
+      { customer_id: customerId, status: ['pending', 'expired'] },
+      { take: 1 },
+      sharedContext,
+    );
+    if (deposit) {
+      return {
+        ok: false,
+        reason: 'DEPOSIT_PENDING',
+        detail: 'A deposit is still being processed.',
+      };
+    }
+
+    // A vaulted pull is an owned asset the customer can still sell for credits;
+    // a delivering one is already on its way out. Either is unsettled value.
+    const [pull] = await this.listPulls(
+      { customer_id: customerId, status: ['vaulted', 'delivering'] },
+      { take: 1 },
+      sharedContext,
+    );
+    if (pull) {
+      return {
+        ok: false,
+        reason: 'CARDS_UNSETTLED',
+        detail: 'You still have cards in your vault.',
+      };
+    }
+
+    // Nothing may still be shipping to an address this purge is about to erase.
+    //
+    // Expressed as "not terminal" rather than as the list of in-flight
+    // statuses: the enumeration is an exact complement TODAY, so a status
+    // added later would silently pass the guard — a delete that fails open.
+    // The terminal set is the half that does not grow.
+    const [delivery] = await this.listDeliveryOrders(
+      {
+        customer_id: customerId,
+        status: { $nin: ['completed', 'canceled'] },
+      },
+      { take: 1 },
+      sharedContext,
+    );
+    if (delivery) {
+      return {
+        ok: false,
+        reason: 'DELIVERY_IN_FLIGHT',
+        detail: 'A delivery is still on its way.',
+      };
+    }
+
+    return { ok: true };
+  }
+
+  // Which of these customers no longer have an owner.
+  //
+  // The `delete_account` audit row is the signal, rather than the account-state
+  // tombstone or the customer row's deleted_at: it is written inside the same
+  // packs transaction as the rest of the purge, it is purpose-built for this
+  // (an admin cannot produce one by typing a disable reason), and it is written
+  // BEFORE the customer soft delete, so it covers a half-finished purge too.
+  // The customer module is not reachable from this service anyway.
+  //
+  // The two callers use this very differently, and a comment that flatters
+  // either one would mislead the next reader: settleChallengeWeek reads the
+  // WHOLE ranking in one query (at most ten ids, outside the per-winner
+  // transactions, service.ts:7619), while payCommission calls it once per
+  // BENEFICIARY inside its fan-out loop (service.ts:3427) — inside the credit
+  // advisory lock — so one pack open runs it about five times. Hoisting a
+  // batched read out of that loop would mean restructuring it for ~5 index
+  // seeks, which is not worth doing; it is worth not claiming otherwise.
+  //
+  // No `take`. The id count looked safe because the audit write is idempotent,
+  // but "near-impossible" is not "impossible": a second delete_account row for
+  // one customer would push another customer's row past the limit and hand back
+  // a set that silently omits a deleted account — which then gets PAID. The
+  // filter already constrains the read to these ids; a bound on top of it buys
+  // nothing and can only subtract.
+  //
+  // entity_type is redundant for correctness (only the purge writes
+  // 'delete_account', always with 'customer') but NOT for cost: the sole usable
+  // index is IDX_admin_action_audit_entity on (entity_type, entity_id), and
+  // omitting the leading column drops the seek for a full scan. admin_action_
+  // audit is append-only and grows with every admin money mutation forever,
+  // and payCommission runs this read inside settleOpen's credit advisory lock.
+  @InjectManager()
+  async deletedCustomerIds(
+    customerIds: string[],
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<Set<string>> {
+    if (customerIds.length === 0) return new Set();
+    const rows = await this.listAdminActionAudits(
+      {
+        entity_type: 'customer',
+        entity_id: customerIds,
+        action: 'delete_account',
+      },
+      {},
+      sharedContext,
+    );
+    return new Set(rows.map((r) => r.entity_id));
+  }
+
+  // The packs-module half of an account deletion: scrub the personal data out
+  // of the rows we KEEP, and delete the rows that are pure personal data.
+  //
+  // Transactional within this module. The rest of the purge (customer row,
+  // notifications, auth identities, avatar object) lives in other modules and
+  // cannot join this transaction — see the route for the ordering that makes a
+  // partial failure recoverable.
+  //
+  // What is deliberately NOT touched: credit_transaction, ledger_entry,
+  // globepay_deposit, pull, commission, vip_member_state and
+  // referral_relationship. Those are the business books. They carry only a
+  // customer_id that no longer resolves to a person, and the referral rows in
+  // particular must survive or a downline's upline dangles.
+  @InjectTransactionManager()
+  async purgeAccountPacksData(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `credit:${customerId}`,
+    ]);
+    // Re-check INSIDE the lock. The route's earlier preflight is the fast,
+    // friendly rejection that gives the customer an actionable reason; THIS one
+    // is the correctness gate. Without it a spin, sell, deposit credit or
+    // withdrawal landing between the two calls would be purged straight
+    // through — and that window is minutes wide in production, because
+    // deposits are credited by the reconcile sweep rather than the callback.
+    const check = await this.deleteAccountPreflight(customerId, sharedContext);
+    if (!check.ok) {
+      throw new MedusaError(MedusaError.Types.NOT_ALLOWED, check.reason);
+    }
+
+    // Retained financial rows, scrubbed to the operator-chosen minimum: the
+    // amounts, statuses, gateway ids and timestamps that make the books
+    // reconcile stay; the counterparty identity goes. Last 4 of the account
+    // number is kept for the same reason setPayoutDetails keeps it in its audit
+    // row — a same-bank redirect is otherwise indistinguishable from a no-op.
+    await em.execute(
+      `update "globepay_withdrawal"
+          set "account_number" = right("account_number", 4),
+              "account_holder_name" = ''
+        where "customer_id" = ?`,
+      [customerId],
+    );
+    // proof_images goes with the address fields, not with the tracking number:
+    // a doorstep photo can show the label or the recipient, which re-exposes
+    // exactly what the ship_* scrub removes. NOTE the column holds admin-typed
+    // http(s) URLs, not file-provider ids (admin/delivery-orders/validate.ts:126),
+    // so nulling it removes our copy of the reference — an object hosted in our
+    // own bucket still needs an operator sweep, and there is no id to hand the
+    // file workflow.
+    //
+    // ship_country_code is NOT NULL and deliberately left alone: a bare country
+    // is not identifying, and it is what makes a shipped order's cost still
+    // reconcile.
+    await em.execute(
+      `update "delivery_order"
+          set "ship_name" = '', "ship_address_1" = '', "ship_address_2" = null,
+              "ship_city" = '', "ship_province" = null, "ship_postal_code" = '',
+              "ship_phone" = null, "proof_images" = null
+        where "customer_id" = ?`,
+      [customerId],
+    );
+
+    // Pure personal data, no business value — deleted outright.
+    await em.execute(
+      `delete from "player_payout_details" where "customer_id" = ?`,
+      [customerId],
+    );
+    await em.execute(`delete from "notification_read" where "customer_id" = ?`, [
+      customerId,
+    ]);
+
+    // The account-state row is the TOMBSTONE, not garbage. Soft-deleting it is
+    // what would re-open the account: isAccountDisabled reads through
+    // listCustomerAccountStates, which excludes soft-deleted rows, so it would
+    // return false and the session guard would wave requests through — and a
+    // bearer minted before the delete keeps verifying for up to a day (JWT auth
+    // does no DB lookup and medusa-config.ts sets no jwtExpiresIn, so the
+    // framework default "1d" applies).
+    //
+    // Upsert, not a bare UPDATE: most customers have never been disabled or
+    // frozen and therefore have NO row at all (setAccountDisabled creates it
+    // lazily), and an update that no-ops for them would leave the commonest
+    // account with no tombstone at all.
+    //
+    // CONSEQUENCE, deliberate: from this write on, the blanket /store/* session
+    // guard 403s this customer's own bearer, so the customer cannot re-drive the
+    // route after a later step fails. Finishing a half-done purge is a manual
+    // job; see the route header for exactly how narrow that is.
+    const tombstone = {
+      disabled: true,
+      disabled_reason: 'Account deleted by the customer.',
+      disabled_at: new Date(),
+    };
+    const [state] = await this.listCustomerAccountStates(
+      { customer_id: customerId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (state) {
+      await this.updateCustomerAccountStates(
+        { selector: { id: state.id }, data: tombstone },
+        sharedContext,
+      );
+    } else {
+      await this.createCustomerAccountStates(
+        [{ customer_id: customerId, ...tombstone }],
+        sharedContext,
+      );
+    }
+
+    // Idempotent: a half-finished purge gets finished by hand, and an audit
+    // trail that grows a row per attempt reports one deletion as several.
+    const [existingAudit] = await this.listAdminActionAudits(
+      { entity_id: customerId, action: 'delete_account' },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!existingAudit) {
+      await this.createAdminActionAudits(
+        [
+          {
+            admin_id: customerId,
+            entity_type: 'customer',
+            entity_id: customerId,
+            action: 'delete_account',
+            before: { deleted: false },
+            after: { deleted: true },
+            reason: 'Customer deleted their own account.',
+          },
+        ],
+        sharedContext,
+      );
+    }
   }
 
   // Wallet summary: raw balance, available (freeze-aware), locked (pending-
@@ -7218,9 +7604,16 @@ class PacksModuleService extends MedusaService({
         ]),
       ),
     };
+    // A deleted customer keeps their `pull` rows — the books are retained on
+    // purpose — so they stay ranked, and settlement would mint real balance and
+    // a real card to an account with no owner. Read once for the whole ranking,
+    // outside the per-winner transactions.
+    const deleted = await this.deletedCustomerIds(ranking, sharedContext);
+
     const winners: SettledWinner[] = [];
     for (const [i, customerId] of ranking.entries()) {
       if (settledCustomers.has(customerId)) continue; // paid on a prior tick
+      if (deleted.has(customerId)) continue; // account deleted; nobody to pay
       const payout = byRank.get(i + 1);
       if (!payout || (payout.credits <= 0 && payout.cardIds.length === 0)) {
         continue; // rank pays nothing this week

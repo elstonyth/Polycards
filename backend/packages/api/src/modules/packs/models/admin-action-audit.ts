@@ -51,6 +51,9 @@ export const AdminActionAudit = model
       // A read that exposes data the list view masks — see
       // Migration20260812000000.
       'reveal',
+      // Customer self-service account deletion. admin_id carries the
+      // CUSTOMER's own id for this action — see service.purgeAccountPacksData.
+      'delete_account',
     ]),
     before: model.json().nullable(),
     after: model.json().nullable(),

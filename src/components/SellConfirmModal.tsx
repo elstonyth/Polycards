@@ -1,20 +1,18 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Loader2 } from 'lucide-react';
 import { SlabImage } from '@/components/SlabImage';
 import { rm } from '@/lib/format';
 import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
-import { lockBodyScroll, unlockBodyScroll } from '@/lib/use-modal-a11y';
-
-const FOCUSABLE =
-  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+import { useModalA11y } from '@/lib/use-modal-a11y';
 
 // Confirm-before-sell dialog, shared by the pack reveal and the vault grid.
 // `rateType` switches the copy between the on-reveal instant offer (with a live
-// countdown) and the flat vault rate. Accessibility mirrors AuthModal: focus
-// moves into the panel, Tab is trapped, Escape + backdrop close, focus restores.
+// countdown) and the flat vault rate. Accessibility comes from useModalA11y:
+// focus moves into the panel, Tab is trapped, Escape + backdrop close, focus
+// restores.
 export default function SellConfirmModal({
   open,
   cardName,
@@ -50,46 +48,19 @@ export default function SellConfirmModal({
   // pluralize off the count rather than off `bulk`.
   const plural = count !== 1;
   const panelRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLElement | null>(null);
 
   // Liquid-glass rim on the panel (frosted fallback on Safari/Firefox).
   useLiquidGlass(panelRef, open, GLASS_SUBTLE);
 
-  useEffect(() => {
-    if (!open) return;
-    triggerRef.current = document.activeElement as HTMLElement | null;
-    const panel = panelRef.current;
-    panel?.focus();
-
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        if (!busy) onCancel();
-        return;
-      }
-      if (e.key !== 'Tab' || !panel) return;
-      const f = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE));
-      if (f.length === 0) return;
-      // f.length === 0 is checked above; both indices are in bounds
-      const first = f[0]!;
-      const last = f[f.length - 1]!;
-      const active = document.activeElement;
-      if (e.shiftKey && (active === first || active === panel)) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && active === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-
-    document.addEventListener('keydown', onKey);
-    lockBodyScroll();
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      unlockBodyScroll();
-      triggerRef.current?.focus();
-    };
-  }, [open, busy, onCancel]);
+  // Escape is busy-gated like the X and Cancel — a mid-sell dismissal would
+  // leave the request in flight with nothing on screen. The hook reads this
+  // through a ref refreshed every render, so it always sees the current `busy`
+  // without re-running (the old hand-rolled effect listed `busy` in its deps,
+  // so every flip tore down, bounced focus back to the trigger behind the
+  // modal, and re-focused the panel).
+  useModalA11y(panelRef, open, () => {
+    if (!busy) onCancel();
+  });
 
   if (!open) return null;
 

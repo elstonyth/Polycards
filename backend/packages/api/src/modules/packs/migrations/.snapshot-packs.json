@@ -46,7 +46,8 @@
             "challenge_stages",
             "challenge_settings",
             "delivery_order",
-            "purchase_invoice"
+            "purchase_invoice",
+            "tier_settings"
           ],
           "mappedType": "enum"
         },
@@ -86,7 +87,9 @@
             "bulk_status",
             "disable",
             "enable",
-            "create"
+            "create",
+            "reveal",
+            "delete_account"
           ],
           "mappedType": "enum"
         },
@@ -790,6 +793,124 @@
         },
         {
           "keyName": "challenge_payout_pkey",
+          "columnNames": [
+            "id"
+          ],
+          "composite": false,
+          "constraint": true,
+          "primary": true,
+          "unique": true
+        }
+      ],
+      "checks": [],
+      "foreignKeys": {},
+      "nativeEnums": {}
+    },
+    {
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "text"
+        },
+        "starts_at": {
+          "name": "starts_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "length": 6,
+          "mappedType": "datetime"
+        },
+        "label": {
+          "name": "label",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "text"
+        },
+        "stages": {
+          "name": "stages",
+          "type": "jsonb",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "json"
+        },
+        "applied_at": {
+          "name": "applied_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "length": 6,
+          "mappedType": "datetime"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "length": 6,
+          "default": "now()",
+          "mappedType": "datetime"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "length": 6,
+          "default": "now()",
+          "mappedType": "datetime"
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "length": 6,
+          "mappedType": "datetime"
+        }
+      },
+      "name": "challenge_schedule",
+      "schema": "public",
+      "indexes": [
+        {
+          "keyName": "IDX_challenge_schedule_deleted_at",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_challenge_schedule_deleted_at\" ON \"challenge_schedule\" (\"deleted_at\") WHERE deleted_at IS NULL"
+        },
+        {
+          "keyName": "IDX_challenge_schedule_pending",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_challenge_schedule_pending\" ON \"challenge_schedule\" (\"starts_at\") WHERE applied_at IS NULL AND deleted_at IS NULL"
+        },
+        {
+          "keyName": "challenge_schedule_pkey",
           "columnNames": [
             "id"
           ],
@@ -1584,6 +1705,16 @@
           "length": 6,
           "mappedType": "datetime"
         },
+        "phone_verified_at": {
+          "name": "phone_verified_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "length": 6,
+          "mappedType": "datetime"
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamptz",
@@ -2206,6 +2337,452 @@
           "nullable": false,
           "mappedType": "text"
         },
+        "merchant_transaction_id": {
+          "name": "merchant_transaction_id",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "text"
+        },
+        "gateway_transaction_id": {
+          "name": "gateway_transaction_id",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "text"
+        },
+        "customer_id": {
+          "name": "customer_id",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "text"
+        },
+        "amount_requested": {
+          "name": "amount_requested",
+          "type": "numeric",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "decimal"
+        },
+        "amount_settled": {
+          "name": "amount_settled",
+          "type": "numeric",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "decimal"
+        },
+        "payment_method_code": {
+          "name": "payment_method_code",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "text"
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "default": "'pending'",
+          "enumItems": [
+            "pending",
+            "settled",
+            "failed",
+            "expired"
+          ],
+          "mappedType": "enum"
+        },
+        "gateway_status": {
+          "name": "gateway_status",
+          "type": "integer",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "integer"
+        },
+        "settled_at": {
+          "name": "settled_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "length": 6,
+          "mappedType": "datetime"
+        },
+        "raw_amount_requested": {
+          "name": "raw_amount_requested",
+          "type": "jsonb",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "json"
+        },
+        "raw_amount_settled": {
+          "name": "raw_amount_settled",
+          "type": "jsonb",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "json"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "length": 6,
+          "default": "now()",
+          "mappedType": "datetime"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "length": 6,
+          "default": "now()",
+          "mappedType": "datetime"
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "length": 6,
+          "mappedType": "datetime"
+        }
+      },
+      "name": "globepay_deposit",
+      "schema": "public",
+      "indexes": [
+        {
+          "keyName": "IDX_globepay_deposit_merchant_transaction_id_unique",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE UNIQUE INDEX IF NOT EXISTS \"IDX_globepay_deposit_merchant_transaction_id_unique\" ON \"globepay_deposit\" (\"merchant_transaction_id\") WHERE deleted_at IS NULL"
+        },
+        {
+          "keyName": "IDX_globepay_deposit_deleted_at",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_globepay_deposit_deleted_at\" ON \"globepay_deposit\" (\"deleted_at\") WHERE deleted_at IS NULL"
+        },
+        {
+          "keyName": "IDX_globepay_deposit_merchant_transaction_id",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_globepay_deposit_merchant_transaction_id\" ON \"globepay_deposit\" (\"merchant_transaction_id\") WHERE deleted_at IS NULL"
+        },
+        {
+          "keyName": "IDX_globepay_deposit_status_created_at",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_globepay_deposit_status_created_at\" ON \"globepay_deposit\" (\"status\", \"created_at\") WHERE deleted_at IS NULL"
+        },
+        {
+          "keyName": "globepay_deposit_pkey",
+          "columnNames": [
+            "id"
+          ],
+          "composite": false,
+          "constraint": true,
+          "primary": true,
+          "unique": true
+        }
+      ],
+      "checks": [],
+      "foreignKeys": {},
+      "nativeEnums": {}
+    },
+    {
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "text"
+        },
+        "merchant_transaction_id": {
+          "name": "merchant_transaction_id",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "text"
+        },
+        "gateway_transaction_id": {
+          "name": "gateway_transaction_id",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "text"
+        },
+        "customer_id": {
+          "name": "customer_id",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "text"
+        },
+        "amount": {
+          "name": "amount",
+          "type": "numeric",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "decimal"
+        },
+        "bank_code": {
+          "name": "bank_code",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "text"
+        },
+        "account_number": {
+          "name": "account_number",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "text"
+        },
+        "account_holder_name": {
+          "name": "account_holder_name",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "text"
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "default": "'pending'",
+          "enumItems": [
+            "pending",
+            "settled",
+            "failed",
+            "held"
+          ],
+          "mappedType": "enum"
+        },
+        "gateway_status": {
+          "name": "gateway_status",
+          "type": "integer",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "integer"
+        },
+        "settled_at": {
+          "name": "settled_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "length": 6,
+          "mappedType": "datetime"
+        },
+        "idempotency_key": {
+          "name": "idempotency_key",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "text"
+        },
+        "verify_outcome": {
+          "name": "verify_outcome",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "text"
+        },
+        "failure_reason": {
+          "name": "failure_reason",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "text"
+        },
+        "raw_amount": {
+          "name": "raw_amount",
+          "type": "jsonb",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "json"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "length": 6,
+          "default": "now()",
+          "mappedType": "datetime"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "length": 6,
+          "default": "now()",
+          "mappedType": "datetime"
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "length": 6,
+          "mappedType": "datetime"
+        }
+      },
+      "name": "globepay_withdrawal",
+      "schema": "public",
+      "indexes": [
+        {
+          "keyName": "IDX_globepay_withdrawal_merchant_transaction_id_unique",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE UNIQUE INDEX IF NOT EXISTS \"IDX_globepay_withdrawal_merchant_transaction_id_unique\" ON \"globepay_withdrawal\" (\"merchant_transaction_id\") WHERE deleted_at IS NULL"
+        },
+        {
+          "keyName": "IDX_globepay_withdrawal_deleted_at",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_globepay_withdrawal_deleted_at\" ON \"globepay_withdrawal\" (\"deleted_at\") WHERE deleted_at IS NULL"
+        },
+        {
+          "keyName": "IDX_globepay_withdrawal_merchant_transaction_id",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_globepay_withdrawal_merchant_transaction_id\" ON \"globepay_withdrawal\" (\"merchant_transaction_id\") WHERE deleted_at IS NULL"
+        },
+        {
+          "keyName": "IDX_globepay_withdrawal_status_created_at",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_globepay_withdrawal_status_created_at\" ON \"globepay_withdrawal\" (\"status\", \"created_at\") WHERE deleted_at IS NULL"
+        },
+        {
+          "keyName": "UQ_globepay_withdrawal_customer_idempotency_key",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE UNIQUE INDEX IF NOT EXISTS \"UQ_globepay_withdrawal_customer_idempotency_key\" ON \"globepay_withdrawal\" (\"customer_id\", \"idempotency_key\") WHERE idempotency_key is not null and deleted_at is null and status <> 'failed'"
+        },
+        {
+          "keyName": "globepay_withdrawal_pkey",
+          "columnNames": [
+            "id"
+          ],
+          "composite": false,
+          "constraint": true,
+          "primary": true,
+          "unique": true
+        }
+      ],
+      "checks": [],
+      "foreignKeys": {},
+      "nativeEnums": {}
+    },
+    {
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "text"
+        },
         "display_id": {
           "name": "display_id",
           "type": "text",
@@ -2604,6 +3181,15 @@
           "expression": "CREATE UNIQUE INDEX IF NOT EXISTS \"IDX_notification_read_notification_id_customer_id_unique\" ON \"notification_read\" (\"notification_id\", \"customer_id\") WHERE deleted_at IS NULL"
         },
         {
+          "keyName": "IDX_notification_read_customer_id",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_notification_read_customer_id\" ON \"notification_read\" (\"customer_id\") WHERE deleted_at IS NULL"
+        },
+        {
           "keyName": "notification_read_pkey",
           "columnNames": [
             "id"
@@ -2775,6 +3361,15 @@
           "nullable": false,
           "default": "0",
           "mappedType": "integer"
+        },
+        "tier_ranges": {
+          "name": "tier_ranges",
+          "type": "jsonb",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "json"
         },
         "raw_price": {
           "name": "raw_price",
@@ -4770,6 +5365,86 @@
         },
         {
           "keyName": "stock_movement_pkey",
+          "columnNames": [
+            "id"
+          ],
+          "composite": false,
+          "constraint": true,
+          "primary": true,
+          "unique": true
+        }
+      ],
+      "checks": [],
+      "foreignKeys": {},
+      "nativeEnums": {}
+    },
+    {
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "text"
+        },
+        "ranges": {
+          "name": "ranges",
+          "type": "jsonb",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "json"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "length": 6,
+          "default": "now()",
+          "mappedType": "datetime"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "length": 6,
+          "default": "now()",
+          "mappedType": "datetime"
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "length": 6,
+          "mappedType": "datetime"
+        }
+      },
+      "name": "tier_settings",
+      "schema": "public",
+      "indexes": [
+        {
+          "keyName": "IDX_tier_settings_deleted_at",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_tier_settings_deleted_at\" ON \"tier_settings\" (\"deleted_at\") WHERE deleted_at IS NULL"
+        },
+        {
+          "keyName": "tier_settings_pkey",
           "columnNames": [
             "id"
           ],
