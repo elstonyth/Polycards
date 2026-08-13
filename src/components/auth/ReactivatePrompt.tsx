@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { logout } from '@/lib/actions/auth';
 import { reactivateAccount } from '@/lib/actions/account-lifecycle';
+import { useAuth } from './AuthProvider';
 
 /**
  * Offered after a successful login when the account turns out to be
@@ -24,6 +25,7 @@ export default function ReactivatePrompt({
 }: {
   onDone: (reactivated: boolean) => void;
 }) {
+  const { setCustomer } = useAuth();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -50,6 +52,17 @@ export default function ReactivatePrompt({
             setError(null);
             try {
               await logout();
+              // Clear the CLIENT context too, not just the cookie. On the
+              // Google path /api/me succeeds before this prompt shows (the
+              // guard carves out GET /store/customers/me), so AuthProvider is
+              // populated and the header renders a signed-in session that
+              // declining would otherwise leave on screen until the next
+              // navigation. router.refresh() cannot fix that — it re-renders
+              // server components, and this state is client-side. Same order as
+              // MeActions.tsx's logout. Done here rather than in either caller
+              // so both entry points get it; the AuthForm path only looks
+              // correct today because its context happens to be empty.
+              setCustomer(null);
               onDone(false);
             } catch {
               // Leaving must never dead-end. Without this the button would sit
