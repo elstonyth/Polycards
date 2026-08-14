@@ -26,6 +26,7 @@ import {
 } from './saved-accounts';
 import { FRAME_LEVELS } from './avatar-frames';
 import { challengePackId } from './challenge-prize';
+import { FREE_WELCOME_CATEGORY } from './free-pack';
 import Pack from './models/pack';
 import Card from './models/card';
 import CardPriceHistory from './models/card-price-history';
@@ -2798,6 +2799,131 @@ class PacksModuleService extends MedusaService({
         sharedContext,
       );
     }
+  }
+
+  // Stamp the account as eligible for the one free welcome pack (spec
+  // docs/superpowers/specs/2026-08-14-free-welcome-pack-design.md). Called from
+  // the customer.created subscriber, which is why only accounts registered
+  // after the feature shipped ever carry it — that IS the "new registrations
+  // only" rule, with no date cutoff anywhere.
+  //
+  // markPhoneVerified's shape, for markPhoneVerified's reasons: idempotent and
+  // first-write-wins (a re-stamp must not move the timestamp), under the SAME
+  // `credit:` advisory key as every other account-state upsert so two
+  // concurrent first-writes can't race the unique customer_id to a 23505.
+  @InjectTransactionManager()
+  async markFreePackAvailable(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `credit:${customerId}`,
+    ]);
+    const [existing] = await this.listCustomerAccountStates(
+      { customer_id: customerId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (existing?.free_pack_available_at) return;
+    if (existing) {
+      await this.updateCustomerAccountStates(
+        {
+          selector: { id: existing.id },
+          data: { free_pack_available_at: new Date() },
+        },
+        sharedContext,
+      );
+    } else {
+      await this.createCustomerAccountStates(
+        [{ customer_id: customerId, free_pack_available_at: new Date() }],
+        sharedContext,
+      );
+    }
+  }
+
+  /**
+   * ATOMIC ONE-SHOT CLAIM of the free welcome pack — answers `true` to exactly
+   * one caller, and `false` to every other.
+   *
+   * ONE conditional UPDATE, for the same reason as
+   * claimGlobePayWithdrawalStatus: Postgres re-evaluates the predicate against
+   * committed state AFTER the row lock is released, so of two concurrent
+   * claims — a double-tapped "Open free pack" is the realistic trigger —
+   * exactly one matches a row. A read-then-write (list the state, check
+   * free_pack_claimed_at, then update) type-checks and reads like the same
+   * guard, but takes no row lock: both callers see NULL and both open a free
+   * pack. `true` means THIS caller owns the free open that follows.
+   *
+   * No row is lazily created here: an unstamped account has no
+   * free_pack_available_at, so the WHERE matches nothing and the claim is
+   * refused. No advisory lock either — the row lock is the whole mutex.
+   */
+  @InjectTransactionManager()
+  async claimFreePack(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<boolean> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ id: string }[]>(
+      'UPDATE customer_account_state ' +
+        'SET free_pack_claimed_at = now(), updated_at = now() ' +
+        'WHERE customer_id = ? AND free_pack_available_at IS NOT NULL ' +
+        'AND free_pack_claimed_at IS NULL AND deleted_at IS NULL ' +
+        'RETURNING id',
+      [customerId],
+    );
+    return rows.length > 0;
+  }
+
+  // Compensation for a free open that failed after the claim was won: hand the
+  // customer back the pack they never received. Unconditional by design — the
+  // workflow step only ever compensates the claim IT just won, and re-checking
+  // free_pack_claimed_at here would just be the same row read twice.
+  @InjectTransactionManager()
+  async clearFreePackClaim(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute(
+      'UPDATE customer_account_state ' +
+        'SET free_pack_claimed_at = NULL, updated_at = now() ' +
+        'WHERE customer_id = ? AND deleted_at IS NULL',
+      [customerId],
+    );
+  }
+
+  // Has this customer ever opened a PAID pack? The free pull's sell/deliver
+  // lock reads this (refusal copy: FREE_PULL_LOCKED_MESSAGE) — 'free' and
+  // 'reward' pulls are not purchases, so only source='pack' unlocks. One
+  // indexed read (IDX_pull_customer_id_rolled_at), mirroring isPhoneVerified.
+  @InjectManager()
+  async hasPaidOpen(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<boolean> {
+    const pulls = await this.listPulls(
+      { customer_id: customerId, source: 'pack' },
+      { take: 1, select: ['id'] },
+      sharedContext,
+    );
+    return pulls.length > 0;
+  }
+
+  // The live free welcome pack, or null when the operator has not published
+  // one (the storefront badge and the free-open path both go quiet then). It is
+  // an ordinary Pack in the reserved 'free_welcome' category — hidden from the
+  // public catalog like 'reward_box'. Admin validation keeps at most one
+  // ACTIVE; rank ASC + take 1 makes this read deterministic regardless.
+  @InjectManager()
+  async getActiveFreePack(@MedusaContext() sharedContext: Context = {}) {
+    const [pack] = await this.listPacks(
+      { category: FREE_WELCOME_CATEGORY, status: 'active' },
+      { take: 1, order: { rank: 'ASC' } },
+      sharedContext,
+    );
+    return pack ?? null;
   }
 
   // True if the customer's login is administratively disabled. One indexed read
