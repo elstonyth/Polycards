@@ -181,6 +181,75 @@ try {
   ok('free-pack badge visible on /slots');
   await shot(page, 'badge');
 
+  // 1b ── OVERLAP GUARD: the badge is `fixed` bottom-right at z-40, floating
+  // OVER the catalog. Tapping the tile nearest it must still open THAT tile.
+  // The click is deliberately NOT forced, so Playwright's pointer-interception
+  // check is the assertion — a badge that swallows the tap fails right here.
+  // 700px tall on desktop, not 900: at 900 this catalog fits without scrolling
+  // and the badge floats over empty footer space, which would make the tap test
+  // vacuous — a real (longer) catalog always has a card row on that rail.
+  for (const [w, h, label] of [
+    [375, 812, 'mobile'],
+    [1440, 700, 'desktop'],
+  ]) {
+    await page.setViewportSize({ width: w, height: h });
+    await page.goto(`${BASE}/slots`, { waitUntil: 'networkidle' });
+    const floating = page.getByTestId('free-pack-badge').first();
+    await floating.waitFor({ state: 'visible', timeout: 20000 });
+    // Catalog links only: every pack href carries ?count=, the badge's does not.
+    const tiles = page.locator('a[href*="count="]');
+    const hits = (a, b) =>
+      a.x < b.x + b.width &&
+      b.x < a.x + a.width &&
+      a.y < b.y + b.height &&
+      b.y < a.y + a.height;
+    // PARK a tile UNDER the badge. Scrolled fully to the bottom the badge
+    // floats over the FOOTER, which would make the tap test vacuous, so step
+    // back up until a catalog row really is beneath it.
+    await page.keyboard.press('End');
+    await page.waitForTimeout(600);
+    let nearest = null;
+    let overlaps = false;
+    for (let step = 0; step < 20 && !overlaps; step++) {
+      const badgeBox = await floating.boundingBox();
+      const under = [];
+      for (let i = 0; i < (await tiles.count()); i++) {
+        const box = await tiles.nth(i).boundingBox();
+        if (!box || box.y + box.height < 0 || box.y > h) continue;
+        under.push({ i, box, overlap: hits(box, badgeBox) });
+      }
+      nearest = under.find((u) => u.overlap) ?? under.at(-1) ?? null;
+      overlaps = Boolean(nearest?.overlap);
+      if (!overlaps) {
+        await page.mouse.wheel(0, -90);
+        await page.waitForTimeout(250);
+      }
+    }
+    await shot(page, `badge-overlap-${label}`);
+    if (!nearest) {
+      fail(`${label}: no catalog tile on screen under the badge rail`);
+      continue;
+    }
+    const target = tiles.nth(nearest.i);
+    const href = await target.getAttribute('href');
+    try {
+      await target.click({ timeout: 5000 });
+      await page.waitForURL(
+        new RegExp(href.split('?')[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+        { timeout: 15000 },
+      );
+      // `overlap:true` is what makes this a real test — false means the local
+      // catalog was too short to park a tile under the badge at this viewport.
+      ok(`${label}: tile ${href} opens on tap (badge overlap: ${overlaps})`);
+    } catch (e) {
+      fail(
+        `${label}: badge swallowed the tap on ${href} — ${e.message.split('\n')[0]}`,
+      );
+    }
+  }
+  await page.setViewportSize({ width: 430, height: 932 });
+  await page.goto(`${BASE}/slots`, { waitUntil: 'networkidle' });
+
   // 2 ── the detail page is in free mode
   await badge.click();
   await page.waitForURL(new RegExp(`/slots/${SLUG}`), { timeout: 20000 });
