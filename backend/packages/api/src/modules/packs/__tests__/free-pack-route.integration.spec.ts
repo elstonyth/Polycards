@@ -298,7 +298,16 @@ moduleIntegrationTestRunner<PacksModuleService>({
         // sell 400s. Same unquoted block the open route degrades to — the item
         // still renders (the storefront drops a row with no finite
         // buyback.percent), it just offers nothing payable.
-        expect(item.buyback).toEqual(UNQUOTED_BUYBACK);
+        expect(item.buyback.amount).toBe(0);
+        expect(item.buyback.vault_amount).toBe(0);
+        expect(Number.isFinite(item.buyback.percent)).toBe(true);
+        // ...but `firm` stays the REAL FX firmness (true on this firm seed),
+        // NOT UNQUOTED_BUYBACK's false. The vault aggregates firmness across
+        // ALL items (`items.every(i => i.buyback.firm)`), so a false here would
+        // blame the lock on a pricing outage for the whole vault and block the
+        // customer's other, sellable cards. The lock rides on `locked` alone.
+        expect(item.buyback.firm).toBe(true);
+        expect(item.buyback).toEqual({ ...UNQUOTED_BUYBACK, firm: true });
         // The card's VALUE still shows — only the sell offer is withheld.
         expect(item.card.marketPriceMyr).toBeGreaterThan(0);
       });

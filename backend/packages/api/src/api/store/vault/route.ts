@@ -188,8 +188,17 @@ export async function GET(
         // omitted/null field, because the storefront drops any vault row
         // without a finite buyback.percent, which would delete the customer's
         // free card from their own vault.
+        //
+        // `firm` is OVERRIDDEN back to the real FX firmness — it must NOT be
+        // UNQUOTED_BUYBACK's false. `firm` means "the FX rate is firm", which
+        // is a GLOBAL fact, and FX is firm for a locked pull like any other.
+        // The vault aggregates it globally (`items.every(i => i.buyback.firm)`
+        // in VaultClient.tsx), so a hardcoded false on ONE locked row would
+        // blame the lock on a pricing outage for the WHOLE vault and block the
+        // customer from selling their other, genuinely sellable cards.
+        // The lock is carried by `locked`, never by `firm`.
         buyback: locked
-          ? UNQUOTED_BUYBACK
+          ? { ...UNQUOTED_BUYBACK, firm: fxFirm }
           : {
               percent,
               amount: buybackAmount(marketPriceMyr, percent),
