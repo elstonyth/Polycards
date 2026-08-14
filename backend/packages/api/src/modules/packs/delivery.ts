@@ -57,16 +57,22 @@ export type DeliveryRequestVerdict =
   | "already_delivered"
   | "bought_back"
   | "not_vaulted" // fallback for any other non-vaulted status
-  | "reward_source";
+  | "reward_source"
+  | "free_locked";
 
 // Pure validation for a batch delivery request. `fetchedPulls` is whatever the
 // DB returned for `requestedIds`; ownership failure and unknown id BOTH map to
 // the same caller-facing 404 upstream (no existence leak), but we distinguish
 // them here for precise logging/branching.
+//
+// `freeUnlocked` is the caller's hasPaidOpen(callerId) — resolved ONCE per
+// request, never stored on the pull, so the customer's first paid open lifts
+// the free-welcome lock with zero writes (spec 2026-08-14).
 export function validateDeliveryRequest(
   fetchedPulls: PullLike[],
   requestedIds: string[],
   callerId: string,
+  freeUnlocked: boolean,
 ): DeliveryRequestVerdict {
   if (requestedIds.length === 0) return "empty";
   if (new Set(requestedIds).size !== requestedIds.length) return "duplicate";
@@ -87,6 +93,9 @@ export function validateDeliveryRequest(
     // Reward prizes ship ONLY via recordRewardWithdrawal (redemption gate +
     // daily cap + is_reward stamping) — never via the generic delivery path.
     if (pull.source === "reward") return "reward_source";
+    // The free welcome pull ships only after the customer's first PAID open —
+    // same lock the buyback step applies (modules/packs/free-pack.ts).
+    if (pull.source === "free" && !freeUnlocked) return "free_locked";
   }
   return "ok";
 }

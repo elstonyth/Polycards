@@ -2287,6 +2287,11 @@ class PacksModuleService extends MedusaService({
       pull ? [pull] : [],
       [pullId],
       customerId,
+      // freeUnlocked is irrelevant on this path: the reward gate returns first
+      // for the only shape that ships here, and a source='free' pull is
+      // 'invalid' whichever verdict it earns. No hasPaidOpen read under the
+      // lock.
+      true,
     );
     if (verdict !== 'reward_source') {
       return { status: 'invalid' };

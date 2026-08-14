@@ -8,6 +8,7 @@ import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
 import { findCardInventoryTarget } from '../../modules/packs/card-stock';
 import { isChallengePrizePack } from '../../modules/packs/challenge-prize';
+import { FREE_PULL_LOCKED_MESSAGE } from '../../modules/packs/free-pack';
 import {
   buybackAmount,
   resolveBuybackRate,
@@ -85,6 +86,16 @@ export const buybackPullStep = createStep(
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
         "Reward prizes can't be sold back",
+      );
+    }
+    // Free welcome pull: fully locked (no buyback, no delivery) until the
+    // customer's first PAID open — computed, never stored, so the first
+    // source='pack' pull unlocks it with zero writes (spec 2026-08-14).
+    // buyback-batch runs this same step per id, so the batch inherits the gate.
+    if (pull.source === 'free' && !(await packs.hasPaidOpen(pull.customer_id))) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        FREE_PULL_LOCKED_MESSAGE,
       );
     }
 

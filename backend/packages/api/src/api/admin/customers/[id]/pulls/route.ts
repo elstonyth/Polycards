@@ -71,6 +71,10 @@ export async function GET(
   );
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
   const { rate: fx, firm: fxFirm } = await resolveFxRateInfo(packs);
+  // Whole-list read (one indexed query): a free welcome pull is unsellable
+  // until this customer's first PAID open, so it must show no payable-now quote
+  // while locked — admin and customer refuse on the SAME rule.
+  const freeUnlocked = await packs.hasPaidOpen(id);
   const filter: Record<string, unknown> = { customer_id: id };
   if (status) filter.status = status;
   if (source) filter.source = source;
@@ -99,9 +103,10 @@ export async function GET(
     items: rows.map((p: any) => {
       const card = cardByHandle.get(p.card_id);
       // Payable-now quote — vaulted card pulls only (reward pulls can't be
-      // sold back; other statuses have nothing to pay). Uses the per-card
-      // multiplier exactly like GET /store/vault, so this amount is the same
-      // number the customer sees on their sell button.
+      // sold back, a locked free welcome pull can't yet; other statuses have
+      // nothing to pay). Uses the per-card multiplier exactly like GET
+      // /store/vault, so this amount is the same number the customer sees on
+      // their sell button.
       let quote: {
         percent: number;
         amount: number;
@@ -109,7 +114,12 @@ export async function GET(
         firm: boolean;
         instant_deadline_ms: number;
       } | null = null;
-      if (p.status === 'vaulted' && p.source !== 'reward' && card) {
+      if (
+        p.status === 'vaulted' &&
+        p.source !== 'reward' &&
+        (p.source !== 'free' || freeUnlocked) &&
+        card
+      ) {
         const marketPriceMyr = displayMarketPrice(
           toMoney(card.market_value),
           fx,
