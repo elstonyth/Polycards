@@ -331,6 +331,32 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(result.price).toBe(0);
         expect((await latestPull(customerId, FREE_SLUG)).source).toBe('free');
       });
+
+      // The other half of that property: the no-op branch carries NO
+      // compensate payload, so a failed PAID open must not hand back a free
+      // pack the customer already spent.
+      it('a failed PAID open does not resurrect a spent claim', async () => {
+        await service.markFreePackAvailable(customerId);
+        await open(FREE_SLUG, customerId); // spend the claim for real
+        const claimedAt = (await claimState(customerId))!.free_pack_claimed_at;
+        expect(claimedAt).toBeTruthy();
+        await fund(customerId, 100);
+
+        const brokenRecord = buildContainer(
+          packsWith({
+            recordPullsWithLedger: async () => {
+              throw new Error('record exploded');
+            },
+          }),
+        );
+        expect(
+          await openFails(PAID_SLUG, customerId, brokenRecord),
+        ).toMatch(/record exploded/);
+
+        expect((await claimState(customerId))!.free_pack_claimed_at).toEqual(
+          claimedAt,
+        );
+      });
     });
   },
 });
