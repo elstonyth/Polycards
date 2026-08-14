@@ -93,6 +93,11 @@ export async function GET(
   //
   // Ranks are re-numbered over the survivors (1..N, no gaps): a gap would
   // publish the fact that someone was removed, which is the opposite of hiding.
+  //
+  // DELETED players are dropped here too — the purge writes the same disabled
+  // tombstone (see disabledCustomerIds). That direction is consistent rather
+  // than accidental: settleChallengeWeek already skips deleted customers, so
+  // the board now agrees with who can actually be paid.
   const disabled = await packs.disabledCustomerIds(
     ranked.map((r) => r.customer_id),
   );

@@ -2819,6 +2819,12 @@ class PacksModuleService extends MedusaService({
   // customer id and must not put an administratively disabled player on
   // display. One indexed read over the ids already in hand.
   //
+  // This also matches DELETED customers, and that is the purge's doing, not an
+  // extra rule: purgeAccountPacksData upserts the account-state tombstone with
+  // disabled=true (it is what 403s a deleted customer's surviving bearer). So
+  // a deleted player leaves the boards too. Callers wanting the older
+  // "deleted, shown anonymously" behaviour must subtract deletedCustomerIds.
+  //
   // No `take` bound, for the same reason deletedCustomerIds omits one: the
   // filter already constrains the read to these ids, and a bound on top of it
   // can only subtract — silently omitting a disabled customer, which here means

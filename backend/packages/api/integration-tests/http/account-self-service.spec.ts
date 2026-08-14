@@ -497,11 +497,21 @@ medusaIntegrationTestRunner({
       });
 
       // Spec §4. The `pull` rows are retained by design, so a deleted customer
-      // can still be ranked on a PUBLIC board. `publicProfileFields` is already
-      // undefined-safe, which is exactly why this needs a test: nothing else
-      // would stop a future refactor turning the first real delete into a 500
-      // on the leaderboard, and that page is the one nobody is logged in to.
-      it('renders a deleted-but-ranked player anonymously on the public boards', async () => {
+      // is still RANKED by the aggregate — the boards must survive that, and
+      // this test exists because that page is the one nobody is logged in to:
+      // nothing else would stop a refactor turning the first real delete into
+      // a 500 on the leaderboard.
+      //
+      // They are no longer DISPLAYED, and that is a consequence of the purge
+      // rather than a rule of its own: the purge upserts the account-state
+      // tombstone with disabled=true (that is what 403s a deleted customer's
+      // surviving bearer), and the boards filter disabled players. It lands on
+      // the right side of settlement, too — settleChallengeWeek already SKIPS
+      // deleted customers via deletedCustomerIds, so dropping them from the
+      // board makes the ranks agree with who can actually be paid. Reverting
+      // to "shown anonymously" means subtracting deletedCustomerIds from the
+      // boards' disabled filter, not deleting this test.
+      it('drops a deleted player from the public boards (the purge disables them)', async () => {
         const email = 'delete-ranked@test.dev';
         const { id, token } = await register(email);
         const packs = packsOf();
@@ -548,11 +558,12 @@ medusaIntegrationTestRunner({
         const entry = (
           board.data.entries as { seed: number; name: string }[]
         ).find((e) => e.seed === seedOf(id));
-        expect(entry).toBeDefined();
-        // Exact, not /^Collector \d{4}$/: seedOf is a 32-bit hash whose decimal
-        // form is not guaranteed to be 4+ digits, and a loose pattern would
-        // fail for reasons that have nothing to do with deletion.
-        expect(entry?.name).toBe(`Collector ${String(seedOf(id)).slice(0, 4)}`);
+        expect(entry).toBeUndefined();
+        // Asserted by seed rather than by name: the seed is the only handle a
+        // purged customer still has on a public board (the name is derived
+        // from a scrubbed customer row), so it is what proves the row is gone
+        // rather than merely anonymised.
+        expect(JSON.stringify(board.data)).not.toContain(String(seedOf(id)));
       });
     });
   },
