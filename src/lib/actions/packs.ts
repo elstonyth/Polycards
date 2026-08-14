@@ -69,6 +69,12 @@ export type OpenPackResult =
       /** Pack price debited for this open (RM decimal). Already in the HTTP
        *  response; surfaced for the slot's COST display. Null if it regresses. */
       price: number | null;
+      /** True when this was the one-time FREE welcome open — read from the
+       *  backend's `free` flag (which it reads off the recorded pull), never
+       *  inferred from `price === 0`, which a future promo pack could also be.
+       *  A free pull carries no sell offer and the reveal says why. Defaults
+       *  false so an older backend can only ever under-claim. */
+      free: boolean;
     }
   | { ok: false; error: string; needsAuth?: boolean; needsTopUp?: boolean };
 
@@ -128,17 +134,19 @@ export async function openPack(slug: string): Promise<OpenPackResult> {
   }
 
   try {
-    const { pull, card, balance, price, buyback } = await sdk.client.fetch<{
-      pull?: { id?: unknown };
-      card: BackendWonCard;
-      balance?: unknown;
-      price?: unknown;
-      buyback?: BackendBuyback;
-    }>(`/store/packs/${encodeURIComponent(slug)}/open`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      body: {},
-    });
+    const { pull, card, balance, price, buyback, free } =
+      await sdk.client.fetch<{
+        pull?: { id?: unknown };
+        card: BackendWonCard;
+        balance?: unknown;
+        price?: unknown;
+        buyback?: BackendBuyback;
+        free?: unknown;
+      }>(`/store/packs/${encodeURIComponent(slug)}/open`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: {},
+      });
 
     // The fetch generic is a type assertion, not a runtime guard — validate the
     // shape so a renamed field can't render "$NaN" / an undefined rarity ring.
@@ -187,6 +195,8 @@ export async function openPack(slug: string): Promise<OpenPackResult> {
           ? balance
           : null,
       price: typeof price === 'number' && Number.isFinite(price) ? price : null,
+      // Only a literal true claims a free open (an older backend omits it).
+      free: free === true,
     };
   } catch (error) {
     logger.error(`[packs] open-pack failed for '${slug}':`, error);

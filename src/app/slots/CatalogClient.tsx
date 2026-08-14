@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils';
 import { pillVariants } from '@/components/ui/pill';
 import Reveal from '@/components/Reveal';
 import QtyStepper from '@/components/QtyStepper';
+import FreePackBadge from '@/components/FreePackBadge';
 import { packHref, type Pack, type PackCategory } from '@/lib/packs-data';
 
 // Pack catalog comes from the backend via getPackCategories() (server page);
@@ -225,9 +226,13 @@ function PackRow({
 export default function CatalogClient({
   categories,
   initialCategory,
+  freePackSlug = null,
 }: {
   categories: PackCategory[];
   initialCategory: string;
+  /** Non-null only while this customer's one-time welcome claim is unspent —
+   *  the badge is the free pack's only entry point (it is not in `categories`). */
+  freePackSlug?: string | null;
 }) {
   const [active, setActive] = useState<string>(initialCategory);
 
@@ -244,6 +249,8 @@ export default function CatalogClient({
 
   return (
     <div className="mx-auto w-full px-fluid py-4">
+      {freePackSlug && <FreePackBadge slug={freePackSlug} />}
+
       {/* Sticky filter bar — category chip rail */}
       <div className="glass-chrome sticky top-2 z-20 mb-6 rounded-2xl border border-white/10 p-2">
         {/* Category chip rail (icons + label) */}
