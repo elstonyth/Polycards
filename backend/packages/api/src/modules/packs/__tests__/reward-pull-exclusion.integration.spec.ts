@@ -1,11 +1,20 @@
 /**
  * C1 — Exclude reward Pulls from 4 read sites (integration:modules)
  *
+ * Extended by the free welcome pack (2026-08-14): 'free' pulls are excluded from
+ * exactly the same read sites as 'reward' ones, and the free pack itself is
+ * hidden from the public catalog like a reward_box.
+ *
  * Asserted contracts:
- *  - leaderboardTop: reward Pull excluded from COUNT (source <> 'reward' in raw SQL).
- *  - listPulls with source { $ne: 'reward' }: excludes reward Pulls (mirrors
- *    pulls/recent route filter and profile recent-feed filter after C1).
- *  - profile collection: showcased reward Pulls excluded by the C1 source filter.
+ *  - leaderboardTop: reward AND free Pulls excluded from COUNT (source = 'pack'
+ *    in raw SQL).
+ *  - listPulls with source { $nin: ['reward', 'free'] }: excludes both (mirrors
+ *    the pulls/recent route filter).
+ *  - profile collection: showcased reward/free Pulls excluded by the source filter.
+ *  - GET /store/packs: an ACTIVE free_welcome pack is absent from the catalog body.
+ *  - backfillRecordedPullValues: a free Pull keeps recorded_value_usd NULL even
+ *    though its card exists — without that, the next backfill run would stamp a
+ *    live value on it and the COALESCE fallback would put it back on every board.
  *  - buyback gate: a reward Pull has source='reward' and status='vaulted' — the C1
  *    guard in buyback-pull.ts fires before listCards; Pull attributes confirmed here.
  *
@@ -17,6 +26,11 @@
 import path from 'path';
 import { moduleIntegrationTestRunner } from '@medusajs/test-utils';
 import { PACKS_MODULE } from '../index';
+import { FREE_WELCOME_CATEGORY } from '../free-pack';
+import {
+  GET as catalogGET,
+  clearPackListCache,
+} from '../../../api/store/packs/route';
 import type PacksModuleService from '../service';
 import Pack from '../models/pack';
 import Card from '../models/card';
@@ -67,12 +81,15 @@ moduleIntegrationTestRunner<PacksModuleService>({
       cardHandle: `card-c1-${tag}`,
       packSlug: `pack-c1-${tag}`,
       rewardPackSlug: `reward-box-c1-${tag}`,
+      freePackSlug: `free-welcome-c1-${tag}`,
       prizeHandle: `prize-c1-${tag}`,
     });
 
-    // Seed: normal card pack + reward_box pack + card + PackOdds + one normal Pull
-    // (source='pack', vaulted, showcased) + one reward Pull (source='reward', vaulted).
-    // Returns both Pull records.
+    // Seed: normal card pack + reward_box pack + ACTIVE free_welcome pack + card
+    // + PackOdds + one normal Pull (source='pack', vaulted, showcased) + one
+    // reward Pull (source='reward', vaulted) + one free Pull (source='free',
+    // vaulted, showcased, pointing at the REAL card so the backfill assertion
+    // isn't vacuously satisfied by the batch CTE's JOIN card). Returns all three.
     const seed = async (ids: ReturnType<typeof mkIds>) => {
       await service.createPacks([
         {
@@ -94,6 +111,17 @@ moduleIntegrationTestRunner<PacksModuleService>({
           status: 'active',
           price: 0,
           buyback_percent: 0,
+        },
+      ]);
+      await service.createPacks([
+        {
+          slug: ids.freePackSlug,
+          title: 'C1 Free Welcome Pack',
+          image: 'img.png',
+          category: FREE_WELCOME_CATEGORY,
+          status: 'active',
+          price: 0,
+          buyback_percent: 90,
         },
       ]);
       await service.createCards([
@@ -158,38 +186,72 @@ moduleIntegrationTestRunner<PacksModuleService>({
         { id: rewardPull.id, status: 'vaulted' as const, showcased: true },
       ]);
 
-      return { normalPull, rewardPull };
+      const [freePull] = await service.createPulls([
+        {
+          customer_id: ids.customer,
+          pack_id: ids.freePackSlug,
+          card_id: ids.cardHandle, // a REAL card — see the seed comment
+          order_id: null,
+          rolled_at: new Date(),
+          source: 'free',
+        },
+      ]);
+      await service.updatePulls([
+        { id: freePull.id, status: 'vaulted' as const, showcased: true },
+      ]);
+
+      return { normalPull, rewardPull, freePull };
     };
 
     describe('C1 — reward Pull exclusion', () => {
-      it('leaderboardTop: reward Pull excluded — only the normal Pull is counted', async () => {
+      it('leaderboardTop: reward AND free Pulls excluded — only the normal Pull is counted', async () => {
         const ids = mkIds('ldb');
         await seed(ids);
 
         const rows = await service.leaderboardTop({ sinceMs: null, limit: 50 });
         const entry = rows.find((r) => r.customer_id === ids.customer);
 
-        // After C1: only the 1 source='pack' pull counts; the reward pull is excluded.
+        // Only the 1 source='pack' pull counts; reward + free are excluded.
         expect(entry).toBeDefined();
         expect(entry!.pulls).toBe(1);
       });
 
-      it('listPulls source $ne reward: excludes reward Pulls (mirrors pulls/recent + profile recent)', async () => {
+      it('challengeWeekTop: reward AND free Pulls excluded from the weekly count', async () => {
+        const ids = mkIds('chal');
+        await seed(ids);
+
+        // Monday-reset KL week — the current week always contains "now", so the
+        // just-seeded pulls are inside the window.
+        const rows = await service.challengeWeekTop({
+          timezone: 'Asia/Kuala_Lumpur',
+          resetDay: 1,
+          resetHour: 0,
+          limit: 100,
+        });
+        const entry = rows.find((r) => r.customer_id === ids.customer);
+
+        expect(entry).toBeDefined();
+        expect(entry!.pulls).toBe(1);
+      });
+
+      it('listPulls source $nin [reward, free]: excludes both (mirrors pulls/recent)', async () => {
         const ids = mkIds('recent');
         await seed(ids);
 
-        // Without filter: both pulls visible
+        // Without filter: all three pulls visible
         const all = await service.listPulls(
           { customer_id: ids.customer },
           { take: 100 },
         );
-        expect(all.length).toBe(2);
+        expect(all.length).toBe(3);
 
-        // With C1 filter (mirrors route.ts: source: { $ne: 'reward' })
+        // With the feed filter (mirrors pulls/recent/route.ts)
         const filtered = await service.listPulls(
           {
             customer_id: ids.customer,
-            source: { $ne: 'reward' } as Parameters<typeof service.listPulls>[0]['source'],
+            source: { $nin: ['reward', 'free'] } as Parameters<
+              typeof service.listPulls
+            >[0]['source'],
           },
           { take: 100 },
         );
@@ -197,7 +259,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(filtered[0].source).toBe('pack');
       });
 
-      it('profile collection filter: showcased reward Pull excluded; normal Pull included', async () => {
+      it('profile collection filter: showcased reward/free Pulls excluded; normal Pull included', async () => {
         const ids = mkIds('coll');
         await seed(ids);
 
@@ -205,10 +267,11 @@ moduleIntegrationTestRunner<PacksModuleService>({
           { customer_id: ids.customer },
           { take: 100 },
         );
-        // C1 collection filter (mirrors profiles/[handle]/route.ts after patch)
+        // Collection filter (mirrors profiles/[handle]/route.ts, which filters
+        // POSITIVELY on source='pack' — free/reward can never leak in).
         const collection = allPulls.filter(
           (p) =>
-            p.source !== 'reward' &&
+            p.source === 'pack' &&
             (p as unknown as { showcased: boolean }).showcased &&
             p.status === 'vaulted',
         );
@@ -216,6 +279,41 @@ moduleIntegrationTestRunner<PacksModuleService>({
         // Only the pack pull survives
         expect(collection).toHaveLength(1);
         expect(collection[0].source).toBe('pack');
+      });
+
+      it('GET /store/packs: an ACTIVE free_welcome pack is absent from the catalog', async () => {
+        const ids = mkIds('catalog');
+        await seed(ids);
+        clearPackListCache(); // module state outlives a test's fixtures
+
+        let body: { packs: { slug: string }[] } | undefined;
+        await catalogGET(
+          { scope: { resolve: () => service } } as never,
+          { json: (b: unknown) => (body = b as typeof body) } as never,
+        );
+
+        const slugs = (body?.packs ?? []).map((p) => p.slug);
+        // Control: the ordinary active pack IS listed, so an empty catalog
+        // can't make this pass vacuously.
+        expect(slugs).toContain(ids.packSlug);
+        expect(slugs).not.toContain(ids.freePackSlug);
+        expect(slugs).not.toContain(ids.rewardPackSlug);
+      });
+
+      it('backfillRecordedPullValues: stamps the pack Pull, leaves the free Pull NULL', async () => {
+        const ids = mkIds('backfill');
+        const { normalPull, freePull } = await seed(ids);
+
+        await service.backfillRecordedPullValues();
+
+        // Control: the free pull points at the SAME card as the pack pull, so a
+        // non-null here proves the batch CTE reached that card and the NULL
+        // below is the source filter, not a missing JOIN row.
+        const [np] = await service.listPulls({ id: normalPull.id }, { take: 1 });
+        expect(Number(np!.recorded_value_usd)).toBeGreaterThan(0);
+
+        const [fp] = await service.listPulls({ id: freePull.id }, { take: 1 });
+        expect(fp!.recorded_value_usd).toBeNull();
       });
 
       it('buyback guard: reward Pull has source=reward + vaulted so the C1 gate fires', async () => {

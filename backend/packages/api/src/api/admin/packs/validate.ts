@@ -7,6 +7,7 @@ import {
   type PublishedOdds,
 } from '../../../workflows/steps/create-pack';
 import { FLAT_PERCENT } from '../../../modules/packs/buyback-rate';
+import { FREE_WELCOME_CATEGORY } from '../../../modules/packs/free-pack';
 import { validateTierRangeMap } from '../../../modules/packs/tier-settings-validate';
 
 const HANDLE_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -218,11 +219,20 @@ export function coercePackBody(raw: unknown, slug: string): PackWriteInput {
     );
   }
 
+  // The free welcome pack is an ordinary Pack in a RESERVED category, so what
+  // makes it "the free pack" is enforced here rather than by the schema: it is
+  // FREE. Both admin write paths (create + update) run this.
+  const category = reqStr(b, 'category');
+  const price = num(b, 'price', 0);
+  if (category === FREE_WELCOME_CATEGORY && price !== 0) {
+    bad(`A '${FREE_WELCOME_CATEGORY}' pack must have a price of 0.`);
+  }
+
   return {
     slug,
     title: reqStr(b, 'title'),
-    category: reqStr(b, 'category'),
-    price: num(b, 'price', 0),
+    category,
+    price,
     image: imageStr(b, 'image'),
     display_image: optImageStr(b, 'display_image'),
     buyback_percent: buybackPercent,
@@ -232,4 +242,31 @@ export function coercePackBody(raw: unknown, slug: string): PackWriteInput {
     published_odds: coercePublishedOdds(b.published_odds),
     tier_ranges: coerceTierRanges(b.tier_ranges),
   };
+}
+
+// The second free-pack invariant: at most ONE free_welcome pack may be active,
+// because the storefront's claim path resolves "the" free pack by category
+// (getActiveFreePack). `existingActiveSlug` is the live one's slug (null when
+// none) — re-saving THAT pack is the normal edit and must not 400.
+// Pure so it unit-tests without a DB; the routes do the lookup and call it.
+// ponytail: read-then-write, so two simultaneous admin saves could both pass.
+// Admin writes are single-operator and rare; upgrade to a partial unique index
+// on pack(category) WHERE status='active' AND category='free_welcome' if that
+// ever actually happens.
+export function assertSingleActiveFreePack(
+  existingActiveSlug: string | null,
+  incoming: { slug: string; category: string; status: string },
+): void {
+  if (
+    incoming.category !== FREE_WELCOME_CATEGORY ||
+    incoming.status !== 'active'
+  ) {
+    return;
+  }
+  if (existingActiveSlug !== null && existingActiveSlug !== incoming.slug) {
+    bad(
+      `Only one active '${FREE_WELCOME_CATEGORY}' pack is allowed — ` +
+        `'${existingActiveSlug}' is live. Deactivate it first.`,
+    );
+  }
 }

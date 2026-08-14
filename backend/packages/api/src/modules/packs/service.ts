@@ -4313,7 +4313,9 @@ class PacksModuleService extends MedusaService({
   // draw-time USD value (recorded_value_usd, stamped by the open workflows so a
   // mid-week price sync can't rewrite history), falling back to live
   // market_value(USD) × the card's multiplier for pre-backfill rows — × the
-  // live FX rate. Reward-box pulls stay excluded (source <> 'reward').
+  // live FX rate. Only source='pack' pulls count: reward-box prizes and free
+  // welcome pulls are not played packs (positive filter, so a future fourth
+  // source can never leak onto the board by default).
   //
   // sinceMs = null → all-time; a timestamp → weekly window.
   @InjectManager()
@@ -4365,7 +4367,7 @@ class PacksModuleService extends MedusaService({
         ') AS volume_usd ' +
         '    FROM pull pu ' +
         '    LEFT JOIN card c ON c.handle = pu.card_id AND c.deleted_at IS NULL ' +
-        "   WHERE pu.deleted_at IS NULL AND pu.customer_id IS NOT NULL AND pu.source <> 'reward' " +
+        "   WHERE pu.deleted_at IS NULL AND pu.customer_id IS NOT NULL AND pu.source = 'pack' " +
         (since === null ? '' : '     AND pu.rolled_at >= ?::timestamptz ') +
         '   GROUP BY pu.customer_id ' +
         ') ' +
@@ -7482,8 +7484,8 @@ class PacksModuleService extends MedusaService({
   // customers (recorded draw-time USD value, live FMV × multiplier fallback
   // for pre-backfill rows, × FX → MYR) since the week anchor (shared
   // CHALLENGE_WEEK_ANCHOR_CTE). Mirrors leaderboardTop's wins CTE
-  // (source <> 'reward'); read-only, so the pool is REAL ledger data even while
-  // the reward settlement engine is inert.
+  // (source = 'pack' — reward and free pulls excluded); read-only, so the
+  // pool is REAL ledger data even while the reward settlement engine is inert.
   @InjectManager()
   async challengeWeekPool(
     opts: ChallengeWeekAnchor,
@@ -7500,7 +7502,7 @@ class PacksModuleService extends MedusaService({
         '), 0) * ? * 100) / 100 AS pooled_myr ' +
         '  FROM pull pu ' +
         '  LEFT JOIN card c ON c.handle = pu.card_id AND c.deleted_at IS NULL ' +
-        " WHERE pu.deleted_at IS NULL AND pu.customer_id IS NOT NULL AND pu.source <> 'reward' " +
+        " WHERE pu.deleted_at IS NULL AND pu.customer_id IS NOT NULL AND pu.source = 'pack' " +
         '   AND pu.rolled_at >= (SELECT start_utc FROM anchor) ' +
         '   AND pu.rolled_at <  (SELECT end_utc FROM anchor)',
       [...challengeWeekAnchorParams(opts), DEFAULT_MARKET_MULTIPLIER, fxRate],
@@ -7531,7 +7533,7 @@ class PacksModuleService extends MedusaService({
         ') * ? * 100) / 100 AS volume_myr ' +
         '  FROM pull pu ' +
         '  LEFT JOIN card c ON c.handle = pu.card_id AND c.deleted_at IS NULL ' +
-        " WHERE pu.deleted_at IS NULL AND pu.customer_id IS NOT NULL AND pu.source <> 'reward' " +
+        " WHERE pu.deleted_at IS NULL AND pu.customer_id IS NOT NULL AND pu.source = 'pack' " +
         '   AND pu.rolled_at >= (SELECT start_utc FROM anchor) ' +
         '   AND pu.rolled_at <  (SELECT end_utc FROM anchor) ' +
         ' GROUP BY pu.customer_id ' +
@@ -8086,9 +8088,11 @@ class PacksModuleService extends MedusaService({
   // Iteration 3): stamp recorded_value_usd on pre-existing rows from the
   // CURRENT card values — the same expression the aggregates' COALESCE
   // fallback computes, so backfilling is observation-neutral at run time and
-  // only pins the value against FUTURE price syncs. Reward pulls stay null
-  // (excluded from every pulled-value board). raw_ twin written alongside so
-  // the ORM's bigNumber hydration matches workflow-stamped rows. Idempotent
+  // only pins the value against FUTURE price syncs. Reward and free-welcome
+  // pulls stay null (they are excluded from every pulled-value board, and the
+  // aggregates' COALESCE fallback would put a stamped value straight back on
+  // one). raw_ twin written alongside so the ORM's bigNumber hydration
+  // matches workflow-stamped rows. Idempotent
   // (IS NULL guard). Run via src/scripts/backfill-recorded-pull-value.ts.
   //
   // Chunked so a large historical pull table isn't pinned under one long
@@ -8112,7 +8116,7 @@ class PacksModuleService extends MedusaService({
         'WITH batch AS ( ' +
           '  SELECT pu.id FROM pull pu ' +
           '    JOIN card c ON c.handle = pu.card_id AND c.deleted_at IS NULL ' +
-          "   WHERE pu.recorded_value_usd IS NULL AND pu.source <> 'reward' " +
+          "   WHERE pu.recorded_value_usd IS NULL AND pu.source = 'pack' " +
           '   LIMIT ? ' +
           ') ' +
           'UPDATE pull pu ' +

@@ -18,6 +18,8 @@ import { parsePaginationParams } from "../../../utils/pagination";
 // PER-PACK (PackOdds), so each pull's tier comes from its (pack_id, card_id)
 // odds row; pulls whose odds row no longer exists show rarity null.
 const ROLLUP_WINDOW = 5000;
+// Pull.source enum — mirrors models/pull.ts and the sibling customer-pulls route.
+const PULL_SOURCES = ["pack", "reward", "free"];
 
 export async function GET(
   req: MedusaRequest,
@@ -33,15 +35,17 @@ export async function GET(
     { defaultLimit: 50, maxLimit: 100 },
   );
 
-  // Optional ?source= filter (pack | reward). The All Orders "Pack purchases"
-  // tab passes source=pack so reward-economy pulls never render as purchases;
-  // the Pull Ledger stays all-source. Rollups stay UNFILTERED on purpose —
-  // they are global stats, not a view of the current page.
+  // Optional ?source= filter (pack | reward | free). The All Orders "Pack
+  // purchases" tab passes source=pack so reward-economy and free-welcome pulls
+  // never render as purchases; the Pull Ledger stays all-source. Rollups stay
+  // UNFILTERED on purpose — they are global stats, not a view of the page.
   const rawSource = req.query.source;
   const source =
     typeof rawSource === "string" && rawSource.length ? rawSource : undefined;
-  if (source !== undefined && source !== "pack" && source !== "reward") {
-    res.status(400).json({ message: "source must be 'pack' or 'reward'" });
+  if (source !== undefined && !PULL_SOURCES.includes(source)) {
+    res
+      .status(400)
+      .json({ message: `source must be one of ${PULL_SOURCES.join(", ")}` });
     return;
   }
   const ledgerFilter: Record<string, unknown> = source ? { source } : {};

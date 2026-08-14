@@ -58,9 +58,12 @@ export async function GET(
   const fxRate = await resolveFxRate(packs);
 
   const pulls = await packs.listPulls(
-    // ponytail: $ne filter mirrors the leaderboard SQL exclusion — reward prizes
-    // are private vault items, not public feed entries.
-    { source: { $ne: 'reward' } } as Parameters<typeof packs.listPulls>[0],
+    // ponytail: $nin filter mirrors the leaderboard SQL exclusion — reward
+    // prizes are private vault items, and free welcome pulls are a signup gift
+    // rather than a played pack; neither is a public feed entry.
+    { source: { $nin: ['reward', 'free'] } } as Parameters<
+      typeof packs.listPulls
+    >[0],
     { order: { rolled_at: 'DESC' }, take: RECENT_LIMIT },
   );
 
