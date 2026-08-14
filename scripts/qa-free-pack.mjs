@@ -23,6 +23,9 @@ import { chromium } from 'playwright';
 const BASE = process.env.PW_BASE ?? 'http://localhost:4100';
 const API = process.env.QA_API ?? 'http://localhost:9000';
 const SLUG = 'qa-free-welcome';
+// A paid control for the breakpoint matrix — free mode is a layout fork, so the
+// ordinary money page has to be checked at the same two widths.
+const PAID_SLUG = process.env.QA_PAID_PACK ?? 'bronze-pack';
 const PASSWORD = 'QaFreePack123!';
 const ADMIN_EMAIL = process.env.QA_ADMIN_EMAIL;
 const ADMIN_PASSWORD = process.env.QA_ADMIN_PASSWORD;
@@ -193,6 +196,54 @@ try {
     ok('no quantity stepper');
   }
   await shot(page, 'detail');
+
+  // 2b ── free mode is a LAYOUT fork, so check both breakpoints against a paid
+  // control. The desktop configurator (`lg:` only) carries its own CTA,
+  // quantity row and footer copy — none of which the phone viewport renders, so
+  // a mobile-only pass leaves the paid money page with zero coverage.
+  for (const [slug, kind] of [
+    [SLUG, 'free'],
+    [PAID_SLUG, 'paid'],
+  ]) {
+    for (const [w, h, label] of [
+      [430, 932, 'mobile'],
+      [1440, 900, 'desktop'],
+    ]) {
+      await page.setViewportSize({ width: w, height: h });
+      await page.goto(`${BASE}/slots/${slug}`, { waitUntil: 'networkidle' });
+      const cta = page
+        .getByRole('button', { name: /open (free )?pack/i })
+        .filter({ visible: true })
+        .first();
+      if (!(await cta.count())) {
+        fail(`${kind}/${label}: no open CTA on /slots/${slug}`);
+        continue;
+      }
+      const ctaText = (await cta.innerText()).replace(/\s+/g, ' ').trim();
+      const stepper = await page
+        .getByLabel('Increase quantity')
+        .filter({ visible: true })
+        .count();
+      const wantsFree = kind === 'free';
+      const labelOk = wantsFree
+        ? /open free pack/i.test(ctaText)
+        : /open pack/i.test(ctaText) && !/free/i.test(ctaText);
+      // The desktop CTA carries the total inside the pill; the phone dock holds
+      // it instead, so only the desktop pill is a price assertion.
+      const priceOk =
+        label === 'mobile' ||
+        (wantsFree ? !/RM/.test(ctaText) : /RM/.test(ctaText));
+      const stepperOk = wantsFree ? stepper === 0 : stepper > 0;
+      if (labelOk && priceOk && stepperOk) {
+        ok(`${kind}/${label}: "${ctaText}", ${stepper} stepper(s)`);
+      } else {
+        fail(`${kind}/${label}: "${ctaText}", ${stepper} stepper(s)`);
+      }
+      await shot(page, `detail-${kind}-${label}`);
+    }
+  }
+  await page.setViewportSize({ width: 430, height: 932 });
+  await page.goto(`${BASE}/slots/${SLUG}`, { waitUntil: 'networkidle' });
 
   // 3 ── open it: the reveal offers no sell, only the unlock note
   await openCta.click();
