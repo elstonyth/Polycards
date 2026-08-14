@@ -51,6 +51,17 @@ export async function POST(
   // never disagree with what the ledger recorded.
   const isFree = result.pull.source === 'free';
 
+  // Is this pull SELL/DELIVER-LOCKED? Only a free pull ever is, and only until
+  // the customer's first PAID open — which may already have happened BEFORE the
+  // claim (nothing gates claiming on a never-spent account). So `free` is the
+  // WRONG signal for the reveal's sell UI: it would suppress the sell on a pull
+  // that GET /store/vault and buybackPullStep both treat as unlocked. Resolved
+  // live below from the same hasPaidOpen() read those two use.
+  //
+  // Seeded as `isFree` so it is default-safe: if the enrichment below fails, the
+  // response never advertises a sell that would then 400.
+  let locked = isFree;
+
   // ⚠ EVERYTHING BELOW IS POST-COMMIT — the workflow has ALREADY debited the
   // customer and written the pull row, and nothing here can roll that back. So
   // a failure below must NOT fail the request: the player paid and the card IS
@@ -85,12 +96,17 @@ export async function POST(
 
     card = { ...result.card, marketPriceMyr };
 
-    // The FREE welcome pull is unsellable until this customer's first PAID open
+    // A LOCKED pull is unsellable until this customer's first PAID open
     // (FREE_PULL_LOCKED_MESSAGE), so its reveal must offer no sell-on-the-spot
     // price — quoting one would advertise money the sell then refuses. Only the
     // OFFER is withheld: marketPriceMyr above still shows what the card is
     // worth. Same unquoted block GET /store/vault emits while locked.
-    if (isFree) {
+    //
+    // An UNLOCKED free pull (the customer had already paid-opened before
+    // claiming) takes the normal quote path — buybackPullStep re-checks
+    // hasPaidOpen live and honours the sell, so the offer is real.
+    if (isFree) locked = !(await packsService.hasPaidOpen(customerId));
+    if (locked) {
       buyback = UNQUOTED_BUYBACK;
     } else {
       // Quote the instant sell-back from the SAME helper the buyback workflow credits
@@ -146,9 +162,14 @@ export async function POST(
     balance: result.balance,
     price: result.price,
     buyback,
-    // The reveal switches to the free-pack copy ("Purchase & open any pack to
-    // unlock selling & delivery") on this flag rather than inferring it from
-    // price === 0, which a future promo pack could also be.
+    // Was this the one-time welcome claim? Badge/analytics/copy only — read
+    // from the recorded pull rather than inferred from price === 0, which a
+    // future promo pack could also be.
     free: isFree,
+    // THE LOCK SIGNAL. The reveal suppresses its sell UI and shows the unlock
+    // note ("Purchase & open any pack to unlock selling & delivery") on THIS,
+    // never on `free`: a free pull claimed after a paid open is already
+    // unlocked and fully sellable. Mirrors GET /store/vault's per-item `locked`.
+    locked,
   });
 }

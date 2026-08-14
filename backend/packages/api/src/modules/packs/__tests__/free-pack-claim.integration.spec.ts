@@ -99,6 +99,18 @@ moduleIntegrationTestRunner<PacksModuleService>({
           },
         ]);
         expect(await service.hasPaidOpen('cus_4')).toBe(false);
+        // A challenge/reward prize is not a purchase either — it must not lift
+        // the free pull's lock (CodeRabbit: the case the name promised).
+        await service.createPulls([
+          {
+            customer_id: 'cus_4',
+            pack_id: 'challenge-2026-08-10',
+            card_id: 'c1',
+            rolled_at: new Date(),
+            source: 'reward',
+          },
+        ]);
+        expect(await service.hasPaidOpen('cus_4')).toBe(false);
         await service.createPulls([
           {
             customer_id: 'cus_4',

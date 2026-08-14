@@ -284,14 +284,16 @@ export default function SlotMachineClient({
     forId: string | null;
     offers: (SellBackOffer | null)[];
     cards: WonCard[];
-    /** The server said this open was the one-time FREE claim (open response's
-     *  `free`) — the reveal then offers no sell, only the unlock note. */
-    free: boolean;
+    /** The server said this pull cannot be sold or delivered yet (open
+     *  response's `locked`) — the reveal then offers no sell, only the unlock
+     *  note. NOT the same as `free`: a welcome pack claimed after a paid open
+     *  comes back unlocked, with a real sell offer. */
+    locked: boolean;
   } | null>(null);
   const [offers, setOffers] = useState<(SellBackOffer | null)[]>([]);
-  // Mirrors the settled batch's `free` — held in state (not a ref) because the
+  // Mirrors the settled batch's `locked` — held in state (not a ref) because the
   // reveal renders from it.
-  const [freeReveal, setFreeReveal] = useState(false);
+  const [lockedReveal, setLockedReveal] = useState(false);
   const [announce, setAnnounce] = useState('');
   const cooldownTimer = useRef<number | null>(null);
   const meterTimer = useRef<number | null>(null);
@@ -401,7 +403,7 @@ export default function SlotMachineClient({
         forId: null,
         offers: cards.map(() => null),
         cards,
-        free: false,
+        locked: false,
       };
       setSpin({ nonce: spinAt, cards, winners: cards.map(winnerFor) });
       setPhase('spinning');
@@ -437,11 +439,14 @@ export default function SlotMachineClient({
     // the claim pays for exactly one pull). Its result carries the same
     // per-roll fields, so it is adapted to a one-roll batch and every beat
     // below — charge paint, vault dot, offers, reveal — stays one code path.
-    let freeOpen = false;
+    // Sell/deliver lock for THIS open, straight off the response — never
+    // derived from `isFreePack`: a welcome pack claimed after a paid open comes
+    // back unlocked and must keep its sell button.
+    let lockedOpen = false;
     try {
       if (isFreePack) {
         const one = await openPack(pack.id);
-        freeOpen = one.ok && one.free;
+        lockedOpen = one.ok && one.locked;
         res = one.ok
           ? {
               ok: true,
@@ -595,7 +600,7 @@ export default function SlotMachineClient({
         forId: customer?.id ?? null,
         offers: builtOffers,
         cards,
-        free: freeOpen,
+        locked: lockedOpen,
       };
       setSpin({ nonce: spinAt, cards, winners });
       setPhase('spinning');
@@ -617,7 +622,7 @@ export default function SlotMachineClient({
           forId: customer?.id ?? null,
           offers: builtOffers,
           cards: settledCards,
-          free: freeOpen,
+          locked: lockedOpen,
         };
       }
       setSpin({ nonce: spinAt, cards: settledCards, winners });
@@ -655,7 +660,7 @@ export default function SlotMachineClient({
       applyBalance(held.balance);
     }
     setOffers(held.offers);
-    setFreeReveal(held.free);
+    setLockedReveal(held.locked);
 
     // Prepend one RecentPull per card won in this batch — real wins only; a
     // demo draw is theater and must never appear in the live pull ticker.
@@ -745,7 +750,7 @@ export default function SlotMachineClient({
   const handleConclude = useCallback(() => {
     setSpin(null);
     setOffers([]);
-    setFreeReveal(false);
+    setLockedReveal(false);
     setPhase('idle');
   }, []);
 
@@ -1064,7 +1069,7 @@ export default function SlotMachineClient({
                   spriteSrcs={spriteSrcs}
                   reduced={reduced}
                   demo={isDemo}
-                  free={freeReveal}
+                  locked={lockedReveal}
                   onSignUp={isDemo ? () => openAuth('signup') : undefined}
                   onSkip={skipToCards}
                   onConclude={handleConclude}

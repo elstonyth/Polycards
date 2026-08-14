@@ -360,24 +360,44 @@ moduleIntegrationTestRunner<PacksModuleService>({
     });
 
     describe('POST /store/packs/:slug/open', () => {
-      it('a free open answers free:true with no sellable quote, keeping the card value', async () => {
+      it('a free open answers free:true + locked:true with no sellable quote, keeping the card value', async () => {
         await service.markFreePackAvailable(customerId);
 
         const body = await openPack(FREE_SLUG);
 
         expect(body.free).toBe(true);
+        expect(body.locked).toBe(true);
         expect(body.price).toBe(0);
         expect(body.buyback).toEqual(UNQUOTED_BUYBACK);
         // The reveal still shows what the card is worth.
         expect(body.card.marketPriceMyr).toBeGreaterThan(0);
       });
 
-      it('a paid open is unchanged: a live quote and no free flag', async () => {
+      // Nothing stops a customer paying FIRST and claiming the welcome pack
+      // afterwards — claimFreePack only checks stamped-and-unclaimed. That pull
+      // is already unlocked (buybackPullStep and the vault both say so), so the
+      // reveal must NOT suppress its sell UI. `free` alone cannot express that;
+      // `locked` is the signal (CodeRabbit).
+      it('a free open AFTER a paid open is free:true but locked:false, with a real quote', async () => {
+        await service.markFreePackAvailable(customerId);
+        await fund(100);
+        await openPack(PAID_SLUG); // the first PAID open — the unlock
+
+        const body = await openPack(FREE_SLUG);
+
+        expect(body.free).toBe(true);
+        expect(body.locked).toBe(false);
+        expect(body.buyback.amount).toBeGreaterThan(0);
+        expect(body.buyback.firm).toBe(true);
+      });
+
+      it('a paid open is unchanged: a live quote, no free flag, never locked', async () => {
         await fund(100);
 
         const body = await openPack(PAID_SLUG);
 
         expect(body.free).toBeFalsy();
+        expect(body.locked).toBe(false);
         expect(body.buyback.amount).toBeGreaterThan(0);
         expect(body.buyback.firm).toBe(true);
         expect(body.card.marketPriceMyr).toBeGreaterThan(0);

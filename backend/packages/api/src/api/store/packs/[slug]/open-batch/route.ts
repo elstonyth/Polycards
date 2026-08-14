@@ -58,12 +58,15 @@ export async function POST(
 
   // The free welcome pack is a ONE-TIME single open — never a batch (the claim
   // pays for exactly one pull, and openBatchWorkflow has no claim seam).
+  // Thrown, not res.status(400): the framework's error handler maps
+  // NOT_ALLOWED to 400 with the same typed body every other refusal on this
+  // route uses (the count guard above included).
   const [pack] = await packsService.listPacks({ slug }, { take: 1 });
   if (pack?.category === FREE_WELCOME_CATEGORY) {
-    res
-      .status(400)
-      .json({ message: 'The free welcome pack can only be opened once, singly.' });
-    return;
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'The free welcome pack can only be opened once, singly.',
+    );
   }
 
   const { result } = await openBatchWorkflow(req.scope).run({

@@ -72,9 +72,14 @@ export type OpenPackResult =
       /** True when this was the one-time FREE welcome open — read from the
        *  backend's `free` flag (which it reads off the recorded pull), never
        *  inferred from `price === 0`, which a future promo pack could also be.
-       *  A free pull carries no sell offer and the reveal says why. Defaults
-       *  false so an older backend can only ever under-claim. */
+       *  Badge/copy only: the SELL lock rides on `locked`. Defaults false so an
+       *  older backend can only ever under-claim. */
       free: boolean;
+      /** True when this pull cannot be sold or delivered yet — the free welcome
+       *  pull before the account's first PAID open. NOT the same as `free`: a
+       *  free pack claimed AFTER a paid open is already unlocked and sellable,
+       *  and suppressing its sell UI would hide a real offer. */
+      locked: boolean;
     }
   | { ok: false; error: string; needsAuth?: boolean; needsTopUp?: boolean };
 
@@ -134,7 +139,7 @@ export async function openPack(slug: string): Promise<OpenPackResult> {
   }
 
   try {
-    const { pull, card, balance, price, buyback, free } =
+    const { pull, card, balance, price, buyback, free, locked } =
       await sdk.client.fetch<{
         pull?: { id?: unknown };
         card: BackendWonCard;
@@ -142,6 +147,7 @@ export async function openPack(slug: string): Promise<OpenPackResult> {
         price?: unknown;
         buyback?: BackendBuyback;
         free?: unknown;
+        locked?: unknown;
       }>(`/store/packs/${encodeURIComponent(slug)}/open`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
@@ -197,6 +203,9 @@ export async function openPack(slug: string): Promise<OpenPackResult> {
       price: typeof price === 'number' && Number.isFinite(price) ? price : null,
       // Only a literal true claims a free open (an older backend omits it).
       free: free === true,
+      // A backend that predates `locked` still sends `free` — fall back to it
+      // so a free pull reads as locked rather than offering a sell that 400s.
+      locked: typeof locked === 'boolean' ? locked : free === true,
     };
   } catch (error) {
     logger.error(`[packs] open-pack failed for '${slug}':`, error);

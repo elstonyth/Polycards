@@ -37,6 +37,22 @@ describe('coercePackBody — free_welcome price', () => {
       coercePackBody({ ...base, category: 'pokemon', price: 10 }, 'fw').price,
     ).toBe(10);
   });
+
+  // The money gate, not tidiness: chargePackOpenStep skips the debit at price 0
+  // and open-pack stamps source='pack' on every non-free-category open — which
+  // is what hasPaidOpen() reads to unlock the free welcome pull. An RM0 pack in
+  // a normal category would hand out that unlock for nothing.
+  it('rejects an RM0 pack in a NORMAL category', () => {
+    expect(() =>
+      coercePackBody({ ...base, category: 'pokemon', price: 0 }, 'fw'),
+    ).toThrow(/only the free welcome pack/i);
+  });
+
+  it('rejects an omitted price in a normal category (defaults to 0)', () => {
+    expect(() =>
+      coercePackBody({ ...base, category: 'pokemon', price: undefined }, 'fw'),
+    ).toThrow(/only the free welcome pack/i);
+  });
 });
 
 describe('assertSingleActiveFreePack', () => {

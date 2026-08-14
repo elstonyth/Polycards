@@ -43,7 +43,22 @@ export default async function customerFreePackHandler({
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
     // markFreePackAvailable is idempotent and first-write-wins, so a replayed
     // event re-stamps nothing and cannot move the timestamp.
-    for (const id of ids) await packs.markFreePackAvailable(id);
+    //
+    // PER-ID catch: a bulk create is one event for N accounts, and the stamps
+    // are independent — one row's failure must not cost the rest of the batch
+    // their free pack. The outer catch still covers a failed resolve (nothing
+    // to loop over then).
+    for (const id of ids) {
+      try {
+        await packs.markFreePackAvailable(id);
+      } catch (e) {
+        logger.warn(
+          `[customer-free-pack] could not stamp ${id}: ${
+            e instanceof Error ? e.message : String(e)
+          }`,
+        );
+      }
+    }
   } catch (e) {
     logger.warn(
       `[customer-free-pack] could not stamp ${ids.length} customer(s): ${

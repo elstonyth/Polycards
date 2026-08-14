@@ -71,6 +71,27 @@ describe('customer-free-pack subscriber', () => {
     expect(packs.markFreePackAvailable).not.toHaveBeenCalled();
   });
 
+  // One event carries the WHOLE bulk create, so a single bad row must not cost
+  // every account after it its free pack (CodeRabbit).
+  it('keeps stamping the rest of the batch after one id fails', async () => {
+    const mark = jest
+      .fn()
+      .mockRejectedValueOnce(new Error('row locked'))
+      .mockResolvedValue(undefined);
+    const { warn, packs, container } = buildHarness(mark);
+
+    await expect(
+      run([{ id: 'cus_bad' }, { id: 'cus_2' }], container),
+    ).resolves.toBeUndefined();
+
+    expect(packs.markFreePackAvailable).toHaveBeenCalledTimes(2);
+    expect(packs.markFreePackAvailable).toHaveBeenNthCalledWith(2, 'cus_2');
+    // The failing id is named, so a partial batch is diagnosable.
+    const logged = warn.mock.calls.map((c) => c[0]).join('\n');
+    expect(logged).toContain('cus_bad');
+    expect(logged).toContain('row locked');
+  });
+
   it('never throws on stamp failure (fail-safe, mirrors phone-verified)', async () => {
     const mark = jest.fn().mockRejectedValue(new Error('db down'));
     const { warn, container } = buildHarness(mark);

@@ -221,11 +221,23 @@ export function coercePackBody(raw: unknown, slug: string): PackWriteInput {
 
   // The free welcome pack is an ordinary Pack in a RESERVED category, so what
   // makes it "the free pack" is enforced here rather than by the schema: it is
-  // FREE. Both admin write paths (create + update) run this.
+  // FREE, and it is the ONLY pack that may be. Both admin write paths (create +
+  // update) run this.
+  //
+  // The second half is a money gate, not tidiness: chargePackOpenStep skips the
+  // debit entirely at price 0, and open-pack labels every non-free-category
+  // open source='pack' — which is exactly what hasPaidOpen() reads to unlock a
+  // customer's free welcome pull for sell/delivery. So an RM0 pack in a NORMAL
+  // category would mint that unlock with no payment ever made. `num` already
+  // refuses negatives, so 0 is the whole remaining case.
   const category = reqStr(b, 'category');
   const price = num(b, 'price', 0);
-  if (category === FREE_WELCOME_CATEGORY && price !== 0) {
-    bad(`A '${FREE_WELCOME_CATEGORY}' pack must have a price of 0.`);
+  if (category === FREE_WELCOME_CATEGORY) {
+    if (price !== 0) {
+      bad(`A '${FREE_WELCOME_CATEGORY}' pack must have a price of 0.`);
+    }
+  } else if (price === 0) {
+    bad('Only the free welcome pack may have a price of 0.');
   }
 
   return {

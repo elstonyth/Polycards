@@ -118,43 +118,69 @@ await fetch(`${API}/admin/packs/${SLUG}/odds`, {
     })),
   }),
 }).then(json);
-await fetch(`${API}/admin/packs/${SLUG}`, {
-  method: 'POST',
-  headers: AH,
-  body: JSON.stringify({ ...packBody, status: 'active' }),
-}).then(json);
-ok(`active free_welcome pack '${SLUG}' over ${handles.length} card(s)`);
-
-// The catalog must NOT list it — the badge is its only entry point.
-const catalog = await fetch(`${API}/store/packs`, {
-  headers: { 'x-publishable-api-key': PK },
-}).then(json);
-if ((catalog.packs ?? []).some((p) => p.slug === SLUG)) {
-  fail('free_welcome pack is listed in the public catalog');
-} else {
-  ok('free_welcome pack excluded from GET /store/packs');
-}
-
-// Brand-new customer — the subscriber stamps its one-time claim on create.
-const email = `qa-free-${Date.now()}@test.dev`;
-const reg = await fetch(`${API}/auth/customer/emailpass/register`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ email, password: PASSWORD }),
-}).then(json);
-await fetch(`${API}/store/customers`, {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-    'x-publishable-api-key': PK,
-    Authorization: `Bearer ${reg.token}`,
-  },
-  body: JSON.stringify({ email }),
-}).then(json);
-ok(`registered ${email}`);
-
-const browser = await chromium.launch({ headless: true });
+// From the activation on, this run OWNS the single active-`free_welcome` slot,
+// so EVERY exit path has to hand it back — which is why the try/finally opens
+// here rather than after the browser launch (a throw in between used to skip
+// teardown entirely and leave the slot held). The two teardowns are gated
+// independently: `activated` for the slot, `browser` so the cleanup can't
+// `close()` a browser that was never launched.
+let activated = false;
+let browser = null;
 try {
+  const activate = await fetch(`${API}/admin/packs/${SLUG}`, {
+    method: 'POST',
+    headers: AH,
+    body: JSON.stringify({ ...packBody, status: 'active' }),
+  });
+  if (!activate.ok) {
+    throw new Error(`could not activate '${SLUG}' — ${activate.status}`);
+  }
+  activated = true;
+  ok(`active free_welcome pack '${SLUG}' over ${handles.length} card(s)`);
+
+  // The catalog must NOT list it — the badge is its only entry point.
+  const catalog = await fetch(`${API}/store/packs`, {
+    headers: { 'x-publishable-api-key': PK },
+  }).then(json);
+  if ((catalog.packs ?? []).some((p) => p.slug === SLUG)) {
+    fail('free_welcome pack is listed in the public catalog');
+  } else {
+    ok('free_welcome pack excluded from GET /store/packs');
+  }
+
+  // The PAID control of the breakpoint matrix below. Checked here, not there:
+  // a missing/draft pack renders the storefront's 404, and every assertion in
+  // that loop would then fail as a layout bug instead of naming the real cause.
+  const paidRes = await fetch(`${API}/admin/packs/${PAID_SLUG}`, {
+    headers: AH,
+  });
+  const paidPack = paidRes.ok ? (await json(paidRes)).pack : null;
+  if (paidPack?.status !== 'active') {
+    throw new Error(
+      `paid control pack '${PAID_SLUG}' not active — set QA_PAID_PACK or seed it`,
+    );
+  }
+  ok(`paid control pack '${PAID_SLUG}' is active`);
+
+  // Brand-new customer — the subscriber stamps its one-time claim on create.
+  const email = `qa-free-${Date.now()}@test.dev`;
+  const reg = await fetch(`${API}/auth/customer/emailpass/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password: PASSWORD }),
+  }).then(json);
+  await fetch(`${API}/store/customers`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-publishable-api-key': PK,
+      Authorization: `Bearer ${reg.token}`,
+    },
+    body: JSON.stringify({ email }),
+  }).then(json);
+  ok(`registered ${email}`);
+
+  browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
     viewport: { width: 430, height: 932 }, // mobile-first: the badge docks above the tab bar
   });
@@ -458,16 +484,18 @@ try {
 } catch (err) {
   fail(err.message);
 } finally {
-  await browser.close();
+  if (browser) await browser.close();
   // Hand back the single-active-`free_welcome` slot. Left active, this QA pack
   // blocks the next activation of ANY free pack (the admin validation allows
   // exactly one) — including the next run of this script and the local seed
   // fixture. Draft, not DELETE: the run's pulls still reference it.
-  const teardown = await fetch(`${API}/admin/packs/${SLUG}`, {
-    method: 'POST',
-    headers: AH,
-    body: JSON.stringify({ ...packBody, status: 'draft' }),
-  });
-  if (teardown.ok) ok(`'${SLUG}' set back to draft (slot released)`);
-  else fail(`teardown: '${SLUG}' is still active — ${teardown.status}`);
+  if (activated) {
+    const teardown = await fetch(`${API}/admin/packs/${SLUG}`, {
+      method: 'POST',
+      headers: AH,
+      body: JSON.stringify({ ...packBody, status: 'draft' }),
+    });
+    if (teardown.ok) ok(`'${SLUG}' set back to draft (slot released)`);
+    else fail(`teardown: '${SLUG}' is still active — ${teardown.status}`);
+  }
 }

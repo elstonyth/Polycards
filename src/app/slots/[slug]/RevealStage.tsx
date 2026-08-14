@@ -31,7 +31,7 @@ export function RevealStage({
   spriteSrcs,
   reduced,
   demo = false,
-  free = false,
+  locked = false,
   onSignUp,
   onSkip,
   onConclude,
@@ -52,10 +52,12 @@ export function RevealStage({
   /** Guest demo reveal: no sell window, a sign-up CTA instead — and the stage
    *  never auto-concludes (all-null offers read as "concluded" instantly). */
   demo?: boolean;
-  /** The open response's `free` — this was the one-time welcome claim. The pull
-   *  IS real and vaulted; it just can't be sold or delivered until the first
-   *  PAID open, so the reveal shows the unlock note where the sell CTA sits. */
-  free?: boolean;
+  /** The open response's `locked` — this pull can't be sold or delivered yet
+   *  (the free welcome pull before the account's first PAID open). The pull IS
+   *  real and vaulted, so the reveal shows the unlock note where the sell CTA
+   *  sits. Keyed off `locked`, NOT off the response's `free`: a welcome pack
+   *  claimed after a paid open is already unlocked and keeps its sell offer. */
+  locked?: boolean;
   /** Demo-only conversion CTA (openAuth signup). */
   onSignUp?: () => void;
   onSkip: () => void;
@@ -250,13 +252,14 @@ export function RevealStage({
     const offer = offers[i];
     const state = states[i] ?? { phase: 'idle' as const };
     if (!offer) return null;
-    // FREE welcome pull — checked FIRST, above every other branch. The backend
-    // sends UNQUOTED_BUYBACK (firm:false, amount 0) for it, which would
-    // otherwise fall into the vaulted/expired or non-firm branches and blame the
-    // lock on a pricing outage ("sell once rates are back") — the wrong reason
-    // entirely. Keep stays, and must: it is the only affordance that concludes
-    // the card, and without it the stage sits until the 30s clock expires.
-    if (free) {
+    // LOCKED pull (the free welcome pull before the first PAID open) — checked
+    // FIRST, above every other branch. The backend sends UNQUOTED_BUYBACK
+    // (firm:false, amount 0) for it, which would otherwise fall into the
+    // vaulted/expired or non-firm branches and blame the lock on a pricing
+    // outage ("sell once rates are back") — the wrong reason entirely. Keep
+    // stays, and must: it is the only affordance that concludes the card, and
+    // without it the stage sits until the 30s clock expires.
+    if (locked) {
       return (
         <>
           <button
