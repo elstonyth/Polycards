@@ -325,6 +325,28 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(free.buyback.firm).toBe(true);
       });
 
+      // The two tests above seed their pulls with createPulls, which proves the
+      // READ but assumes the writes. This one drives the whole leg through the
+      // real routes — free open → locked, paid open → unlocked — so the unlock
+      // can't silently depend on a hand-written pull row (the carried Task 8
+      // review gap: nothing exercised the first PAID open flipping `locked`).
+      it('free open → locked; the first PAID open through the route unlocks it', async () => {
+        await service.markFreePackAvailable(customerId);
+        await fund(100);
+
+        expect((await openPack(FREE_SLUG)).free).toBe(true);
+
+        const [afterFree] = await vaultItems();
+        expect(afterFree.source).toBe('free');
+        expect(afterFree.locked).toBe(true);
+
+        expect((await openPack(PAID_SLUG)).free).toBeFalsy();
+
+        const free = (await vaultItems()).find((i) => i.source === 'free');
+        expect(free.locked).toBe(false);
+        expect(free.buyback.amount).toBeGreaterThan(0);
+      });
+
       it('a normal pack pull is source=pack and never locked', async () => {
         const packId = await seedPull('pack');
 

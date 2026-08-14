@@ -140,6 +140,7 @@ export async function connectTestRedisOrFail(purpose: string): Promise<Redis> {
  *   - customer-default-group  -> INSERT customer_group_customer   (always)
  *   - customer-phone-verified -> upsert customer_account_state     (only when
  *     PHONE_VERIFICATION_REQUIRED is on AND the customer carries a phone)
+ *   - customer-free-pack      -> upsert customer_account_state     (always)
  *
  * The runner TRUNCATEs ~200 tables in its PER-TEST teardown
  * (@medusajs/test-utils medusa-test-runner.js: afterEach -> dbUtils.teardown),
@@ -188,31 +189,42 @@ async function drainCustomerCreated(
   phone?: string | null,
 ): Promise<void> {
   const customers = container.resolve<ICustomerModuleService>(Modules.CUSTOMER);
+  const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
   // Mirrors customer-phone-verified.ts's own gate: with either half false that
   // subscriber returns having written nothing, so there is nothing to wait for.
-  const packs =
+  const expectPhoneStamp =
     isPhoneVerificationRequired(process.env) &&
     typeof phone === "string" &&
-    phone !== ""
-      ? container.resolve<PacksModuleService>(PACKS_MODULE)
-      : null;
+    phone !== "";
 
   const deadline = Date.now() + DRAIN_TIMEOUT_MS;
   for (;;) {
     const grouped =
       (await customers.listCustomerGroupCustomers({ customer_id: customerId }))
         .length > 0;
+    const states = await packs.listCustomerAccountStates({
+      customer_id: customerId,
+    });
     const stamped =
-      !packs ||
-      (
-        await packs.listCustomerAccountStates({ customer_id: customerId })
-      ).some((s: { phone_verified_at?: Date | null }) => !!s.phone_verified_at);
-    if (grouped && stamped) return;
+      !expectPhoneStamp ||
+      states.some(
+        (s: { phone_verified_at?: Date | null }) => !!s.phone_verified_at,
+      );
+    // customer-free-pack stamps EVERY new customer (that unconditional stamp is
+    // the "new registrations only" rule), so this half is never optional — and
+    // leaving it undrained would put an in-flight write back in the path of the
+    // per-test TRUNCATE this helper exists to get out of.
+    const freeStamped = states.some(
+      (s: { free_pack_available_at?: Date | null }) =>
+        !!s.free_pack_available_at,
+    );
+    if (grouped && stamped && freeStamped) return;
     if (Date.now() > deadline) {
       throw new Error(
         `customer.created subscribers did not land for ${customerId} within ` +
           `${DRAIN_TIMEOUT_MS}ms (default group: ${grouped}, phone stamp: ` +
-          `${stamped}) — look for a swallowed subscriber warn in the run log.`,
+          `${stamped}, free-pack stamp: ${freeStamped}) — look for a swallowed ` +
+          `subscriber warn in the run log.`,
       );
     }
     await new Promise((resolve) => setTimeout(resolve, 25));
