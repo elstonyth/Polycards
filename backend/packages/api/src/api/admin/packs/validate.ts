@@ -230,13 +230,19 @@ export function coercePackBody(raw: unknown, slug: string): PackWriteInput {
   // customer's free welcome pull for sell/delivery. So an RM0 pack in a NORMAL
   // category would mint that unlock with no payment ever made. `num` already
   // refuses negatives, so 0 is the whole remaining case.
+  //
+  // 'reward_box' is exempt: those packs are internal draw pools, RM0 by nature
+  // and never bought — fetchPackData throws NOT_FOUND for the category
+  // (workflows/steps/roll-pack.ts), so they can never mint a source='pack' pull
+  // at all. Same carve-out the activation guard already makes for them
+  // (workflows/steps/update-pack.ts).
   const category = reqStr(b, 'category');
   const price = num(b, 'price', 0);
   if (category === FREE_WELCOME_CATEGORY) {
     if (price !== 0) {
       bad(`A '${FREE_WELCOME_CATEGORY}' pack must have a price of 0.`);
     }
-  } else if (price === 0) {
+  } else if (price === 0 && category !== 'reward_box') {
     bad('Only the free welcome pack may have a price of 0.');
   }
 

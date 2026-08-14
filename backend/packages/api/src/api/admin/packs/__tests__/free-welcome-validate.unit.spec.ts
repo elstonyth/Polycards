@@ -48,6 +48,15 @@ describe('coercePackBody — free_welcome price', () => {
     ).toThrow(/only the free welcome pack/i);
   });
 
+  // Internal draw pools are RM0 by nature and never bought — fetchPackData
+  // refuses to open the category outright, so no unpaid source='pack' pull is
+  // reachable through them. Banning their price would 400 every admin edit.
+  it('accepts an RM0 reward_box pack (internal draw pool)', () => {
+    expect(
+      coercePackBody({ ...base, category: 'reward_box', price: 0 }, 'rb').price,
+    ).toBe(0);
+  });
+
   it('rejects an omitted price in a normal category (defaults to 0)', () => {
     expect(() =>
       coercePackBody({ ...base, category: 'pokemon', price: undefined }, 'fw'),
