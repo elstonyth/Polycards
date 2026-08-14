@@ -92,11 +92,14 @@ export const buybackPullStep = createStep(
     // customer's first PAID open — computed, never stored, so the first
     // source='pack' pull unlocks it with zero writes (spec 2026-08-14).
     // buyback-batch runs this same step per id, so the batch inherits the gate.
-    if (pull.source === 'free' && !(await packs.hasPaidOpen(pull.customer_id))) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_ALLOWED,
-        FREE_PULL_LOCKED_MESSAGE,
-      );
+    if (pull.source === 'free') {
+      const unlocked = await packs.hasPaidOpen(input.customer_id);
+      if (!unlocked) {
+        throw new MedusaError(
+          MedusaError.Types.NOT_ALLOWED,
+          FREE_PULL_LOCKED_MESSAGE,
+        );
+      }
     }
 
     // Frozen accounts cannot draw value out (Batch A item 5): a fraud/AMLA hold
