@@ -46,6 +46,11 @@ export async function POST(
 
   const packsService = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
 
+  // The one-time free welcome open (the claim step stamped source='free' on the
+  // pull it just wrote). Read from the PULL, not the pack, so the response can
+  // never disagree with what the ledger recorded.
+  const isFree = result.pull.source === 'free';
+
   // ⚠ EVERYTHING BELOW IS POST-COMMIT — the workflow has ALREADY debited the
   // customer and written the pull row, and nothing here can roll that back. So
   // a failure below must NOT fail the request: the player paid and the card IS
@@ -78,39 +83,49 @@ export async function POST(
       Number(wonCardRow?.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER),
     );
 
-    // Quote the instant sell-back from the SAME helper the buyback workflow credits
-    // with (quoteBuyback wraps resolveBuybackRate + buybackAmount) — off the MYR
-    // Value — so the reveal's "sell on the spot" number is authoritative and can
-    // never disagree with what selling actually credits. The storefront must NOT
-    // recompute this. Freshly rolled, so this is inside the instant window.
-    const quoted = await packsService.quoteBuyback(
-      slug,
-      {
-        rolled_at: result.pull.rolled_at,
-        revealed_at: result.pull.revealed_at,
-        instant_closed_at: result.pull.instant_closed_at,
-      },
-      marketPriceMyr,
-    );
-
     card = { ...result.card, marketPriceMyr };
-    buyback = {
-      ...quoted,
-      // false when the MYR amounts were computed on the display FX fallback:
-      // the sell would be refused ("Exchange rate unavailable"), so the UI
-      // must not present this quote as a firm offer (sim finding P1-1).
-      firm: fxFirm,
-      // The flat rate that applies after the instant window — surfaced so the
-      // reveal can offer a post-expiry "sell at flat" without recomputing.
-      vault_percent: FLAT_PERCENT,
-      vault_amount: buybackAmount(marketPriceMyr, FLAT_PERCENT),
-      // Fallback instant deadline (rolled_at + window) for when the reveal ping
-      // fails; the ping returns the authoritative, reveal-anchored deadline.
-      instant_deadline_ms: instantDeadlineMs(
-        result.pull.rolled_at,
-        result.pull.revealed_at,
-      ),
-    };
+
+    // The FREE welcome pull is unsellable until this customer's first PAID open
+    // (FREE_PULL_LOCKED_MESSAGE), so its reveal must offer no sell-on-the-spot
+    // price — quoting one would advertise money the sell then refuses. Only the
+    // OFFER is withheld: marketPriceMyr above still shows what the card is
+    // worth. Same unquoted block GET /store/vault emits while locked.
+    if (isFree) {
+      buyback = UNQUOTED_BUYBACK;
+    } else {
+      // Quote the instant sell-back from the SAME helper the buyback workflow credits
+      // with (quoteBuyback wraps resolveBuybackRate + buybackAmount) — off the MYR
+      // Value — so the reveal's "sell on the spot" number is authoritative and can
+      // never disagree with what selling actually credits. The storefront must NOT
+      // recompute this. Freshly rolled, so this is inside the instant window.
+      const quoted = await packsService.quoteBuyback(
+        slug,
+        {
+          rolled_at: result.pull.rolled_at,
+          revealed_at: result.pull.revealed_at,
+          instant_closed_at: result.pull.instant_closed_at,
+        },
+        marketPriceMyr,
+      );
+
+      buyback = {
+        ...quoted,
+        // false when the MYR amounts were computed on the display FX fallback:
+        // the sell would be refused ("Exchange rate unavailable"), so the UI
+        // must not present this quote as a firm offer (sim finding P1-1).
+        firm: fxFirm,
+        // The flat rate that applies after the instant window — surfaced so the
+        // reveal can offer a post-expiry "sell at flat" without recomputing.
+        vault_percent: FLAT_PERCENT,
+        vault_amount: buybackAmount(marketPriceMyr, FLAT_PERCENT),
+        // Fallback instant deadline (rolled_at + window) for when the reveal ping
+        // fails; the ping returns the authoritative, reveal-anchored deadline.
+        instant_deadline_ms: instantDeadlineMs(
+          result.pull.rolled_at,
+          result.pull.revealed_at,
+        ),
+      };
+    }
   } catch (err) {
     req.scope
       .resolve(ContainerRegistrationKeys.LOGGER)
@@ -131,5 +146,9 @@ export async function POST(
     balance: result.balance,
     price: result.price,
     buyback,
+    // The reveal switches to the free-pack copy ("Purchase & open any pack to
+    // unlock selling & delivery") on this flag rather than inferring it from
+    // price === 0, which a future promo pack could also be.
+    free: isFree,
   });
 }

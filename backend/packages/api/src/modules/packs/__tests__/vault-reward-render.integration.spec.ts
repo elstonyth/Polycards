@@ -225,7 +225,11 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(normalItem!.card).toBeDefined();
         expect((normalItem!.card as Record<string, unknown>).handle).toBe(ids.cardHandle);
         expect(normalItem!.buyback).toBeDefined();
-        expect(normalItem!.source).toBeUndefined(); // source not exposed in normal vault shape
+        // Free-welcome pack (Task 7): EVERY vault item now states how it was
+        // acquired and whether it is locked. This used to assert `source` was
+        // absent from the normal shape; a plain pack pull is 'pack' + unlocked.
+        expect(normalItem!.source).toBe('pack');
+        expect(normalItem!.locked).toBe(false);
       });
 
       it('reward Pull has a matching RewardDraw with prize_snapshot.{title,image}', async () => {

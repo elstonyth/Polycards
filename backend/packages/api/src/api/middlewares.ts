@@ -474,6 +474,14 @@ export default defineMiddlewares({
       middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
     },
     {
+      // Free welcome pack eligibility (GET /store/free-pack) — the ONLY public
+      // surface the free pack has (the catalog excludes its category), so it
+      // must be authenticated: the answer is per-customer.
+      matcher: '/store/free-pack',
+      method: 'GET',
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+    },
+    {
       matcher: '/store/packs/*/open',
       method: 'POST',
       middlewares: [
