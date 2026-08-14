@@ -27,6 +27,12 @@ const SLUG = 'qa-free-welcome';
 // ordinary money page has to be checked at the same two widths.
 const PAID_SLUG = process.env.QA_PAID_PACK ?? 'bronze-pack';
 const PASSWORD = 'QaFreePack123!';
+// Minimum breathing room between the floating badge and the nearest catalog
+// control once the page is scrolled to the end (CatalogClient reserves the
+// badge's rail as bottom padding). 16px = the badge's own `right-4` inset —
+// the page's smallest deliberate gutter, so anything under it reads as the
+// badge sitting ON the controls rather than beside it.
+const MIN_BADGE_GAP = 16;
 const ADMIN_EMAIL = process.env.QA_ADMIN_EMAIL;
 const ADMIN_PASSWORD = process.env.QA_ADMIN_PASSWORD;
 if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {
@@ -181,10 +187,23 @@ try {
   ok('free-pack badge visible on /slots');
   await shot(page, 'badge');
 
-  // 1b ── OVERLAP GUARD: the badge is `fixed` bottom-right at z-40, floating
-  // OVER the catalog. Tapping the tile nearest it must still open THAT tile.
-  // The click is deliberately NOT forced, so Playwright's pointer-interception
-  // check is the assertion — a badge that swallows the tap fails right here.
+  // 1b ── BADGE vs CATALOG. The badge is `fixed` bottom-right at z-40, floating
+  // OVER the catalog, so it gets TWO assertions — they fail on different bugs
+  // and neither substitutes for the other:
+  //
+  //   (a) CLEARANCE. At the end of the scroll the badge must not sit on a
+  //       catalog tile: CatalogClient reserves its rail as bottom padding
+  //       (`pb-56 lg:pb-44`, gated on the badge rendering). Delete that padding
+  //       and this fails — that is the regression this half exists to catch.
+  //       Measured against tile boxes, since a tile's Open/MAX controls live at
+  //       its bottom edge, exactly where the badge lands.
+  //   (b) NO TAP SWALLOWING. Mid-scroll a row still passes under the badge —
+  //       padding cannot change that, only the resting position. So park a tile
+  //       under the badge on purpose and tap it with a NON-forced click, making
+  //       Playwright's pointer-interception check the assertion. If no genuinely
+  //       overlapping tile can be found the check has nothing to prove and FAILS
+  //       rather than falling back to a tile that never touched the badge.
+  //
   // 700px tall on desktop, not 900: at 900 this catalog fits without scrolling
   // and the badge floats over empty footer space, which would make the tap test
   // vacuous — a real (longer) catalog always has a card row on that rail.
@@ -203,23 +222,61 @@ try {
       b.x < a.x + a.width &&
       a.y < b.y + b.height &&
       b.y < a.y + a.height;
-    // PARK a tile UNDER the badge. Scrolled fully to the bottom the badge
-    // floats over the FOOTER, which would make the tap test vacuous, so step
-    // back up until a catalog row really is beneath it.
-    await page.keyboard.press('End');
-    await page.waitForTimeout(600);
-    let nearest = null;
-    let overlaps = false;
-    for (let step = 0; step < 20 && !overlaps; step++) {
+    // On-screen tiles + whether each intersects the badge, at the current scroll.
+    const scan = async () => {
       const badgeBox = await floating.boundingBox();
-      const under = [];
+      const rows = [];
       for (let i = 0; i < (await tiles.count()); i++) {
         const box = await tiles.nth(i).boundingBox();
-        if (!box || box.y + box.height < 0 || box.y > h) continue;
-        under.push({ i, box, overlap: hits(box, badgeBox) });
+        if (!box) continue;
+        const onScreen =
+          box.y + box.height > 0 &&
+          box.y < h &&
+          box.x + box.width > 0 &&
+          box.x < w;
+        if (!onScreen) continue;
+        rows.push({ i, box, overlap: hits(box, badgeBox) });
       }
-      nearest = under.find((u) => u.overlap) ?? under.at(-1) ?? null;
-      overlaps = Boolean(nearest?.overlap);
+      return rows;
+    };
+
+    // (a) CLEARANCE at rest, bottom of the page. Measured as a GAP, not a
+    // boolean: with the page's footer under the badge, "no intersection" is
+    // true even with the padding deleted, so a boolean here would be vacuous.
+    // Measured on this catalog, 2026-08-14 — padding deleted: desktop 6px
+    // (fails), mobile 51px; padding present: desktop 166px, mobile 259px. The
+    // gap is what the reserved rail actually buys, so the gap is asserted.
+    await page.keyboard.press('End');
+    await page.waitForTimeout(700);
+    const badgeBox = await floating.boundingBox();
+    const atRest = await scan();
+    // Only tiles on the badge's own column can be fouled by it.
+    const onRail = atRest.filter(
+      (u) =>
+        u.box.x < badgeBox.x + badgeBox.width &&
+        badgeBox.x < u.box.x + u.box.width,
+    );
+    const gap = onRail.length
+      ? Math.min(...onRail.map((u) => badgeBox.y - (u.box.y + u.box.height)))
+      : Infinity;
+    await shot(page, `badge-clearance-${label}`);
+    if (gap >= MIN_BADGE_GAP) {
+      ok(
+        `${label}: badge sits ${Math.round(gap)}px below the nearest control at full scroll`,
+      );
+    } else {
+      fail(
+        `${label}: only ${Math.round(gap)}px between the badge and a catalog control at full scroll (want >= ${MIN_BADGE_GAP}px) — the reserved rail is gone`,
+      );
+    }
+
+    // (b) NO TAP SWALLOWING — park a tile under the badge, then tap it.
+    let nearest = null;
+    let overlaps = false;
+    for (let step = 0; step < 30 && !overlaps; step++) {
+      const rows = await scan();
+      nearest = rows.find((u) => u.overlap) ?? null;
+      overlaps = Boolean(nearest);
       if (!overlaps) {
         await page.mouse.wheel(0, -90);
         await page.waitForTimeout(250);
@@ -227,7 +284,7 @@ try {
     }
     await shot(page, `badge-overlap-${label}`);
     if (!nearest) {
-      fail(`${label}: no catalog tile on screen under the badge rail`);
+      fail(`${label}: no catalog tile parked under the badge`);
       continue;
     }
     const target = tiles.nth(nearest.i);
@@ -402,4 +459,15 @@ try {
   fail(err.message);
 } finally {
   await browser.close();
+  // Hand back the single-active-`free_welcome` slot. Left active, this QA pack
+  // blocks the next activation of ANY free pack (the admin validation allows
+  // exactly one) — including the next run of this script and the local seed
+  // fixture. Draft, not DELETE: the run's pulls still reference it.
+  const teardown = await fetch(`${API}/admin/packs/${SLUG}`, {
+    method: 'POST',
+    headers: AH,
+    body: JSON.stringify({ ...packBody, status: 'draft' }),
+  });
+  if (teardown.ok) ok(`'${SLUG}' set back to draft (slot released)`);
+  else fail(`teardown: '${SLUG}' is still active — ${teardown.status}`);
 }

@@ -7,6 +7,10 @@
  * Asserted contracts:
  *  - Free open: claim consumed, nothing debited, pull is source='free' with a
  *    NULL recorded_value_usd (free pulls must never move the boards).
+ *  - ...but its SP ledger row still books the card's draw-time vault_delta:
+ *    the vault liability is real even when the pull records no board value.
+ *  - A FROZEN account (manual or auto) is refused, claim left unspent — the
+ *    gate paid opens get from settleOpen, which a price-0 open never reaches.
  *  - A SECOND free open is refused — the claim is one-shot.
  *  - An unstamped account cannot open the free pack at all.
  *  - A paid open is byte-identical to before: source='pack', recorded value
@@ -40,6 +44,7 @@ import { createMedusaContainer } from '@medusajs/framework/utils';
 import { asValue } from 'awilix';
 import { PACKS_MODULE } from '../index';
 import type PacksModuleService from '../service';
+import { displayMarketPrice, resolveFxRate } from '../pricing';
 import { openPackWorkflow } from '../../../workflows/open-pack';
 import Pack from '../models/pack';
 import Card from '../models/card';
@@ -180,6 +185,35 @@ moduleIntegrationTestRunner<PacksModuleService>({
       return s;
     };
 
+    // The SP ledger row paired with an open (recordPullsWithLedger keys it on
+    // the open_id the pull carries).
+    const spRow = async (openId: string) => {
+      const [row] = await service.listLedgerEntries(
+        { type: 'SP', ref_id: openId },
+        { take: 1 },
+      );
+      return row;
+    };
+
+    // Freeze the account the two ways settleOpen's gate treats alike: the admin
+    // hold (cause='manual') and the negative-balance clawback hold
+    // (cause='auto'). markFreePackAvailable has already created the row.
+    const freeze = async (customerId: string, cause: 'manual' | 'auto') => {
+      if (cause === 'manual') {
+        await service.setManualFreeze({
+          customerId,
+          adminId: 'usr_admin_qa',
+          reason: 'fraud review',
+        });
+        return;
+      }
+      const state = (await claimState(customerId))!;
+      await service.updateCustomerAccountStates({
+        selector: { id: state.id },
+        data: { frozen: true, cause: 'auto', frozen_at: new Date() },
+      });
+    };
+
     const fund = (customerId: string, amount: number) =>
       service.createCreditTransactions([
         {
@@ -270,6 +304,68 @@ moduleIntegrationTestRunner<PacksModuleService>({
           (await claimState(customerId))!.free_pack_claimed_at,
         ).toBeTruthy();
       });
+
+      // Vault liability is the ONE number a free open still has to book: the
+      // card enters the vault, and the eventual sell/delivery subtracts its
+      // full value, so an SP row carrying vault_delta 0 (what a NULL
+      // recorded_value_usd derives) would drift cumulative liability down
+      // forever. The pull row stays NULL — boards clean, ledger honest.
+      it('free open books the real vault_delta while the pull records no value', async () => {
+        await service.markFreePackAvailable(customerId);
+        await open(FREE_SLUG, customerId);
+
+        const pull = await latestPull(customerId, FREE_SLUG);
+        expect(pull.recorded_value_usd).toBeNull();
+
+        const [card] = await service.listCards(
+          { handle: 'card-free' },
+          { take: 1 },
+        );
+        // roll-pack's draw-time snapshot: FMV x the card's multiplier, shown in
+        // MYR at the display rate (recordPullsWithLedger's own conversion).
+        const expected = displayMarketPrice(
+          Number(card!.market_value) * Number(card!.market_multiplier),
+          await resolveFxRate(service),
+          1,
+        );
+        expect(expected).toBeGreaterThan(0); // the assertion below must bite
+        const sp = await spRow(pull.open_id!);
+        expect(sp).toBeTruthy();
+        expect(Number(sp!.vault_delta)).toBe(expected);
+        // Wallet side is untouched — nothing was charged.
+        expect(Number(sp!.wallet_delta)).toBe(0);
+      });
+
+      // The free open never reaches settleOpen (price 0 short-circuits the
+      // charge step), so the freeze gate paid opens get for free has to live in
+      // the claim step — and it must run BEFORE the claim, or a refused open
+      // burns the one-time pack. Both causes, because settleOpen's gate is
+      // any-cause (isFrozen), not manual-only (assertNotFrozen).
+      it.each(['manual', 'auto'] as const)(
+        'a %s-frozen account cannot open the free pack, and the claim survives',
+        async (cause) => {
+          await service.markFreePackAvailable(customerId);
+          await freeze(customerId, cause);
+
+          expect(await openFails(FREE_SLUG, customerId)).toMatch(/frozen/i);
+
+          const state = (await claimState(customerId))!;
+          expect(state.free_pack_claimed_at).toBeNull();
+          expect(state.free_pack_available_at).toBeTruthy();
+          expect(
+            await service.listPulls({ customer_id: customerId }),
+          ).toHaveLength(0);
+
+          // Unspent means genuinely re-claimable, not merely blanked.
+          await service.updateCustomerAccountStates({
+            selector: { id: state.id },
+            data: { frozen: false, unfrozen_at: new Date() },
+          });
+          const { result } = await open(FREE_SLUG, customerId);
+          expect(result.price).toBe(0);
+          expect((await latestPull(customerId, FREE_SLUG)).source).toBe('free');
+        },
+      );
 
       it('second free open is refused (claim consumed)', async () => {
         await service.markFreePackAvailable(customerId);

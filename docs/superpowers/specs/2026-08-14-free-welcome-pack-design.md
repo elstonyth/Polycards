@@ -71,7 +71,11 @@ shape. Inside the workflow, when the pack is `free_welcome`:
   and the playthrough withdrawal gate are all naturally unaffected. RM0 price
   display; `pack.price` is ignored for free packs.
 - Roll, stock earmark (`stock_earmarked`), and pull record run unchanged; the
-  pull is written with `source='free'`, `open_id` NULL (no charge row to link).
+  pull is written with `source='free'` and the open's `open_id` stamped as
+  usual — there is no charge row, but the paired SP ledger row (wallet_delta 0,
+  vault_delta = the card's draw-time value, so vault liability still balances
+  against a later sell/delivery) hangs off that same id, making it a working
+  audit link rather than a dead one.
 
 Adjacent routes:
 

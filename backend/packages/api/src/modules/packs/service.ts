@@ -3722,18 +3722,35 @@ class PacksModuleService extends MedusaService({
         packId: string;
         channel: 'single' | 'batch';
         fx: number;
+        /**
+         * Draw-time USD value for THIS open's vault_delta, overriding the sum
+         * over `pulls`. Exists for the free welcome open: its pull row carries
+         * recorded_value_usd NULL on purpose (the boards must never see a free
+         * pull), but the card really does enter the vault, and the later
+         * sell/delivery subtracts its full value — so a NULL-derived 0 here
+         * would drift cumulative vault liability down forever. Free opens are
+         * always single-pull (batch rejects free_welcome), hence one scalar.
+         */
+        vaultValueUsd?: number | null;
       };
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<Awaited<ReturnType<PacksModuleService['createPulls']>>> {
     const pulls = await this.createPulls(input.pulls, sharedContext);
 
-    const vaultDelta = input.pulls.reduce(
-      (sum, p) =>
-        sum +
-        displayMarketPrice(Number(p.recorded_value_usd), input.ledger.fx, 1),
-      0,
-    );
+    const vaultDelta =
+      input.ledger.vaultValueUsd != null
+        ? displayMarketPrice(input.ledger.vaultValueUsd, input.ledger.fx, 1)
+        : input.pulls.reduce(
+            (sum, p) =>
+              sum +
+              displayMarketPrice(
+                Number(p.recorded_value_usd),
+                input.ledger.fx,
+                1,
+              ),
+            0,
+          );
 
     await this.recordLedgerEntry(
       {
@@ -3770,9 +3787,13 @@ class PacksModuleService extends MedusaService({
   // lagging (a matured-but-not-yet-flipped 'pending' row reads as available).
   // True if the customer is currently frozen. Read on the caller's connection so
   // it participates in the same advisory-locked transaction as the debit gate.
-  private async isFrozen(
+  // ANY-cause freeze read (manual OR auto) — the gate settleOpen holds over
+  // every paid open. Public because the FREE open never reaches settleOpen
+  // (a price-0 charge returns early), so claim-free-pack.ts has to run the
+  // same check itself; assertNotFrozen is NOT the same gate (manual only).
+  async isFrozen(
     customerId: string,
-    sharedContext: Context,
+    sharedContext: Context = {},
   ): Promise<boolean> {
     const [row] = await this.listCustomerAccountStates(
       { customer_id: customerId, frozen: true },

@@ -65,6 +65,11 @@ export const openPackWorkflow = createWorkflow(
       // Free pulls record NO pulled value — they must never move the
       // leaderboard/challenge aggregates (same stance as reward pulls).
       recorded_value_usd: d.claim.free ? null : d.card.recorded_value_usd,
+      // ...but the vault liability is real either way, so the LEDGER row takes
+      // the draw-time value explicitly on a free open (the paid path derives it
+      // from recorded_value_usd, which is NULL here). Without this the SP row
+      // books 0 in while the eventual sell/delivery books the full value out.
+      vault_value_usd: d.claim.free ? d.card.recorded_value_usd : null,
       open_id: d.charged.open_id,
       source: d.claim.free ? ("free" as const) : ("pack" as const),
     }));

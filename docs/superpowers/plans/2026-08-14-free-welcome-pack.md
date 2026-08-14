@@ -19,6 +19,7 @@
   Integration specs: `$env:NODE_OPTIONS='--experimental-vm-modules'; $env:TEST_TYPE='integration:modules'` (or `integration:http`) against the `pokenic-postgres` Docker container. Never pipe jest through `tail`/`head`.
 - **integration:modules schema comes from the spec's `moduleModels` array** — if a spec hits `relation "x" does not exist`, add the model to that spec's array; `db:migrate` can never fix it.
 - **Migrations:** `pull_source_check` is MODEL-OWNED, emitted by `db:generate` — never hand-write a second CHECK (42710 collision). `db:generate` diffs against `.snapshot-packs.json`, NOT the live DB — read the generated SQL and confirm it contains exactly the expected statements.
+- **Forward-only migration:** `Migration20260814100042.down()` cannot run once free pulls exist — it narrows `pull.source` back to `('pack','reward')` and any `source='free'` row violates the restored CHECK. Rollback is restore-from-backup, the repo's standing precedent for shipped enum widenings.
 - **Money:** MYR decimals, never cents. The free pack's `price` is `0`.
 - **Copy (user-facing lock message):** "Purchase & open any pack to unlock selling & delivery." — use verbatim everywhere the lock surfaces.
 - **Badge asset exists:** `public/images/polycards/free-pack-badge.webp` (393×512, transparent — the black/gold squircle "FREE PACK" badge). Do not regenerate.

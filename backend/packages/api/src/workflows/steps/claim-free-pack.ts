@@ -30,6 +30,17 @@ export const claimFreePackStep = createStep(
         free: false,
       });
     }
+    // Freeze gate. A paid open inherits this from settleOpen (service.ts step
+    // 1a), but a price-0 open never reaches it — chargePackOpenStep returns
+    // early — so the free branch carries the check itself, with the SAME
+    // helper and message so both opens fail identically. BEFORE the claim: a
+    // refused open must leave the one-time claim unspent.
+    if (await packs.isFrozen(input.customer_id)) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'This account is frozen.',
+      );
+    }
     const claimed = await packs.claimFreePack(input.customer_id);
     if (!claimed) {
       throw new MedusaError(
