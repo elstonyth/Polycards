@@ -2815,6 +2815,28 @@ class PacksModuleService extends MedusaService({
     return Boolean(state);
   }
 
+  // Batch form of isAccountDisabled, for the PUBLIC boards: they rank by
+  // customer id and must not put an administratively disabled player on
+  // display. One indexed read over the ids already in hand.
+  //
+  // No `take` bound, for the same reason deletedCustomerIds omits one: the
+  // filter already constrains the read to these ids, and a bound on top of it
+  // can only subtract — silently omitting a disabled customer, which here means
+  // publishing them.
+  @InjectManager()
+  async disabledCustomerIds(
+    customerIds: string[],
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<Set<string>> {
+    if (customerIds.length === 0) return new Set();
+    const rows = await this.listCustomerAccountStates(
+      { customer_id: customerIds, disabled: true },
+      {},
+      sharedContext,
+    );
+    return new Set(rows.map((r) => r.customer_id));
+  }
+
   // Upsert a customer's manual-cashout bank destination + audit row in ONE
   // transaction (POLYCARD-BACK §4.3). Own advisory key — the row lives in its
   // own table, so this must not serialize against the credit ledger, but the

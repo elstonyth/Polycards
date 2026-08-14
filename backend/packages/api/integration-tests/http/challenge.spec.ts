@@ -417,6 +417,27 @@ medusaIntegrationTestRunner({
         expect(JSON.stringify(body.top)).not.toContain('cus_sc_1'); // no raw id
       });
 
+      // Same rule as the sibling leaderboard board: an admin disable hides the
+      // player from this public top-10 (display only — the pool aggregate and
+      // settlement still see their pulls).
+      it('hides an administratively disabled player from the top', async () => {
+        await packs().setAccountDisabled({
+          customerId: 'cus_sc_1',
+          adminId: 'user_sc_admin',
+          disabled: true,
+          reason: 'test disable',
+        });
+        clearChallengeCache();
+
+        const body = await getStore();
+        expect(body.top.map((t: { seed: number }) => t.seed)).toEqual([
+          seedOf('cus_sc_2'),
+        ]);
+        expect(body.top[0]).toMatchObject({ rank: 1, volumeMyr: MYR(30) });
+        // Display only: the community pool still counts the hidden player.
+        expect(body.progress.pooledMyr).toBe(MYR(180));
+      });
+
       it('maps stages and resolves referenced card art', async () => {
         const body = await getStore();
         expect(body.stages).toHaveLength(2);
