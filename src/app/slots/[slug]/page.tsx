@@ -55,7 +55,7 @@ export default async function SlotsPackDetailPage({
   // inactive packs, so this page would not exist otherwise), which is why a
   // guest reliably lands on `signup` here rather than `hidden`. The state →
   // eligibility mapping, including that guest case, is unit-tested in
-  // lib/data/__tests__/free-pack-state.test.ts.
+  // src/lib/data/__tests__/free-pack.test.ts.
   const freePackEligible =
     base.pack.categoryId === FREE_WELCOME_CATEGORY
       ? canClaimFreePack(await getFreePackState(), slug)

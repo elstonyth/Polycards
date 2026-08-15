@@ -114,7 +114,7 @@ describe('PackDetailClient — free pack eligibility', () => {
     const text = await render(true);
     expect(text).toContain('Open Free Pack');
     expect(text).toContain('nothing charged');
-    expect(text).not.toContain('Already claimed');
+    expect(text).not.toContain("isn't available");
   });
 
   // The prop defaults to true so every paid pack (page.tsx passes nothing for
@@ -123,9 +123,16 @@ describe('PackDetailClient — free pack eligibility', () => {
     expect(await render(undefined)).toContain('Open Free Pack');
   });
 
-  test('tells a spent account the truth instead of promising a gift', async () => {
+  // Wording matters here, not just suppression: ineligible covers a spent claim
+  // AND a failed eligibility read, which the storefront cannot tell apart. Copy
+  // asserting a past claim would be a lie to a first-time guest whose read fell
+  // over, so the state must stay neutral about WHY.
+  test('tells an ineligible visitor the truth instead of promising a gift', async () => {
     const text = await render(false);
-    expect(text).toContain('Already claimed');
+    expect(text).toContain(
+      "This welcome pack isn't available on this account.",
+    );
+    expect(text).not.toContain('Already claimed');
     expect(text).not.toContain('Open Free Pack');
     // The specific lie: a page that still promised "nothing charged" while the
     // backend would refuse the open.
@@ -143,11 +150,12 @@ describe('PackDetailClient — free pack eligibility', () => {
     expect(dockText).not.toContain('Open Free Pack');
     // Positive half: the dock must still SAY something in the slot the CTA
     // vacated, or it collapses and the bottom chrome reads as a broken layout.
-    expect(dockText).toContain('One-time gift, already used');
+    expect(dockText).toContain('Not available on this account');
+    expect(dockText).not.toContain('Claimed');
     // The desktop panel is a separate JSX branch — assert it independently of
     // the dock, so suppressing one and not the other cannot pass.
     const panelText = (container.textContent ?? '').replace(dockText, '');
     expect(panelText).not.toContain('Open Free Pack');
-    expect(panelText).toContain('Already claimed');
+    expect(panelText).toContain("isn't available on this account");
   });
 });
