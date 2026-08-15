@@ -687,7 +687,7 @@ doctl apps list-deployments 4bf179e0-70a8-4fd7-bd25-9be43e9d0319 --format ID,Pha
 
 ```bash
 # Guest promo answer (no bearer):
-curl -s https://polycards-backend-gce6p.ondigitalocean.app/store/free-pack -H "x-publishable-api-key: pk_86273b7c12ca5b2fd838bf1c1cf6427dbb6ef41c723d8af1efa20db183517534"
+curl -s https://polycards-backend-gce6p.ondigitalocean.app/store/free-pack -H "x-publishable-api-key: <prod publishable key — NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY in the storefront DO spec>"
 ```
 
 Expected: 200, `promo:false` until the operator creates the free pack (or `promo:true` after). NOT 401. Then a headless-browser check of https://polycards.gg/slots as a guest: badge present iff `promo:true`. Report both to the operator.
