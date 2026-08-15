@@ -24,19 +24,23 @@ export async function GET(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
-  const customerId = req.auth_context?.actor_id;
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
 
-  // Anonymous visitor (allowUnauthenticated) — answer only the catalog fact
-  // "an active free pack exists", so the storefront can show the signup-hook
-  // badge. Nothing per-customer leaves on this branch, and `promo` appears
-  // ONLY here: a linked-customer answer stays byte-identical to pre-promo
-  // clients. (A fresh register token's actor_id is '' until POST
-  // /store/customers links it — see medusa-register-token-empty-actor-id —
-  // so that narrow window also falls into this branch; harmless since the
-  // response shape is still boolean-or-absent, but it is not "authed" in
-  // the linked-customer sense.)
-  if (!customerId) {
+  // Anonymous visitor (allowUnauthenticated) — NO auth_context at all.
+  // Answer only the catalog fact "an active free pack exists", so the
+  // storefront can show the signup-hook badge. Nothing per-customer leaves
+  // on this branch, and `promo` appears ONLY here.
+  //
+  // Branch on PRESENCE of auth_context, not actor_id truthiness: a fresh
+  // register token carries auth_context with actor_id '' until POST
+  // /store/customers links it (medusa-register-token-empty-actor-id). That
+  // caller IS authenticated (auth_context present) and must fall through to
+  // the per-customer path below — listCustomerAccountStates finds no row for
+  // customer_id '', so it gets the same plain 3-key ineligible answer as any
+  // other unstamped account, byte-identical to pre-promo clients. `== null`
+  // (not `=== undefined`) so a hypothetical null auth_context is also
+  // treated as anonymous rather than crashing on `.actor_id` below.
+  if (req.auth_context == null) {
     const active = await packs.getActiveFreePack();
     res.json({
       eligible: false,
@@ -47,6 +51,7 @@ export async function GET(
     return;
   }
 
+  const customerId = req.auth_context.actor_id;
   const [state] = await packs.listCustomerAccountStates(
     { customer_id: customerId },
     { take: 1 },

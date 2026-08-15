@@ -336,6 +336,19 @@ moduleIntegrationTestRunner<PacksModuleService>({
         const body = await eligibility();
         expect(body).not.toHaveProperty('promo');
       });
+
+      // A freshly-registered customer's bearer carries auth_context with
+      // actor_id '' until POST /store/customers links it
+      // (medusa-register-token-empty-actor-id). That request IS
+      // authenticated (auth_context present, just an empty actor_id) and
+      // must NOT take the anonymous-promo branch — an empty-string
+      // customer_id matches no row, so it gets the same plain 3-key
+      // ineligible answer as any other unstamped account.
+      it('an unlinked register token (actor_id "") gets the plain ineligible answer — no promo key, even with an active free pack', async () => {
+        const body = await eligibility('');
+        expect(body).toEqual({ eligible: false, slug: null, image: null });
+        expect(body).not.toHaveProperty('promo');
+      });
     });
 
     describe('GET /store/vault', () => {
