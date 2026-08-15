@@ -181,6 +181,62 @@ try {
   ok(`registered ${email}`);
 
   browser = await chromium.launch({ headless: true });
+
+  // ── Guest: the badge is the signup hook ───────────────────────────────────
+  // A fresh incognito context — no auth cookie — before the registration/login
+  // section below touches the browser at all.
+  {
+    const guest = await browser.newContext({
+      viewport: { width: 430, height: 932 }, // mobile-first: the badge docks above the tab bar
+    });
+    const gp = await guest.newPage();
+    await gp.goto(`${BASE}/slots`, { waitUntil: 'networkidle' });
+    // Cookie banner docks on the badge rail; the badge holds until answered.
+    await gp
+      .getByRole('button', { name: /^reject$/i })
+      .first()
+      .click();
+    const badge = gp.getByTestId('free-pack-badge').first();
+    if (!(await badge.isVisible().catch(() => false))) {
+      fail(
+        'guest badge not visible on /slots while an active free pack exists',
+      );
+    } else {
+      ok('guest badge visible on /slots');
+      // A cold incognito context has never fetched the badge art before, unlike
+      // the member context below (which warms the same image on its pre-login
+      // /slots visit) — wait for it to actually paint or the screenshot below
+      // catches the container mid-fetch and shows an empty corner.
+      await badge
+        .locator('img')
+        .first()
+        .evaluate(
+          (img) =>
+            img.complete ||
+            new Promise((res) =>
+              img.addEventListener('load', res, { once: true }),
+            ),
+        )
+        .catch(() => {});
+      await shot(gp, 'guest-badge');
+      await badge.click();
+      // openAuth('signup') → auth modal with an email field.
+      const email = gp.locator('input[type="email"]');
+      if (
+        !(await email
+          .first()
+          .isVisible({ timeout: 4000 })
+          .catch(() => false))
+      ) {
+        fail('tapping the guest badge did not open the auth modal');
+      } else {
+        ok('guest badge tap opens the auth modal (signup)');
+        await shot(gp, 'guest-badge-auth-modal');
+      }
+    }
+    await guest.close();
+  }
+
   const context = await browser.newContext({
     viewport: { width: 430, height: 932 }, // mobile-first: the badge docks above the tab bar
   });
