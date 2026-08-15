@@ -14,7 +14,6 @@ import { rm } from '@/lib/format';
 import { openAuth } from '@/components/AuthButton';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { SuccessToast } from '@/components/ui/SuccessToast';
-import { useCreditDot } from './CreditDotProvider';
 import TopUpSheet from './TopUpSheet';
 
 /** How often to look while a gateway payment is outstanding. Their callback
@@ -142,7 +141,6 @@ export function TopUpProvider({ children }: { children: ReactNode }) {
           if (cancelled) return;
           if (next != null) {
             setBalance({ forId, value: next });
-            refreshCreditDot();
             const gained =
               balanceWhileWaiting == null ? 0 : next - balanceWhileWaiting;
             if (gained > 0) {
@@ -178,7 +176,7 @@ export function TopUpProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [customer, refreshCreditDot, router]);
+  }, [customer, router]);
 
   // Event-handler refresh (post-purchase, focus, etc.) — not effect-driven.
   const refreshBalance = useCallback(async () => {
