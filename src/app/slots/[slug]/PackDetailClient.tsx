@@ -96,9 +96,14 @@ export default function PackDetailClient({
   // Credit balance (A2: opens debit the pack price) — read from the app-shell
   // TopUpProvider (identity-tagged; null = logged out / loading), so this page,
   // the header chip, and the top-up sheet can never disagree.
-  // Live Recent Pulls — seeded from the server snapshot, then polled (~4s)
-  // so anyone's pull shows up here without a reload.
-  const recent = useLiveRecentPulls(recentPulls);
+  // Live Recent Pulls for THIS pack — seeded from the server snapshot, then
+  // polled (~4s) so anyone's pull shows up here without a reload. Keyed on the
+  // active sibling: the sibling row switches packs in place, no navigation.
+  // Deliberately NOT blanked on that switch (unlike usePackDetailPoll above):
+  // the previous pack's rows show for the one in-flight poll, but the rows
+  // carry no pack label, so nothing on screen contradicts itself — whereas
+  // blanking would flash "No pulls yet" on a pack that demonstrably has pulls.
+  const recent = useLiveRecentPulls(recentPulls, active.id);
 
   // The one-time free welcome pack: no price, no quantity, no batch — the claim
   // pays for exactly ONE open (the backend rejects a batch on this category), so

@@ -214,11 +214,14 @@ moduleIntegrationTestRunner<PacksModuleService>({
       return captured.body as { items: Array<Record<string, unknown>> };
     };
 
-    // pulls/recent: unauthenticated; scope.resolve returns service
+    // pulls/recent: unauthenticated; scope.resolve returns service. `query` is
+    // part of the mock because the route reads ?pack_id off it — express always
+    // populates it, so an absent query is a gap in this fake, not in the route.
     const callRecentRoute = async () => {
       const captured: Record<string, unknown> = {};
       const res = { json: (body: unknown) => { captured.body = body; } };
       const req = {
+        query: {},
         scope: { resolve: (_name: string) => service },
       };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

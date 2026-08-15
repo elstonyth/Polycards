@@ -79,7 +79,11 @@ export const Pull = model
       where: 'deleted_at IS NULL',
     },
     // global recent-pulls feed + leaderboard window: order/range on rolled_at,
-    // no customer predicate (so it can't use the composite above).
+    // no customer predicate (so it can't use the composite above). The feed can
+    // now ALSO be filtered by pack_id (?pack_id on the store route) — that scan
+    // walks this index until it accumulates 12 matching rows, which the route's
+    // 5s cache keeps to ~0.2 qps per pack. Add (pack_id, rolled_at) only if a
+    // quiet pack's scan ever shows up.
     {
       name: 'IDX_pull_rolled_at',
       on: ['rolled_at'],

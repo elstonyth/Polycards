@@ -371,16 +371,20 @@ export interface RecentPull {
 const FALLBACK_PACK_ICON = '/images/polycards/bronze-pack.webp';
 
 /**
- * The most recent pulls across all packs, for the /claw/[slug] "Recent Pulls"
- * feed. Returns `[]` (not mock) on any backend failure or empty ledger — an
+ * The most recent pulls for the "Recent Pulls" feed — across all packs, or, with
+ * `packSlug`, only that pack's own history (the /slots/[slug] pages; filtering
+ * backend-side, so a quiet pack still shows its real history instead of nothing).
+ * Returns `[]` (not mock) on any backend failure or empty ledger — an
  * empty feed is a meaningful, truthful state for a live ledger (the component
  * renders a "no pulls yet" empty state), unlike the catalog/detail getters that
  * fall back to mock to keep the page populated.
  */
-export async function getRecentPulls(): Promise<RecentPull[]> {
+export async function getRecentPulls(packSlug?: string): Promise<RecentPull[]> {
   try {
     const { pulls } = await sdk.client.fetch<{ pulls: BackendRecentPull[] }>(
-      '/store/pulls/recent',
+      packSlug
+        ? `/store/pulls/recent?pack_id=${encodeURIComponent(packSlug)}`
+        : '/store/pulls/recent',
     );
     if (!Array.isArray(pulls)) return [];
 
