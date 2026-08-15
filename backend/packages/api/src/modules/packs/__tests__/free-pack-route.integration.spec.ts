@@ -153,6 +153,24 @@ moduleIntegrationTestRunner<PacksModuleService>({
       return captured.body;
     };
 
+    const guestReqRes = () => {
+      const captured: ResCapture = {};
+      const res = {
+        status(code: number) {
+          captured.status = code;
+          return this;
+        },
+        json(body: unknown) {
+          captured.body = body;
+          return this;
+        },
+      };
+      // No auth_context at all — allowUnauthenticated passes anonymous
+      // requests through without one.
+      const req = { params: {}, scope: container };
+      return { req: req as any, res: res as any, captured };
+    };
+
     const vaultItems = async (who = customerId) => {
       const { req, res, captured } = makeReqRes({ customerId: who });
       await vaultGET(req, res);
@@ -282,6 +300,41 @@ moduleIntegrationTestRunner<PacksModuleService>({
           slug: null,
           image: null,
         });
+      });
+    });
+
+    describe('GET /store/free-pack — unauthenticated promo answer', () => {
+      it('answers promo:true (and nothing per-customer) while an active free pack exists', async () => {
+        // beforeEach already seeds an ACTIVE free_welcome pack (FREE_SLUG) —
+        // no extra seeding needed here.
+        const { req, res, captured } = guestReqRes();
+        await freePackGET(req, res);
+        expect(captured.body).toEqual({
+          eligible: false,
+          slug: null,
+          image: null,
+          promo: true,
+        });
+      });
+
+      it('answers promo:false when no active free pack exists', async () => {
+        await service.updatePacks({
+          selector: { slug: FREE_SLUG },
+          data: { status: 'draft' },
+        });
+        const { req, res, captured } = guestReqRes();
+        await freePackGET(req, res);
+        expect(captured.body).toEqual({
+          eligible: false,
+          slug: null,
+          image: null,
+          promo: false,
+        });
+      });
+
+      it('authed answer is unchanged — no promo field', async () => {
+        const body = await eligibility();
+        expect(body).not.toHaveProperty('promo');
       });
     });
 
