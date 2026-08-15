@@ -50,6 +50,30 @@ export function compositionGroup(
   return graded === total ? 'GRADED' : graded === 0 ? 'RAW' : 'MIX';
 }
 
+// The shared pool traversal behind both pack lists (admin + public catalog):
+// per-pack graded / PSA-10 / total counts. Reward rows (card_id null) carry no
+// card and orphaned odds rows (card deleted) are not part of the pool at all —
+// the two routes must always agree on that skip-set, so it lives here.
+export type PoolComposition = { graded: number; psa10: number; total: number };
+export function poolComposition(
+  odds: { pack_id: string; card_id: string | null }[],
+  cards: { handle: string; grader: string; grade: string }[],
+): Map<string, PoolComposition> {
+  const byHandle = cardByHandle(cards);
+  const comp = new Map<string, PoolComposition>();
+  for (const o of odds) {
+    if (o.card_id == null) continue;
+    const card = byHandle.get(o.card_id);
+    if (card === undefined) continue;
+    const t = comp.get(o.pack_id) ?? { graded: 0, psa10: 0, total: 0 };
+    t.total += 1;
+    if (isGraded(card)) t.graded += 1;
+    if (isPsa10(card)) t.psa10 += 1;
+    comp.set(o.pack_id, t);
+  }
+  return comp;
+}
+
 // card_id/rarity are nullable on the row (reward rows have neither); the lookup
 // keys defensively and defaults to "Common", so a reward row passed in here is
 // harmless — it just never matches a real (pack, card) card lookup.

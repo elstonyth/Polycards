@@ -12,7 +12,10 @@ import {
   packTheoreticalRtp,
   publishedEv,
 } from '../../../modules/packs/economy';
-import { compositionGroup, isGraded } from '../../../modules/packs/card-view';
+import {
+  compositionGroup,
+  poolComposition,
+} from '../../../modules/packs/card-view';
 import { normalizeTierRanges } from '../../../modules/packs/tier-settings-validate';
 import { weightForSet, type OddsSet } from '../../../modules/packs/odds-sets';
 import {
@@ -64,7 +67,10 @@ export async function GET(
       ),
     ]),
   );
-  const graderByHandle = new Map(allCards.map((c) => [c.handle, c.grader]));
+  // §2.4.8 composition counts — the shared pool traversal (identical
+  // reward-row + orphan skip-set) the public catalog uses, so the two lists
+  // can never disagree on RAW/GRADED.
+  const comp = poolComposition(allOdds, allCards);
 
   // Reward rows (card_id null) carry no card and no value — drop them here so
   // the per-pack loop below never has to re-check. Narrows card_id to string.
@@ -91,13 +97,12 @@ export async function GET(
         market_value: number;
       }[] = [];
       const tiers = new Map<string, { sum: number; n: number }>();
-      let graded = 0;
       for (const o of oddsByPack.get(p.slug) ?? []) {
         const cardPrice = priceByHandle.get(o.card_id);
-        const grader = graderByHandle.get(o.card_id);
         // Orphaned odds row (card deleted) — not part of the pool at all.
-        if (cardPrice === undefined || grader === undefined) continue;
-        if (isGraded({ grader })) graded++;
+        // (displayMarketPrice always returns a number, so undefined here ⇔
+        // missing card — the same skip-set poolComposition applies.)
+        if (cardPrice === undefined) continue;
         const rarity = o.rarity ?? 'Common';
         const t = tiers.get(rarity) ?? { sum: 0, n: 0 };
         t.sum += cardPrice;
@@ -151,8 +156,12 @@ export async function GET(
         tier_ranges:
           p.tier_ranges == null ? null : normalizeTierRanges(p.tier_ranges),
         // §2.4.8 composition — AUTO-DETECTED from the pool, never operator-set
-        // (shared thresholds with the public catalog; null = empty pool).
-        group: compositionGroup(graded, pool.length),
+        // (shared traversal + thresholds with the public catalog; null =
+        // empty pool).
+        group: compositionGroup(
+          comp.get(p.slug)?.graded ?? 0,
+          comp.get(p.slug)?.total ?? 0,
+        ),
         ev: { s1: r1?.ev ?? null, s2: r2?.ev ?? null, s3: r3?.ev ?? null },
         rtp: {
           s1: r1?.rtp_pct ?? null,

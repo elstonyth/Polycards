@@ -4,8 +4,7 @@ import { PACKS_MODULE } from '../../../modules/packs';
 import { FREE_WELCOME_CATEGORY } from '../../../modules/packs/free-pack';
 import {
   compositionGroup,
-  isGraded,
-  isPsa10,
+  poolComposition,
 } from '../../../modules/packs/card-view';
 import { pageAll } from '../../utils/page-all';
 
@@ -78,36 +77,18 @@ async function computeCatalogBody(req: MedusaRequest): Promise<unknown> {
     { order: { category: 'ASC', rank: 'ASC' }, take: 500 },
   );
 
-  // §2.4.8 composition — the SAME auto-detect the admin pack list ships
-  // (shared compositionGroup thresholds), derived from the pool, never
-  // operator-set. `psa10` is the stricter guarantee gate: the storefront's
-  // "Guaranteed PSA 10" section requires EVERY pooled card to be a PSA 10 —
-  // an all-graded pack holding a PSA 9 or a BGS slab is GRADED but NOT psa10,
-  // so the heading can never overclaim. Costs two paged reads per cache
-  // window (30s), same fan-out the admin list does on every load.
+  // §2.4.8 composition — the SAME shared pool traversal the admin pack list
+  // uses (poolComposition + compositionGroup), derived, never operator-set.
+  // `psa10` is the stricter guarantee gate: the storefront's "Guaranteed
+  // PSA 10" section requires EVERY pooled card to be a PSA 10 — an all-graded
+  // pack holding a PSA 9 or a BGS slab is GRADED but NOT psa10, so the
+  // heading can never overclaim. Costs two paged reads per cache window
+  // (30s), same fan-out the admin list does on every load.
   const [allOdds, allCards] = await Promise.all([
     pageAll((opts) => packsModuleService.listPackOdds({}, opts)),
     pageAll((opts) => packsModuleService.listCards({}, opts)),
   ]);
-  const cardByHandleMap = new Map(
-    allCards.map((c) => [c.handle, { grader: c.grader, grade: c.grade }]),
-  );
-  const comp = new Map<
-    string,
-    { graded: number; psa10: number; total: number }
-  >();
-  for (const o of allOdds) {
-    // Reward rows carry no card; orphaned odds rows (card deleted) are not
-    // part of the pool at all — both mirror the admin list.
-    if (o.card_id == null) continue;
-    const card = cardByHandleMap.get(o.card_id);
-    if (card === undefined) continue;
-    const t = comp.get(o.pack_id) ?? { graded: 0, psa10: 0, total: 0 };
-    t.total += 1;
-    if (isGraded(card)) t.graded += 1;
-    if (isPsa10(card)) t.psa10 += 1;
-    comp.set(o.pack_id, t);
-  }
+  const comp = poolComposition(allOdds, allCards);
   const groupOf = (slug: string): 'GRADED' | 'RAW' | 'MIX' | null => {
     const t = comp.get(slug);
     return compositionGroup(t?.graded ?? 0, t?.total ?? 0);
