@@ -27,6 +27,7 @@ import {
 import { FRAME_LEVELS } from './avatar-frames';
 import { challengePackId } from './challenge-prize';
 import { FREE_WELCOME_CATEGORY } from './free-pack';
+import { isGraded, isPsa10, type PoolComposition } from './card-view';
 import Pack from './models/pack';
 import Card from './models/card';
 import CardPriceHistory from './models/card-price-history';
@@ -4539,6 +4540,68 @@ class PacksModuleService extends MedusaService({
       by_rarity[r.rarity] = (by_rarity[r.rarity] ?? 0) + n;
     }
     return { pulls, volume, by_rarity };
+  }
+
+  // §2.4.8 per-pack pool composition for the pack lists — one grouped scan
+  // instead of paging EVERY pack_odds row and EVERY card into Node (the cost
+  // used to scale with total catalog size, not pack count).
+  //
+  // The skip-set poolComposition documents lives in the SQL here: reward rows
+  // (card_id NULL) and orphaned odds rows (the card is gone or soft-deleted)
+  // never survive the inner join. Deliberately NO `DISTINCT ON (pack_id,
+  // card_id)` — poolComposition counts every odds row, and UQ_pack_odds_pack_card
+  // already guarantees one live row per pair, so a DISTINCT copied from the
+  // profileStatsForCustomer CTE below would only mask a broken uniqueness
+  // guarantee rather than match the fold this replaces.
+  //
+  // Deliberately GROUP BY the card's (grader, grade) and let card-view.ts's
+  // isGraded/isPsa10 classify the groups, rather than COUNT(*) FILTER (…) with
+  // the predicates rewritten in SQL: JS `trim()` strips Unicode whitespace and
+  // `toUpperCase()` is locale-independent, and PG's btrim()/upper() reproduce
+  // neither exactly — a translated predicate could drift the RAW/GRADED split
+  // (and the "Guaranteed PSA 10" gate) on an operator-typed stray character.
+  // This way the two lists and the SQL can never disagree by construction.
+  // ponytail: group count is distinct (pack_id, grader, grade) — a tiny closed
+  // vocabulary in practice; even pathological free-text grades only degrade to
+  // the row count we already paged today.
+  @InjectManager()
+  async packPoolComposition(
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<Map<string, PoolComposition>> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+
+    const rows = await em.execute<
+      {
+        pack_id: string;
+        grader: string;
+        grade: string;
+        // `::int` below makes the driver hand this back as a JS number; typed
+        // loosely (and Number()'d) so dropping that cast can't silently
+        // reintroduce the bigint-as-string bug the loop guards against.
+        n: string | number;
+      }[]
+    >(
+      `SELECT o.pack_id, c.grader, c.grade, COUNT(*)::int AS n
+         FROM pack_odds o
+         JOIN card c ON c.handle = o.card_id AND c.deleted_at IS NULL
+        WHERE o.deleted_at IS NULL AND o.card_id IS NOT NULL
+        GROUP BY o.pack_id, c.grader, c.grade`,
+    );
+
+    const comp = new Map<string, PoolComposition>();
+    for (const r of rows) {
+      // COUNT is bigint to the driver — an unconverted string would make
+      // compositionGroup's `graded === total` fail and report an all-raw pack
+      // as MIX, so the counts are Number()'d before any arithmetic.
+      const n = Number(r.n);
+      const t = comp.get(r.pack_id) ?? { graded: 0, psa10: 0, total: 0 };
+      t.total += n;
+      if (isGraded(r)) t.graded += n;
+      if (isPsa10(r)) t.psa10 += n;
+      comp.set(r.pack_id, t);
+    }
+    return comp;
   }
 
   // Per-reason lifetime ledger sums for /admin/economy — one GROUP BY instead

@@ -4,6 +4,12 @@ import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
 import { clearFxDisplayCache } from '../../src/modules/packs/pricing';
 import { clearPackListCache } from '../../src/api/store/packs/route';
+import { clearAdminPackListCache } from '../../src/api/admin/packs/route';
+import {
+  compositionGroup,
+  poolComposition,
+} from '../../src/modules/packs/card-view';
+import { pageAll } from '../../src/api/utils/page-all';
 import { mintSuperAdmin, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
@@ -58,6 +64,11 @@ medusaIntegrationTestRunner({
         // this suite's per-test DB reset — a rate cached before the FxRate row
         // below existed would silently reprice every card at the 4.7 fallback.
         clearFxDisplayCache();
+        // Both pack lists cache for 30s in MODULE state, which outlives the
+        // per-test DB reset. This suite seeds through the module service (not
+        // the write routes), so nothing busts them for us.
+        clearAdminPackListCache();
+        clearPackListCache();
         adminToken = await mintSuperAdmin(
           getContainer(),
           api,
@@ -342,6 +353,196 @@ medusaIntegrationTestRunner({
         expect(rows.get(PUB_PACK)?.psa10).toBe(false);
         expect(rows.get(PACK)?.psa10).toBe(false);
         expect(rows.get(RAW_PACK)?.psa10).toBe(false);
+      });
+
+      // The reward-row + orphan skip-set, end to end. GET /store/packs now
+      // derives composition from a SQL aggregate while GET /admin/packs still
+      // folds poolComposition in Node — this is the contract that keeps the two
+      // implementations agreeing, and the guard for any future isGraded /
+      // isPsa10 change.
+      it('matches poolComposition across the reward-row and orphan skip-set', async () => {
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        const ZOO = 'stats-zoo-pack';
+        // GUARD is all-PSA-10 ONLY once the skips apply: its reward row and its
+        // orphaned RAW card would each drag psa10 to false (and group to MIX)
+        // if either leaked into the pool, so the `psa10: true` assertion below
+        // is what makes this case non-vacuous.
+        const GUARD = 'stats-guard-pack';
+        await packs.createPacks([
+          {
+            slug: ZOO,
+            title: 'Stats Zoo Pack',
+            category: 'pokemon',
+            price: 100,
+            image: '/qa.png',
+            status: 'active' as const,
+            rank: 6,
+          },
+          {
+            slug: GUARD,
+            title: 'Stats Guard Pack',
+            category: 'pokemon',
+            price: 100,
+            image: '/qa.png',
+            status: 'active' as const,
+            rank: 7,
+          },
+        ]);
+        // Both RAW on purpose — see GUARD above. `orphan` is HARD-deleted (the
+        // row vanishes, so the join simply misses it); `softGone` is
+        // SOFT-deleted, which is the only fixture that exercises the
+        // `card.deleted_at IS NULL` scoping — a hard delete would pass even if
+        // that clause were dropped.
+        const [orphan, softGone] = await packs.createCards([
+          {
+            handle: 'stats-orphan',
+            name: 'Stats Orphan',
+            set: 'QA',
+            grader: '',
+            grade: '',
+            market_value: 10,
+            market_multiplier: 1,
+            image: '/qa.png',
+          },
+          {
+            handle: 'stats-softgone',
+            name: 'Stats Soft Gone',
+            set: 'QA',
+            grader: '',
+            grade: '',
+            market_value: 10,
+            market_multiplier: 1,
+            image: '/qa.png',
+          },
+        ]);
+        const rewardRow = (packId: string) =>
+          ({
+            pack_id: packId,
+            card_id: null,
+            rarity: null,
+            // kind is REQUIRED on a card-less row (pack_odds_kind_payout_check).
+            kind: 'nothing',
+            locked: false,
+            weight: 1000,
+          }) as Parameters<typeof packs.createPackOdds>[0][number];
+        await packs.createPackOdds([
+          // ZOO's live pool: PSA 10 + PSA 9 + raw ⇒ MIX, never the guarantee.
+          {
+            pack_id: ZOO,
+            card_id: 'stats-a',
+            rarity: 'Legendary' as const,
+            locked: false,
+            weight: 1000,
+          },
+          {
+            pack_id: ZOO,
+            card_id: 'stats-common',
+            rarity: 'Common' as const,
+            locked: false,
+            weight: 1000,
+          },
+          {
+            pack_id: ZOO,
+            card_id: 'stats-b',
+            rarity: 'Rare' as const,
+            locked: false,
+            weight: 1000,
+          },
+          // GUARD's live pool: one PSA 10.
+          {
+            pack_id: GUARD,
+            card_id: 'stats-a',
+            rarity: 'Legendary' as const,
+            locked: false,
+            weight: 1000,
+          },
+          // Rows BOTH implementations must skip: reward entries (no card) and
+          // rows whose card is deleted right below.
+          rewardRow(ZOO),
+          rewardRow(GUARD),
+          {
+            pack_id: ZOO,
+            card_id: 'stats-orphan',
+            rarity: 'Common' as const,
+            locked: false,
+            weight: 1000,
+          },
+          {
+            pack_id: GUARD,
+            card_id: 'stats-orphan',
+            rarity: 'Common' as const,
+            locked: false,
+            weight: 1000,
+          },
+          {
+            pack_id: ZOO,
+            card_id: 'stats-softgone',
+            rarity: 'Common' as const,
+            locked: false,
+            weight: 1000,
+          },
+          {
+            pack_id: GUARD,
+            card_id: 'stats-softgone',
+            rarity: 'Common' as const,
+            locked: false,
+            weight: 1000,
+          },
+        ]);
+        // Orphan them both ways: the cards go, their odds rows stay behind.
+        await packs.deleteCards([orphan.id]);
+        await packs.softDeleteCards([softGone.id]);
+        clearPackListCache();
+        clearAdminPackListCache();
+
+        // Expected = poolComposition folded over the SAME rows the old code
+        // path read, so this is a true A/B and not a restatement of the seed.
+        const [allOdds, allCards] = await Promise.all([
+          pageAll((opts) => packs.listPackOdds({}, opts)),
+          pageAll((opts) => packs.listCards({}, opts)),
+        ]);
+        const comp = poolComposition(allOdds, allCards);
+        // Non-vacuity: 6 seeded odds rows on ZOO, only 3 survive the skip-set
+        // (and 4 on GUARD, only 1). A no-op delete or an uncounted reward row
+        // fails right here, before either route is asked.
+        expect(comp.get(ZOO)).toEqual({ total: 3, graded: 2, psa10: 1 });
+        expect(comp.get(GUARD)).toEqual({ total: 1, graded: 1, psa10: 1 });
+
+        const apiKeyModule = getContainer().resolve(Modules.API_KEY);
+        const key = await apiKeyModule.createApiKeys({
+          title: 'stats-zoo-key',
+          type: 'publishable',
+          created_by: 'packs-list-stats',
+        });
+        const res = await unwrapResponse(
+          api.get('/store/packs', {
+            headers: { 'x-publishable-api-key': key.token },
+          }),
+        );
+        expect(res.status).toBe(200);
+        const store = new Map(
+          (
+            res.data.packs as { slug: string; group: unknown; psa10: unknown }[]
+          ).map((p) => [p.slug, p]),
+        );
+        const admin = await rowsOf();
+
+        for (const slug of [ZOO, GUARD]) {
+          const t = comp.get(slug);
+          expect(t).toBeDefined();
+          const expectedGroup = compositionGroup(t!.graded, t!.total);
+          expect(store.get(slug)?.group).toBe(expectedGroup);
+          expect(store.get(slug)?.psa10).toBe(
+            t!.total > 0 && t!.psa10 === t!.total,
+          );
+          expect(admin.get(slug)?.group).toBe(expectedGroup);
+        }
+        // Spelled out too, so a bug that made BOTH sides agree on the WRONG
+        // number still fails.
+        expect(store.get(ZOO)?.group).toBe('MIX');
+        expect(store.get(ZOO)?.psa10).toBe(false);
+        expect(store.get(GUARD)?.group).toBe('GRADED');
+        expect(store.get(GUARD)?.psa10).toBe(true);
       });
 
       it('computes Published EV from the published tier percentages', async () => {
