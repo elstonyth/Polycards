@@ -197,7 +197,16 @@ try {
       .first()
       .click();
     const badge = gp.getByTestId('free-pack-badge').first();
-    if (!(await badge.isVisible().catch(() => false))) {
+    // waitFor, not isVisible(): the badge only mounts once the consent click
+    // above re-renders it, so a bare isVisible() fires before that lands and
+    // false-✗s. Same idiom the member context uses on this testid (~line 267).
+    let badgeVisible = true;
+    try {
+      await badge.waitFor({ state: 'visible', timeout: 20000 });
+    } catch {
+      badgeVisible = false;
+    }
+    if (!badgeVisible) {
       fail(
         'guest badge not visible on /slots while an active free pack exists',
       );
@@ -221,13 +230,17 @@ try {
       await shot(gp, 'guest-badge');
       await badge.click();
       // openAuth('signup') → auth modal with an email field.
+      // waitFor, not isVisible({ timeout }): Playwright's isVisible() ignores
+      // its timeout option (deprecated, returns immediately), so it would
+      // race the modal-open transition instead of actually waiting for it.
       const email = gp.locator('input[type="email"]');
-      if (
-        !(await email
-          .first()
-          .isVisible({ timeout: 4000 })
-          .catch(() => false))
-      ) {
+      let modalOpen = true;
+      try {
+        await email.first().waitFor({ state: 'visible', timeout: 4000 });
+      } catch {
+        modalOpen = false;
+      }
+      if (!modalOpen) {
         fail('tapping the guest badge did not open the auth modal');
       } else {
         ok('guest badge tap opens the auth modal (signup)');
