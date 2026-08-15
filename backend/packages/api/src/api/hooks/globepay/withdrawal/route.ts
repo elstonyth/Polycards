@@ -6,7 +6,10 @@ import {
   openCallback,
 } from '../../../../modules/packs/globepay';
 import { globepayConfigFromEnv } from '../../../../modules/packs/globepay-client';
-import { withdrawalRefundReference } from '../../../../modules/packs/globepay-withdrawal';
+import {
+  formatGatewayFailureReason,
+  withdrawalRefundReference,
+} from '../../../../modules/packs/globepay-withdrawal';
 import { notifyFeed } from '../../../../modules/packs/notify-feed';
 import { withdrawalFeedKey } from '../../../../modules/packs/feed-events';
 import { sendWithdrawalReceipt } from '../../../../modules/packs/withdrawal-receipt';
@@ -207,6 +210,20 @@ export async function POST(
           gateway_status: data.Status,
           gateway_transaction_id:
             gatewayTransactionId || withdrawal.gateway_transaction_id,
+          // The gateway's own reason text for the bank-side refusal — the
+          // ordinary path for a bank declining a transfer. Without this the
+          // row lands in the admin queue reasonless, exactly the blank-reason
+          // state PR #433 exists to abolish. Redacted the same way the submit
+          // refusal path is: their Remark can echo the account number back.
+          failure_reason: formatGatewayFailureReason({
+            prefix: 'callback failed',
+            codes: [],
+            httpStatus: 0,
+            bankCode: withdrawal.bank_code,
+            message: data.Remark ?? '',
+            accountNumber: withdrawal.account_number,
+            accountHolderName: withdrawal.account_holder_name,
+          }),
         },
       });
 
