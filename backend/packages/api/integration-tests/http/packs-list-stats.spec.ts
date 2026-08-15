@@ -545,6 +545,40 @@ medusaIntegrationTestRunner({
         expect(store.get(GUARD)?.psa10).toBe(true);
       });
 
+      // This list caches for 30s, so every admin pack write has to bust it. The
+      // odds editor is the sharpest case: the operator saves weights and goes
+      // straight back to the list they came from to read the new EV.
+      it('reflects an odds save immediately rather than serving the cached EV', async () => {
+        // Populates the cache with the pre-edit numbers.
+        expect((await rowsOf()).get(PACK)).toMatchObject({ ev: { s1: 170 } });
+
+        // Common is the balancer, so pinning the two non-Common rows at 50/30
+        // leaves stats-c (Common, RM100) absorbing the remaining 20%:
+        // 0.5×300 + 0.3×200 + 0.2×100 = RM230.
+        const saved = await unwrapResponse(
+          api.post(
+            `/admin/packs/${PACK}/odds`,
+            {
+              entries: [
+                {
+                  card_id: 'stats-a',
+                  locked: false,
+                  pct: 50,
+                  rarity: 'Legendary',
+                },
+                { card_id: 'stats-b', locked: false, pct: 30, rarity: 'Rare' },
+                { card_id: 'stats-c', locked: false, pct: 20, rarity: 'Common' },
+              ],
+            },
+            { headers: { authorization: `Bearer ${adminToken}` } },
+          ),
+        );
+        expect(saved.status).toBe(200);
+
+        // Without the bust in the odds route this still reads the cached 170.
+        expect((await rowsOf()).get(PACK)).toMatchObject({ ev: { s1: 230 } });
+      });
+
       it('computes Published EV from the published tier percentages', async () => {
         const rows = await rowsOf();
         // 150 × 20% + 55 × 80% = 30 + 44 = RM74 promised on a RM200 pack ⇒ the

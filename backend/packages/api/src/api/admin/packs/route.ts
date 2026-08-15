@@ -31,8 +31,8 @@ const round2 = (n: number): number => Math.round(n * 100) / 100;
 // every odds row and every card, and it re-ran on every admin pack-page load.
 // The body is pack-global (no requesting-admin data) and Medusa's admin auth
 // runs before this handler, so caching neither leaks across admins nor widens
-// who may read it. Every pack write below busts it, so what lags is only what
-// no write path busts today (see clearAdminPackListCache).
+// who may read it. Every admin pack write busts it — see the invariant on
+// clearAdminPackListCache.
 const CACHE_TTL_MS = 30_000;
 const LIST_KEY = 'list';
 const listCache = new Map<string, { expires: number; body: unknown }>();
@@ -43,9 +43,18 @@ let inFlight: Promise<unknown> | null = null;
 
 /** Bust seam for the pack write paths + a test seam (module state outlives a
  *  test's fixtures — one jest process is one module instance).
- *  KNOWN GAP: only the pack routes call this. An odds edit
- *  (POST /admin/packs/:slug/odds) or a card price change leaves the EV/RTP
- *  numbers here up to 30s stale; wiring those is a one-line follow-up. */
+ *
+ *  INVARIANT: every admin PACK write that moves a number this list renders
+ *  calls this — create/update/delete (`[slug]`), reorder, membership
+ *  (`[slug]/members`) and odds (`[slug]/odds`). Adding a write route under
+ *  api/admin/packs/** that touches pool, weights, rank or pack fields means
+ *  adding a call here too. `[slug]/top-hits` deliberately does NOT: it writes
+ *  only `top_hit_order`, which is storefront display order and appears nowhere
+ *  in this body.
+ *
+ *  Not covered, and shared with the storefront caches rather than introduced
+ *  by this one: CARD-level edits (price/grader/grade via the admin card
+ *  routes) feed EV and composition but bust nothing, so those lag ≤30s. */
 export function clearAdminPackListCache(): void {
   listCache.clear();
   inFlight = null;
