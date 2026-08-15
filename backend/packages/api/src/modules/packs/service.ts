@@ -80,6 +80,10 @@ import {
   nonNegativeIntFromEnv,
 } from '../../api/utils/rate-limit';
 import {
+  adjustDailyMintError,
+  ADJUST_DAILY_MINT_MAX_RM_DEFAULT,
+} from './credit-adjust';
+import {
   resolveBuybackRate,
   buybackAmount,
   instantDeadlineMs,
@@ -918,8 +922,10 @@ class PacksModuleService extends MedusaService({
   }
 
   // Rolling-24h GLOBAL sum of MINTED credit (positive `adjustment` rows), in
-  // integer cents. Backs the ADJUST_DAILY_MINT_MAX_RM ceiling checked in the
-  // adjust-credits step.
+  // integer cents. Backs the ADJUST_DAILY_MINT_MAX_RM ceiling enforced in
+  // adminAdjustCredit. Callers MUST pass the locked transaction's context and
+  // hold the 'credit-adjust:mint-window' lock — read unlocked, this is a stale
+  // best-effort number, not a bound.
   //
   // Two properties here are the whole point, and both are what a copy of the
   // per-customer withdrawal cap would get wrong:
@@ -5532,6 +5538,72 @@ class PacksModuleService extends MedusaService({
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ id: string; amount: number; balance: number }> {
+    // Rolling-24h GLOBAL mint ceiling (ADJUST_DAILY_MINT_MAX_RM), enforced HERE
+    // — inside this transaction, under a global lock — because an unlocked
+    // pre-check outside it was only enforcement-at-margin: 50 parallel
+    // max-size grants to 50 DIFFERENT customers each read the window before any
+    // sibling committed, so all 50 passed a RM 1,000,000/day cap and minted
+    // ~RM 50,000,000 in one burst. Per-customer locks cannot bound a GLOBAL
+    // total (50 customers = 50 different keys), so concurrency, not the admin
+    // rate limiter, was the only thing standing in the way.
+    //
+    // The lock key is a CONSTANT: every positive adjustment serializes against
+    // every other one, which is what makes the sum below exact rather than
+    // best-effort. Taken BEFORE mutateCreditAtomic's `credit:<customer>` lock,
+    // so the order is always global -> customer.
+    //
+    // Deadlock-free by construction, not by convention: 'credit-adjust:mint-
+    // window' is requested at this ONE site and nowhere else in the codebase,
+    // so no transaction can ever hold `credit:` while waiting for it, and no
+    // cycle can form. adminAdjustCredit's only production caller is the
+    // adjust-credits workflow step, which holds no lock when it calls in.
+    //
+    // DEPENDS ON READ COMMITTED (the default; @InjectTransactionManager
+    // forwards `isolationLevel` from the caller's context and this path passes
+    // none) — the same dependency withdrawForCashout documents above. A sibling
+    // that commits while we wait on the lock must be VISIBLE to the sum below;
+    // under REPEATABLE READ the sum would use a snapshot from before that
+    // commit and the ceiling would leak again. Do not compose this method into
+    // a context carrying a stricter isolation level.
+    //
+    // ponytail: one global lock serializes ALL positive adjustments. Deliberate
+    // — manual mints are rare and human-initiated, so throughput is a non-issue
+    // here; if that ever changes, the upgrade path is a counter table keyed by
+    // day rather than a re-summed window.
+    const amountCents = Math.round(input.amount * 100);
+    if (amountCents > 0) {
+      // Clawbacks take NO global lock: they are never blocked, never counted,
+      // and must never contend with a grant.
+      const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+      await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+        'credit-adjust:mint-window',
+      ]);
+      // nonNegativeIntFromEnv, NOT positiveIntFromEnv: 0 must mean "refuse every
+      // grant" (the incident stop lever), not "fall back to the default".
+      const capCents =
+        nonNegativeIntFromEnv(
+          'ADJUST_DAILY_MINT_MAX_RM',
+          ADJUST_DAILY_MINT_MAX_RM_DEFAULT,
+        ) * 100;
+      // sharedContext threaded so the sum joins THIS locked transaction.
+      const windowCents = await this.rollingAdjustmentMintCents(sharedContext);
+      const refusal = adjustDailyMintError(windowCents, amountCents, capCents);
+      if (refusal) {
+        // The alerting seam: one structured line per refusal. No customer id —
+        // the ceiling is global and this lands in shared operator logs.
+        console.warn(
+          JSON.stringify({
+            event: 'adjust_credit.daily_mint_refused',
+            admin_id: input.adminId,
+            attempted_cents: amountCents,
+            window_cents: windowCents,
+            cap_cents: capCents,
+          }),
+        );
+        throw new MedusaError(MedusaError.Types.NOT_ALLOWED, refusal);
+      }
+    }
+
     // `amount` here is mutateCreditAtomic's own cent-rounded value (matches
     // the SUM(ROUND(...)) actually persisted to credit_transaction) — used
     // below for the ledger row so it can't drift from input.amount when this
