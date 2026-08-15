@@ -456,11 +456,11 @@ export default function PackDetailClient({
                 onClick={handleGoToReel}
                 className="w-full justify-between px-5"
               >
-                {isFreePack
-                  ? 'Open Free Pack'
-                  : customer
-                    ? 'Open Pack'
-                    : 'Log in to open'}
+                {customer
+                  ? isFreePack
+                    ? 'Open Free Pack'
+                    : 'Open Pack'
+                  : 'Log in to open'}
                 <span className="flex items-center gap-1.5 font-heading text-base tracking-tight tabular-nums">
                   {!isFreePack && rm(priceNum * qty)}
                   <ArrowRight className="h-4 w-4" aria-hidden />
@@ -699,7 +699,11 @@ export default function PackDetailClient({
             onClick={handleGoToReel}
             className="shrink-0 px-5"
           >
-            {isFreePack ? 'Open Free Pack' : customer ? 'Open Pack' : 'Log in'}
+            {customer
+              ? isFreePack
+                ? 'Open Free Pack'
+                : 'Open Pack'
+              : 'Log in'}
           </Pill>
         </div>
         {openError && (

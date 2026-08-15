@@ -20,6 +20,7 @@ import {
   type Pack,
   type PackCategory,
 } from '@/lib/packs-data';
+import type { FreePackState } from '@/lib/data/free-pack';
 
 // Pack catalog comes from the backend via getPackCategories() (server page);
 // types + presentational category meta live in @/lib/packs-data.
@@ -255,13 +256,15 @@ const GROUPS = [
 export default function CatalogClient({
   categories,
   initialCategory,
-  freePackSlug = null,
+  freePack = null,
 }: {
   categories: PackCategory[];
   initialCategory: string;
-  /** Non-null only while this customer's one-time welcome claim is unspent —
-   *  the badge is the free pack's only entry point (it is not in `categories`). */
-  freePackSlug?: string | null;
+  /** Visible badge state, or null. `claim` only while this customer's one-time
+   *  welcome claim is unspent; `signup` for logged-out visitors while an
+   *  active free pack exists. The badge is the free pack's only entry point
+   *  (it is not in `categories`). */
+  freePack?: Exclude<FreePackState, { mode: 'hidden' }> | null;
 }) {
   const [active, setActive] = useState<string>(initialCategory);
 
@@ -296,10 +299,10 @@ export default function CatalogClient({
         // catalog can always be scrolled clear of it. Badge box: 146px tall
         // (112px art at 393x512) over a 4.5rem dock offset = 218px, dropping
         // to 24px + 146px = 170px once the tab bar is gone at lg.
-        freePackSlug && 'pb-56 lg:pb-44',
+        freePack && 'pb-56 lg:pb-44',
       )}
     >
-      {freePackSlug && <FreePackBadge slug={freePackSlug} />}
+      {freePack && <FreePackBadge state={freePack} />}
 
       {/* Sticky filter bar — category chip rail */}
       <div className="glass-chrome sticky top-2 z-20 mb-6 rounded-2xl border border-white/10 p-2">

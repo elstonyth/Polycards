@@ -153,6 +153,24 @@ moduleIntegrationTestRunner<PacksModuleService>({
       return captured.body;
     };
 
+    const guestReqRes = () => {
+      const captured: ResCapture = {};
+      const res = {
+        status(code: number) {
+          captured.status = code;
+          return this;
+        },
+        json(body: unknown) {
+          captured.body = body;
+          return this;
+        },
+      };
+      // No auth_context at all — allowUnauthenticated passes anonymous
+      // requests through without one.
+      const req = { params: {}, scope: container };
+      return { req: req as any, res: res as any, captured };
+    };
+
     const vaultItems = async (who = customerId) => {
       const { req, res, captured } = makeReqRes({ customerId: who });
       await vaultGET(req, res);
@@ -282,6 +300,60 @@ moduleIntegrationTestRunner<PacksModuleService>({
           slug: null,
           image: null,
         });
+      });
+    });
+
+    describe('GET /store/free-pack — unauthenticated promo answer', () => {
+      it('answers promo:true (and nothing per-customer) while an active free pack exists', async () => {
+        // beforeEach already seeds an ACTIVE free_welcome pack (FREE_SLUG) —
+        // no extra seeding needed here.
+        const { req, res, captured } = guestReqRes();
+        await freePackGET(req, res);
+        expect(captured.body).toEqual({
+          eligible: false,
+          slug: null,
+          image: null,
+          promo: true,
+        });
+      });
+
+      it('answers promo:false when no active free pack exists', async () => {
+        await service.updatePacks({
+          selector: { slug: FREE_SLUG },
+          data: { status: 'draft' },
+        });
+        const { req, res, captured } = guestReqRes();
+        await freePackGET(req, res);
+        expect(captured.body).toEqual({
+          eligible: false,
+          slug: null,
+          image: null,
+          promo: false,
+        });
+      });
+
+      it('authed answer is unchanged — no promo field', async () => {
+        const body = await eligibility();
+        expect(body).not.toHaveProperty('promo');
+      });
+
+      // Robustness test, not a currently-reachable request shape: this
+      // route's middlewares.ts entry sets only { allowUnauthenticated:
+      // true }, no allowUnregistered, so per the installed framework
+      // (authenticate-middleware.js) a request can never actually arrive
+      // here with auth_context PRESENT and actor_id ''. A fresh, unlinked
+      // register token (medusa-register-token-empty-actor-id) instead
+      // falls through with NO auth_context at all and hits the
+      // anonymous-promo branch above. This test pins what route.ts's
+      // `== null` guard's empty-actor_id fall-through does for that
+      // fabricated/future state (real only if this route ever gains
+      // { allowUnregistered: true }): customer_id '' matches no row, so it
+      // still degrades to the plain 3-key ineligible answer, never a promo
+      // leak.
+      it("defense-in-depth: a present-but-empty auth_context (unreachable under this route's current config) still gets the plain ineligible answer, not promo", async () => {
+        const body = await eligibility('');
+        expect(body).toEqual({ eligible: false, slug: null, image: null });
+        expect(body).not.toHaveProperty('promo');
       });
     });
 
