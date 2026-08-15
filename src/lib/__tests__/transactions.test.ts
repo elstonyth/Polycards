@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { reasonLabel, signedRm } from '@/lib/transactions';
+import { elapsedLabel, reasonLabel, signedRm } from '@/lib/transactions';
 
 describe('reasonLabel', () => {
   it('maps each reason to a human label', () => {
@@ -29,5 +29,23 @@ describe('signedRm', () => {
     expect(signedRm(48)).toBe('+RM 48.00');
     expect(signedRm(-25)).toBe('-RM 25.00');
     expect(signedRm(0)).toBe('RM 0.00');
+  });
+});
+
+describe('elapsedLabel', () => {
+  const minutes = (n: number) => n * 60_000;
+
+  it('reads in minutes, and never says "0 minutes"', () => {
+    const now = 1_000_000_000;
+    expect(elapsedLabel(now - 1_000, now)).toBe('just now');
+    expect(elapsedLabel(now - minutes(1), now)).toBe('1 minute ago');
+    expect(elapsedLabel(now - minutes(2), now)).toBe('2 minutes ago');
+    expect(elapsedLabel(now - minutes(7) - 30_000, now)).toBe('7 minutes ago');
+  });
+
+  // A clock skew must not render someone's payment as starting in the future.
+  it('clamps a start instant that is ahead of now', () => {
+    const now = 1_000_000_000;
+    expect(elapsedLabel(now + minutes(5), now)).toBe('just now');
   });
 });

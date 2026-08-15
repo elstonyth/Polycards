@@ -384,10 +384,46 @@ Baseline recorded 2026-07-29: `https://admin.polycards.gg` → **404 on both
 probes**, as expected — PR #252 is unmerged and prod carries no `GLOBEPAY_*`
 env. That is the "not deployed" reading, not a fault.
 
+### Organic callback delivery — OBSERVED, AND IT WAS BLOCKED (2026-08-11)
+
+Real customers have now paid, and the callbacks are real: GlobePay POSTs to the
+exact `NotifyUrl` we send per request, from `13.159.14.239` (AS16509 Amazon,
+Japan — the production address in the table at the top of this file), with an
+**empty user agent**, retrying roughly every 1–5 minutes.
+
+Not one of them reached the origin. Cloudflare's **Bot Fight Mode** answered each
+with a **Managed Challenge**, which a webhook cannot solve:
+
+```
+Service: Bot fight mode        Action: Managed Challenge
+POST admin.polycards.gg /hooks/globepay/deposit    IP 13.159.14.239
+```
+
+Eight challenges between 14:53 and 15:08 GMT+8 for one RM 500 deposit; the
+backend logged zero `/hooks/globepay/deposit` requests over the same 13 hours
+in which it logged eight `/store/credits/deposit` starts. Every top-up was
+therefore credited by the reconciliation sweep instead, which is exactly what
+the sweep's "credited … from a REQUERY, not a callback" warning is for — the
+customer's wait became the sweep interval.
+
+Fix applied the same day: the three server-to-server URLs
+(`GLOBEPAY_NOTIFY_URL`, `GLOBEPAY_WITHDRAW_NOTIFY_URL`,
+`GLOBEPAY_PAYOUT_VERIFY_URL`) now point at the app's own origin hostname,
+`https://polycards-backend-gce6p.ondigitalocean.app`, which Cloudflare does not
+front. On the free plan Bot Fight Mode is zone-wide and cannot be excepted
+per-path by a WAF skip rule, so moving the callbacks off the proxied hostname is
+the narrow fix; disabling Bot Fight Mode for the whole zone was the alternative.
+No security is lost — these routes authenticate the RSA signature over their AES
+payload and have never trusted the edge or the source IP.
+
+**Diagnostic worth keeping:** an absence of hook requests in the DO logs does NOT
+mean they never sent. Check Cloudflare → Security → Analytics → Events before
+concluding anything about their side.
+
 ### Still open
 
-- No human has ever paid through BQR or OB. Organic callback delivery and
-  `ReturnUrl` behaviour remain unobserved.
+- No human has ever paid through BQR or OB. `ReturnUrl` behaviour remains
+  unobserved.
 - Alerting on pending-past-window is not built; the Deposits page shows it, but
   someone has to look.
 

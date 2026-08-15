@@ -145,3 +145,6 @@ pixel-pokemon-backfill.json
 public/images/claw/polycards-factory-test.png
 # Added by code-review-graph
 .code-review-graph/
+
+# local promo video renders (large, unversioned)
+videos/
