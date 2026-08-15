@@ -12,6 +12,11 @@ export default async function seedHeldWithdrawal({
 }: {
   container: { resolve: <T>(k: string) => T };
 }): Promise<void> {
+  // The fabricated row has no matching ledger debit — approving it against a
+  // real gateway pays out money nobody was charged for. Refuse anywhere prod.
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('[seed-held-withdrawal] refusing to run in production');
+  }
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
   const stamp = Date.now();
   const rows = await packs.createGlobePayWithdrawals([
@@ -26,7 +31,10 @@ export default async function seedHeldWithdrawal({
     },
   ]);
   const row = Array.isArray(rows) ? rows[0] : rows;
-  console.log(
-    `[seed-held-withdrawal] created ${row?.id} status=${row?.status}`,
-  );
+  if (!row) {
+    throw new Error(
+      '[seed-held-withdrawal] createGlobePayWithdrawals returned no row',
+    );
+  }
+  console.log(`[seed-held-withdrawal] created ${row.id} status=${row.status}`);
 }

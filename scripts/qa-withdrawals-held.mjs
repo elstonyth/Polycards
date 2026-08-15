@@ -4,7 +4,7 @@
 // Creds come from the gitignored scripts/.dev-logins (KEY=VALUE), same file
 // login-stack.mjs uses. Screenshots -> docs/research/.
 import { chromium } from '@playwright/test';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 
 const env = {};
 for (const line of readFileSync('scripts/.dev-logins', 'utf8').split(/\r?\n/)) {
@@ -59,6 +59,7 @@ await page
   .first()
   .waitFor({ timeout: 15000 });
 await page.waitForTimeout(500);
+mkdirSync('docs/research', { recursive: true });
 await page.screenshot({
   path: 'docs/research/qa-withdrawals-held.png',
   fullPage: true,
