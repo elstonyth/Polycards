@@ -27,6 +27,7 @@ import {
 import { FRAME_LEVELS } from './avatar-frames';
 import { challengePackId } from './challenge-prize';
 import { FREE_WELCOME_CATEGORY } from './free-pack';
+import { isGraded, isPsa10, type PoolComposition } from './card-view';
 import Pack from './models/pack';
 import Card from './models/card';
 import CardPriceHistory from './models/card-price-history';
@@ -56,7 +57,9 @@ import ChallengeSchedule from './models/challenge-schedule';
 import ChallengeSettings from './models/challenge-settings';
 import TierSettings from './models/tier-settings';
 import GlobePayDeposit from './models/globepay-deposit';
-import GlobePayWithdrawal from './models/globepay-withdrawal';
+import GlobePayWithdrawal, {
+  WITHDRAWAL_STATUSES,
+} from './models/globepay-withdrawal';
 import ChallengePayout from './models/challenge-payout';
 import LedgerEntry from './models/ledger-entry';
 import LedgerSequence from './models/ledger-sequence';
@@ -76,6 +79,10 @@ import {
   positiveIntFromEnv,
   nonNegativeIntFromEnv,
 } from '../../api/utils/rate-limit';
+import {
+  adjustDailyMintError,
+  ADJUST_DAILY_MINT_MAX_RM_DEFAULT,
+} from './credit-adjust';
 import {
   resolveBuybackRate,
   buybackAmount,
@@ -292,9 +299,10 @@ type LedgerSqlManager = {
   execute<T = unknown>(query: string, params?: unknown[]): Promise<T>;
 };
 
-/** The globepay_withdrawal.status domain, mirrored from the model's enum for
- *  the raw-SQL claim below (raw SQL carries no model types). */
-type WithdrawalStatus = 'pending' | 'settled' | 'failed' | 'held';
+/** The globepay_withdrawal.status domain, derived from the model's
+ *  WITHDRAWAL_STATUSES for the raw-SQL claim below (raw SQL carries no model
+ *  types). */
+type WithdrawalStatus = (typeof WITHDRAWAL_STATUSES)[number];
 
 /** One raw `ledger_entry` row as listLedgerEntriesForAdmin reads it. */
 export type LedgerEntryRow = {
@@ -911,6 +919,41 @@ class PacksModuleService extends MedusaService({
       period: r.period,
       spend: Number(r.spend_cents) / 100,
     }));
+  }
+
+  // Rolling-24h GLOBAL sum of MINTED credit (positive `adjustment` rows), in
+  // integer cents. Backs the ADJUST_DAILY_MINT_MAX_RM ceiling enforced in
+  // adminAdjustCredit. Callers MUST pass the locked transaction's context and
+  // hold the 'credit-adjust:mint-window' lock — read unlocked, this is a stale
+  // best-effort number, not a bound.
+  //
+  // Two properties here are the whole point, and both are what a copy of the
+  // per-customer withdrawal cap would get wrong:
+  //   * NO customer scope — the bound is on how much the operator population
+  //     can mint per day in total. Scoping it per customer would let N
+  //     customers buy N ceilings, and per-admin would just mean N tokens.
+  //   * `amount > 0` only — clawbacks never count, so a deduction cannot
+  //     restore headroom for a fresh grant.
+  // `deleted_at IS NULL` matters too: the step's compensation handler removes
+  // the row, and a compensated attempt must not consume the day's ceiling.
+  //
+  // ponytail: no (reason, created_at) index. At this table's size Postgres
+  // seq-scans regardless (measured 0.2 ms / 37 buffers over 1,223 rows), and
+  // the call path is capped at 200/min by the admin limiter. Add a partial
+  // index on (created_at) WHERE reason = 'adjustment' if this reaches slow logs.
+  @InjectManager()
+  async rollingAdjustmentMintCents(
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<number> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ sum_cents: string | null }[]>(
+      'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS sum_cents ' +
+        'FROM credit_transaction ' +
+        "WHERE reason = 'adjustment' AND amount > 0 AND deleted_at IS NULL " +
+        "AND created_at > now() - interval '24 hours'",
+    );
+    return Number(rows[0]?.sum_cents ?? 0);
   }
 
   // Customer credit balance = Σ(amount) over the append-only ledger. Kept as a
@@ -4198,8 +4241,15 @@ class PacksModuleService extends MedusaService({
 
     // Idempotent: a half-finished purge gets finished by hand, and an audit
     // trail that grows a row per attempt reports one deletion as several.
+    // entity_type is here for the same reason deletedCustomerIds carries it
+    // (above): it is the leading column of IDX_admin_action_audit_entity, and
+    // this read runs inside the credit advisory lock this transaction just took.
     const [existingAudit] = await this.listAdminActionAudits(
-      { entity_id: customerId, action: 'delete_account' },
+      {
+        entity_type: 'customer',
+        entity_id: customerId,
+        action: 'delete_account',
+      },
       { take: 1 },
       sharedContext,
     );
@@ -4539,6 +4589,68 @@ class PacksModuleService extends MedusaService({
       by_rarity[r.rarity] = (by_rarity[r.rarity] ?? 0) + n;
     }
     return { pulls, volume, by_rarity };
+  }
+
+  // §2.4.8 per-pack pool composition for the pack lists — one grouped scan
+  // instead of paging EVERY pack_odds row and EVERY card into Node (the cost
+  // used to scale with total catalog size, not pack count).
+  //
+  // The skip-set poolComposition documents lives in the SQL here: reward rows
+  // (card_id NULL) and orphaned odds rows (the card is gone or soft-deleted)
+  // never survive the inner join. Deliberately NO `DISTINCT ON (pack_id,
+  // card_id)` — poolComposition counts every odds row, and UQ_pack_odds_pack_card
+  // already guarantees one live row per pair, so a DISTINCT copied from the
+  // profileStatsForCustomer CTE below would only mask a broken uniqueness
+  // guarantee rather than match the fold this replaces.
+  //
+  // Deliberately GROUP BY the card's (grader, grade) and let card-view.ts's
+  // isGraded/isPsa10 classify the groups, rather than COUNT(*) FILTER (…) with
+  // the predicates rewritten in SQL: JS `trim()` strips Unicode whitespace and
+  // `toUpperCase()` is locale-independent, and PG's btrim()/upper() reproduce
+  // neither exactly — a translated predicate could drift the RAW/GRADED split
+  // (and the "Guaranteed PSA 10" gate) on an operator-typed stray character.
+  // This way the two lists and the SQL can never disagree by construction.
+  // ponytail: group count is distinct (pack_id, grader, grade) — a tiny closed
+  // vocabulary in practice; even pathological free-text grades only degrade to
+  // the row count we already paged today.
+  @InjectManager()
+  async packPoolComposition(
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<Map<string, PoolComposition>> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+
+    const rows = await em.execute<
+      {
+        pack_id: string;
+        grader: string;
+        grade: string;
+        // `::int` below makes the driver hand this back as a JS number; typed
+        // loosely (and Number()'d) so dropping that cast can't silently
+        // reintroduce the bigint-as-string bug the loop guards against.
+        n: string | number;
+      }[]
+    >(
+      `SELECT o.pack_id, c.grader, c.grade, COUNT(*)::int AS n
+         FROM pack_odds o
+         JOIN card c ON c.handle = o.card_id AND c.deleted_at IS NULL
+        WHERE o.deleted_at IS NULL AND o.card_id IS NOT NULL
+        GROUP BY o.pack_id, c.grader, c.grade`,
+    );
+
+    const comp = new Map<string, PoolComposition>();
+    for (const r of rows) {
+      // COUNT is bigint to the driver — an unconverted string would make
+      // compositionGroup's `graded === total` fail and report an all-raw pack
+      // as MIX, so the counts are Number()'d before any arithmetic.
+      const n = Number(r.n);
+      const t = comp.get(r.pack_id) ?? { graded: 0, psa10: 0, total: 0 };
+      t.total += n;
+      if (isGraded(r)) t.graded += n;
+      if (isPsa10(r)) t.psa10 += n;
+      comp.set(r.pack_id, t);
+    }
+    return comp;
   }
 
   // Per-reason lifetime ledger sums for /admin/economy — one GROUP BY instead
@@ -5426,6 +5538,72 @@ class PacksModuleService extends MedusaService({
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ id: string; amount: number; balance: number }> {
+    // Rolling-24h GLOBAL mint ceiling (ADJUST_DAILY_MINT_MAX_RM), enforced HERE
+    // — inside this transaction, under a global lock — because an unlocked
+    // pre-check outside it was only enforcement-at-margin: 50 parallel
+    // max-size grants to 50 DIFFERENT customers each read the window before any
+    // sibling committed, so all 50 passed a RM 1,000,000/day cap and minted
+    // ~RM 50,000,000 in one burst. Per-customer locks cannot bound a GLOBAL
+    // total (50 customers = 50 different keys), so concurrency, not the admin
+    // rate limiter, was the only thing standing in the way.
+    //
+    // The lock key is a CONSTANT: every positive adjustment serializes against
+    // every other one, which is what makes the sum below exact rather than
+    // best-effort. Taken BEFORE mutateCreditAtomic's `credit:<customer>` lock,
+    // so the order is always global -> customer.
+    //
+    // Deadlock-free by construction, not by convention: 'credit-adjust:mint-
+    // window' is requested at this ONE site and nowhere else in the codebase,
+    // so no transaction can ever hold `credit:` while waiting for it, and no
+    // cycle can form. adminAdjustCredit's only production caller is the
+    // adjust-credits workflow step, which holds no lock when it calls in.
+    //
+    // DEPENDS ON READ COMMITTED (the default; @InjectTransactionManager
+    // forwards `isolationLevel` from the caller's context and this path passes
+    // none) — the same dependency withdrawForCashout documents above. A sibling
+    // that commits while we wait on the lock must be VISIBLE to the sum below;
+    // under REPEATABLE READ the sum would use a snapshot from before that
+    // commit and the ceiling would leak again. Do not compose this method into
+    // a context carrying a stricter isolation level.
+    //
+    // ponytail: one global lock serializes ALL positive adjustments. Deliberate
+    // — manual mints are rare and human-initiated, so throughput is a non-issue
+    // here; if that ever changes, the upgrade path is a counter table keyed by
+    // day rather than a re-summed window.
+    const amountCents = Math.round(input.amount * 100);
+    if (amountCents > 0) {
+      // Clawbacks take NO global lock: they are never blocked, never counted,
+      // and must never contend with a grant.
+      const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+      await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+        'credit-adjust:mint-window',
+      ]);
+      // nonNegativeIntFromEnv, NOT positiveIntFromEnv: 0 must mean "refuse every
+      // grant" (the incident stop lever), not "fall back to the default".
+      const capCents =
+        nonNegativeIntFromEnv(
+          'ADJUST_DAILY_MINT_MAX_RM',
+          ADJUST_DAILY_MINT_MAX_RM_DEFAULT,
+        ) * 100;
+      // sharedContext threaded so the sum joins THIS locked transaction.
+      const windowCents = await this.rollingAdjustmentMintCents(sharedContext);
+      const refusal = adjustDailyMintError(windowCents, amountCents, capCents);
+      if (refusal) {
+        // The alerting seam: one structured line per refusal. No customer id —
+        // the ceiling is global and this lands in shared operator logs.
+        console.warn(
+          JSON.stringify({
+            event: 'adjust_credit.daily_mint_refused',
+            admin_id: input.adminId,
+            attempted_cents: amountCents,
+            window_cents: windowCents,
+            cap_cents: capCents,
+          }),
+        );
+        throw new MedusaError(MedusaError.Types.NOT_ALLOWED, refusal);
+      }
+    }
+
     // `amount` here is mutateCreditAtomic's own cent-rounded value (matches
     // the SUM(ROUND(...)) actually persisted to credit_transaction) — used
     // below for the ledger row so it can't drift from input.amount when this

@@ -15,7 +15,7 @@ import Reveal from '@/components/Reveal';
 import QtyStepper from '@/components/QtyStepper';
 import FreePackBadge from '@/components/FreePackBadge';
 import {
-  inGuaranteedGroup,
+  catalogGroupOf,
   packHref,
   type Pack,
   type PackCategory,
@@ -227,18 +227,24 @@ function PackRow({
 }
 
 // ---------------------------------------------------------------------------
-// Client — two composition sections, auto-detected from the backend's §2.4.8
-// `group` + strict `psa10` gate (see inGuaranteedGroup): "Graded (Guaranteed
-// PSA 10)" lists ONLY pools where every card is a PSA 10; everything else
-// (RAW, MIX, empty/unknown, graded-but-not-all-PSA-10) lists under "Raw Cards
-// (Ungraded)" so the guarantee heading can never overclaim.
-// The category chip rail still filters which packs feed the two sections.
+// Client — three composition sections, auto-detected from the backend's
+// §2.4.8 `group` + strict `psa10` gate (see catalogGroupOf in packs-data.ts):
+// "Graded (Guaranteed PSA 10)" lists ONLY pools where every card is a PSA 10;
+// "Raw Cards (Ungraded)" lists ONLY backend-derived all-raw pools; everything
+// uncertain (MIX, graded-but-not-all-PSA-10, null/older-backend) lists under
+// the claim-free "More Packs" so neither heading can ever overclaim.
+// The category chip rail still filters which packs feed the sections.
 // Desktop renders a horizontally-scrolling card row per section; mobile
 // renders list rows. `initialCategory` lets a deep link (/slots?category=<key>)
 // preselect a tab.
 // ---------------------------------------------------------------------------
 
-const GROUPS = [
+const GROUPS: {
+  id: 'graded' | 'raw' | 'more';
+  heading: string;
+  note?: string;
+  Icon: typeof ShieldCheck;
+}[] = [
   {
     id: 'graded',
     heading: 'Graded',
@@ -251,7 +257,15 @@ const GROUPS = [
     note: 'Ungraded',
     Icon: RectangleVertical,
   },
-] as const;
+  {
+    // Claim-free by design — see catalogGroupOf's doc comment. No `note`:
+    // an empty/omitted note is the only wording that's honest for every
+    // member (MIX, non-PSA-10 graded, AND unknown/null composition alike).
+    id: 'more',
+    heading: 'More Packs',
+    Icon: Layers,
+  },
+];
 
 export default function CatalogClient({
   categories,
@@ -284,8 +298,9 @@ export default function CatalogClient({
     })),
   );
   const byGroup = {
-    graded: entries.filter((e) => inGuaranteedGroup(e.pack)),
-    raw: entries.filter((e) => !inGuaranteedGroup(e.pack)),
+    graded: entries.filter((e) => catalogGroupOf(e.pack) === 'graded'),
+    raw: entries.filter((e) => catalogGroupOf(e.pack) === 'raw'),
+    more: entries.filter((e) => catalogGroupOf(e.pack) === 'more'),
   } as const;
 
   return (
@@ -355,11 +370,18 @@ export default function CatalogClient({
           <div className="mb-4 flex items-center gap-2.5">
             <g.Icon className="h-6 w-6 shrink-0 text-white/80" aria-hidden />
             <h2 className="font-heading text-lg font-bold tracking-tight text-white sm:text-xl">
-              {g.heading}{' '}
-              {/* The parenthetical is body voice, not Nekst display */}
-              <span className="font-sans text-sm font-medium text-white/60 sm:text-base">
-                ({g.note})
-              </span>
+              {g.heading}
+              {/* The parenthetical is body voice, not Nekst display. Skipped
+                  entirely (not rendered empty) when a section has no note
+                  that's honest for every pack in it — see GROUPS above. */}
+              {g.note && (
+                <>
+                  {' '}
+                  <span className="font-sans text-sm font-medium text-white/60 sm:text-base">
+                    ({g.note})
+                  </span>
+                </>
+              )}
             </h2>
             <span className="ml-auto text-[13px] text-white/60">
               {byGroup[g.id].length}{' '}

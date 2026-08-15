@@ -72,18 +72,22 @@ import {
 // one deliberate exception: it authenticates with { allowUnauthenticated:
 // true }, so storeReadRateLimit runs for anonymous callers too — it falls
 // back to the same per-IP key (rate-limit.ts's `auth?.actor_id || ip:...`).
-// In production that IS one shared bucket, not per-visitor: every guest
-// /slots render is proxied server-side through the storefront's ONE Next.js
-// egress IP (the same single-egress-IP topology createAuthRateLimit /
-// createProfileReadRateLimit already document — see rate-limit.ts
-// ~750-760), so this is a whole-storefront CIRCUIT BREAKER on the badge's
-// guest read (STORE_READ_DEFAULTS: 120/10s burst, 480/60s sustained
-// sitewide), the same accepted stance as those other public-read tiers.
-// Overflow fails closed at the badge only — src/lib/data/free-pack.ts's
-// try/catch maps any non-2xx (including a 429) to `hidden`, so the catalog
-// itself is unaffected. If that ceiling ever binds in practice, the lever
-// is caching the identity-free guest fetch storefront-side, not widening
-// this limiter.
+// In production that IS one shared bucket, not per-visitor: the badge is
+// site-wide (every route, not just /slots — #442), and every guest read is
+// proxied server-side through the storefront's ONE Next.js egress IP (the
+// same single-egress-IP topology createAuthRateLimit / createProfileReadRateLimit
+// already document — see rate-limit.ts ~750-760), so this is a
+// whole-storefront CIRCUIT BREAKER on the badge's guest read
+// (STORE_READ_DEFAULTS: 120/10s burst, 480/60s sustained sitewide), the same
+// accepted stance as those other public-read tiers. Overflow fails closed at
+// the badge only — src/lib/data/free-pack.ts's try/catch maps any non-2xx
+// (including a 429) to `hidden`, so the catalog itself is unaffected. The
+// actual per-egress-IP call volume is throttled well below this ceiling by
+// the storefront itself (plan 097): GlobalFreePackBadge re-reads at most once
+// per 30s per identity (FreePackBadge.tsx's REFETCH_TTL_MS), and the guest
+// answer additionally sits behind a 60s in-process cache in
+// src/app/api/free-pack/route.ts, so this limiter is a backstop, not the
+// primary defense.
 
 // One instance shared by the vault + credits matchers: the two reads travel
 // together in the UI, so they share one budget (and one Redis connection).

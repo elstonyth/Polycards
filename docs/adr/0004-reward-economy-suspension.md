@@ -25,13 +25,16 @@ and turn the revert into a rewrite."
 
 Known holders as of this ADR, carrying either the full `SUSPENDED` banner or
 an equivalent inline note: `src/lib/actions/daily.ts`,
-`src/lib/actions/referral.ts`, `src/lib/referral-cookie.ts` (30-day cookie
-revert hazard — see its own header), `src/components/rewards/PrizeReveal.tsx`,
+`src/lib/actions/referral.ts` (**deleted by #427, 2026-08-12** — see the
+Amended section below), `src/lib/referral-cookie.ts` (**deleted by #427** —
+carried a 30-day cookie revert hazard note; see the Amended section),
+`src/components/rewards/PrizeReveal.tsx`,
 `src/components/rewards/WithdrawForm.tsx` (full banner); `src/components/account/ui.tsx`
 and `src/lib/format.ts`'s `voucherLabel` (inline "(suspended 2026-07-29)" /
 "UNUSED while … suspended" notes, not the full banner block); and — added
 alongside this ADR — `src/app/(account)/vip/vip-benefits.ts` and
-`src/app/(account)/ReferralCookieClaim.tsx` (full banner).
+`src/app/(account)/ReferralCookieClaim.tsx` (**deleted by #427** — carried the
+full banner).
 
 ## Consequences
 
@@ -48,3 +51,54 @@ alongside this ADR — `src/app/(account)/vip/vip-benefits.ts` and
   suspension drift indefinitely. Whoever picks this up next should check
   both this ADR and the 2026-07-29 suspension spec (which carries the same
   review-by line) before acting.
+
+## Amended 2026-08-15 — partially superseded by #427
+
+PR #427 (`b49ba094`, 2026-08-12) deleted three of the holders named above:
+`src/lib/actions/referral.ts`, `src/lib/referral-cookie.ts`, and
+`src/app/(account)/ReferralCookieClaim.tsx`. This was a security fix, not a
+tidy-up, and it makes the "revert, not a rewrite" claim above **false for the
+referral half** of this ADR.
+
+**What was deleted and why.** `linkSponsor`'s cycle probe was a recursive CTE
+with `UNION ALL`, no depth bound and no dedup. Against a cyclic sponsor graph
+where the sought id is not on the walk it never terminated, pinning a pooled
+DB connection until the pool exhausted — a real DoS, and the route it served
+(`POST /store/referral`) was the one suspended-surface route with no feature
+gate. Postgres does not detect cycles without an explicit `CYCLE` clause, and
+`statement_timeout` cannot be set through `databaseDriverOptions`, so the fix
+was to stop reaching the code at all: #427 removed `linkSponsor`,
+`POST /store/referral` and its middleware entry, and the storefront referral
+surfaces (`ReferralCookieClaim`, the referral cookie helpers).
+
+**Corrected claim.** VIP reward claiming and the daily box are unaffected —
+their holders (`daily.ts`, `PrizeReveal.tsx`, `WithdrawForm.tsx`,
+`vip-benefits.ts`, the `account/ui.tsx` / `format.ts` inline notes) are
+untouched, and restoring them is still a revert: delete the banner, re-add
+the route. **Referrals are not.** Restoring the referral write path now means
+rebuilding `linkSponsor` (with an actual cycle guard this time) and the
+storefront surfaces from scratch — a REBUILD, not a revert.
+
+**Deliberately kept**, and still live: the `commission` and
+`referral_relationship` models, the three `credit_transaction` reason values,
+`mature-commissions.ts`, `lockedCommissionCents`, and the admin
+referral/commission read/repair routes. `credit_transaction` is an
+append-only ledger and balance reads must keep working over every row ever
+written, so dropping a reason value the history can carry would break the
+ledger's self-description. `mature-commissions.ts` only matures *existing*
+rows — deleting it would strand any pending commission as permanently locked
+and silently cut those customers' withdrawable balance. With no writer left
+(no `linkSponsor`, no new `referral_relationship` rows), all of these drain
+to zero on their own rather than needing an active retirement step. The
+commission fan-out in `settleOpen` is left in place behind a `SUSPENDED`
+banner — gated on a `referral_relationship` lookup and now unreachable for
+any new customer — because excising it means surgery on the atomic
+open-settlement seam and was judged to deserve its own reviewed change.
+
+This does not change the review-by date or the retire-vs-restore decision
+above — it corrects what "restore" costs for one half of it.
+
+See also: `docs/superpowers/specs/2026-07-29-suspend-vip-referral-surfaces-design.md`
+and `docs/superpowers/plans/2026-07-29-suspend-vip-referral-surfaces.md`, both
+of which named `referral.ts` / `referral-cookie.ts` as "keep, do not delete"
+and now carry their own one-line pointers to this amendment.

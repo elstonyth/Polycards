@@ -2,11 +2,7 @@ import { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
 import PacksModuleService from '../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../modules/packs';
 import { FREE_WELCOME_CATEGORY } from '../../../modules/packs/free-pack';
-import {
-  compositionGroup,
-  poolComposition,
-} from '../../../modules/packs/card-view';
-import { pageAll } from '../../utils/page-all';
+import { compositionGroup } from '../../../modules/packs/card-view';
 
 // GET /store/packs — the gacha pack catalog for /claw and the home "Open Packs"
 // tiles. A plain Medusa store route (publishable-key scoped, but NOT subject to
@@ -26,8 +22,8 @@ const LIST_KEY = 'list';
 const listCache = new Map<string, { expires: number; body: unknown }>();
 
 /** Single-flight guard: concurrent misses during an expiry window share ONE
- *  compute — the composition fan-out below reads every odds/card row, and a
- *  miss stampede would run it N times for identical bodies. */
+ *  compute — the catalog query plus the composition aggregate below, which a
+ *  miss stampede would otherwise run N times for identical bodies. */
 let inFlight: Promise<unknown> | null = null;
 
 /** Test seam: module state outlives a test's fixtures — one jest process is one
@@ -77,18 +73,15 @@ async function computeCatalogBody(req: MedusaRequest): Promise<unknown> {
     { order: { category: 'ASC', rank: 'ASC' }, take: 500 },
   );
 
-  // §2.4.8 composition — the SAME shared pool traversal the admin pack list
-  // uses (poolComposition + compositionGroup), derived, never operator-set.
+  // §2.4.8 composition — ONE grouped scan (packPoolComposition) rather than
+  // paging every odds row and every card in to fold in Node; it applies the
+  // same reward-row + orphan skip-set and the same isGraded/isPsa10 the admin
+  // list's poolComposition does, so the two can never disagree.
   // `psa10` is the stricter guarantee gate: the storefront's "Guaranteed
   // PSA 10" section requires EVERY pooled card to be a PSA 10 — an all-graded
   // pack holding a PSA 9 or a BGS slab is GRADED but NOT psa10, so the
-  // heading can never overclaim. Costs two paged reads per cache window
-  // (30s), same fan-out the admin list does on every load.
-  const [allOdds, allCards] = await Promise.all([
-    pageAll((opts) => packsModuleService.listPackOdds({}, opts)),
-    pageAll((opts) => packsModuleService.listCards({}, opts)),
-  ]);
-  const comp = poolComposition(allOdds, allCards);
+  // heading can never overclaim.
+  const comp = await packsModuleService.packPoolComposition();
   const groupOf = (slug: string): 'GRADED' | 'RAW' | 'MIX' | null => {
     const t = comp.get(slug);
     return compositionGroup(t?.graded ?? 0, t?.total ?? 0);

@@ -68,6 +68,23 @@ export type Pack = {
 export const inGuaranteedGroup = (p: Pack): boolean =>
   p.group === 'GRADED' && p.psa10 === true;
 
+/** Three-way catalog section a pack belongs in — first match wins, nothing
+ *  ever moves INTO the guarantee bucket:
+ *  - 'graded' — `inGuaranteedGroup` (unchanged, still the only truth-critical
+ *    gate backing the "Guaranteed PSA 10" copy).
+ *  - 'raw' — `group === 'RAW'` ONLY. This is now a backend-derived fact, so
+ *    "Raw Cards (Ungraded)" claims exactly what it says.
+ *  - 'more' — everything uncertain: MIX, non-PSA-10 GRADED (a PSA 9/BGS pool
+ *    is NOT raw — mislabeling it "Ungraded" would be its own overclaim),
+ *    null/absent group (empty pool or an older backend that never sent
+ *    composition). None of these can be described with a claim that's
+ *    guaranteed true, so they land in the claim-free "More Packs" bucket. */
+export const catalogGroupOf = (p: Pack): 'graded' | 'raw' | 'more' => {
+  if (inGuaranteedGroup(p)) return 'graded';
+  if (p.group === 'RAW') return 'raw';
+  return 'more';
+};
+
 export type PackCategory = {
   id: string;
   /** Tab label in the top filter bar. */

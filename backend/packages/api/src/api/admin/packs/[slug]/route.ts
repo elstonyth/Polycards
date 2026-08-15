@@ -8,13 +8,16 @@ import { assertSingleActiveFreePack, coercePackBody } from "../validate";
 import { FREE_WELCOME_CATEGORY } from "../../../../modules/packs/free-pack";
 import { clearPackListCache } from "../../../store/packs/route";
 import { clearPackDetailCache } from "../../../store/packs/[slug]/route";
+import { clearAdminPackListCache } from "../route";
 
-// Bust the storefront's 30s read caches (list + detail) so an admin pack edit
-// (price/status/stock/published-odds) shows IMMEDIATELY instead of ≤30s later.
-// The caches keep read-perf; this only invalidates them on the rare write.
-function bustStorefrontPackCaches(): void {
+// Bust the 30s read caches (storefront list + detail, and the admin pack list)
+// so an admin pack edit (price/status/stock/published-odds) shows IMMEDIATELY
+// instead of ≤30s later. The caches keep read-perf; this only invalidates them
+// on the rare write.
+function bustPackCaches(): void {
   clearPackListCache();
   clearPackDetailCache();
+  clearAdminPackListCache();
 }
 
 // GET /admin/packs/:slug — load one pack for the edit form.
@@ -70,7 +73,7 @@ export async function POST(
   );
 
   const { result } = await updatePackWorkflow(req.scope).run({ input });
-  bustStorefrontPackCaches();
+  bustPackCaches();
   res.json({ pack: result });
 }
 
@@ -82,6 +85,6 @@ export async function DELETE(
 ): Promise<void> {
   const { slug } = req.params;
   await deletePackWorkflow(req.scope).run({ input: { slug } });
-  bustStorefrontPackCaches();
+  bustPackCaches();
   res.json({ deleted: true, slug });
 }

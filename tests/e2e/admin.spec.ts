@@ -164,11 +164,18 @@ test.describe('admin workflow', () => {
 
   test('economy report renders lifetime stats and RTP', async ({ page }) => {
     await page.goto(`${ADMIN}/economy`, { waitUntil: 'domcontentloaded' });
+    // Scope to the <main> content landmark (@mercurjs/admin's Shell wraps the
+    // route Outlet in <main>, sibling to the sidebar's <nav>/<aside> — verified
+    // against the installed 2.1.6 bundle). The sidebar's "Payouts" entry is
+    // CSS-hidden (admin-ui.css §2.1, display:none) but the node stays in the
+    // DOM, so an unscoped getByText(...).first() can latch onto the hidden
+    // sidebar anchor instead of the visible stat on this page.
+    const main = page.getByRole('main');
     for (const stat of [/revenue/i, /payouts/i, /vault liability/i]) {
-      await expect(page.getByText(stat).first()).toBeVisible({
+      await expect(main.getByText(stat).first()).toBeVisible({
         timeout: 15_000,
       });
     }
-    expect(await page.locator('table tbody tr').count()).toBeGreaterThan(0);
+    expect(await main.locator('table tbody tr').count()).toBeGreaterThan(0);
   });
 });

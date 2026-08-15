@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { inGuaranteedGroup, type Pack } from '@/lib/packs-data';
+import { catalogGroupOf, inGuaranteedGroup, type Pack } from '@/lib/packs-data';
 
 // Membership rule for the "Graded (Guaranteed PSA 10)" catalog section — the
 // truth-critical gate (real-money guarantee copy). Both backend flags must
@@ -33,5 +33,44 @@ describe('inGuaranteedGroup', () => {
     expect(inGuaranteedGroup(pack({}))).toBe(false);
     // Inconsistent payload (psa10 without group) still fails the group gate.
     expect(inGuaranteedGroup(pack({ psa10: true }))).toBe(false);
+  });
+});
+
+// Three-way catalog section membership — "Raw Cards (Ungraded)" must now
+// claim only backend-derived all-raw pools; everything uncertain (MIX,
+// non-PSA-10 graded, null/older-backend) lands in the claim-free bucket.
+describe('catalogGroupOf', () => {
+  it('places an all-PSA-10 graded pool in graded', () => {
+    expect(catalogGroupOf(pack({ group: 'GRADED', psa10: true }))).toBe(
+      'graded',
+    );
+  });
+
+  it('places a backend-derived all-raw pool in raw', () => {
+    expect(catalogGroupOf(pack({ group: 'RAW' }))).toBe('raw');
+  });
+
+  it('places a mixed pool in the claim-free bucket', () => {
+    expect(catalogGroupOf(pack({ group: 'MIX' }))).toBe('more');
+  });
+
+  it('places a graded-but-not-PSA-10 pool in the claim-free bucket, not raw', () => {
+    // Headline case: an all-graded PSA-9-poisoned pool must NOT be
+    // mislabeled "Raw Cards (Ungraded)" — it is not raw at all.
+    expect(catalogGroupOf(pack({ group: 'GRADED', psa10: false }))).toBe(
+      'more',
+    );
+  });
+
+  it('places a null/absent group (older backend, unknown composition) in the claim-free bucket', () => {
+    expect(catalogGroupOf(pack({ group: null }))).toBe('more');
+    expect(catalogGroupOf(pack({}))).toBe('more');
+  });
+
+  it('follows group === RAW alone, even with an inconsistent psa10:true payload', () => {
+    // 'raw' is gated on the backend's own group derivation only — not a
+    // second guess against psa10. If group says RAW, that pool has no
+    // graded cards to be PSA-10 poisoned by in the first place.
+    expect(catalogGroupOf(pack({ group: 'RAW', psa10: true }))).toBe('raw');
   });
 });

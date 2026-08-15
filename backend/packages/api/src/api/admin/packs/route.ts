@@ -26,6 +26,40 @@ import {
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
+// ponytail: per-process 30s cache — the same shape as the storefront catalog's
+// (store/packs/route.ts). Unlike the public catalog this body is EV math over
+// every odds row and every card, and it re-ran on every admin pack-page load.
+// The body is pack-global (no requesting-admin data) and Medusa's admin auth
+// runs before this handler, so caching neither leaks across admins nor widens
+// who may read it. Every admin pack write busts it — see the invariant on
+// clearAdminPackListCache.
+const CACHE_TTL_MS = 30_000;
+const LIST_KEY = 'list';
+const listCache = new Map<string, { expires: number; body: unknown }>();
+
+/** Single-flight guard: concurrent misses share ONE compute, so a miss
+ *  stampede can't run the whole-catalog EV fan-out N times over. */
+let inFlight: Promise<unknown> | null = null;
+
+/** Bust seam for the pack write paths + a test seam (module state outlives a
+ *  test's fixtures — one jest process is one module instance).
+ *
+ *  INVARIANT: every admin PACK write that moves a number this list renders
+ *  calls this — create/update/delete (`[slug]`), reorder, membership
+ *  (`[slug]/members`) and odds (`[slug]/odds`). Adding a write route under
+ *  api/admin/packs/** that touches pool, weights, rank or pack fields means
+ *  adding a call here too. `[slug]/top-hits` deliberately does NOT: it writes
+ *  only `top_hit_order`, which is storefront display order and appears nowhere
+ *  in this body.
+ *
+ *  Not covered, and shared with the storefront caches rather than introduced
+ *  by this one: CARD-level edits (price/grader/grade via the admin card
+ *  routes) feed EV and composition but bust nothing, so those lag ≤30s. */
+export function clearAdminPackListCache(): void {
+  listCache.clear();
+  inFlight = null;
+}
+
 // GET /admin/packs — the pack selector list for the win-rate editor. An admin
 // route, so it is auto-protected by Medusa's admin auth (session/bearer); no
 // custom middleware needed. Returns every pack (active + draft) ordered by
@@ -34,6 +68,28 @@ export async function GET(
   req: MedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
+  const cached = listCache.get(LIST_KEY);
+  if (cached && cached.expires > Date.now()) {
+    res.json(cached.body);
+    return;
+  }
+
+  if (!inFlight) {
+    inFlight = computePackListBody(req)
+      .then((body) => {
+        listCache.set(LIST_KEY, { expires: Date.now() + CACHE_TTL_MS, body });
+        return body;
+      })
+      .finally(() => {
+        inFlight = null;
+      });
+  }
+  // A rejected compute rejects every waiter identically — same outcome as
+  // each having run it, minus the duplicate work.
+  res.json(await inFlight);
+}
+
+async function computePackListBody(req: MedusaRequest): Promise<unknown> {
   const packsModuleService: PacksModuleService =
     req.scope.resolve(PACKS_MODULE);
 
@@ -84,7 +140,7 @@ export async function GET(
     oddsByPack.set(o.pack_id, list);
   }
 
-  res.json({
+  return {
     packs: sorted.map((p) => {
       const price = toMoney(p.price);
       // One pass over the pack's pool feeds all three readouts: the per-set
@@ -173,7 +229,7 @@ export async function GET(
           pub_ev !== null && price > 0 ? round2((pub_ev / price) * 100) : null,
       };
     }),
-  });
+  };
 }
 
 // POST /admin/packs — create a pack listing. A new pack starts with an empty
@@ -203,5 +259,6 @@ export async function POST(
   // was never cached — the store detail route doesn't cache 404s — so there is
   // nothing to evict there.)
   clearPackListCache();
+  clearAdminPackListCache();
   res.status(201).json({ pack: result });
 }

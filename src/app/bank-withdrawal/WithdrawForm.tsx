@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { CheckCircle2, Clock, Landmark } from 'lucide-react';
 import { rm, rm0, timeUntil } from '@/lib/format';
@@ -74,6 +74,12 @@ export default function WithdrawForm({
     reference: string;
     status: 'pending' | 'held';
   } | null>(null);
+  // One idempotency key per withdrawal ATTEMPT: minted lazily on submit,
+  // REUSED on error retries (so a debited-but-response-lost attempt replays
+  // instead of double-debiting AND double-transferring — see the doc comment
+  // on startWithdrawal), and rotated only after a confirmed success so the
+  // next withdrawal starts a fresh attempt. Mirrors TopUpSheet's attemptKey.
+  const attemptKey = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -129,11 +135,19 @@ export default function WithdrawForm({
     }
     setSubmitting(true);
     try {
-      const res = await startWithdrawal({ amount, accountId });
+      attemptKey.current ??= crypto.randomUUID();
+      const res = await startWithdrawal({
+        amount,
+        accountId,
+        idempotencyKey: attemptKey.current,
+      });
       if (!res.ok) {
+        // Key stays armed on purpose — a retry of THIS attempt must replay,
+        // not double-debit and double-transfer.
         setError(res.error);
         return;
       }
+      attemptKey.current = null;
       // The payout already debited server-side; repaint the header chip now so
       // it is not stale. Adding a destination lives on /bank since Plan 088, so
       // there is no save-the-account side effect left to fire here.

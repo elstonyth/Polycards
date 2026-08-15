@@ -3,6 +3,7 @@ import { reorderPacksWorkflow } from '../../../../workflows/reorder-packs';
 import { coerceReorderBody } from '../validate';
 import { clearPackListCache } from '../../../store/packs/route';
 import { clearPackDetailCache } from '../../../store/packs/[slug]/route';
+import { clearAdminPackListCache } from '../route';
 
 // POST /admin/packs/reorder — persist the packs-list order as ONE batch of
 // rank writes (all-or-nothing). Replaces the old N-parallel full-payload
@@ -16,9 +17,10 @@ export async function POST(
 
   const { result } = await reorderPacksWorkflow(req.scope).run({ input });
 
-  // Rank drives the storefront list order — bust the 30s read caches so the
-  // new order shows immediately, same as every other admin pack write.
+  // Rank drives BOTH list orders — bust the 30s read caches so the new order
+  // shows immediately, same as every other admin pack write.
   clearPackListCache();
   clearPackDetailCache();
+  clearAdminPackListCache();
   res.json(result);
 }

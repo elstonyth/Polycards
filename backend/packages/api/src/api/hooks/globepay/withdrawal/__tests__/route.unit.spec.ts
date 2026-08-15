@@ -105,6 +105,9 @@ const pendingRow = {
   gateway_transaction_id: null,
   amount: 50,
   status: 'pending',
+  bank_code: 'MBB',
+  account_number: '9876543210',
+  account_holder_name: 'AHMAD BIN ALI',
 };
 
 describe('withdrawal callback — authentication', () => {
@@ -199,6 +202,23 @@ describe('withdrawal callback — status 5 (failed) refunds', () => {
       (c: [{ idempotencyReference: string }]) => c[0].idempotencyReference,
     );
     expect(new Set(anchors).size).toBe(1);
+  });
+
+  it('writes a redacted failure_reason from the signed Remark so the admin queue is never blank', async () => {
+    const h = harness(pendingRow);
+    await run(
+      h,
+      callback({
+        ...paid,
+        Status: 5,
+        Remark: 'insufficient balance at bank 1234567890123',
+      }),
+    );
+    const call = h.packs.updateGlobePayWithdrawals.mock.calls[0][0];
+    expect(call.data.failure_reason).toEqual(expect.any(String));
+    expect(call.data.failure_reason.length).toBeGreaterThan(0);
+    expect(call.data.failure_reason).toContain('insufficient balance');
+    expect(call.data.failure_reason).not.toContain('1234567890123');
   });
 
   it('does NOT ack when the refund throws, so the money comes back on retry', async () => {
