@@ -57,6 +57,15 @@ describe('getPublicProfile', () => {
     expect(res).toEqual({ status: 'notfound' });
   });
 
+  // A disabled account's handle is REAL, so folding 410 into notfound would
+  // hand it the mock persona — a fabricated collector published exactly where
+  // an operator asked for the profile to disappear.
+  it('returns { status: "unavailable" } on a 410 (disabled account → NOT mock)', async () => {
+    fetchMock.mockRejectedValue(new FetchError('gone', 'Gone', 410));
+    const res = await getPublicProfile('nobody-410');
+    expect(res).toEqual({ status: 'unavailable' });
+  });
+
   it('returns { status: "error" } on a non-404 throw (outage → NOT mock)', async () => {
     fetchMock.mockRejectedValue(new FetchError('boom', 'Server Error', 500));
     const res = await getPublicProfile('ace-500');

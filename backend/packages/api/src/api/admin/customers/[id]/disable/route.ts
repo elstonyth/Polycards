@@ -2,6 +2,7 @@ import type { AuthenticatedMedusaRequest, MedusaResponse } from '@medusajs/frame
 import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../../modules/packs';
 import type PacksModuleService from '../../../../../modules/packs/service';
+import { invalidateProfileForCustomer } from '../../../../../utils/profile-cache';
 
 type Body = { reason?: unknown };
 
@@ -29,5 +30,14 @@ export async function POST(
     disabled: true,
     reason: reason.trim(),
   });
+  // The public profile is hidden from this moment (GET /store/profiles/:handle
+  // 410s a disabled player), but a body cached BEFORE this call would keep
+  // serving them for the rest of its 30s TTL. Evicting here closes that window
+  // at the write instead of paying for a state read on every public cache hit —
+  // the same seam the showcase toggle uses. Best-effort by contract, so it is
+  // deliberately not guarded: a failed eviction costs ≤30s of staleness, never
+  // a failed disable. The BOARDS keep their 30s window (their cache is keyed by
+  // period, not by customer, so there is nothing customer-scoped to evict).
+  await invalidateProfileForCustomer(req.scope, customerId);
   res.json({ disabled: true });
 }
