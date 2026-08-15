@@ -56,9 +56,15 @@ describe('VAULT_RULES backend-message contract', () => {
     expect(map('Withdrawals must be between RM 30 and RM 1,000.')).toBe(
       'Withdrawals must be between RM 30 and RM 1,000.',
     );
-    expect(map('We could not start your withdrawal.')).toBe(
-      'We could not start your withdrawal. Please check the bank details and try again.',
-    );
+    const refused =
+      'Your withdrawal was refused by the payment provider and your balance has been returned. Check your bank details are correct — if they are, contact support rather than retrying.';
+    expect(
+      map('Your withdrawal was refused by the payment provider and…'),
+    ).toBe(refused);
+    // The pre-095 backend wording still maps, because a storefront deploy and
+    // a backend deploy are two different rollouts and the older message can
+    // arrive after this one ships.
+    expect(map('We could not start your withdrawal.')).toBe(refused);
   });
 
   it('points an unverified customer at the screen that clears the gate', () => {

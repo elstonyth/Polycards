@@ -10,7 +10,7 @@ import {
 } from './globepay-client';
 import { newMerchantTransactionId } from './globepay-deposit';
 import { withdrawalGateError } from './withdrawable';
-import { positiveIntFromEnv } from '../../api/utils/rate-limit';
+import { nonNegativeIntFromEnv } from '../../api/utils/rate-limit';
 import { notifyFeed } from './notify-feed';
 import { withdrawalFeedKey } from './feed-events';
 import { sendWithdrawalReceipt } from './withdrawal-receipt';
@@ -62,7 +62,16 @@ export const GLOBEPAY_WD_MAX_RM = 50000;
  *
  * Env override GLOBEPAY_WD_APPROVAL_ABOVE_RM, read PER CALL (the plan-066
  * convention, same as GLOBEPAY_WD_DAILY_MAX_RM in service.ts and the cooldown
- * in saved-accounts.ts) via positiveIntFromEnv — never latched at module load.
+ * in saved-accounts.ts) via nonNegativeIntFromEnv, deliberately NOT
+ * positiveIntFromEnv — never latched at module load.
+ *
+ * This is a money CEILING, not a rate limit, so 0 must be a real, meaningful
+ * value: it is the operator's stop lever during an incident ("hold every
+ * payout for a human"). positiveIntFromEnv rejects 0 and falls back to the
+ * default, which would route the stop lever straight back to the wide-open
+ * 1000 cap with only a log line noting it was ignored — see
+ * nonNegativeIntFromEnv's own doc block in rate-limit.ts for the general
+ * rule this follows.
  */
 export const GLOBEPAY_WD_APPROVAL_ABOVE_RM_DEFAULT = 1000;
 
@@ -143,6 +152,68 @@ export function withdrawalDetailsError(input: {
     return 'Enter the account holder name exactly as the bank has it.';
   }
   return null;
+}
+
+/**
+ * The one place a gateway refusal is turned into a `failure_reason` string
+ * (plan 095). Two callers build this — the store submit path below and the
+ * admin approve route — and they must not drift, because the redaction here is
+ * a control, not formatting.
+ *
+ * WHY REDACT AT ALL, when the log line beside each call site prints the same
+ * message unredacted and the row already stores the account number: because
+ * the two surfaces are not equivalent. The admin Withdrawals LIST masks
+ * `account_number` to `••••1234` and serves the full value only from the
+ * separate ./[id]/account route, so an unredacted provider message that echoed
+ * a submitted account number would put it back on the list page — undoing the
+ * mask through a column nobody thinks of as PII. Logs are a different audience
+ * with different access; the database column is the one that renders.
+ *
+ * `msg` is the gateway's own text and the only field we do not compose, so it
+ * is the only one that can carry anything we did not choose. Three rules run
+ * over it, and the caller must pass the destination so the last two can:
+ *
+ *   1. digit sequences of 6+, SEPARATOR-TOLERANT — `1234-5678-9012` and
+ *      `1234 5678 9012` are the same account number as `123456789012`, and a
+ *      contiguous-only rule (the first version of this) passed the formatted
+ *      forms straight through;
+ *   2. the exact account number we submitted, for the short accounts rule 1
+ *      cannot reach;
+ *   3. the holder name we submitted, which carries no digits at all and so was
+ *      wholly invisible to a digit rule — `AHMAD BIN ALI` is PII in a way
+ *      `PMT10021` is not.
+ *
+ * The words around the redactions — where the diagnosis lives — survive.
+ */
+export function formatGatewayFailureReason(input: {
+  prefix: string;
+  codes: readonly string[];
+  httpStatus: number;
+  bankCode: string;
+  message: string;
+  /** The destination we submitted, so its own value can be redacted out of
+   *  their echo of it. Both callers hold it at the point they build this. */
+  accountNumber: string;
+  accountHolderName: string;
+}): string {
+  const escape = (raw: string) => raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  let redacted = input.message
+    // A digit, then 5+ more digits with an optional single space or hyphen
+    // between each — covers grouped, hyphenated and plain account numbers.
+    .replace(/\d(?:[\s-]?\d){5,}/g, '[redacted]');
+  const account = input.accountNumber.trim();
+  if (account.length >= 4) {
+    redacted = redacted.replaceAll(account, '[redacted]');
+  }
+  const holder = input.accountHolderName.trim();
+  if (holder.length >= 3) {
+    redacted = redacted.replace(new RegExp(escape(holder), 'gi'), '[redacted]');
+  }
+  return (
+    `${input.prefix}: codes=${input.codes.join(',') || 'none'} ` +
+    `httpStatus=${input.httpStatus} bankCode=${input.bankCode} ` +
+    `msg=${redacted}`
+  ).slice(0, 400);
 }
 
 export type StartWithdrawalInput = {
@@ -358,7 +429,7 @@ export async function startGlobePayWithdrawal(
   // 1,000.00 exactly still auto-submits (Global Constraint 1).
   const held =
     Math.round(amount * 100) >
-    positiveIntFromEnv(
+    nonNegativeIntFromEnv(
       'GLOBEPAY_WD_APPROVAL_ABOVE_RM',
       GLOBEPAY_WD_APPROVAL_ABOVE_RM_DEFAULT,
     ) *
@@ -503,7 +574,31 @@ export async function startGlobePayWithdrawal(
           gatewayRef: merchantTransactionId,
         },
       });
-      await packs.updateGlobePayWithdrawals({ id: row.id, status: 'failed' });
+      // The reason rides along with the close, on the SAME write: a second
+      // round-trip could fail on its own and leave the row closed with nothing
+      // said. `failure_reason` is the durable half of the log line below —
+      // DigitalOcean run logs only cover the current deployment, so on
+      // 2026-08-11 the codes for eight failed production payouts were gone by
+      // the next morning while the rows themselves survived, saying only
+      // 'failed'. Their codes, the HTTP status and the destination BANK CODE,
+      // plus their message with digit runs redacted — see
+      // formatGatewayFailureReason for why this column redacts where the log
+      // beside it does not.
+      await packs.updateGlobePayWithdrawals({
+        id: row.id,
+        status: 'failed',
+        failure_reason: formatGatewayFailureReason({
+          prefix: 'submit refused',
+          codes: error.codes,
+          httpStatus: error.httpStatus,
+          bankCode,
+          message: error.message,
+          // The destination we actually submitted — the only values their
+          // message could echo back at us.
+          accountNumber,
+          accountHolderName,
+        }),
+      });
       // Log their reason before it is flattened into the customer-facing
       // message below — the sibling deposit branch has done this since
       // 2026-08-04 and this one never did, so a live payout could refuse with
@@ -551,9 +646,17 @@ export async function startGlobePayWithdrawal(
         // Swallowed deliberately: the logger is the thing that failed, so there
         // is nothing left to report it with.
       }
+      // Says who refused, and does not instruct the customer to fix something
+      // that may well be correct. The old wording ("check the bank details")
+      // was a guess dressed as a diagnosis: on 2026-08-11 two customers retried
+      // ten times against bank details that were fine — the payout channel was
+      // refusing every attempt — and nobody escalated, because the message read
+      // as their mistake. The refund is stated because it already happened
+      // above, and it is the fact that decides whether they need support at
+      // all.
       throw new MedusaError(
         MedusaError.Types.INVALID_DATA,
-        'We could not start your withdrawal. Please check the bank details and try again.',
+        'Your withdrawal was refused by the payment provider and your balance has been returned. Check your bank details are correct — if they are, contact support rather than retrying.',
       );
     }
     // AMBIGUOUS (timeout, reset, WAF page): the request may have been
@@ -667,6 +770,16 @@ export async function refundGlobePayWithdrawal(
   },
   gatewayStatus: number | null,
   fromStatus: 'pending' | 'held' | 'failed' = 'pending',
+  /**
+   * Why this payout is being closed, stored on the row (plan 095). REQUIRED,
+   * though the three callers know three different things: the admin deny route
+   * knows a human said no, the sweep knows what a requery answered, and the
+   * approve route knows the gateway's own codes. It was briefly optional, which
+   * bought an untested "omitted leaves the column alone" branch that no caller
+   * used — a closing writer with nothing to say about why is the state this
+   * whole change exists to abolish, so the type refuses it.
+   */
+  failureReason: string,
 ): ReturnType<PacksModuleService['withdrawCreditsWithLedger']> {
   const packs = scope.resolve<PacksModuleService>(PACKS_MODULE);
   const refund = await packs.withdrawCreditsWithLedger({
@@ -720,7 +833,13 @@ export async function refundGlobePayWithdrawal(
   });
   await packs.updateGlobePayWithdrawals({
     selector: { id: withdrawal.id, status: fromStatus },
-    data: { status: 'failed', gateway_status: gatewayStatus },
+    data: {
+      status: 'failed',
+      gateway_status: gatewayStatus,
+      ...(failureReason
+        ? { failure_reason: failureReason.slice(0, 400) }
+        : {}),
+    },
   });
   if (!refund.replayed) {
     try {

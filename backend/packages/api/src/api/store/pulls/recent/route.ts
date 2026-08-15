@@ -20,16 +20,24 @@ import {
 // display name (first_name only — the same field the leaderboard already
 // shows in full; never email, never customer_id), the won card, the source
 // pack's title/image, and when it was rolled. Each pull is joined to its Card
-// by handle; orphaned rows (card removed) are dropped.
+// by handle; orphaned rows (card removed) are dropped. `?pack_id=<Pack.slug>`
+// scopes the feed to a single pack — the pack pages show that pack's own
+// history, not the global one.
 const RECENT_LIMIT = 12;
+// Over-fetch, because the disabled filter below runs AFTER the query — same
+// reason (and same 2x bound) as the leaderboard's FETCH_N: a disabled puller
+// among the latest 12 must not shorten the feed to 11. A window where more than
+// half the pulls are disabled players renders short, which is the honest outcome.
+const FETCH_LIMIT = RECENT_LIMIT * 2;
 
 // ponytail: per-process 5s cache — mirrors the leaderboard's boardCache. This
 // feed is polled every 4s per open tab (use-recent-pulls); a 5s TTL collapses
 // ~6 queries/poll to one compute per 5s window PER PROCESS, regardless of how
-// many tabs poll. The feed has no per-request inputs, so a single key suffices.
+// many tabs poll. Keyed by the ?pack_id filter (absent = the global feed) —
+// a single key would serve one pack's rows to every other pack for the window.
 // A new pull surfaces ≤5s later than before — invisible on a "recent" feed.
 const CACHE_TTL_MS = 5_000;
-const RECENT_KEY = 'recent';
+const ALL_PACKS_KEY = 'recent';
 const recentCache = new Map<string, { expires: number; body: unknown }>();
 
 /** Test seam: module state outlives a test's fixtures — one jest process is one
@@ -48,7 +56,15 @@ export async function GET(
   req: MedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
-  const cached = recentCache.get(RECENT_KEY);
+  // ?pack_id=<Pack.slug> scopes the feed to one pack (the /slots/[slug] pages);
+  // absent = the global feed (home). An unknown slug yields an empty feed.
+  const packId =
+    typeof req.query.pack_id === 'string' && req.query.pack_id.trim()
+      ? req.query.pack_id.trim()
+      : null;
+  const cacheKey = packId ?? ALL_PACKS_KEY;
+
+  const cached = recentCache.get(cacheKey);
   if (cached && cached.expires > Date.now()) {
     res.json(cached.body);
     return;
@@ -57,12 +73,34 @@ export async function GET(
   const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
   const fxRate = await resolveFxRate(packs);
 
-  const pulls = await packs.listPulls(
-    // ponytail: $ne filter mirrors the leaderboard SQL exclusion — reward prizes
-    // are private vault items, not public feed entries.
-    { source: { $ne: 'reward' } } as Parameters<typeof packs.listPulls>[0],
-    { order: { rolled_at: 'DESC' }, take: RECENT_LIMIT },
+  const fetched = await packs.listPulls(
+    // ponytail: $nin filter mirrors the leaderboard SQL exclusion — reward
+    // prizes are private vault items, and free welcome pulls are a signup gift
+    // rather than a played pack; neither is a public feed entry.
+    {
+      source: { $nin: ['reward', 'free'] },
+      // Pull.pack_id IS Pack.slug (see the model), so the query param is the slug.
+      ...(packId ? { pack_id: packId } : {}),
+    } as Parameters<typeof packs.listPulls>[0],
+    { order: { rolled_at: 'DESC' }, take: FETCH_LIMIT },
   );
+
+  // An administratively disabled player is hidden from every public surface —
+  // the same rule (and the same helper) the leaderboard applies, so a disable
+  // taken in the dashboard removes the player here too. DROPPED, not renamed to
+  // "Anonymous": that is what the boards chose, and an anonymised row would
+  // still publish the pull. The filter runs BEFORE the response is cached, so a
+  // disable can never be served for the rest of a cache window. Pulls with no
+  // customer_id are kept — there is nobody to hide.
+  const pullerIds = [
+    ...new Set(
+      fetched.map((p) => p.customer_id).filter((id): id is string => !!id),
+    ),
+  ];
+  const disabled = await packs.disabledCustomerIds(pullerIds);
+  const pulls = fetched
+    .filter((p) => !p.customer_id || !disabled.has(p.customer_id))
+    .slice(0, RECENT_LIMIT);
 
   const handles = [...new Set(pulls.map((p) => p.card_id))];
   const cards = handles.length
@@ -143,6 +181,12 @@ export async function GET(
     .filter((e): e is NonNullable<typeof e> => e !== null);
 
   const body = { pulls: recent };
-  recentCache.set(RECENT_KEY, { expires: Date.now() + CACHE_TTL_MS, body });
+  // ponytail: pack_id is caller-supplied, so the key space is unbounded (the
+  // storefront proxy forwards any ?pack=) — cap the map instead of letting
+  // unknown slugs accrete entries. The real catalog is ~10 packs; a flush costs
+  // one recompute per live pack. Not "don't cache empties": a legitimately
+  // quiet pack returns [] too, and that is the case the TTL exists to protect.
+  if (recentCache.size > 64) recentCache.clear();
+  recentCache.set(cacheKey, { expires: Date.now() + CACHE_TTL_MS, body });
   res.json(body);
 }

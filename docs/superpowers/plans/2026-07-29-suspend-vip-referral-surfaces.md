@@ -14,7 +14,7 @@
 
 - **Storefront only.** Nothing under `backend/` changes in this plan.
 - **VIP level accrual stays visible:** `/me` keeps the LV number, progress bar, and threshold labels (spec §Decisions).
-- **Keep as unreferenced orphans** (do NOT delete): `src/lib/actions/daily.ts`, `src/lib/actions/referral.ts`, `src/lib/referral-cookie.ts`, `src/components/rewards/PrizeReveal.tsx`, `src/app/(account)/vip/vip-benefits.ts` + its `__tests__/vip-benefits.test.ts`.
+- **Keep as unreferenced orphans** (do NOT delete): `src/lib/actions/daily.ts`, `src/lib/actions/referral.ts`, `src/lib/referral-cookie.ts`, `src/components/rewards/PrizeReveal.tsx`, `src/app/(account)/vip/vip-benefits.ts` + its `__tests__/vip-benefits.test.ts`. **Partially superseded by #427** (2026-08-12): `referral.ts` and `referral-cookie.ts` were deleted as a security fix (unbounded recursive-CTE DoS in `linkSponsor`) — see ADR 0004's 2026-08-15 amendment.
 - **Working tree hygiene:** the repo has unrelated uncommitted changes (`SiteFooter.tsx`, `about/page.tsx`, `CookieConsent.tsx`, `backend/**`, `plans/README.md`). Stage files **explicitly by path** in every commit — never `git add -A` / `git add .`.
 - **Worktree:** execute this plan in a worktree per the superpowers `using-git-worktrees` skill (consent pre-granted). Run `npm install` in a fresh worktree. Verify on a self-built port (`:4100`), not the main tree's `:4000` (see memory: worktree prod-serve staleness).
 - The Stop hook type-checks storefront + backend; a leftover import of a deleted file fails the build — that is the primary regression net.

@@ -8,6 +8,14 @@
     "title": "Gacha Packs",
     "subtitle": "Create and manage gacha packs — listing details, status, and prize pools. Open a pack to edit its prize pool and win rates.",
     "new": "New pack",
+    "tabs": {
+      "packs": "Packs",
+      "free": "Free pack"
+    },
+    "free": {
+      "create": "Create free pack",
+      "hint": "One active free pack at a time. Price is fixed at RM 0 — new accounts get one open; the won card stays locked until their first paid open."
+    },
     "list": {
       "pack": "Pack",
       "category": "Category",
@@ -444,6 +452,7 @@
       "failed": "Refunded"
     },
     "statusStale": "Overdue",
+    "noVerify": "No payout verification outcome recorded — either their verification never reached us, it was rejected before we could match it to this row, or this payout predates outcome recording.",
     "staleWarning": "{{n}} row(s) on this page are past the reconcile window — the customer is debited with no payout confirmed. Check the withdrawal in the GlobePay back office before touching anything by hand.",
     "empty": "No withdrawals in this view.",
     "emptyView": "No {{view}} withdrawals right now. Other statuses may still have rows.",

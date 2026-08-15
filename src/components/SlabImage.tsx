@@ -68,6 +68,67 @@ function frameSrc(rarity: string): string {
 }
 
 /**
+ * RAW-card geometry — measured so an ungraded card renders at the EXACT
+ * card-art size a graded tile shows, instead of filling the box (which made
+ * raw cards read ~30% bigger than their slabbed neighbours):
+ *
+ *   slab window width = 1 − 0.1094 − 0.1087 (bake-slab SLAB_WINDOW), minus
+ *   composeSlab's px-rounded recess (8px each side at 1600) ⇒ card = 1235px
+ *   = 0.7719 of slab width; a FRAMED tile then insets the slab 5% ⇒ card =
+ *   0.7719 × 0.9 of the box. On the 1600×2700 box: 1112×1557, corner r 53.
+ *
+ * The tier band (public/images/raw-frames/<tier>.webp — the "glass border"
+ * pick, hue-tinted per rarity like the slab band; built by
+ * scripts/compose-rawframe-tiers.mjs) pads the card by 64px, outer radius
+ * 117, and the asset is cropped to that band box — placed here by inset.
+ */
+const RAW_BOX_W = 1600;
+const RAW_BOX_H = 2700;
+const RAW_CARD_W = 1112;
+const RAW_CARD_H = 1557;
+const RAW_PAD = 64; // band thickness around the card
+const RAW_OUTER_R = 117; // band outer corner radius (card r 53 + pad)
+/**
+ * Vertical anchor: the graded card art is NOT vertically centered in the slab
+ * (the label bar sits on top) — composeSlab top-aligns the card at
+ * round(2700 × SLAB_WINDOW.top) + 8px recess, putting a 5:7 card's CENTER at
+ * (739 + 1729/2) / 2700 ≈ 59.39% of the composite height. Raw cards anchor to
+ * the SAME center, scaled through the frame inset where applicable, so mixed
+ * graded/raw rows are aligned — not just size-matched.
+ */
+const ART_CENTER_Y = 0.5939;
+/** 3-value CSS inset (top, left/right, bottom) for a w×h box whose vertical
+ *  CENTER sits at `centerY` (fraction of box height), horizontally centered.
+ *  Top/bottom % resolve against height, left/right % against width. */
+const rawInset = (w: number, h: number, centerY: number): string => {
+  const top = centerY * RAW_BOX_H - h / 2;
+  const pctH = (n: number): string => `${((n / RAW_BOX_H) * 100).toFixed(4)}%`;
+  const pctW = (n: number): string => `${((n / RAW_BOX_W) * 100).toFixed(4)}%`;
+  return `${pctH(top)} ${pctW((RAW_BOX_W - w) / 2)} ${pctH(RAW_BOX_H - top - h)}`;
+};
+/** FRAMED raw card center — the graded center seen through the 5% slab inset. */
+const RAW_FRAMED_CENTER_Y = 0.05 + 0.9 * ART_CENTER_Y;
+const RAW_CARD_INSET = rawInset(RAW_CARD_W, RAW_CARD_H, RAW_FRAMED_CENTER_Y);
+const RAW_BAND_INSET = rawInset(
+  RAW_CARD_W + 2 * RAW_PAD,
+  RAW_CARD_H + 2 * RAW_PAD,
+  RAW_FRAMED_CENTER_Y,
+);
+const RAW_BAND_RADIUS = `${((RAW_OUTER_R / (RAW_CARD_W + 2 * RAW_PAD)) * 100).toFixed(2)}% / ${((RAW_OUTER_R / (RAW_CARD_H + 2 * RAW_PAD)) * 100).toFixed(2)}%`;
+/** UNFRAMED raw card — the card art inside an UNframed slab: 0.7719 of the
+ *  box width (px-rounded bake: 1235/1600), anchored to the same art center. */
+const RAW_BARE_W = 0.7719;
+const RAW_BARE_INSET = rawInset(
+  RAW_BARE_W * RAW_BOX_W,
+  (RAW_BARE_W * RAW_BOX_W) / CARD_ASPECT_RAW,
+  ART_CENTER_Y,
+);
+function rawFrameSrc(rarity: string): string {
+  const key = rarity.toLowerCase();
+  return `/images/raw-frames/${FRAME_TIERS.has(key) ? key : 'common'}.webp`;
+}
+
+/**
  * Cosmetic frames that are NOT rarity tiers — chosen by the surface, not by the
  * card. `prism` is cut from the same dark-glass master as the six tiers but
  * spectrally tinted (see the prism recipe); it marks Weekly Pulled Value
@@ -93,26 +154,39 @@ export const VARIANT_RGB: Record<FrameVariant, string> = {
  * renders 80px slabs — a full 44px halo there is wider than the slab and
  * bleeds into its neighbours). Default 1 = the tuned full-size halo.
  */
+const glowShadow = (rgb: string, scale: number): string =>
+  `0 0 ${44 * scale}px ${-2 * scale}px rgba(${rgb},0.8), 0 0 ${90 * scale}px ${-20 * scale}px rgba(${rgb},0.6)`;
+
 function glowStyle(rgb: string, scale: number): React.CSSProperties {
   return {
     inset: FRAME_INSET,
     borderRadius: FRAME_RADIUS,
-    boxShadow: `0 0 ${44 * scale}px ${-2 * scale}px rgba(${rgb},0.8), 0 0 ${90 * scale}px ${-20 * scale}px rgba(${rgb},0.6)`,
+    boxShadow: glowShadow(rgb, scale),
+  };
+}
+
+/** Same halo, hugging the raw-card band box instead of the slab frame. */
+function rawGlowStyle(rgb: string, scale: number): React.CSSProperties {
+  return {
+    inset: RAW_BAND_INSET,
+    borderRadius: RAW_BAND_RADIUS,
+    boxShadow: glowShadow(rgb, scale),
   };
 }
 
 /**
  * One card image. Graded cards pass `slabSrc` — the backend-baked
  * frame+photo composite — rendered as a single <Image>. Raw cards (and
- * graded cards whose bake failed) render the bare photo, letterboxed inside
- * the SAME SLAB_ASPECT box so mixed grids stay row-uniform and call sites
- * never branch on aspect. The corner rounding matches what the old runtime
- * clip applied (4.8% / 3.4%).
+ * graded cards whose bake failed) render the bare photo inside the SAME
+ * SLAB_ASPECT box at the measured graded card-art size (RAW_* geometry
+ * above), so mixed grids stay row-uniform, cards read the same physical
+ * size slabbed or not, and call sites never branch on aspect. The corner
+ * rounding matches what the old runtime clip applied (4.8% / 3.4%).
  *
- * Pass `rarity` (the admin-set gacha tier) to surround the slab with the
- * tier-colored glass frame (rarity.ts colors: Immortal orange, Legendary
- * pink, …). Graded (slabSrc) renders only — it's the slab's outer layer,
- * not a raw-card treatment.
+ * Pass `rarity` (the admin-set gacha tier) to add the tier-colored glass
+ * frame + halo (rarity.ts colors: Immortal orange, Legendary pink, …).
+ * Graded gets the slab band (public/images/slab-frames); raw gets the
+ * card-hugging glass border (public/images/raw-frames).
  */
 export function SlabImage({
   src,
@@ -200,13 +274,52 @@ export function SlabImage({
             className="object-contain"
           />
         )
+      ) : framed ? (
+        // RAW + tier/variant frame — card at the measured graded card-art
+        // size, wrapped by the raw-card glass band + the same rarity halo.
+        <>
+          <span
+            aria-hidden
+            className="pointer-events-none absolute"
+            style={rawGlowStyle(glowRgb, glowScale)}
+          />
+          <span
+            aria-hidden
+            className="pointer-events-none absolute"
+            style={{ inset: RAW_BAND_INSET }}
+          >
+            <Image
+              src={
+                frameVariant
+                  ? `/images/raw-frames/${frameVariant}.webp`
+                  : rawFrameSrc(rarity ?? '')
+              }
+              alt=""
+              fill
+              sizes={sizes}
+              priority={priority}
+              className="object-fill"
+            />
+          </span>
+          <span
+            className="absolute overflow-hidden"
+            style={{ inset: RAW_CARD_INSET, borderRadius: '4.8% / 3.4%' }}
+          >
+            <Image
+              src={src}
+              alt={alt}
+              fill
+              sizes={sizes}
+              priority={priority}
+              className="object-cover"
+            />
+          </span>
+        </>
       ) : (
+        // RAW, unframed — bare card at the unframed slab's card-art size.
         <span
-          className="absolute left-0 right-0 top-1/2 -translate-y-1/2 overflow-hidden"
-          style={{
-            aspectRatio: String(CARD_ASPECT_RAW),
-            borderRadius: '4.8% / 3.4%',
-          }}
+          className="absolute overflow-hidden"
+          style={{ inset: RAW_BARE_INSET, borderRadius: '4.8% / 3.4%' }}
         >
           <Image
             src={src}

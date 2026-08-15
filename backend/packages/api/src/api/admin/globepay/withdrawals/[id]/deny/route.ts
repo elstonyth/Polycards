@@ -126,6 +126,9 @@ export async function POST(
     row,
     row.gateway_status ?? null,
     'failed',
+    // Names the admin, so a denied row is never mistaken later for one the
+    // gateway refused (plan 095).
+    `denied by admin ${adminId}`,
   );
 
   res.setHeader('Cache-Control', 'no-store');

@@ -36,7 +36,9 @@
     "format:check": "prettier --check src scripts",
     "test": "vitest run",
     "qa:csp": "node scripts/qa-csp.mjs",
-    "test:a11y": "node scripts/qa-a11y.mjs"
+    "test:a11y": "node scripts/qa-a11y.mjs",
+    "qa:free-pack": "node scripts/qa-free-pack.mjs",
+    "qa:catalog-groups": "node scripts/qa-catalog-groups.mjs"
   },
   "dependencies": {
     "@medusajs/js-sdk": "^2.18.0",

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Eye, Search, Star } from 'lucide-react';
+import { Eye, Lock, Search, Star } from 'lucide-react';
 import { SlabImage } from '@/components/SlabImage';
 import { rm, rm0 } from '@/lib/format';
 import {
@@ -15,7 +15,10 @@ import {
 import { type AddressView } from '@/lib/actions/delivery';
 import RequestDeliveryModal from '@/components/account/RequestDeliveryModal';
 import { SuccessToast } from '@/components/ui/SuccessToast';
-import { FLAT_BUYBACK_PERCENT } from '@/lib/packs-data';
+import {
+  FLAT_BUYBACK_PERCENT,
+  FREE_PULL_LOCKED_MESSAGE,
+} from '@/lib/packs-data';
 import SellConfirmModal from '@/components/SellConfirmModal';
 import { useTopUp } from '@/components/app-shell/TopUpProvider';
 import { useVaultDot } from '@/components/app-shell/VaultDotProvider';
@@ -82,14 +85,24 @@ export default function VaultClient({
   const [confirmBulkSell, setConfirmBulkSell] = useState(false);
   const [bulkSelling, setBulkSelling] = useState(false);
 
+  // Locked cards (the free welcome pull before the first PAID open) can be
+  // neither sold nor delivered — the backend refuses both — so they never enter
+  // a selection. Keyed on `locked` ONLY: a weekly-challenge prize is
+  // source='reward' with a live, sellable quote and must stay selectable.
   const toggleSelect = (pullId: string) =>
     setSelected((prev) => {
+      if (items.some((i) => i.pullId === pullId && i.locked)) return prev;
       const next = new Set(prev);
       if (next.has(pullId)) next.delete(pullId);
       else next.add(pullId);
       return next;
     });
-  const selectedItems = items.filter((i) => selected.has(i.pullId));
+  // Which locked cards have had their explainer tapped away. Dismissing only
+  // uncovers the art — the row stays unselectable, and tapping it re-explains.
+  const [lockDismissed, setLockDismissed] = useState<Set<string>>(new Set());
+  const selectedItems = items.filter(
+    (i) => selected.has(i.pullId) && !i.locked,
+  );
   // Money display must use the MYR price (marketPriceMyr) — card.marketValue
   // is the raw USD FMV from PriceCharting and must never render behind "RM".
   const selectedFmv = selectedItems.reduce(
@@ -111,7 +124,12 @@ export default function VaultClient({
   // FX firmness is global (one rate), so any non-firm quote means all quotes
   // are on the display fallback and the backend would refuse every sell —
   // gate the sell CTAs and say why instead of letting the 400 explain it.
-  const quotesFirm = items.every((i) => i.buyback.firm);
+  // LOCKED rows are excluded: they carry no sellable quote at all, so folding
+  // them in would let the free welcome card's unlock masquerade as a global
+  // pricing outage and block selling everything else. (All-locked ⇒ `every` on
+  // an empty list ⇒ true ⇒ no spurious banner, which is right: nothing is
+  // mispriced, there is just nothing to sell yet.)
+  const quotesFirm = items.every((i) => i.locked || i.buyback.firm);
 
   const vaultValue = items.reduce(
     (sum, i) => sum + (i.card.marketPriceMyr ?? 0),
@@ -160,7 +178,10 @@ export default function VaultClient({
     if (latestAt) markSeen();
   }, [latestAt, markSeen]);
 
-  const visibleIds = visible.map((i) => i.pullId);
+  // Select All operates on the SELECTABLE visible set — a locked row filtered
+  // out here as well as in `toggleSelect`, or Select All would re-add it and
+  // re-arm the sell CTA behind the per-row guard.
+  const visibleIds = visible.filter((i) => !i.locked).map((i) => i.pullId);
   const allVisibleSelected =
     visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
 
@@ -431,6 +452,10 @@ export default function VaultClient({
           {shown.map((item) => {
             const isSelected = selected.has(item.pullId);
             const glow = rarityRgb(item.card.rarity);
+            // The free welcome card until the first PAID open. `locked` is the
+            // ONLY signal — never `source`, which a sellable challenge prize
+            // also carries ('reward').
+            const showLock = item.locked && !lockDismissed.has(item.pullId);
             const art = (
               // Pass `rarity` so the slab renders its tier frame + halo, matching
               // the pool and card-detail (operator 2026-07-18 — the vault was
@@ -461,28 +486,84 @@ export default function VaultClient({
                 <div className="relative">
                   <button
                     type="button"
-                    onClick={() => toggleSelect(item.pullId)}
-                    aria-pressed={isSelected}
+                    // A locked card can be neither sold nor delivered, so it is
+                    // never selectable — tapping it re-shows the explainer
+                    // instead of silently doing nothing.
+                    onClick={() =>
+                      item.locked
+                        ? setLockDismissed((prev) => {
+                            const next = new Set(prev);
+                            next.delete(item.pullId);
+                            return next;
+                          })
+                        : toggleSelect(item.pullId)
+                    }
+                    aria-disabled={item.locked || undefined}
+                    aria-pressed={item.locked ? undefined : isSelected}
                     aria-label={
-                      isSelected
-                        ? `Deselect ${item.card.name}`
-                        : `Select ${item.card.name}`
+                      item.locked
+                        ? `${item.card.name} — shipping & selling locked`
+                        : isSelected
+                          ? `Deselect ${item.card.name}`
+                          : `Select ${item.card.name}`
                     }
                     className="relative block w-full focus:outline-none focus-visible:ring-2 focus-visible:ring-white"
                   >
                     {art}
-                    <span
-                      className={cn(
-                        'absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full border text-[13px] font-bold',
-                        isSelected
-                          ? 'border-white bg-neutral-50 text-neutral-950'
-                          : 'border-white/40 bg-black/50 text-transparent',
-                      )}
-                      aria-hidden
-                    >
-                      ✓
-                    </span>
+                    {!item.locked && (
+                      <span
+                        className={cn(
+                          'absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full border text-[13px] font-bold',
+                          isSelected
+                            ? 'border-white bg-neutral-50 text-neutral-950'
+                            : 'border-white/40 bg-black/50 text-transparent',
+                        )}
+                        aria-hidden
+                      >
+                        ✓
+                      </span>
+                    )}
+                    {/* Dismissed explainer leaves a permanent lock chip — the
+                        card must never look ordinary while it isn't. */}
+                    {item.locked && !showLock && (
+                      <span
+                        aria-hidden
+                        className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-neutral-950/80 text-white/70"
+                      >
+                        <Lock className="h-3 w-3" />
+                      </span>
+                    )}
                   </button>
+
+                  {/* Locked explainer — covers the art until tapped away, so a
+                      customer meets the rule before they go hunting for a sell
+                      button that was never going to work. Copy is verbatim the
+                      backend's refusal message. */}
+                  {showLock && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setLockDismissed((prev) =>
+                          new Set(prev).add(item.pullId),
+                        )
+                      }
+                      className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-1 rounded-xl bg-neutral-900/85 px-1.5 text-center backdrop-blur-[2px]"
+                    >
+                      <Lock
+                        className="h-4 w-4 text-white/80 sm:h-5 sm:w-5"
+                        aria-hidden
+                      />
+                      <span className="text-[10px] font-bold leading-tight text-white sm:text-[11px]">
+                        Shipping &amp; Selling Locked
+                      </span>
+                      <span className="text-[9px] leading-tight text-white/70 sm:text-[10px]">
+                        {FREE_PULL_LOCKED_MESSAGE}
+                      </span>
+                      <span className="mt-0.5 text-[9px] font-semibold uppercase tracking-wide text-white/45">
+                        Tap to dismiss
+                      </span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => handleToggleShowcase(item)}

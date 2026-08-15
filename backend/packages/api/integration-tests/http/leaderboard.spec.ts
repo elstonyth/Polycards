@@ -179,6 +179,33 @@ medusaIntegrationTestRunner({
         });
       });
 
+      // An admin disable must take the player off the PUBLIC board, on both
+      // periods. Their pull/spend rows are untouched (a disable is reversible,
+      // so nothing is confiscated) — this is a display filter, and the
+      // survivors are re-numbered 1..N because a gap in the ranks would itself
+      // publish that someone was removed.
+      it('hides an administratively disabled player and re-numbers the ranks', async () => {
+        const packs =
+          getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        await packs.setAccountDisabled({
+          customerId: 'cus_lb_1',
+          adminId: 'user_lb_admin',
+          disabled: true,
+          reason: 'test disable',
+        });
+
+        const weekly = await board();
+        expect(weekly.map((e) => e.seed)).toEqual([
+          seedOf('cus_lb_3'),
+          seedOf('cus_lb_2'),
+        ]);
+        expect(weekly.map((e) => e.rank)).toEqual([1, 2]);
+
+        const alltime = await board('alltime');
+        expect(alltime.map((e) => e.seed)).not.toContain(seedOf('cus_lb_1'));
+        expect(alltime.map((e) => e.rank)).toEqual([1, 2, 3]);
+      });
+
       it('all-time includes the old spend and ranks it #1', async () => {
         const entries = await board('alltime');
         expect(entries).toHaveLength(4);

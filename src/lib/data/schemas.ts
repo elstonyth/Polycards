@@ -74,6 +74,14 @@ function droppableRecord<T>(item: z.ZodType<T>) {
 export const PackRowSchema = z.looseObject({
   category: z.string(),
   price: finite,
+  /** §2.4.8 pool composition, backend-derived (GRADED = every card graded,
+   *  RAW = none, MIX = both, null = empty pool). Absent on an older backend;
+   *  a malformed value degrades to null rather than dropping the pack row. */
+  group: z.enum(['GRADED', 'RAW', 'MIX']).nullable().catch(null).optional(),
+  /** Strict guarantee gate: true iff EVERY pooled card is a PSA 10 (stricter
+   *  than group === 'GRADED' — a PSA 9 or a BGS slab is graded but not psa10).
+   *  Malformed/absent degrades to false: never overclaim the guarantee. */
+  psa10: z.boolean().catch(false).optional(),
 });
 
 /** GET /store/packs/:slug odds row — handle + known rarity + finite value.
@@ -225,6 +233,16 @@ export const VaultItemSchema = z.looseObject({
   pull_id: z.string(),
   showcased: z.boolean().optional(),
   card: z.looseObject({ name: z.string() }),
+  // How the pull was acquired, and whether it is sell/deliver locked (the free
+  // welcome pull before the account's first PAID open). `.catch` rather than
+  // required: a cached/older payload must keep parsing, because parseList DROPS
+  // a failing row — which would delete the customer's card from their own
+  // vault. `locked` defaults FALSE for the same reason (a stuck lock is worse
+  // than a late one; the backend refuses the sell either way).
+  // ⚠ Lock UI keys off `locked` ONLY, never `source`: a weekly-challenge prize
+  // is source='reward' with a live, sellable quote.
+  source: z.enum(['pack', 'reward', 'free']).catch('pack'),
+  locked: z.boolean().catch(false),
   // `firm` is false when the backend priced the quote on its FX display
   // fallback — selling would be refused, so the UI must not offer it as firm.
   // Optional: an older backend omits it (treated as firm).
@@ -233,6 +251,20 @@ export const VaultItemSchema = z.looseObject({
     percent: finite,
     firm: z.boolean().optional(),
   }),
+});
+
+// --- data/free-pack.ts ------------------------------------------------------
+
+/** GET /store/free-pack — the one-time welcome-pack claim badge's whole answer.
+ *  `image` rides along on the loose object but is unread: the badge art is a
+ *  fixed local asset, not the pack shot. Anything unparsable degrades to "not
+ *  eligible" in the getter — the badge is an enhancement, never an error
+ *  surface. */
+export const FreePackSchema = z.looseObject({
+  eligible: z.boolean(),
+  slug: z.string().nullable(),
+  /** Anonymous answers only: "an active free pack exists" (the signup hook). */
+  promo: z.boolean().optional(),
 });
 
 /** POST /store/vault/:id/showcase response — pull_id + final showcased state. */

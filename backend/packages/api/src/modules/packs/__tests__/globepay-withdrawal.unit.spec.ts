@@ -1,5 +1,6 @@
 import { MedusaError } from '@medusajs/framework/utils';
 import {
+  GLOBEPAY_WD_MIN_RM,
   globepayWithdrawalsEnabled,
   startGlobePayWithdrawal,
   withdrawalDetailsError,
@@ -334,9 +335,14 @@ describe('startGlobePayWithdrawal — money ordering', () => {
   // Test-plan case 3.
   it('refuses an account still inside the cooling-off window', async () => {
     const h = harness([
-      { ...SAVED_ACCOUNT, savedAt: new Date(Date.now() - 60_000).toISOString() },
+      {
+        ...SAVED_ACCOUNT,
+        savedAt: new Date(Date.now() - 60_000).toISOString(),
+      },
     ]);
-    await expect(start(h)).rejects.toThrow(/not available for withdrawals yet/i);
+    await expect(start(h)).rejects.toThrow(
+      /not available for withdrawals yet/i,
+    );
     expect(h.packs.createGlobePayWithdrawals).not.toHaveBeenCalled();
     expect(h.packs.withdrawForCashout.mock.calls.length).toBe(0);
   });
@@ -379,7 +385,7 @@ describe('startGlobePayWithdrawal — money ordering', () => {
     submitMock.mockRejectedValue(
       new GlobePayError('nope', ['PMT10013'], 200, true),
     );
-    await expect(start(h)).rejects.toThrow(/could not start your withdrawal/i);
+    await expect(start(h)).rejects.toThrow(/refused by the payment provider/i);
 
     // The debit went through withdrawForCashout, so the ONLY
     // withdrawCreditsWithLedger call left on this path is the refund: positive
@@ -393,10 +399,21 @@ describe('startGlobePayWithdrawal — money ordering', () => {
     expect(
       h.packs.withdrawCreditsWithLedger.mock.calls[0][0].idempotencyReference,
     ).toMatch(/^wd-refund:/);
+    // The close carries the reason with it, on ONE write (plan 095): the log
+    // line below says the same thing but does not survive the next deployment,
+    // and on 2026-08-11 that is exactly how eight production refusals ended up
+    // unexplainable the following morning.
     expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith({
       id: 'gpw_1',
       status: 'failed',
+      failure_reason: expect.stringContaining('PMT10013'),
     });
+    const [{ failure_reason: reason }] =
+      h.packs.updateGlobePayWithdrawals.mock.calls[0];
+    expect(reason).toMatch(/httpStatus=200/);
+    expect(reason).toMatch(/bankCode=MBB/);
+    // Same PII rule as the log: never the account number or the holder name.
+    expect(reason).not.toMatch(/1234567890|AHMAD BIN ALI/i);
 
     // Their code is the ONLY record of why a payout was refused: the row keeps
     // no code, and a definite refusal leaves nothing at the gateway to requery.
@@ -417,6 +434,59 @@ describe('startGlobePayWithdrawal — money ordering', () => {
     expect(logged).not.toMatch(/1234567890|AHMAD BIN ALI/i);
   });
 
+  it('keeps a submitted account number out of the persisted reason', async () => {
+    // `msg` is the gateway's own text — the one field of the reason we do not
+    // compose — so it is the only one that can echo something we sent them.
+    // The row's `account_number` is MASKED on the admin list (`••••1234`) and
+    // revealed only one row at a time by ./[id]/account, so an unredacted
+    // message would put the full number back on the list page through a column
+    // nobody reads as PII. The log beside this write is a different audience
+    // and stays unredacted, deliberately.
+    const h = harness();
+    submitMock.mockRejectedValue(
+      new GlobePayError(
+        'invalid beneficiary account 1234567890 for AHMAD BIN ALI',
+        ['PMT10021'],
+        200,
+        true,
+      ),
+    );
+    await expect(start(h)).rejects.toThrow(/refused by the payment provider/i);
+
+    const [{ failure_reason: reason }] =
+      h.packs.updateGlobePayWithdrawals.mock.calls[0];
+    expect(reason).not.toMatch(/1234567890/);
+    // The holder name carries no digits, so a digit-only rule left it whole.
+    expect(reason).not.toMatch(/AHMAD BIN ALI/i);
+    expect(reason).toMatch(/\[redacted\]/);
+    // The diagnosis around the digits survives — redaction that ate the
+    // sentence would defeat the column.
+    expect(reason).toMatch(/invalid beneficiary account/);
+    expect(reason).toMatch(/PMT10021/);
+  });
+
+  it('redacts an account number their message reformatted with separators', async () => {
+    // `1234-5678-9012` is the same account as `123456789012`. The first
+    // version of this redaction matched contiguous digits only, so a gateway
+    // that pretty-printed the number back at us defeated it entirely.
+    const h = harness();
+    submitMock.mockRejectedValue(
+      new GlobePayError(
+        'beneficiary 1234-5678-9012 rejected by receiving bank',
+        ['PMT10021'],
+        200,
+        true,
+      ),
+    );
+    await expect(start(h)).rejects.toThrow(/refused by the payment provider/i);
+
+    const [{ failure_reason: reason }] =
+      h.packs.updateGlobePayWithdrawals.mock.calls[0];
+    expect(reason).not.toMatch(/1234-5678-9012/);
+    expect(reason).not.toMatch(/5678/);
+    expect(reason).toMatch(/rejected by receiving bank/);
+  });
+
   it('still refuses with the customer-facing message when the logger throws', async () => {
     // The log is diagnostics; the MedusaError is the customer's instruction.
     // A logger that throws must not be able to swap one for the other — before
@@ -428,16 +498,18 @@ describe('startGlobePayWithdrawal — money ordering', () => {
     submitMock.mockRejectedValue(
       new GlobePayError('nope', ['PMT10013'], 200, true),
     );
-    await expect(start(h)).rejects.toThrow(/could not start your withdrawal/i);
+    await expect(start(h)).rejects.toThrow(/refused by the payment provider/i);
     // Self-contained on purpose: without this the test would still pass if the
     // log were deleted outright, and the deletion is the regression it exists
     // to catch.
     expect(h.logger.warn).toHaveBeenCalled();
-    // And the money path still completed: refund issued, row closed.
+    // And the money path still completed: refund issued, row closed — with the
+    // reason on it, which is what makes a thrown logger survivable at all now.
     expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
     expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith({
       id: 'gpw_1',
       status: 'failed',
+      failure_reason: expect.stringContaining('PMT10013'),
     });
   });
 
@@ -709,6 +781,21 @@ describe('startGlobePayWithdrawal — approval threshold (held)', () => {
     expect(result.status).toBe('held');
   });
 
+  it('GLOBEPAY_WD_APPROVAL_ABOVE_RM=0 holds ANY amount — the operator incident stop lever', async () => {
+    // 0 is the "hold everything for a human" lever. A parser that rejects 0
+    // and falls back to the 1000 default would let this RM-minimum amount
+    // auto-submit — the exact silent-reopen failure this case exists to catch.
+    // (Can't use RM 1 here: GLOBEPAY_WD_MIN_RM=50 rejects it before the
+    // threshold check ever runs, so the smallest amount that reaches the
+    // threshold check is the minimum itself.)
+    process.env.GLOBEPAY_WD_APPROVAL_ABOVE_RM = '0';
+    const h = harness();
+    h.packs.walletSummary.mockResolvedValue(roomyWallet);
+    const result = await start(h, { amount: GLOBEPAY_WD_MIN_RM });
+    expect(submitMock).not.toHaveBeenCalled();
+    expect(result.status).toBe('held');
+  });
+
   it('a held-sized withdrawal is still refused BEFORE any row is written when frozen', async () => {
     const h = harness();
     h.packs.walletSummary.mockResolvedValue({
@@ -955,7 +1042,10 @@ describe('PacksModuleService.withdrawForCashout', () => {
   it("refuses another customer's account id — no debit", async () => {
     const f = fakeService();
     await expect(
-      f.svc.withdrawForCashout({ ...cashout, accountId: OTHER_CUSTOMERS_ACCOUNT.id }, f.ctx),
+      f.svc.withdrawForCashout(
+        { ...cashout, accountId: OTHER_CUSTOMERS_ACCOUNT.id },
+        f.ctx,
+      ),
     ).rejects.toMatchObject({
       type: MedusaError.Types.INVALID_DATA,
       message: 'Select a saved bank account.',
@@ -970,7 +1060,11 @@ describe('PacksModuleService.withdrawForCashout', () => {
     const owner = fakeService();
     await expect(
       owner.svc.withdrawForCashout(
-        { ...cashout, customerId: 'cus_2', accountId: OTHER_CUSTOMERS_ACCOUNT.id },
+        {
+          ...cashout,
+          customerId: 'cus_2',
+          accountId: OTHER_CUSTOMERS_ACCOUNT.id,
+        },
         owner.ctx,
       ),
     ).resolves.toMatchObject({
@@ -1124,8 +1218,12 @@ describe('PacksModuleService.withdrawForCashout', () => {
   });
 
   it('blocks a frozen account entirely — no debit', async () => {
-    const f = fakeService(fakeWallet({ isFrozen: true, available: 0, withdrawable: 0 }));
-    await expect(f.svc.withdrawForCashout(cashout, f.ctx)).rejects.toMatchObject({
+    const f = fakeService(
+      fakeWallet({ isFrozen: true, available: 0, withdrawable: 0 }),
+    );
+    await expect(
+      f.svc.withdrawForCashout(cashout, f.ctx),
+    ).rejects.toMatchObject({
       type: MedusaError.Types.NOT_ALLOWED,
       message: expect.stringMatching(/under review/i),
     });
@@ -1151,7 +1249,9 @@ describe('PacksModuleService.withdrawForCashout', () => {
     const f = fakeService(
       fakeWallet({ available: 40, locked: 960, withdrawable: 40 }),
     );
-    await expect(f.svc.withdrawForCashout(cashout, f.ctx)).rejects.toMatchObject({
+    await expect(
+      f.svc.withdrawForCashout(cashout, f.ctx),
+    ).rejects.toMatchObject({
       type: MedusaError.Types.INVALID_DATA,
       message: expect.stringMatching(/withdraw up to RM 40\.00 right now/),
     });
@@ -1169,9 +1269,12 @@ describe('PacksModuleService.withdrawForCashout', () => {
   it('refuses past the rolling-24h cap, naming the remaining headroom', async () => {
     // 49,980 already withdrawn today; a 50 RM payout would reach 50,030 > 50,000.
     const f = fakeService(fakeWallet(), 49_980_00);
-    await expect(f.svc.withdrawForCashout(cashout, f.ctx)).rejects.toMatchObject({
+    await expect(
+      f.svc.withdrawForCashout(cashout, f.ctx),
+    ).rejects.toMatchObject({
       type: MedusaError.Types.NOT_ALLOWED,
-      message: 'Daily withdrawal limit reached. You can withdraw RM 20.00 more today.',
+      message:
+        'Daily withdrawal limit reached. You can withdraw RM 20.00 more today.',
     });
     expect(f.withdrawCreditsWithLedger).not.toHaveBeenCalled();
   });
@@ -1235,7 +1338,8 @@ describe('PacksModuleService.withdrawForCashout', () => {
       f.svc.withdrawForCashout(cashout, f.ctx),
     ).rejects.toMatchObject({
       type: MedusaError.Types.NOT_ALLOWED,
-      message: 'Daily withdrawal limit reached. You can withdraw RM 40.00 more today.',
+      message:
+        'Daily withdrawal limit reached. You can withdraw RM 40.00 more today.',
     });
     expect(f.withdrawCreditsWithLedger).not.toHaveBeenCalled();
   });
@@ -1276,14 +1380,17 @@ describe('PacksModuleService.withdrawForCashout', () => {
   // This method inverts the caller's sign convention, so a caller that passed
   // an already-negated amount would CREDIT the customer. Fail loud, before the
   // lock and before any read.
-  it.each([0, -50, Number.NaN])('refuses a non-positive amount (%p)', async (amount) => {
-    const f = fakeService();
-    await expect(
-      f.svc.withdrawForCashout({ ...cashout, amount }, f.ctx),
-    ).rejects.toMatchObject({ type: MedusaError.Types.INVALID_DATA });
-    expect(f.em.execute).not.toHaveBeenCalled();
-    expect(f.withdrawCreditsWithLedger).not.toHaveBeenCalled();
-  });
+  it.each([0, -50, Number.NaN])(
+    'refuses a non-positive amount (%p)',
+    async (amount) => {
+      const f = fakeService();
+      await expect(
+        f.svc.withdrawForCashout({ ...cashout, amount }, f.ctx),
+      ).rejects.toMatchObject({ type: MedusaError.Types.INVALID_DATA });
+      expect(f.em.execute).not.toHaveBeenCalled();
+      expect(f.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+    },
+  );
 });
 
 /**
@@ -1508,9 +1615,12 @@ describe('startGlobePayWithdrawal — Idempotency-Key', () => {
     );
     h.packs.createGlobePayWithdrawals.mockImplementation(async () => {
       seenPrior = true;
-      throw Object.assign(new Error('duplicate key value violates unique constraint'), {
-        code: '23505',
-      });
+      throw Object.assign(
+        new Error('duplicate key value violates unique constraint'),
+        {
+          code: '23505',
+        },
+      );
     });
 
     const res = await start(h, { idempotencyKey: 'raced' });
@@ -1529,14 +1639,17 @@ describe('startGlobePayWithdrawal — Idempotency-Key', () => {
     const h = harness();
     h.packs.listGlobePayWithdrawals.mockResolvedValue([]);
     h.packs.createGlobePayWithdrawals.mockRejectedValue(
-      Object.assign(new Error('duplicate key value violates unique constraint'), {
-        code: '23505',
-      }),
+      Object.assign(
+        new Error('duplicate key value violates unique constraint'),
+        {
+          code: '23505',
+        },
+      ),
     );
 
-    await expect(start(h, { idempotencyKey: 'raced-then-freed' })).rejects.toThrow(
-      /duplicate key/i,
-    );
+    await expect(
+      start(h, { idempotencyKey: 'raced-then-freed' }),
+    ).rejects.toThrow(/duplicate key/i);
     expect(h.packs.withdrawForCashout).not.toHaveBeenCalled();
   });
 

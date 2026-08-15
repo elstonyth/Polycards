@@ -372,6 +372,31 @@ const WithdrawalsPage = () => {
                           {w.gateway_transaction_id}
                         </div>
                       )}
+                      {/* Plan 095 forensics, in the references cell rather
+                          than a seventh column: it is the only wide cell, and
+                          both strings are diagnostic detail an operator reads
+                          when a row already caught their eye. */}
+                      {w.failure_reason && (
+                        <div className="text-ui-fg-muted mt-1">
+                          {w.failure_reason}
+                        </div>
+                      )}
+                      {/* Their Payout Verification is active, so a failed row
+                          with no outcome recorded is worth a look — but it is a
+                          POINTER, not a verdict: their call may never have
+                          arrived, it may have been refused before we could
+                          match it to this row, or the row may predate the
+                          column. The copy says exactly that. */}
+                      {w.status === 'failed' && !w.verify_outcome && (
+                        <div className="text-ui-tag-orange-text mt-1 font-sans">
+                          {t('withdrawals.noVerify')}
+                        </div>
+                      )}
+                      {w.verify_outcome && (
+                        <div className="text-ui-fg-muted mt-1">
+                          {w.verify_outcome}
+                        </div>
+                      )}
                     </Table.Cell>
                     {/* held rows only — the row's own status, never the
                         current VIEW: the 'all' view mixes every status, and a

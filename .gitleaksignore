@@ -17,3 +17,10 @@
 # `// gitleaks:allow` carries forward across squash re-authoring, this
 # fingerprint waives the already-pushed branch commit in history.
 4f23518f2396708bb97a1f4b011722092c683214:backend/packages/api/integration-tests/http/pack-published-odds.spec.ts:generic-api-key:7
+
+# The prod PUBLISHABLE key (pk_…, NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY) quoted in
+# a plan doc's verification curl — public by design, embedded in every
+# storefront page served to browsers; not a credential. The doc's tip copy is
+# redacted to a placeholder, so squash-merged master never contains the key;
+# this fingerprint waives the already-pushed branch commit in history.
+b7623b23350b471dfa7db8769af0d8128abfd613:docs/superpowers/plans/2026-08-15-public-free-pack-badge.md:curl-auth-header:690

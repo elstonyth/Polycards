@@ -19,6 +19,7 @@ import { formatValue, isRarity, type PublishedOdds } from '@/lib/packs-format';
 import { money, relativeTime } from '@/lib/format';
 import {
   parseList,
+  parseOne,
   PackRowSchema,
   OddsEntrySchema,
   RecentPullSchema,
@@ -45,6 +46,8 @@ interface BackendPack {
   rank: number;
   buyback_percent?: number;
   in_stock?: boolean;
+  group?: 'GRADED' | 'RAW' | 'MIX' | null;
+  psa10?: boolean;
 }
 
 // Pack prices are in RM; render as "RM 1,000".
@@ -62,12 +65,18 @@ const toPack = (p: BackendPack): Pack => ({
   buybackPercent:
     typeof p.buyback_percent === 'number' ? p.buyback_percent : undefined,
   inStock: p.in_stock === false ? false : undefined,
+  // Schema-validated (unknown values already degraded to null/false) —
+  // passthrough. psa10 defaults false: never overclaim the guarantee.
+  group: p.group ?? null,
+  psa10: p.psa10 === true,
 });
 
-/** 'one-piece' → 'One Piece' — label for a category key the local meta lacks. */
+/** 'one-piece' → 'One Piece' — label for a category key the local meta lacks.
+ *  Underscores split too, so the reserved 'free_welcome' key reads as a label
+ *  rather than 'Free_welcome'. */
 const titleCase = (key: string): string =>
   key
-    .split('-')
+    .split(/[-_]/)
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(' ');
 
@@ -143,7 +152,7 @@ export async function getPackBySlug(slug: string): Promise<PackBase | null> {
   const categories = await getPackCategories();
   const category = categories.find((c) => c.packs.some((p) => p.id === slug));
   const pack = category?.packs.find((p) => p.id === slug);
-  if (!category || !pack) return null;
+  if (!category || !pack) return getUncatalogedPack(slug);
   return {
     pack: {
       ...pack,
@@ -153,6 +162,48 @@ export async function getPackBySlug(slug: string): Promise<PackBase | null> {
     },
     siblings: category.packs,
   };
+}
+
+/**
+ * A pack that is REACHABLE but not LISTED — resolved from the detail route
+ * (`GET /store/packs/:slug`) instead of the catalog list.
+ *
+ * The free welcome pack lives in the reserved `free_welcome` category, which
+ * `GET /store/packs` filters out (it is reached only through its own claim
+ * badge), so the catalog lookup above can never find it and every /slots/<slug>
+ * surface would 404. The detail route only hides `reward_box`, so it answers
+ * here — which also keeps internal draw pools hidden (it 404s them) without a
+ * second exclusion list to drift.
+ *
+ * `siblings` is empty by construction: an unlisted pack has no catalog row to
+ * sit beside, and the detail page hides its pack selector when the list is
+ * empty. Returns null on 404 / any failure — the page then 404s as before.
+ */
+async function getUncatalogedPack(slug: string): Promise<PackBase | null> {
+  try {
+    const { pack } = await sdk.client.fetch<{ pack?: BackendPack }>(
+      `/store/packs/${encodeURIComponent(slug)}`,
+    );
+    // Same runtime guard the list path applies (category + finite price) — the
+    // fetch generic is a type assertion, not a validator.
+    if (!parseOne(PackRowSchema, pack) || !pack) return null;
+    const meta = CATEGORY_META.find((c) => c.id === pack.category);
+    return {
+      pack: {
+        ...toPack(pack),
+        categoryId: pack.category,
+        categoryName: meta?.tab ?? titleCase(pack.category),
+        icon: meta?.icon ?? CAT_ICON.pokemon,
+      },
+      siblings: [],
+    };
+  } catch (error) {
+    logger.error(
+      `[packs] uncataloged pack lookup failed for '${slug}':`,
+      error,
+    );
+    return null;
+  }
 }
 
 // --- Pack detail: Top Hits + Pull Odds (GET /store/packs/:slug) -------------
@@ -326,16 +377,20 @@ export interface RecentPull {
 const FALLBACK_PACK_ICON = '/images/polycards/bronze-pack.webp';
 
 /**
- * The most recent pulls across all packs, for the /claw/[slug] "Recent Pulls"
- * feed. Returns `[]` (not mock) on any backend failure or empty ledger — an
+ * The most recent pulls for the "Recent Pulls" feed — across all packs, or, with
+ * `packSlug`, only that pack's own history (the /slots/[slug] pages; filtering
+ * backend-side, so a quiet pack still shows its real history instead of nothing).
+ * Returns `[]` (not mock) on any backend failure or empty ledger — an
  * empty feed is a meaningful, truthful state for a live ledger (the component
  * renders a "no pulls yet" empty state), unlike the catalog/detail getters that
  * fall back to mock to keep the page populated.
  */
-export async function getRecentPulls(): Promise<RecentPull[]> {
+export async function getRecentPulls(packSlug?: string): Promise<RecentPull[]> {
   try {
     const { pulls } = await sdk.client.fetch<{ pulls: BackendRecentPull[] }>(
-      '/store/pulls/recent',
+      packSlug
+        ? `/store/pulls/recent?pack_id=${encodeURIComponent(packSlug)}`
+        : '/store/pulls/recent',
     );
     if (!Array.isArray(pulls)) return [];
 

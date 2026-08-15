@@ -1,5 +1,18 @@
 import { model } from '@medusajs/framework/utils';
 
+// The globepay_withdrawal.status domain — single source of truth for the
+// model's enum below, the admin route's STATUS_FILTERS
+// (api/admin/globepay/withdrawals/route.ts), and the service's
+// WithdrawalStatus type (modules/packs/service.ts). The migration's CHECK
+// constraint (Migration20260811220000) is FROZEN HISTORY and cannot derive
+// from this — it carries its own pointer comment back here instead.
+export const WITHDRAWAL_STATUSES = [
+  'pending',
+  'settled',
+  'failed',
+  'held',
+] as const;
+
 // GlobePayWithdrawal — the outstanding-payout record for the GlobePay365
 // gateway (method WD). Mirrors GlobePayDeposit, inverted: the ledger DEBIT
 // happens BEFORE SubmitWithdrawal (money must never leave the gateway without
@@ -39,7 +52,7 @@ export const GlobePayWithdrawal = model
     // approve route (-> 'pending') or the admin deny route (-> 'failed',
     // refunded).
     status: model
-      .enum(['pending', 'settled', 'failed', 'held'])
+      .enum([...WITHDRAWAL_STATUSES])
       .default('pending'),
     // Their raw numeric status from the last callback/requery (4 = success,
     // 5 = fail, else processing), for support.
@@ -51,6 +64,26 @@ export const GlobePayWithdrawal = model
     // the replay check race-safe; Postgres ignores NULLs in unique indexes, so
     // keyless withdrawals never collide with each other.
     idempotency_key: model.text().nullable(),
+    // FORENSICS (plan 095). Both columns exist because a payout that dies at
+    // the gateway leaves nothing behind that outlives DigitalOcean's log
+    // retention: the run logs only cover the CURRENT deployment, and the
+    // 2026-08-11 production failures (8 payouts created at GlobePay and
+    // immediately marked statusId 5) were already unreadable the next morning.
+    // A row that records its own cause is the difference between "we know
+    // within one attempt" and "wait for another customer to lose a day".
+    //
+    // Their Payout Verification is ACTIVE on the production merchant, so every
+    // payout is offered to /hooks/globepay/payout-verify BEFORE they execute
+    // it, and anything but the literal "success" rejects it. NULL therefore
+    // carries real information: their verification never reached us at all
+    // (wrong URL their side, blocked egress, a timeout shorter than our
+    // answer) — a config fault, not a code one. Written on EVERY invocation,
+    // 'success' included, precisely so that distinction survives.
+    verify_outcome: model.text().nullable(),
+    // Why the payout died on OUR side of the wire: the gateway's own codes and
+    // message from a definite submit refusal. Never the request envelope
+    // (signed and encrypted) and never the account number or holder name.
+    failure_reason: model.text().nullable(),
   })
   .indexes([
     // Callback lookup path.

@@ -78,18 +78,34 @@
 /* POLYCARD-BACK §2.1: hide the core Collections/Categories sidebar entries.
    Nav lives in the prebuilt @mercurjs/admin bundle (useCoreRoutes) — not
    patchable from src/routes. CSS-hide only: the pages stay URL-reachable and
-   Medusa data is untouched (spec baked default). */
+   Medusa data is untouched (spec baked default).
+
+   /payouts joins them for a different reason: it is Mercur's MARKETPLACE
+   SELLER payout list (@mercurjs/admin's own pages/payouts/*, reading
+   sdk.admin.payouts). Polycards has no marketplace sellers, so it is
+   permanently empty — and its label sits three rows above our own Withdrawals
+   page, so operators looked for customer withdrawals there and concluded they
+   were missing. Customer money-out is Orders → Withdrawals
+   (src/routes/withdrawals, GET /admin/globepay/withdrawals), which is a
+   different table and a different API.
+
+   Why CSS and not the supported override: mercurDashboardPlugin's
+   `components.MainSidebar` option exists in the SDK's TYPES but nothing
+   consumes it — as of @mercurjs/{admin,dashboard-sdk} 2.1.6 neither bundle
+   references it or the `virtual:mercur/components` module the plugin emits, so
+   passing it is a silent no-op. Re-check on the next Mercur upgrade; a real
+   override is the better home for all three of these. */
 nav a[href$="/collections"],
-nav a[href$="/categories"] {
+nav a[href$="/categories"],
+nav a[href$="/payouts"] {
   display: none;
 }
 
 /* Hiding only the <a> left a 28px hole for each entry: the vendored markup
    wraps every nav row in `<li class="flex h-7 items-center">`, and that FIXED
-   height does not collapse just because its child is invisible. Two hidden
-   entries = ~56px of dead space between Products and the Gacha entries under
-   it, which reads as a rendering glitch rather than a deliberate omission.
-   Collapse the row itself.
+   height does not collapse just because its child is invisible. Each hidden
+   entry leaves ~28px of dead space (three of them now), which reads as a
+   rendering glitch rather than a deliberate omission. Collapse the row itself.
 
    `> * >` scopes this to the entry's OWN <li> (the anchor sits exactly one
    wrapper deep), so an ancestor <li> that merely contains the link somewhere
@@ -102,3 +118,14 @@ nav li:has(> * > a[href$="/collections"]),
 nav li:has(> * > a[href$="/categories"]) {
   display: none;
 }
+
+/* /payouts is deliberately NOT in the rule above. As of @mercurjs/admin 2.1.6
+   the sidebar no longer wraps nav rows in <li> at all — the anchor sits in a
+   plain `div.w-full` inside `nav.flex.flex-col` — so hiding the <a> collapses
+   the row on its own and an `li:has()` clause would be dead code. Verified in
+   the browser: no gap between Stores and Pixel Pokédex.
+
+   By the same token the two rules above are now legacy: this version's core nav
+   has no Collections or Categories entries and no <li> wrappers, so neither
+   matches anything. They are kept as harmless no-ops in case a future upgrade
+   reintroduces either shape; do not treat them as a working example. */

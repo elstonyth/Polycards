@@ -230,10 +230,13 @@ describe('WithdrawForm', () => {
     await submit();
 
     // The destination is an id and nothing else: the server resolves the bank
-    // details from the customer's own saved list.
+    // details from the customer's own saved list. A per-attempt idempotency
+    // key rides along too (see the attemptKey doc comment) — its exact value
+    // is random, so only its shape is pinned here.
     expect(startWithdrawal).toHaveBeenCalledExactlyOnceWith({
       amount: 50,
       accountId: READY_ACCOUNT.id,
+      idempotencyKey: expect.any(String),
     });
     // The payout debits the balance server-side; the form must repaint it, or
     // the header chip stays stale. (It also used to light the Me-tab money dot
@@ -290,5 +293,31 @@ describe('WithdrawForm', () => {
       'Withdrawals are not open yet.',
     );
     expect(container.textContent).not.toContain('ON ITS WAY');
+  });
+
+  // The dangerous direction: if a retry ever minted a NEW key, a debited-but-
+  // response-lost first attempt plus a retry would be a second debit and a
+  // second real bank transfer. This pins the key staying armed across a
+  // failed attempt, exactly like TopUpSheet's attemptKey.
+  it('reuses the SAME idempotency key across a failed retry of the same attempt', async () => {
+    await render();
+    // Set for BOTH calls (not Once): the key-reuse assertion below must hold
+    // regardless of what any earlier test left as the mock's implementation.
+    startWithdrawal.mockResolvedValue({
+      ok: false,
+      error: 'Something went wrong. Please try again.',
+    });
+    fillValidForm();
+    await submit();
+    await submit();
+
+    expect(startWithdrawal).toHaveBeenCalledTimes(2);
+    const [firstCall] = startWithdrawal.mock.calls[0]! as [
+      { idempotencyKey: string },
+    ];
+    const [secondCall] = startWithdrawal.mock.calls[1]! as [
+      { idempotencyKey: string },
+    ];
+    expect(secondCall.idempotencyKey).toBe(firstCall.idempotencyKey);
   });
 });

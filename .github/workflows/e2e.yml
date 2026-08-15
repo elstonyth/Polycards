@@ -196,6 +196,7 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Run E2E
+        id: e2e
         run: npx playwright test
 
       # a11y gate: axe-core scan of key public routes against the running
@@ -204,6 +205,7 @@ jobs:
       # installed above; BASE_URL defaults to :4000 (see scripts/qa-a11y.mjs).
       # `always()` so a red E2E run doesn't mask a11y regressions (or vice versa).
       - name: Run a11y gate
+        id: a11y
         if: always()
         run: npm run test:a11y
 
@@ -215,8 +217,52 @@ jobs:
       # violations here are still catchable regressions, not noise.
       # `always()` for the same reason as the a11y gate above.
       - name: Run CSP gate
+        id: csp
         if: always()
         run: npm run qa:csp
+
+      # Free-pack QA gate (#441/#442): walks the whole claim loop as a
+      # brand-new customer against the running storefront (:4000) + backend
+      # (:9000, already up). PW_BASE overrides the script's own :4100 default
+      # (that default is for the local worktree recipe, which serves on 4100
+      # to avoid clashing with a main-tree :4000). QA_ADMIN_* has no fallback
+      # to ADMIN_EMAIL/ADMIN_PASSWORD inside the script, so alias the same
+      # seeded CI admin explicitly. `always()` for the same reason as above.
+      - name: Run free-pack QA gate
+        id: qafp
+        if: always()
+        env:
+          PW_BASE: http://localhost:4000
+          QA_ADMIN_EMAIL: admin@polycards.local
+          QA_ADMIN_PASSWORD: ${{ secrets.PW_ADMIN_PASSWORD || 'polycards-ci-e2e-2026' }}
+        run: npm run qa:free-pack
+
+      # Catalog-groups QA gate (#443): screenshots the /slots Graded/Raw
+      # grouping against the running storefront (:4000, already up); the
+      # script's own default base is already :4000. `always()` for the same
+      # reason as above.
+      - name: Run catalog-groups QA gate
+        id: qacg
+        if: always()
+        run: npm run qa:catalog-groups
+
+      # Per-gate step summary: `gh run list` otherwise reports this whole job
+      # as one bit, so a red nightly has meant three different single causes
+      # in two weeks. Table lives in $GITHUB_STEP_SUMMARY so the run page
+      # names the failing gate without opening logs. `always()` so the table
+      # renders even when an earlier gate failed.
+      - name: Gate summary
+        if: always()
+        run: |
+          {
+            echo "| Gate | Outcome |"
+            echo "|------|---------|"
+            echo "| E2E | ${{ steps.e2e.outcome }} |"
+            echo "| a11y | ${{ steps.a11y.outcome }} |"
+            echo "| CSP | ${{ steps.csp.outcome }} |"
+            echo "| Free-pack QA | ${{ steps.qafp.outcome }} |"
+            echo "| Catalog-groups QA | ${{ steps.qacg.outcome }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload report + service logs
         if: always()
