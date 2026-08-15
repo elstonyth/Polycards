@@ -92,9 +92,12 @@ export async function POST(
   // request-time gate that must be re-checked: the whole point of a held
   // queue is that a human looks at a suspicious payout, and a freeze landing
   // between the request and the click is exactly how "suspicious" gets
-  // recorded. Task 6's brief does not require the queue to surface the flag,
-  // so the approver may not be able to see it — this is not something to
-  // leave to the human.
+  // recorded. The queue DOES surface the flag — the list route's `frozen`
+  // field (route.ts:225-228) drives a badge on the row and disables that
+  // row's Approve button — but by that same comment it is a PREVIEW read at
+  // poll time, not the gate: a freeze landing in the gap between two polls
+  // still shows `frozen: false` until the next refresh. This re-read is what
+  // actually enforces it.
   //
   // A BARE freeze read, deliberately: the rest of withdrawForCashout's gate
   // must NOT be re-run here. The debit already landed, so re-checking the
