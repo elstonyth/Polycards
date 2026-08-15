@@ -26,14 +26,16 @@ const ADMIN_SRC = join(
 
 function adminFreeWelcomeCategory(): string {
   const src = readFileSync(ADMIN_SRC, 'utf8');
-  const m = src.match(/const FREE_WELCOME_CATEGORY\s*=\s*'([^']+)'/);
-  if (!m) {
+  const captured = src.match(
+    /const FREE_WELCOME_CATEGORY\s*=\s*'([^']+)'/,
+  )?.[1];
+  if (captured === undefined) {
     throw new Error(
       `FREE_WELCOME_CATEGORY not found in ${ADMIN_SRC}. If it was renamed or ` +
         `moved, update this guard -- do not delete it.`,
     );
   }
-  return m[1];
+  return captured;
 }
 
 // FREE_WELCOME_CATEGORY and FREE_PULL_LOCKED_MESSAGE are hand-copied across
