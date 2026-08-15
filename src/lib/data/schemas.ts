@@ -74,6 +74,14 @@ function droppableRecord<T>(item: z.ZodType<T>) {
 export const PackRowSchema = z.looseObject({
   category: z.string(),
   price: finite,
+  /** §2.4.8 pool composition, backend-derived (GRADED = every card graded,
+   *  RAW = none, MIX = both, null = empty pool). Absent on an older backend;
+   *  a malformed value degrades to null rather than dropping the pack row. */
+  group: z.enum(['GRADED', 'RAW', 'MIX']).nullable().catch(null).optional(),
+  /** Strict guarantee gate: true iff EVERY pooled card is a PSA 10 (stricter
+   *  than group === 'GRADED' — a PSA 9 or a BGS slab is graded but not psa10).
+   *  Malformed/absent degrades to false: never overclaim the guarantee. */
+  psa10: z.boolean().catch(false).optional(),
 });
 
 /** GET /store/packs/:slug odds row — handle + known rarity + finite value.

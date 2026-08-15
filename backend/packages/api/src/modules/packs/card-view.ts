@@ -30,6 +30,50 @@ export function cardByHandle<T extends { handle: string }>(
 export const isGraded = (c: { grader: string }): boolean =>
   c.grader.trim() !== '';
 
+// Strictly a PSA 10 — what the storefront's "Guaranteed PSA 10" section
+// verifies. GRADED alone is not enough: a PSA 9 or a BGS/CGC slab is graded
+// but would make that heading false advertising, so the guarantee gate checks
+// grader AND grade. Case/whitespace-tolerant on grader (operator-typed).
+export const isPsa10 = (c: { grader: string; grade: string }): boolean =>
+  c.grader.trim().toUpperCase() === 'PSA' && c.grade.trim() === '10';
+
+// §2.4.8 composition from a pool's graded count: GRADED iff EVERY pooled card
+// is graded, RAW iff none, MIX otherwise; an empty pool has nothing to infer
+// from (null, never 'RAW'). Shared by the admin pack list and the public
+// catalog so the two can never drift on the thresholds.
+export type CompositionGroup = 'GRADED' | 'RAW' | 'MIX';
+export function compositionGroup(
+  graded: number,
+  total: number,
+): CompositionGroup | null {
+  if (total === 0) return null;
+  return graded === total ? 'GRADED' : graded === 0 ? 'RAW' : 'MIX';
+}
+
+// The shared pool traversal behind both pack lists (admin + public catalog):
+// per-pack graded / PSA-10 / total counts. Reward rows (card_id null) carry no
+// card and orphaned odds rows (card deleted) are not part of the pool at all —
+// the two routes must always agree on that skip-set, so it lives here.
+export type PoolComposition = { graded: number; psa10: number; total: number };
+export function poolComposition(
+  odds: { pack_id: string; card_id: string | null }[],
+  cards: { handle: string; grader: string; grade: string }[],
+): Map<string, PoolComposition> {
+  const byHandle = cardByHandle(cards);
+  const comp = new Map<string, PoolComposition>();
+  for (const o of odds) {
+    if (o.card_id == null) continue;
+    const card = byHandle.get(o.card_id);
+    if (card === undefined) continue;
+    const t = comp.get(o.pack_id) ?? { graded: 0, psa10: 0, total: 0 };
+    t.total += 1;
+    if (isGraded(card)) t.graded += 1;
+    if (isPsa10(card)) t.psa10 += 1;
+    comp.set(o.pack_id, t);
+  }
+  return comp;
+}
+
 // card_id/rarity are nullable on the row (reward rows have neither); the lookup
 // keys defensively and defaults to "Common", so a reward row passed in here is
 // harmless — it just never matches a real (pack, card) card lookup.

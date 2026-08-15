@@ -46,6 +46,8 @@ interface BackendPack {
   rank: number;
   buyback_percent?: number;
   in_stock?: boolean;
+  group?: 'GRADED' | 'RAW' | 'MIX' | null;
+  psa10?: boolean;
 }
 
 // Pack prices are in RM; render as "RM 1,000".
@@ -63,6 +65,10 @@ const toPack = (p: BackendPack): Pack => ({
   buybackPercent:
     typeof p.buyback_percent === 'number' ? p.buyback_percent : undefined,
   inStock: p.in_stock === false ? false : undefined,
+  // Schema-validated (unknown values already degraded to null/false) —
+  // passthrough. psa10 defaults false: never overclaim the guarantee.
+  group: p.group ?? null,
+  psa10: p.psa10 === true,
 });
 
 /** 'one-piece' → 'One Piece' — label for a category key the local meta lacks.

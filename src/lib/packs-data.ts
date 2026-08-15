@@ -47,7 +47,26 @@ export type Pack = {
   buybackPercent?: number;
   /** false → render a greyed "Out of Stock" / "Sold out" tile. Default in-stock. */
   inStock?: boolean;
+  /** §2.4.8 pool composition, auto-detected by the backend from the pack's
+   *  prize pool — never operator-set. GRADED = every card graded (the catalog's
+   *  "Guaranteed PSA 10" section), RAW = none graded, MIX = both, null/absent =
+   *  empty pool or an older backend. Anything but GRADED lists under Raw:
+   *  the PSA 10 guarantee heading must never cover a pack with an ungraded
+   *  card in its pool. */
+  group?: 'GRADED' | 'RAW' | 'MIX' | null;
+  /** Strict guarantee gate, backend-derived: true iff EVERY pooled card is a
+   *  PSA 10. Stricter than `group === 'GRADED'` — an all-graded pack holding
+   *  a PSA 9 or a BGS slab is GRADED but NOT psa10. Absent/false on an older
+   *  backend, which errs in the never-overclaim direction. */
+  psa10?: boolean;
 };
+
+/** Membership rule for the catalog's "Graded (Guaranteed PSA 10)" section —
+ *  BOTH gates: every pooled card graded AND every one a PSA 10. Everything
+ *  else (RAW, MIX, empty, non-PSA-10 graded, older backend) lists under
+ *  "Raw Cards (Ungraded)" so the guarantee heading can never overclaim. */
+export const inGuaranteedGroup = (p: Pack): boolean =>
+  p.group === 'GRADED' && p.psa10 === true;
 
 export type PackCategory = {
   id: string;

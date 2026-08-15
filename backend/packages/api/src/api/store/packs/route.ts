@@ -1,7 +1,12 @@
-import { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
-import PacksModuleService from "../../../modules/packs/service";
-import { PACKS_MODULE } from "../../../modules/packs";
-import { FREE_WELCOME_CATEGORY } from "../../../modules/packs/free-pack";
+import { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
+import PacksModuleService from '../../../modules/packs/service';
+import { PACKS_MODULE } from '../../../modules/packs';
+import { FREE_WELCOME_CATEGORY } from '../../../modules/packs/free-pack';
+import {
+  compositionGroup,
+  poolComposition,
+} from '../../../modules/packs/card-view';
+import { pageAll } from '../../utils/page-all';
 
 // GET /store/packs — the gacha pack catalog for /claw and the home "Open Packs"
 // tiles. A plain Medusa store route (publishable-key scoped, but NOT subject to
@@ -20,15 +25,21 @@ const CACHE_TTL_MS = 30_000;
 const LIST_KEY = 'list';
 const listCache = new Map<string, { expires: number; body: unknown }>();
 
+/** Single-flight guard: concurrent misses during an expiry window share ONE
+ *  compute — the composition fan-out below reads every odds/card row, and a
+ *  miss stampede would run it N times for identical bodies. */
+let inFlight: Promise<unknown> | null = null;
+
 /** Test seam: module state outlives a test's fixtures — one jest process is one
  *  module instance, so a prior test's catalog would be served to the next. */
 export function clearPackListCache(): void {
   listCache.clear();
+  inFlight = null;
 }
 
 export async function GET(
   req: MedusaRequest,
-  res: MedusaResponse
+  res: MedusaResponse,
 ): Promise<void> {
   const cached = listCache.get(LIST_KEY);
   if (cached && cached.expires > Date.now()) {
@@ -36,16 +47,56 @@ export async function GET(
     return;
   }
 
-  const packsModuleService: PacksModuleService = req.scope.resolve(PACKS_MODULE);
+  if (!inFlight) {
+    inFlight = computeCatalogBody(req)
+      .then((body) => {
+        listCache.set(LIST_KEY, { expires: Date.now() + CACHE_TTL_MS, body });
+        return body;
+      })
+      .finally(() => {
+        inFlight = null;
+      });
+  }
+  // A rejected compute rejects every waiter identically — same outcome as
+  // each having run it, minus the duplicate work.
+  res.json(await inFlight);
+}
+
+async function computeCatalogBody(req: MedusaRequest): Promise<unknown> {
+  const packsModuleService: PacksModuleService =
+    req.scope.resolve(PACKS_MODULE);
 
   const packs = await packsModuleService.listPacks(
     // reward_box packs are internal draw pools (B2) and the free welcome pack is
     // reached only via its own claim badge — both excluded from the public catalog.
-    { status: "active", category: { $nin: ["reward_box", FREE_WELCOME_CATEGORY] } } as Parameters<typeof packsModuleService.listPacks>[0],
+    {
+      status: 'active',
+      category: { $nin: ['reward_box', FREE_WELCOME_CATEGORY] },
+    } as Parameters<typeof packsModuleService.listPacks>[0],
     // Explicit take so a framework default can't silently cap the catalog.
-    { order: { category: "ASC", rank: "ASC" }, take: 500 }
+    { order: { category: 'ASC', rank: 'ASC' }, take: 500 },
   );
 
+  // §2.4.8 composition — the SAME shared pool traversal the admin pack list
+  // uses (poolComposition + compositionGroup), derived, never operator-set.
+  // `psa10` is the stricter guarantee gate: the storefront's "Guaranteed
+  // PSA 10" section requires EVERY pooled card to be a PSA 10 — an all-graded
+  // pack holding a PSA 9 or a BGS slab is GRADED but NOT psa10, so the
+  // heading can never overclaim. Costs two paged reads per cache window
+  // (30s), same fan-out the admin list does on every load.
+  const [allOdds, allCards] = await Promise.all([
+    pageAll((opts) => packsModuleService.listPackOdds({}, opts)),
+    pageAll((opts) => packsModuleService.listCards({}, opts)),
+  ]);
+  const comp = poolComposition(allOdds, allCards);
+  const groupOf = (slug: string): 'GRADED' | 'RAW' | 'MIX' | null => {
+    const t = comp.get(slug);
+    return compositionGroup(t?.graded ?? 0, t?.total ?? 0);
+  };
+  const psa10Of = (slug: string): boolean => {
+    const t = comp.get(slug);
+    return t !== undefined && t.total > 0 && t.psa10 === t.total;
+  };
   // Explicit public shape — `price` is bigNumber now, so a raw spread would
   // leak the internal `raw_price` jsonb sidecar (and id/timestamps) into a
   // public payload. `price` serializes as a JSON number (RM — all pack
@@ -61,10 +112,11 @@ export async function GET(
       boost: p.boost,
       buyback_percent: p.buyback_percent,
       in_stock: p.in_stock,
+      group: groupOf(p.slug),
+      psa10: psa10Of(p.slug),
       rank: p.rank,
       status: p.status,
     })),
   };
-  listCache.set(LIST_KEY, { expires: Date.now() + CACHE_TTL_MS, body });
-  res.json(body);
+  return body;
 }

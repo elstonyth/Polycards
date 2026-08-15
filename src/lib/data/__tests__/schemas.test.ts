@@ -42,6 +42,22 @@ describe('parseList — drops invalid items, never throws', () => {
     expect((out[0] as unknown as { title: string }).title).toBe('A'); // looseObject passthrough
   });
 
+  it('pack row group keeps known values, degrades junk to null, allows absent', () => {
+    const out = parseList(PackRowSchema, [
+      { category: 'pokemon', price: 10, group: 'GRADED', psa10: true },
+      { category: 'pokemon', price: 10, group: 'weird', psa10: 'yes' }, // junk → null/false, row kept
+      { category: 'pokemon', price: 10 }, // older backend → absent
+    ]) as unknown as { group?: string | null; psa10?: boolean }[];
+    expect(out).toHaveLength(3);
+    expect(out[0]?.group).toBe('GRADED');
+    expect(out[0]?.psa10).toBe(true);
+    // psa10 junk must degrade to FALSE (never overclaim the guarantee).
+    expect(out[1]?.group).toBeNull();
+    expect(out[1]?.psa10).toBe(false);
+    expect(out[2]?.group).toBeUndefined();
+    expect(out[2]?.psa10).toBeUndefined();
+  });
+
   it('OddsEntry drops unknown rarity + non-finite value', () => {
     const out = parseList(OddsEntrySchema, [
       { handle: 'x', rarity: 'Mythical', market_value: 5 },
