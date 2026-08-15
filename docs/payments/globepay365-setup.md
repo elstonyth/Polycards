@@ -45,6 +45,9 @@ salt=aesKey, 1000 iters, 32 bytes)`, `AES-256-CBC` + PKCS7, random 16-byte IV
 | `GLOBEPAY_WITHDRAW_NOTIFY_URL`  | their POST target for payout outcomes |
 | `GLOBEPAY_PAYOUT_VERIFY_URL`    | their POST target for Payout Verification — **ACTIVE on the production merchant** (portal read 2026-08-05; the "inactive" note below is the STAGING account), so the route must answer or payouts stall |
 | `GLOBEPAY_CURRENCY`             | optional, defaults to `MYR` |
+| `GLOBEPAY_WD_APPROVAL_ABOVE_RM` | withdrawals above this RM figure hold for admin approval instead of auto-submitting (admin `/withdrawals` queue, default view `held`); strictly greater-than, optional, defaults to `1000` |
+| `GLOBEPAY_WD_DAILY_MAX_RM`      | rolling-24h cap on one customer's summed withdrawals, in RM; `0` is a deliberate stop-lever (holds every withdrawal), optional, defaults to `50000` |
+| `PAYOUT_DESTINATION_COOLDOWN_HOURS` | cooling-off window (hours) between saving a payout destination and being allowed to pay out to it — the control on the steal-a-token → add-a-destination → cash-out chain; not a GlobePay-specific var, but gates the same money-out path; `0` is a deliberate opt-out, optional, defaults to `24` |
 
 Set the withdrawal three only when payouts are meant to be live: without them
 `globepayWithdrawalsEnabled()` is false and the withdrawal path fails closed —
