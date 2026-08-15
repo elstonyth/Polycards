@@ -106,8 +106,10 @@ export function GlobalFreePackBadge() {
 
   useEffect(() => {
     // Hold until the auth hydrate settles so a logged-in visitor never sees
-    // the guest promo answer flash before the per-customer one.
-    if (isLoading) return;
+    // the guest promo answer flash before the per-customer one. /slots never
+    // renders this mount (it draws its own server-passed badge), so skip the
+    // fetch there too — that page already paid for the state server-side.
+    if (isLoading || pathname === '/slots') return;
     let cancelled = false;
     void fetch('/api/free-pack', { cache: 'no-store' })
       .then((res) => (res.ok ? (res.json() as Promise<FreePackState>) : null))
@@ -131,10 +133,10 @@ export function GlobalFreePackBadge() {
 
   if (state.mode === 'hidden') return null;
   if (pathname === '/slots') return null;
-  if (
-    state.mode === 'claim' &&
-    pathname.startsWith(`/slots/${encodeURIComponent(state.slug)}`)
-  ) {
+  // Raw slug, not encodeURIComponent: usePathname() answers decoded, so an
+  // encoded comparison would miss any slug with special characters. (The href
+  // in FreePackBadge still encodes — that side goes INTO a URL.)
+  if (state.mode === 'claim' && pathname.startsWith(`/slots/${state.slug}`)) {
     return null;
   }
   return <FreePackBadge state={state} />;
