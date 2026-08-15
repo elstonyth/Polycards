@@ -49,13 +49,20 @@ import { usePackDetailPoll } from '@/lib/use-pack-detail-poll';
 import { SlabImage } from '@/components/SlabImage';
 
 /**
- * Shown where the gift offer would be, once this account's claim is spent.
+ * Shown where the gift offer would be, when this visitor cannot claim it.
+ *
+ * DELIBERATELY does not say "already claimed". The ineligible state is
+ * `canClaimFreePack` → false, which covers a spent claim AND a failed
+ * eligibility read (backend down, breaker open) — the storefront cannot tell
+ * them apart, so any wording asserting a past claim is a lie to a first-time
+ * visitor whose read simply failed. This sentence is true in both.
+ *
  * Storefront-only copy (unlike FREE_PULL_LOCKED_MESSAGE, which the backend also
  * throws): nothing server-side refuses with this wording — the open's refusal
  * is the backend's own, and this page never gets that far.
  */
-const FREE_PACK_CLAIMED_MESSAGE =
-  'Already claimed — your welcome pack was a one-time gift.';
+const FREE_PACK_UNAVAILABLE_MESSAGE =
+  "This welcome pack isn't available on this account.";
 
 export default function PackDetailClient({
   pack,
@@ -76,7 +83,7 @@ export default function PackDetailClient({
   /**
    * Free pack ONLY: may this visitor still claim it? The route is public (the
    * pack is merely uncataloged), so a shared link / history entry / stale badge
-   * lands a spent account here — and the backend then refuses the open at the
+   * lands an ineligible account here — and the backend refuses the open at the
    * reel. Defaults true so every paid pack, for which page.tsx passes nothing,
    * renders exactly as before.
    *
@@ -133,11 +140,13 @@ export default function PackDetailClient({
   // siblings list is empty (it is not in the catalog), so `active` can never
   // become a different, paid pack.
   const isFreePack = pack.categoryId === FREE_WELCOME_CATEGORY;
-  // The free pack, reached by someone who can no longer claim it. Every gift
+  // The free pack, reached by someone who cannot claim it — a spent claim OR a
+  // failed eligibility read, which the storefront cannot tell apart (hence the
+  // neutral copy above; nothing here may assert a past claim). Every gift
   // affordance below turns off together — a half-suppressed state (dock CTA
   // gone, panel copy still promising "nothing charged") reads as a bug, and the
   // promise is the part that is actually false.
-  const freeClaimSpent = isFreePack && !freePackEligible;
+  const freeClaimUnavailable = isFreePack && !freePackEligible;
 
   // Real backend price, never re-parsed from the rounded display string.
   const priceNum = active.priceValue;
@@ -320,18 +329,18 @@ export default function PackDetailClient({
               {isFreePack ? (
                 // A free pull can be neither sold nor delivered until the first
                 // PAID open, so a buyback rate here would advertise money the
-                // sell then refuses. Say what it IS instead — or, once the
-                // claim is spent, what it WAS (quiet white, not chase gold:
-                // this is a receipt, not an offer).
+                // sell then refuses. Say what it IS instead — or, when it
+                // cannot be claimed, drop to quiet white: not an offer, and
+                // not a claim about why (see FREE_PACK_UNAVAILABLE_MESSAGE).
                 <span
                   className={cn(
                     'inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide',
-                    freeClaimSpent
+                    freeClaimUnavailable
                       ? 'bg-white/10 text-white/60'
                       : 'bg-chase/15 text-chase',
                   )}
                 >
-                  {freeClaimSpent ? 'Claimed' : 'Free'}
+                  {freeClaimUnavailable ? 'Unavailable' : 'Free'}
                 </span>
               ) : (
                 <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-buyback/90 px-2.5 py-1 text-[11px] font-bold text-white">
@@ -486,9 +495,9 @@ export default function PackDetailClient({
             <div className="hidden border-t border-white/10 p-4 lg:block">
               {/* DESIGN.md primary: Paper White pill, Ink text — buyback green
                   is a money-IN signal and never a spend CTA. Money in Nekst.
-                  Absent once the claim is spent: the open would 4xx, so a
+                  Absent when the claim is unavailable: the open would 4xx, so a
                   primary CTA here is an invitation to a refusal. */}
-              {!freeClaimSpent && (
+              {!freeClaimUnavailable && (
                 <Pill
                   variant="primary"
                   size="lg"
@@ -536,11 +545,11 @@ export default function PackDetailClient({
               <p
                 className={cn(
                   'text-center text-[11px] text-white/60',
-                  !freeClaimSpent && 'mt-2',
+                  !freeClaimUnavailable && 'mt-2',
                 )}
               >
-                {freeClaimSpent ? (
-                  <>{FREE_PACK_CLAIMED_MESSAGE}</>
+                {freeClaimUnavailable ? (
+                  <>{FREE_PACK_UNAVAILABLE_MESSAGE}</>
                 ) : isFreePack ? (
                   <>
                     Your one-time welcome pack — nothing charged. The card lands
@@ -704,15 +713,15 @@ export default function PackDetailClient({
                 slot must not go empty, or the pill drifts left and the dock
                 reads like a different component. */}
             <p className="truncate font-heading text-xl font-bold leading-none tracking-tight text-white tabular-nums">
-              {freeClaimSpent
-                ? 'Claimed'
+              {freeClaimUnavailable
+                ? 'Unavailable'
                 : isFreePack
                   ? 'Free'
                   : rm(priceNum * qty)}
             </p>
             <p className="mt-1 text-[11px] leading-none text-white/60">
-              {freeClaimSpent
-                ? 'One-time gift, already used'
+              {freeClaimUnavailable
+                ? 'Not available on this account'
                 : isFreePack
                   ? 'Your welcome pack'
                   : `${active.buybackPercent ?? FLAT_BUYBACK_PERCENT}% buyback`}
@@ -746,7 +755,7 @@ export default function PackDetailClient({
               <Plus className="h-4 w-4" aria-hidden />
             </button>
           </div>
-          {!freeClaimSpent && (
+          {!freeClaimUnavailable && (
             <Pill
               variant="primary"
               size="md"
