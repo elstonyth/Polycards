@@ -913,6 +913,39 @@ class PacksModuleService extends MedusaService({
     }));
   }
 
+  // Rolling-24h GLOBAL sum of MINTED credit (positive `adjustment` rows), in
+  // integer cents. Backs the ADJUST_DAILY_MINT_MAX_RM ceiling checked in the
+  // adjust-credits step.
+  //
+  // Two properties here are the whole point, and both are what a copy of the
+  // per-customer withdrawal cap would get wrong:
+  //   * NO customer scope — the bound is on how much the operator population
+  //     can mint per day in total. Scoping it per customer would let N
+  //     customers buy N ceilings, and per-admin would just mean N tokens.
+  //   * `amount > 0` only — clawbacks never count, so a deduction cannot
+  //     restore headroom for a fresh grant.
+  // `deleted_at IS NULL` matters too: the step's compensation handler removes
+  // the row, and a compensated attempt must not consume the day's ceiling.
+  //
+  // ponytail: no (reason, created_at) index. At this table's size Postgres
+  // seq-scans regardless (measured 0.2 ms / 37 buffers over 1,223 rows), and
+  // the call path is capped at 200/min by the admin limiter. Add a partial
+  // index on (created_at) WHERE reason = 'adjustment' if this reaches slow logs.
+  @InjectManager()
+  async rollingAdjustmentMintCents(
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<number> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ sum_cents: string | null }[]>(
+      'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS sum_cents ' +
+        'FROM credit_transaction ' +
+        "WHERE reason = 'adjustment' AND amount > 0 AND deleted_at IS NULL " +
+        "AND created_at > now() - interval '24 hours'",
+    );
+    return Number(rows[0]?.sum_cents ?? 0);
+  }
+
   // Customer credit balance = Σ(amount) over the append-only ledger. Kept as a
   // thin delegate so existing callers (pack detail affordability, etc.) are
   // unchanged.
