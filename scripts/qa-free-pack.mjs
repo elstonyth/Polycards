@@ -247,6 +247,21 @@ try {
         await shot(gp, 'guest-badge-auth-modal');
       }
     }
+    // Site-wide mount: the same guest also sees the badge OFF /slots (layout's
+    // GlobalFreePackBadge). Home is the representative "any other page".
+    await gp.goto(`${BASE}/`, { waitUntil: 'networkidle' });
+    let homeBadgeVisible = true;
+    try {
+      await gp
+        .getByTestId('free-pack-badge')
+        .first()
+        .waitFor({ state: 'visible', timeout: 20000 });
+    } catch {
+      homeBadgeVisible = false;
+    }
+    if (homeBadgeVisible) ok('guest badge visible on / (global mount)');
+    else fail('guest badge missing on / — global mount broken');
+    await shot(gp, 'guest-badge-home');
     await guest.close();
   }
 
@@ -281,6 +296,30 @@ try {
   await badge.waitFor({ state: 'visible', timeout: 20000 });
   ok('free-pack badge visible on /slots');
   await shot(page, 'badge');
+
+  // 1a ── claim badge deep-links to the reels, and follows the member onto
+  // every other page via the global mount.
+  const badgeHref = await badge.getAttribute('href');
+  if (badgeHref === `/slots/${SLUG}/spin`) {
+    ok(`claim badge href is the spin page (${badgeHref})`);
+  } else {
+    fail(`claim badge href is ${badgeHref}, want /slots/${SLUG}/spin`);
+  }
+  await page.goto(`${BASE}/`, { waitUntil: 'networkidle' });
+  let memberHomeBadge = true;
+  try {
+    await page
+      .getByTestId('free-pack-badge')
+      .first()
+      .waitFor({ state: 'visible', timeout: 20000 });
+  } catch {
+    memberHomeBadge = false;
+  }
+  if (memberHomeBadge) ok('member badge visible on / (global mount)');
+  else fail('member badge missing on / — global mount broken');
+  await shot(page, 'member-badge-home');
+  await page.goto(`${BASE}/slots`, { waitUntil: 'networkidle' });
+  await badge.waitFor({ state: 'visible', timeout: 20000 });
 
   // 1b ── BADGE vs CATALOG. The badge is `fixed` bottom-right at z-40, floating
   // OVER the catalog, so it gets TWO assertions — they fail on different bugs
@@ -402,9 +441,12 @@ try {
   await page.setViewportSize({ width: 430, height: 932 });
   await page.goto(`${BASE}/slots`, { waitUntil: 'networkidle' });
 
-  // 2 ── the detail page is in free mode
+  // 2 ── the badge lands straight on the reels; the detail page (reached by
+  // URL — the badge no longer routes through it) still renders free mode.
   await badge.click();
-  await page.waitForURL(new RegExp(`/slots/${SLUG}`), { timeout: 20000 });
+  await page.waitForURL(new RegExp(`/slots/${SLUG}/spin`), { timeout: 20000 });
+  ok('badge tap lands on the spin page');
+  await page.goto(`${BASE}/slots/${SLUG}`, { waitUntil: 'networkidle' });
   const openCta = page.getByRole('button', { name: /open free pack/i }).first();
   await openCta.waitFor({ timeout: 20000 });
   ok('detail CTA reads "Open Free Pack"');
@@ -548,6 +590,15 @@ try {
     fail('badge still visible after the claim was spent');
   } else {
     ok('badge gone after claim');
+  }
+  // The global mount must agree: navigate off /slots and let /api/free-pack
+  // re-answer for the spent claim.
+  await page.goto(`${BASE}/`, { waitUntil: 'networkidle' });
+  await page.waitForTimeout(2000);
+  if (await page.getByTestId('free-pack-badge').count()) {
+    fail('global badge still visible on / after the claim was spent');
+  } else {
+    ok('global badge gone on / after claim');
   }
   await shot(page, 'badge-gone');
 } catch (err) {

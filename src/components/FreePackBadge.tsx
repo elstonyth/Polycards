@@ -1,22 +1,30 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
+import { usePathname } from 'next/navigation';
 import { openAuth } from '@/components/AuthButton';
+import { useAuth } from '@/components/auth/AuthProvider';
 import type { FreePackState } from '@/lib/data/free-pack';
 import { usePrefersReducedMotion } from '@/lib/use-reveal';
 import { useConsent } from '@/lib/use-consent';
 import { cn } from '@/lib/utils';
 
 /**
- * The free welcome pack's ONLY entry point — a floating badge on /slots.
+ * The free welcome pack's ONLY entry point — a floating badge.
  *
  * Two variants sharing one visual:
- *  - `claim`  — an eligible customer; links to the (uncataloged) pack page.
+ *  - `claim`  — an eligible customer; links straight to the (uncataloged)
+ *    pack's spin page, so one tap lands on the reels.
  *  - `signup` — a logged-out visitor while an active free pack exists; opens
  *    the auth modal in register mode. AuthForm calls router.refresh() on
  *    success, so the server page re-answers and this badge flips to `claim`
  *    (fresh account) or disappears (ineligible account).
+ *
+ * Rendered two ways: /slots passes server-read state directly (so the catalog
+ * can reserve scroll clearance for it), and every other page gets it via
+ * GlobalFreePackBadge below.
  *
  * Docked above the 5-tab bar (TabBar is `h-16` + safe-area, `lg:hidden`), so it
  * sits on the same rail as the pack page's mobile buy dock and drops to a plain
@@ -73,7 +81,7 @@ export default function FreePackBadge({
   }
   return (
     <Link
-      href={`/slots/${encodeURIComponent(state.slug)}`}
+      href={`/slots/${encodeURIComponent(state.slug)}/spin`}
       data-testid="free-pack-badge"
       aria-label="Claim your free welcome pack"
       className={shellCls}
@@ -81,4 +89,55 @@ export default function FreePackBadge({
       {art}
     </Link>
   );
+}
+
+/**
+ * Site-wide mount (layout.tsx): re-reads /api/free-pack on every route or
+ * auth change, so the badge follows the visitor everywhere and disappears on
+ * the next navigation after the claim is spent. Skips /slots (that page
+ * renders the badge itself from server state) and the free pack's own
+ * detail/spin pages (the badge would link to where the visitor already is).
+ */
+export function GlobalFreePackBadge() {
+  const pathname = usePathname();
+  const { customer, isLoading } = useAuth();
+  const customerId = customer?.id ?? null;
+  const [state, setState] = useState<FreePackState>({ mode: 'hidden' });
+
+  useEffect(() => {
+    // Hold until the auth hydrate settles so a logged-in visitor never sees
+    // the guest promo answer flash before the per-customer one. /slots never
+    // renders this mount (it draws its own server-passed badge), so skip the
+    // fetch there too — that page already paid for the state server-side.
+    if (isLoading || pathname === '/slots') return;
+    let cancelled = false;
+    void fetch('/api/free-pack', { cache: 'no-store' })
+      .then((res) => (res.ok ? (res.json() as Promise<FreePackState>) : null))
+      .then((next) => {
+        if (cancelled || !next) return;
+        // Same-origin self-API, but a malformed answer must fail to hidden —
+        // the badge is an enhancement, never an error surface.
+        setState(
+          next.mode === 'claim' && typeof next.slug === 'string'
+            ? next
+            : next.mode === 'signup'
+              ? { mode: 'signup' }
+              : { mode: 'hidden' },
+        );
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname, customerId, isLoading]);
+
+  if (state.mode === 'hidden') return null;
+  if (pathname === '/slots') return null;
+  // Raw slug, not encodeURIComponent: usePathname() answers decoded, so an
+  // encoded comparison would miss any slug with special characters. (The href
+  // in FreePackBadge still encodes — that side goes INTO a URL.)
+  if (state.mode === 'claim' && pathname.startsWith(`/slots/${state.slug}`)) {
+    return null;
+  }
+  return <FreePackBadge state={state} />;
 }
