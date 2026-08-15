@@ -1,25 +1,25 @@
-import { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
-import PacksModuleService from "../../../modules/packs/service";
-import { PACKS_MODULE } from "../../../modules/packs";
-import { createPackWorkflow } from "../../../workflows/create-pack";
-import { assertSingleActiveFreePack, coercePackBody } from "./validate";
-import { FREE_WELCOME_CATEGORY } from "../../../modules/packs/free-pack";
-import { clearPackListCache } from "../../store/packs/route";
-import { normalizePublishedOdds } from "../../../workflows/steps/create-pack";
-import { pageAll } from "../../utils/page-all";
-import { toMoney } from "../../../modules/packs/money";
+import { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
+import PacksModuleService from '../../../modules/packs/service';
+import { PACKS_MODULE } from '../../../modules/packs';
+import { createPackWorkflow } from '../../../workflows/create-pack';
+import { assertSingleActiveFreePack, coercePackBody } from './validate';
+import { FREE_WELCOME_CATEGORY } from '../../../modules/packs/free-pack';
+import { clearPackListCache } from '../../store/packs/route';
+import { normalizePublishedOdds } from '../../../workflows/steps/create-pack';
+import { pageAll } from '../../utils/page-all';
+import { toMoney } from '../../../modules/packs/money';
 import {
   packTheoreticalRtp,
   publishedEv,
-} from "../../../modules/packs/economy";
-import { isGraded } from "../../../modules/packs/card-view";
-import { normalizeTierRanges } from "../../../modules/packs/tier-settings-validate";
-import { weightForSet, type OddsSet } from "../../../modules/packs/odds-sets";
+} from '../../../modules/packs/economy';
+import { compositionGroup, isGraded } from '../../../modules/packs/card-view';
+import { normalizeTierRanges } from '../../../modules/packs/tier-settings-validate';
+import { weightForSet, type OddsSet } from '../../../modules/packs/odds-sets';
 import {
   resolveFxRate,
   displayMarketPrice,
   DEFAULT_MARKET_MULTIPLIER,
-} from "../../../modules/packs/pricing";
+} from '../../../modules/packs/pricing';
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
@@ -29,25 +29,26 @@ const round2 = (n: number): number => Math.round(n * 100) / 100;
 // (category, rank) to mirror the storefront grouping.
 export async function GET(
   req: MedusaRequest,
-  res: MedusaResponse
+  res: MedusaResponse,
 ): Promise<void> {
-  const packsModuleService: PacksModuleService = req.scope.resolve(PACKS_MODULE);
+  const packsModuleService: PacksModuleService =
+    req.scope.resolve(PACKS_MODULE);
 
   const packs = await packsModuleService.listPacks({}, { take: 1000 });
   const sorted = [...packs].sort((a, b) =>
     a.category === b.category
       ? a.rank - b.rank
-      : a.category.localeCompare(b.category)
+      : a.category.localeCompare(b.category),
   );
 
   // Stats fan-out — every odds row and every card ONCE, then all the per-pack
   // math in memory (same shape as GET /admin/economy). N packs must not mean
   // N queries: this list renders on every admin pack-page load.
   const allOdds = await pageAll((opts) =>
-    packsModuleService.listPackOdds({}, opts)
+    packsModuleService.listPackOdds({}, opts),
   );
   const allCards = await pageAll((opts) =>
-    packsModuleService.listCards({}, opts)
+    packsModuleService.listCards({}, opts),
   );
   const fx = await resolveFxRate(packsModuleService);
   // PRICE, not raw FMV: FMV × live fx × the card's OWN markup multiplier — the
@@ -59,16 +60,16 @@ export async function GET(
       displayMarketPrice(
         toMoney(c.market_value),
         fx,
-        toMoney(c.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER)
+        toMoney(c.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER),
       ),
-    ])
+    ]),
   );
   const graderByHandle = new Map(allCards.map((c) => [c.handle, c.grader]));
 
   // Reward rows (card_id null) carry no card and no value — drop them here so
   // the per-pack loop below never has to re-check. Narrows card_id to string.
   const cardOdds = allOdds.filter(
-    (o): o is typeof o & { card_id: string } => o.card_id != null
+    (o): o is typeof o & { card_id: string } => o.card_id != null,
   );
   const oddsByPack = new Map<string, typeof cardOdds>();
   for (const o of cardOdds) {
@@ -97,7 +98,7 @@ export async function GET(
         // Orphaned odds row (card deleted) — not part of the pool at all.
         if (cardPrice === undefined || grader === undefined) continue;
         if (isGraded({ grader })) graded++;
-        const rarity = o.rarity ?? "Common";
+        const rarity = o.rarity ?? 'Common';
         const t = tiers.get(rarity) ?? { sum: 0, n: 0 };
         t.sum += cardPrice;
         t.n += 1;
@@ -118,7 +119,7 @@ export async function GET(
             weight: weightForSet(c, s),
             market_value: c.market_value,
           })),
-          price
+          price,
         );
       const [r1, r2, r3] = [rtpFor(1), rtpFor(2), rtpFor(3)];
 
@@ -149,15 +150,9 @@ export async function GET(
         // tier_settings singleton (null vs {} matters — see the odds route).
         tier_ranges:
           p.tier_ranges == null ? null : normalizeTierRanges(p.tier_ranges),
-        // §2.4.8 composition — AUTO-DETECTED from the pool, never operator-set.
-        // Null = empty pool: nothing to infer from, not "raw".
-        group: !pool.length
-          ? null
-          : graded === pool.length
-            ? "GRADED"
-            : graded === 0
-              ? "RAW"
-              : "MIX",
+        // §2.4.8 composition — AUTO-DETECTED from the pool, never operator-set
+        // (shared thresholds with the public catalog; null = empty pool).
+        group: compositionGroup(graded, pool.length),
         ev: { s1: r1?.ev ?? null, s2: r2?.ev ?? null, s3: r3?.ev ?? null },
         rtp: {
           s1: r1?.rtp_pct ?? null,
@@ -176,15 +171,16 @@ export async function GET(
 // prize pool; cards are assigned via the membership editor.
 export async function POST(
   req: MedusaRequest,
-  res: MedusaResponse
+  res: MedusaResponse,
 ): Promise<void> {
   const body = (req.body ?? {}) as Record<string, unknown>;
-  const slug = typeof body.slug === "string" ? body.slug.trim() : "";
+  const slug = typeof body.slug === 'string' ? body.slug.trim() : '';
   const input = coercePackBody(body, slug);
 
   // Only ONE free_welcome pack may be live — the lookup runs only when this
   // write is actually a free-pack write.
-  const packsModuleService: PacksModuleService = req.scope.resolve(PACKS_MODULE);
+  const packsModuleService: PacksModuleService =
+    req.scope.resolve(PACKS_MODULE);
   assertSingleActiveFreePack(
     input.category === FREE_WELCOME_CATEGORY
       ? ((await packsModuleService.getActiveFreePack())?.slug ?? null)

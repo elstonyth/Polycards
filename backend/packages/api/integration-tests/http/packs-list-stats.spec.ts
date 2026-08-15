@@ -1,7 +1,9 @@
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
+import { Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
 import { clearFxDisplayCache } from '../../src/modules/packs/pricing';
+import { clearPackListCache } from '../../src/api/store/packs/route';
 import { mintSuperAdmin, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
@@ -29,6 +31,16 @@ jest.setTimeout(240 * 1000);
 const PACK = 'stats-pack';
 const PUB_PACK = 'stats-pub-pack';
 const EMPTY_PACK = 'stats-empty-pack';
+// Composition edges: an ALL-RAW pool (the `graded === 0` branch neither route
+// asserted before) and an all-PSA-10 pool (the only pool the public catalog
+// may flag `psa10` — PUB_PACK is all-graded but holds a PSA 9, the exact
+// mis-entry that must NOT reach the "Guaranteed PSA 10" section).
+const RAW_PACK = 'stats-raw-pack';
+const PSA10_PACK = 'stats-psa10-pack';
+// ACTIVE with no pool: the public catalog must list it with group null +
+// psa10 false (EMPTY_PACK can't cover this — it is draft, so the store route
+// filters it out entirely).
+const ACTIVE_EMPTY_PACK = 'stats-active-empty-pack';
 const PACK_PRICE = 300;
 // NOT the same as pub_ev's RM74: at price 100 the pub_rtp assertion below would
 // pass just as well against an implementation that dropped the division (or
@@ -97,6 +109,33 @@ medusaIntegrationTestRunner({
             image: '/qa.png',
             status: 'draft' as const,
             rank: 2,
+          },
+          {
+            slug: RAW_PACK,
+            title: 'Stats Raw Pack',
+            category: 'pokemon',
+            price: 40,
+            image: '/qa.png',
+            status: 'active' as const,
+            rank: 3,
+          },
+          {
+            slug: PSA10_PACK,
+            title: 'Stats PSA10 Pack',
+            category: 'pokemon',
+            price: 400,
+            image: '/qa.png',
+            status: 'active' as const,
+            rank: 4,
+          },
+          {
+            slug: ACTIVE_EMPTY_PACK,
+            title: 'Stats Active Empty Pack',
+            category: 'pokemon',
+            price: 60,
+            image: '/qa.png',
+            status: 'active' as const,
+            rank: 5,
           },
         ]);
         // grader/grade are NOT NULL columns; '' is how a RAW card is stored.
@@ -194,13 +233,45 @@ medusaIntegrationTestRunner({
             locked: false,
             weight: 9000,
           },
+          // RAW_PACK reuses the two raw cards; PSA10_PACK the two PSA 10s —
+          // composition comes from the (pack, card) links, no new cards needed.
+          {
+            pack_id: RAW_PACK,
+            card_id: 'stats-b',
+            rarity: 'Rare' as const,
+            locked: false,
+            weight: 5000,
+          },
+          {
+            pack_id: RAW_PACK,
+            card_id: 'stats-c',
+            rarity: 'Common' as const,
+            locked: false,
+            weight: 5000,
+          },
+          {
+            pack_id: PSA10_PACK,
+            card_id: 'stats-a',
+            rarity: 'Legendary' as const,
+            locked: false,
+            weight: 5000,
+          },
+          {
+            pack_id: PSA10_PACK,
+            card_id: 'stats-legendary',
+            rarity: 'Legendary' as const,
+            locked: false,
+            weight: 5000,
+          },
         ]);
       });
 
       const list = (headers: Record<string, string>) =>
         unwrapResponse(api.get('/admin/packs', { headers }));
 
-      const rowsOf = async (): Promise<Map<string, Record<string, unknown>>> => {
+      const rowsOf = async (): Promise<
+        Map<string, Record<string, unknown>>
+      > => {
         const res = await list({ authorization: `Bearer ${adminToken}` });
         expect(res.status).toBe(200);
         const packs = res.data.packs as Record<string, unknown>[];
@@ -225,10 +296,52 @@ medusaIntegrationTestRunner({
       it('auto-detects the pack composition from its pool', async () => {
         const rows = await rowsOf();
         // stats-a is PSA, stats-b/c are raw ⇒ MIX. PUB_PACK's two cards are
-        // both graded ⇒ GRADED. An empty pool has nothing to infer ⇒ null.
+        // both graded ⇒ GRADED. An all-raw pool ⇒ RAW (not null). An empty
+        // pool has nothing to infer ⇒ null.
         expect(rows.get(PACK)?.group).toBe('MIX');
         expect(rows.get(PUB_PACK)?.group).toBe('GRADED');
+        expect(rows.get(RAW_PACK)?.group).toBe('RAW');
         expect(rows.get(EMPTY_PACK)?.group).toBeNull();
+      });
+      it('mirrors the composition on the public catalog (GET /store/packs)', async () => {
+        // The store list cache is MODULE state and outlives the per-test DB
+        // reset — clear it or this test reads a prior test's catalog.
+        clearPackListCache();
+        const apiKeyModule = getContainer().resolve(Modules.API_KEY);
+        const key = await apiKeyModule.createApiKeys({
+          title: 'stats-store-key',
+          type: 'publishable',
+          created_by: 'packs-list-stats',
+        });
+        const res = await unwrapResponse(
+          api.get('/store/packs', {
+            headers: { 'x-publishable-api-key': key.token },
+          }),
+        );
+        expect(res.status).toBe(200);
+        const rows = new Map(
+          (
+            res.data.packs as { slug: string; group: unknown; psa10: unknown }[]
+          ).map((p) => [p.slug, p]),
+        );
+        expect(rows.get(PACK)?.group).toBe('MIX');
+        expect(rows.get(PUB_PACK)?.group).toBe('GRADED');
+        expect(rows.get(RAW_PACK)?.group).toBe('RAW');
+        // EMPTY_PACK is draft — the public catalog must not list it at all.
+        expect(rows.has(EMPTY_PACK)).toBe(false);
+        // An ACTIVE empty pool is listed, with nothing to infer (null) and
+        // never the guarantee.
+        expect(rows.get(ACTIVE_EMPTY_PACK)?.group).toBeNull();
+        expect(rows.get(ACTIVE_EMPTY_PACK)?.psa10).toBe(false);
+
+        // The PSA 10 guarantee gate is STRICTER than GRADED: PUB_PACK is
+        // all-graded but holds a PSA 9, so it must NOT be flagged psa10 —
+        // only the all-PSA-10 pool may carry the storefront's guarantee.
+        expect(rows.get(PSA10_PACK)?.group).toBe('GRADED');
+        expect(rows.get(PSA10_PACK)?.psa10).toBe(true);
+        expect(rows.get(PUB_PACK)?.psa10).toBe(false);
+        expect(rows.get(PACK)?.psa10).toBe(false);
+        expect(rows.get(RAW_PACK)?.psa10).toBe(false);
       });
 
       it('computes Published EV from the published tier percentages', async () => {

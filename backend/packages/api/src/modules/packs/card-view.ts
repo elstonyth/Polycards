@@ -30,6 +30,26 @@ export function cardByHandle<T extends { handle: string }>(
 export const isGraded = (c: { grader: string }): boolean =>
   c.grader.trim() !== '';
 
+// Strictly a PSA 10 — what the storefront's "Guaranteed PSA 10" section
+// verifies. GRADED alone is not enough: a PSA 9 or a BGS/CGC slab is graded
+// but would make that heading false advertising, so the guarantee gate checks
+// grader AND grade. Case/whitespace-tolerant on grader (operator-typed).
+export const isPsa10 = (c: { grader: string; grade: string }): boolean =>
+  c.grader.trim().toUpperCase() === 'PSA' && c.grade.trim() === '10';
+
+// §2.4.8 composition from a pool's graded count: GRADED iff EVERY pooled card
+// is graded, RAW iff none, MIX otherwise; an empty pool has nothing to infer
+// from (null, never 'RAW'). Shared by the admin pack list and the public
+// catalog so the two can never drift on the thresholds.
+export type CompositionGroup = 'GRADED' | 'RAW' | 'MIX';
+export function compositionGroup(
+  graded: number,
+  total: number,
+): CompositionGroup | null {
+  if (total === 0) return null;
+  return graded === total ? 'GRADED' : graded === 0 ? 'RAW' : 'MIX';
+}
+
 // card_id/rarity are nullable on the row (reward rows have neither); the lookup
 // keys defensively and defaults to "Common", so a reward row passed in here is
 // harmless — it just never matches a real (pack, card) card lookup.
