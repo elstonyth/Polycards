@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { getPackCategories } from '@/lib/data/packs';
-import { getFreePackEligibility } from '@/lib/data/free-pack';
+import { getFreePackState } from '@/lib/data/free-pack';
 import CatalogClient from './CatalogClient';
 
 export const metadata: Metadata = {
@@ -19,9 +19,9 @@ export default async function SlotsPage({
   const [{ category }, categories, freePack] = await Promise.all([
     searchParams,
     getPackCategories(),
-    // Per-customer and never cached; degrades to "not eligible" on any failure,
-    // so it can't take the catalog down with it.
-    getFreePackEligibility(),
+    // Per-visitor and never cached; degrades to "hidden" on any failure, so it
+    // can't take the catalog down with it.
+    getFreePackState(),
   ]);
 
   // Honor /slots?category=<key> when it exists; else default to "All Packs".
@@ -34,7 +34,7 @@ export default async function SlotsPage({
       initialCategory={initialCategory}
       // The free pack is absent from `categories` by design (the backend hides
       // its category) — the badge is its only entry point.
-      freePackSlug={freePack.eligible ? freePack.slug : null}
+      freePack={freePack.mode === 'hidden' ? null : freePack}
     />
   );
 }
