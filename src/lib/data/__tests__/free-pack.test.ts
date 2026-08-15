@@ -22,7 +22,7 @@ vi.mock('@/lib/data/customer', () => ({
   getAuthToken: vi.fn(),
 }));
 
-import { mapFreePackState } from '../free-pack';
+import { canClaimFreePack, mapFreePackState } from '../free-pack';
 
 describe('mapFreePackState — (token, response) → badge state', () => {
   it('guest + promo:true → signup', () => {
@@ -67,5 +67,37 @@ describe('mapFreePackState — (token, response) → badge state', () => {
     expect(
       mapFreePackState(true, { eligible: false, slug: null, promo: true }),
     ).toEqual({ mode: 'hidden' });
+  });
+});
+
+// The /slots/[slug] eligibility branch. A server component has no test net
+// here, so this mapper is where that page's behaviour is pinned.
+describe('canClaimFreePack — (badge state, slug) → may this visitor claim it', () => {
+  it('logged-out visitor still sees the offer, on whatever slug they landed on', () => {
+    // Mapping `signup` to false would greet every first-time visitor to the
+    // free pack with "already claimed" — both wrong, and the exact funnel the
+    // badge exists to feed. `signup` carries no per-customer claim to match a
+    // slug against, only the catalog fact that a promo is live.
+    expect(canClaimFreePack({ mode: 'signup' }, 'welcome-pack')).toBe(true);
+    expect(canClaimFreePack({ mode: 'signup' }, 'anything')).toBe(true);
+  });
+
+  it('eligible customer may claim THIS pack', () => {
+    expect(
+      canClaimFreePack({ mode: 'claim', slug: 'welcome-pack' }, 'welcome-pack'),
+    ).toBe(true);
+  });
+
+  it('a claim on a DIFFERENT pack does not authorise this one', () => {
+    // Guards the window where the operator swaps which free pack is active.
+    expect(
+      canClaimFreePack({ mode: 'claim', slug: 'other-pack' }, 'welcome-pack'),
+    ).toBe(false);
+  });
+
+  it('spent claim — or a failed read — withholds the offer', () => {
+    // `hidden` is both, and the storefront cannot tell them apart: withhold
+    // rather than advertise an offer the backend would refuse.
+    expect(canClaimFreePack({ mode: 'hidden' }, 'welcome-pack')).toBe(false);
   });
 });

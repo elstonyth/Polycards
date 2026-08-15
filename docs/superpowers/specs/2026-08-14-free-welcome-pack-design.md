@@ -163,6 +163,83 @@ badge is the only public surface of the free pack.
 - **Storefront**: Playwright QA loop — badge visibility (eligible vs not),
   locked overlay, post-unlock normal behavior.
 
+## Economics invariant
+
+**The published free pool's expected buyback value must stay below the gross
+margin of the cheapest paid pack open.** Formally, with `p_i` the free pack's
+per-card odds and `v_i` each card's live FMV:
+
+```
+Σ(p_i × v_i) × (free_pack.buyback_percent / 100)   <   price(cheapest paid pack) − Σ(p_j × v_j) over that pack
+```
+
+Why this is a real constraint and not a modelling nicety — **the free pull's
+sale value becomes withdrawable real money after one paid open**:
+
+1. The free-pull sell/delivery lock lifts on ANY paid open
+   (`hasPaidOpen`, `source='pack'`) — the "full lock" above is temporary by
+   design, not permanent.
+2. The sell then credits `buyback_percent` of live FMV. That floor is the flat
+   rate, 90% (`validate.ts`: `buyback_percent` must be between the flat rate and
+   100), so the pool's EV is discounted by at most 10%.
+3. Buyback credit is written with **`external_funded_cents = 0`** — it banks NO
+   playthrough. That does not protect anything here: the playthrough gate is
+   `remaining = max(0, deposited − used)` (`withdrawable.ts`), so an account that
+   deposits `D` and spends `D` on the unlocking open already has
+   `remaining = 0`. Every credit in the balance — including the entire free-pull
+   sale — is then withdrawable.
+
+So the loop is: deposit `D` → open the cheapest paid pack (playthrough
+satisfied) → sell the free card → withdraw. The house's take on that round trip
+is the paid pack's own margin; the free pool's discounted EV is paid straight
+out. If the inequality above inverts, opening one paid pack becomes
+**+EV for the player** and the free pack funds an arbitrage rather than an
+acquisition cost.
+
+Consequences for whoever configures the free pack:
+
+- The constraint binds against the **cheapest** paid pack, not the average one —
+  a farmer picks the cheapest unlock every time.
+- It is an invariant over *live FMV*, which moves without anyone touching the
+  pack. A free pool that was compliant at publication can drift out of it when a
+  chase card appreciates; re-check when card values are repriced.
+- Capping the free pool's top-end FMV is the direct lever. Odds alone cannot fix
+  a pool whose tail card is worth more than the unlock margin, because a single
+  lucky account realises the tail, not the mean.
+
+## Eligibility model — OPEN (do not treat the prose above as settled)
+
+The "new registrations only" rule as shipped is **stamped by a
+`customer.created` subscriber, unconditionally**, and that has a hole the
+brainstorm did not consider: account **self-deletion re-arms the grant**.
+Deletion hard-deletes the auth identities (deliberately, so re-signup works) and
+soft-deletes the customer; a re-signup with the same email mints a new
+`customer_id`, fires `customer.created` again, and stamps a fresh free pack.
+Nothing records that the person already consumed one. Combined with the
+Economics invariant above, the cost of that loop is exactly one paid open per
+cycle.
+
+The proposed control is to move the stamp from registration to **first phone
+verification** — the control this repo already uses to bound every other money
+surface (`requirePhoneVerified` on topup / deposit / withdraw / delivery), where
+phone numbers are the practical per-person scarcity and the OTP rate limits
+price bulk farming. It is **not implemented**, and it is not a drop-in move:
+
+- `customer-phone-verified.ts` subscribes to `customer.created`, not to a
+  verification event. It stamps only signups that arrived with an
+  already-proven phone, and it early-returns when `PHONE_VERIFICATION_REQUIRED`
+  is off.
+- The other first-verification path is `POST /store/phone-verification/change`
+  (Google signups carry no phone and verify there). Stamping only in the
+  subscriber would leave every Google signup permanently ineligible.
+- `markFreePackAvailable` is first-write-wins on a column that is currently
+  never set for legacy accounts, so stamping in that route newly grants a free
+  pack to every pre-existing customer on their first verification — a grant-policy
+  widening that needs an explicit decision, not an implementation choice.
+
+Whoever resolves this must state which accounts become eligible, and update the
+Decisions table's "Eligibility" row rather than leaving both models documented.
+
 ## Out of scope
 
 - Retroactive grants to existing accounts.
