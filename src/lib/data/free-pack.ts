@@ -42,6 +42,24 @@ export function mapFreePackState(
 }
 
 /**
+ * May the visitor looking at `slug` still claim it? Pure, so the detail page's
+ * eligibility branch has a test net — a server component has none here.
+ *
+ * `signup` (logged out, promo live) is ELIGIBLE on purpose: the offer is real
+ * for them, and the detail page's CTA prompts login on tap. Answering false
+ * would tell a first-time visitor their welcome pack was already claimed.
+ *
+ * The slug guard keeps a `claim` for a DIFFERENT active free pack from
+ * authorising this one, and `hidden` — a spent claim, or a failed read — is
+ * false: withhold the offer rather than advertise one the backend refuses.
+ */
+export function canClaimFreePack(state: FreePackState, slug: string): boolean {
+  return (
+    state.mode === 'signup' || (state.mode === 'claim' && state.slug === slug)
+  );
+}
+
+/**
  * Never throws and never caches: any failure is `hidden` and the page
  * renders exactly as it does today.
  */

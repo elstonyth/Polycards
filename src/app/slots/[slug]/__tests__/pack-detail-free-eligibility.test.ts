@@ -139,7 +139,15 @@ describe('PackDetailClient — free pack eligibility', () => {
     await render(false);
     const dock = container.querySelector('[data-testid="pack-buy-dock"]');
     expect(dock).not.toBeNull();
-    expect(dock?.textContent ?? '').not.toContain('Open Free Pack');
-    expect(container.textContent ?? '').not.toContain('Open Pack');
+    const dockText = dock?.textContent ?? '';
+    expect(dockText).not.toContain('Open Free Pack');
+    // Positive half: the dock must still SAY something in the slot the CTA
+    // vacated, or it collapses and the bottom chrome reads as a broken layout.
+    expect(dockText).toContain('One-time gift, already used');
+    // The desktop panel is a separate JSX branch — assert it independently of
+    // the dock, so suppressing one and not the other cannot pass.
+    const panelText = (container.textContent ?? '').replace(dockText, '');
+    expect(panelText).not.toContain('Open Free Pack');
+    expect(panelText).toContain('Already claimed');
   });
 });

@@ -2,7 +2,7 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { getPackBySlug, getPackDetail, getRecentPulls } from '@/lib/data/packs';
-import { getFreePackState } from '@/lib/data/free-pack';
+import { canClaimFreePack, getFreePackState } from '@/lib/data/free-pack';
 import { FREE_WELCOME_CATEGORY } from '@/lib/packs-data';
 import PackDetailClient from './PackDetailClient';
 
@@ -51,20 +51,14 @@ export default async function SlotsPackDetailPage({
   // page that would otherwise promise a gift the backend then refuses at the
   // reel. One extra read, and only for that one pack.
   //
-  // `signup` (logged out, promo live) counts as eligible on purpose: the offer
-  // is real for them and the client prompts login on tap. A rendered free pack
-  // is always the ACTIVE one — /store/packs/:slug 404s inactive packs, so the
-  // page would not exist otherwise — which is why guests reliably land on
-  // `signup` here rather than `hidden`.
-  //
-  // A failed read is `hidden` → not eligible → the already-claimed state. Same
-  // fail-direction as the badge: on a bad read we withhold the offer rather than
-  // advertise one we cannot stand behind.
+  // A rendered free pack is always the ACTIVE one (/store/packs/:slug 404s
+  // inactive packs, so this page would not exist otherwise), which is why a
+  // guest reliably lands on `signup` here rather than `hidden`. The state →
+  // eligibility mapping, including that guest case, is unit-tested in
+  // lib/data/__tests__/free-pack-state.test.ts.
   const freePackEligible =
     base.pack.categoryId === FREE_WELCOME_CATEGORY
-      ? await getFreePackState().then(
-          (s) => s.mode === 'signup' || (s.mode === 'claim' && s.slug === slug),
-        )
+      ? canClaimFreePack(await getFreePackState(), slug)
       : undefined;
 
   return (
