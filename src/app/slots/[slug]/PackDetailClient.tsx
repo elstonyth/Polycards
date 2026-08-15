@@ -48,12 +48,22 @@ import {
 import { usePackDetailPoll } from '@/lib/use-pack-detail-poll';
 import { SlabImage } from '@/components/SlabImage';
 
+/**
+ * Shown where the gift offer would be, once this account's claim is spent.
+ * Storefront-only copy (unlike FREE_PULL_LOCKED_MESSAGE, which the backend also
+ * throws): nothing server-side refuses with this wording — the open's refusal
+ * is the backend's own, and this page never gets that far.
+ */
+const FREE_PACK_CLAIMED_MESSAGE =
+  'Already claimed — your welcome pack was a one-time gift.';
+
 export default function PackDetailClient({
   pack,
   siblings,
   detail,
   recentPulls,
   initialQty = 1,
+  freePackEligible = true,
 }: {
   pack: ResolvedPack;
   siblings: Pack[];
@@ -63,6 +73,18 @@ export default function PackDetailClient({
   recentPulls: RecentPull[];
   /** Clamped 1–3 from the URL's `?count=` (the catalog stepper's choice). */
   initialQty?: number;
+  /**
+   * Free pack ONLY: may this visitor still claim it? The route is public (the
+   * pack is merely uncataloged), so a shared link / history entry / stale badge
+   * lands a spent account here — and the backend then refuses the open at the
+   * reel. Defaults true so every paid pack, for which page.tsx passes nothing,
+   * renders exactly as before.
+   *
+   * Logged-out visitors are eligible=true on purpose: page.tsx maps the
+   * `signup` badge state to true, so the offer that brought them here still
+   * shows and `handleGoToReel` prompts login.
+   */
+  freePackEligible?: boolean;
 }) {
   const { customer } = useAuth();
   const { balance, openTopUp } = useTopUp();
@@ -111,6 +133,11 @@ export default function PackDetailClient({
   // siblings list is empty (it is not in the catalog), so `active` can never
   // become a different, paid pack.
   const isFreePack = pack.categoryId === FREE_WELCOME_CATEGORY;
+  // The free pack, reached by someone who can no longer claim it. Every gift
+  // affordance below turns off together — a half-suppressed state (dock CTA
+  // gone, panel copy still promising "nothing charged") reads as a bug, and the
+  // promise is the part that is actually false.
+  const freeClaimSpent = isFreePack && !freePackEligible;
 
   // Real backend price, never re-parsed from the rounded display string.
   const priceNum = active.priceValue;
@@ -293,9 +320,18 @@ export default function PackDetailClient({
               {isFreePack ? (
                 // A free pull can be neither sold nor delivered until the first
                 // PAID open, so a buyback rate here would advertise money the
-                // sell then refuses. Say what it IS instead.
-                <span className="inline-flex shrink-0 items-center rounded-full bg-chase/15 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-chase">
-                  Free
+                // sell then refuses. Say what it IS instead — or, once the
+                // claim is spent, what it WAS (quiet white, not chase gold:
+                // this is a receipt, not an offer).
+                <span
+                  className={cn(
+                    'inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide',
+                    freeClaimSpent
+                      ? 'bg-white/10 text-white/60'
+                      : 'bg-chase/15 text-chase',
+                  )}
+                >
+                  {freeClaimSpent ? 'Claimed' : 'Free'}
                 </span>
               ) : (
                 <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-buyback/90 px-2.5 py-1 text-[11px] font-bold text-white">
@@ -449,23 +485,27 @@ export default function PackDetailClient({
             {/* Open Pack — desktop panel footer (phones use the sticky bar) */}
             <div className="hidden border-t border-white/10 p-4 lg:block">
               {/* DESIGN.md primary: Paper White pill, Ink text — buyback green
-                  is a money-IN signal and never a spend CTA. Money in Nekst. */}
-              <Pill
-                variant="primary"
-                size="lg"
-                onClick={handleGoToReel}
-                className="w-full justify-between px-5"
-              >
-                {customer
-                  ? isFreePack
-                    ? 'Open Free Pack'
-                    : 'Open Pack'
-                  : 'Log in to open'}
-                <span className="flex items-center gap-1.5 font-heading text-base tracking-tight tabular-nums">
-                  {!isFreePack && rm(priceNum * qty)}
-                  <ArrowRight className="h-4 w-4" aria-hidden />
-                </span>
-              </Pill>
+                  is a money-IN signal and never a spend CTA. Money in Nekst.
+                  Absent once the claim is spent: the open would 4xx, so a
+                  primary CTA here is an invitation to a refusal. */}
+              {!freeClaimSpent && (
+                <Pill
+                  variant="primary"
+                  size="lg"
+                  onClick={handleGoToReel}
+                  className="w-full justify-between px-5"
+                >
+                  {customer
+                    ? isFreePack
+                      ? 'Open Free Pack'
+                      : 'Open Pack'
+                    : 'Log in to open'}
+                  <span className="flex items-center gap-1.5 font-heading text-base tracking-tight tabular-nums">
+                    {!isFreePack && rm(priceNum * qty)}
+                    <ArrowRight className="h-4 w-4" aria-hidden />
+                  </span>
+                </Pill>
+              )}
               {openError && (
                 <p
                   role="alert"
@@ -493,8 +533,15 @@ export default function PackDetailClient({
                   (cosmetic in this preview); a real open rolls ONE pack and debits
                   its price from the credit balance (A2). Quantity & provably-fair
                   pulls stay out of scope. */}
-              <p className="mt-2 text-center text-[11px] text-white/60">
-                {isFreePack ? (
+              <p
+                className={cn(
+                  'text-center text-[11px] text-white/60',
+                  !freeClaimSpent && 'mt-2',
+                )}
+              >
+                {freeClaimSpent ? (
+                  <>{FREE_PACK_CLAIMED_MESSAGE}</>
+                ) : isFreePack ? (
                   <>
                     Your one-time welcome pack — nothing charged. The card lands
                     in your vault. {FREE_PULL_LOCKED_MESSAGE}
@@ -657,12 +704,18 @@ export default function PackDetailClient({
                 slot must not go empty, or the pill drifts left and the dock
                 reads like a different component. */}
             <p className="truncate font-heading text-xl font-bold leading-none tracking-tight text-white tabular-nums">
-              {isFreePack ? 'Free' : rm(priceNum * qty)}
+              {freeClaimSpent
+                ? 'Claimed'
+                : isFreePack
+                  ? 'Free'
+                  : rm(priceNum * qty)}
             </p>
             <p className="mt-1 text-[11px] leading-none text-white/60">
-              {isFreePack
-                ? 'Your welcome pack'
-                : `${active.buybackPercent ?? FLAT_BUYBACK_PERCENT}% buyback`}
+              {freeClaimSpent
+                ? 'One-time gift, already used'
+                : isFreePack
+                  ? 'Your welcome pack'
+                  : `${active.buybackPercent ?? FLAT_BUYBACK_PERCENT}% buyback`}
             </p>
           </div>
           <div
@@ -693,18 +746,20 @@ export default function PackDetailClient({
               <Plus className="h-4 w-4" aria-hidden />
             </button>
           </div>
-          <Pill
-            variant="primary"
-            size="md"
-            onClick={handleGoToReel}
-            className="shrink-0 px-5"
-          >
-            {customer
-              ? isFreePack
-                ? 'Open Free Pack'
-                : 'Open Pack'
-              : 'Log in'}
-          </Pill>
+          {!freeClaimSpent && (
+            <Pill
+              variant="primary"
+              size="md"
+              onClick={handleGoToReel}
+              className="shrink-0 px-5"
+            >
+              {customer
+                ? isFreePack
+                  ? 'Open Free Pack'
+                  : 'Open Pack'
+                : 'Log in'}
+            </Pill>
+          )}
         </div>
         {openError && (
           <p role="alert" className="mt-2 text-center text-[11px] text-red-300">
