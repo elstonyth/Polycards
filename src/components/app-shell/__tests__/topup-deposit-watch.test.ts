@@ -31,11 +31,6 @@ const refresh = vi.fn();
 const router = { refresh };
 vi.mock('next/navigation', () => ({ useRouter: () => router }));
 
-const refreshCreditDot = vi.fn();
-vi.mock('../CreditDotProvider', () => ({
-  useCreditDot: () => ({ refresh: refreshCreditDot }),
-}));
-
 // The sheet drags in the whole top-up flow (channel fetch, focus trap, glass)
 // and none of it is under test here.
 vi.mock('../TopUpSheet', () => ({ default: () => null }));
@@ -116,8 +111,9 @@ describe('TopUpProvider — gateway deposit watch', () => {
     expect(container.textContent).toContain('600');
     expect(container.textContent).toContain('RM 500.00 added to your balance');
     // Server-rendered money surfaces (ledger, /me, /wallet) must re-read.
+    // (The money dot's refresh went with the dot itself on 2026-08-11 — see
+    // the SUSPENDED banner in components/account/credit-dot.tsx.)
     expect(refresh).toHaveBeenCalled();
-    expect(refreshCreditDot).toHaveBeenCalled();
   });
 
   // A deposit can leave the pending list by FAILING. Announcing credit then
