@@ -4201,8 +4201,15 @@ class PacksModuleService extends MedusaService({
 
     // Idempotent: a half-finished purge gets finished by hand, and an audit
     // trail that grows a row per attempt reports one deletion as several.
+    // entity_type is here for the same reason deletedCustomerIds carries it
+    // (above): it is the leading column of IDX_admin_action_audit_entity, and
+    // this read runs inside the credit advisory lock this transaction just took.
     const [existingAudit] = await this.listAdminActionAudits(
-      { entity_id: customerId, action: 'delete_account' },
+      {
+        entity_type: 'customer',
+        entity_id: customerId,
+        action: 'delete_account',
+      },
       { take: 1 },
       sharedContext,
     );
