@@ -12,12 +12,19 @@
 > symbol by NAME (grep), not line number, and STOP only if a listed method's
 > body has materially changed.
 
+> **Re-baselined 2026-08-15 (plan 106) against `5c74ce17`; supersedes the
+> 5,096-line-era inventory below.** Line numbers, the symbol list, and the
+> dependency status were re-measured; the extraction pattern, decorator
+> constraint, caller list, and spec list were left untouched (only
+> re-anchored). See the "Cross-slice dependency" and "Sequencing option"
+> subsections added under Current state.
+
 ## Status
 
 - **Priority**: P3
 - **Effort**: M
 - **Risk**: MED (the money-core file; mitigation: move-only, no behavior change, dense existing specs)
-- **Depends on**: 044 and 047 first (both touch challenge validators/service edges; land them, then rebase)
+- **Depends on**: 044 and 047 first (both touch challenge validators/service edges; land them, then rebase) — **SATISFIED**: both merged, squashed into PR #247 (`plans/README.md:1139`)
 - **Category**: tech-debt
 - **Planned at**: commit `b5944e26`, 2026-07-20
 
@@ -25,36 +32,57 @@
 
 `service.ts` grew 4,425 → 5,096 lines (+671, +15%) in one round — 3.5× the largest prior round's growth — almost entirely from the Weekly-Challenge slice and three one-shot backfills landing inside the god object that five audit rounds have flagged as the repo's highest-blast-radius refactor target. The challenge slice is self-contained (own models `challenge-settings`/`challenge-stage`, own validators, cohesive read/write set) and is the natural FIRST extraction seam: moving it now (a) reverses this round's growth, (b) rehearses the facade-delegation pattern the eventual full refactor needs, and (c) hands plan 056's settlement engine a clean module to build beside instead of deepening the pile.
 
+**Update (2026-08-15, plan 106):** this is the repo's only standing TODO surviving ten audit rounds, and the file kept growing without it: 5,096 → 8,852 lines (+3,756) since this plan was written, none of it from the challenge slice itself — payout/withdrawal hardening (+760, 51% of the delta), account deletion + disabled-player handling (+421, 28%), the free welcome pack (+156, 10%), and further weekly-challenge work (+132, 9%; scheduling, editable schedules, and the settlement engine plan 056 anticipated). The Weekly-Challenge block is now `:7149-8303` (~1,155 lines) and has grown 8 methods the original inventory below didn't list — see the re-anchored inventory. `Depends on: 044 and 047` above is now SATISFIED (both merged, squashed into PR #247) — the only remaining blocker to dispatching this plan is its own staleness, which this re-baseline fixes.
+
 ## Current state
 
-- `backend/packages/api/src/modules/packs/service.ts` (5,096 lines at `b5944e26`) — symbols to move, located by grep at plan time:
-  - `:247` `PULLED_VALUE_USD_SQL` — **SHARED** (used by `leaderboardTop`'s wins CTE at `:2486` AND the challenge aggregates) — see Step 2 for where it goes.
-  - `:348` `challengeWeekAnchorParams` (+ the `CHALLENGE_WEEK_ANCHOR_CTE` it parameterizes — grep for it) — challenge-only.
-  - `:4811` `challengeWeekPool`, `:4839` `challengeWeekTop` — the two week aggregates (raw SQL through the ORM's knex/em).
-  - `:4935` `challengeSettings`, `editChallengeSettings` (nearby, ~`:4956`), `:4701` `saveChallengeStages` — config read/writes with audit rows.
-  - `:3575` `backfillExternalFundedBasis`, `:3613` `backfillExternalFundedBasisForCustomer`, `:4893` `backfillRecordedPullValues` — one-shot migration backfills, invoked only by `medusa exec` scripts under `src/scripts/` (verify each caller by grep before moving).
-  - `:4599` `saveVipLevels` — VIP, NOT challenge; LEAVE IT (its extraction couples to the vip-ladder slice — out of scope).
+- `backend/packages/api/src/modules/packs/service.ts` (**8,852 lines at `5c74ce17`** — re-measured 2026-08-15, plan 106; was 5,096 lines at `b5944e26`) — symbols to move, re-located by grep:
+  - `:326` `PULLED_VALUE_USD_SQL` — **SHARED** (used by `leaderboardTop`'s wins CTE AND the challenge aggregates) — see Step 2 for where it goes.
+  - `:429` `CHALLENGE_WEEK_ANCHOR_CTE`, `:448` `challengeWeekAnchorParams` — challenge-only.
+  - `:7551` `challengeWeekPool`, `:7580` `challengeWeekTop` — the two week aggregates (raw SQL through the ORM's knex/em).
+  - `:8214` `challengeSettings`, `:8233` `editChallengeSettings`, `:7153` `saveChallengeStages` — config read/writes with audit rows.
+  - `:6023` `backfillExternalFundedBasis`, `:6061` `backfillExternalFundedBasisForCustomer`, `:8172` `backfillRecordedPullValues` — one-shot migration backfills, invoked only by `medusa exec` scripts under `src/scripts/` (verify each caller by grep before moving).
+  - `:3094` `listSettledPayoutDestinations` (**new since plan-time**, length unverified — re-count at extraction time) — a fourth one-shot backfill; sole caller confirmed at `scripts/backfill-payout-destinations.ts:90`. Same treatment as the other three in Step 4.
+  - `:7051` `saveVipLevels` — VIP, NOT challenge; LEAVE IT (its extraction couples to the vip-ladder slice — out of scope).
+  - **8 methods new since plan-time, missing from the original inventory — all challenge-slice, all in scope for Step 3:** `:7281` `promoteDueChallengeSchedules`, `:7346` `promoteOneChallengeSchedule`, `:7402` `editChallengeSchedule`, `:7494` `challengeWinnerWeeks`, `:7623` `challengeWeekBounds`, `:7657` `settleChallengeWeek`, `:7856` `settleChallengeWinner` (`protected`), `:8120` `reserveSettledStock` (`private`). Together with the original 5 service methods (plus the 2 module-level symbols `challengeWeekAnchorParams`/`CHALLENGE_WEEK_ANCHOR_CTE`) these make up the Weekly-Challenge block, now `:7149-8303` (~1,155 lines, up from ~600). See "Cross-slice dependency" below before extracting `settleChallengeWinner`.
 - The extraction pattern — TWO established shapes among the sibling helpers, and the challenge methods need the SECOND one:
   1. **Pure-function helpers** (`withdrawable.ts`, `credit-summary.ts`, `buyback-rate.ts`, `voucher-ranges.ts`): exports take plain data, no DB handle. NOT the shape for this slice — the challenge methods are DB-bound.
-  2. **Service-as-argument helpers** (`pricing.ts` — read `resolveFxRate(source: FxRateSource)` and how `challengeWeekPool` already calls it at `service.ts:4810-4831`): the helper takes the service (typed to a narrow interface) and/or a resolved `em`, and the DECORATED service method stays home, resolving what the helper needs and forwarding it. This is your exemplar.
-- **Decorator reality (this is the load-bearing constraint)**: every method in scope carries `@InjectManager()` or `@InjectTransactionManager()` + `@MedusaContext()` (verified at `:3574, :3612, :4700, :4810, :4838, :4892, :4934, :4955`). Those decorators MUST remain on the service methods — they are what threads the transaction manager. The extracted functions in `challenge.ts` therefore take `(em, service, args)`-style parameters; the service method keeps its decorator + `@MedusaContext()` signature, resolves `em = sharedContext.transactionManager ?? sharedContext.manager`, and forwards. `challengeSettings`/`editChallengeSettings` also call `this.listChallengeSettings(...)`/`this.listCards(...)`, so the extracted functions need the service instance (narrow interface), not just `em`.
+  2. **Service-as-argument helpers** (`pricing.ts` — read `resolveFxRate(source: FxRateSource)` and how `challengeWeekPool` already calls it): the helper takes the service (typed to a narrow interface) and/or a resolved `em`, and the DECORATED service method stays home, resolving what the helper needs and forwarding it. This is your exemplar.
+- **Decorator reality (this is the load-bearing constraint)**: every method in scope carries `@InjectManager()` or `@InjectTransactionManager()` + `@MedusaContext()` (re-verified at `:6022, :6060, :7152, :7550, :7579, :8171, :8213, :8232`, plus the 8 newly-inventoried methods above — same pattern, verify by grep). Those decorators MUST remain on the service methods — they are what threads the transaction manager. The extracted functions in `challenge.ts` therefore take `(em, service, args)`-style parameters; the service method keeps its decorator + `@MedusaContext()` signature, resolves `em = sharedContext.transactionManager ?? sharedContext.manager`, and forwards. `challengeSettings`/`editChallengeSettings` also call `this.listChallengeSettings(...)`/`this.listCards(...)`, so the extracted functions need the service instance (narrow interface), not just `em`.
 - The facade keeps its public method names + signatures, so ALL callers — routes, workflows, tests — stay untouched.
-- Callers that must keep working unchanged (grep at plan time; re-verify): `api/store/challenge/route.ts`, `api/store/leaderboard/route.ts` (weekly period → `challengeWeekTop`), `api/admin/challenge/{stages,settings}/route.ts`, scripts calling the backfills, and the specs below.
+- Callers that must keep working unchanged (grep at plan time; re-verify): `api/store/challenge/route.ts`, `api/store/leaderboard/route.ts` (weekly period → `challengeWeekTop`), `api/admin/challenge/{stages,settings}/route.ts`, scripts calling the backfills, and the specs below. Re-measured 2026-08-15: the facade also now reaches `api/admin/challenge/schedule/route.ts`, `api/store/customers/me/delete/route.ts` (via the `deletedCustomerIds` coupling below), `jobs/settle-challenge-week.ts`, `scripts/settle-challenge-now.ts`, and `modules/packs/challenge-validate.ts` — still routes/jobs/scripts/validators only, no new god-object coupling.
 - The specs that lock behavior (your safety net — they must pass before AND after): `modules/packs/__tests__/challenge*.spec.ts` + `challenge-validate.unit.spec.ts`, `recorded-pull-value.integration.spec.ts`, `wallet-summary.spec.ts`, `credit-external-funded.spec.ts`, the leaderboard HTTP suite, `store/challenge` HTTP suite. Run the modules+unit tiers to enumerate exactly.
 - CONTEXT.md vocabulary: "Pull", "Open", "PackOdds" — keep names/comments consistent; the new module is about the **Weekly Pulled Value Challenge** (its proper noun).
 
+### Cross-slice dependency (new since plan-time)
+
+`settleChallengeWinner` (`:7856`) reads `this.deletedCustomerIds(ranking, sharedContext)` at `:7801` — a read-only predicate defined in the account-deletion region (`:4068`), also called from `:3578`. The comment at `:7797-7801` explains why:
+
+> A deleted customer keeps their `pull` rows — the books are retained on purpose — so they stay ranked, and settlement would mint real balance and a real card to an account with no owner. Read once for the whole ranking, outside the per-winner transactions.
+
+This wasn't in the original interface design. The narrow service interface the extracted `challenge.ts` functions take (per the decorator-forwarder shape above) must include `deletedCustomerIds` as a read-only dependency — it does not need to move with the slice (it stays with account-lifecycle, see below), just be reachable through the narrow interface passed in.
+
+### Sequencing option — cheaper first extraction (new since plan-time)
+
+Two smaller, newer slices are self-contained candidates that could go FIRST, at lower risk, and would settle where `deletedCustomerIds` should live before this plan extracts anything that calls it:
+
+- **Account-lifecycle** (`:3921-4232`): `deleteAccountPreflight`, `deletedCustomerIds`, `purgeAccountPacksData`. No ledger-write coupling, owns its own route family (`api/store/customers/me/delete/route.ts`).
+- **Free-pack** (`:2824-2940`): `markFreePackAvailable`, `claimFreePack`, `clearFreePackClaim`, `hasPaidOpen`, `getActiveFreePack`.
+
+Extracting account-lifecycle first would rehearse the facade-delegation pattern on a smaller, lower-risk slice AND resolve where `deletedCustomerIds` should live (its own module, re-exported/imported by `challenge.ts`, vs. duplicated) before this plan's Step 3 has to make that call under pressure. This is presented as an option for whoever sequences the extraction work, not a mandate — plan 054 itself is scoped to the challenge slice only and does not require account-lifecycle to move first.
+
 ## Commands you will need
 
-| Purpose                            | Command                                                           | Expected               |
-| ---------------------------------- | ----------------------------------------------------------------- | ---------------------- |
-| Backend deps (fresh worktree)      | `cd backend && corepack yarn install --immutable`                 | exit 0                 |
-| Workspace dep build                | `cd backend/packages/odds-math && corepack yarn build`            | exit 0                 |
-| Typecheck                          | `cd backend/packages/api && corepack yarn check-types`            | exit 0                 |
-| Unit tier                          | `corepack yarn test:unit`                                         | all pass               |
-| Modules tier (DB up)               | `corepack yarn test:integration:modules`                          | all pass               |
-| Money smoke (DB up)                | `corepack yarn test:integration:smoke`                            | all pass               |
-| Challenge/leaderboard HTTP (DB up) | `corepack yarn test:integration:http -- "challenge\|leaderboard"` | all pass               |
-| Line count                         | `wc -l src/modules/packs/service.ts`                              | ≥600 lines below 5,096 |
+| Purpose                            | Command                                                           | Expected                                                                           |
+| ---------------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Backend deps (fresh worktree)      | `cd backend && corepack yarn install --immutable`                 | exit 0                                                                             |
+| Workspace dep build                | `cd backend/packages/odds-math && corepack yarn build`            | exit 0                                                                             |
+| Typecheck                          | `cd backend/packages/api && corepack yarn check-types`            | exit 0                                                                             |
+| Unit tier                          | `corepack yarn test:unit`                                         | all pass                                                                           |
+| Modules tier (DB up)               | `corepack yarn test:integration:modules`                          | all pass                                                                           |
+| Money smoke (DB up)                | `corepack yarn test:integration:smoke`                            | all pass                                                                           |
+| Challenge/leaderboard HTTP (DB up) | `corepack yarn test:integration:http -- "challenge\|leaderboard"` | all pass                                                                           |
+| Line count                         | `wc -l src/modules/packs/service.ts`                              | ≥1,155 lines below 8,852 (re-baselined 2026-08-15, plan 106; was ≥600 below 5,096) |
 
 ## Scope
 
@@ -63,7 +91,7 @@
 - `backend/packages/api/src/modules/packs/service.ts` (deletions + thin decorated forwarders only)
 - NEW `backend/packages/api/src/modules/packs/challenge.ts` (the slice)
 - NEW `backend/packages/api/src/modules/packs/pulled-value.ts` (the shared SQL constant — see Step 2) — or an existing shared home if one fits better (e.g. `pricing.ts` if that's where its FX/fallback inputs live; executor judgment, state the choice)
-- NEW `backend/packages/api/src/modules/packs/backfills.ts` (the three one-shots)
+- NEW `backend/packages/api/src/modules/packs/backfills.ts` (the four one-shots — re-baselined 2026-08-15, plan 106: `listSettledPayoutDestinations` joins the original three)
 
 **Out of scope**:
 
@@ -95,21 +123,23 @@ Create `pulled-value.ts` exporting `PULLED_VALUE_USD_SQL` (and its companion con
 
 ### Step 3: Extract the challenge slice
 
-Create `challenge.ts` housing `challengeWeekAnchorParams` + `CHALLENGE_WEEK_ANCHOR_CTE`, and the BODIES of `challengeWeekPool`, `challengeWeekTop`, `challengeSettings`, `editChallengeSettings`, `saveChallengeStages` as exported functions taking explicit dependencies — `(em, service, args)` or narrower, per method. Exemplar: `pricing.ts`'s `resolveFxRate(source: FxRateSource)` (service-as-narrow-interface argument), which `challengeWeekPool` already consumes.
+Create `challenge.ts` housing `challengeWeekAnchorParams` + `CHALLENGE_WEEK_ANCHOR_CTE`, and the BODIES of the full challenge slice as exported functions taking explicit dependencies — `(em, service, args)` or narrower, per method. Exemplar: `pricing.ts`'s `resolveFxRate(source: FxRateSource)` (service-as-narrow-interface argument), which `challengeWeekPool` already consumes.
 
-The service methods stay home as THIN DECORATED FORWARDERS — this is deliberate and is NOT a "one-line delegation" in the literal sense: each keeps its `@InjectManager()`/`@InjectTransactionManager()` decorator and `@MedusaContext()` parameter (stripping them breaks transaction threading — see the plan-021 `mature-commissions` precedent), resolves `em = sharedContext.transactionManager ?? sharedContext.manager` exactly as the current body does, and calls the extracted function with `(em, this, args)`. A correct forwarder is therefore ~3-5 lines: decorator, signature, em-resolve, return-call. Move the methods' doc comments to `challenge.ts` with the bodies.
+**Method list re-baselined 2026-08-15 (plan 106) — 13 service methods, not the original 5** (plus `challengeWeekAnchorParams`/`CHALLENGE_WEEK_ANCHOR_CTE`, module-level, not service methods). Original five: `challengeWeekPool`, `challengeWeekTop`, `challengeSettings`, `editChallengeSettings`, `saveChallengeStages`. Plus the 8 added since plan-time (see Current state inventory): `promoteDueChallengeSchedules`, `promoteOneChallengeSchedule`, `editChallengeSchedule`, `challengeWinnerWeeks`, `challengeWeekBounds`, `settleChallengeWeek`, `settleChallengeWinner`, `reserveSettledStock`. `settleChallengeWinner`'s narrow service interface must also carry `deletedCustomerIds` (read-only) — see "Cross-slice dependency" above; that method itself stays where it lives (account-lifecycle region) unless the "Sequencing option" is taken.
+
+The service methods stay home as THIN DECORATED FORWARDERS — this is deliberate and is NOT a "one-line delegation" in the literal sense: each keeps its `@InjectManager()`/`@InjectTransactionManager()` decorator and `@MedusaContext()` parameter (stripping them breaks transaction threading — see the plan-021 `mature-commissions` precedent), resolves `em = sharedContext.transactionManager ?? sharedContext.manager` exactly as the current body does, and calls the extracted function with `(em, this, args)`. A correct forwarder is therefore ~3-5 lines: decorator, signature, em-resolve, return-call. Move the methods' doc comments to `challenge.ts` with the bodies. Two of the 8 new methods are not on the public facade — `settleChallengeWinner` is `protected`, `reserveSettledStock` is `private` — they still move, but re-verify their callers are all inside service.ts or the new sibling module, not external.
 
 **Verify**: `check-types` → 0; unit + modules tiers green; challenge/leaderboard HTTP green.
 
 ### Step 4: Extract the backfills
 
-Same treatment into `backfills.ts` for the three `backfill*` methods. Grep each script under `src/scripts/` that invokes them — they call service methods, which remain as delegations, so scripts stay untouched.
+Same treatment into `backfills.ts` for the **four** `backfill*`/one-shot methods: the original three plus `listSettledPayoutDestinations` (`:3094`, re-baselined 2026-08-15, plan 106 — sole caller `scripts/backfill-payout-destinations.ts:90`). Grep each script under `src/scripts/` that invokes them — they call service methods, which remain as delegations, so scripts stay untouched.
 
 **Verify**: `check-types` → 0; `node --check` passes on any script if edited (should be none); modules tier green.
 
 ### Step 5: Final gates
 
-**Verify**: full unit + modules + smoke green with counts equal to Step 1; `wc -l service.ts` shows ≥600-line reduction; `git diff service.ts` contains ONLY deletions, imports, and thin decorated forwarders (decorator + signature + em-resolve + call — no logic edits beyond that shape).
+**Verify**: full unit + modules + smoke green with counts equal to Step 1; `wc -l service.ts` shows ≥1,155-line reduction (re-baselined 2026-08-15, plan 106; was ≥600); `git diff service.ts` contains ONLY deletions, imports, and thin decorated forwarders (decorator + signature + em-resolve + call — no logic edits beyond that shape).
 
 ## Test plan
 
@@ -117,8 +147,8 @@ No new tests — the move is locked by the existing dense suites (Step 1 baselin
 
 ## Done criteria
 
-- [ ] service.ts ≤ ~4,450 lines; challenge/backfill logic lives in the new siblings
-- [ ] All five public method names unchanged on the service (grep from route files resolves)
+- [ ] service.ts ≤ ~7,700 lines (re-baselined 2026-08-15, plan 106: 8,852 − ~1,155; was ≤~4,450 against the 5,096-line baseline); challenge/backfill logic lives in the new siblings
+- [ ] All eleven public method names unchanged on the service (re-baselined 2026-08-15, plan 106 — the original 5 plus 6 added since plan-time: `promoteDueChallengeSchedules`, `promoteOneChallengeSchedule`, `editChallengeSchedule`, `challengeWinnerWeeks`, `challengeWeekBounds`, `settleChallengeWeek`; `settleChallengeWinner` stays `protected` and `reserveSettledStock` stays `private` — not on the facade) (grep from route files resolves)
 - [ ] Unit + modules + smoke + challenge/leaderboard HTTP all green, same counts as baseline
 - [ ] SQL strings byte-identical (diff the moved constants against baseline)
 - [ ] No files outside scope modified except recorded spec-import updates (`git status`)
