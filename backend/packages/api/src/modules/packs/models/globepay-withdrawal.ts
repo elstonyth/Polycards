@@ -1,5 +1,18 @@
 import { model } from '@medusajs/framework/utils';
 
+// The globepay_withdrawal.status domain — single source of truth for the
+// model's enum below, the admin route's STATUS_FILTERS
+// (api/admin/globepay/withdrawals/route.ts), and the service's
+// WithdrawalStatus type (modules/packs/service.ts). The migration's CHECK
+// constraint (Migration20260811220000) is FROZEN HISTORY and cannot derive
+// from this — it carries its own pointer comment back here instead.
+export const WITHDRAWAL_STATUSES = [
+  'pending',
+  'settled',
+  'failed',
+  'held',
+] as const;
+
 // GlobePayWithdrawal — the outstanding-payout record for the GlobePay365
 // gateway (method WD). Mirrors GlobePayDeposit, inverted: the ledger DEBIT
 // happens BEFORE SubmitWithdrawal (money must never leave the gateway without
@@ -39,7 +52,7 @@ export const GlobePayWithdrawal = model
     // approve route (-> 'pending') or the admin deny route (-> 'failed',
     // refunded).
     status: model
-      .enum(['pending', 'settled', 'failed', 'held'])
+      .enum([...WITHDRAWAL_STATUSES])
       .default('pending'),
     // Their raw numeric status from the last callback/requery (4 = success,
     // 5 = fail, else processing), for support.

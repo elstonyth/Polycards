@@ -3,6 +3,7 @@ import { Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
 import { GLOBEPAY_STALE_AFTER_MS } from '../../../../modules/packs/globepay-reconcile';
+import { WITHDRAWAL_STATUSES } from '../../../../modules/packs/models/globepay-withdrawal';
 import {
   parsePaginationParams,
   parseSortParam,
@@ -54,7 +55,7 @@ import {
 // details for one row's worth of need. The reveal endpoint is what keeps that
 // workflow off the database console, where nothing is audited.
 
-const STATUS_FILTERS = ['pending', 'settled', 'failed', 'held', 'all'] as const;
+const STATUS_FILTERS = [...WITHDRAWAL_STATUSES, 'all'] as const;
 type StatusFilter = (typeof STATUS_FILTERS)[number];
 
 // Display mask for the destination account: `••••1234`.

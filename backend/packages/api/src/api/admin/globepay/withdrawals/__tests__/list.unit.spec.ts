@@ -3,9 +3,39 @@ import { join } from 'node:path';
 import { GET, maskAccountNumber, parseStatusFilter } from '../route';
 import { GET as REVEAL } from '../[id]/account/route';
 import { GLOBEPAY_STALE_AFTER_MS } from '../../../../../modules/packs/globepay-reconcile';
+import { WITHDRAWAL_STATUSES } from '../../../../../modules/packs/models/globepay-withdrawal';
 
 // Money-OUT mirror of ../deposits — same contract, inverted stakes: a stale
 // pending row here is a customer ALREADY debited with no payout and no refund.
+
+// The admin SPA's VIEWS array (apps/admin/src/routes/withdrawals/page.tsx) is
+// a FIFTH uncoordinated copy of this same status set, plus 'all'. It can't be
+// imported here: @acme/api's package.json `exports` map serves only
+// `./_generated` (see plans/041's identical finding for usdToMyr), and
+// apps/admin is a separate SPA package this project's tsconfig doesn't reach
+// either. Read the source text and regex the array out instead — same
+// technique buyback-parity.test.ts uses for the backend's FLAT_PERCENT and
+// free-pack-parity.test.ts uses for the admin packs page's
+// FREE_WELCOME_CATEGORY — so a real edit to VIEWS is what this test observes,
+// not a second hand-copy that could drift independently of the real array.
+const ADMIN_WITHDRAWALS_PAGE = join(
+  __dirname,
+  '../../../../../../../../apps/admin/src/routes/withdrawals/page.tsx',
+);
+
+function adminWithdrawalViews(): string[] {
+  const src = readFileSync(ADMIN_WITHDRAWALS_PAGE, 'utf8');
+  const m = src.match(
+    /const VIEWS: GlobePayWithdrawalView\[\] = \[([\s\S]*?)\];/,
+  );
+  if (!m) {
+    throw new Error(
+      `VIEWS not found in ${ADMIN_WITHDRAWALS_PAGE}. If it was renamed or ` +
+        `moved, update this guard -- do not delete it.`,
+    );
+  }
+  return [...m[1].matchAll(/'([a-z]+)'/g)].map((mm) => mm[1]);
+}
 
 const mkRes = () => {
   const out: { body?: any; headers: Record<string, string> } = { headers: {} };
@@ -108,6 +138,15 @@ describe('parseStatusFilter', () => {
     for (const s of ['pending', 'settled', 'failed', 'held', 'all']) {
       expect(parseStatusFilter(s)).toBe(s);
     }
+  });
+
+  // SET equality only (never order — 'held' is deliberately first in VIEWS
+  // as the operator default; see that array's own comment). If either side
+  // drifts, update both in one PR — never loosen this test.
+  it('the admin SPA VIEWS set matches WITHDRAWAL_STATUSES + all (order not asserted)', () => {
+    expect(new Set(adminWithdrawalViews())).toEqual(
+      new Set([...WITHDRAWAL_STATUSES, 'all']),
+    );
   });
 });
 
