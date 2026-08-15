@@ -170,8 +170,15 @@ export async function POST(
   const addressed = await notifications.listNotifications({
     to: [email, customerId],
   });
-  if (addressed.length > 0) {
-    await notifications.deleteNotifications(addressed.map((n) => n.id));
+  // Chunked: deleteNotifications is a generated MedusaService method that
+  // hands the whole id array straight to one `DELETE ... WHERE id IN (...)`
+  // (mikro-orm-repository.js's `delete`, no batching) — one bind param per
+  // id against Postgres's 65,535-parameter ceiling. A heavy long-lived
+  // account's notification history can exceed that in one statement.
+  for (let i = 0; i < addressed.length; i += 1_000) {
+    await notifications.deleteNotifications(
+      addressed.slice(i, i + 1_000).map((n) => n.id),
+    );
   }
   logger.info(
     `[account-delete] ${addressed.length} notification(s) removed for ${customerId}`,

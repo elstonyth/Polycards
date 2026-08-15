@@ -496,6 +496,53 @@ medusaIntegrationTestRunner({
         expect(again.status).toBe(200);
       });
 
+      // Pins the route's chunked notification delete (step 4): the generated
+      // MedusaService `deleteNotifications` hands its whole id array to one
+      // `DELETE ... WHERE id IN (...)` (mikro-orm-repository.js's `delete`, no
+      // internal batching), so the route now loops in batches of 1,000.
+      // 1,001 addressed rows crosses exactly one chunk boundary — enough to
+      // prove the loop iterates more than once and still finishes, without
+      // literally reproducing Postgres's 65,535-bind-parameter ceiling (which
+      // would need over 65,535 seeded rows to hit for real).
+      it('chunks the notification purge past one batch boundary', async () => {
+        const email = 'delete-bulk-notifications@test.dev';
+        const { id, token } = await register(email);
+        const notifications =
+          getContainer().resolve<INotificationModuleService>(
+            Modules.NOTIFICATION,
+          );
+
+        const BULK_COUNT = 1_001;
+        await notifications.createNotifications(
+          Array.from({ length: BULK_COUNT }, (_, i) => ({
+            to: id,
+            receiver_id: id,
+            channel: CUSTOMER_FEED_CHANNEL,
+            template: 'bulk_test',
+            data: { i },
+          })),
+        );
+        expect(await notifications.listNotifications({ to: id })).toHaveLength(
+          BULK_COUNT,
+        );
+
+        const res = await post(
+          '/store/customers/me/delete',
+          { password: PASSWORD },
+          token,
+        );
+        expect(res.status).toBe(200);
+
+        // withDeleted: true — a soft delete would leave these `to id` rows
+        // readable this way; only a real hard delete zeroes this out.
+        expect(
+          await notifications.listNotifications(
+            { to: id },
+            { withDeleted: true },
+          ),
+        ).toHaveLength(0);
+      });
+
       // Spec §4. The `pull` rows are retained by design, so a deleted customer
       // is still RANKED by the aggregate — the boards must survive that, and
       // this test exists because that page is the one nobody is logged in to:
