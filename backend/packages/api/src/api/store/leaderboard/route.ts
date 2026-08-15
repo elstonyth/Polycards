@@ -85,19 +85,38 @@ export async function GET(
   // disabling an account from the dashboard must not leave it on display here.
   //
   // Display-only, and deliberately so: their `pull` rows stay in the aggregate,
-  // and settleChallengeWeek still ranks and pays them. A disable is REVERSIBLE
-  // (unlike the delete `deletedCustomerIds` guards, where nobody is left to
-  // pay), so hiding the row must not also confiscate the week's winnings. The
-  // consequence is that a disabled winner's payout rank is not the rank anyone
-  // saw on the board — that is the intended trade, not an oversight.
+  // and settleChallengeWeek still ranks and pays a DISABLED player. A disable
+  // is REVERSIBLE (unlike a delete, where nobody is left to pay), so hiding the
+  // row must not also confiscate the week's winnings.
   //
   // Ranks are re-numbered over the survivors (1..N, no gaps): a gap would
   // publish the fact that someone was removed, which is the opposite of hiding.
   //
   // DELETED players are dropped here too — the purge writes the same disabled
-  // tombstone (see disabledCustomerIds). That direction is consistent rather
-  // than accidental: settleChallengeWeek already skips deleted customers, so
-  // the board now agrees with who can actually be paid.
+  // tombstone (see disabledCustomerIds), so one filter catches both.
+  //
+  // KNOW WHAT THE RE-NUMBERING COSTS, because it is not the hidden player who
+  // pays it. settleChallengeWeek pays `rank = i + 1` over the ORIGINAL ranking
+  // and merely `continue`s past a skipped customer (service.ts, the winner
+  // loop) — it never re-numbers. So every survivor BELOW a hidden player is
+  // displayed one rank higher than the rank they are paid at, and
+  // /leaderboard's prize table is keyed by rank, so the gap is visible to them:
+  // hide the week's #1 and the player shown at #1 is paid the #2 prize. True
+  // for a deleted #1 as much as a disabled one — the deleted player is not paid
+  // at all, but the survivors below are still paid at their original ranks.
+  // Accepted for now, and the fix if it ever produces a support ticket is to
+  // re-number SETTLEMENT over the same filtered set, never to un-hide the
+  // board.
+  //
+  // NOT filtered, and known: GET /store/pulls/recent, the live pull feed on the
+  // home, pack-detail and spin pages. It builds its own display name and shows
+  // a FULL first_name, so it is the most identifying surface of the four — but
+  // it was left out of this pass while another change was in flight in that
+  // file. Bounded rather than harmless: a disabled player cannot pull again
+  // (the session guard 403s them), and the feed keeps only the newest 12 rows,
+  // so their rows age out. Deleted players already read as "Anonymous" there,
+  // because the purge nulls first_name. Filtering it is one disabledCustomerIds
+  // call in that route.
   const disabled = await packs.disabledCustomerIds(
     ranked.map((r) => r.customer_id),
   );

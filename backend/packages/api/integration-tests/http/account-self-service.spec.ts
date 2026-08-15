@@ -505,12 +505,15 @@ medusaIntegrationTestRunner({
       // They are no longer DISPLAYED, and that is a consequence of the purge
       // rather than a rule of its own: the purge upserts the account-state
       // tombstone with disabled=true (that is what 403s a deleted customer's
-      // surviving bearer), and the boards filter disabled players. It lands on
-      // the right side of settlement, too — settleChallengeWeek already SKIPS
-      // deleted customers via deletedCustomerIds, so dropping them from the
-      // board makes the ranks agree with who can actually be paid. Reverting
-      // to "shown anonymously" means subtracting deletedCustomerIds from the
-      // boards' disabled filter, not deleting this test.
+      // surviving bearer), and the boards filter disabled players. Reverting to
+      // "shown anonymously" means subtracting deletedCustomerIds from the
+      // boards' filter, not deleting this test.
+      //
+      // Both halves are asserted, and the ranked half is the load-bearing one:
+      // `expect(entry).toBeUndefined()` alone would pass just as happily if the
+      // fixture stopped ranking at all (card drift, a week-anchor change, a
+      // `source` default flip), and then this test would guard nothing while
+      // staying green.
       it('drops a deleted player from the public boards (the purge disables them)', async () => {
         const email = 'delete-ranked@test.dev';
         const { id, token } = await register(email);
@@ -537,6 +540,19 @@ medusaIntegrationTestRunner({
           token,
         );
         expect(del.status).toBe(200);
+
+        // Positive control, and the reason the absence assertion below means
+        // anything: the retained `pull` row must still RANK them in the
+        // aggregate. Without this, a fixture that quietly stopped ranking would
+        // satisfy "not on the board" for entirely the wrong reason.
+        const settings = await packs.challengeSettings();
+        const stillRanked = await packs.challengeWeekTop({
+          timezone: settings.timezone,
+          resetDay: settings.reset_day,
+          resetHour: settings.reset_hour,
+          limit: 50,
+        });
+        expect(stillRanked.map((r) => r.customer_id)).toContain(id);
 
         // No auth header: these are the anonymous surfaces.
         for (const path of [

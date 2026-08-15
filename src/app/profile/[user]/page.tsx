@@ -19,11 +19,13 @@ export async function generateMetadata({
   const { user } = await params;
   const handle = decodeURIComponent(user);
   const result = await getPublicProfile(handle); // cache()d — shared with the page
-  // Metadata must never throw: treat error the same as notfound (generic name).
-  // `unavailable` is the exception — that handle belongs to a real, hidden
-  // player, so neither the title nor the description may carry a name, mock
-  // persona or otherwise.
-  if (result.status === 'unavailable') {
+  // Metadata must never throw, and the mock persona's name is only ever correct
+  // for `notfound` — the one status where the handle really is a mock-pool
+  // username. `unavailable` is a real player we are hiding, and `error` is a
+  // real player we simply could not load; putting a fabricated name in either
+  // title is the same mistake the 410 exists to prevent, and it would also
+  // contradict the body, which says "couldn't load this profile" for `error`.
+  if (result.status !== 'ok' && result.status !== 'notfound') {
     return {
       title: 'Profile unavailable',
       description: 'This profile is not available.',
