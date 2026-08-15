@@ -337,14 +337,20 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(body).not.toHaveProperty('promo');
       });
 
-      // A freshly-registered customer's bearer carries auth_context with
-      // actor_id '' until POST /store/customers links it
-      // (medusa-register-token-empty-actor-id). That request IS
-      // authenticated (auth_context present, just an empty actor_id) and
-      // must NOT take the anonymous-promo branch — an empty-string
-      // customer_id matches no row, so it gets the same plain 3-key
-      // ineligible answer as any other unstamped account.
-      it('an unlinked register token (actor_id "") gets the plain ineligible answer — no promo key, even with an active free pack', async () => {
+      // Robustness test, not a currently-reachable request shape: this
+      // route's middlewares.ts entry sets only { allowUnauthenticated:
+      // true }, no allowUnregistered, so per the installed framework
+      // (authenticate-middleware.js) a request can never actually arrive
+      // here with auth_context PRESENT and actor_id ''. A fresh, unlinked
+      // register token (medusa-register-token-empty-actor-id) instead
+      // falls through with NO auth_context at all and hits the
+      // anonymous-promo branch above. This test pins what route.ts's
+      // `== null` guard's empty-actor_id fall-through does for that
+      // fabricated/future state (real only if this route ever gains
+      // { allowUnregistered: true }): customer_id '' matches no row, so it
+      // still degrades to the plain 3-key ineligible answer, never a promo
+      // leak.
+      it("defense-in-depth: a present-but-empty auth_context (unreachable under this route's current config) still gets the plain ineligible answer, not promo", async () => {
         const body = await eligibility('');
         expect(body).toEqual({ eligible: false, slug: null, image: null });
         expect(body).not.toHaveProperty('promo');

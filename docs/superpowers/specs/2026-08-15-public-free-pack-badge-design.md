@@ -37,6 +37,15 @@ shipped and stays exactly as is.
   adding it would either cost an extra read on the claimed-common-case path
   or lie `false` while a pack exists). `promo` appears only on the
   unauthenticated answer; the schema marks it optional.
+- Verified in the installed framework (`authenticate-middleware.js` +
+  `router.js`): the register-token "empty actor_id" window only ever
+  produces a PRESENT `auth_context` under `{ allowUnregistered: true }`,
+  which this route does not set (only `{ allowUnauthenticated: true }`). So
+  an unlinked register token arrives here with NO `auth_context` at all —
+  same as a fully anonymous caller — and gets the promo answer, not a
+  fall-through per-customer read. The route's `actor_id === ''` fallback
+  path is defense-in-depth for a hypothetical future/fabricated auth
+  state, not something this route's current config can produce.
 - The guest answer leaks only "an active free pack exists" — a catalog fact.
   Response stays uncached (per-customer when authed; keep one code path).
 

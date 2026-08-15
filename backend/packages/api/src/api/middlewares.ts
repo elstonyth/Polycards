@@ -71,8 +71,19 @@ import {
 // request IP (the middleware's designed fallback). /store/free-pack is the
 // one deliberate exception: it authenticates with { allowUnauthenticated:
 // true }, so storeReadRateLimit runs for anonymous callers too — it falls
-// back to the same per-IP key (rate-limit.ts's `auth?.actor_id || ip:...`),
-// never a single shared bucket.
+// back to the same per-IP key (rate-limit.ts's `auth?.actor_id || ip:...`).
+// In production that IS one shared bucket, not per-visitor: every guest
+// /slots render is proxied server-side through the storefront's ONE Next.js
+// egress IP (the same single-egress-IP topology createAuthRateLimit /
+// createProfileReadRateLimit already document — see rate-limit.ts
+// ~750-760), so this is a whole-storefront CIRCUIT BREAKER on the badge's
+// guest read (STORE_READ_DEFAULTS: 120/10s burst, 480/60s sustained
+// sitewide), the same accepted stance as those other public-read tiers.
+// Overflow fails closed at the badge only — src/lib/data/free-pack.ts's
+// try/catch maps any non-2xx (including a 429) to `hidden`, so the catalog
+// itself is unaffected. If that ceiling ever binds in practice, the lever
+// is caching the identity-free guest fetch storefront-side, not widening
+// this limiter.
 
 // One instance shared by the vault + credits matchers: the two reads travel
 // together in the UI, so they share one budget (and one Redis connection).
