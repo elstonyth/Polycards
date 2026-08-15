@@ -38,10 +38,20 @@ server-side act (`POST /store/packs/[slug]/open`).
 _Avoid_: buy, purchase, spin, draw
 
 **Pull**:
-The record of one prize acquisition — a pack Open (`source='pack'`) or a product
-win from a Reward Draw (`source='reward'`). The append-only source of truth for
-the live-pulls feed, the leaderboard, and the Vault.
+The record of one prize acquisition — a pack Open (`source='pack'`), a product
+win from a Reward Draw (`source='reward'`), or the one-time Free Welcome Pack
+open (`source='free'`). The append-only source of truth for the live-pulls feed,
+the leaderboard, and the Vault.
 _Avoid_: spin, roll, result
+
+**Free Welcome Pack**:
+The one-time free pack a newly registered account may open once (`category=
+'free_welcome'` — a reserved category hidden from the catalog like
+`reward_box`; storefront entry is the floating badge only). Its Pull has
+`source='free'`: excluded from the leaderboard/challenge/feed like `'reward'`,
+and LOCKED from Buyback and Delivery until the customer's first paid Open
+(computed — any `source='pack'` Pull unlocks it).
+_Avoid_: reward (that is the daily VIP draw), demo spin
 
 **Vault**:
 A customer's held Pulls — the cards they keep. Not a table: a vault item is a

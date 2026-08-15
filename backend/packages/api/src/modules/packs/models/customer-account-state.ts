@@ -31,6 +31,13 @@ export const CustomerAccountState = model
     disabled_by: model.text().nullable(), // admin_id
     disabled_at: model.dateTime().nullable(),
     phone_verified_at: model.dateTime().nullable(),
+    // Free welcome pack (spec 2026-08-14): `available_at` is stamped by the
+    // customer.created subscriber — only accounts registered after the feature
+    // shipped ever get it (this IS the "new registrations only" rule; no date
+    // cutoffs). `claimed_at` is stamped atomically by claimFreePack() when the
+    // one free open is consumed; cleared by workflow compensation on failure.
+    free_pack_available_at: model.dateTime().nullable(),
+    free_pack_claimed_at: model.dateTime().nullable(),
   })
   .indexes([
     {

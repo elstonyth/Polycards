@@ -71,10 +71,17 @@ export interface PublicProfile {
  * falls back to the deterministic mock pool for `notfound` (a legacy-handle
  * product choice) but must NOT do so for `error` — a backend outage on a real
  * handle would otherwise render a fabricated persona under the real user's name.
+ *
+ * `unavailable` (410) is the third case and exists for the same reason: the
+ * backend returns it for an administratively DISABLED player, whose profile is
+ * meant to disappear. Folding it into `notfound` would hand that handle the
+ * mock persona — publishing a made-up collector exactly where an operator just
+ * asked for nothing to be shown.
  */
 export type ProfileResult =
   | { status: 'ok'; profile: PublicProfile }
   | { status: 'notfound' }
+  | { status: 'unavailable' }
   | { status: 'error' };
 
 /**
@@ -97,6 +104,11 @@ export const getPublicProfile = cache(
       // 404 = not a collector handle (e.g. a mock-pool username) — expected.
       if (error instanceof FetchError && error.status === 404) {
         return { status: 'notfound' };
+      }
+      // 410 = a real handle the backend is deliberately hiding (disabled
+      // account). Not an error, and never the mock pool.
+      if (error instanceof FetchError && error.status === 410) {
+        return { status: 'unavailable' };
       }
       logger.error(`[profiles] failed to load profile "${handle}":`, error);
       return { status: 'error' };

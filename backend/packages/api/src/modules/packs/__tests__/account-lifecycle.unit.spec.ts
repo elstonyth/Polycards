@@ -395,6 +395,44 @@ describe('deletedCustomerIds', () => {
   });
 });
 
+describe('disabledCustomerIds', () => {
+  it('returns the ids whose account state is disabled', async () => {
+    const svc = Object.create(
+      PacksModuleService.prototype,
+    ) as PacksModuleService & { listCustomerAccountStates: jest.Mock };
+    svc.listCustomerAccountStates = jest
+      .fn()
+      .mockResolvedValue([{ customer_id: 'cus_2' }]);
+    await expect(
+      svc.disabledCustomerIds(['cus_1', 'cus_2'], CTX),
+    ).resolves.toEqual(new Set(['cus_2']));
+    // Same reason the sibling read above pins its filter: the mock answers
+    // whatever it is asked, so a filter that quietly matched the WRONG rows
+    // would leave this file green. Both halves are load-bearing in opposite
+    // directions — drop `disabled` and every account-state row matches, which
+    // hides frozen and merely phone-verified players from the public boards;
+    // drop the id list and it becomes a full scan on a table that grows with
+    // every disable, freeze and phone verification.
+    expect(svc.listCustomerAccountStates).toHaveBeenCalledWith(
+      { customer_id: ['cus_1', 'cus_2'], disabled: true },
+      // No `take`, asserted as the empty config rather than anything(): a bound
+      // can only subtract here, and the id it dropped would be a disabled
+      // player PUBLISHED on the leaderboard.
+      {},
+      CTX_ARG,
+    );
+  });
+
+  it('does not query at all for an empty ranking', async () => {
+    const svc = Object.create(
+      PacksModuleService.prototype,
+    ) as PacksModuleService & { listCustomerAccountStates: jest.Mock };
+    svc.listCustomerAccountStates = jest.fn();
+    await expect(svc.disabledCustomerIds([], CTX)).resolves.toEqual(new Set());
+    expect(svc.listCustomerAccountStates).not.toHaveBeenCalled();
+  });
+});
+
 describe('settleChallengeWeek — deleted winners', () => {
   // Enough of the enumerator to reach the winner loop: everything it reads
   // before paying anyone, stubbed with the smallest shape that satisfies it.

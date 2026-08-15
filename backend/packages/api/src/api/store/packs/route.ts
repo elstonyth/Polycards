@@ -1,6 +1,7 @@
 import { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import PacksModuleService from "../../../modules/packs/service";
 import { PACKS_MODULE } from "../../../modules/packs";
+import { FREE_WELCOME_CATEGORY } from "../../../modules/packs/free-pack";
 
 // GET /store/packs — the gacha pack catalog for /claw and the home "Open Packs"
 // tiles. A plain Medusa store route (publishable-key scoped, but NOT subject to
@@ -38,8 +39,9 @@ export async function GET(
   const packsModuleService: PacksModuleService = req.scope.resolve(PACKS_MODULE);
 
   const packs = await packsModuleService.listPacks(
-    // reward_box packs are internal draw pools — excluded from the public catalog (B2).
-    { status: "active", category: { $ne: "reward_box" } } as Parameters<typeof packsModuleService.listPacks>[0],
+    // reward_box packs are internal draw pools (B2) and the free welcome pack is
+    // reached only via its own claim badge — both excluded from the public catalog.
+    { status: "active", category: { $nin: ["reward_box", FREE_WELCOME_CATEGORY] } } as Parameters<typeof packsModuleService.listPacks>[0],
     // Explicit take so a framework default can't silently cap the catalog.
     { order: { category: "ASC", rank: "ASC" }, take: 500 }
   );

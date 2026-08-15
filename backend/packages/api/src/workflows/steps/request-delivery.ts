@@ -6,6 +6,7 @@ import {
   validateDeliveryRequest,
   snapshotAddress,
 } from "../../modules/packs/delivery";
+import { FREE_PULL_LOCKED_MESSAGE } from "../../modules/packs/free-pack";
 import { resolveFxRate } from "../../modules/packs/pricing";
 
 export type RequestDeliveryInput = {
@@ -66,6 +67,14 @@ export const verdictError = (
         MedusaError.Types.NOT_ALLOWED,
         "Reward prizes are shipped from the rewards page, not the vault.",
       );
+    // NOT_ALLOWED is a 400 (same mapping as every case above) carrying the one
+    // shared lock copy, so vault, buyback and delivery all refuse in the same
+    // words.
+    case "free_locked":
+      return new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        FREE_PULL_LOCKED_MESSAGE,
+      );
     // not_found AND forbidden both surface as 404 — no cross-account leak.
     default:
       return new MedusaError(
@@ -88,10 +97,14 @@ export const requestDeliveryStep = createStep(
           { take: input.pull_ids.length },
         )
       : [];
+    // One indexed read for the whole batch: a free welcome pull can't ship
+    // until this customer has opened a PAID pack (spec 2026-08-14).
+    const freeUnlocked = await packs.hasPaidOpen(input.customer_id);
     const verdict = validateDeliveryRequest(
       pulls,
       input.pull_ids,
       input.customer_id,
+      freeUnlocked,
     );
     if (verdict !== "ok") throw verdictError(verdict);
 

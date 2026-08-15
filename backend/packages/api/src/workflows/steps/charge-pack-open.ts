@@ -55,6 +55,10 @@ export const chargePackOpenStep = createStep(
 
     // A free pack debits nothing — skip the pointless -0 ledger row (and the
     // lock): there's no overspend to guard when nothing is charged.
+    // INVARIANT (enforced in api/admin/packs/validate.ts, not here): only the
+    // 'free_welcome' category may be priced 0. This branch is otherwise a free
+    // source='pack' pull, which is exactly what hasPaidOpen() reads to unlock a
+    // customer's free welcome pull — an unlock with no payment.
     if (price === 0) {
       const balance = await packs.creditBalance(input.customer_id);
       return new StepResponse(

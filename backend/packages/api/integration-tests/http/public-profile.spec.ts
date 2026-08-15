@@ -425,6 +425,25 @@ medusaIntegrationTestRunner({
         expect(raw.toLowerCase()).not.toContain("vault");
       });
 
+      // A disabled account is hidden here too, and with 410 rather than 404:
+      // the storefront answers a 404 with a deterministic MOCK persona (legacy
+      // handles are a product choice), so 404-ing a real handle would publish a
+      // fabricated collector exactly where the operator asked for nothing.
+      it("410s a disabled collector (NOT 404 — 404 would draw the mock persona)", async () => {
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        await packs.setAccountDisabled({
+          customerId: seededCustomerId,
+          adminId: "user_pp_admin",
+          disabled: true,
+          reason: "test disable",
+        });
+        clearProfileCache();
+
+        const res = await getProfile(SEEDED_HANDLE);
+        expect(res.status).toBe(410);
+        expect(JSON.stringify(res.data)).not.toContain(SEEDED_NAME);
+      });
+
       it("404s an unknown or malformed handle", async () => {
         expect((await getProfile("no-such-collector-zz")).status).toBe(404);
         // Malformed param (uppercase / junk) is also a 404, not a 500.

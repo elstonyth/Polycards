@@ -7,6 +7,7 @@ import {
 import { emitEventStep } from "@medusajs/medusa/core-flows";
 import { rollPackStep } from "./steps/roll-pack";
 import { chargePackOpenStep } from "./steps/charge-pack-open";
+import { claimFreePackStep } from "./steps/claim-free-pack";
 import { recordPullStep } from "./steps/record-pull";
 import { decrementCardStockStep } from "./steps/decrement-card-stock";
 import { settleVipStep } from "./steps/settle-vip";
@@ -32,6 +33,12 @@ export const openPackWorkflow = createWorkflow(
     // 1. Validate the pack is active and roll a winner over its weighted odds.
     const card = rollPackStep(input);
 
+    // Free welcome pack: consume the one-time claim before the charge seam.
+    // { free:false } for every normal pack — the step is a no-op there. It
+    // lives INSIDE the workflow so its compensation (hand the claim back) only
+    // ever fires while THIS open is rolling back.
+    const claim = claimFreePackStep(input);
+
     // Mint a per-open id (uuid) BEFORE the charge so it can anchor the charge row
     // and (Phase 2a) every commission paid for this open. transform() is the only
     // impure seam in a workflow body — minting here keeps the composition pure.
@@ -51,12 +58,20 @@ export const openPackWorkflow = createWorkflow(
     const charge = chargePackOpenStep(charged);
 
     // 2. Record the pull (compensated by delete on failure).
-    const recordInput = transform({ input, card, charged }, (d) => ({
+    const recordInput = transform({ input, card, charged, claim }, (d) => ({
       customer_id: d.input.customer_id,
       pack_id: d.input.pack_id,
       card_id: d.card.handle,
-      recorded_value_usd: d.card.recorded_value_usd,
+      // Free pulls record NO pulled value — they must never move the
+      // leaderboard/challenge aggregates (same stance as reward pulls).
+      recorded_value_usd: d.claim.free ? null : d.card.recorded_value_usd,
+      // ...but the vault liability is real either way, so the LEDGER row takes
+      // the draw-time value explicitly on a free open (the paid path derives it
+      // from recorded_value_usd, which is NULL here). Without this the SP row
+      // books 0 in while the eventual sell/delivery books the full value out.
+      vault_value_usd: d.claim.free ? d.card.recorded_value_usd : null,
       open_id: d.charged.open_id,
+      source: d.claim.free ? ("free" as const) : ("pack" as const),
     }));
     const pull = recordPullStep(
       transform({ recordInput, charge }, (d) => ({ ...d.recordInput, price: d.charge.price })),

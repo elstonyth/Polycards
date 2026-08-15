@@ -7,6 +7,7 @@ import {
   type PublishedOdds,
 } from '../../../workflows/steps/create-pack';
 import { FLAT_PERCENT } from '../../../modules/packs/buyback-rate';
+import { FREE_WELCOME_CATEGORY } from '../../../modules/packs/free-pack';
 import { validateTierRangeMap } from '../../../modules/packs/tier-settings-validate';
 
 const HANDLE_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -218,11 +219,38 @@ export function coercePackBody(raw: unknown, slug: string): PackWriteInput {
     );
   }
 
+  // The free welcome pack is an ordinary Pack in a RESERVED category, so what
+  // makes it "the free pack" is enforced here rather than by the schema: it is
+  // FREE, and it is the ONLY pack that may be. Both admin write paths (create +
+  // update) run this.
+  //
+  // The second half is a money gate, not tidiness: chargePackOpenStep skips the
+  // debit entirely at price 0, and open-pack labels every non-free-category
+  // open source='pack' — which is exactly what hasPaidOpen() reads to unlock a
+  // customer's free welcome pull for sell/delivery. So an RM0 pack in a NORMAL
+  // category would mint that unlock with no payment ever made. `num` already
+  // refuses negatives, so 0 is the whole remaining case.
+  //
+  // 'reward_box' is exempt: those packs are internal draw pools, RM0 by nature
+  // and never bought — fetchPackData throws NOT_FOUND for the category
+  // (workflows/steps/roll-pack.ts), so they can never mint a source='pack' pull
+  // at all. Same carve-out the activation guard already makes for them
+  // (workflows/steps/update-pack.ts).
+  const category = reqStr(b, 'category');
+  const price = num(b, 'price', 0);
+  if (category === FREE_WELCOME_CATEGORY) {
+    if (price !== 0) {
+      bad(`A '${FREE_WELCOME_CATEGORY}' pack must have a price of 0.`);
+    }
+  } else if (price === 0 && category !== 'reward_box') {
+    bad('Only the free welcome pack may have a price of 0.');
+  }
+
   return {
     slug,
     title: reqStr(b, 'title'),
-    category: reqStr(b, 'category'),
-    price: num(b, 'price', 0),
+    category,
+    price,
     image: imageStr(b, 'image'),
     display_image: optImageStr(b, 'display_image'),
     buyback_percent: buybackPercent,
@@ -232,4 +260,31 @@ export function coercePackBody(raw: unknown, slug: string): PackWriteInput {
     published_odds: coercePublishedOdds(b.published_odds),
     tier_ranges: coerceTierRanges(b.tier_ranges),
   };
+}
+
+// The second free-pack invariant: at most ONE free_welcome pack may be active,
+// because the storefront's claim path resolves "the" free pack by category
+// (getActiveFreePack). `existingActiveSlug` is the live one's slug (null when
+// none) — re-saving THAT pack is the normal edit and must not 400.
+// Pure so it unit-tests without a DB; the routes do the lookup and call it.
+// ponytail: read-then-write, so two simultaneous admin saves could both pass.
+// Admin writes are single-operator and rare; upgrade to a partial unique index
+// on pack(category) WHERE status='active' AND category='free_welcome' if that
+// ever actually happens.
+export function assertSingleActiveFreePack(
+  existingActiveSlug: string | null,
+  incoming: { slug: string; category: string; status: string },
+): void {
+  if (
+    incoming.category !== FREE_WELCOME_CATEGORY ||
+    incoming.status !== 'active'
+  ) {
+    return;
+  }
+  if (existingActiveSlug !== null && existingActiveSlug !== incoming.slug) {
+    bad(
+      `Only one active '${FREE_WELCOME_CATEGORY}' pack is allowed — ` +
+        `'${existingActiveSlug}' is live. Deactivate it first.`,
+    );
+  }
 }

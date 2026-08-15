@@ -79,6 +79,22 @@ export async function GET(
 
   const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
 
+  // An administratively disabled player is hidden from every public surface,
+  // this page included. Checked here rather than above the cache read: a hit
+  // can still serve a body built before the disable, for at most the 30s TTL —
+  // the same window the boards' own caches carry, and not worth two extra
+  // queries on every cache hit to close.
+  //
+  // 410, NOT 404, and this is load-bearing: the storefront answers a 404 with a
+  // deterministic MOCK persona (unknown/legacy handles are a product choice —
+  // app/profile/[user]/page.tsx), so 404-ing here would publish a fabricated
+  // collector under this real handle instead of hiding anything. The status is
+  // written directly because MedusaError has no 410 mapping.
+  if (await packs.isAccountDisabled(customer.id)) {
+    res.status(410).json({ message: 'Profile unavailable' });
+    return;
+  }
+
   // Stats — same definitions as the leaderboard: volume = Σ won-card MYR
   // display value (FMV × multiplier × FX); it can drift from the board by
   // cents (per-card rounding here vs one sum-level round there) and is

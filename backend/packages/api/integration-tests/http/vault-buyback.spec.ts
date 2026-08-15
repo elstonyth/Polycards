@@ -2,6 +2,7 @@ import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
 import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
+import { FREE_PULL_LOCKED_MESSAGE } from '../../src/modules/packs/free-pack';
 import { postStoreCustomer, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
@@ -15,6 +16,7 @@ const PASSWORD = 'vb-test-password-1';
 // pays the FLAT rate (90%), crediting RM 216.00. FX is pinned in beforeEach so
 // these stay deterministic (no live feed / DEFAULT_USD_MYR coupling).
 const PACK_SLUG = 'vb-pack';
+const FREE_PACK_SLUG = 'vb-free-welcome';
 const CARD_HANDLE = 'vb-card';
 const FMV = 50;
 const MULTIPLIER = 1.2;
@@ -437,15 +439,20 @@ medusaIntegrationTestRunner({
             reason: 'adjustment' as const,
           },
         ]);
-        await packs.createCustomerAccountStates([
-          {
-            customer_id: customerId,
+        // UPDATE, not create: this customer registered for real, so the
+        // customer.created free-pack subscriber has already upserted their
+        // customer_account_state row (customer_id is unique — inserting a
+        // second one raises "already exists"). postStoreCustomer drains that
+        // subscriber, so the row is guaranteed to be here.
+        await packs.updateCustomerAccountStates({
+          selector: { customer_id: customerId },
+          data: {
             frozen: true,
             cause: 'auto' as const,
             frozen_reason: 'clawback:open_x',
             frozen_at: new Date(),
           },
-        ]);
+        });
 
         // The owner sells the card — a frozen account can still buy back, and the
         // +230.40 credit lands the balance at +222.40 (>= 0), clearing the freeze.
@@ -512,6 +519,65 @@ medusaIntegrationTestRunner({
         );
         expect(sell.status).toBe(200);
         expect(sell.data.amount).toBe(row.buyback.amount);
+      });
+
+      // Free welcome pull (spec 2026-08-14): locked from sell/deliver until the
+      // customer's first PAID open. The module suite proves the guard; this is
+      // the HTTP-tier pin the Task 6 review asked for — the refusal's STATUS and
+      // COPY as the storefront receives them, plus the unlock through a real
+      // paid open (not a hand-written source='pack' row).
+      it('refuses a free welcome pull with 400 until a paid open, then sells it', async () => {
+        const token = await registerCustomer('vb-freepack@test.dev');
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        await packs.createPacks([
+          {
+            slug: FREE_PACK_SLUG,
+            title: 'VB Free Welcome Pack',
+            category: 'free_welcome',
+            price: 0,
+            image: '/cdn/free-pack.webp',
+          },
+        ]);
+        const [free] = await packs.createPulls([
+          {
+            customer_id: await customerIdOf(token),
+            pack_id: FREE_PACK_SLUG,
+            card_id: CARD_HANDLE,
+            order_id: null,
+            rolled_at: new Date(),
+            status: 'vaulted' as const,
+            source: 'free' as const,
+          },
+        ]);
+
+        const locked = await request(
+          'post',
+          `/store/vault/${free.id}/buyback`,
+          authed(token),
+        );
+        expect(locked.status).toBe(400);
+        expect(locked.data.message).toBe(FREE_PULL_LOCKED_MESSAGE);
+
+        // The first PAID open — through the real route — lifts the lock.
+        await api.post(
+          '/store/credits/topup',
+          { amount: TOPUP },
+          { headers: { ...authed(token), 'idempotency-key': 'vb-free-topup' } },
+        );
+        const paid = await request(
+          'post',
+          `/store/packs/${PACK_SLUG}/open`,
+          authed(token),
+        );
+        expect(paid.status).toBe(200);
+
+        const sell = await request(
+          'post',
+          `/store/vault/${free.id}/buyback`,
+          authed(token),
+        );
+        expect(sell.status).toBe(200);
+        expect(sell.data.amount).toBeGreaterThan(0);
       });
 
       // The reward-box guard must still refuse an actual reward-box prize —

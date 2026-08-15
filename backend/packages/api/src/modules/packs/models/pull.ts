@@ -54,11 +54,14 @@ export const Pull = model
     buyback_at: model.dateTime().nullable(),
     // Profile showcase opt-in: customer chose to display this pull publicly.
     showcased: model.boolean().default(false),
-    // Origin of this pull: 'pack' (standard open) or 'reward' (daily reward draw).
+    // Origin of this pull: 'pack' (standard open), 'reward' (daily reward draw),
+    // or 'free' (the one-time free welcome pack — excluded from boards/feed like
+    // 'reward', and locked from buyback/delivery until the customer's first paid
+    // open; see modules/packs/free-pack.ts).
     // For reward pulls, card_id holds the product_handle sentinel.
     // Model-owned CHECK (pull_source_check) emitted by db:generate — do NOT
     // hand-write a separate CHECK (would collide → 42710).
-    source: model.enum(['pack', 'reward']).default('pack'),
+    source: model.enum(['pack', 'reward', 'free']).default('pack'),
     // The open's stable id (same uuid the pack_open charge row stores in
     // credit_transaction.source_transaction_id) — the money↔card audit link.
     // A count=N batch open shares ONE open_id across its N pulls (one charge
