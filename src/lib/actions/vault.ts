@@ -15,6 +15,7 @@
 import { sdk } from '@/lib/medusa';
 import { logger } from '@/lib/logger';
 import { sanePage } from '@/lib/page-param';
+import { elapsedLabel } from '@/lib/transactions';
 import { getAuthToken } from '@/lib/data/customer';
 import { friendlyError, isAuthError } from '@/lib/errors';
 import { VAULT_RULES, VAULT_FALLBACK } from '@/lib/vault-errors';
@@ -35,6 +36,7 @@ import {
   AmountBalanceSchema,
   BuybackResultSchema,
   DepositStartSchema,
+  PendingDepositSchema,
   WithdrawStartSchema,
   WithdrawBanksSchema,
   SavedBankAccountsSchema,
@@ -698,6 +700,72 @@ export async function getTransactions(
       error: friendlyError(error, VAULT_RULES, VAULT_FALLBACK),
       needsAuth: isAuthError(error),
     };
+  }
+}
+
+export type PendingDeposit = {
+  /** The gateway reference support quotes. */
+  reference: string;
+  /** What we asked the gateway for — see PendingDepositSchema. */
+  amount: number;
+  /** FPX/BQR/… when the backend recorded one. */
+  method: string | null;
+  /** "just now" / "7 minutes ago", stamped HERE rather than in the component:
+   *  the row renders on the server and again on hydration, and a clock read in
+   *  either render would make the two disagree (and trips the React Compiler's
+   *  impure-call rule). The 10-second refresh is what advances it. */
+  startedLabel: string;
+  /** Past the backend's chase window. The copy stops promising an imminent
+   *  credit and points at support instead — see PendingDeposits. */
+  overdue: boolean;
+};
+
+/** How long before a pending deposit stops being "confirming" and becomes a
+ *  support case. Mirrors the backend's GLOBEPAY_STALE_AFTER_MS, which is also
+ *  where it stops being served at all — so this only bites on a page left
+ *  open, and stops that page claiming to confirm something indefinitely. */
+const DEPOSIT_OVERDUE_MS = 60 * 60 * 1000;
+
+/**
+ * Top-ups the customer has started but that have not settled yet.
+ *
+ * The Transactions page reads the LEDGER, and a deposit writes nothing there
+ * until it settles — so a customer who paid and came straight back saw a page
+ * with no trace of their money and reasonably concluded it had failed. This is
+ * the "we can see your payment" half.
+ *
+ * Returns a plain array and NEVER an error shape: it decorates a page that must
+ * render regardless, so a failed read degrades to "no pending row" rather than
+ * replacing the ledger with an error. The signed-out case is the same nothing —
+ * the (account) layout has already gated the page by the time this runs.
+ */
+export async function getPendingDeposits(): Promise<PendingDeposit[]> {
+  const token = await getAuthToken();
+  if (!token) return [];
+  try {
+    const raw = await sdk.client.fetch('/store/credits/deposit', {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+    });
+    // One instant for the whole list, so two rows started a second apart do not
+    // read as if measured by different clocks.
+    const now = Date.now();
+    return parseList(
+      PendingDepositSchema,
+      (raw as { deposits?: unknown }).deposits,
+    ).map((deposit) => {
+      const startedAt = new Date(deposit.created_at).getTime();
+      return {
+        reference: deposit.merchant_transaction_id,
+        amount: deposit.amount,
+        method: deposit.payment_method_code ?? null,
+        startedLabel: elapsedLabel(startedAt, now),
+        overdue: now - startedAt > DEPOSIT_OVERDUE_MS,
+      };
+    });
+  } catch (error) {
+    logger.error('[credits] pending deposits load failed:', error);
+    return [];
   }
 }
 

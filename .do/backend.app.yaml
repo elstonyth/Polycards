@@ -297,9 +297,23 @@ envs:
   # Their server-to-server targets. Explicit, not derived: production names its
   # storefront var MERCUR_STOREFRONT_URL, so deriving would silently produce a
   # localhost default and the gateway would call an address that does not exist.
+  #
+  # THE APP'S OWN ORIGIN HOSTNAME, NOT admin.polycards.gg. That name is proxied
+  # through Cloudflare, and Cloudflare's Bot Fight Mode answered every one of
+  # their callbacks with a Managed Challenge — POST /hooks/globepay/deposit from
+  # 13.159.14.239 (AS16509, empty user agent), eight challenges for one RM 500
+  # deposit on 2026-08-11, none of which reached the origin. A webhook cannot
+  # solve a browser challenge, so every top-up fell back to the reconciliation
+  # sweep and the customer waited minutes for credit.
+  #
+  # On the free plan Bot Fight Mode is zone-wide and cannot be excepted per-path
+  # by a WAF skip rule, so the fix is to keep the machine-to-machine callbacks
+  # off the proxied hostname entirely. Nothing is lost: these routes are
+  # authenticated by the RSA signature over their AES payload, never by the edge.
+  # Keep customer-facing URLs (GLOBEPAY_RETURN_URL) on the pretty domain.
   - key: GLOBEPAY_NOTIFY_URL
     scope: RUN_TIME
-    value: https://admin.polycards.gg/hooks/globepay/deposit
+    value: https://polycards-backend-gce6p.ondigitalocean.app/hooks/globepay/deposit
   - key: GLOBEPAY_RETURN_URL
     scope: RUN_TIME
     value: https://polycards.gg/transactions
@@ -373,12 +387,18 @@ envs:
   - key: GLOBEPAY_WITHDRAWALS_ENABLED
     scope: RUN_TIME
     value: "true"
+  # Origin hostname for the same reason as GLOBEPAY_NOTIFY_URL above — and it
+  # matters more here: payout-verify is the gate their §1.7 flow waits on, so a
+  # Cloudflare challenge on it stalls a payout rather than merely delaying a
+  # credit. No withdrawal traffic happened to be in the window that exposed the
+  # deposit callbacks, so this half was moved on the same reasoning, not on its
+  # own evidence.
   - key: GLOBEPAY_WITHDRAW_NOTIFY_URL
     scope: RUN_TIME
-    value: https://admin.polycards.gg/hooks/globepay/withdrawal
+    value: https://polycards-backend-gce6p.ondigitalocean.app/hooks/globepay/withdrawal
   - key: GLOBEPAY_PAYOUT_VERIFY_URL
     scope: RUN_TIME
-    value: https://admin.polycards.gg/hooks/globepay/payout-verify
+    value: https://polycards-backend-gce6p.ondigitalocean.app/hooks/globepay/payout-verify
 
   # Cooling-off window on a newly saved payout destination, in hours. The code
   # default is 24; "0" here switches it OFF, so a bank account can be withdrawn
