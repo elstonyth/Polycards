@@ -68,7 +68,22 @@ import {
 // execution order, so auth_context.actor_id is populated for keying, and
 // unauthenticated requests are rejected with 401 before consuming any budget.
 // The auth endpoints have no auth_context by nature — that limiter keys on the
-// request IP (the middleware's designed fallback).
+// request IP (the middleware's designed fallback). /store/free-pack is the
+// one deliberate exception: it authenticates with { allowUnauthenticated:
+// true }, so storeReadRateLimit runs for anonymous callers too — it falls
+// back to the same per-IP key (rate-limit.ts's `auth?.actor_id || ip:...`).
+// In production that IS one shared bucket, not per-visitor: every guest
+// /slots render is proxied server-side through the storefront's ONE Next.js
+// egress IP (the same single-egress-IP topology createAuthRateLimit /
+// createProfileReadRateLimit already document — see rate-limit.ts
+// ~750-760), so this is a whole-storefront CIRCUIT BREAKER on the badge's
+// guest read (STORE_READ_DEFAULTS: 120/10s burst, 480/60s sustained
+// sitewide), the same accepted stance as those other public-read tiers.
+// Overflow fails closed at the badge only — src/lib/data/free-pack.ts's
+// try/catch maps any non-2xx (including a 429) to `hidden`, so the catalog
+// itself is unaffected. If that ceiling ever binds in practice, the lever
+// is caching the identity-free guest fetch storefront-side, not widening
+// this limiter.
 
 // One instance shared by the vault + credits matchers: the two reads travel
 // together in the UI, so they share one budget (and one Redis connection).
@@ -475,11 +490,17 @@ export default defineMiddlewares({
     },
     {
       // Free welcome pack eligibility (GET /store/free-pack) — the ONLY public
-      // surface the free pack has (the catalog excludes its category), so it
-      // must be authenticated: the answer is per-customer.
+      // surface the free pack has (the catalog excludes its category). The
+      // per-customer answer still requires the verified bearer; an
+      // unauthenticated request now falls through to an anonymous
+      // catalog-only promo answer (route.ts handles both branches) instead
+      // of 401ing, so the storefront can show a signup-hook badge.
       matcher: '/store/free-pack',
       method: 'GET',
-      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+      middlewares: [
+        authenticate('customer', ['bearer'], { allowUnauthenticated: true }),
+        storeReadRateLimit,
+      ],
     },
     {
       matcher: '/store/packs/*/open',

@@ -152,6 +152,21 @@ describe('FreePackSchema — GET /store/free-pack', () => {
     expect(parseOne(FreePackSchema, { eligible: true })).toBeNull();
     expect(parseOne(FreePackSchema, null)).toBeNull();
   });
+
+  it('accepts the anonymous promo answer, promo optional elsewhere', () => {
+    expect(
+      parseOne(FreePackSchema, {
+        eligible: false,
+        slug: null,
+        image: null,
+        promo: true,
+      }),
+    ).toMatchObject({ eligible: false, promo: true });
+    // promo must be a boolean when present
+    expect(
+      parseOne(FreePackSchema, { eligible: false, slug: null, promo: 'yes' }),
+    ).toBeNull();
+  });
 });
 
 // #6 — the buyback percent is shown the instant a customer commits money. Guard

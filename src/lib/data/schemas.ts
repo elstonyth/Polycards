@@ -255,6 +255,8 @@ export const VaultItemSchema = z.looseObject({
 export const FreePackSchema = z.looseObject({
   eligible: z.boolean(),
   slug: z.string().nullable(),
+  /** Anonymous answers only: "an active free pack exists" (the signup hook). */
+  promo: z.boolean().optional(),
 });
 
 /** POST /store/vault/:id/showcase response — pull_id + final showcased state. */
