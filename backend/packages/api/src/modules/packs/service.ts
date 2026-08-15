@@ -56,7 +56,9 @@ import ChallengeSchedule from './models/challenge-schedule';
 import ChallengeSettings from './models/challenge-settings';
 import TierSettings from './models/tier-settings';
 import GlobePayDeposit from './models/globepay-deposit';
-import GlobePayWithdrawal from './models/globepay-withdrawal';
+import GlobePayWithdrawal, {
+  WITHDRAWAL_STATUSES,
+} from './models/globepay-withdrawal';
 import ChallengePayout from './models/challenge-payout';
 import LedgerEntry from './models/ledger-entry';
 import LedgerSequence from './models/ledger-sequence';
@@ -292,9 +294,10 @@ type LedgerSqlManager = {
   execute<T = unknown>(query: string, params?: unknown[]): Promise<T>;
 };
 
-/** The globepay_withdrawal.status domain, mirrored from the model's enum for
- *  the raw-SQL claim below (raw SQL carries no model types). */
-type WithdrawalStatus = 'pending' | 'settled' | 'failed' | 'held';
+/** The globepay_withdrawal.status domain, derived from the model's
+ *  WITHDRAWAL_STATUSES for the raw-SQL claim below (raw SQL carries no model
+ *  types). */
+type WithdrawalStatus = (typeof WITHDRAWAL_STATUSES)[number];
 
 /** One raw `ledger_entry` row as listLedgerEntriesForAdmin reads it. */
 export type LedgerEntryRow = {

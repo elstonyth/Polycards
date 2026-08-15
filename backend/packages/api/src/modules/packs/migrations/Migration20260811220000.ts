@@ -44,6 +44,11 @@ export class Migration20260811220000 extends Migration {
         END IF;
       END $$;
     `);
+    // Literal list mirrors WITHDRAWAL_STATUSES (models/globepay-withdrawal.ts)
+    // as of this migration. FROZEN HISTORY — a migration is a record of what
+    // ran, so this SQL string is never edited to derive from that constant;
+    // widen the domain via a NEW migration instead (as this one did to its
+    // predecessor).
     this.addSql(
       `alter table if exists "globepay_withdrawal" add constraint "globepay_withdrawal_status_check" check ("status" in ('pending', 'settled', 'failed', 'held'));`,
     );

@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { GET, maskAccountNumber, parseStatusFilter } from '../route';
 import { GET as REVEAL } from '../[id]/account/route';
 import { GLOBEPAY_STALE_AFTER_MS } from '../../../../../modules/packs/globepay-reconcile';
+import { WITHDRAWAL_STATUSES } from '../../../../../modules/packs/models/globepay-withdrawal';
 
 // Money-OUT mirror of ../deposits — same contract, inverted stakes: a stale
 // pending row here is a customer ALREADY debited with no payout and no refund.
@@ -108,6 +109,21 @@ describe('parseStatusFilter', () => {
     for (const s of ['pending', 'settled', 'failed', 'held', 'all']) {
       expect(parseStatusFilter(s)).toBe(s);
     }
+  });
+
+  // The admin SPA's VIEWS array (apps/admin/src/routes/withdrawals/page.tsx)
+  // is a FIFTH uncoordinated copy of this same status set, plus 'all'. It
+  // can't be imported here: @acme/api's package.json `exports` map serves
+  // only `./_generated` (see plans/041), and apps/admin is a separate SPA
+  // package this project's tsconfig doesn't reach either. So this hand-lists
+  // VIEWS' current contents and checks SET equality (never order — 'held'
+  // is deliberately first as the operator default, VIEWS' own comment) against
+  // WITHDRAWAL_STATUSES + 'all'. If either side drifts, update both in one PR.
+  it('the admin SPA VIEWS set matches WITHDRAWAL_STATUSES + all (order not asserted)', () => {
+    const adminViews = ['held', 'pending', 'settled', 'failed', 'all'];
+    expect(new Set(adminViews)).toEqual(
+      new Set([...WITHDRAWAL_STATUSES, 'all']),
+    );
   });
 });
 
