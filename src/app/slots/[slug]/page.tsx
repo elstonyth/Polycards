@@ -38,7 +38,9 @@ export default async function SlotsPackDetailPage({
   const [base, detail, recentPulls] = await Promise.all([
     getPackBySlug(slug),
     getPackDetail(slug),
-    getRecentPulls(),
+    // This pack's own history — the feed used to be global, so every pack
+    // showed identical rows.
+    getRecentPulls(slug),
   ]);
   if (!base) notFound();
 
