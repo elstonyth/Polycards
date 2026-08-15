@@ -230,14 +230,17 @@ describe('WithdrawForm', () => {
     await submit();
 
     // The destination is an id and nothing else: the server resolves the bank
-    // details from the customer's own saved list.
+    // details from the customer's own saved list. A per-attempt idempotency
+    // key rides along too (see the attemptKey doc comment) — its exact value
+    // is random, so only its shape is pinned here.
     expect(startWithdrawal).toHaveBeenCalledExactlyOnceWith({
       amount: 50,
       accountId: READY_ACCOUNT.id,
+      idempotencyKey: expect.any(String),
     });
     // The payout debits the balance server-side; the form must repaint it, or
-    // the header chip stays stale and the Me tab's money dot never lights until
-    // a focus event.
+    // the header chip stays stale. (It also used to light the Me-tab money dot
+    // — suspended 2026-08-11, see components/account/credit-dot.tsx.)
     expect(applyBalance).toHaveBeenCalledWith(50);
     const text = container.textContent ?? '';
     expect(text).toContain('RM 50.00 ON ITS WAY');
@@ -247,6 +250,35 @@ describe('WithdrawForm', () => {
     expect(text).toContain('returns to your balance');
     expect(text).toContain('W2026072200000001');
     expect(text).toContain('RM 50.00');
+  });
+
+  it('shows a held withdrawal as under review — never "paid", never spendable', async () => {
+    await render();
+    startWithdrawal.mockResolvedValue({
+      ok: true,
+      amount: 80,
+      balance: 20,
+      reference: 'wd_merchant_ref_123',
+      status: 'held',
+    });
+    fillValidForm('80');
+    await submit();
+
+    const text = container.textContent ?? '';
+    expect(text).toContain('RM 80.00 UNDER REVIEW');
+    // A held withdrawal was never submitted to the gateway — it must never
+    // read as a completed payout.
+    expect(text).not.toMatch(/paid|complete|has been sent|ON ITS WAY/i);
+    // It must say plainly that the debit already happened and what happens
+    // if a human refuses it — without naming the threshold figure, which
+    // the backend reads from an env var.
+    expect(text).toContain('already left your balance');
+    expect(text).toContain('returns automatically');
+    expect(text).not.toMatch(/RM ?1,?000/);
+    expect(text).toContain('wd_merchant_ref_123');
+    // The POST-debit balance — showing it is how the copy avoids implying
+    // the withdrawn amount is still spendable.
+    expect(text).toContain('RM 20.00');
   });
 
   it('shows the server error and stays on the form when the backend refuses', async () => {
@@ -261,5 +293,31 @@ describe('WithdrawForm', () => {
       'Withdrawals are not open yet.',
     );
     expect(container.textContent).not.toContain('ON ITS WAY');
+  });
+
+  // The dangerous direction: if a retry ever minted a NEW key, a debited-but-
+  // response-lost first attempt plus a retry would be a second debit and a
+  // second real bank transfer. This pins the key staying armed across a
+  // failed attempt, exactly like TopUpSheet's attemptKey.
+  it('reuses the SAME idempotency key across a failed retry of the same attempt', async () => {
+    await render();
+    // Set for BOTH calls (not Once): the key-reuse assertion below must hold
+    // regardless of what any earlier test left as the mock's implementation.
+    startWithdrawal.mockResolvedValue({
+      ok: false,
+      error: 'Something went wrong. Please try again.',
+    });
+    fillValidForm();
+    await submit();
+    await submit();
+
+    expect(startWithdrawal).toHaveBeenCalledTimes(2);
+    const [firstCall] = startWithdrawal.mock.calls[0]! as [
+      { idempotencyKey: string },
+    ];
+    const [secondCall] = startWithdrawal.mock.calls[1]! as [
+      { idempotencyKey: string },
+    ];
+    expect(secondCall.idempotencyKey).toBe(firstCall.idempotencyKey);
   });
 });

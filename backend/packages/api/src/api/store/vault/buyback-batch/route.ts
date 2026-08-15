@@ -20,10 +20,12 @@ import { buybackPullWorkflow } from '../../../../workflows/buyback-pull';
 // Money safety is unchanged and per-pull: each iteration is independently
 // atomic (credit row written first under the unique-pull_id guard, then the
 // pull is flipped; the step undoes the credit if the flip fails). A pull that
-// can't be sold — already sold, out for delivery, not owned, or a frozen
-// account — is SKIPPED with its reason and reported back; the others still
-// sell. No pull ever leaves 'vaulted' without a matching credit, so a partial
-// batch can never lose a card without paying for it.
+// can't be sold — already sold, out for delivery, not owned, a frozen account,
+// or a free welcome pull still locked until the first paid open — is SKIPPED
+// with its reason and reported back; the others still sell. Every gate lives
+// in the step, so this route needs no pre-filter of its own. No pull ever
+// leaves 'vaulted' without a matching credit, so a partial batch can never lose
+// a card without paying for it.
 //
 // AUTH + RATE LIMIT: registered in src/api/middlewares.ts (authenticate() then
 // the vault-buyback limiter). The customer id comes ONLY from the verified

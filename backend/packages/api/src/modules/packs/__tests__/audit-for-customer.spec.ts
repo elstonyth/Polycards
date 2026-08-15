@@ -58,7 +58,11 @@ moduleIntegrationTestRunner<PacksModuleService>({
         await seedLadder(); // REQUIRED — else settleOpen rolls back and no commission row exists to reverse
 
         // commission: link + open so a commission exists, then reverse it (writes commission-keyed audit)
-        await service.linkSponsor({ recruitId: 'au_R', sponsorId: 'au_S' });
+        // Referral writes were retired with linkSponsor; the model is kept, so the
+        // edge is seeded directly for setup.
+        await service.createReferralRelationships([
+          { customer_id: 'au_R', sponsor_id: 'au_S' },
+        ]);
         await service.mutateCreditAtomic({ customerId: 'au_R', amount: 30, reason: 'topup' });
         await service.settleOpen({ customerId: 'au_R', amount: -20, sourceTransactionId: 'au_open' });
         const [comm] = await service.listCommissions({ beneficiary: 'au_S' }, { take: 1 });

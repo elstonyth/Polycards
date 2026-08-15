@@ -27,7 +27,7 @@ level, and `/me` still shows the level number and progress bar. Only the
 | --- | --- |
 | Dead routes: 404 or redirect? | **Delete the route directories → 404.** Matches the 2026-07-20 orphan-route purge precedent. Old `/invite/<handle>` links in the wild will 404. |
 | Feature flags? | **No.** `src/lib/features.ts` was deleted 2026-07-20 for exactly this reason — flags that gate removed routes are dead weight. Git history is the undo. |
-| Server actions / libs? | **Left in place, unreferenced** (`lib/actions/daily.ts`, `lib/actions/referral.ts`, `lib/referral-cookie.ts`, `components/rewards/PrizeReveal.tsx`). `lib/actions/vip.ts` stays *referenced* — `/me` still calls `getVip()`. Deleting the others buys nothing and makes the restore a rewrite instead of a revert. |
+| Server actions / libs? | **Left in place, unreferenced** (`lib/actions/daily.ts`, `lib/actions/referral.ts`, `lib/referral-cookie.ts`, `components/rewards/PrizeReveal.tsx`). `lib/actions/vip.ts` stays *referenced* — `/me` still calls `getVip()`. Deleting the others buys nothing and makes the restore a rewrite instead of a revert. **Partially superseded by #427** (2026-08-12): `referral.ts` and `referral-cookie.ts` were deleted as a security fix (unbounded recursive-CTE DoS in `linkSponsor`) — see ADR 0004's 2026-08-15 amendment. |
 | `/me` VIP card | Keeps the LV number, progress bar, and threshold labels. Loses the link, the voucher tail, and the daily-box line. |
 
 ### Assumption — NOT answered by the operator

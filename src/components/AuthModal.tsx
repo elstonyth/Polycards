@@ -4,12 +4,10 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
-import { lockBodyScroll, unlockBodyScroll } from '@/lib/use-modal-a11y';
+import { useModalA11y } from '@/lib/use-modal-a11y';
 import AuthForm from './AuthForm';
 
-// Tabbable-element selector used by the focus trap.
-const FOCUSABLE =
-  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+type AuthMode = 'login' | 'signup';
 
 /**
  * Global auth modal — mounted once (in SiteHeader, always present). Opens in response
@@ -22,9 +20,10 @@ const FOCUSABLE =
  */
 export default function AuthModal() {
   const [open, setOpen] = useState(false);
-  const [mode, setMode] = useState<'login' | 'signup'>('login');
+  const [mode, setMode] = useState<AuthMode>('login');
   const panelRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLElement | null>(null);
+
+  const dismiss = () => setOpen(false);
 
   // Liquid-glass rim on the panel — subtle settings; the interior must stay
   // legible behind a form. Safari/Firefox get the frosted fallback.
@@ -32,9 +31,9 @@ export default function AuthModal() {
 
   useEffect(() => {
     const onOpen = (e: Event) => {
-      const detail = (e as CustomEvent<{ mode?: 'login' | 'signup' }>).detail;
-      // Remember whatever had focus so it can be restored when the modal closes.
-      triggerRef.current = document.activeElement as HTMLElement | null;
+      const detail = (e as CustomEvent<{ mode?: AuthMode }>).detail;
+      // Whatever has focus now is the trigger; useModalA11y captures it when
+      // the open flip reaches its effect and restores it on close.
       setMode(detail?.mode ?? 'login');
       setOpen(true);
     };
@@ -57,46 +56,11 @@ export default function AuthModal() {
     window.history.replaceState({}, '', url);
   }, []);
 
-  useEffect(() => {
-    if (!open) return;
-    const panel = panelRef.current;
-
-    // Move focus into the dialog on open (WCAG 2.4.3).
-    panel?.focus();
-
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setOpen(false);
-        return;
-      }
-      // Trap focus within the dialog so background content stays unreachable (WCAG 2.1.2).
-      if (e.key !== 'Tab' || !panel) return;
-      const focusables = Array.from(
-        panel.querySelectorAll<HTMLElement>(FOCUSABLE),
-      );
-      if (focusables.length === 0) return;
-      // length === 0 is checked above; both indices are in bounds
-      const first = focusables[0]!;
-      const last = focusables[focusables.length - 1]!;
-      const active = document.activeElement;
-      if (e.shiftKey && (active === first || active === panel)) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && active === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-
-    document.addEventListener('keydown', onKey);
-    lockBodyScroll();
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      unlockBodyScroll();
-      // Restore focus to the element that opened the modal (WCAG 2.4.3).
-      triggerRef.current?.focus();
-    };
-  }, [open]);
+  // Focus into the panel, Tab trap, Escape, body-scroll lock and focus restore.
+  // The hook re-runs only when `open` flips, so switching login↔signup no longer
+  // tears the listener down and bounces focus off the control just used — which
+  // is what listing `mode` in the old hand-rolled effect's deps did.
+  useModalA11y(panelRef, open, dismiss);
 
   // `open` only flips true via a client event (post-hydration), so createPortal is
   // never reached during SSR — no separate mounted gate needed.
@@ -110,7 +74,7 @@ export default function AuthModal() {
         type="button"
         aria-hidden="true"
         tabIndex={-1}
-        onClick={() => setOpen(false)}
+        onClick={dismiss}
         className="glass-stage absolute inset-0 cursor-default bg-black/40"
       />
       <div
@@ -123,7 +87,7 @@ export default function AuthModal() {
       >
         <button
           type="button"
-          onClick={() => setOpen(false)}
+          onClick={dismiss}
           aria-label="Close"
           className="absolute right-2.5 top-2.5 flex h-11 w-11 items-center justify-center rounded-lg text-white/50 transition-colors hover:bg-white/5 hover:text-white"
         >

@@ -45,6 +45,14 @@ export const adjustCreditsStep = createStep(
 
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
 
+    // NOTE: the rolling-24h GLOBAL mint ceiling (ADJUST_DAILY_MINT_MAX_RM) is
+    // NOT checked here. It lives inside adminAdjustCredit, under a global
+    // advisory lock in the same transaction as the write — deliberately the
+    // ONE load-bearing check, because a copy here would be unlocked, would let
+    // concurrent grants to different customers each pass a stale window, and
+    // would be a second place for the rule to drift. Refusals surface as
+    // NOT_ALLOWED -> HTTP 400, same as the RM 0 balance floor.
+
     // Atomic write: the credit ledger row AND an admin_action_audit row are
     // written together in the same transaction inside adminAdjustCredit, so
     // both commit or neither does. The advisory-lock serialisation from

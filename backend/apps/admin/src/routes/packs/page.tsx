@@ -14,6 +14,7 @@ import {
   Select,
   Label,
   StatusBadge,
+  Tabs,
   FocusModal,
   Prompt,
   toast,
@@ -88,6 +89,12 @@ const CATEGORIES = [
 ] as const;
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
+// Reserved category of the free welcome pack (mirrors FREE_WELCOME_CATEGORY in
+// the API's modules/packs/free-pack.ts — the admin app doesn't import from the
+// backend package). It is deliberately NOT in CATEGORIES: the free pack lives
+// on its own sub-tab, so it is never picked from the category dropdown.
+const FREE_WELCOME_CATEGORY = 'free_welcome';
+
 // Columns in the packs table — the expander row spans all of them. Keep in
 // step with the <Table.Header> row below.
 const COLUMN_COUNT = 9;
@@ -154,6 +161,10 @@ const PacksListPage = () => {
   const reorderPacks = useReorderPacks();
   const removePack = useDeletePack();
   const uploadImg = useUploadImage();
+  // Which sub-tab is showing. The free welcome pack is an ordinary pack in a
+  // reserved category, so it is split off here rather than filtered by hand:
+  // the money packs tab never shows it, the Free pack tab shows only it.
+  const [tab, setTab] = useState<'packs' | 'free'>('packs');
   const [mode, setMode] = useState<'create' | 'edit' | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [deleteTarget, setDeleteTarget] = useState<AdminPack | null>(null);
@@ -184,8 +195,14 @@ const PacksListPage = () => {
       return next;
     });
 
+  // Create from the Free pack tab pre-fills the two fields that MAKE it the
+  // free pack (the server validates both); everything else is the normal form.
   const openCreate = () => {
-    setForm(EMPTY_FORM);
+    setForm(
+      tab === 'free'
+        ? { ...EMPTY_FORM, category: FREE_WELCOME_CATEGORY, price: '0' }
+        : EMPTY_FORM,
+    );
     setMode('create');
   };
   const openEdit = (pack: AdminPack) => {
@@ -305,9 +322,13 @@ const PacksListPage = () => {
   // Category groups in display order (the API list is already (category, rank)
   // sorted; re-sort defensively so the arrows always match what is rendered —
   // rank ties broken by slug, same as nothing guarantees in the DB).
+  // The tab split happens HERE, at the source list, so every derivation below
+  // (row order, counts, search, sort, the reorder arrows' position numbers)
+  // sees only the packs of the active tab.
   const grouped = useMemo(() => {
     const m = new Map<string, AdminPack[]>();
     for (const p of packs ?? []) {
+      if ((p.category === FREE_WELCOME_CATEGORY) !== (tab === 'free')) continue;
       const g = m.get(p.category) ?? [];
       g.push(p);
       m.set(p.category, g);
@@ -315,7 +336,7 @@ const PacksListPage = () => {
     for (const g of m.values())
       g.sort((a, b) => a.rank - b.rank || a.slug.localeCompare(b.slug));
     return m;
-  }, [packs]);
+  }, [packs, tab]);
 
   // Render rows in the exact grouped order so the position numbers always
   // match what's on screen, even while duplicate ranks are still unnormalized.
@@ -365,49 +386,18 @@ const PacksListPage = () => {
     }
   };
 
-  return (
-    <Container className="divide-y p-0">
-      <div className="flex items-start justify-between gap-4 px-6 py-4">
-        <div>
-          <Heading level="h2">{t('packs.title')}</Heading>
-          <Text className="text-ui-fg-subtle mt-1" size="small">
-            {t('packs.subtitle')}
-          </Text>
-        </div>
-        <Input
-          className="w-56"
-          placeholder="Search title…"
-          aria-label="Search packs by title"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
-        <Select
-          value={statusFilter}
-          onValueChange={(v) =>
-            setStatusFilter(v === 'draft' || v === 'active' ? v : 'all')
-          }
-        >
-          <Select.Trigger className="w-44" aria-label="Filter by status">
-            <Select.Value />
-          </Select.Trigger>
-          <Select.Content>
-            <Select.Item value="all">All statuses</Select.Item>
-            <Select.Item value="draft">draft</Select.Item>
-            <Select.Item value="active">active</Select.Item>
-          </Select.Content>
-        </Select>
-        <Button size="small" variant="primary" onClick={openCreate}>
-          {t('packs.new')}
-        </Button>
-      </div>
-
-      <GachaPipelineHint current="pack" />
-
+  // The list body. Both tabs render the SAME table over their own slice of the
+  // catalog (the split lives in `grouped`), so it is described once here and
+  // handed to whichever <Tabs.Content> is mounted.
+  const table = (
+    <>
       {packs !== null && (
         <Text size="small" className="text-ui-fg-subtle px-6 pb-2">
-          {filtering
-            ? `${visibleRows.length} of ${rows.length} packs`
-            : `${rows.length} packs`}
+          {/* Singular matters here: the Free pack tab is a one-row list by
+              design, so "1 packs" would be its permanent state. */}
+          {`${filtering ? `${visibleRows.length} of ` : ''}${rows.length} pack${
+            rows.length === 1 ? '' : 's'
+          }`}
         </Text>
       )}
 
@@ -422,7 +412,7 @@ const PacksListPage = () => {
         <div className="px-6 py-8">
           <LoadingSkeleton />
         </div>
-      ) : packs.length === 0 ? (
+      ) : rows.length === 0 ? (
         <div className="px-6 py-8">
           <Text className="text-ui-fg-subtle">{t('packs.list.empty')}</Text>
         </div>
@@ -631,6 +621,67 @@ const PacksListPage = () => {
           </Table>
         </div>
       )}
+    </>
+  );
+
+  return (
+    <Container className="divide-y p-0">
+      <Tabs
+        className="divide-y"
+        value={tab}
+        onValueChange={(v) => setTab(v === 'free' ? 'free' : 'packs')}
+      >
+        <div className="flex items-start justify-between gap-4 px-6 py-4">
+          <div>
+            <Heading level="h2">{t('packs.title')}</Heading>
+            <Text className="text-ui-fg-subtle mt-1" size="small">
+              {t('packs.subtitle')}
+            </Text>
+          </div>
+          <Input
+            className="w-56"
+            placeholder="Search title…"
+            aria-label="Search packs by title"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+          <Select
+            value={statusFilter}
+            onValueChange={(v) =>
+              setStatusFilter(v === 'draft' || v === 'active' ? v : 'all')
+            }
+          >
+            <Select.Trigger className="w-44" aria-label="Filter by status">
+              <Select.Value />
+            </Select.Trigger>
+            <Select.Content>
+              <Select.Item value="all">All statuses</Select.Item>
+              <Select.Item value="draft">draft</Select.Item>
+              <Select.Item value="active">active</Select.Item>
+            </Select.Content>
+          </Select>
+          <Button size="small" variant="primary" onClick={openCreate}>
+            {tab === 'free' ? t('packs.free.create') : t('packs.new')}
+          </Button>
+        </div>
+
+        <div className="px-6 py-3">
+          <Tabs.List>
+            <Tabs.Trigger value="packs">{t('packs.tabs.packs')}</Tabs.Trigger>
+            <Tabs.Trigger value="free">{t('packs.tabs.free')}</Tabs.Trigger>
+          </Tabs.List>
+        </div>
+
+        <GachaPipelineHint current="pack" />
+
+        <Tabs.Content value="packs">{table}</Tabs.Content>
+        <Tabs.Content value="free">
+          <Text size="small" className="text-ui-fg-subtle px-6 pb-1 pt-3">
+            {t('packs.free.hint')}
+          </Text>
+          {table}
+        </Tabs.Content>
+      </Tabs>
 
       <FocusModal
         open={mode !== null}
@@ -836,21 +887,28 @@ const PacksListPage = () => {
                   <Label size="small" weight="plus" htmlFor="pack-category">
                     {t('packs.form.category')}
                   </Label>
-                  <Select
-                    value={form.category}
-                    onValueChange={(v) => patch({ category: v })}
-                  >
-                    <Select.Trigger id="pack-category">
-                      <Select.Value />
-                    </Select.Trigger>
-                    <Select.Content>
-                      {CATEGORIES.map((c) => (
-                        <Select.Item key={c} value={c}>
-                          {c}
-                        </Select.Item>
-                      ))}
-                    </Select.Content>
-                  </Select>
+                  {/* The free pack's category is fixed (and absent from
+                      CATEGORIES, so a Select would render blank) — same
+                      disabled-Input treatment as the immutable slug. */}
+                  {form.category === FREE_WELCOME_CATEGORY ? (
+                    <Input id="pack-category" value={form.category} disabled />
+                  ) : (
+                    <Select
+                      value={form.category}
+                      onValueChange={(v) => patch({ category: v })}
+                    >
+                      <Select.Trigger id="pack-category">
+                        <Select.Value />
+                      </Select.Trigger>
+                      <Select.Content>
+                        {CATEGORIES.map((c) => (
+                          <Select.Item key={c} value={c}>
+                            {c}
+                          </Select.Item>
+                        ))}
+                      </Select.Content>
+                    </Select>
+                  )}
                 </div>
                 <div className="flex flex-col gap-y-2">
                   <Label size="small" weight="plus" htmlFor="pack-status">
@@ -895,12 +953,16 @@ const PacksListPage = () => {
                   <Label size="small" weight="plus" htmlFor="pack-price">
                     {t('packs.form.price')}
                   </Label>
+                  {/* A free_welcome pack must be free — the server rejects any
+                      other price, so the field is locked rather than left to
+                      fail on save. */}
                   <Input
                     id="pack-price"
                     type="number"
                     min={0}
                     step={1}
                     value={form.price}
+                    disabled={form.category === FREE_WELCOME_CATEGORY}
                     onChange={(e) => patch({ price: e.target.value })}
                   />
                 </div>

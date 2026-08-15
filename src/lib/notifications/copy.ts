@@ -261,6 +261,30 @@ export const NOTIFICATION_COPY: Record<string, NotificationCopy> = {
     action: 'Review accounts',
   },
 
+  bank_account_removed: {
+    icon: Landmark,
+    variant: 'info',
+    // Toasts for the same reason bank_account_added does, and it is the same
+    // attack: swapping the owner's payout destination for the attacker's is a
+    // remove followed by an add. With PAYOUT_DESTINATION_COOLDOWN_HOURS at 0
+    // there is no waiting period left to notice during, so the alert pair IS
+    // the defence. The /bank list updates in place without a toast of its own,
+    // so nothing else tells the owner's other tab.
+    policy: 'always',
+    title: 'Bank account removed',
+    body: (data) => {
+      const bank = strOf(data, 'bank_name');
+      const last4 = strOf(data, 'account_last4');
+      // EXACTLY four digits, same guard as the added sibling and the email
+      // renderer: a merely non-empty check would render a FULL account number
+      // into a toast if a malformed payload ever reached here.
+      if (!last4 || !/^\d{4}$/.test(last4)) return null;
+      return `${bank ? `${bank} ` : ''}····${last4} was removed from your withdrawal accounts. If this wasn't you, change your password now.`;
+    },
+    href: '/bank',
+    action: 'Review accounts',
+  },
+
   challenge_payout: {
     icon: Trophy,
     variant: 'reward',

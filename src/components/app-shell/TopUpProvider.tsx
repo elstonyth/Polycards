@@ -49,12 +49,16 @@ export function useTopUp(): TopUpContextValue {
 export function TopUpProvider({ children }: { children: ReactNode }) {
   const { customer } = useAuth();
   const router = useRouter();
-  // Every balance movement writes a credit_transaction, and that row is exactly
-  // what the money dot watches. Refreshing HERE rather than at each call site
-  // means a sell, a top-up, a spin charge and a payout all light the dot
-  // without anyone remembering to wire it. CreditDotProvider sits outside this
-  // one in the layout for this reason.
-  const { refresh: refreshCreditDot } = useCreditDot();
+  // The money dot used to be re-read here on every balance movement (a sell, a
+  // top-up, a spin charge, a payout), so no call site had to remember to light
+  // it. That went with the dot itself on 2026-08-11 — see the SUSPENDED banner
+  // in components/account/credit-dot.tsx. Deliberately NOT left in place as
+  // harmless plumbing: this refresh is the one path createUnreadDot exempts
+  // from its 30s throttle, so keeping it would have cost a server-action round
+  // trip per SPIN for a signal nothing renders — and the throttle exists
+  // because of the 2026-07-07 store-read-ceiling incident. Restoring the dot
+  // means restoring this line too. CreditDotProvider still wraps this one in
+  // the layout; MarkCreditsSeen (/transactions) is its only live consumer now.
   // Balance is stored WITH the customer id it was fetched for. A value tagged
   // for another identity never renders (security review: on logout→login as a
   // different account, an untagged balance briefly leaked the previous user's
@@ -194,9 +198,8 @@ export function TopUpProvider({ children }: { children: ReactNode }) {
     (value: number) => {
       if (!customer) return;
       setBalance({ forId: customer.id, value });
-      refreshCreditDot();
     },
-    [customer, refreshCreditDot],
+    [customer],
   );
 
   const openTopUp = useCallback(() => {

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { friendlyError } from '@/lib/errors';
 import { VAULT_RULES, VAULT_FALLBACK } from '@/lib/vault-errors';
+import { isPhoneGateError } from '@/lib/phone-gate';
 
 // Contract test for the same message-substring coupling as delivery-errors:
 // @medusajs/js-sdk's FetchError keeps only message/status, so there is no code
@@ -55,9 +56,15 @@ describe('VAULT_RULES backend-message contract', () => {
     expect(map('Withdrawals must be between RM 30 and RM 1,000.')).toBe(
       'Withdrawals must be between RM 30 and RM 1,000.',
     );
-    expect(map('We could not start your withdrawal.')).toBe(
-      'We could not start your withdrawal. Please check the bank details and try again.',
-    );
+    const refused =
+      'Your withdrawal was refused by the payment provider and your balance has been returned. Check your bank details are correct — if they are, contact support rather than retrying.';
+    expect(
+      map('Your withdrawal was refused by the payment provider and…'),
+    ).toBe(refused);
+    // The pre-095 backend wording still maps, because a storefront deploy and
+    // a backend deploy are two different rollouts and the older message can
+    // arrive after this one ships.
+    expect(map('We could not start your withdrawal.')).toBe(refused);
   });
 
   it('points an unverified customer at the screen that clears the gate', () => {
@@ -66,6 +73,14 @@ describe('VAULT_RULES backend-message contract', () => {
     expect(map('Verify your phone number before continuing.')).toBe(
       'Verify your phone number in Account settings before continuing.',
     );
+    // ...and the copy must stay recognisable to PhoneGateAction, which turns
+    // that sentence into the button that goes there. Matching display text is
+    // the only handle it has (the action returns a plain string), so a reword
+    // that drops the phrase would silently remove the button.
+    expect(
+      isPhoneGateError(map('Verify your phone number before continuing.')),
+    ).toBe(true);
+    expect(isPhoneGateError(map('kaboom'))).toBe(false);
   });
 
   // The kill switch is the documented incident response for a dead gateway

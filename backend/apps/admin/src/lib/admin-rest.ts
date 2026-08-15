@@ -1113,7 +1113,20 @@ export function getGlobePayDeposits(
 // mirror of the deposits window. 'stale' = still pending past the sweep's
 // window; for a withdrawal that means a customer already debited with no
 // payout confirmed and no refund, i.e. the row to chase first.
-export type GlobePayWithdrawalView = 'pending' | 'settled' | 'failed' | 'all';
+//
+// 'held' (Task 6, plan 094) is the operator-facing DEFAULT view: a held row
+// is debited, above the approval threshold, and awaiting a human's approve or
+// deny — it outranks 'pending' because a customer waiting on a HUMAN is a
+// different kind of waiting than a customer waiting on the gateway. The
+// backend's own default (parseStatusFilter) is left on 'pending' — this SPA
+// always sends `status` explicitly (see getGlobePayWithdrawals below), so the
+// page's default view is what actually decides what an operator sees first.
+export type GlobePayWithdrawalView =
+  | 'held'
+  | 'pending'
+  | 'settled'
+  | 'failed'
+  | 'all';
 
 export interface GlobePayWithdrawal {
   id: string;
@@ -1127,11 +1140,28 @@ export interface GlobePayWithdrawal {
    *  full value comes one row at a time from getGlobePayWithdrawalAccount. */
   account_number: string;
   account_holder_name: string;
-  status: 'pending' | 'settled' | 'failed';
+  status: 'held' | 'pending' | 'settled' | 'failed';
   gateway_status: number | null;
+  /** Why the payout died — the gateway's own codes, a sweep verdict, or the
+   *  admin who denied it. Null on rows that never failed, and on the ten
+   *  pre-2026-08-12 failures that predate the column. */
+  failure_reason: string | null;
+  /** How we answered their Payout Verification, stamped on EVERY hit we can
+   *  match to a row. Null does NOT prove their call never came: a decrypt or
+   *  signature failure is refused before we know which withdrawal it belongs
+   *  to, and rows created before this column exist keep it null forever. It
+   *  narrows the search to those three, and the HTTP access log separates
+   *  them. */
+  verify_outcome: string | null;
   created_at: string;
   settled_at: string | null;
   stale: boolean;
+  /** The customer's funds-freeze state, as of this page load — a PREVIEW,
+   *  not a guarantee: ./[id]/approve re-checks it live at click time, so a
+   *  freeze that lands between two polls can still refuse an approve this
+   *  said `false` a moment ago. Surfaced so an approver sees the reason
+   *  BEFORE clicking into that refusal, not just after. */
+  frozen: boolean;
 }
 
 export interface GlobePayWithdrawalsResponse {
@@ -1170,6 +1200,56 @@ export function getGlobePayWithdrawalAccount(
     `/admin/globepay/withdrawals/${encodeURIComponent(id)}/account`,
   );
 }
+
+// ── Held-withdrawal approval queue (Task 6, plan 094) ────────────────────────
+
+/** Mirrors ./[id]/approve's response verbatim (see its route.ts) — three real
+ *  shapes collapse into `approved`/`transaction_id`: approved:true with an id
+ *  is a submitted payout, approved:true with a null id is a submit whose
+ *  gateway outcome is ambiguous (left pending for the reconcile sweep), and
+ *  approved:false is the idempotent no-op (the row was not 'held' anymore —
+ *  another click or another admin already resolved it). `status` can be
+ *  STALE on the no-op branch (the route reads it once, before the claim it
+ *  then fails to make — see approve/route.ts), so callers must not treat it
+ *  as the row's current truth; see withdrawal-outcome.ts's classifier, which
+ *  deliberately never reads this field. */
+export interface GlobePayWithdrawalApproveResult {
+  id: string;
+  status: string;
+  transaction_id: string | null;
+  approved: boolean;
+}
+
+/** Claim a HELD withdrawal and submit it to the gateway. Refuses (thrown,
+ *  via httpError) when the payout channel is closed, the customer is frozen,
+ *  or the row was never actually debited — each with its own specific
+ *  MedusaError message, which is what reaches the operator's toast. No body:
+ *  the route acts only on `:id` and the session's admin actor. */
+export const approveGlobePayWithdrawal = (id: string) =>
+  postJson<GlobePayWithdrawalApproveResult>(
+    `/admin/globepay/withdrawals/${encodeURIComponent(id)}/approve`,
+    {},
+  );
+
+/** Mirrors ./[id]/deny's response verbatim. `refunded:false` is the
+ *  never-debited edge case (a held row whose debit never landed, closed
+ *  without minting a refund) — distinct from `refunded:true`'s normal path,
+ *  and from a thrown NOT_ALLOWED (wrong status: only held/failed can be
+ *  denied) or NOT_FOUND. */
+export interface GlobePayWithdrawalDenyResult {
+  id: string;
+  status: string;
+  refunded: boolean;
+}
+
+/** Claim a HELD (or already-'failed', for the crash-recovery re-run — see
+ *  the route's own comment) withdrawal, refund it, and close it. No body,
+ *  same reason as approve. */
+export const denyGlobePayWithdrawal = (id: string) =>
+  postJson<GlobePayWithdrawalDenyResult>(
+    `/admin/globepay/withdrawals/${encodeURIComponent(id)}/deny`,
+    {},
+  );
 
 // ── Epic 2 (Players) ─────────────────────────────────────────────────────────
 

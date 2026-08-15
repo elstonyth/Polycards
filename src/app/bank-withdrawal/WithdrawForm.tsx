@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { CheckCircle2, Landmark } from 'lucide-react';
+import { CheckCircle2, Clock, Landmark } from 'lucide-react';
 import { rm, rm0, timeUntil } from '@/lib/format';
 import {
   fetchSavedBankAccounts,
@@ -11,6 +11,7 @@ import {
 } from '@/lib/actions/vault';
 import { useTopUp } from '@/components/app-shell/TopUpProvider';
 import { Pill, pillVariants } from '@/components/ui/pill';
+import { PhoneGateAction } from '@/components/account/PhoneGateAction';
 import { cn } from '@/lib/utils';
 
 // The real payout band (mirrors the backend's GLOBEPAY_WD_MIN/MAX): RM 50 –
@@ -59,8 +60,8 @@ export default function WithdrawForm({
   withdrawable: number | null;
 }) {
   // The payout debits the balance server-side; repaint it here so the header
-  // chip is not stale, and so the money dot lights without waiting for a focus
-  // event (withdrawals are one of the movements it is meant to announce).
+  // chip is not stale. (This used to light the Me-tab money dot too — that dot
+  // was suspended 2026-08-11; see components/account/credit-dot.tsx.)
   const { applyBalance } = useTopUp();
   const [saved, setSaved] = useState<SavedBankAccount[] | null>(null);
   const [accountId, setAccountId] = useState('');
@@ -71,7 +72,14 @@ export default function WithdrawForm({
     amount: number;
     balance: number;
     reference: string;
+    status: 'pending' | 'held';
   } | null>(null);
+  // One idempotency key per withdrawal ATTEMPT: minted lazily on submit,
+  // REUSED on error retries (so a debited-but-response-lost attempt replays
+  // instead of double-debiting AND double-transferring — see the doc comment
+  // on startWithdrawal), and rotated only after a confirmed success so the
+  // next withdrawal starts a fresh attempt. Mirrors TopUpSheet's attemptKey.
+  const attemptKey = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -127,11 +135,19 @@ export default function WithdrawForm({
     }
     setSubmitting(true);
     try {
-      const res = await startWithdrawal({ amount, accountId });
+      attemptKey.current ??= crypto.randomUUID();
+      const res = await startWithdrawal({
+        amount,
+        accountId,
+        idempotencyKey: attemptKey.current,
+      });
       if (!res.ok) {
+        // Key stays armed on purpose — a retry of THIS attempt must replay,
+        // not double-debit and double-transfer.
         setError(res.error);
         return;
       }
+      attemptKey.current = null;
       // The payout already debited server-side; repaint the header chip now so
       // it is not stale. Adding a destination lives on /bank since Plan 088, so
       // there is no save-the-account side effect left to fire here.
@@ -140,6 +156,7 @@ export default function WithdrawForm({
         amount: res.amount,
         balance: res.balance,
         reference: res.reference,
+        status: res.status,
       });
     } catch {
       setError('Something went wrong. Please try again.');
@@ -149,16 +166,27 @@ export default function WithdrawForm({
   }
 
   if (done) {
+    // 'held' means the amount above already left the balance but was parked
+    // for a human to approve instead of being sent to the gateway — it must
+    // never read as a completed payout, and the copy below never claims the
+    // balance is still spendable (the "Balance now" line already reflects the
+    // debit). No threshold figure here on purpose: naming RM 1,000 would be a
+    // second source of truth for a value the backend reads from an env var.
+    const held = done.status === 'held';
     return (
       <div className="mt-6 flex max-w-md flex-col items-center rounded-2xl border border-white/10 bg-neutral-900 px-6 py-8 text-center">
-        <CheckCircle2 className="h-12 w-12 text-buyback-fg" aria-hidden />
+        {held ? (
+          <Clock className="h-12 w-12 text-amber-400" aria-hidden />
+        ) : (
+          <CheckCircle2 className="h-12 w-12 text-buyback-fg" aria-hidden />
+        )}
         <p className="mt-3 font-heading text-2xl text-white">
-          {rm(done.amount)} ON ITS WAY
+          {rm(done.amount)} {held ? 'UNDER REVIEW' : 'ON ITS WAY'}
         </p>
         <p className="mt-2 max-w-sm text-sm text-neutral-400">
-          Your bank transfer is processing — most arrive within minutes. If the
-          bank rejects it, the full amount returns to your balance
-          automatically.
+          {held
+            ? "Withdrawals this size go through a manual review before they're sent to your bank — the amount has already left your balance, and returns automatically if the withdrawal isn't approved. Either way, we'll let you know."
+            : 'Your bank transfer is processing — most arrive within minutes. If the bank rejects it, the full amount returns to your balance automatically.'}
         </p>
         <p className="mt-3 text-[12px] text-neutral-500">
           Reference <span className="font-mono">{done.reference}</span>
@@ -189,8 +217,8 @@ export default function WithdrawForm({
             No saved bank accounts yet.
           </p>
           <p className="mt-1 text-[13px] text-neutral-500">
-            Withdrawals go to an account you saved earlier. Add one now — it
-            becomes available for withdrawals a day later.
+            Withdrawals go to an account you saved earlier. Add one to get
+            started.
           </p>
           <Link
             href="/bank"
@@ -235,9 +263,9 @@ export default function WithdrawForm({
 
       {accounts.length > 0 && usableAccounts.length === 0 && (
         <p className="mt-2 text-[13px] text-neutral-400">
-          A newly saved bank account can only receive withdrawals a day after
-          you add it. This protects your balance if someone else ever gets into
-          your account.
+          A newly saved bank account waits before it can receive withdrawals —
+          the picker says how long. This protects your balance if someone else
+          ever gets into your account.
         </p>
       )}
 
@@ -257,13 +285,16 @@ export default function WithdrawForm({
         </span>
       </label>
 
+      {/* The remedy sits INSIDE role="alert" so problem and way out are one
+          announcement. No onNavigate here — this is a page, not a modal. */}
       {error && (
-        <p
+        <div
           role="alert"
-          className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-[13px] font-medium text-red-300"
+          className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2"
         >
-          {error}
-        </p>
+          <p className="text-[13px] font-medium text-red-300">{error}</p>
+          <PhoneGateAction error={error} />
+        </div>
       )}
 
       <Pill

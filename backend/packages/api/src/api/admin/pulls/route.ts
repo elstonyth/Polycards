@@ -17,7 +17,15 @@ import { parsePaginationParams } from "../../../utils/pagination";
 // and, over a wider window, the top cards and rarities by pull count. Rarity is
 // PER-PACK (PackOdds), so each pull's tier comes from its (pack_id, card_id)
 // odds row; pulls whose odds row no longer exists show rarity null.
+//
+// The rollups count PURCHASED pulls only (source='pack'), matching the public
+// boards: reward-economy and free-welcome pulls are giveaways, and letting them
+// inflate "top cards / top rarities" would misreport what players actually pull
+// for money. The LEDGER half stays all-source (that is the operator's full
+// audit trail) unless ?source= narrows it.
 const ROLLUP_WINDOW = 5000;
+// Pull.source enum — mirrors models/pull.ts and the sibling customer-pulls route.
+const PULL_SOURCES = ["pack", "reward", "free"];
 
 export async function GET(
   req: MedusaRequest,
@@ -33,15 +41,18 @@ export async function GET(
     { defaultLimit: 50, maxLimit: 100 },
   );
 
-  // Optional ?source= filter (pack | reward). The All Orders "Pack purchases"
-  // tab passes source=pack so reward-economy pulls never render as purchases;
-  // the Pull Ledger stays all-source. Rollups stay UNFILTERED on purpose —
-  // they are global stats, not a view of the current page.
+  // Optional ?source= filter (pack | reward | free). The All Orders "Pack
+  // purchases" tab passes source=pack so reward-economy and free-welcome pulls
+  // never render as purchases; the Pull Ledger stays all-source. This filter is
+  // the LEDGER's only — the rollups below are global stats, not a view of the
+  // page, and carry their own fixed source='pack' scope.
   const rawSource = req.query.source;
   const source =
     typeof rawSource === "string" && rawSource.length ? rawSource : undefined;
-  if (source !== undefined && source !== "pack" && source !== "reward") {
-    res.status(400).json({ message: "source must be 'pack' or 'reward'" });
+  if (source !== undefined && !PULL_SOURCES.includes(source)) {
+    res
+      .status(400)
+      .json({ message: `source must be one of ${PULL_SOURCES.join(", ")}` });
     return;
   }
   const ledgerFilter: Record<string, unknown> = source ? { source } : {};
@@ -65,10 +76,12 @@ export async function GET(
   // numbers that read as this one player's — skip the window fetch entirely and
   // let topCards/topRarities fall out empty. Ledger rows still resolve their own
   // card + per-pack rarity below (`handles` also spreads `ledger`).
+  // source: 'pack' is a POSITIVE filter (the boards' rule), so a future
+  // Pull.source value is excluded by default rather than silently counted.
   const allPulls = customerId
     ? []
     : await packs.listPulls(
-        {},
+        { source: "pack" },
         { order: { rolled_at: "DESC" }, take: ROLLUP_WINDOW }
       );
   // `id` tiebreaker: a batch open (open-batch) stamps every pull in the

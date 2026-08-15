@@ -47,8 +47,14 @@ medusaIntegrationTestRunner({
         const grandchildId = await registerCustomer('c360-grandchild@test.dev');
         const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
         await seedLadder(packs);
-        await packs.linkSponsor({ recruitId: childId, sponsorId: rootId });
-        await packs.linkSponsor({ recruitId: grandchildId, sponsorId: childId });
+        // Referral writes were retired with linkSponsor; the model is kept, so the
+        // edge is seeded directly for setup.
+        await packs.createReferralRelationships([
+          { customer_id: childId, sponsor_id: rootId },
+        ]);
+        await packs.createReferralRelationships([
+          { customer_id: grandchildId, sponsor_id: childId },
+        ]);
 
         const res = await unwrapResponse(
           api.get(`/admin/customers/${rootId}/referral-tree?maxDepth=2`, { headers: adminHeaders() }));
@@ -71,7 +77,9 @@ medusaIntegrationTestRunner({
         const recruitId = await registerCustomer('c360-aud-recruit@test.dev');
         const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
         await seedLadder(packs);                  // REQUIRED before settleOpen
-        await packs.linkSponsor({ recruitId, sponsorId });
+        await packs.createReferralRelationships([
+          { customer_id: recruitId, sponsor_id: sponsorId },
+        ]);
         await packs.mutateCreditAtomic({ customerId: recruitId, amount: 30, reason: 'topup' });
         await packs.settleOpen({ customerId: recruitId, amount: -20, sourceTransactionId: 'c360_aud_open' });
         const [comm] = await packs.listCommissions({ beneficiary: sponsorId }, { take: 1 });
@@ -93,7 +101,9 @@ medusaIntegrationTestRunner({
         const recruitId = await registerCustomer('c360-recruit@test.dev');
         const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
         await seedLadder(packs);                  // REQUIRED before settleOpen
-        await packs.linkSponsor({ recruitId, sponsorId });
+        await packs.createReferralRelationships([
+          { customer_id: recruitId, sponsor_id: sponsorId },
+        ]);
         await packs.mutateCreditAtomic({ customerId: recruitId, amount: 30, reason: 'topup' });
         await packs.settleOpen({ customerId: recruitId, amount: -20, sourceTransactionId: 'c360_open_1' });
 

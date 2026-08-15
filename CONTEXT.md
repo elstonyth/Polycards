@@ -38,10 +38,20 @@ server-side act (`POST /store/packs/[slug]/open`).
 _Avoid_: buy, purchase, spin, draw
 
 **Pull**:
-The record of one prize acquisition — a pack Open (`source='pack'`) or a product
-win from a Reward Draw (`source='reward'`). The append-only source of truth for
-the live-pulls feed, the leaderboard, and the Vault.
+The record of one prize acquisition — a pack Open (`source='pack'`), a product
+win from a Reward Draw (`source='reward'`), or the one-time Free Welcome Pack
+open (`source='free'`). The append-only source of truth for the live-pulls feed,
+the leaderboard, and the Vault.
 _Avoid_: spin, roll, result
+
+**Free Welcome Pack**:
+The one-time free pack a newly registered account may open once (`category=
+'free_welcome'` — a reserved category hidden from the catalog like
+`reward_box`; storefront entry is the floating badge only). Its Pull has
+`source='free'`: excluded from the leaderboard/challenge/feed like `'reward'`,
+and LOCKED from Buyback and Delivery until the customer's first paid Open
+(computed — any `source='pack'` Pull unlocks it).
+_Avoid_: reward (that is the daily VIP draw), demo spin
 
 **Vault**:
 A customer's held Pulls — the cards they keep. Not a table: a vault item is a
@@ -114,17 +124,70 @@ Listing a Card for sale to other users on the marketplace. Distinct from
 Buyback (which sells to the house).
 _Avoid_: sell (ambiguous between this and Buyback — say which)
 
-**Cashout**:
-Converting site credit out to real money (ledger reason `cashout`).
-_Avoid_: withdraw (that word is the physical reward-shipment flow — see Delivery
-Order and `rewards/withdraw`), payout
+**Withdrawal**:
+Converting site credit out to real money through the GlobePay365 payout
+channel — table `globepay_withdrawal`, route `POST /store/credits/withdraw`,
+admin queue `/withdrawals`. The ledger reason string stays `cashout`
+(pre-dates the withdrawal build; `credit_transaction` is append-only, so an
+existing reason string is never renamed once rows carry it) — say
+"Withdrawal" in customer-facing copy and new code, "cashout" only when
+naming the literal reason string.
+_Avoid_: "withdraw" for the physical reward-shipment flow (`rewards/withdraw`)
+— that surface is SUSPENDED (ADR 0004) and its vocabulary does not mean this;
+"payout" as a synonym for this action (reserved for the Payout Destination
+below, the saved account, not the money-out event)
+
+**Held Withdrawal** / **Approval**:
+A Withdrawal above `GLOBEPAY_WD_APPROVAL_ABOVE_RM` (default RM 1,000,
+strictly greater-than) is written status `held` — debited from the customer
+but never submitted to the gateway — until an admin approves or denies it
+from the admin `/withdrawals` queue, whose default view is `held`. Approve
+re-checks the customer's freeze state live at click time (the queue's
+`frozen` badge is a preview only, not the gate); deny refunds the debit.
+_Avoid_: pending (a _different_ status — that row already reached the
+gateway and is awaiting its callback)
+
+**Payout Destination**:
+A customer's saved bank account for Withdrawals. Adding one starts a
+`PAYOUT_DESTINATION_COOLDOWN_HOURS` cooling-off window (default 24h; `0` is
+a deliberate, explicit operator opt-out, never the default) before it may be
+paid out to — the control on the steal-a-token → add-a-destination →
+cash-out chain.
+_Avoid_: bank account (fine as plain English inside a definition; Payout
+Destination is the domain term when naming the entity)
+
+**Account Deletion**:
+Permanent, customer-initiated account removal. Personal data is destroyed
+(payout destination account numbers scrubbed to the last 4, holder names
+and delivery addresses emptied) while money records — Withdrawal rows,
+Delivery Orders, the credit ledger — are retained as anonymous books so the
+figures still reconcile. Login becomes impossible forever on the deleted
+identity; the same email may re-signup as a new account, but the old one is
+never recovered. See ADR 0006.
+_Avoid_: deactivate, disable (Account Disable is a separate, reversible
+surface — see `disabled-guard.ts` — do not conflate the two)
+
+**Expired Deposit**:
+A top-up whose gateway status never resolved within `GLOBEPAY_STALE_AFTER_MS`
+(1h, vs GlobePay365's own 10-minute cashier timeout). Non-terminal: the slow
+reconciliation sweep keeps re-querying an expired deposit for up to 7 days
+rather than writing it off, because "we stopped chasing" is not "the gateway
+said no" and a late-landing bank transfer must still be recoverable.
+_Avoid_: failed (a genuinely gateway-refused deposit is a different,
+terminal status)
 
 ## Rewards, VIP, and referrals
 
 _The reward-granting surfaces below (Reward Box, Reward Draw, Voucher, referral Commission
 pages) are SUSPENDED 2026-07-29 (#294) — storefront routes 404, backend stays live. The
-vocabulary is retained because un-suspending is meant to be a revert, not a rewrite; see
-ADR 0004. VIP Level accrual itself stayed live throughout._
+VIP/daily vocabulary is retained because un-suspending is meant to be a revert, not a
+rewrite; see ADR 0004. VIP Level accrual itself stayed live throughout. **Commission /
+Sponsor / Recruit are a partial exception** (ADR 0004's 2026-08-15 amendment): #427
+deleted the referral WRITE path (`linkSponsor`, `POST /store/referral`) as a security
+fix, so restoring referrals is a rebuild, not a revert. The vocabulary below still
+describes live code, because the ledger reason values and `mature-commissions.ts` were
+deliberately kept — only the write path that would create new referral relationships
+is gone._
 
 **VIP Level**:
 A customer's rung 1–100, reached by cumulative pack-open turnover (winnings-funded

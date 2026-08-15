@@ -12,6 +12,7 @@ import type { WonCard } from '@/lib/actions/packs';
 import type { SellBackOffer, SellBackFn, RevealFn } from './useSellWindow';
 import SellConfirmModal from '@/components/SellConfirmModal';
 import { rm } from '@/lib/format';
+import { FREE_PULL_LOCKED_MESSAGE } from '@/lib/packs-data';
 import { rarityRgb, isTopRarity, rarityWinVolume } from '@/lib/rarity';
 import type { SoundName } from '@/lib/use-sound';
 import type { SfxName } from '@/lib/slot-sfx';
@@ -30,6 +31,7 @@ export function RevealStage({
   spriteSrcs,
   reduced,
   demo = false,
+  locked = false,
   onSignUp,
   onSkip,
   onConclude,
@@ -50,6 +52,12 @@ export function RevealStage({
   /** Guest demo reveal: no sell window, a sign-up CTA instead — and the stage
    *  never auto-concludes (all-null offers read as "concluded" instantly). */
   demo?: boolean;
+  /** The open response's `locked` — this pull can't be sold or delivered yet
+   *  (the free welcome pull before the account's first PAID open). The pull IS
+   *  real and vaulted, so the reveal shows the unlock note where the sell CTA
+   *  sits. Keyed off `locked`, NOT off the response's `free`: a welcome pack
+   *  claimed after a paid open is already unlocked and keeps its sell offer. */
+  locked?: boolean;
   /** Demo-only conversion CTA (openAuth signup). */
   onSignUp?: () => void;
   onSkip: () => void;
@@ -244,6 +252,32 @@ export function RevealStage({
     const offer = offers[i];
     const state = states[i] ?? { phase: 'idle' as const };
     if (!offer) return null;
+    // LOCKED pull (the free welcome pull before the first PAID open) — checked
+    // FIRST, above every other branch. The backend sends UNQUOTED_BUYBACK
+    // (firm:false, amount 0) for it, which would otherwise fall into the
+    // vaulted/expired or non-firm branches and blame the lock on a pricing
+    // outage ("sell once rates are back") — the wrong reason entirely. Keep
+    // stays, and must: it is the only affordance that concludes the card, and
+    // without it the stage sits until the 30s clock expires.
+    if (locked) {
+      return (
+        <>
+          <button
+            type="button"
+            onClick={() => keep(i)}
+            disabled={!flipped}
+            className="inline-flex h-11 w-full items-center justify-center rounded-xl border border-white/12 bg-white/5 text-[13px] font-semibold text-white/70 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-50"
+          >
+            Keep in vault
+          </button>
+          {/* Verbatim FREE_PULL_LOCKED_MESSAGE — the same string the backend
+              returns if a sell/deliver is attempted anyway. */}
+          <p className="text-center text-[11px] leading-tight text-white/50">
+            {FREE_PULL_LOCKED_MESSAGE}
+          </p>
+        </>
+      );
+    }
     if (state.phase === 'sold') {
       return (
         <p className="flex h-11 w-full items-center justify-center rounded-xl border border-buyback/50 bg-buyback/10 text-sm font-bold text-buyback-fg">

@@ -47,3 +47,39 @@ export function rejectCustomerMetadata(
   }
   next();
 }
+
+/**
+ * Admin-side counterpart: refuse a bank_accounts write through the framework's
+ * generic customer route.
+ *
+ * Narrower than rejectCustomerMetadata on purpose. The store guard rejects the
+ * whole metadata field because the storefront never sends it; an operator may
+ * legitimately need to fix another key (a handle, say), so only the reserved
+ * payout-destination key is refused here.
+ *
+ * Why it matters: mergeMetadata is a shallow top-level merge, so
+ * metadata:{bank_accounts:[...]} INJECTS the key while siblings survive, and
+ * the saved-account id is sha256(bankCode, accountNumber) with no server secret
+ * — offline-computable, so a well-formed entry passes resolveWithdrawalDestination's
+ * integrity re-check. That write would bypass both the metadata:<customer>
+ * advisory lock and any audit row, unlike setPayoutDetails which records bank
+ * name + last-4 on every change.
+ */
+export function rejectAdminBankAccountsMetadata(
+  req: MedusaRequest,
+  _res: MedusaResponse,
+  next: MedusaNextFunction,
+): void {
+  const body = req.body as Record<string, unknown> | null | undefined;
+  const metadata = body?.metadata as Record<string, unknown> | null | undefined;
+  if (metadata && typeof metadata === 'object' && 'bank_accounts' in metadata) {
+    next(
+      new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'bank_accounts is not writable through this route. Payout destinations are customer-owned and audited.',
+      ),
+    );
+    return;
+  }
+  next();
+}

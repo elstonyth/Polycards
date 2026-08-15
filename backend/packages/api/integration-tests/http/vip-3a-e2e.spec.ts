@@ -107,7 +107,11 @@ medusaIntegrationTestRunner({
           amount: 100,
           reason: 'topup',
         });
-        await packs.linkSponsor({ recruitId: recruit, sponsorId: sponsor });
+        // Referral writes were retired with linkSponsor; the model is kept, so the
+        // edge is seeded directly for setup.
+        await packs.createReferralRelationships([
+          { customer_id: recruit, sponsor_id: sponsor },
+        ]);
 
         // ── 2. Recruit opens a pack → commission credited to sponsor (matured) ─
         const settled = await packs.settleOpen({

@@ -3,12 +3,24 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { ChevronRight, Layers } from 'lucide-react';
+import {
+  ChevronRight,
+  Layers,
+  ShieldCheck,
+  RectangleVertical,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { pillVariants } from '@/components/ui/pill';
 import Reveal from '@/components/Reveal';
 import QtyStepper from '@/components/QtyStepper';
-import { packHref, type Pack, type PackCategory } from '@/lib/packs-data';
+import FreePackBadge from '@/components/FreePackBadge';
+import {
+  catalogGroupOf,
+  packHref,
+  type Pack,
+  type PackCategory,
+} from '@/lib/packs-data';
+import type { FreePackState } from '@/lib/data/free-pack';
 
 // Pack catalog comes from the backend via getPackCategories() (server page);
 // types + presentational category meta live in @/lib/packs-data.
@@ -215,19 +227,58 @@ function PackRow({
 }
 
 // ---------------------------------------------------------------------------
-// Client — per-category sections ("Pokémon Packs / 5 packs" headings).
+// Client — three composition sections, auto-detected from the backend's
+// §2.4.8 `group` + strict `psa10` gate (see catalogGroupOf in packs-data.ts):
+// "Graded (Guaranteed PSA 10)" lists ONLY pools where every card is a PSA 10;
+// "Raw Cards (Ungraded)" lists ONLY backend-derived all-raw pools; everything
+// uncertain (MIX, graded-but-not-all-PSA-10, null/older-backend) lists under
+// the claim-free "More Packs" so neither heading can ever overclaim.
+// The category chip rail still filters which packs feed the sections.
 // Desktop renders a horizontally-scrolling card row per section; mobile
-// renders list rows. The chip rail shows every category (incl. ones with no
-// in-stock packs — selecting one shows an empty state). `initialCategory`
-// lets a deep link (/slots?category=<key>) preselect a tab.
+// renders list rows. `initialCategory` lets a deep link (/slots?category=<key>)
+// preselect a tab.
 // ---------------------------------------------------------------------------
+
+const GROUPS: {
+  id: 'graded' | 'raw' | 'more';
+  heading: string;
+  note?: string;
+  Icon: typeof ShieldCheck;
+}[] = [
+  {
+    id: 'graded',
+    heading: 'Graded',
+    note: 'Guaranteed PSA 10',
+    Icon: ShieldCheck,
+  },
+  {
+    id: 'raw',
+    heading: 'Raw Cards',
+    note: 'Ungraded',
+    Icon: RectangleVertical,
+  },
+  {
+    // Claim-free by design — see catalogGroupOf's doc comment. No `note`:
+    // an empty/omitted note is the only wording that's honest for every
+    // member (MIX, non-PSA-10 graded, AND unknown/null composition alike).
+    id: 'more',
+    heading: 'More Packs',
+    Icon: Layers,
+  },
+];
 
 export default function CatalogClient({
   categories,
   initialCategory,
+  freePack = null,
 }: {
   categories: PackCategory[];
   initialCategory: string;
+  /** Visible badge state, or null. `claim` only while this customer's one-time
+   *  welcome claim is unspent; `signup` for logged-out visitors while an
+   *  active free pack exists. The badge is the free pack's only entry point
+   *  (it is not in `categories`). */
+  freePack?: Exclude<FreePackState, { mode: 'hidden' }> | null;
 }) {
   const [active, setActive] = useState<string>(initialCategory);
 
@@ -235,15 +286,39 @@ export default function CatalogClient({
     { id: 'all', tab: 'All Packs', icon: '' },
     ...categories.map((c) => ({ id: c.id, tab: c.tab, icon: c.icon })),
   ];
-  // "All" hides empty categories from the sections (but keeps their chip); a
-  // directly-selected empty category renders an empty state.
-  const visible =
-    active === 'all'
-      ? categories.filter((c) => c.packs.length > 0)
-      : categories.filter((c) => c.id === active);
+  // The chip filter narrows the pack set; the sections below regroup it by
+  // composition, so category icons/names travel with each pack entry.
+  const filtered =
+    active === 'all' ? categories : categories.filter((c) => c.id === active);
+  const entries = filtered.flatMap((cat) =>
+    cat.packs.map((pack) => ({
+      pack,
+      icon: cat.icon,
+      categoryName: cat.tab,
+    })),
+  );
+  const byGroup = {
+    graded: entries.filter((e) => catalogGroupOf(e.pack) === 'graded'),
+    raw: entries.filter((e) => catalogGroupOf(e.pack) === 'raw'),
+    more: entries.filter((e) => catalogGroupOf(e.pack) === 'more'),
+  } as const;
 
   return (
-    <div className="mx-auto w-full px-fluid py-4">
+    <div
+      className={cn(
+        'mx-auto w-full px-fluid py-4',
+        // The badge is `fixed` on the bottom-right rail, floating OVER the
+        // catalog — at the end of the scroll it lands on the last row and
+        // covers the right-most tile's MAX/Open controls. Reserve its rail as
+        // bottom padding (only while the badge actually renders) so the
+        // catalog can always be scrolled clear of it. Badge box: 146px tall
+        // (112px art at 393x512) over a 4.5rem dock offset = 218px, dropping
+        // to 24px + 146px = 170px once the tab bar is gone at lg.
+        freePack && 'pb-56 lg:pb-44',
+      )}
+    >
+      {freePack && <FreePackBadge state={freePack} />}
+
       {/* Sticky filter bar — category chip rail */}
       <div className="glass-chrome sticky top-2 z-20 mb-6 rounded-2xl border border-white/10 p-2">
         {/* Category chip rail (icons + label) */}
@@ -279,68 +354,65 @@ export default function CatalogClient({
         </div>
       </div>
 
-      {/* Global empty state — "All" with zero packs anywhere (the backend is
-          the source of truth) renders no sections, so say so instead of a
-          blank page. A directly-selected empty category has its own state. */}
-      {visible.length === 0 && (
+      {/* Empty state — zero packs behind the active filter (the backend is
+          the source of truth), whether that's "All" on an empty catalog or a
+          directly-selected empty category. */}
+      {entries.length === 0 && (
         <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-10 text-center text-[13px] text-white/60">
           No packs available right now — check back soon.
         </div>
       )}
 
-      {/* Per-category sections */}
-      {visible.map((cat) => (
-        <section key={cat.id} className="mb-8">
+      {/* Composition sections — only the non-empty ones render. */}
+      {GROUPS.filter((g) => byGroup[g.id].length > 0).map((g) => (
+        <section key={g.id} className="mb-8">
           {/* Section header */}
           <div className="mb-4 flex items-center gap-2.5">
-            <Image
-              src={cat.icon}
-              alt=""
-              aria-hidden="true"
-              width={24}
-              height={24}
-              className="h-6 w-6 shrink-0 rounded-full object-cover"
-            />
+            <g.Icon className="h-6 w-6 shrink-0 text-white/80" aria-hidden />
             <h2 className="font-heading text-lg font-bold tracking-tight text-white sm:text-xl">
-              {cat.heading}
+              {g.heading}
+              {/* The parenthetical is body voice, not Nekst display. Skipped
+                  entirely (not rendered empty) when a section has no note
+                  that's honest for every pack in it — see GROUPS above. */}
+              {g.note && (
+                <>
+                  {' '}
+                  <span className="font-sans text-sm font-medium text-white/60 sm:text-base">
+                    ({g.note})
+                  </span>
+                </>
+              )}
             </h2>
             <span className="ml-auto text-[13px] text-white/60">
-              {cat.packs.length} {cat.packs.length === 1 ? 'pack' : 'packs'}
+              {byGroup[g.id].length}{' '}
+              {byGroup[g.id].length === 1 ? 'pack' : 'packs'}
             </span>
           </div>
 
-          {cat.packs.length === 0 ? (
-            <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-10 text-center text-[13px] text-white/60">
-              No packs available right now — check back soon.
-            </div>
-          ) : (
-            <>
-              {/* Desktop: horizontally-scrolling card row (matches live) */}
-              <div className="hidden gap-4 overflow-x-auto pb-2 sm:flex [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                {cat.packs.map((p, i) => (
-                  <Reveal
-                    key={p.id}
-                    delay={Math.min(i, 6) * 50}
-                    className="h-full w-44 shrink-0 lg:w-48"
-                  >
-                    <PackCard pack={p} icon={cat.icon} />
-                  </Reveal>
-                ))}
-              </div>
+          {/* Desktop: horizontally-scrolling card row (matches live) */}
+          <div className="hidden gap-4 overflow-x-auto pb-2 sm:flex [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {byGroup[g.id].map((e, i) => (
+              <Reveal
+                key={e.pack.id}
+                delay={Math.min(i, 6) * 50}
+                className="h-full w-44 shrink-0 lg:w-48"
+              >
+                <PackCard pack={e.pack} icon={e.icon} />
+              </Reveal>
+            ))}
+          </div>
 
-              {/* Mobile: list rows */}
-              <div className="flex flex-col gap-2 sm:hidden">
-                {cat.packs.map((p) => (
-                  <PackRow
-                    key={p.id}
-                    pack={p}
-                    icon={cat.icon}
-                    categoryName={cat.tab}
-                  />
-                ))}
-              </div>
-            </>
-          )}
+          {/* Mobile: list rows */}
+          <div className="flex flex-col gap-2 sm:hidden">
+            {byGroup[g.id].map((e) => (
+              <PackRow
+                key={e.pack.id}
+                pack={e.pack}
+                icon={e.icon}
+                categoryName={e.categoryName}
+              />
+            ))}
+          </div>
         </section>
       ))}
     </div>

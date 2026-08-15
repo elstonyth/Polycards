@@ -30,6 +30,67 @@ export const GLOBEPAY_STALE_AFTER_MS = 60 * 60 * 1000;
  */
 export const GLOBEPAY_RECONCILE_BATCH = 50;
 
+/**
+ * Fast tier: how young a pending deposit has to be to get requeried EVERY
+ * minute instead of every tenth one.
+ *
+ * WHY the tier exists: the gateway is not delivering deposit callbacks in
+ * production (verified 2026-08-11 — every settled deposit is credited by the
+ * sweep, logging "the callback for this deposit was never received"), so the
+ * sweep cadence IS the customer's wait. Ten minutes of staring at an unchanged
+ * balance after paying is not a wait we get to charge them.
+ *
+ * It is a WINDOW rather than "every pending row" because the slow tiers must
+ * NOT come along for the ride: an abandoned row stays pending for an hour
+ * (GLOBEPAY_STALE_AFTER_MS) and an 'expired' row is re-read for seven days
+ * without ever leaving that population, so requerying them sixty times as often
+ * would spend the provider's rate budget on rows nobody is waiting for.
+ * Twenty minutes covers the whole live window — their cashier times out in ten
+ * — with margin for a bank transfer that lands just after it.
+ */
+export const GLOBEPAY_FAST_WINDOW_MS = 20 * 60 * 1000;
+
+/**
+ * Cap for one fast-tier run. Smaller than GLOBEPAY_RECONCILE_BATCH because the
+ * tier runs ten times as often and can only ever see the last twenty minutes of
+ * deposits; anything bigger than this is a backlog, which is the full sweep's
+ * job.
+ */
+export const GLOBEPAY_FAST_BATCH = 20;
+
+/** Minutes between full sweeps (stale pending rows + the 'expired' tier). */
+export const GLOBEPAY_FULL_SWEEP_EVERY_MIN = 10;
+
+/**
+ * Does this run cover every tier, or only the fast window?
+ *
+ * Decided from ELAPSED TIME since the last full sweep, not from the handler's
+ * minute-of-hour.
+ *
+ * The minute-of-hour version looked stateless and safe, and it is safe against
+ * PHASE SHIFT — BullMQ re-anchors each occurrence with cron.next() from
+ * wall-clock now, so a '* * * * *' schedule snaps back to the whole-minute grid
+ * and delay does not accumulate. What it is NOT safe against is OMISSION: a run
+ * picked up at 09:11 instead of 09:10 simply skips that decade's full sweep,
+ * with no catch-up and no log line. The pickup does not even need this handler
+ * to be slow — every scheduled job shares ONE BullMQ worker at concurrency 1,
+ * and globepay-withdrawal-reconcile runs on a ten-minute cron, i.e. exactly
+ * the minutes this predicate wanted. Under sustained overrun the intended
+ * ten-minute guarantee measured out past an hour, silently, on the only path
+ * that credits a paid deposit in production.
+ *
+ * Elapsed-time is self-correcting: however late a run is, it still asks "has it
+ * been long enough", so a missed slot is picked up by the next run rather than
+ * abandoned.
+ */
+export const isFullSweepDue = (
+  now: Date,
+  lastFullSweepAt: Date | null,
+): boolean =>
+  lastFullSweepAt === null ||
+  now.getTime() - lastFullSweepAt.getTime() >=
+    GLOBEPAY_FULL_SWEEP_EVERY_MIN * 60 * 1000;
+
 export type ReconcileAction =
   /** Requery says settled: credit it, exactly as a callback would have. */
   | { kind: 'settle'; amount: number }
@@ -282,14 +343,31 @@ export function withdrawalReconcileAction(
  *   code), never non-existence. Refunding here would systematically double-
  *   pay every in-flight payout while the banks still execute them — so this
  *   path always waits, however old the row gets (the job logs it loudly).
+ *
+ * `submittedAt` is SUBMIT time, not row-creation time, and the distinction is
+ * load-bearing (plan 094). GLOBEPAY_STALE_AFTER_MS is an hour of grace for a
+ * payout to become visible at the gateway before we call it non-existent —
+ * so the clock has to start when we told them about it. For every row the
+ * store path writes those two instants are the same, but an admin-approved
+ * row (globepay/withdrawals/[id]/approve) was CREATED when the customer
+ * asked, possibly days earlier, and submitted only when a human clicked. Feed
+ * this created_at and such a row is born stale: the very next sweep tick
+ * reads a not-yet-propagated payout as "never existed" and refunds a transfer
+ * the bank goes on to execute — money out AND credited back.
+ *
+ * The invariant on whatever the caller feeds here: it must ADVANCE ONLY AT
+ * SUBMIT. A clock that any later touch can push forward inverts the failure —
+ * the row never ages out, and a debit that never reached the bank is stranded
+ * pending forever, which no sweep will ever recover. See the job's call site
+ * for the audit that keeps that true.
  */
 export function unknownWithdrawalAction(
-  createdAt: Date,
+  submittedAt: Date,
   now: Date,
   hasGatewayTransactionId: boolean,
 ): WithdrawalReconcileAction {
   if (hasGatewayTransactionId) return { kind: 'wait' };
-  return now.getTime() - createdAt.getTime() > GLOBEPAY_STALE_AFTER_MS
+  return now.getTime() - submittedAt.getTime() > GLOBEPAY_STALE_AFTER_MS
     ? { kind: 'refund' }
     : { kind: 'wait' };
 }
@@ -297,3 +375,24 @@ export function unknownWithdrawalAction(
 /** Past this age a still-processing payout warrants a loud log line every
  * sweep — a payout stuck for a day is a support case, not background noise. */
 export const GLOBEPAY_WD_SLOW_AFTER_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Past this age, the OLDEST held withdrawal warrants its own loud log line
+ * every sweep (plan 094 review fix) — the held-row mirror of
+ * GLOBEPAY_WD_SLOW_AFTER_MS above, for a completely different failure mode.
+ * A 'pending' row goes quiet because the GATEWAY is slow; a 'held' row goes
+ * quiet because a HUMAN hasn't looked, and nothing else ever ages it: the
+ * sweep never selects one for processing (by design — see the model's
+ * 'held' comment) and the admin list's `stale` flag is `status === 'pending'`
+ * only, so without this a held row can sit forever with zero automated
+ * signal that anyone forgot it. The plan states the approval queue's
+ * response time is a customer-support commitment; this is its only
+ * automated backstop.
+ *
+ * Same 24h bar as GLOBEPAY_WD_SLOW_AFTER_MS, deliberately not a looser one —
+ * a held row is, if anything, the MORE urgent of the two: nothing is
+ * automatically retrying it the way the sweep retries a slow gateway. A
+ * customer's money sitting untouched for a day is equally a support case
+ * whether the cause is a slow provider or a queue nobody worked.
+ */
+export const GLOBEPAY_WD_HELD_STALE_AFTER_MS = 24 * 60 * 60 * 1000;

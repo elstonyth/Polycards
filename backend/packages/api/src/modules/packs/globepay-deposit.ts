@@ -33,6 +33,28 @@ export const GLOBEPAY_DEFAULT_METHOD = 'BQR';
 export const GLOBEPAY_MYR_METHODS = ['FPX', 'DN', 'BQR', 'OB'] as const;
 
 /**
+ * How many deposits one customer may have awaiting payment at once, and the
+ * window that cap is measured over.
+ *
+ * The row is written BEFORE the gateway call and an UNPAID deposit requeries as
+ * statusId 4 (VerifyFail), which depositState maps to 'pending' — not 'failed'.
+ * So an unpaid row stays selectable until it ages past GLOBEPAY_STALE_AFTER_MS
+ * and a sweep actually looks at it. The sweep selects oldest-first with a fixed
+ * LIMIT (GLOBEPAY_RECONCILE_BATCH), which means a customer who opens cashier
+ * sessions and never pays can hold the front of that queue indefinitely and
+ * starve everyone else's PAID deposits of the only path that credits them
+ * (callbacks are not delivered in production — the sweep is the sole writer).
+ *
+ * The window matters as much as the cap: there is no customer-facing cancel or
+ * abandon endpoint, so a pending row only leaves 'pending' via settle, fail, or
+ * the sweep-driven expire. An UNSCOPED cap would lock a customer who merely
+ * closed a few cashier tabs out of depositing until the sweep caught up. Scoped
+ * to a window, an abandoned session stops counting against them on its own.
+ */
+export const GLOBEPAY_MAX_RECENT_PENDING_PER_CUSTOMER = 5;
+export const GLOBEPAY_PENDING_WINDOW_MS = 20 * 60 * 1000;
+
+/**
  * Per-transaction limits for the PRODUCTION merchant account, confirmed by the
  * provider 2026-07-29 (Sean): Online Banking bank-to-bank and QR e-wallet both
  * RM 30 – RM 10,000. The old RM 30–1,000 ceiling was the TEST account's, probed
@@ -169,6 +191,23 @@ export async function startGlobePayDeposit(
 
   const config = globepayConfigFromEnv();
   const packs = scope.resolve<PacksModuleService>(PACKS_MODULE);
+
+  // Bound the customer's own share of the reconcile sweep's fixed-LIMIT,
+  // oldest-first queue. Without this, creating cashier sessions and never
+  // paying is free and unbounded, and the resulting backlog delays or prevents
+  // OTHER customers' paid deposits from ever being credited.
+  const [, recentPending] = await packs.listAndCountGlobePayDeposits({
+    customer_id: input.customerId,
+    status: 'pending',
+    created_at: { $gte: new Date(Date.now() - GLOBEPAY_PENDING_WINDOW_MS) },
+  });
+  if (recentPending >= GLOBEPAY_MAX_RECENT_PENDING_PER_CUSTOMER) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'You have several top-ups still waiting for payment. Finish one, or wait a few minutes before starting another.',
+    );
+  }
+
   const merchantTransactionId = newMerchantTransactionId();
 
   const [row] = await packs.createGlobePayDeposits([
@@ -219,21 +258,39 @@ export async function startGlobePayDeposit(
       // cutover had a live deposit failing with no way to tell a bad key from
       // an unprovisioned payment method from an IP the gateway refuses.
       //
-      // AFTER the status update on purpose: the row write is money-path state
-      // and must not depend on the logger resolving. `error.message` carries
-      // the diagnosis when `codes` is empty — a non-JSON/WAF response (an
-      // un-allowlisted IP lands here) is built from the response text alone,
-      // see globepay-client.ts. Safe to log: their codes and message, the HTTP
-      // status, our own opaque reference, the method and the amount. NEVER the
-      // request or response envelope — those carry the signed/encrypted body.
-      scope
-        .resolve<{ warn: (message: string) => void }>('logger')
-        .warn(
-          `[globepay] deposit refused: codes=${error.codes.join(',') || 'none'} ` +
-            `httpStatus=${error.httpStatus} definite=${error.definite} ` +
-            `method=${paymentMethodCode} amount=${amount} ref=${merchantTransactionId} ` +
-            `msg=${error.message}`,
-        );
+      // AFTER the status update. The try/catch below already covers a logger
+      // that THROWS, so ordering is not what protects the row write from that;
+      // what it still buys is protection from a logger that HANGS — a blocked
+      // transport or a full disk — which no catch can rescue. The cost is a
+      // blind spot: if updateGlobePayDeposits itself throws, the refusal never
+      // reaches the logs. Accepted, because a hung logger stranding the row
+      // write is worse than a rare unlogged double failure. Same trade as the
+      // payout branch (globepay-withdrawal.ts), which these two are kept
+      // deliberately parallel to.
+      //
+      // `error.message` carries the diagnosis when `codes` is empty — a
+      // non-JSON/WAF response (an un-allowlisted IP lands here) is built from
+      // the response text alone, see globepay-client.ts. Safe to log: their
+      // codes and message, the HTTP status, our own opaque reference, the
+      // method and the amount. NEVER the request or response envelope — those
+      // carry the signed/encrypted body.
+      //
+      // Best-effort. Without the catch, a throw from `resolve` or `warn`
+      // escapes in place of the MedusaError below and the customer gets a 500
+      // instead of the sentence telling them to try another amount or method.
+      try {
+        scope
+          .resolve<{ warn: (message: string) => void }>('logger')
+          .warn(
+            `[globepay] deposit refused: codes=${error.codes.join(',') || 'none'} ` +
+              `httpStatus=${error.httpStatus} definite=${error.definite} ` +
+              `method=${paymentMethodCode} amount=${amount} ref=${merchantTransactionId} ` +
+              `msg=${error.message}`,
+          );
+      } catch {
+        // Swallowed deliberately: the logger is the thing that failed, so there
+        // is nothing left to report it with.
+      }
       // Their validation errors are the customer's problem to fix (amount out
       // of range, method unavailable), not a 500.
       throw new MedusaError(
@@ -247,6 +304,30 @@ export async function startGlobePayDeposit(
     // the authoritative answer (globepay-reconcile.ts). Marking it 'failed'
     // here would drop it out of the sweep's status='pending' scan permanently
     // and strand a real payment.
+    //
+    // Say so before rethrowing, for the same reason the refusal above is
+    // logged: this branch CREATES a pending row and nothing else records why.
+    // The rethrow reaches Medusa's default handler, which logs the bare error
+    // message — no reference, no method, no amount — so without this line the
+    // row and the cause it came from cannot be tied together. The payout twin
+    // has logged its ambiguous outcome all along (globepay-withdrawal.ts); this
+    // is the half of that parallel the deposit path was missing.
+    //
+    // Guarded like the refusal log: a throw from the logger here would replace
+    // the gateway error with its own, and the gateway error is what the sweep's
+    // operator needs to read.
+    try {
+      scope
+        .resolve<{ error: (msg: string) => void }>('logger')
+        .error(
+          `[globepay] deposit ${merchantTransactionId} submit outcome AMBIGUOUS ` +
+            `(${(error as Error).message}) — left pending for the sweep`,
+        );
+    } catch {
+      // Swallowed deliberately: the logger is the thing that failed. The row
+      // stays 'pending', so the sweep still resolves this deposit whether or
+      // not anyone ever reads about it.
+    }
     throw error;
   }
 

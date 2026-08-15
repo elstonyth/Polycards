@@ -17,9 +17,12 @@ import { topupFeedKey } from '../modules/packs/feed-events';
 import {
   GLOBEPAY_EXPIRED_RETRY_BATCH,
   GLOBEPAY_EXPIRED_RETRY_MS,
+  GLOBEPAY_FAST_BATCH,
+  GLOBEPAY_FAST_WINDOW_MS,
   GLOBEPAY_RECONCILE_BATCH,
   ambiguousRefusalAction,
   classifyRequeryError,
+  isFullSweepDue,
   reconcileAction,
   unknownDepositAction,
 } from '../modules/packs/globepay-reconcile';
@@ -37,6 +40,30 @@ import {
  * (signed MerchantTransactionId), so a callback and a sweep racing on the same
  * deposit produce exactly one credit — whichever gets there first.
  */
+// Last run that covered every tier. Module-scoped rather than persisted: the
+// worker is instance_count 1 and BullMQ runs scheduled jobs at concurrency 1,
+// so there is exactly one reader/writer, and a restart resets this to null,
+// which forces a full sweep on the next run — more coverage, never less.
+let lastFullSweepAt: Date | null = null;
+
+/**
+ * Test seam, and the reason one exists.
+ *
+ * Keeping the marker in module state is right for the worker — one process, one
+ * reader/writer, and a restart forces a full sweep. It also makes the job
+ * stateful ACROSS invocations, which is poison in a spec that drives several
+ * sweeps in a row: only the first would be a full sweep and every later one
+ * would silently narrow to the fast window, so any assertion about an aged or
+ * expired row would quietly stop testing what it says it tests.
+ *
+ * That is not hypothetical — it is what turned integration-http shard 4 red.
+ * The predicate this replaced (minute-of-hour) was pure, so specs never had to
+ * think about it; trading purity for correctness means handing them a reset.
+ */
+export function __resetFullSweepMarkerForTests(): void {
+  lastFullSweepAt = null;
+}
+
 export default async function globepayReconcileJob(container: MedusaContainer) {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
   if (!globepayEnabled()) return;
@@ -45,11 +72,32 @@ export default async function globepayReconcileJob(container: MedusaContainer) {
   const config = globepayConfigFromEnv();
   const now = new Date();
 
+  // TWO cadences in one job. Most runs are the fast tier: only deposits young
+  // enough that a customer is plausibly still watching their balance. Every
+  // tenth run is the full sweep the slow tiers below were sized for. See
+  // isFullSweepDue and GLOBEPAY_FAST_WINDOW_MS for why the split, not the cron,
+  // carries this decision.
+  const fullSweep = isFullSweepDue(now, lastFullSweepAt);
+  // Stamped BEFORE the work, not after: a full sweep that throws part way still
+  // counts as attempted, so a persistently failing run cannot turn every
+  // subsequent run into a full sweep and hammer the gateway.
+  if (fullSweep) lastFullSweepAt = now;
+
   // Oldest first (the status+created_at index): a backlog drains over several
   // runs instead of starving the earliest deposits.
   const pending = await packs.listGlobePayDeposits(
-    { status: 'pending' },
-    { take: GLOBEPAY_RECONCILE_BATCH, order: { created_at: 'ASC' } },
+    fullSweep
+      ? { status: 'pending' }
+      : {
+          status: 'pending',
+          created_at: {
+            $gte: new Date(now.getTime() - GLOBEPAY_FAST_WINDOW_MS),
+          },
+        },
+    {
+      take: fullSweep ? GLOBEPAY_RECONCILE_BATCH : GLOBEPAY_FAST_BATCH,
+      order: { created_at: 'ASC' },
+    },
   );
 
   // Second, smaller tier: deposits we gave up chasing. 'expired' means the
@@ -57,25 +105,31 @@ export default async function globepayReconcileJob(container: MedusaContainer) {
   // without this tier that row would never be requeried again and the payment
   // would be lost silently. Bounded on BOTH axes so it can never grow into a
   // full-table scan: a 7-day age window (same ['status','created_at'] index)
-  // and a batch a fifth the size of the live queue.
-  const revivable = await packs.listGlobePayDeposits(
-    {
-      status: 'expired',
-      created_at: { $gte: new Date(now.getTime() - GLOBEPAY_EXPIRED_RETRY_MS) },
-    },
-    // NEWEST first, unlike the live queue above. Requerying an 'expired' row
-    // leaves it 'expired' (the `deposit.status === next` no-op below), so the row
-    // stays in this population forever. Oldest-first therefore pinned the batch to
-    // the same ten rows closest to ageing OUT of the window and never reached one
-    // that had just expired — the exact case this tier exists for, since a late
-    // bank transfer lands hours after we gave up, not days. Newest-first asks
-    // about the rows most likely to have changed, and matches what
-    // GLOBEPAY_AMBIGUOUS_GIVEUP_MS already documents: a row aged out by the
-    // ambiguous bound has spent a week yielding nothing and is not worth ten more
-    // requeries. No column records WHEN a row expired, so created_at is the only
-    // sort key available.
-    { take: GLOBEPAY_EXPIRED_RETRY_BATCH, order: { created_at: 'DESC' } },
-  );
+  // and a batch a fifth the size of the live queue. Full sweeps only, on top
+  // of that: a row we already gave up chasing has, by definition, nobody
+  // waiting on the next sixty seconds.
+  const revivable = !fullSweep
+    ? []
+    : await packs.listGlobePayDeposits(
+        {
+          status: 'expired',
+          created_at: {
+            $gte: new Date(now.getTime() - GLOBEPAY_EXPIRED_RETRY_MS),
+          },
+        },
+        // NEWEST first, unlike the live queue above. Requerying an 'expired' row
+        // leaves it 'expired' (the `deposit.status === next` no-op below), so the row
+        // stays in this population forever. Oldest-first therefore pinned the batch to
+        // the same ten rows closest to ageing OUT of the window and never reached one
+        // that had just expired — the exact case this tier exists for, since a late
+        // bank transfer lands hours after we gave up, not days. Newest-first asks
+        // about the rows most likely to have changed, and matches what
+        // GLOBEPAY_AMBIGUOUS_GIVEUP_MS already documents: a row aged out by the
+        // ambiguous bound has spent a week yielding nothing and is not worth ten more
+        // requeries. No column records WHEN a row expired, so created_at is the only
+        // sort key available.
+        { take: GLOBEPAY_EXPIRED_RETRY_BATCH, order: { created_at: 'DESC' } },
+      );
 
   const outstanding = [...pending, ...revivable];
   if (outstanding.length === 0) return;
@@ -289,19 +343,16 @@ export default async function globepayReconcileJob(container: MedusaContainer) {
 
 export const config = {
   name: 'globepay-reconcile',
-  // EVERY MINUTE, not every ten. The ten-minute cadence assumed this sweep was
-  // the exception — a safety net for the occasional dropped callback. On the
-  // live merchant account it is the RULE: between 2026-08-10 18:09 and
-  // 2026-08-11 07:21 production received EIGHT deposit starts and ZERO
-  // callbacks at /hooks/globepay/deposit, and the one settlement in that window
-  // was credited here ("credited … from a REQUERY, not a callback"). So the
-  // sweep interval IS the customer's wait: a RM 500 top-up paid at 06:53
-  // credited at 07:00.
+  // Every minute. It used to be every ten — "roughly one sweep per deposit
+  // lifetime", which was sized for a world where the callback did the crediting
+  // and this was only the safety net. In production the callback never arrives,
+  // so this sweep is the ONLY thing that credits a payment and its period is
+  // the customer's wait: ten minutes of it, measured on a real RM 300 top-up on
+  // 2026-08-11 (paid 09:04:11Z, credited 09:10:01Z).
   //
-  // A minute costs one extra requery per pending row per run (at this volume,
-  // single digits), and cuts the worst case from ten minutes to one. It does
-  // NOT fix the missing callbacks — that is a GlobePay/Cloudflare delivery
-  // question, tracked separately. Restore */10 once organic callbacks are
-  // observed arriving, since then this really is just a net again.
+  // The extra runs are cheap because they are not the same sweep: isFullSweepDue
+  // keeps the stale and 'expired' tiers on the old ten-minute cadence, so a
+  // minute-cadence run costs one requery per deposit started in the last twenty
+  // minutes — normally zero.
   schedule: '* * * * *',
 };

@@ -74,6 +74,14 @@ function droppableRecord<T>(item: z.ZodType<T>) {
 export const PackRowSchema = z.looseObject({
   category: z.string(),
   price: finite,
+  /** §2.4.8 pool composition, backend-derived (GRADED = every card graded,
+   *  RAW = none, MIX = both, null = empty pool). Absent on an older backend;
+   *  a malformed value degrades to null rather than dropping the pack row. */
+  group: z.enum(['GRADED', 'RAW', 'MIX']).nullable().catch(null).optional(),
+  /** Strict guarantee gate: true iff EVERY pooled card is a PSA 10 (stricter
+   *  than group === 'GRADED' — a PSA 9 or a BGS slab is graded but not psa10).
+   *  Malformed/absent degrades to false: never overclaim the guarantee. */
+  psa10: z.boolean().catch(false).optional(),
 });
 
 /** GET /store/packs/:slug odds row — handle + known rarity + finite value.
@@ -225,6 +233,16 @@ export const VaultItemSchema = z.looseObject({
   pull_id: z.string(),
   showcased: z.boolean().optional(),
   card: z.looseObject({ name: z.string() }),
+  // How the pull was acquired, and whether it is sell/deliver locked (the free
+  // welcome pull before the account's first PAID open). `.catch` rather than
+  // required: a cached/older payload must keep parsing, because parseList DROPS
+  // a failing row — which would delete the customer's card from their own
+  // vault. `locked` defaults FALSE for the same reason (a stuck lock is worse
+  // than a late one; the backend refuses the sell either way).
+  // ⚠ Lock UI keys off `locked` ONLY, never `source`: a weekly-challenge prize
+  // is source='reward' with a live, sellable quote.
+  source: z.enum(['pack', 'reward', 'free']).catch('pack'),
+  locked: z.boolean().catch(false),
   // `firm` is false when the backend priced the quote on its FX display
   // fallback — selling would be refused, so the UI must not offer it as firm.
   // Optional: an older backend omits it (treated as firm).
@@ -233,6 +251,20 @@ export const VaultItemSchema = z.looseObject({
     percent: finite,
     firm: z.boolean().optional(),
   }),
+});
+
+// --- data/free-pack.ts ------------------------------------------------------
+
+/** GET /store/free-pack — the one-time welcome-pack claim badge's whole answer.
+ *  `image` rides along on the loose object but is unread: the badge art is a
+ *  fixed local asset, not the pack shot. Anything unparsable degrades to "not
+ *  eligible" in the getter — the badge is an enhancement, never an error
+ *  surface. */
+export const FreePackSchema = z.looseObject({
+  eligible: z.boolean(),
+  slug: z.string().nullable(),
+  /** Anonymous answers only: "an active free pack exists" (the signup hook). */
+  promo: z.boolean().optional(),
 });
 
 /** POST /store/vault/:id/showcase response — pull_id + final showcased state. */
@@ -327,7 +359,15 @@ export const PendingDepositSchema = z.looseObject({
  *  is the only field the redirect flow needs; the bank/QR extras ride along on
  *  the loose object for a future in-page renderer. */
 export const DepositStartSchema = z.looseObject({
-  url: z.string(),
+  // The cashier URL comes from the GATEWAY's response body, which — unlike
+  // their callbacks — carries no signature; TLS is the only thing vouching for
+  // it, and it flows straight into window.location.assign. A bare z.string()
+  // accepts 'javascript:' and 'data:', which CSP script-src does not block for
+  // a navigation. Requires a compromised gateway or TLS interception, so this
+  // is a trust-boundary belt, not a live hole.
+  url: z
+    .string()
+    .refine((u) => /^https:\/\//i.test(u), 'cashier url must be https'),
   transactionId: z.string(),
   merchantTransactionId: z.string(),
   amount: finite,
@@ -336,12 +376,27 @@ export const DepositStartSchema = z.looseObject({
 /** POST /store/credits/withdraw response. The debit already happened —
  *  `balance` is the post-debit balance, and the payout completes (or refunds)
  *  asynchronously via the gateway callback. `transactionId` is null when the
- *  submit outcome was ambiguous (still resolves asynchronously). */
+ *  submit outcome was ambiguous (still resolves asynchronously) OR the row was
+ *  held for admin approval instead of submitted (see `status`).
+ *  `status: 'held'` means the amount left the balance but a human has not yet
+ *  approved sending it to the gateway (plan 094) — the form must not render
+ *  that as a completed payout.
+ *  `.optional()`, not required: this field shipped in plan 094, and the
+ *  storefront and backend are separate deploy units (own DO app components) —
+ *  a storefront build that rolls out ahead of the backend must still parse a
+ *  response with no `status` at all. Absent means a pre-094 backend, which
+ *  has no held state, so defaulting to 'pending' downstream (vault.ts) is the
+ *  true reading, not a guess. Same reasoning as `usableFrom` on
+ *  SavedBankAccountsSchema below: making this required would fail the WHOLE
+ *  object during that skew window, and `parseOne` returning null AFTER the
+ *  backend already debited is the exact "money vanished" failure this plan
+ *  exists to prevent, reached through a different door. */
 export const WithdrawStartSchema = z.looseObject({
   merchantTransactionId: z.string(),
   transactionId: z.string().nullable(),
   amount: finite,
   balance: finite,
+  status: z.enum(['pending', 'held']).optional(),
 });
 
 /** GET /store/credits/withdraw/banks response — the payout bank picker. */
@@ -472,20 +527,6 @@ export const VipSchema = z.looseObject({
     )
     .default([]),
 });
-
-// --- actions/referral.ts ----------------------------------------------------
-
-/** GET /store/referral — referral summary for the authenticated customer. */
-export const ReferralSummarySchema = z.looseObject({
-  directRecruits: z.array(
-    z.looseObject({ handle: z.string().nullable(), contribution: finite }),
-  ),
-  downstreamCount: finite,
-  totalEarned: finite,
-});
-
-/** POST /store/referral — apply-referral response (just the new link id). */
-export const ReferralApplySchema = z.looseObject({ id: z.string() });
 
 // --- actions/notifications.ts -----------------------------------------------
 

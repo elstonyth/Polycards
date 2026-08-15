@@ -41,6 +41,19 @@ export async function POST(
     account_id?: unknown;
   };
 
+  // Money-out parity with POST /store/credits/topup. Optional: existing clients
+  // that send no header keep working exactly as before, they simply get no
+  // replay protection. Bounded at the same 200 characters as the top-up route.
+  const headerKey = req.headers['idempotency-key'];
+  const rawKey = Array.isArray(headerKey) ? headerKey[0] : headerKey;
+  const trimmedKey = typeof rawKey === 'string' ? rawKey.trim() : '';
+  if (trimmedKey.length > 200) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      'Idempotency-Key must be at most 200 characters.',
+    );
+  }
+
   const notifyUrl = process.env.GLOBEPAY_WITHDRAW_NOTIFY_URL;
   const verifyUrl = process.env.GLOBEPAY_PAYOUT_VERIFY_URL;
   if (!notifyUrl || !verifyUrl) {
@@ -65,6 +78,7 @@ export async function POST(
       amount: body.amount,
       accountId: body.account_id,
       ipAddress,
+      idempotencyKey: trimmedKey !== '' ? trimmedKey : undefined,
     },
     notifyUrl,
     verifyUrl,

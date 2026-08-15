@@ -8,6 +8,7 @@ import {
 import { MedusaError } from '@medusajs/framework/utils';
 import multer from 'multer';
 import {
+  createAccountDeleteRateLimit,
   createAdminActionRateLimit,
   createAuthIdentifierRateLimit,
   createAuthRateLimit,
@@ -30,7 +31,10 @@ import {
   createVaultBuybackRateLimit,
 } from './utils/rate-limit';
 import { createResetTokenSingleUseGuard } from './utils/reset-token-guard';
-import { rejectCustomerMetadata } from './utils/customer-metadata-guard';
+import {
+  rejectCustomerMetadata,
+  rejectAdminBankAccountsMetadata,
+} from './utils/customer-metadata-guard';
 import {
   requireSignupPhoneProof,
   blockUnverifiedPhoneWrite,
@@ -64,7 +68,26 @@ import {
 // execution order, so auth_context.actor_id is populated for keying, and
 // unauthenticated requests are rejected with 401 before consuming any budget.
 // The auth endpoints have no auth_context by nature — that limiter keys on the
-// request IP (the middleware's designed fallback).
+// request IP (the middleware's designed fallback). /store/free-pack is the
+// one deliberate exception: it authenticates with { allowUnauthenticated:
+// true }, so storeReadRateLimit runs for anonymous callers too — it falls
+// back to the same per-IP key (rate-limit.ts's `auth?.actor_id || ip:...`).
+// In production that IS one shared bucket, not per-visitor: the badge is
+// site-wide (every route, not just /slots — #442), and every guest read is
+// proxied server-side through the storefront's ONE Next.js egress IP (the
+// same single-egress-IP topology createAuthRateLimit / createProfileReadRateLimit
+// already document — see rate-limit.ts ~750-760), so this is a
+// whole-storefront CIRCUIT BREAKER on the badge's guest read
+// (STORE_READ_DEFAULTS: 120/10s burst, 480/60s sustained sitewide), the same
+// accepted stance as those other public-read tiers. Overflow fails closed at
+// the badge only — src/lib/data/free-pack.ts's try/catch maps any non-2xx
+// (including a 429) to `hidden`, so the catalog itself is unaffected. The
+// actual per-egress-IP call volume is throttled well below this ceiling by
+// the storefront itself (plan 097): GlobalFreePackBadge re-reads at most once
+// per 30s per identity (FreePackBadge.tsx's REFETCH_TTL_MS), and the guest
+// answer additionally sits behind a 60s in-process cache in
+// src/app/api/free-pack/route.ts, so this limiter is a backstop, not the
+// primary defense.
 
 // One instance shared by the vault + credits matchers: the two reads travel
 // together in the UI, so they share one budget (and one Redis connection).
@@ -94,6 +117,9 @@ const deliveryWriteRateLimit = createDeliveryWriteRateLimit((req) => {
 // Frame equip/unequip — cosmetic metadata write with its own generous budget
 // (sharing the delivery-write tier 429'd a collector's 11th frame swap).
 const profileAppearanceRateLimit = createProfileAppearanceRateLimit();
+// Permanent account deletion — its own tier because the route takes a password
+// and the write tier is no throttle for one (see createAccountDeleteRateLimit).
+const accountDeleteRateLimit = createAccountDeleteRateLimit();
 // One instance shared by all admin money-mutation matchers: they share one
 // budget and one Redis connection (a compromised admin token is throttled
 // across all mutation routes together).
@@ -433,6 +459,53 @@ export default defineMiddlewares({
       method: 'POST',
       middlewares: [validateDeliverableAddress('update')],
     },
+    // Customer self-service account deletion. Two tiers, not one: /delete has
+    // its own stricter tier because it carries a password field (see its
+    // entry), and /account is a plain read. authenticate() FIRST on both: the
+    // array is the execution order, and the limiters key on
+    // auth_context.actor_id, so an unauthenticated request must 401 before it
+    // consumes anyone's budget.
+    //
+    // No disabled-session guard and no Cache-Control entry here: the blanket
+    // '/store/*' entry at the end of this array already applies both.
+    //
+    // The authenticate() call DOES duplicate Medusa's own registration for
+    // ALL /store/customers/me* — deliberately, not by oversight. Restricting
+    // to ['bearer'] is stricter than the framework default and matches this
+    // repo's policy at middlewares.ts:58-64, so it stays; a future reader
+    // must not delete it as dead.
+    {
+      matcher: '/store/customers/me/delete',
+      method: 'POST',
+      // The delete tier ONLY — not authRateLimit as well. That limiter keys on
+      // actor_id here, which makes it strictly weaker than the write tier and
+      // no throttle at all on a password field; see its comment in
+      // rate-limit.ts. authenticate() stays first so an unauthenticated request
+      // 401s before it consumes anyone's budget.
+      middlewares: [
+        authenticate('customer', ['bearer']),
+        accountDeleteRateLimit,
+      ],
+    },
+    {
+      matcher: '/store/customers/me/account',
+      method: 'GET',
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+    },
+    {
+      // Free welcome pack eligibility (GET /store/free-pack) — the ONLY public
+      // surface the free pack has (the catalog excludes its category). The
+      // per-customer answer still requires the verified bearer; an
+      // unauthenticated request now falls through to an anonymous
+      // catalog-only promo answer (route.ts handles both branches) instead
+      // of 401ing, so the storefront can show a signup-hook badge.
+      matcher: '/store/free-pack',
+      method: 'GET',
+      middlewares: [
+        authenticate('customer', ['bearer'], { allowUnauthenticated: true }),
+        storeReadRateLimit,
+      ],
+    },
     {
       matcher: '/store/packs/*/open',
       method: 'POST',
@@ -448,26 +521,6 @@ export default defineMiddlewares({
         authenticate('customer', ['bearer']),
         createPackOpenBatchRateLimit(),
       ],
-    },
-    {
-      // The recruit calls this to set their sponsor. recruitId is taken from the
-      // bearer token (auth_context.actor_id) — never from the body.
-      matcher: '/store/referral',
-      method: 'POST',
-      middlewares: [
-        authenticate('customer', ['bearer']),
-        createReferralRecruitRateLimit(),
-      ],
-    },
-    {
-      // Referral summary (GET /store/referral) — separate entry because the
-      // existing POST entry above pins method:'POST'; omitting method here
-      // would protect both verbs with one entry, but method:'GET' keeps the
-      // rate-limiting tiers clean: writes use the recruit limiter, reads share
-      // the storeReadRateLimit budget with vault/credits/vip/notifications.
-      matcher: '/store/referral',
-      method: 'GET',
-      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
     },
     {
       // Money-dot signal (GET /store/credits/latest). Own entry because the
@@ -832,8 +885,31 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      // The framework's own POST /admin/customers/:id writes customer.metadata
+      // directly, and mergeMetadata is a SHALLOW top-level merge — so a request
+      // could inject bank_accounts (a live payout destination) with no audit
+      // row and without the metadata:<customer> advisory lock the store-side
+      // writer holds. The admin SPA never round-trips metadata, so nothing
+      // legitimate is refused here.
+      matcher: '/admin/customers/*',
+      method: 'POST',
+      middlewares: [rejectAdminBankAccountsMetadata],
+    },
+    {
       matcher: '/admin/customers/*/payout-details',
       method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // The GET returns the FULL bank account number, so it needs the limiter at
+      // least as much as the write does. It was previously unthrottled, and the
+      // coverage guard could not catch that because
+      // admin-rate-limit-coverage.unit.spec.ts only scans POST|PUT|PATCH|DELETE
+      // exports — it is structurally unable to flag a sensitive READ. Listed as
+      // its own entry rather than by dropping the method pin, because that guard
+      // matches coverage per method.
+      matcher: '/admin/customers/*/payout-details',
+      method: 'GET',
       middlewares: [adminActionRateLimit],
     },
     {
@@ -970,6 +1046,25 @@ export default defineMiddlewares({
       // re-derives exactly the bulk view the masking removed.
       matcher: '/admin/globepay/withdrawals/*/account',
       method: 'GET',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Release a HELD payout to the gateway (plan 094). The most literal
+      // money mutation on this limiter: one call submits a real bank
+      // transfer. The row's own atomic status claim is what stops a
+      // double-click paying twice — this budget is the outer bound on how
+      // fast a compromised admin token could work the queue at all.
+      matcher: '/admin/globepay/withdrawals/*/approve',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Refuse a HELD payout and refund the debit — same budget as its
+      // approve twin. It mints no credit beyond the one refund the row's
+      // shared idempotency anchor allows, but it is still a ledger write
+      // driven by an admin token.
+      matcher: '/admin/globepay/withdrawals/*/deny',
+      method: 'POST',
       middlewares: [adminActionRateLimit],
     },
     {

@@ -5,6 +5,7 @@ import {
 import PacksModuleService from '../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../modules/packs';
 import {
+  UNQUOTED_BUYBACK,
   buybackAmount,
   resolveBuybackRate,
 } from '../../../modules/packs/buyback-rate';
@@ -28,6 +29,11 @@ import {
 // window, the flat rate after — resolveBuybackRate, the same logic the
 // buyback workflow runs, so the quote always matches the credit).
 //
+// Every item carries `source` and `locked`. `locked` is true ONLY for the free
+// welcome pull before the customer's first PAID open (hasPaidOpen, resolved once
+// per request): it can be neither sold nor delivered until then, so it carries
+// NO sellable quote — see the buyback block below.
+//
 // Reward Pulls (source='reward') are included here — they are rendered from
 // the matching reward_draw.prize_snapshot (keyed by vault_pull_id) rather than
 // a Card row. No buyback block is emitted for reward prizes (they can't be sold
@@ -44,7 +50,13 @@ export async function GET(
 ): Promise<void> {
   const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
   const customerId = req.auth_context.actor_id;
-  const { rate: fxRate, firm: fxFirm } = await resolveFxRateInfo(packs);
+  // ONE hasPaidOpen read for the whole list (the unlock is computed, never
+  // stored — see modules/packs/free-pack.ts), resolved next to the FX read so
+  // it costs no extra round trip.
+  const [{ rate: fxRate, firm: fxFirm }, freeUnlocked] = await Promise.all([
+    resolveFxRateInfo(packs),
+    packs.hasPaidOpen(customerId),
+  ]);
 
   const pulls = await packs.listPulls(
     { customer_id: customerId, status: 'vaulted' },
@@ -122,6 +134,9 @@ export async function GET(
       if (!Number.isFinite(marketValue)) return null;
       const pack = packBySlug.get(p.pack_id);
       const prize = isChallengePrizePack(p.pack_id);
+      // The free welcome pull is unsellable until the customer's first PAID
+      // open — the SAME rule buyback-pull.ts refuses on.
+      const locked = p.source === 'free' && !freeUnlocked;
       const { percent, rate_type } = resolveBuybackRate(pack, {
         rolled_at: p.rolled_at,
         revealed_at: p.revealed_at,
@@ -161,15 +176,38 @@ export async function GET(
           ),
           marketPriceMyr,
         },
-        buyback: {
-          percent,
-          amount: buybackAmount(marketPriceMyr, percent),
-          rate_type,
-          // false when amount was computed on the display FX fallback — the
-          // sell would refuse, so the UI must not present it as a firm offer
-          // (sim finding P1-1).
-          firm: fxFirm,
-        },
+        // How the pull was acquired. NOTE for UI code: a weekly-challenge prize
+        // takes THIS path with source='reward' and a live, sellable quote — so
+        // the sell/deliver lock must be keyed off `locked`, NEVER off `source`.
+        source: p.source ?? 'pack',
+        locked,
+        // A LOCKED free pull must advertise NOTHING payable: selling it 400s
+        // (FREE_PULL_LOCKED_MESSAGE), so quoting a price here would offer the
+        // customer money the sell then refuses. UNQUOTED_BUYBACK is the same
+        // "no quote" block the open route degrades to — deliberately NOT an
+        // omitted/null field, because the storefront drops any vault row
+        // without a finite buyback.percent, which would delete the customer's
+        // free card from their own vault.
+        //
+        // `firm` is OVERRIDDEN back to the real FX firmness — it must NOT be
+        // UNQUOTED_BUYBACK's false. `firm` means "the FX rate is firm", which
+        // is a GLOBAL fact, and FX is firm for a locked pull like any other.
+        // The vault aggregates it globally (`items.every(i => i.buyback.firm)`
+        // in VaultClient.tsx), so a hardcoded false on ONE locked row would
+        // blame the lock on a pricing outage for the WHOLE vault and block the
+        // customer from selling their other, genuinely sellable cards.
+        // The lock is carried by `locked`, never by `firm`.
+        buyback: locked
+          ? { ...UNQUOTED_BUYBACK, firm: fxFirm }
+          : {
+              percent,
+              amount: buybackAmount(marketPriceMyr, percent),
+              rate_type,
+              // false when amount was computed on the display FX fallback — the
+              // sell would refuse, so the UI must not present it as a firm offer
+              // (sim finding P1-1).
+              firm: fxFirm,
+            },
       };
     })
     .filter((e): e is NonNullable<typeof e> => e !== null);
@@ -193,6 +231,10 @@ export async function GET(
       title: snap.title ?? 'Reward prize',
       image: snap.image ?? '',
       source: 'reward' as const,
+      // Reward prizes are never the free welcome pull, so they are never
+      // locked — stated rather than left absent so `locked` is present on
+      // EVERY item and the storefront needs no `?? false` fallback.
+      locked: false,
     };
   });
 

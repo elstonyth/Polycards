@@ -76,6 +76,20 @@ export class GlobePayError extends Error {
    * may have been accepted and only the response was lost. Money-out callers
    * MUST branch on this: refunding an ambiguous submit would double-pay if
    * the payout later executes.
+   *
+   * "isSuccess: false" is meant literally. A response that says isSuccess TRUE
+   * but carries no `data` is an ACCEPTED request with an unreadable payload,
+   * and a body missing `isSuccess` entirely is not their envelope at all —
+   * both are ambiguous, however much they look like failures from here.
+   *
+   * One documented exception to "no transaction exists on their side":
+   * PMT10000 (duplicate merchant reference) is an explicit isSuccess:false, so
+   * it lands here as definite, yet it means a transaction DOES exist — it is a
+   * replay, not a refusal (see the class doc above). Refunding on it would give
+   * back a debit for a payout the gateway already holds. Unreachable today,
+   * because every submit mints a fresh merchantTransactionId and none is ever
+   * retried with the same one; if that ever changes, the money-out callers must
+   * branch on the code before they trust this flag.
    */
   readonly definite: boolean;
 
@@ -150,12 +164,30 @@ async function post<T>(
         .join('; ') ||
       parsed.errorMessage ||
       'unknown error';
-    // Parsed refusal — the gateway definitively rejected this request.
+    // `definite` answers a NARROWER question than "did this call fail", and
+    // conflating the two costs real money on the payout path. It may only be
+    // true when the gateway EXPLICITLY refused — `isSuccess: false` — because
+    // that is the one shape that proves no transaction exists on their side.
+    //
+    // The other half of this condition, `!parsed.data`, is the opposite case:
+    // the gateway said isSuccess TRUE and we simply could not read the payload.
+    // The request was accepted. Calling that definite told startGlobePayWithdrawal
+    // to refund a debit whose payout may well execute — the customer keeps the
+    // credit AND the money leaves — and, worse, closed the row 'failed', which
+    // drops it out of the sweep's status='pending' scan permanently so nothing
+    // ever revisits it. The deposit mirror image writes off a live payment.
+    //
+    // Same reasoning covers a body with no `isSuccess` at all (a JSON error
+    // page from something in front of them): not a parseable GlobePay refusal,
+    // so not definite. Hence `=== false` rather than a truthiness check.
+    //
+    // Ambiguity is survivable in a way a wrong definite is not: the sweep can
+    // refund a payout that never happened, but nothing can un-pay one that did.
     throw new GlobePayError(
       `GlobePay365 ${path} failed: ${detail}`,
       codes,
       response.status,
-      true,
+      parsed.isSuccess === false,
     );
   }
 

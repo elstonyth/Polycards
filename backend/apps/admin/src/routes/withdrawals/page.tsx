@@ -10,10 +10,15 @@ import {
   Select,
   StatusBadge,
   toast,
+  usePrompt,
 } from '@medusajs/ui';
 import { ArrowUpTray } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
-import { useGlobePayWithdrawals } from '../../lib/queries';
+import {
+  useGlobePayWithdrawals,
+  useApproveGlobePayWithdrawal,
+  useDenyGlobePayWithdrawal,
+} from '../../lib/queries';
 import { getGlobePayWithdrawalAccount } from '../../lib/admin-rest';
 import type {
   GlobePayWithdrawal,
@@ -31,7 +36,18 @@ export const config: RouteConfig = {
   rank: 3,
 };
 
-const VIEWS: GlobePayWithdrawalView[] = ['pending', 'settled', 'failed', 'all'];
+// held FIRST and is the page's default view (Task 6, plan 094) — a held row
+// is a customer waiting on a HUMAN, which outranks pending's "waiting on the
+// gateway". The backend's own default stays 'pending' (route.ts); this SPA
+// always sends `status` explicitly, so this ordering/default is what actually
+// decides what an operator sees first.
+const VIEWS: GlobePayWithdrawalView[] = [
+  'held',
+  'pending',
+  'settled',
+  'failed',
+  'all',
+];
 
 // EXACTLY the backend's SORTABLE allow-list (api/admin/globepay/withdrawals/
 // route.ts) — real columns only, and only the ones this table renders a header
@@ -43,6 +59,11 @@ type SortKey = 'created_at' | 'amount';
 // never refunded? A stale pending row (past the sweep window, flagged
 // server-side) is that customer until proven otherwise.
 const statusBadge = (w: GlobePayWithdrawal, label: string) => {
+  // held: needs a human, not the gateway — orange reads as "awaiting action"
+  // the same way a stale pending row does, without conflating the two (a
+  // held row's `stale` is always false; the sweep never touches it).
+  if (w.status === 'held')
+    return <StatusBadge color="orange">{label}</StatusBadge>;
   if (w.status === 'settled')
     return <StatusBadge color="green">{label}</StatusBadge>;
   // 'failed' on a withdrawal means the debit was REFUNDED — resolved, not an
@@ -55,11 +76,14 @@ const statusBadge = (w: GlobePayWithdrawal, label: string) => {
 const WithdrawalsPage = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const prompt = usePrompt();
+  const approveMutation = useApproveGlobePayWithdrawal();
+  const denyMutation = useDenyGlobePayWithdrawal();
   const [page, setPage] = useState(0);
-  const [view, setView] = useState<GlobePayWithdrawalView>('pending');
+  const [view, setView] = useState<GlobePayWithdrawalView>('held');
   // Starts NULL, not seeded — same contract as the Deposits page: the route's
-  // status-dependent default order (pending oldest-first) holds until the
-  // operator explicitly picks a column.
+  // status-dependent default order (pending AND held oldest-first — Task 6,
+  // plan 094) holds until the operator explicitly picks a column.
   const { sort, sortHeader } = useTableSort<SortKey>(null, {
     onChange: () => setPage(0),
   });
@@ -97,6 +121,71 @@ const WithdrawalsPage = () => {
       });
     }
   };
+
+  // Row ids currently running an approve or deny. Added BEFORE the confirm
+  // prompt even opens (not after it resolves) — a click that only starts
+  // disabling once the operator confirms leaves a real window where a
+  // double-click opens two prompts, and through them two approves. Shared by
+  // both actions per row: once either is in flight, both of that row's
+  // buttons disable, since they are mutually exclusive outcomes for the same
+  // withdrawal.
+  const [acting, setActing] = useState<ReadonlySet<string>>(new Set());
+
+  const withActing = async (id: string, run: () => Promise<void>) => {
+    if (acting.has(id)) return;
+    setActing((prev) => new Set(prev).add(id));
+    try {
+      await run();
+    } catch {
+      // Swallowed: the mutation's own onError already toasted the specific
+      // backend refusal (frozen account, wrong status, channel closed, …).
+      // Nothing left to surface here — just fall through to re-enable below.
+    } finally {
+      setActing((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  };
+
+  // Confirm copy always uses the MASKED destination (w.account_number),
+  // never `revealed[w.id]` even if the operator already revealed this row —
+  // the brief asks for "the masked destination", and the confirm step is the
+  // last gate before a real bank payout, not a second reveal surface.
+  const approveHeld = (w: GlobePayWithdrawal) =>
+    withActing(w.id, async () => {
+      const ok = await prompt({
+        title: t('withdrawals.confirmApproveTitle'),
+        description: t('withdrawals.confirmApproveBody', {
+          amount: rm(w.amount),
+          bank: w.bank_code,
+          account: w.account_number,
+          holder: w.account_holder_name,
+        }),
+        confirmText: t('withdrawals.approve'),
+        variant: 'confirmation',
+      });
+      if (!ok) return;
+      await approveMutation.mutateAsync(w.id);
+    });
+
+  const denyHeld = (w: GlobePayWithdrawal) =>
+    withActing(w.id, async () => {
+      const ok = await prompt({
+        title: t('withdrawals.confirmDenyTitle'),
+        description: t('withdrawals.confirmDenyBody', {
+          amount: rm(w.amount),
+          bank: w.bank_code,
+          account: w.account_number,
+          holder: w.account_holder_name,
+        }),
+        confirmText: t('withdrawals.deny'),
+        variant: 'danger',
+      });
+      if (!ok) return;
+      await denyMutation.mutateAsync(w.id);
+    });
 
   // A view change restarts paging — page 3 of "pending" has nothing to do
   // with page 3 of "all".
@@ -205,6 +294,9 @@ const WithdrawalsPage = () => {
                   <Table.HeaderCell>
                     {t('withdrawals.reference')}
                   </Table.HeaderCell>
+                  <Table.HeaderCell>
+                    {t('withdrawals.actions')}
+                  </Table.HeaderCell>
                 </Table.Row>
               </Table.Header>
               <Table.Body>
@@ -214,13 +306,27 @@ const WithdrawalsPage = () => {
                       {timeAgo(w.created_at)}
                     </Table.Cell>
                     <Table.Cell className="text-ui-fg-subtle">
-                      <button
-                        type="button"
-                        className="text-ui-fg-interactive hover:underline"
-                        onClick={() => navigate(`/customers/${w.customer_id}`)}
-                      >
-                        {w.customer_email ?? w.customer_id.slice(0, 8)}
-                      </button>
+                      <div className="flex items-center gap-x-2 whitespace-nowrap">
+                        <button
+                          type="button"
+                          className="text-ui-fg-interactive hover:underline"
+                          onClick={() =>
+                            navigate(`/customers/${w.customer_id}`)
+                          }
+                        >
+                          {w.customer_email ?? w.customer_id.slice(0, 8)}
+                        </button>
+                        {/* Approve refuses on a frozen account (Task 5) — this
+                            is a PREVIEW as of the last page load, re-checked
+                            live at click time, so it can lag a freeze that
+                            landed seconds ago. Shown so the approver sees the
+                            reason before clicking into that refusal. */}
+                        {w.frozen && (
+                          <StatusBadge color="red">
+                            {t('withdrawals.frozen')}
+                          </StatusBadge>
+                        )}
+                      </div>
                     </Table.Cell>
                     {/* The destination we instructed — the dispute record,
                         since their callback never echoes it. Masked by the
@@ -265,6 +371,69 @@ const WithdrawalsPage = () => {
                         <div className="text-ui-fg-muted">
                           {w.gateway_transaction_id}
                         </div>
+                      )}
+                      {/* Plan 095 forensics, in the references cell rather
+                          than a seventh column: it is the only wide cell, and
+                          both strings are diagnostic detail an operator reads
+                          when a row already caught their eye. */}
+                      {w.failure_reason && (
+                        <div className="text-ui-fg-muted mt-1">
+                          {w.failure_reason}
+                        </div>
+                      )}
+                      {/* Their Payout Verification is active, so a failed row
+                          with no outcome recorded is worth a look — but it is a
+                          POINTER, not a verdict: their call may never have
+                          arrived, it may have been refused before we could
+                          match it to this row, or the row may predate the
+                          column. The copy says exactly that. */}
+                      {w.status === 'failed' && !w.verify_outcome && (
+                        <div className="text-ui-tag-orange-text mt-1 font-sans">
+                          {t('withdrawals.noVerify')}
+                        </div>
+                      )}
+                      {w.verify_outcome && (
+                        <div className="text-ui-fg-muted mt-1">
+                          {w.verify_outcome}
+                        </div>
+                      )}
+                    </Table.Cell>
+                    {/* held rows only — the row's own status, never the
+                        current VIEW: the 'all' view mixes every status, and a
+                        row that just left 'held' must not keep its buttons
+                        until the next poll. */}
+                    <Table.Cell>
+                      {w.status === 'held' ? (
+                        <div className="flex items-center gap-x-2">
+                          {/* Pre-emptively disabled on a frozen account: the
+                              backend refuses this one anyway (Task 5), so
+                              skip the doomed round-trip — the red badge above
+                              is the explanation, not a hover title (disabled
+                              buttons don't reliably fire hover). */}
+                          <Button
+                            size="small"
+                            variant="primary"
+                            disabled={acting.has(w.id) || w.frozen}
+                            onClick={() => approveHeld(w)}
+                          >
+                            {t('withdrawals.approve')}
+                          </Button>
+                          {/* NOT disabled on frozen — deny only ever returns
+                              money to the customer's own balance, and the
+                              backend never gates it on freeze either. */}
+                          <Button
+                            size="small"
+                            variant="danger"
+                            disabled={acting.has(w.id)}
+                            onClick={() => denyHeld(w)}
+                          >
+                            {t('withdrawals.deny')}
+                          </Button>
+                        </div>
+                      ) : (
+                        <Text size="small" className="text-ui-fg-muted">
+                          —
+                        </Text>
                       )}
                     </Table.Cell>
                   </Table.Row>
