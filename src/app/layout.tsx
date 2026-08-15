@@ -9,6 +9,7 @@ import { CreditDotProvider } from '@/components/app-shell/CreditDotProvider';
 import { TopUpProvider } from '@/components/app-shell/TopUpProvider';
 import { VaultDotProvider } from '@/components/app-shell/VaultDotProvider';
 import { AuthProvider } from '@/components/auth/AuthProvider';
+import { GlobalFreePackBadge } from '@/components/FreePackBadge';
 import SkipLink from '@/components/SkipLink';
 import CookieConsent from '@/components/CookieConsent';
 import MetaPixel from '@/components/MetaPixel';
@@ -101,6 +102,9 @@ export default async function RootLayout({
                 {/* Footer carries the TabBar clearance (pb-28) on phones. */}
                 <SiteFooter />
                 <TabBar />
+                {/* Site-wide free-pack badge; /slots renders its own copy from
+                    server state, so the global one skips that route. */}
+                <GlobalFreePackBadge />
                 <CookieConsent />
               </VaultDotProvider>
             </TopUpProvider>
