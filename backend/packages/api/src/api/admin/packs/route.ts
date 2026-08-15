@@ -1,26 +1,64 @@
-import { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
-import PacksModuleService from "../../../modules/packs/service";
-import { PACKS_MODULE } from "../../../modules/packs";
-import { createPackWorkflow } from "../../../workflows/create-pack";
-import { coercePackBody } from "./validate";
-import { clearPackListCache } from "../../store/packs/route";
-import { normalizePublishedOdds } from "../../../workflows/steps/create-pack";
-import { pageAll } from "../../utils/page-all";
-import { toMoney } from "../../../modules/packs/money";
+import { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
+import PacksModuleService from '../../../modules/packs/service';
+import { PACKS_MODULE } from '../../../modules/packs';
+import { createPackWorkflow } from '../../../workflows/create-pack';
+import { assertSingleActiveFreePack, coercePackBody } from './validate';
+import { FREE_WELCOME_CATEGORY } from '../../../modules/packs/free-pack';
+import { clearPackListCache } from '../../store/packs/route';
+import { normalizePublishedOdds } from '../../../workflows/steps/create-pack';
+import { pageAll } from '../../utils/page-all';
+import { toMoney } from '../../../modules/packs/money';
 import {
   packTheoreticalRtp,
   publishedEv,
-} from "../../../modules/packs/economy";
-import { isGraded } from "../../../modules/packs/card-view";
-import { normalizeTierRanges } from "../../../modules/packs/tier-settings-validate";
-import { weightForSet, type OddsSet } from "../../../modules/packs/odds-sets";
+} from '../../../modules/packs/economy';
+import {
+  compositionGroup,
+  poolComposition,
+} from '../../../modules/packs/card-view';
+import { normalizeTierRanges } from '../../../modules/packs/tier-settings-validate';
+import { weightForSet, type OddsSet } from '../../../modules/packs/odds-sets';
 import {
   resolveFxRate,
   displayMarketPrice,
   DEFAULT_MARKET_MULTIPLIER,
-} from "../../../modules/packs/pricing";
+} from '../../../modules/packs/pricing';
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
+
+// ponytail: per-process 30s cache — the same shape as the storefront catalog's
+// (store/packs/route.ts). Unlike the public catalog this body is EV math over
+// every odds row and every card, and it re-ran on every admin pack-page load.
+// The body is pack-global (no requesting-admin data) and Medusa's admin auth
+// runs before this handler, so caching neither leaks across admins nor widens
+// who may read it. Every admin pack write busts it — see the invariant on
+// clearAdminPackListCache.
+const CACHE_TTL_MS = 30_000;
+const LIST_KEY = 'list';
+const listCache = new Map<string, { expires: number; body: unknown }>();
+
+/** Single-flight guard: concurrent misses share ONE compute, so a miss
+ *  stampede can't run the whole-catalog EV fan-out N times over. */
+let inFlight: Promise<unknown> | null = null;
+
+/** Bust seam for the pack write paths + a test seam (module state outlives a
+ *  test's fixtures — one jest process is one module instance).
+ *
+ *  INVARIANT: every admin PACK write that moves a number this list renders
+ *  calls this — create/update/delete (`[slug]`), reorder, membership
+ *  (`[slug]/members`) and odds (`[slug]/odds`). Adding a write route under
+ *  api/admin/packs/** that touches pool, weights, rank or pack fields means
+ *  adding a call here too. `[slug]/top-hits` deliberately does NOT: it writes
+ *  only `top_hit_order`, which is storefront display order and appears nowhere
+ *  in this body.
+ *
+ *  Not covered, and shared with the storefront caches rather than introduced
+ *  by this one: CARD-level edits (price/grader/grade via the admin card
+ *  routes) feed EV and composition but bust nothing, so those lag ≤30s. */
+export function clearAdminPackListCache(): void {
+  listCache.clear();
+  inFlight = null;
+}
 
 // GET /admin/packs — the pack selector list for the win-rate editor. An admin
 // route, so it is auto-protected by Medusa's admin auth (session/bearer); no
@@ -28,25 +66,48 @@ const round2 = (n: number): number => Math.round(n * 100) / 100;
 // (category, rank) to mirror the storefront grouping.
 export async function GET(
   req: MedusaRequest,
-  res: MedusaResponse
+  res: MedusaResponse,
 ): Promise<void> {
-  const packsModuleService: PacksModuleService = req.scope.resolve(PACKS_MODULE);
+  const cached = listCache.get(LIST_KEY);
+  if (cached && cached.expires > Date.now()) {
+    res.json(cached.body);
+    return;
+  }
+
+  if (!inFlight) {
+    inFlight = computePackListBody(req)
+      .then((body) => {
+        listCache.set(LIST_KEY, { expires: Date.now() + CACHE_TTL_MS, body });
+        return body;
+      })
+      .finally(() => {
+        inFlight = null;
+      });
+  }
+  // A rejected compute rejects every waiter identically — same outcome as
+  // each having run it, minus the duplicate work.
+  res.json(await inFlight);
+}
+
+async function computePackListBody(req: MedusaRequest): Promise<unknown> {
+  const packsModuleService: PacksModuleService =
+    req.scope.resolve(PACKS_MODULE);
 
   const packs = await packsModuleService.listPacks({}, { take: 1000 });
   const sorted = [...packs].sort((a, b) =>
     a.category === b.category
       ? a.rank - b.rank
-      : a.category.localeCompare(b.category)
+      : a.category.localeCompare(b.category),
   );
 
   // Stats fan-out — every odds row and every card ONCE, then all the per-pack
   // math in memory (same shape as GET /admin/economy). N packs must not mean
   // N queries: this list renders on every admin pack-page load.
   const allOdds = await pageAll((opts) =>
-    packsModuleService.listPackOdds({}, opts)
+    packsModuleService.listPackOdds({}, opts),
   );
   const allCards = await pageAll((opts) =>
-    packsModuleService.listCards({}, opts)
+    packsModuleService.listCards({}, opts),
   );
   const fx = await resolveFxRate(packsModuleService);
   // PRICE, not raw FMV: FMV × live fx × the card's OWN markup multiplier — the
@@ -58,16 +119,19 @@ export async function GET(
       displayMarketPrice(
         toMoney(c.market_value),
         fx,
-        toMoney(c.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER)
+        toMoney(c.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER),
       ),
-    ])
+    ]),
   );
-  const graderByHandle = new Map(allCards.map((c) => [c.handle, c.grader]));
+  // §2.4.8 composition counts — the shared pool traversal (identical
+  // reward-row + orphan skip-set) the public catalog uses, so the two lists
+  // can never disagree on RAW/GRADED.
+  const comp = poolComposition(allOdds, allCards);
 
   // Reward rows (card_id null) carry no card and no value — drop them here so
   // the per-pack loop below never has to re-check. Narrows card_id to string.
   const cardOdds = allOdds.filter(
-    (o): o is typeof o & { card_id: string } => o.card_id != null
+    (o): o is typeof o & { card_id: string } => o.card_id != null,
   );
   const oddsByPack = new Map<string, typeof cardOdds>();
   for (const o of cardOdds) {
@@ -76,7 +140,7 @@ export async function GET(
     oddsByPack.set(o.pack_id, list);
   }
 
-  res.json({
+  return {
     packs: sorted.map((p) => {
       const price = toMoney(p.price);
       // One pass over the pack's pool feeds all three readouts: the per-set
@@ -89,14 +153,13 @@ export async function GET(
         market_value: number;
       }[] = [];
       const tiers = new Map<string, { sum: number; n: number }>();
-      let graded = 0;
       for (const o of oddsByPack.get(p.slug) ?? []) {
         const cardPrice = priceByHandle.get(o.card_id);
-        const grader = graderByHandle.get(o.card_id);
         // Orphaned odds row (card deleted) — not part of the pool at all.
-        if (cardPrice === undefined || grader === undefined) continue;
-        if (isGraded({ grader })) graded++;
-        const rarity = o.rarity ?? "Common";
+        // (displayMarketPrice always returns a number, so undefined here ⇔
+        // missing card — the same skip-set poolComposition applies.)
+        if (cardPrice === undefined) continue;
+        const rarity = o.rarity ?? 'Common';
         const t = tiers.get(rarity) ?? { sum: 0, n: 0 };
         t.sum += cardPrice;
         t.n += 1;
@@ -117,7 +180,7 @@ export async function GET(
             weight: weightForSet(c, s),
             market_value: c.market_value,
           })),
-          price
+          price,
         );
       const [r1, r2, r3] = [rtpFor(1), rtpFor(2), rtpFor(3)];
 
@@ -148,15 +211,13 @@ export async function GET(
         // tier_settings singleton (null vs {} matters — see the odds route).
         tier_ranges:
           p.tier_ranges == null ? null : normalizeTierRanges(p.tier_ranges),
-        // §2.4.8 composition — AUTO-DETECTED from the pool, never operator-set.
-        // Null = empty pool: nothing to infer from, not "raw".
-        group: !pool.length
-          ? null
-          : graded === pool.length
-            ? "GRADED"
-            : graded === 0
-              ? "RAW"
-              : "MIX",
+        // §2.4.8 composition — AUTO-DETECTED from the pool, never operator-set
+        // (shared traversal + thresholds with the public catalog; null =
+        // empty pool).
+        group: compositionGroup(
+          comp.get(p.slug)?.graded ?? 0,
+          comp.get(p.slug)?.total ?? 0,
+        ),
         ev: { s1: r1?.ev ?? null, s2: r2?.ev ?? null, s3: r3?.ev ?? null },
         rtp: {
           s1: r1?.rtp_pct ?? null,
@@ -168,18 +229,29 @@ export async function GET(
           pub_ev !== null && price > 0 ? round2((pub_ev / price) * 100) : null,
       };
     }),
-  });
+  };
 }
 
 // POST /admin/packs — create a pack listing. A new pack starts with an empty
 // prize pool; cards are assigned via the membership editor.
 export async function POST(
   req: MedusaRequest,
-  res: MedusaResponse
+  res: MedusaResponse,
 ): Promise<void> {
   const body = (req.body ?? {}) as Record<string, unknown>;
-  const slug = typeof body.slug === "string" ? body.slug.trim() : "";
+  const slug = typeof body.slug === 'string' ? body.slug.trim() : '';
   const input = coercePackBody(body, slug);
+
+  // Only ONE free_welcome pack may be live — the lookup runs only when this
+  // write is actually a free-pack write.
+  const packsModuleService: PacksModuleService =
+    req.scope.resolve(PACKS_MODULE);
+  assertSingleActiveFreePack(
+    input.category === FREE_WELCOME_CATEGORY
+      ? ((await packsModuleService.getActiveFreePack())?.slug ?? null)
+      : null,
+    input,
+  );
 
   const { result } = await createPackWorkflow(req.scope).run({ input });
   // A pack can be created directly as `active`, so bust the storefront list
@@ -187,5 +259,6 @@ export async function POST(
   // was never cached — the store detail route doesn't cache 404s — so there is
   // nothing to evict there.)
   clearPackListCache();
+  clearAdminPackListCache();
   res.status(201).json({ pack: result });
 }

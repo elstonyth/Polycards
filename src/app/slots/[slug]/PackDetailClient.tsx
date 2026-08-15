@@ -24,6 +24,8 @@ import {
   type ResolvedPack,
   type PackCard,
   FLAT_BUYBACK_PERCENT,
+  FREE_WELCOME_CATEGORY,
+  FREE_PULL_LOCKED_MESSAGE,
   factoryVideo,
 } from '@/lib/packs-data';
 import { AmbientVideo } from '@/components/AmbientVideo';
@@ -46,12 +48,29 @@ import {
 import { usePackDetailPoll } from '@/lib/use-pack-detail-poll';
 import { SlabImage } from '@/components/SlabImage';
 
+/**
+ * Shown where the gift offer would be, when this visitor cannot claim it.
+ *
+ * DELIBERATELY does not say "already claimed". The ineligible state is
+ * `canClaimFreePack` → false, which covers a spent claim AND a failed
+ * eligibility read (backend down, breaker open) — the storefront cannot tell
+ * them apart, so any wording asserting a past claim is a lie to a first-time
+ * visitor whose read simply failed. This sentence is true in both.
+ *
+ * Storefront-only copy (unlike FREE_PULL_LOCKED_MESSAGE, which the backend also
+ * throws): nothing server-side refuses with this wording — the open's refusal
+ * is the backend's own, and this page never gets that far.
+ */
+const FREE_PACK_UNAVAILABLE_MESSAGE =
+  "This welcome pack isn't available on this account.";
+
 export default function PackDetailClient({
   pack,
   siblings,
   detail,
   recentPulls,
   initialQty = 1,
+  freePackEligible = true,
 }: {
   pack: ResolvedPack;
   siblings: Pack[];
@@ -61,6 +80,18 @@ export default function PackDetailClient({
   recentPulls: RecentPull[];
   /** Clamped 1–3 from the URL's `?count=` (the catalog stepper's choice). */
   initialQty?: number;
+  /**
+   * Free pack ONLY: may this visitor still claim it? The route is public (the
+   * pack is merely uncataloged), so a shared link / history entry / stale badge
+   * lands an ineligible account here — and the backend refuses the open at the
+   * reel. Defaults true so every paid pack, for which page.tsx passes nothing,
+   * renders exactly as before.
+   *
+   * Logged-out visitors are eligible=true on purpose: page.tsx maps the
+   * `signup` badge state to true, so the offer that brought them here still
+   * shows and `handleGoToReel` prompts login.
+   */
+  freePackEligible?: boolean;
 }) {
   const { customer } = useAuth();
   const { balance, openTopUp } = useTopUp();
@@ -94,9 +125,28 @@ export default function PackDetailClient({
   // Credit balance (A2: opens debit the pack price) — read from the app-shell
   // TopUpProvider (identity-tagged; null = logged out / loading), so this page,
   // the header chip, and the top-up sheet can never disagree.
-  // Live Recent Pulls — seeded from the server snapshot, then polled (~4s)
-  // so anyone's pull shows up here without a reload.
-  const recent = useLiveRecentPulls(recentPulls);
+  // Live Recent Pulls for THIS pack — seeded from the server snapshot, then
+  // polled (~4s) so anyone's pull shows up here without a reload. Keyed on the
+  // active sibling: the sibling row switches packs in place, no navigation.
+  // Deliberately NOT blanked on that switch (unlike usePackDetailPoll above):
+  // the previous pack's rows show for the one in-flight poll, but the rows
+  // carry no pack label, so nothing on screen contradicts itself — whereas
+  // blanking would flash "No pulls yet" on a pack that demonstrably has pulls.
+  const recent = useLiveRecentPulls(recentPulls, active.id);
+
+  // The one-time free welcome pack: no price, no quantity, no batch — the claim
+  // pays for exactly ONE open (the backend rejects a batch on this category), so
+  // every money/quantity control is removed rather than merely zeroed. Its
+  // siblings list is empty (it is not in the catalog), so `active` can never
+  // become a different, paid pack.
+  const isFreePack = pack.categoryId === FREE_WELCOME_CATEGORY;
+  // The free pack, reached by someone who cannot claim it — a spent claim OR a
+  // failed eligibility read, which the storefront cannot tell apart (hence the
+  // neutral copy above; nothing here may assert a past claim). Every gift
+  // affordance below turns off together — a half-suppressed state (dock CTA
+  // gone, panel copy still promising "nothing charged") reads as a bug, and the
+  // promise is the part that is actually false.
+  const freeClaimUnavailable = isFreePack && !freePackEligible;
 
   // Real backend price, never re-parsed from the rounded display string.
   const priceNum = active.priceValue;
@@ -154,6 +204,14 @@ export default function PackDetailClient({
   function handleGoToReel() {
     if (!customer) {
       openAuth('login');
+      return;
+    }
+    // A free open costs nothing and is always singular — skip the credit gate
+    // (a brand-new account has a zero balance by definition) and pin count=1.
+    if (isFreePack) {
+      setOpenError(null);
+      setNeedsTopUp(false);
+      router.push(`/slots/${active.id}/spin?count=1`);
       return;
     }
     if (balance !== null && !affordable(balance, priceNum * qty)) {
@@ -268,10 +326,28 @@ export default function PackDetailClient({
               <h1 className="font-heading text-xl font-bold tracking-tight text-white sm:text-2xl">
                 {active.name}
               </h1>
-              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-buyback/90 px-2.5 py-1 text-[11px] font-bold text-white">
-                {active.buybackPercent ?? 90}% Buyback
-                <Info className="h-3 w-3 opacity-80" aria-hidden />
-              </span>
+              {isFreePack ? (
+                // A free pull can be neither sold nor delivered until the first
+                // PAID open, so a buyback rate here would advertise money the
+                // sell then refuses. Say what it IS instead — or, when it
+                // cannot be claimed, drop to quiet white: not an offer, and
+                // not a claim about why (see FREE_PACK_UNAVAILABLE_MESSAGE).
+                <span
+                  className={cn(
+                    'inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide',
+                    freeClaimUnavailable
+                      ? 'bg-white/10 text-white/60'
+                      : 'bg-chase/15 text-chase',
+                  )}
+                >
+                  {freeClaimUnavailable ? 'Unavailable' : 'Free'}
+                </span>
+              ) : (
+                <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-buyback/90 px-2.5 py-1 text-[11px] font-bold text-white">
+                  {active.buybackPercent ?? 90}% Buyback
+                  <Info className="h-3 w-3 opacity-80" aria-hidden />
+                </span>
+              )}
             </div>
 
             <div className="flex flex-col gap-4 px-5 py-4">
@@ -325,55 +401,65 @@ export default function PackDetailClient({
                 </div>
               </div>
 
-              {/* Pack tiles */}
-              <div>
-                <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/60">
-                  Pack
-                </p>
-                {/* Compact 3-col grid so all tiers fit on screen at once — the
+              {/* Pack tiles — an uncataloged pack (the free welcome pack) has
+                  no siblings, and an empty selector grid reads as a broken
+                  section rather than a choice. */}
+              {siblings.length > 0 && (
+                <div>
+                  <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/60">
+                    Pack
+                  </p>
+                  {/* Compact 3-col grid so all tiers fit on screen at once — the
                     selector must never scroll inside the panel. */}
-                <div className="grid grid-cols-3 gap-1.5">
-                  {siblings.map((p) => {
-                    const selected = p.id === active.id;
-                    return (
-                      <button
-                        key={p.id}
-                        type="button"
-                        onClick={() => {
-                          setActive(p);
-                          reset();
-                        }}
-                        className={cn(
-                          'flex flex-col items-center gap-0.5 rounded-xl border px-1 py-2 text-center transition-colors',
-                          selected
-                            ? 'border-white/40 bg-white/10'
-                            : 'border-white/10 bg-white/[0.03] hover:border-white/20 hover:bg-white/[0.06]',
-                        )}
-                      >
-                        <Image
-                          src={p.image}
-                          alt=""
-                          aria-hidden
-                          width={205}
-                          height={360}
-                          unoptimized
-                          className="h-9 w-auto object-contain"
-                        />
-                        <span className="w-full truncate text-[11px] font-medium leading-tight text-white">
-                          {p.name.replace(' Pack', '')}
-                        </span>
-                        <span className="text-[11px] font-semibold tabular-nums text-white/55">
-                          {p.price}
-                        </span>
-                      </button>
-                    );
-                  })}
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {siblings.map((p) => {
+                      const selected = p.id === active.id;
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => {
+                            setActive(p);
+                            reset();
+                          }}
+                          className={cn(
+                            'flex flex-col items-center gap-0.5 rounded-xl border px-1 py-2 text-center transition-colors',
+                            selected
+                              ? 'border-white/40 bg-white/10'
+                              : 'border-white/10 bg-white/[0.03] hover:border-white/20 hover:bg-white/[0.06]',
+                          )}
+                        >
+                          <Image
+                            src={p.image}
+                            alt=""
+                            aria-hidden
+                            width={205}
+                            height={360}
+                            unoptimized
+                            className="h-9 w-auto object-contain"
+                          />
+                          <span className="w-full truncate text-[11px] font-medium leading-tight text-white">
+                            {p.name.replace(' Pack', '')}
+                          </span>
+                          <span className="text-[11px] font-semibold tabular-nums text-white/55">
+                            {p.price}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Quantity — desktop only; on phones it lives in the sticky
-                  buy bar so there is a single Open Pack control per zone. */}
-              <div className="hidden items-center gap-2 lg:flex">
+                  buy bar so there is a single Open Pack control per zone.
+                  Absent on the free pack: the claim buys exactly one open. */}
+              <div
+                className={cn(
+                  'hidden items-center gap-2',
+                  !isFreePack && 'lg:flex',
+                )}
+              >
                 <button
                   type="button"
                   aria-label="Decrease quantity"
@@ -408,19 +494,27 @@ export default function PackDetailClient({
             {/* Open Pack — desktop panel footer (phones use the sticky bar) */}
             <div className="hidden border-t border-white/10 p-4 lg:block">
               {/* DESIGN.md primary: Paper White pill, Ink text — buyback green
-                  is a money-IN signal and never a spend CTA. Money in Nekst. */}
-              <Pill
-                variant="primary"
-                size="lg"
-                onClick={handleGoToReel}
-                className="w-full justify-between px-5"
-              >
-                {customer ? 'Open Pack' : 'Log in to open'}
-                <span className="flex items-center gap-1.5 font-heading text-base tracking-tight tabular-nums">
-                  {rm(priceNum * qty)}
-                  <ArrowRight className="h-4 w-4" aria-hidden />
-                </span>
-              </Pill>
+                  is a money-IN signal and never a spend CTA. Money in Nekst.
+                  Absent when the claim is unavailable: the open would 4xx, so a
+                  primary CTA here is an invitation to a refusal. */}
+              {!freeClaimUnavailable && (
+                <Pill
+                  variant="primary"
+                  size="lg"
+                  onClick={handleGoToReel}
+                  className="w-full justify-between px-5"
+                >
+                  {customer
+                    ? isFreePack
+                      ? 'Open Free Pack'
+                      : 'Open Pack'
+                    : 'Log in to open'}
+                  <span className="flex items-center gap-1.5 font-heading text-base tracking-tight tabular-nums">
+                    {!isFreePack && rm(priceNum * qty)}
+                    <ArrowRight className="h-4 w-4" aria-hidden />
+                  </span>
+                </Pill>
+              )}
               {openError && (
                 <p
                   role="alert"
@@ -448,8 +542,20 @@ export default function PackDetailClient({
                   (cosmetic in this preview); a real open rolls ONE pack and debits
                   its price from the credit balance (A2). Quantity & provably-fair
                   pulls stay out of scope. */}
-              <p className="mt-2 text-center text-[11px] text-white/60">
-                {customer && balance !== null ? (
+              <p
+                className={cn(
+                  'text-center text-[11px] text-white/60',
+                  !freeClaimUnavailable && 'mt-2',
+                )}
+              >
+                {freeClaimUnavailable ? (
+                  <>{FREE_PACK_UNAVAILABLE_MESSAGE}</>
+                ) : isFreePack ? (
+                  <>
+                    Your one-time welcome pack — nothing charged. The card lands
+                    in your vault. {FREE_PULL_LOCKED_MESSAGE}
+                  </>
+                ) : customer && balance !== null ? (
                   <>
                     Each open costs {rm(priceNum)} in site credits — your
                     balance:{' '}
@@ -597,17 +703,36 @@ export default function PackDetailClient({
           left (money is the content), quiet capsule stepper, and one
           single-purpose white pill (the panel's own qty/footer are lg-only,
           so there is exactly one CTA per zone). Max = two taps of +. */}
-      <div className="fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-40 border-t border-white/10 bg-neutral-950 px-fluid py-2.5 lg:hidden">
+      <div
+        data-testid="pack-buy-dock"
+        className="fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-40 border-t border-white/10 bg-neutral-950 px-fluid py-2.5 lg:hidden"
+      >
         <div className="flex items-center gap-3">
           <div className="min-w-0 flex-1">
+            {/* Free mode states the gift where the total normally sits — the
+                slot must not go empty, or the pill drifts left and the dock
+                reads like a different component. */}
             <p className="truncate font-heading text-xl font-bold leading-none tracking-tight text-white tabular-nums">
-              {rm(priceNum * qty)}
+              {freeClaimUnavailable
+                ? 'Unavailable'
+                : isFreePack
+                  ? 'Free'
+                  : rm(priceNum * qty)}
             </p>
             <p className="mt-1 text-[11px] leading-none text-white/60">
-              {active.buybackPercent ?? FLAT_BUYBACK_PERCENT}% buyback
+              {freeClaimUnavailable
+                ? 'Not available on this account'
+                : isFreePack
+                  ? 'Your welcome pack'
+                  : `${active.buybackPercent ?? FLAT_BUYBACK_PERCENT}% buyback`}
             </p>
           </div>
-          <div className="flex h-11 shrink-0 items-center rounded-full bg-white/5">
+          <div
+            className={cn(
+              'h-11 shrink-0 items-center rounded-full bg-white/5',
+              isFreePack ? 'hidden' : 'flex',
+            )}
+          >
             <button
               type="button"
               aria-label="Decrease quantity"
@@ -630,14 +755,20 @@ export default function PackDetailClient({
               <Plus className="h-4 w-4" aria-hidden />
             </button>
           </div>
-          <Pill
-            variant="primary"
-            size="md"
-            onClick={handleGoToReel}
-            className="shrink-0 px-5"
-          >
-            {customer ? 'Open Pack' : 'Log in'}
-          </Pill>
+          {!freeClaimUnavailable && (
+            <Pill
+              variant="primary"
+              size="md"
+              onClick={handleGoToReel}
+              className="shrink-0 px-5"
+            >
+              {customer
+                ? isFreePack
+                  ? 'Open Free Pack'
+                  : 'Open Pack'
+                : 'Log in'}
+            </Pill>
+          )}
         </div>
         {openError && (
           <p role="alert" className="mt-2 text-center text-[11px] text-red-300">

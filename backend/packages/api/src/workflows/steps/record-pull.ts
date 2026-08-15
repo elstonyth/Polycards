@@ -7,7 +7,15 @@ type RecordPullInput = {
   customer_id: string;
   pack_id: string; // = Pack.slug
   card_id: string; // = Card.handle (the won card)
-  recorded_value_usd: number; // draw-time USD pulled value snapshot (roll-pack)
+  // Draw-time USD pulled value snapshot (roll-pack). NULL on a free welcome
+  // pull: it records no pulled value, so the boards never see it.
+  recorded_value_usd: number | null;
+  // Draw-time USD value for the LEDGER row's vault_delta only. Non-null ONLY
+  // on a free open, where recorded_value_usd above is deliberately NULL: the
+  // card still enters the vault, so the liability the later sell/delivery
+  // subtracts has to go IN somewhere (see recordPullsWithLedger).
+  vault_value_usd: number | null;
+  source: "pack" | "free"; // 'free' = the one-time free welcome open
   // The open_id (uuid) the charge row stored in source_transaction_id — the
   // money<->card audit link stamped on the pull.
   open_id: string;
@@ -40,6 +48,7 @@ export const recordPullStep = createStep(
           order_id: null,
           rolled_at: new Date(),
           recorded_value_usd: input.recorded_value_usd,
+          source: input.source,
           open_id: input.open_id,
         },
       ],
@@ -50,6 +59,7 @@ export const recordPullStep = createStep(
         packId: input.pack_id,
         channel: "single",
         fx,
+        vaultValueUsd: input.vault_value_usd,
       },
     });
     return new StepResponse(pull, { id: pull.id, open_id: input.open_id });

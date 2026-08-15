@@ -38,7 +38,8 @@ export default async function SlotSpinPage({
   const [base, detail, recentPulls] = await Promise.all([
     getPackBySlug(slug),
     getPackDetail(slug),
-    getRecentPulls(),
+    // Scoped to this pack, same as the detail page above.
+    getRecentPulls(slug),
   ]);
   if (!base) notFound();
 

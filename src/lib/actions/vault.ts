@@ -472,8 +472,17 @@ export type StartWithdrawalResult =
  * Start a REAL payout through the GlobePay365 gateway. The balance is debited
  * immediately (the returned `balance` reflects it); the bank transfer then
  * completes asynchronously, and a failed payout refunds the debit — so the
- * money is never both spendable and in flight. No Idempotency-Key: the backend
- * mints a fresh reference per attempt, and each attempt debits atomically.
+ * money is never both spendable and in flight.
+ *
+ * `idempotencyKey` comes from the CALLER, minted once per withdrawal ATTEMPT
+ * and reused across retries of that attempt (see `topUpCredits` above and
+ * `WithdrawForm`) — a key minted here per call would rotate on every retry
+ * and bypass the backend's replay guard (PR #427), which exists precisely
+ * for the debited-but-response-lost case: a server action can reject at the
+ * action boundary (offline, 5xx, deployment-id rotation) AFTER the backend
+ * already debited and submitted the payout, and a retry without the same key
+ * would be a second debit and a second bank transfer. The fallback mint only
+ * covers callers that never retry.
  *
  * Takes an `accountId`, never bank details: the destination is resolved
  * server-side from the caller's own saved accounts, inside the transaction that
@@ -483,6 +492,7 @@ export type StartWithdrawalResult =
 export async function startWithdrawal(input: {
   amount: number;
   accountId: string;
+  idempotencyKey?: string;
 }): Promise<StartWithdrawalResult> {
   // Validate at the boundary — a server action is a public endpoint.
   if (
@@ -506,7 +516,12 @@ export async function startWithdrawal(input: {
       WithdrawStartSchema,
       await sdk.client.fetch('/store/credits/withdraw', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          // See the doc comment above: caller-minted so a retry of the same
+          // attempt replays instead of double-debiting.
+          'Idempotency-Key': input.idempotencyKey ?? crypto.randomUUID(),
+        },
         body: {
           amount: input.amount,
           account_id: input.accountId,

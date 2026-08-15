@@ -1,5 +1,6 @@
 import { MedusaError } from '@medusajs/framework/utils';
 import {
+  GLOBEPAY_WD_MIN_RM,
   globepayWithdrawalsEnabled,
   startGlobePayWithdrawal,
   withdrawalDetailsError,
@@ -776,6 +777,21 @@ describe('startGlobePayWithdrawal — approval threshold (held)', () => {
     const h = harness();
     h.packs.walletSummary.mockResolvedValue(roomyWallet);
     const result = await start(h, { amount: 100 });
+    expect(submitMock).not.toHaveBeenCalled();
+    expect(result.status).toBe('held');
+  });
+
+  it('GLOBEPAY_WD_APPROVAL_ABOVE_RM=0 holds ANY amount — the operator incident stop lever', async () => {
+    // 0 is the "hold everything for a human" lever. A parser that rejects 0
+    // and falls back to the 1000 default would let this RM-minimum amount
+    // auto-submit — the exact silent-reopen failure this case exists to catch.
+    // (Can't use RM 1 here: GLOBEPAY_WD_MIN_RM=50 rejects it before the
+    // threshold check ever runs, so the smallest amount that reaches the
+    // threshold check is the minimum itself.)
+    process.env.GLOBEPAY_WD_APPROVAL_ABOVE_RM = '0';
+    const h = harness();
+    h.packs.walletSummary.mockResolvedValue(roomyWallet);
+    const result = await start(h, { amount: GLOBEPAY_WD_MIN_RM });
     expect(submitMock).not.toHaveBeenCalled();
     expect(result.status).toBe('held');
   });

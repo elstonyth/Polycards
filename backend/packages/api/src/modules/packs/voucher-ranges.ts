@@ -6,8 +6,9 @@ const LEVELS = 100;
 
 // Per-level payout ceiling. voucher_amount is a credit-minting lever once the
 // rewards economy is live, so an admin write needs an upper bound like every
-// sibling money input. 10_000 mirrors the credit-adjust ADJUST_MAX_RM ceiling
-// and sits well above the seeded 0–888 range (see seed-reward-economy-demo.ts).
+// sibling money input. 10_000 is this lever's own ceiling (it used to mirror
+// credit-adjust ADJUST_MAX_RM, which has since been raised) and sits well
+// above the seeded 0–888 range (see seed-reward-economy-demo.ts).
 export const MAX_VOUCHER_MYR = 10_000;
 
 export function foldRanges(ranges: VoucherRange[]): number[] {

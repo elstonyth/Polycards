@@ -8,6 +8,14 @@
     "title": "Gacha Packs",
     "subtitle": "Create and manage gacha packs — listing details, status, and prize pools. Open a pack to edit its prize pool and win rates.",
     "new": "New pack",
+    "tabs": {
+      "packs": "Packs",
+      "free": "Free pack"
+    },
+    "free": {
+      "create": "Create free pack",
+      "hint": "One active free pack at a time. Price is fixed at RM 0 — new accounts get one open; the won card stays locked until their first paid open."
+    },
     "list": {
       "pack": "Pack",
       "category": "Category",

@@ -8,6 +8,7 @@ import {
 } from '@medusajs/framework/utils';
 import { openBatchWorkflow } from '../../../../../workflows/open-batch';
 import { PACKS_MODULE } from '../../../../../modules/packs';
+import { FREE_WELCOME_CATEGORY } from '../../../../../modules/packs/free-pack';
 import type PacksModuleService from '../../../../../modules/packs/service';
 import { toMoney } from '../../../../../modules/packs/money';
 import {
@@ -53,11 +54,24 @@ export async function POST(
     );
   }
 
+  const packsService = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+
+  // The free welcome pack is a ONE-TIME single open — never a batch (the claim
+  // pays for exactly one pull, and openBatchWorkflow has no claim seam).
+  // Thrown, not res.status(400): the framework's error handler maps
+  // NOT_ALLOWED to 400 with the same typed body every other refusal on this
+  // route uses (the count guard above included).
+  const [pack] = await packsService.listPacks({ slug }, { take: 1 });
+  if (pack?.category === FREE_WELCOME_CATEGORY) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'The free welcome pack can only be opened once, singly.',
+    );
+  }
+
   const { result } = await openBatchWorkflow(req.scope).run({
     input: { pack_id: slug, customer_id: customerId, count },
   });
-
-  const packsService = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
 
   // ⚠ EVERYTHING BELOW IS POST-COMMIT — the workflow has ALREADY debited the
   // customer and written the pull rows, and nothing here can roll that back.

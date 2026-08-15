@@ -16,6 +16,12 @@ export type VaultItem = {
    *  was won there, not pulled from a pack. */
   challengePrize: boolean;
   showcased: boolean;
+  /** How the pull was acquired. Display/telemetry only — see `locked`. */
+  source: 'pack' | 'reward' | 'free';
+  /** Sell + delivery are refused server-side (the free welcome pull, until the
+   *  account's first PAID open). EVERY lock affordance must key off THIS, never
+   *  `source`: a weekly-challenge prize is source='reward' and fully sellable. */
+  locked: boolean;
   card: {
     handle: string;
     name: string;
@@ -41,6 +47,9 @@ export interface BackendVaultItem {
   pack_title: string;
   /** Absent on an older backend → false (the pre-prism behaviour). */
   challenge_prize?: boolean;
+  /** Absent on an older backend → 'pack' / false (see VaultItemSchema). */
+  source?: 'pack' | 'reward' | 'free';
+  locked?: boolean;
   card: {
     handle: string;
     name: string;
@@ -61,6 +70,8 @@ export function mapVaultItem(i: BackendVaultItem): VaultItem {
     packTitle: i.pack_title,
     challengePrize: i.challenge_prize ?? false,
     showcased: (i as unknown as { showcased?: boolean }).showcased ?? false,
+    source: i.source ?? 'pack',
+    locked: i.locked ?? false,
     card: {
       handle: i.card.handle,
       name: i.card.name,

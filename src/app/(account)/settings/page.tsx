@@ -2,7 +2,8 @@ import type { Metadata } from 'next';
 import { AccountHeader, Panel } from '@/components/account/ui';
 import SettingsForm from '@/components/account/SettingsForm';
 import CookieSettings from './CookieSettings';
-import { getCustomer } from '@/lib/data/customer';
+import DangerZone from '@/components/account/DangerZone';
+import { getAccountInfo, getCustomer } from '@/lib/data/customer';
 
 export const metadata: Metadata = { title: 'Settings' };
 
@@ -10,7 +11,12 @@ export const metadata: Metadata = { title: 'Settings' };
 export const dynamic = 'force-dynamic';
 
 export default async function SettingsPage() {
-  const customer = await getCustomer();
+  // getCustomer() is cache()-wrapped and already resolved by the layout's auth
+  // gate, so the only real round-trip here is the account read.
+  const [customer, accountInfo] = await Promise.all([
+    getCustomer(),
+    getAccountInfo(),
+  ]);
   // The account layout gate redirects unauthenticated visitors, so this is a
   // defensive guard for the nullable type rather than a reachable state.
   if (!customer) return null;
@@ -47,6 +53,7 @@ export default async function SettingsPage() {
           Email notifications, pull alerts, and two-factor authentication are
           still to come.
         </p>
+        <DangerZone hasPassword={accountInfo.hasPassword} />
       </div>
     </>
   );

@@ -4,10 +4,18 @@ import { useEffect, useRef, type RefObject } from 'react';
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-// Open-modal stack: the TOPMOST panel owns Escape. Stacked dialogs (e.g.
-// CardDetailOverlay at z-[100] over PoolModal at z-50) each register their own
-// document keydown listener; without this gate one Escape press fires every
-// onClose in the same event, collapsing the whole stack.
+// Open-modal stack: the TOPMOST panel owns Escape and Tab. Stacked dialogs
+// (e.g. CardDetailOverlay at z-[100] over PoolModal at z-50) each register
+// their own document keydown listener; without this gate one Escape press
+// fires every onClose in the same event, collapsing the whole stack, and one
+// Tab lets a lower panel drag focus out of the overlay above it.
+//
+// "Topmost" here means LAST OPENED, which assumes open order matches z-order.
+// It holds today because the app's stacked dialogs open strictly inside one
+// another. Two dialogs that can be open at once with the later-opened one
+// UNDERNEATH would break it — a dialog outside this hook is the same hazard,
+// since it never registers at all (that is why AuthModal and SellConfirmModal
+// were migrated onto the hook rather than left hand-rolled).
 const modalStack: HTMLElement[] = [];
 
 // Body scroll lock is reference-counted at module level so stacked modals can
@@ -65,10 +73,13 @@ export function useModalA11y(
     if (panel) modalStack.push(panel);
 
     const onKey = (e: KeyboardEvent) => {
+      // A panel that isn't topmost ignores BOTH keys — the overlay above it
+      // owns them. For Escape, the next press reaches this panel. For Tab, the
+      // topmost panel runs its own trap: without this gate the lower panel
+      // would see focus inside the overlay above as "outside my panel" and
+      // (per the boundary rule below) yank it down out of the overlay.
+      if (panel && modalStack[modalStack.length - 1] !== panel) return;
       if (e.key === 'Escape') {
-        // A panel that isn't topmost ignores Escape — the overlay above it
-        // handles this press; the next press reaches this panel.
-        if (panel && modalStack[modalStack.length - 1] !== panel) return;
         onCloseRef.current();
         return;
       }
@@ -79,6 +90,20 @@ export function useModalA11y(
       const first = f[0]!;
       const last = f[f.length - 1]!;
       const active = document.activeElement;
+      // Anything not inside the panel is the trap boundary — not just the
+      // first/last control. `document.body` is the case that bites: the browser
+      // blurs to it whenever the focused element becomes `disabled`, which any
+      // modal does to its own action button during a request. Enumerating the
+      // boundary elements matched nothing there, so Tab escaped the panel.
+      if (!(active instanceof Node) || !panel.contains(active)) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+        return;
+      }
+      // The panel itself counts as inside (it contains itself) and holds focus
+      // from open until the first Tab, so Shift+Tab off it still wraps to the
+      // last control. Plain Tab off it is left to the browser, which moves to
+      // the first control inside.
       if (e.shiftKey && (active === first || active === panel)) {
         e.preventDefault();
         last.focus();

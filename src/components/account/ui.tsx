@@ -40,9 +40,17 @@ export function Panel({
   children: ReactNode;
   className?: string;
 }) {
+  // cn(), not string concatenation: a caller passing `border-red-500/25` (the
+  // Danger zone) conflicts with the base `border-white/10`, and CSS resolves
+  // that by stylesheet order, not by position in the class attribute — the base
+  // silently won. tailwind-merge drops the loser so the caller's override
+  // actually lands. Verified: the panel border read white-at-10% before this.
   return (
     <div
-      className={`rounded-2xl border border-white/10 bg-white/[0.03] p-5 sm:p-6 ${className}`}
+      className={cn(
+        'rounded-2xl border border-white/10 bg-white/[0.03] p-5 sm:p-6',
+        className,
+      )}
     >
       {children}
     </div>

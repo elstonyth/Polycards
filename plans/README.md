@@ -1627,22 +1627,22 @@ definite one. Three findings are exploitable today.
 
 ### Round-10 plans
 
-| Plan | Title                                                                 | Priority | Effort | Depends on | Status                                                                                                                                                             |
-| ---- | --------------------------------------------------------------------- | -------- | ------ | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 080  | Phone-change re-auth + change notification                            | P1       | M      | —          | DONE — commits `7ff002c4` (re-auth gate), `aa12c563` (current-password prompt), `b6630cda` (http fixtures), `61bc1f08` (phone-changed payload contract), `9fe4830f` (Google-only accounts). Advisor-reviewed. **GAP: the Google-only two-OTP path has never been exercised in a browser** — it is covered by unit + http tests only, so the first real run is the operator's. |
-| 081  | Per-identifier rate-limit tier on the credential endpoints            | P1       | S      | —          | DONE — commits `8ddb4d3e` (per-identifier key), `3c7a6471` (tier coverage), `2b0c4c9b` (read the field the route acts on), `f131bc23` (charge every identifier in the body), `bcf6f507` (raise the sitewide burst so it stops shadowing 300/60s). Advisor-reviewed; rate-limit unit suite green. |
-| 082  | Withdrawal gate under the credit lock + per-window value cap          | P1       | M      | —          | DONE — commits `e18870d5` (gate moved inside the `credit:` lock), `71a4c52e` (skip the row for an already-certain refusal), `0a5ae573` (self-exclusion guard made real), `5c230384` (fixture account ids). The rolling-24h sum excludes the attempt's own row (`service.ts:1311`, `AND merchant_transaction_id <> ?`), pinned by a test on both the SQL text and the binding. Advisor-reviewed. |
-| 083  | Bound the credited deposit amount; validate the signed `MerchantCode` | P1       | S      | —          | DONE — commits `2d19f451` (deposit ceiling + signed `MerchantCode` check), `d4a19496` (quarantine branch covered, ceiling edges sharpened). Advisor-reviewed. |
-| 084  | Narrow the not-found test; give expiry a non-terminal status          | P2       | M      | —          | DONE — commits `5871e9a1` (not-found narrowed; `expired` status + `Migration20260807120000`), `0c62f2c4` (ambiguous-refusal branches, bounded wait), `23871a72` (give-up bound via env), `12e87ce4` (admin surfaces expired deposits). **GAP: never independently reviewed** — executor self-verified only. Alerting is still log-only; escalation is manual (plan 093 carries it as an operator item). |
-| 085  | Derive the payer IP identically on both money routes                  | P2       | S      | —          | DONE — commits `da5033b7` (payer IP from the proxy chain, not the raw header), `cb7447db` (helper contract + `string[]` claim corrected). Advisor-reviewed. |
-| 086  | SMS destination-country allowlist (backend + picker together)         | P2       | S      | —          | DONE — commits `15b90bdb` (allowlist), `8d30138b` (frozen default set), `a7d7b83c` (password-reset exempt; reject unserved at submit), `d1394bf1` (spec unbroken; dead allowlist made loud). Advisor-reviewed. Post-review: the `GB: '+44'` row was REMOVED (CodeRabbit on PR #396) — +44 is shared with the Crown Dependencies, so a prefix cannot mean GB alone; prod is `ALLOWED_SMS_COUNTRIES=MY` and was unaffected. |
-| 087  | Mask the admin bank list; stop logging decrypted bank details         | P2       | S–M    | —          | DONE — commit `3b744440` (admin list masked, per-id reveal route, decrypted bank details no longer logged). **GAP: never independently reviewed** — executor self-verified only. |
+| Plan | Title                                                                 | Priority | Effort | Depends on | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ---- | --------------------------------------------------------------------- | -------- | ------ | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 080  | Phone-change re-auth + change notification                            | P1       | M      | —          | DONE — commits `7ff002c4` (re-auth gate), `aa12c563` (current-password prompt), `b6630cda` (http fixtures), `61bc1f08` (phone-changed payload contract), `9fe4830f` (Google-only accounts). Advisor-reviewed. **GAP: the Google-only two-OTP path has never been exercised in a browser** — it is covered by unit + http tests only, so the first real run is the operator's.                                                                                                                                                                                    |
+| 081  | Per-identifier rate-limit tier on the credential endpoints            | P1       | S      | —          | DONE — commits `8ddb4d3e` (per-identifier key), `3c7a6471` (tier coverage), `2b0c4c9b` (read the field the route acts on), `f131bc23` (charge every identifier in the body), `bcf6f507` (raise the sitewide burst so it stops shadowing 300/60s). Advisor-reviewed; rate-limit unit suite green.                                                                                                                                                                                                                                                                 |
+| 082  | Withdrawal gate under the credit lock + per-window value cap          | P1       | M      | —          | DONE — commits `e18870d5` (gate moved inside the `credit:` lock), `71a4c52e` (skip the row for an already-certain refusal), `0a5ae573` (self-exclusion guard made real), `5c230384` (fixture account ids). The rolling-24h sum excludes the attempt's own row (`service.ts:1311`, `AND merchant_transaction_id <> ?`), pinned by a test on both the SQL text and the binding. Advisor-reviewed.                                                                                                                                                                  |
+| 083  | Bound the credited deposit amount; validate the signed `MerchantCode` | P1       | S      | —          | DONE — commits `2d19f451` (deposit ceiling + signed `MerchantCode` check), `d4a19496` (quarantine branch covered, ceiling edges sharpened). Advisor-reviewed.                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 084  | Narrow the not-found test; give expiry a non-terminal status          | P2       | M      | —          | DONE — commits `5871e9a1` (not-found narrowed; `expired` status + `Migration20260807120000`), `0c62f2c4` (ambiguous-refusal branches, bounded wait), `23871a72` (give-up bound via env), `12e87ce4` (admin surfaces expired deposits). **GAP: never independently reviewed** — executor self-verified only. Alerting is still log-only; escalation is manual (plan 093 carries it as an operator item).                                                                                                                                                          |
+| 085  | Derive the payer IP identically on both money routes                  | P2       | S      | —          | DONE — commits `da5033b7` (payer IP from the proxy chain, not the raw header), `cb7447db` (helper contract + `string[]` claim corrected). Advisor-reviewed.                                                                                                                                                                                                                                                                                                                                                                                                      |
+| 086  | SMS destination-country allowlist (backend + picker together)         | P2       | S      | —          | DONE — commits `15b90bdb` (allowlist), `8d30138b` (frozen default set), `a7d7b83c` (password-reset exempt; reject unserved at submit), `d1394bf1` (spec unbroken; dead allowlist made loud). Advisor-reviewed. Post-review: the `GB: '+44'` row was REMOVED (CodeRabbit on PR #396) — +44 is shared with the Crown Dependencies, so a prefix cannot mean GB alone; prod is `ALLOWED_SMS_COUNTRIES=MY` and was unaffected.                                                                                                                                        |
+| 087  | Mask the admin bank list; stop logging decrypted bank details         | P2       | S–M    | —          | DONE — commit `3b744440` (admin list masked, per-id reveal route, decrypted bank details no longer logged). **GAP: never independently reviewed** — executor self-verified only.                                                                                                                                                                                                                                                                                                                                                                                 |
 | 088  | Bind payouts to a saved, cooled-off destination                       | P2       | M–L    | **082**    | DONE — policy DECIDED 2026-08-07: 24h cooldown (env-tunable), backfill destinations already used by a settled withdrawal, `player_payout_details` stays admin-only. Commits `2e923915` (pay only a saved, cooled-off destination), `87e58d41` (destination read on the locked transaction), `041a3e4e` (re-alarm on a re-add; backfill clock coerced), `5046ad0c` (metadata guard pinned as a money control; payout id invariant). Advisor-reviewed. Backfill script `scripts/backfill-payout-destinations.ts` is written but **has not been run against prod**. |
-| 089  | Rate-limit the hook routes; memoize the AES key derivation            | P3       | S      | —          | DONE — commits `a47de815` (hook-route limiter + memoized AES KDF), `1a0aa8fc` (gateway-retry claim attributed; middleware-before-route ordering recorded). **GAP: never independently reviewed** — executor self-verified only. |
-| 090  | Boot-time phone-gate evidence; correct the false limiter comment      | P3       | S      | —          | DONE — commits `f84669dd` (boot-time gate evidence; false comment corrected), `f4106137` (false clause dropped), `d7bb85dc` (phone password-reset refused while the gate is off). Advisor-reviewed. |
-| 091  | Blanket `no-store` on `/admin/*`                                      | P3       | S      | —          | DONE — commits `f4770b96` (`no-store` on every authenticated `/admin` response), `c2292ca4` (the matcher's real compiled regex quoted). Advisor-reviewed. |
-| 092  | Lock the metadata read-modify-write; log the duplicate-phone dead end | P3       | S      | —          | DONE — commits `99153327` (metadata writes serialized; duplicate-phone dead end logged), `149b6c54` (lock, read and write kept on one connection). Advisor-reviewed. Post-review: `workflows/steps/ensure-profile-handle.ts` was the last writer still outside the lock and was converted on PR #396 (CodeRabbit). |
-| 093  | Operator security checklist for the console-side controls             | P3       | S–M    | —          | DONE — commits `2a540913` (checklist), `0067d5c1` (provenance rule), `492e6346` (item A arithmetic; unconfirmed OTP TTL flagged), `88744740` (unresolvable citations, settled-table schema). Document only — the console-side controls it lists are **operator actions that have not been performed**. |
+| 089  | Rate-limit the hook routes; memoize the AES key derivation            | P3       | S      | —          | DONE — commits `a47de815` (hook-route limiter + memoized AES KDF), `1a0aa8fc` (gateway-retry claim attributed; middleware-before-route ordering recorded). **GAP: never independently reviewed** — executor self-verified only.                                                                                                                                                                                                                                                                                                                                  |
+| 090  | Boot-time phone-gate evidence; correct the false limiter comment      | P3       | S      | —          | DONE — commits `f84669dd` (boot-time gate evidence; false comment corrected), `f4106137` (false clause dropped), `d7bb85dc` (phone password-reset refused while the gate is off). Advisor-reviewed.                                                                                                                                                                                                                                                                                                                                                              |
+| 091  | Blanket `no-store` on `/admin/*`                                      | P3       | S      | —          | DONE — commits `f4770b96` (`no-store` on every authenticated `/admin` response), `c2292ca4` (the matcher's real compiled regex quoted). Advisor-reviewed.                                                                                                                                                                                                                                                                                                                                                                                                        |
+| 092  | Lock the metadata read-modify-write; log the duplicate-phone dead end | P3       | S      | —          | DONE — commits `99153327` (metadata writes serialized; duplicate-phone dead end logged), `149b6c54` (lock, read and write kept on one connection). Advisor-reviewed. Post-review: `workflows/steps/ensure-profile-handle.ts` was the last writer still outside the lock and was converted on PR #396 (CodeRabbit).                                                                                                                                                                                                                                               |
+| 093  | Operator security checklist for the console-side controls             | P3       | S–M    | —          | DONE — commits `2a540913` (checklist), `0067d5c1` (provenance rule), `492e6346` (item A arithmetic; unconfirmed OTP TTL flagged), `88744740` (unresolvable citations, settled-table schema). Document only — the console-side controls it lists are **operator actions that have not been performed**.                                                                                                                                                                                                                                                           |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (reason) | REJECTED (reason)
 
@@ -1867,3 +1867,246 @@ plan's Step 1.
 - **Rounds 1–9 rejected-findings lists** were read before filing but not
   re-audited — **except** that every one of them predates the real payment
   gateway and should be re-read with that in mind.
+
+---
+
+## Round 11 — delta audit (PRs #392–#443), 2026-08-15
+
+Generated by the `improve` skill (standard tier) against commit `5c74ce17`
+(master). Scope: the delta since round 10's base `db2767f5` — 39 commits /
+445 files / +44,719/−5,144 (payout hardening wave #419–#433, account deletion
+#434, free welcome pack #438/#441/#442, catalog grouping #443, odds precision
+#395, challenge queue #400, email receipts #394) — plus reconciliation of all
+prior rounds and verification of round 10's three never-independently-reviewed
+plans. Method: four parallel read-only audits (backend money/security,
+storefront correctness/trust, tests/CI/perf with LIVE gh run evidence,
+debt/deps/docs/direction), every table-bound finding re-opened and its cited
+lines re-read by the advisor. Static code-read except the CI lane (live run
+logs). User selected: all 12 plans.
+
+### Reconciliation
+
+- Round 9 plans 069–079: **MERGED** via PR #326 (`8f82a683`).
+- Round 10 plans 080–093: **MERGED** via PR #396 (`ca0f969a`). The three plans
+  merged without independent review (**084, 087, 089**) were verified at HEAD
+  this round: all three present and sound (see verified-clean). Review gap
+  CLOSED.
+- Plan 094 (withdrawal approval hold): executed and **MERGED** via PR #426
+  (`ff0d98bc`); this round's SEC finding 1 (the `0` stop-lever) is a residual
+  on that work → plan 095.
+- Plan 054: still TODO and drifted 2× — re-baselined by plan 106.
+- Round-9/10 runtime WATCH items: customer.spec money-path GREEN nightly since
+  08-03; card-management PASSING (not skipped) since 08-08; a11y gate GREEN
+  since 08-10 (post-#404); CSP gate GREEN; trace artifacts upload
+  (include-hidden-files fixed). All closed with run URLs in the round-11 CI
+  lane report.
+- **Working-tree note at audit time**: 76 uncommitted deletions under
+  `public/` (55 `cdn/cards` webps, 16 social assets, branding) + untracked
+  `videos/` and 3 QA scripts predate this audit and are NOT covered by any
+  plan — operator to resolve before committing anything.
+
+### Headline
+
+The delta's money engineering held: #434 closes all four recorded Medusa
+deletion traps, #438's free-pull lock is server-enforced on both sell paths,
+#425/#428's gateway-ambiguity work is asserted from both sides, and every
+delta money feature carries real specs. Round 11's stories: **(1) three small
+holes on one withdrawal surface** — the #426 approval threshold's `0` incident
+lever silently becomes RM 1,000, the payout callback discards the gateway's
+`Remark` (bank-side rejections land reasonless — the state #433 exists to
+abolish), and the storefront never sends the Idempotency-Key #427 built;
+**(2) the free welcome pack shipped without stated economics** — self-deletion
+re-arms the grant and no invariant bounds the pool EV against the unlocking
+margin; **(3) the growth chrome fires an uncached read per navigation per
+visitor** (the 2026-07-07 incident class, mitigation pattern two files away)
+while covering primary CTAs at equal z-40.
+
+### Round-11 findings table (vetted — every citation re-read by the advisor)
+
+| #   | Finding                                                                                                                                                                                                                                                 | Category      | Impact                | Effort | Risk | Confidence | Plan    |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- | --------------------- | ------ | ---- | ---------- | ------- |
+| 1   | `GLOBEPAY_WD_APPROVAL_ABOVE_RM=0` stop-lever silently routes to the RM 1,000 default (`positiveIntFromEnv` rejects 0; the repo's own parser doc names this failure)                                                                                     | security      | HIGH (incident lever) | S      | LOW  | HIGH       | 095     |
+| 2   | Storefront withdrawal never sends the Idempotency-Key #427 added; transport-failure retry = second debit + second bank transfer                                                                                                                         | bug/money     | HIGH                  | S      | LOW  | HIGH       | 095     |
+| 3   | Payout callback failed branch writes no `failure_reason`; signed `Remark` parsed and discarded                                                                                                                                                          | bug/money-ops | MED-HIGH              | S      | LOW  | HIGH       | 095     |
+| 4   | Free pack: self-deletion re-arms the grant; minted value withdrawable after one paid open; EV invariant unstated                                                                                                                                        | security/econ | MED-HIGH              | M      | MED  | HIGH mech  | 096     |
+| 5   | Nightly red since 08-13: #436 CSS-hid the Mercur Payouts sidebar entry, `admin.spec.ts` `getByText(/payouts/i).first()` latches the hidden node                                                                                                         | tests         | HIGH (signal)         | S      | LOW  | HIGH       | 099     |
+| 6   | Free-pack badge: uncached fetch per navigation per visitor; covers pack-dock/vault-bar/leaderboard CTAs at equal z-40; prefix own-page match; zero tests                                                                                                | perf/bug      | MED-HIGH              | S–M    | LOW  | HIGH       | 097     |
+| 7   | RM 1M/call adjustment ceiling × 200/min admin limiter = ~RM 200M/min mintable immediately-withdrawable credit; no aggregate bound                                                                                                                       | security      | HIGH (rogue token)    | M      | MED  | HIGH       | 098     |
+| 8   | "Raw Cards (Ungraded)" false for MIX and non-PSA-10 graded pools (deliberate never-overclaim design; the catch-all heading still overclaims the other way)                                                                                              | trust         | MED                   | S      | LOW  | HIGH       | 100     |
+| 9   | Free pack's detail page shows the unconditional gift CTA to ineligible visitors (category-keyed only)                                                                                                                                                   | trust         | MED                   | S      | LOW  | HIGH       | 096     |
+| 10  | Both pack-list routes `pageAll` EVERY odds row + card for two booleans/pack; admin route uncached                                                                                                                                                       | perf          | MED (scales)          | M      | MED  | HIGH       | 101     |
+| 11  | Purge audit read omits `entity_type` → seq scan of append-only audit table under the `credit:` lock; unbounded single-statement notification delete (65k-param ceiling)                                                                                 | perf/bug      | MED                   | S      | LOW  | HIGH       | 102     |
+| 12  | Docs: ADR 0004 + gitignored CLAUDE.md name #427-deleted files (referral restore is now a REBUILD); CONTEXT.md Cashout says avoid the words the schema uses; 3 payout env knobs undocumented; deletion-retention has no ADR; stale approve-route comment | docs          | MED (operator hazard) | S–M    | LOW  | HIGH       | 103     |
+| 13  | Mirror-drift instances 4+5: free-pack constants hand-copied across THREE deploy units, no parity test; withdrawal status set defined 4 uncoordinated times                                                                                              | tech-debt     | MED (latent)          | S      | LOW  | HIGH       | 104     |
+| 14  | Plan 054 stale: challenge slice ~1,155 lines (plan says ~600, misses 8 symbols); new `deletedCustomerIds` cross-slice coupling; two newer cheaper seams exist                                                                                           | tech-debt     | MED                   | S      | LOW  | HIGH       | 106     |
+| 15  | Nightly's 3 gates = one job conclusion (red is unreadable); `nanoid` 3.3.16 high advisory via next→postcss                                                                                                                                              | tests/deps    | LOW-MED               | S      | LOW  | HIGH       | 099/105 |
+
+### Round-11 plans
+
+| Plan | Title                                                                     | Priority | Effort | Depends on | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ---- | ------------------------------------------------------------------------- | -------- | ------ | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 095  | Withdrawal-path trio (0 stop-lever, callback Remark, Idempotency-Key)     | P1       | S      | —          | DONE (APPROVE 2026-08-15; branch `advisor/095-withdrawal-path-trio`, 3 commits; reviewer re-ran both backend unit suites 94/94 + 57/57 and read all three fixes in-diff. Accepted deviations: RM 50 not RM 1 in the zero-lever test (RM 1 dies on the min-amount check first); `withdraw-form.test.ts` updated (its exact-call assertion pinned the pre-change arg shape); retry-key-reuse test covers the dangerous direction. On the rollup)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| 096  | Free-pack economics (deletion re-arm, EV invariant, detail-page truth)    | P1       | M      | —          | DONE-partial (storefront+docs APPROVED; backend re-arm control BLOCKED-pending-policy). Executor STOPPED correctly: the plan's premise was wrong — `customer-phone-verified.ts` fires on `customer.created` (stamps only pre-proven-phone signups); the real verify path is `store/phone-verification/change/route.ts:214`, and stamping there would newly grant a free pack to EVERY legacy customer on first verification (first-write-wins on a column legacy rows never had). That is a grant-policy decision, not an implementation choice — see the OPEN section the executor added to the design doc. Delivered: detail-page already-claimed state (incl. a plan-formula fix mapping guest `signup` → eligible), `canClaimFreePack` extracted+tested, EV invariant + `## Eligibility model — OPEN` in the design doc. Commits `d27ce39c`/`d53f84d3`/`42ed0e0d`/`2a6fbba3` (revision: neutral "isn't available on this account" copy — the prior "Already claimed" wording was false on a failed read; panel+badge+dock all fixed, negative assertions pin the old wording out). **Operator decision needed** → the deletion re-arm remains open (bounded only by free-pull lock economics); the grant-policy options are in the design doc's `## Eligibility model — OPEN` section |
+| 097  | Free-pack badge (guest cache, z-tier, segment match, tests)               | P1       | S–M    | —          | DONE (APPROVE 2026-08-15; branch `advisor/097-free-pack-badge`, commit `51aa80d0`. Guest cache provably guest-shaped-only (cache write happens on the tokenless branch; comment states the leak-proof); 30s throttle with identity busting; z-30; segment own-page match kept as defense-in-depth under the new blanket `/slots/` skip; 7-case test file. Accepted deviations: case-3 pinned via the exported predicate (blanket skip makes the component path unreachable — sanctioned); microtask setState for the lint rule, matching `create-unread-dot`'s documented workaround; z-40 grep hits are prose comments only)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| 098  | Rolling-24h global ceiling on positive credit adjustments                 | P2       | M      | —          | DONE (APPROVE 2026-08-15; branch `worktree-agent-a91b6a42a0d513a58`, commit `203e491e`. Reviewer verified the SQL (global, positive-only, 24h, soft-delete-scoped) and the per-call env read in the workflow step. Executor found a plan bug: the plan's `jest credits` verification filter never selects `credit-adjust.spec.ts` — substituted a 4-suite filter with `--listTests` proof. RED proven retroactively (exact 4-fail/6-pass split with the check neutered). EXPLAIN run: seq-scan fine at current scale, index = operator decision at growth. REVISION 2 (fresh-context review finding): check moved INSIDE `adminAdjustCredit`'s transaction under a global `pg_advisory_xact_lock('credit-adjust:mint-window')` taken before the per-customer lock — N parallel grants can no longer overshoot the cap; cycle impossible (the key has exactly one requesting site); clawbacks take no lock; step pre-check deleted (one load-bearing site); new `credit-adjust-lock.unit.spec.ts` proven load-bearing (3/4 cases fail with the lock removed); READ COMMITTED dependency documented mirroring `withdrawForCashout`; bonus: direct service callers that bypass the workflow step are now bounded too)                                                                        |
+| 099  | Nightly signal round 2 (locator rescope, gate summary, QA-script promote) | P2       | S      | —          | DONE (APPROVE 2026-08-15; branch `advisor/099-nightly-signal-2`, commit `280364ab`. `<main>` landmark verified against the installed @mercurjs/admin 2.1.6 tarball; other bare `.first()` calls cleared via nav-label enumeration and deliberately left unscoped. Executor found a plan error: `qa-free-pack.mjs` defaults :4100 not :4000 — fixed via `PW_BASE` + `QA_ADMIN_*` env wiring in the workflow step. FOLLOW-UP recorded: `qa-catalog-groups.mjs` has zero assertions (detects "storefront up" only) — candidate for a future round. WATCH: first nightly proves the landmark + the two new gate steps live)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| 100  | Catalog label truth (three honest sections)                               | P2       | S      | —          | DONE (APPROVE 2026-08-15; commit `c1671b04` on `worktree-agent-a60c08cbd3fa02e39`. `catalogGroupOf` = clean first-match partition; `inGuaranteedGroup` byte-identical; 8/8 tests re-run by reviewer. Accepted deviation: NO note on the "More Packs" section (the planned "Mixed & graded pools" note would overclaim for null-composition older-backend rows — the plan's own escape valve). +1 extra pinning test (RAW+psa10:true → raw). Reviewer partition check: type system enforces GROUPS→byGroup; reverse direction is convention (noted by executor))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| 101  | Pack-list SQL composition aggregate (+ admin cache)                       | P2       | M      | —          | DONE (APPROVE 2026-08-15 after 1 revision; branch `advisor/101-pack-list-aggregate`, commits `872a9dce`+`e0194583`. Core: store route aggregate via GROUP BY (pack_id, grader, grade) + the EXISTING TS predicates over the group set — better than the plan's SQL-predicate sketch, no translation drift on the PSA-10 gate; admin route 30s cache. Revision closed the executor's own KNOWN-GAP: `clearAdminPackListCache()` fires from all 5 list-moving write handlers (create/update/delete, reorder, odds, members — members found by the executor: membership moves EV AND composition); pinning assertion mutation-proved (bust commented out → exact-EV fail). `top-hits` deliberately excluded (display order only). RECORDED FOLLOW-UP: card-level writes (admin card routes, PriceCharting sync) bust NO pack cache — pre-existing, shared with the storefront caches, now visible on one more surface; stated in the seam's docblock. Full module+unit tiers green pre-revision; 9 HTTP suites green post)                                                                                                                                                                                                                                                                   |
+| 102  | Deletion-path small fixes (audit-read index shape, chunked delete)        | P2       | S      | —          | DONE (APPROVE 2026-08-15; branch `advisor/102-deletion-small-fixes`, commits `5e57b05e`+`96382baa`. Reviewer read both hunks: indexed filter with pointer comment; chunk loop with the no-internal-batching evidence (mikro-orm `delete` builds one `IN` list — verified in dist). 1,001-row integration pin green 3×. Honest caveat on record: the test proves the chunk boundary, not the 65,535-param ceiling itself. NOTE: adds ~20-25s to `account-self-service` on the integration-http critical path)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| 103  | Docs truth round 7 (ADR 0004 amend, CONTEXT.md, env knobs, ADR 0006)      | P2       | S–M    | —          | DONE (APPROVE 2026-08-15; branch `advisor/103-docs-truth-7`, 5 commits, 9 files. All grep gates re-run by reviewer. Bonus catches accepted: CONTEXT.md's suspension marker fixed (it repeated the exact falsehood Step 1 corrects); ADR 0006 flags that the 08-13 design doc describes an unshipped `disabled_cause`/self-service-disable feature (verified against the live model + guard). OPERATOR FOLLOW-UP: user-global `CLAUDE.md:39` (gitignored) still names the two #427-deleted referral files as SUSPENDED holders — update by hand per the corrected list in ADR 0004)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| 104  | Parity-lock the free-pack + withdrawal-status mirrors                     | P3       | S      | —          | DONE (APPROVE 2026-08-15; branch `advisor/104-mirror-parity`, 3 commits. Both parity tests MUTATION-PROVED (backend-message edit → RED; VIEWS drop-'held' → RED); the VIEWS test reads the real `page.tsx` source (executor self-caught its first hand-listed version as unable to fail). Reviewer re-ran the parity test + verified the tuple derivations. SIXTH mirror found and recorded, left out of scope: `apps/admin/src/lib/admin-rest.ts:1124` `GlobePayWithdrawalView` hand-copied union — partially self-guarding via the `VIEWS` typing; candidate for the next debt pass)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 105  | nanoid high-advisory bump                                                 | P3       | S      | —          | DONE (APPROVE 2026-08-15; branch `advisor/105-nanoid-bump`, commit `f9ab0d5e`. Lockfile-only 3+/3−; reviewer re-verified nanoid 3.3.18 + 0 vulnerabilities in-worktree; no override needed)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| 106  | Re-baseline plan 054                                                      | P3       | S      | —          | DONE (APPROVE 2026-08-15; commit `db04dd1b` on `worktree-agent-a2b5c050051cea72e`. Plan 054 re-baselined: banner, 13-symbol inventory, `deletedCustomerIds` cross-slice interface note, cheaper-first-extraction option (account-lifecycle slice), 4th backfill recorded. Accepted beyond-checklist fixes: four self-contradicting stale numbers in untargeted sections. One unverified figure honestly marked "re-count at extraction time")                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+
+Sequencing: all independent; suggested order = table order (095 first — the
+stop-lever is the incident-response gap). File-collision map: 096 and 102 both
+touch `store/customers/me/delete/route.ts`'s FAMILY but different regions
+(096: none in that route; 102: the notification block) — actually disjoint;
+096 and 097 both read free-pack state — disjoint files, either order; 095 and
+098 both cite `rate-limit.ts` parsers but neither edits them; 098 and 102 both
+add to `service.ts` (disjoint regions — adjust read vs purge filter; merge
+either order, rebase on conflict); 100 and 097 both touch storefront catalog
+surfaces — disjoint files; 103's env-template lines and 098's are different
+entries (append both). Per the round-8 lesson, which rounds 9 and 10 honored:
+**finish with a rollup branch + PR; DONE means merged.**
+
+### Round-11 vetted but NOT planned (ask for a plan if wanted)
+
+- **`/transactions` scrollable-region a11y** (#394's Reference column +
+  `break-all` monospace likely overflows 375px; the container has no
+  `tabIndex`/`role` — the exact axe rule #404 fixed on PullsMarquee, and
+  `/transactions` is auth-gated so the a11y gate can't see it): MED confidence,
+  needs a 375px measurement first. S if confirmed; the RecentPullsSection
+  pattern is the fix. Noted in plan 103's maintenance notes.
+- **`VaultClient.bulkSell` has `try/finally` with no `catch` on a money path**
+  (`:249-302`; a rejected action surfaces no error and skips `refreshVault()`)
+  — PRE-EXISTING (outside the delta window), the round-9 plan-074 class. S.
+- **Admin pool-picker transfers the whole catalog client-side**
+  (`apps/admin/src/lib/queries.ts` `useCards`/`usePacks`, no paging; #401's
+  shift-select assumes a materialized list): MED — pair with plan 101's
+  aggregate when the catalog actually hurts; recorded in 101's maintenance
+  notes.
+- **Badge dismissal affordance** (signup badge follows every logged-out
+  visitor with no exit): product call, recorded in plan 097.
+- **Demo spin's static-ODDS fallback** (`SlotMachineClient.tsx:372-382` falls
+  back to a site-wide hardcoded table when a pack publishes no odds): bounded,
+  DEMO-badged, nothing charged — not worth a diff; fold into the next reveal
+  rework.
+- **Held-withdrawal customer email** (DIR-F) and **free-pack funnel admin
+  tile** (DIR-G): direction items below.
+
+### Round-11 corrected / considered and rejected during vetting
+
+- **"`/store/pulls/recent` shows disabled players" — REFUTED.** The route
+  filters at HEAD (`store/pulls/recent/route.ts:88-102`: 2× over-fetch +
+  `disabledCustomerIds`, with the leaderboard-parity comment). The lane
+  trusted #439's commit-body note, which a later commit obsoleted. Do not
+  re-file.
+- **"Settings nudge checks phone presence, not verification" — DOWNGRADED.**
+  `me/page.tsx:78-81` records the decision in-code with a rationale
+  (PhoneGateAction covers the unverified cohort at the blocked action).
+  Revisit only as a product choice; needs a backend field exposure (S–M).
+- **Withdrawal-status storefront narrowing (`['pending','held']`) — NOT
+  drift**: deliberate deploy-skew design, documented at `schemas.ts:369-387`.
+  Plan 104 adds a subset assertion only.
+- **`getByText` admin-spec fragility beyond the economy test** — swept into
+  plan 099 Step 1 rather than filed per-instance.
+- **`GLOBEPAY_MAX_RM` (deposit ceiling) undocumented** — it is a hardcoded
+  constant with in-code provenance (`globepay-deposit.ts:60-69`), not an env
+  knob; correctly absent from plan 103.
+- **`INVENTORY_EXPORT_MAX_ROWS` undocumented** — pre-existing (0 delta
+  commits), not delta-induced; left unfiled this round.
+
+### Round-11 verified clean — do NOT re-audit
+
+- **Plans 084/087/089 present and sound at HEAD** (the round-10 review gap):
+  084 — only explicit `PMT10016` is terminal not-found; `expired` status
+  non-terminal with correct `not valid`→`validate` migration + down(); second
+  sweep requeries expired; admin surfaces them. 087 — admin list masked,
+  per-id reveal route on the admin limiter with audit + `no-store`, decrypted
+  details never logged. 089 — `/hooks/globepay/*` limiter wired
+  (`middlewares.ts:328`, 100/10s=600/60s), AES KDF memoized
+  (`globepay.ts:50-56`).
+- **#434 account deletion**: all four recorded Medusa traps closed (raw ledger
+  balance not availableBalance; auth identities HARD-deleted; metadata clear
+  before soft-delete; soft-delete last). Money-state gates complete incl.
+  `held` withdrawals and `expired` deposits. Delete×withdrawal race safe (purge
+  re-runs preflight under the `credit:` lock). Google-only no-password residual
+  recorded in the 08-13 design doc. Bearer-auth before its own limiter tier.
+- **#438 free pack mechanics**: grant idempotent first-write-wins under the
+  advisory lock; claim = single conditional UPDATE; compensation correct; the
+  sell/deliver lock enforced on single AND batch paths; `price === 0` non-free
+  pack hole closed by admin validate; specs cover all of it (claim, open,
+  lock, route, subscriber — named in the round-11 CI lane report).
+- **#425/#428**: `GlobePayError.definite` = explicit `isSuccess:false` only,
+  no-data case ambiguous, asserted both directions; `isFullSweepDue`
+  elapsed-time based, marker stamped before work.
+- **#426 held flow**: rows inserted with final status, count against the
+  rolling-24h cap, approve route re-reads freeze + claims under the lock;
+  storefront renders UNDER REVIEW honestly, hard-codes no threshold.
+- **CI/nightly (live evidence)**: ci.yml 15/15 green on master; nightly
+  deterministic (no flakes) — every red in 12 runs traced to one cause;
+  customer money-path, card-management, a11y, CSP all green; traces upload.
+- **Delta test coverage**: every money feature has real specs (free-pack ×5
+  suites, account deletion 586-line HTTP suite, withdrawal hold/forensics/
+  receipt, reconcile tier, refusal narrowing, challenge promote race, MYR
+  repair, +20% margin, catalog grouping, odds 4-decimal).
+- **Deps**: zero new dependencies in 39 commits; backend audit 0 critical/high
+  (one known-blocked react-router moderate); js-yaml/hono bumps coherent,
+  9-line lockfile delta total; no manifest drift.
+- **No dead code introduced by the delta** (every new module has a live
+  importer; sole single-caller item folded into plan 106's backfill list).
+- **Storefront cross-cutting**: all new mutation handlers use `try/finally`
+  correctly; all new effects clean up; no new `body.style.overflow` writers
+  (everything routes through the refcounted `use-modal-a11y`); reduced-motion
+  honored on new animation (badge doubly-guarded).
+- **#443 guarantee side**: `inGuaranteedGroup` conservative (GRADED + all
+  PSA-10), backed by real pool composition, degraded shapes fall out; only the
+  catch-all heading is filed (plan 100).
+- **No prompt-injection content** found by any lane. No secret values
+  encountered or reproduced.
+
+### Round-11 Direction (options for the maintainer — not bugs)
+
+1. **DIR-A — CLOSED.** The manual cash-out writer shipped (#426
+   `withdrawForCashout` — destination lookup, gate, and debit in one locked
+   transaction; admin approve/deny queue; payout-verify fail-closed and active
+   on the production merchant). The remaining pole is KYC/AMLA: a repo-wide
+   grep finds zero identity-verification code — vendor selection before code. L.
+2. **DIR-B — Disclose the playthrough gate at deposit time. FIFTH round.**
+   `TopUpSheet.tsx` (434 lines): zero hits for playthrough/turnover/wager.
+   #419 raised the top rung to RM 5,000 in that exact file without adding the
+   line. Cash-out is now live, so the surprise is real money. S; the honest
+   conversion dip is the cost.
+3. **DIR-D — Split ADR 0004's review (2026-10-01, ~6 weeks out).** #427 made
+   it TWO decisions: VIP/daily = revert (holders intact); referrals = rebuild
+   (`linkSponsor`, `POST /store/referral`, storefront surfaces gone). Deciding
+   them together answers one wrong. Plan 103 corrects the ADR's inputs; the
+   decision is the operator's. S to split.
+4. **DIR-F (new) — Email the customer when a withdrawal is held.** Six resend
+   templates exist (incl. two for destination changes); the one event with an
+   open-ended human wait sends nothing — on the largest payouts.
+   `withdrawal-receipt.ts` types `'paid' | 'refunded'` only. S; trade-off: an
+   implied approval SLA.
+5. **DIR-G (new) — Make the free-pack funnel measurable.**
+   `free_pack_available_at`/`claimed_at` + `hasPaidOpen` all exist; admin greps
+   zero hits for `free_pack`. The operator can run the experiment but not read
+   it. S for a claimed/eligible/converted tile; M for cohort views (cohort by
+   claimed-week × converted-within-N-days, or a lifetime counter will flatter).
+6. **DIR-C (inventory outbound `stock_movement`) and DIR-E (PRODUCT.md
+   redesign fork — the incremental path has visibly won; cheapest resolution is
+   the doc edit)**: unchanged from rounds 8–10.
+
+### Round-11 coverage — what was NOT audited
+
+- Runtime beyond CI/nightly log reads — no local flow was driven live; plan
+  verification commands are the executors' runtime proof.
+- Files outside the `db2767f5..HEAD` delta (prior rounds own that record;
+  their rejected lists were trusted except where a delta commit touched the
+  same surface).
+- Admin SPA browser walk (static reads + live nightly logs only);
+  `backend/apps/vendor` (dormant); vendored/framework internals beyond what
+  findings required; i18n depth; `.claude/` hook scripts; `videos/` and the
+  untracked scripts (uncommitted).
+- Third-party console state (Twilio, GlobePay portal, DO dashboards) — plan
+  093's checklist remains the operator's runbook there.

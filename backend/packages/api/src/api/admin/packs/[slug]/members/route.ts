@@ -3,6 +3,7 @@ import PacksModuleService from '../../../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../../../modules/packs';
 import { setPackMembersWorkflow } from '../../../../../workflows/set-pack-members';
 import { clearPackDetailCache } from '../../../../store/packs/[slug]/route';
+import { clearAdminPackListCache } from '../../route';
 import { pageAll } from '../../../../utils/page-all';
 
 // GET /admin/packs/:slug/members — the card handles currently in the pack's
@@ -47,7 +48,10 @@ export async function POST(
   });
   // Membership IS the pack's prize pool — the exact Pokémon the reel shows and
   // the Top-Hit candidates. Bust the 30s storefront detail cache so a pool edit
-  // reflects immediately (matches the sibling odds/top-hits routes).
+  // reflects immediately (matches the sibling odds/top-hits routes), and the
+  // admin pack list, whose EV/RTP and RAW/GRADED composition are both derived
+  // from this pool.
   clearPackDetailCache();
+  clearAdminPackListCache();
   res.json(result);
 }

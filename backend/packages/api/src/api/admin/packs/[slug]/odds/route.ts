@@ -18,6 +18,7 @@ import {
 import { cardByHandle, isGraded } from '../../../../../modules/packs/card-view';
 import { normalizeTierRanges } from '../../../../../modules/packs/tier-settings-validate';
 import { clearPackDetailCache } from '../../../../store/packs/[slug]/route';
+import { clearAdminPackListCache } from '../../route';
 import { pageAll } from '../../../../utils/page-all';
 
 // 4-decimal odds: the editor seeds its inputs from these pcts, so anything
@@ -298,6 +299,10 @@ export async function POST(
   // A per-card rarity change is shown on the storefront detail (Top Hits +
   // the reel's rarity lighting), so bust the 30s detail cache to reflect it now.
   clearPackDetailCache();
+  // The weights (and rarity, via the tier price averages) ARE the admin list's
+  // EV/RTP inputs — without this the operator saves odds here, returns to the
+  // list they came from, and reads their pre-edit numbers for up to 30s.
+  clearAdminPackListCache();
 
   res.json({ odds: result });
 }

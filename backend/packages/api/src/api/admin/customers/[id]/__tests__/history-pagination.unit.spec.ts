@@ -37,9 +37,12 @@ const pull = (i: number) => ({
 // ?status=/?source= cases assert those land in the filter, not just in a 200.
 const seen: { pulls?: any } = {};
 
-function mkScope() {
+// `hasPaid` is the customer's hasPaidOpen() — the free-welcome lock the pulls
+// route reads so its payable-now quote refuses exactly where the customer's
+// sell button does.
+function mkScope(opts: { hasPaid?: boolean; rows?: any[] } = {}) {
   const txs = Array.from({ length: 60 }, (_, i) => tx(i));
-  const pulls = Array.from({ length: 60 }, (_, i) => pull(i));
+  const pulls = opts.rows ?? Array.from({ length: 60 }, (_, i) => pull(i));
   seen.pulls = undefined;
   return {
     resolve: () => ({
@@ -59,6 +62,7 @@ function mkScope() {
       ],
       listPacks: async () => [{ slug: 'pack_1', buyback_percent: 95 }],
       listFxRates: async () => [],
+      hasPaidOpen: async () => opts.hasPaid ?? true,
     }),
   };
 }
@@ -108,6 +112,35 @@ describe('customer history pagination', () => {
       instant_deadline_ms: expect.any(Number),
     });
     expect(item.buyback_at).toBeNull();
+  });
+
+  // The desk must not be quoted a price the customer cannot take: a free
+  // welcome pull is unsellable until the first PAID open, so its payable-now
+  // quote appears only once hasPaidOpen() is true (spec 2026-08-14).
+  it('pulls: a locked free pull carries no payable-now quote', async () => {
+    const rows = [{ ...pull(0), source: 'free' }];
+
+    const locked = mkRes();
+    await getPulls(
+      {
+        scope: mkScope({ hasPaid: false, rows }),
+        params: { id: 'cus_1' },
+        query: {},
+      } as any,
+      locked.res,
+    );
+    expect(locked.out.body.items[0].quote).toBeNull();
+
+    const unlocked = mkRes();
+    await getPulls(
+      {
+        scope: mkScope({ hasPaid: true, rows }),
+        params: { id: 'cus_1' },
+        query: {},
+      } as any,
+      unlocked.res,
+    );
+    expect(unlocked.out.body.items[0].quote).not.toBeNull();
   });
 
   // Player tab filters: "show me only what's still in their vault" / "only

@@ -8,6 +8,7 @@ import {
 import { MedusaError } from '@medusajs/framework/utils';
 import multer from 'multer';
 import {
+  createAccountDeleteRateLimit,
   createAdminActionRateLimit,
   createAuthIdentifierRateLimit,
   createAuthRateLimit,
@@ -67,7 +68,26 @@ import {
 // execution order, so auth_context.actor_id is populated for keying, and
 // unauthenticated requests are rejected with 401 before consuming any budget.
 // The auth endpoints have no auth_context by nature — that limiter keys on the
-// request IP (the middleware's designed fallback).
+// request IP (the middleware's designed fallback). /store/free-pack is the
+// one deliberate exception: it authenticates with { allowUnauthenticated:
+// true }, so storeReadRateLimit runs for anonymous callers too — it falls
+// back to the same per-IP key (rate-limit.ts's `auth?.actor_id || ip:...`).
+// In production that IS one shared bucket, not per-visitor: the badge is
+// site-wide (every route, not just /slots — #442), and every guest read is
+// proxied server-side through the storefront's ONE Next.js egress IP (the
+// same single-egress-IP topology createAuthRateLimit / createProfileReadRateLimit
+// already document — see rate-limit.ts ~750-760), so this is a
+// whole-storefront CIRCUIT BREAKER on the badge's guest read
+// (STORE_READ_DEFAULTS: 120/10s burst, 480/60s sustained sitewide), the same
+// accepted stance as those other public-read tiers. Overflow fails closed at
+// the badge only — src/lib/data/free-pack.ts's try/catch maps any non-2xx
+// (including a 429) to `hidden`, so the catalog itself is unaffected. The
+// actual per-egress-IP call volume is throttled well below this ceiling by
+// the storefront itself (plan 097): GlobalFreePackBadge re-reads at most once
+// per 30s per identity (FreePackBadge.tsx's REFETCH_TTL_MS), and the guest
+// answer additionally sits behind a 60s in-process cache in
+// src/app/api/free-pack/route.ts, so this limiter is a backstop, not the
+// primary defense.
 
 // One instance shared by the vault + credits matchers: the two reads travel
 // together in the UI, so they share one budget (and one Redis connection).
@@ -97,6 +117,9 @@ const deliveryWriteRateLimit = createDeliveryWriteRateLimit((req) => {
 // Frame equip/unequip — cosmetic metadata write with its own generous budget
 // (sharing the delivery-write tier 429'd a collector's 11th frame swap).
 const profileAppearanceRateLimit = createProfileAppearanceRateLimit();
+// Permanent account deletion — its own tier because the route takes a password
+// and the write tier is no throttle for one (see createAccountDeleteRateLimit).
+const accountDeleteRateLimit = createAccountDeleteRateLimit();
 // One instance shared by all admin money-mutation matchers: they share one
 // budget and one Redis connection (a compromised admin token is throttled
 // across all mutation routes together).
@@ -435,6 +458,53 @@ export default defineMiddlewares({
       matcher: '/store/customers/me/addresses/*',
       method: 'POST',
       middlewares: [validateDeliverableAddress('update')],
+    },
+    // Customer self-service account deletion. Two tiers, not one: /delete has
+    // its own stricter tier because it carries a password field (see its
+    // entry), and /account is a plain read. authenticate() FIRST on both: the
+    // array is the execution order, and the limiters key on
+    // auth_context.actor_id, so an unauthenticated request must 401 before it
+    // consumes anyone's budget.
+    //
+    // No disabled-session guard and no Cache-Control entry here: the blanket
+    // '/store/*' entry at the end of this array already applies both.
+    //
+    // The authenticate() call DOES duplicate Medusa's own registration for
+    // ALL /store/customers/me* — deliberately, not by oversight. Restricting
+    // to ['bearer'] is stricter than the framework default and matches this
+    // repo's policy at middlewares.ts:58-64, so it stays; a future reader
+    // must not delete it as dead.
+    {
+      matcher: '/store/customers/me/delete',
+      method: 'POST',
+      // The delete tier ONLY — not authRateLimit as well. That limiter keys on
+      // actor_id here, which makes it strictly weaker than the write tier and
+      // no throttle at all on a password field; see its comment in
+      // rate-limit.ts. authenticate() stays first so an unauthenticated request
+      // 401s before it consumes anyone's budget.
+      middlewares: [
+        authenticate('customer', ['bearer']),
+        accountDeleteRateLimit,
+      ],
+    },
+    {
+      matcher: '/store/customers/me/account',
+      method: 'GET',
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+    },
+    {
+      // Free welcome pack eligibility (GET /store/free-pack) — the ONLY public
+      // surface the free pack has (the catalog excludes its category). The
+      // per-customer answer still requires the verified bearer; an
+      // unauthenticated request now falls through to an anonymous
+      // catalog-only promo answer (route.ts handles both branches) instead
+      // of 401ing, so the storefront can show a signup-hook badge.
+      matcher: '/store/free-pack',
+      method: 'GET',
+      middlewares: [
+        authenticate('customer', ['bearer'], { allowUnauthenticated: true }),
+        storeReadRateLimit,
+      ],
     },
     {
       matcher: '/store/packs/*/open',

@@ -17,8 +17,9 @@ import {
 // deploy:init) ships packs as EMPTY DRAFTS by design (operators register cards
 // in admin), so a fresh CI DB has NO openable pack — the whole nightly E2E suite
 // then dies at auth.setup's `seed packs present` preflight and 19 specs never
-// run. This script recreates the two fully-populated, ACTIVE packs the specs
-// hardcode (pokemon-rookie / pokemon-elite) with just the rows a pack open
+// run. This script recreates the fully-populated, ACTIVE packs the specs
+// hardcode (pokemon-rookie / pokemon-elite, plus the hidden free-welcome pack
+// a fresh registration is offered) with just the rows a pack open
 // actually reads: an active Pack, its Card rows, and weighted PackOdds. No
 // product/inventory/slab-bake — the roll (workflows/steps/roll-pack.ts) needs
 // none of that, and skipping it also dodges the localhost-SSRF bake trap in CI.
@@ -78,11 +79,30 @@ const CARDS: CardSeed[] = [
 const cardImage = (n: number): string =>
   `/cdn/cards/h-${String(n).padStart(3, '0')}.webp`;
 
-type PackSeed = { slug: string; title: string; price: number; rank: number };
+type PackSeed = {
+  slug: string;
+  title: string;
+  price: number;
+  rank: number;
+  /** Defaults to 'pokemon' — an ordinary, catalog-visible, openable pack. */
+  category?: string;
+  /** Defaults to a real seeded bronze-pack asset. */
+  image?: string;
+  /** Card handles this pack rolls over. Defaults to the whole CARDS pool. */
+  cards?: string[];
+};
 
 // Net-new packs — the base seed owns bronze/silver/gold/platinum/diamond, so
 // these slugs never collide. Prices match odds-reflection.spec's funding math
 // (rookie RM25, elite RM50: 3 opens of each = RM225, under the RM400 it funds).
+//
+// 'free-welcome' is the FREE WELCOME PACK (spec 2026-08-14): price 0, the
+// reserved 'free_welcome' category, and a deliberately SMALL 3-card pool (the
+// one free open should land a modest card, not a chance at the RM900 Mewtwo).
+// It is hidden from GET /store/packs like a reward_box, so seeding it cannot
+// disturb the catalog specs — the storefront reaches it only through the
+// floating badge, which shows for accounts the customer.created subscriber
+// stamped, i.e. every customer an E2E spec registers.
 const PACKS: PackSeed[] = [
   {
     slug: 'pokemon-rookie',
@@ -91,6 +111,15 @@ const PACKS: PackSeed[] = [
     rank: 90,
   },
   { slug: 'pokemon-elite', title: 'Pokémon Elite (E2E)', price: 50, rank: 91 },
+  {
+    slug: 'free-welcome',
+    title: 'Free Welcome Pack (E2E)',
+    price: 0,
+    rank: 92,
+    category: 'free_welcome',
+    image: '/images/polycards/free-pack-badge.webp',
+    cards: ['pw-pikachu', 'pw-bulbasaur', 'pw-jolteon'],
+  },
 ];
 
 export default async function seedE2eFixtures({
@@ -111,9 +140,9 @@ export default async function seedE2eFixtures({
   const packsToCreate = PACKS.filter((p) => !havePack.has(p.slug)).map((p) => ({
     slug: p.slug,
     title: p.title,
-    category: 'pokemon', // must be non-'reward_box' to be openable
+    category: p.category ?? 'pokemon', // must be non-'reward_box' to be openable
     price: p.price,
-    image: `/images/polycards/bronze-pack.webp`, // reuse a real seeded asset
+    image: p.image ?? `/images/polycards/bronze-pack.webp`, // reuse a real seeded asset
     rank: p.rank,
     status: 'active' as const,
   }));
@@ -167,14 +196,16 @@ export default async function seedE2eFixtures({
     existingOdds.map((o) => oddsKey(o.pack_id, o.card_id ?? '')),
   );
   const oddsToCreate = PACKS.flatMap((pack) =>
-    CARDS.filter((card) => !haveOdds.has(oddsKey(pack.slug, card.handle))).map(
-      (card) => ({
-        pack_id: pack.slug,
-        card_id: card.handle,
-        rarity: card.rarity,
-        weight: RARITY_WEIGHT[card.rarity],
-      }),
-    ),
+    CARDS.filter(
+      (card) =>
+        (pack.cards ?? cardHandles).includes(card.handle) &&
+        !haveOdds.has(oddsKey(pack.slug, card.handle)),
+    ).map((card) => ({
+      pack_id: pack.slug,
+      card_id: card.handle,
+      rarity: card.rarity,
+      weight: RARITY_WEIGHT[card.rarity],
+    })),
   );
   if (oddsToCreate.length > 0) {
     await packs.createPackOdds(oddsToCreate);

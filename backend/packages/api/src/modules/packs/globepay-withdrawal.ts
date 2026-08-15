@@ -10,7 +10,7 @@ import {
 } from './globepay-client';
 import { newMerchantTransactionId } from './globepay-deposit';
 import { withdrawalGateError } from './withdrawable';
-import { positiveIntFromEnv } from '../../api/utils/rate-limit';
+import { nonNegativeIntFromEnv } from '../../api/utils/rate-limit';
 import { notifyFeed } from './notify-feed';
 import { withdrawalFeedKey } from './feed-events';
 import { sendWithdrawalReceipt } from './withdrawal-receipt';
@@ -62,7 +62,16 @@ export const GLOBEPAY_WD_MAX_RM = 50000;
  *
  * Env override GLOBEPAY_WD_APPROVAL_ABOVE_RM, read PER CALL (the plan-066
  * convention, same as GLOBEPAY_WD_DAILY_MAX_RM in service.ts and the cooldown
- * in saved-accounts.ts) via positiveIntFromEnv — never latched at module load.
+ * in saved-accounts.ts) via nonNegativeIntFromEnv, deliberately NOT
+ * positiveIntFromEnv — never latched at module load.
+ *
+ * This is a money CEILING, not a rate limit, so 0 must be a real, meaningful
+ * value: it is the operator's stop lever during an incident ("hold every
+ * payout for a human"). positiveIntFromEnv rejects 0 and falls back to the
+ * default, which would route the stop lever straight back to the wide-open
+ * 1000 cap with only a log line noting it was ignored — see
+ * nonNegativeIntFromEnv's own doc block in rate-limit.ts for the general
+ * rule this follows.
  */
 export const GLOBEPAY_WD_APPROVAL_ABOVE_RM_DEFAULT = 1000;
 
@@ -420,7 +429,7 @@ export async function startGlobePayWithdrawal(
   // 1,000.00 exactly still auto-submits (Global Constraint 1).
   const held =
     Math.round(amount * 100) >
-    positiveIntFromEnv(
+    nonNegativeIntFromEnv(
       'GLOBEPAY_WD_APPROVAL_ABOVE_RM',
       GLOBEPAY_WD_APPROVAL_ABOVE_RM_DEFAULT,
     ) *

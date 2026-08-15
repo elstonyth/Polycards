@@ -19,6 +19,9 @@ import type { ChallengeRankReward } from '../../../modules/packs/challenge-valid
 // 🔒 PII: public — names follow the leaderboard rules (first_name or an
 // anonymous "Collector ####", plus the stable avatar seed; never email/id).
 const TOP_N = 10;
+// Over-fetch so the disabled filter below cannot shorten the board — same
+// reasoning (and the same bound) as the sibling leaderboard route.
+const FETCH_N = TOP_N * 2;
 
 // ponytail: per-process 30s cache — this route runs TWO whole-`pull`-table
 // aggregates (community pool + top-N pull value) whose cost grows with pull
@@ -53,13 +56,13 @@ export async function GET(
     resetDay: settings.reset_day,
     resetHour: settings.reset_hour,
   };
-  const [pool, ranked, stageRows] = await Promise.all([
+  const [pool, rankedAll, stageRows] = await Promise.all([
     // Real community pulled-value this week (ledger aggregate) — the anchor
     // comes from the same settings row the reset line renders.
     packs.challengeWeekPool(week),
     // Weekly Pull Value ranking (pulled value, NOT spend) — the challenge's
     // own top-10, distinct from the spend-ranked main leaderboard.
-    packs.challengeWeekTop({ ...week, limit: TOP_N }),
+    packs.challengeWeekTop({ ...week, limit: FETCH_N }),
     packs.listChallengeStages(
       {},
       {
@@ -129,6 +132,17 @@ export async function GET(
       };
     }
   }
+
+  // An administratively disabled player is hidden from every public surface —
+  // see the sibling leaderboard route for why this is display-only (a disable
+  // is reversible, so settlement still ranks and pays them) and why the
+  // survivors are re-numbered without gaps.
+  const disabledIds = await packs.disabledCustomerIds(
+    rankedAll.map((r) => r.customer_id),
+  );
+  const ranked = rankedAll
+    .filter((r) => !disabledIds.has(r.customer_id))
+    .slice(0, TOP_N);
 
   // PII-safe display fields for the ranked customers (shared with the store
   // leaderboard — never leaks email/id).
