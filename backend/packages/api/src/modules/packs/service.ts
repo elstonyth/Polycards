@@ -72,8 +72,10 @@ import PurchaseInvoice from './models/purchase-invoice';
 import PurchaseInvoiceLine from './models/purchase-invoice-line';
 import StockMovement from './models/stock-movement';
 import { pageAll } from '../../api/utils/page-all';
-import { positiveIntFromEnv,
-  nonNegativeIntFromEnv } from '../../api/utils/rate-limit';
+import {
+  positiveIntFromEnv,
+  nonNegativeIntFromEnv,
+} from '../../api/utils/rate-limit';
 import {
   resolveBuybackRate,
   buybackAmount,
@@ -293,7 +295,6 @@ type LedgerSqlManager = {
 /** The globepay_withdrawal.status domain, mirrored from the model's enum for
  *  the raw-SQL claim below (raw SQL carries no model types). */
 type WithdrawalStatus = 'pending' | 'settled' | 'failed' | 'held';
-
 
 /** One raw `ledger_entry` row as listLedgerEntriesForAdmin reads it. */
 export type LedgerEntryRow = {
@@ -522,7 +523,10 @@ interface SettleSnapshot {
    * Optional: snapshots written before this field existed fall back to the live
    * re-read, which is the pre-existing behaviour.
    */
-  by_rank?: Record<string, { rank: number; credits: number; cardIds: string[] }>;
+  by_rank?: Record<
+    string,
+    { rank: number; credits: number; cardIds: string[] }
+  >;
 }
 
 class PacksModuleService extends MedusaService({
@@ -3172,10 +3176,11 @@ class PacksModuleService extends MedusaService({
     await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
       `metadata:${input.customerId}`,
     ]);
-    const rows = await em.execute<{ metadata: Record<string, unknown> | null }[]>(
-      'SELECT metadata FROM customer WHERE id = ? AND deleted_at IS NULL',
-      [input.customerId],
-    );
+    const rows = await em.execute<
+      { metadata: Record<string, unknown> | null }[]
+    >('SELECT metadata FROM customer WHERE id = ? AND deleted_at IS NULL', [
+      input.customerId,
+    ]);
     if (rows.length === 0) {
       // Same shape retrieveCustomer raised before this went through SQL, so the
       // routes' 404 behaviour is unchanged.
@@ -3569,8 +3574,9 @@ class PacksModuleService extends MedusaService({
               // and the worse one, because under-paying the living is invisible
               // where over-paying the dead is at least auditable.
               if (
-                (await this.deletedCustomerIds([beneficiary], sharedContext))
-                  .has(beneficiary)
+                (
+                  await this.deletedCustomerIds([beneficiary], sharedContext)
+                ).has(beneficiary)
               ) {
                 return;
               }
@@ -4146,9 +4152,10 @@ class PacksModuleService extends MedusaService({
       `delete from "player_payout_details" where "customer_id" = ?`,
       [customerId],
     );
-    await em.execute(`delete from "notification_read" where "customer_id" = ?`, [
-      customerId,
-    ]);
+    await em.execute(
+      `delete from "notification_read" where "customer_id" = ?`,
+      [customerId],
+    );
 
     // The account-state row is the TOMBSTONE, not garbage. Soft-deleting it is
     // what would re-open the account: isAccountDisabled reads through
@@ -7774,7 +7781,8 @@ class PacksModuleService extends MedusaService({
       pool_myr: poolMyr,
       // prior's list wins: re-deriving from `unlocked` would let a deleted
       // stage shrink the frozen record, and the NEXT tick filters against it.
-      unlocked_stages: prior?.unlocked_stages ?? unlocked.map((s) => s.stage_number),
+      unlocked_stages:
+        prior?.unlocked_stages ?? unlocked.map((s) => s.stage_number),
       week_end: endUtc.toISOString(),
       ranking,
       // A Map does not survive the json column — persist as a plain object and
@@ -7816,7 +7824,11 @@ class PacksModuleService extends MedusaService({
       if (!settled) continue;
       winners.push(settled);
       // Committed above; the units are taken now, outside that transaction.
-      await this.reserveSettledStock(settled, deps.decrementStock, weekStartIso);
+      await this.reserveSettledStock(
+        settled,
+        deps.decrementStock,
+        weekStartIso,
+      );
       // Fired AFTER this winner's transaction committed, never inside it.
       if (!deps.onSettled) continue;
       try {
@@ -8108,8 +8120,7 @@ class PacksModuleService extends MedusaService({
   private async reserveSettledStock(
     winner: SettledWinner,
     decrementStock:
-      | ((handle: string, qty: number) => Promise<boolean>)
-      | undefined,
+      ((handle: string, qty: number) => Promise<boolean>) | undefined,
     weekStartIso: string,
   ): Promise<void> {
     if (!decrementStock) return;
