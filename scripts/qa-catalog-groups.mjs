@@ -1,5 +1,7 @@
-// QA: /slots two-group catalog (Graded / Raw) — headings, membership counts,
-// screenshots. Run against a self-built server: node scripts/qa-catalog-groups.mjs [base]
+// QA: /slots composition catalog (Graded / Raw / More Packs) — headings,
+// membership counts, screenshots. Sections are read dynamically from the DOM,
+// so this script needs no update when a section is added/removed/empty.
+// Run against a self-built server: node scripts/qa-catalog-groups.mjs [base]
 import { chromium } from 'playwright';
 
 const BASE = process.argv[2] ?? 'http://localhost:4000';
