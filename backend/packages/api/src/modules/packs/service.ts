@@ -26,6 +26,7 @@ import {
 } from './saved-accounts';
 import { FRAME_LEVELS } from './avatar-frames';
 import { challengePackId } from './challenge-prize';
+import { FREE_WELCOME_CATEGORY } from './free-pack';
 import Pack from './models/pack';
 import Card from './models/card';
 import CardPriceHistory from './models/card-price-history';
@@ -2286,6 +2287,11 @@ class PacksModuleService extends MedusaService({
       pull ? [pull] : [],
       [pullId],
       customerId,
+      // freeUnlocked is irrelevant on this path: the reward gate returns first
+      // for the only shape that ships here, and a source='free' pull is
+      // 'invalid' whichever verdict it earns. No hasPaidOpen read under the
+      // lock.
+      true,
     );
     if (verdict !== 'reward_source') {
       return { status: 'invalid' };
@@ -2798,6 +2804,131 @@ class PacksModuleService extends MedusaService({
         sharedContext,
       );
     }
+  }
+
+  // Stamp the account as eligible for the one free welcome pack (spec
+  // docs/superpowers/specs/2026-08-14-free-welcome-pack-design.md). Called from
+  // the customer.created subscriber, which is why only accounts registered
+  // after the feature shipped ever carry it — that IS the "new registrations
+  // only" rule, with no date cutoff anywhere.
+  //
+  // markPhoneVerified's shape, for markPhoneVerified's reasons: idempotent and
+  // first-write-wins (a re-stamp must not move the timestamp), under the SAME
+  // `credit:` advisory key as every other account-state upsert so two
+  // concurrent first-writes can't race the unique customer_id to a 23505.
+  @InjectTransactionManager()
+  async markFreePackAvailable(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `credit:${customerId}`,
+    ]);
+    const [existing] = await this.listCustomerAccountStates(
+      { customer_id: customerId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (existing?.free_pack_available_at) return;
+    if (existing) {
+      await this.updateCustomerAccountStates(
+        {
+          selector: { id: existing.id },
+          data: { free_pack_available_at: new Date() },
+        },
+        sharedContext,
+      );
+    } else {
+      await this.createCustomerAccountStates(
+        [{ customer_id: customerId, free_pack_available_at: new Date() }],
+        sharedContext,
+      );
+    }
+  }
+
+  /**
+   * ATOMIC ONE-SHOT CLAIM of the free welcome pack — answers `true` to exactly
+   * one caller, and `false` to every other.
+   *
+   * ONE conditional UPDATE, for the same reason as
+   * claimGlobePayWithdrawalStatus: Postgres re-evaluates the predicate against
+   * committed state AFTER the row lock is released, so of two concurrent
+   * claims — a double-tapped "Open free pack" is the realistic trigger —
+   * exactly one matches a row. A read-then-write (list the state, check
+   * free_pack_claimed_at, then update) type-checks and reads like the same
+   * guard, but takes no row lock: both callers see NULL and both open a free
+   * pack. `true` means THIS caller owns the free open that follows.
+   *
+   * No row is lazily created here: an unstamped account has no
+   * free_pack_available_at, so the WHERE matches nothing and the claim is
+   * refused. No advisory lock either — the row lock is the whole mutex.
+   */
+  @InjectTransactionManager()
+  async claimFreePack(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<boolean> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ id: string }[]>(
+      'UPDATE customer_account_state ' +
+        'SET free_pack_claimed_at = now(), updated_at = now() ' +
+        'WHERE customer_id = ? AND free_pack_available_at IS NOT NULL ' +
+        'AND free_pack_claimed_at IS NULL AND deleted_at IS NULL ' +
+        'RETURNING id',
+      [customerId],
+    );
+    return rows.length > 0;
+  }
+
+  // Compensation for a free open that failed after the claim was won: hand the
+  // customer back the pack they never received. Unconditional by design — the
+  // workflow step only ever compensates the claim IT just won, and re-checking
+  // free_pack_claimed_at here would just be the same row read twice.
+  @InjectTransactionManager()
+  async clearFreePackClaim(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute(
+      'UPDATE customer_account_state ' +
+        'SET free_pack_claimed_at = NULL, updated_at = now() ' +
+        'WHERE customer_id = ? AND deleted_at IS NULL',
+      [customerId],
+    );
+  }
+
+  // Has this customer ever opened a PAID pack? The free pull's sell/deliver
+  // lock reads this (refusal copy: FREE_PULL_LOCKED_MESSAGE) — 'free' and
+  // 'reward' pulls are not purchases, so only source='pack' unlocks. One
+  // indexed read (IDX_pull_customer_id_rolled_at), mirroring isPhoneVerified.
+  @InjectManager()
+  async hasPaidOpen(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<boolean> {
+    const pulls = await this.listPulls(
+      { customer_id: customerId, source: 'pack' },
+      { take: 1, select: ['id'] },
+      sharedContext,
+    );
+    return pulls.length > 0;
+  }
+
+  // The live free welcome pack, or null when the operator has not published
+  // one (the storefront badge and the free-open path both go quiet then). It is
+  // an ordinary Pack in the reserved 'free_welcome' category — hidden from the
+  // public catalog like 'reward_box'. Admin validation keeps at most one
+  // ACTIVE; rank ASC + take 1 makes this read deterministic regardless.
+  @InjectManager()
+  async getActiveFreePack(@MedusaContext() sharedContext: Context = {}) {
+    const [pack] = await this.listPacks(
+      { category: FREE_WELCOME_CATEGORY, status: 'active' },
+      { take: 1, order: { rank: 'ASC' } },
+      sharedContext,
+    );
+    return pack ?? null;
   }
 
   // True if the customer's login is administratively disabled. One indexed read
@@ -3591,18 +3722,35 @@ class PacksModuleService extends MedusaService({
         packId: string;
         channel: 'single' | 'batch';
         fx: number;
+        /**
+         * Draw-time USD value for THIS open's vault_delta, overriding the sum
+         * over `pulls`. Exists for the free welcome open: its pull row carries
+         * recorded_value_usd NULL on purpose (the boards must never see a free
+         * pull), but the card really does enter the vault, and the later
+         * sell/delivery subtracts its full value — so a NULL-derived 0 here
+         * would drift cumulative vault liability down forever. Free opens are
+         * always single-pull (batch rejects free_welcome), hence one scalar.
+         */
+        vaultValueUsd?: number | null;
       };
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<Awaited<ReturnType<PacksModuleService['createPulls']>>> {
     const pulls = await this.createPulls(input.pulls, sharedContext);
 
-    const vaultDelta = input.pulls.reduce(
-      (sum, p) =>
-        sum +
-        displayMarketPrice(Number(p.recorded_value_usd), input.ledger.fx, 1),
-      0,
-    );
+    const vaultDelta =
+      input.ledger.vaultValueUsd != null
+        ? displayMarketPrice(input.ledger.vaultValueUsd, input.ledger.fx, 1)
+        : input.pulls.reduce(
+            (sum, p) =>
+              sum +
+              displayMarketPrice(
+                Number(p.recorded_value_usd),
+                input.ledger.fx,
+                1,
+              ),
+            0,
+          );
 
     await this.recordLedgerEntry(
       {
@@ -3639,9 +3787,13 @@ class PacksModuleService extends MedusaService({
   // lagging (a matured-but-not-yet-flipped 'pending' row reads as available).
   // True if the customer is currently frozen. Read on the caller's connection so
   // it participates in the same advisory-locked transaction as the debit gate.
-  private async isFrozen(
+  // ANY-cause freeze read (manual OR auto) — the gate settleOpen holds over
+  // every paid open. Public because the FREE open never reaches settleOpen
+  // (a price-0 charge returns early), so claim-free-pack.ts has to run the
+  // same check itself; assertNotFrozen is NOT the same gate (manual only).
+  async isFrozen(
     customerId: string,
-    sharedContext: Context,
+    sharedContext: Context = {},
   ): Promise<boolean> {
     const [row] = await this.listCustomerAccountStates(
       { customer_id: customerId, frozen: true },
@@ -4187,7 +4339,9 @@ class PacksModuleService extends MedusaService({
   // draw-time USD value (recorded_value_usd, stamped by the open workflows so a
   // mid-week price sync can't rewrite history), falling back to live
   // market_value(USD) × the card's multiplier for pre-backfill rows — × the
-  // live FX rate. Reward-box pulls stay excluded (source <> 'reward').
+  // live FX rate. Only source='pack' pulls count: reward-box prizes and free
+  // welcome pulls are not played packs (positive filter, so a future fourth
+  // source can never leak onto the board by default).
   //
   // sinceMs = null → all-time; a timestamp → weekly window.
   @InjectManager()
@@ -4239,7 +4393,7 @@ class PacksModuleService extends MedusaService({
         ') AS volume_usd ' +
         '    FROM pull pu ' +
         '    LEFT JOIN card c ON c.handle = pu.card_id AND c.deleted_at IS NULL ' +
-        "   WHERE pu.deleted_at IS NULL AND pu.customer_id IS NOT NULL AND pu.source <> 'reward' " +
+        "   WHERE pu.deleted_at IS NULL AND pu.customer_id IS NOT NULL AND pu.source = 'pack' " +
         (since === null ? '' : '     AND pu.rolled_at >= ?::timestamptz ') +
         '   GROUP BY pu.customer_id ' +
         ') ' +
@@ -7356,8 +7510,8 @@ class PacksModuleService extends MedusaService({
   // customers (recorded draw-time USD value, live FMV × multiplier fallback
   // for pre-backfill rows, × FX → MYR) since the week anchor (shared
   // CHALLENGE_WEEK_ANCHOR_CTE). Mirrors leaderboardTop's wins CTE
-  // (source <> 'reward'); read-only, so the pool is REAL ledger data even while
-  // the reward settlement engine is inert.
+  // (source = 'pack' — reward and free pulls excluded); read-only, so the
+  // pool is REAL ledger data even while the reward settlement engine is inert.
   @InjectManager()
   async challengeWeekPool(
     opts: ChallengeWeekAnchor,
@@ -7374,7 +7528,7 @@ class PacksModuleService extends MedusaService({
         '), 0) * ? * 100) / 100 AS pooled_myr ' +
         '  FROM pull pu ' +
         '  LEFT JOIN card c ON c.handle = pu.card_id AND c.deleted_at IS NULL ' +
-        " WHERE pu.deleted_at IS NULL AND pu.customer_id IS NOT NULL AND pu.source <> 'reward' " +
+        " WHERE pu.deleted_at IS NULL AND pu.customer_id IS NOT NULL AND pu.source = 'pack' " +
         '   AND pu.rolled_at >= (SELECT start_utc FROM anchor) ' +
         '   AND pu.rolled_at <  (SELECT end_utc FROM anchor)',
       [...challengeWeekAnchorParams(opts), DEFAULT_MARKET_MULTIPLIER, fxRate],
@@ -7405,7 +7559,7 @@ class PacksModuleService extends MedusaService({
         ') * ? * 100) / 100 AS volume_myr ' +
         '  FROM pull pu ' +
         '  LEFT JOIN card c ON c.handle = pu.card_id AND c.deleted_at IS NULL ' +
-        " WHERE pu.deleted_at IS NULL AND pu.customer_id IS NOT NULL AND pu.source <> 'reward' " +
+        " WHERE pu.deleted_at IS NULL AND pu.customer_id IS NOT NULL AND pu.source = 'pack' " +
         '   AND pu.rolled_at >= (SELECT start_utc FROM anchor) ' +
         '   AND pu.rolled_at <  (SELECT end_utc FROM anchor) ' +
         ' GROUP BY pu.customer_id ' +
@@ -7960,9 +8114,11 @@ class PacksModuleService extends MedusaService({
   // Iteration 3): stamp recorded_value_usd on pre-existing rows from the
   // CURRENT card values — the same expression the aggregates' COALESCE
   // fallback computes, so backfilling is observation-neutral at run time and
-  // only pins the value against FUTURE price syncs. Reward pulls stay null
-  // (excluded from every pulled-value board). raw_ twin written alongside so
-  // the ORM's bigNumber hydration matches workflow-stamped rows. Idempotent
+  // only pins the value against FUTURE price syncs. Reward and free-welcome
+  // pulls stay null (they are excluded from every pulled-value board, and the
+  // aggregates' COALESCE fallback would put a stamped value straight back on
+  // one). raw_ twin written alongside so the ORM's bigNumber hydration
+  // matches workflow-stamped rows. Idempotent
   // (IS NULL guard). Run via src/scripts/backfill-recorded-pull-value.ts.
   //
   // Chunked so a large historical pull table isn't pinned under one long
@@ -7986,7 +8142,7 @@ class PacksModuleService extends MedusaService({
         'WITH batch AS ( ' +
           '  SELECT pu.id FROM pull pu ' +
           '    JOIN card c ON c.handle = pu.card_id AND c.deleted_at IS NULL ' +
-          "   WHERE pu.recorded_value_usd IS NULL AND pu.source <> 'reward' " +
+          "   WHERE pu.recorded_value_usd IS NULL AND pu.source = 'pack' " +
           '   LIMIT ? ' +
           ') ' +
           'UPDATE pull pu ' +

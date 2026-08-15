@@ -10,6 +10,19 @@
  *  Mirrors FLAT_PERCENT in backend/packages/api/src/modules/packs/buyback-rate.ts. */
 export const FLAT_BUYBACK_PERCENT = 90;
 
+/** The reserved category of the one-time free welcome pack. Mirrors
+ *  FREE_WELCOME_CATEGORY in backend/packages/api/src/modules/packs/free-pack.ts.
+ *  A pack in it is free (price 0), hidden from the catalog, opened once, and
+ *  its pull is sell/deliver-locked until the account's first PAID open. */
+export const FREE_WELCOME_CATEGORY = 'free_welcome';
+
+/** Shown wherever a locked free pull's sell/deliver is refused. Must stay
+ *  VERBATIM equal to FREE_PULL_LOCKED_MESSAGE in the backend's free-pack.ts —
+ *  the server returns this exact string on a refused sell/deliver, so the
+ *  storefront's pre-emptive copy has to read identically. */
+export const FREE_PULL_LOCKED_MESSAGE =
+  'Purchase & open any pack to unlock selling & delivery.';
+
 export type Pack = {
   id: string;
   name: string;

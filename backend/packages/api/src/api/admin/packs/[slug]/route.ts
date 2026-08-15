@@ -4,7 +4,8 @@ import { PACKS_MODULE } from "../../../../modules/packs";
 import { updatePackWorkflow } from "../../../../workflows/update-pack";
 import { normalizePublishedOdds } from "../../../../workflows/steps/create-pack";
 import { deletePackWorkflow } from "../../../../workflows/delete-pack";
-import { coercePackBody } from "../validate";
+import { assertSingleActiveFreePack, coercePackBody } from "../validate";
+import { FREE_WELCOME_CATEGORY } from "../../../../modules/packs/free-pack";
 import { clearPackListCache } from "../../../store/packs/route";
 import { clearPackDetailCache } from "../../../store/packs/[slug]/route";
 
@@ -57,6 +58,16 @@ export async function POST(
 ): Promise<void> {
   const { slug } = req.params;
   const input = coercePackBody((req.body ?? {}) as Record<string, unknown>, slug);
+
+  // Only ONE free_welcome pack may be live. Re-saving the pack that IS the live
+  // one passes (same slug); activating a second one 400s.
+  const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
+  assertSingleActiveFreePack(
+    input.category === FREE_WELCOME_CATEGORY
+      ? ((await packs.getActiveFreePack())?.slug ?? null)
+      : null,
+    input,
+  );
 
   const { result } = await updatePackWorkflow(req.scope).run({ input });
   bustStorefrontPackCaches();

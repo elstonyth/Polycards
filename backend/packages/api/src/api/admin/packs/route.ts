@@ -2,7 +2,8 @@ import { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import PacksModuleService from "../../../modules/packs/service";
 import { PACKS_MODULE } from "../../../modules/packs";
 import { createPackWorkflow } from "../../../workflows/create-pack";
-import { coercePackBody } from "./validate";
+import { assertSingleActiveFreePack, coercePackBody } from "./validate";
+import { FREE_WELCOME_CATEGORY } from "../../../modules/packs/free-pack";
 import { clearPackListCache } from "../../store/packs/route";
 import { normalizePublishedOdds } from "../../../workflows/steps/create-pack";
 import { pageAll } from "../../utils/page-all";
@@ -180,6 +181,16 @@ export async function POST(
   const body = (req.body ?? {}) as Record<string, unknown>;
   const slug = typeof body.slug === "string" ? body.slug.trim() : "";
   const input = coercePackBody(body, slug);
+
+  // Only ONE free_welcome pack may be live — the lookup runs only when this
+  // write is actually a free-pack write.
+  const packsModuleService: PacksModuleService = req.scope.resolve(PACKS_MODULE);
+  assertSingleActiveFreePack(
+    input.category === FREE_WELCOME_CATEGORY
+      ? ((await packsModuleService.getActiveFreePack())?.slug ?? null)
+      : null,
+    input,
+  );
 
   const { result } = await createPackWorkflow(req.scope).run({ input });
   // A pack can be created directly as `active`, so bust the storefront list

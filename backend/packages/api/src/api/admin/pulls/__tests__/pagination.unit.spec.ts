@@ -16,7 +16,7 @@ const mkRes = () => {
   };
 };
 
-const pull = (i: number) => ({
+const pull = (i: number, over: Record<string, any> = {}) => ({
   id: `pull_${i}`,
   rolled_at: new Date(2026, 0, i + 1),
   customer_id: 'cus_1',
@@ -24,23 +24,33 @@ const pull = (i: number) => ({
   card_id: 'card-a',
   status: 'vaulted',
   buyback_amount: null,
+  source: 'pack',
+  ...over,
 });
 
-function mkScope(totalPulls: number) {
-  const all = Array.from({ length: totalPulls }, (_, i) => pull(i));
+function mkScope(totalPulls: number, extra: any[] = []) {
+  const all = [
+    ...Array.from({ length: totalPulls }, (_, i) => pull(i)),
+    ...extra,
+  ];
   // Filters each list call actually received — the ?source= tests assert the
-  // ledger is filtered while the rollup window stays global.
+  // ledger is filtered while the rollup window keeps its own fixed scope.
   const seen: { rollup?: any; ledger?: any } = {};
+  // Both list mocks HONOR filter.source: a rollup-scope assertion that only
+  // inspected `seen` would pass even if the route ignored the filter.
+  const match = (rows: any[], f: any) =>
+    f?.source ? rows.filter((r) => r.source === f.source) : rows;
   const packs = {
     listPulls: async (f: any, o: any) => {
       seen.rollup = f;
-      return all.slice(0, o?.take ?? all.length);
+      return match(all, f).slice(0, o?.take ?? all.length);
     },
     listAndCountPulls: async (f: any, o: any) => {
       seen.ledger = f;
+      const rows = match(all, f);
       return [
-        all.slice(o?.skip ?? 0, (o?.skip ?? 0) + (o?.take ?? 50)),
-        all.length,
+        rows.slice(o?.skip ?? 0, (o?.skip ?? 0) + (o?.take ?? 50)),
+        rows.length,
       ];
     },
     listCards: async () => [
@@ -99,12 +109,31 @@ describe('GET /admin/pulls pagination', () => {
     expect(scope.seen.ledger).toEqual({ source: 'pack' });
   });
 
-  it('leaves the rollup window unfiltered when ?source= is set', async () => {
+  it('keeps the rollup window on its own scope when ?source= is set', async () => {
     const { res } = mkRes();
     const scope = mkScope(3);
-    await GET({ scope, query: { source: 'pack' } } as any, res);
-    // Rollups are global stats, not a view of the current page.
-    expect(scope.seen.rollup).toEqual({});
+    await GET({ scope, query: { source: 'free' } } as any, res);
+    // Rollups are global stats, not a view of the current page — the page's
+    // ?source= never reaches them, and their own scope is purchased pulls.
+    expect(scope.seen.rollup).toEqual({ source: 'pack' });
+  });
+
+  // Giveaway pulls are not purchases: a free-welcome (or reward) pull must not
+  // inflate top cards / top rarities, the same rule the public boards follow.
+  it('excludes non-pack pulls from the rollups', async () => {
+    const freebie = pull(99, { source: 'free', card_id: 'card-free' });
+    const { res, out } = mkRes();
+    await GET({ scope: mkScope(3, [freebie]), query: {} } as any, res);
+
+    const { res: res2, out: baseline } = mkRes();
+    await GET({ scope: mkScope(3), query: {} } as any, res2);
+
+    expect(out.body.topCards).toEqual(baseline.body.topCards);
+    expect(out.body.topCards.map((c: any) => c.handle)).not.toContain(
+      'card-free',
+    );
+    // ...but the free pull IS still in the operator's ledger page.
+    expect(out.body.pulls.map((p: any) => p.id)).toContain('pull_99');
   });
 
   it('rejects an unknown ?source=', async () => {
