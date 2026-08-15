@@ -10,8 +10,13 @@ import { useMediaQuery, usePrefersReducedMotion } from '@/lib/use-reveal';
 import { useChromeInert } from '@/lib/use-chrome-inert';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { openAuth } from '@/components/AuthButton';
-import { openBatch, revealPull, closeInstantWindow } from '@/lib/actions/packs';
-import type { WonCard } from '@/lib/actions/packs';
+import {
+  openBatch,
+  openPack,
+  revealPull,
+  closeInstantWindow,
+} from '@/lib/actions/packs';
+import type { WonCard, OpenBatchResult } from '@/lib/actions/packs';
 import { sellBackPull } from '@/lib/actions/vault';
 import { useTopUp } from '@/components/app-shell/TopUpProvider';
 import { useVaultDot } from '@/components/app-shell/VaultDotProvider';
@@ -25,6 +30,7 @@ import {
   type PackCard,
   type Rarity,
   FLAT_BUYBACK_PERCENT,
+  FREE_WELCOME_CATEGORY,
   ODDS,
 } from '@/lib/packs-data';
 import type { RecentPull } from '@/lib/data/packs';
@@ -150,11 +156,16 @@ export default function SlotMachineClient({
   // "demo" spin whose result the settle identity-guard then silently drops.
   const modeUndecided = demoPool !== null && !customer && authLoading;
 
+  // The one-time free welcome pack. It is opened SINGLY through the single-open
+  // route — the backend rejects a batch on this category outright — so the reel
+  // count is pinned to 1 and every bet/quantity control goes away.
+  const isFreePack = pack.categoryId === FREE_WELCOME_CATEGORY;
+
   // Real backend price, never re-parsed from the rounded display string.
   const cost = pack.priceValue;
   // Reel count — prop is the initial value (already clamped from ?count=); the
   // player adds/removes reels in-machine. cost * reels is the batch price.
-  const [reels, setReels] = useState(count);
+  const [reels, setReels] = useState(isFreePack ? 1 : count);
   // Shrink the cell so multiple reels fit across the viewport. On a roomy
   // viewport the cell grows instead: the phone layout on a desktop left the
   // machine a ~110px band floating in ~900px of empty room, which reads as an
@@ -273,8 +284,16 @@ export default function SlotMachineClient({
     forId: string | null;
     offers: (SellBackOffer | null)[];
     cards: WonCard[];
+    /** The server said this pull cannot be sold or delivered yet (open
+     *  response's `locked`) — the reveal then offers no sell, only the unlock
+     *  note. NOT the same as `free`: a welcome pack claimed after a paid open
+     *  comes back unlocked, with a real sell offer. */
+    locked: boolean;
   } | null>(null);
   const [offers, setOffers] = useState<(SellBackOffer | null)[]>([]);
+  // Mirrors the settled batch's `locked` — held in state (not a ref) because the
+  // reveal renders from it.
+  const [lockedReveal, setLockedReveal] = useState(false);
   const [announce, setAnnounce] = useState('');
   const cooldownTimer = useRef<number | null>(null);
   const meterTimer = useRef<number | null>(null);
@@ -296,7 +315,11 @@ export default function SlotMachineClient({
     [],
   );
 
-  const canAfford = balance !== null && affordable(balance, cost * reels);
+  // A free open is always affordable — and must not wait on the balance read,
+  // which is null while it loads and would leave a brand-new account (balance
+  // RM 0, the exact audience) staring at a disabled Spin button.
+  const canAfford =
+    isFreePack || (balance !== null && affordable(balance, cost * reels));
   // Spin + reel add/remove are locked for the ENTIRE non-idle flow — resolve,
   // spin, the reveal theater (flood/transform), AND the review/sell window
   // (spec #43). They only re-enable once every card is sold/kept and the reveal
@@ -380,6 +403,7 @@ export default function SlotMachineClient({
         forId: null,
         offers: cards.map(() => null),
         cards,
+        locked: false,
       };
       setSpin({ nonce: spinAt, cards, winners: cards.map(winnerFor) });
       setPhase('spinning');
@@ -390,7 +414,7 @@ export default function SlotMachineClient({
       openAuth('login');
       return;
     }
-    if (balance !== null && !affordable(balance, cost * reels)) {
+    if (!isFreePack && balance !== null && !affordable(balance, cost * reels)) {
       setNeedsTopUp(true);
       setError('Not enough credits to spin.');
       return;
@@ -410,9 +434,38 @@ export default function SlotMachineClient({
     // the Spin button never re-enables (spinGuarded). Whether the charge landed
     // is genuinely unknown at this point, so the copy must claim NEITHER a free
     // spin nor a charge — it points the player at their balance instead.
-    let res: Awaited<ReturnType<typeof openBatch>>;
+    let res: OpenBatchResult;
+    // Free welcome pack → the SINGLE-open route (open-batch 400s this category:
+    // the claim pays for exactly one pull). Its result carries the same
+    // per-roll fields, so it is adapted to a one-roll batch and every beat
+    // below — charge paint, vault dot, offers, reveal — stays one code path.
+    // Sell/deliver lock for THIS open, straight off the response — never
+    // derived from `isFreePack`: a welcome pack claimed after a paid open comes
+    // back unlocked and must keep its sell button.
+    let lockedOpen = false;
     try {
-      res = await openBatch(pack.id, reels);
+      if (isFreePack) {
+        const one = await openPack(pack.id);
+        lockedOpen = one.ok && one.locked;
+        res = one.ok
+          ? {
+              ok: true,
+              rolls: [
+                {
+                  card: one.card,
+                  pullId: one.pullId,
+                  marketValue: one.marketValue,
+                  buyback: one.buyback,
+                },
+              ],
+              price: one.price,
+              total: one.price,
+              balance: one.balance,
+            }
+          : one;
+      } else {
+        res = await openBatch(pack.id, reels);
+      }
     } catch (err) {
       logger.error('[slots] openBatch transport failure', err);
       // The charge may well have landed (the server executed, the response did
@@ -547,6 +600,7 @@ export default function SlotMachineClient({
         forId: customer?.id ?? null,
         offers: builtOffers,
         cards,
+        locked: lockedOpen,
       };
       setSpin({ nonce: spinAt, cards, winners });
       setPhase('spinning');
@@ -568,6 +622,7 @@ export default function SlotMachineClient({
           forId: customer?.id ?? null,
           offers: builtOffers,
           cards: settledCards,
+          locked: lockedOpen,
         };
       }
       setSpin({ nonce: spinAt, cards: settledCards, winners });
@@ -605,6 +660,7 @@ export default function SlotMachineClient({
       applyBalance(held.balance);
     }
     setOffers(held.offers);
+    setLockedReveal(held.locked);
 
     // Prepend one RecentPull per card won in this batch — real wins only; a
     // demo draw is theater and must never appear in the live pull ticker.
@@ -694,6 +750,7 @@ export default function SlotMachineClient({
   const handleConclude = useCallback(() => {
     setSpin(null);
     setOffers([]);
+    setLockedReveal(false);
     setPhase('idle');
   }, []);
 
@@ -1012,6 +1069,7 @@ export default function SlotMachineClient({
                   spriteSrcs={spriteSrcs}
                   reduced={reduced}
                   demo={isDemo}
+                  locked={lockedReveal}
                   onSignUp={isDemo ? () => openAuth('signup') : undefined}
                   onSkip={skipToCards}
                   onConclude={handleConclude}
@@ -1042,6 +1100,8 @@ export default function SlotMachineClient({
             costLine={
               isDemo ? (
                 <span>Free demo — no credits charged, no real cards won</span>
+              ) : isFreePack ? (
+                <span>Your free welcome pack — nothing charged</span>
               ) : (
                 <span className="inline-flex items-center">
                   <span>Bet </span>
@@ -1073,9 +1133,11 @@ export default function SlotMachineClient({
                   : 'Demo spin'
                 : !customer
                   ? 'Log in to spin'
-                  : hasSpun
-                    ? 'Spin again'
-                    : 'Spin'
+                  : isFreePack
+                    ? 'Open Free Pack'
+                    : hasSpun
+                      ? 'Spin again'
+                      : 'Spin'
             }
             muted={muted}
             onSpin={handleSpin}
@@ -1083,8 +1145,9 @@ export default function SlotMachineClient({
             onOpenOdds={() => setOddsOpen(true)}
             onAddReel={addReel}
             onRemoveReel={removeReel}
-            addDisabled={reels >= 3 || !canAdjustReels}
-            removeDisabled={reels <= 1 || !canAdjustReels}
+            // The free claim buys exactly ONE open — no reels to add or drop.
+            addDisabled={isFreePack || reels >= 3 || !canAdjustReels}
+            removeDisabled={isFreePack || reels <= 1 || !canAdjustReels}
           />
           {error && (
             <p

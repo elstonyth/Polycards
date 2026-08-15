@@ -24,6 +24,8 @@ import {
   type ResolvedPack,
   type PackCard,
   FLAT_BUYBACK_PERCENT,
+  FREE_WELCOME_CATEGORY,
+  FREE_PULL_LOCKED_MESSAGE,
   factoryVideo,
 } from '@/lib/packs-data';
 import { AmbientVideo } from '@/components/AmbientVideo';
@@ -98,6 +100,13 @@ export default function PackDetailClient({
   // so anyone's pull shows up here without a reload.
   const recent = useLiveRecentPulls(recentPulls);
 
+  // The one-time free welcome pack: no price, no quantity, no batch — the claim
+  // pays for exactly ONE open (the backend rejects a batch on this category), so
+  // every money/quantity control is removed rather than merely zeroed. Its
+  // siblings list is empty (it is not in the catalog), so `active` can never
+  // become a different, paid pack.
+  const isFreePack = pack.categoryId === FREE_WELCOME_CATEGORY;
+
   // Real backend price, never re-parsed from the rounded display string.
   const priceNum = active.priceValue;
   // Baked Polycards tiers animate their factory stage (still poster otherwise).
@@ -154,6 +163,14 @@ export default function PackDetailClient({
   function handleGoToReel() {
     if (!customer) {
       openAuth('login');
+      return;
+    }
+    // A free open costs nothing and is always singular — skip the credit gate
+    // (a brand-new account has a zero balance by definition) and pin count=1.
+    if (isFreePack) {
+      setOpenError(null);
+      setNeedsTopUp(false);
+      router.push(`/slots/${active.id}/spin?count=1`);
       return;
     }
     if (balance !== null && !affordable(balance, priceNum * qty)) {
@@ -268,10 +285,19 @@ export default function PackDetailClient({
               <h1 className="font-heading text-xl font-bold tracking-tight text-white sm:text-2xl">
                 {active.name}
               </h1>
-              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-buyback/90 px-2.5 py-1 text-[11px] font-bold text-white">
-                {active.buybackPercent ?? 90}% Buyback
-                <Info className="h-3 w-3 opacity-80" aria-hidden />
-              </span>
+              {isFreePack ? (
+                // A free pull can be neither sold nor delivered until the first
+                // PAID open, so a buyback rate here would advertise money the
+                // sell then refuses. Say what it IS instead.
+                <span className="inline-flex shrink-0 items-center rounded-full bg-chase/15 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-chase">
+                  Free
+                </span>
+              ) : (
+                <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-buyback/90 px-2.5 py-1 text-[11px] font-bold text-white">
+                  {active.buybackPercent ?? 90}% Buyback
+                  <Info className="h-3 w-3 opacity-80" aria-hidden />
+                </span>
+              )}
             </div>
 
             <div className="flex flex-col gap-4 px-5 py-4">
@@ -325,55 +351,65 @@ export default function PackDetailClient({
                 </div>
               </div>
 
-              {/* Pack tiles */}
-              <div>
-                <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/60">
-                  Pack
-                </p>
-                {/* Compact 3-col grid so all tiers fit on screen at once — the
+              {/* Pack tiles — an uncataloged pack (the free welcome pack) has
+                  no siblings, and an empty selector grid reads as a broken
+                  section rather than a choice. */}
+              {siblings.length > 0 && (
+                <div>
+                  <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/60">
+                    Pack
+                  </p>
+                  {/* Compact 3-col grid so all tiers fit on screen at once — the
                     selector must never scroll inside the panel. */}
-                <div className="grid grid-cols-3 gap-1.5">
-                  {siblings.map((p) => {
-                    const selected = p.id === active.id;
-                    return (
-                      <button
-                        key={p.id}
-                        type="button"
-                        onClick={() => {
-                          setActive(p);
-                          reset();
-                        }}
-                        className={cn(
-                          'flex flex-col items-center gap-0.5 rounded-xl border px-1 py-2 text-center transition-colors',
-                          selected
-                            ? 'border-white/40 bg-white/10'
-                            : 'border-white/10 bg-white/[0.03] hover:border-white/20 hover:bg-white/[0.06]',
-                        )}
-                      >
-                        <Image
-                          src={p.image}
-                          alt=""
-                          aria-hidden
-                          width={205}
-                          height={360}
-                          unoptimized
-                          className="h-9 w-auto object-contain"
-                        />
-                        <span className="w-full truncate text-[11px] font-medium leading-tight text-white">
-                          {p.name.replace(' Pack', '')}
-                        </span>
-                        <span className="text-[11px] font-semibold tabular-nums text-white/55">
-                          {p.price}
-                        </span>
-                      </button>
-                    );
-                  })}
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {siblings.map((p) => {
+                      const selected = p.id === active.id;
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => {
+                            setActive(p);
+                            reset();
+                          }}
+                          className={cn(
+                            'flex flex-col items-center gap-0.5 rounded-xl border px-1 py-2 text-center transition-colors',
+                            selected
+                              ? 'border-white/40 bg-white/10'
+                              : 'border-white/10 bg-white/[0.03] hover:border-white/20 hover:bg-white/[0.06]',
+                          )}
+                        >
+                          <Image
+                            src={p.image}
+                            alt=""
+                            aria-hidden
+                            width={205}
+                            height={360}
+                            unoptimized
+                            className="h-9 w-auto object-contain"
+                          />
+                          <span className="w-full truncate text-[11px] font-medium leading-tight text-white">
+                            {p.name.replace(' Pack', '')}
+                          </span>
+                          <span className="text-[11px] font-semibold tabular-nums text-white/55">
+                            {p.price}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Quantity — desktop only; on phones it lives in the sticky
-                  buy bar so there is a single Open Pack control per zone. */}
-              <div className="hidden items-center gap-2 lg:flex">
+                  buy bar so there is a single Open Pack control per zone.
+                  Absent on the free pack: the claim buys exactly one open. */}
+              <div
+                className={cn(
+                  'hidden items-center gap-2',
+                  !isFreePack && 'lg:flex',
+                )}
+              >
                 <button
                   type="button"
                   aria-label="Decrease quantity"
@@ -415,9 +451,13 @@ export default function PackDetailClient({
                 onClick={handleGoToReel}
                 className="w-full justify-between px-5"
               >
-                {customer ? 'Open Pack' : 'Log in to open'}
+                {isFreePack
+                  ? 'Open Free Pack'
+                  : customer
+                    ? 'Open Pack'
+                    : 'Log in to open'}
                 <span className="flex items-center gap-1.5 font-heading text-base tracking-tight tabular-nums">
-                  {rm(priceNum * qty)}
+                  {!isFreePack && rm(priceNum * qty)}
                   <ArrowRight className="h-4 w-4" aria-hidden />
                 </span>
               </Pill>
@@ -449,7 +489,12 @@ export default function PackDetailClient({
                   its price from the credit balance (A2). Quantity & provably-fair
                   pulls stay out of scope. */}
               <p className="mt-2 text-center text-[11px] text-white/60">
-                {customer && balance !== null ? (
+                {isFreePack ? (
+                  <>
+                    Your one-time welcome pack — nothing charged. The card lands
+                    in your vault. {FREE_PULL_LOCKED_MESSAGE}
+                  </>
+                ) : customer && balance !== null ? (
                   <>
                     Each open costs {rm(priceNum)} in site credits — your
                     balance:{' '}
@@ -597,17 +642,30 @@ export default function PackDetailClient({
           left (money is the content), quiet capsule stepper, and one
           single-purpose white pill (the panel's own qty/footer are lg-only,
           so there is exactly one CTA per zone). Max = two taps of +. */}
-      <div className="fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-40 border-t border-white/10 bg-neutral-950 px-fluid py-2.5 lg:hidden">
+      <div
+        data-testid="pack-buy-dock"
+        className="fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-40 border-t border-white/10 bg-neutral-950 px-fluid py-2.5 lg:hidden"
+      >
         <div className="flex items-center gap-3">
           <div className="min-w-0 flex-1">
+            {/* Free mode states the gift where the total normally sits — the
+                slot must not go empty, or the pill drifts left and the dock
+                reads like a different component. */}
             <p className="truncate font-heading text-xl font-bold leading-none tracking-tight text-white tabular-nums">
-              {rm(priceNum * qty)}
+              {isFreePack ? 'Free' : rm(priceNum * qty)}
             </p>
             <p className="mt-1 text-[11px] leading-none text-white/60">
-              {active.buybackPercent ?? FLAT_BUYBACK_PERCENT}% buyback
+              {isFreePack
+                ? 'Your welcome pack'
+                : `${active.buybackPercent ?? FLAT_BUYBACK_PERCENT}% buyback`}
             </p>
           </div>
-          <div className="flex h-11 shrink-0 items-center rounded-full bg-white/5">
+          <div
+            className={cn(
+              'h-11 shrink-0 items-center rounded-full bg-white/5',
+              isFreePack ? 'hidden' : 'flex',
+            )}
+          >
             <button
               type="button"
               aria-label="Decrease quantity"
@@ -636,7 +694,7 @@ export default function PackDetailClient({
             onClick={handleGoToReel}
             className="shrink-0 px-5"
           >
-            {customer ? 'Open Pack' : 'Log in'}
+            {isFreePack ? 'Open Free Pack' : customer ? 'Open Pack' : 'Log in'}
           </Pill>
         </div>
         {openError && (

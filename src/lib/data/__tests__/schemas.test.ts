@@ -9,6 +9,7 @@ import {
   PublicProfileSchema,
   CreditTransactionSchema,
   VaultItemSchema,
+  FreePackSchema,
   BalanceSchema,
   WonCardSchema,
   OpenBuybackSchema,
@@ -84,6 +85,72 @@ describe('parseList — drops invalid items, never throws', () => {
       }, // → drop
     ]);
     expect(out).toHaveLength(1);
+  });
+});
+
+// The free welcome pull is unsellable until the first PAID open. Both flags
+// ride on every vault row, but they arrive from a backend that deploys
+// separately — a cached/older payload must keep parsing, and the SAFE default
+// for `locked` is false (a stuck-locked vault would be worse than a late lock).
+describe('VaultItemSchema — source/locked (free welcome pack)', () => {
+  const base = {
+    pull_id: 'p',
+    card: { name: 'C' },
+    buyback: { amount: 5, percent: 90, firm: true },
+  };
+
+  it('keeps the backend values when present', () => {
+    const out = parseOne(VaultItemSchema, {
+      ...base,
+      source: 'free',
+      locked: true,
+    });
+    expect(out).toMatchObject({ source: 'free', locked: true });
+  });
+
+  it('defaults an older payload to source "pack" / locked false', () => {
+    const out = parseOne(VaultItemSchema, base);
+    expect(out).toMatchObject({ source: 'pack', locked: false });
+  });
+
+  it('catches malformed values instead of dropping the row', () => {
+    // A dropped row deletes the customer's card from their own vault — always
+    // degrade the flag, never the item.
+    const out = parseOne(VaultItemSchema, {
+      ...base,
+      source: 'wat',
+      locked: 'yes',
+    });
+    expect(out).toMatchObject({ source: 'pack', locked: false });
+  });
+
+  it("accepts a challenge prize's source='reward' with a live quote", () => {
+    // Lock UI keys off `locked` ONLY — a reward row is sellable.
+    const out = parseOne(VaultItemSchema, {
+      ...base,
+      source: 'reward',
+      locked: false,
+    });
+    expect(out).toMatchObject({ source: 'reward', locked: false });
+  });
+});
+
+describe('FreePackSchema — GET /store/free-pack', () => {
+  it('needs a boolean eligible + nullable slug', () => {
+    expect(
+      parseOne(FreePackSchema, {
+        eligible: true,
+        slug: 'welcome-pack',
+        image: '/x.webp',
+      }),
+    ).toMatchObject({ eligible: true, slug: 'welcome-pack' });
+    expect(
+      parseOne(FreePackSchema, { eligible: false, slug: null, image: null }),
+    ).toMatchObject({ eligible: false, slug: null });
+    // Anything else is not an answer — the caller falls back to "not eligible".
+    expect(parseOne(FreePackSchema, { eligible: 'yes', slug: 'a' })).toBeNull();
+    expect(parseOne(FreePackSchema, { eligible: true })).toBeNull();
+    expect(parseOne(FreePackSchema, null)).toBeNull();
   });
 });
 

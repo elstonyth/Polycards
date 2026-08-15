@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils';
 import { pillVariants } from '@/components/ui/pill';
 import Reveal from '@/components/Reveal';
 import QtyStepper from '@/components/QtyStepper';
+import FreePackBadge from '@/components/FreePackBadge';
 import { packHref, type Pack, type PackCategory } from '@/lib/packs-data';
 
 // Pack catalog comes from the backend via getPackCategories() (server page);
@@ -225,9 +226,13 @@ function PackRow({
 export default function CatalogClient({
   categories,
   initialCategory,
+  freePackSlug = null,
 }: {
   categories: PackCategory[];
   initialCategory: string;
+  /** Non-null only while this customer's one-time welcome claim is unspent —
+   *  the badge is the free pack's only entry point (it is not in `categories`). */
+  freePackSlug?: string | null;
 }) {
   const [active, setActive] = useState<string>(initialCategory);
 
@@ -243,7 +248,21 @@ export default function CatalogClient({
       : categories.filter((c) => c.id === active);
 
   return (
-    <div className="mx-auto w-full px-fluid py-4">
+    <div
+      className={cn(
+        'mx-auto w-full px-fluid py-4',
+        // The badge is `fixed` on the bottom-right rail, floating OVER the
+        // catalog — at the end of the scroll it lands on the last row and
+        // covers the right-most tile's MAX/Open controls. Reserve its rail as
+        // bottom padding (only while the badge actually renders) so the
+        // catalog can always be scrolled clear of it. Badge box: 146px tall
+        // (112px art at 393x512) over a 4.5rem dock offset = 218px, dropping
+        // to 24px + 146px = 170px once the tab bar is gone at lg.
+        freePackSlug && 'pb-56 lg:pb-44',
+      )}
+    >
+      {freePackSlug && <FreePackBadge slug={freePackSlug} />}
+
       {/* Sticky filter bar — category chip rail */}
       <div className="glass-chrome sticky top-2 z-20 mb-6 rounded-2xl border border-white/10 p-2">
         {/* Category chip rail (icons + label) */}
