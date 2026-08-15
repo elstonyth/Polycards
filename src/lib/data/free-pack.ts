@@ -44,3 +44,49 @@ export async function getFreePackEligibility(): Promise<FreePackEligibility> {
     return NOT_ELIGIBLE;
   }
 }
+
+/** Badge state for /slots — the union the page passes to the catalog. */
+export type FreePackState =
+  | { mode: 'claim'; slug: string }
+  | { mode: 'signup' }
+  | { mode: 'hidden' };
+
+const HIDDEN: FreePackState = { mode: 'hidden' };
+
+/**
+ * Pure mapper, unit-tested: (had a token, parsed answer) → badge state.
+ * Guests read ONLY `promo` (the catalog fact); authed customers read ONLY
+ * `eligible`+`slug` (the per-customer claim). Neither can leak into the
+ * other's branch, so a stray field can never resurrect a spent claim.
+ */
+export function mapFreePackState(
+  hasToken: boolean,
+  parsed: { eligible: boolean; slug: string | null; promo?: boolean } | null,
+): FreePackState {
+  if (!parsed) return HIDDEN;
+  if (!hasToken) return parsed.promo ? { mode: 'signup' } : HIDDEN;
+  return parsed.eligible && parsed.slug
+    ? { mode: 'claim', slug: parsed.slug }
+    : HIDDEN;
+}
+
+/**
+ * Never throws and never caches (same stance as getFreePackEligibility):
+ * any failure is `hidden` and the page renders exactly as it does today.
+ */
+export async function getFreePackState(): Promise<FreePackState> {
+  const token = await getAuthToken();
+  try {
+    const parsed = parseOne(
+      FreePackSchema,
+      await sdk.client.fetch('/store/free-pack', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        cache: 'no-store',
+      }),
+    );
+    return mapFreePackState(Boolean(token), parsed);
+  } catch (error) {
+    logger.error('[free-pack] state read failed:', error);
+    return HIDDEN;
+  }
+}
