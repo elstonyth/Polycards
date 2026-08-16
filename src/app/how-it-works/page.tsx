@@ -241,7 +241,8 @@ export default function HowItWorksPage() {
         />
         <div className="relative aspect-video w-full overflow-hidden rounded-2xl border border-white/10 bg-neutral-950 shadow-[0_8px_40px_rgba(0,0,0,0.45)]">
           <HeroVideo
-            src="/videos/pack-opening-demo.mp4"
+            mp4="/videos/pack-opening-demo.mp4"
+            webm="/videos/pack-opening-demo.webm"
             poster="/images/polycards/bronze-pack.webp"
             label="Pack opening demo"
             className="h-full w-full object-cover"

@@ -142,6 +142,9 @@ try {
     <div class="tag">Rip packs · Pull graded cards · Sell back up to 90%</div>
   </body></html>`);
     await page.evaluate(() => document.fonts.ready);
+    // Playwright writes an unoptimised PNG (~106KB). Follow this with
+    // `node scripts/shrink-images.mjs` — a lossless recompress takes it to
+    // ~58KB. Skipping that step silently reverts the saving.
     const out = resolve(ROOT, 'public/seo/og.png');
     await page.screenshot({
       path: out,

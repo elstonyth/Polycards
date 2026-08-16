@@ -143,4 +143,22 @@ export default withSentryConfig(nextConfig, {
   // Quiet build logs; upload source maps only when an auth token is present.
   silent: !process.env.CI,
   widenClientFileUpload: true,
+  // Measured, so the honest split: `excludeDebugStatements` earns its keep —
+  // `__SENTRY_DEBUG__` lives in @sentry/core|browser|react|nextjs, all of which
+  // ARE in the client graph. The three `excludeReplay*` flags are INERT today:
+  // their constants live only in @sentry/replay(-canvas), and since
+  // instrumentation-client.ts never calls replayIntegration() those packages
+  // are not in the graph for webpack to shake. They are kept as insurance, so
+  // that enabling Replay later does not silently pull in the Shadow-DOM, iframe
+  // and compression-worker recorders too.
+  // `excludeTracing` is deliberately NOT set: tracesSampleRate is 0.1, so
+  // performance monitoring IS live and removing it would silently kill traces.
+  // (For scale: the 457KB every-route chunk is Next's app-router runtime, not
+  // Sentry — this whole block is worth single-digit KB, not a real win.)
+  bundleSizeOptimizations: {
+    excludeDebugStatements: true,
+    excludeReplayShadowDom: true,
+    excludeReplayIframe: true,
+    excludeReplayWorker: true,
+  },
 });
