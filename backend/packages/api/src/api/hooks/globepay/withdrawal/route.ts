@@ -10,6 +10,7 @@ import {
   formatGatewayFailureReason,
   withdrawalRefundReference,
 } from '../../../../modules/packs/globepay-withdrawal';
+import { toOptionalMoney } from '../../../../modules/packs/money';
 import { notifyFeed } from '../../../../modules/packs/notify-feed';
 import { withdrawalFeedKey } from '../../../../modules/packs/feed-events';
 import { sendWithdrawalReceipt } from '../../../../modules/packs/withdrawal-receipt';
@@ -288,6 +289,17 @@ export async function POST(
       gateway_status: data.Status,
       gateway_transaction_id:
         gatewayTransactionId || withdrawal.gateway_transaction_id,
+      // The settlement facts from the SIGNED payload, previously logged (the
+      // Amount disagreement above) or dropped entirely (NetAmount, the bank
+      // references) — audit 2026-08-17 B1/B2/C2. amount_settled is what THEY
+      // say they paid; the ledger debit stays priced at submit time and is
+      // never retro-adjusted, so a disagreement is now durably visible on the
+      // row instead of dying with the deployment's logs. NULL means unknown,
+      // never zero.
+      amount_settled: toOptionalMoney(data.Amount),
+      net_amount: toOptionalMoney(data.NetAmount),
+      bank_reference_no: data.BankReferenceNo || null,
+      unique_reference_no: data.UniqueReferenceNo || null,
       settled_at: new Date(),
     },
   });

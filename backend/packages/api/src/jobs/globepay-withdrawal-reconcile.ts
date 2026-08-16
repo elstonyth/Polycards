@@ -11,6 +11,7 @@ import {
   getWithdrawalDetail,
   globepayConfigFromEnv,
 } from '../modules/packs/globepay-client';
+import { toOptionalMoney } from '../modules/packs/money';
 import { notifyFeed } from '../modules/packs/notify-feed';
 import { withdrawalFeedKey } from '../modules/packs/feed-events';
 import { sendWithdrawalReceipt } from '../modules/packs/withdrawal-receipt';
@@ -67,8 +68,7 @@ export default async function globepayWithdrawalReconcileJob(
       { take: 1, order: { created_at: 'ASC' } },
     );
     if (oldestHeld) {
-      const heldAge =
-        now.getTime() - new Date(oldestHeld.created_at).getTime();
+      const heldAge = now.getTime() - new Date(oldestHeld.created_at).getTime();
       if (heldAge > GLOBEPAY_WD_HELD_STALE_AFTER_MS) {
         logger.error(
           `[globepay-wd-reconcile] held withdrawal ${oldestHeld.merchant_transaction_id} still awaiting admin review after ${Math.round(heldAge / 3_600_000)}h — customer ${oldestHeld.customer_id} has RM ${oldestHeld.amount} waiting on a decision; work the approval queue`,
@@ -96,8 +96,12 @@ export default async function globepayWithdrawalReconcileJob(
     try {
       let action;
       let gatewayStatus: number | null = null;
+      // Held across the try so the settle write below can persist the
+      // settlement facts the requery carries (settled amount, net, bank
+      // references — audit 2026-08-17 B1/B2/C2). Null on the error paths.
+      let detail: Awaited<ReturnType<typeof getWithdrawalDetail>> | null = null;
       try {
-        const detail = await getWithdrawalDetail(
+        detail = await getWithdrawalDetail(
           withdrawal.merchant_transaction_id,
           config,
         );
@@ -205,6 +209,13 @@ export default async function globepayWithdrawalReconcileJob(
           data: {
             status: 'settled',
             gateway_status: gatewayStatus,
+            // Same settlement mirror the callback route writes; `detail` is
+            // non-null on this branch ('settle' only comes from a successful
+            // requery) — the guard keeps tsc honest rather than asserting.
+            amount_settled: toOptionalMoney(detail?.amount),
+            net_amount: toOptionalMoney(detail?.netAmount),
+            bank_reference_no: detail?.bankReferenceNo || null,
+            unique_reference_no: detail?.uniqueReferenceNo || null,
             settled_at: now,
           },
         });

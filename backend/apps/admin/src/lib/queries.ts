@@ -38,6 +38,11 @@ import {
   getCustomerPulls,
   getDeliveryOrder,
   getEconomyReport,
+  getSettlementReport,
+  getGlobePayBalance,
+  type SettlementGranularity,
+  type SettlementReport,
+  type GlobePayBalance,
   getFxHistory,
   getFxRate,
   getPulls,
@@ -119,7 +124,10 @@ import {
 } from './admin-rest';
 import type { SetEntry } from '@acme/odds-math';
 import { qk } from './query-keys';
-import { classifyApproveResult, classifyDenyResult } from './withdrawal-outcome';
+import {
+  classifyApproveResult,
+  classifyDenyResult,
+} from './withdrawal-outcome';
 
 // ── Display queries ──────────────────────────────────────────────────────────
 
@@ -194,6 +202,29 @@ export const useEconomy = (
     queryKey: [...qk.economy, from ?? 'all', to ?? 'all'],
     queryFn: () => getEconomyReport(from, to),
     placeholderData: keepPreviousData,
+  });
+
+// Calendar weekly/monthly gateway settlement report. keepPreviousData so the
+// week/month toggle swaps without a skeleton flash (the economy precedent).
+export const useSettlementReport = (
+  granularity: SettlementGranularity,
+  periods: number,
+): UseQueryResult<SettlementReport> =>
+  useQuery({
+    queryKey: qk.settlement(granularity, periods),
+    queryFn: () => getSettlementReport(granularity, periods),
+    placeholderData: keepPreviousData,
+  });
+
+// Live merchant balance at the gateway. A real upstream call (20s worst case),
+// so it refetches on a slow interval rather than every focus — the number
+// moves with settlements, not with tab switches.
+export const useGlobePayBalance = (): UseQueryResult<GlobePayBalance> =>
+  useQuery({
+    queryKey: qk.globepayBalance,
+    queryFn: getGlobePayBalance,
+    refetchInterval: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
 export const usePackOdds = (slug: string): UseQueryResult<PackOddsResponse> =>

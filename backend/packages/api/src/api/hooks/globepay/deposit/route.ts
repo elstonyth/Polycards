@@ -4,6 +4,7 @@ import type PacksModuleService from '../../../../modules/packs/service';
 import { depositState, openCallback } from '../../../../modules/packs/globepay';
 import { globepayConfigFromEnv } from '../../../../modules/packs/globepay-client';
 import { GLOBEPAY_MAX_RM } from '../../../../modules/packs/globepay-deposit';
+import { toOptionalMoney } from '../../../../modules/packs/money';
 import { topupIdempotencyReference } from '../../../../modules/packs/topup';
 import { sendTopupReceipt } from '../../../../modules/packs/topup-receipt';
 import { notifyFeed } from '../../../../modules/packs/notify-feed';
@@ -348,6 +349,15 @@ export async function POST(
         gateway_transaction_id:
           gatewayTransactionId || deposit.gateway_transaction_id,
         amount_settled: creditedAmount,
+        // The settlement facts the gateway sends and this app used to drop
+        // (money-path-accuracy-audit-2026-08-17 B1/B2). All from the SIGNED
+        // payload. NetAmount is gross minus their fee — display/report data
+        // only, NEVER a ledger input (the credit above is the gross, on
+        // provider confirmation 2026-07-22). toOptionalMoney keeps an absent
+        // or malformed NetAmount as NULL ("unknown"), never 0 ("no fee").
+        net_amount: toOptionalMoney(data.NetAmount),
+        bank_reference_no: data.BankReferenceNo || null,
+        unique_reference_no: data.UniqueReferenceNo || null,
         settled_at: new Date(),
       },
     });

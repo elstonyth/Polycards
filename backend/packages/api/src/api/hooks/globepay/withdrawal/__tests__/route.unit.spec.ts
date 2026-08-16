@@ -166,6 +166,58 @@ describe('withdrawal callback — status 4 (paid)', () => {
     // Still settles — the discrepancy is a support case, not a reason to
     // leave the row pending forever.
     expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalled();
+    // …and the disagreement is now DURABLE, not just a log line that dies
+    // with the deployment (audit 2026-08-17 C2): the row records what they
+    // said they paid, while the ledger debit stays priced at submit time.
+    expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ amount_settled: 45 }),
+      }),
+    );
+  });
+
+  // The settlement mirror (audit 2026-08-17 B1/B2): settled amount, the
+  // fee-bearing net and the bank's references — all signed — must land on the
+  // row for the settlement report and payout disputes.
+  it('persists settled amount, net and bank references on the settled row', async () => {
+    const h = harness(pendingRow);
+    await run(
+      h,
+      callback({
+        ...paid,
+        BankReferenceNo: 'BR-123',
+        UniqueReferenceNo: 'UR-456',
+      }),
+    );
+    expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'settled',
+          amount_settled: 50,
+          net_amount: 49,
+          bank_reference_no: 'BR-123',
+          unique_reference_no: 'UR-456',
+        }),
+      }),
+    );
+  });
+
+  // NULL means UNKNOWN, never "no fee" — see the deposit twin.
+  it('stores an absent NetAmount as null, never zero', async () => {
+    const noNet = { ...paid } as Record<string, unknown>;
+    delete noNet.NetAmount;
+    const h = harness(pendingRow);
+    await run(h, callback(noNet));
+    expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'settled',
+          net_amount: null,
+          bank_reference_no: null,
+          unique_reference_no: null,
+        }),
+      }),
+    );
   });
 });
 
@@ -223,7 +275,9 @@ describe('withdrawal callback — status 5 (failed) refunds', () => {
 
   it('does NOT ack when the refund throws, so the money comes back on retry', async () => {
     const h = harness(pendingRow);
-    h.packs.withdrawCreditsWithLedger.mockRejectedValue(new Error('lock timeout'));
+    h.packs.withdrawCreditsWithLedger.mockRejectedValue(
+      new Error('lock timeout'),
+    );
     const res = await run(h, callback({ ...paid, Status: 5 }));
     expect(res.statusCode).toBe(500);
     expect(res.body).not.toBe('success');
