@@ -119,5 +119,7 @@ for await (const found of glob('public/**/*.{webp,png,jpg,jpeg}')) {
 }
 
 console.log(
-  `\n${changed} re-encoded — ${kb(before)}KB -> ${kb(after)}KB (-${Math.round((1 - after / before) * 100)}%)`,
+  before === 0
+    ? '\n0 re-encoded — no candidates above the size threshold'
+    : `\n${changed} re-encoded — ${kb(before)}KB -> ${kb(after)}KB (-${Math.round((1 - after / before) * 100)}%)`,
 );

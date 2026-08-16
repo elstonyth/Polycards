@@ -56,7 +56,11 @@ for (const { name, path, hero } of PAGES) {
   });
   // The heroes sit below the fold and only fetch once scrolled into view, so a
   // top-of-page load reports zero video bytes even when everything is fine.
-  const heroEl = page.locator(`video source[src*="${hero}"]`).first();
+  // Scroll the <video>, NOT the <source> that identifies it: <source> is a
+  // metadata element with no box, so scrollIntoViewIfNeeded on it cannot move
+  // the viewport — and the .catch() below would swallow that into a silent
+  // no-op. `:has()` selects the parent from the child.
+  const heroEl = page.locator(`video:has(source[src*="${hero}"])`).first();
   if (await heroEl.count()) {
     await heroEl.scrollIntoViewIfNeeded().catch(() => {});
   }
