@@ -5,13 +5,20 @@ import { usePrefersReducedMotion } from '@/lib/use-reveal';
 
 // Demo video with a pause affordance (WCAG 2.2.2): native controls always on,
 // autoplay skipped for reduced-motion users (poster + controls only).
+//
+// Sources follow `AmbientVideo`: `webm` (VP9) first for smaller bytes, `mp4`
+// (H.264) as the universal fallback. This clip autoplays, so `preload`
+// buys nothing once playback starts and the whole file lands on every visit —
+// the VP9 sibling is what keeps that from being 1.8MB.
 export default function HeroVideo({
-  src,
+  mp4,
+  webm,
   poster,
   label,
   className,
 }: {
-  src: string;
+  mp4: string;
+  webm?: string;
   poster: string;
   label: string;
   className?: string;
@@ -27,7 +34,6 @@ export default function HeroVideo({
   return (
     <video
       ref={ref}
-      src={src}
       poster={poster}
       autoPlay={!reduced}
       loop
@@ -37,6 +43,9 @@ export default function HeroVideo({
       preload="metadata"
       aria-label={label}
       className={className}
-    />
+    >
+      {webm ? <source src={webm} type="video/webm" /> : null}
+      <source src={mp4} type="video/mp4" />
+    </video>
   );
 }

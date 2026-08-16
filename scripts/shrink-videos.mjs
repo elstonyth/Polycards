@@ -20,8 +20,13 @@ const dry = process.argv.includes('--dry');
 
 /** Panel-sized, not screen-sized: 1280 covers a 60vw hero to ~2133px wide. */
 const WIDTH = 1280;
-/** scale=W:-2 keeps the aspect and forces an even height (yuv420p needs it). */
-const SCALE = `scale=${WIDTH}:-2`;
+/**
+ * Downscale only, never up. `scale=W:-2` alone would stretch a portrait or
+ * square source (720x1280 is over the height gate but under WIDTH), so cap the
+ * target at the source width. -2 keeps the aspect and forces an even height,
+ * which yuv420p requires.
+ */
+const SCALE = `scale='min(${WIDTH},iw)':-2`;
 
 const DIRS = ['public/images/polycards', 'public/videos'];
 
@@ -68,20 +73,30 @@ async function height(file) {
     'csv=p=0',
     file,
   ]);
-  return Number.parseInt(stdout.trim(), 10);
+  const h = Number.parseInt(stdout.trim(), 10);
+  // A container with no video stream (or a multi-stream oddity) yields NaN, and
+  // `NaN <= 720` is false — so without this the file would fall through to a
+  // pointless encode instead of being skipped.
+  return Number.isFinite(h) ? h : null;
 }
 
 let before = 0;
 let after = 0;
 
 for (const dir of DIRS) {
-  for (const name of await readdir(dir)) {
+  // A pruned directory should skip the pass, not abort it mid-run.
+  const entries = await readdir(dir).catch(() => []);
+  for (const name of entries) {
     const ext = name.slice(name.lastIndexOf('.'));
     const args = ENCODERS[ext];
     if (!args) continue;
 
     const file = join(dir, name);
     const h = await height(file);
+    if (h === null) {
+      console.log(`skip  ${file} (no readable video stream)`);
+      continue;
+    }
     if (h <= 720) {
       console.log(`skip  ${file} (already ${h}p)`);
       continue;
@@ -98,37 +113,46 @@ for (const dir of DIRS) {
 
     // Encode beside the original, then swap — a crashed ffmpeg leaves the
     // original intact rather than a truncated file the storefront would serve.
+    // Beside, not in os.tmpdir(): a cross-device rename fails on Windows. The
+    // `finally` is what stops a crash from leaving the stray inside public/,
+    // where `git add -A` would commit it and the deploy would serve it.
     const tmp = `${file}.tmp${ext}`;
-    await run('ffmpeg', [
-      '-y',
-      '-loglevel',
-      'error',
-      '-i',
-      file,
-      '-vf',
-      SCALE,
-      ...args,
-      tmp,
-    ]);
-    const out = (await stat(tmp)).size;
+    try {
+      await run('ffmpeg', [
+        '-y',
+        '-loglevel',
+        'error',
+        '-i',
+        file,
+        '-vf',
+        SCALE,
+        ...args,
+        tmp,
+      ]);
+      const out = (await stat(tmp)).size;
 
-    if (out >= size) {
-      // Re-encoding made it bigger (already well-compressed). Keep the original.
-      await unlink(tmp);
-      console.log(`keep  ${file} ${kb(size)}KB (re-encode was ${kb(out)}KB)`);
-      after += size;
-      continue;
+      if (out >= size) {
+        // Re-encoding made it bigger (already well-compressed). Keep the original.
+        console.log(`keep  ${file} ${kb(size)}KB (re-encode was ${kb(out)}KB)`);
+        after += size;
+        continue;
+      }
+
+      await rename(tmp, file);
+      after += out;
+      const pct = Math.round((1 - out / size) * 100);
+      console.log(
+        `ok    ${file} ${h}p ${kb(size)}KB -> 720p ${kb(out)}KB (-${pct}%)`,
+      );
+    } finally {
+      // No-op once the rename succeeded; the point is the paths that did not.
+      await unlink(tmp).catch(() => {});
     }
-
-    await rename(tmp, file);
-    after += out;
-    const pct = Math.round((1 - out / size) * 100);
-    console.log(
-      `ok    ${file} ${h}p ${kb(size)}KB -> 720p ${kb(out)}KB (-${pct}%)`,
-    );
   }
 }
 
 console.log(
-  `\ntotal ${kb(before)}KB -> ${kb(after)}KB (-${Math.round((1 - after / before) * 100)}%)`,
+  before === 0
+    ? '\nnothing to do — every clip is already at target'
+    : `\ntotal ${kb(before)}KB -> ${kb(after)}KB (-${Math.round((1 - after / before) * 100)}%)`,
 );

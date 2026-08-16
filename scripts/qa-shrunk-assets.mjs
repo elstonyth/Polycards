@@ -4,13 +4,14 @@
 //
 //   node scripts/qa-shrunk-assets.mjs [--base http://localhost:4000]
 import { chromium } from 'playwright';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, glob } from 'node:fs/promises';
+import { basename } from 'node:path';
 
-const base = process.argv[process.argv.indexOf('--base') + 1]?.startsWith(
-  'http',
-)
-  ? process.argv[process.argv.indexOf('--base') + 1]
-  : 'http://localhost:4000';
+const baseArg = process.argv[process.argv.indexOf('--base') + 1];
+const base = baseArg?.startsWith('http') ? baseArg : 'http://localhost:4000';
+
+/** What scripts/shrink-videos.mjs targets. Asserted, not just reported. */
+const EXPECT_DIMS = '1280x720';
 
 const OUT = 'docs/research/shrink';
 await mkdir(OUT, { recursive: true });
@@ -29,7 +30,12 @@ for (const { name, path, hero } of PAGES) {
   });
   const page = await ctx.newPage();
 
-  /** url -> transferred bytes, so media and images can be totalled separately. */
+  /**
+   * url -> transferred bytes, so media and images can be totalled separately.
+   * Read from `content-length`, which is absent on chunked responses and on
+   * 304s — so these totals are floors for eyeballing, not measurements. The
+   * decode pass below is what actually gates.
+   */
   const media = new Map();
   const images = new Map();
   const failures = [];
@@ -97,23 +103,34 @@ for (const { name, path, hero } of PAGES) {
 // is the real risk in a re-encode (ffmpeg happily writes files a browser
 // refuses), so test it directly against the served files instead of requiring
 // the whole stack to be up.
-const CLIPS = [
-  'shop-night',
-  'bronze-factory',
-  'diamond-factory',
-  'gold-factory',
-  'platinum-factory',
-  'silver-factory',
-];
+// Discovered from disk rather than listed here, so a seventh tier cannot ship
+// unverified — and so this does not restate FACTORY_VIDEO_TIERS in
+// src/lib/packs-data.ts, which would then drift. Mirrors the directories
+// scripts/shrink-videos.mjs walks; every clip is expected to have both
+// containers, which is itself part of what this asserts.
+const CLIPS = (
+  await Array.fromAsync(glob('public/{images/polycards,videos}/*.{webm,mp4}'))
+)
+  .map((p) => p.replaceAll('\\', '/').replace(/\.(webm|mp4)$/, ''))
+  .map((p) => p.replace(/^public/, ''))
+  .filter((p, i, all) => all.indexOf(p) === i)
+  .sort();
+if (!CLIPS.length) {
+  console.error('no clips found under public/ — wrong cwd?');
+  process.exit(1);
+}
 
 const ctx = await browser.newContext();
 const page = await ctx.newPage();
 await page.goto(`${base}/`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
 
-console.log('\ndecode check (readyState>=2 means the browser decoded a frame)');
+console.log(
+  `\ndecode check — ${CLIPS.length} clips, expecting ${EXPECT_DIMS} (readyState>=2 means a frame decoded)`,
+);
 for (const clip of CLIPS) {
   for (const ext of ['webm', 'mp4']) {
-    const src = `/images/polycards/${clip}.${ext}`;
+    // CLIPS already carries the served path minus the extension.
+    const src = `${clip}.${ext}`;
     const r = await page.evaluate(
       ([url]) =>
         new Promise((resolve) => {
@@ -133,7 +150,11 @@ for (const clip of CLIPS) {
         }),
       [src],
     );
-    const ok = !r.err && r.readyState >= 2;
+    // Assert the dimensions, do not merely print them. Decoding proves the file
+    // is playable; only this catches a re-encode that landed at the wrong size —
+    // a regressed skip-guard leaving 1920x1080, or a bad -vf giving 640x360.
+    // Catching that is the whole reason this script exists.
+    const ok = !r.err && r.readyState >= 2 && r.dims === EXPECT_DIMS;
     if (!ok) failed = true;
     console.log(
       `  ${ok ? 'ok  ' : 'FAIL'} ${src.padEnd(44)} readyState=${r.readyState} ${r.dims}${r.err ? ` (${r.err})` : ''}`,
