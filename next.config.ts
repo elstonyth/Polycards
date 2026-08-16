@@ -143,4 +143,16 @@ export default withSentryConfig(nextConfig, {
   // Quiet build logs; upload source maps only when an auth token is present.
   silent: !process.env.CI,
   widenClientFileUpload: true,
+  // The client SDK chunk loads on every route, so anything the storefront does
+  // not use is pure weight. Session Replay is never initialized (see
+  // instrumentation-client.ts — dsn + tracesSampleRate only), so its Shadow-DOM,
+  // iframe and compression-worker paths can be treeshaken out.
+  // `excludeTracing` is deliberately NOT set: tracesSampleRate is 0.1, so
+  // performance monitoring IS live and removing it would silently kill traces.
+  bundleSizeOptimizations: {
+    excludeDebugStatements: true,
+    excludeReplayShadowDom: true,
+    excludeReplayIframe: true,
+    excludeReplayWorker: true,
+  },
 });
