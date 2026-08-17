@@ -17,6 +17,9 @@ import FreePackBadge from '@/components/FreePackBadge';
 import {
   catalogGroupOf,
   packHref,
+  CATALOG_GROUP_HEADING,
+  CATALOG_GROUP_ORDER,
+  type CatalogGroup,
   type Pack,
   type PackCategory,
 } from '@/lib/packs-data';
@@ -239,33 +242,19 @@ function PackRow({
 // preselect a tab.
 // ---------------------------------------------------------------------------
 
-const GROUPS: {
-  id: 'graded' | 'raw' | 'more';
-  heading: string;
-  note?: string;
-  Icon: typeof ShieldCheck;
-}[] = [
-  {
-    id: 'graded',
-    heading: 'Graded',
-    note: 'Guaranteed PSA 10',
-    Icon: ShieldCheck,
-  },
-  {
-    id: 'raw',
-    heading: 'Raw Cards',
-    note: 'Ungraded',
-    Icon: RectangleVertical,
-  },
-  {
-    // Claim-free by design — see catalogGroupOf's doc comment. No `note`:
-    // an empty/omitted note is the only wording that's honest for every
-    // member (MIX, non-PSA-10 graded, AND unknown/null composition alike).
-    id: 'more',
-    heading: 'More Packs',
-    Icon: Layers,
-  },
-];
+// Headings + order come from packs-data (shared with the pack detail page's
+// sibling selector); only the icon and the qualifying note are this page's.
+const GROUP_CHROME: Record<
+  CatalogGroup,
+  { note?: string; Icon: typeof ShieldCheck }
+> = {
+  graded: { note: 'Guaranteed PSA 10', Icon: ShieldCheck },
+  raw: { note: 'Ungraded', Icon: RectangleVertical },
+  // Claim-free by design — see catalogGroupOf's doc comment. No `note`:
+  // an empty/omitted note is the only wording that's honest for every
+  // member (MIX, non-PSA-10 graded, AND unknown/null composition alike).
+  more: { Icon: Layers },
+};
 
 export default function CatalogClient({
   categories,
@@ -364,57 +353,60 @@ export default function CatalogClient({
       )}
 
       {/* Composition sections — only the non-empty ones render. */}
-      {GROUPS.filter((g) => byGroup[g.id].length > 0).map((g) => (
-        <section key={g.id} className="mb-8">
-          {/* Section header */}
-          <div className="mb-4 flex items-center gap-2.5">
-            <g.Icon className="h-6 w-6 shrink-0 text-white/80" aria-hidden />
-            <h2 className="font-heading text-lg font-bold tracking-tight text-white sm:text-xl">
-              {g.heading}
-              {/* The parenthetical is body voice, not Nekst display. Skipped
+      {CATALOG_GROUP_ORDER.filter((id) => byGroup[id].length > 0).map((id) => {
+        const g = GROUP_CHROME[id];
+        return (
+          <section key={id} className="mb-8">
+            {/* Section header */}
+            <div className="mb-4 flex items-center gap-2.5">
+              <g.Icon className="h-6 w-6 shrink-0 text-white/80" aria-hidden />
+              <h2 className="font-heading text-lg font-bold tracking-tight text-white sm:text-xl">
+                {CATALOG_GROUP_HEADING[id]}
+                {/* The parenthetical is body voice, not Nekst display. Skipped
                   entirely (not rendered empty) when a section has no note
-                  that's honest for every pack in it — see GROUPS above. */}
-              {g.note && (
-                <>
-                  {' '}
-                  <span className="font-sans text-sm font-medium text-white/60 sm:text-base">
-                    ({g.note})
-                  </span>
-                </>
-              )}
-            </h2>
-            <span className="ml-auto text-[13px] text-white/60">
-              {byGroup[g.id].length}{' '}
-              {byGroup[g.id].length === 1 ? 'pack' : 'packs'}
-            </span>
-          </div>
+                  that's honest for every pack in it — see GROUP_CHROME above. */}
+                {g.note && (
+                  <>
+                    {' '}
+                    <span className="font-sans text-sm font-medium text-white/60 sm:text-base">
+                      ({g.note})
+                    </span>
+                  </>
+                )}
+              </h2>
+              <span className="ml-auto text-[13px] text-white/60">
+                {byGroup[id].length}{' '}
+                {byGroup[id].length === 1 ? 'pack' : 'packs'}
+              </span>
+            </div>
 
-          {/* Desktop: horizontally-scrolling card row (matches live) */}
-          <div className="hidden gap-4 overflow-x-auto pb-2 sm:flex [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {byGroup[g.id].map((e, i) => (
-              <Reveal
-                key={e.pack.id}
-                delay={Math.min(i, 6) * 50}
-                className="h-full w-44 shrink-0 lg:w-48"
-              >
-                <PackCard pack={e.pack} icon={e.icon} />
-              </Reveal>
-            ))}
-          </div>
+            {/* Desktop: horizontally-scrolling card row (matches live) */}
+            <div className="hidden gap-4 overflow-x-auto pb-2 sm:flex [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {byGroup[id].map((e, i) => (
+                <Reveal
+                  key={e.pack.id}
+                  delay={Math.min(i, 6) * 50}
+                  className="h-full w-44 shrink-0 lg:w-48"
+                >
+                  <PackCard pack={e.pack} icon={e.icon} />
+                </Reveal>
+              ))}
+            </div>
 
-          {/* Mobile: list rows */}
-          <div className="flex flex-col gap-2 sm:hidden">
-            {byGroup[g.id].map((e) => (
-              <PackRow
-                key={e.pack.id}
-                pack={e.pack}
-                icon={e.icon}
-                categoryName={e.categoryName}
-              />
-            ))}
-          </div>
-        </section>
-      ))}
+            {/* Mobile: list rows */}
+            <div className="flex flex-col gap-2 sm:hidden">
+              {byGroup[id].map((e) => (
+                <PackRow
+                  key={e.pack.id}
+                  pack={e.pack}
+                  icon={e.icon}
+                  categoryName={e.categoryName}
+                />
+              ))}
+            </div>
+          </section>
+        );
+      })}
     </div>
   );
 }
