@@ -57,8 +57,16 @@ const QUICK_ACCESS: { label: string; href: string; icon: LucideIcon }[] = [
 // QUICK_ACCESS above still covers /contact.
 
 export default async function MePage() {
-  // Layout guard guarantees a customer here.
-  const customer = (await getCustomer())!;
+  // NOT guaranteed by the account layout's auth gate, despite how it reads:
+  // App Router renders a layout and its page CONCURRENTLY, so the layout's
+  // `redirect('/?auth=login')` does not run before this. A logged-out visitor
+  // resolved null here and the old non-null assertion turned that into a 500
+  // (`Cannot read properties of null (reading 'first_name')`, prod 05:15 UTC
+  // 2026-08-17). Returning null lets the layout's redirect land — same guard
+  // the sibling settings/page.tsx already carries.
+  const customer = await getCustomer();
+  if (!customer) return null;
+
   const [walletResult, handle, vipResult, avatarFrames] = await Promise.all([
     getWallet(),
     getOwnProfileHandle(),

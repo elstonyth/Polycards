@@ -1,6 +1,6 @@
 import {
   getPackCategories,
-  getPackDetail,
+  getPackChase,
   getRecentPulls,
 } from '@/lib/data/packs';
 import { getLeaderboard } from '@/lib/data/leaderboard';
@@ -13,9 +13,15 @@ import TheGame from '@/components/home/TheGame';
 import FinalCta from '@/components/home/FinalCta';
 
 // Pack catalog + live pulls come fresh from the backend on every request.
+//
+// Do NOT add `export const fetchCache` here. `force-dynamic` leaves the Data
+// Cache alone, which is what lets getPackChase hold the chase lookups below;
+// a 'force-no-store' fetchCache makes unstable_cache skip its read and silently
+// puts all N pack-detail payloads back on every render, with nothing failing.
 export const dynamic = 'force-dynamic';
 
-/** How many shelf tiles get a per-pack top-chase lookup (one request each). */
+/** How many shelf tiles get a per-pack top-chase lookup (a cache read each —
+ *  see getPackChase; one backend request each only on a cold miss). */
 const CHASE_LOOKUPS = 16;
 
 export default async function HomePage() {
@@ -34,25 +40,18 @@ export default async function HomePage() {
   // Chase lookups cover the first N tiles PLUS the featured pack, so the hero
   // never silently loses its chase when featured falls outside the first N.
   // ponytail: pools are per-pack (listPackOdds is pack_id-scoped), so these N
-  // lookups are genuinely distinct; collapse to a short-TTL cache only if the
-  // home render cost ever shows up in traces.
+  // lookups are genuinely distinct. The render cost DID show up (2026-08-17:
+  // ~700 KB of pool JSON per home view, TTFB 1.0–3.5 s), so the short-TTL cache
+  // this comment anticipated now lives in getPackChase.
   const lookupPacks = [
     ...new Set([
       ...(featured ? [featured] : []),
       ...packs.slice(0, CHASE_LOOKUPS),
     ]),
   ];
-  const details = await Promise.all(
-    lookupPacks.map((p) => getPackDetail(p.id)),
-  );
-  // pool is value-sorted desc, so the first PRICED entry is the pack's
-  // highest-value card ('—' = an older backend omitted marketPriceMyr; falling
-  // through it keeps a fake headline off the shelf).
+  const chases = await Promise.all(lookupPacks.map((p) => getPackChase(p.id)));
   const chaseByPack = new Map<string, PackCard | null>(
-    lookupPacks.map((p, i) => [
-      p.id,
-      details[i]?.pool.find((c) => c.value !== '—') ?? null,
-    ]),
+    lookupPacks.map((p, i) => [p.id, chases[i] ?? null]),
   );
 
   const featuredChase = featured

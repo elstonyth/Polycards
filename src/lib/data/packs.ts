@@ -13,6 +13,7 @@
  * only supplies the presentational per-category labels/icons (local assets).
  */
 
+import { unstable_cache } from 'next/cache';
 import { sdk } from '@/lib/medusa';
 import { logger } from '@/lib/logger';
 import { formatValue, isRarity, type PublishedOdds } from '@/lib/packs-format';
@@ -331,6 +332,62 @@ export async function getPackDetail(slug: string): Promise<PackDetail | null> {
     return null;
   }
 }
+
+/**
+ * A pack's top chase card — the single field the home shelf needs off a pack.
+ *
+ * Cached because the home page is `force-dynamic` and the only source for this
+ * one card is the whole prize pool: `/store/packs/bronze-pack` alone is ~288 KB
+ * and the five live packs total ~700 KB, all of it fetched, zod-parsed and then
+ * discarded on EVERY home render, on a 1-vCPU box. Measured 2026-08-17 against
+ * a production build: a cold render issues five /store/packs/<slug> requests,
+ * the next three inside the TTL issue none.
+ *
+ * Cached HERE rather than around getPackDetail: the derived card is a few
+ * hundred bytes where the detail is hundreds of KB, so the entry stays cheap to
+ * hold, and `/slots/[slug]` — which genuinely renders the whole pool and its
+ * odds — keeps reading through uncached.
+ *
+ * 60 s because pools change on a catalog edit, not per request; no `tags`
+ * because nothing in the storefront calls `revalidateTag` today, and an
+ * invalidation hook nobody fires is worse than none.
+ *
+ * NOTE the failure path this buys: getPackDetail returns null on a backend
+ * error, and a cache stores whatever it is given, so a blip during a COLD miss
+ * pins "no chase" on that pack for the full TTL where it used to self-heal on
+ * the next request. Only a cold miss — once an entry exists, expiry serves the
+ * stale value and revalidates behind the request, and a failed revalidate keeps
+ * the stale value rather than overwriting it with null.
+ *
+ * Not fixed by throwing on null to keep failures out of the cache, and NOT
+ * because a throw would break the render (it would not — the callback is
+ * awaited before the write, so a rejection is never cached, and a wrapper's
+ * catch absorbs it). Because getPackDetail returns null for TWO things: a
+ * backend error, and a pool that is legitimately empty or all-invalid (see its
+ * early returns). Throwing would make every empty-pool pack refetch its whole
+ * payload on every home render, forever — reinstating exactly the cost this
+ * exists to remove.
+ *
+ * Read the degradation as the hero, not a footnote: a null chase on the
+ * FEATURED pack drops HeroBoard to its no-prize headline ("Rip real graded
+ * cards"), losing the Chase Gold value and its bloom, for up to a TTL. Still
+ * graceful, still the cheaper failure than a dead render.
+ *
+ * `unstable_cache` rather than `use cache`: the latter needs
+ * `cacheComponents: true`, a whole-app rendering-semantics opt-in, for one hot
+ * path. Migrate together, not here.
+ */
+export const getPackChase = unstable_cache(
+  async (slug: string): Promise<PackCard | null> => {
+    const detail = await getPackDetail(slug);
+    // pool is value-sorted desc, so the first PRICED entry is the pack's
+    // highest-value card ('—' = an older backend omitted marketPriceMyr;
+    // falling through it keeps a fake headline off the shelf).
+    return detail?.pool.find((c) => c.value !== '—') ?? null;
+  },
+  ['pack-chase'],
+  { revalidate: 60 },
+);
 
 // --- Recent Pulls: the live ledger feed (GET /store/pulls/recent) -----------
 
