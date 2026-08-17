@@ -1,4 +1,4 @@
-import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
+import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
 import type { MedusaContainer } from '@medusajs/framework/types';
 
 // Physical-stock helpers for gacha cards (Card.handle === Product.handle).
@@ -92,6 +92,23 @@ export async function getCardStockByHandle(
   }
   return stockByHandle;
 }
+
+// Take `qty` units of a card handle out of inventory. `false` = untracked
+// product (nothing counted, so the pull must not be earmarked — buyback would
+// restore a phantom unit). Unconditional by design: the counter may go
+// negative, and negative IS the operator's "units owed" signal. Bound from the
+// container because the inventory module is only reachable there; the packs
+// module service stays container-free.
+export const takeCardStock =
+  (container: MedusaContainer) =>
+  async (handle: string, qty: number): Promise<boolean> => {
+    const target = await findCardInventoryTarget(container, handle);
+    if (!target) return false;
+    await container
+      .resolve(Modules.INVENTORY)
+      .adjustInventory(target.inventoryItemId, target.locationId, -qty);
+    return true;
+  };
 
 // The (inventory item, location) pair a pull decrements for a card — the first
 // tracked level with stock left, else the first tracked level (so the caller

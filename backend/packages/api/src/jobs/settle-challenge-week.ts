@@ -1,9 +1,7 @@
-import { Modules } from '@medusajs/framework/utils';
 import { MedusaContainer } from '@medusajs/framework/types';
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../modules/packs';
-import { getCardStockByHandle,
-  findCardInventoryTarget } from '../modules/packs/card-stock';
+import { takeCardStock } from '../modules/packs/card-stock';
 import { notifyFeedNonfatal } from '../modules/packs/notify-feed';
 import type PacksModuleService from '../modules/packs/service';
 
@@ -19,7 +17,7 @@ import type PacksModuleService from '../modules/packs/service';
  *
  * The onSettled callback runs per winner, AFTER that winner's transaction
  * committed: notification (best-effort + idempotent per (week, customer)) and
- * the spec's stock-gate warning. Per winner rather than after the batch so a
+ * the missing-card warning. Per winner rather than after the batch so a
  * crash later in the batch cannot permanently drop an already-paid winner's
  * notification — the next tick's gate skips them, so it would never retry.
  */
@@ -36,26 +34,16 @@ export default async function settleChallengeWeekJob(
   };
 
   await packs.settleChallengeWeek({
-    getStock: (handles) => getCardStockByHandle(container, handles),
-    // Settlement must RESERVE, not just read. Bound here for the same reason as
-    // getStock: the inventory module is only reachable through the container.
-    // Returns false for an untracked product — nothing to count, and the pull
-    // must not be earmarked or buyback would restore a phantom unit.
-    decrementStock: async (handle, qty) => {
-      const target = await findCardInventoryTarget(container, handle);
-      if (!target) return false;
-      await container
-        .resolve(Modules.INVENTORY)
-        .adjustInventory(target.inventoryItemId, target.locationId, -qty);
-      return true;
-    },
+    // Settlement RESERVES; it never reads stock as a gate.
+    decrementStock: takeCardStock(container),
     onSettled: async (w, weekStartIso) => {
-      // Spec §Granting: a stock-gated card is NOT substituted with credit —
-      // it becomes a manual-fulfilment item. The payout row records it, but
-      // this line is the only thing that puts it in front of an operator.
+      // Stock no longer skips anything (the counter just goes negative). What
+      // is left is a prize card whose Card row is GONE, so there is no handle
+      // to mint against — the payout row records it, and this line is the only
+      // thing that puts it in front of an operator.
       if (w.skippedCardIds.length > 0) {
         warn(
-          `[settle-challenge-week] out of stock, NOT granted (manual fulfilment queue): customer ${w.customerId} rank ${w.rank} week ${weekStartIso} card ids ${w.skippedCardIds.join(', ')}`,
+          `[settle-challenge-week] prize card missing, NOT granted (manual fulfilment queue): customer ${w.customerId} rank ${w.rank} week ${weekStartIso} card ids ${w.skippedCardIds.join(', ')}`,
         );
       }
       // Non-fatal — never fail a committed payout over a notification. The

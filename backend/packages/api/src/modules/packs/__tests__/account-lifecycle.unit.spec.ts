@@ -489,7 +489,7 @@ describe('settleChallengeWeek — deleted winners', () => {
   // rows are retained by design, so a deleted customer stays ranked.
   it('pays nothing to a deleted winner', async () => {
     const svc = mkSettle(['cus_gone']);
-    const result = await svc.settleChallengeWeek({ getStock: jest.fn() }, CTX);
+    const result = await svc.settleChallengeWeek({}, CTX);
     expect(svc.settleChallengeWinner).not.toHaveBeenCalled();
     expect(result.winners).toEqual([]);
     // The RANKING is what must be asked about. Without this, narrowing the
@@ -505,7 +505,7 @@ describe('settleChallengeWeek — deleted winners', () => {
   // would make the test above pass for the wrong reason.
   it('still pays a live winner', async () => {
     const svc = mkSettle([]);
-    await svc.settleChallengeWeek({ getStock: jest.fn() }, CTX);
+    await svc.settleChallengeWeek({}, CTX);
     expect(svc.settleChallengeWinner).toHaveBeenCalled();
   });
 });

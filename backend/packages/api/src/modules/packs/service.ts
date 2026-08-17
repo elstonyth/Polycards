@@ -466,25 +466,22 @@ const challengeWeekAnchorParams = (
 ];
 
 // Weekly-challenge settlement (spec 2026-07-29) — dependency + result shapes
-// for settleChallengeWeek. getStock is injected because physical stock lives
-// in Medusa's inventory module, reachable only through the container the JOB
-// holds — the module service must stay container-free.
+// for settleChallengeWeek. decrementStock is injected because physical stock
+// lives in Medusa's inventory module, reachable only through the container the
+// JOB holds — the module service must stay container-free.
 export interface SettleDeps {
-  /** Available stock per card HANDLE (job binds getCardStockByHandle). */
-  getStock: (handles: string[]) => Promise<Map<string, number | null>>;
   /**
    * Take `qty` units of a card HANDLE out of inventory, returning true when a
    * tracked unit was actually taken (false = untracked product, nothing to
-   * count). Injected for the same reason as getStock: inventory lives in
-   * Medusa's inventory module, reachable only through the container the JOB
-   * holds, and this module service stays container-free.
+   * count).
    *
-   * Without it, settlement read stock as a GATE and never reserved, so every
-   * winner entitled to the same card re-read the same pre-grant value and all
-   * of them were granted — N claims against one physical unit, with the counter
-   * still reading 1 and no operator signal. card-stock.ts states the rule the
-   * other way round ("a FULFILMENT COUNTER, not a gate"), and the pack-open
-   * path already decrements unconditionally for exactly this reason.
+   * Settlement NEVER reads stock as a gate (operator decision 2026-08-17): a
+   * prize card is granted whether or not units are on hand, exactly like the
+   * pack-open path, and the counter is allowed to go negative — a negative
+   * number is the units owed to winners that still need sourcing. See
+   * card-stock.ts ("a FULFILMENT COUNTER, not a gate") and
+   * decrement-card-stock.ts, which has decremented unconditionally since
+   * 2026-07-03.
    */
   decrementStock?: (handle: string, qty: number) => Promise<boolean>;
   /** Fired after each winner's transaction COMMITS — notifications, operator
@@ -501,7 +498,10 @@ export interface SettledWinner {
   credits: number;
   cardHandles: string[]; // granted — DISTINCT handles
   cardCount: number; // pulls actually minted (a handle repeats when qty > 1)
-  skippedCardIds: string[]; // recorded skipped_no_stock
+  /** Prize cards that could not be granted — the Card row (and with it the
+   *  handle a pull is keyed on) is gone. Stock is NOT a reason; see
+   *  SettleDeps.decrementStock. */
+  skippedCardIds: string[];
   /** Granted cards whose inventory units are not taken yet. Taken AFTER
    *  this winner's payout transaction commits — see reserveSettledStock. */
   reservations: { handle: string; qty: number; pullIds: string[] }[];
@@ -8123,7 +8123,6 @@ class PacksModuleService extends MedusaService({
         payout,
         handleById,
         snapshot,
-        getStock: deps.getStock,
       });
       if (!settled) continue;
       winners.push(settled);
@@ -8166,7 +8165,6 @@ class PacksModuleService extends MedusaService({
       payout: RankPayout;
       handleById: Map<string, string>;
       snapshot: SettleSnapshot;
-      getStock: (handles: string[]) => Promise<Map<string, number | null>>;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<SettledWinner | null> {
@@ -8270,8 +8268,12 @@ class PacksModuleService extends MedusaService({
       });
     }
 
-    // 3b) Cards — dedupe ids into (id, qty); resolve handle; stock-gate; mint
-    //     qty pulls or record skipped_no_stock (spec: no credit substitution).
+    // 3b) Cards — dedupe ids into (id, qty); resolve handle; mint qty pulls.
+    //     NO stock gate (operator decision 2026-08-17): a prize is granted
+    //     whether or not units are on hand, and the counter goes negative to
+    //     record what is owed. The only skip left is an unresolvable id — the
+    //     Card row was deleted between the prize-table save and settlement, so
+    //     there is no handle to key a pull on.
     const qtyById = new Map<string, number>();
     for (const id of payout.cardIds) {
       qtyById.set(id, (qtyById.get(id) ?? 0) + 1);
@@ -8280,43 +8282,25 @@ class PacksModuleService extends MedusaService({
     let cardCount = 0; // pulls minted, NOT distinct handles (qty can exceed 1)
     const skippedCardIds: string[] = [];
     const reservations: SettledWinner['reservations'] = [];
-    const handles = [...qtyById.keys()]
-      .map((id) => input.handleById.get(id))
-      .filter((h): h is string => Boolean(h));
-    const stockByHandle = handles.length
-      ? await input.getStock(handles)
-      : new Map<string, number | null>();
 
     for (const [cardId, qty] of qtyById) {
       const handle = input.handleById.get(cardId);
-      const stock = handle ? stockByHandle.get(handle) : undefined;
-      // In stock: tracked with >= qty available, or untracked (null). An
-      // unresolvable id (deleted card) or absent stock row = skipped.
-      const inStock =
-        Boolean(handle) &&
-        stockByHandle.has(handle!) &&
-        (stock === null || (stock !== undefined && stock >= qty));
 
       // qty copies = ONE createPulls call (one round-trip); every minted id is
       // kept — the row's scalar pull_id can only hold the first.
       let pullIds: string[] = [];
-      if (inStock) {
-        // The gate above is kept on purpose — an out-of-stock prize becoming a
-        // manual-fulfilment item is a product decision the job logs for an
-        // operator — but a gate that never decrements is the read-then-check
-        // race decrement-card-stock.ts:24-28 exists to avoid.
-        //
-        // The TAKE itself does not belong in this transaction. adjustInventory
+      if (handle) {
+        // The TAKE does not belong in this transaction. adjustInventory
         // is Medusa's inventory module on its own connection and commits
         // independently, so it cannot roll back with us: called from in here, a
         // later throw rolled the payout back while the take stood, and the next
         // hourly tick took the units again. reserveSettledStock runs it after
-        // this transaction commits — see there for why the race stays closed.
+        // this transaction commits — see there for why that is safe.
         const minted = await this.createPulls(
           Array.from({ length: qty }, () => ({
             customer_id: customerId,
             pack_id: challengePackId(weekStartIso),
-            card_id: handle!,
+            card_id: handle,
             order_id: null,
             rolled_at: new Date(),
             source: 'reward' as const,
@@ -8330,8 +8314,8 @@ class PacksModuleService extends MedusaService({
         );
         pullIds = minted.map((p) => p.id);
         cardCount += pullIds.length;
-        cardHandles.push(handle!);
-        reservations.push({ handle: handle!, qty, pullIds });
+        cardHandles.push(handle);
+        reservations.push({ handle, qty, pullIds });
       } else {
         skippedCardIds.push(cardId);
       }
@@ -8344,7 +8328,10 @@ class PacksModuleService extends MedusaService({
         credits: 0,
         credit_transaction_id: null,
         pull_id: pullIds[0] ?? null, // primary; full set in snapshot.pull_ids
-        status: inStock ? 'granted' : 'skipped_no_stock',
+        // The enum value keeps its historical name — it is a CHECK-backed
+        // column and renaming it is a two-release expand/contract for a label.
+        // It now means "not granted: no card row", never "no stock".
+        status: handle ? 'granted' : 'skipped_no_stock',
         // pull_ids always present (empty on skip) so the audit trail is
         // queryable without a key-exists check.
         snapshot: { ...input.snapshot, qty, pull_ids: pullIds },
@@ -8412,9 +8399,7 @@ class PacksModuleService extends MedusaService({
    * AGAIN, every hour for the ~168 ticks weeksBack:1 keeps the week in scope.
    *
    * Post-commit the winner is in settledCustomers for good, so this runs at
-   * most once per winner. The read-then-check race the take was added for stays
-   * closed: the winner loop is sequential and awaits, so the next winner's
-   * getStock read sees this take.
+   * most once per winner.
    *
    * Failures are logged and bounded, never thrown — the payout is already
    * committed and must not be undone over a counter. Both directions are
@@ -8452,6 +8437,166 @@ class PacksModuleService extends MedusaService({
         );
       }
     }
+  }
+
+  /**
+   * Grant the prize cards past settlements refused over stock.
+   *
+   * The stock gate is gone (2026-08-17), but the weeks it already skipped do
+   * NOT self-heal: settleChallengeWeek's re-entry gate is per CUSTOMER, built
+   * from payout rows, so a winner who was paid credits and denied a card is
+   * permanently outside it. This mints what they are owed, through the same
+   * path settlement uses.
+   *
+   * Idempotent by selector: a granted row no longer matches, so re-running is a
+   * no-op. `weekStart` narrows to one week; omitted, every outstanding row.
+   * Bounded at 1000 rows per run, and that is not a silent cap for the same
+   * reason: granted rows drop out of the selector, so a re-run takes the next
+   * batch.
+   * A row whose card is genuinely gone (no Card, hence no handle) stays
+   * skipped — that is the one case the status now means.
+   *
+   * Deliberately NOT wired into the hourly job: once the gate is gone nothing
+   * new lands here, and a permanent sweep would be fresh logic in a money path.
+   * Run it from scripts/grant-skipped-challenge-cards.ts.
+   *
+   * No WP ledger row and no notification: settlement already wrote both for
+   * these winners under `challenge:<week>:<customer>` (recordLedgerEntry
+   * dedupes on (type, ref_id), and the feed key is the same), so the cards
+   * simply appear in the vault. The WP payload's `value` is 0 either way, so
+   * nothing is lost by not restating it.
+   */
+  @InjectManager()
+  async grantSkippedChallengeCards(
+    input: {
+      weekStart?: Date;
+      decrementStock?: (handle: string, qty: number) => Promise<boolean>;
+    } = {},
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ granted: number; pulls: number; stillSkipped: string[] }> {
+    const rows = await this.listChallengePayouts(
+      {
+        status: 'skipped_no_stock',
+        kind: 'card',
+        ...(input.weekStart ? { week_start: input.weekStart } : {}),
+      },
+      {
+        select: ['id', 'week_start', 'customer_id', 'card_id', 'snapshot'],
+        take: 1000,
+      },
+      sharedContext,
+    );
+    if (rows.length === 0) return { granted: 0, pulls: 0, stillSkipped: [] };
+
+    const cardIds = [...new Set(rows.map((r) => r.card_id))];
+    const cards = await this.listCards(
+      { id: cardIds },
+      { select: ['id', 'handle'], take: cardIds.length },
+      sharedContext,
+    );
+    const handleById = new Map(cards.map((c) => [c.id, c.handle]));
+
+    let granted = 0;
+    let pulls = 0;
+    const stillSkipped: string[] = [];
+    for (const row of rows) {
+      const handle = handleById.get(row.card_id);
+      if (!handle) {
+        stillSkipped.push(row.id);
+        continue;
+      }
+      const qty = Number((row.snapshot as { qty?: number })?.qty ?? 1) || 1;
+      const weekStartIso = new Date(row.week_start).toISOString();
+      // Per row, its own transaction — one card that cannot mint must not roll
+      // back the ones already handed over (promoteDueChallengeSchedules rule).
+      const pullIds = await this.grantOneSkippedChallengeCard({
+        rowId: row.id,
+        customerId: row.customer_id,
+        handle,
+        qty,
+        weekStartIso,
+      });
+      if (pullIds.length === 0) continue;
+      granted += 1;
+      pulls += pullIds.length;
+      // Take the units AFTER the grant committed, for the same reason
+      // reserveSettledStock does — see there.
+      await this.reserveSettledStock(
+        {
+          customerId: row.customer_id,
+          rank: 0,
+          credits: 0,
+          cardHandles: [handle],
+          cardCount: pullIds.length,
+          skippedCardIds: [],
+          reservations: [{ handle, qty, pullIds }],
+        },
+        input.decrementStock,
+        weekStartIso,
+      );
+    }
+    return { granted, pulls, stillSkipped };
+  }
+
+  /** One skipped payout row: mint its pulls and flip it granted, atomically.
+   *  Returns the minted pull ids ([] when the row stopped being skipped between
+   *  the caller's list and this transaction — a concurrent run got it). */
+  @InjectTransactionManager()
+  protected async grantOneSkippedChallengeCard(
+    input: {
+      rowId: string;
+      customerId: string;
+      handle: string;
+      qty: number;
+      weekStartIso: string;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<string[]> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    // Claimed under FOR UPDATE, not merely re-read (promoteOneChallengeSchedule's
+    // reasoning): the caller's list and this transaction are two separate
+    // reads, so two runs of the script could otherwise both see
+    // `skipped_no_stock` and both mint — the winner would end up with double
+    // the pulls, and the second update would silently overwrite the first
+    // one's pull_ids. A concurrent run blocks here, then reads 'granted' and
+    // returns empty.
+    const [fresh] = await em.execute<{ id: string; snapshot: unknown }[]>(
+      `SELECT id, snapshot FROM challenge_payout
+         WHERE id = ? AND status = 'skipped_no_stock' AND deleted_at IS NULL
+           FOR UPDATE`,
+      [input.rowId],
+    );
+    if (!fresh) return [];
+
+    const minted = await this.createPulls(
+      Array.from({ length: input.qty }, () => ({
+        customer_id: input.customerId,
+        pack_id: challengePackId(input.weekStartIso),
+        card_id: input.handle,
+        order_id: null,
+        rolled_at: new Date(),
+        source: 'reward' as const,
+        stock_earmarked: false, // flipped only if a unit is really taken
+      })),
+      sharedContext,
+    );
+    const pullIds = minted.map((p) => p.id);
+    await this.updateChallengePayouts(
+      {
+        selector: { id: input.rowId, status: 'skipped_no_stock' },
+        data: {
+          status: 'granted',
+          pull_id: pullIds[0] ?? null,
+          snapshot: {
+            ...((fresh.snapshot ?? {}) as Record<string, unknown>),
+            pull_ids: pullIds,
+            granted_late: true,
+          },
+        },
+      },
+      sharedContext,
+    );
+    return pullIds;
   }
 
   // One-shot backfill for the recorded-pull-value follow-up (spec 2026-07-19

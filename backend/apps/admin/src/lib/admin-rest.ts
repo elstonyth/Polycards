@@ -998,6 +998,9 @@ export interface ChallengeWinnerDTO {
     image: string | null;
     qty: number;
     status: string;
+    /** Card row no longer exists. On a skipped row this separates the
+     *  stock-era backlog (retro-grantable) from a genuinely manual one. */
+    card_missing: boolean;
   }[];
   pool_myr: number | null;
   unlocked_stages: number[];

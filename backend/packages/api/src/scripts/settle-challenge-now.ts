@@ -6,8 +6,9 @@
  * manual-settlement tool for the accepted multi-week-outage limitation: the
  * job (and this script) settle only the MOST RECENTLY ENDED week, so a week
  * missed because the backend was down across a whole reset must be settled by
- * hand from the challenge_payout audit trail — and any `skipped_no_stock`
- * rows are the operator's manual-fulfillment queue.
+ * hand from the challenge_payout audit trail. Stock never blocks a grant; a
+ * `skipped_no_stock` row now only means the prize Card row is gone (run
+ * grant-skipped-challenge-cards.ts for rows written under the old gate).
  *
  * RUN (DB reachable):
  *   corepack yarn medusa exec ./src/scripts/settle-challenge-now.ts
@@ -20,7 +21,7 @@ import { ExecArgs } from '@medusajs/framework/types';
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import PacksModuleService from '../modules/packs/service';
 import { PACKS_MODULE } from '../modules/packs';
-import { getCardStockByHandle } from '../modules/packs/card-stock';
+import { takeCardStock } from '../modules/packs/card-stock';
 
 export default async function settleChallengeNow({
   container,
@@ -29,7 +30,7 @@ export default async function settleChallengeNow({
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
 
   const result = await packs.settleChallengeWeek({
-    getStock: (handles) => getCardStockByHandle(container, handles),
+    decrementStock: takeCardStock(container),
   });
 
   logger.info(`[settle-challenge-now] ${JSON.stringify(result, null, 2)}`);

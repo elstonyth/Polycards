@@ -973,10 +973,19 @@ const ScheduleTab = () => {
 // What the weekly settlement actually paid, and what it could not. Read-only:
 // settlement owns these rows, and nothing here marks, resends or exports.
 //
-// The out-of-stock half is why this exists. A prize card the settlement could
+// The not-granted half is why this exists. A prize card the settlement could
 // not grant is recorded `skipped_no_stock` and then mentioned once, in a job
 // log, which nobody reads — so the spec's "manual fulfilment queue" had no
 // queue. This is it.
+//
+// Stock is NO LONGER a reason to skip (2026-08-17): prizes are granted whether
+// or not units are on hand and the counter goes negative to record what is
+// owed. The enum value keeps its old name (CHECK-backed column) and now spans
+// both eras, so the banner splits them on `card_missing` (see the winners
+// route): a skipped row whose card still exists is a STOCK-ERA row the
+// retro-grant script can hand over, and only a row whose Card is gone is
+// really manual. Telling an operator to ship 9 cards by hand when one command
+// would grant them is the failure this split exists to avoid.
 const WinnersTab = () => {
   const [week, setWeek] = useState('');
   const { data, isError } = useChallengeWinners(week);
@@ -991,6 +1000,15 @@ const WinnersTab = () => {
   const weeks = data.weeks;
   const summary = weeks.find((w) => w.weekStart === data.week);
   const tz = settings?.timezone;
+  // Counted off the rendered rows rather than the week aggregate: only the rows
+  // carry `card_missing`, and the aggregate cannot answer which half a skip
+  // belongs to. Both reads cover the same week (the route caps at 200 rows,
+  // far above ten ranks).
+  const skippedCards = data.winners.flatMap((w) =>
+    w.cards.filter((c) => c.status === 'skipped_no_stock'),
+  );
+  const missingCount = skippedCards.filter((c) => c.card_missing).length;
+  const grantableCount = skippedCards.length - missingCount;
   const weekLabel = (iso: string) =>
     tz ? describeInShopZone(new Date(iso), tz) : orderDateTime(iso);
 
@@ -1025,15 +1043,33 @@ const WinnersTab = () => {
         )}
       </div>
 
-      {summary && summary.skipped > 0 && (
-        // The one line on this page that needs an operator: these cards were
-        // won and never granted, so somebody has to ship them by hand.
+      {skippedCards.length > 0 && (
+        // The one block on this page that needs an operator. Two different
+        // asks, so they are two different sentences: one is a command to run,
+        // the other is a package to pack.
         <div className="border-ui-border-error rounded-lg border p-3">
           <Text className="text-ui-fg-error" size="small">
-            {summary.skipped} prize card
-            {summary.skipped > 1 ? 's were' : ' was'} out of stock at settlement
-            and never granted — fulfil by hand. Marked below.
+            {skippedCards.length} prize card
+            {skippedCards.length > 1 ? 's were' : ' was'} won and never granted.
+            Marked below.
           </Text>
+          {grantableCount > 0 && (
+            <Text className="text-ui-fg-subtle" size="small">
+              {grantableCount} still {grantableCount > 1 ? 'have' : 'has'} its
+              card in the catalog — settled before prizes stopped being
+              stock-gated. Hand them over with{' '}
+              <code>
+                yarn medusa exec ./src/scripts/grant-skipped-challenge-cards.ts
+              </code>
+              .
+            </Text>
+          )}
+          {missingCount > 0 && (
+            <Text className="text-ui-fg-subtle" size="small">
+              {missingCount} lost {missingCount > 1 ? 'their' : 'its'} card row
+              and cannot be minted — fulfil by hand.
+            </Text>
+          )}
         </div>
       )}
 
@@ -1093,8 +1129,12 @@ const WinnersTab = () => {
                               </Text>
                             )}
                             {c.status === 'skipped_no_stock' && (
-                              <StatusBadge color="red">
-                                Out of stock
+                              <StatusBadge
+                                color={c.card_missing ? 'red' : 'orange'}
+                              >
+                                {c.card_missing
+                                  ? 'Card missing'
+                                  : 'Not granted — retro-grant'}
                               </StatusBadge>
                             )}
                           </div>
