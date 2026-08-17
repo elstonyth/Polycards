@@ -58,6 +58,17 @@ const toAuthCustomer = (
 
 // Known backend errors → friendly copy (patterns local to auth; never raw).
 const AUTH_RULES: ErrorRule[] = [
+  // One phone = one account (the signup gate in
+  // backend/packages/api/src/api/utils/phone-verification-guard.ts). Normally
+  // caught a step earlier at the OTP check, so this fires only when the number
+  // was claimed inside the proof's 10-minute window — rare, and the copy has to
+  // name the phone or they retry the same number forever. Pattern is kept tight
+  // for the reason the disabled-account rule states below; order against the
+  // email rule is not load-bearing (neither message matches the other).
+  [
+    /phone number is already in use/i,
+    'This phone number is already registered to another account. Log in instead, or use a different number.',
+  ],
   [
     /already exists/i,
     'An account with this email already exists. Sign in with your password instead.',
