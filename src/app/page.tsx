@@ -13,9 +13,15 @@ import TheGame from '@/components/home/TheGame';
 import FinalCta from '@/components/home/FinalCta';
 
 // Pack catalog + live pulls come fresh from the backend on every request.
+//
+// Do NOT add `export const fetchCache` here. `force-dynamic` leaves the Data
+// Cache alone, which is what lets getPackChase hold the chase lookups below;
+// a 'force-no-store' fetchCache makes unstable_cache skip its read and silently
+// puts all N pack-detail payloads back on every render, with nothing failing.
 export const dynamic = 'force-dynamic';
 
-/** How many shelf tiles get a per-pack top-chase lookup (one request each). */
+/** How many shelf tiles get a per-pack top-chase lookup (a cache read each —
+ *  see getPackChase; one backend request each only on a cold miss). */
 const CHASE_LOOKUPS = 16;
 
 export default async function HomePage() {
