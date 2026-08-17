@@ -24,9 +24,8 @@ import {
   adminToken,
   adminGetDeliveryOrder,
 } from './helpers/api';
+import { fundFor, primaryPack } from './helpers/catalog';
 import { ensureAdmin } from './helpers/admin';
-
-const PACK = 'pokemon-rookie';
 
 // Operator-facing status labels — what the Manage modal's Select actually
 // renders. Keep in step with backend/apps/admin/src/lib/format.ts.
@@ -61,8 +60,9 @@ test.describe('admin ship-orders workflow', () => {
     page,
   }) => {
     // --- Precondition (API): a fresh customer with one 'requested' delivery order.
-    const cust = await createCustomer(100);
-    await openPack(cust.token, PACK); // auto-vaults the pull
+    const pack = await primaryPack();
+    const cust = await createCustomer(fundFor(pack));
+    await openPack(cust.token, pack.slug); // auto-vaults the pull
     const pullId = await firstVaultPullId(cust.token);
     const addressId = await createAddress(
       cust.token,

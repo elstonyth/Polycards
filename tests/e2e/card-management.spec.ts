@@ -21,6 +21,7 @@ import {
   setMembers,
   setOdds,
 } from './helpers/api';
+import { primaryPack } from './helpers/catalog';
 import {
   ensureAdmin,
   registerCardFromInventory,
@@ -29,10 +30,12 @@ import {
 
 const PRODUCT_TITLE = 'PW Test Eligible Card';
 const CARD_HANDLE = 'pw-test-card';
-const POOL_PACK = 'pokemon-rookie';
 const BIG_FMV = 99_999;
 
 let admin: string;
+// The real entry pack, resolved live — the card is temporarily added to its
+// pool and removed again in the `finally` below.
+let POOL_PACK = '';
 // The eligibility re-check below verifies the lifecycle test's cleanup. The
 // lifecycle test hard-fails (not skips) when its fixture is missing, and its
 // `finally` block restores the pool + deletes the card even on failure, so
@@ -40,6 +43,7 @@ let admin: string;
 
 test.beforeAll(async () => {
   admin = await adminToken();
+  POOL_PACK = (await primaryPack()).slug;
   // Clean slate: deleting the card (if a prior run left it) makes the product
   // eligible to register again.
   await deleteCardIfExists(admin, CARD_HANDLE);

@@ -4,6 +4,7 @@
 import { test, expect } from '@playwright/test';
 import { ADMIN, stamp } from './helpers/constants';
 import { adminToken, api, createCustomer, openPack } from './helpers/api';
+import { fundFor, primaryPack } from './helpers/catalog';
 import { ensureAdmin, createPack } from './helpers/admin';
 
 test.describe('admin workflow', () => {
@@ -41,7 +42,7 @@ test.describe('admin workflow', () => {
       slug,
       title,
       price: 30,
-      imageUrl: '/cdn/packs/pokemon-rookie.webp',
+      imageUrl: '/images/polycards/bronze-pack.webp',
     });
 
     // Appears in the list UI…
@@ -96,8 +97,9 @@ test.describe('admin workflow', () => {
     // removed the seed's demo pulls and this spec can run before any
     // pack-opening spec — so open one pack up front. An API open auto-vaults
     // the pull, giving it the "In vault" status the ledger asserts below.
-    const cust = await createCustomer(100);
-    await openPack(cust.token, 'pokemon-rookie');
+    const pack = await primaryPack();
+    const cust = await createCustomer(fundFor(pack));
+    await openPack(cust.token, pack.slug);
 
     // The standalone "/pulls" page was retired ATOMICALLY in #271 (POLYCARD-BACK
     // epic 2, spec D6, commit 87c7e148): the ledger relocated into the Customer
