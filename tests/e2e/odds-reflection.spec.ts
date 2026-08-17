@@ -26,20 +26,22 @@ import {
   type OddsRow,
 } from './helpers/api';
 import { ensureAdmin, forceCardTo100ViaUI } from './helpers/admin';
-import { fundFor, twoPacks, type TestPack } from './helpers/catalog';
+import { fundFor, mutationPacks, type TestPack } from './helpers/catalog';
 
 const OPENS = 3;
 
 let admin: string;
 let customer: CustomerCreds;
-// The two cheapest REAL packs — resolved from the live catalog, so this spec
-// follows a price change instead of breaking on one.
+// Two REAL packs, resolved from the live catalog so this spec follows a price
+// change instead of breaking on one. NOT the pack the rest of the suite opens:
+// this spec rewrites win rates, and a crash before its `finally` restore would
+// otherwise leave every later spec opening a rigged pack.
 let packA: TestPack;
 let packB: TestPack;
 
 test.beforeAll(async () => {
   admin = await adminToken();
-  [packA, packB] = await twoPacks();
+  [packA, packB] = await mutationPacks();
   // Enough for OPENS opens of BOTH packs, derived from their live prices.
   customer = await createCustomer(
     fundFor(packA, OPENS) + fundFor(packB, OPENS),

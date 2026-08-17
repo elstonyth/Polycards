@@ -90,11 +90,22 @@ function assertLocalDatabase(): void {
     'postgres',
     'host.docker.internal',
   ];
-  if (host && local.includes(host)) return;
+  const why = !host
+    ? "DATABASE_URL is unset or unparseable — can't prove the target is local"
+    : !local.includes(host)
+      ? `DATABASE_URL host '${host}' is not local`
+      : // Second, independent condition. `medusa build` compiles this script into
+        // the production bundle, so the guard is reachable from a prod shell —
+        // and a hostname check alone is satisfied by an SSH tunnel or a
+        // port-forward, which make a remote database look like 127.0.0.1.
+        /^prod/i.test(process.env.NODE_ENV ?? '')
+        ? `NODE_ENV is '${process.env.NODE_ENV}'`
+        : '';
+  if (!why) return;
   throw new Error(
-    `[e2e] REFUSING to seed: DATABASE_URL host '${host || '(unset)'}' is not local. ` +
-      'This fixture writes to the real pack slugs (bronze-pack…diamond-pack) and ' +
-      'would overwrite a live catalog. Point DATABASE_URL at a local/throwaway DB.',
+    `[e2e] REFUSING to seed: ${why}. This fixture writes to the REAL pack slugs ` +
+      '(bronze-pack…diamond-pack) and would overwrite a live catalog. Point ' +
+      'DATABASE_URL at a local/throwaway DB and run outside NODE_ENV=production.',
   );
 }
 
@@ -154,11 +165,20 @@ export default async function seedE2eFixtures({
     grader: c.grader,
     grade: c.grade,
     market_value: usdFromDisplayMyr(c.display_myr, fxRate),
+    // The divisor above assumes the default multiplier, so write it too: a
+    // pre-existing card carrying a custom multiplier would otherwise render at
+    // usd x fx x <custom>, i.e. NOT the production figure this mirror exists to
+    // reproduce (the store route reads market_multiplier at request time).
+    market_multiplier: DEFAULT_MARKET_MULTIPLIER,
     image: c.image,
     // Prod's baked slab composite (a public CDN URL) — reused as-is so the
     // slab rendering path is exercised without running the bake, which would
     // hit the localhost-SSRF guard in CI.
     slab_image: c.slab_image,
+    // The key is the handle of the file a re-bake would DELETE. It belongs to
+    // the composite we just replaced, so leaving it would point a local re-bake
+    // at the wrong file.
+    slab_image_key: null,
     pokemon_dex: c.pokemon_dex,
     sprite_image: c.sprite_image,
     // Gacha-pool only: this fixture creates no backing Medusa product, and
@@ -181,8 +201,6 @@ export default async function seedE2eFixtures({
   if (cardsToCreate.length > 0) {
     await packs.createCards(cardsToCreate);
     logger.info(`[e2e] Seeded ${cardsToCreate.length} prod card(s).`);
-  } else if (cardsToSync.length === 0) {
-    logger.info('[e2e] Cards already present, skipping.');
   }
 
   // --- Packs (the real 5, active) ------------------------------------------
@@ -228,6 +246,10 @@ export default async function seedE2eFixtures({
     buyback_percent: p.buyback_percent,
     rank: p.rank,
     status: 'active' as const,
+    // helpers/catalog.ts filters on in_stock, so an out-of-stock flag left over
+    // on a dev DB would silently promote the NEXT pack to "the one the specs
+    // open" and double every funding amount in the suite.
+    in_stock: true,
   });
 
   const packsToCreate = allPacks
@@ -292,35 +314,75 @@ export default async function seedE2eFixtures({
   // Idempotency is keyed per (pack, card), not per pack: a partial failure that
   // created only some of a pack's odds rows must be backfilled on re-run, not
   // skipped because the pack already has *an* odds row.
+  const ODDS_SCAN = 5000;
   const existingOdds = await packs.listPackOdds(
     { pack_id: packSlugs },
     // No cap tied to the mirror's size: the point of the read is to find rows
     // that AREN'T in the mirror, and a take of exactly the mirror size would
     // hide the extras it needs to see.
-    { select: ['id', 'pack_id', 'card_id'], take: 5000 },
+    { select: ['id', 'pack_id', 'card_id'], take: ODDS_SCAN },
   );
+  if (existingOdds.length === ODDS_SCAN) {
+    // A truncated read under-prunes AND then collides on the (pack, card)
+    // unique index when the create runs. Say so instead of failing cryptically.
+    logger.warn(
+      `[e2e] Odds scan hit its ${ODDS_SCAN}-row cap — the pool sync is ` +
+        'incomplete. Raise ODDS_SCAN.',
+    );
+  }
   const oddsKey = (packId: string, cardId: string): string =>
     `${packId}::${cardId}`;
-  const haveOdds = new Set(
-    existingOdds.map((o) => oddsKey(o.pack_id, o.card_id ?? '')),
+  const oddsIdByKey = new Map(
+    existingOdds
+      .filter((o) => o.card_id != null)
+      .map((o) => [oddsKey(o.pack_id, o.card_id as string), o.id]),
   );
+  // The snapshot types rarity as a plain string (it is scraped); narrow it here
+  // so an unknown tier degrades to Common instead of writing a row the odds
+  // engine can't weight.
+  const oddsFields = (rawRarity: string) => {
+    const rarity: OddsRarity =
+      rawRarity in RARITY_WEIGHT ? (rawRarity as OddsRarity) : 'Common';
+    return {
+      rarity,
+      weight: RARITY_WEIGHT[rarity],
+      // The reset half of the sync. odds-reflection.spec locks a card at 100%
+      // and restores in a `finally` — but a crash, a Ctrl-C or a failing
+      // restore leaves the pack rigged, and if a re-seed did not clear this the
+      // rigged state would survive every later run with nothing pointing at the
+      // cause. weight_2/3 are NULL = "inherit the previous set".
+      locked: false,
+      weight_2: null,
+      weight_3: null,
+    };
+  };
   const oddsToCreate = allPacks.flatMap((pack) =>
     pack.cards
-      .filter((c) => !haveOdds.has(oddsKey(pack.slug, c.handle)))
-      .map((c) => {
-        // The snapshot types rarity as a plain string (it is scraped); narrow it
-        // here so an unknown tier degrades to Common instead of writing a row
-        // the odds engine can't weight.
-        const rarity: OddsRarity =
-          c.rarity in RARITY_WEIGHT ? (c.rarity as OddsRarity) : 'Common';
-        return {
-          pack_id: pack.slug,
-          card_id: c.handle,
-          rarity,
-          weight: RARITY_WEIGHT[rarity],
-        };
-      }),
+      .filter((c) => !oddsIdByKey.has(oddsKey(pack.slug, c.handle)))
+      .map((c) => ({
+        pack_id: pack.slug,
+        card_id: c.handle,
+        ...oddsFields(c.rarity),
+      })),
   );
+  // Sync the rows that already exist — without this the pool is only ever
+  // added to, so a tier that moved in prod (or a win rate a spec left behind)
+  // is never corrected and the "mirror" quietly stops being one.
+  const oddsToSync = allPacks.flatMap((pack) =>
+    pack.cards
+      .filter((c) => oddsIdByKey.has(oddsKey(pack.slug, c.handle)))
+      .map((c) => ({
+        id: oddsIdByKey.get(oddsKey(pack.slug, c.handle))!,
+        ...oddsFields(c.rarity),
+      })),
+  );
+  if (oddsToSync.length > 0) {
+    await packs.updatePackOdds(oddsToSync);
+    logger.info(
+      `[e2e] Reset ${oddsToSync.length} existing pool row(s) to the mirror's ` +
+        'tiers and weights (clears any win-rate a spec left behind).',
+    );
+  }
   // Prune what prod does not have. A mirrored pack whose pool still carries the
   // old local fixture cards is not a mirror — the extra cards change every
   // pull's odds, the rarity mix and the buyback expectation. Only pool rows are
@@ -341,8 +403,6 @@ export default async function seedE2eFixtures({
   if (oddsToCreate.length > 0) {
     await packs.createPackOdds(oddsToCreate);
     logger.info(`[e2e] Seeded ${oddsToCreate.length} pack-odds row(s).`);
-  } else if (oddsToDrop.length === 0) {
-    logger.info('[e2e] Pack odds already present, skipping.');
   }
 
   // --- Eligible inventory product (card-management.spec.ts) ----------------

@@ -21,7 +21,7 @@
 // not JSON, so `medusa exec` compiles it in like vip-levels.data.ts — no runtime
 // file reads and no build-copy step to forget).
 
-import { writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -128,10 +128,13 @@ function gradeOf(handle) {
 }
 
 /** Card set, best-effort from the printed number suffix ("#290/SM-P" -> SM-P).
- *  Display-only in the fixture; no test asserts on it. */
+ *  Empty when the name carries no set — Card.set is NOT NULL but '' is a valid
+ *  "unknown" (the same convention Card.grader uses for a raw card). A synthetic
+ *  placeholder would be a made-up value inside a file whose whole premise is
+ *  fidelity, and it renders on the slab label. */
 function setOf(name) {
   const m = /#[^/\s]*\/([A-Za-z0-9-]+)/.exec(name ?? '');
-  return m ? m[1].toUpperCase() : 'Prod Snapshot';
+  return m ? m[1].toUpperCase() : '';
 }
 
 /** STRATIFIED sample: keep prod's tier PROPORTIONS, with >=1 of every tier the
@@ -198,10 +201,22 @@ async function main() {
 
   const cards = new Map(); // handle -> card (deduped across packs)
   const packRows = [];
+  let ungraded = 0;
 
   for (const pack of packs) {
     const detail = flightText(await get(`${BASE}/slots/${pack.id}`));
     const pool = arrayField(detail, 'pool') ?? [];
+    // An empty pool must NOT be written out. The seed would create the pack
+    // active with no prize rows: it lists in /store/packs, is picked as the
+    // cheapest if it happens to be bronze, and then every open fails at roll
+    // time — a broken mirror that looks like a successful snapshot.
+    if (pool.length === 0) {
+      throw new Error(
+        `no prize pool parsed for '${pack.id}' — either the pack is genuinely ` +
+          'empty on prod, or the storefront markup changed. Refusing to write a ' +
+          'snapshot with an unopenable pack.',
+      );
+    }
     const sampled = samplePool(pool, PER_PACK);
     console.log(
       `[snapshot]   ${pack.id}: pool ${pool.length} -> ${sampled.length} sampled`,
@@ -210,6 +225,10 @@ async function main() {
     for (const c of sampled) {
       if (!cards.has(c.id)) {
         const { grader, grade } = gradeOf(c.id);
+        // A handle the grade regex misses becomes a RAW card locally (no PSA-10
+        // guarantee badge, different composition group) — quiet enough to be
+        // mistaken for prod truth, so count it.
+        if (!grader) ungraded++;
         cards.set(c.id, {
           handle: c.id,
           name: c.name,
@@ -251,6 +270,19 @@ async function main() {
 // seeded card renders the same RM as production.
 `;
 
+  // Only re-stamp the capture time when the catalog actually moved. Otherwise
+  // every re-run produces a diff, and "did prod change?" stops being answerable
+  // from the diff — which is the one question this file exists to answer.
+  const cardsJson = JSON.stringify([...cards.values()], null, 2);
+  const packsJson = JSON.stringify(packRows, null, 2);
+  const previous = existsSync(OUT) ? readFileSync(OUT, 'utf8') : '';
+  const unchanged =
+    previous.includes(cardsJson) && previous.includes(packsJson);
+  const capturedAt = unchanged
+    ? (/PROD_CATALOG_CAPTURED_AT = "([^"]+)"/.exec(previous)?.[1] ??
+      new Date().toISOString())
+    : new Date().toISOString();
+
   const body = `${banner}
 export interface ProdCatalogCard {
   handle: string;
@@ -277,17 +309,19 @@ export interface ProdCatalogPack {
 }
 
 /** ISO timestamp of the snapshot, for staleness triage. */
-export const PROD_CATALOG_CAPTURED_AT = ${JSON.stringify(new Date().toISOString())};
+export const PROD_CATALOG_CAPTURED_AT = ${JSON.stringify(capturedAt)};
 export const PROD_CATALOG_SOURCE = ${JSON.stringify(BASE)};
 
-export const PROD_CARDS: ProdCatalogCard[] = ${JSON.stringify([...cards.values()], null, 2)};
+export const PROD_CARDS: ProdCatalogCard[] = ${cardsJson};
 
-export const PROD_PACKS: ProdCatalogPack[] = ${JSON.stringify(packRows, null, 2)};
+export const PROD_PACKS: ProdCatalogPack[] = ${packsJson};
 `;
 
   writeFileSync(OUT, body, 'utf8');
   console.log(
-    `[snapshot] wrote ${OUT}\n[snapshot] ${packRows.length} packs, ${cards.size} unique cards`,
+    `[snapshot] wrote ${OUT}\n[snapshot] ${packRows.length} packs, ` +
+      `${cards.size} unique cards, ${ungraded} with an unparsed grade` +
+      (unchanged ? ' (catalog unchanged — kept the previous timestamp)' : ''),
   );
 }
 

@@ -5,16 +5,17 @@ all three live surfaces: storefront `:4000`, admin dashboard `:7000`, backend `:
 
 ## The suite runs on a mirror of the PRODUCTION catalog
 
-No spec hardcodes a pack slug or a top-up amount any more. The catalog under test
+No active spec hardcodes a pack slug or a top-up amount any more (the skipped
+`rewards.spec.ts` keeps a default for the suspended `/vip` surface). The catalog under test
 is a snapshot of what polycards.gg actually serves — the same five tier packs
 (`bronze-pack` … `diamond-pack`), the same prices, and real cards with real
 names, art, tiers and prices:
 
-| Piece                                           | Role                                                                                                                                                                                               |
-| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `scripts/snapshot-prod-catalog.mjs` (repo root) | Read-only pull of the live catalog from the public storefront pages → `backend/packages/api/src/scripts/prod-catalog.data.ts`.                                                                     |
-| `seed:e2e` (`seed-e2e-fixtures.ts`)             | Installs that snapshot locally: packs synced to prod's price/art/buyback, cards created, pools rebuilt, off-catalog packs retired to draft. **Refuses to run against a non-local `DATABASE_URL`.** |
-| `helpers/catalog.ts`                            | `primaryPack()` / `twoPacks()` / `fundFor()` — specs resolve the pack and its funding from the live `GET /store/packs`.                                                                            |
+| Piece                                           | Role                                                                                                                                                                                                                                                                              |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scripts/snapshot-prod-catalog.mjs` (repo root) | Read-only pull of the live catalog from the public storefront pages → `backend/packages/api/src/scripts/prod-catalog.data.ts`.                                                                                                                                                    |
+| `seed:e2e` (`seed-e2e-fixtures.ts`)             | Installs that snapshot locally: packs and cards synced to prod's price/art/buyback, pool rows created, reset to the mirror's tiers/weights, and pruned; off-catalog packs retired to draft. **Refuses to run against a non-local `DATABASE_URL` or under `NODE_ENV=production`.** |
+| `helpers/catalog.ts`                            | `primaryPack()` / `mutationPacks()` / `fundFor()` — specs resolve the pack and its funding from the live `GET /store/packs`. Odds-mutating specs get packs the read-only specs never open, so a failed restore can't poison the suite.                                            |
 
 Refresh the mirror after an operator changes the prod catalog:
 

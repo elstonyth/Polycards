@@ -65,12 +65,17 @@ export async function primaryPack(): Promise<TestPack> {
   return (await catalog())[0]!;
 }
 
-/** Two DISTINCT packs (cheapest first) — odds-reflection drives one per surface.
- *  Falls back to the same pack twice only if the catalog has exactly one, which
- *  the seed guard already treats as a broken seed. */
-export async function twoPacks(): Promise<[TestPack, TestPack]> {
+/** Two DISTINCT packs for the specs that MUTATE a pack's odds.
+ *
+ *  Deliberately NOT the primary pack: odds-reflection locks a card at 100% and
+ *  restores in a `finally`, so a crash between those two points leaves the pack
+ *  rigged. Keeping the mutators off the pack every other spec opens confines
+ *  that blast radius to packs nothing else reads. (A re-seed also resets pool
+ *  weights now, so this is the second line of defence, not the only one.)
+ *  Falls back toward the front only on a catalog too small to isolate. */
+export async function mutationPacks(): Promise<[TestPack, TestPack]> {
   const packs = await catalog();
-  return [packs[0]!, packs[1] ?? packs[0]!];
+  return [packs[1] ?? packs[0]!, packs[2] ?? packs[1] ?? packs[0]!];
 }
 
 /** RM needed to open `pack` `opens` times, with headroom for the buyback/fee

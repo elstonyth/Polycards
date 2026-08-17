@@ -33,7 +33,7 @@ export interface ProdCatalogPack {
 }
 
 /** ISO timestamp of the snapshot, for staleness triage. */
-export const PROD_CATALOG_CAPTURED_AT = "2026-08-17T07:31:26.315Z";
+export const PROD_CATALOG_CAPTURED_AT = "2026-08-17T09:04:27.228Z";
 export const PROD_CATALOG_SOURCE = "https://polycards.gg";
 
 export const PROD_CARDS: ProdCatalogCard[] = [
@@ -64,7 +64,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "reshiram-ex-166-psa-10-10026819",
     "name": "Reshiram ex #166",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 2451.6,
@@ -76,7 +76,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "pikachu-205-psa-10-4447679",
     "name": "Pikachu #205",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 2378.05,
@@ -100,7 +100,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "team-rocket-s-moltres-ex-124-psa-10-9090613",
     "name": "Team Rocket's Moltres ex #124",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 906.41,
@@ -112,7 +112,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "glaceon-vstar-gg40-psa-10-4637096",
     "name": "Glaceon VSTAR #GG40",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 882.58,
@@ -124,7 +124,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "pikachu-zekrom-gx-41-psa-10-4118507",
     "name": "Pikachu & Zekrom GX #41",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 851.1,
@@ -136,7 +136,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "mega-latias-ex-88-psa-10-10117332",
     "name": "Mega Latias Ex #88",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 453.55,
@@ -148,7 +148,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "eevee-ex-224-psa-10-8054200",
     "name": "Eevee Ex #224",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 448.3,
@@ -160,7 +160,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "keldeo-ex-169-psa-10-9692268",
     "name": "Keldeo Ex #169",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 441.93,
@@ -172,7 +172,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "mega-clefable-ex-112-psa-10-11760300",
     "name": "Mega Clefable ex #112",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 429.03,
@@ -184,7 +184,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "sawsbuck-92-psa-10-9683082",
     "name": "Sawsbuck #92",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 390.88,
@@ -196,7 +196,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "lillipup-153-psa-10-9688434",
     "name": "Lillipup #153",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 327.93,
@@ -208,7 +208,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "drampa-83-psa-10-6281530",
     "name": "Drampa #83",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 294.19,
@@ -220,7 +220,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "sprigatito-75-psa-10-4947432",
     "name": "Sprigatito #75",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 274.58,
@@ -232,7 +232,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "musharna-122-psa-10-9683004",
     "name": "Musharna #122",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 269.77,
@@ -244,7 +244,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "darmanitan-99-psa-10-9681337",
     "name": "Darmanitan #99",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 269.68,
@@ -256,7 +256,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "darumaka-98-psa-10-9681336",
     "name": "Darumaka #98",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 263.55,
@@ -268,7 +268,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "amoonguss-96-psa-10-9681335",
     "name": "Amoonguss #96",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 262.62,
@@ -292,7 +292,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "vanillite-108-psa-10-9683091",
     "name": "Vanillite #108",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 260.26,
@@ -304,7 +304,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "serperior-ex-167-psa-10-9647339",
     "name": "Serperior ex #167",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 259.87,
@@ -316,7 +316,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "zebstrika-112-psa-10-9683095",
     "name": "Zebstrika #112",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 210.84,
@@ -328,7 +328,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "zacian-87-psa-10-10602360",
     "name": "Zacian #87",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 190.24,
@@ -340,7 +340,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "spearow-74-psa-10-10117514",
     "name": "Spearow #74",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 186.32,
@@ -352,7 +352,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "klawf-88-psa-10-4708204",
     "name": "Klawf #88",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 183.82,
@@ -364,7 +364,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "decidueye-ex-12-psa-10-11748931",
     "name": "Decidueye ex #12",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 181.37,
@@ -376,7 +376,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "munna-121-psa-10-9683003",
     "name": "Munna #121",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 180.24,
@@ -388,7 +388,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "mega-absol-ex-79-psa-10-10117520",
     "name": "Mega Absol Ex #79",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 179.21,
@@ -412,7 +412,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "mewtwo-1st-edition-118-psa-10-3507074",
     "name": "Mewtwo [1st Edition] #118",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 20929.85,
@@ -424,7 +424,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "umbreon-vmax-215-psa-10-2513024",
     "name": "Umbreon VMAX #215",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 20598.74,
@@ -436,7 +436,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "umbreon-gx-229-psa-10-3445777",
     "name": "Umbreon GX #229",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 4827.59,
@@ -448,7 +448,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "s-pikachu-7-psa-10-3684133",
     "name": "'s Pikachu #7",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 4329.53,
@@ -460,7 +460,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "eevee-gx-188-psa-10-4118654",
     "name": "Eevee GX #188",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 4288.24,
@@ -472,7 +472,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "mew-ex-347-psa-10-6125392",
     "name": "Mew ex #347",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 4216.75,
@@ -484,7 +484,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "mew-30-psa-10-3449699",
     "name": "Mew #30",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 2042.72,
@@ -496,7 +496,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "charizard-ex-349-psa-10-6125394",
     "name": "Charizard ex #349",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 1961.28,
@@ -508,7 +508,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "charizard-5-psa-10-4286114",
     "name": "Charizard #5",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 1938.87,
@@ -520,7 +520,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "lugia-gx-100-psa-10-3468671",
     "name": "Lugia GX #100",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 1887.73,
@@ -532,7 +532,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "origin-forme-dialga-vstar-260-psa-10-4447734",
     "name": "Origin Forme Dialga VSTAR #260",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 836.49,
@@ -544,7 +544,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "cinccino-ex-117-psa-10-12300918",
     "name": "Cinccino Ex #117",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 518.12,
@@ -556,7 +556,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "tornadus-158-psa-10-9647436",
     "name": "Tornadus #158",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 490.32,
@@ -568,7 +568,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "leafeon-vstar-210-psa-10-4447684",
     "name": "Leafeon VSTAR #210",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 487.72,
@@ -580,7 +580,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "meowth-ex-100-psa-10-11760288",
     "name": "Meowth ex #100",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 487.38,
@@ -604,7 +604,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "solosis-123-psa-10-9683005",
     "name": "Solosis #123",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 357.79,
@@ -616,7 +616,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "snivy-87-psa-10-9647330",
     "name": "Snivy #87",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 352.59,
@@ -628,7 +628,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "sawk-128-psa-10-9683129",
     "name": "Sawk #128",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 345.68,
@@ -640,7 +640,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "mega-kangaskhan-ex-89-psa-10-10085342",
     "name": "Mega Kangaskhan ex #89",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 343.22,
@@ -652,7 +652,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "minccino-157-psa-10-9683053",
     "name": "Minccino #157",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 342.49,
@@ -664,7 +664,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "haxorus-152-psa-10-9683049",
     "name": "Haxorus #152",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 340.33,
@@ -676,7 +676,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "espeon-master-ball-62-psa-10-7980427",
     "name": "Espeon [Master Ball] #62",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 338.08,
@@ -688,7 +688,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "delphox-v-173-psa-10-4050090",
     "name": "Delphox V #173",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 333.42,
@@ -700,7 +700,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "lilligant-92-psa-10-9647453",
     "name": "Lilligant #92",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 330.97,
@@ -712,7 +712,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "cubchoo-113-psa-10-9682995",
     "name": "Cubchoo #113",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 329.2,
@@ -724,7 +724,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "pikachu-ex-1st-edition-94-psa-10-3506822",
     "name": "Pikachu EX [1st Edition] #94",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 41231.01,
@@ -736,7 +736,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "gengar-ex-1st-edition-90-psa-10-3507567",
     "name": "Gengar EX [1st Edition] #90",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 38667.32,
@@ -748,7 +748,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "latias-latios-gx-105-psa-10-3468793",
     "name": "Latias & Latios GX #105",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 37264.32,
@@ -760,7 +760,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "ooyama-s-pikachu-series-iii-25-psa-10-3473852",
     "name": "Ooyama's Pikachu [Series III] #25",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 36230.43,
@@ -772,7 +772,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "mew-ex-1st-edition-24-psa-10-4723460",
     "name": "Mew EX [1st Edition] #24",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 34925.44,
@@ -784,7 +784,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "pikachu-ex-764-psa-10-11463099",
     "name": "Pikachu ex #764",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 11954.2,
@@ -796,7 +796,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "mega-gengar-ex-284-psa-10-11816195",
     "name": "Mega Gengar ex #284",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 10909.62,
@@ -808,7 +808,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "gyarados-ex-89-psa-10-3462587",
     "name": "Gyarados EX #89",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 10755.56,
@@ -820,7 +820,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "gardevoir-sylveon-gx-61-psa-10-3469236",
     "name": "Gardevoir & Sylveon GX #61",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 9991.45,
@@ -832,7 +832,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "charizard-1-psa-10-3684127",
     "name": "Charizard #1",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 3867.64,
@@ -844,7 +844,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "roaring-moon-ex-162-psa-10-8244605",
     "name": "Roaring Moon ex #162",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 3677.35,
@@ -856,7 +856,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "pikachu-tg05-psa-10-4080757",
     "name": "Pikachu #TG05",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 3646.66,
@@ -868,7 +868,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "rayquaza-gx-177a-psa-10-2390421",
     "name": "Rayquaza GX #177a",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 3590.56,
@@ -880,7 +880,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "mega-lucario-ex-92-psa-10-10117206",
     "name": "Mega Lucario Ex #92",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 3417.78,
@@ -892,7 +892,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "mega-gardevoir-ex-92-psa-10-10117212",
     "name": "Mega Gardevoir Ex #92",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 3383.26,
@@ -904,7 +904,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "greninja-ex-90-psa-10-6526274",
     "name": "Greninja ex #90",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 1745.54,
@@ -916,7 +916,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "giratina-vstar-261-psa-10-4447735",
     "name": "Giratina VSTAR #261",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 1716.12,
@@ -928,7 +928,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "pikachu-vmax-tg17-psa-10-4080769",
     "name": "Pikachu VMAX #TG17",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 1577.95,
@@ -940,7 +940,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "reshiram-charizard-gx-20-psa-10-963176",
     "name": "Reshiram & Charizard GX #20",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 1569.02,
@@ -964,7 +964,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "sylveon-ex-212-psa-10-7980830",
     "name": "Sylveon Ex #212",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 1010.94,
@@ -976,7 +976,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "lillie-s-clefairy-ex-126-psa-10-8437204",
     "name": "Lillie's Clefairy ex #126",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 980.64,
@@ -988,7 +988,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "pikachu-173-psa-10-5326214",
     "name": "Pikachu #173",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 727.14,
@@ -1000,7 +1000,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "palkia-ex-7-psa-10-5253065",
     "name": "Palkia EX #7",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 681.54,
@@ -1012,7 +1012,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "leafeon-ex-200-psa-10-8054193",
     "name": "Leafeon Ex #200",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 673.99,
@@ -1024,7 +1024,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "glaceon-ex-206-psa-10-7980823",
     "name": "Glaceon Ex #206",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 665.61,
@@ -1036,7 +1036,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "team-rocket-s-nidoking-ex-126-psa-10-9090615",
     "name": "Team Rocket's Nidoking ex #126",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 632.76,
@@ -1084,7 +1084,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "latias-latios-gx-170-psa-10-962968",
     "name": "Latias & Latios GX #170",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 77960.88,
@@ -1096,7 +1096,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "umbreon-68-psa-10-3438471",
     "name": "Umbreon #68",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 22570.46,
@@ -1120,7 +1120,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "team-magma-s-groudon-ex-15-psa-10-3445235",
     "name": "Team Magma's Groudon EX #15",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 17970.23,
@@ -1132,7 +1132,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "giratina-v-186-psa-10-4050103",
     "name": "Giratina V #186",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 16861.42,
@@ -1144,7 +1144,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "gengar-mimikyu-gx-103-psa-10-3468791",
     "name": "Gengar & Mimikyu GX #103",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 16487.01,
@@ -1156,7 +1156,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "reshiram-1st-edition-22-psa-10-4723458",
     "name": "Reshiram [1st Edition] #22",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 16460.04,
@@ -1168,7 +1168,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "rayquaza-v-76-psa-10-3472904",
     "name": "Rayquaza V #76",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 7845.07,
@@ -1180,7 +1180,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "charizard-vstar-swsh262-psa-10-4246447",
     "name": "Charizard VStar #SWSH262",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 7394.03,
@@ -1192,7 +1192,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "darkrai-ex-72-psa-10-3460952",
     "name": "Darkrai EX #72",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 7354.8,
@@ -1204,7 +1204,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "charizard-gx-sv49-psa-10-964133",
     "name": "Charizard GX #SV49",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 7227.71,
@@ -1216,7 +1216,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "pikachu-holo-1st-edition-7-psa-10-4723443",
     "name": "Pikachu [Holo 1st Edition] #7",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 7004.47,
@@ -1228,7 +1228,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "rayquaza-vmax-tg20-psa-10-4277108",
     "name": "Rayquaza VMAX #TG20",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 2120.58,
@@ -1240,7 +1240,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "pikachu-ex-234-psa-10-11302600",
     "name": "Pikachu ex #234",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 2086.31,
@@ -1252,7 +1252,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "mew-ex-205-psa-10-5809586",
     "name": "Mew ex #205",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 1483.22,
@@ -1264,7 +1264,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "pikachu-v-104-psa-10-3472139",
     "name": "Pikachu V #104",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 1475.86,
@@ -1276,7 +1276,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "magikarp-80-psa-10-4947437",
     "name": "Magikarp #80",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 1421.93,
@@ -1288,7 +1288,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "detective-pikachu-14-psa-10-4034126",
     "name": "Detective Pikachu #14",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 1397.31,
@@ -1300,7 +1300,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "mega-greninja-ex-114-psa-10-12271092",
     "name": "Mega Greninja Ex #114",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 1378.14,
@@ -1312,7 +1312,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "charizard-ex-105-psa-10-850072",
     "name": "Charizard EX #105",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 187001.92,
@@ -1324,7 +1324,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "pikachu-gold-star-1-psa-10-5491689",
     "name": "Pikachu [Gold Star] #1",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 181418.4,
@@ -1336,7 +1336,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "charizard-gold-star-1st-edition-52-psa-10-9866070",
     "name": "Charizard [Gold Star 1st Edition] #52",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 171234.45,
@@ -1384,7 +1384,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "rayquaza-vmax-83-psa-10-3472911",
     "name": "Rayquaza VMAX #83",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 33111.95,
@@ -1396,7 +1396,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "pikachu-ex-xy84-psa-10-844750",
     "name": "Pikachu EX #XY84",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 32851.44,
@@ -1408,7 +1408,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "flareon-ex-7-psa-10-4557547",
     "name": "Flareon EX #7",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 16159.62,
@@ -1420,7 +1420,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "sylveon-ex-26-psa-10-4557566",
     "name": "Sylveon EX #26",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 15935.4,
@@ -1432,7 +1432,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "mewtwo-mew-gx-98-psa-10-3470024",
     "name": "Mewtwo & Mew GX #98",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 15152.11,
@@ -1444,7 +1444,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "mewtwo-3-psa-10-643534",
     "name": "Mewtwo #3",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 6762.74,
@@ -1468,7 +1468,7 @@ export const PROD_CARDS: ProdCatalogCard[] = [
   {
     "handle": "mewtwo-vstar-gg44-psa-10-4637100",
     "name": "Mewtwo VSTAR #GG44",
-    "set": "Prod Snapshot",
+    "set": "",
     "grader": "PSA",
     "grade": "10",
     "display_myr": 2929.66,

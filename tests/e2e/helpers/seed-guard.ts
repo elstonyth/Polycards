@@ -5,6 +5,7 @@
 // flow (this bit us in plan 023). Assert up front, with a message that names the
 // fix — so a missing seed reads as "reseed the DB", not a mystery timeout.
 import { BACKEND, PK } from './constants';
+import { catalog, primaryPack } from './catalog';
 
 // Two, not five: the suite only needs enough openable packs for the A/B odds
 // spec, and pinning the exact catalog size here would make an operator adding a
@@ -18,11 +19,6 @@ const MIN_OPENABLE_PACKS = 2;
 // `node scripts/snapshot-prod-catalog.mjs` from the repo root.
 const RESEED_HINT =
   'reseed with `corepack yarn seed:e2e` from backend/packages/api';
-
-interface StorePack {
-  slug: string;
-  price: number;
-}
 
 async function storeGet<T>(path: string): Promise<T> {
   let res: Response;
@@ -44,8 +40,10 @@ async function storeGet<T>(path: string): Promise<T> {
 }
 
 export async function assertSeedPacks(): Promise<void> {
-  const { packs } = await storeGet<{ packs: StorePack[] }>('/store/packs');
-  const openable = packs.filter((p) => p.price > 0);
+  // Reuse catalog()'s own resolution rather than re-deriving "openable" here:
+  // when the two disagree, the preflight vouches for a different pack than the
+  // one the specs actually drive, which is worse than no preflight.
+  const openable = await catalog();
   if (openable.length < MIN_OPENABLE_PACKS) {
     throw new Error(
       `Seed preflight: only ${openable.length} openable pack(s) in the catalog, ` +
@@ -54,16 +52,15 @@ export async function assertSeedPacks(): Promise<void> {
   }
 
   // An ACTIVE pack with an EMPTY prize pool is the post-cutover failure mode:
-  // it lists fine and 404s nothing, but every spin fails at roll time. Check the
-  // pool of the pack the specs will actually open (cheapest = catalog.ts's
-  // primaryPack) rather than trusting the listing.
-  const cheapest = [...openable].sort((a, b) => a.price - b.price)[0]!;
+  // it lists fine and 404s nothing, but every spin fails at roll time. Check
+  // the pool of the pack the specs will actually open, not just the listing.
+  const pack = await primaryPack();
   const detail = await storeGet<{ odds: unknown[] }>(
-    `/store/packs/${cheapest.slug}`,
+    `/store/packs/${pack.slug}`,
   );
   if (!detail.odds?.length) {
     throw new Error(
-      `Seed preflight: pack '${cheapest.slug}' has an EMPTY prize pool — ` +
+      `Seed preflight: pack '${pack.slug}' has an EMPTY prize pool — ` +
         `every open would fail. ${RESEED_HINT}.`,
     );
   }
