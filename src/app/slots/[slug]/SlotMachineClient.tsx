@@ -226,6 +226,11 @@ export default function SlotMachineClient({
   // landed ~150ms INTO the transform beat (an 87ms main-thread task on top of
   // the morph, plus the art visibly popping in). The spin gives us ~3s of
   // otherwise-idle network to spend instead.
+  // Only the GRADED back is warmed here, and only because it is a plain <img>
+  // of this exact path. The RAW back renders through next/image (SlabImage), so
+  // the browser requests /_next/image?url=…&w=<picked from srcset> — preloading
+  // the /public path would fetch a URL the reveal never asks for. It carries
+  // `priority` instead, which is next/image's own preload.
   useEffect(() => {
     if (phase === 'spinning') preload(CARD_BACK_SRC, { as: 'image' });
   }, [phase]);

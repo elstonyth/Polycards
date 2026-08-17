@@ -13,7 +13,7 @@ import { motion } from 'motion/react';
 import type { WonCard } from '@/lib/actions/packs';
 import { rm } from '@/lib/format';
 import { isTopRarity } from '@/lib/rarity';
-import { SlabImage, SLAB_ASPECT } from '@/components/SlabImage';
+import { SlabImage, SLAB_ASPECT, FRAME_BAND } from '@/components/SlabImage';
 import { cn } from '@/lib/utils';
 
 /** The card back raster. Exported so the machine can warm it during the spin —
@@ -21,6 +21,15 @@ import { cn } from '@/lib/utils';
  *  the first thing that requested it (a fetch + decode landing right on the
  *  transform beat, which stuttered the morph and popped the art in late). */
 export const CARD_BACK_SRC = '/images/app/polycards-slab-back.webp';
+
+/** RAW back: bare 5:7 card stock, no acrylic case. An ungraded pull is not in a
+ *  slab, so it must not flip out of one — the case-back raster above would be
+ *  the only slab on screen for a RAW pack. Rendered THROUGH SlabImage (same
+ *  component the front uses) rather than by hand, so both faces resolve to the
+ *  identical card rect and the flip has no size jump. NOT exported: it goes out
+ *  through next/image, so the machine's plain-path preload can't warm it (the
+ *  `priority` prop on that SlabImage is what preloads it). */
+const RAW_CARD_BACK_SRC = '/images/app/polycards-card-back.webp';
 
 export function SlabCard({
   card,
@@ -46,6 +55,13 @@ export function SlabCard({
   const top = isTopRarity(card.rarity);
   const value =
     card.marketPriceMyr != null ? rm(card.marketPriceMyr) : card.value;
+  // Same predicate the FRONT branches on (SlabImage renders the bare-card path
+  // when `slabSrc` is falsy). Deliberately not `pack.group === 'RAW'`: a RAW
+  // pack's cards are all raw anyway, and any other signal could pair a card
+  // back with a slab front. Also covers a graded card whose bake failed —
+  // matching the front is the point, and a case-back over a bare card photo is
+  // the worse of the two mismatches.
+  const raw = !card.slab_image;
 
   // Shape-synced morph (spec #16): delta from the landed tile's rect to this
   // card's natural box. Computed in a layout effect (before paint) so the
@@ -137,36 +153,71 @@ export function SlabCard({
           },
         }}
       >
-        {/* BACK — the Polycards graded slab seen from behind: acrylic case,
+        {/* BACK — GRADED: the Polycards slab seen from behind (acrylic case,
             branded label + QR, matte black card with the flat white monogram
-            inside (asset baked to SLAB_ASPECT from the SnapGen render).
-            Opaque raster, so rarity color rides on the outer glow only. */}
+            inside; asset baked to SLAB_ASPECT from the SnapGen render). Opaque
+            raster, so rarity color rides on the outer glow only.
+            RAW: the bare card back, drawn by SlabImage so it lands on the exact
+            rect the front's card art occupies — same size through the flip, and
+            no acrylic case around a card that was never in one. */}
         <span
+          aria-hidden
           className={cn(
-            'absolute inset-0 overflow-hidden rounded-xl [backface-visibility:hidden]',
+            'absolute inset-0 [backface-visibility:hidden]',
             reduced && flipped && 'hidden',
           )}
           style={
-            {
-              boxShadow: '0 18px 50px rgba(0,0,0,0.6)',
-            } as CSSProperties
+            raw
+              ? // Raw has no opaque case to cast a box-shadow, so depth comes
+                // from the same alpha-following drop-shadow the front uses.
+                ({
+                  filter: `drop-shadow(0 18px 30px rgba(0,0,0,0.6))`,
+                } as CSSProperties)
+              : undefined
           }
         >
-          {/* eslint-disable-next-line @next/next/no-img-element -- decorative
-              fixed local asset (one shared card back, already webp) layered
-              inside the flip/morph surface; next/image adds a wrapper + loader
-              to a purely presentational fill with no LCP or bandwidth win. */}
-          <img
-            src={CARD_BACK_SRC}
-            alt=""
-            aria-hidden
-            className="absolute inset-0 h-full w-full object-fill transition-[filter] duration-300"
-            style={
-              {
-                filter: `drop-shadow(0 0 8px rgba(${rarityRgb}, 0.65)) drop-shadow(0 0 24px rgba(${rarityRgb}, 0.35))`,
-              } as CSSProperties
-            }
-          />
+          {raw ? (
+            <SlabImage
+              src={RAW_CARD_BACK_SRC}
+              slabSrc={null}
+              rarity={card.rarity}
+              alt=""
+              sizes="(max-width: 640px) 64vw, 300px"
+              className="absolute inset-0"
+              priority
+            />
+          ) : (
+            // NOT inset-0: the FRONT draws the case at FRAME_BAND% (SlabImage's
+            // own slab inset), so a full-box case back flipped ~11% smaller.
+            // Same inset here = the case overlays itself exactly through the
+            // flip, and the box stays 0.9W x 0.9H — SLAB_ASPECT preserved, so
+            // the object-fill raster below lands undistorted. The tier band
+            // (which sits OUTSIDE this box) growing in on flip is the reveal.
+            <span
+              className="absolute overflow-hidden rounded-xl"
+              style={
+                {
+                  inset: `${FRAME_BAND}%`,
+                  boxShadow: '0 18px 50px rgba(0,0,0,0.6)',
+                } as CSSProperties
+              }
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element -- decorative
+                  fixed local asset (one shared card back, already webp) layered
+                  inside the flip/morph surface; next/image adds a wrapper + loader
+                  to a purely presentational fill with no LCP or bandwidth win. */}
+              <img
+                src={CARD_BACK_SRC}
+                alt=""
+                className="absolute inset-0 h-full w-full object-fill transition-[filter] duration-300"
+                style={
+                  {
+                    filter: `drop-shadow(0 0 8px rgba(${rarityRgb}, 0.65)) drop-shadow(0 0 24px rgba(${rarityRgb}, 0.35))`,
+                  } as CSSProperties
+                }
+              />
+            </span>
+          )}
           {/* the tile's pixel Pokémon rides the morph, fading out mid-growth */}
           {spriteSrc && entering && !reduced && (
             <motion.img

@@ -13,8 +13,15 @@ export const SLAB_ASPECT = 1600 / 2700;
 /** Bare trading-card stock (63×88mm ≈ 5:7) — the raw-card fallback. */
 const CARD_ASPECT_RAW = 5 / 7;
 
-/** Ring thickness of the tier frame, % of width. */
-const FRAME_BAND = 5;
+/**
+ * Ring thickness of the tier frame, % of width — and therefore the inset of the
+ * SLAB itself inside a framed tile. Exported because anything that has to line
+ * up with a framed slab's CASE (the reveal's card back, which flips into one)
+ * must sit on this box: it is 0.9W x 0.9H, so it preserves SLAB_ASPECT and an
+ * object-fill raster lands undistorted. FRAME_INSET below is the BAND's outer
+ * silhouette, which is a different (and wider) box — don't confuse them.
+ */
+export const FRAME_BAND = 5;
 
 /**
  * Tier frame LOCKED IN 2026-07-17, made STATIC 2026-07-17 (operator change):
