@@ -8450,6 +8450,9 @@ class PacksModuleService extends MedusaService({
    *
    * Idempotent by selector: a granted row no longer matches, so re-running is a
    * no-op. `weekStart` narrows to one week; omitted, every outstanding row.
+   * Bounded at 1000 rows per run, and that is not a silent cap for the same
+   * reason: granted rows drop out of the selector, so a re-run takes the next
+   * batch.
    * A row whose card is genuinely gone (no Card, hence no handle) stays
    * skipped — that is the one case the status now means.
    *

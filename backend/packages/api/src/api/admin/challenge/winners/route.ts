@@ -19,7 +19,18 @@ import type PacksModuleService from '../../../../modules/packs/service';
 //
 // Stock stopped being a skip reason on 2026-08-17 (prizes are granted whether
 // or not units are on hand; the counter goes negative instead). The enum value
-// kept its name — a row here now means the prize's Card row is gone.
+// kept its name and now covers TWO eras, which the operator must be able to
+// tell apart:
+//
+//   - written BEFORE the cutover — a real card the old stock gate refused.
+//     grant-skipped-challenge-cards.ts can still hand it over.
+//   - written AFTER — the prize's Card row is gone, so nothing can mint it and
+//     it is genuinely manual.
+//
+// Nothing on the row records which, and back-filling a reason column would be
+// guesswork. The distinction is DERIVED instead: `card_missing` is whether the
+// row's card_id still resolves to a Card. That is exactly the condition
+// settlement now skips on, so it reads the same for both eras.
 
 // Ten ranks × (one credits row + a card row per distinct awarded card). 200 is
 // far above any real week and keeps the read bounded.
@@ -33,6 +44,9 @@ export interface WinnerCard {
    *  to the same rank. */
   qty: number;
   status: string;
+  /** The card_id no longer resolves to a Card. On a skipped row this is the
+   *  difference between "retro-grant can fix it" and "fulfil by hand". */
+  card_missing: boolean;
 }
 
 export interface WinnerRow {
@@ -156,6 +170,7 @@ export async function GET(
       image: card?.slab_image ?? card?.image ?? null,
       qty: typeof snap.qty === 'number' ? snap.qty : 1,
       status: r.status,
+      card_missing: !cardById.has(r.card_id),
     });
   }
 
