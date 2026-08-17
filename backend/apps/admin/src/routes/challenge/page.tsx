@@ -973,10 +973,15 @@ const ScheduleTab = () => {
 // What the weekly settlement actually paid, and what it could not. Read-only:
 // settlement owns these rows, and nothing here marks, resends or exports.
 //
-// The out-of-stock half is why this exists. A prize card the settlement could
+// The not-granted half is why this exists. A prize card the settlement could
 // not grant is recorded `skipped_no_stock` and then mentioned once, in a job
 // log, which nobody reads — so the spec's "manual fulfilment queue" had no
 // queue. This is it.
+//
+// Stock is NO LONGER a reason to skip (2026-08-17): prizes are granted whether
+// or not units are on hand and the counter goes negative to record what is
+// owed. The enum value keeps its old name (CHECK-backed column), so a row here
+// means the prize's Card row is gone — nothing to mint a pull against.
 const WinnersTab = () => {
   const [week, setWeek] = useState('');
   const { data, isError } = useChallengeWinners(week);
@@ -1031,8 +1036,8 @@ const WinnersTab = () => {
         <div className="border-ui-border-error rounded-lg border p-3">
           <Text className="text-ui-fg-error" size="small">
             {summary.skipped} prize card
-            {summary.skipped > 1 ? 's were' : ' was'} out of stock at settlement
-            and never granted — fulfil by hand. Marked below.
+            {summary.skipped > 1 ? 's' : ''} could not be granted — the card no
+            longer exists in the catalog. Fulfil by hand. Marked below.
           </Text>
         </div>
       )}
@@ -1093,9 +1098,7 @@ const WinnersTab = () => {
                               </Text>
                             )}
                             {c.status === 'skipped_no_stock' && (
-                              <StatusBadge color="red">
-                                Out of stock
-                              </StatusBadge>
+                              <StatusBadge color="red">Not granted</StatusBadge>
                             )}
                           </div>
                         ))}

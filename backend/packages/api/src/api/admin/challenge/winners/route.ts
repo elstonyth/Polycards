@@ -12,11 +12,14 @@ import type PacksModuleService from '../../../../modules/packs/service';
 //
 // Read-only. Settlement owns these rows; nothing here writes, marks or resends.
 //
-// The second half is the point: a prize card that was out of stock at
-// settlement is recorded `skipped_no_stock` and otherwise only ever appears in
-// one job-log line, so nobody finds it. Surfacing it turns it into a queue an
-// operator can work by hand, which is what the spec always said would happen to
-// those cards.
+// The second half is the point: a prize card settlement could not grant is
+// recorded `skipped_no_stock` and otherwise only ever appears in one job-log
+// line, so nobody finds it. Surfacing it turns it into a queue an operator can
+// work by hand.
+//
+// Stock stopped being a skip reason on 2026-08-17 (prizes are granted whether
+// or not units are on hand; the counter goes negative instead). The enum value
+// kept its name — a row here now means the prize's Card row is gone.
 
 // Ten ranks × (one credits row + a card row per distinct awarded card). 200 is
 // far above any real week and keeps the read bounded.

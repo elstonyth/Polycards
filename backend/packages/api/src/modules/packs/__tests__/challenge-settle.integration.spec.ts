@@ -7,8 +7,10 @@
  *  - settleChallengeWeek happy path: credits paid through the ledger, card
  *    minted as a source='reward' Pull carrying the card HANDLE, payout rows
  *    written once; a second run is a settled-week no-op (idempotent).
- *  - skipped_no_stock: tracked-but-empty stock records the payout row with no
- *    pull and no credit substitution, and still gates the week.
+ *  - Stock NEVER gates a grant (2026-08-17): an empty counter still mints the
+ *    pull. `skipped_no_stock` survives only for a prize whose Card row is gone.
+ *  - grantSkippedChallengeCards: rows written under the old stock gate are
+ *    granted retroactively, once.
  *
  * Test-runner caveat: moduleIntegrationTestRunner builds schema from MODEL
  * definitions (this file's moduleModels array), not hand-written migrations —
@@ -218,10 +220,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         ]);
         await seedPriorWeekPull('cus_a', card);
 
-        const stock = new Map<string, number | null>([[card.handle, null]]); // untracked = grantable
-        const deps = { getStock: async () => stock };
-
-        const first = await service.settleChallengeWeek(deps);
+        const first = await service.settleChallengeWeek({});
         expect(first.settled).toBe(true);
         expect(first.winners).toEqual([
           expect.objectContaining({
@@ -240,7 +239,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(rewardPulls).toHaveLength(1);
         expect(rewardPulls[0]!.card_id).toBe(card.handle); // HANDLE, not id
 
-        const second = await service.settleChallengeWeek(deps);
+        const second = await service.settleChallengeWeek({});
         expect(second.settled).toBe(false);
         expect(await service.creditBalance('cus_a')).toBe(50); // unchanged
         const payoutRows = await service.listChallengePayouts({}, { take: 10 });
@@ -256,10 +255,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
           await seedStage(1, 100, [{ rank: 1, card_id: card.id, credits: 50 }]);
           await seedPriorWeekPull('cus_a', card);
 
-          await service.settleChallengeWeek({
-            getStock: async () =>
-              new Map<string, number | null>([[card.handle, null]]),
-          });
+          await service.settleChallengeWeek({});
 
           const wpRows = await service.listLedgerEntries(
             { type: 'WP', customer_id: 'cus_a' },
@@ -276,12 +272,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
           const { card } = await seedBase();
           await seedStage(1, 100, [{ rank: 1, card_id: card.id, credits: 50 }]);
           await seedPriorWeekPull('cus_a', card);
-          const deps = {
-            getStock: async () =>
-              new Map<string, number | null>([[card.handle, null]]),
-          };
-
-          await service.settleChallengeWeek(deps);
+          await service.settleChallengeWeek({});
           // Clear the payout-row gate (settleChallengeWinner's step 2 check
           // AND the 2b anchor-overlap guard both query challenge_payout) so
           // the second pass genuinely re-enters 3a/3b/3c instead of short-
@@ -294,7 +285,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
               (r) => r.id,
             ),
           );
-          await service.settleChallengeWeek(deps);
+          await service.settleChallengeWeek({});
 
           const wpRows = await service.listLedgerEntries(
             { type: 'WP', customer_id: 'cus_a' },
@@ -308,10 +299,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
           await seedStage(1, 100, [{ rank: 1, card_id: card.id, credits: 0 }]);
           await seedPriorWeekPull('cus_a', card);
 
-          await service.settleChallengeWeek({
-            getStock: async () =>
-              new Map<string, number | null>([[card.handle, null]]),
-          });
+          await service.settleChallengeWeek({});
 
           const wpRows = await service.listLedgerEntries(
             { type: 'WP', customer_id: 'cus_a' },
@@ -349,12 +337,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         ]);
         await seedPriorWeekPull('cus_a', card);
 
-        const result = await service.settleChallengeWeek({
-          // Tracked with exactly 2 available — proves the stock gate compares
-          // against qty, not against a single copy.
-          getStock: async () =>
-            new Map<string, number | null>([[card.handle, 2]]),
-        });
+        const result = await service.settleChallengeWeek({});
         expect(result.winners[0]!.skippedCardIds).toEqual([]);
         expect(result.winners[0]!.cardCount).toBe(2); // MINTED, not distinct
         expect(result.winners[0]!.cardHandles).toEqual([card.handle]); // distinct
@@ -386,7 +369,11 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(cardRows[0]!.pull_id).toBe(snapshot.pull_ids[0]);
       });
 
-      it('records skipped_no_stock and mints no pull when stock is short', async () => {
+      // The inverse of the old gate test. Stock is a fulfilment COUNTER (see
+      // card-stock.ts), so an empty one grants anyway and the counter is left
+      // to go negative — that negative is the operator's "units owed" signal.
+      // The take is the only thing stock touches here.
+      it('grants and mints even when the card has no stock left', async () => {
         const { card } = await seedBase();
         await service.createChallengeStages([
           {
@@ -399,11 +386,42 @@ moduleIntegrationTestRunner<PacksModuleService>({
         ]);
         await seedPriorWeekPull('cus_a', card);
 
+        const takes: Array<[string, number]> = [];
         const result = await service.settleChallengeWeek({
-          getStock: async () =>
-            new Map<string, number | null>([[card.handle, 0]]), // tracked, none left
+          decrementStock: async (handle, qty) => {
+            takes.push([handle, qty]); // stock at 0 — taken anyway, goes negative
+            return true;
+          },
         });
-        expect(result.winners[0]!.skippedCardIds).toEqual([card.id]);
+        expect(result.winners[0]!.skippedCardIds).toEqual([]);
+        expect(result.winners[0]!.cardCount).toBe(1);
+        expect(takes).toEqual([[card.handle, 1]]);
+
+        const rows = await service.listChallengePayouts(
+          { kind: 'card' },
+          { take: 5 },
+        );
+        expect(rows).toHaveLength(1);
+        expect(rows[0]!.status).toBe('granted');
+        const pulls = await service.listPulls(
+          { customer_id: 'cus_a', source: 'reward' },
+          { take: 5 },
+        );
+        expect(pulls).toHaveLength(1);
+        expect(rows[0]!.pull_id).toBe(pulls[0]!.id);
+      });
+
+      // The ONLY skip left: the prize's Card row is gone, so there is no handle
+      // to key a pull on. The week still gates (a payout row was written).
+      it('records skipped_no_stock when the prize card no longer exists', async () => {
+        const { card } = await seedBase();
+        await seedStage(1, 100, [
+          { rank: 1, card_id: 'card_deleted', credits: 0 },
+        ]);
+        await seedPriorWeekPull('cus_a', card);
+
+        const result = await service.settleChallengeWeek({});
+        expect(result.winners[0]!.skippedCardIds).toEqual(['card_deleted']);
         const rows = await service.listChallengePayouts(
           { kind: 'card' },
           { take: 5 },
@@ -421,14 +439,99 @@ moduleIntegrationTestRunner<PacksModuleService>({
           ),
         ).toHaveLength(0);
         // A skipped week still gates: settled-week record exists.
-        expect(
-          (
-            await service.settleChallengeWeek({
-              getStock: async () =>
-                new Map<string, number | null>([[card.handle, 0]]),
-            })
-          ).settled,
-        ).toBe(false);
+        expect((await service.settleChallengeWeek({})).settled).toBe(false);
+      });
+
+      // The retro-grant for rows the OLD stock gate wrote. settleChallengeWeek
+      // can never reach them again (its re-entry gate is per customer), so this
+      // is the only path that hands those prizes over.
+      describe('grantSkippedChallengeCards', () => {
+        it('mints the pull, flips the row granted, and is a no-op on re-run', async () => {
+          const { card } = await seedBase();
+          const weekStart = priorWeekStartUtc();
+          await service.createChallengePayouts([
+            {
+              week_start: weekStart,
+              customer_id: 'cus_a',
+              rank: 1,
+              kind: 'card' as const,
+              card_id: card.id,
+              credits: 0,
+              credit_transaction_id: null,
+              pull_id: null,
+              status: 'skipped_no_stock' as const,
+              snapshot: { qty: 2, pull_ids: [] },
+            },
+          ]);
+
+          const takes: Array<[string, number]> = [];
+          const first = await service.grantSkippedChallengeCards({
+            decrementStock: async (handle, qty) => {
+              takes.push([handle, qty]);
+              return true;
+            },
+          });
+          expect(first).toEqual({ granted: 1, pulls: 2, stillSkipped: [] });
+          expect(takes).toEqual([[card.handle, 2]]);
+
+          const pulls = await service.listPulls(
+            { customer_id: 'cus_a', source: 'reward' },
+            { take: 5 },
+          );
+          expect(pulls).toHaveLength(2); // snapshot.qty copies
+          expect(pulls[0]!.card_id).toBe(card.handle); // HANDLE, not id
+          expect(pulls.every((p) => p.stock_earmarked)).toBe(true);
+
+          const [row] = await service.listChallengePayouts(
+            { kind: 'card' },
+            { take: 5 },
+          );
+          expect(row!.status).toBe('granted');
+          expect(row!.pull_id).toBe(
+            (row!.snapshot as unknown as { pull_ids: string[] }).pull_ids[0],
+          );
+
+          // Idempotent: the selector no longer matches a granted row.
+          expect(await service.grantSkippedChallengeCards({})).toEqual({
+            granted: 0,
+            pulls: 0,
+            stillSkipped: [],
+          });
+          expect(
+            await service.listPulls(
+              { customer_id: 'cus_a', source: 'reward' },
+              { take: 5 },
+            ),
+          ).toHaveLength(2);
+        });
+
+        it('leaves a row skipped when its prize card is gone', async () => {
+          await seedBase();
+          await service.createChallengePayouts([
+            {
+              week_start: priorWeekStartUtc(),
+              customer_id: 'cus_a',
+              rank: 1,
+              kind: 'card' as const,
+              card_id: 'card_deleted',
+              credits: 0,
+              credit_transaction_id: null,
+              pull_id: null,
+              status: 'skipped_no_stock' as const,
+              snapshot: { qty: 1, pull_ids: [] },
+            },
+          ]);
+
+          const result = await service.grantSkippedChallengeCards({});
+          expect(result.granted).toBe(0);
+          expect(result.stillSkipped).toHaveLength(1);
+          expect(
+            await service.listPulls(
+              { customer_id: 'cus_a', source: 'reward' },
+              { take: 5 },
+            ),
+          ).toHaveLength(0);
+        });
       });
 
       it('takes the unit after the payout commits and flags the minted pull', async () => {
@@ -446,8 +549,6 @@ moduleIntegrationTestRunner<PacksModuleService>({
 
         const takes: Array<[string, number]> = [];
         await service.settleChallengeWeek({
-          getStock: async () =>
-            new Map<string, number | null>([[card.handle, 5]]),
           decrementStock: async (handle, qty) => {
             takes.push([handle, qty]);
             // The contract the fix exists for, asserted from INSIDE the
@@ -510,8 +611,6 @@ moduleIntegrationTestRunner<PacksModuleService>({
 
         let calls = 0;
         const deps = {
-          getStock: async () =>
-            new Map<string, number | null>([[card.handle, 5]]),
           decrementStock: async () => {
             calls += 1;
             throw new Error('inventory unavailable');
@@ -557,10 +656,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         await seedPriorWeekPull('cus_b', card, 200);
         await seedPriorWeekPull('cus_c', card, 100);
 
-        const r = await service.settleChallengeWeek({
-          getStock: async () =>
-            new Map<string, number | null>([[card.handle, null]]),
-        });
+        const r = await service.settleChallengeWeek({});
         expect(
           r.winners.map((w) => [w.customerId, w.rank, w.credits, w.cardCount]),
         ).toEqual([
@@ -595,9 +691,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
           ]);
         }
 
-        const first = await service.settleChallengeWeek({
-          getStock: async () => new Map<string, number | null>(),
-        });
+        const first = await service.settleChallengeWeek({});
         expect(first.settled).toBe(true);
         expect(await service.creditBalance('cus_a')).toBe(50);
         const rowsBefore = await service.listChallengePayouts({}, { take: 20 });
@@ -619,14 +713,12 @@ moduleIntegrationTestRunner<PacksModuleService>({
           100,
         );
 
-        const second = await service.settleChallengeWeek({
-          getStock: async () => new Map<string, number | null>(),
-        });
+        const second = await service.settleChallengeWeek({});
         expect(second.settled).toBe(false);
         expect(await service.creditBalance('cus_a')).toBe(50); // NOT re-paid
-        expect(await service.listChallengePayouts({}, { take: 20 })).toHaveLength(
-          rowsBefore.length,
-        );
+        expect(
+          await service.listChallengePayouts({}, { take: 20 }),
+        ).toHaveLength(rowsBefore.length);
       });
 
       it('replays the frozen snapshot after a mid-batch crash — a reversal cannot re-rank a closed week', async () => {
@@ -639,18 +731,40 @@ moduleIntegrationTestRunner<PacksModuleService>({
         await seedPriorWeekPull('cus_b', card, 200);
         await seedPriorWeekPull('cus_c', card, 100);
 
-        // Tick 1 commits rank 1, then dies inside rank 2's transaction.
-        let stockCalls = 0;
-        await expect(
-          service.settleChallengeWeek({
-            getStock: async () => {
-              stockCalls += 1;
-              if (stockCalls === 2) throw new Error('simulated mid-batch crash');
-              return new Map<string, number | null>([[card.handle, null]]);
+        // The state tick 1 leaves behind when it commits rank 1 and dies inside
+        // rank 2's transaction: rank 1's payout rows exist and carry the FROZEN
+        // snapshot; rank 2 has nothing. Seeded rather than crashed into — every
+        // in-transaction seam (createPulls, mutateCreditAtomic) lives on the
+        // module-service Proxy and cannot be patched from out here.
+        //
+        // Narrower than the crash it replaces, deliberately: the resume path
+        // reads ONLY customer_id + snapshot off these rows (see
+        // settleChallengeWeek's existingRows select), so rank 1's committed
+        // credits and WP row are not part of what tick 2 decides on — and are
+        // no longer exercised here.
+        await service.createChallengePayouts([
+          {
+            week_start: priorWeekStartUtc(),
+            customer_id: 'cus_a',
+            rank: 1,
+            kind: 'credits' as const,
+            card_id: '',
+            credits: 100,
+            credit_transaction_id: null,
+            pull_id: null,
+            status: 'granted' as const,
+            snapshot: {
+              pool_myr: 2400,
+              unlocked_stages: [1],
+              week_end: currentWeekStartUtc().toISOString(),
+              ranking: ['cus_a', 'cus_b', 'cus_c'],
+              by_rank: {
+                '1': { rank: 1, credits: 100, cardIds: [card.id] },
+                '2': { rank: 2, credits: 50, cardIds: [card.id] },
+              },
             },
-          }),
-        ).rejects.toThrow('simulated mid-batch crash');
-        expect(await service.creditBalance('cus_a')).toBe(100);
+          },
+        ]);
         expect(await service.creditBalance('cus_b')).toBe(0);
 
         // An admin reversal soft-deletes the rank-1 pull. Both aggregates
@@ -664,10 +778,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         );
         await service.softDeletePulls([aPull!.id]);
 
-        const second = await service.settleChallengeWeek({
-          getStock: async () =>
-            new Map<string, number | null>([[card.handle, null]]),
-        });
+        const second = await service.settleChallengeWeek({});
         expect(
           second.winners.map((w) => [w.customerId, w.rank, w.credits]),
         ).toEqual([['cus_b', 2, 50]]); // FROZEN rank 2, not the re-ranked 1
@@ -680,9 +791,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         // Threshold 0 unlocks on an empty pool, so this reaches the ranking
         // step with nobody ranked.
         await seedStage(1, 0, [{ rank: 1, credits: 50 }]);
-        const empty = await service.settleChallengeWeek({
-          getStock: async () => new Map<string, number | null>(),
-        });
+        const empty = await service.settleChallengeWeek({});
         expect(empty).toEqual({
           weekStartIso: expect.any(String),
           settled: false,
@@ -694,25 +803,24 @@ moduleIntegrationTestRunner<PacksModuleService>({
           {
             stage_number: 2,
             threshold_myr: 10_000,
-            rank_rewards: [
-              { rank: 1, credits: 50 },
-            ] as unknown as Record<string, unknown>,
+            rank_rewards: [{ rank: 1, credits: 50 }] as unknown as Record<
+              string,
+              unknown
+            >,
           },
         ]);
         await service.deleteChallengeStages(
-          (await service.listChallengeStages({ stage_number: 1 }, { take: 1 })).map(
-            (r) => r.id,
-          ),
+          (
+            await service.listChallengeStages({ stage_number: 1 }, { take: 1 })
+          ).map((r) => r.id),
         );
         await seedPriorWeekPull('cus_a', card);
-        const locked = await service.settleChallengeWeek({
-          getStock: async () => new Map<string, number | null>(),
-        });
+        const locked = await service.settleChallengeWeek({});
         expect(locked.settled).toBe(false);
         expect(await service.creditBalance('cus_a')).toBe(0);
-        expect(await service.listChallengePayouts({}, { take: 5 })).toHaveLength(
-          0,
-        );
+        expect(
+          await service.listChallengePayouts({}, { take: 5 }),
+        ).toHaveLength(0);
       });
     });
   },
