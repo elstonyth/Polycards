@@ -115,8 +115,11 @@ function PackRail({
             aria-pressed={selected}
             onClick={() => onPick(p)}
             className={cn(
-              // Three per view (two 0.375rem gaps), the rest swipeable.
-              'flex w-[calc((100%-0.75rem)/3)] shrink-0 snap-start flex-col items-center gap-0.5 rounded-xl border px-1 py-2 text-center transition-colors',
+              // Three per view (two 0.375rem gaps), the rest swipeable. The
+              // underscores are Tailwind's escape for the spaces CSS `calc()`
+              // requires around `-`; without them it parses only by the
+              // minifier's leniency.
+              'flex w-[calc((100%_-_0.75rem)/3)] shrink-0 snap-start flex-col items-center gap-0.5 rounded-xl border px-1 py-2 text-center transition-colors',
               selected
                 ? 'border-white/40 bg-white/10'
                 : 'border-white/10 bg-white/[0.03] hover:border-white/20 hover:bg-white/[0.06]',
