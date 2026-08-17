@@ -3,6 +3,7 @@ import {
   blockUnverifiedPhoneWrite,
   requirePhoneVerified,
 } from '../phone-verification-guard';
+import { Modules } from '@medusajs/framework/utils';
 import { signPhoneProof } from '../../../utils/phone-verification';
 
 const SECRET = 'test-secret';
@@ -11,16 +12,29 @@ const PHONE = '+60107667787';
 // Build a minimal MedusaRequest stand-in: body, headers, and a scope whose
 // configModule carries jwtSecret (copies the reset-token-guard/address-guard
 // req-mock idiom used by the sibling guard specs in this directory).
-const makeReq = (body: unknown, headers: Record<string, string> = {}) => ({
-  body,
-  headers,
-  scope: {
-    resolve: (key: string) =>
-      key === 'configModule'
-        ? { projectConfig: { http: { jwtSecret: SECRET } } }
-        : undefined,
-  },
-}) as never;
+// `claimants` seeds the customer module's listCustomers for the one-phone-one-
+// account check (assertPhoneUnclaimed) — empty means the number is free.
+const makeReq = (
+  body: unknown,
+  headers: Record<string, string> = {},
+  claimants: { id: string }[] = [],
+) =>
+  ({
+    body,
+    headers,
+    scope: {
+      // Only the two keys the guards actually resolve. A catch-all would hand a
+      // future guard a customer-module stub for whatever it asked for and pass
+      // vacuously.
+      resolve: (key: string) => {
+        if (key === 'configModule')
+          return { projectConfig: { http: { jwtSecret: SECRET } } };
+        if (key === Modules.CUSTOMER)
+          return { listCustomers: async () => claimants };
+        return undefined;
+      },
+    },
+  }) as never;
 
 describe('requireSignupPhoneProof', () => {
   // Capture whatever this key was before the suite (a stray-set env, e.g. a
@@ -32,16 +46,65 @@ describe('requireSignupPhoneProof', () => {
     if (ORIGINAL_PHONE_VERIFICATION_REQUIRED === undefined) {
       delete process.env.PHONE_VERIFICATION_REQUIRED;
     } else {
-      process.env.PHONE_VERIFICATION_REQUIRED = ORIGINAL_PHONE_VERIFICATION_REQUIRED;
+      process.env.PHONE_VERIFICATION_REQUIRED =
+        ORIGINAL_PHONE_VERIFICATION_REQUIRED;
     }
   });
 
+  // Stands in for the framework's wrapHandler (framework/dist/http/router.js
+  // registers every defineMiddlewares entry through it): await the handler and
+  // funnel a throw into the same `next(err)` channel, so a rejection and a
+  // next(err) are indistinguishable here exactly as they are in the app.
   const run = (req: never) =>
-    new Promise<unknown>((resolve) => requireSignupPhoneProof(req, {} as never, resolve));
+    new Promise<unknown>((resolve) => {
+      requireSignupPhoneProof(req, {} as never, resolve).catch(resolve);
+    });
 
   it('passes untouched when enforcement is off', async () => {
     delete process.env.PHONE_VERIFICATION_REQUIRED;
     expect(await run(makeReq({ phone: PHONE }))).toBeUndefined();
+  });
+
+  // One phone = one account. Checked OUTSIDE the enforcement flag on purpose:
+  // PHONE_VERIFICATION_REQUIRED is the rollback lever for OTP enforcement, and
+  // pulling it must not silently reopen multi-accounting on one handset.
+  it('rejects a phone another account already holds, flag off', async () => {
+    delete process.env.PHONE_VERIFICATION_REQUIRED;
+    const err = (await run(
+      makeReq({ phone: PHONE }, {}, [{ id: 'cus_existing' }]),
+    )) as Error;
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toMatch(/already in use/i);
+  });
+
+  it('rejects a duplicate phone even with a valid proof', async () => {
+    process.env.PHONE_VERIFICATION_REQUIRED = 'true';
+    const token = signPhoneProof(SECRET, PHONE, 'signup');
+    const err = (await run(
+      makeReq({ phone: PHONE }, { 'x-phone-verification': token }, [
+        { id: 'cus_existing' },
+      ]),
+    )) as Error;
+    // The MESSAGE, not merely "an Error": the proof check refuses too, so a
+    // bare instanceof assertion would pass for the wrong refusal.
+    expect(err.message).toMatch(/already in use/i);
+    delete process.env.PHONE_VERIFICATION_REQUIRED;
+  });
+
+  // ORDERING, and the reason it is load-bearing: with the flag ARMED an
+  // unproven caller must learn nothing about the number. Refusing the duplicate
+  // first would make this route a "does this number have an account" oracle for
+  // anyone holding one reusable register token — no OTP, unlimited probes.
+  it('hides the duplicate behind the proof check when enforcement is on', async () => {
+    process.env.PHONE_VERIFICATION_REQUIRED = 'true';
+    const claimed = (await run(
+      makeReq({ phone: PHONE }, {}, [{ id: 'cus_existing' }]),
+    )) as Error;
+    const free = (await run(makeReq({ phone: PHONE }))) as Error;
+    // Same refusal either way — no signal to read.
+    expect(claimed.message).toBe(free.message);
+    expect(claimed.message).toMatch(/phone verification required/i);
+    delete process.env.PHONE_VERIFICATION_REQUIRED;
   });
 
   describe('enforcement on', () => {
@@ -87,12 +150,15 @@ describe('blockUnverifiedPhoneWrite', () => {
     if (ORIGINAL_PHONE_VERIFICATION_REQUIRED === undefined) {
       delete process.env.PHONE_VERIFICATION_REQUIRED;
     } else {
-      process.env.PHONE_VERIFICATION_REQUIRED = ORIGINAL_PHONE_VERIFICATION_REQUIRED;
+      process.env.PHONE_VERIFICATION_REQUIRED =
+        ORIGINAL_PHONE_VERIFICATION_REQUIRED;
     }
   });
 
   const run = (req: never) =>
-    new Promise<unknown>((resolve) => blockUnverifiedPhoneWrite(req, {} as never, resolve));
+    new Promise<unknown>((resolve) =>
+      blockUnverifiedPhoneWrite(req, {} as never, resolve),
+    );
 
   it('passes when enforcement is off', async () => {
     delete process.env.PHONE_VERIFICATION_REQUIRED;
@@ -126,7 +192,8 @@ describe('requirePhoneVerified', () => {
     if (ORIGINAL_PHONE_VERIFICATION_REQUIRED === undefined) {
       delete process.env.PHONE_VERIFICATION_REQUIRED;
     } else {
-      process.env.PHONE_VERIFICATION_REQUIRED = ORIGINAL_PHONE_VERIFICATION_REQUIRED;
+      process.env.PHONE_VERIFICATION_REQUIRED =
+        ORIGINAL_PHONE_VERIFICATION_REQUIRED;
     }
     if (ORIGINAL_PHONE_GATE_REQUIRED === undefined) {
       delete process.env.PHONE_GATE_REQUIRED;
