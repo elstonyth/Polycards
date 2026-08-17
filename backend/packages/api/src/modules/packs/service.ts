@@ -8549,10 +8549,19 @@ class PacksModuleService extends MedusaService({
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<string[]> {
-    const [fresh] = await this.listChallengePayouts(
-      { id: input.rowId, status: 'skipped_no_stock' },
-      { select: ['id', 'snapshot'], take: 1 },
-      sharedContext,
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    // Claimed under FOR UPDATE, not merely re-read (promoteOneChallengeSchedule's
+    // reasoning): the caller's list and this transaction are two separate
+    // reads, so two runs of the script could otherwise both see
+    // `skipped_no_stock` and both mint — the winner would end up with double
+    // the pulls, and the second update would silently overwrite the first
+    // one's pull_ids. A concurrent run blocks here, then reads 'granted' and
+    // returns empty.
+    const [fresh] = await em.execute<{ id: string; snapshot: unknown }[]>(
+      `SELECT id, snapshot FROM challenge_payout
+         WHERE id = ? AND status = 'skipped_no_stock' AND deleted_at IS NULL
+           FOR UPDATE`,
+      [input.rowId],
     );
     if (!fresh) return [];
 
