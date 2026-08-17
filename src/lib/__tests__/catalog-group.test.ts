@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { catalogGroupOf, inGuaranteedGroup, type Pack } from '@/lib/packs-data';
+import {
+  catalogGroupOf,
+  groupPacks,
+  inGuaranteedGroup,
+  type Pack,
+} from '@/lib/packs-data';
 
 // Membership rule for the "Graded (Guaranteed PSA 10)" catalog section — the
 // truth-critical gate (real-money guarantee copy). Both backend flags must
@@ -72,5 +77,52 @@ describe('catalogGroupOf', () => {
     // second guess against psa10. If group says RAW, that pool has no
     // graded cards to be PSA-10 poisoned by in the first place.
     expect(catalogGroupOf(pack({ group: 'RAW', psa10: true }))).toBe('raw');
+  });
+});
+
+// Sectioning used by the pack detail page's selector rails. The invariant that
+// matters there: a pack that falls out of the grouping is a pack the customer
+// can no longer switch to.
+describe('groupPacks', () => {
+  const graded = pack({ id: 'g', group: 'GRADED', psa10: true });
+  const raw = pack({ id: 'r', group: 'RAW' });
+  const mixed = pack({ id: 'm', group: 'MIX' });
+
+  it('splits a mixed catalog into graded/raw/more, in that order', () => {
+    // Input order is deliberately scrambled: section order comes from
+    // CATALOG_GROUP_ORDER, not from where a pack sits in the list.
+    expect(groupPacks([mixed, raw, graded])).toEqual([
+      { id: 'graded', packs: [graded] },
+      { id: 'raw', packs: [raw] },
+      { id: 'more', packs: [mixed] },
+    ]);
+  });
+
+  it('keeps every pack — nothing is dropped, no pack lands in two groups', () => {
+    const packs = [
+      graded,
+      raw,
+      mixed,
+      pack({ id: 'p9', group: 'GRADED', psa10: false }),
+      pack({ id: 'unknown' }),
+    ];
+    const ids = groupPacks(packs).flatMap((g) => g.packs.map((p) => p.id));
+    expect(ids.slice().sort()).toEqual(
+      packs
+        .map((p) => p.id)
+        .slice()
+        .sort(),
+    );
+  });
+
+  it('preserves the caller-given (backend rank) order within a group', () => {
+    const a = pack({ id: 'a', group: 'RAW' });
+    const b = pack({ id: 'b', group: 'RAW' });
+    expect(groupPacks([b, a])).toEqual([{ id: 'raw', packs: [b, a] }]);
+  });
+
+  it('drops empty groups, so an all-graded catalog renders one section', () => {
+    expect(groupPacks([graded]).map((g) => g.id)).toEqual(['graded']);
+    expect(groupPacks([])).toEqual([]);
   });
 });

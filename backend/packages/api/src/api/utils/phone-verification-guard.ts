@@ -5,6 +5,7 @@ import type {
   MedusaResponse,
 } from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
+import { assertPhoneUnclaimed } from './phone-claim';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
 import {
@@ -37,28 +38,57 @@ const secretOf = (req: MedusaRequest): string => {
   return secret;
 };
 
-/** POST /store/customers — a signup that writes a phone must prove it. */
-export const requireSignupPhoneProof = (
+/**
+ * POST /store/customers — a signup that writes a phone must prove it, and must
+ * not reuse a number another account already holds.
+ */
+export const requireSignupPhoneProof = async (
   req: MedusaRequest<{ phone?: unknown }>,
   _res: MedusaResponse,
   next: MedusaNextFunction,
-): void => {
-  if (!isPhoneVerificationRequired(process.env)) return next();
+): Promise<void> => {
   const phone = req.body?.phone;
   if (typeof phone !== 'string') return next(); // Google signup has no phone
-  const header = req.headers[PHONE_VERIFICATION_HEADER];
-  const token = typeof header === 'string' ? header : '';
-  const proof = token ? verifyPhoneProof(secretOf(req), token, 'signup') : null;
-  if (!proof || proof.phone !== phone) {
-    // next(err) — repo convention for surfacing middleware errors (see
-    // blockUnusedVendorSelfRegistration in middlewares.ts).
-    return next(
-      new MedusaError(
-        MedusaError.Types.INVALID_DATA,
-        'Phone verification required.',
-      ),
-    );
+
+  if (isPhoneVerificationRequired(process.env)) {
+    const header = req.headers[PHONE_VERIFICATION_HEADER];
+    const token = typeof header === 'string' ? header : '';
+    const proof = token
+      ? verifyPhoneProof(secretOf(req), token, 'signup')
+      : null;
+    if (!proof || proof.phone !== phone) {
+      // next(err) — repo convention for surfacing middleware errors (see
+      // blockUnusedVendorSelfRegistration in middlewares.ts).
+      return next(
+        new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          'Phone verification required.',
+        ),
+      );
+    }
   }
+
+  // One phone = one account. Runs whatever the flag says —
+  // PHONE_VERIFICATION_REQUIRED is the fail-open rollback lever for whether a
+  // phone must be VERIFIED (CONTEXT.md), and pulling it must not reopen
+  // multi-accounting — but deliberately AFTER the proof check above, not
+  // before. The two refusals are distinguishable, so a duplicate-first order
+  // makes this route the very "does this number have an account" oracle that
+  // store/phone-verification/check is placed to avoid: a register token is
+  // reusable until it links a customer, so one token would probe unlimited
+  // numbers with no OTP. Behind the proof, only a caller who has already
+  // proven possession of the number can read the answer.
+  //
+  // Why this site exists at all when the check route refuses duplicates too:
+  // that one is what gives the user a usable error (it fires before the auth
+  // identity is registered), this one is authoritative. A proof is good for 10
+  // minutes and is not single-use, so without this a token minted while the
+  // number was free still creates the second account.
+  //
+  // A throw here reaches the error handler: the framework registers
+  // defineMiddlewares entries through wrapHandler, which awaits and forwards to
+  // next(err) (framework/dist/http/{router,utils/wrap-handler}.js).
+  await assertPhoneUnclaimed(req.scope, phone);
   next();
 };
 

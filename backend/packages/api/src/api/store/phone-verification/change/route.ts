@@ -12,6 +12,7 @@ import {
   E164_RE,
   verifyPhoneProof,
 } from '../../../../utils/phone-verification';
+import { assertPhoneUnclaimed } from '../../../utils/phone-claim';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
 import { isResendConfigured } from '../../../../modules/resend/options';
@@ -42,10 +43,6 @@ type Body = {
 // itself. That is the pre-existing value being echoed back to its own owner's
 // inbox, not a new disclosure, but do not read this as a length guarantee.
 const mask = (phone: string): string => `••••${phone.slice(-4)}`;
-
-// `phone` isn't declared on FilterableCustomerProps (only has_account is) —
-// same cast idiom as start/route.ts.
-type CustomerFilters = Parameters<ICustomerModuleService['listCustomers']>[0];
 
 export async function POST(
   req: AuthenticatedMedusaRequest<Body>,
@@ -182,28 +179,9 @@ export async function POST(
   // its FIRST phone does not qualify and takes the password branch above.
   // ── END RE-AUTH GATE ───────────────────────────────────────────────────────
 
-  // The OTP proof only establishes the CALLER can receive SMS at this number
-  // — it says nothing about whether another account already owns it (ported
-  // number, two people typing the same digits). Same CustomerFilters cast
-  // idiom as start/route.ts.
-  //
-  // DELIBERATELY non-atomic (check-then-update, no lock/constraint): racing
-  // it requires two accounts holding fresh OTP proofs for the SAME phone —
-  // i.e. one phone-holder racing their own accounts — and the duplicate
-  // state it could create is already handled fail-closed downstream
-  // (password-reset refuses a multi-match, start sends no SMS). A unique
-  // index can't back this: customer is a core-Medusa table (no migrations
-  // in this feature) and legacy rows predating verification may share
-  // phones. Revisit only if support ever sees a real duplicate.
-  const matches = await customerService.listCustomers(
-    { phone, has_account: true } as unknown as CustomerFilters,
-    { select: ['id'], take: 2 },
-  );
-  if (matches.some((c) => c.id !== customerId))
-    throw new MedusaError(
-      MedusaError.Types.NOT_ALLOWED,
-      'This phone number is already in use.',
-    );
+  // One phone = one account — shared with the two signup sites (see
+  // api/utils/phone-claim.ts for why it is a check and not a constraint).
+  await assertPhoneUnclaimed(req.scope, phone, customerId);
 
   await customerService.updateCustomers(customerId, { phone });
   // Persist the FACT of verification — the proof token above expires in 10

@@ -79,11 +79,45 @@ export const inGuaranteedGroup = (p: Pack): boolean =>
  *    null/absent group (empty pool or an older backend that never sent
  *    composition). None of these can be described with a claim that's
  *    guaranteed true, so they land in the claim-free "More Packs" bucket. */
-export const catalogGroupOf = (p: Pack): 'graded' | 'raw' | 'more' => {
+export type CatalogGroup = 'graded' | 'raw' | 'more';
+export const catalogGroupOf = (p: Pack): CatalogGroup => {
   if (inGuaranteedGroup(p)) return 'graded';
   if (p.group === 'RAW') return 'raw';
   return 'more';
 };
+
+/** Section order + heading, shared by the /slots catalog sections and the pack
+ *  detail page's sibling selector. ONE copy on purpose: these headings are
+ *  truth claims about pool composition (see catalogGroupOf), and a second copy
+ *  is how one surface drifts into an overclaim the other never makes. The
+ *  qualifying notes ("Guaranteed PSA 10" / "Ungraded") stay in the catalog —
+ *  they need the room only that page has. */
+export const CATALOG_GROUP_ORDER: readonly CatalogGroup[] = [
+  'graded',
+  'raw',
+  'more',
+];
+export const CATALOG_GROUP_HEADING: Record<CatalogGroup, string> = {
+  graded: 'Graded',
+  raw: 'Raw Cards',
+  more: 'More Packs',
+};
+
+/** Split a pack list into its composition sections, in CATALOG_GROUP_ORDER,
+ *  dropping the empty ones. Order WITHIN a group is the caller's (backend
+ *  rank), and every input pack lands in exactly one group — 'more' is the
+ *  catch-all, so a section-per-group render can never lose a pack. Backs the
+ *  pack detail page's selector rails. */
+export function groupPacks(
+  packs: Pack[],
+): { id: CatalogGroup; packs: Pack[] }[] {
+  const by: Record<CatalogGroup, Pack[]> = { graded: [], raw: [], more: [] };
+  for (const p of packs) by[catalogGroupOf(p)].push(p);
+  return CATALOG_GROUP_ORDER.filter((id) => by[id].length > 0).map((id) => ({
+    id,
+    packs: by[id],
+  }));
+}
 
 export type PackCategory = {
   id: string;

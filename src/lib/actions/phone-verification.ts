@@ -67,7 +67,24 @@ const PHONE_RESET_RULES: ErrorRule[] = [
 // disagreeing.
 const NEEDS_OLD_PHONE_PROOF = /verify your current phone number/i;
 
+// One phone = one account (backend/packages/api/src/api/utils/phone-claim.ts).
+// Refused at the check step for 'signup', so it arrives here as a FetchError on
+// a request whose code was correct — read off `.message` by the same mechanism
+// PHONE_RESET_RULES relies on.
+const PHONE_CHECK_RULES: ErrorRule[] = [
+  [
+    /phone number is already in use/i,
+    'This phone number is already registered to another account. Log in instead, or use a different number.',
+  ],
+];
+
 const PHONE_CHANGE_RULES: ErrorRule[] = [
+  // Same refusal as PHONE_CHECK_RULES, from the change route's own gate — the
+  // caller's OTP was fine, the number just belongs to someone else.
+  [
+    /phone number is already in use/i,
+    'This phone number is already registered to another account.',
+  ],
   [
     /enter your current password/i,
     'That password is incorrect. Enter your current password to change your phone number.',
@@ -140,7 +157,16 @@ export async function checkPhoneOtp(input: {
     return { ok: true, token };
   } catch (error) {
     logger.error('[phone-otp] check failed:', error);
-    return fail(messageOf(error, 'Invalid or expired code.'));
+    // The duplicate-phone refusal MUST survive the genericizer: the code they
+    // typed was correct, and "Invalid or expired code." sends them round the
+    // resend loop forever over a problem no code can fix.
+    return fail(
+      friendlyError(
+        error,
+        PHONE_CHECK_RULES,
+        messageOf(error, 'Invalid or expired code.'),
+      ),
+    );
   }
 }
 

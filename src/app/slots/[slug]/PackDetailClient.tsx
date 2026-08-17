@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
@@ -23,10 +23,12 @@ import {
   type Pack,
   type ResolvedPack,
   type PackCard,
+  CATALOG_GROUP_HEADING,
   FLAT_BUYBACK_PERCENT,
   FREE_WELCOME_CATEGORY,
   FREE_PULL_LOCKED_MESSAGE,
   factoryVideo,
+  groupPacks,
 } from '@/lib/packs-data';
 import { AmbientVideo } from '@/components/AmbientVideo';
 import { Pill } from '@/components/ui/pill';
@@ -63,6 +65,88 @@ import { SlabImage } from '@/components/SlabImage';
  */
 const FREE_PACK_UNAVAILABLE_MESSAGE =
   "This welcome pack isn't available on this account.";
+
+/**
+ * One composition group's sibling tiles (Graded / Raw Cards / More Packs) as a
+ * horizontally-swipeable rail: three across, the rest a swipe away. Replaces
+ * the old flat 3-col grid, which mixed graded and raw tiers into one block —
+ * the /slots catalog already sections by the SAME backend-derived composition
+ * (catalogGroupOf), so the selector now reads the same way.
+ */
+function PackRail({
+  packs,
+  activeId,
+  onPick,
+}: {
+  packs: Pack[];
+  activeId: string;
+  onPick: (p: Pack) => void;
+}) {
+  const rail = useRef<HTMLDivElement>(null);
+  const arrived = useRef<HTMLButtonElement>(null);
+
+  // Centre the pack we arrived on. With only three tiles visible, a deep link
+  // to a 6th-place pack would otherwise render a selector that appears not to
+  // contain the pack the panel is titled after. scrollLeft, never
+  // scrollIntoView: the latter also scrolls the page/sticky column to reach
+  // this rail. Mount only — re-centring after a tap yanks the rail under the
+  // thumb, and the tapped tile is by definition already on screen.
+  useEffect(() => {
+    const r = rail.current;
+    const tile = arrived.current;
+    if (!r || !tile) return;
+    r.scrollLeft = tile.offsetLeft - (r.clientWidth - tile.clientWidth) / 2;
+  }, []);
+
+  return (
+    <div
+      ref={rail}
+      data-testid="pack-rail"
+      // `relative`: offsetLeft above is measured against the offsetParent, so
+      // the rail has to be one. Scrollbar hidden like the catalog's rails.
+      className="relative flex snap-x snap-mandatory gap-1.5 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+    >
+      {packs.map((p) => {
+        const selected = p.id === activeId;
+        return (
+          <button
+            key={p.id}
+            ref={selected ? arrived : undefined}
+            type="button"
+            aria-pressed={selected}
+            onClick={() => onPick(p)}
+            className={cn(
+              // Three per view (two 0.375rem gaps), the rest swipeable. The
+              // underscores are Tailwind's escape for the spaces CSS `calc()`
+              // requires around `-`; without them it parses only by the
+              // minifier's leniency.
+              'flex w-[calc((100%_-_0.75rem)/3)] shrink-0 snap-start flex-col items-center gap-0.5 rounded-xl border px-1 py-2 text-center transition-colors',
+              selected
+                ? 'border-white/40 bg-white/10'
+                : 'border-white/10 bg-white/[0.03] hover:border-white/20 hover:bg-white/[0.06]',
+            )}
+          >
+            <Image
+              src={p.image}
+              alt=""
+              aria-hidden
+              width={205}
+              height={360}
+              unoptimized
+              className="h-9 w-auto object-contain"
+            />
+            <span className="w-full truncate text-[11px] font-medium leading-tight text-white">
+              {p.name.replace(' Pack', '')}
+            </span>
+            <span className="text-[11px] font-semibold tabular-nums text-white/55">
+              {p.price}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function PackDetailClient({
   pack,
@@ -186,6 +270,13 @@ export default function PackDetailClient({
     () => pool.filter((c) => isTopRarity(c.rarity)),
     [pool],
   );
+
+  // Sibling selector, sectioned by the SAME backend-derived composition the
+  // /slots catalog groups on (catalogGroupOf) — auto-detected, never operator-
+  // set. Every group is rendered, not just graded/raw: 'more' holds the
+  // uncertain pools (MIX, non-PSA-10 graded, unknown), and dropping it would
+  // make those siblings unreachable from this page. Empty groups are skipped.
+  const siblingGroups = useMemo(() => groupPacks(siblings), [siblings]);
 
   // Card-value range over the FULL pool (not topPool) — one derivation feeding
   // both the odds-panel gate and its range row.
@@ -317,9 +408,10 @@ export default function PackDetailClient({
 
         {/* ---- Configurator (mobile: right after the stage; lg: sticky right column) ---- */}
         <aside className="lg:sticky lg:top-20 lg:col-start-2 lg:row-span-2 lg:row-start-1">
-          {/* The whole configurator fits without an internal scrollbar (like the
-              live site): compact 3-col pack grid, no max-height clamp — on
-              mobile the page itself scrolls, on desktop it fits the viewport. */}
+          {/* The whole configurator fits without a VERTICAL scrollbar (like the
+              live site): the pack selector's rails scroll sideways, no
+              max-height clamp — on mobile the page itself scrolls, on desktop
+              it fits the viewport. */}
           <div className="flex flex-col overflow-hidden rounded-2xl border border-white/10 bg-neutral-950">
             {/* Title + buyback */}
             <div className="flex items-center justify-between gap-3 border-b border-white/10 px-5 py-4">
@@ -409,44 +501,36 @@ export default function PackDetailClient({
                   <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/60">
                     Pack
                   </p>
-                  {/* Compact 3-col grid so all tiers fit on screen at once — the
-                    selector must never scroll inside the panel. */}
-                  <div className="grid grid-cols-3 gap-1.5">
-                    {siblings.map((p) => {
-                      const selected = p.id === active.id;
-                      return (
-                        <button
-                          key={p.id}
-                          type="button"
-                          onClick={() => {
+                  {/* One rail per composition group, three tiles across. The
+                      panel still never scrolls VERTICALLY — the rails scroll
+                      horizontally, so extra tiers cost a swipe, not height. */}
+                  <div
+                    data-testid="pack-selector"
+                    className="flex flex-col gap-2.5"
+                  >
+                    {siblingGroups.map((g) => (
+                      <div key={g.id} data-testid="pack-selector-group">
+                        <div className="mb-1 flex items-baseline justify-between gap-2">
+                          <p className="text-[11px] font-semibold text-white/70">
+                            {CATALOG_GROUP_HEADING[g.id]}
+                          </p>
+                          <span className="text-[10px] text-white/40">
+                            <span className="tabular-nums">
+                              {g.packs.length}
+                            </span>{' '}
+                            {g.packs.length === 1 ? 'pack' : 'packs'}
+                          </span>
+                        </div>
+                        <PackRail
+                          packs={g.packs}
+                          activeId={active.id}
+                          onPick={(p) => {
                             setActive(p);
                             reset();
                           }}
-                          className={cn(
-                            'flex flex-col items-center gap-0.5 rounded-xl border px-1 py-2 text-center transition-colors',
-                            selected
-                              ? 'border-white/40 bg-white/10'
-                              : 'border-white/10 bg-white/[0.03] hover:border-white/20 hover:bg-white/[0.06]',
-                          )}
-                        >
-                          <Image
-                            src={p.image}
-                            alt=""
-                            aria-hidden
-                            width={205}
-                            height={360}
-                            unoptimized
-                            className="h-9 w-auto object-contain"
-                          />
-                          <span className="w-full truncate text-[11px] font-medium leading-tight text-white">
-                            {p.name.replace(' Pack', '')}
-                          </span>
-                          <span className="text-[11px] font-semibold tabular-nums text-white/55">
-                            {p.price}
-                          </span>
-                        </button>
-                      );
-                    })}
+                        />
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}

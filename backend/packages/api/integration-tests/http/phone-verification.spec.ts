@@ -581,10 +581,24 @@ medusaIntegrationTestRunner({
           });
         });
 
+        // The duplicate state is now seeded DIRECTLY for the second account,
+        // and that is the point rather than a workaround: signup refuses a
+        // number another account already holds (api/utils/phone-claim.ts), so
+        // registering both through the storefront no longer reaches this
+        // branch. What it defends against is the state that can still occur —
+        // a legacy row, or POST /admin/customers, which does not pass the
+        // storefront gate. Same directly-seeded idiom as the Google-only case
+        // below.
         it("400s when two accounts share the phone, with the reset-by-email message", async () => {
           const phone = "+60107667803";
           await registerCustomerWithPhone("pw-reset-dup-a@test.dev", phone);
-          await registerCustomerWithPhone("pw-reset-dup-b@test.dev", phone);
+          await getContainer()
+            .resolve(Modules.CUSTOMER)
+            .createCustomers({
+              email: "pw-reset-dup-b@test.dev",
+              phone,
+              has_account: true,
+            });
 
           await start({ phone, purpose: "password-reset" });
           const checked = await check({
@@ -754,6 +768,146 @@ medusaIntegrationTestRunner({
           );
           expect(res.status).toBe(200);
           expect(res.data.customer.phone).toBe(phone);
+        });
+
+        // ONE PHONE = ONE ACCOUNT. Two accounts sharing a number is what this
+        // whole gate exists to stop, and only an HTTP case proves it is wired:
+        // the unit spec runs the guard against a mocked customer module, so it
+        // cannot catch a matcher that misses /store/customers or a helper that
+        // resolves the wrong module.
+        //
+        // The replay is the real attack, not a contrivance: a signup proof is
+        // purpose-scoped but NOT single-use and lives 10 minutes, so one OTP
+        // buys as many create attempts as fit in the window. The check route
+        // refuses the SECOND request for a claimed number (next case), which is
+        // exactly why the second account can only be attempted by replaying the
+        // first proof — and why the middleware has to refuse it too.
+        it("refuses a second account on a number already claimed, even replaying the proof", async () => {
+          const phone = "+60199999993";
+          const tokenA = await register("gated-dup-a@test.dev");
+
+          await start({ phone, purpose: "signup" });
+          const checked = await check({
+            phone,
+            purpose: "signup",
+            code: "000000",
+          });
+          expect(checked.status).toBe(200);
+          const proof = checked.data.token as string;
+
+          const first = await unwrapResponse(
+            postStoreCustomer(
+              api,
+              getContainer(),
+              { email: "gated-dup-a@test.dev", phone },
+              {
+                headers: {
+                  ...headers,
+                  authorization: `Bearer ${tokenA}`,
+                  "x-phone-verification": proof,
+                },
+              },
+            ),
+          );
+          expect(first.status).toBe(200);
+
+          const tokenB = await register("gated-dup-b@test.dev");
+          const second = await unwrapResponse(
+            postStoreCustomer(
+              api,
+              getContainer(),
+              { email: "gated-dup-b@test.dev", phone },
+              {
+                headers: {
+                  ...headers,
+                  authorization: `Bearer ${tokenB}`,
+                  "x-phone-verification": proof,
+                },
+              },
+            ),
+          );
+          expect(second.status).toBe(400);
+          expect(second.data).toMatchObject({
+            message: "This phone number is already in use.",
+          });
+        });
+
+        // The site that makes the refusal USABLE: it fires before the
+        // storefront's signup() registers an auth identity, so the email is not
+        // left stranded on an identity with no customer row. Refused only after
+        // the OTP is approved — see the route comment for why an earlier
+        // refusal would be an account-existence oracle.
+        it("refuses a signup OTP check for a number already claimed", async () => {
+          const phone = "+60199999992";
+          const token = await register("gated-dup-check@test.dev");
+
+          await start({ phone, purpose: "signup" });
+          const first = await check({
+            phone,
+            purpose: "signup",
+            code: "000000",
+          });
+          expect(first.status).toBe(200);
+          expect(
+            (
+              await unwrapResponse(
+                postStoreCustomer(
+                  api,
+                  getContainer(),
+                  { email: "gated-dup-check@test.dev", phone },
+                  {
+                    headers: {
+                      ...headers,
+                      authorization: `Bearer ${token}`,
+                      "x-phone-verification": first.data.token as string,
+                    },
+                  },
+                ),
+              )
+            ).status,
+          ).toBe(200);
+
+          await start({ phone, purpose: "signup" });
+          const second = await check({
+            phone,
+            purpose: "signup",
+            code: "000000",
+          });
+          expect(second.status).toBe(400);
+          expect(second.data).toMatchObject({
+            message: "This phone number is already in use.",
+          });
+        });
+
+        // ORDERING, at the wire. An unproven caller must not be able to tell a
+        // claimed number from a free one: a register token is reusable until it
+        // links a customer, so a duplicate-first guard would hand anyone an
+        // unlimited, OTP-free "does this number have an account" oracle. Both
+        // bodies must come back with the SAME refusal.
+        it("does not leak whether a number is claimed to an unproven caller", async () => {
+          const claimed = "+60199999993"; // taken by the replay case above
+          const free = "+60199999991";
+
+          const attempt = async (email: string, phone: string) => {
+            const token = await register(email);
+            return unwrapResponse(
+              postStoreCustomer(
+                api,
+                getContainer(),
+                { email, phone },
+                { headers: { ...headers, authorization: `Bearer ${token}` } },
+              ),
+            );
+          };
+
+          const onClaimed = await attempt("gated-oracle-a@test.dev", claimed);
+          const onFree = await attempt("gated-oracle-b@test.dev", free);
+
+          expect(onClaimed.status).toBe(onFree.status);
+          expect(onClaimed.data.message).toBe(onFree.data.message);
+          expect(onClaimed.data).toMatchObject({
+            message: "Phone verification required.",
+          });
         });
 
         it("refuses a direct phone change on /store/customers/me", async () => {
