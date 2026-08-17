@@ -31,15 +31,17 @@ for (const [label, viewport] of [
   await panel.screenshot({ path: `docs/research/pack-selector-${label}.png` });
 
   // What the rails actually contain + whether the arrived-on pack is centred.
+  // Anchored on the selector's test ids, so a copy or wrapper change in the
+  // configurator doesn't silently turn this probe into "no groups found".
   const state = await p.evaluate(() => {
-    const label = [...document.querySelectorAll('p')].find(
-      (el) => el.textContent?.trim() === 'Pack',
-    );
-    const box = label?.parentElement;
-    if (!box) return { error: 'selector block not found' };
+    const box = document.querySelector('[data-testid="pack-selector"]');
+    if (!box) return { error: 'pack-selector not found' };
     return {
-      groups: [...box.querySelectorAll(':scope > div > div')].map((g) => {
-        const rail = g.querySelector('div:has(> button)') ?? g;
+      groups: [
+        ...box.querySelectorAll('[data-testid="pack-selector-group"]'),
+      ].map((g) => {
+        const rail = g.querySelector('[data-testid="pack-rail"]');
+        if (!rail) return { error: 'pack-rail not found in group' };
         const active = rail.querySelector('button[aria-pressed="true"]');
         return {
           heading: g.querySelector('p')?.textContent?.trim(),

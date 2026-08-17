@@ -101,6 +101,7 @@ function PackRail({
   return (
     <div
       ref={rail}
+      data-testid="pack-rail"
       // `relative`: offsetLeft above is measured against the offsetParent, so
       // the rail has to be one. Scrollbar hidden like the catalog's rails.
       className="relative flex snap-x snap-mandatory gap-1.5 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
@@ -503,9 +504,12 @@ export default function PackDetailClient({
                   {/* One rail per composition group, three tiles across. The
                       panel still never scrolls VERTICALLY — the rails scroll
                       horizontally, so extra tiers cost a swipe, not height. */}
-                  <div className="flex flex-col gap-2.5">
+                  <div
+                    data-testid="pack-selector"
+                    className="flex flex-col gap-2.5"
+                  >
                     {siblingGroups.map((g) => (
-                      <div key={g.id}>
+                      <div key={g.id} data-testid="pack-selector-group">
                         <div className="mb-1 flex items-baseline justify-between gap-2">
                           <p className="text-[11px] font-semibold text-white/70">
                             {CATALOG_GROUP_HEADING[g.id]}
