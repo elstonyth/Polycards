@@ -21,7 +21,7 @@ vi.mock('@/lib/logger', () => ({
 }));
 vi.mock('@/lib/data/customer', () => ({ getAuthToken: mocks.getAuthToken }));
 
-const { startPhoneOtp, changePhone } =
+const { startPhoneOtp, checkPhoneOtp, changePhone } =
   await import('@/lib/actions/phone-verification');
 
 const MY = '+60107667787';
@@ -164,6 +164,18 @@ describe('changePhone — re-auth fields', () => {
       needsOldPhoneProof: true,
     });
   });
+
+  // Same genericizer problem, different cause: the OTP was fine, the number
+  // just belongs to someone else. "Please try again." would loop them.
+  it('surfaces the duplicate-number refusal', async () => {
+    mocks.clientFetch.mockRejectedValue(
+      new Error('This phone number is already in use.'),
+    );
+    await expect(changePhone({ phone: MY, token: 'proof' })).resolves.toEqual({
+      ok: false,
+      error: 'This phone number is already registered to another account.',
+    });
+  });
 });
 
 // SettingsForm branches its whole flow on this: a Google-only account that
@@ -202,5 +214,38 @@ describe('changePhone — needsOldPhoneProof discriminator', () => {
     mocks.clientFetch.mockResolvedValue({ customer: { phone: MY } });
     const result = await changePhone({ phone: MY, token: 'proof' });
     expect(result).toEqual({ ok: true, phone: MY });
+  });
+});
+
+// One phone = one account (backend/packages/api/src/api/utils/phone-claim.ts).
+// The refusal arrives on a request whose CODE was correct, so `messageOf`'s
+// genericizer would tell the user "Invalid or expired code." and send them back
+// round the resend loop over a problem no code can fix.
+describe('checkPhoneOtp — duplicate-number refusal', () => {
+  it('surfaces the refusal instead of the generic code copy', async () => {
+    mocks.clientFetch.mockRejectedValue(
+      new Error('This phone number is already in use.'),
+    );
+    await expect(
+      checkPhoneOtp({ phone: MY, purpose: 'signup', code: '123456' }),
+    ).resolves.toEqual({
+      ok: false,
+      error:
+        'This phone number is already registered to another account. Log in instead, or use a different number.',
+    });
+  });
+
+  it('still generalizes an unrecognised failure', async () => {
+    mocks.clientFetch.mockRejectedValue(new Error('boom'));
+    await expect(
+      checkPhoneOtp({ phone: MY, purpose: 'signup', code: '123456' }),
+    ).resolves.toEqual({ ok: false, error: 'Invalid or expired code.' });
+  });
+
+  it('returns the proof token on success', async () => {
+    mocks.clientFetch.mockResolvedValue({ token: 'proof' });
+    await expect(
+      checkPhoneOtp({ phone: MY, purpose: 'signup', code: '123456' }),
+    ).resolves.toEqual({ ok: true, token: 'proof' });
   });
 });

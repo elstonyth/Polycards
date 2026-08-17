@@ -425,7 +425,10 @@ export default defineMiddlewares({
       // when PHONE_VERIFICATION_REQUIRED is on and the body carries a phone,
       // the request must also carry a verified 'signup'-purpose proof for
       // that exact number — the enforcement gate that makes Task 2's OTP
-      // routes mandatory instead of opt-in.
+      // routes mandatory instead of opt-in. It ALSO refuses a number another
+      // account already holds, and that half runs whatever the flag says (one
+      // phone = one account is a business rule, not part of the OTP rollback
+      // lever) — see api/utils/phone-claim.ts.
       matcher: '/store/customers',
       method: 'POST',
       middlewares: [rejectCustomerMetadata, requireSignupPhoneProof],

@@ -201,6 +201,31 @@ describe('signup — phone verification enforcement (PHONE_VERIFICATION_REQUIRED
     expect(headers.Authorization).toBe('Bearer reg-tok');
     expect(headers['x-phone-verification']).toBe('proof-tok');
   });
+
+  // One phone = one account. The signup gate (backend
+  // api/utils/phone-verification-guard.ts) refuses at POST /store/customers
+  // when the number was claimed inside the proof's 10-minute window. Without
+  // the AUTH_RULES entry this collapses to "Could not create your account.
+  // Please try again." and they retry the same number forever.
+  it('names the duplicate phone instead of the generic signup failure', async () => {
+    mocks.clientFetch.mockResolvedValueOnce({ token: 'reg-tok' }); // register
+    mocks.customerCreate.mockRejectedValueOnce(
+      new Error('This phone number is already in use.'),
+    );
+
+    const r = await signup({
+      email: 'new@polycards.app',
+      password: 'PolycardsTest123!',
+      phone: '010-766 7787',
+      phone_verification_token: 'proof-tok',
+    });
+
+    expect(r).toEqual({
+      ok: false,
+      error:
+        'This phone number is already registered to another account. Log in instead, or use a different number.',
+    });
+  });
 });
 
 describe('resetPassword — password presence (#3)', () => {
