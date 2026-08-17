@@ -3,6 +3,30 @@
 End-to-end coverage of the **admin management** and **customer** workflows across
 all three live surfaces: storefront `:4000`, admin dashboard `:7000`, backend `:9000`.
 
+## The suite runs on a mirror of the PRODUCTION catalog
+
+No spec hardcodes a pack slug or a top-up amount any more. The catalog under test
+is a snapshot of what polycards.gg actually serves — the same five tier packs
+(`bronze-pack` … `diamond-pack`), the same prices, and real cards with real
+names, art, tiers and prices:
+
+| Piece                                           | Role                                                                                                                                                                                               |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scripts/snapshot-prod-catalog.mjs` (repo root) | Read-only pull of the live catalog from the public storefront pages → `backend/packages/api/src/scripts/prod-catalog.data.ts`.                                                                     |
+| `seed:e2e` (`seed-e2e-fixtures.ts`)             | Installs that snapshot locally: packs synced to prod's price/art/buyback, cards created, pools rebuilt, off-catalog packs retired to draft. **Refuses to run against a non-local `DATABASE_URL`.** |
+| `helpers/catalog.ts`                            | `primaryPack()` / `twoPacks()` / `fundFor()` — specs resolve the pack and its funding from the live `GET /store/packs`.                                                                            |
+
+Refresh the mirror after an operator changes the prod catalog:
+
+```bash
+node scripts/snapshot-prod-catalog.mjs
+```
+
+Then re-run `corepack yarn seed:e2e` from `backend/packages/api`. The previous
+fixture invented its own packs (`pokemon-rookie`, `pokemon-elite`) and cards
+(`PW Pikachu`); those slugs are dead — the seed now deactivates them so the
+"cheapest openable pack" a spec picks can't land on them.
+
 ## What it covers
 
 | Spec                       | Flow                                                                                                                                                                                                                                                                                     |
@@ -39,6 +63,9 @@ docker start pokenic-postgres pokenic-redis
 
 # backend  (backend/packages/api)
 corepack yarn dev                       # :9000  /health
+
+# catalog fixture (backend/packages/api) — mirrors prod into the LOCAL db
+corepack yarn seed:e2e
 
 # admin dashboard  (backend/apps/admin)
 node ../../node_modules/vite/bin/vite.js --port 7000   # :7000/dashboard
@@ -94,3 +121,9 @@ prod host; use `-Smoke` (→ `playwright.prod-smoke.config.ts`, read-only) for p
 - The odds specs snapshot and **restore** each pack's odds in a `finally`, so the
   operator's configuration is left untouched. Stock consumed by the opens is not
   restored (it's a dev database).
+- Because the specs now drive the **real** pack slugs, that restore is load
+  bearing rather than a courtesy — and it's the reason `seed:e2e` hard-refuses a
+  non-local `DATABASE_URL`. Never point either at a production database.
+- The prod prices are real money-sized (bronze RM300 … diamond RM5,000). Specs
+  fund with `fundFor(pack, opens)`; `helpers/api.ts` splits a top-up across the
+  RM10,000-per-call gateway ceiling, so no spec needs its own arithmetic.

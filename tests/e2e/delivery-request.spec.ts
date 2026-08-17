@@ -9,15 +9,17 @@
 import { test, expect } from '@playwright/test';
 import { BASE, stamp } from './helpers/constants';
 import { createCustomer, openPack } from './helpers/api';
+import { fundFor, primaryPack } from './helpers/catalog';
 import * as sf from './helpers/storefront';
 
-const PACK = 'pokemon-rookie';
 // createCustomer() registers every customer with this fixed password.
 const PASSWORD = 'PwE2e2026!';
 
 test('customer requests delivery of a vaulted card via the UI', async ({
   page,
 }) => {
+  const pack = await primaryPack();
+  const PACK = pack.slug;
   // Pre-accept cookie consent (key: src/lib/consent.ts CONSENT_KEY): the fresh-
   // context banner (z-50, bottom-anchored) overlays the action bar's pills and
   // intercepts their clicks; suppressing it also keeps the screenshots clean.
@@ -30,7 +32,7 @@ test('customer requests delivery of a vaulted card via the UI', async ({
   });
 
   // Funded customer holding one vaulted card (API setup), then log into the UI.
-  const cust = await createCustomer(100);
+  const cust = await createCustomer(fundFor(pack));
   await openPack(cust.token, PACK); // auto-vaults the pull
   await sf.login(page, PACK, cust.email, PASSWORD);
 

@@ -14,7 +14,9 @@ import { test, expect } from '@playwright/test';
 import { BASE } from './helpers/constants';
 import * as sf from './helpers/storefront';
 
-const PACK = process.env.PW_REWARD_PACK ?? 'pokemon-rookie';
+// Only used as the page sf.login() lands on. Defaults to the real entry pack;
+// resolve it live (helpers/catalog primaryPack) if this spec is ever un-skipped.
+const PACK = process.env.PW_REWARD_PACK ?? 'bronze-pack';
 const EMAIL = process.env.PW_REWARD_EMAIL ?? 'test@polycards.app';
 const PASSWORD = process.env.PW_REWARD_PASSWORD ?? 'PolycardsTest123!';
 

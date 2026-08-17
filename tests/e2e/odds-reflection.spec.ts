@@ -26,16 +26,24 @@ import {
   type OddsRow,
 } from './helpers/api';
 import { ensureAdmin, forceCardTo100ViaUI } from './helpers/admin';
+import { fundFor, twoPacks, type TestPack } from './helpers/catalog';
 
 const OPENS = 3;
 
 let admin: string;
 let customer: CustomerCreds;
+// The two cheapest REAL packs — resolved from the live catalog, so this spec
+// follows a price change instead of breaking on one.
+let packA: TestPack;
+let packB: TestPack;
 
 test.beforeAll(async () => {
   admin = await adminToken();
-  // Fund enough for OPENS opens of both packs (rookie RM25, elite RM50) + margin.
-  customer = await createCustomer(400);
+  [packA, packB] = await twoPacks();
+  // Enough for OPENS opens of BOTH packs, derived from their live prices.
+  customer = await createCustomer(
+    fundFor(packA, OPENS) + fundFor(packB, OPENS),
+  );
 });
 
 // Pick a drawable target: in the pool, with stock for OPENS opens (highest stock).
@@ -77,10 +85,10 @@ async function assertEveryPullIs(
   expect(pulled).toEqual(Array(OPENS).fill(expectedName));
 }
 
-test('pack A (pokemon-rookie): 100% via admin UI → every pull is that card', async ({
+test('pack A (entry pack): 100% via admin UI → every pull is that card', async ({
   page,
 }) => {
-  const slug = 'pokemon-rookie';
+  const slug = packA.slug;
   const original = snapshotOdds((await getOdds(admin, slug)).odds);
   const publishedBefore = await publishedOddsSnapshot(page, slug);
   try {
@@ -106,10 +114,10 @@ test('pack A (pokemon-rookie): 100% via admin UI → every pull is that card', a
   }
 });
 
-test('pack B (pokemon-elite): 100% via odds API → every pull is that card', async ({
+test('pack B (second pack): 100% via odds API → every pull is that card', async ({
   page,
 }) => {
-  const slug = 'pokemon-elite';
+  const slug = packB.slug;
   const before = (await getOdds(admin, slug)).odds;
   const original = snapshotOdds(before);
   const publishedBefore = await publishedOddsSnapshot(page, slug);

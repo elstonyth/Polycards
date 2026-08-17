@@ -86,16 +86,27 @@ export async function createCustomer(fundUsd = 0): Promise<CustomerCreds> {
   return creds;
 }
 
+// Mirrors TOPUP_MAX_RM (modules/packs/topup.ts): one call can mint at most this.
+const TOPUP_MAX_RM = 10_000;
+
 export async function topup(token: string, amount: number): Promise<number> {
-  const r = await api<{ balance: number }>('/store/credits/topup', {
-    method: 'POST',
-    token,
-    body: { amount },
-    // Idempotency-Key is MANDATORY since the 2026-07-07 audit (a keyless
-    // request 400s before touching the gateway) — mint a fresh one per call.
-    headers: { 'Idempotency-Key': crypto.randomUUID() },
-  });
-  return r.balance;
+  // Real pack prices reach RM5,000 an open, so a spec funding several opens can
+  // exceed the per-call ceiling. Split rather than 400 — the ceiling is an
+  // anti-typo rule, not something the suite should be pinned under.
+  let balance = 0;
+  for (let left = amount; left > 0; left -= TOPUP_MAX_RM) {
+    const chunk = Math.min(left, TOPUP_MAX_RM);
+    const r = await api<{ balance: number }>('/store/credits/topup', {
+      method: 'POST',
+      token,
+      body: { amount: chunk },
+      // Idempotency-Key is MANDATORY since the 2026-07-07 audit (a keyless
+      // request 400s before touching the gateway) — mint a fresh one per call.
+      headers: { 'Idempotency-Key': crypto.randomUUID() },
+    });
+    balance = r.balance;
+  }
+  return balance;
 }
 
 export interface OpenResult {

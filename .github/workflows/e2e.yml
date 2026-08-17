@@ -9,9 +9,12 @@
 #                           the "Webshop" publishable key) + print-publishable-key
 #   deploy:migrate-user  -> idempotent create-admin (ADMIN_EMAIL/ADMIN_PASSWORD)
 #                           + seed-vip-achievements
-#   seed:e2e             -> E2E-only fixture: the ACTIVE, populated pokemon-rookie
-#                           /-elite packs the specs hardcode (prod seed no longer
-#                           creates them). Never run against prod.
+#   seed:e2e             -> E2E-only fixture: installs a MIRROR OF THE PROD
+#                           CATALOG (the five real tier packs + real cards, from
+#                           the committed snapshot in prod-catalog.data.ts) and
+#                           activates them. The specs resolve which pack to drive
+#                           from GET /store/packs, so nothing is hardcoded.
+#                           Refuses to run unless DATABASE_URL is local.
 #   backend :9000 (medusa start) · storefront :4000 (standalone) · admin :7000 (vite)
 # The publishable key is parsed from deploy:init's output, baked into the
 # storefront build (NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY) and passed to the suite
