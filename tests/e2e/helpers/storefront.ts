@@ -158,6 +158,19 @@ export async function readPriceAndBalance(
   return { price: NaN, balance: await readBalance(page) };
 }
 
+// The UI renders amounts through src/lib/format.ts `rm()`, i.e.
+// toLocaleString('en-US') — so RM 1,860.00 carries a thousands separator. Raw
+// interpolation of the number silently stops matching at four digits, which
+// with live pack prices is now a reachable state, not a hypothetical.
+const rmText = (amount: number): string =>
+  amount.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+
+const escapeRe = (s: string): string =>
+  s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 export async function topUp(page: Page, amount: number): Promise<void> {
   await page.goto(`${BASE}/vault`, { waitUntil: 'domcontentloaded' });
   // Top-up is triggered from the header balance chip ("Balance RM 0.00 — top up")
@@ -168,12 +181,14 @@ export async function topUp(page: Page, amount: number): Promise<void> {
     .click();
   await page.getByLabel('Top-up amount in RM').fill(String(amount));
   await page
-    .getByRole('button', { name: new RegExp(`Proceed.*add RM ${amount}\\.00`) })
+    .getByRole('button', {
+      name: new RegExp(`Proceed.*add RM ${escapeRe(rmText(amount))}`),
+    })
     .click();
   // Demo checkout shows an in-modal success state ("RM X ADDED") with a Done
   // button rather than auto-closing — confirm the add, then dismiss.
   await page
-    .getByText(new RegExp(`RM ${amount}\\.00 ADDED`, 'i'))
+    .getByText(new RegExp(`RM ${escapeRe(rmText(amount))} ADDED`, 'i'))
     .waitFor({ timeout: 15_000 });
   await page.getByRole('button', { name: /^Done$/ }).click();
 }

@@ -8,9 +8,8 @@
 import { test, expect } from '@playwright/test';
 import { BASE, stamp } from './helpers/constants';
 import { api } from './helpers/api';
+import { fundFor, primaryPack } from './helpers/catalog';
 import * as sf from './helpers/storefront';
-
-const PACK = 'pokemon-rookie';
 
 test.describe('customer workflow', () => {
   const id = stamp();
@@ -21,6 +20,11 @@ test.describe('customer workflow', () => {
   test('signup → top up → open → keep → vault → sell-back', async ({
     page,
   }) => {
+    // The real catalog's entry pack, read live — no hardcoded slug, and the
+    // top-up below scales with whatever that pack costs today.
+    const pack = await primaryPack();
+    const PACK = pack.slug;
+    const fund = fundFor(pack);
     // Pre-accept cookie consent (key: src/lib/consent.ts CONSENT_KEY): the
     // fresh-context banner (z-50, bottom-anchored) overlays the vault's
     // persistent action bar and intercepts the "Sell 1" pill click below.
@@ -40,13 +44,13 @@ test.describe('customer workflow', () => {
       ).toBeVisible();
     });
 
-    await test.step('top up RM100 and see it on the vault balance', async () => {
-      await sf.topUp(page, 100);
+    await test.step(`top up RM${fund} and see it on the vault balance`, async () => {
+      await sf.topUp(page, fund);
       await sf.gotoVault(page);
-      // Stat strip shows whole-ringgit ("RM 100"); the header chip carries the
-      // exact figure — read that as the canonical balance.
+      // Stat strip shows whole-ringgit; the header chip carries the exact
+      // figure — read that as the canonical balance.
       await expect(page.getByText(/^Balance$/).first()).toBeVisible();
-      expect(await sf.readBalance(page)).toBe(100);
+      expect(await sf.readBalance(page)).toBe(fund);
     });
 
     await test.step('open a pack — balance debits by the open cost', async () => {
@@ -104,6 +108,7 @@ test.describe('customer workflow', () => {
 });
 
 test('anonymous demo spin creates NO backend pull', async ({ page }) => {
+  const { slug: PACK } = await primaryPack();
   const newest = (pulls: Array<{ rolled_at: string }>): string | null =>
     pulls[0]?.rolled_at ?? null;
   const before = await api<{ pulls: Array<{ rolled_at: string }> }>(

@@ -11,11 +11,19 @@
 import { test, expect } from '@playwright/test';
 import { BASE } from './helpers/constants';
 import { api, createCustomer } from './helpers/api';
+import { fundFor, primaryPack, type TestPack } from './helpers/catalog';
 import * as sf from './helpers/storefront';
 
-const PACK = 'pokemon-rookie';
+// The real entry pack, resolved from the live catalog in beforeAll.
+let pack: TestPack;
+let PACK = '';
 // createCustomer() registers every customer with this fixed password.
 const PASSWORD = 'PwE2e2026!';
+
+test.beforeAll(async () => {
+  pack = await primaryPack();
+  PACK = pack.slug;
+});
 
 const FLIP_BUTTON = { name: 'Flip to reveal your card' };
 const SELL_BUTTON = { name: /^Sell for RM/ };
@@ -38,7 +46,7 @@ test.describe('slot vault room', () => {
   test('spin → flip → instant sell → server-truth ledger row', async ({
     page,
   }) => {
-    const cust = await createCustomer(200);
+    const cust = await createCustomer(fundFor(pack, 2));
     await sf.login(page, PACK, cust.email, PASSWORD);
 
     await test.step('the bet debits on spin press, before the reel settles (PR #200 guard)', async () => {
@@ -58,7 +66,7 @@ test.describe('slot vault room', () => {
         .locator('..')
         .locator('.sr-only');
       await creditValue.waitFor({ state: 'visible' });
-      // Parse to a number ("RM 200.00" → 200) so the guard can assert the
+      // Parse to a number ("RM 660.00" → 660) so the guard can assert the
       // balance DROPPED — a mere change would also pass on a top-up or an
       // unrelated re-render, which a debit guard must not.
       const rmToNumber = (s: string): number =>
@@ -145,7 +153,7 @@ test.describe('slot vault room', () => {
 
   test('unsold flipped card auto-vaults at window expiry', async ({ page }) => {
     test.setTimeout(120_000);
-    const cust = await createCustomer(200);
+    const cust = await createCustomer(fundFor(pack, 2));
     await sf.login(page, PACK, cust.email, PASSWORD);
 
     await test.step('second spin, settle, flip — do not sell', async () => {

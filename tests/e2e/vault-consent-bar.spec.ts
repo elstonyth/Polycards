@@ -6,16 +6,18 @@
 import { test, expect } from '@playwright/test';
 import { BASE } from './helpers/constants';
 import { createCustomer, openPack } from './helpers/api';
+import { fundFor, primaryPack } from './helpers/catalog';
 import * as sf from './helpers/storefront';
 
-const PACK = 'pokemon-rookie';
 // createCustomer() registers every customer with this fixed password.
 const PASSWORD = 'PwE2e2026!';
 
 test('action bar waits for cookie consent, then appears without reload', async ({
   page,
 }) => {
-  const cust = await createCustomer(100);
+  const pack = await primaryPack();
+  const PACK = pack.slug;
+  const cust = await createCustomer(fundFor(pack));
   await openPack(cust.token, PACK); // auto-vaults the pull
   // No consent pre-seed: this spec exists to exercise the undecided state.
   await sf.login(page, PACK, cust.email, PASSWORD);
