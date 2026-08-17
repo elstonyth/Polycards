@@ -3,7 +3,14 @@ import { factoryVideo } from '../packs-data';
 
 describe('factoryVideo', () => {
   it('resolves mp4/webm/poster for each baked tier', () => {
-    for (const tier of ['bronze', 'silver', 'gold', 'platinum', 'diamond']) {
+    for (const tier of [
+      'bronze',
+      'silver',
+      'gold',
+      'platinum',
+      'diamond',
+      'ascended',
+    ]) {
       expect(factoryVideo(`/images/polycards/${tier}-factory.webp`)).toEqual({
         mp4: `/images/polycards/${tier}-factory.mp4`,
         webm: `/images/polycards/${tier}-factory.webm`,
