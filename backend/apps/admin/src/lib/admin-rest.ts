@@ -422,6 +422,65 @@ export async function getEconomyReport(
   return getJson<EconomyReport>(`/admin/economy${q ? `?${q}` : ''}`);
 }
 
+// ── GlobePay settlement report (calendar weekly/monthly gateway result) ──────
+
+export type SettlementGranularity = 'week' | 'month';
+
+export interface SettlementDirection {
+  count: number;
+  gross: number;
+  /** Σ net over settled rows whose net is known (NULL = pre-mirror row). */
+  net: number;
+  /** gross − net over the known-net subset only — a FLOOR when missingNet>0. */
+  fee: number;
+  /** Settled rows with no net on file: unknown fee, never zero fee. */
+  missingNet: number;
+}
+
+export interface SettlementPeriod {
+  /** MYT calendar bucket key, 'YYYY-MM-DD' (first day of the week/month). */
+  period: string;
+  deposits: SettlementDirection;
+  withdrawals: SettlementDirection;
+  ledger: { topupCredited: number; cashoutNet: number };
+  /** Gateway-vs-ledger cross-check. Deposits expected ~0; withdrawals is
+   *  timing-skewed across bucket boundaries by design (debit at submit,
+   *  settle later). */
+  delta: { deposits: number; withdrawals: number };
+}
+
+export interface SettlementReport {
+  granularity: SettlementGranularity;
+  periods_requested: number;
+  since: string;
+  periods: SettlementPeriod[];
+}
+
+export async function getSettlementReport(
+  granularity: SettlementGranularity,
+  periods: number,
+): Promise<SettlementReport> {
+  return getJson<SettlementReport>(
+    `/admin/globepay/settlement?granularity=${granularity}&periods=${periods}`,
+  );
+}
+
+export interface GlobePayBalance {
+  enabled: boolean;
+  balance: {
+    currency_code: string;
+    current: number;
+    available: number;
+    t1: number;
+  } | null;
+  /** Set when the gateway could not be reached — the report still renders. */
+  error: string | null;
+}
+
+export async function getGlobePayBalance(): Promise<GlobePayBalance> {
+  return getJson<GlobePayBalance>('/admin/globepay/balance');
+}
+
 // PriceCharting proxies (the API token lives server-side only). A 503 from the
 // proxy means PRICECHARTING_API_TOKEN is not configured — surface the message
 // and fall back to manual FMV entry.
@@ -1069,6 +1128,13 @@ export interface GlobePayDeposit {
   customer_email: string | null;
   amount_requested: number;
   amount_settled: number | null;
+  /** Settled gross minus the gateway's fee. NULL = settled before the mirror
+   *  (unknown fee), never "no fee". */
+  net_amount: number | null;
+  /** The BANK's own references for the transfer (gateway_transaction_id is
+   *  GlobePay's). What support quotes in a dispute. NULL on pre-mirror rows. */
+  bank_reference_no: string | null;
+  unique_reference_no: string | null;
   payment_method_code: string;
   // 'expired' = the reconcile sweep stopped chasing it, but the gateway never
   // ruled on it — NOT a synonym for 'failed', and still creditable by a late
@@ -1135,6 +1201,14 @@ export interface GlobePayWithdrawal {
   customer_id: string;
   customer_email: string | null;
   amount: number;
+  /** What the gateway says it actually paid — durable form of the settled-
+   *  amount disagreement that used to be log-only. NULL on pre-mirror rows. */
+  amount_settled: number | null;
+  /** Settled minus their payout fee. NULL = unknown, never "no fee". */
+  net_amount: number | null;
+  /** The BANK's references for the transfer — not account data. */
+  bank_reference_no: string | null;
+  unique_reference_no: string | null;
   bank_code: string;
   /** MASKED (`••••1234`) — the list never serves a full account number. The
    *  full value comes one row at a time from getGlobePayWithdrawalAccount. */

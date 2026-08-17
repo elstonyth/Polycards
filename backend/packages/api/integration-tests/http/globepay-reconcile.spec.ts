@@ -106,15 +106,52 @@ medusaIntegrationTestRunner({
           state: 'success',
           amount: 50,
           statusId: 6,
+          // The settlement mirror rides the same requery (audit 2026-08-17
+          // B1/B2): the sweep was production's ONLY settle path for a month,
+          // so requery-settled rows are exactly the population the
+          // settlement report leans on after a callback outage.
+          netAmount: 48.5,
+          bankReferenceNo: 'BR-sweep-1',
+          uniqueReferenceNo: 'UR-sweep-1',
         });
 
         await sweep();
 
         const rows = await ledger();
         expect(rows).toHaveLength(1);
+        // The LEDGER credits the gross — never the net (crediting net would
+        // short the customer by the gateway's fee).
         expect(Number(rows[0].amount)).toBe(50);
         expect(rows[0].reason).toBe('topup');
-        expect((await rowOf(row.id)).status).toBe('settled');
+        const settled = await rowOf(row.id);
+        expect(settled.status).toBe('settled');
+        // …while the ROW mirrors the settlement facts, against the real
+        // columns (the raw_net_amount sidecar included — a mocked update
+        // cannot prove the migration added both halves).
+        expect(Number(settled.amount_settled)).toBe(50);
+        expect(Number(settled.net_amount)).toBe(48.5);
+        expect(settled.bank_reference_no).toBe('BR-sweep-1');
+        expect(settled.unique_reference_no).toBe('UR-sweep-1');
+        expect(settled.gateway_status).toBe(6);
+      });
+
+      // NULL means UNKNOWN, never "no fee" — a requery that omits netAmount
+      // (or the bank refs) must leave the columns NULL, not write zeros.
+      it('a settle without net leaves the mirror columns null', async () => {
+        const row = await seed('PC-reconcile-no-net');
+        requery.mockResolvedValue({
+          state: 'success',
+          amount: 50,
+          statusId: 6,
+        });
+
+        await sweep();
+
+        const settled = await rowOf(row.id);
+        expect(settled.status).toBe('settled');
+        expect(settled.net_amount).toBeNull();
+        expect(settled.bank_reference_no).toBeNull();
+        expect(settled.unique_reference_no).toBeNull();
       });
 
       it('credits the amount the GATEWAY reports, not the one we requested', async () => {
@@ -275,7 +312,11 @@ medusaIntegrationTestRunner({
         expect((await rowOf(row.id)).status).toBe('expired');
 
         // The bank transfer lands hours after we gave up.
-        requery.mockResolvedValue({ state: 'success', amount: 50, statusId: 6 });
+        requery.mockResolvedValue({
+          state: 'success',
+          amount: 50,
+          statusId: 6,
+        });
         // The expired-revival tier runs on the FULL sweep only, and the sweep
         // above already claimed this run's full slot. In production the next
         // one is minutes away (one full sweep per
@@ -311,7 +352,11 @@ medusaIntegrationTestRunner({
         const fresh = await seed('PC-reconcile-fresh-expiry');
         await expire(fresh.id);
 
-        requery.mockResolvedValue({ state: 'success', amount: 50, statusId: 6 });
+        requery.mockResolvedValue({
+          state: 'success',
+          amount: 50,
+          statusId: 6,
+        });
         await sweep();
 
         expect((await rowOf(fresh.id)).status).toBe('settled');
@@ -326,7 +371,11 @@ medusaIntegrationTestRunner({
           status: 'expired',
         } as never);
 
-        requery.mockResolvedValue({ state: 'success', amount: 50, statusId: 6 });
+        requery.mockResolvedValue({
+          state: 'success',
+          amount: 50,
+          statusId: 6,
+        });
         await sweep();
 
         // Past the window the row is not even requeried — the tier is bounded

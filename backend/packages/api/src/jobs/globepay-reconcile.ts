@@ -10,6 +10,7 @@ import {
   getDepositDetail,
   globepayConfigFromEnv,
 } from '../modules/packs/globepay-client';
+import { toOptionalMoney } from '../modules/packs/money';
 import { topupIdempotencyReference } from '../modules/packs/topup';
 import { notifyFeed } from '../modules/packs/notify-feed';
 import { sendTopupReceipt } from '../modules/packs/topup-receipt';
@@ -142,8 +143,12 @@ export default async function globepayReconcileJob(container: MedusaContainer) {
   for (const deposit of outstanding) {
     try {
       let action;
+      // Held across the try so the settle write below can persist the
+      // settlement facts the requery carries (net, bank references — audit
+      // 2026-08-17 B1/B2). Null on the error paths, where no detail exists.
+      let detail: Awaited<ReturnType<typeof getDepositDetail>> | null = null;
       try {
-        const detail = await getDepositDetail(
+        detail = await getDepositDetail(
           deposit.merchant_transaction_id,
           config,
         );
@@ -267,6 +272,14 @@ export default async function globepayReconcileJob(container: MedusaContainer) {
           data: {
             status: 'settled',
             amount_settled: action.amount,
+            // Same settlement mirror the callback route writes — the requery
+            // carries the same facts. `detail` cannot be null on this branch
+            // ('settle' is only produced from a successful requery), but the
+            // guard keeps tsc honest rather than asserting.
+            net_amount: toOptionalMoney(detail?.netAmount),
+            bank_reference_no: detail?.bankReferenceNo || null,
+            unique_reference_no: detail?.uniqueReferenceNo || null,
+            gateway_status: detail?.statusId ?? null,
             settled_at: now,
           },
         });

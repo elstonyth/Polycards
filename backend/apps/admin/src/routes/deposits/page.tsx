@@ -154,6 +154,9 @@ const DepositsPage = () => {
                     true,
                   )}
                   {sortHeader('amount_settled', t('deposits.settled'), true)}
+                  <Table.HeaderCell className="text-right">
+                    {t('deposits.net')}
+                  </Table.HeaderCell>
                   <Table.HeaderCell>{t('deposits.status')}</Table.HeaderCell>
                   <Table.HeaderCell>{t('deposits.reference')}</Table.HeaderCell>
                 </Table.Row>
@@ -180,6 +183,11 @@ const DepositsPage = () => {
                     <Table.Cell className="text-ui-fg-subtle text-right tabular-nums whitespace-nowrap">
                       {d.amount_settled === null ? '—' : rm(d.amount_settled)}
                     </Table.Cell>
+                    {/* NULL net = settled before the mirror: fee UNKNOWN, so
+                        render —, never RM 0.00. */}
+                    <Table.Cell className="text-ui-fg-subtle text-right tabular-nums whitespace-nowrap">
+                      {d.net_amount === null ? '—' : rm(d.net_amount)}
+                    </Table.Cell>
                     <Table.Cell>
                       {statusBadge(
                         d,
@@ -188,14 +196,26 @@ const DepositsPage = () => {
                           : t(`deposits.statusLabel.${d.status}`),
                       )}
                     </Table.Cell>
-                    {/* Both references are what support quotes to the provider:
-                        ours (merchant) is what their back office lists, theirs
-                        (gateway) is null until SubmitDeposit returned. */}
+                    {/* All references support can quote: ours (merchant) is
+                        what their back office lists, theirs (gateway) is null
+                        until SubmitDeposit returned, and the BANK's own refs
+                        (settlement mirror) are what a bank quotes back in a
+                        dispute — null on rows settled before the mirror. */}
                     <Table.Cell className="text-ui-fg-subtle font-mono text-xs break-all">
                       <div>{d.merchant_transaction_id}</div>
                       {d.gateway_transaction_id && (
                         <div className="text-ui-fg-muted">
                           {d.gateway_transaction_id}
+                        </div>
+                      )}
+                      {d.bank_reference_no && (
+                        <div className="text-ui-fg-muted">
+                          {t('deposits.bankRef')}: {d.bank_reference_no}
+                        </div>
+                      )}
+                      {d.unique_reference_no && (
+                        <div className="text-ui-fg-muted">
+                          {t('deposits.uniqueRef')}: {d.unique_reference_no}
                         </div>
                       )}
                     </Table.Cell>

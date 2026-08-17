@@ -27,6 +27,11 @@ export const qk = {
   // plain read that only ever touches the one (page, status, sort) it fetched.
   globepayWithdrawalsKey: ['admin', 'globepay-withdrawals'] as const,
   economy: ['admin', 'economy'] as const,
+  // (granularity, periods) always render — same always-rendered-segment rule
+  // as qk.pulls: week and month views cache independently.
+  settlement: (granularity: string, periods: number) =>
+    ['admin', 'globepay-settlement', granularity, periods] as const,
+  globepayBalance: ['admin', 'globepay-balance'] as const,
   eligibleProducts: ['admin', 'eligible-products'] as const,
   customerGacha: (id: string) => ['admin', 'customer', id, 'gacha'] as const,
   referralTree: (id: string, d: number) =>

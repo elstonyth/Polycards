@@ -31,7 +31,28 @@ export const GlobePayDeposit = model
     amount_requested: model.bigNumber(),
     // What we actually credited, from the verified callback. Null until settled.
     amount_settled: model.bigNumber().nullable(),
+    // What GlobePay actually keeps for us: amount_settled MINUS their fee, from
+    // the same callback/requery that reports the gross ("net amount 是减了费用",
+    // provider, 2026-07-22). The customer is credited the GROSS — crediting net
+    // would short them the fee — so this column is never a ledger input. It
+    // exists because without it the fee lives only in GlobePay's back office,
+    // and an operator asking "what did this month actually earn" has to log in
+    // there to find out. Fee is derived (amount_settled − net_amount), not
+    // stored: two columns that must agree is one column too many.
+    //
+    // Nullable forever, not just until settled: rows that settled before this
+    // shipped have no net on file and no way to get one (a requery only answers
+    // for as long as they retain the transaction). A reader must treat NULL as
+    // "unknown", never as zero fee.
+    net_amount: model.bigNumber().nullable(),
     payment_method_code: model.text(),
+    // The BANK's own references, as opposed to gateway_transaction_id which is
+    // GlobePay's. These are what a bank quotes back in a dispute, and they were
+    // arriving on every settlement callback and requery and being dropped. With
+    // them stored, "the customer says it never arrived" is answerable from this
+    // database.
+    bank_reference_no: model.text().nullable(),
+    unique_reference_no: model.text().nullable(),
     // Our own lifecycle, NOT their numeric status: 'pending' covers every
     // non-final state (including their status 4 "VerifyFail", which the doc
     // marks explicitly non-final and which must never be read as failure).

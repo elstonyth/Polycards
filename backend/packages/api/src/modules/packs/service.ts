@@ -71,6 +71,7 @@ import {
   type LedgerPayload,
   type LedgerType,
 } from './ledger';
+import type { GatewayPeriodRow, LedgerPeriodRow } from './globepay-settlement';
 import PurchaseInvoice from './models/purchase-invoice';
 import PurchaseInvoiceLine from './models/purchase-invoice-line';
 import StockMovement from './models/stock-movement';
@@ -4691,6 +4692,129 @@ class PacksModuleService extends MedusaService({
     }));
   }
 
+  // The three grouped result sets behind /admin/globepay/settlement, one DB
+  // round-trip each (audit 2026-08-17 B4/B5): settled gateway rows bucketed by
+  // MYT calendar period, and the credit ledger's topup/cashout sums bucketed
+  // the same way so the two records of the same money can be compared at all.
+  // The merge and the fee/delta arithmetic live in globepay-settlement.ts
+  // (pure, unit-tested) — this method only owns the SQL, mirroring the
+  // ledgerReasonTotals / economy.ts split.
+  //
+  // `granularity` is interpolated into date_trunc, so it is an allowlist here
+  // and NOT a passthrough — the route validates too, but this method must not
+  // rely on its caller for SQL safety.
+  //
+  // Buckets are MYT calendar weeks (ISO, Monday) / months via
+  // AT TIME ZONE 'Asia/Kuala_Lumpur' — calendar-bounded to line up with a
+  // gateway statement, unlike /admin/economy's rolling presets. The named zone
+  // and ledger.ts's fixed +8 agree because MYT has no DST; settlementSince
+  // (the `since` this is fed) documents that pairing.
+  //
+  // FILTER over net_amount implements the NULL-net rule: NULL is "unknown",
+  // never zero fee, so the fee numerator and its matching gross are summed
+  // over known-net rows only and the NULL rows are counted out loud.
+  @InjectManager()
+  async globepaySettlementRows(
+    granularity: 'week' | 'month',
+    since: Date,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{
+    deposits: GatewayPeriodRow[];
+    withdrawals: GatewayPeriodRow[];
+    ledger: LedgerPeriodRow[];
+  }> {
+    if (granularity !== 'week' && granularity !== 'month') {
+      throw new Error(`globepaySettlementRows: bad granularity ${granularity}`);
+    }
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const bucket = (column: string) =>
+      `to_char(date_trunc('${granularity}', ${column} AT TIME ZONE 'Asia/Kuala_Lumpur'), 'YYYY-MM-DD')`;
+
+    type RawGateway = {
+      period: string;
+      n: string;
+      gross_cents: string;
+      net_cents: string;
+      gross_with_net_cents: string;
+      missing_net: string;
+    };
+    const toGateway = (r: RawGateway): GatewayPeriodRow => ({
+      period: r.period,
+      count: Number(r.n),
+      grossCents: Number(r.gross_cents),
+      netCents: Number(r.net_cents),
+      grossWithNetCents: Number(r.gross_with_net_cents),
+      missingNet: Number(r.missing_net),
+    });
+
+    const depositRows = await em.execute<RawGateway[]>(
+      `SELECT ${bucket('settled_at')} AS period,
+              COUNT(*)::bigint AS n,
+              COALESCE(SUM(ROUND(amount_settled * 100)), 0)::bigint AS gross_cents,
+              COALESCE(SUM(ROUND(net_amount * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS net_cents,
+              COALESCE(SUM(ROUND(amount_settled * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS gross_with_net_cents,
+              COUNT(*) FILTER (WHERE net_amount IS NULL)::bigint AS missing_net
+         FROM globepay_deposit
+        WHERE deleted_at IS NULL AND status = 'settled'
+          AND settled_at IS NOT NULL AND settled_at >= ?::timestamptz
+        GROUP BY 1`,
+      [since.toISOString()],
+    );
+
+    // Withdrawal GROSS is `amount` (the debit basis — always present), not
+    // amount_settled, which is NULL on every row settled before the
+    // settlement mirror shipped; that keeps pre-mirror history in the report.
+    // The FEE basis is different: gross_with_net_cents pairs with net_cents to
+    // produce fee = gross − net, and their net is derived from what they
+    // ACTUALLY paid — so on a row where the settled amount disagrees with the
+    // instructed one (logged loudly by the callback, now durable on the row),
+    // pairing `amount` with their net would fold the whole disagreement into
+    // the fee. COALESCE to the settled amount when known; known-net rows are
+    // post-mirror rows, which always carry it (same update writes both).
+    const withdrawalRows = await em.execute<RawGateway[]>(
+      `SELECT ${bucket('settled_at')} AS period,
+              COUNT(*)::bigint AS n,
+              COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS gross_cents,
+              COALESCE(SUM(ROUND(net_amount * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS net_cents,
+              COALESCE(SUM(ROUND(COALESCE(amount_settled, amount) * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS gross_with_net_cents,
+              COUNT(*) FILTER (WHERE net_amount IS NULL)::bigint AS missing_net
+         FROM globepay_withdrawal
+        WHERE deleted_at IS NULL AND status = 'settled'
+          AND settled_at IS NOT NULL AND settled_at >= ?::timestamptz
+        GROUP BY 1`,
+      [since.toISOString()],
+    );
+
+    // The ledger's own view of the same two flows, for the cross-check delta.
+    // topup rows are created in the same request that stamps settled_at, so
+    // the deposit delta is tight; cashout debits are written at SUBMIT time,
+    // so the withdrawal delta is timing-skewed across bucket boundaries by
+    // design (documented on SettlementPeriod.delta).
+    const ledgerRows = await em.execute<
+      { period: string; topup_cents: string; cashout_cents: string }[]
+    >(
+      `SELECT ${bucket('created_at')} AS period,
+              COALESCE(SUM(ROUND(amount * 100)) FILTER (WHERE reason = 'topup' AND amount > 0), 0)::bigint AS topup_cents,
+              COALESCE(SUM(ROUND(-amount * 100)) FILTER (WHERE reason = 'cashout'), 0)::bigint AS cashout_cents
+         FROM credit_transaction
+        WHERE deleted_at IS NULL AND reason IN ('topup', 'cashout')
+          AND created_at >= ?::timestamptz
+        GROUP BY 1`,
+      [since.toISOString()],
+    );
+
+    return {
+      deposits: depositRows.map(toGateway),
+      withdrawals: withdrawalRows.map(toGateway),
+      ledger: ledgerRows.map((r) => ({
+        period: r.period,
+        topupCents: Number(r.topup_cents),
+        cashoutCents: Number(r.cashout_cents),
+      })),
+    };
+  }
+
   // Vault liability = Σ over vaulted pulls of ROUND(card DISPLAY value × fx ×
   // 100) sen, computed in the DB. Display value (FMV × market_multiplier, via
   // the shared LIVE_VALUE_USD_SQL) is the basis buyback percents credit
@@ -5574,7 +5698,8 @@ class PacksModuleService extends MedusaService({
     if (amountCents > 0) {
       // Clawbacks take NO global lock: they are never blocked, never counted,
       // and must never contend with a grant.
-      const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+      const em =
+        sharedContext.transactionManager as unknown as LedgerSqlManager;
       await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
         'credit-adjust:mint-window',
       ]);
@@ -7868,7 +7993,8 @@ class PacksModuleService extends MedusaService({
     // per settleChallengeWinner call), so row 0 is representative — this is
     // not an ordering assumption.
     const prior = existingRows[0]?.snapshot as unknown as
-      SettleSnapshot | undefined;
+      | SettleSnapshot
+      | undefined;
 
     // Sequential, not Promise.all: challengeWeekPool resolves
     // transactionManager ?? manager and listChallengeStages resolves the SAME
@@ -8298,7 +8424,8 @@ class PacksModuleService extends MedusaService({
   private async reserveSettledStock(
     winner: SettledWinner,
     decrementStock:
-      ((handle: string, qty: number) => Promise<boolean>) | undefined,
+      | ((handle: string, qty: number) => Promise<boolean>)
+      | undefined,
     weekStartIso: string,
   ): Promise<void> {
     if (!decrementStock) return;

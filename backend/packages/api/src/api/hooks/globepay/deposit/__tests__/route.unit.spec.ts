@@ -176,6 +176,52 @@ describe('deposit callback — ack contract', () => {
     );
   });
 
+  // The settlement mirror (audit 2026-08-17 B1/B2): the fee-bearing net and
+  // the bank's own references arrive on the settlement callback and must land
+  // on the row — they are what the weekly/monthly settlement report and a
+  // bank dispute read. All from the SIGNED payload.
+  it('persists net and the bank references on the settled row', async () => {
+    const h = harness(pendingRow);
+    await run(
+      h,
+      callback({
+        ...settled,
+        BankReferenceNo: 'BR-777',
+        UniqueReferenceNo: 'UR-888',
+      }),
+    );
+    expect(h.packs.updateGlobePayDeposits).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'settled',
+          amount_settled: 50,
+          net_amount: 48.5,
+          bank_reference_no: 'BR-777',
+          unique_reference_no: 'UR-888',
+        }),
+      }),
+    );
+  });
+
+  // NULL means UNKNOWN, never "no fee" — a malformed or absent NetAmount must
+  // not become net 0 (which would report the entire gross as fee-free profit).
+  it('stores an absent NetAmount as null, never zero', async () => {
+    const noNet = { ...settled } as Record<string, unknown>;
+    delete noNet.NetAmount;
+    const h = harness(pendingRow);
+    await run(h, callback(noNet));
+    expect(h.packs.updateGlobePayDeposits).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'settled',
+          net_amount: null,
+          bank_reference_no: null,
+          unique_reference_no: null,
+        }),
+      }),
+    );
+  });
+
   it('credits the amount THEY confirmed, not the amount we requested', async () => {
     const h = harness({ ...pendingRow, amount_requested: 50 });
     // Customer actually paid 30.

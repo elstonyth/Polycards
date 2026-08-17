@@ -36,6 +36,24 @@ export const GlobePayWithdrawal = model
     // exact figure, so settled == requested unless their callback disagrees
     // (which is logged, never silently absorbed).
     amount: model.bigNumber(),
+    // What the gateway says it ACTUALLY paid, from the settlement callback or
+    // requery. The deposit table has had this since it shipped; the payout side
+    // never did, so a callback settling at a figure other than the one we
+    // instructed was written to the log and nowhere else (see the settle branch
+    // in api/hooks/globepay/withdrawal/route.ts) — and DigitalOcean run logs do
+    // not outlive the deployment. Never a ledger input: the debit was priced at
+    // submit time and is not retro-adjusted. This is the column a reconciliation
+    // compares against it.
+    amount_settled: model.bigNumber().nullable(),
+    // Settled amount MINUS their payout fee, same provenance and same rules as
+    // globepay_deposit.net_amount — see that model for why the fee is derived
+    // rather than stored and why NULL means "unknown", never "no fee".
+    net_amount: model.bigNumber().nullable(),
+    // The BANK's references for the transfer (GlobePay's own id is
+    // gateway_transaction_id). This is what a receiving bank quotes when a payout
+    // is disputed, and it was arriving on every callback and being dropped.
+    bank_reference_no: model.text().nullable(),
+    unique_reference_no: model.text().nullable(),
     // Destination bank account, exactly as submitted. Kept verbatim: a payout
     // dispute is resolved by quoting what we told them to pay, not by memory.
     bank_code: model.text(),
@@ -51,9 +69,7 @@ export const GlobePayWithdrawal = model
     // requeries, refunds, or writes to one). It leaves only via the admin
     // approve route (-> 'pending') or the admin deny route (-> 'failed',
     // refunded).
-    status: model
-      .enum([...WITHDRAWAL_STATUSES])
-      .default('pending'),
+    status: model.enum([...WITHDRAWAL_STATUSES]).default('pending'),
     // Their raw numeric status from the last callback/requery (4 = success,
     // 5 = fail, else processing), for support.
     gateway_status: model.number().nullable(),
@@ -102,7 +118,8 @@ export const GlobePayWithdrawal = model
       name: 'UQ_globepay_withdrawal_customer_idempotency_key',
       on: ['customer_id', 'idempotency_key'],
       unique: true,
-      where: "idempotency_key is not null and deleted_at is null and status <> 'failed'",
+      where:
+        "idempotency_key is not null and deleted_at is null and status <> 'failed'",
     },
   ]);
 
