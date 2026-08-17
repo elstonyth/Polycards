@@ -129,6 +129,16 @@ export async function GET(
       r.amount_settled === null || r.amount_settled === undefined
         ? null
         : Number(r.amount_settled),
+    // Settlement mirror (audit 2026-08-17 B1/B2): the fee-bearing net and the
+    // BANK's own references — what support quotes when a customer disputes a
+    // transfer. NULL means the row settled before the mirror (unknown), never
+    // "no fee"/"no reference".
+    net_amount:
+      r.net_amount === null || r.net_amount === undefined
+        ? null
+        : Number(r.net_amount),
+    bank_reference_no: r.bank_reference_no ?? null,
+    unique_reference_no: r.unique_reference_no ?? null,
     payment_method_code: r.payment_method_code,
     status: r.status,
     gateway_status: r.gateway_status,

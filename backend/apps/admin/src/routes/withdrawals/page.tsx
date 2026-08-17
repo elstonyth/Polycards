@@ -353,7 +353,27 @@ const WithdrawalsPage = () => {
                       </div>
                     </Table.Cell>
                     <Table.Cell className="text-right tabular-nums whitespace-nowrap">
-                      {rm(w.amount)}
+                      <div>{rm(w.amount)}</div>
+                      {/* Settlement mirror: settled ≠ instructed is the
+                          durable form of the disagreement the callback logs;
+                          net is what actually left after their fee. NULL =
+                          pre-mirror row (unknown), rendered as nothing rather
+                          than RM 0.00. */}
+                      {w.amount_settled !== null &&
+                        w.amount_settled !== w.amount && (
+                          <div className="text-ui-fg-error text-xs">
+                            {t('withdrawals.settledAs', {
+                              amount: rm(w.amount_settled),
+                            })}
+                          </div>
+                        )}
+                      {w.net_amount !== null && (
+                        <div className="text-ui-fg-muted text-xs">
+                          {t('withdrawals.netLabel', {
+                            amount: rm(w.net_amount),
+                          })}
+                        </div>
+                      )}
                     </Table.Cell>
                     <Table.Cell>
                       {statusBadge(
@@ -370,6 +390,19 @@ const WithdrawalsPage = () => {
                       {w.gateway_transaction_id && (
                         <div className="text-ui-fg-muted">
                           {w.gateway_transaction_id}
+                        </div>
+                      )}
+                      {/* The BANK's own refs (settlement mirror) — what the
+                          receiving bank quotes in a dispute. Null on rows
+                          settled before the mirror. */}
+                      {w.bank_reference_no && (
+                        <div className="text-ui-fg-muted">
+                          {t('withdrawals.bankRef')}: {w.bank_reference_no}
+                        </div>
+                      )}
+                      {w.unique_reference_no && (
+                        <div className="text-ui-fg-muted">
+                          {t('withdrawals.uniqueRef')}: {w.unique_reference_no}
                         </div>
                       )}
                       {/* Plan 095 forensics, in the references cell rather

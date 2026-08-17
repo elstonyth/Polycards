@@ -413,8 +413,11 @@
     "method": "Method",
     "requested": "Requested",
     "settled": "Credited",
+    "net": "Net",
     "status": "Status",
     "reference": "References",
+    "bankRef": "Bank ref",
+    "uniqueRef": "Unique ref",
     "statusLabel": {
       "pending": "Pending",
       "settled": "Settled",
@@ -442,8 +445,12 @@
     "destination": "Destination",
     "reveal": "Reveal",
     "amount": "Amount",
+    "settledAs": "settled as {{amount}}",
+    "netLabel": "net {{amount}}",
     "status": "Status",
     "reference": "References",
+    "bankRef": "Bank ref",
+    "uniqueRef": "Unique ref",
     "actions": "Actions",
     "statusLabel": {
       "held": "Held",
@@ -643,6 +650,7 @@
     "balanceT1": "T+1",
     "balanceDisabled": "Gateway not configured in this environment.",
     "balanceError": "Could not reach GlobePay: {{message}}",
+    "balanceFetchFailed": "balance request failed — refresh or re-login",
     "empty": "No settled gateway transactions in this window yet.",
     "loadError": "Could not load the settlement report."
   },

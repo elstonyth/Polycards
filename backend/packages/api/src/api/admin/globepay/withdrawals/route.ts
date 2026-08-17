@@ -197,6 +197,21 @@ export async function GET(
     customer_email: emailById.get(r.customer_id) ?? null,
     // bigNumber columns come back as strings/BigNumber — normalize for display.
     amount: Number(r.amount),
+    // Settlement mirror (audit 2026-08-17 B1/B2/C2): what the gateway says it
+    // actually paid, the fee-bearing net, and the BANK's references for the
+    // transfer. NULL = settled before the mirror (unknown), never zero. These
+    // are transfer identifiers, not account data — the masking rule below
+    // covers the customer's account number only.
+    amount_settled:
+      r.amount_settled === null || r.amount_settled === undefined
+        ? null
+        : Number(r.amount_settled),
+    net_amount:
+      r.net_amount === null || r.net_amount === undefined
+        ? null
+        : Number(r.net_amount),
+    bank_reference_no: r.bank_reference_no ?? null,
+    unique_reference_no: r.unique_reference_no ?? null,
     bank_code: r.bank_code,
     // Masked in bulk, full value via ./[id]/account. The field name is kept so
     // the SPA does not break on a rename.

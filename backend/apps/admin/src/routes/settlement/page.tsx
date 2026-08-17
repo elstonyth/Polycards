@@ -25,9 +25,11 @@ import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 export const config: RouteConfig = {
   label: 'Settlement',
   icon: Receipt,
-  // Between Ledger (31) and Weekly Challenge (33): it reads like a sibling of
-  // Economy/Ledger — money reporting, not order operations.
-  rank: 32,
+  // After the Economy (30) / Ledger (31) money-reporting cluster. NOT 32 —
+  // Daily rewards already holds that and a collision leaves the order
+  // tie-break-dependent; 34 sits after Weekly Challenge (33) in a slot
+  // nothing owns.
+  rank: 34,
 };
 
 // MYT bucket key ('YYYY-MM-DD', first day of the week/month) → label. Month
@@ -103,7 +105,20 @@ const SettlementPage = () => {
         {/* Merchant balance strip — its own endpoint, so a gateway outage
             degrades this strip and never the report below it. */}
         <div className="grid grid-cols-3 gap-px border-t bg-ui-border-base">
-          {balance.data?.enabled === false ? (
+          {/* Three degraded states, each distinct: gateway unconfigured
+              (enabled:false), gateway unreachable (200 + error), and OUR
+              endpoint failing (isError — expired session, network). Without
+              the last one the tiles pin at '…' forever, indistinguishable
+              from loading. */}
+          {balance.isError ? (
+            <div className="col-span-3 bg-ui-bg-subtle px-6 py-3">
+              <Text size="small" className="text-ui-fg-error">
+                {t('settlement.balanceError', {
+                  message: t('settlement.balanceFetchFailed'),
+                })}
+              </Text>
+            </div>
+          ) : balance.data?.enabled === false ? (
             <div className="col-span-3 bg-ui-bg-subtle px-6 py-3">
               <Text size="small" className="text-ui-fg-subtle">
                 {t('settlement.balanceDisabled')}

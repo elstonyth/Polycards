@@ -86,13 +86,12 @@ function harness(withdrawal: Record<string, unknown> = pendingRow) {
     // pending fixture as the oldest held row (or vice versa) in nearly every
     // test in this file, since most fixtures share pendingRow's very old
     // created_at. Filtering by status is what a real query does.
-    listGlobePayWithdrawals: jest.fn(
-      (selector: Record<string, unknown> = {}) =>
-        Promise.resolve(
-          selector.status === undefined || selector.status === withdrawal.status
-            ? [withdrawal]
-            : [],
-        ),
+    listGlobePayWithdrawals: jest.fn((selector: Record<string, unknown> = {}) =>
+      Promise.resolve(
+        selector.status === undefined || selector.status === withdrawal.status
+          ? [withdrawal]
+          : [],
+      ),
     ),
     updateGlobePayWithdrawals: jest.fn().mockResolvedValue(undefined),
     // A debit row EXISTS, so the "never refund what was never debited" guard
@@ -173,6 +172,58 @@ describe('withdrawal sweep — an unattributable 400 never refunds', () => {
     await globepayWithdrawalReconcileJob(h.container);
 
     expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
+  });
+
+  // The settlement mirror on the SWEEP path (audit 2026-08-17 B1/B2/C2).
+  // The sweep was production's only settle path for a month (callbacks dead
+  // until 2026-08-13), so "requery-settled rows carry net/refs" is exactly
+  // the population the settlement report leans on after any callback outage.
+  it('a requery settle persists settled amount, net and bank references — never the ledger', async () => {
+    const h = harness();
+    requery.mockResolvedValue({
+      state: 'success',
+      statusId: 4,
+      amount: 100,
+      netAmount: 98.5,
+      bankReferenceNo: 'BR-42',
+      uniqueReferenceNo: 'UR-43',
+    });
+
+    await globepayWithdrawalReconcileJob(h.container);
+
+    expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith(
+      expect.objectContaining({
+        selector: { id: 'gpw_1', status: 'pending' },
+        data: expect.objectContaining({
+          status: 'settled',
+          amount_settled: 100,
+          net_amount: 98.5,
+          bank_reference_no: 'BR-42',
+          unique_reference_no: 'UR-43',
+        }),
+      }),
+    );
+    // Settle never touches money — the debit already happened at submit.
+    expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+  });
+
+  // NULL means UNKNOWN, never "no fee" — same rule as both callback hooks.
+  it('a requery settle with no net stores null, never zero', async () => {
+    const h = harness();
+    requery.mockResolvedValue({ state: 'success', statusId: 4, amount: 100 });
+
+    await globepayWithdrawalReconcileJob(h.container);
+
+    expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'settled',
+          net_amount: null,
+          bank_reference_no: null,
+          unique_reference_no: null,
+        }),
+      }),
+    );
   });
 
   it('a non-400 refusal is rethrown into the per-row catch, not read as an answer', async () => {

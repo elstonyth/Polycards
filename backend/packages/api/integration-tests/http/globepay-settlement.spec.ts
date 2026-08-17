@@ -207,6 +207,41 @@ medusaIntegrationTestRunner({
         const data = await report('?granularity=quarterly&periods=-3');
         expect(data.granularity).toBe('month');
       });
+
+      // The week convention, against the real database: settlementSince says
+      // ISO Monday (fixed +8), Postgres date_trunc('week' …) says ISO Monday
+      // (AT TIME ZONE) — if the two ever disagreed, this row would land under
+      // a different period key than the one derived here and the find() fails.
+      // The month cases above cannot catch that; a month has no weekday
+      // convention to shear on.
+      it('buckets by MYT ISO week under granularity=week', async () => {
+        const weekStart = settlementSince('week', 1, new Date());
+        const weekKey = keyOf(weekStart);
+        // Day 2 of the current MYT week, 02:00 — inside the bucket whatever
+        // today is (future settled_at buckets fine, same as ROLLOVER above).
+        const inWeek = new Date(weekStart.getTime() + 26 * HOUR_MS);
+
+        await packs().createGlobePayDeposits([
+          {
+            merchant_transaction_id: 'PC-settle-week-1',
+            customer_id: CUSTOMER_ID,
+            amount_requested: 40,
+            amount_settled: 40,
+            net_amount: 39,
+            payment_method_code: 'BQR',
+            status: 'settled',
+            settled_at: inWeek,
+          },
+        ]);
+
+        const data = await report('?granularity=week&periods=2');
+        expect(data.granularity).toBe('week');
+        const week = data.periods.find((p) => p.period === weekKey);
+        expect(week).toBeDefined();
+        expect(week!.deposits.count).toBe(1);
+        expect(week!.deposits.gross).toBe(40);
+        expect(week!.deposits.fee).toBe(1);
+      });
     });
   },
 });
