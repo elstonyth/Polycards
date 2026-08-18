@@ -31,7 +31,9 @@ import type {
  * exactly that shape for email (IDX_customer_email_has_account_unique), and
  * the release-on-delete behaviour above means it carries no soft-delete
  * hazard. It is not here for ONE reason: live rows already share numbers, so
- * creating it would fail until those are reconciled. Dedupe, then add it.
+ * creating it would fail until those are reconciled. Dedupe, then add it —
+ * `src/scripts/report-duplicate-phones.ts` names the rows that have to go
+ * first.
  */
 // `phone` isn't declared on FilterableCustomerProps (only has_account is) —
 // same cast idiom as store/phone-verification/start/route.ts.
