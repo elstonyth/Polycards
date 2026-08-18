@@ -39,6 +39,7 @@ import {
   pickDemoOdds,
   publishedOddsRows,
   poolValueRange,
+  poolExpectedValue,
   tierValueRanges,
   type PublishedOdds,
 } from '@/lib/packs-format';
@@ -203,6 +204,12 @@ export default function SlotMachineClient({
   const valueRange = useMemo(() => poolValueRange(pool), [pool]);
   // Per-tier ranges, so the sheet matches the pack page's odds panel row for row.
   const tierRanges = useMemo(() => tierValueRanges(pool), [pool]);
+  // Expected value over the published tiers — the sheet's top row, same as the
+  // pack page's panel.
+  const expectedValue = useMemo(
+    () => (publishedOdds ? poolExpectedValue(pool, publishedOdds.tiers) : null),
+    [pool, publishedOdds],
+  );
   // Per-reel decoy pools: strip i tiles its OWN shuffled copy of basePool, so
   // stacked reels read independently and the idle sequence is never the same
   // twice (reshuffled per idle cycle — see the phase effect below). SSR-safe:
@@ -1197,6 +1204,7 @@ export default function SlotMachineClient({
         onClose={() => setOddsOpen(false)}
         odds={publishedOdds ? publishedOddsRows(publishedOdds) : null}
         range={valueRange}
+        expectedValue={expectedValue}
         tierRanges={tierRanges}
       />
     </div>

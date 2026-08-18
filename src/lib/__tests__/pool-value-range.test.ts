@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { poolValueRange, tierValueRanges } from '../packs-format';
+import {
+  poolValueRange,
+  poolExpectedValue,
+  tierValueRanges,
+} from '../packs-format';
 
 describe('poolValueRange', () => {
   it('returns the min and max of priced cards, formatted', () => {
@@ -100,5 +104,34 @@ describe('tierValueRanges', () => {
     const unpriced = [{ rarity: 'Rare', value: '—' }];
     expect(poolValueRange(unpriced)).toBeNull();
     expect(tierValueRanges(unpriced)).toEqual({});
+  });
+});
+
+describe('poolExpectedValue', () => {
+  it('folds tier averages against the published percentages', () => {
+    // Rare avg 100, Common avg 50 → 0.2×100 + 0.8×50 = 60.
+    const pool = [
+      { rarity: 'Rare', value: 'RM 150.00' },
+      { rarity: 'Rare', value: 'RM 50.00' },
+      { rarity: 'Common', value: 'RM 50.00' },
+    ];
+    expect(poolExpectedValue(pool, { Rare: 20, Common: 80 })).toBe('RM 60.00');
+  });
+
+  it("skips unpriced '—' cards in the tier average, like poolValueRange", () => {
+    const pool = [
+      { rarity: 'Rare', value: 'RM 100.00' },
+      { rarity: 'Rare', value: '—' },
+    ];
+    expect(poolExpectedValue(pool, { Rare: 50 })).toBe('RM 50.00');
+  });
+
+  it('returns null when no published tier has a priced card', () => {
+    const pool = [{ rarity: 'Common', value: 'RM 10.00' }];
+    expect(poolExpectedValue(pool, { Immortal: 100 })).toBeNull();
+    expect(poolExpectedValue(pool, {})).toBeNull();
+    expect(
+      poolExpectedValue([{ rarity: 'Common', value: '—' }], { Common: 100 }),
+    ).toBeNull();
   });
 });

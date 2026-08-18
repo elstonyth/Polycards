@@ -38,6 +38,7 @@ import { PoolByRarity } from './PoolByRarity';
 import {
   publishedOddsRows,
   poolValueRange,
+  poolExpectedValue,
   tierValueRanges,
 } from '@/lib/packs-format';
 import { isTopRarity } from '@/lib/rarity';
@@ -309,6 +310,16 @@ export default function PackDetailClient({
   // card of THAT tier is worth here. The pack-wide range above spans Common to
   // Immortal and so describes no tier in particular.
   const tierRanges = useMemo(() => tierValueRanges(pool), [pool]);
+
+  // Expected value of one pull over the PUBLISHED tiers — what the top row of
+  // the odds panel states now (the range only ever described the pool's span).
+  const expectedValue = useMemo(
+    () =>
+      liveDetail?.publishedOdds
+        ? poolExpectedValue(pool, liveDetail.publishedOdds.tiers)
+        : null,
+    [pool, liveDetail?.publishedOdds],
+  );
 
   // Do NOT open/charge here — navigate to the reel, which performs
   // the single charge via openBatch when the user pulls the lever. Auth + balance
@@ -739,6 +750,7 @@ export default function PackDetailClient({
             <PublishedOddsList
               odds={publishedRows}
               range={valueRange}
+              expectedValue={expectedValue}
               tierRanges={tierRanges}
               rounded="2xl"
             />

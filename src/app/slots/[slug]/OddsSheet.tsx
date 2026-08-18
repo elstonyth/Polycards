@@ -26,13 +26,21 @@ export const hasPublishedOddsContent = (
 export function PublishedOddsList({
   odds,
   range,
+  expectedValue,
   tierRanges,
   rounded = 'xl',
 }: {
   /** Published rows (rarest-first). */
   odds: { rarity: Rarity; chance: string }[];
-  /** Pack card-value range (display prices, markup included); null hides the row. */
+  /** Pack card-value range (display prices, markup included); null hides the row.
+   *  Still the content gate (see hasPublishedOddsContent) even when the row
+   *  itself renders the expected value instead. */
   range: PoolValueRange | null;
+  /** Expected value of one pull over the published tiers; when present it
+   *  REPLACES the range in the top row. Null (no published tier has a priced
+   *  card) falls back to the range, so a pack with a priced pool but no
+   *  per-tier rows still has something in that row. */
+  expectedValue?: string | null;
   /** Per-tier value ranges. A tier absent here (nothing priced in that tier, or
    *  the caller did not supply them) simply renders without a range line. */
   tierRanges?: Partial<Record<Rarity, PoolValueRange>>;
@@ -52,10 +60,10 @@ export function PublishedOddsList({
         {range !== null && (
           <li className="flex items-center justify-between border-b border-white/5 bg-white/[0.03] px-4 py-3">
             <span className="text-[13px] font-semibold text-white">
-              Card value range
+              {expectedValue ? 'Expected value' : 'Card value range'}
             </span>
             <span className="text-[13px] font-semibold tabular-nums text-white">
-              {range.min} – {range.max}
+              {expectedValue ?? `${range.min} – ${range.max}`}
             </span>
           </li>
         )}
@@ -120,6 +128,7 @@ export function OddsSheet({
   onClose,
   odds,
   range,
+  expectedValue,
   tierRanges,
 }: {
   open: boolean;
@@ -127,6 +136,7 @@ export function OddsSheet({
   /** Published rows (rarest-first); null = this pack has no published odds. */
   odds: { rarity: Rarity; chance: string }[] | null;
   range: PoolValueRange | null;
+  expectedValue?: string | null;
   tierRanges?: Partial<Record<Rarity, PoolValueRange>>;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
@@ -172,6 +182,7 @@ export function OddsSheet({
           <PublishedOddsList
             odds={odds}
             range={range}
+            expectedValue={expectedValue}
             tierRanges={tierRanges}
           />
         ) : (
