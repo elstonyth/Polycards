@@ -47,7 +47,15 @@ async function submitSignup(
   await page.fill('input[name="confirmPassword"]', password);
   // PR #311 made the phone field required; PhoneField's E.164 value lives in a
   // hidden input, so fill the visible national-number control instead.
-  await page.getByRole('textbox', { name: 'Phone number' }).fill('0123456789');
+  // The number must be UNIQUE per run: PR #456 ("one phone number, one account")
+  // rejects a signup whose phone already belongs to an account, so the old fixed
+  // '0123456789' passed once and then failed every later run with
+  // "This phone number is already in use." Keep the 012 prefix (valid MY mobile)
+  // and randomize the 7-digit subscriber part.
+  const phone = `012${Math.floor(Math.random() * 10_000_000)
+    .toString()
+    .padStart(7, '0')}`;
+  await page.getByRole('textbox', { name: 'Phone number' }).fill(phone);
   // If the form gains another required field, fail HERE with a clear message
   // instead of timing out 180s later.
   const missing = await page

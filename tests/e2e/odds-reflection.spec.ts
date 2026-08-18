@@ -66,8 +66,15 @@ async function publishedOddsSnapshot(
   slug: string,
 ): Promise<string> {
   await page.goto(`${BASE}/slots/${slug}`, { waitUntil: 'domcontentloaded' });
+  // `Reveal as="section"` nests inside an outer <section>, so BOTH ancestors
+  // match `hasText` and the SAME list resolves twice — strict mode then throws
+  // before the panel is ever read. Narrow to the INNERMOST match (`.last()`,
+  // which is the Reveal wrapper) rather than `.first()` on the lists: that one
+  // section holds exactly one <ul> (PublishedOddsList renders a single list),
+  // so strict mode still catches a genuinely duplicated panel.
   const panel = page
     .locator('section', { hasText: 'Pull Odds (by rarity)' })
+    .last()
     .locator('ul');
   if ((await panel.count()) === 0) return 'no published odds panel';
   return (await panel.innerText()).trim();
