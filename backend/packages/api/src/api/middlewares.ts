@@ -39,6 +39,7 @@ import {
   requireSignupPhoneProof,
   blockUnverifiedPhoneWrite,
   requirePhoneVerified,
+  rejectAdminPhoneWrite,
 } from './utils/phone-verification-guard';
 import { validateDeliverableAddress } from './utils/address-guard';
 import {
@@ -888,15 +889,40 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      // The framework's own POST /admin/customers (bare collection — create)
+      // is NOT reached by the '/admin/customers/*' matcher below: path-to-regexp
+      // 0.1.x requires a segment after the trailing '/', so the wildcard matches
+      // '/admin/customers/cus_123' but not '/admin/customers' itself. Needs its
+      // own entry for that reason alone.
+      //
+      // rejectAdminPhoneWrite (see utils/phone-verification-guard.ts): refuses
+      // any request body carrying a `phone` key outright. Core's admin create
+      // calls createCustomersWorkflow directly (not createCustomerAccountWorkflow,
+      // which is what forces has_account on the store signup path), so a
+      // phone written here lands on a has_account: false row — invisible to
+      // assertPhoneUnclaimed and scripts/report-duplicate-phones.ts. See the
+      // guard's own docblock for the full reasoning, including why the fix is
+      // "refuse the field" rather than "force has_account and check".
+      matcher: '/admin/customers',
+      method: 'POST',
+      middlewares: [rejectAdminPhoneWrite],
+    },
+    {
       // The framework's own POST /admin/customers/:id writes customer.metadata
       // directly, and mergeMetadata is a SHALLOW top-level merge — so a request
       // could inject bank_accounts (a live payout destination) with no audit
       // row and without the metadata:<customer> advisory lock the store-side
       // writer holds. The admin SPA never round-trips metadata, so nothing
       // legitimate is refused here.
+      //
+      // rejectAdminPhoneWrite rides along on this same entry: this is also the
+      // admin UPDATE route, and the phone hole above is just as open on update
+      // as on create (a guest customer created email-only by the cart's
+      // findOrCreateCustomerStep could otherwise have a phone added here) — see
+      // utils/phone-verification-guard.ts for the full reasoning.
       matcher: '/admin/customers/*',
       method: 'POST',
-      middlewares: [rejectAdminBankAccountsMetadata],
+      middlewares: [rejectAdminBankAccountsMetadata, rejectAdminPhoneWrite],
     },
     {
       matcher: '/admin/customers/*/payout-details',

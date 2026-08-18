@@ -101,6 +101,12 @@ gateway-vs-ledger delta would give it.
 
 ### C2 — the withdrawal settle path does not record what was actually paid
 
+**CLOSED 2026-08-17** — `globepay_withdrawal.amount_settled` (+ its
+`raw_amount_settled` sidecar) was added by `Migration20260817090000.ts` and is
+now written by the callback (`api/hooks/globepay/withdrawal/route.ts:299`) and
+the sweep (`jobs/globepay-withdrawal-reconcile.ts:215`), matching the field
+`models/globepay-withdrawal.ts` now declares. Left below as history.
+
 The deposit path stores `amount_settled` from the callback. The withdrawal path
 stores nothing equivalent: on success it writes `status`, `gateway_status`,
 `settled_at` and leaves `amount` as submitted. A settled-amount disagreement is
@@ -109,6 +115,11 @@ instruct the exact figure) but it means the payout side has no settled-amount
 column to reconcile against, unlike deposits.
 
 ### C3 — `verify_outcome` is a payout forensics column with no reader
+
+**CLOSED 2026-08-17** — returned by
+`api/admin/globepay/withdrawals/route.ts:235` and rendered on the admin
+Withdrawals page (`apps/admin/src/routes/withdrawals/page.tsx`). Left below as
+history.
 
 Written on every payout-verify invocation (`globepay-withdrawal.ts` model
 comment explains why NULL is meaningful), surfaced on no admin screen. It is the
@@ -180,14 +191,21 @@ One operational rule the mirror introduces: **a deposit settled BY HAND must
 write `amount_settled`** (and ideally `net_amount`/the bank refs, from the
 GlobePay back office). The settlement report sums `amount_settled` over
 settled deposit rows — a manually-settled row without it counts in `count`
-and contributes RM 0 to gross, understating the period silently. The
-quarantine path (over-ceiling callbacks/requeries) is the one flow that ends
-in manual settlement today.
+and contributes RM 0 to gross. That used to understate the period silently;
+the report now COUNTS those rows (`missingGross`) and renders the gross as a
+FLOOR, not a total, whenever the count is non-zero — so the rule is still a
+rule, but breaking it is now visible on the settlement screen instead of only
+in this document. The quarantine path (over-ceiling callbacks/requeries) is
+the one flow that ends in manual settlement today.
 
 B3 is addressed for the _current_ balance (read live on that screen). Balance
 _history_ is deliberately not stored: one snapshot table with a job behind it
 buys a chart nobody has asked for yet.
 
-C1, C2, C3, E1–E3 and F1 are left open and are recorded here rather than fixed,
-because each needs its own decision (a status + migration for E1, a provider
-conversation for E2, a schema column for C2).
+C1, E1–E3 and F1 are left open and are recorded here rather than fixed, because
+each needs its own decision (a status + migration for E1, a provider
+conversation for E2). C2 and C3 are now closed — see the CLOSED banners on
+their sections above — by the same settlement mirror that ships alongside this
+document: `models/globepay-withdrawal.ts` + `Migration20260817090000.ts` +
+`api/hooks/globepay/withdrawal/route.ts` for C2, and
+`api/admin/globepay/withdrawals/route.ts` + the admin Withdrawals page for C3.

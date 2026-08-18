@@ -160,3 +160,82 @@ export const blockUnverifiedPhoneWrite = (
   }
   next();
 };
+
+/**
+ * Admin-side counterpart to blockUnverifiedPhoneWrite above: the generic
+ * admin customer routes (POST /admin/customers create, POST
+ * /admin/customers/:id update) may NOT write `phone` at all — unlike the
+ * store-side signup gate, this does not route the value through
+ * assertPhoneUnclaimed. It refuses the field outright.
+ *
+ * Why not "force has_account and call assertPhoneUnclaimed", the way
+ * requireSignupPhoneProof does above: that was considered and rejected.
+ * has_account means "this row has a login identity"; forcing it true on a
+ * row the admin route creates without one would be a lie about the row's
+ * login state. It would also corrupt core's composite (email, has_account)
+ * unique index, which exists SPECIFICALLY so a guest row can share an email
+ * with a real account (@medusajs/customer models/customer.js — the index is
+ * declared `on: ["email", "has_account"]`, unique, `where: "deleted_at IS
+ * NULL"`). And because assertPhoneUnclaimed only ever compares against
+ * has_account: true rows, forcing the flag on write would let an admin
+ * silently claim a phone number away from whichever real account currently
+ * holds it, rather than refuse the write.
+ *
+ * The gap this closes: core's admin create (POST /admin/customers,
+ * @medusajs/medusa admin/customers/route.js) calls createCustomersWorkflow
+ * directly — NOT createCustomerAccountWorkflow, the one POST /store/customers
+ * uses to force `has_account: !!authIdentityId` in the same transform that
+ * carries the phone field (@medusajs/core-flows
+ * create-customer-account.js). Nothing on the admin path sets has_account,
+ * so it falls back to the Customer model's default of `false`
+ * (@medusajs/customer models/customer.js). Both AdminCreateCustomer and
+ * AdminUpdateCustomer accept a bare `phone: z.string().nullish()`
+ * (@medusajs/medusa admin/customers/validators.js), with nothing upstream
+ * refusing it — so, absent this guard, an admin caller could create (or add
+ * to) a has_account: false row holding a phone: invisible to
+ * assertPhoneUnclaimed and to scripts/report-duplicate-phones.ts, both of
+ * which filter has_account: true. See phone-claim.ts's docblock for the
+ * full invariant this protects.
+ *
+ * Why UPDATE and not just CREATE: blocking create alone leaves the same hole
+ * open a different way. Core's cart flow creates guest customers
+ * (has_account: false, `{ email }` only) through findOrCreateCustomerStep
+ * (@medusajs/core-flows cart/steps/find-or-create-customer.js); without this
+ * half, an admin could add a phone to one of those rows through
+ * POST /admin/customers/:id and reproduce the exact invisible-row condition.
+ * Same guard, second matcher — see middlewares.ts.
+ *
+ * Rejects on PRESENCE of the key, not truthiness — `phone: null` and
+ * `phone: ''` are refused too. A null write is still a write to a column
+ * whose ownership this guard exists to protect, and admitting it invites a
+ * future partial-update path that silently clears a number the OTP flow
+ * set. Fail-closed, same reasoning as rejectCustomerMetadata's "reject the
+ * whole field" (customer-metadata-guard.ts).
+ *
+ * Honest tradeoff: this removes the ability to set or correct a customer's
+ * phone through the generic admin route, full stop. Nothing in this repo
+ * does that today — apps/admin/src only READS phone (type declarations and
+ * list/detail display in lib/admin-rest.ts, routes/players/page.tsx,
+ * routes/customers/[id]/page.tsx); there is no customer-create or
+ * customer-edit screen, and nothing POSTs a phone to /admin/customers or
+ * /admin/customers/:id. If support ever needs to correct a phone, that
+ * calls for a purpose-built, audited route that goes through
+ * assertPhoneUnclaimed — not a carve-out here.
+ */
+export function rejectAdminPhoneWrite(
+  req: MedusaRequest,
+  _res: MedusaResponse,
+  next: MedusaNextFunction,
+): void {
+  const body = req.body as Record<string, unknown> | null | undefined;
+  if (body && typeof body === 'object' && 'phone' in body) {
+    next(
+      new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'phone is not writable through this route. Phone numbers are bound through OTP verification (store/phone-verification), which is what keeps one phone tied to one account.',
+      ),
+    );
+    return;
+  }
+  next();
+}

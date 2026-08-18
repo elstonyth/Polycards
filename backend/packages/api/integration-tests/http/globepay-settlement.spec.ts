@@ -86,6 +86,7 @@ medusaIntegrationTestRunner({
               net: number;
               fee: number;
               missingNet: number;
+              missingGross: number;
             };
             withdrawals: { count: number; gross: number; fee: number };
             ledger: { topupCredited: number; cashoutNet: number };
@@ -186,6 +187,7 @@ medusaIntegrationTestRunner({
           net: 97,
           fee: 3,
           missingNet: 1,
+          missingGross: 0,
         });
         expect(current!.withdrawals.count).toBe(1);
         expect(current!.withdrawals.gross).toBe(80);
@@ -201,6 +203,52 @@ medusaIntegrationTestRunner({
         expect(next).toBeDefined();
         expect(next!.deposits.count).toBe(1);
         expect(next!.deposits.gross).toBe(30);
+      });
+
+      // The case the unit-tested fold can never reach: this proves the SQL
+      // FILTER itself (missing_gross, service.ts globepaySettlementRows)
+      // exists and casts correctly against a real Postgres, not just the pure
+      // merge over already-shaped rows. Uses its own period (3 months back,
+      // still inside periods=12) so its totals are exact regardless of what
+      // the other cases in this file seed into the current/next-month/current
+      // -week buckets.
+      it('a settled deposit with NULL amount_settled is counted but excluded from gross — missingGross', async () => {
+        const priorStart = mytMonthStartPlus(-3);
+        const priorKey = keyOf(priorStart);
+        const priorMid = new Date(priorStart.getTime() + 26 * HOUR_MS);
+
+        await packs().createGlobePayDeposits([
+          {
+            merchant_transaction_id: 'PC-settle-missgross-1',
+            customer_id: CUSTOMER_ID,
+            amount_requested: 60,
+            amount_settled: 60,
+            payment_method_code: 'BQR',
+            status: 'settled',
+            settled_at: priorMid,
+          },
+          // Hand-settled outside every writer that sets amount_settled — the
+          // quarantine → manual-settlement path (money-path-accuracy-audit-
+          // 2026-08-17). No net_amount either: a real hand-settled row has
+          // neither, same as PC-settle-cur-2 models for missingNet above.
+          {
+            merchant_transaction_id: 'PC-settle-missgross-2',
+            customer_id: CUSTOMER_ID,
+            amount_requested: 999,
+            payment_method_code: 'BQR',
+            status: 'settled',
+            settled_at: priorMid,
+          },
+        ]);
+
+        const data = await report('?granularity=month&periods=12');
+        const period = data.periods.find((p) => p.period === priorKey);
+        expect(period).toBeDefined();
+        // Both settled rows count; only the priced one's amount lands in
+        // gross — the NULL row is excluded from the sum, not zeroed into it.
+        expect(period!.deposits.count).toBe(2);
+        expect(period!.deposits.gross).toBe(60);
+        expect(period!.deposits.missingGross).toBe(1);
       });
 
       it('falls back to month/12 on garbage params instead of erroring', async () => {

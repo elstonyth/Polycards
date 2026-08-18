@@ -4710,9 +4710,14 @@ class PacksModuleService extends MedusaService({
   // and ledger.ts's fixed +8 agree because MYT has no DST; settlementSince
   // (the `since` this is fed) documents that pairing.
   //
-  // FILTER over net_amount implements the NULL-net rule: NULL is "unknown",
-  // never zero fee, so the fee numerator and its matching gross are summed
-  // over known-net rows only and the NULL rows are counted out loud.
+  // FILTER over net_amount and over amount_settled both implement the same
+  // NULL rule: NULL is "unknown", never zero. The fee numerator and its
+  // matching gross are summed over known-net rows only; a deposit's gross is
+  // summed over whatever amount_settled rows exist, which SUM already skips
+  // silently for NULL. Either way, the excluded rows get their own FILTER and
+  // are counted out loud instead of being left to deflate the figure they
+  // were skipped from — see globepay-settlement.ts's header for the full
+  // rule.
   @InjectManager()
   async globepaySettlementRows(
     granularity: 'week' | 'month',
@@ -4738,6 +4743,7 @@ class PacksModuleService extends MedusaService({
       net_cents: string;
       gross_with_net_cents: string;
       missing_net: string;
+      missing_gross: string;
     };
     const toGateway = (r: RawGateway): GatewayPeriodRow => ({
       period: r.period,
@@ -4746,15 +4752,26 @@ class PacksModuleService extends MedusaService({
       netCents: Number(r.net_cents),
       grossWithNetCents: Number(r.gross_with_net_cents),
       missingNet: Number(r.missing_net),
+      missingGross: Number(r.missing_gross),
     });
 
+    // GROSS can also be NULL on a settled deposit: a hand-settled row is
+    // written by an operator outside every writer that sets amount_settled
+    // (money-path-accuracy-audit-2026-08-17's "operational rule" paragraph).
+    // The quarantine branch in globepay-reconcile.ts — over-ceiling
+    // callbacks/requeries — is the one flow that reaches manual settlement
+    // today, and it leaves the row `settled` for a human with nothing written
+    // back; there is no pre-emptive guard. SUM already skips those rows
+    // silently, so this FILTER counts them out loud, the same way the
+    // net_amount FILTER above counts the fee's unknowns.
     const depositRows = await em.execute<RawGateway[]>(
       `SELECT ${bucket('settled_at')} AS period,
               COUNT(*)::bigint AS n,
               COALESCE(SUM(ROUND(amount_settled * 100)), 0)::bigint AS gross_cents,
               COALESCE(SUM(ROUND(net_amount * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS net_cents,
               COALESCE(SUM(ROUND(amount_settled * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS gross_with_net_cents,
-              COUNT(*) FILTER (WHERE net_amount IS NULL)::bigint AS missing_net
+              COUNT(*) FILTER (WHERE net_amount IS NULL)::bigint AS missing_net,
+              COUNT(*) FILTER (WHERE amount_settled IS NULL)::bigint AS missing_gross
          FROM globepay_deposit
         WHERE deleted_at IS NULL AND status = 'settled'
           AND settled_at IS NOT NULL AND settled_at >= ?::timestamptz
@@ -4778,7 +4795,8 @@ class PacksModuleService extends MedusaService({
               COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS gross_cents,
               COALESCE(SUM(ROUND(net_amount * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS net_cents,
               COALESCE(SUM(ROUND(COALESCE(amount_settled, amount) * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS gross_with_net_cents,
-              COUNT(*) FILTER (WHERE net_amount IS NULL)::bigint AS missing_net
+              COUNT(*) FILTER (WHERE net_amount IS NULL)::bigint AS missing_net,
+              0::bigint AS missing_gross  -- withdrawals gross on \`amount\`, never NULL
          FROM globepay_withdrawal
         WHERE deleted_at IS NULL AND status = 'settled'
           AND settled_at IS NOT NULL AND settled_at >= ?::timestamptz

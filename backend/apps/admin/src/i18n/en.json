@@ -642,6 +642,7 @@
     "ledger": "Ledger",
     "delta": "Δ",
     "feeFloorHint": "{{count}} settled row(s) have no net on file (settled before fee tracking) — the fee shown is a floor, not the total.",
+    "grossFloorHint": "{{count}} settled row(s) have no gross on file (likely a deposit settled by hand whose amount_settled was never recorded) — the gross shown is a floor, not the total.",
     "depositDeltaHint": "Δ = gateway settled gross − ledger credits in the period. Expect 0; a persistent gap is a settled deposit whose credit never landed, or a manual/mock top-up with no gateway row.",
     "withdrawalDeltaHint": "Δ = gateway settled gross − ledger cash-outs (net of refunds). Debits are written at submit and can settle in a later bucket, so read this across adjacent periods, not as a per-row alarm.",
     "balanceTitle": "Merchant balance",
