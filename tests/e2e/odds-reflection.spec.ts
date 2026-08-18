@@ -76,7 +76,12 @@ async function publishedOddsSnapshot(
     .locator('section', { hasText: 'Pull Odds (by rarity)' })
     .last()
     .locator('ul');
-  if ((await panel.count()) === 0) return 'no published odds panel';
+  const panelCount = await panel.count();
+  if (panelCount === 0) return 'no published odds panel';
+  // Fail LOUDLY on a second panel rather than letting innerText() throw a bare
+  // strict-mode error: this helper exists to resolve exactly one list, so a
+  // layout change that reintroduces the ambiguity should say so by name.
+  expect(panelCount).toBe(1);
   return (await panel.innerText()).trim();
 }
 
