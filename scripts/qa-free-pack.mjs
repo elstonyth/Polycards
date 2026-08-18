@@ -126,9 +126,10 @@ await fetch(`${API}/admin/packs/${SLUG}/odds`, {
 // From the activation on, this run OWNS the single active-`free_welcome` slot,
 // so EVERY exit path has to hand it back — which is why the try/finally opens
 // here rather than after the browser launch (a throw in between used to skip
-// teardown entirely and leave the slot held). The two teardowns are gated
-// independently: `activated` for the slot, `browser` so the cleanup can't
-// `close()` a browser that was never launched.
+// teardown entirely and leave the slot held). The three teardowns are gated
+// independently: `activated` for this script's own pack, `borrowed` for the
+// incumbent it displaced, `browser` so the cleanup can't `close()` a browser
+// that was never launched.
 // The admin API allows exactly ONE active `free_welcome` pack
 // (assertSingleActiveFreePack, api/admin/packs/validate.ts). The E2E seed ships
 // one — slug `free-welcome`, seeded ACTIVE and deliberately skipped by the
