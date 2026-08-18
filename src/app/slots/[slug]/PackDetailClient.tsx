@@ -313,12 +313,13 @@ export default function PackDetailClient({
 
   // Expected value of one pull over the PUBLISHED tiers — what the top row of
   // the odds panel states now (the range only ever described the pool's span).
+  // The odds are read into a local first: with `liveDetail?.publishedOdds` as a
+  // dependency, the React Compiler infers `liveDetail` (a less specific
+  // property than the source) and refuses to preserve the memo.
+  const publishedOdds = liveDetail?.publishedOdds ?? null;
   const expectedValue = useMemo(
-    () =>
-      liveDetail?.publishedOdds
-        ? poolExpectedValue(pool, liveDetail.publishedOdds.tiers)
-        : null,
-    [pool, liveDetail?.publishedOdds],
+    () => (publishedOdds ? poolExpectedValue(pool, publishedOdds.tiers) : null),
+    [pool, publishedOdds],
   );
 
   // Do NOT open/charge here — navigate to the reel, which performs
