@@ -2,8 +2,9 @@ import {
   requireSignupPhoneProof,
   blockUnverifiedPhoneWrite,
   requirePhoneVerified,
+  rejectAdminPhoneWrite,
 } from '../phone-verification-guard';
-import { Modules } from '@medusajs/framework/utils';
+import { MedusaError, Modules } from '@medusajs/framework/utils';
 import { signPhoneProof } from '../../../utils/phone-verification';
 
 const SECRET = 'test-secret';
@@ -280,5 +281,49 @@ describe('requirePhoneVerified', () => {
     process.env.PHONE_GATE_REQUIRED = 'true';
     expect(await run(gateReq('cus_1', false))).toBeInstanceOf(Error);
     delete process.env.PHONE_GATE_REQUIRED;
+  });
+});
+
+describe('rejectAdminPhoneWrite', () => {
+  // Unconditional — unlike blockUnverifiedPhoneWrite above, this guard is not
+  // gated on PHONE_VERIFICATION_REQUIRED (the admin route never had a
+  // verification path to roll back to; the field is refused outright).
+  const run = (req: never) =>
+    new Promise<unknown>((resolve) =>
+      rejectAdminPhoneWrite(req, {} as never, resolve),
+    );
+
+  it('rejects a phone string with INVALID_DATA and the exact message', async () => {
+    const err = (await run(makeReq({ phone: PHONE }))) as MedusaError;
+    expect(err).toBeInstanceOf(MedusaError);
+    expect(err.type).toBe(MedusaError.Types.INVALID_DATA);
+    expect(err.message).toBe(
+      'phone is not writable through this route. Phone numbers are bound through OTP verification (store/phone-verification), which is what keeps one phone tied to one account.',
+    );
+  });
+
+  // Presence, not truthiness: a null write still touches the column this
+  // guard exists to protect ownership of (see the guard's own docblock).
+  it('rejects phone: null', async () => {
+    const err = (await run(makeReq({ phone: null }))) as MedusaError;
+    expect(err).toBeInstanceOf(MedusaError);
+    expect(err.type).toBe(MedusaError.Types.INVALID_DATA);
+  });
+
+  it('rejects phone: "" (empty string)', async () => {
+    const err = (await run(makeReq({ phone: '' }))) as MedusaError;
+    expect(err).toBeInstanceOf(MedusaError);
+    expect(err.type).toBe(MedusaError.Types.INVALID_DATA);
+  });
+
+  it('passes a body with no phone key', async () => {
+    expect(
+      await run(makeReq({ email: 'a@b.c', first_name: 'A' })),
+    ).toBeUndefined();
+  });
+
+  it('does not throw on a null or undefined body', async () => {
+    expect(await run(makeReq(undefined))).toBeUndefined();
+    expect(await run(makeReq(null))).toBeUndefined();
   });
 });

@@ -35,21 +35,34 @@ import type {
  * store/customers/me/delete which nulls it — both act only on
  * `req.auth_context.actor_id`, and a guest customer has no session to be one.
  *
- * NOT true for the admin API. `POST /admin/customers`
+ * WAS NOT true for the admin API — CLOSED 2026-08-19. `POST /admin/customers`
  * (@medusajs/medusa admin/customers/route.js) calls createCustomersWorkflow
- * DIRECTLY — not createCustomerAccountWorkflow — so nothing forces
+ * DIRECTLY — not createCustomerAccountWorkflow — so nothing forced
  * has_account on that path; the customer model defaults it to `false`
- * (@medusajs/customer models/customer.js), and AdminCreateCustomer's Zod
- * schema accepts a `phone` string regardless. An admin caller can therefore
- * create a has_account: false row holding a phone today. No customer-create
- * screen exists under this repo's apps/admin/src as of this writing, and this
- * could not be checked against the live table (customer-table SQL needs
- * direct DB access this comment's author didn't have), so treat this as a
- * verified CODE-LEVEL exception, not a confirmed data one.
+ * (@medusajs/customer models/customer.js), and AdminCreateCustomer's (and
+ * AdminUpdateCustomer's) Zod schema accepted a `phone` string regardless. An
+ * admin caller could therefore create — or add to — a has_account: false row
+ * holding a phone. No customer-create screen exists under this repo's
+ * apps/admin/src, so this was a verified CODE-LEVEL exception, not a
+ * confirmed data one.
  *
- * Either way: if this ever produces a real row, or a future customer-creation
- * path sets `phone` without `has_account` some other way, a
- * has_account: true-scoped report or index stops covering the whole
+ * CLOSED by rejectAdminPhoneWrite (utils/phone-verification-guard.ts), which
+ * refuses any request carrying a `phone` key on the body outright, on both
+ * admin write verbs. Deliberately NOT routed through this function the way
+ * signup is: forcing has_account true to make assertPhoneUnclaimed apply
+ * would corrupt the composite index this file's index paragraph below
+ * describes, and would let an admin silently claim a number away from
+ * whoever really holds it, rather than refuse the write. Wired on two
+ * middlewares.ts matchers: `POST /admin/customers` (create — needs its own
+ * entry, since the trailing-wildcard `/admin/customers/*` matcher does not
+ * reach the bare collection path) and `POST /admin/customers/*` (update —
+ * closes the same hole a second way, via findOrCreateCustomerStep's
+ * email-only guest rows; see the guard's own docblock for the full
+ * reasoning on both).
+ *
+ * Either way: if a future customer-creation path sets `phone` without
+ * `has_account` some other way — or rejectAdminPhoneWrite is ever unwired —
+ * a has_account: true-scoped report or index stops covering the whole
  * phone-holding population with no error to say so.
  *
  * NOT atomic — check-then-write, no lock or unique index. State the real
@@ -63,12 +76,14 @@ import type {
  * `CREATE UNIQUE INDEX ... ON customer (email, has_account) WHERE deleted_at
  * IS NULL`, specifically so a guest row can share an email with a real
  * account — so a bare single-column phone index is only its equivalent
- * because of the has_account invariant above, and that invariant has a known
- * CODE-LEVEL exception (the admin API, above), not a guaranteed one. Whoever
- * writes that migration must either close that exception first and keep the
- * index single-column, or make it composite (phone, has_account) to
- * genuinely mirror the email precedent and stop depending on the invariant
- * at all. It is not here for ONE reason:
+ * because of the has_account invariant above. That invariant's one known
+ * exception (the admin API) is now CLOSED by rejectAdminPhoneWrite (above),
+ * so a single-column index is defensible — but that defensibility rests on
+ * an app-code guard staying wired on both its matchers, not on anything the
+ * database itself enforces. Composite (phone, has_account), mirroring the
+ * email precedent exactly, remains the option that depends on no invariant
+ * at all. Whoever writes that migration should choose with that tradeoff in
+ * view, not assume single-column is free. It is not here for ONE reason:
  * live rows already share numbers, so creating it would fail until those are
  * reconciled. Dedupe, then add it — `src/scripts/report-duplicate-phones.ts`
  * names the rows that have to go first.
