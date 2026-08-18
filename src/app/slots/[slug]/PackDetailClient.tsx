@@ -87,7 +87,6 @@ function PackRail({
   // for a horizontal rail (a vertical wheel does nothing here), so the extra
   // packs were unreachable on desktop without a trackpad.
   const drag = useDragScroll<HTMLDivElement>();
-  const rail = drag.ref;
   const arrived = useRef<HTMLButtonElement>(null);
 
   // Centre the pack we arrived on. With only three tiles visible, a deep link
@@ -97,12 +96,15 @@ function PackRail({
   // this rail. Mount only — re-centring after a tap yanks the rail under the
   // thumb, and the tapped tile is by definition already on screen.
   useEffect(() => {
-    const r = rail.current;
     const tile = arrived.current;
-    if (!r || !tile) return;
+    // The rail is the tile's parent. Reached that way rather than through
+    // `drag.ref`, because writing scrollLeft through a value a custom hook
+    // returned trips react-hooks/immutability (the compiler treats a hook's
+    // return as frozen; a local useRef is exempt, a borrowed one is not).
+    const r = tile?.parentElement;
+    if (!tile || !r) return;
     r.scrollLeft = tile.offsetLeft - (r.clientWidth - tile.clientWidth) / 2;
-    // `rail` is a ref object -- stable identity, so this stays mount-only.
-  }, [rail]);
+  }, []);
 
   return (
     <div
