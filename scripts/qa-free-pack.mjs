@@ -7,7 +7,12 @@
 //   → /slots badge is gone (the claim is spent).
 //
 // Setup is idempotent: it (re)creates an ACTIVE free_welcome pack over existing
-// cards through the admin API, so a fresh DB needs no hand-seeding.
+// cards through the admin API, so a fresh DB needs no hand-seeding. The admin
+// API allows only ONE active free_welcome pack at a time, so this script
+// borrows that slot from whatever pack currently holds it (e.g. the E2E seed's
+// `free-welcome`) and hands it back in the `finally` block. A killed run
+// (SIGKILL / runner cancellation) between the borrow and the restore leaves the
+// incumbent in draft — re-run `seed:e2e` to recover locally.
 //
 // Run (worktree serves on 4100 — the main tree may hold 4000):
 //   npm run build
@@ -124,9 +129,48 @@ await fetch(`${API}/admin/packs/${SLUG}/odds`, {
 // teardown entirely and leave the slot held). The two teardowns are gated
 // independently: `activated` for the slot, `browser` so the cleanup can't
 // `close()` a browser that was never launched.
+// The admin API allows exactly ONE active `free_welcome` pack
+// (assertSingleActiveFreePack, api/admin/packs/validate.ts). The E2E seed ships
+// one — slug `free-welcome`, seeded ACTIVE and deliberately skipped by the
+// seed's stray sweep — so on any correctly seeded database the slot is already
+// taken and activating this script's own pack 400s. That is not a hypothetical:
+// it is why this gate failed on every nightly from 2026-08-15 to 2026-08-17
+// without ever once running an assertion.
+//
+// So borrow the slot rather than compete for it: draft the incumbent here,
+// restore it in the `finally` AFTER this script's pack is drafted (the slot
+// must be free at the moment of restore, or the restore itself 400s).
+//
+// Not DELETE and not a seed change: the incumbent is a real fixture other specs
+// need, and its own pulls reference it.
+const allPacks = await fetch(`${API}/admin/packs`, { headers: AH }).then(json);
+const incumbent =
+  (allPacks.packs ?? []).find(
+    (p) =>
+      p.category === 'free_welcome' && p.status === 'active' && p.slug !== SLUG,
+  ) ?? null;
 let activated = false;
+let borrowed = false;
 let browser = null;
 try {
+  // Draft the incumbent so the single-active slot is free. `borrowed` gates the
+  // restore in `finally` the same way `activated` gates this script's own
+  // teardown — a mutation that did not happen must not be reversed.
+  if (incumbent) {
+    const release = await fetch(`${API}/admin/packs/${incumbent.slug}`, {
+      method: 'POST',
+      headers: AH,
+      body: JSON.stringify({ ...incumbent, status: 'draft' }),
+    });
+    if (!release.ok) {
+      throw new Error(
+        `could not release the live free pack '${incumbent.slug}' — ${release.status}`,
+      );
+    }
+    borrowed = true;
+    ok(`borrowed the free_welcome slot from '${incumbent.slug}'`);
+  }
+
   const activate = await fetch(`${API}/admin/packs/${SLUG}`, {
     method: 'POST',
     headers: AH,
@@ -617,5 +661,24 @@ try {
     });
     if (teardown.ok) ok(`'${SLUG}' set back to draft (slot released)`);
     else fail(`teardown: '${SLUG}' is still active — ${teardown.status}`);
+  }
+
+  // Give the slot back, AFTER the block above freed it. A restore attempted
+  // while this script's pack is still active would 400 for the same reason the
+  // activation did. A hard kill (SIGKILL / runner cancellation) between the
+  // borrow and here leaves the incumbent drafted: in CI the database is an
+  // ephemeral service container so it cannot outlive the run, and locally the
+  // fix is re-running `seed:e2e`. Not worth a crash-recovery mechanism.
+  if (borrowed) {
+    const restore = await fetch(`${API}/admin/packs/${incumbent.slug}`, {
+      method: 'POST',
+      headers: AH,
+      body: JSON.stringify({ ...incumbent, status: 'active' }),
+    });
+    if (restore.ok) ok(`restored '${incumbent.slug}' to active`);
+    else
+      fail(
+        `teardown: '${incumbent.slug}' left in draft — ${restore.status}; re-run seed:e2e`,
+      );
   }
 }
