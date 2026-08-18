@@ -171,7 +171,7 @@ Same treatment into `backfills.ts` for the **four** `backfill*`/one-shot methods
 
 ### Step 5: Final gates
 
-**Verify**: full unit + modules + smoke green with counts equal to Step 1; `git diff --stat service.ts` (this change only, per plan 111's relative criteria — see "Commands you will need") shows a net deletion within a reasonable margin of N, where N = total lines landing in `challenge.ts`/`backfills.ts` (measured via `wc -l` on those new files, independently of service.ts's own diff — not an absolute `wc -l` floor, and not service.ts's baseline-minus-after, which would be circular against itself); `git diff service.ts` contains ONLY deletions, imports, and thin decorated forwarders (decorator + signature + em-resolve + call — no logic edits beyond that shape).
+**Verify**: full unit + modules + smoke green with counts equal to Step 1; `git diff --stat service.ts` (this change only, per plan 111's relative criteria — see "Commands you will need") shows a net deletion within a reasonable margin of N, where N = total lines landing in `challenge.ts`/`backfills.ts`/`pulled-value.ts` (measured via `wc -l` on those new files, independently of service.ts's own diff — not an absolute `wc -l` floor, and not service.ts's baseline-minus-after, which would be circular against itself); `git diff service.ts` contains ONLY deletions, imports, and thin decorated forwarders (decorator + signature + em-resolve + call — no logic edits beyond that shape).
 
 ## Test plan
 
