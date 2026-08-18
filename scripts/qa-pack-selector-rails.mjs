@@ -43,11 +43,35 @@ for (const [label, viewport] of [
         const rail = g.querySelector('[data-testid="pack-rail"]');
         if (!rail) return { error: 'pack-rail not found in group' };
         const active = rail.querySelector('button[aria-pressed="true"]');
+        // How many px of a partially-visible tile are showing at each edge —
+        // the "peek" that tells a user the rail scrolls. 0 on a side with
+        // nothing to scroll to is correct; 0 on a side that still has packs
+        // is the bug.
+        const peek = (side) => {
+          const tiles = [...rail.querySelectorAll('button')];
+          const l = rail.scrollLeft;
+          const r = l + rail.clientWidth;
+          // offsetWidth, not clientWidth: the tiles carry a 1px border, which
+          // clientWidth excludes — enough to miss a barely-straddling tile.
+          const cut = tiles.find((t) =>
+            side === 'left'
+              ? t.offsetLeft < l - 1 && t.offsetLeft + t.offsetWidth > l + 1
+              : t.offsetLeft < r - 1 && t.offsetLeft + t.offsetWidth > r + 1,
+          );
+          if (!cut) return 0;
+          return Math.round(
+            side === 'left'
+              ? cut.offsetLeft + cut.offsetWidth - l
+              : r - cut.offsetLeft,
+          );
+        };
         return {
           heading: g.querySelector('p')?.textContent?.trim(),
           tiles: rail.querySelectorAll('button').length,
           scrollable: rail.scrollWidth > rail.clientWidth + 1,
           scrollLeft: Math.round(rail.scrollLeft),
+          peekLeftPx: peek('left'),
+          peekRightPx: peek('right'),
           activeVisible: active
             ? active.offsetLeft >= rail.scrollLeft - 1 &&
               active.offsetLeft + active.clientWidth <=

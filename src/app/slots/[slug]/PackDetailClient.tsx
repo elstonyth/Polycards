@@ -14,6 +14,7 @@ import {
   Plus,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useDragScroll } from '@/lib/use-drag-scroll';
 import { rm, affordable } from '@/lib/format';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { openAuth } from '@/components/AuthButton';
@@ -82,7 +83,11 @@ function PackRail({
   activeId: string;
   onPick: (p: Pack) => void;
 }) {
-  const rail = useRef<HTMLDivElement>(null);
+  // Mouse drag-to-scroll: touch swipes natively, but a mouse has no gesture
+  // for a horizontal rail (a vertical wheel does nothing here), so the extra
+  // packs were unreachable on desktop without a trackpad.
+  const drag = useDragScroll<HTMLDivElement>();
+  const rail = drag.ref;
   const arrived = useRef<HTMLButtonElement>(null);
 
   // Centre the pack we arrived on. With only three tiles visible, a deep link
@@ -96,15 +101,23 @@ function PackRail({
     const tile = arrived.current;
     if (!r || !tile) return;
     r.scrollLeft = tile.offsetLeft - (r.clientWidth - tile.clientWidth) / 2;
-  }, []);
+    // `rail` is a ref object -- stable identity, so this stays mount-only.
+  }, [rail]);
 
   return (
     <div
-      ref={rail}
+      {...drag}
       data-testid="pack-rail"
       // `relative`: offsetLeft above is measured against the offsetParent, so
       // the rail has to be one. Scrollbar hidden like the catalog's rails.
-      className="relative flex snap-x snap-mandatory gap-1.5 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className={cn(
+        // No scroll-snap: `snap-mandatory` re-settles every rest position
+        // with a tile flush to the left edge, which erases the left-hand peek
+        // (and undid the mount-centring below). The teaser rail in
+        // PoolByRarity scrolls free too.
+        'relative flex gap-1.5 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
+        packs.length > 3 && 'cursor-grab active:cursor-grabbing',
+      )}
     >
       {packs.map((p) => {
         const selected = p.id === activeId;
@@ -116,11 +129,19 @@ function PackRail({
             aria-pressed={selected}
             onClick={() => onPick(p)}
             className={cn(
-              // Three per view (two 0.375rem gaps), the rest swipeable. The
-              // underscores are Tailwind's escape for the spaces CSS `calc()`
-              // requires around `-`; without them it parses only by the
-              // minifier's leniency.
-              'flex w-[calc((100%_-_0.75rem)/3)] shrink-0 snap-start flex-col items-center gap-0.5 rounded-xl border px-1 py-2 text-center transition-colors',
+              'flex shrink-0 flex-col items-center gap-0.5 rounded-xl border px-1 py-2 text-center transition-colors',
+              // With more packs than fit, tiles are narrowed so a 4th one
+              // peeks in from the edge -- the only affordance that tells a
+              // user the rail scrolls at all. The mount-centring above then
+              // leaves a partial tile on BOTH sides whenever there is one to
+              // scroll to. Exactly three (or fewer) still
+              // fill the row edge-to-edge: two 0.375rem gaps. The underscores
+              // are Tailwind's escape for the spaces CSS `calc()` requires
+              // around `-`; without them it parses only by the minifier's
+              // leniency.
+              packs.length > 3
+                ? 'w-[calc((100%_-_1.125rem)/3.7)]'
+                : 'w-[calc((100%_-_0.75rem)/3)]',
               selected
                 ? 'border-white/40 bg-white/10'
                 : 'border-white/10 bg-white/[0.03] hover:border-white/20 hover:bg-white/[0.06]',
