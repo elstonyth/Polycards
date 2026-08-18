@@ -77,6 +77,12 @@ const SettlementPage = () => {
     (sum, p) => sum + p.deposits.missingNet + p.withdrawals.missingNet,
     0,
   );
+  // Deposits only — withdrawals' missingGross is structurally 0 (its gross
+  // basis, `amount`, is never NULL), so there is nothing to total there.
+  const missingGrossTotal = (data?.periods ?? []).reduce(
+    (sum, p) => sum + p.deposits.missingGross,
+    0,
+  );
 
   return (
     <div className="flex flex-col gap-y-3">
@@ -236,7 +242,17 @@ const SettlementPage = () => {
                       {p.deposits.count || '—'}
                     </Table.Cell>
                     <Table.Cell className="text-right tabular-nums">
-                      {rm(p.deposits.gross)}
+                      {p.deposits.missingGross > 0 ? (
+                        <Tooltip
+                          content={t('settlement.grossFloorHint', {
+                            count: p.deposits.missingGross,
+                          })}
+                        >
+                          <span>≥ {rm(p.deposits.gross)}</span>
+                        </Tooltip>
+                      ) : (
+                        rm(p.deposits.gross)
+                      )}
                     </Table.Cell>
                     <Table.Cell className="text-ui-fg-subtle text-right tabular-nums">
                       {p.deposits.missingNet > 0 ? (
@@ -290,6 +306,15 @@ const SettlementPage = () => {
               <div className="border-t px-6 py-3">
                 <Badge size="2xsmall" color="orange">
                   {t('settlement.feeFloorHint', { count: missingNetTotal })}
+                </Badge>
+              </div>
+            )}
+            {missingGrossTotal > 0 && (
+              <div className="border-t px-6 py-3">
+                <Badge size="2xsmall" color="orange">
+                  {t('settlement.grossFloorHint', {
+                    count: missingGrossTotal,
+                  })}
                 </Badge>
               </div>
             )}

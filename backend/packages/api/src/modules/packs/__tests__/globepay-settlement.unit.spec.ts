@@ -12,6 +12,7 @@ const gw = (over: Partial<GatewayPeriodRow>): GatewayPeriodRow => ({
   netCents: 0,
   grossWithNetCents: 0,
   missingNet: 0,
+  missingGross: 0,
   ...over,
 });
 
@@ -43,6 +44,7 @@ describe('mergeSettlementPeriods', () => {
       net: 145.5,
       fee: 4.5,
       missingNet: 0,
+      missingGross: 0,
     });
     expect(p.delta.deposits).toBe(0);
   });
@@ -65,6 +67,47 @@ describe('mergeSettlementPeriods', () => {
     // Fee = 100 − 97 over the known row, NOT 150 − 97 = 53.
     expect(p.deposits.fee).toBe(3);
     expect(p.deposits.missingNet).toBe(1);
+  });
+
+  it('gross is computed over whatever amount_settled rows exist — a hand-settled NULL row is counted, not silently dropped', () => {
+    // Two settled deposits: one priced (RM 100), one hand-settled with no
+    // amount_settled on file. SUM already skips the NULL row (gross reads
+    // RM 100, the honest floor); missingGross is what tells the reader it IS
+    // a floor and not the whole bucket.
+    const [p] = mergeSettlementPeriods(
+      [
+        gw({
+          count: 2,
+          grossCents: 10_000, // only the priced row's gross
+          missingGross: 1,
+        }),
+      ],
+      [],
+      [],
+    );
+    expect(p.deposits.gross).toBe(100);
+    expect(p.deposits.missingGross).toBe(1);
+  });
+
+  it('a fully-known bucket reports missingGross 0 — not a hard-coded non-zero default', () => {
+    const [p] = mergeSettlementPeriods(
+      [gw({ count: 1, grossCents: 5_000, missingGross: 0 })],
+      [],
+      [],
+    );
+    expect(p.deposits.missingGross).toBe(0);
+  });
+
+  it('a period present only in the ledger renders the empty half (EMPTY_DIRECTION) with missingGross 0', () => {
+    const [p] = mergeSettlementPeriods([], [], [lg({ topupCents: 1_000 })]);
+    expect(p.deposits).toEqual({
+      count: 0,
+      gross: 0,
+      net: 0,
+      fee: 0,
+      missingNet: 0,
+      missingGross: 0,
+    });
   });
 
   it('surfaces the gateway-vs-ledger delta per period, in exact cents', () => {

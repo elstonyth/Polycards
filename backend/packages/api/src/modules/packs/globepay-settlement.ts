@@ -6,14 +6,23 @@
 // and credit-summary.ts are. All inputs are integer cents (sen); the report
 // converts to 2dp MYR exactly once, at the end.
 //
-// THE NULL-NET RULE, which every consumer of this report must keep honoring:
+// THE NULL RULE, which every consumer of this report must keep honoring: NULL
+// means UNKNOWN, never zero — for BOTH nullable money columns this report
+// sums, not just the one the name below calls out.
 // `net_amount` is NULL on any row that settled before the settlement mirror
 // shipped (Migration20260817090000) and on any settlement where the gateway
-// omitted it. NULL means UNKNOWN, never "no fee". So the fee is computed only
-// over rows whose net is known — `grossWithNetCents − netCents` — and the rows
-// excluded from it are COUNTED and shown (`missingNet`), rather than silently
-// deflating the fee. A period with missingNet > 0 has a fee figure that is a
-// floor, not a total, and the response says so structurally.
+// omitted it. So the fee is computed only over rows whose net is known —
+// `grossWithNetCents − netCents` — and the rows excluded from it are COUNTED
+// and shown (`missingNet`), rather than silently deflating the fee.
+// `amount_settled` (deposits only) can ALSO be NULL — not from the gateway,
+// but from a deposit settled BY HAND outside every writer that sets the
+// column (the over-ceiling quarantine path in globepay-reconcile.ts ends in
+// exactly this). SQL SUM already skips those rows, so gross silently reads
+// low unless the exclusion is counted too (`missingGross`).
+// A period with missingNet > 0 has a fee that is a floor, not a total; a
+// period with missingGross > 0 has a gross that is a floor too, for the same
+// reason. Both counters exist so the reader sees the floor, not just the
+// number.
 
 /** One period-bucket of settled gateway rows, as grouped by the service SQL. */
 export type GatewayPeriodRow = {
@@ -29,6 +38,10 @@ export type GatewayPeriodRow = {
   grossWithNetCents: number;
   /** Rows in this bucket with net_amount IS NULL ("unknown", pre-mirror). */
   missingNet: number;
+  /** Settled rows in this bucket whose gross is NULL — they count in `count`
+   *  and contribute 0 to `gross`, so `gross` is a FLOOR whenever this is
+   *  non-zero. */
+  missingGross: number;
 };
 
 /** One period-bucket of the credit ledger's gateway-adjacent rows. */
@@ -50,6 +63,9 @@ export type SettlementDirection = {
   fee: number;
   /** Settled rows whose net the gateway never told us (NULL, not zero). */
   missingNet: number;
+  /** Settled rows whose gross was never written (NULL, not zero) — `gross`
+   *  above is a FLOOR, not a total, whenever this is non-zero. */
+  missingGross: number;
 };
 
 export type SettlementPeriod = {
@@ -88,6 +104,7 @@ const EMPTY_DIRECTION: SettlementDirection = {
   net: 0,
   fee: 0,
   missingNet: 0,
+  missingGross: 0,
 };
 
 function toDirection(row: GatewayPeriodRow | undefined): SettlementDirection {
@@ -96,9 +113,10 @@ function toDirection(row: GatewayPeriodRow | undefined): SettlementDirection {
     count: row.count,
     gross: row.grossCents / 100,
     net: row.netCents / 100,
-    // Fee over the known-net subset ONLY — see the NULL-net rule above.
+    // Fee over the known-net subset ONLY — see the NULL rule above.
     fee: (row.grossWithNetCents - row.netCents) / 100,
     missingNet: row.missingNet,
+    missingGross: row.missingGross,
   };
 }
 

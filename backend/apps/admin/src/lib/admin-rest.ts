@@ -435,6 +435,9 @@ export interface SettlementDirection {
   fee: number;
   /** Settled rows with no net on file: unknown fee, never zero fee. */
   missingNet: number;
+  /** Settled rows with no gross on file: unknown gross, never zero gross —
+   *  `gross` above is a FLOOR, not a total, whenever this is non-zero. */
+  missingGross: number;
 }
 
 export interface SettlementPeriod {
