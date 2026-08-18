@@ -34,40 +34,55 @@ const shoot = async (width, height, out) => {
   const page = await browser.newPage({ viewport: { width, height } });
   await page.goto(`${BASE}/slots`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(1200); // Reveal animations settle
-  const headings = await page.locator('section h2').allInnerTexts();
+  // Scoped under layout.tsx's sitewide <main id="main"> rather than a bare
+  // `section` — nothing else on /slots renders a stray <section>/<h2>/count
+  // span today (checked), but scoping costs nothing and turns a future
+  // stray <section> elsewhere on the page into a wrong-count failure
+  // instead of a silent false read.
+  const headings = await page.locator('main#main section h2').allInnerTexts();
   const counts = await page
-    .locator('section span.ml-auto')
+    .locator('main#main section span.ml-auto')
     .allInnerTexts()
     .catch(() => []);
-  // Pack-tile count, taken from each section's DESKTOP row's direct
+  // Pack-tile counts, taken from each section's row containers' direct
   // children — NOT from `a[href*="count="]` (every pack tile's href does
   // carry `?count=`, per packHref in packs-data.ts, but that selector is
-  // the wrong handle for a COUNT here for two independent reasons visible
-  // in CatalogClient.tsx):
+  // wrong for a COUNT here, for two reasons visible in CatalogClient.tsx):
   //   1. The desktop card row (`hidden ... sm:flex`) and the mobile list
   //      row (`flex ... sm:hidden`) are BOTH unconditionally rendered —
-  //      Tailwind's responsive classes only toggle `display` in CSS, so at
-  //      ANY viewport both are present in the DOM. A bare anchor count
-  //      would be 2x the true per-viewport tile count.
+  //      Tailwind only toggles `display` in CSS, so at ANY viewport both
+  //      are in the DOM. A bare anchor count would be 2x.
   //   2. An out-of-stock pack renders NO anchor on either layout — PackCard
-  //      swaps its `<Link>` for a plain `<span>Sold out</span>`, and PackRow
-  //      swaps its `<Link>` wrapper for a plain `<div>`. Anchor-counting
-  //      would silently drop every OOS pack from the tile count, which
-  //      would make assertion #7 fail for a reason that has nothing to do
-  //      with the partition the first time an operator marks a pack OOS.
-  // Each section's desktop row (`Reveal`, default `as="div"`) renders
-  // exactly one <div> per pack UNCONDITIONALLY — stock status only changes
-  // what's inside PackCard, never whether the Reveal wrapper renders — and
-  // that row exists in the DOM at every viewport. So `section > div ` at
-  // index 1 (the 2nd of the section's three always-rendered div children:
-  // header, desktop row, mobile row) is a handle that is both
-  // viewport-independent and OOS-independent.
-  const tiles = await page
-    .locator('section > div:nth-of-type(2) > div')
+  //      swaps its `<Link>` for a `<span>Sold out</span>`; PackRow swaps its
+  //      `<Link>` wrapper for a plain `<div>`. Anchor-counting would drop
+  //      every OOS pack, breaking #7 for a reason unrelated to the
+  //      partition the first time an operator marks a pack OOS.
+  // Each section renders exactly 3 direct <div> children, unconditionally,
+  // in fixed order — header, desktop row, mobile row (verified against
+  // CatalogClient.tsx at commit 16cc85d3). If this selector ever needs
+  // updating, check that section's child count/order first. Both rows
+  // always exist in the DOM regardless of viewport; Reveal's wrapper
+  // (desktop) and PackRow's own root (mobile) render one child per pack
+  // UNCONDITIONALLY — stock status only changes what's INSIDE that child,
+  // never whether it renders — so counting either row's children is both
+  // viewport- and OOS-independent. Counted separately (not just desktop,
+  // mirrored for mobile too) and cross-checked in #7 below, so a filter
+  // touching only one layout's .map() shows up as a mismatch instead of
+  // hiding behind the other layout's still-correct count. Mobile's children
+  // are `> *`, not `> div`: PackRow's own root is an <a> (in stock) or
+  // <div> (OOS), unlike desktop's uniformly-<div> Reveal wrapper.
+  // The real fix here would be a `data-testid="pack-tile"` on PackCard's
+  // and PackRow's root, closing this gap without a positional selector —
+  // recorded as a follow-up; CatalogClient.tsx is out of scope for this gate.
+  const desktopTiles = await page
+    .locator('main#main section > div:nth-of-type(2) > div')
+    .count();
+  const mobileTiles = await page
+    .locator('main#main section > div:nth-of-type(3) > *')
     .count();
   await page.screenshot({ path: out, fullPage: true });
   await page.close();
-  return { headings, counts, tiles };
+  return { headings, counts, desktopTiles, mobileTiles };
 };
 
 const desktop = await shoot(
@@ -107,15 +122,24 @@ function splitHeading(text) {
   return { base: null, note: null };
 }
 
-function assertViewport(label, { headings, counts, tiles }) {
+function assertViewport(
+  label,
+  { headings, counts, desktopTiles, mobileTiles },
+) {
   // #1 — at least one section renders. Zero sections means the catalog
   // failed to load or the grouping collapsed entirely — the base case the
   // old screenshot-only script could never detect.
   if (headings.length === 0) {
     fail(`${label}: no sections rendered — ${JSON.stringify(headings)}`);
-  } else {
-    ok(`${label}: ${headings.length} section(s) rendered`);
+    // #2-7 would each report a VACUOUS ✓ against an empty catalog (nothing
+    // to be unknown, nothing to duplicate, nothing whose note could
+    // mismatch, 0 sums to 0 tiles...) — one real ✗ buried under six ✓ lines
+    // is exactly the "0 violations, 0 passes reads clean" shape this repo
+    // already got burned by once (the a11y gate). #1 is the whole signal
+    // for this case, so stop here.
+    return;
   }
+  ok(`${label}: ${headings.length} section(s) rendered`);
 
   const parsed = headings.map(splitHeading);
 
@@ -215,40 +239,60 @@ function assertViewport(label, { headings, counts, tiles }) {
     ok(`${label}: every section count is >= 1 with correct noun agreement`);
   }
 
-  // #7 — section counts sum exactly to the number of rendered pack tiles.
-  // The partition is total and disjoint, so this must hold exactly. This is
-  // the assertion that catches a pack silently dropping out of every
-  // section — the failure mode with the worst consequence and the least
-  // visible symptom of the bunch.
+  // #7 — section counts sum exactly to the number of rendered pack tiles,
+  // checked against the desktop row's tile count AND the mobile row's tile
+  // count INDEPENDENTLY (not desktop mirrored twice) — the partition is
+  // total and disjoint, so both must hold exactly. This is the assertion
+  // that catches a pack silently dropping out of every section, and (since
+  // it counts each layout's own DOM children rather than reusing one count
+  // for both) a filter that touches only one layout's .map() — the failure
+  // modes with the worst consequence and the least visible symptom.
   const sum = parsedCounts.reduce((s, n) => s + n, 0);
-  if (sum === tiles) {
+  const desktopOk = sum === desktopTiles;
+  const mobileOk = sum === mobileTiles;
+  if (desktopOk && mobileOk) {
     ok(
-      `${label}: section counts sum to ${sum}, matching ${tiles} rendered tile(s)`,
+      `${label}: section counts sum to ${sum}, matching ${desktopTiles} desktop tile(s) and ${mobileTiles} mobile tile(s)`,
     );
   } else {
-    fail(
-      `${label}: section counts sum to ${sum}, but ${tiles} tile(s) rendered`,
-    );
+    if (!desktopOk) {
+      fail(
+        `${label}: section counts sum to ${sum}, but ${desktopTiles} desktop tile(s) rendered`,
+      );
+    }
+    if (!mobileOk) {
+      fail(
+        `${label}: section counts sum to ${sum}, but ${mobileTiles} mobile tile(s) rendered`,
+      );
+    }
   }
 }
 
 assertViewport('desktop', desktop);
 assertViewport('mobile', mobile);
 
-// #8 — desktop and mobile render the identical section set: same headings
-// (so same notes, since the note is part of the heading text), in the same
-// order, with the same counts. The two views differ in layout only (card
-// row vs list row); a divergence means a breakpoint-gated filter crept into
-// which packs or sections show.
-if (
-  JSON.stringify(desktop.headings) === JSON.stringify(mobile.headings) &&
-  JSON.stringify(desktop.counts) === JSON.stringify(mobile.counts)
-) {
-  ok('desktop and mobile agree on headings, order, and counts');
-} else {
-  fail(
-    `desktop/mobile disagree — desktop ${JSON.stringify({ headings: desktop.headings, counts: desktop.counts })} vs mobile ${JSON.stringify({ headings: mobile.headings, counts: mobile.counts })}`,
-  );
+// #8 — desktop and mobile render the identical HEADING/COUNT TEXT: same
+// headings (so same notes, since the note is part of the heading text), in
+// the same order, with the same displayed counts. This is a TEXT-level
+// check only — it can't see a rendered row silently diverging from that
+// text (e.g. a filter applied inside just one layout's .map() without
+// touching byGroup[id].length); #7 above catches that instead, since it
+// independently counts both the desktop and mobile row's actual DOM
+// children at every viewport, not the text a viewport happens to display.
+// Skipped when either viewport rendered zero sections: #1 already failed
+// and is the whole signal for that case (see assertViewport) — comparing
+// two empty arrays here would just be another vacuous ✓ stacked on top.
+if (desktop.headings.length > 0 && mobile.headings.length > 0) {
+  if (
+    JSON.stringify(desktop.headings) === JSON.stringify(mobile.headings) &&
+    JSON.stringify(desktop.counts) === JSON.stringify(mobile.counts)
+  ) {
+    ok('desktop and mobile agree on headings, order, and counts');
+  } else {
+    fail(
+      `desktop/mobile disagree — desktop ${JSON.stringify({ headings: desktop.headings, counts: desktop.counts })} vs mobile ${JSON.stringify({ headings: mobile.headings, counts: mobile.counts })}`,
+    );
+  }
 }
 
 await browser.close();
