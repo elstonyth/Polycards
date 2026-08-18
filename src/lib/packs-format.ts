@@ -103,3 +103,41 @@ export function tierValueRanges(
   }
   return out;
 }
+
+/**
+ * Expected value of one pull, from the PUBLISHED tier percentages: Σ over
+ * published tiers of (average priced card in that tier) × (percent / 100).
+ * Null when no published tier has a priced card — the caller then falls back
+ * to the value range.
+ *
+ * Mirrors the backend's `publishedEv`, but folds over DISPLAY prices (FX ×
+ * markup, like every other figure on this panel) and skips unpriced cards the
+ * same way `poolValueRange` does, so the storefront figure reads slightly
+ * higher than the admin's raw-market "Published EV". Deliberate: one panel,
+ * one price basis.
+ */
+export function poolExpectedValue(
+  pool: readonly { rarity: string; value: string }[],
+  tiers: Partial<Record<Rarity, number>>,
+): string | null {
+  const sums = new Map<Rarity, { sum: number; n: number }>();
+  for (const card of pool) {
+    if (!isRarity(card.rarity)) continue;
+    const v = priceNumber(card.value);
+    if (v <= 0) continue;
+    const t = sums.get(card.rarity) ?? { sum: 0, n: 0 };
+    t.sum += v;
+    t.n += 1;
+    sums.set(card.rarity, t);
+  }
+  let ev = 0;
+  let any = false;
+  for (const rarity of RARITIES) {
+    const pct = tiers[rarity];
+    const t = sums.get(rarity);
+    if (!t || typeof pct !== 'number' || !Number.isFinite(pct)) continue;
+    any = true;
+    ev += (t.sum / t.n) * (pct / 100);
+  }
+  return any ? formatValue(Math.round(ev * 100) / 100) : null;
+}
