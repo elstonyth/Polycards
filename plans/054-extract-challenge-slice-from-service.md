@@ -19,6 +19,19 @@
 > re-anchored). See the "Cross-slice dependency" and "Sequencing option"
 > subsections added under Current state.
 
+> **Drift-proofed 2026-08-18 (plan 111) against `16cc85d3`.** `service.ts`
+> measured **9,302 lines** — a third drift in three days against the 8,852
+> figure the 2026-08-15 re-baseline (plan 106) set (+450 lines since then).
+> Plan 111 therefore replaced the absolute Line-count row in "Commands you
+> will need" and the absolute line-count targets in Step 5's Verify and in
+> Done criteria with criteria stated **relative to a baseline the executor of
+> THIS plan records at the moment they start** (see those sections below) —
+> so no future growth on `service.ts` can invalidate them, and a fourth
+> re-baseline is not needed for that reason. The line-numbered symbol anchors
+> in the inventory below remain stale by construction; the drift-check
+> banner's "re-locate every symbol by NAME (grep), not line number"
+> instruction above is the operative one, unchanged by this plan.
+
 ## Status
 
 - **Priority**: P3
@@ -71,18 +84,37 @@ Two smaller, newer slices are self-contained candidates that could go FIRST, at 
 
 Extracting account-lifecycle first would rehearse the facade-delegation pattern on a smaller, lower-risk slice AND resolve where `deletedCustomerIds` should live (its own module, re-exported/imported by `challenge.ts`, vs. duplicated) before this plan's Step 3 has to make that call under pressure. This is presented as an option for whoever sequences the extraction work, not a mandate — plan 054 itself is scoped to the challenge slice only and does not require account-lifecycle to move first.
 
+> **Promoted to a recommendation 2026-08-18 (plan 111).** After eleven audit
+> rounds without the challenge slice being started, the evidence is about the
+> size of the first bite, not about the team or the plan's correctness. Plan
+> 111 promotes the account-lifecycle slice above from an option to the
+> **recommended first extraction**: it rehearses the same facade-delegation
+> pattern this plan needs, at lower risk, and it settles where
+> `deletedCustomerIds` should live (see "Cross-slice dependency" above)
+> before the challenge slice's `settleChallengeWinner` has to depend on it —
+> that coupling did not exist when this sequencing option was first written
+> and makes the challenge slice a harder first bite than it used to be. This
+> is an ordering recommendation, not a replacement: plan 054 stays valid as
+> written for the challenge slice, and the challenge extraction is **not
+> cancelled** — only sequenced second. The account-lifecycle extraction does
+> not yet exist as its own plan file (tracked in `plans/README.md`'s Round 12
+> section as a follow-up to write).
+
 ## Commands you will need
 
-| Purpose                            | Command                                                           | Expected                                                                           |
-| ---------------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Backend deps (fresh worktree)      | `cd backend && corepack yarn install --immutable`                 | exit 0                                                                             |
-| Workspace dep build                | `cd backend/packages/odds-math && corepack yarn build`            | exit 0                                                                             |
-| Typecheck                          | `cd backend/packages/api && corepack yarn check-types`            | exit 0                                                                             |
-| Unit tier                          | `corepack yarn test:unit`                                         | all pass                                                                           |
-| Modules tier (DB up)               | `corepack yarn test:integration:modules`                          | all pass                                                                           |
-| Money smoke (DB up)                | `corepack yarn test:integration:smoke`                            | all pass                                                                           |
-| Challenge/leaderboard HTTP (DB up) | `corepack yarn test:integration:http -- "challenge\|leaderboard"` | all pass                                                                           |
-| Line count                         | `wc -l src/modules/packs/service.ts`                              | ≥1,155 lines below 8,852 (re-baselined 2026-08-15, plan 106; was ≥600 below 5,096) |
+| Purpose                            | Command                                                                                                            | Expected                                                                                                                                                                   |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Backend deps (fresh worktree)      | `cd backend && corepack yarn install --immutable`                                                                  | exit 0                                                                                                                                                                     |
+| Workspace dep build                | `cd backend/packages/odds-math && corepack yarn build`                                                             | exit 0                                                                                                                                                                     |
+| Typecheck                          | `cd backend/packages/api && corepack yarn check-types`                                                             | exit 0                                                                                                                                                                     |
+| Unit tier                          | `corepack yarn test:unit`                                                                                          | all pass                                                                                                                                                                   |
+| Modules tier (DB up)               | `corepack yarn test:integration:modules`                                                                           | all pass                                                                                                                                                                   |
+| Money smoke (DB up)                | `corepack yarn test:integration:smoke`                                                                             | all pass                                                                                                                                                                   |
+| Challenge/leaderboard HTTP (DB up) | `corepack yarn test:integration:http -- "challenge\|leaderboard"`                                                  | all pass                                                                                                                                                                   |
+| Baseline (record at start)         | `wc -l backend/packages/api/src/modules/packs/service.ts`, run before any edit                                     | a number; write it into the PR description — that number, not a number from this plan, is the comparison point                                                             |
+| Slice gone from `service.ts`       | `grep -c "<symbolName>" backend/packages/api/src/modules/packs/service.ts` for every symbol in the inventory above | `0`, or the count of a thin decorated forwarder only — say which symbols kept one and why                                                                                  |
+| Slice present in `challenge.ts`    | `grep -c "<symbolName>" backend/packages/api/src/modules/packs/challenge.ts`; `wc -l` on the new module            | every symbol found; line count within a reasonable margin of the block removed from `service.ts`                                                                           |
+| Net deletion on `service.ts`       | `git diff --stat` on `service.ts`, this change only                                                                | net deletion ≥ N lines, where N = lines actually removed by the extraction — NOT an absolute `wc -l` floor (concurrent work on master can add lines during the extraction) |
 
 ## Scope
 
@@ -139,7 +171,7 @@ Same treatment into `backfills.ts` for the **four** `backfill*`/one-shot methods
 
 ### Step 5: Final gates
 
-**Verify**: full unit + modules + smoke green with counts equal to Step 1; `wc -l service.ts` shows ≥1,155-line reduction (re-baselined 2026-08-15, plan 106; was ≥600); `git diff service.ts` contains ONLY deletions, imports, and thin decorated forwarders (decorator + signature + em-resolve + call — no logic edits beyond that shape).
+**Verify**: full unit + modules + smoke green with counts equal to Step 1; `git diff --stat service.ts` (this change only, per plan 111's relative criteria — see "Commands you will need") shows a net deletion of at least the number of lines actually moved into `challenge.ts`/`backfills.ts`, not an absolute `wc -l` floor; `git diff service.ts` contains ONLY deletions, imports, and thin decorated forwarders (decorator + signature + em-resolve + call — no logic edits beyond that shape).
 
 ## Test plan
 
@@ -147,7 +179,7 @@ No new tests — the move is locked by the existing dense suites (Step 1 baselin
 
 ## Done criteria
 
-- [ ] service.ts ≤ ~7,700 lines (re-baselined 2026-08-15, plan 106: 8,852 − ~1,155; was ≤~4,450 against the 5,096-line baseline); challenge/backfill logic lives in the new siblings
+- [ ] `service.ts` shrank by at least the size of what moved (plan 111, 2026-08-18: relative criterion, replaces the old absolute-line-count target) — `git diff --stat` on `service.ts` for this change only shows a net deletion ≥ N lines, where N is the baseline recorded at Step 1 (before any edit) minus the count after; concurrent work on master can add lines during the extraction, so this is about the delta this change makes, not an absolute `wc -l` floor. Challenge/backfill logic lives in the new siblings.
 - [ ] All eleven public method names unchanged on the service (re-baselined 2026-08-15, plan 106 — the original 5 plus 6 added since plan-time: `promoteDueChallengeSchedules`, `promoteOneChallengeSchedule`, `editChallengeSchedule`, `challengeWinnerWeeks`, `challengeWeekBounds`, `settleChallengeWeek`; `settleChallengeWinner` stays `protected` and `reserveSettledStock` stays `private` — not on the facade) (grep from route files resolves)
 - [ ] Unit + modules + smoke + challenge/leaderboard HTTP all green, same counts as baseline
 - [ ] SQL strings byte-identical (diff the moved constants against baseline)
