@@ -130,6 +130,7 @@ await fetch(`${API}/admin/packs/${SLUG}/odds`, {
 // independently: `activated` for this script's own pack, `borrowed` for the
 // incumbent it displaced, `browser` so the cleanup can't `close()` a browser
 // that was never launched.
+//
 // The admin API allows exactly ONE active `free_welcome` pack
 // (assertSingleActiveFreePack, api/admin/packs/validate.ts). The E2E seed ships
 // one — slug `free-welcome`, seeded ACTIVE and deliberately skipped by the
