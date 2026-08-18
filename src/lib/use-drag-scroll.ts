@@ -39,6 +39,12 @@ export function useDragScroll<T extends HTMLElement>() {
     onPointerMove: (e: PointerEvent<T>) => {
       const s = state.current;
       if (!s.down || e.pointerType !== 'mouse' || !el.current) return;
+      // Nothing to scroll => never claim the click. A rail that exactly fills
+      // its container (PackRail's <=3-pack groups, a one-card PoolByRarity
+      // rail) would otherwise let a slightly-shaky click cross the drag
+      // threshold, and onClickCapture below would eat the selection. `+ 1`
+      // because an exactly-filled rail can measure a subpixel overflow.
+      if (el.current.scrollWidth <= el.current.clientWidth + 1) return;
       const dx = e.clientX - s.startX;
       if (s.dragged || Math.abs(dx) > 4) {
         s.dragged = true;
