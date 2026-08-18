@@ -4,9 +4,11 @@
  * "One phone number = one account" (api/utils/phone-claim.ts) is enforced
  * only in application code today — check-then-write, no lock, no unique
  * index. That file's docblock names the backstop (a partial unique index on
- * customer(phone) WHERE deleted_at IS NULL, mirroring core Medusa's
- * IDX_customer_email_has_account_unique) and names the one reason it is not
- * there yet: "live rows already share numbers, so creating it would fail
+ * customer(phone) WHERE deleted_at IS NULL — see that file for how it
+ * relates to core Medusa's composite IDX_customer_email_has_account_unique,
+ * and for the has_account invariant this report's scope depends on) and
+ * names the one reason it is not there yet: "live rows already share
+ * numbers, so creating it would fail
  * until those are reconciled. Dedupe, then add it." This script is that
  * first step — it names the duplicate population precisely enough for an
  * operator to act on. It does not dedupe, merge, or decide anything itself;
@@ -20,6 +22,11 @@
  *
  * The optional argument caps how many duplicate groups print in full. The
  * expected count is small, so omitting it prints all of them.
+ *
+ * A clean run is not a permanent guarantee. New signups and phone changes
+ * keep landing under the same non-atomic check-then-write this file exists to
+ * backstop, so the population can grow between this report and the index
+ * migration. Re-run immediately before creating the index, not just once.
  *
  * READ-ONLY: no create/update/delete/upsert calls anywhere in this file. It
  * only pages customers and groups them in memory; it writes nothing.
@@ -81,8 +88,13 @@ export default async function reportDuplicatePhones({
   // deleted account never holds a number. `has_account` + the soft-delete
   // default are exactly the two filters assertPhoneUnclaimed applies;
   // reproduce them here or this report stops predicting whether the unique
-  // index can be created. Stable order (created_at, id) so a page boundary
-  // can't skip or duplicate a row — same shape as backfill-default-group.ts.
+  // index can be created. (phone-claim.ts's docblock states and verifies the
+  // invariant that makes has_account-scoping complete: every CUSTOMER-FACING
+  // write path only ever puts phone on a has_account: true row — and also
+  // names its one known code-level exception, the admin API, which this
+  // report therefore cannot see either.) Stable order (created_at, id) so a
+  // page boundary can't skip or duplicate a row — same
+  // shape as backfill-default-group.ts.
   const rows: CustomerDTO[] = [];
   let skip = 0;
   let total = 0;
@@ -99,7 +111,14 @@ export default async function reportDuplicatePhones({
     total = count;
     if (page.length === 0) break;
     rows.push(...page);
-    skip += PAGE;
+    // page.length, not PAGE: a page short of PAGE isn't necessarily the last
+    // one under concurrent soft-deletion (a row already scanned could be
+    // deleted mid-scan). Advancing by the nominal page size would compound
+    // that drift and could skip a not-yet-scanned row while rows.length still
+    // happens to equal total, so the INCOMPLETE check below wouldn't catch
+    // it. This narrows the failure mode, it does not eliminate it — see the
+    // re-run note in the header.
+    skip += page.length;
     if (skip >= total) break;
   }
 
@@ -114,14 +133,20 @@ export default async function reportDuplicatePhones({
   // strings, so this must match both or its verdict predicts a different
   // outcome from the index it exists to justify.
   //
-  // Skip only a falsy phone (null or ''). A whitespace-only value is left
-  // alone rather than trimmed — that is a row the index would genuinely
-  // enforce on too, and normalizing it here would be the same mistake as
+  // Skip phone == null (SQL NULL) — not falsy. '' is not SQL NULL
+  // (`'' IS NOT NULL` is true in Postgres), so a `WHERE phone IS NOT NULL`
+  // partial index would still enforce on two empty-string rows; treating ''
+  // as falsy and skipping it would make that pair invisible to this report.
+  // No live writer produces phone: '' today (delete writes literal null,
+  // both OTP paths validate E164_RE first), so this is currently dormant —
+  // the report should still say what the index would actually catch, not
+  // what today's writers happen to produce. Whitespace-only values are left
+  // alone for the same reason: normalizing here would be the same mistake as
   // normalizing the digits.
   const groups = new Map<string, CustomerDTO[]>();
   let nonPlusCount = 0;
   for (const row of rows) {
-    if (!row.phone) continue;
+    if (row.phone == null) continue;
     if (!row.phone.startsWith('+')) nonPlusCount += 1;
     const bucket = groups.get(row.phone);
     if (bucket) bucket.push(row);
