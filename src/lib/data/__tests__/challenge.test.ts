@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // challenge.ts imports @/lib/medusa (sdk) and @/lib/logger — mock both. The real
 // parseOne/ChallengeSchema, rm0, and avatarForSeed run, so schema validation +
@@ -13,6 +13,9 @@ import { getChallenge } from '@/lib/data/challenge';
 
 describe('getChallenge', () => {
   beforeEach(() => fetchMock.mockReset());
+  // The clock is faked in one test below; restore it even when that test
+  // throws, or every later test in this file runs frozen.
+  afterEach(() => vi.useRealTimers());
 
   const active = {
     active: true,
@@ -86,21 +89,22 @@ describe('getChallenge', () => {
     ],
   };
 
-  it('maps an active challenge, formatting RM and resolving cards', async () => {
-    fetchMock.mockResolvedValue(active);
-    const c = await getChallenge();
-    expect(c).not.toBeNull();
-    expect(c!.resetLabel).toBe('Resets Mondays 00:00 (MYT)');
-    // The countdown deadline is wired from the SAME settings as the label:
+  it('wires resetAt from the same settings as the label', async () => {
     // Thursday 2026-08-20 10:00Z = 18:00 MYT, so the next Monday 00:00 MYT is
     // 2026-08-23T16:00Z. Catches an argument-order slip the label alone can't.
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-08-20T10:00:00Z'));
-    const dated = await getChallenge();
-    expect(new Date(dated!.resetAt).toISOString()).toBe(
-      '2026-08-23T16:00:00.000Z',
-    );
-    vi.useRealTimers();
+    fetchMock.mockResolvedValueOnce(active);
+    const c = await getChallenge();
+    expect(c!.resetLabel).toBe('Resets Mondays 00:00 (MYT)');
+    expect(new Date(c!.resetAt).toISOString()).toBe('2026-08-23T16:00:00.000Z');
+  });
+
+  it('maps an active challenge, formatting RM and resolving cards', async () => {
+    fetchMock.mockResolvedValueOnce(active);
+    const c = await getChallenge();
+    expect(c).not.toBeNull();
+    expect(c!.resetLabel).toBe('Resets Mondays 00:00 (MYT)');
     expect(c!.stages[0]).toMatchObject({
       threshold: 'RM 500',
       thresholdCompact: 'RM 500',
