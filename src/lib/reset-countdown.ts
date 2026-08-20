@@ -7,6 +7,7 @@
  * importing these from the data layer would drag the Medusa SDK into the
  * browser bundle.
  */
+import { logger } from '@/lib/logger';
 
 const DAYS = [
   'Sunday',
@@ -79,8 +80,11 @@ export function nextResetAt(
   } catch {
     // Unknown IANA zone: fall back to the runtime zone rather than throwing the
     // whole challenge away over a cosmetic countdown. The label still prints the
-    // raw zone name, so the two CAN disagree for that (misconfigured) case —
-    // counting down in the wrong zone beats rendering nothing.
+    // raw zone name, so the two DO disagree for that case — warn, because the
+    // symptom (a countdown a few hours off) is otherwise unattributable.
+    logger.warn(
+      `[reset-countdown] unknown timezone ${timezone} — counting down in the runtime zone; the label still says ${timezone}`,
+    );
     fmt = new Intl.DateTimeFormat('en-US', opts);
   }
   const parts = fmt.formatToParts(now);

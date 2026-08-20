@@ -9,7 +9,10 @@ import { createRoot, type Root } from 'react-dom/client';
 // sits over last week's pool and standings.
 
 const refresh = vi.fn();
-vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }));
+// ONE object for every render, like the real App Router — a fresh object each
+// call would re-run the component's effect and re-arm the rollover every render.
+const router = { refresh };
+vi.mock('next/navigation', () => ({ useRouter: () => router }));
 
 const { ResetCountdown } = await import('../ResetCountdown');
 
@@ -76,6 +79,16 @@ describe('ResetCountdown', () => {
     // every subsequent tick while the server response is in flight.
     await advance(60_000);
     expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  test('treats a clock that steps backwards as skew, not a rollover', async () => {
+    await mount();
+    // An NTP correction / waking from sleep: remaining time GROWS without the
+    // deadline having passed. That must not refetch.
+    vi.setSystemTime(RESET_AT - 60_000);
+    await advance(2000);
+    expect(refresh).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('00h 00m 58s');
   });
 
   test('does not refresh again when the refreshed resetAt arrives', async () => {

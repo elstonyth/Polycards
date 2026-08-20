@@ -28,19 +28,26 @@ export function ResetCountdown({
 }) {
   const [left, setLeft] = useState<string | null>(null);
   const router = useRouter();
-  // Last tick's remaining ms. Cleared per effect run so the week-long jump that
-  // arrives WITH the refreshed `resetAt` can't be read as a second rollover.
-  const prevMs = useRef<number | null>(null);
+  // Whether THIS deadline has been passed and refetched. Cleared per effect run,
+  // so the refreshed `resetAt` arms the next week rather than counting as a
+  // second rollover.
+  const refetched = useRef(false);
 
   useEffect(() => {
-    prevMs.current = null;
+    refetched.current = false;
     const tick = () => {
-      const ms = resetMsLeft(resetAt, Date.now());
-      // Remaining time only ever grows when the deadline rolled to next week —
-      // i.e. the week this page rendered just ended. Refetch the server
-      // components once; the new `resetAt` re-runs this effect.
-      if (prevMs.current !== null && ms > prevMs.current) router.refresh();
-      prevMs.current = ms;
+      const now = Date.now();
+      // The deadline the page rendered with just passed: the pool, stages and
+      // standings below are last week's now. Refetch the server components
+      // once — the new `resetAt` re-runs this effect and arms the next one.
+      // Testing the instant (not a jump in remaining time) keeps a clock that
+      // steps BACKWARDS — an NTP correction, waking from sleep — from reading
+      // as a rollover.
+      if (!refetched.current && now >= resetAt) {
+        refetched.current = true;
+        router.refresh();
+      }
+      const ms = resetMsLeft(resetAt, now);
       setLeft(formatResetLeft(ms));
     };
     tick();
