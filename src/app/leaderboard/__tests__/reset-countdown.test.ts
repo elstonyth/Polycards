@@ -81,6 +81,17 @@ describe('ResetCountdown', () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
+  test('refreshes on mount when hydration starts after the deadline', async () => {
+    // A tab that hydrates late (slow device, restored session) would otherwise
+    // sit on last week's pool and standings for the whole next week.
+    vi.setSystemTime(RESET_AT + 5000);
+    await mount();
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain('6d 23h 59m 55s');
+    await advance(3000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
   test('treats a clock that steps backwards as skew, not a rollover', async () => {
     await mount();
     // An NTP correction / waking from sleep: remaining time GROWS without the

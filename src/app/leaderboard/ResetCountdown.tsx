@@ -28,13 +28,12 @@ export function ResetCountdown({
 }) {
   const [left, setLeft] = useState<string | null>(null);
   const router = useRouter();
-  // Whether THIS deadline has been passed and refetched. Cleared per effect run,
-  // so the refreshed `resetAt` arms the next week rather than counting as a
-  // second rollover.
-  const refetched = useRef(false);
+  // The deadline already refetched for. Keyed by the deadline itself rather than
+  // cleared per effect run, so a remount (React Strict Mode) can't refetch the
+  // same rollover twice, while the refreshed `resetAt` still arms the next one.
+  const refetchedFor = useRef<number | null>(null);
 
   useEffect(() => {
-    refetched.current = false;
     const tick = () => {
       const now = Date.now();
       // The deadline the page rendered with just passed: the pool, stages and
@@ -43,8 +42,8 @@ export function ResetCountdown({
       // Testing the instant (not a jump in remaining time) keeps a clock that
       // steps BACKWARDS — an NTP correction, waking from sleep — from reading
       // as a rollover.
-      if (!refetched.current && now >= resetAt) {
-        refetched.current = true;
+      if (refetchedFor.current !== resetAt && now >= resetAt) {
+        refetchedFor.current = resetAt;
         router.refresh();
       }
       const ms = resetMsLeft(resetAt, now);

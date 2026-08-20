@@ -49,6 +49,54 @@ describe('reset countdown', () => {
     expect(() => nextResetAt(1, 0, 'Not/AZone', thu)).not.toThrow();
   });
 
+  // A zone that CHANGES offset inside the week: a fixed 7-day walk lands an
+  // hour off across a DST transition. Assert the zone-local reading rather than
+  // a hand-computed UTC instant — "Monday 00:00 there" is the actual contract.
+  const inZone = (ms: number, timeZone: string) =>
+    new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      weekday: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).format(new Date(ms));
+
+  it('still lands on Monday 00:00 local across spring-forward', () => {
+    // DST starts Sun 2026-03-08 in America/New_York; the reset is the Monday
+    // after, so the week's offset changes mid-flight.
+    const ms = nextResetAt(
+      1,
+      0,
+      'America/New_York',
+      new Date('2026-03-06T17:00:00Z'),
+    );
+    expect(inZone(ms, 'America/New_York')).toBe('Mon 00:00');
+  });
+
+  it('still lands on Monday 00:00 local across fall-back', () => {
+    // DST ends Sun 2026-11-01 in America/New_York.
+    const ms = nextResetAt(
+      1,
+      0,
+      'America/New_York',
+      new Date('2026-10-30T16:00:00Z'),
+    );
+    expect(inZone(ms, 'America/New_York')).toBe('Mon 00:00');
+  });
+
+  it('leaves a no-DST zone exactly where the plain walk put it', () => {
+    expect(
+      new Date(
+        nextResetAt(
+          1,
+          0,
+          'Asia/Kuala_Lumpur',
+          new Date('2026-08-20T10:00:00Z'),
+        ),
+      ).toISOString(),
+    ).toBe('2026-08-23T16:00:00.000Z');
+  });
+
   it('rolls a stale deadline forward instead of sticking at zero', () => {
     const at = Date.parse('2026-08-23T16:00:00Z');
     expect(resetMsLeft(at, at - 60_000)).toBe(60_000);

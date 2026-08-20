@@ -57,9 +57,13 @@ export function formatReset(
  * Epoch ms of the next reset instant, from the same (day, hour, timezone) the
  * label is built from.
  *
- * ponytail: assumes the zone's UTC offset holds across the coming week — exact
- * for MYT (no DST). A DST zone would be an hour off for the single week that
- * spans a transition; swap in a tz library if one ever ships.
+ * Walking a fixed 7-day offset lands an hour off in a zone that changes its
+ * offset inside the window (America/New_York across a DST transition), so the
+ * candidate is read back IN the zone and corrected by however far its local
+ * hour drifted. That costs one extra format call and keeps this dependency-free
+ * — a tz library would be the alternative. In a spring-forward gap the target
+ * wall time doesn't exist at all; the correction then lands on the nearest hour
+ * that does.
  */
 export function nextResetAt(
   day: number,
@@ -105,7 +109,18 @@ export function nextResetAt(
   let delta = ((reset.day - wd + 7) % 7) * 86400 + reset.hour * 3600 - nowSec;
   if (delta <= 0) delta += 7 * 86400;
   // Drop the sub-second remainder so the deadline lands ON the minute.
-  return now.getTime() - now.getMilliseconds() + delta * 1000;
+  const candidate = now.getTime() - now.getMilliseconds() + delta * 1000;
+
+  // Correct for an offset change between now and the candidate: read the
+  // candidate back in the zone and shift by the signed hour drift (-12..11),
+  // which is 0 for a zone that never moves.
+  const landedHour =
+    Number(
+      fmt.formatToParts(new Date(candidate)).find((p) => p.type === 'hour')
+        ?.value ?? reset.hour,
+    ) % 24;
+  const driftHours = (((reset.hour - landedHour + 36) % 24) - 12) % 24;
+  return candidate + driftHours * 3600 * 1000;
 }
 
 /** Ms until the next reset. A stale (cached) deadline rolls forward whole weeks
