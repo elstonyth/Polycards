@@ -7,7 +7,7 @@
 import { chromium } from 'playwright';
 
 const BASE = process.env.BASE_URL ?? 'https://polycards.gg';
-const PIXEL_ID = '1867225397993589';
+const PIXEL_ID = '956101387505207';
 
 const browser = await chromium.launch();
 // fbevents.js bot-filters HeadlessChrome UAs and silently skips the /tr
