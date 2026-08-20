@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // challenge.ts imports @/lib/medusa (sdk) and @/lib/logger — mock both. The real
 // parseOne/ChallengeSchema, rm0, and avatarForSeed run, so schema validation +
@@ -9,29 +9,13 @@ vi.mock('@/lib/logger', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
 }));
 
-import { getChallenge, formatReset } from '@/lib/data/challenge';
-
-describe('formatReset', () => {
-  it('formats a Monday 00:00 Asia/Kuala_Lumpur reset', () => {
-    expect(formatReset(1, 0, 'Asia/Kuala_Lumpur')).toBe(
-      'Resets Mondays 00:00 (MYT)',
-    );
-  });
-
-  it('pads the hour and maps Sunday=0..Saturday=6', () => {
-    expect(formatReset(0, 9, 'UTC')).toBe('Resets Sundays 09:00 (UTC)');
-    expect(formatReset(6, 23, 'UTC')).toBe('Resets Saturdays 23:00 (UTC)');
-  });
-
-  it('falls back to the raw IANA name for an unknown zone', () => {
-    expect(formatReset(1, 0, 'America/New_York')).toBe(
-      'Resets Mondays 00:00 (America/New_York)',
-    );
-  });
-});
+import { getChallenge } from '@/lib/data/challenge';
 
 describe('getChallenge', () => {
   beforeEach(() => fetchMock.mockReset());
+  // The clock is faked in one test below; restore it even when that test
+  // throws, or every later test in this file runs frozen.
+  afterEach(() => vi.useRealTimers());
 
   const active = {
     active: true,
@@ -104,6 +88,17 @@ describe('getChallenge', () => {
       },
     ],
   };
+
+  it('wires resetAt from the same settings as the label', async () => {
+    // Thursday 2026-08-20 10:00Z = 18:00 MYT, so the next Monday 00:00 MYT is
+    // 2026-08-23T16:00Z. Catches an argument-order slip the label alone can't.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-20T10:00:00Z'));
+    fetchMock.mockResolvedValueOnce(active);
+    const c = await getChallenge();
+    expect(c!.resetLabel).toBe('Resets Mondays 00:00 (MYT)');
+    expect(new Date(c!.resetAt).toISOString()).toBe('2026-08-23T16:00:00.000Z');
+  });
 
   it('maps an active challenge, formatting RM and resolving cards', async () => {
     fetchMock.mockResolvedValueOnce(active);

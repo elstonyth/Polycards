@@ -18,6 +18,7 @@ import { logger } from '@/lib/logger';
 import { rm0, compact } from '@/lib/format';
 import { avatarForSeed } from '@/lib/profile-view';
 import { parseOne, ChallengeSchema } from '@/lib/data/schemas';
+import { formatReset, nextResetAt } from '@/lib/reset-countdown';
 
 export interface ChallengeCard {
   name: string;
@@ -109,8 +110,11 @@ export interface ChallengeTopEntry {
   avatar: string;
 }
 export interface Challenge {
-  /** e.g. "Resets Mondays 00:00 (MYT)". */
+  /** e.g. "Resets Mondays 00:00 (MYT)" — the countdown's no-JS/SSR fallback. */
   resetLabel: string;
+  /** Epoch ms of the NEXT reset. Absolute, so a cached render can't skew it —
+   *  the client only subtracts its own clock. */
+  resetAt: number;
   stages: ChallengeStage[];
   /** Null when the backend sent no progress (older deploy) — hide the panel. */
   pool: ChallengePool | null;
@@ -121,38 +125,6 @@ export interface Challenge {
   /** Per-rank CURRENT prize table (unlocked stages, cumulative), sparse and
    *  ascending — feeds the weekly standings' prize column. */
   rankPrizes: ChallengeRankPrize[];
-}
-
-const DAYS = [
-  'Sunday',
-  'Monday',
-  'Tuesday',
-  'Wednesday',
-  'Thursday',
-  'Friday',
-  'Saturday',
-];
-
-// Short timezone tag for the reset line. A tiny known-zone map keeps it honest
-// without pulling a tz library; an unknown zone falls back to the raw IANA name.
-const TZ_ABBR: Record<string, string> = {
-  'Asia/Kuala_Lumpur': 'MYT',
-  UTC: 'UTC',
-};
-
-/** "Resets Mondays 00:00 (MYT)" from (resetDay 0=Sun…6=Sat, resetHour, timezone). */
-export function formatReset(
-  day: number,
-  hour: number,
-  timezone: string,
-): string {
-  const name = DAYS[((Math.trunc(day) % 7) + 7) % 7] ?? 'Monday';
-  const hh = String(Math.max(0, Math.min(23, Math.trunc(hour)))).padStart(
-    2,
-    '0',
-  );
-  const tz = TZ_ABBR[timezone] ?? timezone;
-  return `Resets ${name}s ${hh}:00 (${tz})`;
 }
 
 export async function getChallenge(): Promise<Challenge | null> {
@@ -262,6 +234,11 @@ export async function getChallenge(): Promise<Challenge | null> {
 
     return {
       resetLabel: formatReset(
+        data.settings.resetDay,
+        data.settings.resetHour,
+        data.settings.timezone,
+      ),
+      resetAt: nextResetAt(
         data.settings.resetDay,
         data.settings.resetHour,
         data.settings.timezone,
