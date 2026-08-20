@@ -10,7 +10,7 @@
     "test": "turbo run test"
   },
   "dependencies": {
-    "@hookform/resolvers": "5.6.0",
+    "@hookform/resolvers": "5.8.0",
     "@medusajs/icons": "2.13.6",
     "@medusajs/ui": "4.1.19",
     "@mercurjs/client": "2.1.6",
@@ -22,7 +22,7 @@
     "lodash": "^4.18.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-hook-form": "7.84.0",
+    "react-hook-form": "7.85.0",
     "react-i18next": "13.5.0",
     "react-jwt": "^2.0.0",
     "react-router-dom": "6.30.4",
@@ -50,15 +50,15 @@
     "@types/react": "^18.3.2",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.2.1",
-    "eslint": "^10.8.0",
+    "eslint": "^10.8.1",
     "eslint-plugin-react-hooks": "^7.0.1",
-    "eslint-plugin-react-refresh": "^0.5.3",
-    "globals": "^17.8.0",
+    "eslint-plugin-react-refresh": "^0.5.4",
+    "globals": "^17.11.0",
     "prettier": "^3.9.6",
     "ts-node": "^10.9.2",
-    "turbo": "^2.10.8",
+    "turbo": "^2.10.10",
     "typescript": "5.9.3",
-    "typescript-eslint": "^8.65.0",
+    "typescript-eslint": "^8.67.0",
     "vite": "^6.4.3"
   },
   "engines": {
