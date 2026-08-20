@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { CONSENT_EVENT, getConsent } from '@/lib/consent';
 
-const META_PIXEL_ID = '1867225397993589';
+const META_PIXEL_ID = '956101387505207';
 
 // Routes that carry a single-use credential in the URL (query string or
 // path). The pixel's PageView beacon reports the full URL to Facebook, and
