@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 import type { Challenge } from '@/lib/data/challenge';
 import { PrizeCard } from './PrizeCard';
 import { StageCarousel } from './StageCarousel';
+import { ResetCountdown } from './ResetCountdown';
 
 // The standard's rules block (页面介绍) — rendered under the live content.
 const RULES = [
@@ -41,9 +42,10 @@ export function WeeklyChallenge({ challenge }: { challenge: Challenge }) {
         <h2 className="font-heading mt-4 text-4xl text-white">
           WEEKLY PULLED VALUE CHALLENGE
         </h2>
-        <p className="mt-3 text-xs font-medium tracking-wide text-neutral-400 uppercase">
-          {challenge.resetLabel}
-        </p>
+        <ResetCountdown
+          resetAt={challenge.resetAt}
+          label={challenge.resetLabel}
+        />
       </header>
 
       {/* Community Progress — adapted uiverse strong-parrot-96 panel. */}
