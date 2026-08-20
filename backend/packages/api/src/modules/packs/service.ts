@@ -4692,6 +4692,55 @@ class PacksModuleService extends MedusaService({
     }));
   }
 
+  // Count-then-insert for a GlobePay deposit, serialized per customer.
+  //
+  // GLOBEPAY_MAX_RECENT_PENDING_PER_CUSTOMER used to be enforced by counting
+  // pending rows and then inserting, on separate connections: N concurrent
+  // submits could each read N−1, all pass, and all insert, so the cap was not
+  // a cap (#429). The count and the insert now share ONE transaction behind a
+  // customer-scoped advisory lock — the same shape as mutateCreditAtomic.
+  //
+  // `sharedContext` on the count is the load-bearing part: without it the read
+  // runs on a different connection and the lock is decoration.
+  //
+  // Returns null — not a throw — when the cap is reached. The customer-facing
+  // sentence belongs with the policy in globepay-deposit.ts; the lock has no
+  // opinion about wording. The gateway call deliberately stays OUTSIDE this
+  // transaction: holding an advisory lock across a third-party HTTP timeout
+  // would be worse than the race being fixed.
+  @InjectTransactionManager()
+  async createGlobePayDepositCapped(
+    input: {
+      data: {
+        merchant_transaction_id: string;
+        customer_id: string;
+        amount_requested: number;
+        payment_method_code: string;
+        status: 'pending';
+      };
+      maxRecentPending: number;
+      windowMs: number;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ id: string } | null> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `globepay-deposit:${input.data.customer_id}`,
+    ]);
+    const [, recentPending] = await this.listAndCountGlobePayDeposits(
+      {
+        customer_id: input.data.customer_id,
+        status: 'pending',
+        created_at: { $gte: new Date(Date.now() - input.windowMs) },
+      },
+      {},
+      sharedContext,
+    );
+    if (recentPending >= input.maxRecentPending) return null;
+    const [row] = await this.createGlobePayDeposits([input.data], sharedContext);
+    return { id: row.id };
+  }
+
   // The three grouped result sets behind /admin/globepay/settlement, one DB
   // round-trip each (audit 2026-08-17 B4/B5): settled gateway rows bucketed by
   // MYT calendar period, and the credit ledger's topup/cashout sums bucketed

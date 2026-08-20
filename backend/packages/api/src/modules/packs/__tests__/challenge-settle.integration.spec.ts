@@ -786,6 +786,76 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(await service.creditBalance('cus_c')).toBe(0); // never promoted
       });
 
+      // b6bcf484 moved frozenByRank AHEAD of the empty-`unlocked` early return.
+      // That fix shipped without a test; this is it (#431). `unlocked` is
+      // rebuilt by filtering LIVE stages against the frozen unlocked_stages, so
+      // an admin deleting the stage between ticks empties it — and the gate,
+      // reached first, used to strand every unpaid winner behind a prize table
+      // we had already frozen and still held.
+      it('pays the rest of a partial settlement after an admin deletes the unlocked stage', async () => {
+        const { card } = await seedBase();
+        await seedStage(1, 100, [
+          { rank: 1, credits: 100 },
+          { rank: 2, credits: 50 },
+        ]);
+        await seedPriorWeekPull('cus_a', card, 300);
+        await seedPriorWeekPull('cus_b', card, 200);
+
+        // Tick 1: rank 1 committed, rank 2 not yet — seeded rather than
+        // crashed into, for the reason the sibling test above gives.
+        //
+        // The frozen rank-2 credits are 777, a number NO live stage can
+        // produce here. A regression that falls back to payoutByRank(unlocked)
+        // then fails loudly instead of coincidentally matching the seeded 50.
+        await service.createChallengePayouts([
+          {
+            week_start: priorWeekStartUtc(), // EXACT startUtc — the gate's lookup is exact-match
+            customer_id: 'cus_a',
+            rank: 1,
+            kind: 'credits' as const,
+            card_id: '',
+            credits: 100,
+            credit_transaction_id: null,
+            pull_id: null,
+            status: 'granted' as const,
+            snapshot: {
+              pool_myr: 2000,
+              unlocked_stages: [1],
+              week_end: currentWeekStartUtc().toISOString(),
+              ranking: ['cus_a', 'cus_b'],
+              by_rank: {
+                '1': { rank: 1, credits: 100, cardIds: [] },
+                '2': { rank: 2, credits: 777, cardIds: [] },
+              },
+            },
+          },
+        ]);
+
+        // The admin edit that used to strand cus_b: the only unlocked stage is
+        // deleted between ticks, so nothing live backs the frozen table.
+        await service.deleteChallengeStages(
+          (await service.listChallengeStages({}, { take: 10 })).map((r) => r.id),
+        );
+
+        const tick2 = await service.settleChallengeWeek({});
+        expect(
+          tick2.winners.map((w) => [w.customerId, w.rank, w.credits]),
+        ).toEqual([['cus_b', 2, 777]]);
+        expect(await service.creditBalance('cus_b')).toBe(777);
+
+        // The frozen record survives the tick that consumed it — a THIRD tick
+        // must still see the stage list tick 1 froze, not one shrunk by the
+        // deletion.
+        const [bRow] = await service.listChallengePayouts(
+          { customer_id: 'cus_b' },
+          { take: 1 },
+        );
+        expect(
+          (bRow!.snapshot as unknown as { unlocked_stages: number[] })
+            .unlocked_stages,
+        ).toEqual([1]);
+      });
+
       it('early-returns with no participants and with no unlocked stage', async () => {
         const { card } = await seedBase();
         // Threshold 0 unlocks on an empty pool, so this reaches the ranking

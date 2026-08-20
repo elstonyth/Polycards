@@ -93,20 +93,122 @@ export async function getCardStockByHandle(
   return stockByHandle;
 }
 
+export type CardStockLevel = {
+  inventoryItemId: string;
+  locationId: string;
+  /** stocked − reserved, the SAME basis getCardStockByHandle aggregates on. */
+  available: number;
+};
+
+export type CardStockTake = {
+  inventoryItemId: string;
+  locationId: string;
+  /** Units to REMOVE at this level (positive; the caller negates). */
+  qty: number;
+};
+
+// Every tracked (inventory item, location) level for a handle, in query order.
+// Sibling of findCardInventoryTarget, which answers the same question for a
+// SINGLE unit; this one is what a multi-unit take needs, because one level's
+// stock is not the handle's stock.
+export async function cardInventoryLevels(
+  container: MedusaContainer,
+  handle: string,
+): Promise<CardStockLevel[]> {
+  const rows = await queryStockRows(container, [handle]);
+  const levels: CardStockLevel[] = [];
+  for (const row of rows) {
+    for (const variant of row.variants ?? []) {
+      if (!variant?.manage_inventory) continue;
+      for (const item of variant.inventory_items ?? []) {
+        const itemId = item?.inventory?.id;
+        if (!itemId) continue;
+        for (const level of item?.inventory?.location_levels ?? []) {
+          if (!level?.location_id) continue;
+          levels.push({
+            inventoryItemId: itemId,
+            locationId: level.location_id,
+            available:
+              num(level.stocked_quantity) - num(level.reserved_quantity),
+          });
+        }
+      }
+    }
+  }
+  return levels;
+}
+
+// Split a take of `qty` units across a handle's levels (#430). The gate reads
+// stock AGGREGATED over locations while the take used to hit whichever single
+// location happened to have units, so a card split 3+2 across two locations
+// could have all 4 units of a settlement prize taken out of the location
+// holding 3 — driving that one to −1 while the other kept its 2 untouched.
+//
+// Each level gives up at most its own available units, in query order, and
+// whatever is still unmet lands on the LAST level. That remainder is NOT an
+// error and is never clamped: the counter is allowed to go negative, and
+// negative is exactly the operator's "units owed to winners" signal
+// (2026-07-03). Σ(plan) === qty always, so the aggregate the gate reads moves
+// by exactly what was asked for.
+//
+// Pure — the levels come from cardInventoryLevels — so the arithmetic is
+// testable without a container or a database.
+export function planCardStockTake(
+  levels: CardStockLevel[],
+  qty: number,
+): CardStockTake[] {
+  if (levels.length === 0 || qty <= 0) return [];
+  const plan: CardStockTake[] = [];
+  let remaining = qty;
+  for (const level of levels) {
+    if (remaining <= 0) break;
+    const take = Math.min(remaining, Math.max(0, level.available));
+    if (take <= 0) continue;
+    plan.push({
+      inventoryItemId: level.inventoryItemId,
+      locationId: level.locationId,
+      qty: take,
+    });
+    remaining -= take;
+  }
+  if (remaining > 0) {
+    const last = levels[levels.length - 1];
+    const existing = plan.find(
+      (p) =>
+        p.inventoryItemId === last.inventoryItemId &&
+        p.locationId === last.locationId,
+    );
+    if (existing) existing.qty += remaining;
+    else
+      plan.push({
+        inventoryItemId: last.inventoryItemId,
+        locationId: last.locationId,
+        qty: remaining,
+      });
+  }
+  return plan;
+}
+
 // Take `qty` units of a card handle out of inventory. `false` = untracked
 // product (nothing counted, so the pull must not be earmarked — buyback would
-// restore a phantom unit). Unconditional by design: the counter may go
+// restore a phantom unit); a TRACKED but empty handle still returns true, since
+// the units are owed either way. Unconditional by design: the counter may go
 // negative, and negative IS the operator's "units owed" signal. Bound from the
 // container because the inventory module is only reachable there; the packs
 // module service stays container-free.
 export const takeCardStock =
   (container: MedusaContainer) =>
   async (handle: string, qty: number): Promise<boolean> => {
-    const target = await findCardInventoryTarget(container, handle);
-    if (!target) return false;
-    await container
-      .resolve(Modules.INVENTORY)
-      .adjustInventory(target.inventoryItemId, target.locationId, -qty);
+    const levels = await cardInventoryLevels(container, handle);
+    if (levels.length === 0) return false;
+    const inventory = container.resolve(Modules.INVENTORY);
+    for (const take of planCardStockTake(levels, qty)) {
+      await inventory.adjustInventory(
+        take.inventoryItemId,
+        take.locationId,
+        -take.qty,
+      );
+    }
     return true;
   };
 

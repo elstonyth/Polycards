@@ -35,11 +35,11 @@ const submitMock = submitDeposit as jest.Mock;
 
 function harness() {
   const packs = {
-    createGlobePayDeposits: jest.fn().mockResolvedValue([{ id: 'gpd_1' }]),
+    // The cap and the insert are ONE customer-locked service call (#429): null
+    // back means the cap refused, and no row was written. Default is a
+    // successful insert so every existing case behaves as it did before the cap.
+    createGlobePayDepositCapped: jest.fn().mockResolvedValue({ id: 'gpd_1' }),
     updateGlobePayDeposits: jest.fn().mockResolvedValue(undefined),
-    // [rows, count] — the pending-deposit cap reads the count only. Default is
-    // an empty backlog so every existing case behaves as it did before the cap.
-    listAndCountGlobePayDeposits: jest.fn().mockResolvedValue([[], 0]),
   };
   // Resolve BY KEY. The old stub returned `packs` for every key, which passed
   // only because the subject resolved one dependency; the first call to
@@ -112,9 +112,9 @@ describe('startGlobePayDeposit', () => {
   it('writes the pending row BEFORE calling the gateway', async () => {
     const h = harness();
     const order: string[] = [];
-    h.packs.createGlobePayDeposits.mockImplementation(async () => {
+    h.packs.createGlobePayDepositCapped.mockImplementation(async () => {
       order.push('row');
-      return [{ id: 'gpd_1' }];
+      return { id: 'gpd_1' };
     });
     submitMock.mockImplementation(async () => {
       order.push('gateway');
@@ -135,7 +135,7 @@ describe('startGlobePayDeposit', () => {
     });
     expect(result.url).toBe('https://cashier/x');
     expect(result.merchantTransactionId).toBe(
-      h.packs.createGlobePayDeposits.mock.calls[0][0][0]
+      h.packs.createGlobePayDepositCapped.mock.calls[0][0].data
         .merchant_transaction_id,
     );
   });
@@ -303,7 +303,7 @@ describe('startGlobePayDeposit', () => {
       /greater than zero/i,
     );
     expect(submitMock).not.toHaveBeenCalled();
-    expect(h.packs.createGlobePayDeposits).not.toHaveBeenCalled();
+    expect(h.packs.createGlobePayDepositCapped).not.toHaveBeenCalled();
   });
 
   // Provider-confirmed band (RM 30–1000, 2026-07-22). Checked before the
@@ -317,7 +317,7 @@ describe('startGlobePayDeposit', () => {
         /between RM 30 and RM 10,000/,
       );
       expect(submitMock).not.toHaveBeenCalled();
-      expect(h.packs.createGlobePayDeposits).not.toHaveBeenCalled();
+      expect(h.packs.createGlobePayDepositCapped).not.toHaveBeenCalled();
     },
   );
 
@@ -333,7 +333,7 @@ describe('startGlobePayDeposit', () => {
         /at most RM 10,000 per top-up/,
       );
       expect(submitMock).not.toHaveBeenCalled();
-      expect(h.packs.createGlobePayDeposits).not.toHaveBeenCalled();
+      expect(h.packs.createGlobePayDepositCapped).not.toHaveBeenCalled();
     },
   );
 
@@ -353,7 +353,7 @@ describe('startGlobePayDeposit', () => {
       /unsupported payment method/i,
     );
     expect(submitMock).not.toHaveBeenCalled();
-    expect(h.packs.createGlobePayDeposits).not.toHaveBeenCalled();
+    expect(h.packs.createGlobePayDepositCapped).not.toHaveBeenCalled();
   });
 
   it('accepts every documented MYR method', async () => {
@@ -378,47 +378,40 @@ describe('startGlobePayDeposit', () => {
 // customer looping unpaid cashier sessions could hold the front of that queue
 // and starve everyone else's real payments, so the row insert is capped.
 describe('startGlobePayDeposit — pending-deposit cap', () => {
-  it('refuses once the customer already has the maximum recent pending rows', async () => {
+  it('refuses when the capped insert reports the cap was reached', async () => {
     const h = harness();
-    h.packs.listAndCountGlobePayDeposits.mockResolvedValue([
-      [],
-      GLOBEPAY_MAX_RECENT_PENDING_PER_CUSTOMER,
-    ]);
+    h.packs.createGlobePayDepositCapped.mockResolvedValue(null);
 
     await expect(start(h)).rejects.toThrow(/waiting for payment/i);
 
-    // Refused BEFORE the row insert and before the gateway call — otherwise the
-    // cap would create the very backlog it exists to prevent.
-    expect(h.packs.createGlobePayDeposits).not.toHaveBeenCalled();
+    // Nothing was written (the service refused under its lock) and nothing
+    // reached the gateway — otherwise the cap would create the very backlog it
+    // exists to prevent.
     expect(submitMock).not.toHaveBeenCalled();
   });
 
-  it('allows the request one below the cap', async () => {
+  it('proceeds when the capped insert returns a row', async () => {
     const h = harness();
-    h.packs.listAndCountGlobePayDeposits.mockResolvedValue([
-      [],
-      GLOBEPAY_MAX_RECENT_PENDING_PER_CUSTOMER - 1,
-    ]);
 
     await expect(start(h)).resolves.toBeTruthy();
-    expect(h.packs.createGlobePayDeposits).toHaveBeenCalled();
+    expect(h.packs.createGlobePayDepositCapped).toHaveBeenCalled();
+    expect(submitMock).toHaveBeenCalled();
   });
 
-  it('scopes the count to this customer, to pending only, and to a window', async () => {
+  it('hands the service the policy: this customer, the cap, the window', async () => {
     const h = harness();
     await start(h);
 
-    const filter = h.packs.listAndCountGlobePayDeposits.mock.calls[0][0];
-    expect(filter.status).toBe('pending');
-    expect(typeof filter.customer_id).toBe('string');
-    expect(filter.customer_id.length).toBeGreaterThan(0);
+    // The count itself (status='pending', created_at window) lives inside the
+    // locked transaction now — globepay-deposit-cap-lock.unit.spec.ts pins that
+    // half. What this file still owns is the policy the module passes down.
+    const arg = h.packs.createGlobePayDepositCapped.mock.calls[0][0];
+    expect(arg.data.customer_id).toBe(input.customerId);
+    expect(arg.data.status).toBe('pending');
+    expect(arg.maxRecentPending).toBe(GLOBEPAY_MAX_RECENT_PENDING_PER_CUSTOMER);
     // Window-scoped on purpose: there is no customer-facing cancel endpoint, so
     // an unscoped cap would lock out someone who merely closed a few cashier
     // tabs until the sweep expired their rows.
-    expect(filter.created_at?.$gte).toBeInstanceOf(Date);
-    expect(Date.now() - filter.created_at.$gte.getTime()).toBeCloseTo(
-      GLOBEPAY_PENDING_WINDOW_MS,
-      -3,
-    );
+    expect(arg.windowMs).toBe(GLOBEPAY_PENDING_WINDOW_MS);
   });
 });

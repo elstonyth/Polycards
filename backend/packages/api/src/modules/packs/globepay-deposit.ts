@@ -192,33 +192,35 @@ export async function startGlobePayDeposit(
   const config = globepayConfigFromEnv();
   const packs = scope.resolve<PacksModuleService>(PACKS_MODULE);
 
+  const merchantTransactionId = newMerchantTransactionId();
+
   // Bound the customer's own share of the reconcile sweep's fixed-LIMIT,
   // oldest-first queue. Without this, creating cashier sessions and never
   // paying is free and unbounded, and the resulting backlog delays or prevents
   // OTHER customers' paid deposits from ever being credited.
-  const [, recentPending] = await packs.listAndCountGlobePayDeposits({
-    customer_id: input.customerId,
-    status: 'pending',
-    created_at: { $gte: new Date(Date.now() - GLOBEPAY_PENDING_WINDOW_MS) },
-  });
-  if (recentPending >= GLOBEPAY_MAX_RECENT_PENDING_PER_CUSTOMER) {
-    throw new MedusaError(
-      MedusaError.Types.NOT_ALLOWED,
-      'You have several top-ups still waiting for payment. Finish one, or wait a few minutes before starting another.',
-    );
-  }
-
-  const merchantTransactionId = newMerchantTransactionId();
-
-  const [row] = await packs.createGlobePayDeposits([
-    {
+  //
+  // The count and the insert happen inside ONE customer-locked transaction in
+  // the service (#429). Counting here and inserting afterwards let N concurrent
+  // submits each read N−1 and all pass, so the cap could be overshot by exactly
+  // the number of requests in flight. `null` back means the cap is reached, and
+  // nothing was written — so nothing reaches the gateway either.
+  const row = await packs.createGlobePayDepositCapped({
+    data: {
       merchant_transaction_id: merchantTransactionId,
       customer_id: input.customerId,
       amount_requested: amount,
       payment_method_code: paymentMethodCode,
       status: 'pending',
     },
-  ]);
+    maxRecentPending: GLOBEPAY_MAX_RECENT_PENDING_PER_CUSTOMER,
+    windowMs: GLOBEPAY_PENDING_WINDOW_MS,
+  });
+  if (!row) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'You have several top-ups still waiting for payment. Finish one, or wait a few minutes before starting another.',
+    );
+  }
 
   let result;
   try {
