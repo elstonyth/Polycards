@@ -9,72 +9,7 @@ vi.mock('@/lib/logger', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
 }));
 
-import {
-  getChallenge,
-  formatReset,
-  nextResetAt,
-  resetMsLeft,
-  formatResetLeft,
-} from '@/lib/data/challenge';
-
-describe('formatReset', () => {
-  it('formats a Monday 00:00 Asia/Kuala_Lumpur reset', () => {
-    expect(formatReset(1, 0, 'Asia/Kuala_Lumpur')).toBe(
-      'Resets Mondays 00:00 (MYT)',
-    );
-  });
-
-  it('pads the hour and maps Sunday=0..Saturday=6', () => {
-    expect(formatReset(0, 9, 'UTC')).toBe('Resets Sundays 09:00 (UTC)');
-    expect(formatReset(6, 23, 'UTC')).toBe('Resets Saturdays 23:00 (UTC)');
-  });
-
-  it('falls back to the raw IANA name for an unknown zone', () => {
-    expect(formatReset(1, 0, 'America/New_York')).toBe(
-      'Resets Mondays 00:00 (America/New_York)',
-    );
-  });
-});
-
-describe('reset countdown', () => {
-  // Thursday 2026-08-20 10:00Z = Thursday 18:00 MYT (UTC+8) — the next Monday
-  // 00:00 MYT is 3d 6h later, i.e. 2026-08-23T16:00Z.
-  const thu = new Date('2026-08-20T10:00:00Z');
-
-  it('resolves the next reset instant in the challenge timezone', () => {
-    expect(
-      new Date(nextResetAt(1, 0, 'Asia/Kuala_Lumpur', thu)).toISOString(),
-    ).toBe('2026-08-23T16:00:00.000Z');
-  });
-
-  it('skips a whole week when the reset moment has just passed', () => {
-    const mondayMidnightMyt = new Date('2026-08-23T16:00:00Z');
-    expect(
-      new Date(
-        nextResetAt(1, 0, 'Asia/Kuala_Lumpur', mondayMidnightMyt),
-      ).toISOString(),
-    ).toBe('2026-08-30T16:00:00.000Z');
-  });
-
-  it('falls back to the runtime zone for an unknown IANA name', () => {
-    expect(() => nextResetAt(1, 0, 'Not/AZone', thu)).not.toThrow();
-  });
-
-  it('rolls a stale deadline forward instead of sticking at zero', () => {
-    const at = Date.parse('2026-08-23T16:00:00Z');
-    expect(resetMsLeft(at, at - 60_000)).toBe(60_000);
-    // A page cached past the reset still counts down to the NEXT one.
-    expect(resetMsLeft(at, at + 60_000)).toBe(7 * 86_400_000 - 60_000);
-  });
-
-  it('formats days only while there are days left', () => {
-    expect(formatResetLeft((2 * 86_400 + 3 * 3600 + 4 * 60 + 5) * 1000)).toBe(
-      '2d 03h 04m 05s',
-    );
-    expect(formatResetLeft(59 * 1000)).toBe('00h 00m 59s');
-    expect(formatResetLeft(-5)).toBe('00h 00m 00s');
-  });
-});
+import { getChallenge } from '@/lib/data/challenge';
 
 describe('getChallenge', () => {
   beforeEach(() => fetchMock.mockReset());
@@ -152,10 +87,20 @@ describe('getChallenge', () => {
   };
 
   it('maps an active challenge, formatting RM and resolving cards', async () => {
-    fetchMock.mockResolvedValueOnce(active);
+    fetchMock.mockResolvedValue(active);
     const c = await getChallenge();
     expect(c).not.toBeNull();
     expect(c!.resetLabel).toBe('Resets Mondays 00:00 (MYT)');
+    // The countdown deadline is wired from the SAME settings as the label:
+    // Thursday 2026-08-20 10:00Z = 18:00 MYT, so the next Monday 00:00 MYT is
+    // 2026-08-23T16:00Z. Catches an argument-order slip the label alone can't.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-20T10:00:00Z'));
+    const dated = await getChallenge();
+    expect(new Date(dated!.resetAt).toISOString()).toBe(
+      '2026-08-23T16:00:00.000Z',
+    );
+    vi.useRealTimers();
     expect(c!.stages[0]).toMatchObject({
       threshold: 'RM 500',
       thresholdCompact: 'RM 500',

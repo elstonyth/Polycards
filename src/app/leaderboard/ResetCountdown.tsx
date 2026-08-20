@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { formatResetLeft, resetMsLeft } from '@/lib/data/challenge';
+// Pure module, NOT '@/lib/data/challenge' — importing the data layer here
+// would ship the Medusa SDK and zod to every visitor of this route.
+import { formatResetLeft, resetMsLeft } from '@/lib/reset-countdown';
 
 /**
  * Live "resets in …" clock under the challenge hero. `resetAt` is an absolute
