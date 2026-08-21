@@ -1,4 +1,5 @@
 import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
+import sharp from 'sharp';
 import { PACKS_MODULE } from './index';
 import type PacksModuleService from './service';
 import { RARITY_ORDER, rarityRank, type Rarity } from './rarity';
@@ -192,10 +193,71 @@ async function callTelegram(
   return (await res.json()) as TelegramResult;
 }
 
-/** Post as a photo when we have an image Telegram's servers can fetch, else as
- *  text. The text fallback also covers the failed-photo case: locally the card
- *  image is a localhost URL Telegram cannot reach, and a silent drop there
- *  would make the whole board look broken in dev. */
+/** Backdrop the slab art is composited onto before it is posted. Telegram
+ *  flattens any transparency onto WHITE, and a baked slab is ~1/3
+ *  semi-transparent glass, so a URL-sent slab arrives wrapped in a white box —
+ *  wrong against both the channel's dark theme and the storefront, which
+ *  renders the same art on a dark ground. */
+const PHOTO_BACKGROUND = '#000000';
+
+/** Telegram's own upload ceiling for a multipart sendPhoto. Ours are ~200 KB;
+ *  the guard only exists so an unexpectedly huge asset falls back to the URL
+ *  path (where Telegram fetches and downscales it itself) instead of eating a
+ *  413 and dropping to text. */
+const PHOTO_UPLOAD_LIMIT = 10 * 1024 * 1024;
+
+/**
+ * Fetch the card art and composite it onto {@link PHOTO_BACKGROUND}, returning
+ * JPEG bytes to upload. Null on ANY failure — an unreachable URL (locally the
+ * art is a localhost URL), a non-image body, an oversized result — because the
+ * caller's fallback is to hand Telegram the URL, which is exactly the old
+ * behaviour. Never throws: a background colour must not be able to cost us the
+ * post.
+ */
+export async function blackBackedPhoto(url: string): Promise<Buffer | null> {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+    if (!res.ok) return null;
+    const flattened = await sharp(Buffer.from(await res.arrayBuffer()))
+      .flatten({ background: PHOTO_BACKGROUND })
+      .jpeg({ quality: 90 })
+      .toBuffer();
+    return flattened.byteLength > PHOTO_UPLOAD_LIMIT ? null : flattened;
+  } catch {
+    return null;
+  }
+}
+
+/** sendPhoto with the image as multipart bytes rather than a URL — the only
+ *  way to control what transparency is composited onto, since Telegram gives
+ *  no background option when it fetches the URL itself. */
+async function uploadApexPhoto(
+  token: string,
+  chatId: string,
+  caption: string,
+  photo: Buffer,
+): Promise<TelegramResult> {
+  const form = new FormData();
+  form.append('chat_id', chatId);
+  form.append('caption', caption);
+  form.append('parse_mode', 'HTML');
+  form.append('photo', new Blob([photo], { type: 'image/jpeg' }), 'pull.jpg');
+  const res = await fetch(`${TELEGRAM_API}/bot${token}/sendPhoto`, {
+    method: 'POST',
+    body: form,
+    // Longer than the JSON calls: this one carries the image itself.
+    signal: AbortSignal.timeout(30_000),
+  });
+  return (await res.json()) as TelegramResult;
+}
+
+/** Post as a photo when we have an image, else as text. Two photo paths: the
+ *  preferred one uploads bytes we flattened onto black ourselves; if that
+ *  fails for any reason we hand Telegram the URL as before, so a broken
+ *  composite step costs the backdrop, never the post. The text fallback then
+ *  covers a failed photo entirely: locally the card image is a localhost URL
+ *  Telegram cannot reach, and a silent drop would make the board look broken
+ *  in dev. */
 export async function sendApexPost(
   token: string,
   chatId: string,
@@ -203,12 +265,15 @@ export async function sendApexPost(
   photoUrl: string | null,
 ): Promise<TelegramResult> {
   if (photoUrl) {
-    const photo = await callTelegram(token, 'sendPhoto', {
-      chat_id: chatId,
-      photo: photoUrl,
-      caption,
-      parse_mode: 'HTML',
-    });
+    const bytes = await blackBackedPhoto(photoUrl);
+    const photo = bytes
+      ? await uploadApexPhoto(token, chatId, caption, bytes)
+      : await callTelegram(token, 'sendPhoto', {
+          chat_id: chatId,
+          photo: photoUrl,
+          caption,
+          parse_mode: 'HTML',
+        });
     if (photo.ok) return photo;
   }
   return callTelegram(token, 'sendMessage', {

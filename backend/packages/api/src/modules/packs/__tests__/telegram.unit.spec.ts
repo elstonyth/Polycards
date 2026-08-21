@@ -1,3 +1,4 @@
+import sharp from 'sharp';
 import {
   buildApexCaption,
   escapeHtml,
@@ -171,6 +172,65 @@ describe('postApexPull', () => {
     expect(call.body.caption).toContain(
       '<a href="https://polycards.gg/profile/old-name-1a2b">Elston</a>',
     );
+  });
+
+  // Telegram composites transparency onto WHITE and offers no way to change
+  // that when it fetches a URL itself, so the art has to be flattened here and
+  // uploaded as bytes. A baked slab is ~1/3 semi-transparent glass — sending
+  // the URL puts every apex pull in a white box on a dark channel.
+  it('uploads the art flattened onto black rather than letting Telegram fetch it', async () => {
+    const transparentArt = await sharp({
+      create: {
+        width: 8,
+        height: 8,
+        channels: 4,
+        background: { r: 255, g: 255, b: 255, alpha: 0 },
+      },
+    })
+      .png()
+      .toBuffer();
+    let uploaded: Buffer | null = null;
+    global.fetch = (async (url: string, init?: { body?: unknown }) => {
+      if (String(url).startsWith('https://cdn.example/')) {
+        return { ok: true, arrayBuffer: async () => transparentArt };
+      }
+      const form = init?.body as FormData;
+      uploaded = Buffer.from(await (form.get('photo') as Blob).arrayBuffer());
+      sent.push({ url, body: { caption: form.get('caption') } });
+      return { json: async () => ({ ok: true, result: { message_id: 7 } }) };
+    }) as unknown as typeof fetch;
+
+    await postApexPull(fakeContainer({}), EVENT);
+
+    const [call] = sent as { url: string; body: { caption: string } }[];
+    expect(call.url).toContain('/sendPhoto');
+    expect(call.body.caption).toContain('LEGENDARY PULL');
+    expect(uploaded).not.toBeNull();
+    const meta = await sharp(uploaded!).metadata();
+    expect(meta.format).toBe('jpeg');
+    expect(meta.hasAlpha).toBe(false);
+    // The fully transparent source pixel must land on black, not Telegram's
+    // white. JPEG is lossy, hence a threshold rather than an exact 0.
+    const { data } = await sharp(uploaded!)
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    expect(Math.max(data[0], data[1], data[2])).toBeLessThan(16);
+  });
+
+  // The flatten is a nicety; the post is not. Anything that stops us producing
+  // our own bytes has to degrade to the old URL send, not to text.
+  it('falls back to the URL photo when the art cannot be fetched', async () => {
+    global.fetch = (async (url: string, init: { body: string }) => {
+      if (String(url).startsWith('https://cdn.example/')) return { ok: false };
+      sent.push({ url, body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true }) };
+    }) as unknown as typeof fetch;
+
+    await postApexPull(fakeContainer({}), EVENT);
+
+    const [call] = sent as { url: string; body: { photo: string } }[];
+    expect(call.url).toContain('/sendPhoto');
+    expect(call.body.photo).toBe('https://cdn.example/m.png');
   });
 
   it('falls back to the anonymous Collector name when first_name is blank', async () => {
