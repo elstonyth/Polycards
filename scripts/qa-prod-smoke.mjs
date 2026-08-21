@@ -5,7 +5,7 @@
 import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
 
-const BASE = process.argv[2] ?? 'https://polycards.gg';
+const BASE = process.env.QA_BASE ?? process.argv[2] ?? 'https://polycards.gg';
 const OUT = 'docs/research/prod-smoke';
 mkdirSync(OUT, { recursive: true });
 

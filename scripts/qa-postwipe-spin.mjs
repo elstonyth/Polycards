@@ -3,12 +3,19 @@
 // The DB is the assertion surface; the browser just drives a real open.
 // Run: node scripts/qa-postwipe-spin.mjs   (needs CUST_EMAIL + CUST_PW in env)
 import { chromium } from 'playwright';
+import { mkdirSync } from 'node:fs';
 
-const BASE = 'http://127.0.0.1:4000';
+// Same precedence as qa-prod-smoke.mjs: QA_BASE, then a positional arg, then
+// the default this script is actually for (the local standalone build).
+const BASE = process.env.QA_BASE ?? process.argv[2] ?? 'http://127.0.0.1:4000';
+const OUT = 'docs/research';
 const PACK = process.env.QA_PACK ?? 'bronze-pack';
 const EMAIL = process.env.CUST_EMAIL ?? 'test@pokenic.app';
 const PASSWORD = process.env.CUST_PW;
 if (!PASSWORD) throw new Error('CUST_PW not in env');
+// docs/research is gitignored, so it is absent on a fresh checkout and the
+// screenshot below would throw at the very end of an otherwise good run.
+mkdirSync(OUT, { recursive: true });
 
 const ok = (m) => console.log(`OK  ${m}`);
 const fail = (m) => {
@@ -64,7 +71,7 @@ try {
     : fail('never saw aria-busy');
   await page.waitForTimeout(3000); // let the settle writes land
   await page.screenshot({
-    path: 'docs/research/postwipe-spin.png',
+    path: `${OUT}/postwipe-spin.png`,
     fullPage: false,
   });
 } finally {
