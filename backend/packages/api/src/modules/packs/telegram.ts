@@ -133,7 +133,28 @@ export function buildApexCaption(input: ApexCaptionInput): string {
     : caption;
 }
 
-type TelegramResult = { ok: boolean; description?: string };
+type TelegramResult = {
+  ok: boolean;
+  description?: string;
+  /** Telegram's own payload. Only message_id is read — it is what lets an
+   *  operator (or the pre-flight script) delete one specific post again. */
+  result?: { message_id?: number };
+};
+
+/** Remove a post the bot made. The board itself never calls this: it exists so
+ *  telegram-apex-smoke.ts can verify against the LIVE customer-facing channel
+ *  and take its own test post straight back down. Requires the bot to hold
+ *  "Delete Messages" in the channel, which the same admin grant gives it. */
+export async function deleteApexPost(
+  token: string,
+  chatId: string,
+  messageId: number,
+): Promise<TelegramResult> {
+  return callTelegram(token, 'deleteMessage', {
+    chat_id: chatId,
+    message_id: messageId,
+  });
+}
 
 async function callTelegram(
   token: string,
@@ -176,6 +197,13 @@ export async function sendApexPost(
   });
 }
 
+export type ApexPostResult = {
+  caption: string;
+  /** Telegram's id for the post, so a caller can delete it again. Null when the
+   *  send failed. */
+  messageId: number | null;
+};
+
 export type ApexPullEvent = {
   pull_id: string;
   pack_id: string; // = Pack.slug
@@ -201,16 +229,18 @@ const logWarn = (
  * and Telegram has no dedupe — a retry is a DUPLICATE PUBLIC POST, which is
  * worse than a dropped one. The pull itself is already committed either way.
  *
- * Returns the caption it built and attempted to send, or null when a gate
+ * Returns the caption it built and attempted to send plus the resulting
+ * Telegram message id, or null when a gate
  * rejected the pull (or an error was thrown). A send FAILURE still returns the
  * caption — it is logged separately, and the pre-flight's whole job is to show
  * the real rendered text, which is exactly what you need to see when the send
- * is the thing that is broken. The subscriber ignores the return value.
+ * is the thing that is broken; messageId is null in that case. The subscriber
+ * ignores the return value.
  */
 export async function postApexPull(
   container: { resolve: (k: string) => any },
   event: ApexPullEvent,
-): Promise<string | null> {
+): Promise<ApexPostResult | null> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = process.env.TELEGRAM_CHAT_ID;
   if (!token || !chatId) return null; // feature off (dev / CI / tests)
@@ -304,7 +334,7 @@ export async function postApexPull(
         `[telegram] apex post rejected for pull ${event.pull_id}: ${result.description ?? 'unknown error'}`,
       );
     }
-    return caption;
+    return { caption, messageId: result.result?.message_id ?? null };
   } catch (err) {
     logWarn(
       container,

@@ -161,6 +161,28 @@ describe('postApexPull', () => {
     expect(call.body.caption).toContain('Headshot001');
   });
 
+  // The id is what lets the pre-flight take its own test post back down.
+  it("returns Telegram's message id so the post can be deleted again", async () => {
+    global.fetch = (async (url: string, init: { body: string }) => {
+      sent.push({ url, body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true, result: { message_id: 4321 } }) };
+    }) as unknown as typeof fetch;
+    await expect(postApexPull(fakeContainer({}), EVENT)).resolves.toMatchObject(
+      {
+        messageId: 4321,
+      },
+    );
+  });
+
+  it('reports a null message id when the send is rejected', async () => {
+    global.fetch = (async () => ({
+      json: async () => ({ ok: false, description: 'CHAT_WRITE_FORBIDDEN' }),
+    })) as unknown as typeof fetch;
+    const posted = await postApexPull(fakeContainer({}), EVENT);
+    expect(posted?.messageId).toBeNull();
+    expect(posted?.caption).toContain('LEGENDARY PULL');
+  });
+
   it('posts an Immortal pull (above the bar)', async () => {
     await postApexPull(
       fakeContainer({ odds: [{ rarity: 'Immortal' }] }),

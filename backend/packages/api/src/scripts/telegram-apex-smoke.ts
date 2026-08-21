@@ -2,7 +2,7 @@ import { ExecArgs } from '@medusajs/framework/types';
 import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../modules/packs';
 import type PacksModuleService from '../modules/packs/service';
-import { postApexPull } from '../modules/packs/telegram';
+import { deleteApexPost, postApexPull } from '../modules/packs/telegram';
 
 // Telegram apex-board pre-flight — the same gap check-globepay.ts closes for
 // payments. It exercises the ENTIRE integration end to end (odds lookup →
@@ -13,9 +13,9 @@ import { postApexPull } from '../modules/packs/telegram';
 //   medusa exec ./src/scripts/telegram-apex-smoke.ts
 //
 // Picks a REAL apex (pack, card) pair and a REAL customer from the catalog,
-// inserts a temporary Pull row, posts it, then deletes the row again. Nothing
-// durable is left behind — but the Telegram post IS real and stays in the
-// channel, so run it against a test channel or delete the post afterwards.
+// inserts a temporary Pull row, posts it, then deletes BOTH the post and the
+// row. Safe to run against the live customer-facing channel: subscribers see
+// the post for a second or two at most. TELEGRAM_SMOKE_KEEP=1 leaves it up.
 export default async function telegramApexSmoke({ container }: ExecArgs) {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
   const packs = container.resolve(PACKS_MODULE) as PacksModuleService;
@@ -84,21 +84,49 @@ export default async function telegramApexSmoke({ container }: ExecArgs) {
     logger.info(
       `[telegram-smoke] posting ${odds.rarity} ${card.handle} from ${odds.pack_id} as ${customer.id}`,
     );
-    const caption = await postApexPull(container, {
+    const posted = await postApexPull(container, {
       pull_id: pull.id,
       pack_id: odds.pack_id,
       card_id: card.handle,
       customer_id: customer.id,
     });
-    if (caption) {
-      // Printed whether or not Telegram accepted it: a rejected send logs its
-      // own warn above, and seeing the rendered text is the whole point of a
-      // pre-flight — especially when the send is the broken part. No warn
-      // above means it is live in the channel.
-      logger.info(`[telegram-smoke] caption:\n${caption}`);
-    } else {
+    if (!posted) {
       logger.error(
         '[telegram-smoke] nothing built — a gate rejected this pull (rarity, source, or a disabled player).',
+      );
+      return;
+    }
+
+    // Printed whether or not Telegram accepted it: a rejected send logs its own
+    // warn above, and seeing the rendered text is the whole point of a
+    // pre-flight — especially when the send is the broken part.
+    logger.info(`[telegram-smoke] caption:\n${posted.caption}`);
+
+    // Take the test post straight back down. The default is DELETE, not keep:
+    // this runs against the live customer-facing channel, and a pre-flight that
+    // leaves marketing debris in front of real subscribers is a worse pre-flight
+    // than one that proves nothing. Set TELEGRAM_SMOKE_KEEP=1 to leave it up.
+    if (posted.messageId === null) return;
+    if (process.env.TELEGRAM_SMOKE_KEEP === '1') {
+      logger.warn(
+        `[telegram-smoke] TELEGRAM_SMOKE_KEEP=1 — message ${posted.messageId} LEFT UP in the channel.`,
+      );
+      return;
+    }
+    const removed = await deleteApexPost(
+      process.env.TELEGRAM_BOT_TOKEN!,
+      process.env.TELEGRAM_CHAT_ID!,
+      posted.messageId,
+    );
+    if (removed.ok) {
+      logger.info(
+        `[telegram-smoke] test post ${posted.messageId} deleted — channel is clean.`,
+      );
+    } else {
+      // Loud, and with the id: an undeleted post is visible to every subscriber
+      // and someone has to remove it by hand.
+      logger.error(
+        `[telegram-smoke] COULD NOT DELETE message ${posted.messageId} (${removed.description ?? 'unknown error'}) — remove it manually.`,
       );
     }
   } finally {
