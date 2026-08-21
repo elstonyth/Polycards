@@ -45,11 +45,30 @@ const DEFAULT_MIN_RARITY: Rarity = 'Legendary';
  * marketing channel. Anything not exactly in RARITY_ORDER falls back to the
  * default instead.
  */
-const minRarity = (): Rarity => {
+let minRarityWarned = false;
+
+/** Test seam: module state outlives a test's fixtures (one jest process is one
+ *  module instance), so the once-only warn would not fire for the next spec. */
+export function resetTelegramWarnings(): void {
+  minRarityWarned = false;
+}
+
+const minRarity = (container: { resolve: (k: string) => any }): Rarity => {
   const configured = process.env.TELEGRAM_MIN_RARITY?.trim();
-  return configured && RARITY_ORDER.includes(configured as Rarity)
-    ? (configured as Rarity)
-    : DEFAULT_MIN_RARITY;
+  if (!configured) return DEFAULT_MIN_RARITY;
+  if (RARITY_ORDER.includes(configured as Rarity)) return configured as Rarity;
+  // Once per process, not per open: this runs on EVERY pack.opened, and a line
+  // per pack open would bury the thing it is trying to report. Silence here
+  // would be worse than noise though — the fallback is invisible from the
+  // outside, so a typo'd bar looks exactly like a quiet week of no apex pulls.
+  if (!minRarityWarned) {
+    minRarityWarned = true;
+    logWarn(
+      container,
+      `[telegram] TELEGRAM_MIN_RARITY="${configured}" is not one of ${RARITY_ORDER.join(', ')} — falling back to ${DEFAULT_MIN_RARITY}.`,
+    );
+  }
+  return DEFAULT_MIN_RARITY;
 };
 const DEFAULT_SITE_URL = 'https://polycards.gg';
 
@@ -257,7 +276,7 @@ export async function postApexPull(
       { take: 1 },
     );
     const rarity = odds?.rarity ?? 'Common';
-    if (rarityRank(rarity) > rarityRank(minRarity())) return null;
+    if (rarityRank(rarity) > rarityRank(minRarity(container))) return null;
 
     // 2. Source gate — private vault prizes never go public.
     const [pull] = await packs.listPulls({ id: event.pull_id }, { take: 1 });

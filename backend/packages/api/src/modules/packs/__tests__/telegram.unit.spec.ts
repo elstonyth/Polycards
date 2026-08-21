@@ -2,6 +2,7 @@ import {
   buildApexCaption,
   escapeHtml,
   postApexPull,
+  resetTelegramWarnings,
   type ApexCaptionInput,
 } from '../telegram';
 
@@ -83,6 +84,8 @@ describe('escapeHtml', () => {
 
 type Row = Record<string, unknown>;
 
+let warned: string[] = [];
+
 const fakeContainer = (rows: {
   odds?: Row[];
   pulls?: Row[];
@@ -99,7 +102,7 @@ const fakeContainer = (rows: {
         }),
       };
     }
-    if (key === 'logger') return { warn: () => undefined };
+    if (key === 'logger') return { warn: (m: string) => warned.push(m) };
     return {
       listPackOdds: async () => rows.odds ?? [{ rarity: 'Legendary' }],
       listPulls: async () => rows.pulls ?? [{ source: 'pack' }],
@@ -143,6 +146,8 @@ describe('postApexPull', () => {
     process.env.TELEGRAM_BOT_TOKEN = 'test-token';
     process.env.TELEGRAM_CHAT_ID = '-100123';
     delete process.env.TELEGRAM_MIN_RARITY;
+    warned = [];
+    resetTelegramWarnings();
   });
 
   afterEach(() => {
@@ -249,6 +254,35 @@ describe('postApexPull', () => {
     delete process.env.TELEGRAM_BOT_TOKEN;
     await postApexPull(fakeContainer({}), EVENT);
     expect(sent).toHaveLength(0);
+  });
+
+  // The card can be deleted between the roll and this subscriber running.
+  it('stays silent when the card was removed since the roll', async () => {
+    await expect(
+      postApexPull(fakeContainer({ cards: [] }), EVENT),
+    ).resolves.toBeNull();
+    expect(sent).toHaveLength(0);
+  });
+
+  // The fallback is invisible from outside — a typo'd bar looks exactly like a
+  // quiet week of no apex pulls, so it has to say so in the log.
+  it('warns ONCE about an invalid TELEGRAM_MIN_RARITY, not once per open', async () => {
+    process.env.TELEGRAM_MIN_RARITY = 'Mythic';
+    await postApexPull(fakeContainer({ odds: [{ rarity: 'Common' }] }), EVENT);
+    await postApexPull(fakeContainer({ odds: [{ rarity: 'Common' }] }), EVENT);
+    expect(
+      warned.filter((m) => m.includes('TELEGRAM_MIN_RARITY')),
+    ).toHaveLength(1);
+    expect(warned[0]).toContain('Mythic');
+    expect(warned[0]).toContain('Legendary');
+  });
+
+  it('says nothing when TELEGRAM_MIN_RARITY is valid or unset', async () => {
+    process.env.TELEGRAM_MIN_RARITY = 'Mythical';
+    await postApexPull(fakeContainer({ odds: [{ rarity: 'Common' }] }), EVENT);
+    delete process.env.TELEGRAM_MIN_RARITY;
+    await postApexPull(fakeContainer({ odds: [{ rarity: 'Common' }] }), EVENT);
+    expect(warned).toHaveLength(0);
   });
 
   // A throw would be re-delivered by the event bus, and Telegram has no
