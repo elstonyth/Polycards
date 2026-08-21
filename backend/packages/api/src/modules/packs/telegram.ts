@@ -8,6 +8,7 @@ import {
   displayMarketPrice,
   resolveFxRate,
 } from './pricing';
+import { publicProfileFields, seedOf } from '../../utils/profile-handle';
 
 // Telegram "apex pull" board — posts every Legendary-or-better pull to the
 // public POLYCARDS.GG channel, so the community sees the big hits land in real
@@ -99,7 +100,8 @@ const rarityEmoji = (rarity: string): string =>
   rarity === 'Immortal' ? '👑' : '🌟';
 
 export type ApexCaptionInput = {
-  /** Public display name — profile handle, else first name, else 'Anonymous'. */
+  /** Public display name — first name, else the anonymous "Collector ####".
+   *  NOT the handle: that is only the link target (see postApexPull). */
   who: string;
   /** Absolute profile URL, or null when the puller has no handle yet. */
   profileUrl: string | null;
@@ -295,10 +297,15 @@ export async function postApexPull(
     ]);
     if (!card) return null; // card removed since the roll — nothing to show
 
-    // Public identity: the profile handle when the customer has one (it is
-    // already public and links to /profile/<handle>), else the full first name
-    // — the same field the leaderboard and live feed show. Never email, never
-    // customer_id. A customer-module failure degrades to 'Anonymous'.
+    // Public identity: the SAME name/handle split every other public surface
+    // uses (publicProfileFields — leaderboard, weekly challenge, profile page).
+    // The NAME is first_name, else the anonymous "Collector ####"; the handle
+    // is only the /profile/<handle> link target. Never the other way round:
+    // a handle is a slug of the name at signup and is NEVER re-derived on a
+    // rename, so showing it as the display name announces a renamed customer
+    // under the name they signed up with.
+    // Never email, never customer_id. A customer-module failure degrades to
+    // 'Anonymous'.
     const siteUrl = (
       process.env.TELEGRAM_SITE_URL?.trim() || DEFAULT_SITE_URL
     ).replace(/\/+$/, '');
@@ -307,13 +314,10 @@ export async function postApexPull(
     try {
       const customers = container.resolve(Modules.CUSTOMER);
       const customer = await customers.retrieveCustomer(event.customer_id);
-      const handle = (customer.metadata as Record<string, unknown> | null)
-        ?.handle;
-      if (typeof handle === 'string' && handle.trim()) {
-        who = handle.trim();
-        profileUrl = `${siteUrl}/profile/${encodeURIComponent(who)}`;
-      } else if (customer.first_name?.trim()) {
-        who = customer.first_name.trim();
+      const profile = publicProfileFields(customer, seedOf(event.customer_id));
+      who = profile.name;
+      if (profile.handle) {
+        profileUrl = `${siteUrl}/profile/${encodeURIComponent(profile.handle)}`;
       }
     } catch {
       // customer module unavailable — post it anonymously rather than not at all

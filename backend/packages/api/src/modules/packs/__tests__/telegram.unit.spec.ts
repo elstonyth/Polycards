@@ -96,9 +96,11 @@ const fakeContainer = (rows: {
   resolve: (key: string) => {
     if (key === 'customer') {
       return {
+        // Real shape: a lowercase kebab handle (HANDLE_RE) derived from the
+        // name at signup, and a first_name the customer has since changed.
         retrieveCustomer: async () => ({
           first_name: 'Elston',
-          metadata: { handle: 'Headshot001' },
+          metadata: { handle: 'old-name-1a2b' },
         }),
       };
     }
@@ -163,7 +165,26 @@ describe('postApexPull', () => {
     const [call] = sent as { url: string; body: { caption: string } }[];
     expect(call.url).toContain('/sendPhoto');
     expect(call.body.caption).toContain('LEGENDARY PULL');
-    expect(call.body.caption).toContain('Headshot001');
+    // Name = first_name, handle = link target only. Regression: the handle is
+    // a slug of the name at SIGNUP and is never re-derived, so posting it as
+    // the display name announces a renamed customer under their old name.
+    expect(call.body.caption).toContain(
+      '<a href="https://polycards.gg/profile/old-name-1a2b">Elston</a>',
+    );
+  });
+
+  it('falls back to the anonymous Collector name when first_name is blank', async () => {
+    const container = fakeContainer({});
+    const anon = {
+      resolve: (key: string) =>
+        key === 'customer'
+          ? { retrieveCustomer: async () => ({ first_name: '', metadata: {} }) }
+          : container.resolve(key),
+    };
+    await postApexPull(anon, EVENT);
+    const [call] = sent as { body: { caption: string } }[];
+    expect(call.body.caption).toMatch(/Collector \d{1,4}/);
+    expect(call.body.caption).not.toContain('/profile/');
   });
 
   // The id is what lets the pre-flight take its own test post back down.
