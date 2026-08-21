@@ -46,7 +46,12 @@ if ($App -eq 'backend') {
   # here is required unconditionally — the list and the spec placeholders move
   # together, and both only after deploy/.env.deploy carries the real values,
   # or the throw below blocks EVERY backend apply rather than one feature.
-  foreach ($k in 'DATABASE_URL', 'REDIS_URL', 'JWT_SECRET', 'COOKIE_SECRET', 'ADMIN_PASSWORD', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY', 'GOOGLE_CLIENT_SECRET', 'RESEND_API_KEY', 'PRICECHARTING_API_TOKEN', 'GLOBEPAY_AES_KEY', 'GLOBEPAY_PUBLIC_KEY', 'GLOBEPAY_MERCHANT_PRIVATE_KEY', 'TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_VERIFY_SERVICE_SID') {
+  #
+  # TELEGRAM_BOT_TOKEN added 2026-08-21 with the apex-pull board. The live app
+  # already carries the value (applied straight through `doctl apps update` on
+  # the day), so this entry exists to stop the next full-spec apply from
+  # DELETING it — App Platform replaces the whole spec, it does not merge.
+  foreach ($k in 'DATABASE_URL', 'REDIS_URL', 'JWT_SECRET', 'COOKIE_SECRET', 'ADMIN_PASSWORD', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY', 'GOOGLE_CLIENT_SECRET', 'RESEND_API_KEY', 'PRICECHARTING_API_TOKEN', 'GLOBEPAY_AES_KEY', 'GLOBEPAY_PUBLIC_KEY', 'GLOBEPAY_MERCHANT_PRIVATE_KEY', 'TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_VERIFY_SERVICE_SID', 'TELEGRAM_BOT_TOKEN') {
     if (-not $secrets.ContainsKey($k) -or [string]::IsNullOrWhiteSpace($secrets[$k])) {
       throw "deploy/.env.deploy is missing a value for $k"
     }

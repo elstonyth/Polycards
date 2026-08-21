@@ -269,6 +269,31 @@ envs:
   - key: ALLOWED_SMS_COUNTRIES
     scope: RUN_TIME
     value: "MY"
+  # ── Telegram apex-pull board (Legendary+ pulls → the public channel) ────────
+  # Both keys were applied straight to the live app on 2026-08-21 (a surgical
+  # `doctl apps update`, because this integration shipped after that day's spec
+  # work). They are mirrored here because App Platform REPLACES the whole spec
+  # on apply — it does not merge — so a spec without them would silently delete
+  # them from production and turn the board off with no error anywhere.
+  #
+  # APP level, not services.backend: the pack.opened subscriber runs on the
+  # WORKER component, exactly like the Resend password-reset subscriber above.
+  # Scoped to the service, the worker would boot unconfigured and every apex
+  # pull would be a silent no-op.
+  #
+  # CHAT_ID is QUOTED and must stay quoted — it starts with '-', so unquoted
+  # YAML parses it as a negative number and the API rejects the spec. Numeric
+  # id over @polycardsgg on purpose: it survives a channel rename.
+  # TELEGRAM_MIN_RARITY is deliberately unset (defaults to Legendary, which
+  # means Legendary + Immortal — this repo's RARITY_ORDER puts Mythical BELOW
+  # Legendary). Set it to 'Mythical' to widen the board by one tier.
+  - key: TELEGRAM_BOT_TOKEN
+    scope: RUN_TIME
+    type: SECRET
+    value: __SECRET__TELEGRAM_BOT_TOKEN__
+  - key: TELEGRAM_CHAT_ID
+    scope: RUN_TIME
+    value: "-1003945115527"
   # ╔═══════════════════════════════════════════════════════════════════════╗
   # ║ DO NOT APPLY THIS SPEC UNTIL PR #252 IS MERGED.                        ║
   # ║ ALLOW_MOCK_TOPUP is GONE (the go-live blocker is cleared) and the      ║
