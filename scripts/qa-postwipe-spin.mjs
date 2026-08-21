@@ -25,16 +25,24 @@ try {
   const reject = page.getByRole('button', { name: /reject/i }).first();
   if (await reject.isVisible().catch(() => false)) await reject.click();
 
-  await page.getByRole('button', { name: /^login$/i }).first().click();
+  await page
+    .getByRole('button', { name: /^login$/i })
+    .first()
+    .click();
   await page.fill('input[name="email"]', EMAIL);
   await page.fill('input[name="password"]', PASSWORD);
   await page.press('input[name="password"]', 'Enter');
   // Success signal = the modal's email input DETACHING (the header Login
   // button never reliably detaches).
-  await page.waitForSelector('input[name="email"]', { state: 'detached', timeout: 30_000 });
+  await page.waitForSelector('input[name="email"]', {
+    state: 'detached',
+    timeout: 30_000,
+  });
   ok(`logged in as ${EMAIL}`);
 
-  await page.goto(`${BASE}/slots/${PACK}/spin`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${BASE}/slots/${PACK}/spin`, {
+    waitUntil: 'domcontentloaded',
+  });
   const spin = page.getByRole('button', { name: /spin|open pack/i }).first();
   await spin.waitFor({ state: 'visible', timeout: 30_000 });
   await spin.click();
@@ -51,9 +59,14 @@ try {
     else if (sawBusy) break;
     await page.waitForTimeout(150);
   }
-  sawBusy ? ok('spin ran (aria-busy rose then cleared)') : fail('never saw aria-busy');
+  sawBusy
+    ? ok('spin ran (aria-busy rose then cleared)')
+    : fail('never saw aria-busy');
   await page.waitForTimeout(3000); // let the settle writes land
-  await page.screenshot({ path: 'docs/research/postwipe-spin.png', fullPage: false });
+  await page.screenshot({
+    path: 'docs/research/postwipe-spin.png',
+    fullPage: false,
+  });
 } finally {
   await browser.close();
 }
