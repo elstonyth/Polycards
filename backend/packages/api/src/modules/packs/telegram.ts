@@ -100,8 +100,9 @@ const rarityEmoji = (rarity: string): string =>
   rarity === 'Immortal' ? '👑' : '🌟';
 
 export type ApexCaptionInput = {
-  /** Public display name — first name, else the anonymous "Collector ####".
-   *  NOT the handle: that is only the link target (see postApexPull). */
+  /** Public display name — first name, else the anonymous "Collector ####"
+   *  (or 'Anonymous' when the customer lookup itself failed). NOT the handle:
+   *  that is only the link target (see postApexPull). */
   who: string;
   /** Absolute profile URL, or null when the puller has no handle yet. */
   profileUrl: string | null;

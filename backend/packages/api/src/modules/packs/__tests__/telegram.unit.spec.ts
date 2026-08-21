@@ -9,7 +9,7 @@ import {
 const caption = (over: Partial<ApexCaptionInput> = {}): string =>
   buildApexCaption({
     who: 'Headshot001',
-    profileUrl: 'https://polycards.gg/profile/Headshot001',
+    profileUrl: 'https://polycards.gg/profile/headshot-001',
     rarity: 'Legendary',
     cardName: 'Meowth',
     grade: 'PSA 10',
@@ -38,7 +38,7 @@ describe('buildApexCaption', () => {
 
   it('links the puller to their profile only when they have a handle', () => {
     expect(caption()).toContain(
-      '<a href="https://polycards.gg/profile/Headshot001">Headshot001</a>',
+      '<a href="https://polycards.gg/profile/headshot-001">Headshot001</a>',
     );
     const noHandle = caption({ profileUrl: null, who: 'Elston' });
     expect(noHandle).toContain('<b>Elston</b>');
