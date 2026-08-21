@@ -1,7 +1,7 @@
 import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from './index';
 import type PacksModuleService from './service';
-import { rarityRank, type Rarity } from './rarity';
+import { RARITY_ORDER, rarityRank, type Rarity } from './rarity';
 import { toMoney } from './money';
 import {
   DEFAULT_MARKET_MULTIPLIER,
@@ -35,6 +35,22 @@ const TELEGRAM_API = 'https://api.telegram.org';
 const EXCLUDED_SOURCES: readonly string[] = ['reward'];
 
 const DEFAULT_MIN_RARITY: Rarity = 'Legendary';
+
+/**
+ * The lowest tier that gets posted. FAIL-CLOSED on an unrecognised value, and
+ * that is load-bearing rather than tidy: rarityRank() returns RARITY_ORDER.length
+ * for an unknown tier, so a typo'd bar ('legendary', 'Mythic', a stray space
+ * surviving a paste into the DO console) would rank BELOW Common and turn the
+ * gate into `every tier <= 6` — i.e. every single pack open posting to a public
+ * marketing channel. Anything not exactly in RARITY_ORDER falls back to the
+ * default instead.
+ */
+const minRarity = (): Rarity => {
+  const configured = process.env.TELEGRAM_MIN_RARITY?.trim();
+  return configured && RARITY_ORDER.includes(configured as Rarity)
+    ? (configured as Rarity)
+    : DEFAULT_MIN_RARITY;
+};
 const DEFAULT_SITE_URL = 'https://polycards.gg';
 
 /** Telegram caption limit for sendPhoto. Ours is far shorter; the clamp only
@@ -184,14 +200,20 @@ const logWarn = (
  * NEVER throws. A throw here would be re-delivered by the Medusa event bus,
  * and Telegram has no dedupe — a retry is a DUPLICATE PUBLIC POST, which is
  * worse than a dropped one. The pull itself is already committed either way.
+ *
+ * Returns the caption it built and attempted to send, or null when a gate
+ * rejected the pull (or an error was thrown). A send FAILURE still returns the
+ * caption — it is logged separately, and the pre-flight's whole job is to show
+ * the real rendered text, which is exactly what you need to see when the send
+ * is the thing that is broken. The subscriber ignores the return value.
  */
 export async function postApexPull(
   container: { resolve: (k: string) => any },
   event: ApexPullEvent,
-): Promise<void> {
+): Promise<string | null> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = process.env.TELEGRAM_CHAT_ID;
-  if (!token || !chatId) return; // feature off (dev / CI / tests)
+  if (!token || !chatId) return null; // feature off (dev / CI / tests)
 
   try {
     const packs = container.resolve(PACKS_MODULE) as PacksModuleService;
@@ -205,26 +227,24 @@ export async function postApexPull(
       { take: 1 },
     );
     const rarity = odds?.rarity ?? 'Common';
-    const minRarity =
-      process.env.TELEGRAM_MIN_RARITY?.trim() || DEFAULT_MIN_RARITY;
-    if (rarityRank(rarity) > rarityRank(minRarity)) return;
+    if (rarityRank(rarity) > rarityRank(minRarity())) return null;
 
     // 2. Source gate — private vault prizes never go public.
     const [pull] = await packs.listPulls({ id: event.pull_id }, { take: 1 });
-    if (!pull || EXCLUDED_SOURCES.includes(pull.source)) return;
+    if (!pull || EXCLUDED_SOURCES.includes(pull.source)) return null;
 
     // 3. An administratively disabled player is hidden from every public
     //    surface (the leaderboard/feed rule). A Telegram post is far less
     //    retractable than a feed row, so this gate matters more here.
     const disabled = await packs.disabledCustomerIds([event.customer_id]);
-    if (disabled.has(event.customer_id)) return;
+    if (disabled.has(event.customer_id)) return null;
 
     const [[card], [pack], fxRate] = await Promise.all([
       packs.listCards({ handle: event.card_id }, { take: 1 }),
       packs.listPacks({ slug: event.pack_id }, { take: 1 }),
       resolveFxRate(packs),
     ]);
-    if (!card) return; // card removed since the roll — nothing to show
+    if (!card) return null; // card removed since the roll — nothing to show
 
     // Public identity: the profile handle when the customer has one (it is
     // already public and links to /profile/<handle>), else the full first name
@@ -284,6 +304,7 @@ export async function postApexPull(
         `[telegram] apex post rejected for pull ${event.pull_id}: ${result.description ?? 'unknown error'}`,
       );
     }
+    return caption;
   } catch (err) {
     logWarn(
       container,
@@ -291,5 +312,6 @@ export async function postApexPull(
         err instanceof Error ? err.message : String(err)
       }`,
     );
+    return null;
   }
 }

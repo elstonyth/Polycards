@@ -45,10 +45,14 @@ export default async function telegramApexSmoke({ container }: ExecArgs) {
     { take: handles.length },
   );
   const cdnCard = cards.find((c) => c.slab_image?.startsWith('https://'));
-  const odds = apexOdds.find((o) => o.card_id === (cdnCard ?? cards[0])?.handle);
+  const odds = apexOdds.find(
+    (o) => o.card_id === (cdnCard ?? cards[0])?.handle,
+  );
   const card = cdnCard ?? cards[0];
   if (!odds || !card) {
-    logger.error('No Legendary/Immortal odds row in this catalog — cannot test.');
+    logger.error(
+      'No Legendary/Immortal odds row in this catalog — cannot test.',
+    );
     return;
   }
   if (!cdnCard) {
@@ -80,15 +84,23 @@ export default async function telegramApexSmoke({ container }: ExecArgs) {
     logger.info(
       `[telegram-smoke] posting ${odds.rarity} ${card.handle} from ${odds.pack_id} as ${customer.id}`,
     );
-    await postApexPull(container, {
+    const caption = await postApexPull(container, {
       pull_id: pull.id,
       pack_id: odds.pack_id,
       card_id: card.handle,
       customer_id: customer.id,
     });
-    logger.info(
-      '[telegram-smoke] done — check the channel. No post means a gate rejected it (see warnings above).',
-    );
+    if (caption) {
+      // Printed whether or not Telegram accepted it: a rejected send logs its
+      // own warn above, and seeing the rendered text is the whole point of a
+      // pre-flight — especially when the send is the broken part. No warn
+      // above means it is live in the channel.
+      logger.info(`[telegram-smoke] caption:\n${caption}`);
+    } else {
+      logger.error(
+        '[telegram-smoke] nothing built — a gate rejected this pull (rarity, source, or a disabled player).',
+      );
+    }
   } finally {
     await packs.deletePulls([pull.id]);
   }

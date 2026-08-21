@@ -187,6 +187,25 @@ describe('postApexPull', () => {
     expect(sent).toHaveLength(1);
   });
 
+  // An unknown tier ranks BELOW Common, so a naive `<=` gate would treat a
+  // typo'd bar as "post everything" — every open, to a public channel.
+  it.each(['legendary', 'Legendary ', 'Mythic', ''])(
+    'falls back to Legendary when TELEGRAM_MIN_RARITY is %p, not to posting everything',
+    async (bar) => {
+      process.env.TELEGRAM_MIN_RARITY = bar;
+      await postApexPull(
+        fakeContainer({ odds: [{ rarity: 'Common' }] }),
+        EVENT,
+      );
+      expect(sent).toHaveLength(0);
+      await postApexPull(
+        fakeContainer({ odds: [{ rarity: 'Legendary' }] }),
+        EVENT,
+      );
+      expect(sent).toHaveLength(1);
+    },
+  );
+
   it('stays silent when the odds row is missing (unknown tier)', async () => {
     await postApexPull(fakeContainer({ odds: [] }), EVENT);
     expect(sent).toHaveLength(0);
@@ -219,7 +238,7 @@ describe('postApexPull', () => {
         throw new Error('module down');
       },
     };
-    await expect(postApexPull(broken, EVENT)).resolves.toBeUndefined();
+    await expect(postApexPull(broken, EVENT)).resolves.toBeNull();
     expect(sent).toHaveLength(0);
   });
 });
