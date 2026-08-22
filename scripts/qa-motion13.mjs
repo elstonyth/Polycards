@@ -7,11 +7,9 @@
 // assertions are: zero page errors, and every motion-owned node ends up with a
 // non-zero opacity (i.e. its enter animation actually resolved).
 import { chromium } from 'playwright';
-import { mkdirSync } from 'node:fs';
 
 const BASE = process.argv[2] ?? 'http://127.0.0.1:4000';
 const OUT = 'docs/research/motion13';
-mkdirSync(OUT, { recursive: true });
 
 const errors = [];
 const browser = await chromium.launch();

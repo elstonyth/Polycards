@@ -3,11 +3,9 @@
 // a Next build can render a perfectly healthy empty state when the API is
 // down, so "page loaded" is not the assertion. No writes, no spin.
 import { chromium } from 'playwright';
-import { mkdirSync } from 'node:fs';
 
 const BASE = process.env.QA_BASE ?? process.argv[2] ?? 'https://polycards.gg';
 const OUT = 'docs/research/prod-smoke';
-mkdirSync(OUT, { recursive: true });
 
 const browser = await chromium.launch();
 const ctx = await browser.newContext({
