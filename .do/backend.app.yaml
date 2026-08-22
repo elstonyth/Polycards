@@ -456,6 +456,19 @@ envs:
 egress:
   type: DEDICATED_IP
 
+# Routing. Present because `doctl apps update` replaces the FULL spec and the
+# live app carries this block — with one service DO would regenerate an
+# equivalent default, but matching live exactly keeps the apply a no-op for
+# everything except the values we meant to change. (Same rationale as the
+# storefront spec's copy of this block.)
+ingress:
+  rules:
+    - match:
+        path:
+          prefix: /
+      component:
+        name: backend
+
 services:
   - name: backend
     dockerfile_path: backend/Dockerfile
@@ -465,8 +478,23 @@ services:
       branch: master
       deploy_on_push: true
     http_port: 9000
-    instance_size_slug: basic-xs
-    instance_count: 1
+    # professional-xs, not basic-xs, ONLY because the basic tier is hard-capped
+    # at one instance — `doctl apps propose` rejects instance_count: 2 with
+    # "must not exceed 1 instance for instance_size_slug basic-xs". Same 1 shared
+    # vCPU and 1 GiB for $12/mo instead of $10; the tier buys horizontal scaling
+    # (and unlocks autoscaling), not a faster box.
+    instance_size_slug: professional-xs
+    # TWO is the ceiling here, and the arithmetic is the reason — this is not a
+    # budget choice. The cluster is db-s-1vcpu-1gb: 25 connections, ~22 usable.
+    # Every backend process opens up to DEFAULT_DB_POOL_MAX (5, see
+    # src/utils/db-driver-options.ts), and the PRE_DEPLOY migrate job runs while
+    # the old containers are still serving. 2 x 5 + worker 5 + migrate 5 = 20,
+    # which leaves room for an operator psql. A THIRD instance is 25 and
+    # exhausts the cluster mid-deploy — every acquire then fails with
+    # KnexTimeoutError against a perfectly healthy database, which is the exact
+    # outage the pool cap was written to prevent. Raise the cluster first, or
+    # lower DB_POOL_MAX in step, before going past 2.
+    instance_count: 2
     health_check:
       http_path: /health
     alerts:
@@ -527,6 +555,8 @@ jobs:
       repo: elstonyth/Polycards
       branch: master
     instance_size_slug: basic-xxs
+    # Explicit because the live app carries it — see the ingress note above.
+    instance_count: 1
     run_command: corepack yarn deploy:migrate-user
 
 databases:
