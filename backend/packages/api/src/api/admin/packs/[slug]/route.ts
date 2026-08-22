@@ -10,10 +10,13 @@ import { clearPackListCache } from "../../../store/packs/route";
 import { clearPackDetailCache } from "../../../store/packs/[slug]/route";
 import { clearAdminPackListCache } from "../route";
 
-// Bust the 30s read caches (storefront list + detail, and the admin pack list)
-// so an admin pack edit (price/status/stock/published-odds) shows IMMEDIATELY
-// instead of ≤30s later. The caches keep read-perf; this only invalidates them
-// on the rare write.
+// Bust the 30s read caches IN THIS PROCESS (storefront list + detail, and
+// the admin pack list). Since #473 the app runs 2 instances and these Maps
+// are per-process: the instance that took the write serves the edit
+// immediately, the other serves ≤30s stale until its window rolls. Bounded
+// and display-only (purchase/spin paths re-check live state). If operators
+// report edit-flapping in practice, the recorded upgrade is a Redis
+// pub/sub bust on REDIS_URL — see src/lib/ttl-cache.ts's ladder note.
 function bustPackCaches(): void {
   clearPackListCache();
   clearPackDetailCache();

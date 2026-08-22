@@ -16,6 +16,16 @@
 //
 // Per-process is the point, not a limitation: N storefront instances make N
 // backend calls per window instead of N x requests.
+//
+// STALENESS LADDER (worst case per layer; per instance, 2 instances of
+// each app since #473 — layers stack, they do not synchronize):
+//   backend route Map        30s (packs list/detail, leaderboard; pulls 5s)
+//   this storefront memo     30s (catalog, board) / 60s (avatar frames)
+//   home route cache         15s (src/app/page.tsx revalidate)
+//   getPackChase             60s (unstable_cache, no tags)
+// ⇒ an admin pack edit can take ~60s to reach /slots, ~75s to reach /,
+//   ~105s to reach a home chase card. Admin busts clear ONLY the writing
+//   backend instance's Maps; the other instance rolls over on TTL.
 
 type Entry = { expires: number; value: Promise<unknown> };
 

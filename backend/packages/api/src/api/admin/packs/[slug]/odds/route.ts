@@ -297,11 +297,13 @@ export async function POST(
   }
 
   // A per-card rarity change is shown on the storefront detail (Top Hits +
-  // the reel's rarity lighting), so bust the 30s detail cache to reflect it now.
+  // the reel's rarity lighting), so bust the 30s detail cache IN THIS PROCESS;
+  // it reflects now here, ≤30s stale on the other instance (#473 runs 2).
   clearPackDetailCache();
   // The weights (and rarity, via the tier price averages) ARE the admin list's
-  // EV/RTP inputs — without this the operator saves odds here, returns to the
-  // list they came from, and reads their pre-edit numbers for up to 30s.
+  // EV/RTP inputs — without this (or on the other instance, #473 runs 2) the
+  // operator saves odds here, returns to the list they came from, and reads
+  // their pre-edit numbers for up to 30s.
   clearAdminPackListCache();
 
   res.json({ odds: result });

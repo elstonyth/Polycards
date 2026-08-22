@@ -52,9 +52,10 @@ interface BackendEntry {
 // same PII-safe seed renders the same avatar on both surfaces.
 
 /**
- * Live leaderboard for a period. Maps the backend aggregate to the standings
- * shape, assigning a deterministic avatar from the PII-safe seed. Returns []
- * on any backend failure or an empty ledger — never fake rows.
+ * Leaderboard for a period (rows memoised 30s per instance). Maps the backend
+ * aggregate to the standings shape, assigning a deterministic avatar from the
+ * PII-safe seed. Returns [] on any backend failure or an empty ledger — never
+ * fake rows.
  */
 // Matches the backend's own 30s window on GET /store/leaderboard. Only the raw
 // rows are memoised — the frame enrichment below depends on the caller's avatar

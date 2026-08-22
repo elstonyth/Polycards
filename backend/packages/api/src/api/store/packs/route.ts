@@ -15,8 +15,10 @@ import { compositionGroup } from '../../../modules/packs/card-view';
 // identical for every viewer, fetched on every anonymous (force-dynamic) home
 // view via getPackCategories; this collapses the multi-row catalog query to one
 // compute per 30s window. A pack going active/inactive or a price/stock edit
-// lags ≤30s — display-only (the purchase path re-checks live state). Upgrade to
-// Redis only if we ever run >1 instance.
+// lags ≤30s — display-only (the purchase path re-checks live state).
+// >1 instance since #473: per-process is accepted — N instances = N
+// computes per window and ≤TTL cross-instance skew, display-only either
+// way. Decision + upgrade path recorded in plan 116.
 const CACHE_TTL_MS = 30_000;
 const LIST_KEY = 'list';
 const listCache = new Map<string, { expires: number; body: unknown }>();

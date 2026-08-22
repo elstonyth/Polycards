@@ -31,7 +31,8 @@ const round2 = (n: number): number => Math.round(n * 100) / 100;
 // every odds row and every card, and it re-ran on every admin pack-page load.
 // The body is pack-global (no requesting-admin data) and Medusa's admin auth
 // runs before this handler, so caching neither leaks across admins nor widens
-// who may read it. Every admin pack write busts it — see the invariant on
+// who may read it. Every admin pack write busts it in the writing process;
+// other instances roll over within 30s (#473 runs 2) — see the invariant on
 // clearAdminPackListCache.
 const CACHE_TTL_MS = 30_000;
 const LIST_KEY = 'list';

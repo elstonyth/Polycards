@@ -33,7 +33,10 @@ import {
 // pack going inactive/out-of-stock, or an admin edit to price/odds, keeps
 // serving the stale 200 until the window rolls — display-only and acceptable
 // (the purchase path re-checks live state; no explicit bust, matches boardCache).
-// Prices are ≤30s stale, fine. Upgrade to Redis only if we ever run >1 instance.
+// Prices are ≤30s stale, fine.
+// >1 instance since #473: per-process is accepted — N instances = N
+// computes per window and ≤TTL cross-instance skew, display-only either
+// way. Decision + upgrade path recorded in plan 116.
 const CACHE_TTL_MS = 30_000;
 const packCache = new Map<string, { expires: number; body: unknown }>();
 
