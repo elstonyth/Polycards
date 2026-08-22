@@ -193,6 +193,17 @@ try {
     );
     results.push(false, false, false);
   }
+} catch (e) {
+  // Any throw from visit() (navigation/screenshot/evaluate) or the /slots
+  // re-navigation above would otherwise skip straight to the finally and
+  // then propagate past the summary/exitCode below, crashing this gate with
+  // a raw stack trace — exactly what it must not do now that it runs
+  // nightly with `if: always()`. Same treatment as every other failure in
+  // this script: a single FAIL line, counted as data, no rethrow.
+  console.log(
+    `FAIL script aborted — ${String(e && e.message ? e.message : e).split('\n')[0]}`,
+  );
+  results.push(false);
 } finally {
   await browser.close();
 }
