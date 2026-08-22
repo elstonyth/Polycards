@@ -9,7 +9,8 @@ import type PacksModuleService from '../modules/packs/service';
  * That report says WHICH phone values are duplicated; this one says which of
  * the accounts sharing a value is the real one, so an operator can decide what
  * to reconcile without guessing. It performs NO writes — the only calls are
- * `retrieveCustomer` and `list*`/`listAndCount*` reads.
+ * `retrieveCustomer`, `list*`/`listAndCount*`, and `creditBalance` (a
+ * SELECT-only SQL aggregate) reads.
  *
  * Ids come from the report's own output and are passed in, never discovered
  * here, so this can only ever look at accounts an operator already chose.
