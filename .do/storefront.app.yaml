@@ -49,12 +49,23 @@ services:
       branch: master
       deploy_on_push: true
     http_port: 3000
-    # basic-xs, NOT basic-xxs: the 512 MB box ran the storefront out of memory
-    # in production (mem pinned ~99%, CPU idle, /healthz UNHEALTHY, 503s). The
-    # live app was bumped by hand; this spec lagged behind, so applying the old
-    # value would re-create the outage. Keep it in step with NODE_OPTIONS below.
-    instance_size_slug: basic-xs
-    instance_count: 1
+    # 1 GiB, NEVER 512 MB: the smaller box ran the storefront out of memory in
+    # production (mem pinned ~99%, CPU idle, /healthz UNHEALTHY, 503s). Keep it
+    # in step with NODE_OPTIONS below.
+    #
+    # professional-xs, not basic-xs, ONLY because the basic tier is hard-capped
+    # at one instance — `doctl apps propose` rejects instance_count: 2 with
+    # "must not exceed 1 instance for instance_size_slug basic-xs". Same 1 shared
+    # vCPU and 1 GiB for $12/mo instead of $10; the tier buys horizontal scaling
+    # (and unlocks autoscaling), not a faster box.
+    instance_size_slug: professional-xs
+    # TWO instances, not one. The storefront reaches the backend over HTTP and
+    # touches no Postgres connection, so it scales freely — and it is where the
+    # read ceiling actually sits: every public page except / reads an auth
+    # cookie somewhere in its tree (getFreePackState, getOwnProfileHandle) and
+    # so must be React-rendered per request. The second instance is also what
+    # makes a deploy a rolling one instead of an outage window.
+    instance_count: 2
     health_check:
       http_path: /healthz
     alerts:

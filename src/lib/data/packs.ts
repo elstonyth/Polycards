@@ -14,6 +14,7 @@
  */
 
 import { unstable_cache } from 'next/cache';
+import { cached } from '@/lib/ttl-cache';
 import { sdk } from '@/lib/medusa';
 import { logger } from '@/lib/logger';
 import { formatValue, isRarity, type PublishedOdds } from '@/lib/packs-format';
@@ -88,8 +89,8 @@ const titleCase = (key: string): string =>
  * empty categories and the pages render their empty states. Presentational
  * labels/icons come from the local category meta.
  */
-export async function getPackCategories(): Promise<PackCategory[]> {
-  try {
+async function loadPackCategories(): Promise<PackCategory[]> {
+  {
     const { packs } = await sdk.client.fetch<{ packs: BackendPack[] }>(
       '/store/packs',
     );
@@ -127,6 +128,28 @@ export async function getPackCategories(): Promise<PackCategory[]> {
         packs: list,
       }));
     return [...known, ...extras];
+  }
+}
+
+// Matches the backend's own 30s window on GET /store/packs. The catalog is the
+// same for every visitor, but /slots and /leaderboard read auth cookies, so
+// those pages can never be statically rendered — without this every request
+// re-pays the backend hop and the zod parse for a body the backend is already
+// serving from cache.
+const CATALOG_TTL_MS = 30_000;
+
+/**
+ * Pack catalog, memoised per process for one backend cache window.
+ *
+ * The degradation is caught HERE, outside `cached`, and loadPackCategories is
+ * left to throw. Catching inside the loader would make a transient backend
+ * failure resolve to an empty catalog, which `cached` cannot tell from a real
+ * one — so one blip would blank /slots for the full 30s window instead of for
+ * the blip. Rejecting lets `cached` evict, and the next request retries.
+ */
+export async function getPackCategories(): Promise<PackCategory[]> {
+  try {
+    return await cached('pack-categories', CATALOG_TTL_MS, loadPackCategories);
   } catch (error) {
     logger.error('[packs] failed to load packs from backend:', error);
     // Backend unreachable — truthfully show no packs rather than a mock set.

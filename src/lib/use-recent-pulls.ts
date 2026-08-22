@@ -3,10 +3,16 @@
 import { useEffect, useRef, useState } from 'react';
 import type { RecentPull } from '@/lib/data/packs';
 
-// "Live" = fast polling of the same-origin proxy (a direct :9000 call is
-// CORS-blocked). 4s keeps any pull visible to everyone within seconds without
-// websocket infrastructure — revisit only if traffic makes polling hurt.
-const POLL_MS = 4000;
+// "Live" = polling of the same-origin proxy (a direct :9000 call is
+// CORS-blocked). This is the storefront's single highest-volume request: one
+// tick per open tab on the home or a pack page, forever. At 4s, 2000 concurrent
+// tabs meant 500 req/s against a one-vCPU instance; 10s is the same feed at a
+// fifth of the cost.
+//
+// Nothing perceptible is lost. Both hops already serve from 5s caches (this
+// route and the backend's store/pulls/recent), so a row could already be ~10s
+// behind the ledger, and the feed labels time in whole minutes.
+const POLL_MS = 10_000;
 
 /** Live recent-pulls feed: seeds from the server snapshot, then polls.
  *  `packSlug` scopes the poll to one pack's own history (the /slots/[slug]
@@ -27,8 +33,8 @@ export function useLiveRecentPulls(
     let active = true;
     const tick = async () => {
       // Hidden/background tabs poll forever otherwise — skip while not visible
-      // (mirrors usePackDetailPoll / useCardPrice); the 5s backend cache means
-      // even visible tabs collapse to one compute per window.
+      // (mirrors usePackDetailPoll / useCardPrice); the 5s caches on both hops
+      // mean even visible tabs collapse to one compute per window.
       if (document.visibilityState !== 'visible') return;
       try {
         const res = await fetch(

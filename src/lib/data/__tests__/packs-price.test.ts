@@ -15,6 +15,7 @@ vi.mock('@/lib/logger', () => ({
 }));
 
 import { getPackCategories } from '@/lib/data/packs';
+import { clearTtlCache } from '@/lib/ttl-cache';
 
 const row = (over: Record<string, unknown> = {}) => ({
   slug: 'bronze-pack',
@@ -39,6 +40,9 @@ const firstPack = async () => {
 
 beforeEach(() => {
   fetchMock.mockReset();
+  // getPackCategories is memoised per process for one backend cache window, so
+  // without this the FIRST fixture's catalog is served to every later case.
+  clearTtlCache();
 });
 
 describe('pack price: display vs charge', () => {
@@ -85,5 +89,18 @@ describe('pack price: display vs charge', () => {
 
     expect(packs.map((p) => p.id)).toEqual(['good']);
     expect(packs.every((p) => Number.isFinite(p.priceValue))).toBe(true);
+  });
+
+  it('does not serve a failed catalog for the rest of the cache window', async () => {
+    // The catalog is memoised for 30s. If the degradation were caught INSIDE
+    // the memo, the empty fallback would resolve successfully and be served for
+    // the whole window — one blip would blank /slots for 30s. It is caught
+    // outside instead, so the rejection evicts and the next read retries.
+    fetchMock.mockRejectedValueOnce(new Error('backend down'));
+    expect((await getPackCategories()).flatMap((c) => c.packs)).toEqual([]);
+
+    fetchMock.mockResolvedValue({ packs: [row()] });
+    const packs = (await getPackCategories()).flatMap((c) => c.packs);
+    expect(packs.map((p) => p.id)).toEqual(['bronze-pack']);
   });
 });

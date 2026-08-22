@@ -12,13 +12,23 @@ import RecentPullsSection from '@/components/RecentPullsSection';
 import TheGame from '@/components/home/TheGame';
 import FinalCta from '@/components/home/FinalCta';
 
-// Pack catalog + live pulls come fresh from the backend on every request.
+// The home page is the only public route whose whole tree is visitor-agnostic:
+// the layout resolves auth client-side (AuthProvider / AppHeader / the free-pack
+// badge are all 'use client'), and nothing here reads cookies() or headers().
+// So it is rendered ONCE per window and served from the route cache, instead of
+// re-running a ~158 KB React render per request — the single largest cost on the
+// storefront's 1-vCPU instance under load.
 //
-// Do NOT add `export const fetchCache` here. `force-dynamic` leaves the Data
-// Cache alone, which is what lets getPackChase hold the chase lookups below;
-// a 'force-no-store' fetchCache makes unstable_cache skip its read and silently
-// puts all N pack-detail payloads back on every render, with nothing failing.
-export const dynamic = 'force-dynamic';
+// 15s adds no staleness the reader can perceive: the backend already serves the
+// catalog and the board from its own 30s caches, and the pulls feed re-hydrates
+// live on the client (use-recent-pulls polls every 10s). Every OTHER public page
+// (/slots, /slots/[slug], /leaderboard) reads an auth cookie somewhere in its
+// tree and must stay per-request — scale those with instances, not with this.
+//
+// Do NOT add `export const fetchCache` here. It would make unstable_cache skip
+// its read and silently put all N pack-detail payloads back on every render of
+// getPackChase below, with nothing failing.
+export const revalidate = 15;
 
 /** How many shelf tiles get a per-pack top-chase lookup (a cache read each —
  *  see getPackChase; one backend request each only on a cold miss). */
