@@ -137,4 +137,23 @@ describe('ResetCountdown', () => {
     await advance(60_000);
     expect(refresh).toHaveBeenCalledTimes(2);
   });
+
+  // The two cases above remount to a deadline a full WEEK out, so the outer
+  // `now >= resetAt` gate alone accounts for "no further refresh" — they'd
+  // pass even if the ladder were keyed wrong. This is the one case where the
+  // gate stays OPEN (the new deadline is also already past) so the outcome
+  // depends entirely on the retry state being keyed per-deadline: a new
+  // resetAt must start a FRESH ladder (immediate refresh), not be mistaken
+  // for a continuation of the old one (which would still be inside its 20s
+  // window and refresh nothing).
+  test('a resetAt that changes while still in the past starts a fresh ladder, not a continued retry', async () => {
+    await mount();
+    await advance(4000); // 1st refresh at the deadline
+    expect(refresh).toHaveBeenCalledTimes(1);
+    // Server rolled, but the new deadline is ALSO already past (+500 keeps it
+    // off the now===resetAt equality edge). Keyed per-deadline, this is a
+    // fresh ladder and fires immediately instead of waiting out 20s.
+    await mount(RESET_AT + 500);
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
 });
