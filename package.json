@@ -38,7 +38,11 @@
     "qa:csp": "node scripts/qa-csp.mjs",
     "test:a11y": "node scripts/qa-a11y.mjs",
     "qa:free-pack": "node scripts/qa-free-pack.mjs",
-    "qa:catalog-groups": "node scripts/qa-catalog-groups.mjs"
+    "qa:catalog-groups": "node scripts/qa-catalog-groups.mjs",
+    "qa:motion13": "node scripts/qa-motion13.mjs",
+    "qa:reset-countdown": "node scripts/qa-reset-countdown.mjs",
+    "qa:prod-smoke": "node scripts/qa-prod-smoke.mjs",
+    "qa:postwipe-spin": "node scripts/qa-postwipe-spin.mjs"
   },
   "dependencies": {
     "@medusajs/js-sdk": "^2.19.0",
