@@ -2411,19 +2411,74 @@ before it entered the table. Live evidence: `gh run` nightly history + the
 
 ### Round-13 plans
 
-| Plan | Title                                                                                            | Priority | Effort | Depends on | Status |
-| ---- | ------------------------------------------------------------------------------------------------ | -------- | ------ | ---------- | ------ |
-| 113  | Free-pack gate desktop badge precondition                                                        | P1       | S      | —          | TODO   |
-| 114  | Telegram board hardening (guarded fetch, fallback, clamp, env, 429)                              | P1       | S      | —          | TODO   |
-| 115  | Telegram smoke-script safety (named test customer, id-before-delete)                             | P2       | S      | —          | TODO   |
-| 116  | Cross-instance cache truth (comment/doc + staleness ladder; no mechanism change)                 | P2       | S      | —          | TODO   |
-| 117  | TTL-cache bounds + slug gate + shape-throw + getChallenge adoption + tests                       | P2       | M      | —          | TODO   |
-| 118  | #468 follow-ups (stock-take wiring test, cap window case, partial-take diagnostics, iso comment) | P2       | S–M    | —          | TODO   |
-| 119  | EV display validation (suppress row when odds don't sum / cover the pool)                        | P3       | S      | —          | TODO   |
-| 120  | QA-gate wiring + de-vacuate motion13 + prod-smoke cache assertion + postwipe truth               | P3       | S–M    | 113        | TODO   |
-| 121  | ResetCountdown bounded retry ladder                                                              | P3       | S      | —          | TODO   |
+| Plan | Title                                                                                            | Priority | Effort | Depends on | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ---- | ------------------------------------------------------------------------------------------------ | -------- | ------ | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 113  | Free-pack gate desktop badge precondition                                                        | P1       | S      | —          | **DONE** — APPROVE 2026-08-22, commit `b0f18a32`. Executor KEPT the `End` keypress the plan's literal "replace this block" wording would have deleted; correct, because assertion (b) scrolls UP hunting an overlap and only finds one from the bottom, so deleting it would have failed BOTH legs including the mobile one the plan calls fine. **Reviewer live-verified the mechanism** against the local prod build: `catalog-root` computed `paddingBottom` = 224px mobile (`pb-56`) / 176px desktop (`lg:pb-44`), and the refit math (railRight=1034, rightOffset=16, badgeW=112 → fitted=1122) DOES park a tile under the badge — the exact CI blocker, resolved. Full gate could not finish locally for an unrelated environmental reason; see "Live verification" below.                                                                                                                                                               |
+| 114  | Telegram board hardening (guarded fetch, fallback, clamp, env, 429)                              | P1       | S      | —          | **DONE** — APPROVE 2026-08-22, commits `1a1ecfcb`+`a7b01280`. `fetchBytes`/`isAllowedImageUrl` lifted to `api/utils/image-fetch.ts`, re-exported from `bake-slab.ts` so every existing importer compiles untouched; `blackBackedPhoto` routed through it with `limitInputPixels`. Reviewer confirmed both photo paths wrapped in `attempt()` while the final `sendMessage` stays bare (its throw must reach `postApexPull`'s catch). Clamp uses an EMPIRICALLY MEASURED scaffold (317 → `SCAFFOLD_MAX` 360, `PER_FIELD` 131; 5×132+360=1020 ≤ 1024) plus a drift-guard spec — no guessed expansion factor. 429 retry bounded to one attempt ≤5s. Executor caught its own clamp test as vacuous (plain `x`/`y` never cuts mid-entity), replaced with `&`/`"` repeats, red/green-proved.                                                                                                                                                         |
+| 115  | Telegram smoke-script safety (named test customer, id-before-delete)                             | P2       | S      | —          | **DONE** — APPROVE 2026-08-22, commit `dedd1705`. `TELEGRAM_SMOKE_CUSTOMER_ID` now required; the script refuses rather than posting a fabricated apex pull under an arbitrary REAL customer's display name. Message id logged before any delete attempt; `deleteApexPost` wrapped in a `.catch()` that RESOLVES to `{ok:false,description}` so the `finally` row-cleanup still runs (reviewer verified). "Safe to run against the live channel" claim corrected. Expected first operator run: refuses until the env var names a durable test account.                                                                                                                                                                                                                                                                                                                                                                                          |
+| 116  | Cross-instance cache truth (comment/doc + staleness ladder; no mechanism change)                 | P2       | S      | —          | **DONE** — APPROVE 2026-08-22 after 1 revision, commits `9b22da71`+`0dfea604`. Operator chose option (A). Executor REPORTED rather than silently expanding when Step 2's grep came back dirty: the plan's Current State had missed three more per-process caches carrying the same tripped sentence (`store/challenge/route.ts`, `utils/profile-cache.ts`, `modules/packs/pricing.ts`). Reviewer verified all three, formally extended scope, revision closed them. `grep -rn "if we ever run" backend/packages/api/src/` now returns **0**; all six surviving `>1 instance` hits are the decision record. Comment-only confirmed by filtering added lines.                                                                                                                                                                                                                                                                                    |
+| 117  | TTL-cache bounds + slug gate + shape-throw + getChallenge adoption + tests                       | P2       | M      | —          | **DONE** — APPROVE 2026-08-22, commit `40528e23`. Cache size-bounded (256, oldest-insertion); key gate is catalog-bounded, not shape-only (executor found the storefront `Pack` exposes the backend slug as `.id` via `toPack`, not `.slug`). **Plan premise was wrong on one file and the executor caught it**: the backend `recentCache` already had a `size > 64 → clear()` from PR #440, predating the baseline, so a stacked 256 cap would be dead code — it REPLACED the coarse clear with oldest-insertion eviction (also avoids thunder-herding every hot key). New `cache-contract.test.ts` asserts CALL COUNTS and separates legit-empty-IS-cached from malformed-NOT-cached; one case red/green-proved.                                                                                                                                                                                                                             |
+| 118  | #468 follow-ups (stock-take wiring test, cap window case, partial-take diagnostics, iso comment) | P2       | S–M    | —          | **DONE** — APPROVE 2026-08-22, commit `766295d1`. `takeCardStock`'s split-location wiring pinned by a container-fake spec driving the real `cardInventoryLevels → planCardStockTake → adjustInventory` chain, **mutation-proved** (reverting to the pre-#468 body fails exactly the split case). Cap window-boundary case added and **mutation-proved**. `updateGlobePayDeposits` CAN write `created_at` via the `as never` hatch already used in `globepay-reconcile.spec.ts` — the STOP condition never fired, proven not assumed. `CardStockTakeError` stops the "counter reads high" log from lying when it reads LOW; earmark semantics unchanged. Integration run for real: cap 5/5, challenge-settle 17/17.                                                                                                                                                                                                                             |
+| 119  | EV display validation (suppress row when odds don't sum / cover the pool)                        | P3       | S      | —          | **DONE** — APPROVE 2026-08-22, commit `c1ff85ec`. Guard tracks published vs contributing mass, `SUM_TOLERANCE` 0.5. A STOP condition fired — an existing test pinned the bug (`{Rare: 50}` expecting non-null `'RM 50.00'`) — and the executor reported it with the fixture before changing it, as the plan directs. **Reviewer independently verified the repair preserves the test's purpose**: retargeted to `{Rare: 100}`/`'RM 100.00'`, so if unpriced `—` cards were wrongly averaged in, the result would be 50 and it would still fail. Admin warning render-only; `allValid` is a pure extraction, Save untouched. Verified with `tsc -b apps/admin` (turbo skips it).                                                                                                                                                                                                                                                                |
+| 120  | QA-gate wiring + de-vacuate motion13 + prod-smoke cache assertion + postwipe truth               | P3       | S–M    | 113        | **DONE** — APPROVE 2026-08-22 after 2 revisions, commits `01fdfca5`, `15180171`, + header fix. **Revision 1 caught a regression that would have created the next never-green gate**: the plan's own `nodes > 0` assertion made the newly-wired nightly exit 1 on 4 of 6 surfaces. Reviewer probed `[style*="opacity"]` at 100/300/600/1200/2500/3700ms — `/` and `/slots` read 0 at EVERY point, so the heuristic was invalid, not mistimed, and unrescuable by earlier sampling; dropped, keeping `stuckHidden()` as the real vacuity guard plus the SKIP→FAIL fix. Gate now **6/6 clean, exit 0, live-verified**. `qa-reset-countdown` deliberately NOT wired (CI seeds no challenge → would be red nightly); `qa-prod-smoke` is `workflow_dispatch`-only with SHAs pinned to the repo's style; executor caught a real `inputs.base` empty-string bug in its own workflow. Postwipe balance assertion written from source, runtime-unproven. |
+| 121  | ResetCountdown bounded retry ladder                                                              | P3       | S      | —          | **DONE** — APPROVE 2026-08-22, commits `ce0c49df`+`e5acfac3`. Bounded ladder: ≤5 refreshes, 20s apart, per deadline. The three preserved properties (tick-down, late-mount, backwards-clock-is-skew) passed with ZERO test edits, as required. **The executor mutation-tested its own new tests and found two vacuous** — both ladder-stop cases remounted to a FUTURE deadline, so the outer `now >= resetAt` gate alone explained the pass and they survived removing the per-deadline keying; it added an 8th case using a new deadline that is ALSO already past, which genuinely depends on that keying.                                                                                                                                                                                                                                                                                                                                  |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (reason) | REJECTED (reason)
+
+### Round-13 execution & live verification (2026-08-22)
+
+All nine plans were executed **in dependency order** by dispatched
+`general-purpose` executors onto a single batch branch,
+`advisor/round13-batch`, each reviewed by the advisor before the next was
+dispatched. Two plans took revision rounds (116, 120); both revisions were
+triggered by the executor surfacing a defect in the PLAN rather than by
+executor error, which is the intended failure direction.
+
+**Gate results on the branch** (all run by the reviewer, not trusted from
+executor reports):
+
+| Gate                                     | Result                                        |
+| ---------------------------------------- | --------------------------------------------- |
+| Storefront `npm run typecheck`           | exit 0                                        |
+| Storefront `npm test` (vitest)           | **665/665**, 74 files (was 645 on master)     |
+| Storefront `npm run format:check`        | exit 0                                        |
+| Storefront `npm run build`               | success (24 routes)                           |
+| Backend `corepack yarn check-types`      | exit 0                                        |
+| Admin `tsc -b apps/admin/tsconfig.json`  | exit 0 (turbo skips this — must be run alone) |
+| Backend `corepack yarn test:unit`        | **1843/1844**, 1 pre-existing skip            |
+| Backend integration (cap, challenge)     | 5/5 and 17/17                                 |
+| `npm run qa:catalog-groups` (live :4000) | 15/15 ✓                                       |
+| `npm run qa:reset-countdown` (live)      | ✓ ticking, exit 0                             |
+| `node scripts/qa-motion13.mjs` (live)    | **6/6 surfaces clean, exit 0**                |
+
+**`npm run lint` exits 1 locally and that is NOT a branch defect** — both
+errors are `require()` calls in
+`.agents/skills/security-audit/validate-findings.cjs`, which is UNTRACKED
+and excluded via `.git/info/exclude`. CI's `actions/checkout` never
+materialises it, so the CI lint gate is green. `npx eslint` over every file
+this branch touched exits 0. Do not "fix" this file.
+
+**The free-pack gate cannot complete on this machine, for a reason that has
+nothing to do with plan 113.** It dies at the first `page.goto('/slots',
+{waitUntil:'networkidle'})` AFTER the customer logs in and accepts cookies.
+Diagnosed to exhaustion: with consent accepted the Meta Pixel loads
+`https://connect.facebook.net/en_US/fbevents.js`, and in Playwright's
+Chromium here that request never settles, so `networkidle` can never fire
+(the anonymous leg passes because it clicks **Reject** and the pixel never
+loads; `curl` reaches the same URL in 150ms, so it is a browser-level
+quirk, not connectivity). The goto is PRE-EXISTING code that plan 113 does
+not touch, `src/components/MetaPixel.tsx` is untouched by this branch, and
+the same step passed in the 2026-08-21 CI nightly — CI does not have this
+quirk. Plan 113's actual new mechanisms were therefore verified directly in
+a real browser with only that one request blocked; the numbers are in 113's
+status cell above. **The authoritative proof is the next nightly.**
+
+**WATCH — the next nightly run** is the real verdict for two things at once:
+that the free-pack gate finally goes green on the 5-pack CI catalog (plan
+113), and that the newly-added motion gate holds there (plan 120). If
+free-pack still fails, the failure message now prints `railRight`,
+`rightOffset`, `badgeW` and `fitted`, so that single run hands over the
+numbers instead of costing another round.
 
 ### Round-13 dependency & sequencing notes
 
