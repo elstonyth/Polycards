@@ -137,7 +137,7 @@ import {
   normalizeTierRanges,
   type TierSettingsView,
 } from './tier-settings-validate';
-import { getCardStockByHandle } from './card-stock';
+import { getCardStockByHandle, CardStockTakeError } from './card-stock';
 import {
   unlockedStages,
   payoutByRank,
@@ -4708,6 +4708,14 @@ class PacksModuleService extends MedusaService({
   // opinion about wording. The gateway call deliberately stays OUTSIDE this
   // transaction: holding an advisory lock across a third-party HTTP timeout
   // would be worse than the race being fixed.
+  //
+  // DEPENDS ON READ COMMITTED (the default; @InjectTransactionManager
+  // forwards `isolationLevel` from the caller's context and this path passes
+  // none) — the count at the locked re-read must see rows committed by
+  // whichever sibling transaction released this lock just before we acquired
+  // it; under REPEATABLE READ the count would use a snapshot from before that
+  // commit and the cap race (#429) would silently reopen. Do not compose this
+  // method into a context carrying a stricter isolation level.
   @InjectTransactionManager()
   async createGlobePayDepositCapped(
     input: {
@@ -8491,14 +8499,26 @@ class PacksModuleService extends MedusaService({
           data: { stock_earmarked: true },
         });
       } catch (err) {
+        // A CardStockTakeError means SOME of the plan's levels were already
+        // adjusted before the throw (adjustInventory commits per call, so
+        // there is nothing to roll back) — the counter now sits below true
+        // stock by those units, the opposite direction of a take that never
+        // started.
+        const appliedQty =
+          err instanceof CardStockTakeError
+            ? err.applied.reduce((s, t) => s + t.qty, 0)
+            : 0;
         // eslint-disable-next-line no-console
         console.warn(
-          '[settleChallengeWeek] stock take failed AFTER the payout committed — counter reads high, prize already granted',
+          appliedQty > 0
+            ? '[settleChallengeWeek] stock take PARTIALLY applied then failed — counter reads LOW by the applied units and the pulls stay unflagged (buyback will not restore them); reconcile by hand'
+            : '[settleChallengeWeek] stock take failed AFTER the payout committed — counter reads high, prize already granted',
           {
             customer_id: winner.customerId,
             week_start: weekStartIso,
             handle: r.handle,
             qty: r.qty,
+            applied_qty: appliedQty,
             error: String(err),
           },
         );
