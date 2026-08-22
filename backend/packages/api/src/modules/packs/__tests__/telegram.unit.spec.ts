@@ -1,9 +1,11 @@
 import sharp from 'sharp';
 import {
+  blackBackedPhoto,
   buildApexCaption,
   escapeHtml,
   postApexPull,
   resetTelegramWarnings,
+  SCAFFOLD_MAX,
   type ApexCaptionInput,
 } from '../telegram';
 
@@ -71,11 +73,83 @@ describe('buildApexCaption', () => {
       1024,
     );
   });
+
+  // Step 4 regression: the OLD clamp was a blind `caption.slice(0, 1023)` on
+  // an already-HTML-escaped string, which could cut mid-tag or mid-entity —
+  // and every send uses parse_mode: 'HTML', so a bisected tag/entity 400s.
+  // clipEscaped clips each field BEFORE it is wrapped in a tag, so this
+  // pathological input must still come out as valid, well-formed HTML.
+  it('keeps the caption valid HTML after clamping pathologically long fields', () => {
+    const text = caption({
+      cardName: 'x'.repeat(500),
+      packTitle: 'y'.repeat(500),
+    });
+    expect(text.length).toBeLessThanOrEqual(1024);
+    // A real entity is always &amp; &lt; &gt; or &quot; — any OTHER '&' means
+    // clipEscaped cut through one instead of trimming back before it.
+    expect(/&(?!amp;|lt;|gt;|quot;)/.test(text)).toBe(false);
+    // No bisected tag: every opened <b>/<a> is closed.
+    expect((text.match(/<b>/g) ?? []).length).toBe(
+      (text.match(/<\/b>/g) ?? []).length,
+    );
+    expect((text.match(/<a /g) ?? []).length).toBe(
+      (text.match(/<\/a>/g) ?? []).length,
+    );
+  });
+
+  // Drift guard for the Step 4 budget: SCAFFOLD_MAX must stay >= the real
+  // fixed cost of the template (tags, labels, emoji, both conditional
+  // grade/set branches, and the deliberately-unclipped tier/price/URLs) or
+  // PER_FIELD's derivation stops holding — see the comment on SCAFFOLD_MAX
+  // in telegram.ts for the full arithmetic. Isolated the same way it was
+  // measured: who/cardName/packTitle at '' (0 chars via clipEscaped),
+  // grade/set at a 1-char placeholder each (forces BOTH conditional
+  // branches on), then the 2 placeholder chars are subtracted back out.
+  it('keeps the caption scaffolding inside SCAFFOLD_MAX (Step 4 budget)', () => {
+    const scaffolded = buildApexCaption({
+      who: '',
+      profileUrl: `https://polycards.gg/profile/${'x'.repeat(60)}`,
+      rarity: 'Legendary',
+      cardName: '',
+      grade: 'x',
+      set: 'x',
+      packTitle: '',
+      priceMyr: 1234567.89,
+      siteUrl: 'https://polycards.gg',
+    });
+    expect(scaffolded.length - 2).toBeLessThanOrEqual(SCAFFOLD_MAX);
+  });
 });
 
 describe('escapeHtml', () => {
   it('escapes &, < and > (and & first, so it is not double-escaped)', () => {
     expect(escapeHtml('a & <b> "c"')).toBe('a &amp; &lt;b&gt; &quot;c&quot;');
+  });
+});
+
+// Pins Step 2's wiring: blackBackedPhoto now fetches through the SSRF-guarded
+// fetchBytes (shared with bake-slab.ts) instead of a bare `fetch`.
+describe('blackBackedPhoto', () => {
+  const realFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = realFetch;
+  });
+
+  // A private-host URL must be rejected by the allowlist BEFORE any network
+  // call, not after — a bare `fetch` (the pre-fix bug) would have dialled
+  // 127.0.0.1 first and only failed on connection refused/timeout.
+  it('rejects a private-host URL via the allowlist, without ever calling fetch', async () => {
+    let fetchCalled = false;
+    global.fetch = (async () => {
+      fetchCalled = true;
+      throw new Error('fetch should never be reached for a blocked host');
+    }) as unknown as typeof fetch;
+
+    const result = await blackBackedPhoto('http://127.0.0.1/x.png');
+
+    expect(result).toBeNull();
+    expect(fetchCalled).toBe(false);
   });
 });
 
@@ -135,6 +209,23 @@ const EVENT = {
   card_id: 'meowth',
   customer_id: 'cus_1',
 };
+
+// `card.slab_image ?? card.image ?? null` only lands on null when BOTH are
+// nullish (?? doesn't fall through on ''), so image: '' here means "no
+// photo" — isolates a test to the text-only sendMessage path with no photo
+// fetch/upload calls to also mock.
+const NO_PHOTO_CARDS = [
+  {
+    name: 'Meowth',
+    set: 'ME02',
+    grader: 'PSA',
+    grade: '10',
+    market_value: 100,
+    market_multiplier: 1.2,
+    image: '',
+    slab_image: null,
+  },
+];
 
 describe('postApexPull', () => {
   let sent: unknown[];
@@ -233,6 +324,30 @@ describe('postApexPull', () => {
     expect(call.body.photo).toBe('https://cdn.example/m.png');
   });
 
+  // Step 3 regression: before the fix, a REJECTED (thrown) photo send escaped
+  // sendApexPost entirely, skipping the documented sendMessage fallback —
+  // postApexPull's outer catch then dropped the WHOLE post silently, not just
+  // the photo. A non-ok JSON response (the test above) was already handled;
+  // this pins the THROW case specifically.
+  it('falls back to sendMessage when the photo send REJECTS, not just returns ok:false', async () => {
+    global.fetch = (async (url: string, init?: { body?: unknown }) => {
+      const u = String(url);
+      if (u.startsWith('https://cdn.example/')) return { ok: false }; // art unfetchable -> URL photo path
+      if (u.includes('/sendPhoto')) throw new Error('ECONNRESET');
+      sent.push({ url: u, body: JSON.parse(init!.body as string) });
+      return { json: async () => ({ ok: true, result: { message_id: 55 } }) };
+    }) as unknown as typeof fetch;
+
+    const result = await postApexPull(fakeContainer({}), EVENT);
+
+    expect(sent).toHaveLength(1);
+    const [call] = sent as { url: string; body: { text: string } }[];
+    expect(call.url).toContain('/sendMessage');
+    expect(call.body.text).toContain('LEGENDARY PULL');
+    expect(result?.caption).toContain('LEGENDARY PULL');
+    expect(result?.messageId).toBe(55);
+  });
+
   it('falls back to the anonymous Collector name when first_name is blank', async () => {
     const container = fakeContainer({});
     const anon = {
@@ -267,6 +382,44 @@ describe('postApexPull', () => {
     const posted = await postApexPull(fakeContainer({}), EVENT);
     expect(posted?.messageId).toBeNull();
     expect(posted?.caption).toContain('LEGENDARY PULL');
+  });
+
+  // Step 6: a 429 means Telegram did NOT deliver the message, so exactly one
+  // bounded retry cannot duplicate a post. NO_PHOTO_CARDS isolates this to
+  // the sendMessage path alone so the fetch mock only has one call shape to
+  // handle.
+  it('retries once on a 429, waiting retry_after seconds (bounded to 5s)', async () => {
+    jest.useFakeTimers();
+    try {
+      let calls = 0;
+      global.fetch = (async (url: string, init: { body: string }) => {
+        calls++;
+        if (calls === 1) {
+          return {
+            json: async () => ({
+              ok: false,
+              error_code: 429,
+              parameters: { retry_after: 1 },
+            }),
+          };
+        }
+        sent.push({ url, body: JSON.parse(init.body) });
+        return { json: async () => ({ ok: true, result: { message_id: 77 } }) };
+      }) as unknown as typeof fetch;
+
+      const pending = postApexPull(
+        fakeContainer({ cards: NO_PHOTO_CARDS }),
+        EVENT,
+      );
+      await jest.advanceTimersByTimeAsync(1000);
+      const result = await pending;
+
+      expect(calls).toBe(2);
+      expect(sent).toHaveLength(1);
+      expect(result?.messageId).toBe(77);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('posts an Immortal pull (above the bar)', async () => {
