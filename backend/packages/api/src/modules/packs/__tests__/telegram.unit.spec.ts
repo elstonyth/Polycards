@@ -79,10 +79,18 @@ describe('buildApexCaption', () => {
   // and every send uses parse_mode: 'HTML', so a bisected tag/entity 400s.
   // clipEscaped clips each field BEFORE it is wrapped in a tag, so this
   // pathological input must still come out as valid, well-formed HTML.
-  it('keeps the caption valid HTML after clamping pathologically long fields', () => {
+  //
+  // The fields MUST be entity-dense (not plain 'x'/'y' repeats) or this test
+  // is vacuous: a plain-char field never puts a '&' near the cut point, so
+  // the assertion below would pass identically even with clipEscaped's
+  // trim-back deleted (i.e. a bare `slice(0, max) + '…'`). '&' escapes to
+  // '&amp;' (5 chars) and '"' to '&quot;' (6 chars); PER_FIELD (~131) is a
+  // multiple of neither, so the raw cut is GUARANTEED to land mid-entity for
+  // both fields, forcing clipEscaped's trim-back to actually fire.
+  it('keeps the caption valid HTML after clamping entity-dense, pathologically long fields', () => {
     const text = caption({
-      cardName: 'x'.repeat(500),
-      packTitle: 'y'.repeat(500),
+      cardName: '&'.repeat(500),
+      packTitle: '"'.repeat(500),
     });
     expect(text.length).toBeLessThanOrEqual(1024);
     // A real entity is always &amp; &lt; &gt; or &quot; — any OTHER '&' means
