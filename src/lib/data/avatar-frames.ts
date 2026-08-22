@@ -4,13 +4,20 @@
  * data getters; failures degrade to {} (avatars render frameless).
  */
 import 'server-only';
-import { cache } from 'react';
 import { sdk } from '@/lib/medusa';
 import { logger } from '@/lib/logger';
 import { parseOne, AvatarFramesSchema } from '@/lib/data/schemas';
+import { cached } from '@/lib/ttl-cache';
 
-export const getAvatarFrames = cache(
-  async (): Promise<Record<string, string>> => {
+// A milestone-frame catalog changes when the operator adds a frame — never
+// between two page views. React's cache() only deduped this WITHIN one request,
+// so /leaderboard (and every profile) paid a fresh backend hop, and a DB read
+// behind it, per visitor; unlike the pack and board routes this one has no
+// backend-side cache to fall back on. 60s over a catalog that changes monthly.
+const FRAMES_TTL_MS = 60_000;
+
+export function getAvatarFrames(): Promise<Record<string, string>> {
+  return cached('avatar-frames', FRAMES_TTL_MS, async () => {
     try {
       const parsed = parseOne(
         AvatarFramesSchema,
@@ -21,5 +28,5 @@ export const getAvatarFrames = cache(
       logger.error('[avatar-frames] catalog load failed:', error);
       return {};
     }
-  },
-);
+  });
+}

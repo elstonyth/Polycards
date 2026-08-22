@@ -14,6 +14,7 @@
  */
 
 import { unstable_cache } from 'next/cache';
+import { cached } from '@/lib/ttl-cache';
 import { sdk } from '@/lib/medusa';
 import { logger } from '@/lib/logger';
 import { formatValue, isRarity, type PublishedOdds } from '@/lib/packs-format';
@@ -88,7 +89,7 @@ const titleCase = (key: string): string =>
  * empty categories and the pages render their empty states. Presentational
  * labels/icons come from the local category meta.
  */
-export async function getPackCategories(): Promise<PackCategory[]> {
+async function loadPackCategories(): Promise<PackCategory[]> {
   try {
     const { packs } = await sdk.client.fetch<{ packs: BackendPack[] }>(
       '/store/packs',
@@ -132,6 +133,18 @@ export async function getPackCategories(): Promise<PackCategory[]> {
     // Backend unreachable — truthfully show no packs rather than a mock set.
     return CATEGORY_META.map((cat) => ({ ...cat, packs: [] }));
   }
+}
+
+// Matches the backend's own 30s window on GET /store/packs. The catalog is the
+// same for every visitor, but /slots and /leaderboard read auth cookies, so
+// those pages can never be statically rendered — without this every request
+// re-pays the backend hop and the zod parse for a body the backend is already
+// serving from cache.
+const CATALOG_TTL_MS = 30_000;
+
+/** Pack catalog, memoised per process for one backend cache window. */
+export function getPackCategories(): Promise<PackCategory[]> {
+  return cached('pack-categories', CATALOG_TTL_MS, loadPackCategories);
 }
 
 export interface PackBase {

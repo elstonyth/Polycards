@@ -15,6 +15,7 @@ vi.mock('@/lib/logger', () => ({
 }));
 
 import { getPackCategories } from '@/lib/data/packs';
+import { clearTtlCache } from '@/lib/ttl-cache';
 
 const row = (over: Record<string, unknown> = {}) => ({
   slug: 'bronze-pack',
@@ -39,6 +40,9 @@ const firstPack = async () => {
 
 beforeEach(() => {
   fetchMock.mockReset();
+  // getPackCategories is memoised per process for one backend cache window, so
+  // without this the FIRST fixture's catalog is served to every later case.
+  clearTtlCache();
 });
 
 describe('pack price: display vs charge', () => {

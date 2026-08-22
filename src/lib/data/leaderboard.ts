@@ -17,6 +17,7 @@ import { logger } from '@/lib/logger';
 import { avatarForSeed } from '@/lib/profile-view';
 import { rm } from '@/lib/format';
 import { parseList, LeaderboardEntrySchema } from '@/lib/data/schemas';
+import { cached } from '@/lib/ttl-cache';
 
 export type LeaderboardPeriod = 'weekly' | 'alltime';
 
@@ -55,6 +56,28 @@ interface BackendEntry {
  * shape, assigning a deterministic avatar from the PII-safe seed. Returns []
  * on any backend failure or an empty ledger — never fake rows.
  */
+// Matches the backend's own 30s window on GET /store/leaderboard. Only the raw
+// rows are memoised — the frame enrichment below depends on the caller's avatar
+// catalog promise, which is not a cache key. The board renders on the home page
+// AND /leaderboard, both of which read auth cookies elsewhere in the tree and so
+// can never be statically rendered; without this each request re-pays the
+// backend hop and the zod parse for an already-cached body.
+const BOARD_TTL_MS = 30_000;
+
+/** Parsed board rows for a period, memoised per process for one window. */
+function fetchBoard(period: LeaderboardPeriod): Promise<BackendEntry[]> {
+  return cached(`leaderboard:${period}`, BOARD_TTL_MS, async () => {
+    const { entries } = await sdk.client.fetch<{ entries: BackendEntry[] }>(
+      `/store/leaderboard?period=${period}`,
+    );
+    if (!Array.isArray(entries) || entries.length === 0) return [];
+    return parseList(
+      LeaderboardEntrySchema,
+      entries,
+    ) as unknown as BackendEntry[];
+  });
+}
+
 export async function getLeaderboard(
   period: LeaderboardPeriod = 'weekly',
   // Accepts the pending catalog promise so callers can start this fetch and
@@ -63,15 +86,11 @@ export async function getLeaderboard(
   framesInput: Record<string, string> | Promise<Record<string, string>> = {},
 ): Promise<LeaderboardEntry[]> {
   try {
-    const { entries } = await sdk.client.fetch<{ entries: BackendEntry[] }>(
-      `/store/leaderboard?period=${period}`,
-    );
-    if (!Array.isArray(entries) || entries.length === 0) return [];
+    const entries = await fetchBoard(period);
+    if (entries.length === 0) return [];
     const frames = await framesInput;
 
-    return (
-      parseList(LeaderboardEntrySchema, entries) as unknown as BackendEntry[]
-    ).map((e, i) => ({
+    return entries.map((e, i) => ({
       rank: i + 1,
       name: e.name,
       handle: typeof e.handle === 'string' ? e.handle : null,
