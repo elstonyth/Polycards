@@ -44,8 +44,15 @@ const stuckHidden = () =>
       .slice(0, 5),
   );
 
-// How many motion-driven nodes mounted at all. If motion failed to initialise,
-// this collapses to 0 and "no stuck nodes" would be vacuously true.
+// How many motion-driven nodes mounted at all — diagnostic only, NOT part of
+// the pass/fail verdict. Measured empirically (2026-08-22, local prod build,
+// :4000, sampled 100ms-3.7s post-navigation): on `/` and `/slots` this is 0
+// at every sampled point, because those pages' motion trees never leave an
+// inline `opacity` in the style attribute — so a zero count can't
+// distinguish "motion never ran" from "motion ran and doesn't linger in
+// style." The real vacuity guard is stuckHidden() above: if motion failed to
+// initialise, Reveal-wrapped content would be STUCK at opacity 0 and
+// stuckOpacity0 would catch it.
 const motionNodes = () =>
   page.evaluate(() => document.querySelectorAll('[style*="opacity"]').length);
 
@@ -66,13 +73,10 @@ async function visit(name, url, after) {
   const hidden = await stuckHidden();
   const nodes = await motionNodes();
   const fresh = errors.slice(before);
-  const pass = fresh.length === 0 && hidden.length === 0 && nodes > 0;
+  const pass = fresh.length === 0 && hidden.length === 0;
   console.log(
     `${pass ? 'PASS' : 'FAIL'} ${name} ` +
-      `errors=${fresh.length} stuckOpacity0=${hidden.length} motionNodes=${nodes}` +
-      (nodes === 0
-        ? ' (zero motion-driven nodes — did motion initialise at all?)'
-        : ''),
+      `errors=${fresh.length} stuckOpacity0=${hidden.length} motionNodes=${nodes}`,
   );
   if (fresh.length) console.log('   ' + fresh.slice(0, 3).join('\n   '));
   if (hidden.length) console.log('   stuck: ' + hidden.join(' | '));
