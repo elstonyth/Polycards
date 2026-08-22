@@ -4,9 +4,10 @@ import type { MedusaContainer } from '@medusajs/framework/types';
 // Per-process cache of the public-profile body (GET /store/profiles/:handle),
 // the leaderboard pattern: profile stats are per-customer aggregates over the
 // pull/ledger history, too expensive to recompute on every render of /me and
-// /profile/:handle. Upgrade to Redis if we ever run >1 backend instance —
-// invalidation below is per-process, so a second instance would still serve
-// its own copy for up to the TTL.
+// /profile/:handle. >1 instance since #473: per-process is accepted — the
+// invalidation below only clears the writing instance's Map, so a second
+// instance still serves its own copy for up to the TTL, display-only either
+// way. Decision + upgrade path recorded in plan 116.
 //
 // It lives here rather than inside the route module so the MUTATIONS that must
 // be visible immediately (the vault showcase toggle) can evict the entry

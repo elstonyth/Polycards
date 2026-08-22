@@ -27,8 +27,10 @@ const FETCH_N = TOP_N * 2;
 // aggregates (community pool + top-N pull value) whose cost grows with pull
 // history, on a public unauthenticated route. Same TTL as the sibling
 // leaderboard board (so /task and the weekly board converge within one
-// window); upgrade to Redis if we ever run >1 instance. No query params → one
-// entry.
+// window). No query params → one entry.
+// >1 instance since #473: per-process is accepted — N instances = N
+// computes per window and ≤TTL cross-instance skew, display-only either
+// way. Decision + upgrade path recorded in plan 116.
 const CACHE_TTL_MS = 30_000;
 let challengeCache: { expires: number; body: unknown } | null = null;
 
