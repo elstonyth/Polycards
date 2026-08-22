@@ -3,9 +3,16 @@
 //
 // motion 13.0.0's only breaking change is the removal of the optional
 // @emotion/is-prop-valid integration; a break would surface as a runtime
-// console error or as motion nodes frozen at their `initial` style. So the
-// assertions are: zero page errors, and every motion-owned node ends up with a
-// non-zero opacity (i.e. its enter animation actually resolved).
+// console error or as motion nodes frozen at their `initial` style. So, per
+// surface, the assertions are: zero console/page errors, and zero on-screen
+// nodes stuck at opacity 0 (stuckHidden() below catches a frozen `initial`
+// style).
+//
+// `motionNodes` is printed per surface as diagnostics only and is NOT
+// asserted — see the comment above its definition for why.
+//
+// A missing pack link on /slots is not a skip: it fails the three
+// dependent surfaces (pack-detail, card-overlay, demo-spin) instead.
 import { chromium } from 'playwright';
 
 const BASE = process.argv[2] ?? 'http://127.0.0.1:4000';
