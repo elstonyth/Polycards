@@ -10,6 +10,7 @@ import {
   resolveFxRate,
 } from './pricing';
 import { publicProfileFields, seedOf } from '../../utils/profile-handle';
+import { fetchBytes, MAX_DECODE_PIXELS } from '../../api/utils/image-fetch';
 
 // Telegram "apex pull" board — posts every Legendary-or-better pull to the
 // public POLYCARDS.GG channel, so the community sees the big hits land in real
@@ -78,6 +79,53 @@ const DEFAULT_SITE_URL = 'https://polycards.gg';
  *  exists so a pathological card/pack name can never 400 the whole post. */
 const CAPTION_LIMIT = 1024;
 
+/** Clip an already-HTML-escaped, tag-free field to `max` visible-ish chars
+ *  without bisecting an entity. Fields carry entities (&amp; &lt; &gt;
+ *  &quot;) but NO tags — tags are added by buildApexCaption around these
+ *  clipped values — so the only hazard is cutting mid-entity, which we undo
+ *  by trimming back to before a trailing `&` that has no following `;`. */
+function clipEscaped(escaped: string, max: number): string {
+  if (escaped.length <= max) return escaped;
+  let cut = escaped.slice(0, max);
+  const amp = cut.lastIndexOf('&');
+  if (amp !== -1 && !cut.slice(amp).includes(';')) cut = cut.slice(0, amp);
+  return `${cut}…`;
+}
+
+// SCAFFOLD_MAX / PER_FIELD together make the final CAPTION_LIMIT clamp below
+// unreachable-by-construction instead of a blind slice: every field is
+// escaped THEN clipped (clipEscaped, entity-aware) before it goes into a tag,
+// so the assembled caption can never bisect a `<b>`/`<a>` tag or an entity.
+//
+// SCAFFOLD_MAX reserves room for everything in buildApexCaption that is NOT
+// one of the five clipped fields (who, cardName, grade, set, packTitle):
+// the fixed template text (emoji — surrogate pairs, 2 UTF-16 units each —
+// tags, labels, newlines, the conditional ` · ` grade separator and the
+// conditional whole `🃏` set line), PLUS the three other inputs that are
+// deliberately left UNCLIPPED: the uppercased rarity tier, the formatted
+// price, and profileUrl/siteUrl (operator config — a clipped URL is broken,
+// so these are exactly what the reserve is for, not the fields).
+//
+// Measured empirically (not hand-counted — the emoji are surrogate pairs),
+// 2026-08-22: assembling the caption with who/cardName/packTitle = '' (they
+// contribute 0 via clipEscaped), grade = set = 'x' (1 char each, just to
+// force BOTH conditional branches on), rarity = 'Legendary' (the longer of
+// the two apex tiers that can reach this function, ties 'Immortal' at
+// uppercase length 9), a 7-figure MYR price, and a 90-char profileUrl
+// (default site origin + '/profile/' + a 60-char handle — HANDLE_RE's own
+// max; deriveHandle's real ceiling is 45) measured 317 total; subtracting
+// the 2 placeholder chars from grade/set gives a fixed cost of 315. The
+// 'scaffolding stays inside SCAFFOLD_MAX' spec in telegram.unit.spec.ts
+// re-measures this on every run — it is the drift guard if anyone adds a
+// caption line, and it fails long before the inequality below could stop
+// closing.
+export const SCAFFOLD_MAX = 360;
+// clipEscaped appends '…' on a clip, so a clipped field can be PER_FIELD + 1
+// chars, and there are 5 fields — hence "- 5" below reserves one ellipsis
+// per field, not a spare character. Closes with margin: 5*(131+1) + 360 =
+// 1020 <= 1024.
+const PER_FIELD = Math.floor((CAPTION_LIMIT - SCAFFOLD_MAX - 5) / 5); // 131
+
 /** Telegram's `parse_mode: HTML` needs these escaped. first_name and the
  *  profile handle are customer-controlled at signup, so an unescaped caption
  *  would let a customer inject markup (or a link) into a public marketing
@@ -124,7 +172,7 @@ export type ApexCaptionInput = {
 export function buildApexCaption(input: ApexCaptionInput): string {
   const emoji = rarityEmoji(input.rarity);
   const tier = input.rarity.toUpperCase();
-  const who = escapeHtml(input.who);
+  const who = clipEscaped(escapeHtml(input.who), PER_FIELD);
   const name = input.profileUrl
     ? `<a href="${escapeHtml(input.profileUrl)}">${who}</a>`
     : who;
@@ -132,24 +180,31 @@ export function buildApexCaption(input: ApexCaptionInput): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
+  const cardName = clipEscaped(escapeHtml(input.cardName), PER_FIELD);
+  const grade = clipEscaped(escapeHtml(input.grade.trim()), PER_FIELD);
+  const set = clipEscaped(escapeHtml(input.set.trim()), PER_FIELD);
+  const packTitle = clipEscaped(escapeHtml(input.packTitle), PER_FIELD);
 
   const lines = [
     `${emoji} <b>${tier} PULL</b> ${emoji}`,
     '',
     `🎉 Congratulations <b>${name}</b>!`,
     '',
-    `💎 <b>${escapeHtml(input.cardName)}</b>${
-      input.grade.trim() ? ` · ${escapeHtml(input.grade.trim())}` : ''
-    }`,
+    `💎 <b>${cardName}</b>${input.grade.trim() ? ` · ${grade}` : ''}`,
   ];
-  if (input.set.trim()) lines.push(`🃏 ${escapeHtml(input.set.trim())}`);
+  if (input.set.trim()) lines.push(`🃏 ${set}`);
   lines.push(
-    `🎰 Pulled from <b>${escapeHtml(input.packTitle)}</b>`,
+    `🎰 Pulled from <b>${packTitle}</b>`,
     `💰 Market value <b>RM ${price}</b>`,
     '',
     `🔗 <a href="${escapeHtml(input.siteUrl)}">Open your own pack at polycards.gg</a>`,
   );
 
+  // Belt-and-braces only: every field above is already bounded by
+  // clipEscaped, so this is unreachable for any input the SCAFFOLD_MAX /
+  // PER_FIELD budgets allow (see the comment on SCAFFOLD_MAX). It is NOT
+  // relied on for HTML-safety — a raw slice here could still bisect a tag
+  // or entity, which is exactly the bug the budgets above exist to avoid.
   const caption = lines.join('\n');
   return caption.length > CAPTION_LIMIT
     ? `${caption.slice(0, CAPTION_LIMIT - 1)}…`
@@ -159,6 +214,11 @@ export function buildApexCaption(input: ApexCaptionInput): string {
 type TelegramResult = {
   ok: boolean;
   description?: string;
+  /** Telegram's rate-limit code (429) and the seconds it says to wait before
+   *  retrying. Loosely typed — this is the one Telegram error shape
+   *  postApexPull acts on; every other error path only reads `description`. */
+  error_code?: number;
+  parameters?: { retry_after?: number };
   /** Telegram's own payload. Only message_id is read — it is what lets an
    *  operator (or the pre-flight script) delete one specific post again. */
   result?: { message_id?: number };
@@ -212,13 +272,18 @@ const PHOTO_UPLOAD_LIMIT = 10 * 1024 * 1024;
  * art is a localhost URL), a non-image body, an oversized result — because the
  * caller's fallback is to hand Telegram the URL, which is exactly the old
  * behaviour. Never throws: a background colour must not be able to cost us the
- * post.
+ * post. The fetch itself is host-validated and redirect-checked (fetchBytes,
+ * shared with bake-slab.ts's admin image fetch) rather than a bare `fetch` —
+ * a blocked URL degrades to the URL photo fallback exactly like an
+ * unreachable one.
  */
 export async function blackBackedPhoto(url: string): Promise<Buffer | null> {
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
-    if (!res.ok) return null;
-    const flattened = await sharp(Buffer.from(await res.arrayBuffer()))
+    const bytes = await fetchBytes(url);
+    if (!bytes) return null;
+    const flattened = await sharp(bytes, {
+      limitInputPixels: MAX_DECODE_PIXELS,
+    })
       .flatten({ background: PHOTO_BACKGROUND })
       .jpeg({ quality: 90 })
       .toBuffer();
@@ -251,13 +316,26 @@ async function uploadApexPhoto(
   return (await res.json()) as TelegramResult;
 }
 
+/** Turn a rejected promise into an `ok: false` result instead of letting it
+ *  escape as a throw. Used only on the two photo-send paths (below) so a
+ *  network error, an `AbortSignal.timeout`, or a non-JSON 5xx body from an
+ *  edge proxy degrades to the text fallback instead of skipping it — never
+ *  on the final `sendMessage`, whose throw must keep propagating to
+ *  postApexPull's catch. */
+const attempt = async (p: Promise<TelegramResult>): Promise<TelegramResult> =>
+  p.catch((err) => ({
+    ok: false,
+    description: err instanceof Error ? err.message : String(err),
+  }));
+
 /** Post as a photo when we have an image, else as text. Two photo paths: the
  *  preferred one uploads bytes we flattened onto black ourselves; if that
- *  fails for any reason we hand Telegram the URL as before, so a broken
+ *  fails for any reason — including a thrown network/timeout error, not just
+ *  a non-ok response — we hand Telegram the URL as before, so a broken
  *  composite step costs the backdrop, never the post. The text fallback then
- *  covers a failed photo entirely: locally the card image is a localhost URL
- *  Telegram cannot reach, and a silent drop would make the board look broken
- *  in dev. */
+ *  genuinely covers a failed photo entirely, thrown or not: locally the card
+ *  image is a localhost URL Telegram cannot reach, and a silent drop would
+ *  make the board look broken in dev. */
 export async function sendApexPost(
   token: string,
   chatId: string,
@@ -267,13 +345,15 @@ export async function sendApexPost(
   if (photoUrl) {
     const bytes = await blackBackedPhoto(photoUrl);
     const photo = bytes
-      ? await uploadApexPhoto(token, chatId, caption, bytes)
-      : await callTelegram(token, 'sendPhoto', {
-          chat_id: chatId,
-          photo: photoUrl,
-          caption,
-          parse_mode: 'HTML',
-        });
+      ? await attempt(uploadApexPhoto(token, chatId, caption, bytes))
+      : await attempt(
+          callTelegram(token, 'sendPhoto', {
+            chat_id: chatId,
+            photo: photoUrl,
+            caption,
+            parse_mode: 'HTML',
+          }),
+        );
     if (photo.ok) return photo;
   }
   return callTelegram(token, 'sendMessage', {
@@ -411,12 +491,24 @@ export async function postApexPull(
     });
 
     // The baked slab is the hero image; raw cards fall back to the bare photo.
-    const result = await sendApexPost(
-      token,
-      chatId,
-      caption,
-      card.slab_image ?? card.image ?? null,
-    );
+    const photoUrl = card.slab_image ?? card.image ?? null;
+    let result = await sendApexPost(token, chatId, caption, photoUrl);
+    // A 429 means Telegram did NOT deliver the message, so exactly one retry
+    // cannot duplicate a post — the no-duplicate-post rule above is about
+    // redelivery on a THROW, which this branch never does. Bounded hard: one
+    // retry, 5s ceiling, because this runs inside an event-bus worker slot
+    // and must not back up under a rate-limit storm. Never extend this retry
+    // to any other non-ok reason — every other failure is exactly the
+    // "post dropped" case the doc comment above describes.
+    if (!result.ok && result.error_code === 429) {
+      const waitSec = Math.min(result.parameters?.retry_after ?? 1, 5);
+      logWarn(
+        container,
+        `[telegram] apex post rate-limited for pull ${event.pull_id} — retrying once after ${waitSec}s`,
+      );
+      await new Promise((r) => setTimeout(r, waitSec * 1000));
+      result = await sendApexPost(token, chatId, caption, photoUrl);
+    }
     if (!result.ok) {
       logWarn(
         container,

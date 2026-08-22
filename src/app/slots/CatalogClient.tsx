@@ -294,6 +294,7 @@ export default function CatalogClient({
 
   return (
     <div
+      data-testid="catalog-root"
       className={cn(
         'mx-auto w-full px-fluid py-4',
         // The badge is `fixed` on the bottom-right rail, floating OVER the

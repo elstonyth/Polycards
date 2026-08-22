@@ -17,8 +17,10 @@ export async function POST(
 
   const { result } = await reorderPacksWorkflow(req.scope).run({ input });
 
-  // Rank drives BOTH list orders — bust the 30s read caches so the new order
-  // shows immediately, same as every other admin pack write.
+  // Rank drives BOTH list orders — bust the 30s read caches IN THIS PROCESS.
+  // The new order is immediate on this instance; the other instance rolls
+  // over on its own ≤30s window (#473 runs 2), same as every other admin
+  // pack write.
   clearPackListCache();
   clearPackDetailCache();
   clearAdminPackListCache();

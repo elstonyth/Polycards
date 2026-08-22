@@ -101,6 +101,27 @@ medusaIntegrationTestRunner({
       ).not.toBeNull();
     });
 
+    it('does not count a pending row older than the window', async () => {
+      const customer = 'cus_cap_stale';
+      const rows = await seed(customer, CAP);
+      // updateGlobePayDeposits's generated type excludes created_at (it is
+      // ORM-managed on insert) — the same `as never` escape hatch
+      // globepay-reconcile.spec.ts uses to backdate rows for its stale-window
+      // cases.
+      await packs().updateGlobePayDeposits(
+        rows.map((r) => ({
+          id: r.id,
+          created_at: new Date(
+            Date.now() - GLOBEPAY_PENDING_WINDOW_MS - 60_000,
+          ),
+        })) as never,
+      );
+
+      expect(
+        await packs().createGlobePayDepositCapped(capped(customer)),
+      ).not.toBeNull();
+    });
+
     it('does not count another customer against this one', async () => {
       const customer = 'cus_cap_mine';
       await seed('cus_cap_theirs', CAP);

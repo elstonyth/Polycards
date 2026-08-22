@@ -10,9 +10,15 @@ vi.mock('@/lib/logger', () => ({
 }));
 
 import { getChallenge } from '@/lib/data/challenge';
+import { clearTtlCache } from '@/lib/ttl-cache';
 
 describe('getChallenge', () => {
-  beforeEach(() => fetchMock.mockReset());
+  beforeEach(() => {
+    fetchMock.mockReset();
+    // getChallenge is now memoised per process for one 30s window, so without
+    // this the FIRST test's fixture would be served to every later case.
+    clearTtlCache();
+  });
   // The clock is faked in one test below; restore it even when that test
   // throws, or every later test in this file runs frozen.
   afterEach(() => vi.useRealTimers());
@@ -348,6 +354,9 @@ describe('getChallenge', () => {
     });
     expect((await getChallenge())!.rankPrizes).toEqual([]);
 
+    // Without this, the second call would be served the cached first result
+    // instead of re-fetching — passing either way and testing nothing new.
+    clearTtlCache();
     const { progress: _p, ...rest } = active;
     fetchMock.mockResolvedValueOnce(rest);
     expect((await getChallenge())!.rankPrizes).toEqual([]);

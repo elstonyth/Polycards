@@ -1,0 +1,52 @@
+# Read-only prod smoke (scripts/qa-prod-smoke.mjs) — deliberately targets a
+# real origin, so this runs only on manual dispatch, never on a schedule or
+# per-PR. See plan 120 for why the four nightly QA gates don't include this
+# one.
+name: prod-smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      base:
+        description: Target origin
+        default: https://polycards.gg
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run prod smoke
+        run: npm run qa:prod-smoke
+        env:
+          QA_BASE: ${{ github.event.inputs.base }}
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: prod-smoke-shots
+          path: docs/research/prod-smoke/
+          retention-days: 7
+          if-no-files-found: ignore

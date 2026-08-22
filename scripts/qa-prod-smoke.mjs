@@ -3,11 +3,9 @@
 // a Next build can render a perfectly healthy empty state when the API is
 // down, so "page loaded" is not the assertion. No writes, no spin.
 import { chromium } from 'playwright';
-import { mkdirSync } from 'node:fs';
 
 const BASE = process.env.QA_BASE ?? process.argv[2] ?? 'https://polycards.gg';
 const OUT = 'docs/research/prod-smoke';
-mkdirSync(OUT, { recursive: true });
 
 const browser = await chromium.launch();
 const ctx = await browser.newContext({
@@ -40,6 +38,26 @@ await page
   .catch(() => {});
 await page.waitForTimeout(2000);
 await page.screenshot({ path: `${OUT}/home.png` });
+
+// #473's headline: "/" renders once per 15s window (route cache). The
+// regression mode is silent (page.tsx's fetchCache warning), so probe it:
+// two requests inside one window must show a cache HIT on the second.
+// Behind a CDN/edge that strips x-nextjs-cache we can't observe it —
+// SKIP LOUDLY rather than pass silently.
+const p1 = await ctx.request.get(BASE + '/');
+const p2 = await ctx.request.get(BASE + '/');
+const cacheHeader = p2.headers()['x-nextjs-cache'];
+if (cacheHeader === undefined) {
+  console.log(
+    'SKIP home route-cache probe — x-nextjs-cache not observable through this edge',
+  );
+} else {
+  check(
+    /HIT|STALE/i.test(cacheHeader),
+    'home served from the route cache',
+    `x-nextjs-cache=${cacheHeader}`,
+  );
+}
 
 // The real backend assertion: pack links only exist if the catalog API answered.
 await page.goto(BASE + '/slots', {

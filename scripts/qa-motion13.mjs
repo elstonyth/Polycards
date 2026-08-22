@@ -3,15 +3,20 @@
 //
 // motion 13.0.0's only breaking change is the removal of the optional
 // @emotion/is-prop-valid integration; a break would surface as a runtime
-// console error or as motion nodes frozen at their `initial` style. So the
-// assertions are: zero page errors, and every motion-owned node ends up with a
-// non-zero opacity (i.e. its enter animation actually resolved).
+// console error or as motion nodes frozen at their `initial` style. So, per
+// surface, the assertions are: zero console/page errors, and zero on-screen
+// nodes stuck at opacity 0 (stuckHidden() below catches a frozen `initial`
+// style).
+//
+// `motionNodes` is printed per surface as diagnostics only and is NOT
+// asserted — see the comment above its definition for why.
+//
+// A missing pack link on /slots is not a skip: it fails the three
+// dependent surfaces (pack-detail, card-overlay, demo-spin) instead.
 import { chromium } from 'playwright';
-import { mkdirSync } from 'node:fs';
 
 const BASE = process.argv[2] ?? 'http://127.0.0.1:4000';
 const OUT = 'docs/research/motion13';
-mkdirSync(OUT, { recursive: true });
 
 const errors = [];
 const browser = await chromium.launch();
@@ -46,8 +51,15 @@ const stuckHidden = () =>
       .slice(0, 5),
   );
 
-// How many motion-driven nodes mounted at all. If motion failed to initialise,
-// this collapses to 0 and "no stuck nodes" would be vacuously true.
+// How many motion-driven nodes mounted at all — diagnostic only, NOT part of
+// the pass/fail verdict. Measured empirically (2026-08-22, local prod build,
+// :4000, sampled 100ms-3.7s post-navigation): on `/` and `/slots` this is 0
+// at every sampled point, because those pages' motion trees never leave an
+// inline `opacity` in the style attribute — so a zero count can't
+// distinguish "motion never ran" from "motion ran and doesn't linger in
+// style." The real vacuity guard is stuckHidden() above: if motion failed to
+// initialise, Reveal-wrapped content would be STUCK at opacity 0 and
+// stuckOpacity0 would catch it.
 const motionNodes = () =>
   page.evaluate(() => document.querySelectorAll('[style*="opacity"]').length);
 
@@ -68,13 +80,14 @@ async function visit(name, url, after) {
   const hidden = await stuckHidden();
   const nodes = await motionNodes();
   const fresh = errors.slice(before);
+  const pass = fresh.length === 0 && hidden.length === 0;
   console.log(
-    `${fresh.length === 0 && hidden.length === 0 ? 'PASS' : 'FAIL'} ${name} ` +
+    `${pass ? 'PASS' : 'FAIL'} ${name} ` +
       `errors=${fresh.length} stuckOpacity0=${hidden.length} motionNodes=${nodes}`,
   );
   if (fresh.length) console.log('   ' + fresh.slice(0, 3).join('\n   '));
   if (hidden.length) console.log('   stuck: ' + hidden.join(' | '));
-  return fresh.length === 0 && hidden.length === 0;
+  return pass;
 }
 
 const results = [];
@@ -164,8 +177,9 @@ if (href) {
   results.push(spinOk);
 } else {
   console.log(
-    'SKIP pack-detail/card-overlay/spin — no pack link on /slots (backend down?)',
+    'FAIL pack-detail/card-overlay/spin — no pack link on /slots (backend down?)',
   );
+  results.push(false, false, false);
 }
 
 await browser.close();

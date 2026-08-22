@@ -56,7 +56,8 @@
       "saved": "Published odds saved.",
       "sum": "Tier total: {{sum}}% (tiers usually sum to 100%)",
       "ev": "Published EV",
-      "notSet": "Not set yet — the storefront hides the odds panel for this pack until you save."
+      "notSet": "Not set yet — the storefront hides the odds panel for this pack until you save.",
+      "sumWarning": "Published odds sum to {{sum}}% — the storefront will hide the Expected value row until they sum to 100."
     },
     "form": {
       "createTitle": "New pack",

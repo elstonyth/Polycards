@@ -5,8 +5,9 @@ import { createRoot, type Root } from 'react-dom/client';
 
 // The pure formatting/rollover math is covered by lib/__tests__/reset-countdown.
 // This pins the one behaviour that only exists in the component: a tab left
-// open across the reset refetches the page ONCE, so the fresh countdown never
-// sits over last week's pool and standings.
+// open across the reset refetches the page, retrying every 20s (bounded by
+// MAX_REFRESHES) while the server keeps returning the same deadline, so the
+// fresh countdown never sits indefinitely over last week's pool and standings.
 
 const refresh = vi.fn();
 // ONE object for every render, like the real App Router — a fresh object each
@@ -69,16 +70,25 @@ describe('ResetCountdown', () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 
-  test('refreshes once when the deadline passes, then counts the new week', async () => {
+  test('refreshes at the deadline, then retries every 20s while the server returns the same deadline', async () => {
     await mount();
     await advance(4000);
     expect(refresh).toHaveBeenCalledTimes(1);
     // Rolled forward: a hair under a full week, not a stuck zero.
     expect(container.textContent).toContain('6d 23h 59m 59s');
-    // Still one refresh a minute later — the rollover must not re-fire on
-    // every subsequent tick while the server response is in flight.
+    // A minute later: retries at +20s/+40s/+60s (1 initial + 3 retries) — the
+    // rollover must not re-fire on EVERY tick, only on the 20s cadence.
     await advance(60_000);
-    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledTimes(4);
+  });
+
+  test('stops retrying once MAX_REFRESHES is spent against a server that never rolls', async () => {
+    await mount();
+    // A wedged backend / disabled challenge: resetAt never changes. Advancing
+    // ten minutes covers many 20s retry windows — the ladder must still cap
+    // at MAX_REFRESHES (5) rather than polling forever.
+    await advance(10 * 60_000);
+    expect(refresh).toHaveBeenCalledTimes(5);
   });
 
   test('refreshes on mount when hydration starts after the deadline', async () => {
@@ -102,14 +112,48 @@ describe('ResetCountdown', () => {
     expect(container.textContent).toContain('00h 00m 58s');
   });
 
-  test('does not refresh again when the refreshed resetAt arrives', async () => {
+  test('a new resetAt stops the retry ladder', async () => {
     await mount();
     await advance(4000);
     expect(refresh).toHaveBeenCalledTimes(1);
     // What the server sends back after the refresh: next week's deadline. The
-    // remaining time jumps a full week, which must NOT read as a rollover.
+    // remaining time jumps a full week, which must NOT read as a rollover —
+    // and, since resetAt changed, the ladder for the old deadline is gone.
     await mount(RESET_AT + WEEK_MS);
     await advance(2000);
     expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  test('a new resetAt stops the retry ladder mid-flight, after a retry has already fired', async () => {
+    await mount();
+    await advance(4000); // past the deadline: 1st refresh
+    expect(refresh).toHaveBeenCalledTimes(1);
+    await advance(20_000); // 20s retry cadence: 2nd refresh
+    expect(refresh).toHaveBeenCalledTimes(2);
+    // The server finally rolls mid-ladder (2 of 5 refreshes spent). The new
+    // deadline is a week out, so no further refresh — for either the old
+    // budget or the new one.
+    await mount(RESET_AT + WEEK_MS);
+    await advance(60_000);
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
+  // The two cases above remount to a deadline a full WEEK out, so the outer
+  // `now >= resetAt` gate alone accounts for "no further refresh" — they'd
+  // pass even if the ladder were keyed wrong. This is the one case where the
+  // gate stays OPEN (the new deadline is also already past) so the outcome
+  // depends entirely on the retry state being keyed per-deadline: a new
+  // resetAt must start a FRESH ladder (immediate refresh), not be mistaken
+  // for a continuation of the old one (which would still be inside its 20s
+  // window and refresh nothing).
+  test('a resetAt that changes while still in the past starts a fresh ladder, not a continued retry', async () => {
+    await mount();
+    await advance(4000); // 1st refresh at the deadline
+    expect(refresh).toHaveBeenCalledTimes(1);
+    // Server rolled, but the new deadline is ALSO already past (+500 keeps it
+    // off the now===resetAt equality edge). Keyed per-deadline, this is a
+    // fresh ladder and fires immediately instead of waiting out 20s.
+    await mount(RESET_AT + 500);
+    expect(refresh).toHaveBeenCalledTimes(2);
   });
 });

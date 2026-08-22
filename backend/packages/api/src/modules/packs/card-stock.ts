@@ -189,6 +189,25 @@ export function planCardStockTake(
   return plan;
 }
 
+// Thrown by takeCardStock when a multi-level plan fails partway through.
+// adjustInventory commits per call on the inventory module's own connection —
+// there is no transaction here to roll the already-applied calls back — so a
+// mid-plan throw leaves the counter LOW by exactly `applied`'s units, not
+// unchanged. `plan` vs `applied` is what lets a catch tell "nothing moved"
+// apart from "some of it moved": comparing their lengths (or summed qty) is
+// the whole point of carrying both.
+export class CardStockTakeError extends Error {
+  constructor(
+    readonly plan: CardStockTake[],
+    readonly applied: CardStockTake[],
+    cause: unknown,
+  ) {
+    super(
+      `card stock take applied ${applied.length}/${plan.length} level adjustments: ${String(cause)}`,
+    );
+  }
+}
+
 // Take `qty` units of a card handle out of inventory. `false` = untracked
 // product (nothing counted, so the pull must not be earmarked — buyback would
 // restore a phantom unit); a TRACKED but empty handle still returns true, since
@@ -202,12 +221,22 @@ export const takeCardStock =
     const levels = await cardInventoryLevels(container, handle);
     if (levels.length === 0) return false;
     const inventory = container.resolve(Modules.INVENTORY);
-    for (const take of planCardStockTake(levels, qty)) {
-      await inventory.adjustInventory(
-        take.inventoryItemId,
-        take.locationId,
-        -take.qty,
-      );
+    const plan = planCardStockTake(levels, qty);
+    const applied: CardStockTake[] = [];
+    try {
+      for (const take of plan) {
+        await inventory.adjustInventory(
+          take.inventoryItemId,
+          take.locationId,
+          -take.qty,
+        );
+        applied.push(take);
+      }
+    } catch (err) {
+      // See CardStockTakeError above — attach the split so the caller's log
+      // can say which units actually moved (without this, a partial take is
+      // indistinguishable from none).
+      throw new CardStockTakeError(plan, applied, err);
     }
     return true;
   };

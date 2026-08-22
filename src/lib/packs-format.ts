@@ -107,8 +107,9 @@ export function tierValueRanges(
 /**
  * Expected value of one pull, from the PUBLISHED tier percentages: Σ over
  * published tiers of (average priced card in that tier) × (percent / 100).
- * Null when no published tier has a priced card — the caller then falls back
- * to the value range.
+ * Null when no published tier has a priced card, or when the published
+ * odds don't form a coherent distribution (see SUM_TOLERANCE below) — the
+ * caller then falls back to the value range.
  *
  * Mirrors the backend's `publishedEv`, but folds over DISPLAY prices (FX ×
  * markup, like every other figure on this panel) and skips unpriced cards the
@@ -132,12 +133,29 @@ export function poolExpectedValue(
   }
   let ev = 0;
   let any = false;
+  let publishedPct = 0;
+  let contributingPct = 0;
   for (const rarity of RARITIES) {
     const pct = tiers[rarity];
+    if (typeof pct !== 'number' || !Number.isFinite(pct)) continue;
+    publishedPct += pct;
     const t = sums.get(rarity);
-    if (!t || typeof pct !== 'number' || !Number.isFinite(pct)) continue;
+    if (!t) continue;
     any = true;
+    contributingPct += pct;
     ev += (t.sum / t.n) * (pct / 100);
   }
-  return any ? formatValue(Math.round(ev * 100) / 100) : null;
+  // The figure is only the promised EV when (a) the published tiers form a
+  // full distribution and (b) every published tier contributed priced
+  // cards — a tier skipped for having no prices silently deletes its
+  // probability mass. Tolerance covers admin rounding (33.3+33.3+33.4).
+  const SUM_TOLERANCE = 0.5;
+  if (
+    !any ||
+    Math.abs(publishedPct - 100) > SUM_TOLERANCE ||
+    publishedPct - contributingPct > SUM_TOLERANCE
+  ) {
+    return null;
+  }
+  return formatValue(Math.round(ev * 100) / 100);
 }

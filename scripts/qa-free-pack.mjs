@@ -32,12 +32,6 @@ const SLUG = 'qa-free-welcome';
 // ordinary money page has to be checked at the same two widths.
 const PAID_SLUG = process.env.QA_PAID_PACK ?? 'bronze-pack';
 const PASSWORD = 'QaFreePack123!';
-// Minimum breathing room between the floating badge and the nearest catalog
-// control once the page is scrolled to the end (CatalogClient reserves the
-// badge's rail as bottom padding). 16px = the badge's own `right-4` inset —
-// the page's smallest deliberate gutter, so anything under it reads as the
-// badge sitting ON the controls rather than beside it.
-const MIN_BADGE_GAP = 16;
 const ADMIN_EMAIL = process.env.QA_ADMIN_EMAIL;
 const ADMIN_PASSWORD = process.env.QA_ADMIN_PASSWORD;
 if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {
@@ -371,12 +365,13 @@ try {
   // OVER the catalog, so it gets TWO assertions — they fail on different bugs
   // and neither substitutes for the other:
   //
-  //   (a) CLEARANCE. At the end of the scroll the badge must not sit on a
-  //       catalog tile: CatalogClient reserves its rail as bottom padding
-  //       (`pb-56 lg:pb-44`, gated on the badge rendering). Delete that padding
-  //       and this fails — that is the regression this half exists to catch.
-  //       Measured against tile boxes, since a tile's Open/MAX controls live at
-  //       its bottom edge, exactly where the badge lands.
+  //   (a) RESERVED RAIL. CatalogClient reserves the badge's rail as bottom
+  //       padding (`pb-56 lg:pb-44`, gated on the badge rendering) so it never
+  //       sits on a catalog tile's Open/MAX controls. Delete that padding and
+  //       this fails — that is the regression this half exists to catch.
+  //       Asserted via computed style, not tile geometry: a short catalog (CI
+  //       mirrors prod: 5 packs) may put no tile under the badge's column at
+  //       all, which made the old geometric check pass vacuously.
   //   (b) NO TAP SWALLOWING. Mid-scroll a row still passes under the badge —
   //       padding cannot change that, only the resting position. So park a tile
   //       under the badge on purpose and tap it with a NON-forced click, making
@@ -387,7 +382,7 @@ try {
   // 700px tall on desktop, not 900: at 900 this catalog fits without scrolling
   // and the badge floats over empty footer space, which would make the tap test
   // vacuous — a real (longer) catalog always has a card row on that rail.
-  for (const [w, h, label] of [
+  for (let [w, h, label] of [
     [375, 812, 'mobile'],
     [1440, 700, 'desktop'],
   ]) {
@@ -420,37 +415,72 @@ try {
       return rows;
     };
 
-    // (a) CLEARANCE at rest, bottom of the page. Measured as a GAP, not a
-    // boolean: with the page's footer under the badge, "no intersection" is
-    // true even with the padding deleted, so a boolean here would be vacuous.
-    // Measured on this catalog, 2026-08-14 — padding deleted: desktop 6px
-    // (fails), mobile 51px; padding present: desktop 166px, mobile 259px. The
-    // gap is what the reserved rail actually buys, so the gap is asserted.
-    await page.keyboard.press('End');
-    await page.waitForTimeout(700);
-    const badgeBox = await floating.boundingBox();
-    const atRest = await scan();
-    // Only tiles on the badge's own column can be fouled by it.
-    const onRail = atRest.filter(
-      (u) =>
-        u.box.x < badgeBox.x + badgeBox.width &&
-        badgeBox.x < u.box.x + u.box.width,
-    );
-    const gap = onRail.length
-      ? Math.min(...onRail.map((u) => badgeBox.y - (u.box.y + u.box.height)))
-      : Infinity;
-    await shot(page, `badge-clearance-${label}`);
-    if (gap >= MIN_BADGE_GAP) {
+    // The desktop catalog is a fixed-width horizontal rail; a short
+    // catalog (CI = 5 packs) ends left of the fixed bottom-right badge,
+    // so no tile can ever intersect it at 1440. Measure the rail's right
+    // edge and the badge box, then re-open at a width where the badge's
+    // column overlaps the last tile by ~40px. Clamped to [1024, 1440] so
+    // the lg tile geometry (w-48) is preserved.
+    if (label === 'desktop') {
+      const initialRows = await scan();
+      const railRight = Math.max(
+        0,
+        ...initialRows.map((u) => u.box.x + u.box.width),
+      );
+      const bb = await floating.boundingBox();
+      const rightOffset = w - (bb.x + bb.width); // ≈16 (right-4)
+      const fitted = Math.floor(railRight + rightOffset + bb.width - 40);
+      if (fitted < 1024) {
+        // Self-diagnosing: print every input so a red nightly hands over the
+        // numbers instead of costing another round (the trap that let plan
+        // 107 ship red). If `fitted` is only just under 1024, the -40 overlap
+        // margin is the knob; if railRight is tiny, the catalog is genuinely
+        // too short.
+        fail(
+          `desktop: catalog too small to park a tile under the badge at any lg viewport ` +
+            `(railRight=${Math.round(railRight)} rightOffset=${Math.round(rightOffset)} ` +
+            `badgeW=${Math.round(bb.width)} fitted=${fitted}, need >=1024) — seed at least ~4 packs`,
+        );
+        continue;
+      }
+      if (fitted < w) {
+        // Reassign the loop's own `w` (declared `let` above) so scan()'s
+        // on-screen filter — which closes over `w`/`h` — sees the refitted
+        // viewport instead of comparing tiles against the stale 1440 width.
+        w = fitted;
+        await page.setViewportSize({ width: w, height: h });
+        await page.goto(`${BASE}/slots`, { waitUntil: 'networkidle' });
+        await floating.waitFor({ state: 'visible', timeout: 20000 });
+      }
+    }
+
+    // (a) RESERVED RAIL. CatalogClient reserves the badge's rail as bottom
+    // padding (`pb-56 lg:pb-44`, gated on the badge rendering). The old
+    // geometric clearance check needed a tile on the badge's column at full
+    // scroll, which a short catalog (CI mirrors prod: 5 packs) never
+    // provides — so assert the padding itself, which is what the deleted-
+    // padding regression actually removes. pb-56 = 224px, pb-44 = 176px.
+    const minPad = label === 'desktop' ? 176 : 224;
+    const pad = await page
+      .getByTestId('catalog-root')
+      .first()
+      .evaluate((el) => parseFloat(getComputedStyle(el).paddingBottom));
+    if (pad >= minPad) {
       ok(
-        `${label}: badge sits ${Math.round(gap)}px below the nearest control at full scroll`,
+        `${label}: catalog reserves ${Math.round(pad)}px bottom rail for the badge (want >= ${minPad})`,
       );
     } else {
       fail(
-        `${label}: only ${Math.round(gap)}px between the badge and a catalog control at full scroll (want >= ${MIN_BADGE_GAP}px) — the reserved rail is gone`,
+        `${label}: catalog bottom padding is ${Math.round(pad)}px (want >= ${minPad}) — the reserved badge rail is gone`,
       );
     }
 
     // (b) NO TAP SWALLOWING — park a tile under the badge, then tap it.
+    // Scroll to the end first: the padding check above reads computed style
+    // (scroll-independent), but the park loop below scrolls UP hunting for
+    // an overlap, which only finds one starting from the bottom of the page.
+    await page.keyboard.press('End');
+    await page.waitForTimeout(700);
     let nearest = null;
     let overlaps = false;
     for (let step = 0; step < 30 && !overlaps; step++) {

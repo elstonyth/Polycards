@@ -249,6 +249,16 @@ jobs:
         if: always()
         run: npm run qa:catalog-groups
 
+      # Motion-13 QA gate: the motion v12→13 major drives 8 storefront
+      # surfaces (reveal stages, overlays, the reels). Asserts real motion
+      # nodes mounted and none stuck at opacity 0, against the running
+      # storefront (:4000) + backend (:9000). `always()` for the same
+      # reason as the gates above.
+      - name: Run motion QA gate
+        id: qamotion
+        if: always()
+        run: npm run qa:motion13
+
       # Per-gate step summary: `gh run list` otherwise reports this whole job
       # as one bit, so a red nightly has meant three different single causes
       # in two weeks. Table lives in $GITHUB_STEP_SUMMARY so the run page
@@ -265,6 +275,7 @@ jobs:
             echo "| CSP | ${{ steps.csp.outcome }} |"
             echo "| Free-pack QA | ${{ steps.qafp.outcome }} |"
             echo "| Catalog-groups QA | ${{ steps.qacg.outcome }} |"
+            echo "| Motion QA | ${{ steps.qamotion.outcome }} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload report + service logs

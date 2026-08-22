@@ -16,10 +16,23 @@
 //
 // Per-process is the point, not a limitation: N storefront instances make N
 // backend calls per window instead of N x requests.
+//
+// STALENESS LADDER (worst case per layer; per instance, 2 instances of
+// each app since #473 — layers stack, they do not synchronize):
+//   backend route Map        30s (packs list/detail, leaderboard; pulls 5s)
+//   this storefront memo     30s (catalog, board) / 60s (avatar frames)
+//   home route cache         15s (src/app/page.tsx revalidate)
+//   getPackChase             60s (unstable_cache, no tags)
+// ⇒ an admin pack edit can take ~60s to reach /slots, ~75s to reach /,
+//   ~105s to reach a home chase card. Admin busts clear ONLY the writing
+//   backend instance's Maps; the other instance rolls over on TTL.
 
 type Entry = { expires: number; value: Promise<unknown> };
 
 const store = new Map<string, Entry>();
+
+// Hard bound on the store's key count — see the eviction check in cached().
+const MAX_ENTRIES = 256;
 
 /**
  * Memoise `load()` under `key` for `ttlMs`.
@@ -47,6 +60,14 @@ export function cached<T>(
 
   const value = load();
   store.set(key, { expires: Date.now() + ttlMs, value });
+  // Hard bound: keys can be attacker-influenced (recent-pulls' pack_id), and
+  // expired entries are otherwise never removed. Map iterates in insertion
+  // order, so this evicts oldest-inserted first — not LRU, but the legit key
+  // population is tiny (catalog + a few fixed keys), so anything evicted
+  // under pressure is an attacker key or long-expired.
+  if (store.size > MAX_ENTRIES) {
+    store.delete(store.keys().next().value as string);
+  }
   void value.catch(() => {
     // Only evict our own entry — a later window may have replaced it already.
     if (store.get(key)?.value === value) store.delete(key);

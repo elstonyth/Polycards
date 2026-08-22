@@ -2027,14 +2027,17 @@ const PublishedOddsSection = ({
   const validPct = (v: string) =>
     v.trim() === '' ||
     (Number.isFinite(Number(v)) && Number(v) >= 0 && Number(v) <= 100);
-  const allValid =
-    overall.trim() !== '' &&
-    validPct(overall) &&
-    RARITIES.every((r) => validPct(tiers[r] ?? ''));
+  const tiersValid = RARITIES.every((r) => validPct(tiers[r] ?? ''));
+  const allValid = overall.trim() !== '' && validPct(overall) && tiersValid;
   const sum =
     Math.round(
       RARITIES.reduce((s, r) => s + (Number(tiers[r]) || 0), 0) * 10_000,
     ) / 10_000;
+  // Mirrors the storefront's EV-row guard (src/lib/packs-format.ts
+  // poolExpectedValue, plan 119): render-only warning, never blocks Save —
+  // existing packs may already violate this and blocking would strand them.
+  const SUM_TOLERANCE = 0.5;
+  const sumMismatch = tiersValid && Math.abs(sum - 100) > SUM_TOLERANCE;
   // What the PUBLISHED percentages promise the player, priced off the pool the
   // operator is looking at — live against the tier inputs being typed (the
   // packs list carries the saved figure). The gap against the per-set EV chips
@@ -2186,6 +2189,11 @@ const PublishedOddsSection = ({
         </span>
         {` · ${t('packs.published.ev')} ${pubEv === null ? '—' : rm(pubEv)}`}
         {!pack.published_odds && ` · ${t('packs.published.notSet')}`}
+        {sumMismatch && (
+          <span className="text-ui-tag-orange-text">
+            {` · ${t('packs.published.sumWarning', { sum })}`}
+          </span>
+        )}
       </Text>
     </div>
   );

@@ -30,7 +30,10 @@ const FETCH_N = TOP_N * 2;
 // and the public profile page render the SAME avatar for the same customer.
 
 // ponytail: per-process 30s cache — the board is a global aggregate whose cost
-// grows with total pull history; upgrade to Redis if we ever run >1 instance.
+// grows with total pull history.
+// >1 instance since #473: per-process is accepted — N instances = N
+// computes per window and ≤TTL cross-instance skew, display-only either
+// way. Decision + upgrade path recorded in plan 116.
 const CACHE_TTL_MS = 30_000;
 const boardCache = new Map<string, { expires: number; body: unknown }>();
 

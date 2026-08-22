@@ -8,8 +8,9 @@ import { getAvatarFrames } from '@/lib/data/avatar-frames';
 
 // Live leaderboard + Weekly Pulled Value Challenge, aggregated from the gacha
 // Pull ledger. Fetched server-side (the storefront origin can reach the backend;
-// the browser is CORS-blocked) and rendered per-request so it always reflects
-// the current ledger.
+// the browser is CORS-blocked) and rendered per-request; standings and avatar
+// frames are memoised (30s/60s per instance, see src/lib/ttl-cache.ts) — the
+// challenge block is genuinely per-request.
 export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {

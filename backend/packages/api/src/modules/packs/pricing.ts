@@ -100,8 +100,10 @@ export async function resolveFxRateInfo(packs: FxRateSource): Promise<FxRateInfo
 
 // ponytail: 30s process cache, display reads only — the strict resolver
 // (money writes) stays uncached by design (round-3 decision). No admin-edit
-// invalidation: worst case a displayed price is 30s stale. Single-instance
-// cache; upgrade to Redis if we ever run >1 instance.
+// invalidation: worst case a displayed price is 30s stale.
+// >1 instance since #473: per-process is accepted — N instances = N
+// computes per window and ≤TTL cross-instance skew, display-only either
+// way. Decision + upgrade path recorded in plan 116.
 const FX_DISPLAY_TTL_MS = 30_000;
 let fxDisplayCache: { value: number; expiresAt: number } | null = null;
 
