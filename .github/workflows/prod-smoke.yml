@@ -40,7 +40,7 @@ jobs:
       - name: Run prod smoke
         run: npm run qa:prod-smoke
         env:
-          QA_BASE: ${{ inputs.base }}
+          QA_BASE: ${{ github.event.inputs.base }}
 
       - name: Upload screenshots
         if: always()
