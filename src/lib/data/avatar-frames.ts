@@ -30,7 +30,12 @@ export async function getAvatarFrames(): Promise<Record<string, string>> {
         AvatarFramesSchema,
         await sdk.client.fetch('/store/avatar-frames', { cache: 'no-store' }),
       );
-      return parsed ? parsed.frames : {};
+      // A schema reject is a malformed 200, not a legitimately empty catalog
+      // — throw so the TTL memo evicts instead of caching {} for the window.
+      if (!parsed) {
+        throw new Error('/store/avatar-frames body failed schema parse');
+      }
+      return parsed.frames;
     });
   } catch (error) {
     logger.error('[avatar-frames] catalog load failed:', error);

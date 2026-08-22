@@ -1,5 +1,5 @@
 import type { NextRequest } from 'next/server';
-import { getRecentPulls } from '@/lib/data/packs';
+import { getPackCategories, getRecentPulls } from '@/lib/data/packs';
 import { cached } from '@/lib/ttl-cache';
 
 // Same-origin endpoint the "Recent Pulls" feeds poll for live updates — a
@@ -33,12 +33,19 @@ export async function GET(request: NextRequest) {
   // absent = the global feed (home). Same param name as the Store route it
   // proxies, so the chain reads end-to-end without a rename. The cache key
   // carries it — a single key would serve one pack's rows to every other pack.
-  const pack = request.nextUrl.searchParams.get('pack_id')?.trim();
-  const body = await cached(
-    `recent-pulls:${pack || ''}`,
-    CACHE_TTL_MS,
-    async () =>
-      JSON.stringify({ pulls: await getRecentPulls(pack || undefined) }),
+  //
+  // Cache keys must be bounded to the real catalog, not just kebab-shaped: an
+  // unbounded valid-shaped namespace still fills the TTL Map and evicts the
+  // hot keys. getPackCategories is already cached (same 30s window), so this
+  // adds no backend hop. A slug not in the catalog scopes to the global feed —
+  // the same rows getRecentPulls returns for an unknown pack anyway, now
+  // without minting a per-garbage-key cache entry.
+  const raw = request.nextUrl.searchParams.get('pack_id')?.trim() ?? '';
+  const cats = await getPackCategories();
+  const known = new Set(cats.flatMap((c) => c.packs.map((p) => p.id)));
+  const pack = raw && known.has(raw) ? raw : '';
+  const body = await cached(`recent-pulls:${pack}`, CACHE_TTL_MS, async () =>
+    JSON.stringify({ pulls: await getRecentPulls(pack || undefined) }),
   );
   return new Response(body, {
     headers: { 'content-type': 'application/json' },

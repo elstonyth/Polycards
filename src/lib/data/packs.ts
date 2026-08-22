@@ -95,6 +95,13 @@ async function loadPackCategories(): Promise<PackCategory[]> {
       '/store/packs',
     );
 
+    // A non-array packs field is a malformed 200 (deploy skew, proxy error
+    // page, schema rename), not a legitimately empty catalog — throw so the
+    // TTL memo evicts instead of caching an all-empty catalog for the window.
+    if (!Array.isArray(packs)) {
+      throw new Error('/store/packs returned a non-array packs field');
+    }
+
     // Group backend packs by category key (response is already rank-ordered).
     // Skip malformed rows defensively — the fetch generic is a type assertion,
     // not a runtime guard, so a renamed/absent field can't silently render
@@ -102,7 +109,7 @@ async function loadPackCategories(): Promise<PackCategory[]> {
     const byCategory = new Map<string, Pack[]>();
     for (const p of parseList(
       PackRowSchema,
-      Array.isArray(packs) ? packs : [],
+      packs,
     ) as unknown as BackendPack[]) {
       const list = byCategory.get(p.category) ?? [];
       list.push(toPack(p));

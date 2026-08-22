@@ -19,6 +19,7 @@ import { rm0, compact } from '@/lib/format';
 import { avatarForSeed } from '@/lib/profile-view';
 import { parseOne, ChallengeSchema } from '@/lib/data/schemas';
 import { formatReset, nextResetAt } from '@/lib/reset-countdown';
+import { cached } from '@/lib/ttl-cache';
 
 export interface ChallengeCard {
   name: string;
@@ -127,202 +128,214 @@ export interface Challenge {
   rankPrizes: ChallengeRankPrize[];
 }
 
-export async function getChallenge(): Promise<Challenge | null> {
-  try {
-    const raw = await sdk.client.fetch<unknown>('/store/challenge');
-    const data = parseOne(ChallengeSchema, raw);
-    if (!data || !data.active || data.stages.length === 0) return null;
+// Matches the backend's own 30s window on GET /store/challenge.
+const CHALLENGE_TTL_MS = 30_000;
 
-    // ONE mapper for every prize thumbnail on the page (summary, per-stage
-    // rank table, standings prize column), so a field added to the payload
-    // reaches all three surfaces or none — they used to construct the shape
-    // inline in three places.
-    const toCard = (c: {
-      name: string;
-      image: string;
-      handle?: string | null;
-      slab_image?: string | null;
-    }): ChallengeCard => ({
-      name: c.name,
-      image: c.image,
-      handle: c.handle ?? null,
-      slabImage: c.slab_image ?? null,
+/**
+ * Throws on fetch/parse failure — the degradation is caught OUTSIDE, in
+ * getChallenge, so `cached` can tell a real failure from a genuine "off"
+ * state and evict only the former (see getPackCategories for the shape).
+ * Returns null ONLY for "challenge genuinely off" (inactive or no stages) —
+ * that null is a real, cacheable state.
+ */
+async function loadChallenge(): Promise<Challenge | null> {
+  const raw = await sdk.client.fetch<unknown>('/store/challenge');
+  const data = parseOne(ChallengeSchema, raw);
+  if (!data) {
+    throw new Error('/store/challenge body failed schema parse');
+  }
+  if (!data.active || data.stages.length === 0) return null;
+
+  // ONE mapper for every prize thumbnail on the page (summary, per-stage
+  // rank table, standings prize column), so a field added to the payload
+  // reaches all three surfaces or none — they used to construct the shape
+  // inline in three places.
+  const toCard = (c: {
+    name: string;
+    image: string;
+    handle?: string | null;
+    slab_image?: string | null;
+  }): ChallengeCard => ({
+    name: c.name,
+    image: c.image,
+    handle: c.handle ?? null,
+    slabImage: c.slab_image ?? null,
+  });
+  // Flat resolver: drop ids the backend couldn't resolve (deleted card).
+  // Used for the summary, where order/rank don't matter.
+  const resolveCards = (ids: string[]): ChallengeCard[] =>
+    ids.flatMap((id) => {
+      const c = data.cards[id];
+      return c ? [toCard(c)] : [];
     });
-    // Flat resolver: drop ids the backend couldn't resolve (deleted card).
-    // Used for the summary, where order/rank don't matter.
-    const resolveCards = (ids: string[]): ChallengeCard[] =>
-      ids.flatMap((id) => {
-        const c = data.cards[id];
-        return c ? [toCard(c)] : [];
-      });
-    // Resolver for a stage per-rank prize table. `rank` comes from the row
-    // itself, so an unresolvable card id can never shift a lower rank under the
-    // wrong numeral (the row keeps its rank and survives on its credits; with
-    // no credits it drops out entirely rather than rendering empty).
-    const rankRewardsFor = (
-      rows: { rank: number; cardId: string | null; credits: number }[],
-    ): ChallengeRankReward[] =>
-      rows
-        .slice()
-        .sort((a, b) => a.rank - b.rank)
-        .flatMap((r) => {
-          const c = r.cardId ? data.cards[r.cardId] : undefined;
-          const credits = Math.max(0, r.credits);
-          if (!c && credits === 0) return [];
-          return [
-            {
-              rank: r.rank,
-              // slabImage drives the prism frame: only a real graded slab is
-              // framed, raw card art has the wrong aspect for the band.
-              card: c ? toCard(c) : null,
-              credits,
-              creditsLabel: credits > 0 ? rm0(credits) : null,
-            },
-          ];
-        });
-    const creditsOf = (
-      rows: { rank: number; credits: number }[],
-      minRank = 1,
-    ): number =>
-      rows.reduce(
-        (sum, r) => (r.rank >= minRank ? sum + Math.max(0, r.credits) : sum),
-        0,
-      );
-
-    // `rankRewards` is optional (deploy skew) — normalize once so every
-    // consumer below reads a plain array.
-    const ordered = data.stages
+  // Resolver for a stage per-rank prize table. `rank` comes from the row
+  // itself, so an unresolvable card id can never shift a lower rank under the
+  // wrong numeral (the row keeps its rank and survives on its credits; with
+  // no credits it drops out entirely rather than rendering empty).
+  const rankRewardsFor = (
+    rows: { rank: number; cardId: string | null; credits: number }[],
+  ): ChallengeRankReward[] =>
+    rows
       .slice()
-      .sort((a, b) => a.stageNumber - b.stageNumber)
-      .map((s) => ({ ...s, rankRewards: s.rankRewards ?? [] }));
-    const top = ordered[ordered.length - 1]?.thresholdMyr ?? 0;
-    const pooled = data.progress?.pooledMyr ?? null;
-    // First stage the pool hasn't reached yet — everything before it is
-    // complete, everything after locked. null when all stages are cleared.
-    const nextStage =
+      .sort((a, b) => a.rank - b.rank)
+      .flatMap((r) => {
+        const c = r.cardId ? data.cards[r.cardId] : undefined;
+        const credits = Math.max(0, r.credits);
+        if (!c && credits === 0) return [];
+        return [
+          {
+            rank: r.rank,
+            // slabImage drives the prism frame: only a real graded slab is
+            // framed, raw card art has the wrong aspect for the band.
+            card: c ? toCard(c) : null,
+            credits,
+            creditsLabel: credits > 0 ? rm0(credits) : null,
+          },
+        ];
+      });
+  const creditsOf = (
+    rows: { rank: number; credits: number }[],
+    minRank = 1,
+  ): number =>
+    rows.reduce(
+      (sum, r) => (r.rank >= minRank ? sum + Math.max(0, r.credits) : sum),
+      0,
+    );
+
+  // `rankRewards` is optional (deploy skew) — normalize once so every
+  // consumer below reads a plain array.
+  const ordered = data.stages
+    .slice()
+    .sort((a, b) => a.stageNumber - b.stageNumber)
+    .map((s) => ({ ...s, rankRewards: s.rankRewards ?? [] }));
+  const top = ordered[ordered.length - 1]?.thresholdMyr ?? 0;
+  const pooled = data.progress?.pooledMyr ?? null;
+  // First stage the pool hasn't reached yet — everything before it is
+  // complete, everything after locked. null when all stages are cleared.
+  const nextStage =
+    pooled === null
+      ? null
+      : (ordered.find((s) => pooled < s.thresholdMyr) ?? null);
+  const unlocked =
+    pooled === null ? [] : ordered.filter((s) => pooled >= s.thresholdMyr);
+
+  // What each rank wins right now: rewards are cumulative, so a rank's prize
+  // is every unlocked stage's row at that rank. `unlocked` is ascending;
+  // cards list highest-stage-first (the headline leads) — ALL of them, the
+  // operator rejected the +N collapse — and credits sum across stages.
+  const rankPrizes: ChallengeRankPrize[] = Array.from(
+    { length: 10 },
+    (_, i) => i + 1,
+  ).flatMap((rank) => {
+    const rows = unlocked.flatMap((s) =>
+      s.rankRewards.filter((r) => r.rank === rank),
+    );
+    const cards = rows.flatMap((r) => {
+      const c = r.cardId ? data.cards[r.cardId] : undefined;
+      return c ? [c] : [];
+    });
+    const credits = rows.reduce((sum, r) => sum + Math.max(0, r.credits), 0);
+    if (cards.length === 0 && credits === 0) return [];
+    return [
+      {
+        rank,
+        cards: cards.map(toCard).reverse(),
+        creditsLabel: credits > 0 ? rm0(credits) : null,
+      },
+    ];
+  });
+
+  return {
+    resetLabel: formatReset(
+      data.settings.resetDay,
+      data.settings.resetHour,
+      data.settings.timezone,
+    ),
+    resetAt: nextResetAt(
+      data.settings.resetDay,
+      data.settings.resetHour,
+      data.settings.timezone,
+    ),
+    pool:
       pooled === null
         ? null
-        : (ordered.find((s) => pooled < s.thresholdMyr) ?? null);
-    const unlocked =
-      pooled === null ? [] : ordered.filter((s) => pooled >= s.thresholdMyr);
-
-    // What each rank wins right now: rewards are cumulative, so a rank's prize
-    // is every unlocked stage's row at that rank. `unlocked` is ascending;
-    // cards list highest-stage-first (the headline leads) — ALL of them, the
-    // operator rejected the +N collapse — and credits sum across stages.
-    const rankPrizes: ChallengeRankPrize[] = Array.from(
-      { length: 10 },
-      (_, i) => i + 1,
-    ).flatMap((rank) => {
-      const rows = unlocked.flatMap((s) =>
-        s.rankRewards.filter((r) => r.rank === rank),
-      );
-      const cards = rows.flatMap((r) => {
-        const c = r.cardId ? data.cards[r.cardId] : undefined;
-        return c ? [c] : [];
-      });
-      const credits = rows.reduce((sum, r) => sum + Math.max(0, r.credits), 0);
-      if (cards.length === 0 && credits === 0) return [];
-      return [
-        {
-          rank,
-          cards: cards.map(toCard).reverse(),
-          creditsLabel: credits > 0 ? rm0(credits) : null,
-        },
-      ];
-    });
-
-    return {
-      resetLabel: formatReset(
-        data.settings.resetDay,
-        data.settings.resetHour,
-        data.settings.timezone,
-      ),
-      resetAt: nextResetAt(
-        data.settings.resetDay,
-        data.settings.resetHour,
-        data.settings.timezone,
-      ),
-      pool:
-        pooled === null
-          ? null
-          : {
-              pooled: rm0(pooled),
-              topThreshold: rm0(top),
-              overallPct: top > 0 ? Math.min(100, (pooled / top) * 100) : 0,
-              next: nextStage
-                ? {
-                    stageNumber: nextStage.stageNumber,
-                    threshold: rm0(nextStage.thresholdMyr),
-                    remaining: rm0(
-                      Math.max(0, nextStage.thresholdMyr - pooled),
-                    ),
-                  }
-                : null,
-            },
-      summary:
-        pooled === null
-          ? null
-          : {
-              unlockedCount: unlocked.length,
-              // Dedupe by card IDENTITY (id), not image: the same card featured
-              // in two unlocked stages shows one thumb, while two distinct cards
-              // that happen to share fallback art are NOT collapsed. Dedupe the
-              // ids first, then resolve. Podium ranks (1-3) only — this feeds
-              // the "Top 3 will receive" tile, matching the `creditsOf(…, 4)`
-              // boundary just below (ranks 4+ go to the credits sheet instead).
-              cards: resolveCards([
-                ...new Set(
-                  unlocked.flatMap((s) =>
-                    s.rankRewards
-                      .filter((r) => r.rank <= 3)
-                      .map((r) => r.cardId)
-                      .filter((id): id is string => Boolean(id)),
-                  ),
-                ),
-              ]),
-              // Ranks 4-10 only, matching the stage tile (reward, below) and the
-              // "Total credits across ranks 4-10" summary label. Podium credits
-              // have no display surface (see StageCarousel), so counting them
-              // here would inflate a figure the operator can't see itemised.
-              credits: rm0(
-                unlocked.reduce(
-                  (sum, s) => sum + creditsOf(s.rankRewards, 4),
-                  0,
+        : {
+            pooled: rm0(pooled),
+            topThreshold: rm0(top),
+            overallPct: top > 0 ? Math.min(100, (pooled / top) * 100) : 0,
+            next: nextStage
+              ? {
+                  stageNumber: nextStage.stageNumber,
+                  threshold: rm0(nextStage.thresholdMyr),
+                  remaining: rm0(Math.max(0, nextStage.thresholdMyr - pooled)),
+                }
+              : null,
+          },
+    summary:
+      pooled === null
+        ? null
+        : {
+            unlockedCount: unlocked.length,
+            // Dedupe by card IDENTITY (id), not image: the same card featured
+            // in two unlocked stages shows one thumb, while two distinct cards
+            // that happen to share fallback art are NOT collapsed. Dedupe the
+            // ids first, then resolve. Podium ranks (1-3) only — this feeds
+            // the "Top 3 will receive" tile, matching the `creditsOf(…, 4)`
+            // boundary just below (ranks 4+ go to the credits sheet instead).
+            cards: resolveCards([
+              ...new Set(
+                unlocked.flatMap((s) =>
+                  s.rankRewards
+                    .filter((r) => r.rank <= 3)
+                    .map((r) => r.cardId)
+                    .filter((id): id is string => Boolean(id)),
                 ),
               ),
-            },
-      stages: ordered.map((s) => ({
-        stageNumber: s.stageNumber,
-        threshold: rm0(s.thresholdMyr),
-        thresholdCompact: `RM ${compact(s.thresholdMyr)}`,
-        reward: rm0(creditsOf(s.rankRewards, 4)),
-        rankRewards: rankRewardsFor(s.rankRewards),
-        pct: top > 0 ? Math.min(100, (s.thresholdMyr / top) * 100) : 0,
-        progressPct:
-          pooled === null
-            ? null
-            : s.thresholdMyr > 0
-              ? Math.min(100, (pooled / s.thresholdMyr) * 100)
-              : 100,
-        state:
-          pooled === null
-            ? null
-            : pooled >= s.thresholdMyr
-              ? 'complete'
-              : nextStage && s.stageNumber === nextStage.stageNumber
-                ? 'active'
-                : 'locked',
-      })),
-      rankPrizes,
-      top: (data.top ?? []).map((t) => ({
-        rank: t.rank,
-        name: t.name,
-        handle: typeof t.handle === 'string' ? t.handle : null,
-        volume: rm0(t.volumeMyr),
-        avatar: t.avatar_url ?? avatarForSeed(t.seed),
-      })),
-    };
+            ]),
+            // Ranks 4-10 only, matching the stage tile (reward, below) and the
+            // "Total credits across ranks 4-10" summary label. Podium credits
+            // have no display surface (see StageCarousel), so counting them
+            // here would inflate a figure the operator can't see itemised.
+            credits: rm0(
+              unlocked.reduce((sum, s) => sum + creditsOf(s.rankRewards, 4), 0),
+            ),
+          },
+    stages: ordered.map((s) => ({
+      stageNumber: s.stageNumber,
+      threshold: rm0(s.thresholdMyr),
+      thresholdCompact: `RM ${compact(s.thresholdMyr)}`,
+      reward: rm0(creditsOf(s.rankRewards, 4)),
+      rankRewards: rankRewardsFor(s.rankRewards),
+      pct: top > 0 ? Math.min(100, (s.thresholdMyr / top) * 100) : 0,
+      progressPct:
+        pooled === null
+          ? null
+          : s.thresholdMyr > 0
+            ? Math.min(100, (pooled / s.thresholdMyr) * 100)
+            : 100,
+      state:
+        pooled === null
+          ? null
+          : pooled >= s.thresholdMyr
+            ? 'complete'
+            : nextStage && s.stageNumber === nextStage.stageNumber
+              ? 'active'
+              : 'locked',
+    })),
+    rankPrizes,
+    top: (data.top ?? []).map((t) => ({
+      rank: t.rank,
+      name: t.name,
+      handle: typeof t.handle === 'string' ? t.handle : null,
+      volume: rm0(t.volumeMyr),
+      avatar: t.avatar_url ?? avatarForSeed(t.seed),
+    })),
+  };
+}
+
+export async function getChallenge(): Promise<Challenge | null> {
+  try {
+    return await cached('challenge', CHALLENGE_TTL_MS, loadChallenge);
   } catch (error) {
     logger.error('[challenge] failed to load:', error);
     return null;

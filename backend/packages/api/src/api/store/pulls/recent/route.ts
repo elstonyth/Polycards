@@ -38,6 +38,9 @@ const FETCH_LIMIT = RECENT_LIMIT * 2;
 // A new pull surfaces ≤5s later than before — invisible on a "recent" feed.
 const CACHE_TTL_MS = 5_000;
 const ALL_PACKS_KEY = 'recent';
+// ponytail: hard bound on the map's key count — see the eviction check at
+// the cache-set site below.
+const MAX_ENTRIES = 256;
 const recentCache = new Map<string, { expires: number; body: unknown }>();
 
 /** Test seam: module state outlives a test's fixtures — one jest process is one
@@ -183,10 +186,16 @@ export async function GET(
   const body = { pulls: recent };
   // ponytail: pack_id is caller-supplied, so the key space is unbounded (the
   // storefront proxy forwards any ?pack=) — cap the map instead of letting
-  // unknown slugs accrete entries. The real catalog is ~10 packs; a flush costs
-  // one recompute per live pack. Not "don't cache empties": a legitimately
-  // quiet pack returns [] too, and that is the case the TTL exists to protect.
-  if (recentCache.size > 64) recentCache.clear();
+  // unknown slugs accrete entries. Map iterates in insertion order, so this
+  // evicts oldest-inserted first — not LRU, but the real catalog is ~10 packs
+  // + the global key, so anything evicted under pressure is a garbage key or
+  // long-expired (a full clear() would instead thunder-herd every hot key on
+  // the same request that trips the bound). Not "don't cache empties": a
+  // legitimately quiet pack returns [] too, and that is the case the TTL
+  // exists to protect.
+  if (recentCache.size > MAX_ENTRIES) {
+    recentCache.delete(recentCache.keys().next().value as string);
+  }
   recentCache.set(cacheKey, { expires: Date.now() + CACHE_TTL_MS, body });
   res.json(body);
 }

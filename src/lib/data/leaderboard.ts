@@ -71,7 +71,13 @@ function fetchBoard(period: LeaderboardPeriod): Promise<BackendEntry[]> {
     const { entries } = await sdk.client.fetch<{ entries: BackendEntry[] }>(
       `/store/leaderboard?period=${period}`,
     );
-    if (!Array.isArray(entries) || entries.length === 0) return [];
+    // Non-array is a malformed 200 — throw so the TTL memo evicts instead of
+    // caching a blanked board for the window. Empty-and-valid is a real,
+    // cacheable state (a quiet leaderboard).
+    if (!Array.isArray(entries)) {
+      throw new Error('/store/leaderboard returned a non-array entries field');
+    }
+    if (entries.length === 0) return [];
     return parseList(
       LeaderboardEntrySchema,
       entries,
