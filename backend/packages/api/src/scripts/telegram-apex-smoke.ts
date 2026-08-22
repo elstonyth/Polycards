@@ -12,10 +12,12 @@ import { deleteApexPost, postApexPull } from '../modules/packs/telegram';
 //
 //   medusa exec ./src/scripts/telegram-apex-smoke.ts
 //
-// Picks a REAL apex (pack, card) pair and a REAL customer from the catalog,
-// inserts a temporary Pull row, posts it, then deletes BOTH the post and the
-// row. Safe to run against the live customer-facing channel: subscribers see
-// the post for a second or two at most. TELEGRAM_SMOKE_KEEP=1 leaves it up.
+// Uses a REAL apex (pack, card) pair from the catalog and the TEST customer
+// named by TELEGRAM_SMOKE_CUSTOMER_ID (required — refuses to run without it,
+// because the post publicly names its customer and Telegram push
+// notifications outlive the delete below). Inserts a temporary Pull row, posts,
+// then deletes BOTH the post and the row. Subscribers may still see the
+// post and its notification briefly. TELEGRAM_SMOKE_KEEP=1 leaves it up.
 export default async function telegramApexSmoke({ container }: ExecArgs) {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
   const packs = container.resolve(PACKS_MODULE) as PacksModuleService;
@@ -61,10 +63,25 @@ export default async function telegramApexSmoke({ container }: ExecArgs) {
     );
   }
 
+  // NEVER an arbitrary customer: the post publicly attributes a fabricated
+  // pull to a real display name, and Telegram's push notifications outlive
+  // the delete below. The operator must consciously name a test account.
+  const smokeCustomerId = process.env.TELEGRAM_SMOKE_CUSTOMER_ID?.trim();
+  if (!smokeCustomerId) {
+    logger.error(
+      'TELEGRAM_SMOKE_CUSTOMER_ID unset — refusing to post as an arbitrary real customer. ' +
+        "Set it to a test account's customer id (cus_…) and re-run.",
+    );
+    return;
+  }
   const customers = container.resolve(Modules.CUSTOMER);
-  const [customer] = await customers.listCustomers({}, { take: 1 });
+  const customer = await customers
+    .retrieveCustomer(smokeCustomerId)
+    .catch(() => null);
   if (!customer) {
-    logger.error('No customer in this database — cannot test.');
+    logger.error(
+      `TELEGRAM_SMOKE_CUSTOMER_ID=${smokeCustomerId} does not resolve to a customer — nothing posted.`,
+    );
     return;
   }
 
@@ -97,6 +114,13 @@ export default async function telegramApexSmoke({ container }: ExecArgs) {
       return;
     }
 
+    if (posted.messageId !== null) {
+      // Logged BEFORE any delete attempt: if the delete throws (network,
+      // timeout, non-JSON body), this line is the only place the id exists
+      // for a human to remove the post by hand.
+      logger.info(`[telegram-smoke] posted as message ${posted.messageId}`);
+    }
+
     // Printed whether or not Telegram accepted it: a rejected send logs its own
     // warn above, and seeing the rendered text is the whole point of a
     // pre-flight — especially when the send is the broken part.
@@ -117,7 +141,10 @@ export default async function telegramApexSmoke({ container }: ExecArgs) {
       process.env.TELEGRAM_BOT_TOKEN!,
       process.env.TELEGRAM_CHAT_ID!,
       posted.messageId,
-    );
+    ).catch((err) => ({
+      ok: false as const,
+      description: err instanceof Error ? err.message : String(err),
+    }));
     if (removed.ok) {
       logger.info(
         `[telegram-smoke] test post ${posted.messageId} deleted — channel is clean.`,
