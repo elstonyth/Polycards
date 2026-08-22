@@ -68,13 +68,17 @@ async function visit(name, url, after) {
   const hidden = await stuckHidden();
   const nodes = await motionNodes();
   const fresh = errors.slice(before);
+  const pass = fresh.length === 0 && hidden.length === 0 && nodes > 0;
   console.log(
-    `${fresh.length === 0 && hidden.length === 0 ? 'PASS' : 'FAIL'} ${name} ` +
-      `errors=${fresh.length} stuckOpacity0=${hidden.length} motionNodes=${nodes}`,
+    `${pass ? 'PASS' : 'FAIL'} ${name} ` +
+      `errors=${fresh.length} stuckOpacity0=${hidden.length} motionNodes=${nodes}` +
+      (nodes === 0
+        ? ' (zero motion-driven nodes — did motion initialise at all?)'
+        : ''),
   );
   if (fresh.length) console.log('   ' + fresh.slice(0, 3).join('\n   '));
   if (hidden.length) console.log('   stuck: ' + hidden.join(' | '));
-  return fresh.length === 0 && hidden.length === 0;
+  return pass;
 }
 
 const results = [];
@@ -164,8 +168,9 @@ if (href) {
   results.push(spinOk);
 } else {
   console.log(
-    'SKIP pack-detail/card-overlay/spin — no pack link on /slots (backend down?)',
+    'FAIL pack-detail/card-overlay/spin — no pack link on /slots (backend down?)',
   );
+  results.push(false, false, false);
 }
 
 await browser.close();
