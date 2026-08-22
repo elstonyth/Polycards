@@ -21,7 +21,7 @@ import FinalCta from '@/components/home/FinalCta';
 //
 // 15s adds no staleness the reader can perceive: the backend already serves the
 // catalog and the board from its own 30s caches, and the pulls feed re-hydrates
-// live on the client (use-recent-pulls polls every 4s). Every OTHER public page
+// live on the client (use-recent-pulls polls every 10s). Every OTHER public page
 // (/slots, /slots/[slug], /leaderboard) reads an auth cookie somewhere in its
 // tree and must stay per-request — scale those with instances, not with this.
 //

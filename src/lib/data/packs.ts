@@ -90,7 +90,7 @@ const titleCase = (key: string): string =>
  * labels/icons come from the local category meta.
  */
 async function loadPackCategories(): Promise<PackCategory[]> {
-  try {
+  {
     const { packs } = await sdk.client.fetch<{ packs: BackendPack[] }>(
       '/store/packs',
     );
@@ -128,10 +128,6 @@ async function loadPackCategories(): Promise<PackCategory[]> {
         packs: list,
       }));
     return [...known, ...extras];
-  } catch (error) {
-    logger.error('[packs] failed to load packs from backend:', error);
-    // Backend unreachable — truthfully show no packs rather than a mock set.
-    return CATEGORY_META.map((cat) => ({ ...cat, packs: [] }));
   }
 }
 
@@ -142,9 +138,23 @@ async function loadPackCategories(): Promise<PackCategory[]> {
 // serving from cache.
 const CATALOG_TTL_MS = 30_000;
 
-/** Pack catalog, memoised per process for one backend cache window. */
-export function getPackCategories(): Promise<PackCategory[]> {
-  return cached('pack-categories', CATALOG_TTL_MS, loadPackCategories);
+/**
+ * Pack catalog, memoised per process for one backend cache window.
+ *
+ * The degradation is caught HERE, outside `cached`, and loadPackCategories is
+ * left to throw. Catching inside the loader would make a transient backend
+ * failure resolve to an empty catalog, which `cached` cannot tell from a real
+ * one — so one blip would blank /slots for the full 30s window instead of for
+ * the blip. Rejecting lets `cached` evict, and the next request retries.
+ */
+export async function getPackCategories(): Promise<PackCategory[]> {
+  try {
+    return await cached('pack-categories', CATALOG_TTL_MS, loadPackCategories);
+  } catch (error) {
+    logger.error('[packs] failed to load packs from backend:', error);
+    // Backend unreachable — truthfully show no packs rather than a mock set.
+    return CATEGORY_META.map((cat) => ({ ...cat, packs: [] }));
+  }
 }
 
 export interface PackBase {

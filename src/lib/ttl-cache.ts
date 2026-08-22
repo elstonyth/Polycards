@@ -30,10 +30,12 @@ const store = new Map<string, Entry>();
  * herd through the gap.
  *
  * A REJECTED promise is evicted rather than served for the rest of the window.
- * Note the storefront data functions mostly catch their own failures and return
- * `[]`, so an empty result still gets cached for one window; TTLs here are set
- * to match the backend's own cache TTLs, so that window is never longer than
- * the staleness the backend already serves.
+ * That eviction is the ONLY thing standing between a one-second backend blip
+ * and a blank catalog for a full window, so callers must let their loader throw
+ * and catch the degradation OUTSIDE this call — a loader that catches its own
+ * failure and returns `[]` resolves successfully, and nothing here can tell
+ * that empty result from a real one. See getPackCategories and getAvatarFrames
+ * for the shape.
  */
 export function cached<T>(
   key: string,

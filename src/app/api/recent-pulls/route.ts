@@ -18,6 +18,14 @@ export const dynamic = 'force-dynamic';
 //
 // A new pull surfaces up to 5s later than before, on top of the backend's own
 // 5s window. Invisible on a feed whose rows are labelled in whole minutes.
+//
+// Unlike getPackCategories and getAvatarFrames, the degradation is NOT hoisted
+// out of the cached loader here: getRecentPulls catches its own failure and
+// returns [], and its OTHER callers (the home and pack-detail server renders)
+// depend on that — making it throw would 500 the force-dynamic pack page. So a
+// blip can cache `{"pulls":[]}` for one 5s window. That is inert: the client
+// hook ignores an empty payload for the pack it is already showing
+// (use-recent-pulls), so a healthy feed never blanks from it.
 const CACHE_TTL_MS = 5_000;
 
 export async function GET(request: NextRequest) {
