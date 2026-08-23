@@ -73,10 +73,15 @@ beforeEach(() => {
   // Every fixture below has slab_frame_url: null, so resolveFrameBytes
   // returns the bundled default WITHOUT calling fetch — this mock only ever
   // serves the per-card photo fetch.
-  global.fetch = jest.fn().mockResolvedValue({
-    ok: true,
-    arrayBuffer: async () => TEST_PHOTO,
-  }) as unknown as typeof fetch;
+  // A REAL Response, not a hand-rolled `{ ok, arrayBuffer }`: fetchBytes reads
+  // the body as a stream so it can abort past MAX_FETCH_BYTES instead of
+  // materialising the whole thing first, and a mock with no `body` would make
+  // it (correctly) return null.
+  global.fetch = jest
+    .fn()
+    .mockImplementation(
+      async () => new Response(new Uint8Array(TEST_PHOTO)),
+    ) as unknown as typeof fetch;
 });
 
 const buildContainer = (opts: {

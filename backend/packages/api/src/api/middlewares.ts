@@ -50,6 +50,7 @@ import {
   noStoreForAuthenticatedAdmin,
   noStoreForAuthenticatedStore,
 } from './utils/cache-headers';
+import { refuseCrossOriginAdminWrite } from './utils/admin-origin-guard';
 
 // Custom-route middleware. /store/* is NOT a default customer-protected prefix
 // (only /store/customers/me/* is), so every customer-owned route here must opt
@@ -862,6 +863,25 @@ export default defineMiddlewares({
         authenticate('customer', ['bearer']),
         profileAppearanceRateLimit,
       ],
+    },
+    // BLANKET cross-origin write guard for the whole admin surface. Second
+    // layer behind medusa-config.ts's `cookieOptions: { sameSite: 'lax' }`,
+    // which is the real fix for the admin-CSRF finding — see
+    // utils/admin-origin-guard.ts for why CORS does not already cover this and
+    // why an absent Origin passes.
+    //
+    // Blanket, and listed BEFORE the per-route limiter entries, for the same
+    // reason noStoreForAuthenticatedStore is blanket: a route added next month
+    // is covered without anyone remembering to opt in, and a forged request is
+    // refused before it consumes the shared admin-action budget. Carries no
+    // adminActionRateLimit, so the coverage guard in
+    // __tests__/admin-rate-limit-coverage.unit.spec.ts ignores it.
+    //
+    // No `method` pin: the guard passes GET/HEAD/OPTIONS itself, and pinning
+    // the mutation verbs here would silently miss any future one.
+    {
+      matcher: '/admin/*',
+      middlewares: [refuseCrossOriginAdminWrite],
     },
     // Admin money-mutation routes — already auth-protected by the framework
     // admin auth, so no explicit authenticate() entry is needed here. All share

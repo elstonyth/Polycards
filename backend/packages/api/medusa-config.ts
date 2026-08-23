@@ -196,6 +196,29 @@ module.exports = defineConfig({
         | 'worker'
         | 'server'
         | undefined) ?? 'shared',
+    // SameSite=Lax on the express-session cookie. Medusa's own express-loader
+    // defaults it to `none` whenever NODE_ENV is production (see
+    // node_modules/@medusajs/framework/dist/http/express-loader.js — `if
+    // (isProduction || isStaging) { secure = true; sameSite = "none" }`), and
+    // `/admin/*` accepts that cookie as a credential
+    // (authenticate('user', ['bearer','session','api-key']) in the framework's
+    // router). Medusa v2 ships no CSRF token, the global body-parser stack
+    // includes express.urlencoded, and the `cors` middleware does NOT reject a
+    // foreign origin on a non-preflight request (it appends headers and calls
+    // next()). Together that made every admin mutation with a string-shaped
+    // body cross-site forgeable from any origin — audit run-5 finding #1.
+    //
+    // Lax costs nothing here: admin (/dashboard) and vendor (/seller) are
+    // served BY this backend, so the dashboards are same-ORIGIN, and SameSite
+    // is judged on the registrable domain anyway — polycards.gg and
+    // admin.polycards.gg are same-SITE, as are localhost:7000 and
+    // localhost:9000 in dev (ports are not part of the site). Customer auth is
+    // bearer-only and never uses this cookie at all.
+    //
+    // cookieOptions is spread LAST into the framework's cookie object, so this
+    // overrides the default with no patching. Keep it — dropping it silently
+    // restores sameSite:'none' in production.
+    cookieOptions: { sameSite: 'lax' },
     http: {
       storeCors: process.env.STORE_CORS!,
       adminCors: process.env.ADMIN_CORS!,

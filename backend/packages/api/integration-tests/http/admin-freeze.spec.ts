@@ -110,6 +110,53 @@ medusaIntegrationTestRunner({
         expect(res.status).toBe(401);
       });
 
+      // Proves the cross-origin write guard is WIRED, not just correct. The unit
+      // spec (src/api/utils/__tests__/admin-origin-guard.unit.spec.ts) covers the
+      // function; what silently breaks is the middlewares.ts entry, and only a
+      // booted app can catch that.
+      //
+      // Second layer behind medusa-config.ts's `cookieOptions: { sameSite: 'lax' }`
+      // — the real fix for the admin-CSRF finding, which no test can observe (the
+      // attribute is set by the framework's express-loader at boot, and these
+      // suites authenticate with a bearer token).
+      it('POST /admin/customers/:id/freeze → refused when Origin is foreign, even WITH valid admin auth', async () => {
+        // ADMIN_CORS is unset in the test env and the guard fails OPEN on an empty
+        // allowlist by design (see its docblock), so set one. It is read PER
+        // REQUEST, so this takes effect on an already-booted app.
+        const prior = process.env.ADMIN_CORS;
+        process.env.ADMIN_CORS = 'https://admin.polycards.gg';
+        try {
+          const forged = await unwrapResponse(
+            api.post(
+              '/admin/customers/cust_route_csrf/freeze',
+              { reason: 'forged' },
+              { headers: { ...adminHeaders(), origin: 'https://attacker.example' } },
+            ),
+          );
+          expect(forged.status).toBe(400);
+
+          // Nothing was written — the refusal lands before the handler.
+          const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+          expect(
+            await packs.listCustomerAccountStates({ customer_id: 'cust_route_csrf' }, { take: 1 }),
+          ).toHaveLength(0);
+
+          // The other direction: the real dashboard origin still works, so this is
+          // a gate and not a blanket refusal.
+          const legit = await unwrapResponse(
+            api.post(
+              '/admin/customers/cust_route_csrf/freeze',
+              { reason: 'legit' },
+              { headers: { ...adminHeaders(), origin: 'https://admin.polycards.gg' } },
+            ),
+          );
+          expect(legit.status).toBe(200);
+        } finally {
+          if (prior === undefined) delete process.env.ADMIN_CORS;
+          else process.env.ADMIN_CORS = prior;
+        }
+      });
+
       it('POST /admin/customers/:id/freeze → 400 when reason is missing', async () => {
         const res = await unwrapResponse(
           api.post('/admin/customers/cust_route_2/freeze', {}, { headers: adminHeaders() }),

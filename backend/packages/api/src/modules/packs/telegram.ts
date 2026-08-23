@@ -144,6 +144,44 @@ export function escapeHtml(value: string): string {
   );
 }
 
+/**
+ * Strip link-SHAPED text from a customer-controlled display name.
+ *
+ * escapeHtml above stops a customer writing `<a href>` into the caption, but it
+ * does not stop Telegram writing one FOR them: under `parse_mode: HTML` the
+ * client still auto-detects bare URLs, bare domains and `@mentions` in the text
+ * and renders them clickable. So a first_name of `cheap-cards.example` arrives
+ * in the official channel as a live link to a competitor or a phishing page —
+ * escaped, well-formed, and exactly as dangerous as the tag we blocked.
+ * `link_preview_options.is_disabled` does not help: it suppresses the preview
+ * CARD, not the anchor, and it is only set on the sendMessage fallback anyway.
+ *
+ * Applied to `who` ONLY — the one field an untrusted party writes. Card, pack
+ * and set names are admin-set, and a name legitimately containing a dot
+ * ("Ho-Oh V .5") should not be silently mangled on the operator's behalf.
+ *
+ * Conservative by construction: the TLD arm requires two or more trailing
+ * letters, so ordinary initials ("J.R. Smith") are untouched.
+ */
+export function stripAutolinks(value: string): string {
+  return (
+    value
+      // scheme URLs, including tg://
+      .replace(/[a-z][a-z0-9+.-]*:\/\/\S*/gi, ' ')
+      // bare domains (with optional path), e.g. t.me/x or cheap-cards.example
+      .replace(/\b[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}\b(?:\/\S*)?/gi, ' ')
+      // Telegram @mentions. Lookbehind, not `(^|\s)`: Telegram starts a mention
+      // at any @ NOT preceded by a word character, so `(@evil)`, `hello,@evil`
+      // and `[@evil]` are live mentions too and a whitespace-only boundary
+      // leaves them intact. `bob@example` keeps its @ — a word char before it
+      // means Telegram reads an email fragment, not a mention, and the domain
+      // arm above already handles the case that has a real TLD.
+      .replace(/(?<!\w)@\w+/g, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim()
+  );
+}
+
 /** Apex tiers get their own crown; everything else rides the star. */
 const rarityEmoji = (rarity: string): string =>
   rarity === 'Immortal' ? '👑' : '🌟';
@@ -172,7 +210,14 @@ export type ApexCaptionInput = {
 export function buildApexCaption(input: ApexCaptionInput): string {
   const emoji = rarityEmoji(input.rarity);
   const tier = input.rarity.toUpperCase();
-  const who = clipEscaped(escapeHtml(input.who), PER_FIELD);
+  // stripAutolinks BEFORE escapeHtml: it matches on the raw text, and an
+  // already-escaped `&amp;` would give its `amp;` fragment to the domain arm.
+  // A name that is nothing BUT a link degrades to the same 'Anonymous' the
+  // customer-lookup failure path uses, rather than an empty <b></b>.
+  const who = clipEscaped(
+    escapeHtml(stripAutolinks(input.who) || 'Anonymous'),
+    PER_FIELD,
+  );
   const name = input.profileUrl
     ? `<a href="${escapeHtml(input.profileUrl)}">${who}</a>`
     : who;

@@ -167,8 +167,53 @@ export const fetchBytes = async (url: string): Promise<Buffer | null> => {
       continue;
     }
     if (!resp.ok) return null;
-    const bytes = Buffer.from(await resp.arrayBuffer());
-    return bytes.length > 0 && bytes.length <= MAX_FETCH_BYTES ? bytes : null;
+    return await readCapped(resp);
   }
   return null; // redirect chain longer than MAX_REDIRECTS — fail closed
 };
+
+/**
+ * Read the body, abandoning it the moment it exceeds MAX_FETCH_BYTES.
+ *
+ * This used to be `Buffer.from(await resp.arrayBuffer())` followed by a length
+ * check, which measured a body it had ALREADY materialised in full — a 2 GB
+ * response was 2 GB resident before being rejected, on a 512 MB-class box.
+ * Content-Length is checked first where the server offers one, but it is
+ * advisory and absent entirely under chunked transfer, so the running total
+ * during the read is the real bound.
+ *
+ * Null on any failure (over-limit, empty, mid-stream network error), matching
+ * fetchBytes' fail-closed contract — every caller already treats null as
+ * "skip / fall back", never as an error to surface.
+ */
+async function readCapped(resp: Response): Promise<Buffer | null> {
+  // Cheap pre-check: a truthful server saves us opening the stream at all.
+  const declared = Number(resp.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > MAX_FETCH_BYTES) {
+    await resp.body?.cancel().catch(() => {});
+    return null;
+  }
+  if (!resp.body) return null;
+
+  const chunks: Buffer[] = [];
+  let total = 0;
+  const reader = resp.body.getReader();
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_FETCH_BYTES) {
+        // Stop the transfer rather than draining it: the peer is either
+        // hostile or misconfigured, and either way we are not going to use it.
+        await reader.cancel().catch(() => {});
+        return null;
+      }
+      chunks.push(Buffer.from(value));
+    }
+  } catch {
+    // Timeout (AbortSignal) or a socket error mid-body.
+    return null;
+  }
+  return total > 0 ? Buffer.concat(chunks, total) : null;
+}
