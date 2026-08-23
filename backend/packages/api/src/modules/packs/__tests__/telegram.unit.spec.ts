@@ -5,6 +5,7 @@ import {
   escapeHtml,
   postApexPull,
   resetTelegramWarnings,
+  stripAutolinks,
   SCAFFOLD_MAX,
   type ApexCaptionInput,
 } from '../telegram';
@@ -58,13 +59,17 @@ describe('buildApexCaption', () => {
   // first_name/handle are customer-controlled at signup: an unescaped caption
   // would let a customer inject a link into the public marketing channel.
   it('escapes customer- and admin-supplied text', () => {
+    // The href target here is deliberately NOT URL-shaped: `who` is now also
+    // run through stripAutolinks (see its own describe below), which would
+    // remove a real URL before this assertion could see it escaped. The markup
+    // itself is what this test pins.
     const evil = caption({
-      who: '<a href="http://evil.example">clickme</a>',
+      who: '<a href="evil">clickme</a>',
       profileUrl: null,
       cardName: 'Tom & Jerry',
     });
-    expect(evil).not.toContain('<a href="http://evil.example"');
-    expect(evil).toContain('&lt;a href=&quot;http://evil.example&quot;&gt;');
+    expect(evil).not.toContain('<a href="evil"');
+    expect(evil).toContain('&lt;a href=&quot;evil&quot;&gt;');
     expect(evil).toContain('Tom &amp; Jerry');
   });
 
@@ -132,6 +137,48 @@ describe('buildApexCaption', () => {
 describe('escapeHtml', () => {
   it('escapes &, < and > (and & first, so it is not double-escaped)', () => {
     expect(escapeHtml('a & <b> "c"')).toBe('a &amp; &lt;b&gt; &quot;c&quot;');
+  });
+});
+
+// escapeHtml stops the customer writing an anchor; this stops TELEGRAM writing
+// one for them. Under parse_mode:HTML the client auto-links bare URLs, bare
+// domains and @mentions in the text, so an escaped-but-link-shaped first_name
+// still lands in the public channel as a clickable foreign link.
+describe('stripAutolinks', () => {
+  it.each([
+    ['https://evil.example/x', ''],
+    ['tg://resolve?domain=evil', ''],
+    ['cheap-cards.example', ''],
+    ['t.me/evilchannel', ''],
+    ['@evilchannel', ''],
+    ['Ash from evil.example/win', 'Ash from'],
+  ])('neutralises %j', (input, expected) => {
+    expect(stripAutolinks(input)).toBe(expected);
+  });
+
+  it.each(['Headshot001', 'J.R. Smith', "Ka'imi Lee-Wong", 'Collector 4821'])(
+    'leaves the ordinary name %j alone',
+    (name) => {
+      expect(stripAutolinks(name)).toBe(name);
+    },
+  );
+
+  it('keeps a link-shaped puller out of the caption', () => {
+    const text = caption({ who: 'buy-at-cheap-cards.example' });
+    expect(text).not.toContain('cheap-cards.example');
+  });
+
+  it('falls back to Anonymous when the name was nothing but a link', () => {
+    // Not an empty <b></b> — reuse the same wording the customer-lookup
+    // failure path already posts under. profileUrl: null so the assertion
+    // reads the bare name rather than the <a> wrapper.
+    expect(
+      caption({ who: 'https://evil.example', profileUrl: null }),
+    ).toContain('<b>Anonymous</b>');
+  });
+
+  it('is applied before escaping, so an escaped entity cannot be mistaken for a domain', () => {
+    expect(caption({ who: 'Tom & Jerry' })).toContain('Tom &amp; Jerry');
   });
 });
 
@@ -291,7 +338,9 @@ describe('postApexPull', () => {
     let uploaded: Buffer | null = null;
     global.fetch = (async (url: string, init?: { body?: unknown }) => {
       if (String(url).startsWith('https://cdn.example/')) {
-        return { ok: true, arrayBuffer: async () => transparentArt };
+        // A REAL Response: fetchBytes reads the body as a stream so it can
+        // abort past MAX_FETCH_BYTES, so a mock with no `body` returns null.
+        return new Response(new Uint8Array(transparentArt));
       }
       const form = init?.body as FormData;
       uploaded = Buffer.from(await (form.get('photo') as Blob).arrayBuffer());

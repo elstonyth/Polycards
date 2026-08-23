@@ -257,6 +257,46 @@ envs:
     scope: RUN_TIME
     type: SECRET
     value: __SECRET__TWILIO_VERIFY_SERVICE_SID__
+  # Per-purpose Verify TEMPLATE SIDs — the mitigation for the cross-purpose OTP
+  # pretext (audit run-5 hardening note). Twilio verifies on (phone, code)
+  # ALONE, and the default template reads identically for all three flows, so a
+  # code a victim reads back under a "verify your number" pretext is
+  # exchangeable at POST /store/phone-verification/check for a 'password-reset'
+  # proof — and that route returns a live reset token. The MAC'd `purpose` stops
+  # a signup proof being REPLAYED at password-reset; it is a scope tag on the
+  # token, not evidence of what the human agreed to. Naming the flow in the SMS
+  # is what lets the person reading it refuse.
+  #
+  # otpTemplateSid() (src/utils/phone-verification.ts) falls back to Twilio's
+  # default when a key is unset, so the feature ships DARK and each flow can be
+  # switched on independently as its template clears Twilio's approval queue.
+  # UNCOMMENT A LINE ONLY ONCE ITS TEMPLATE IS APPROVED — an unapproved or
+  # mistyped SID makes Twilio reject the send (error 60xxx), which surfaces as
+  # "the code never arrives", the exact failure shape the 21608 incident shows
+  # costs a day to diagnose.
+  #
+  # Operator steps (Twilio Console → Verify → Templates):
+  #   1. Create three SMS templates, each naming its flow in the body, e.g.
+  #      "{{code}} is your Polycards sign-up code."
+  #      "{{code}} is your Polycards phone-change code."
+  #      "{{code}} is your Polycards PASSWORD RESET code. We will never ask you
+  #       for it."
+  #   2. Submit each for approval; wait for Approved.
+  #   3. Paste each HJ… SID below, uncomment, and re-apply the spec.
+  #
+  # Plain values, NOT secrets: these are identifiers, and do-apply.ps1 aborts
+  # the whole apply on any surviving redacted-secret placeholder (comments
+  # included — do NOT write that token here, even to name it),
+  # so never write one here for a non-secret.
+  # - key: TWILIO_VERIFY_TEMPLATE_SID_SIGNUP
+  #   scope: RUN_TIME
+  #   value: "HJxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  # - key: TWILIO_VERIFY_TEMPLATE_SID_PHONE_CHANGE
+  #   scope: RUN_TIME
+  #   value: "HJxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  # - key: TWILIO_VERIFY_TEMPLATE_SID_PASSWORD_RESET
+  #   scope: RUN_TIME
+  #   value: "HJxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
   # Destination geo-lock for the UNAUTHENTICATED send route: every call there
   # bills a real SMS, and the per-phone limiter bounds one number, not a pumping
   # run rotating fresh ones. Plain value, NOT a secret — do-apply.ps1 aborts the
