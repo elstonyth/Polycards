@@ -170,8 +170,13 @@ export function stripAutolinks(value: string): string {
       .replace(/[a-z][a-z0-9+.-]*:\/\/\S*/gi, ' ')
       // bare domains (with optional path), e.g. t.me/x or cheap-cards.example
       .replace(/\b[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}\b(?:\/\S*)?/gi, ' ')
-      // Telegram @mentions
-      .replace(/(^|\s)@[\w]+/g, '$1')
+      // Telegram @mentions. Lookbehind, not `(^|\s)`: Telegram starts a mention
+      // at any @ NOT preceded by a word character, so `(@evil)`, `hello,@evil`
+      // and `[@evil]` are live mentions too and a whitespace-only boundary
+      // leaves them intact. `bob@example` keeps its @ — a word char before it
+      // means Telegram reads an email fragment, not a mention, and the domain
+      // arm above already handles the case that has a real TLD.
+      .replace(/(?<!\w)@\w+/g, '')
       .replace(/\s{2,}/g, ' ')
       .trim()
   );

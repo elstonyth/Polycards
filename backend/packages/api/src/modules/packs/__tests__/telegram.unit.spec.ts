@@ -151,12 +151,27 @@ describe('stripAutolinks', () => {
     ['cheap-cards.example', ''],
     ['t.me/evilchannel', ''],
     ['@evilchannel', ''],
+    // Telegram starts a mention at ANY @ not preceded by a word char, so a
+    // whitespace-only boundary left these live (caught in review on #477).
+    ['(@evilchannel)', '()'],
+    ['hello,@evilchannel', 'hello,'],
+    ['[@evil]', '[]'],
+    ['x -@evil', 'x -'],
     ['Ash from evil.example/win', 'Ash from'],
   ])('neutralises %j', (input, expected) => {
     expect(stripAutolinks(input)).toBe(expected);
   });
 
-  it.each(['Headshot001', 'J.R. Smith', "Ka'imi Lee-Wong", 'Collector 4821'])(
+  // 'bob@example': a word char before the @ means Telegram reads an email
+  // fragment, not a mention, so the @ stays. With a real TLD the domain arm
+  // above takes it first.
+  it.each([
+    'Headshot001',
+    'J.R. Smith',
+    "Ka'imi Lee-Wong",
+    'Collector 4821',
+    'bob@example',
+  ])(
     'leaves the ordinary name %j alone',
     (name) => {
       expect(stripAutolinks(name)).toBe(name);
