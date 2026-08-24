@@ -24,6 +24,7 @@ import {
   createPhoneOtpStartPhoneRateLimit,
   createPhoneOtpStartRateLimit,
   createProfileAppearanceRateLimit,
+  createReferralBindRateLimit,
   createProfileReadRateLimit,
   createPullRevealRateLimit,
   createStoreReadRateLimit,
@@ -118,6 +119,7 @@ const deliveryWriteRateLimit = createDeliveryWriteRateLimit((req) => {
 // Frame equip/unequip — cosmetic metadata write with its own generous budget
 // (sharing the delivery-write tier 429'd a collector's 11th frame swap).
 const profileAppearanceRateLimit = createProfileAppearanceRateLimit();
+const referralBindRateLimit = createReferralBindRateLimit();
 // Permanent account deletion — its own tier because the route takes a password
 // and the write tier is no throttle for one (see createAccountDeleteRateLimit).
 const accountDeleteRateLimit = createAccountDeleteRateLimit();
@@ -658,6 +660,27 @@ export default defineMiddlewares({
       middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
     },
     {
+      // The customer's referral panel (GET /store/referral) — invite handle,
+      // live downline turnover, projected commission, settled history.
+      matcher: '/store/referral',
+      method: 'GET',
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+    },
+    {
+      // Permanent one-shot referral attribution (POST /store/referral/bind).
+      // Fired blind by the storefront after signup when an invite cookie is
+      // present; tiny per-customer budget — one legitimate call per lifetime.
+      matcher: '/store/referral/bind',
+      method: 'POST',
+      middlewares: [authenticate('customer', ['bearer']), referralBindRateLimit],
+    },
+    {
+      // The customer's VIP rebate panel (GET /store/vip-rebate).
+      matcher: '/store/vip-rebate',
+      method: 'GET',
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+    },
+    {
       // The customer's in-app notification feed (GET /store/notifications).
       // receiver_id is scoped to the verified bearer token in the route handler —
       // never from query/body — so this entry is the auth + rate-limit gate only.
@@ -994,6 +1017,34 @@ export default defineMiddlewares({
       // VIP-ladder write (POST /admin/vip-levels) — rewrites the ladder incl.
       // vip_level.voucher_amount, so it shares the admin money-mutation budget.
       matcher: '/admin/vip-levels',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Referral tier table + partner bounds (POST /admin/referrals/settings).
+      matcher: '/admin/referrals/settings',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // The weekly settlement lifecycle (approve/pay) and per-line void.
+      matcher: '/admin/referrals/settlements/*/approve',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      matcher: '/admin/referrals/settlements/*/pay',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      matcher: '/admin/referrals/lines/*/void',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Partner-rate flag on a customer (POST /admin/customers/:id/partner-rate).
+      matcher: '/admin/customers/*/partner-rate',
       method: 'POST',
       middlewares: [adminActionRateLimit],
     },

@@ -1,0 +1,48 @@
+import type {
+  AuthenticatedMedusaRequest,
+  MedusaResponse,
+} from '@medusajs/framework/http';
+import { PACKS_MODULE } from '../../../../../modules/packs';
+import type PacksModuleService from '../../../../../modules/packs/service';
+
+// GET /admin/customers/:id/referral — the Customer-360 referral card: who
+// referred them, their direct downline, their partner rate, and their
+// settlement lines (both kinds), newest first.
+export async function GET(
+  req: AuthenticatedMedusaRequest,
+  res: MedusaResponse,
+): Promise<void> {
+  const customerId = req.params.id;
+  const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+
+  const [[referredBy], downline, [state], lines] = await Promise.all([
+    packs.listReferralAttributions({ customer_id: customerId }, { take: 1 }),
+    packs.listReferralAttributions(
+      { referrer_id: customerId },
+      { order: { created_at: 'DESC' }, take: 1000 },
+    ),
+    packs.listCustomerAccountStates({ customer_id: customerId }, { take: 1 }),
+    packs.listWeeklySettlementLines(
+      { customer_id: customerId },
+      { order: { created_at: 'DESC' }, take: 50 },
+    ),
+  ]);
+
+  res.json({
+    referred_by: referredBy?.referrer_id ?? null,
+    partner_referral_bp: state?.partner_referral_bp ?? null,
+    downline: downline.map((d) => ({
+      customer_id: d.customer_id,
+      since: d.created_at,
+    })),
+    lines: lines.map((l) => ({
+      id: l.id,
+      settlement_id: l.settlement_id,
+      kind: l.kind,
+      basis_cents: l.basis_cents,
+      rate_bp: l.rate_bp,
+      amount_cents: l.amount_cents,
+      status: l.status,
+    })),
+  });
+}

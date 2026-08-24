@@ -1149,3 +1149,24 @@ export function createPhoneOtpCheckRateLimit(): MiddlewareHandler {
     },
   });
 }
+
+/**
+ * The referral-bind limiter (POST /store/referral/bind). One legitimate call
+ * per account lifetime (attribution is permanent), fired blind by the
+ * storefront right after signup — so the budget is tiny and per-customer.
+ * Env-tunable:
+ * REFERRAL_BIND_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 3/60s)
+ * REFERRAL_BIND_RATE_LIMIT / _WINDOW_MS (default 10/1h)
+ */
+export function createReferralBindRateLimit(): MiddlewareHandler {
+  return createEnvRateLimit({
+    name: 'referral-bind',
+    message: 'Too many referral attempts.',
+    defaults: {
+      burstLimit: 3,
+      burstWindowMs: 60_000,
+      limit: 10,
+      windowMs: 3_600_000,
+    },
+  });
+}

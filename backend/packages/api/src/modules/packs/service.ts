@@ -1347,6 +1347,177 @@ class PacksModuleService extends MedusaService({
     return { paid, skipped };
   }
 
+  // Storefront read: the /task Referral tab payload. Live numbers for the
+  // CURRENT (still-open) week plus this customer's settled history.
+  @InjectManager()
+  async referralStorefrontSummary(
+    input: { customerId: string; now?: Date },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{
+    downline_count: number;
+    week: {
+      start: string;
+      turnover_cents: number;
+      rate_bp: number;
+      projected_cents: number;
+      partner: boolean;
+    };
+    history: {
+      week_start: string;
+      basis_cents: number;
+      rate_bp: number;
+      amount_cents: number;
+      status: string;
+    }[];
+  }> {
+    const week = referralWeekFor(input.now ?? new Date());
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+
+    const downline = await this.listReferralAttributions(
+      { referrer_id: input.customerId },
+      { select: ['customer_id'], take: 100_000 },
+      sharedContext,
+    );
+    const downlineIds = downline.map((d) => d.customer_id);
+
+    let turnoverCents = 0;
+    if (downlineIds.length > 0) {
+      const placeholders = downlineIds.map(() => '?').join(', ');
+      const rows = await em.execute<{ turnover_cents: string | null }[]>(
+        'SELECT COALESCE(SUM(ROUND(-amount * 100)), 0)::bigint AS turnover_cents ' +
+          'FROM credit_transaction ' +
+          `WHERE reason = 'pack_open' AND deleted_at IS NULL ` +
+          `  AND customer_id IN (${placeholders}) ` +
+          '  AND created_at >= ? AND created_at < ?',
+        [...downlineIds, week.startUtc, week.endUtcExcl],
+      );
+      turnoverCents = Number(rows[0]?.turnover_cents ?? 0);
+    }
+
+    const [state] = await this.listCustomerAccountStates(
+      { customer_id: input.customerId },
+      { take: 1 },
+      sharedContext,
+    );
+    const partnerBp = state?.partner_referral_bp ?? null;
+    const settings = await this.getReferralSettings(sharedContext);
+    const rateBp = resolveRateBp(turnoverCents, settings.tiers, partnerBp);
+
+    return {
+      downline_count: downlineIds.length,
+      week: {
+        start: week.weekStartIso,
+        turnover_cents: turnoverCents,
+        rate_bp: rateBp,
+        projected_cents: payoutCents(turnoverCents, rateBp),
+        partner: partnerBp != null,
+      },
+      history: await this.settlementHistoryFor(
+        { customerId: input.customerId, kind: 'referral_commission' },
+        sharedContext,
+      ),
+    };
+  }
+
+  // Storefront read: the /task VIP tab payload — own-turnover rebate.
+  @InjectManager()
+  async vipRebateStorefrontSummary(
+    input: { customerId: string; now?: Date },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{
+    level: number;
+    rebate_bp: number;
+    week: { start: string; turnover_cents: number; projected_cents: number };
+    history: {
+      week_start: string;
+      basis_cents: number;
+      rate_bp: number;
+      amount_cents: number;
+      status: string;
+    }[];
+  }> {
+    const week = referralWeekFor(input.now ?? new Date());
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ turnover_cents: string | null }[]>(
+      'SELECT COALESCE(SUM(ROUND(-amount * 100)), 0)::bigint AS turnover_cents ' +
+        'FROM credit_transaction ' +
+        `WHERE reason = 'pack_open' AND deleted_at IS NULL ` +
+        '  AND customer_id = ? AND created_at >= ? AND created_at < ?',
+      [input.customerId, week.startUtc, week.endUtcExcl],
+    );
+    const turnoverCents = Number(rows[0]?.turnover_cents ?? 0);
+
+    const [stateRow] = await this.listVipMemberStates(
+      { customer_id: input.customerId },
+      { take: 1 },
+      sharedContext,
+    );
+    const level = stateRow ? Number(stateRow.current_level) : 1;
+    const [levelRow] = await this.listVipLevels(
+      { level },
+      { select: ['level', 'rebate_bp'], take: 1 },
+      sharedContext,
+    );
+    const rebateBp = Number(levelRow?.rebate_bp ?? 0);
+
+    return {
+      level,
+      rebate_bp: rebateBp,
+      week: {
+        start: week.weekStartIso,
+        turnover_cents: turnoverCents,
+        projected_cents: payoutCents(turnoverCents, rebateBp),
+      },
+      history: await this.settlementHistoryFor(
+        { customerId: input.customerId, kind: 'vip_rebate' },
+        sharedContext,
+      ),
+    };
+  }
+
+  // Shared history read: this customer's settled lines of one kind, newest
+  // first, week_start denormalized from the parent run.
+  @InjectManager()
+  protected async settlementHistoryFor(
+    input: { customerId: string; kind: 'referral_commission' | 'vip_rebate' },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<
+    {
+      week_start: string;
+      basis_cents: number;
+      rate_bp: number;
+      amount_cents: number;
+      status: string;
+    }[]
+  > {
+    const lines = await this.listWeeklySettlementLines(
+      { customer_id: input.customerId, kind: input.kind },
+      { order: { created_at: 'DESC' }, take: 12 },
+      sharedContext,
+    );
+    if (lines.length === 0) return [];
+    const runs = await this.listWeeklySettlements(
+      { id: [...new Set(lines.map((l) => l.settlement_id))] },
+      { select: ['id', 'week_start'], take: lines.length },
+      sharedContext,
+    );
+    const weekById = new Map(
+      runs.map((r) => [
+        r.id,
+        new Date(r.week_start).toISOString().slice(0, 10),
+      ]),
+    );
+    return lines.map((l) => ({
+      week_start: weekById.get(l.settlement_id) ?? '',
+      basis_cents: l.basis_cents,
+      rate_bp: l.rate_bp,
+      amount_cents: l.amount_cents,
+      status: l.status,
+    }));
+  }
+
   // Admin edit of the avatar-frame catalog — upsert + audit, same discipline
   // as editSiteSettings (which owns slab_frame_url; this method never touches
   // it and vice versa).
