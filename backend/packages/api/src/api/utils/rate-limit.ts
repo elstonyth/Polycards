@@ -1170,3 +1170,24 @@ export function createReferralBindRateLimit(): MiddlewareHandler {
     },
   });
 }
+
+/**
+ * The task-action limiter (POST /store/tasks/checkin and
+ * /store/tasks/:id/claim). Both are idempotent single-tap writes — one
+ * legitimate check-in per day, one claim per task per period — so the budget
+ * mirrors notification-read's shape but tighter. Env-tunable:
+ * TASK_ACTION_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 10/10s)
+ * TASK_ACTION_RATE_LIMIT / _WINDOW_MS (default 60/60s)
+ */
+export function createTaskActionRateLimit(): MiddlewareHandler {
+  return createEnvRateLimit({
+    name: 'task-action',
+    message: 'Too many task actions.',
+    defaults: {
+      burstLimit: 10,
+      burstWindowMs: 10_000,
+      limit: 60,
+      windowMs: 60_000,
+    },
+  });
+}
