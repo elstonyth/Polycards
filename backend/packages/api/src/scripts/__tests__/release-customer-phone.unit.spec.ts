@@ -204,6 +204,16 @@ describe('release-customer-phone script guards', () => {
     process.env.CONFIRM_RELEASE = 'cus_1';
     await run();
 
+    // Pins the guard's FILTER BASIS, not just its arithmetic: exact phone
+    // string + has_account: true is what makes this predict the same
+    // grouping the future partial unique index enforces (plan 124). Without
+    // this, a mock that ignores its arguments would still pass even if the
+    // real query dropped has_account or matched the wrong phone.
+    expect(listAndCountCustomers).toHaveBeenCalledWith(
+      expect.objectContaining({ phone: '+60123456789', has_account: true }),
+      expect.objectContaining({ take: expect.any(Number) }),
+    );
+
     expect(updateCustomers).toHaveBeenCalledTimes(1);
     expect(updateCustomers).toHaveBeenCalledWith('cus_1', { phone: null });
 
