@@ -126,6 +126,19 @@ export default async function telegramApexSmoke({ container }: ExecArgs) {
     // pre-flight — especially when the send is the broken part.
     logger.info(`[telegram-smoke] caption:\n${posted.caption}`);
 
+    // A picture-less post is an `ok` post, so nothing above would flag it —
+    // which is exactly how the board ran text-only from #469 to 2026-08-24
+    // while this pre-flight kept reporting success. The photo path is the part
+    // of this integration no unit test can prove, so it is the part the
+    // pre-flight has to check, and it must never read as a pass.
+    if (posted.photoError) {
+      logger.error(
+        `[telegram-smoke] POSTED WITHOUT ITS PICTURE — the board is degraded to text: ${posted.photoError}`,
+      );
+    } else {
+      logger.info('[telegram-smoke] picture sent — the photo path is healthy.');
+    }
+
     // Take the test post straight back down. The default is DELETE, not keep:
     // this runs against the live customer-facing channel, and a pre-flight that
     // leaves marketing debris in front of real subscribers is a worse pre-flight

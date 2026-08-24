@@ -132,10 +132,26 @@ const assetOrigin = (): string =>
 
 const MAX_REDIRECTS = 3;
 
-export const fetchBytes = async (url: string): Promise<Buffer | null> => {
+/**
+ * Fetch an image, fail-closed to null.
+ *
+ * `onFail` is an OPTIONAL diagnostic sink: every null return folds a different
+ * cause — blocked host, HTTP status, redirect shape, timeout, over-cap body —
+ * into the same value, which is right for the callers (they all just fall back)
+ * but leaves an operator with no way to tell a firewall from a 404. Callers
+ * that log (telegram.ts's apex board) pass a collector; bake-slab.ts ignores it.
+ */
+export const fetchBytes = async (
+  url: string,
+  onFail?: (reason: string) => void,
+): Promise<Buffer | null> => {
+  const fail = (reason: string): null => {
+    onFail?.(reason);
+    return null;
+  };
   // Fail closed (null → caller warns + falls back to the bundled default frame,
   // or skips the card) rather than fetching an internal host.
-  if (!isAllowedImageUrl(url)) return null;
+  if (!isAllowedImageUrl(url)) return fail('blocked or malformed URL');
   // isAllowedImageUrl passes storefront-relative paths, but Node's fetch()
   // throws on them — resolve against the trusted storefront origin so
   // relative card images actually bake instead of being silently skipped.
@@ -150,26 +166,30 @@ export const fetchBytes = async (url: string): Promise<Buffer | null> => {
         redirect: 'manual',
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       });
-    } catch {
-      return null;
+    } catch (err) {
+      // Covers the AbortSignal timeout, DNS failure and connection refused.
+      return fail(
+        `request failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
     if (resp.status >= 300 && resp.status < 400) {
       const loc = resp.headers.get('location');
-      if (!loc) return null;
+      if (!loc) return fail(`HTTP ${resp.status} with no Location`);
       let next: URL;
       try {
         next = new URL(loc, target); // Location may be relative to the hop
       } catch {
-        return null;
+        return fail('unparseable redirect target');
       }
-      if (!isAllowedImageUrl(next.toString())) return null;
+      if (!isAllowedImageUrl(next.toString()))
+        return fail('redirect to a blocked host');
       target = next.toString();
       continue;
     }
-    if (!resp.ok) return null;
-    return await readCapped(resp);
+    if (!resp.ok) return fail(`HTTP ${resp.status}`);
+    return await readCapped(resp, fail);
   }
-  return null; // redirect chain longer than MAX_REDIRECTS — fail closed
+  return fail(`more than ${MAX_REDIRECTS} redirects`); // fail closed
 };
 
 /**
@@ -186,14 +206,17 @@ export const fetchBytes = async (url: string): Promise<Buffer | null> => {
  * fetchBytes' fail-closed contract — every caller already treats null as
  * "skip / fall back", never as an error to surface.
  */
-async function readCapped(resp: Response): Promise<Buffer | null> {
+async function readCapped(
+  resp: Response,
+  fail: (reason: string) => null,
+): Promise<Buffer | null> {
   // Cheap pre-check: a truthful server saves us opening the stream at all.
   const declared = Number(resp.headers.get('content-length'));
   if (Number.isFinite(declared) && declared > MAX_FETCH_BYTES) {
     await resp.body?.cancel().catch(() => {});
-    return null;
+    return fail(`declared ${declared}B over the ${MAX_FETCH_BYTES}B cap`);
   }
-  if (!resp.body) return null;
+  if (!resp.body) return fail('empty response body');
 
   const chunks: Buffer[] = [];
   let total = 0;
@@ -207,13 +230,15 @@ async function readCapped(resp: Response): Promise<Buffer | null> {
         // Stop the transfer rather than draining it: the peer is either
         // hostile or misconfigured, and either way we are not going to use it.
         await reader.cancel().catch(() => {});
-        return null;
+        return fail(`body exceeded the ${MAX_FETCH_BYTES}B cap mid-stream`);
       }
       chunks.push(Buffer.from(value));
     }
-  } catch {
+  } catch (err) {
     // Timeout (AbortSignal) or a socket error mid-body.
-    return null;
+    return fail(
+      `body read failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
-  return total > 0 ? Buffer.concat(chunks, total) : null;
+  return total > 0 ? Buffer.concat(chunks, total) : fail('zero-byte body');
 }

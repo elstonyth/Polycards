@@ -218,8 +218,15 @@ describe('blackBackedPhoto', () => {
 
     const result = await blackBackedPhoto('http://127.0.0.1/x.png');
 
-    expect(result).toBeNull();
+    expect(result.photo).toBeNull();
     expect(fetchCalled).toBe(false);
+  });
+
+  // The reason is the only trace a text-only post leaves — postApexPull logs
+  // it, and without it a silent photo drop is undiagnosable from outside.
+  it('reports why the composite produced no bytes', async () => {
+    const result = await blackBackedPhoto('http://127.0.0.1/x.png');
+    expect(result.error).toBeTruthy();
   });
 });
 
@@ -418,6 +425,75 @@ describe('postApexPull', () => {
     expect(call.body.text).toContain('LEGENDARY PULL');
     expect(result?.caption).toContain('LEGENDARY PULL');
     expect(result?.messageId).toBe(55);
+  });
+
+  // Regression: a REJECTED byte upload used to skip the URL photo entirely and
+  // drop straight to text — the URL path was only reached when the composite
+  // produced no bytes at all. A picture Telegram refuses to accept as an upload
+  // is exactly the case where letting it fetch the URL itself is worth a try.
+  it('falls back to the URL photo when the byte UPLOAD is rejected', async () => {
+    const art = await sharp({
+      create: {
+        width: 8,
+        height: 8,
+        channels: 4,
+        background: { r: 0, g: 0, b: 0, alpha: 0 },
+      },
+    })
+      .png()
+      .toBuffer();
+    global.fetch = (async (url: string, init?: { body?: unknown }) => {
+      const u = String(url);
+      if (u.startsWith('https://cdn.example/'))
+        return new Response(new Uint8Array(art));
+      // Multipart body = the byte upload; Telegram refuses it.
+      if (init?.body instanceof FormData) {
+        return {
+          json: async () => ({ ok: false, description: 'IMAGE_PROCESS_FAILED' }),
+        };
+      }
+      sent.push({ url: u, body: JSON.parse(init!.body as string) });
+      return { json: async () => ({ ok: true, result: { message_id: 88 } }) };
+    }) as unknown as typeof fetch;
+
+    const result = await postApexPull(fakeContainer({}), EVENT);
+
+    expect(sent).toHaveLength(1);
+    const [call] = sent as { url: string; body: { photo: string } }[];
+    expect(call.url).toContain('/sendPhoto');
+    expect(call.body.photo).toBe('https://cdn.example/m.png');
+    expect(result?.messageId).toBe(88);
+  });
+
+  // The board degrading to a text-only channel is an `ok` post, so nothing else
+  // logs it. Without this warn the failure is invisible from outside Telegram.
+  it('warns with each path’s reason when the post lands without its picture', async () => {
+    global.fetch = (async (url: string, init?: { body?: unknown }) => {
+      const u = String(url);
+      // A real Response: the warn names the HTTP status the art fetch got,
+      // which is what separates "the CDN 404'd" from "egress is blocked".
+      if (u.startsWith('https://cdn.example/'))
+        return new Response('nope', { status: 404 });
+      if (u.includes('/sendPhoto'))
+        return {
+          json: async () => ({ ok: false, description: 'PHOTO_INVALID_DIMENSIONS' }),
+        };
+      sent.push({ url: u, body: JSON.parse(init!.body as string) });
+      return { json: async () => ({ ok: true, result: { message_id: 9 } }) };
+    }) as unknown as typeof fetch;
+
+    const result = await postApexPull(fakeContainer({}), EVENT);
+
+    const [call] = sent as { url: string }[];
+    expect(call.url).toContain('/sendMessage');
+    // Also RETURNED, not only logged: telegram-apex-smoke.ts fails its
+    // pre-flight on this field, and a pre-flight that reads a text-only post
+    // as a pass is how this shipped picture-less in the first place.
+    expect(result?.photoError).toContain('PHOTO_INVALID_DIMENSIONS');
+    const warn = warned.find((w) => w.includes('WITHOUT its picture'));
+    expect(warn).toContain('https://cdn.example/m.png');
+    expect(warn).toContain('HTTP 404');
+    expect(warn).toContain('PHOTO_INVALID_DIMENSIONS');
   });
 
   it('falls back to the anonymous Collector name when first_name is blank', async () => {
