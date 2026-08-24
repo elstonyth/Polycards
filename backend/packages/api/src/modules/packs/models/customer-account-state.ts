@@ -31,6 +31,11 @@ export const CustomerAccountState = model
     disabled_by: model.text().nullable(), // admin_id
     disabled_at: model.dateTime().nullable(),
     phone_verified_at: model.dateTime().nullable(),
+    // Referral rebuild (spec 2026-08-24): non-null marks a PARTNER account —
+    // this manual rate (basis points, validated against referral_settings
+    // partner bounds) REPLACES the commission tier table for their weekly
+    // referral payout. Null = ordinary account, tiered by downline turnover.
+    partner_referral_bp: model.number().nullable(),
     // Free welcome pack (spec 2026-08-14): `available_at` is stamped by the
     // customer.created subscriber — only accounts registered after the feature
     // shipped ever get it (this IS the "new registrations only" rule; no date

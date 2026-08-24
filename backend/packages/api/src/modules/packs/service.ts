@@ -73,6 +73,10 @@ import type { GatewayPeriodRow, LedgerPeriodRow } from './globepay-settlement';
 import PurchaseInvoice from './models/purchase-invoice';
 import PurchaseInvoiceLine from './models/purchase-invoice-line';
 import StockMovement from './models/stock-movement';
+import ReferralAttribution from './models/referral-attribution';
+import ReferralSettings from './models/referral-settings';
+import WeeklySettlement from './models/weekly-settlement';
+import WeeklySettlementLine from './models/weekly-settlement-line';
 import { pageAll } from '../../api/utils/page-all';
 import {
   positiveIntFromEnv,
@@ -533,6 +537,10 @@ class PacksModuleService extends MedusaService({
   PurchaseInvoice,
   PurchaseInvoiceLine,
   StockMovement,
+  ReferralAttribution,
+  ReferralSettings,
+  WeeklySettlement,
+  WeeklySettlementLine,
 }) {
   // Apply a pack-membership diff (add rows + delete rows + renormalize
   // survivor weights) as ONE transaction. The set-pack-members workflow step
@@ -3096,7 +3104,6 @@ class PacksModuleService extends MedusaService({
         ],
         sharedContext,
       );
-
     } catch (e) {
       // A 23505 means this open_id already settled (the debit index).
       // The 23505 already aborted THIS txn (25P02); re-raise as DUPLICATE_ERROR so
@@ -4021,7 +4028,10 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     if (recentPending >= input.maxRecentPending) return null;
-    const [row] = await this.createGlobePayDeposits([input.data], sharedContext);
+    const [row] = await this.createGlobePayDeposits(
+      [input.data],
+      sharedContext,
+    );
     return { id: row.id };
   }
 
