@@ -353,6 +353,20 @@ describe('release-customer-phone script guards', () => {
       .mockResolvedValueOnce([[{ id: 'cus_1' }, { id: 'cus_2' }], 2]); // TOCTOU re-check
     await run();
 
+    // Pins the SECOND read's filter basis, not just its position: it must
+    // be genuinely unfiltered (no has_account key at all), or a future edit
+    // that added has_account: true to it would collapse allHoldersCount to
+    // matchingCount and silence this warning forever — while this test,
+    // with its positional mocks, would keep passing regardless of what was
+    // actually asked. Same failure mode the guard's own filter-basis
+    // assertion (above) exists to prevent.
+    expect(listAndCountCustomers.mock.calls[1][0]).not.toHaveProperty(
+      'has_account',
+    );
+    expect(listAndCountCustomers.mock.calls[1][0]).toMatchObject({
+      phone: '+60123456789',
+    });
+
     // Never refuses on this by itself.
     expect(updateCustomers).toHaveBeenCalledTimes(1);
 
@@ -366,6 +380,9 @@ describe('release-customer-phone script guards', () => {
 
     const summary = findSummary();
     expect(summary).toContain('DONE'); // the release itself still succeeded
+    // Both counts are unconditional in the final summary, not just the
+    // has_account:false difference note.
+    expect(summary).toContain('all live holders (any has_account) were 3');
     expect(summary).toContain('has_account:false');
   });
 

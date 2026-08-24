@@ -369,13 +369,17 @@ export default async function releaseCustomerPhone({ container }: ExecArgs) {
   // success. `released` is the single source of truth for the DONE/ANOMALY
   // word; nothing else decides it.
   const released = afterPhone === '(none)';
+  // allHoldersCount is unconditional here, not just folded into the
+  // has_account:false warning below: the coordinator asked for both counts
+  // in the final summary, not only when they differ, so an operator reading
+  // only the last line still sees the full picture.
   const holderNote = unscopedExtra
     ? `; ${allHoldersCount - matchingCount} has_account:false row(s) also held this number`
     : '';
   logger.info(
     `[release-customer-phone] ${released ? 'DONE' : 'ANOMALY'} — ${customerId}. phone ` +
       `${mask(customer.phone)} -> ${afterPhone}. other has_account:true holders were ` +
-      `${otherHolders}${holderNote}.` +
+      `${otherHolders}; all live holders (any has_account) were ${allHoldersCount}${holderNote}.` +
       (released
         ? ''
         : ' The release did NOT take — do not treat this phone collision as resolved.'),
