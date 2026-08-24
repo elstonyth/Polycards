@@ -114,6 +114,21 @@ import {
   countCustomersInGroup,
   setCustomerGroup,
   type AdminCustomerGroup,
+  // ── Referral rebuild (spec 2026-08-24) ──
+  getReferralSettings,
+  updateReferralSettings,
+  listReferralSettlements,
+  getReferralSettlement,
+  approveReferralSettlement,
+  payReferralSettlement,
+  voidReferralLine,
+  getCustomerReferral,
+  setPartnerRate,
+  type CustomerReferralCard,
+  type ReferralSettings,
+  type ReferralSettlement,
+  type ReferralSettlementLine,
+  type ReferralTierWire,
 } from './admin-rest';
 import type { SetEntry } from '@acme/odds-math';
 import { qk } from './query-keys';
@@ -1336,5 +1351,109 @@ export const useCreateProductsFromPriceChartingBatch = () => {
         invalidateInventory();
       }
     },
+  });
+};
+
+// ── Referral rebuild (spec 2026-08-24) ───────────────────────────────────────
+
+export type {
+  CustomerReferralCard,
+  ReferralSettings,
+  ReferralSettlement,
+  ReferralSettlementLine,
+  ReferralTierWire,
+} from './admin-rest';
+
+export const useReferralSettings = (): UseQueryResult<ReferralSettings> =>
+  useQuery({
+    queryKey: qk.referralSettings,
+    queryFn: getReferralSettings,
+  });
+
+export const useUpdateReferralSettings = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      tiers?: ReferralTierWire[];
+      partner_min_bp?: number;
+      partner_max_bp?: number;
+      reason: string;
+    }) => updateReferralSettings(input),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: qk.referralSettings }),
+  });
+};
+
+export const useReferralSettlements = (): UseQueryResult<
+  ReferralSettlement[]
+> =>
+  useQuery({
+    queryKey: qk.referralSettlements,
+    queryFn: listReferralSettlements,
+  });
+
+export const useReferralSettlement = (
+  id: string | null,
+): UseQueryResult<{
+  settlement: ReferralSettlement;
+  lines: ReferralSettlementLine[];
+}> =>
+  useQuery({
+    queryKey: qk.referralSettlement(id ?? 'none'),
+    queryFn: () => getReferralSettlement(id as string),
+    enabled: id !== null,
+  });
+
+// approve / pay / void all reshape the run list AND the open detail — a plain
+// prefix invalidation of qk.referralSettlements covers both (detail keys nest
+// under the list key).
+export const useApproveReferralSettlement = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => approveReferralSettlement(id),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: qk.referralSettlements }),
+  });
+};
+
+export const usePayReferralSettlement = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => payReferralSettlement(id),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: qk.referralSettlements }),
+  });
+};
+
+export const useVoidReferralLine = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { lineId: string; reason: string }) =>
+      voidReferralLine(vars.lineId, vars.reason),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: qk.referralSettlements }),
+  });
+};
+
+export const useCustomerReferral = (
+  customerId: string,
+): UseQueryResult<CustomerReferralCard> =>
+  useQuery({
+    queryKey: qk.customerReferral(customerId),
+    queryFn: () => getCustomerReferral(customerId),
+  });
+
+export const useSetPartnerRate = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: {
+      customerId: string;
+      rateBp: number | null;
+      reason: string;
+    }) => setPartnerRate(vars.customerId, vars.rateBp, vars.reason),
+    onSuccess: (_data, vars) =>
+      qc.invalidateQueries({
+        queryKey: qk.customerReferral(vars.customerId),
+      }),
   });
 };

@@ -822,6 +822,8 @@ export interface VipLevelDTO {
   voucher_amount: number; // MYR
   box_tier: string;
   frame_unlock: boolean;
+  /** Weekly personal rebate (referral rebuild, spec 2026-08-24), basis points. */
+  rebate_bp: number;
 }
 
 export const getVipLevels = () =>
@@ -1725,4 +1727,118 @@ export async function exportInventoryXlsx(q?: string): Promise<void> {
   // file. Handing the revoke to the next task lets the download claim the blob
   // first, while still releasing it (a leaked object URL lives until reload).
   setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+// ── Referral rebuild (spec 2026-08-24) ───────────────────────────────────────
+
+export interface ReferralTierWire {
+  min_cents: number;
+  rate_bp: number;
+}
+
+export interface ReferralSettings {
+  tiers: ReferralTierWire[];
+  partner_min_bp: number;
+  partner_max_bp: number;
+}
+
+export async function getReferralSettings(): Promise<ReferralSettings> {
+  return getJson<ReferralSettings>('/admin/referrals/settings');
+}
+
+export async function updateReferralSettings(input: {
+  tiers?: ReferralTierWire[];
+  partner_min_bp?: number;
+  partner_max_bp?: number;
+  reason: string;
+}): Promise<ReferralSettings> {
+  return postJson<ReferralSettings>('/admin/referrals/settings', input);
+}
+
+export interface ReferralSettlement {
+  id: string;
+  week_start: string;
+  status: 'draft' | 'approved' | 'paid' | 'void';
+  approved_by: string | null;
+  approved_at: string | null;
+  paid_at: string | null;
+  total_commission_cents: number;
+  total_rebate_cents: number;
+}
+
+export interface ReferralSettlementLine {
+  id: string;
+  customer_id: string;
+  kind: 'referral_commission' | 'vip_rebate';
+  basis_cents: number;
+  rate_bp: number;
+  amount_cents: number;
+  status: 'pending' | 'voided' | 'paid';
+  void_reason: string | null;
+  paid_transaction_id: string | null;
+}
+
+export async function listReferralSettlements(): Promise<
+  ReferralSettlement[]
+> {
+  const data = await getJson<{ settlements: ReferralSettlement[] }>(
+    '/admin/referrals/settlements',
+  );
+  return data.settlements;
+}
+
+export async function getReferralSettlement(id: string): Promise<{
+  settlement: ReferralSettlement;
+  lines: ReferralSettlementLine[];
+}> {
+  return getJson(`/admin/referrals/settlements/${id}`);
+}
+
+export async function approveReferralSettlement(id: string): Promise<void> {
+  await postJson(`/admin/referrals/settlements/${id}/approve`, {});
+}
+
+export async function payReferralSettlement(
+  id: string,
+): Promise<{ paid: number; skipped: number }> {
+  return postJson(`/admin/referrals/settlements/${id}/pay`, {});
+}
+
+export async function voidReferralLine(
+  lineId: string,
+  reason: string,
+): Promise<void> {
+  await postJson(`/admin/referrals/lines/${lineId}/void`, { reason });
+}
+
+export interface CustomerReferralCard {
+  referred_by: string | null;
+  partner_referral_bp: number | null;
+  downline: { customer_id: string; since: string }[];
+  lines: {
+    id: string;
+    settlement_id: string;
+    kind: 'referral_commission' | 'vip_rebate';
+    basis_cents: number;
+    rate_bp: number;
+    amount_cents: number;
+    status: string;
+  }[];
+}
+
+export async function getCustomerReferral(
+  customerId: string,
+): Promise<CustomerReferralCard> {
+  return getJson(`/admin/customers/${customerId}/referral`);
+}
+
+export async function setPartnerRate(
+  customerId: string,
+  rateBp: number | null,
+  reason: string,
+): Promise<void> {
+  await postJson(`/admin/customers/${customerId}/partner-rate`, {
+    rate_bp: rateBp,
+    reason,
+  });
 }
