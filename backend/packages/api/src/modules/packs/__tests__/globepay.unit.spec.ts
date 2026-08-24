@@ -167,9 +167,30 @@ describe('AES key derivation is memoized (plan 089)', () => {
   });
 
   it('does not share one derivation between two different keys', () => {
+    const plaintext = '{"a":1}';
     const before = pbkdf2Spy.mock.calls.length;
-    const enc = aesEncrypt('{"a":1}', 'memo-key-a');
-    expect(() => aesDecrypt(enc, 'memo-key-b')).toThrow();
+    const enc = aesEncrypt(plaintext, 'memo-key-a');
+
+    // The wrong-key decrypt is here to FORCE a second derivation, not to prove
+    // rejection — and it must not assert one. aes-256-cbc is unauthenticated,
+    // so a wrong key only rejects when PKCS#7 unpadding happens to fail: about
+    // 255 times in 256, re-rolled every run by the random IV. `.toThrow()`
+    // therefore failed CI at random (2026-08-24, run 32717061178) on a tree
+    // that was green locally, and the failure never had anything to do with
+    // the change under review. Do not put it back.
+    //
+    // What IS deterministic is that the wrong key never reproduces the
+    // plaintext, so that is what gets asserted. Both outcomes — a throw or
+    // garbage — are correct.
+    let recovered: string | null = null;
+    try {
+      recovered = aesDecrypt(enc, 'memo-key-b');
+    } catch {
+      // Expected on the ~255/256 path. The derivation still happened before
+      // the unpad failed, so the delta below is 2 either way.
+    }
+    expect(recovered).not.toBe(plaintext);
+
     // Also the liveness check for the spy above: a delta of 0 here would mean
     // the spy never reached the call site, which would make the memo test
     // green for the wrong reason.
