@@ -1850,3 +1850,33 @@ export async function setPartnerRate(
     reason,
   });
 }
+
+// ── Task system (spec 2026-08-24 Phase B) ────────────────────────────────────
+
+export interface AdminTaskDefinition {
+  id: string;
+  kind: 'weekly' | 'achievement';
+  title: string;
+  requirement: Record<string, unknown>;
+  reward: Record<string, unknown>;
+  active: boolean;
+  sort: number;
+}
+
+export async function listTaskDefinitions(): Promise<AdminTaskDefinition[]> {
+  const data = await getJson<{ tasks: AdminTaskDefinition[] }>('/admin/tasks');
+  return data.tasks;
+}
+
+export async function saveTaskDefinition(input: {
+  id?: string;
+  kind: 'weekly' | 'achievement';
+  title: string;
+  requirement: Record<string, unknown>;
+  reward: Record<string, unknown>;
+  active: boolean;
+  sort: number;
+  reason: string;
+}): Promise<{ id: string }> {
+  return postJson<{ id: string }>('/admin/tasks', input);
+}

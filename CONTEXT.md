@@ -216,6 +216,19 @@ A customer's own weekly pack turnover times their VIP level's `rebate_bp`
 (admin-set on the Levels ladder; 0 by default). Same weekly cycle and ledger
 treatment as commission, reason `vip_rebate`.
 
+**Task / Achievement**:
+An admin-defined goal on the /task hub (Phase B of the same spec). Weekly
+tasks (check-in days, rip counts — optionally per pack) reset with the
+Referral Week; achievements (reach VIP level, vault N cards, vault N pixel
+Pokémon) are once per account. Progress is computed live from the underlying
+facts; only claims are stored (`task_claim`, one per customer × task ×
+period). Rewards: credit, a free rip of a pack, or a card straight to the
+vault — the latter two land as `source='reward'` pulls.
+
+**Check-in**:
+The explicit once-per-MYT-day button on /task (`daily_checkin`), counted by
+weekly check-in tasks.
+
 **Weekly Settlement**:
 One `weekly_settlement` run per closed week: draft (Tuesday close) → approved
 (human gate on the admin Referrals page) → paid (Wednesday cron or "Pay now").

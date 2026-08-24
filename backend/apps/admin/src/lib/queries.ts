@@ -123,6 +123,9 @@ import {
   payReferralSettlement,
   voidReferralLine,
   getCustomerReferral,
+  listTaskDefinitions,
+  saveTaskDefinition,
+  type AdminTaskDefinition,
   setCustomerReferrer,
   setPartnerRate,
   voidReferralSettlement,
@@ -1477,5 +1480,19 @@ export const useSetPartnerRate = () => {
       qc.invalidateQueries({
         queryKey: qk.customerReferral(vars.customerId),
       }),
+  });
+};
+
+export type { AdminTaskDefinition } from './admin-rest';
+
+export const useTaskDefinitions = (): UseQueryResult<AdminTaskDefinition[]> =>
+  useQuery({ queryKey: qk.taskDefinitions, queryFn: listTaskDefinitions });
+
+export const useSaveTaskDefinition = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: Parameters<typeof saveTaskDefinition>[0]) =>
+      saveTaskDefinition(input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.taskDefinitions }),
   });
 };

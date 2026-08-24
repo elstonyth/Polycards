@@ -776,3 +776,30 @@ export const VipRebateSchema = z.looseObject({
   history: z.array(SettlementHistoryRowSchema),
 });
 export type VipRebate = z.infer<typeof VipRebateSchema>;
+
+/** One task row of GET /store/tasks (Phase B). requirement/reward are the
+ *  backend's discriminated unions; the tab renders from progress + reward, so
+ *  both stay loose JSON here (deploy-skew rule: an unknown new requirement
+ *  type must not crash the page). */
+export const TaskEntrySchema = z.looseObject({
+  id: z.string(),
+  kind: z.enum(['weekly', 'achievement']),
+  title: z.string(),
+  requirement: z.looseObject({ type: z.string() }),
+  reward: z.looseObject({ type: z.string() }),
+  progress: z.looseObject({
+    current: finite,
+    target: finite,
+    completed: z.boolean(),
+  }),
+  claimed: z.boolean(),
+});
+export type TaskEntry = z.infer<typeof TaskEntrySchema>;
+
+/** GET /store/tasks — the /task Tasks tab payload. */
+export const TaskHubSchema = z.looseObject({
+  week_start: z.string(),
+  checked_in_today: z.boolean(),
+  tasks: z.array(TaskEntrySchema),
+});
+export type TaskHub = z.infer<typeof TaskHubSchema>;

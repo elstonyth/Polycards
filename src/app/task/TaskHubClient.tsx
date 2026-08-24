@@ -1,12 +1,28 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useTransition } from 'react';
 import Link from 'next/link';
-import { Check, Copy, Crown, ListChecks, Users } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import {
+  CalendarCheck,
+  Check,
+  Copy,
+  Crown,
+  Gift,
+  ListChecks,
+  Trophy,
+  Users,
+} from 'lucide-react';
+import { checkInToday, claimTaskReward } from '@/lib/actions/tasks';
 import { Pill, pillVariants } from '@/components/ui/pill';
 import { cn } from '@/lib/utils';
 import { rm } from '@/lib/format';
-import type { ReferralSummary, VipRebate } from '@/lib/data/schemas';
+import type {
+  ReferralSummary,
+  TaskEntry,
+  TaskHub,
+  VipRebate,
+} from '@/lib/data/schemas';
 
 type TabKey = 'tasks' | 'referral' | 'vip';
 
@@ -216,27 +232,200 @@ function VipTab({ data }: { data: VipRebate | null }) {
   );
 }
 
-function TasksTab() {
+const REWARD_LABEL: Record<string, string> = {
+  credit: 'Credit',
+  pack: 'Free rip',
+  card: 'Card',
+};
+
+function rewardLabel(reward: TaskEntry['reward']): string {
+  if (reward.type === 'credit' && typeof reward.amount_myr === 'number') {
+    return rm(reward.amount_myr);
+  }
+  return REWARD_LABEL[reward.type] ?? 'Reward';
+}
+
+function TaskRow({
+  task,
+  onDone,
+}: {
+  task: TaskEntry;
+  onDone: (message: string) => void;
+}) {
+  const [pending, startTransition] = useTransition();
+  const router = useRouter();
+  const pctDone =
+    task.progress.target > 0
+      ? Math.round((task.progress.current / task.progress.target) * 100)
+      : 0;
+  const claim = () =>
+    startTransition(async () => {
+      const res = await claimTaskReward(task.id);
+      if (res.ok && res.claimed) {
+        onDone(
+          res.rewardType === 'credit'
+            ? 'Credit added to your wallet.'
+            : res.rewardType === 'pack'
+              ? 'Your free rip landed in your vault.'
+              : 'Card added to your vault.',
+        );
+      } else if (res.ok && !res.claimed && res.reason === 'already_claimed') {
+        onDone('Already claimed.');
+      } else if (res.ok && !res.claimed) {
+        onDone('Not completed yet.');
+      } else if (!res.ok) {
+        onDone(res.error);
+      }
+      router.refresh();
+    });
   return (
-    <Panel className="py-10 text-center">
-      <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-neutral-900">
-        <ListChecks className="text-chase h-6 w-6" aria-hidden />
-      </span>
-      <p className="font-heading mt-3 text-xl text-white">WEEKLY TASKS</p>
-      <p className="mx-auto mt-1 max-w-[36ch] text-sm leading-relaxed text-neutral-400">
-        Check-ins, rip challenges and achievements are coming soon — with
-        credit, pack and card rewards.
-      </p>
-    </Panel>
+    <li className="flex items-center gap-3 py-3">
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm text-white">{task.title}</p>
+        <div className="mt-1.5 flex items-center gap-2">
+          <div
+            className="h-1.5 w-28 overflow-hidden rounded-full bg-neutral-800"
+            role="progressbar"
+            aria-valuenow={task.progress.current}
+            aria-valuemin={0}
+            aria-valuemax={task.progress.target}
+            aria-label={`${task.title} progress`}
+          >
+            <div
+              className="bg-chase h-full rounded-full"
+              style={{ width: `${pctDone}%` }}
+            />
+          </div>
+          <span className="text-xs text-white/40 tabular-nums">
+            {task.progress.current}/{task.progress.target}
+          </span>
+          <span className="inline-flex items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-neutral-300">
+            <Gift className="h-3 w-3" aria-hidden />
+            {rewardLabel(task.reward)}
+          </span>
+        </div>
+      </div>
+      {task.claimed ? (
+        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2.5 py-1 text-[11px] font-semibold text-emerald-300 uppercase">
+          <Check className="h-3 w-3" aria-hidden /> Claimed
+        </span>
+      ) : (
+        <Pill
+          size="sm"
+          variant={task.progress.completed ? 'primary' : 'ghost'}
+          disabled={!task.progress.completed || pending}
+          onClick={claim}
+        >
+          Claim
+        </Pill>
+      )}
+    </li>
+  );
+}
+
+function TasksTab({ data }: { data: TaskHub | null }) {
+  const [pending, startTransition] = useTransition();
+  const [notice, setNotice] = useState<string | null>(null);
+  const router = useRouter();
+  if (!data) return <SignInPrompt what="your tasks and achievements" />;
+
+  const weekly = data.tasks.filter((t) => t.kind === 'weekly');
+  const achievements = data.tasks.filter((t) => t.kind === 'achievement');
+  const checkIn = () =>
+    startTransition(async () => {
+      const res = await checkInToday();
+      setNotice(
+        res.ok
+          ? res.checked
+            ? 'Checked in — see you tomorrow!'
+            : 'Already checked in today.'
+          : res.error,
+      );
+      router.refresh();
+    });
+
+  return (
+    <div className="space-y-4">
+      <Panel className="flex items-center gap-3">
+        <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-neutral-900">
+          <CalendarCheck className="text-chase h-5 w-5" aria-hidden />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-white">Daily check-in</p>
+          <p className="text-xs text-neutral-500">
+            Week of {data.week_start} — check-ins feed the weekly tasks.
+          </p>
+        </div>
+        <Pill
+          size="sm"
+          variant={data.checked_in_today ? 'ghost' : 'primary'}
+          disabled={data.checked_in_today || pending}
+          onClick={checkIn}
+        >
+          {data.checked_in_today ? (
+            <>
+              <Check className="h-4 w-4" aria-hidden /> Done
+            </>
+          ) : (
+            'Check in'
+          )}
+        </Pill>
+      </Panel>
+
+      {notice && (
+        <p
+          aria-live="polite"
+          className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-neutral-300"
+        >
+          {notice}
+        </p>
+      )}
+
+      <Panel>
+        <p className="mb-1 flex items-center gap-1.5 text-[11px] tracking-wide text-white/40 uppercase">
+          <ListChecks className="h-3.5 w-3.5" aria-hidden /> Weekly tasks
+        </p>
+        {weekly.length === 0 ? (
+          <p className="py-3 text-center text-sm text-neutral-500">
+            No weekly tasks right now — check back soon.
+          </p>
+        ) : (
+          <ul className="divide-y divide-white/5">
+            {weekly.map((t) => (
+              <TaskRow key={t.id} task={t} onDone={setNotice} />
+            ))}
+          </ul>
+        )}
+      </Panel>
+
+      <Panel>
+        <p className="mb-1 flex items-center gap-1.5 text-[11px] tracking-wide text-white/40 uppercase">
+          <Trophy className="h-3.5 w-3.5" aria-hidden /> Achievements
+        </p>
+        {achievements.length === 0 ? (
+          <p className="py-3 text-center text-sm text-neutral-500">
+            No achievements configured yet.
+          </p>
+        ) : (
+          <ul className="divide-y divide-white/5">
+            {achievements.map((t) => (
+              <TaskRow key={t.id} task={t} onDone={setNotice} />
+            ))}
+          </ul>
+        )}
+      </Panel>
+    </div>
   );
 }
 
 export function TaskHubClient({
   referral,
   vipRebate,
+  taskHub,
 }: {
   referral: ReferralSummary | null;
   vipRebate: VipRebate | null;
+  taskHub: TaskHub | null;
 }) {
   const [tab, setTab] = useState<TabKey>('tasks');
   return (
@@ -266,7 +455,7 @@ export function TaskHubClient({
         ))}
       </div>
       <div className="mt-4">
-        {tab === 'tasks' && <TasksTab />}
+        {tab === 'tasks' && <TasksTab data={taskHub} />}
         {tab === 'referral' && <ReferralTab data={referral} />}
         {tab === 'vip' && <VipTab data={vipRebate} />}
       </div>

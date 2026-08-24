@@ -1,4 +1,12 @@
-# Referral Rebuild + Task Page — Design
+claim is an explicit store endpoint,
+  idempotent via the task_claim unique index, and grants through existing
+  mechanics: credit via mutateCreditAtomic (idempotency reference per
+  task+period), card via a source='reward' pull (vault entry, stock counter
+  decremented, never gated). **Pack reward (decided at implementation): a free
+  rip** — the claim rolls the pack's live odds server-side (rollOne, the same
+  draw a paid open uses, customer's own odds set) and vaults the result as a
+  source='reward' pull. No charge-seam change; reward pulls never move the
+  boards.# Referral Rebuild + Task Page — Design
 
 **Date:** 2026-08-24 · **Status:** approved in chat · **Depends on:** PR #482 (`chore/remove-referrals`), ADR 0007
 
