@@ -28,8 +28,7 @@ export async function getTaskHub(): Promise<TaskHub | null> {
 }
 
 export type CheckInResult =
-  | { ok: true; checked: boolean }
-  | { ok: false; error: string };
+  { ok: true; checked: boolean } | { ok: false; error: string };
 
 export async function checkInToday(): Promise<CheckInResult> {
   const token = await getAuthToken();
