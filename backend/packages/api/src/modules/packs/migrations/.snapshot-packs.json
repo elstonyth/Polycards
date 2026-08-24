@@ -47,7 +47,9 @@
             "challenge_settings",
             "delivery_order",
             "purchase_invoice",
-            "tier_settings"
+            "tier_settings",
+            "referral_settings",
+            "weekly_settlement"
           ],
           "mappedType": "enum"
         },
@@ -89,7 +91,12 @@
             "enable",
             "create",
             "reveal",
-            "delete_account"
+            "delete_account",
+            "set_partner_rate",
+            "edit_referral_settings",
+            "approve_settlement",
+            "void_settlement_line",
+            "pay_settlement"
           ],
           "mappedType": "enum"
         },

@@ -73,6 +73,7 @@ import type { GatewayPeriodRow, LedgerPeriodRow } from './globepay-settlement';
 import PurchaseInvoice from './models/purchase-invoice';
 import PurchaseInvoiceLine from './models/purchase-invoice-line';
 import StockMovement from './models/stock-movement';
+import { DEFAULT_REFERRAL_TIERS, type ReferralTier } from './referral';
 import ReferralAttribution from './models/referral-attribution';
 import ReferralSettings from './models/referral-settings';
 import WeeklySettlement from './models/weekly-settlement';
@@ -690,6 +691,251 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     return data;
+  }
+
+  // ── Referral rebuild (spec 2026-08-24) ─────────────────────────────────
+  // Attribution + settings + partner rates. The weekly engine itself
+  // (close/approve/void/pay) lives further down with the other money writers.
+
+  // Permanent one-shot attribution. The route layer resolves the referral
+  // code (a profile handle) to referrerId — this module never reaches into
+  // another module's tables. Races on the same customer are settled by the
+  // unique customer_id index: the loser's 23505 reads as already_bound.
+  @InjectTransactionManager()
+  async bindReferral(
+    input: { customerId: string; referrerId: string },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<
+    { bound: true } | { bound: false; reason: 'self' | 'already_bound' }
+  > {
+    if (input.customerId === input.referrerId) {
+      return { bound: false, reason: 'self' };
+    }
+    const [existing] = await this.listReferralAttributions(
+      { customer_id: input.customerId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (existing) return { bound: false, reason: 'already_bound' };
+    try {
+      await this.createReferralAttributions(
+        [{ customer_id: input.customerId, referrer_id: input.referrerId }],
+        sharedContext,
+      );
+    } catch (e: unknown) {
+      if ((e as { code?: string })?.code === '23505') {
+        return { bound: false, reason: 'already_bound' };
+      }
+      throw e;
+    }
+    return { bound: true };
+  }
+
+  // Lazy-seeded singleton read (same pattern as tier/site settings). Returns
+  // plain values, never the row.
+  @InjectManager()
+  async getReferralSettings(
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{
+    tiers: ReferralTier[];
+    partner_min_bp: number;
+    partner_max_bp: number;
+  }> {
+    const [row] = await this.listReferralSettings(
+      {},
+      { take: 1 },
+      sharedContext,
+    );
+    if (row) {
+      return {
+        tiers: row.tiers as unknown as ReferralTier[],
+        partner_min_bp: row.partner_min_bp,
+        partner_max_bp: row.partner_max_bp,
+      };
+    }
+    await this.createReferralSettings(
+      [
+        {
+          id: 'global',
+          tiers: DEFAULT_REFERRAL_TIERS as unknown as Record<string, unknown>,
+        },
+      ],
+      sharedContext,
+    );
+    return {
+      tiers: DEFAULT_REFERRAL_TIERS,
+      partner_min_bp: 300,
+      partner_max_bp: 500,
+    };
+  }
+
+  // Named `edit…` to avoid shadowing the generated updateReferralSettings
+  // CRUD method (editSiteSettings convention). Validates, upserts, audits.
+  @InjectTransactionManager()
+  async editReferralSettings(
+    input: {
+      tiers?: ReferralTier[];
+      partner_min_bp?: number;
+      partner_max_bp?: number;
+      adminId: string;
+      reason: string;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const before = await this.getReferralSettings(sharedContext);
+    const next = {
+      tiers: input.tiers ?? before.tiers,
+      partner_min_bp: input.partner_min_bp ?? before.partner_min_bp,
+      partner_max_bp: input.partner_max_bp ?? before.partner_max_bp,
+    };
+    if (!next.tiers.length || next.tiers[0].min_cents !== 0) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'The first tier must start at min_cents 0.',
+      );
+    }
+    for (let i = 0; i < next.tiers.length; i++) {
+      const t = next.tiers[i];
+      if (
+        !Number.isInteger(t.min_cents) ||
+        t.min_cents < 0 ||
+        !Number.isInteger(t.rate_bp) ||
+        t.rate_bp < 0 ||
+        t.rate_bp > 10_000
+      ) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `Tier ${i + 1}: min_cents must be a non-negative integer and rate_bp an integer in 0..10000.`,
+        );
+      }
+      if (i > 0 && t.min_cents <= next.tiers[i - 1].min_cents) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          'Tier bounds must be strictly increasing.',
+        );
+      }
+    }
+    if (
+      !Number.isInteger(next.partner_min_bp) ||
+      !Number.isInteger(next.partner_max_bp) ||
+      next.partner_min_bp < 0 ||
+      next.partner_max_bp > 10_000 ||
+      next.partner_min_bp >= next.partner_max_bp
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'partner bounds must be integers in 0..10000 with min < max.',
+      );
+    }
+    const [row] = await this.listReferralSettings(
+      {},
+      { take: 1 },
+      sharedContext,
+    );
+    if (row) {
+      await this.updateReferralSettings(
+        {
+          selector: { id: row.id },
+          data: {
+            ...next,
+            tiers: next.tiers as unknown as Record<string, unknown>,
+          },
+        },
+        sharedContext,
+      );
+    } else {
+      await this.createReferralSettings(
+        [
+          {
+            id: 'global',
+            ...next,
+            tiers: next.tiers as unknown as Record<string, unknown>,
+          },
+        ],
+        sharedContext,
+      );
+    }
+    await this.createAdminActionAudits(
+      [
+        {
+          admin_id: input.adminId,
+          entity_type: 'referral_settings',
+          entity_id: 'global',
+          action: 'edit_referral_settings',
+          before,
+          after: next,
+          reason: input.reason,
+        },
+      ],
+      sharedContext,
+    );
+  }
+
+  // Partner flag: a manual commission rate that REPLACES the tier table for
+  // this customer. null clears it. Bounds come from referral_settings.
+  @InjectTransactionManager()
+  async setPartnerRate(
+    input: {
+      customerId: string;
+      rateBp: number | null;
+      adminId: string;
+      reason?: string;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    if (input.rateBp != null) {
+      const { partner_min_bp, partner_max_bp } =
+        await this.getReferralSettings(sharedContext);
+      if (
+        !Number.isInteger(input.rateBp) ||
+        input.rateBp < partner_min_bp ||
+        input.rateBp > partner_max_bp
+      ) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `Partner rate must be an integer between ${partner_min_bp} and ${partner_max_bp} bp.`,
+        );
+      }
+    }
+    const [existing] = await this.listCustomerAccountStates(
+      { customer_id: input.customerId },
+      { take: 1 },
+      sharedContext,
+    );
+    const beforeBp = existing?.partner_referral_bp ?? null;
+    if (existing) {
+      await this.updateCustomerAccountStates(
+        {
+          selector: { id: existing.id },
+          data: { partner_referral_bp: input.rateBp },
+        },
+        sharedContext,
+      );
+    } else {
+      await this.createCustomerAccountStates(
+        [
+          {
+            customer_id: input.customerId,
+            partner_referral_bp: input.rateBp,
+          },
+        ],
+        sharedContext,
+      );
+    }
+    await this.createAdminActionAudits(
+      [
+        {
+          admin_id: input.adminId,
+          entity_type: 'customer',
+          entity_id: input.customerId,
+          action: 'set_partner_rate',
+          before: { partner_referral_bp: beforeBp },
+          after: { partner_referral_bp: input.rateBp },
+          reason: input.reason ?? 'partner rate change',
+        },
+      ],
+      sharedContext,
+    );
   }
 
   // Admin edit of the avatar-frame catalog — upsert + audit, same discipline

@@ -82,6 +82,18 @@ export class Migration20260824150000 extends Migration {
     this.addSql(
       `alter table if exists "ledger_entry" add constraint "ledger_entry_type_check" check("type" in ('TP', 'SP', 'SE', 'OD', 'AD', 'WP', 'WD', 'RF'));`,
     );
+    this.addSql(
+      `alter table if exists "admin_action_audit" drop constraint if exists "admin_action_audit_entity_type_check";`,
+    );
+    this.addSql(
+      `alter table if exists "admin_action_audit" add constraint "admin_action_audit_entity_type_check" check("entity_type" in ('customer', 'commission', 'rewards_settings', 'credit', 'reward_pool', 'daily_reward_settings', 'daily_box', 'voucher_ladder', 'fx', 'site_settings', 'vip_levels', 'challenge_stages', 'challenge_settings', 'delivery_order', 'purchase_invoice', 'tier_settings', 'referral_settings', 'weekly_settlement'));`,
+    );
+    this.addSql(
+      `alter table if exists "admin_action_audit" drop constraint if exists "admin_action_audit_action_check";`,
+    );
+    this.addSql(
+      `alter table if exists "admin_action_audit" add constraint "admin_action_audit_action_check" check("action" in ('freeze', 'unfreeze', 'reverse_commission', 'suspend_commission', 'unsuspend_commission', 'adjust_credit', 'edit_rewards_settings', 'edit_reward_pool', 'edit_daily_reward_settings', 'edit_daily_box', 'edit_voucher_ladder', 'edit_fx_rate', 'edit_site_settings', 'edit_avatar_frames', 'replace', 'edit', 'bulk_status', 'disable', 'enable', 'create', 'reveal', 'delete_account', 'set_partner_rate', 'edit_referral_settings', 'approve_settlement', 'void_settlement_line', 'pay_settlement'));`,
+    );
   }
 
   override async down(): Promise<void> {
@@ -135,6 +147,21 @@ export class Migration20260824150000 extends Migration {
     );
     this.addSql(
       `alter table if exists "ledger_entry" add constraint "ledger_entry_type_check" check("type" in ('TP', 'SP', 'SE', 'OD', 'AD', 'WP', 'WD'));`,
+    );
+    // Narrow the audit CHECKs back. Deliberately unguarded: Postgres validates
+    // existing rows when the constraint is added, so a row carrying one of the
+    // new values fails this loudly instead of being silently stranded.
+    this.addSql(
+      `alter table if exists "admin_action_audit" drop constraint if exists "admin_action_audit_entity_type_check";`,
+    );
+    this.addSql(
+      `alter table if exists "admin_action_audit" add constraint "admin_action_audit_entity_type_check" check("entity_type" in ('customer', 'commission', 'rewards_settings', 'credit', 'reward_pool', 'daily_reward_settings', 'daily_box', 'voucher_ladder', 'fx', 'site_settings', 'vip_levels', 'challenge_stages', 'challenge_settings', 'delivery_order', 'purchase_invoice', 'tier_settings'));`,
+    );
+    this.addSql(
+      `alter table if exists "admin_action_audit" drop constraint if exists "admin_action_audit_action_check";`,
+    );
+    this.addSql(
+      `alter table if exists "admin_action_audit" add constraint "admin_action_audit_action_check" check("action" in ('freeze', 'unfreeze', 'reverse_commission', 'suspend_commission', 'unsuspend_commission', 'adjust_credit', 'edit_rewards_settings', 'edit_reward_pool', 'edit_daily_reward_settings', 'edit_daily_box', 'edit_voucher_ladder', 'edit_fx_rate', 'edit_site_settings', 'edit_avatar_frames', 'replace', 'edit', 'bulk_status', 'disable', 'enable', 'create', 'reveal', 'delete_account'));`,
     );
   }
 }
