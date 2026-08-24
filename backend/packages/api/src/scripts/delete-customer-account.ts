@@ -109,14 +109,18 @@ export default async function deleteCustomerAccount({ container }: ExecArgs) {
     );
   }
 
+  // The whole point of this print is proving the number was released, so a
+  // failed read here must never render the same as a successful one — that
+  // would tell the operator the phone is free when nothing was verified.
   const after = await customers
     .retrieveCustomer(customerId, {
       withDeleted: true,
       select: ['id', 'phone'],
     })
     .catch(() => null);
+  const afterPhone = after ? mask(after.phone) : '(unreadable — verify manually)';
   logger.info(
     `[delete-customer-account] DONE — ${customerId} deleted. phone ` +
-      `${mask(customer.phone)} -> ${mask(after?.phone ?? null)}`,
+      `${mask(customer.phone)} -> ${afterPhone}`,
   );
 }

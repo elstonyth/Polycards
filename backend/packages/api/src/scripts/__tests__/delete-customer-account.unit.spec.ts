@@ -114,4 +114,27 @@ describe('delete-customer-account script guards', () => {
     // (withDeleted: true, proving the phone was released) never ran.
     expect(retrieveCustomer).toHaveBeenCalledTimes(1);
   });
+
+  // The DONE line is the only evidence this script gives that the phone was
+  // actually released. If the post-delete read errors, `mask(null)` and a
+  // genuinely-freed phone both print '(none)' — indistinguishable to the
+  // operator — so a failed verification read must render differently, never
+  // silently agree with the success case.
+  it('post-delete verification read fails: reports unreadable rather than implying release', async () => {
+    process.env.DELETE_CUSTOMER_ID = 'cus_1';
+    process.env.CONFIRM_DELETE = 'cus_1';
+    mockPurgeAndDeleteAccount.mockResolvedValue({ ok: true });
+    retrieveCustomer.mockReset().mockImplementation(
+      async (id: string, options?: { withDeleted?: boolean }) => {
+        if (options?.withDeleted) throw new Error('db unreachable');
+        return { id, email: 'a@b.dev', phone: '+60123456789', has_account: true };
+      },
+    );
+    await run();
+    const doneCall = logger.info.mock.calls.find((c) =>
+      String(c[0]).includes('DONE'),
+    );
+    expect(doneCall?.[0]).toContain('(unreadable');
+    expect(doneCall?.[0]).not.toContain('(none)');
+  });
 });

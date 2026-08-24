@@ -46,9 +46,11 @@ async function emailpassEntityId(
 //
 // Be honest about what recovery actually exists, because it is thinner than
 // "just re-run it" suggests and this is a deletion path:
-//   - There is NO automated retry. This route is purgeAccountPacksData's only
-//     caller — no admin route, no script entry point — so a failed purge is
-//     finished by hand.
+//   - There is NO automated retry. purgeAndDeleteAccount (api/utils/account-
+//     deletion.ts) now has a second caller — the operator-run
+//     scripts/delete-customer-account.ts — but that is a fresh one-shot
+//     deletion an operator chooses to run, not a resume of a partial purge,
+//     so a failed purge is still finished by hand.
 //   - The customer cannot retry. Step 3 commits the account-state tombstone,
 //     and from then on the blanket /store/* session guard 403s their bearer.
 //   - An operator retry means: un-disable, reset the password, authenticate as
