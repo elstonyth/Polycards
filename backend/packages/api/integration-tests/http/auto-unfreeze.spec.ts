@@ -7,7 +7,6 @@ jest.setTimeout(180 * 1000);
 
 medusaIntegrationTestRunner({
   inApp: true,
-  env: { COMMISSION_COOLDOWN_DAYS: '0' }, // immediate maturity for scenario C
   testSuite: ({ getContainer }) => {
     async function seedLadder(packs: PacksModuleService) {
       const existing = await packs.listVipLevels({}, { take: 1 });

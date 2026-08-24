@@ -68,8 +68,8 @@ import {
 // own docstring): a sheet silently cut off at N rows reads to the operator as
 // "this is the whole inventory" when it isn't. `INVENTORY_EXPORT_MAX_ROWS` is
 // read PER REQUEST rather than frozen at import -- same process.env pattern
-// as rewardsRedemptionEnabled (modules/packs/rewards-gate.ts) and
-// COMMISSION_COOLDOWN_DAYS (modules/packs/service.ts) -- so an operator can
+// as rewardsRedemptionEnabled (modules/packs/rewards-gate.ts) -- so an operator
+// can
 // tune it live and inventory-export.spec can drive both the default and an
 // overridden cap through the one booted app.
 const DEFAULT_INVENTORY_EXPORT_MAX_ROWS = 10000;
