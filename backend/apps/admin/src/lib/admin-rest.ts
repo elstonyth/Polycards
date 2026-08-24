@@ -1056,11 +1056,7 @@ export const createPixelPokemon = (body: CreatePixelPokemonBody) =>
 // reconciliation sweep's window, i.e. a payment that may have landed at the
 // gateway without ever being credited here.
 export type GlobePayDepositView =
-  | 'pending'
-  | 'settled'
-  | 'failed'
-  | 'expired'
-  | 'all';
+  'pending' | 'settled' | 'failed' | 'expired' | 'all';
 
 export interface GlobePayDeposit {
   id: string;
@@ -1130,11 +1126,7 @@ export function getGlobePayDeposits(
 // always sends `status` explicitly (see getGlobePayWithdrawals below), so the
 // page's default view is what actually decides what an operator sees first.
 export type GlobePayWithdrawalView =
-  | 'held'
-  | 'pending'
-  | 'settled'
-  | 'failed'
-  | 'all';
+  'held' | 'pending' | 'settled' | 'failed' | 'all';
 
 export interface GlobePayWithdrawal {
   id: string;
@@ -1778,9 +1770,7 @@ export interface ReferralSettlementLine {
   paid_transaction_id: string | null;
 }
 
-export async function listReferralSettlements(): Promise<
-  ReferralSettlement[]
-> {
+export async function listReferralSettlements(): Promise<ReferralSettlement[]> {
   const data = await getJson<{ settlements: ReferralSettlement[] }>(
     '/admin/referrals/settlements',
   );
@@ -1802,6 +1792,24 @@ export async function payReferralSettlement(
   id: string,
 ): Promise<{ paid: number; skipped: number }> {
   return postJson(`/admin/referrals/settlements/${id}/pay`, {});
+}
+
+export async function voidReferralSettlement(
+  id: string,
+  reason: string,
+): Promise<void> {
+  await postJson(`/admin/referrals/settlements/${id}/void`, { reason });
+}
+
+export async function setCustomerReferrer(
+  customerId: string,
+  referrerId: string | null,
+  reason: string,
+): Promise<void> {
+  await postJson(`/admin/customers/${customerId}/referral`, {
+    referrer_id: referrerId,
+    reason,
+  });
 }
 
 export async function voidReferralLine(

@@ -355,6 +355,12 @@ export async function googleCallback(query: {
         { Authorization: `Bearer ${sessionToken}` },
       );
       const handle = await fetchProfileHandle(sessionToken);
+      if (!payload.actor_id) {
+        // First Google login IS a signup — consume the invite cookie exactly
+        // like the emailpass path, or every Google recruit's link is dropped
+        // (review 2026-08-25, spec finding 2). Swallows failures internally.
+        await bindReferralFromCookie();
+      }
       return { ok: true, customer: toAuthCustomer(customer, handle) };
     } catch (error) {
       await clearAuthToken();

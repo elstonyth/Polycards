@@ -8,6 +8,12 @@ export interface TierRow {
   ratePct: string;
 }
 
+// Float-safe "is a whole number of hundredths": 1.15 * 100 is
+// 114.99999999999999, so Number.isInteger(x * 100) rejects valid money
+// (review 2026-08-25 finding 2). Round and compare within epsilon instead.
+const isHundredths = (x: number): boolean =>
+  Math.abs(x * 100 - Math.round(x * 100)) < 1e-6;
+
 const num = (s: string): number | null => {
   const trimmed = s.trim();
   if (trimmed === '') return null;
@@ -25,13 +31,13 @@ export function validateTierRows(rows: TierRow[]): string | null {
     if (minRm === null || ratePct === null) {
       return `Tier ${i + 1}: both fields must be numbers.`;
     }
-    if (minRm < 0 || !Number.isInteger(minRm * 100)) {
+    if (minRm < 0 || !isHundredths(minRm)) {
       return `Tier ${i + 1}: minimum must be a non-negative RM amount.`;
     }
     if (i === 0 && minRm !== 0) {
       return 'The first tier must start at RM 0.';
     }
-    if (ratePct < 0 || ratePct > 100 || !Number.isInteger(ratePct * 100)) {
+    if (ratePct < 0 || ratePct > 100 || !isHundredths(ratePct)) {
       return `Tier ${i + 1}: rate must be 0–100% in steps of 0.01.`;
     }
     if (minRm <= prevMin) {

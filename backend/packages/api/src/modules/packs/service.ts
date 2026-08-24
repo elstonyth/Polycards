@@ -760,15 +760,22 @@ class PacksModuleService extends MedusaService({
         partner_max_bp: row.partner_max_bp,
       };
     }
-    await this.createReferralSettings(
-      [
-        {
-          id: 'global',
-          tiers: DEFAULT_REFERRAL_TIERS as unknown as Record<string, unknown>,
-        },
-      ],
-      sharedContext,
-    );
+    try {
+      await this.createReferralSettings(
+        [
+          {
+            id: 'global',
+            tiers: DEFAULT_REFERRAL_TIERS as unknown as Record<string, unknown>,
+          },
+        ],
+        sharedContext,
+      );
+    } catch (e: unknown) {
+      // Two concurrent cold reads race the seed; the loser's PK collision
+      // (23505) means the row now exists — this is a READ path and must
+      // never 500 over losing that race (review 2026-08-25 finding 4).
+      if ((e as { code?: string })?.code !== '23505') throw e;
+    }
     return {
       tiers: DEFAULT_REFERRAL_TIERS,
       partner_min_bp: 300,
@@ -945,6 +952,35 @@ class PacksModuleService extends MedusaService({
     );
   }
 
+  // THE definition of "pack turnover in a window": per-customer cents summed
+  // from pack_open ledger rows. One query, three consumers (close, the two
+  // storefront panels) — review 2026-08-25 dedup. customerIds omitted =
+  // everyone who spent in the window; [] = nobody (empty map, no query).
+  @InjectManager()
+  protected async packTurnoverCentsByCustomer(
+    input: { startUtc: Date; endUtcExcl: Date; customerIds?: string[] },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<Map<string, number>> {
+    if (input.customerIds && input.customerIds.length === 0) return new Map();
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const filter = input.customerIds
+      ? `  AND customer_id IN (${input.customerIds.map(() => '?').join(', ')}) `
+      : '';
+    const rows = await em.execute<
+      { customer_id: string; turnover_cents: string }[]
+    >(
+      'SELECT customer_id, COALESCE(SUM(ROUND(-amount * 100)), 0)::bigint AS turnover_cents ' +
+        'FROM credit_transaction ' +
+        "WHERE reason = 'pack_open' AND deleted_at IS NULL " +
+        filter +
+        '  AND created_at >= ? AND created_at < ? ' +
+        'GROUP BY customer_id',
+      [...(input.customerIds ?? []), input.startUtc, input.endUtcExcl],
+    );
+    return new Map(rows.map((r) => [r.customer_id, Number(r.turnover_cents)]));
+  }
+
   // The Tuesday close ("TUES CHECK"): compute the just-ended week's referral
   // commissions and VIP rebates into a DRAFT settlement run. No money moves
   // here — payWeeklySettlement (after the admin approve gate) does that.
@@ -978,20 +1014,9 @@ class PacksModuleService extends MedusaService({
     }
 
     // Per-spender pack turnover inside the window, in cents.
-    const em = (sharedContext.transactionManager ??
-      sharedContext.manager) as unknown as LedgerSqlManager;
-    const spenders = await em.execute<
-      { customer_id: string; turnover_cents: string }[]
-    >(
-      'SELECT customer_id, COALESCE(SUM(ROUND(-amount * 100)), 0)::bigint AS turnover_cents ' +
-        'FROM credit_transaction ' +
-        "WHERE reason = 'pack_open' AND deleted_at IS NULL " +
-        '  AND created_at >= ? AND created_at < ? ' +
-        'GROUP BY customer_id',
-      [week.startUtc, week.endUtcExcl],
-    );
-    const turnoverByCustomer = new Map(
-      spenders.map((s) => [s.customer_id, Number(s.turnover_cents)]),
+    const turnoverByCustomer = await this.packTurnoverCentsByCustomer(
+      { startUtc: week.startUtc, endUtcExcl: week.endUtcExcl },
+      sharedContext,
     );
 
     const settings = await this.getReferralSettings(sharedContext);
@@ -1181,6 +1206,164 @@ class PacksModuleService extends MedusaService({
     );
   }
 
+  // Subtract a voided line's amount from its run's stored totals, so the
+  // numbers the admin review screen quotes stay true after every void.
+  @InjectTransactionManager()
+  protected async deductRunTotal(
+    input: {
+      settlementId: string;
+      kind: 'referral_commission' | 'vip_rebate';
+      amountCents: number;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const [run] = await this.listWeeklySettlements(
+      { id: input.settlementId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!run) return;
+    const data =
+      input.kind === 'referral_commission'
+        ? {
+            total_commission_cents: Math.max(
+              0,
+              run.total_commission_cents - input.amountCents,
+            ),
+          }
+        : {
+            total_rebate_cents: Math.max(
+              0,
+              run.total_rebate_cents - input.amountCents,
+            ),
+          };
+    await this.updateWeeklySettlements(
+      { selector: { id: run.id }, data },
+      sharedContext,
+    );
+  }
+
+  // Admin set/fix of attribution (spec: "Admin can set/fix one manually").
+  // Upserts — unlike bindReferral, which is the customer path and permanent.
+  // referrerId null clears the attribution. Audited.
+  @InjectTransactionManager()
+  async adminSetReferral(
+    input: {
+      customerId: string;
+      referrerId: string | null;
+      adminId: string;
+      reason: string;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    if (input.referrerId === input.customerId) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'A customer cannot refer themself.',
+      );
+    }
+    const [existing] = await this.listReferralAttributions(
+      { customer_id: input.customerId },
+      { take: 1 },
+      sharedContext,
+    );
+    const before = existing?.referrer_id ?? null;
+    if (input.referrerId === null) {
+      if (existing) {
+        await this.deleteReferralAttributions({ id: existing.id }, sharedContext);
+      }
+    } else if (existing) {
+      await this.updateReferralAttributions(
+        { selector: { id: existing.id }, data: { referrer_id: input.referrerId } },
+        sharedContext,
+      );
+    } else {
+      await this.createReferralAttributions(
+        [{ customer_id: input.customerId, referrer_id: input.referrerId }],
+        sharedContext,
+      );
+    }
+    await this.createAdminActionAudits(
+      [
+        {
+          admin_id: input.adminId,
+          entity_type: 'customer',
+          entity_id: input.customerId,
+          action: 'edit',
+          before: { referrer_id: before },
+          after: { referrer_id: input.referrerId },
+          reason: input.reason,
+        },
+      ],
+      sharedContext,
+    );
+  }
+
+  // Void a whole DRAFT run — the "this week is bad, recompute later" lever
+  // (the status value existed with no writer; review 2026-08-25). Every
+  // pending line is voided with the run's reason; a re-close of the same
+  // week stays blocked by the unique week_start until the row is removed
+  // deliberately.
+  @InjectTransactionManager()
+  async voidWeeklySettlement(
+    input: { settlementId: string; adminId: string; reason: string },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const [run] = await this.listWeeklySettlements(
+      { id: input.settlementId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!run) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        `Settlement ${input.settlementId} not found.`,
+      );
+    }
+    if (run.status !== 'draft') {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `Only a draft run can be voided (this one is '${run.status}').`,
+      );
+    }
+    await this.updateWeeklySettlementLines(
+      {
+        selector: { settlement_id: run.id, status: 'pending' },
+        data: {
+          status: 'voided' as const,
+          void_reason: input.reason,
+          voided_by: input.adminId,
+        },
+      },
+      sharedContext,
+    );
+    await this.updateWeeklySettlements(
+      {
+        selector: { id: run.id },
+        data: {
+          status: 'void' as const,
+          total_commission_cents: 0,
+          total_rebate_cents: 0,
+        },
+      },
+      sharedContext,
+    );
+    await this.createAdminActionAudits(
+      [
+        {
+          admin_id: input.adminId,
+          entity_type: 'weekly_settlement',
+          entity_id: run.id,
+          action: 'void_settlement',
+          before: { status: 'draft' },
+          after: { status: 'void' },
+          reason: input.reason,
+        },
+      ],
+      sharedContext,
+    );
+  }
+
   // Void one payable line before its money moves. Allowed while the line is
   // pending and the run is draft or approved — never after pay.
   @InjectTransactionManager()
@@ -1216,6 +1399,13 @@ class PacksModuleService extends MedusaService({
       },
       sharedContext,
     );
+    // Keep the run totals live — the approve dialog quotes them as "will pay
+    // out", so a voided line must leave the number the operator reads
+    // (review 2026-08-25 finding 3).
+    await this.deductRunTotal(
+      { settlementId: line.settlement_id, kind: line.kind, amountCents: line.amount_cents },
+      sharedContext,
+    );
     await this.createAdminActionAudits(
       [
         {
@@ -1242,16 +1432,22 @@ class PacksModuleService extends MedusaService({
   // per pending line of an APPROVED run. Idempotent two ways: the line row
   // flips to paid inside the same transaction as its ledger write, and the
   // ledger (type='RF', ref_id=line.id) unique index refuses a double-credit
-  // even if the line update was lost. skipCustomerIds (deleted accounts,
-  // resolved by the job layer — this module cannot see the customer module)
-  // are voided rather than paid.
+  // even if the line update was lost. Deleted accounts are resolved HERE via
+  // deletedCustomerIds (the audit trail's delete_account rows — the one
+  // customer-module fact this module can see) and voided rather than paid,
+  // so the route and the cron can't drift apart on that rule.
+  //
+  // adminId present = the dashboard's "Pay now"; absent = the Wednesday
+  // cron. Either way the payout is audited (action 'pay_settlement') when
+  // any money moved — a money mutation with no audit row was review
+  // 2026-08-25 finding 1.
   //
   // ponytail: the whole run commits as ONE transaction — fine at this
   // volume; chunk per-line (settleChallengeWeek style) if runs ever grow to
   // thousands of lines.
   @InjectTransactionManager()
   async payWeeklySettlement(
-    input: { settlementId: string; skipCustomerIds?: string[] },
+    input: { settlementId: string; adminId?: string },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ paid: number; skipped: number }> {
     const [run] = await this.listWeeklySettlements(
@@ -1272,10 +1468,13 @@ class PacksModuleService extends MedusaService({
       );
     }
     const weekStartIso = new Date(run.week_start).toISOString().slice(0, 10);
-    const skip = new Set(input.skipCustomerIds ?? []);
     const pending = await this.listWeeklySettlementLines(
       { settlement_id: run.id, status: 'pending' },
       { take: 100_000 },
+      sharedContext,
+    );
+    const skip = await this.deletedCustomerIds(
+      [...new Set(pending.map((l) => l.customer_id))],
       sharedContext,
     );
 
@@ -1287,6 +1486,14 @@ class PacksModuleService extends MedusaService({
           {
             selector: { id: line.id },
             data: { status: 'voided' as const, void_reason: 'account_deleted' },
+          },
+          sharedContext,
+        );
+        await this.deductRunTotal(
+          {
+            settlementId: run.id,
+            kind: line.kind,
+            amountCents: line.amount_cents,
           },
           sharedContext,
         );
@@ -1344,6 +1551,22 @@ class PacksModuleService extends MedusaService({
         sharedContext,
       );
     }
+    if (paid > 0 || skipped > 0) {
+      await this.createAdminActionAudits(
+        [
+          {
+            admin_id: input.adminId ?? 'system:pay-referral-week',
+            entity_type: 'weekly_settlement',
+            entity_id: run.id,
+            action: 'pay_settlement',
+            before: { status: run.status },
+            after: { paid, skipped },
+            reason: `week ${weekStartIso}`,
+          },
+        ],
+        sharedContext,
+      );
+    }
     return { paid, skipped };
   }
 
@@ -1381,19 +1604,18 @@ class PacksModuleService extends MedusaService({
     );
     const downlineIds = downline.map((d) => d.customer_id);
 
-    let turnoverCents = 0;
-    if (downlineIds.length > 0) {
-      const placeholders = downlineIds.map(() => '?').join(', ');
-      const rows = await em.execute<{ turnover_cents: string | null }[]>(
-        'SELECT COALESCE(SUM(ROUND(-amount * 100)), 0)::bigint AS turnover_cents ' +
-          'FROM credit_transaction ' +
-          `WHERE reason = 'pack_open' AND deleted_at IS NULL ` +
-          `  AND customer_id IN (${placeholders}) ` +
-          '  AND created_at >= ? AND created_at < ?',
-        [...downlineIds, week.startUtc, week.endUtcExcl],
-      );
-      turnoverCents = Number(rows[0]?.turnover_cents ?? 0);
-    }
+    const downlineTurnover = await this.packTurnoverCentsByCustomer(
+      {
+        startUtc: week.startUtc,
+        endUtcExcl: week.endUtcExcl,
+        customerIds: downlineIds,
+      },
+      sharedContext,
+    );
+    const turnoverCents = [...downlineTurnover.values()].reduce(
+      (a, b) => a + b,
+      0,
+    );
 
     const [state] = await this.listCustomerAccountStates(
       { customer_id: input.customerId },
@@ -1438,16 +1660,17 @@ class PacksModuleService extends MedusaService({
     }[];
   }> {
     const week = referralWeekFor(input.now ?? new Date());
-    const em = (sharedContext.transactionManager ??
-      sharedContext.manager) as unknown as LedgerSqlManager;
-    const rows = await em.execute<{ turnover_cents: string | null }[]>(
-      'SELECT COALESCE(SUM(ROUND(-amount * 100)), 0)::bigint AS turnover_cents ' +
-        'FROM credit_transaction ' +
-        `WHERE reason = 'pack_open' AND deleted_at IS NULL ` +
-        '  AND customer_id = ? AND created_at >= ? AND created_at < ?',
-      [input.customerId, week.startUtc, week.endUtcExcl],
-    );
-    const turnoverCents = Number(rows[0]?.turnover_cents ?? 0);
+    const turnoverCents =
+      (
+        await this.packTurnoverCentsByCustomer(
+          {
+            startUtc: week.startUtc,
+            endUtcExcl: week.endUtcExcl,
+            customerIds: [input.customerId],
+          },
+          sharedContext,
+        )
+      ).get(input.customerId) ?? 0;
 
     const [stateRow] = await this.listVipMemberStates(
       { customer_id: input.customerId },
@@ -1492,8 +1715,11 @@ class PacksModuleService extends MedusaService({
       status: string;
     }[]
   > {
+    // status 'paid' ONLY: Tuesday's draft (and even an approved-but-unpaid
+    // line) is still voidable — showing it as a "past payout" promises money
+    // the human gate can still pull (review 2026-08-25 finding, spec axis 5).
     const lines = await this.listWeeklySettlementLines(
-      { customer_id: input.customerId, kind: input.kind },
+      { customer_id: input.customerId, kind: input.kind, status: 'paid' },
       { order: { created_at: 'DESC' }, take: 12 },
       sharedContext,
     );

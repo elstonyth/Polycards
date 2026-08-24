@@ -40,6 +40,16 @@ describe('validateTierRows', () => {
   it('rejects a rate with more than 2 decimal places (sub-bp)', () => {
     expect(validateTierRows(rows(['0', '0.505']))).toMatch(/rate/i);
   });
+
+  it('accepts float-hazard hundredths (1.15% and RM 0.15 are valid money)', () => {
+    // 1.15 * 100 === 114.99999999999999 — a naive Number.isInteger guard
+    // rejects these; the validator must not.
+    expect(validateTierRows(rows(['0', '1.15']))).toBeNull();
+    expect(validateTierRows(rows(['0', '0.5'], ['0.15', '1.15']))).toBeNull();
+    expect(tierRowsToPayload(rows(['0', '1.15']))).toEqual([
+      { min_cents: 0, rate_bp: 115 },
+    ]);
+  });
 });
 
 describe('tierRowsToPayload', () => {

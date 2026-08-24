@@ -20,6 +20,7 @@ import {
   useReferralSettlements,
   useUpdateReferralSettings,
   useVoidReferralLine,
+  useVoidReferralSettlement,
   type ReferralSettings,
   type ReferralSettlement,
 } from '../../lib/queries';
@@ -43,7 +44,10 @@ export const config: RouteConfig = {
 };
 
 const fromCents = (cents: number): string => rm(cents / 100);
-const pctLabel = (bp: number): string => `${(bp / 100).toFixed(2)}%`;
+// Same rendering as the storefront /task hub: up to 2 decimals, trailing
+// zeros trimmed.
+const pctLabel = (bp: number): string =>
+  `${(bp / 100).toFixed(2).replace(/\.?0+$/, '')}%`;
 
 const STATUS_COLOR: Record<
   ReferralSettlement['status'],
@@ -75,8 +79,12 @@ function SettingsEditor({ initial }: { initial: ReferralSettings }) {
       ratePct: String(t.rate_bp / 100),
     })),
   );
-  const [minPct, setMinPct] = useState(() => String(initial.partner_min_bp / 100));
-  const [maxPct, setMaxPct] = useState(() => String(initial.partner_max_bp / 100));
+  const [minPct, setMinPct] = useState(() =>
+    String(initial.partner_min_bp / 100),
+  );
+  const [maxPct, setMaxPct] = useState(() =>
+    String(initial.partner_max_bp / 100),
+  );
   const [reason, setReason] = useState('');
 
   const error = validateTierRows(rows);
@@ -323,6 +331,7 @@ function RunsCard() {
   const { data, isLoading } = useReferralSettlements();
   const approve = useApproveReferralSettlement();
   const pay = usePayReferralSettlement();
+  const voidRun = useVoidReferralSettlement();
   const prompt = usePrompt();
   const [openId, setOpenId] = useState<string | null>(null);
 
@@ -339,6 +348,25 @@ function RunsCard() {
       onSuccess: () => toast.success('Settlement approved.'),
       onError: (e) => toast.error(e.message),
     });
+  };
+
+  const onVoidRun = async (run: ReferralSettlement) => {
+    const reason = window.prompt('Void reason (audited):')?.trim();
+    if (!reason) return;
+    const confirmed = await prompt({
+      title: `Void week ${run.week_start}?`,
+      description:
+        'Every pending line is voided and nothing pays out for this week. This cannot be undone.',
+      confirmText: 'Void run',
+    });
+    if (!confirmed) return;
+    voidRun.mutate(
+      { id: run.id, reason },
+      {
+        onSuccess: () => toast.success('Settlement voided.'),
+        onError: (e) => toast.error(e.message),
+      },
+    );
   };
 
   const onPay = async (run: ReferralSettlement) => {
@@ -409,13 +437,23 @@ function RunsCard() {
                         {openId === run.id ? 'Hide lines' : 'Review lines'}
                       </Button>
                       {run.status === 'draft' && (
-                        <Button
-                          size="small"
-                          onClick={() => void onApprove(run)}
-                          disabled={approve.isPending}
-                        >
-                          Approve
-                        </Button>
+                        <>
+                          <Button
+                            size="small"
+                            variant="transparent"
+                            onClick={() => void onVoidRun(run)}
+                            disabled={voidRun.isPending}
+                          >
+                            Void run
+                          </Button>
+                          <Button
+                            size="small"
+                            onClick={() => void onApprove(run)}
+                            disabled={approve.isPending}
+                          >
+                            Approve
+                          </Button>
+                        </>
                       )}
                       {run.status === 'approved' && (
                         <Button

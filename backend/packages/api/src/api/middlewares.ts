@@ -1043,6 +1043,17 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      matcher: '/admin/referrals/settlements/*/void',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Admin set/fix of attribution (POST /admin/customers/:id/referral).
+      matcher: '/admin/customers/*/referral',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
       // Partner-rate flag on a customer (POST /admin/customers/:id/partner-rate).
       matcher: '/admin/customers/*/partner-rate',
       method: 'POST',

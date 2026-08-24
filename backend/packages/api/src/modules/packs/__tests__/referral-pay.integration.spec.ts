@@ -200,16 +200,26 @@ moduleIntegrationTestRunner<PacksModuleService>({
       ).toHaveLength(2);
     });
 
-    it('skipCustomerIds voids those lines as account_deleted', async () => {
+    it('a deleted account is voided as account_deleted, not paid', async () => {
       const id = await seedClosedWeek();
+      // How the pay step detects deletion: the delete_account audit row —
+      // the same source deletedCustomerIds reads everywhere else.
+      await service.createAdminActionAudits([
+        {
+          admin_id: 'cus_a',
+          entity_type: 'customer',
+          entity_id: 'cus_a',
+          action: 'delete_account',
+          before: null,
+          after: null,
+          reason: 'self-service deletion',
+        },
+      ]);
       await service.approveWeeklySettlement({
         settlementId: id,
         adminId: 'admin_1',
       });
-      const res = await service.payWeeklySettlement({
-        settlementId: id,
-        skipCustomerIds: ['cus_a'],
-      });
+      const res = await service.payWeeklySettlement({ settlementId: id });
       expect(res.paid).toBe(1);
       expect(res.skipped).toBe(1);
       const [aLine] = await service.listWeeklySettlementLines({
@@ -218,9 +228,111 @@ moduleIntegrationTestRunner<PacksModuleService>({
       });
       expect(aLine.status).toBe('voided');
       expect(aLine.void_reason).toBe('account_deleted');
-      // Run still flips to paid — nothing pending remains.
+      // The skip deducted A's rebate from the run's stored totals.
       const [run] = await service.listWeeklySettlements({ id });
+      expect(run.total_rebate_cents).toBe(0);
+      // Run still flips to paid — nothing pending remains.
       expect(run.status).toBe('paid');
+    });
+
+    it('voiding a line keeps the run totals the approve dialog quotes true', async () => {
+      const id = await seedClosedWeek();
+      const lines = await service.listWeeklySettlementLines({
+        settlement_id: id,
+      });
+      const rebate = lines.find((l) => l.kind === 'vip_rebate')!;
+      await service.voidSettlementLine({
+        lineId: rebate.id,
+        adminId: 'admin_1',
+        reason: 'test',
+      });
+      const [run] = await service.listWeeklySettlements({ id });
+      expect(run.total_rebate_cents).toBe(0);
+      expect(run.total_commission_cents).toBe(500); // untouched
+    });
+
+    it('pay writes a pay_settlement audit row (cron identity when no admin)', async () => {
+      const id = await seedClosedWeek();
+      await service.approveWeeklySettlement({
+        settlementId: id,
+        adminId: 'admin_1',
+      });
+      await service.payWeeklySettlement({ settlementId: id });
+      const audits = await service.listAdminActionAudits({
+        action: 'pay_settlement',
+        entity_id: id,
+      });
+      expect(audits).toHaveLength(1);
+      expect(audits[0].admin_id).toBe('system:pay-referral-week');
+      // An idempotent re-run pays nothing and must not add a second row.
+      await service.payWeeklySettlement({ settlementId: id });
+      expect(
+        await service.listAdminActionAudits({
+          action: 'pay_settlement',
+          entity_id: id,
+        }),
+      ).toHaveLength(1);
+    });
+
+    it('voidWeeklySettlement voids a whole draft run', async () => {
+      const id = await seedClosedWeek();
+      await service.voidWeeklySettlement({
+        settlementId: id,
+        adminId: 'admin_1',
+        reason: 'recompute later',
+      });
+      const [run] = await service.listWeeklySettlements({ id });
+      expect(run.status).toBe('void');
+      expect(run.total_commission_cents).toBe(0);
+      const lines = await service.listWeeklySettlementLines({
+        settlement_id: id,
+      });
+      expect(lines.every((l) => l.status === 'voided')).toBe(true);
+      // Not approvable or payable afterwards.
+      await expect(
+        service.approveWeeklySettlement({ settlementId: id, adminId: 'a' }),
+      ).rejects.toThrow(/draft/i);
+      await expect(
+        service.payWeeklySettlement({ settlementId: id }),
+      ).rejects.toThrow(/approved/i);
+    });
+
+    it('adminSetReferral overrides, clears and audits attribution', async () => {
+      await service.bindReferral({
+        customerId: 'cus_x',
+        referrerId: 'cus_r1',
+      });
+      // Customer path is permanent…
+      expect(
+        await service.bindReferral({ customerId: 'cus_x', referrerId: 'cus_r2' }),
+      ).toEqual({ bound: false, reason: 'already_bound' });
+      // …the admin path can fix it.
+      await service.adminSetReferral({
+        customerId: 'cus_x',
+        referrerId: 'cus_r2',
+        adminId: 'admin_1',
+        reason: 'support ticket',
+      });
+      let [row] = await service.listReferralAttributions({
+        customer_id: 'cus_x',
+      });
+      expect(row.referrer_id).toBe('cus_r2');
+      await expect(
+        service.adminSetReferral({
+          customerId: 'cus_x',
+          referrerId: 'cus_x',
+          adminId: 'admin_1',
+          reason: 'bad',
+        }),
+      ).rejects.toThrow(/themself/i);
+      await service.adminSetReferral({
+        customerId: 'cus_x',
+        referrerId: null,
+        adminId: 'admin_1',
+        reason: 'clear',
+      });
+      [row] = await service.listReferralAttributions({ customer_id: 'cus_x' });
+      expect(row).toBeUndefined();
     });
   },
 });

@@ -33,6 +33,7 @@ import {
   usePulls,
   useSavePayoutDetails,
   useReferralSettings,
+  useSetCustomerReferrer,
   useSetPartnerRate,
   useSetPlayerGroup,
   useSpendReport,
@@ -74,13 +75,7 @@ const deliveryTone = (
 type ModalKind = 'freeze' | 'unfreeze' | 'credits';
 
 type TabKey =
-  | 'profile'
-  | 'lvl'
-  | 'wallet'
-  | 'vault'
-  | 'orders'
-  | 'pulls'
-  | 'history';
+  'profile' | 'lvl' | 'wallet' | 'vault' | 'orders' | 'pulls' | 'history';
 
 // ── Tab bodies ──────────────────────────────────────────────────────────────
 // One component per tab, following routes/deliveries/page.tsx: an inactive
@@ -311,7 +306,6 @@ const GroupCard = ({ customerId }: { customerId: string }) => {
   );
 };
 
-
 // Referral card (rebuild, spec 2026-08-24): who referred them, their direct
 // downline, their weekly payout lines, and the partner-rate control. The rate
 // REPLACES the tier table for this customer; bounds come from the Referrals
@@ -352,6 +346,10 @@ const ReferralCardBody = ({
 }) => {
   const { data: settings } = useReferralSettings();
   const setRate = useSetPartnerRate();
+  const setReferrer = useSetCustomerReferrer();
+  const [referrerInput, setReferrerInput] = useState(
+    () => data.referred_by ?? '',
+  );
   const [ratePct, setRatePct] = useState(() =>
     data.partner_referral_bp === null
       ? ''
@@ -379,76 +377,106 @@ const ReferralCardBody = ({
 
   return (
     <div className="border-t px-6 py-4">
-          <dl className="grid grid-cols-[9rem_1fr] gap-x-4 gap-y-2 text-sm break-words">
-            <dt className="text-ui-fg-subtle">Referred by</dt>
-            <dd className="font-mono text-xs">{data.referred_by ?? '—'}</dd>
-            <dt className="text-ui-fg-subtle">Direct referrals</dt>
-            <dd>{data.downline.length}</dd>
-            <dt className="text-ui-fg-subtle">Partner rate</dt>
-            <dd>
-              <div className="flex items-center gap-2">
-                <Input
-                  type="number"
-                  value={ratePct}
-                  onChange={(e) => setRatePct(e.target.value)}
-                  placeholder={boundsHint}
-                  className="w-24"
-                />
-                <Text size="small" className="text-ui-fg-muted">
-                  %
-                </Text>
-                <Button
-                  size="small"
-                  variant="secondary"
-                  disabled={setRate.isPending || ratePct.trim() === ''}
-                  onClick={() => apply(Math.round(Number(ratePct) * 100))}
-                >
-                  Set
-                </Button>
-                {data.partner_referral_bp !== null && (
-                  <Button
-                    size="small"
-                    variant="transparent"
-                    disabled={setRate.isPending}
-                    onClick={() => {
-                      setRatePct('');
-                      apply(null);
-                    }}
-                  >
-                    Clear
-                  </Button>
-                )}
-              </div>
-              {boundsHint && (
-                <Text size="xsmall" className="text-ui-fg-muted">
-                  Allowed range {boundsHint} — replaces the tier table for this
-                  customer.
-                </Text>
-              )}
-            </dd>
-          </dl>
-          {data.lines.length > 0 && (
-            <div className="mt-4">
-              <Text size="small" className="text-ui-fg-subtle">
-                Weekly payouts
-              </Text>
-              <ul className="mt-1 flex flex-col gap-1 text-sm">
-                {data.lines.slice(0, 8).map((l) => (
-                  <li key={l.id} className="flex items-center gap-2">
-                    <Badge size="2xsmall">
-                      {l.kind === 'referral_commission'
-                        ? 'Commission'
-                        : 'Rebate'}
-                    </Badge>
-                    <span className="tabular-nums">
-                      {rm(l.amount_cents / 100)}
-                    </span>
-                    <span className="text-ui-fg-muted text-xs">{l.status}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
+      <dl className="grid grid-cols-[9rem_1fr] gap-x-4 gap-y-2 text-sm break-words">
+        <dt className="text-ui-fg-subtle">Referred by</dt>
+        <dd>
+          <div className="flex items-center gap-2">
+            <Input
+              value={referrerInput}
+              onChange={(e) => setReferrerInput(e.target.value)}
+              placeholder="cus_… (blank = none)"
+              className="w-64 font-mono text-xs"
+            />
+            <Button
+              size="small"
+              variant="secondary"
+              disabled={
+                setReferrer.isPending ||
+                (referrerInput.trim() || null) === data.referred_by
+              }
+              onClick={() => {
+                const reason = window.prompt('Reason (audited):')?.trim();
+                if (!reason) return;
+                setReferrer.mutate(
+                  {
+                    customerId,
+                    referrerId: referrerInput.trim() || null,
+                    reason,
+                  },
+                  {
+                    onSuccess: () => toast.success('Attribution updated.'),
+                    onError: (e) => toast.error(e.message),
+                  },
+                );
+              }}
+            >
+              Set
+            </Button>
+          </div>
+        </dd>
+        <dt className="text-ui-fg-subtle">Direct referrals</dt>
+        <dd>{data.downline.length}</dd>
+        <dt className="text-ui-fg-subtle">Partner rate</dt>
+        <dd>
+          <div className="flex items-center gap-2">
+            <Input
+              type="number"
+              value={ratePct}
+              onChange={(e) => setRatePct(e.target.value)}
+              placeholder={boundsHint}
+              className="w-24"
+            />
+            <Text size="small" className="text-ui-fg-muted">
+              %
+            </Text>
+            <Button
+              size="small"
+              variant="secondary"
+              disabled={setRate.isPending || ratePct.trim() === ''}
+              onClick={() => apply(Math.round(Number(ratePct) * 100))}
+            >
+              Set
+            </Button>
+            {data.partner_referral_bp !== null && (
+              <Button
+                size="small"
+                variant="transparent"
+                disabled={setRate.isPending}
+                onClick={() => {
+                  setRatePct('');
+                  apply(null);
+                }}
+              >
+                Clear
+              </Button>
+            )}
+          </div>
+          {boundsHint && (
+            <Text size="xsmall" className="text-ui-fg-muted">
+              Allowed range {boundsHint} — replaces the tier table for this
+              customer.
+            </Text>
           )}
+        </dd>
+      </dl>
+      {data.lines.length > 0 && (
+        <div className="mt-4">
+          <Text size="small" className="text-ui-fg-subtle">
+            Weekly payouts
+          </Text>
+          <ul className="mt-1 flex flex-col gap-1 text-sm">
+            {data.lines.slice(0, 8).map((l) => (
+              <li key={l.id} className="flex items-center gap-2">
+                <Badge size="2xsmall">
+                  {l.kind === 'referral_commission' ? 'Commission' : 'Rebate'}
+                </Badge>
+                <span className="tabular-nums">{rm(l.amount_cents / 100)}</span>
+                <span className="text-ui-fg-muted text-xs">{l.status}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 };

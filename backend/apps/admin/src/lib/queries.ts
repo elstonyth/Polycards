@@ -123,7 +123,9 @@ import {
   payReferralSettlement,
   voidReferralLine,
   getCustomerReferral,
+  setCustomerReferrer,
   setPartnerRate,
+  voidReferralSettlement,
   type CustomerReferralCard,
   type ReferralSettings,
   type ReferralSettlement,
@@ -1379,8 +1381,7 @@ export const useUpdateReferralSettings = () => {
       partner_max_bp?: number;
       reason: string;
     }) => updateReferralSettings(input),
-    onSuccess: () =>
-      qc.invalidateQueries({ queryKey: qk.referralSettings }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.referralSettings }),
   });
 };
 
@@ -1411,8 +1412,7 @@ export const useApproveReferralSettlement = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => approveReferralSettlement(id),
-    onSuccess: () =>
-      qc.invalidateQueries({ queryKey: qk.referralSettlements }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.referralSettlements }),
   });
 };
 
@@ -1420,8 +1420,31 @@ export const usePayReferralSettlement = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => payReferralSettlement(id),
-    onSuccess: () =>
-      qc.invalidateQueries({ queryKey: qk.referralSettlements }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.referralSettlements }),
+  });
+};
+
+export const useVoidReferralSettlement = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; reason: string }) =>
+      voidReferralSettlement(vars.id, vars.reason),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.referralSettlements }),
+  });
+};
+
+export const useSetCustomerReferrer = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: {
+      customerId: string;
+      referrerId: string | null;
+      reason: string;
+    }) => setCustomerReferrer(vars.customerId, vars.referrerId, vars.reason),
+    onSuccess: (_data, vars) =>
+      qc.invalidateQueries({
+        queryKey: qk.customerReferral(vars.customerId),
+      }),
   });
 };
 
@@ -1430,8 +1453,7 @@ export const useVoidReferralLine = () => {
   return useMutation({
     mutationFn: (vars: { lineId: string; reason: string }) =>
       voidReferralLine(vars.lineId, vars.reason),
-    onSuccess: () =>
-      qc.invalidateQueries({ queryKey: qk.referralSettlements }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.referralSettlements }),
   });
 };
 

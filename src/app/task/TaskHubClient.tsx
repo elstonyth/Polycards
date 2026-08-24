@@ -17,8 +17,10 @@ const TABS: { key: TabKey; label: string; icon: typeof Users }[] = [
 ];
 
 const fromCents = (cents: number): string => rm(cents / 100);
+// Same rendering as the admin console: up to 2 decimals, trailing zeros
+// trimmed — 50→"0.5%", 115→"1.15%", 200→"2%" (review 2026-08-25 finding 5).
 const pct = (bp: number): string =>
-  `${(bp / 100).toFixed(bp % 100 === 0 ? 0 : 1)}%`;
+  `${(bp / 100).toFixed(2).replace(/\.?0+$/, '')}%`;
 
 function Panel({
   children,

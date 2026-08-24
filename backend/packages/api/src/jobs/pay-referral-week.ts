@@ -10,9 +10,8 @@ import type PacksModuleService from '../modules/packs/service';
  *
  * Idempotent end to end (line status + the RF ledger (type, ref_id) unique
  * index), so the hourly Wednesday cadence — and an admin's early "Pay now"
- * from the dashboard — can never double-credit anyone. Deleted accounts are
- * voided here (the packs module cannot see the customer module; the audit
- * trail's delete_account rows can — deletedCustomerIds).
+ * from the dashboard — can never double-credit anyone. Deleted-account
+ * voiding and the pay_settlement audit both live inside payWeeklySettlement.
  */
 export default async function payReferralWeekJob(container: MedusaContainer) {
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
@@ -29,17 +28,7 @@ export default async function payReferralWeekJob(container: MedusaContainer) {
     { take: 100 },
   );
   for (const run of approved) {
-    const pending = await packs.listWeeklySettlementLines(
-      { settlement_id: run.id, status: 'pending' },
-      { select: ['customer_id'], take: 100_000 },
-    );
-    const deleted = await packs.deletedCustomerIds([
-      ...new Set(pending.map((l) => l.customer_id)),
-    ]);
-    const result = await packs.payWeeklySettlement({
-      settlementId: run.id,
-      skipCustomerIds: [...deleted],
-    });
+    const result = await packs.payWeeklySettlement({ settlementId: run.id });
     log(
       `[pay-referral-week] settlement ${run.id}: paid ${result.paid}, skipped ${result.skipped}`,
     );

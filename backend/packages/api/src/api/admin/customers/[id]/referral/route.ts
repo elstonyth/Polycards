@@ -4,6 +4,8 @@ import type {
 } from '@medusajs/framework/http';
 import { PACKS_MODULE } from '../../../../../modules/packs';
 import type PacksModuleService from '../../../../../modules/packs/service';
+import { MedusaError } from '@medusajs/framework/utils';
+import { reqReason } from '../../../rewards-settings/validate';
 
 // GET /admin/customers/:id/referral — the Customer-360 referral card: who
 // referred them, their direct downline, their partner rate, and their
@@ -45,4 +47,29 @@ export async function GET(
       status: l.status,
     })),
   });
+}
+
+// POST /admin/customers/:id/referral { referrer_id, reason } — admin set/fix
+// of attribution (spec: "Admin can set/fix one manually"). referrer_id null
+// clears it. Unlike the customer bind, this may OVERRIDE an existing row;
+// audited in the service.
+export async function POST(
+  req: AuthenticatedMedusaRequest<{ referrer_id?: unknown; reason?: unknown }>,
+  res: MedusaResponse,
+): Promise<void> {
+  const referrerId = req.body?.referrer_id ?? null;
+  if (referrerId !== null && typeof referrerId !== 'string') {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      'referrer_id must be a customer id string or null.',
+    );
+  }
+  const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+  await packs.adminSetReferral({
+    customerId: req.params.id,
+    referrerId,
+    adminId: req.auth_context.actor_id,
+    reason: reqReason(req.body),
+  });
+  res.json({ ok: true });
 }

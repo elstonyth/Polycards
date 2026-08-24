@@ -51,11 +51,12 @@ export function validateVipLevelsClient(rows: VipLevelRow[]): string[] {
     // column is gone. All three stay enforced server-side, surfacing as a toast
     // rather than a permanent block.
     const rebate = num(r.rebateInput);
+    // Float-safe hundredths check — Number.isInteger(1.15 * 100) is false.
     if (
       !Number.isFinite(rebate) ||
       rebate < 0 ||
       rebate > 100 ||
-      !Number.isInteger(rebate * 100)
+      Math.abs(rebate * 100 - Math.round(rebate * 100)) >= 1e-6
     ) {
       errors.push(`Level ${level}: rebate must be 0–100% in steps of 0.01.`);
     }

@@ -69,6 +69,7 @@ export const AdminActionAudit = model
       'edit_referral_settings',
       'approve_settlement',
       'void_settlement_line',
+      'void_settlement',
       'pay_settlement',
     ]),
     before: model.json().nullable(),
