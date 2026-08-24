@@ -21,6 +21,14 @@ import { deleteApexPost, postApexPull } from '../modules/packs/telegram';
 export default async function telegramApexSmoke({ container }: ExecArgs) {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
   const packs = container.resolve(PACKS_MODULE) as PacksModuleService;
+  // Set by the verdict below and thrown at the very END (in the finally, after
+  // the test post and the temporary Pull row are cleaned up). A logger.error
+  // line leaves the process exiting 0, so anything reading the exit status —
+  // a deploy gate, a cron wrapper, an operator's `&&` — would read a degraded
+  // board as a passing pre-flight, which is the exact failure mode this script
+  // exists to catch. Cleanup first, though: aborting early would strand a
+  // fabricated pull in the public channel.
+  let degraded: string | null = null;
 
   if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_CHAT_ID) {
     logger.error(
@@ -108,6 +116,8 @@ export default async function telegramApexSmoke({ container }: ExecArgs) {
       customer_id: customer.id,
     });
     if (!posted) {
+      degraded =
+        'nothing built — a gate rejected this pull (rarity, source, or a disabled player)';
       logger.error(
         '[telegram-smoke] nothing built — a gate rejected this pull (rarity, source, or a disabled player).',
       );
@@ -126,11 +136,40 @@ export default async function telegramApexSmoke({ container }: ExecArgs) {
     // pre-flight — especially when the send is the broken part.
     logger.info(`[telegram-smoke] caption:\n${posted.caption}`);
 
+    // A picture-less post is an `ok` post, so nothing above would flag it —
+    // which is exactly how the board ran text-only from #469 to 2026-08-24
+    // while this pre-flight kept reporting success. The photo path is the part
+    // of this integration no unit test can prove, so it is the part the
+    // pre-flight has to check, and it must never read as a pass.
+    if (posted.photoPath === 'bytes') {
+      logger.info(
+        '[telegram-smoke] picture uploaded as our own composite — the photo path is healthy.',
+      );
+    } else if (posted.photoPath === 'url') {
+      degraded = `photo path fell back to the URL picture: ${posted.photoError ?? 'no reason recorded'}`;
+      // The trap this pre-flight missed for months: the post HAS a picture, so
+      // a human glancing at the channel sees a working board, while the
+      // composite is dead and Telegram is white-flattening the slab.
+      logger.error(
+        `[telegram-smoke] DEGRADED — the picture came from the URL fallback (white-flattened by Telegram), not our black composite: ${posted.photoError ?? 'no reason recorded'}`,
+      );
+    } else {
+      degraded = `posted without its picture: ${posted.photoError ?? 'no reason recorded'}`;
+      logger.error(
+        `[telegram-smoke] POSTED WITHOUT ITS PICTURE — the board is degraded to text: ${posted.photoError ?? 'no reason recorded'}`,
+      );
+    }
+
     // Take the test post straight back down. The default is DELETE, not keep:
     // this runs against the live customer-facing channel, and a pre-flight that
     // leaves marketing debris in front of real subscribers is a worse pre-flight
     // than one that proves nothing. Set TELEGRAM_SMOKE_KEEP=1 to leave it up.
-    if (posted.messageId === null) return;
+    if (posted.messageId === null) {
+      // postApexPull already warned with Telegram's own description; this is
+      // the exit-status half of it.
+      degraded ??= 'Telegram rejected the post (no message id)';
+      return;
+    }
     if (process.env.TELEGRAM_SMOKE_KEEP === '1') {
       logger.warn(
         `[telegram-smoke] TELEGRAM_SMOKE_KEEP=1 — message ${posted.messageId} LEFT UP in the channel.`,
@@ -158,5 +197,12 @@ export default async function telegramApexSmoke({ container }: ExecArgs) {
     }
   } finally {
     await packs.deletePulls([pull.id]);
+    // Thrown from the finally deliberately: every return path above lands here,
+    // and by now the test post and the Pull row are gone. Left as `null` when
+    // postApexPull itself threw, so the original error keeps propagating
+    // instead of being masked by this one.
+    if (degraded) {
+      throw new Error(`[telegram-smoke] apex board is DEGRADED — ${degraded}`);
+    }
   }
 }

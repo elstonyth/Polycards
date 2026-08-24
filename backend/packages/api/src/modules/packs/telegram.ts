@@ -14,8 +14,10 @@ import { fetchBytes, MAX_DECODE_PIXELS } from '../../api/utils/image-fetch';
 
 // Telegram "apex pull" board — posts every Legendary-or-better pull to the
 // public POLYCARDS.GG channel, so the community sees the big hits land in real
-// time. Fed by the `pack.opened` event (one per pull, from BOTH open-pack and
-// open-batch), via subscribers/pack-opened-telegram.ts.
+// time. Fed by the `pull.revealed` event via subscribers/pull-revealed-telegram
+// .ts — the FLIP, not the roll. It hung off `pack.opened` until 2026-08-24,
+// which fires when the roll commits: the channel named the card while the
+// player's reels were still spinning.
 //
 // Config is env-only, so an unconfigured environment (dev, CI, integration
 // tests) is a silent no-op rather than a failure or a stray post:
@@ -60,8 +62,8 @@ const minRarity = (container: { resolve: (k: string) => any }): Rarity => {
   const configured = process.env.TELEGRAM_MIN_RARITY?.trim();
   if (!configured) return DEFAULT_MIN_RARITY;
   if (RARITY_ORDER.includes(configured as Rarity)) return configured as Rarity;
-  // Once per process, not per open: this runs on EVERY pack.opened, and a line
-  // per pack open would bury the thing it is trying to report. Silence here
+  // Once per process, not per reveal: this runs on EVERY pull.revealed, and a
+  // line per reveal would bury the thing it is trying to report. Silence here
   // would be worse than noise though — the fallback is invisible from the
   // outside, so a typo'd bar looks exactly like a quiet week of no apex pulls.
   if (!minRarityWarned) {
@@ -284,7 +286,10 @@ export async function deleteApexPost(
   });
 }
 
-async function callTelegram(
+/** Exported for the live probe (telegram-live.unit.spec.ts), which has to
+ *  exercise each send path SEPARATELY — sendApexPost returns on the first
+ *  success and so hides which one actually carried the picture. */
+export async function callTelegram(
   token: string,
   method: string,
   body: Record<string, unknown>,
@@ -311,37 +316,68 @@ const PHOTO_BACKGROUND = '#000000';
  *  413 and dropping to text. */
 const PHOTO_UPLOAD_LIMIT = 10 * 1024 * 1024;
 
+/** A composite attempt: the JPEG bytes, or null plus the reason it failed. The
+ *  reason exists because the caller's fallbacks are silent by design (a dropped
+ *  backdrop must never cost the post), and silent fallbacks are undiagnosable
+ *  from the outside — a text-only post looks identical whether the art was
+ *  unreachable, undecodable, or oversized. sendApexPost forwards it to
+ *  postApexPull, which owns the logger. */
+export type PhotoComposite = { photo: Buffer | null; error?: string };
+
+const reason = (err: unknown): string =>
+  err instanceof Error ? err.message : String(err);
+
 /**
  * Fetch the card art and composite it onto {@link PHOTO_BACKGROUND}, returning
- * JPEG bytes to upload. Null on ANY failure — an unreachable URL (locally the
- * art is a localhost URL), a non-image body, an oversized result — because the
- * caller's fallback is to hand Telegram the URL, which is exactly the old
- * behaviour. Never throws: a background colour must not be able to cost us the
- * post. The fetch itself is host-validated and redirect-checked (fetchBytes,
- * shared with bake-slab.ts's admin image fetch) rather than a bare `fetch` —
- * a blocked URL degrades to the URL photo fallback exactly like an
+ * JPEG bytes to upload. `photo: null` on ANY failure — an unreachable URL
+ * (locally the art is a localhost URL), a non-image body, an oversized result —
+ * because the caller's fallback is to hand Telegram the URL, which is exactly
+ * the old behaviour. Never throws: a background colour must not be able to cost
+ * us the post. The fetch itself is host-validated and redirect-checked
+ * (fetchBytes, shared with bake-slab.ts's admin image fetch) rather than a bare
+ * `fetch` — a blocked URL degrades to the URL photo fallback exactly like an
  * unreachable one.
  */
-export async function blackBackedPhoto(url: string): Promise<Buffer | null> {
+export async function blackBackedPhoto(url: string): Promise<PhotoComposite> {
+  // fetchBytes is fail-closed and folds every cause into null — a blocked host,
+  // a non-2xx, a redirect chain, a timeout, an over-cap body all look alike. Its
+  // onFail sink is what separates "the CDN 404'd" from "egress is blocked",
+  // which is the difference between one deploy cycle and two.
+  let why = 'art fetch returned nothing';
+  let bytes: Buffer | null;
   try {
-    const bytes = await fetchBytes(url);
-    if (!bytes) return null;
+    bytes = await fetchBytes(url, (r) => {
+      why = r;
+    });
+  } catch (err) {
+    return { photo: null, error: `art fetch threw: ${reason(err)}` };
+  }
+  if (!bytes) return { photo: null, error: `art fetch: ${why}` };
+  try {
     const flattened = await sharp(bytes, {
       limitInputPixels: MAX_DECODE_PIXELS,
     })
       .flatten({ background: PHOTO_BACKGROUND })
       .jpeg({ quality: 90 })
       .toBuffer();
-    return flattened.byteLength > PHOTO_UPLOAD_LIMIT ? null : flattened;
-  } catch {
-    return null;
+    return flattened.byteLength > PHOTO_UPLOAD_LIMIT
+      ? {
+          photo: null,
+          error: `composite ${flattened.byteLength}B over the ${PHOTO_UPLOAD_LIMIT}B upload limit`,
+        }
+      : { photo: flattened };
+  } catch (err) {
+    return { photo: null, error: `composite failed: ${reason(err)}` };
   }
 }
 
 /** sendPhoto with the image as multipart bytes rather than a URL — the only
  *  way to control what transparency is composited onto, since Telegram gives
  *  no background option when it fetches the URL itself. */
-async function uploadApexPhoto(
+/** Exported for the same reason as callTelegram above — the live probe posts a
+ *  synthetic JPEG through it to tell a bad IMAGE apart from a bad transport.
+ *  Not a general-purpose sender: sendApexPost owns the fallback order. */
+export async function uploadApexPhoto(
   token: string,
   chatId: string,
   caption: string,
@@ -368,52 +404,114 @@ async function uploadApexPhoto(
  *  on the final `sendMessage`, whose throw must keep propagating to
  *  postApexPull's catch. */
 const attempt = async (p: Promise<TelegramResult>): Promise<TelegramResult> =>
-  p.catch((err) => ({
-    ok: false,
-    description: err instanceof Error ? err.message : String(err),
-  }));
+  p.catch((err) => ({ ok: false, description: reason(err) }));
 
-/** Post as a photo when we have an image, else as text. Two photo paths: the
- *  preferred one uploads bytes we flattened onto black ourselves; if that
- *  fails for any reason — including a thrown network/timeout error, not just
- *  a non-ok response — we hand Telegram the URL as before, so a broken
- *  composite step costs the backdrop, never the post. The text fallback then
- *  genuinely covers a failed photo entirely, thrown or not: locally the card
- *  image is a localhost URL Telegram cannot reach, and a silent drop would
- *  make the board look broken in dev. */
+/** Which route actually carried the post.
+ *
+ *  'bytes' is the only healthy one. 'url' means Telegram fetched the art itself
+ *  and flattened its transparency onto WHITE — the post has a picture, in the
+ *  wrong backdrop, which is precisely the state #471 was written to end and
+ *  precisely the state production was found in on 2026-08-24. It is a degraded
+ *  success, so it must be distinguishable from both a healthy post and a
+ *  text-only one; treating it as "fine, it has a photo" is how it went
+ *  unnoticed. */
+export type ApexPhotoPath = 'bytes' | 'url' | 'text';
+
+/** A send, plus how it got there and what failed on the way. `photoError` is
+ *  set on EVERY post that wanted the byte path and did not get it — INCLUDING
+ *  the ones that still went out with a picture via the URL fallback. That is
+ *  the case this exists for: `ok` is true, a picture is visible, and without
+ *  this the composite can be dead for months with nothing to show for it. */
+export type ApexSendResult = TelegramResult & {
+  photoError?: string;
+  photoPath: ApexPhotoPath;
+};
+
+/** Post as a photo when we have an image, else as text. Two photo paths, tried
+ *  in order and BOTH tried on failure: the preferred one uploads bytes we
+ *  flattened onto black ourselves; if the composite or its upload fails for any
+ *  reason — including a thrown network/timeout error, not just a non-ok
+ *  response — we hand Telegram the URL as before, so a broken byte path costs
+ *  the backdrop, never the picture. (Before, a failed UPLOAD skipped the URL
+ *  path entirely and went straight to text — the composite only had a fallback
+ *  when it returned no bytes at all.) The text fallback then genuinely covers a
+ *  failed photo entirely, thrown or not: locally the card image is a localhost
+ *  URL Telegram cannot reach, and a silent drop would make the board look
+ *  broken in dev. */
 export async function sendApexPost(
   token: string,
   chatId: string,
   caption: string,
   photoUrl: string | null,
-): Promise<TelegramResult> {
+): Promise<ApexSendResult> {
+  const failures: string[] = [];
   if (photoUrl) {
-    const bytes = await blackBackedPhoto(photoUrl);
-    const photo = bytes
-      ? await attempt(uploadApexPhoto(token, chatId, caption, bytes))
-      : await attempt(
-          callTelegram(token, 'sendPhoto', {
-            chat_id: chatId,
-            photo: photoUrl,
-            caption,
-            parse_mode: 'HTML',
-          }),
-        );
-    if (photo.ok) return photo;
+    const composite = await blackBackedPhoto(photoUrl);
+    if (composite.error) failures.push(composite.error);
+    if (composite.photo) {
+      const upload = await attempt(
+        uploadApexPhoto(token, chatId, caption, composite.photo),
+      );
+      if (upload.ok) return { ...upload, photoPath: 'bytes' };
+      failures.push(`byte upload: ${upload.description ?? 'unknown error'}`);
+    }
+    const urlPhoto = await attempt(
+      callTelegram(token, 'sendPhoto', {
+        chat_id: chatId,
+        photo: photoUrl,
+        caption,
+        parse_mode: 'HTML',
+      }),
+    );
+    // Carries `failures` even though it SUCCEEDED. This return is the normal
+    // production path when the composite is broken, so dropping the reasons
+    // here would silence the diagnostic in exactly the case it was written for
+    // and leave it firing only on a total photo failure.
+    if (urlPhoto.ok)
+      return { ...urlPhoto, ...photoErrorOf(failures), photoPath: 'url' };
+    failures.push(`url photo: ${urlPhoto.description ?? 'unknown error'}`);
   }
-  return callTelegram(token, 'sendMessage', {
-    chat_id: chatId,
-    text: caption,
-    parse_mode: 'HTML',
-    link_preview_options: { is_disabled: true },
-  });
+  // Deliberately NOT wrapped in attempt(): a thrown text send must keep
+  // propagating to postApexPull's catch. The rethrow carries the photo reasons
+  // into that catch's message, which is otherwise the one path where the whole
+  // trail is lost.
+  let text: TelegramResult;
+  try {
+    text = await callTelegram(token, 'sendMessage', {
+      chat_id: chatId,
+      text: caption,
+      parse_mode: 'HTML',
+      link_preview_options: { is_disabled: true },
+    });
+  } catch (err) {
+    throw failures.length
+      ? new Error(
+          `${reason(err)} (photo had already failed: ${failures.join('; ')})`,
+        )
+      : err;
+  }
+  return { ...text, ...photoErrorOf(failures), photoPath: 'text' };
 }
+
+/** Spread helper so an empty failure list leaves `photoError` ABSENT rather
+ *  than present-and-undefined — callers branch on its presence. */
+const photoErrorOf = (failures: string[]): { photoError?: string } =>
+  failures.length ? { photoError: failures.join('; ') } : {};
 
 export type ApexPostResult = {
   caption: string;
   /** Telegram's id for the post, so a caller can delete it again. Null when the
    *  send failed. */
   messageId: number | null;
+  /** Why the byte path did not carry this post, when there was art to send.
+   *  Undefined = the composite went out (or there was no art at all). Set even
+   *  when a picture DID appear via the URL fallback. */
+  photoError?: string;
+  /** Which route carried it. Surfaced, not just logged, so the smoke pre-flight
+   *  can fail on anything but 'bytes': a URL-fallback post and a text-only post
+   *  are both `ok` posts, and reporting those as success is how the board ran
+   *  on the fallback from #471 to 2026-08-24 without anyone noticing. */
+  photoPath: ApexPhotoPath;
 };
 
 export type ApexPullEvent = {
@@ -538,6 +636,11 @@ export async function postApexPull(
     // The baked slab is the hero image; raw cards fall back to the bare photo.
     const photoUrl = card.slab_image ?? card.image ?? null;
     let result = await sendApexPost(token, chatId, caption, photoUrl);
+    // Accumulated, not read off the final result: the 429 branch below
+    // REASSIGNS `result`, and a rate-limit is exactly when the photo reason is
+    // worth keeping. Deduped — the same cause twice is one line.
+    const photoErrors = new Set<string>();
+    if (result.photoError) photoErrors.add(result.photoError);
     // A 429 means Telegram did NOT deliver the message, so exactly one retry
     // cannot duplicate a post — the no-duplicate-post rule above is about
     // redelivery on a THROW, which this branch never does. Bounded hard: one
@@ -553,6 +656,7 @@ export async function postApexPull(
       );
       await new Promise((r) => setTimeout(r, waitSec * 1000));
       result = await sendApexPost(token, chatId, caption, photoUrl);
+      if (result.photoError) photoErrors.add(result.photoError);
     }
     if (!result.ok) {
       logWarn(
@@ -560,7 +664,35 @@ export async function postApexPull(
         `[telegram] apex post rejected for pull ${event.pull_id}: ${result.description ?? 'unknown error'}`,
       );
     }
-    return { caption, messageId: result.result?.message_id ?? null };
+    // A photo that fell through to text is an OK post — so it logs nothing
+    // above, and the board quietly renders as a text-only channel with no
+    // trace of why. Warn separately, with the reason each photo path gave.
+    if (photoErrors.size) {
+      // The wording tracks the FINAL path, never the accumulated failures.
+      // Those failures can belong to a rate-limited FIRST attempt whose retry
+      // then delivered the picture perfectly well, and reporting that as
+      // "posted WITHOUT its picture" is a lie the reader can check against the
+      // channel — which is how a real warn gets written off as noise.
+      // 'url' is the trap in the other direction: the post DOES carry a
+      // picture, just Telegram's white-flattened one instead of our composite,
+      // so it must not read as a clean success either.
+      const what =
+        result.photoPath === 'bytes'
+          ? 'delivered its picture on the retry, after an earlier attempt failed'
+          : result.photoPath === 'url'
+            ? 'fell back to the URL picture (Telegram white-flattens it; the black composite is broken)'
+            : 'posted WITHOUT its picture';
+      logWarn(
+        container,
+        `[telegram] apex post for pull ${event.pull_id} ${what} (${photoUrl}): ${[...photoErrors].join('; ')}`,
+      );
+    }
+    return {
+      caption,
+      messageId: result.result?.message_id ?? null,
+      ...(photoErrors.size ? { photoError: [...photoErrors].join('; ') } : {}),
+      photoPath: result.photoPath,
+    };
   } catch (err) {
     logWarn(
       container,

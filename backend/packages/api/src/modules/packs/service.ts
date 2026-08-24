@@ -234,6 +234,15 @@ export type CreditMutationInput = {
   idempotencyReference?: string | null;
 };
 
+export type RevealPullResult = {
+  /** Epoch ms the 30s instant-sell window closes. */
+  instant_deadline_ms: number;
+  /** True only for the call that actually stamped revealed_at. Not part of the
+   *  route's response — it gates the public Telegram announcement, which must
+   *  fire once per pull and only after the player has seen the card. */
+  first_reveal: boolean;
+};
+
 export type SettleOpenInput = {
   customerId: string;
   /** Signed MYR (RM) decimal — the open debit (always < 0). */
@@ -5446,11 +5455,14 @@ class PacksModuleService extends MedusaService({
   // later calls return the same deadline. Ownership enforced (a foreign/unknown
   // pull 404s — same error, no existence leak). The grace cap in instantDeadlineMs
   // means a late first call can't extend the window.
+  /** `first_reveal` is true ONLY for the call that stamped revealed_at — the
+   *  one moment the player actually saw the card. It gates the public
+   *  announcement; see the reveal route. */
   async revealPull(
     pullId: string,
     customerId: string,
     nowMs: number = Date.now(),
-  ): Promise<{ instant_deadline_ms: number }> {
+  ): Promise<RevealPullResult> {
     const [pull] = await this.listPulls({ id: pullId }, { take: 1 });
     if (!pull || pull.customer_id !== customerId) {
       throw new MedusaError(
@@ -5462,7 +5474,7 @@ class PacksModuleService extends MedusaService({
       // First-write-wins under concurrent reveals: the FILTERED update only
       // stamps while revealed_at IS NULL (atomic at the DB), so racing calls
       // can't shift the anchor. Re-read to return whichever value persisted.
-      await this.updatePulls({
+      const stamped = await this.updatePulls({
         selector: { id: pull.id, revealed_at: null },
         data: { revealed_at: new Date(nowMs) },
       });
@@ -5472,10 +5484,17 @@ class PacksModuleService extends MedusaService({
           fresh.rolled_at,
           fresh.revealed_at,
         ),
+        // The rows the FILTERED update actually touched — empty for the loser
+        // of a race, because its selector no longer matched. That is the whole
+        // exactly-once guarantee behind the announcement: Telegram has no
+        // dedupe, so a second caller believing it revealed the pull would mean
+        // the same hit posted twice to a public channel.
+        first_reveal: stamped.length > 0,
       };
     }
     return {
       instant_deadline_ms: instantDeadlineMs(pull.rolled_at, pull.revealed_at),
+      first_reveal: false,
     };
   }
 

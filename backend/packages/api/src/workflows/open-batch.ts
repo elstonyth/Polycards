@@ -86,7 +86,8 @@ export const openBatchWorkflow = createWorkflow(
     }));
     decrementCardStockBatchStep(stockInput);
 
-    // 3. Emit one pack.opened event per pull. emitEventStep accepts an array
+    // 3. Emit one pack.opened event per pull. NOTE (2026-08-24): no subscribers
+    //    — the Telegram board listens to `pull.revealed` now. emitEventStep accepts an array
     //    for data — it fires one event per element. Payload matches the single-
     //    open workflow byte-for-byte: { pull_id, pack_id, card_id, customer_id }.
     const eventData = transform({ input, cards, pulls }, (d) =>
