@@ -1,5 +1,9 @@
 import { ExecArgs } from '@medusajs/framework/types';
-import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
+import {
+  ContainerRegistrationKeys,
+  MedusaError,
+  Modules,
+} from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../modules/packs';
 import type PacksModuleService from '../modules/packs/service';
 import { purgeAndDeleteAccount } from '../api/utils/account-deletion';
@@ -36,6 +40,9 @@ const emailHint = (email?: string | null): string => {
   return `${local.slice(0, 1)}${'*'.repeat(Math.max(1, local.length - 1))}@${domain}`;
 };
 
+const isNotFound = (error: unknown): boolean =>
+  error instanceof MedusaError && error.type === MedusaError.Types.NOT_FOUND;
+
 export default async function deleteCustomerAccount({ container }: ExecArgs) {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
   const customerId = process.env.DELETE_CUSTOMER_ID?.trim();
@@ -49,11 +56,25 @@ export default async function deleteCustomerAccount({ container }: ExecArgs) {
   const customers = container.resolve(Modules.CUSTOMER);
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
 
+  // NOT_FOUND (a genuinely missing customer) is the only case that may print
+  // "does not resolve" and stop cleanly (signaled by `null` below). Any other
+  // failure — a DB blip, a timeout — must NOT be swallowed into that same
+  // message: this script's whole job is telling an operator the true state
+  // of an account before an irreversible delete, so an outage that LOOKS
+  // like "already gone" is the one failure mode that can never be silent. It
+  // is rethrown, which surfaces loudly and exits non-zero instead.
   const customer = await customers
     .retrieveCustomer(customerId, {
       select: ['id', 'email', 'phone', 'has_account'],
     })
-    .catch(() => null);
+    .catch((error) => {
+      if (isNotFound(error)) return null;
+      logger.error(
+        `[delete-customer-account] lookup FAILED for ${customerId} — operational error, ` +
+          `NOT a confirmed missing customer: ${(error as Error).message}`,
+      );
+      throw error;
+    });
   if (!customer) {
     logger.error(
       `[delete-customer-account] ${customerId} does not resolve — nothing to do.`,
@@ -109,16 +130,22 @@ export default async function deleteCustomerAccount({ container }: ExecArgs) {
     );
   }
 
-  // The whole point of this print is proving the number was released, so a
-  // failed read here must never render the same as a successful one — that
-  // would tell the operator the phone is free when nothing was verified.
-  const after = await customers
-    .retrieveCustomer(customerId, {
+  // Same NOT_FOUND-vs-operational split as the lookup above, but the
+  // consequence differs: the delete already succeeded, so a failed read here
+  // is a REPORTING problem, not a reason to fail the run — it must never
+  // render the same as a confirmed release, but it also must never throw.
+  // NOT_FOUND on this read means the row is genuinely gone, which is itself
+  // proof the phone was released, so that case renders exactly like success.
+  let afterPhone: string;
+  try {
+    const after = await customers.retrieveCustomer(customerId, {
       withDeleted: true,
       select: ['id', 'phone'],
-    })
-    .catch(() => null);
-  const afterPhone = after ? mask(after.phone) : '(unreadable — verify manually)';
+    });
+    afterPhone = mask(after.phone);
+  } catch (error) {
+    afterPhone = isNotFound(error) ? mask(null) : '(unreadable — verify manually)';
+  }
   logger.info(
     `[delete-customer-account] DONE — ${customerId} deleted. phone ` +
       `${mask(customer.phone)} -> ${afterPhone}`,

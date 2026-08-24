@@ -17,7 +17,11 @@ jest.mock('../../api/utils/account-deletion', () => ({
   purgeAndDeleteAccount: (...args: unknown[]) => mockPurgeAndDeleteAccount(...args),
 }));
 
-import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
+import {
+  ContainerRegistrationKeys,
+  MedusaError,
+  Modules,
+} from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../modules/packs';
 import deleteCustomerAccount from '../delete-customer-account';
 
@@ -64,6 +68,44 @@ describe('delete-customer-account script guards', () => {
     expect(logger.error).toHaveBeenCalled();
     expect(retrieveCustomer).not.toHaveBeenCalled();
     expect(listAndCountPulls).not.toHaveBeenCalled();
+    expect(deleteAccountPreflight).not.toHaveBeenCalled();
+    expect(mockPurgeAndDeleteAccount).not.toHaveBeenCalled();
+  });
+
+  // Sourcery flagged (PR #478): a blanket .catch(() => null) on the initial
+  // lookup meant ANY failure — including an outage — printed the same
+  // "does not resolve" line as a genuinely missing customer, with a clean
+  // exit either way. That is the one failure mode this script can never
+  // produce: an operator reading "already gone" for what was actually a DB
+  // blip would stop looking, right before an irreversible delete. These two
+  // cases pin the split.
+  it('initial lookup rejects NOT_FOUND: prints does-not-resolve, calls no other service', async () => {
+    process.env.DELETE_CUSTOMER_ID = 'cus_1';
+    retrieveCustomer
+      .mockReset()
+      .mockRejectedValue(
+        new MedusaError(MedusaError.Types.NOT_FOUND, 'Customer not found'),
+      );
+    await run();
+    expect(
+      logger.error.mock.calls.some((c) =>
+        String(c[0]).includes('does not resolve'),
+      ),
+    ).toBe(true);
+    expect(listAndCountPulls).not.toHaveBeenCalled();
+    expect(deleteAccountPreflight).not.toHaveBeenCalled();
+    expect(mockPurgeAndDeleteAccount).not.toHaveBeenCalled();
+  });
+
+  it('initial lookup rejects with a generic error (an outage): surfaces the failure, never prints does-not-resolve, never proceeds', async () => {
+    process.env.DELETE_CUSTOMER_ID = 'cus_1';
+    retrieveCustomer.mockReset().mockRejectedValue(new Error('connection reset'));
+    await expect(run()).rejects.toThrow(/connection reset/);
+    expect(
+      logger.error.mock.calls.some((c) =>
+        String(c[0]).includes('does not resolve'),
+      ),
+    ).toBe(false);
     expect(deleteAccountPreflight).not.toHaveBeenCalled();
     expect(mockPurgeAndDeleteAccount).not.toHaveBeenCalled();
   });
