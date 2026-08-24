@@ -596,6 +596,66 @@ describe('postApexPull', () => {
     }
   });
 
+  // Review catch (Sourcery, #480): photoErrors accumulate ACROSS the 429
+  // retry, so a first attempt whose photo failed leaves entries behind even
+  // when the retry then delivers the picture perfectly. Keying the wording off
+  // those accumulated failures reported a post that visibly HAS its picture as
+  // "posted WITHOUT its picture" — a warn the reader can disprove by looking
+  // at the channel, which is how a real warn gets written off as noise.
+  it('does not claim a missing picture when the 429 retry delivered one', async () => {
+    jest.useFakeTimers();
+    try {
+      const art = await sharp({
+        create: {
+          width: 8,
+          height: 8,
+          channels: 4,
+          background: { r: 0, g: 0, b: 0, alpha: 0 },
+        },
+      })
+        .png()
+        .toBuffer();
+      let cdnCalls = 0;
+      global.fetch = (async (url: string, init?: { body?: unknown }) => {
+        const u = String(url);
+        if (u.startsWith('https://cdn.example/')) {
+          // Art unfetchable on the FIRST attempt only, so attempt 1 records a
+          // composite failure and attempt 2 uploads bytes.
+          cdnCalls++;
+          return cdnCalls === 1
+            ? new Response('nope', { status: 500 })
+            : new Response(new Uint8Array(art));
+        }
+        if (init?.body instanceof FormData) {
+          sent.push({ url: u, body: { caption: init.body.get('caption') } });
+          return { json: async () => ({ ok: true, result: { message_id: 91 } }) };
+        }
+        // The URL photo and the text send are both rate-limited on attempt 1.
+        return {
+          json: async () => ({
+            ok: false,
+            error_code: 429,
+            parameters: { retry_after: 1 },
+          }),
+        };
+      }) as unknown as typeof fetch;
+
+      const pending = postApexPull(fakeContainer({}), EVENT);
+      await jest.advanceTimersByTimeAsync(1000);
+      const result = await pending;
+
+      expect(result?.messageId).toBe(91);
+      expect(result?.photoPath).toBe('bytes');
+      // The reason is still kept — the first attempt's failure is real history.
+      expect(result?.photoError).toContain('HTTP 500');
+      const warn = warned.find((w) => w.includes('apex post for pull'));
+      expect(warn).toContain('delivered its picture on the retry');
+      expect(warn).not.toContain('WITHOUT its picture');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('posts an Immortal pull (above the bar)', async () => {
     await postApexPull(
       fakeContainer({ odds: [{ rarity: 'Immortal' }] }),

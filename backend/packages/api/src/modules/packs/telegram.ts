@@ -668,14 +668,20 @@ export async function postApexPull(
     // above, and the board quietly renders as a text-only channel with no
     // trace of why. Warn separately, with the reason each photo path gave.
     if (photoErrors.size) {
-      // Three outcomes, and the middle one is the trap: 'url' means the post
-      // DOES carry a picture, just Telegram's white-flattened version instead
-      // of our black composite. Calling that "without its picture" would read
-      // as a contradiction of the channel and get dismissed.
+      // The wording tracks the FINAL path, never the accumulated failures.
+      // Those failures can belong to a rate-limited FIRST attempt whose retry
+      // then delivered the picture perfectly well, and reporting that as
+      // "posted WITHOUT its picture" is a lie the reader can check against the
+      // channel — which is how a real warn gets written off as noise.
+      // 'url' is the trap in the other direction: the post DOES carry a
+      // picture, just Telegram's white-flattened one instead of our composite,
+      // so it must not read as a clean success either.
       const what =
-        result.photoPath === 'url'
-          ? 'fell back to the URL picture (Telegram white-flattens it; the black composite is broken)'
-          : 'posted WITHOUT its picture';
+        result.photoPath === 'bytes'
+          ? 'delivered its picture on the retry, after an earlier attempt failed'
+          : result.photoPath === 'url'
+            ? 'fell back to the URL picture (Telegram white-flattens it; the black composite is broken)'
+            : 'posted WITHOUT its picture';
       logWarn(
         container,
         `[telegram] apex post for pull ${event.pull_id} ${what} (${photoUrl}): ${[...photoErrors].join('; ')}`,
