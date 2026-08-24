@@ -309,6 +309,9 @@ export const CREDIT_REASONS = [
   'voucher_claim',
   'reward_credit',
   'daily_reward',
+  // Referral rebuild (spec 2026-08-24): the Wednesday settlement payouts.
+  'referral_commission',
+  'vip_rebate',
 ] as const;
 export type CreditReason = (typeof CREDIT_REASONS)[number];
 
@@ -734,3 +737,42 @@ export const CardDetailSchema = z.looseObject({
   pcSyncedAt: z.string().nullable().catch(null),
   priceHistory: z.array(CardPricePointSchema).catch([]),
 });
+
+/** One settled weekly line as the store surfaces render it (both the
+ *  Referral and VIP tabs of /task). Cents + basis points on the wire; the
+ *  UI converts for display. */
+export const SettlementHistoryRowSchema = z.looseObject({
+  week_start: z.string(),
+  basis_cents: finite,
+  rate_bp: finite,
+  amount_cents: finite,
+  status: z.string(),
+});
+
+/** GET /store/referral — the /task Referral tab payload. */
+export const ReferralSummarySchema = z.looseObject({
+  handle: z.string(),
+  downline_count: finite,
+  week: z.looseObject({
+    start: z.string(),
+    turnover_cents: finite,
+    rate_bp: finite,
+    projected_cents: finite,
+    partner: z.boolean(),
+  }),
+  history: z.array(SettlementHistoryRowSchema),
+});
+export type ReferralSummary = z.infer<typeof ReferralSummarySchema>;
+
+/** GET /store/vip-rebate — the /task VIP tab payload. */
+export const VipRebateSchema = z.looseObject({
+  level: finite,
+  rebate_bp: finite,
+  week: z.looseObject({
+    start: z.string(),
+    turnover_cents: finite,
+    projected_cents: finite,
+  }),
+  history: z.array(SettlementHistoryRowSchema),
+});
+export type VipRebate = z.infer<typeof VipRebateSchema>;

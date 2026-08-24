@@ -18,6 +18,7 @@ import { logger } from '@/lib/logger';
 import { setAuthToken, clearAuthToken } from '@/lib/data/customer';
 import { fetchProfileHandle } from '@/lib/data/profiles';
 import { friendlyError, type ErrorRule } from '@/lib/errors';
+import { bindReferralFromCookie } from '@/lib/referral-cookie';
 import { NAME_MAX, normalizePhone } from '@/lib/profile-validation';
 import { ALLOWED_SELF_HOSTS } from '@/lib/allowed-hosts';
 import { PHONE_VERIFICATION_REQUIRED } from '@/lib/phone-verification';
@@ -37,7 +38,8 @@ export type AuthCustomer = {
 };
 
 export type AuthResult =
-  { ok: true; customer: AuthCustomer } | { ok: false; error: string };
+  | { ok: true; customer: AuthCustomer }
+  | { ok: false; error: string };
 
 type TokenResponse = { token: string };
 
@@ -199,7 +201,13 @@ export async function signup(input: {
       },
     );
     // The register token isn't a session token — log in to get the real one.
-    return await login({ email, password: input.password });
+    const result = await login({ email, password: input.password });
+    if (result.ok) {
+      // One-shot referral attribution from the invite cookie. Swallows every
+      // failure internally — a referral hiccup must never fail a signup.
+      await bindReferralFromCookie();
+    }
+    return result;
   } catch (error) {
     logger.error('[auth] signup failed:', error);
     return {
